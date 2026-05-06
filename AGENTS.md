@@ -1,5 +1,7 @@
 # AGENTS.md
 
+> **Uno fork.** This repo is forked into **Uno Work**. Fork-specific customizations (branding, dev mode, preview pane, etc.) live in [`UNO_FORK.md`](./UNO_FORK.md). Read it before touching `apps/web/src/components/{ChatHeader,ChatView,preview/}`, `apps/desktop/src/appBranding*`, or `packages/contracts/src/{filesystem,ipc,rpc}.ts`.
+
 ## Task Completion Requirements
 
 - All of `bun fmt`, `bun lint`, and `bun typecheck` must pass before considering tasks completed.
