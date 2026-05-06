@@ -101,6 +101,8 @@ import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
+import { useDevMode } from "../devMode";
+import { detectFileKind, usePreviewPane } from "./preview/PreviewPaneContext";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
@@ -609,6 +611,8 @@ export default function ChatView(props: ChatViewProps) {
     reserveTitleBarControlInset = true,
   } = props;
   const draftId = routeKind === "draft" ? props.draftId : null;
+  const devMode = useDevMode();
+  const { openFile: openPreviewFile } = usePreviewPane();
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -3459,6 +3463,27 @@ export default function ChatView(props: ChatViewProps) {
       if (!isServerThread) {
         return;
       }
+
+      if (filePath) {
+        const name = filePath.split(/[\\/]/).pop() ?? filePath;
+        const kind = detectFileKind(name);
+        // text (код) → diff. Всё остальное (md/html/pdf/csv/json/image/xlsx/unknown) → preview-вкладка.
+        if (kind !== "text") {
+          const isAbsolute = filePath.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(filePath);
+          const absolutePath =
+            isAbsolute || !gitCwd ? filePath : `${gitCwd.replace(/[\\/]$/, "")}/${filePath}`;
+          openPreviewFile({
+            id: absolutePath,
+            name,
+            kind,
+            content: "",
+            path: absolutePath,
+            environmentId,
+          });
+          return;
+        }
+      }
+
       onDiffPanelOpen?.();
       void navigate({
         to: "/$environmentId/$threadId",
@@ -3474,7 +3499,7 @@ export default function ChatView(props: ChatViewProps) {
         },
       });
     },
-    [environmentId, isServerThread, navigate, onDiffPanelOpen, threadId],
+    [environmentId, gitCwd, isServerThread, navigate, onDiffPanelOpen, openPreviewFile, threadId],
   );
   // Both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
@@ -3677,7 +3702,7 @@ export default function ChatView(props: ChatViewProps) {
                 />
               </div>
             </div>
-            {isGitRepo && (
+            {devMode && isGitRepo && (
               <BranchToolbar
                 environmentId={activeThread.environmentId}
                 threadId={activeThread.id}

@@ -434,6 +434,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       const endsWithSeparator = /[\\/]$/.test(input.partialPath) || input.partialPath === "~";
       const parentPath = endsWithSeparator ? resolvedInputPath : path.dirname(resolvedInputPath);
       const prefix = endsWithSeparator ? "" : path.basename(resolvedInputPath);
+      const includeFiles = input.includeFiles === true;
 
       const dirents = yield* Effect.tryPromise({
         try: () => fsPromises.readdir(parentPath, { withFileTypes: true }),
@@ -450,21 +451,26 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       const showHidden = endsWithSeparator || prefix.startsWith(".");
       const lowerPrefix = prefix.toLowerCase();
 
-      return {
-        parentPath,
-        entries: dirents
-          .filter(
-            (dirent) =>
-              dirent.isDirectory() &&
-              dirent.name.toLowerCase().startsWith(lowerPrefix) &&
-              (showHidden || !dirent.name.startsWith(".")),
-          )
-          .map((dirent) => ({
-            name: dirent.name,
-            fullPath: path.join(parentPath, dirent.name),
-          }))
-          .toSorted((left, right) => left.name.localeCompare(right.name)),
-      };
+      const entries = dirents
+        .filter(
+          (dirent) =>
+            (dirent.isDirectory() || (includeFiles && dirent.isFile())) &&
+            dirent.name.toLowerCase().startsWith(lowerPrefix) &&
+            (showHidden || !dirent.name.startsWith(".")),
+        )
+        .map((dirent) => ({
+          name: dirent.name,
+          fullPath: path.join(parentPath, dirent.name),
+          kind: (dirent.isDirectory() ? "directory" : "file") as "directory" | "file",
+        }))
+        .toSorted((left, right) => {
+          if (left.kind !== right.kind) {
+            return left.kind === "directory" ? -1 : 1;
+          }
+          return left.name.localeCompare(right.name);
+        });
+
+      return { parentPath, entries };
     },
   );
 

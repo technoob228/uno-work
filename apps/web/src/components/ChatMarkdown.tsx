@@ -29,6 +29,7 @@ import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from "../markdown-links";
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
+import { detectFileKind, usePreviewPane } from "./preview/PreviewPaneContext";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -366,7 +367,11 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   theme,
   className,
 }: MarkdownFileLinkProps) {
-  const handleOpen = useCallback(() => {
+  const { openFile } = usePreviewPane();
+  const previewKind = useMemo(() => detectFileKind(filePath), [filePath]);
+  const canPreview = previewKind !== "unknown";
+
+  const openInEditor = useCallback(() => {
     const api = readLocalApi();
     if (!api) {
       toastManager.add({
@@ -386,6 +391,21 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
       );
     });
   }, [targetPath]);
+
+  const handleOpen = useCallback(() => {
+    if (canPreview) {
+      const basename = filePath.split(/[\\/]/).pop() ?? filePath;
+      openFile({
+        id: targetPath || filePath,
+        name: basename,
+        kind: previewKind,
+        content: "",
+        path: targetPath || displayPath,
+      });
+      return;
+    }
+    openInEditor();
+  }, [canPreview, filePath, targetPath, displayPath, previewKind, openFile, openInEditor]);
 
   const handleCopy = useCallback((value: string, title: string) => {
     if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
@@ -427,17 +447,23 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
       const api = readLocalApi();
       if (!api) return;
 
-      const clicked = await api.contextMenu.show(
-        [
-          { id: "open", label: "Open in editor" },
-          { id: "copy-relative", label: "Copy relative path" },
-          { id: "copy-full", label: "Copy full path" },
-        ] as const,
-        { x: event.clientX, y: event.clientY },
-      );
+      const items = [
+        ...(canPreview ? [{ id: "preview" as const, label: "Open in preview" }] : []),
+        { id: "editor" as const, label: "Open in editor" },
+        { id: "copy-relative" as const, label: "Copy relative path" },
+        { id: "copy-full" as const, label: "Copy full path" },
+      ];
+      const clicked = await api.contextMenu.show(items, {
+        x: event.clientX,
+        y: event.clientY,
+      });
 
-      if (clicked === "open") {
+      if (clicked === "preview") {
         handleOpen();
+        return;
+      }
+      if (clicked === "editor") {
+        openInEditor();
         return;
       }
       if (clicked === "copy-relative") {
@@ -448,7 +474,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         handleCopy(targetPath, "Full path");
       }
     },
-    [displayPath, handleCopy, handleOpen, targetPath],
+    [canPreview, displayPath, handleCopy, handleOpen, openInEditor, targetPath],
   );
 
   return (

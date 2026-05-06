@@ -206,6 +206,9 @@ function createMockEnvironmentApi(input: {
     projects: {} as EnvironmentApi["projects"],
     filesystem: {
       browse: input.browse,
+      readFile: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["filesystem"]["readFile"],
     },
     sourceControl: {} as EnvironmentApi["sourceControl"],
     vcs: {} as EnvironmentApi["vcs"],
@@ -4496,15 +4499,17 @@ describe("ChatView timeline estimator parity (full app)", () => {
             return {
               parentPath: "~/Development/",
               entries: [
-                { name: "alpha", fullPath: "~/Development/alpha" },
-                { name: "beta", fullPath: "~/Development/beta" },
+                { name: "alpha", fullPath: "~/Development/alpha", kind: "directory" as const },
+                { name: "beta", fullPath: "~/Development/beta", kind: "directory" as const },
               ],
             };
           }
 
           return {
             parentPath: "~/",
-            entries: [{ name: "Development", fullPath: "~/Development" }],
+            entries: [
+              { name: "Development", fullPath: "~/Development", kind: "directory" as const },
+            ],
           };
         }
 
@@ -4605,7 +4610,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
         if (body._tag === WS_METHODS.filesystemBrowse) {
           return {
             parentPath: "~/",
-            entries: [{ name: "Development", fullPath: "~/Development" }],
+            entries: [
+              { name: "Development", fullPath: "~/Development", kind: "directory" as const },
+            ],
           };
         }
 
@@ -4703,7 +4710,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
         if (body._tag === WS_METHODS.filesystemBrowse) {
           return {
             parentPath: "~/",
-            entries: [{ name: "Development", fullPath: "~/Development" }],
+            entries: [
+              { name: "Development", fullPath: "~/Development", kind: "directory" as const },
+            ],
           };
         }
 
@@ -4760,13 +4769,21 @@ describe("ChatView timeline estimator parity (full app)", () => {
           if (body.partialPath === "~/Development/") {
             return {
               parentPath: "~/Development/",
-              entries: [{ name: "codething", fullPath: "~/Development/codething" }],
+              entries: [
+                {
+                  name: "codething",
+                  fullPath: "~/Development/codething",
+                  kind: "directory" as const,
+                },
+              ],
             };
           }
 
           return {
             parentPath: "~/",
-            entries: [{ name: "Development", fullPath: "~/Development" }],
+            entries: [
+              { name: "Development", fullPath: "~/Development", kind: "directory" as const },
+            ],
           };
         }
 
@@ -4815,13 +4832,15 @@ describe("ChatView timeline estimator parity (full app)", () => {
           if (body.partialPath === "~/Desktop/") {
             return {
               parentPath: "~/Desktop/",
-              entries: [{ name: "existing", fullPath: "~/Desktop/existing" }],
+              entries: [
+                { name: "existing", fullPath: "~/Desktop/existing", kind: "directory" as const },
+              ],
             };
           }
 
           return {
             parentPath: "~/",
-            entries: [{ name: "Desktop", fullPath: "~/Desktop" }],
+            entries: [{ name: "Desktop", fullPath: "~/Desktop", kind: "directory" as const }],
           };
         }
 
@@ -4895,13 +4914,21 @@ describe("ChatView timeline estimator parity (full app)", () => {
           if (body.partialPath === "~/Development/codex/") {
             return {
               parentPath: "~/Development/codex/",
-              entries: [{ name: "Codex.app", fullPath: "~/Development/codex/Codex.app" }],
+              entries: [
+                {
+                  name: "Codex.app",
+                  fullPath: "~/Development/codex/Codex.app",
+                  kind: "directory" as const,
+                },
+              ],
             };
           }
 
           return {
             parentPath: "~/",
-            entries: [{ name: "Development", fullPath: "~/Development" }],
+            entries: [
+              { name: "Development", fullPath: "~/Development", kind: "directory" as const },
+            ],
           };
         }
 
@@ -4981,13 +5008,15 @@ describe("ChatView timeline estimator parity (full app)", () => {
       if (partialPath === "~/workspaces/") {
         return {
           parentPath: "~/workspaces/",
-          entries: [{ name: "codething", fullPath: "~/workspaces/codething" }],
+          entries: [
+            { name: "codething", fullPath: "~/workspaces/codething", kind: "directory" as const },
+          ],
         };
       }
 
       return {
         parentPath: "~/",
-        entries: [{ name: "workspaces", fullPath: "~/workspaces" }],
+        entries: [{ name: "workspaces", fullPath: "~/workspaces", kind: "directory" as const }],
       };
     });
     const remoteDispatchMock = vi.fn(async () => ({
@@ -5116,13 +5145,21 @@ describe("ChatView timeline estimator parity (full app)", () => {
           if (body.partialPath === "~/Applications/") {
             return {
               parentPath: "~/Applications/",
-              entries: [{ name: "Utilities", fullPath: "~/Applications/Utilities" }],
+              entries: [
+                {
+                  name: "Utilities",
+                  fullPath: "~/Applications/Utilities",
+                  kind: "directory" as const,
+                },
+              ],
             };
           }
 
           return {
             parentPath: "~/",
-            entries: [{ name: "Applications", fullPath: "~/Applications" }],
+            entries: [
+              { name: "Applications", fullPath: "~/Applications", kind: "directory" as const },
+            ],
           };
         }
 
@@ -5235,15 +5272,17 @@ describe("ChatView timeline estimator parity (full app)", () => {
             return {
               parentPath: "~/Development/",
               entries: [
-                { name: "alpha", fullPath: "~/Development/alpha" },
-                { name: "beta", fullPath: "~/Development/beta" },
+                { name: "alpha", fullPath: "~/Development/alpha", kind: "directory" as const },
+                { name: "beta", fullPath: "~/Development/beta", kind: "directory" as const },
               ],
             };
           }
 
           return {
             parentPath: "~/",
-            entries: [{ name: "Development", fullPath: "~/Development" }],
+            entries: [
+              { name: "Development", fullPath: "~/Development", kind: "directory" as const },
+            ],
           };
         }
 

@@ -9,7 +9,12 @@
 import { Schema, Context } from "effect";
 import type { Effect } from "effect";
 
-import type { ProjectWriteFileInput, ProjectWriteFileResult } from "@t3tools/contracts";
+import type {
+  FilesystemReadFileInput,
+  FilesystemReadFileResult,
+  ProjectWriteFileInput,
+  ProjectWriteFileResult,
+} from "@t3tools/contracts";
 import { WorkspacePathOutsideRootError } from "./WorkspacePaths.ts";
 
 export class WorkspaceFileSystemError extends Schema.TaggedErrorClass<WorkspaceFileSystemError>()(
@@ -17,6 +22,16 @@ export class WorkspaceFileSystemError extends Schema.TaggedErrorClass<WorkspaceF
   {
     cwd: Schema.String,
     relativePath: Schema.optional(Schema.String),
+    operation: Schema.String,
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class WorkspaceReadFileError extends Schema.TaggedErrorClass<WorkspaceReadFileError>()(
+  "WorkspaceReadFileError",
+  {
+    path: Schema.String,
     operation: Schema.String,
     detail: Schema.String,
     cause: Schema.optional(Schema.Defect),
@@ -39,6 +54,14 @@ export interface WorkspaceFileSystemShape {
     ProjectWriteFileResult,
     WorkspaceFileSystemError | WorkspacePathOutsideRootError
   >;
+
+  /**
+   * Read a file by absolute path. Returns content as utf8 or base64 with size +
+   * truncation metadata. `~` prefix is expanded to the user home directory.
+   */
+  readonly readFile: (
+    input: FilesystemReadFileInput,
+  ) => Effect.Effect<FilesystemReadFileResult, WorkspaceReadFileError>;
 }
 
 /**

@@ -112,7 +112,7 @@ const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";
 const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
-const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
+const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".unowork");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
 const CLIENT_SETTINGS_PATH = Path.join(STATE_DIR, "client-settings.json");
@@ -130,10 +130,10 @@ const desktopAppBranding: DesktopAppBranding = resolveDesktopAppBranding({
   appVersion: app.getVersion(),
 });
 const APP_DISPLAY_NAME = desktopAppBranding.displayName;
-const APP_USER_MODEL_ID = isDevelopment ? "com.t3tools.t3code.dev" : "com.t3tools.t3code";
-const LINUX_DESKTOP_ENTRY_NAME = isDevelopment ? "t3code-dev.desktop" : "t3code.desktop";
-const LINUX_WM_CLASS = isDevelopment ? "t3code-dev" : "t3code";
-const USER_DATA_DIR_NAME = isDevelopment ? "t3code-dev" : "t3code";
+const APP_USER_MODEL_ID = isDevelopment ? "xyz.getuno.work.dev" : "xyz.getuno.work";
+const LINUX_DESKTOP_ENTRY_NAME = isDevelopment ? "unowork-dev.desktop" : "unowork.desktop";
+const LINUX_WM_CLASS = isDevelopment ? "unowork-dev" : "unowork";
+const USER_DATA_DIR_NAME = isDevelopment ? "unowork-dev" : "unowork";
 const LEGACY_USER_DATA_DIR_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
@@ -871,7 +871,7 @@ function handleFatalStartupError(stage: string, error: unknown): void {
   console.error(`[desktop] fatal startup error (${stage})`, error);
   if (!isQuitting) {
     isQuitting = true;
-    dialog.showErrorBox("T3 Code failed to start", `Stage: ${stage}\n${message}${detail}`);
+    dialog.showErrorBox("Work failed to start", `Stage: ${stage}\n${message}${detail}`);
   }
   stopBackend();
   restoreStdIoCapture?.();
@@ -976,7 +976,7 @@ async function checkForUpdatesFromMenu(): Promise<void> {
     void dialog.showMessageBox({
       type: "info",
       title: "You're up to date!",
-      message: `T3 Code ${updateState.currentVersion} is currently the newest version available.`,
+      message: `Work ${updateState.currentVersion} is currently the newest version available.`,
       buttons: ["OK"],
     });
   } else if (updateState.status === "error") {

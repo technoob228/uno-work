@@ -10,6 +10,7 @@ import {
   DiffPanelShell,
   type DiffPanelMode,
 } from "../components/DiffPanelShell";
+import { usePreviewPane } from "../components/preview/PreviewPaneContext";
 import { finalizePromotedDraftThreadByRef, useComposerDraftStore } from "../composerDraftStore";
 import {
   type DiffRouteSearch,
@@ -169,6 +170,7 @@ function ChatThreadRouteView() {
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
   const diffOpen = search.diff === "1";
   const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  const { open: previewPaneOpen, setOpen: setPreviewPaneOpen } = usePreviewPane();
   const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
   const [diffPanelMountState, setDiffPanelMountState] = useState(() => ({
     threadKey: currentThreadKey,
@@ -213,6 +215,20 @@ function ChatThreadRouteView() {
       },
     });
   }, [markDiffOpened, navigate, threadRef]);
+
+  useEffect(() => {
+    if (diffOpen) {
+      setPreviewPaneOpen(false);
+    }
+  }, [diffOpen, setPreviewPaneOpen]);
+
+  useEffect(() => {
+    if (previewPaneOpen && diffOpen) {
+      closeDiff();
+    }
+    // Только при изменении previewPaneOpen — иначе оба эффекта могут закрыть друг друга.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewPaneOpen]);
 
   useEffect(() => {
     if (!threadRef || !bootstrapComplete) {

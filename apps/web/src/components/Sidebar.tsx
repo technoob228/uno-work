@@ -59,7 +59,7 @@ import {
 } from "@t3tools/contracts/settings";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { isElectron } from "../env";
-import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
+import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform, newCommandId } from "../lib/utils";
 import {
@@ -97,6 +97,7 @@ import {
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
+import { SidebarEnvSwitcher } from "./SidebarEnvSwitcher";
 import { Kbd } from "./ui/kbd";
 import {
   getArm64IntelBuildWarningDescription,
@@ -2393,14 +2394,19 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
           render={
             <Link
               aria-label="Go to threads"
-              className="ml-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
+              className="ml-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
               to="/"
             >
-              <T3Wordmark />
-              <span className="truncate text-sm font-medium tracking-tight text-muted-foreground">
-                Code
+              <span
+                aria-hidden="true"
+                className="grid size-5 shrink-0 place-items-center rounded-md bg-primary font-bold text-[11px] text-primary-foreground"
+              >
+                U
               </span>
-              <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
+              <span className="truncate text-sm font-semibold tracking-tight text-foreground">
+                {APP_BASE_NAME}
+              </span>
+              <span className="rounded-full bg-primary/12 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-primary">
                 {APP_STAGE_LABEL}
               </span>
             </Link>
@@ -2433,8 +2439,9 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   }, [isMobile, navigate, setOpenMobile]);
 
   return (
-    <SidebarFooter className="p-2">
+    <SidebarFooter className="gap-2 p-2">
       <SidebarUpdatePill />
+      <SidebarEnvSwitcher />
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton
