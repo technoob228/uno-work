@@ -6,9 +6,11 @@ export type PreviewFileKind =
   | "html"
   | "pdf"
   | "xlsx"
+  | "docx"
   | "csv"
   | "json"
   | "image"
+  | "svg"
   | "text"
   | "unknown";
 
@@ -136,7 +138,6 @@ const TEXT_EXTS = new Set([
   "conf",
   "env",
   "xml",
-  "svg",
   "css",
   "scss",
   "less",
@@ -177,6 +178,8 @@ export function detectFileKind(name: string): PreviewFileKind {
   if (ext === "csv" || ext === "tsv") return "csv";
   if (ext === "json") return "json";
   if (ext === "xlsx" || ext === "xls") return "xlsx";
+  if (ext === "docx") return "docx";
+  if (ext === "svg") return "svg";
   if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "gif" || ext === "webp") {
     return "image";
   }

@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import * as XLSX from "xlsx";
 
 import { cn } from "../../lib/utils";
 import { openInPreferredEditor } from "../../editorPreferences";
@@ -34,9 +35,11 @@ const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   html: GlobeIcon,
   pdf: FileIcon,
   xlsx: FileSpreadsheetIcon,
+  docx: FileTextIcon,
   csv: TableIcon,
   json: BracesIcon,
   image: ImageIcon,
+  svg: ImageIcon,
   text: FileCode2Icon,
   unknown: FileIcon,
 };
@@ -46,9 +49,11 @@ const KIND_LABEL: Record<PreviewFileKind, string> = {
   html: "HTML",
   pdf: "PDF",
   xlsx: "Spreadsheet",
+  docx: "Word",
   csv: "Table",
   json: "JSON",
   image: "Image",
+  svg: "SVG",
   text: "Text",
   unknown: "File",
 };
@@ -56,6 +61,8 @@ const KIND_LABEL: Record<PreviewFileKind, string> = {
 const PREVIEW_WIDTH_STORAGE_KEY = "preview_pane_width";
 const DEFAULT_PREVIEW_WIDTH = 24 * 16;
 const MIN_PREVIEW_WIDTH = 22 * 16;
+const SPREADSHEET_MAX_ROWS = 500;
+const SPREADSHEET_MAX_COLS = 80;
 
 function readStoredWidth(): number {
   if (typeof window === "undefined") return DEFAULT_PREVIEW_WIDTH;
@@ -188,6 +195,19 @@ function parseDelimitedRows(input: string, delimiter: string): string[][] {
 
 const CSV_MAX_ROWS = 500;
 
+function keyedCsvEntries<T extends ReadonlyArray<string>>(entries: ReadonlyArray<T>) {
+  const seen = new Map<string, number>();
+  return entries.map((entry) => {
+    const signature = entry.join("\u0000");
+    const count = seen.get(signature) ?? 0;
+    seen.set(signature, count + 1);
+    return {
+      key: count === 0 ? signature : `${signature}\u0000${count}`,
+      entry,
+    };
+  });
+}
+
 function CsvBody({ file, content }: { file: PreviewFile; content: string }) {
   const ext = file.name.toLowerCase().split(".").pop() ?? "";
   const delimiter = ext === "tsv" ? "\t" : ",";
@@ -196,7 +216,19 @@ function CsvBody({ file, content }: { file: PreviewFile; content: string }) {
     return <MetadataPlaceholder file={file} label="Пустая таблица" />;
   }
   const header = rows[0]!;
+  const columns = useMemo(
+    () =>
+      keyedCsvEntries([header]).flatMap(({ entry }) =>
+        entry.map((cell, columnIndex) => ({
+          key: `${cell}\u0000${columnIndex}`,
+          label: cell,
+          columnIndex,
+        })),
+      ),
+    [header],
+  );
   const body = rows.slice(1, CSV_MAX_ROWS + 1);
+  const bodyRows = keyedCsvEntries(body);
   const truncated = rows.length - 1 > CSV_MAX_ROWS;
   return (
     <ScrollArea className="h-full">
@@ -204,25 +236,25 @@ function CsvBody({ file, content }: { file: PreviewFile; content: string }) {
         <table className="w-full border-collapse">
           <thead>
             <tr className="bg-muted">
-              {header.map((cell, idx) => (
+              {columns.map((column) => (
                 <th
-                  key={idx}
+                  key={column.key}
                   className="border border-border px-2 py-1.5 text-left font-medium text-foreground"
                 >
-                  {cell}
+                  {column.label}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {body.map((row, rowIdx) => (
-              <tr key={rowIdx} className="hover:bg-muted/50">
-                {header.map((_, colIdx) => (
+            {bodyRows.map(({ key, entry }) => (
+              <tr key={key} className="hover:bg-muted/50">
+                {columns.map((column) => (
                   <td
-                    key={colIdx}
+                    key={column.key}
                     className="border border-border px-2 py-1 align-top text-muted-foreground"
                   >
-                    {row[colIdx] ?? ""}
+                    {entry[column.columnIndex] ?? ""}
                   </td>
                 ))}
               </tr>
@@ -264,11 +296,289 @@ function TextBody({ content }: { content: string }) {
   );
 }
 
+function SvgBody({
+  file,
+  content,
+  blobUrl,
+}: {
+  file: PreviewFile;
+  content?: string;
+  blobUrl?: string;
+}) {
+  // sandbox="" блокирует JS внутри SVG (XSS-risk), srcDoc показывает как картинку.
+  if (blobUrl) {
+    return (
+      <iframe
+        title={file.name}
+        src={blobUrl}
+        sandbox=""
+        className="h-full w-full border-0 bg-white"
+      />
+    );
+  }
+  if (content) {
+    return (
+      <iframe
+        title={file.name}
+        srcDoc={content}
+        sandbox=""
+        className="h-full w-full border-0 bg-white"
+      />
+    );
+  }
+  return <MetadataPlaceholder file={file} label="SVG content unavailable" />;
+}
+
+function DocxBody({ file, base64 }: { file: PreviewFile; base64: string }) {
+  const { data, isPending, error } = useQuery({
+    queryKey: ["docxPreview", file.id, base64.length],
+    queryFn: async () => {
+      const mammoth = await import("mammoth/mammoth.browser");
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      const result = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
+      return result.value;
+    },
+    staleTime: Infinity,
+  });
+
+  if (isPending) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        <Loader2Icon className="mr-2 size-4 animate-spin" />
+        Конвертация документа...
+      </div>
+    );
+  }
+  if (error || !data) {
+    return (
+      <MetadataPlaceholder
+        file={file}
+        label={error instanceof Error ? error.message : "Не удалось прочитать .docx"}
+      />
+    );
+  }
+  return (
+    <ScrollArea className="h-full">
+      <div
+        className="preview-markdown px-5 py-4"
+        // mammoth выдаёт sanitized HTML без скриптов; всё содержимое — стилизованный текст.
+        dangerouslySetInnerHTML={{ __html: data }}
+      />
+    </ScrollArea>
+  );
+}
+
+interface SpreadsheetSheetPreview {
+  name: string;
+  rows: Array<{
+    key: string;
+    number: number;
+    cells: string[];
+  }>;
+  totalRows: number;
+  totalCols: number;
+  renderedCols: number;
+}
+
+interface SpreadsheetPreview {
+  sheets: SpreadsheetSheetPreview[];
+}
+
+function spreadsheetColumnLabel(index: number): string {
+  let value = index + 1;
+  let label = "";
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    label = String.fromCharCode(65 + remainder) + label;
+    value = Math.floor((value - 1) / 26);
+  }
+  return label;
+}
+
+function spreadsheetCellText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return value.toLocaleString();
+  return String(value);
+}
+
+function sheetDimensions(sheet: XLSX.WorkSheet, fallbackRows: number, fallbackCols: number) {
+  const ref = sheet["!ref"];
+  if (!ref) {
+    return { totalRows: fallbackRows, totalCols: fallbackCols };
+  }
+  const range = XLSX.utils.decode_range(ref);
+  return {
+    totalRows: Math.max(fallbackRows, range.e.r - range.s.r + 1),
+    totalCols: Math.max(fallbackCols, range.e.c - range.s.c + 1),
+  };
+}
+
+function parseSpreadsheetPreview(content: string): SpreadsheetPreview {
+  const workbook = XLSX.read(content, {
+    type: "base64",
+    cellDates: true,
+    sheetRows: SPREADSHEET_MAX_ROWS + 1,
+  });
+  const sheets = workbook.SheetNames.map((name) => {
+    const sheet = workbook.Sheets[name];
+    if (!sheet) return null;
+    const rawRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      raw: false,
+      defval: "",
+      blankrows: false,
+    });
+    const fallbackCols = rawRows.reduce((max, row) => Math.max(max, row.length), 0);
+    const dimensions = sheetDimensions(sheet, rawRows.length, fallbackCols);
+    const renderedCols = Math.min(
+      SPREADSHEET_MAX_COLS,
+      Math.max(1, Math.min(dimensions.totalCols, fallbackCols || dimensions.totalCols)),
+    );
+    const rows = rawRows.slice(0, SPREADSHEET_MAX_ROWS).map((row, index) => ({
+      key: `${name}:${index + 1}`,
+      number: index + 1,
+      cells: Array.from({ length: renderedCols }, (_, cellIndex) =>
+        spreadsheetCellText(row[cellIndex]),
+      ),
+    }));
+    return {
+      name,
+      rows,
+      renderedCols,
+      totalRows: dimensions.totalRows,
+      totalCols: dimensions.totalCols,
+    } satisfies SpreadsheetSheetPreview;
+  }).filter((sheet): sheet is SpreadsheetSheetPreview => sheet !== null);
+
+  return { sheets };
+}
+
+function SpreadsheetBody({
+  file,
+  content,
+  sourceTruncated,
+}: {
+  file: PreviewFile;
+  content: string;
+  sourceTruncated?: boolean | undefined;
+}) {
+  const parsed = useMemo(() => {
+    try {
+      return { preview: parseSpreadsheetPreview(content), error: null };
+    } catch (error) {
+      return {
+        preview: null,
+        error: error instanceof Error ? error.message : "Не удалось прочитать Excel-файл",
+      };
+    }
+  }, [content]);
+  const [activeSheet, setActiveSheet] = useState<string | null>(null);
+  const sheets = parsed.preview?.sheets ?? [];
+  const selectedSheet = sheets.find((sheet) => sheet.name === activeSheet) ?? sheets[0];
+
+  if (parsed.error) {
+    return <MetadataPlaceholder file={file} label={parsed.error} />;
+  }
+  if (!selectedSheet) {
+    return <MetadataPlaceholder file={file} label="В workbook нет листов для предпросмотра" />;
+  }
+
+  const rowCount = selectedSheet.rows.length;
+  const truncatedRows = selectedSheet.totalRows > rowCount;
+  const truncatedCols = selectedSheet.totalCols > selectedSheet.renderedCols;
+
+  return (
+    <div className="flex h-full flex-col bg-background">
+      {sheets.length > 1 ? (
+        <div className="scrollbar-hide flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-card px-2 py-1">
+          {sheets.map((sheet) => (
+            <button
+              key={sheet.name}
+              type="button"
+              onClick={() => setActiveSheet(sheet.name)}
+              className={cn(
+                "h-7 shrink-0 rounded px-2 text-xs",
+                sheet.name === selectedSheet.name
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+              )}
+              title={sheet.name}
+            >
+              <span className="block max-w-32 truncate">{sheet.name}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-auto">
+        <table className="min-w-full border-separate border-spacing-0 text-xs">
+          <thead>
+            <tr>
+              <th className="sticky left-0 top-0 z-20 h-7 min-w-10 border-b border-r border-border bg-muted px-2 text-muted-foreground" />
+              {Array.from({ length: selectedSheet.renderedCols }, (_, index) => {
+                const label = spreadsheetColumnLabel(index);
+                return (
+                  <th
+                    key={label}
+                    className="sticky top-0 z-10 h-7 min-w-24 border-b border-r border-border bg-muted px-2 text-left font-medium text-muted-foreground"
+                  >
+                    {label}
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {selectedSheet.rows.map((row) => (
+              <tr key={row.key} className="hover:bg-muted/40">
+                <th className="sticky left-0 z-10 h-7 min-w-10 border-b border-r border-border bg-muted px-2 text-right font-medium text-muted-foreground">
+                  {row.number}
+                </th>
+                {Array.from({ length: selectedSheet.renderedCols }, (_, colIndex) => {
+                  const columnLabel = spreadsheetColumnLabel(colIndex);
+                  return (
+                    <td
+                      key={`${row.key}:${columnLabel}`}
+                      className="max-w-80 border-b border-r border-border px-2 py-1 align-top text-foreground"
+                      title={row.cells[colIndex] ?? ""}
+                    >
+                      <span className="line-clamp-3 whitespace-pre-wrap break-words">
+                        {row.cells[colIndex] ?? ""}
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rowCount === 0 ? (
+          <div className="p-4 text-sm text-muted-foreground">Лист пустой</div>
+        ) : null}
+      </div>
+      {sourceTruncated || truncatedRows || truncatedCols ? (
+        <div className="shrink-0 border-t border-border bg-card px-3 py-2 text-[11px] text-muted-foreground">
+          {sourceTruncated ? "Файл был обрезан при чтении. " : null}
+          {truncatedRows
+            ? `Показаны первые ${rowCount} строк из ${selectedSheet.totalRows}. `
+            : null}
+          {truncatedCols
+            ? `Показаны первые ${selectedSheet.renderedCols} колонок из ${selectedSheet.totalCols}.`
+            : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 interface LoadedFileData {
   content: string;
   encoding: "utf8" | "base64";
   mimeType?: string | undefined;
   blobUrl?: string | undefined;
+  size?: number | undefined;
+  truncated?: boolean | undefined;
 }
 
 function renderLoadedBody(file: PreviewFile, data: LoadedFileData) {
@@ -296,12 +606,26 @@ function renderLoadedBody(file: PreviewFile, data: LoadedFileData) {
     if (file.kind === "json") {
       return <JsonBody content={data.content} />;
     }
-    if (file.kind === "text" || file.kind === "unknown" || file.kind === "xlsx") {
+    if (file.kind === "text" || file.kind === "unknown") {
       return <TextBody content={data.content} />;
+    }
+    if (file.kind === "svg") {
+      return <SvgBody file={file} content={data.content} />;
     }
   }
 
   if (data.encoding === "base64" && data.blobUrl) {
+    if (file.kind === "xlsx") {
+      return (
+        <SpreadsheetBody file={file} content={data.content} sourceTruncated={data.truncated} />
+      );
+    }
+    if (file.kind === "docx") {
+      return <DocxBody file={file} base64={data.content} />;
+    }
+    if (file.kind === "svg") {
+      return <SvgBody file={file} blobUrl={data.blobUrl} />;
+    }
     if (file.kind === "pdf") {
       return <iframe title={file.name} src={data.blobUrl} className="h-full w-full border-0" />;
     }
@@ -410,10 +734,14 @@ function Body({ file }: { file: PreviewFile }) {
       return <JsonBody content={file.content} />;
     case "text":
       return <TextBody content={file.content} />;
+    case "svg":
+      return <SvgBody file={file} content={file.content} />;
     case "pdf":
       return <MetadataPlaceholder file={file} label="PDF доступен только из файловой системы" />;
     case "xlsx":
-      return <MetadataPlaceholder file={file} label="Excel-таблицы пока не поддерживаются" />;
+      return <MetadataPlaceholder file={file} label="Excel доступен только из файловой системы" />;
+    case "docx":
+      return <MetadataPlaceholder file={file} label="Word доступен только из файловой системы" />;
     default:
       return <MetadataPlaceholder file={file} label="Формат не поддерживается" />;
   }

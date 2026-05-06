@@ -1771,6 +1771,20 @@ export function selectSidebarThreadsAcrossEnvironments(state: AppState): Sidebar
   );
 }
 
+export function selectSidebarThreadsForEnvironment(
+  state: AppState,
+  environmentId: EnvironmentId | null | undefined,
+): SidebarThreadSummary[] {
+  if (!environmentId) {
+    return [];
+  }
+  const environmentState = selectEnvironmentState(state, environmentId);
+  return environmentState.threadIds.flatMap((threadId) => {
+    const thread = environmentState.sidebarThreadSummaryById[threadId];
+    return thread && thread.environmentId === environmentId ? [thread] : [];
+  });
+}
+
 export function selectSidebarThreadsForProjectRef(
   state: AppState,
   ref: ScopedProjectRef | null | undefined,

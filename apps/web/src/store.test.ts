@@ -19,6 +19,7 @@ import {
   removeEnvironmentState,
   selectEnvironmentState,
   selectProjectsAcrossEnvironments,
+  selectSidebarThreadsForEnvironment,
   selectThreadByRef,
   selectThreadExistsByRef,
   setThreadBranch,
@@ -84,6 +85,26 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     branch: null,
     worktreePath: null,
     ...overrides,
+  };
+}
+
+function makeSidebarThreadSummary(thread: Thread) {
+  return {
+    id: thread.id,
+    environmentId: thread.environmentId,
+    projectId: thread.projectId,
+    title: thread.title,
+    interactionMode: thread.interactionMode,
+    session: thread.session,
+    createdAt: thread.createdAt,
+    archivedAt: thread.archivedAt,
+    latestTurn: thread.latestTurn,
+    branch: thread.branch,
+    worktreePath: thread.worktreePath,
+    latestUserMessageAt: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
   };
 }
 
@@ -277,6 +298,42 @@ describe("environment state removal", () => {
     const next = removeEnvironmentState(state, remoteEnvironmentId);
 
     expect(next).toBe(state);
+  });
+});
+
+describe("environment-scoped sidebar thread selection", () => {
+  it("returns only sidebar threads for the requested environment", () => {
+    const localThread = makeThread({ id: ThreadId.make("thread-local") });
+    const remoteThread = makeThread({
+      id: ThreadId.make("thread-remote"),
+      environmentId: remoteEnvironmentId,
+    });
+    const localState = makeState(localThread).environmentStateById[localEnvironmentId]!;
+    const remoteState = makeState(remoteThread).environmentStateById[remoteEnvironmentId]!;
+    const state: AppState = {
+      activeEnvironmentId: localEnvironmentId,
+      environmentStateById: {
+        [localEnvironmentId]: {
+          ...localState,
+          sidebarThreadSummaryById: {
+            [localThread.id]: makeSidebarThreadSummary(localThread),
+          },
+        },
+        [remoteEnvironmentId]: {
+          ...remoteState,
+          sidebarThreadSummaryById: {
+            [remoteThread.id]: makeSidebarThreadSummary(remoteThread),
+          },
+        },
+      },
+    };
+
+    expect(selectSidebarThreadsForEnvironment(state, localEnvironmentId).map((t) => t.id)).toEqual([
+      localThread.id,
+    ]);
+    expect(selectSidebarThreadsForEnvironment(state, remoteEnvironmentId).map((t) => t.id)).toEqual(
+      [remoteThread.id],
+    );
   });
 });
 

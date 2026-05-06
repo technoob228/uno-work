@@ -2,6 +2,8 @@
 
 Этот репозиторий — форк [pingdotgg/t3code](https://github.com/pingdotgg/t3code), кастомизированный под продукт **Uno Work**. Основной апстрим-документ — [`AGENTS.md`](./AGENTS.md). Здесь описаны только наши изменения относительно апстрима.
 
+Продуктовый план Uno Work лежит в [`UNO_ROADMAP.md`](./UNO_ROADMAP.md).
+
 ## Запуск
 
 ```bash

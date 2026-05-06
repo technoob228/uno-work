@@ -32,9 +32,11 @@ const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   html: GlobeIcon,
   pdf: FileIcon,
   xlsx: FileSpreadsheetIcon,
+  docx: FileTextIcon,
   csv: TableIcon,
   json: BracesIcon,
   image: ImageIcon,
+  svg: ImageIcon,
   text: FileCode2Icon,
   unknown: FileIcon,
 };
@@ -44,9 +46,11 @@ const KIND_BG: Record<PreviewFileKind, string> = {
   html: "bg-orange-500/16 text-orange-700 dark:text-orange-300",
   pdf: "bg-red-500/16 text-red-700 dark:text-red-300",
   xlsx: "bg-green-500/16 text-green-700 dark:text-green-300",
+  docx: "bg-blue-500/16 text-blue-700 dark:text-blue-300",
   csv: "bg-cyan-500/16 text-cyan-700 dark:text-cyan-300",
   json: "bg-amber-500/16 text-amber-700 dark:text-amber-300",
   image: "bg-pink-500/16 text-pink-700 dark:text-pink-300",
+  svg: "bg-pink-500/16 text-pink-700 dark:text-pink-300",
   text: "bg-slate-500/16 text-slate-700 dark:text-slate-300",
   unknown: "bg-muted text-muted-foreground",
 };

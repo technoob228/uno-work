@@ -64,9 +64,9 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform, newCommandId } from "../lib/utils";
 import {
   selectProjectByRef,
-  selectProjectsAcrossEnvironments,
+  selectProjectsForEnvironment,
   selectSidebarThreadsForProjectRefs,
-  selectSidebarThreadsAcrossEnvironments,
+  selectSidebarThreadsForEnvironment,
   selectThreadByRef,
   useStore,
 } from "../store";
@@ -2719,8 +2719,15 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 });
 
 export default function Sidebar() {
-  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
-  const sidebarThreads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const activeEnvironmentId = useStore((store) => store.activeEnvironmentId);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const selectedEnvironmentId = activeEnvironmentId ?? primaryEnvironmentId;
+  const projects = useStore(
+    useShallow((store) => selectProjectsForEnvironment(store, selectedEnvironmentId)),
+  );
+  const sidebarThreads = useStore(
+    useShallow((store) => selectSidebarThreadsForEnvironment(store, selectedEnvironmentId)),
+  );
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);
@@ -2759,7 +2766,6 @@ export default function Sidebar() {
   const platform = navigator.platform;
   const shortcutModifiers = useShortcutModifierState();
   const modelPickerOpen = useModelPickerOpen();
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((s) => s.byId);
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((s) => s.byId);
   const orderedProjects = useMemo(() => {
