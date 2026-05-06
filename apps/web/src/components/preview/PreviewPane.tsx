@@ -3,6 +3,7 @@ import {
   CheckIcon,
   ChevronRightIcon,
   CopyIcon,
+  ExternalLinkIcon,
   FileCode2Icon,
   FileIcon,
   FileSpreadsheetIcon,
@@ -844,6 +845,22 @@ function PathBar({ file, onOpenBrowser }: { file: PreviewFile; onOpenBrowser: ()
             }
           />
           <TooltipPopup side="bottom">{copied ? "Copied!" : "Copy path"}</TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                onClick={() => file.path && openFileInEditor(file.path)}
+                disabled={!file.path}
+                aria-label="Open file in default editor"
+                className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ExternalLinkIcon className="size-3.5" />
+              </button>
+            }
+          />
+          <TooltipPopup side="bottom">Open file</TooltipPopup>
         </Tooltip>
       </TooltipProvider>
     </div>
