@@ -112,11 +112,6 @@ export const ChatHeader = memo(function ChatHeader({
             <span className="min-w-0 truncate">{activeProjectName}</span>
           </Badge>
         )}
-        {activeProjectName && !isGitRepo && (
-          <Badge variant="outline" className="shrink-0 text-[10px] text-amber-700">
-            No Git
-          </Badge>
-        )}
         <TooltipProvider delay={0} closeDelay={0}>
           <Tooltip>
             <TooltipTrigger
@@ -155,6 +150,11 @@ export const ChatHeader = memo(function ChatHeader({
             availableEditors={availableEditors}
             openInCwd={openInCwd}
           />
+        )}
+        {devMode && activeProjectName && !isGitRepo && (
+          <Badge variant="outline" className="shrink-0 text-[10px] text-amber-700">
+            No Git
+          </Badge>
         )}
         {devMode && activeProjectName && (
           <GitActionsControl

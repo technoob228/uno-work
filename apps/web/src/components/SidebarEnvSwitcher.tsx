@@ -15,14 +15,13 @@ import { AddEnvModal } from "./AddEnvModal";
 import { cn } from "../lib/utils";
 import { readPrimaryEnvironmentDescriptor, usePrimaryEnvironmentId } from "../environments/primary";
 import {
-  reconnectSavedEnvironment,
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
+import { useReconnectEnvironment } from "../hooks/useReconnectEnvironment";
 import { selectSidebarThreadsForEnvironment, useStore } from "../store";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { Menu, MenuPopup, MenuTrigger } from "./ui/menu";
-import { stackedThreadToast, toastManager } from "./ui/toast";
 
 interface EnvironmentOption {
   id: EnvironmentId;
@@ -83,9 +82,7 @@ function formatSavedEnvironmentMeta(input: {
 export function SidebarEnvSwitcher() {
   const navigate = useNavigate();
   const [addEnvOpen, setAddEnvOpen] = useState(false);
-  const [reconnectingEnvironmentId, setReconnectingEnvironmentId] = useState<EnvironmentId | null>(
-    null,
-  );
+  const { reconnect, reconnectingId } = useReconnectEnvironment();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
   const setActiveEnvironmentId = useStore((state) => state.setActiveEnvironmentId);
@@ -157,7 +154,7 @@ export function SidebarEnvSwitcher() {
   const canReconnectCurrent =
     currentSavedEnvironment != null &&
     (current?.connectionState === "disconnected" || current?.connectionState === "error");
-  const isReconnectingCurrent = current != null && reconnectingEnvironmentId === current.id;
+  const isReconnectingCurrent = current != null && reconnectingId === current.id;
 
   const switchEnvironment = (environmentId: EnvironmentId) => {
     setActiveEnvironmentId(environmentId);
@@ -177,23 +174,9 @@ export function SidebarEnvSwitcher() {
     void navigate({ to: "/" });
   };
 
-  const reconnectCurrentEnvironment = async () => {
+  const reconnectCurrentEnvironment = () => {
     if (!currentSavedEnvironment || !current) return;
-    setReconnectingEnvironmentId(current.id);
-    try {
-      await reconnectSavedEnvironment(current.id);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to reconnect environment.";
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not reconnect environment",
-          description: message,
-        }),
-      );
-    } finally {
-      setReconnectingEnvironmentId(null);
-    }
+    void reconnect(current.id);
   };
 
   return (

@@ -4,7 +4,7 @@ import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
-import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
+import { BRAND_ASSET_PATHS, PUBLISH_ICON_OVERRIDES } from "./lib/brand-assets.ts";
 import { getDefaultBuildArch } from "./lib/build-target-arch.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
@@ -554,8 +554,8 @@ export function resolveMockUpdateServerUrl(mockUpdateServerPort: number | undefi
 
 export function resolveDesktopProductName(version: string): string {
   return resolveDesktopUpdateChannel(version) === "nightly"
-    ? "T3 Code (Nightly)"
-    : (desktopPackageJson.productName ?? "T3 Code");
+    ? "Uno Work (Nightly)"
+    : (desktopPackageJson.productName ?? "Uno Work");
 }
 
 const createBuildConfig = Effect.fn("createBuildConfig")(function* (
@@ -567,9 +567,9 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   mockUpdateServerPort: number | undefined,
 ) {
   const buildConfig: Record<string, unknown> = {
-    appId: "com.t3tools.t3code",
+    appId: "com.unotools.work",
     productName: resolveDesktopProductName(version),
-    artifactName: "T3-Code-${version}-${arch}.${ext}",
+    artifactName: "Uno Work.${ext}",
     directories: {
       buildResources: "apps/desktop/resources",
     },
@@ -596,6 +596,7 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   }
 
   if (platform === "linux") {
+    buildConfig.npmRebuild = false;
     buildConfig.linux = {
       target: [target],
       executableName: "t3code",
@@ -739,6 +740,20 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     );
   }
 
+  // build:desktop wires DEV-brand favicons into apps/server/dist/client; for
+  // packaged artifacts we want the production-brand icons instead.
+  yield* Effect.log("[desktop-artifact] Applying production icon overrides to dist/client...");
+  for (const override of PUBLISH_ICON_OVERRIDES) {
+    const sourcePath = path.join(repoRoot, override.sourceRelativePath);
+    const targetPath = path.join(repoRoot, "apps/server", override.targetRelativePath);
+    if (!(yield* fs.exists(sourcePath))) {
+      return yield* new BuildScriptError({
+        message: `Missing publish icon source: ${sourcePath}`,
+      });
+    }
+    yield* fs.copyFile(sourcePath, targetPath);
+  }
+
   for (const [label, dir] of Object.entries(distDirs)) {
     if (!(yield* fs.exists(dir))) {
       return yield* new BuildScriptError({
@@ -783,8 +798,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     buildVersion: appVersion,
     t3codeCommitHash: commitHash,
     private: true,
-    description: "T3 Code desktop build",
-    author: "T3 Tools",
+    description: "Uno Work desktop build",
+    author: "Uno Tools",
     main: "apps/desktop/dist-electron/main.cjs",
     build: yield* createBuildConfig(
       options.platform,
@@ -942,7 +957,7 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
     Flag.optional,
   ),
 }).pipe(
-  Command.withDescription("Build a desktop artifact for T3 Code."),
+  Command.withDescription("Build a desktop artifact for Uno Work."),
   Command.withHandler((input) => Effect.flatMap(resolveBuildOptions(input), buildDesktopArtifact)),
 );
 

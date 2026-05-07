@@ -2709,8 +2709,15 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
         )}
 
         {projectsLength === 0 && (
-          <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">
-            No projects yet
+          <div className="flex flex-col items-center gap-3 px-2 pt-6 pb-3 text-center">
+            <div className="flex size-9 items-center justify-center rounded-lg border border-border/60 bg-card/40 text-muted-foreground">
+              <FolderPlusIcon className="size-4" />
+            </div>
+            <div className="text-xs text-muted-foreground/80">No projects in this environment</div>
+            <Button size="sm" variant="outline" onClick={openAddProject}>
+              <FolderPlusIcon className="size-3.5" />
+              Add project
+            </Button>
           </div>
         )}
       </SidebarGroup>

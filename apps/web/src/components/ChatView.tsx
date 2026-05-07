@@ -612,7 +612,7 @@ export default function ChatView(props: ChatViewProps) {
   } = props;
   const draftId = routeKind === "draft" ? props.draftId : null;
   const devMode = useDevMode();
-  const { openFile: openPreviewFile } = usePreviewPane();
+  const { openFile: openPreviewFile, setCurrentChatContext } = usePreviewPane();
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -1634,6 +1634,12 @@ export default function ChatView(props: ChatViewProps) {
       })
     : null;
   const gitStatusQuery = useGitStatus({ environmentId, cwd: gitCwd });
+  useEffect(() => {
+    setCurrentChatContext({
+      projectCwd: activeProject?.cwd ?? null,
+      environmentId,
+    });
+  }, [activeProject?.cwd, environmentId, setCurrentChatContext]);
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();
   // Prefer an instance-id match so a custom Codex instance (e.g.
@@ -3472,6 +3478,7 @@ export default function ChatView(props: ChatViewProps) {
           const isAbsolute = filePath.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(filePath);
           const absolutePath =
             isAbsolute || !gitCwd ? filePath : `${gitCwd.replace(/[\\/]$/, "")}/${filePath}`;
+          const projectCwd = activeProject?.cwd ?? gitCwd ?? null;
           openPreviewFile({
             id: absolutePath,
             name,
@@ -3479,6 +3486,7 @@ export default function ChatView(props: ChatViewProps) {
             content: "",
             path: absolutePath,
             environmentId,
+            ...(projectCwd ? { projectCwd } : {}),
           });
           return;
         }
@@ -3499,7 +3507,16 @@ export default function ChatView(props: ChatViewProps) {
         },
       });
     },
-    [environmentId, gitCwd, isServerThread, navigate, onDiffPanelOpen, openPreviewFile, threadId],
+    [
+      activeProject?.cwd,
+      environmentId,
+      gitCwd,
+      isServerThread,
+      navigate,
+      onDiffPanelOpen,
+      openPreviewFile,
+      threadId,
+    ],
   );
   // Both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.

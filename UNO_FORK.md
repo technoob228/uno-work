@@ -21,8 +21,9 @@ bun fmt && bun lint && bun typecheck  # перед коммитом
 - `apps/web/src/branding.ts` — `APP_BASE_NAME = "Work"`
 - `apps/desktop/src/appBranding.ts` (+ `.test.ts`)
 - `apps/desktop/scripts/electron-launcher.mjs` — `APP_DISPLAY_NAME = "Work (Dev)" | "Work"`
-- `apps/desktop/src/main.ts` — текст диалогов
+- `apps/desktop/src/main.ts` — текст диалогов + `USER_DATA_DIR_NAME = "unowork"` (миграция со старого `LEGACY_USER_DATA_DIR_NAME = "T3 Code (Alpha)"`)
 - `apps/desktop/package.json` — `productName: "Work"`
+- `scripts/build-desktop-artifact.ts` — `appId: "com.unotools.work"`, `artifactName: "Uno-Work-${version}-${arch}.${ext}"`, description/author/CLI help
 - В UI — только логотип + бейдж «Work», без слова «Uno».
 
 ### 2. Dev mode toggle
@@ -75,6 +76,7 @@ bun fmt && bun lint && bun typecheck  # перед коммитом
 - `apps/web/src/components/ChatView.tsx` — onOpenTurnDiff, импорты preview.
 - `apps/web/src/routes/_chat.$environmentId.$threadId.tsx` — mutual exclusion.
 - `apps/web/src/branding.ts`, `apps/desktop/src/appBranding*.ts`, `apps/desktop/package.json`, `electron-launcher.mjs`, `apps/desktop/src/main.ts` — наш бренд.
+- `scripts/build-desktop-artifact.ts` — `appId`, `artifactName`, description/author.
 - `packages/contracts/src/{filesystem,rpc,ipc}.ts` — новые методы для preview.
 
 Перед мерджем: запустить `bun typecheck` после resolve. После: `bun dev:desktop` и проверить, что (а) логотип «Work», (б) dev-toggle переключает кнопки, (в) preview pane открывается на md/html, (г) клик по changed file роутит правильно.

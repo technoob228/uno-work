@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import type { EnvironmentId } from "@t3tools/contracts";
 
+import { forgetScrollPosition } from "./previewScrollMemory";
+
 export type PreviewFileKind =
   | "md"
   | "html"
@@ -21,6 +23,7 @@ export interface PreviewFile {
   content: string;
   blobUrl?: string;
   path?: string;
+  projectCwd?: string;
   environmentId?: EnvironmentId;
 }
 
@@ -35,6 +38,8 @@ interface PreviewPaneState {
   activeFileId: string | null;
   browserOpen: boolean;
   browserContext: BrowserContext;
+  currentChatProjectCwd: string | null;
+  currentChatEnvironmentId: EnvironmentId | null;
   setOpen: (open: boolean) => void;
   toggleOpen: () => void;
   openFile: (file: PreviewFile) => void;
@@ -42,6 +47,10 @@ interface PreviewPaneState {
   setActiveFile: (id: string) => void;
   openBrowser: (context: BrowserContext) => void;
   closeBrowser: () => void;
+  setCurrentChatContext: (context: {
+    projectCwd: string | null;
+    environmentId: EnvironmentId | null;
+  }) => void;
 }
 
 const EMPTY_BROWSER_CONTEXT: BrowserContext = { environmentId: null, startPath: null };
@@ -54,6 +63,10 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
   const [browserOpen, setBrowserOpen] = useState(false);
   const [browserContext, setBrowserContext] = useState<BrowserContext>(EMPTY_BROWSER_CONTEXT);
+  const [currentChatProjectCwd, setCurrentChatProjectCwd] = useState<string | null>(null);
+  const [currentChatEnvironmentId, setCurrentChatEnvironmentId] = useState<EnvironmentId | null>(
+    null,
+  );
 
   const openFile = useCallback((file: PreviewFile) => {
     setFiles((prev) => {
@@ -77,6 +90,7 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
         const remaining = files.filter((f) => f.id !== id);
         return remaining[0]?.id ?? null;
       });
+      forgetScrollPosition(id);
     },
     [files],
   );
@@ -90,6 +104,14 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
     setBrowserOpen(false);
   }, []);
 
+  const setCurrentChatContext = useCallback(
+    (context: { projectCwd: string | null; environmentId: EnvironmentId | null }) => {
+      setCurrentChatProjectCwd(context.projectCwd);
+      setCurrentChatEnvironmentId(context.environmentId);
+    },
+    [],
+  );
+
   const value = useMemo<PreviewPaneState>(
     () => ({
       open,
@@ -97,6 +119,8 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       activeFileId,
       browserOpen,
       browserContext,
+      currentChatProjectCwd,
+      currentChatEnvironmentId,
       setOpen,
       toggleOpen: () => setOpen((v) => !v),
       openFile,
@@ -104,6 +128,7 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       setActiveFile: setActiveFileId,
       openBrowser,
       closeBrowser,
+      setCurrentChatContext,
     }),
     [
       open,
@@ -111,10 +136,13 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       activeFileId,
       browserOpen,
       browserContext,
+      currentChatProjectCwd,
+      currentChatEnvironmentId,
       openFile,
       closeFile,
       openBrowser,
       closeBrowser,
+      setCurrentChatContext,
     ],
   );
 

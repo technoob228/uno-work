@@ -1188,6 +1188,16 @@ function createSavedEnvironmentClient(
             lastErrorAt: isoNow(),
           });
         },
+        onHeartbeatTimeout: () => {
+          const mismatch = resolveServerConfigVersionMismatch(
+            useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
+          );
+          useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
+            connectionState: "error",
+            lastError: appendVersionMismatchHint("WebSocket heartbeat timed out.", mismatch),
+            lastErrorAt: isoNow(),
+          });
+        },
         onClose: (
           details: { readonly code: number; readonly reason: string },
           context: WsProtocolCloseContext,

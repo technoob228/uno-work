@@ -17,7 +17,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
-const APP_DISPLAY_NAME = isDevelopment ? "Work (Dev)" : "Work";
+const APP_DISPLAY_NAME = isDevelopment ? "Uno Work (Dev)" : "Uno Work";
 const APP_BUNDLE_ID = isDevelopment ? "xyz.getuno.work.dev" : "xyz.getuno.work";
 const LAUNCHER_VERSION = 2;
 

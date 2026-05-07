@@ -61,6 +61,7 @@ import {
   textContainsInlineTerminalContextLabels,
 } from "./userMessageTerminalContexts";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
+import { detectFileKind, usePreviewPane } from "../preview/PreviewPaneContext";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via useContext.
@@ -937,6 +938,29 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workspaceRoot: string | undefined;
 }) {
   const { workEntry, workspaceRoot } = props;
+  const { activeThreadEnvironmentId } = use(TimelineRowCtx);
+  const { openFile } = usePreviewPane();
+  const handleOpenWorkFile = useCallback(
+    (filePath: string) => {
+      const isAbsolute = filePath.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(filePath);
+      const absolutePath =
+        isAbsolute || !workspaceRoot
+          ? filePath
+          : `${workspaceRoot.replace(/[\\/]$/, "")}/${filePath}`;
+      const name = absolutePath.split(/[\\/]/).pop() ?? absolutePath;
+      const kind = detectFileKind(name);
+      openFile({
+        id: absolutePath,
+        name,
+        kind,
+        content: "",
+        path: absolutePath,
+        environmentId: activeThreadEnvironmentId,
+        ...(workspaceRoot ? { projectCwd: workspaceRoot } : {}),
+      });
+    },
+    [activeThreadEnvironmentId, openFile, workspaceRoot],
+  );
   const iconConfig = workToneIcon(workEntry.tone);
   const EntryIcon = workEntryIcon(workEntry);
   const heading = toolWorkEntryHeading(workEntry);
@@ -1033,13 +1057,15 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           {workEntry.changedFiles?.slice(0, 4).map((filePath) => {
             const displayPath = formatWorkspaceRelativePath(filePath, workspaceRoot);
             return (
-              <span
+              <button
+                type="button"
                 key={`${workEntry.id}:${filePath}`}
-                className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75"
+                onClick={() => handleOpenWorkFile(filePath)}
+                className="cursor-pointer rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75 transition-colors hover:border-border hover:bg-background hover:text-foreground"
                 title={displayPath}
               >
                 {displayPath}
-              </span>
+              </button>
             );
           })}
           {(workEntry.changedFiles?.length ?? 0) > 4 && (

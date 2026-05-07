@@ -12,10 +12,19 @@ import {
   GlobeIcon,
   ImageIcon,
   Loader2Icon,
+  PlusIcon,
   TableIcon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -30,6 +39,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import { type PreviewFile, type PreviewFileKind, usePreviewPane } from "./PreviewPaneContext";
+import { getScrollPosition, setScrollPosition } from "./previewScrollMemory";
 
 const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   md: FileTextIcon,
@@ -71,6 +81,59 @@ function readStoredWidth(): number {
   if (!raw) return DEFAULT_PREVIEW_WIDTH;
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : DEFAULT_PREVIEW_WIDTH;
+}
+
+function attachScrollMemory(el: HTMLElement, fileId: string): () => void {
+  const saved = getScrollPosition(fileId);
+  if (saved !== undefined) {
+    el.scrollTop = saved;
+  }
+  let frame = 0;
+  const onScroll = () => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => {
+      setScrollPosition(fileId, el.scrollTop);
+    });
+  };
+  el.addEventListener("scroll", onScroll, { passive: true });
+  return () => {
+    cancelAnimationFrame(frame);
+    el.removeEventListener("scroll", onScroll);
+  };
+}
+
+function useScrollMemoryRef<T extends HTMLElement>(fileId: string) {
+  const ref = useRef<T | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    return attachScrollMemory(el, fileId);
+  }, [fileId]);
+  return ref;
+}
+
+function MemoizedScrollArea({
+  fileId,
+  className,
+  children,
+}: {
+  fileId: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const viewport = root.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    if (!viewport) return;
+    return attachScrollMemory(viewport, fileId);
+  }, [fileId]);
+  return (
+    <div ref={rootRef} className="h-full min-h-0">
+      <ScrollArea className={className}>{children}</ScrollArea>
+    </div>
+  );
 }
 
 function MarkdownBody({ content }: { content: string }) {
@@ -232,7 +295,7 @@ function CsvBody({ file, content }: { file: PreviewFile; content: string }) {
   const bodyRows = keyedCsvEntries(body);
   const truncated = rows.length - 1 > CSV_MAX_ROWS;
   return (
-    <ScrollArea className="h-full">
+    <MemoizedScrollArea fileId={file.id} className="h-full">
       <div className="p-3 text-xs">
         <table className="w-full border-collapse">
           <thead>
@@ -268,11 +331,11 @@ function CsvBody({ file, content }: { file: PreviewFile; content: string }) {
           </div>
         ) : null}
       </div>
-    </ScrollArea>
+    </MemoizedScrollArea>
   );
 }
 
-function JsonBody({ content }: { content: string }) {
+function JsonBody({ fileId, content }: { fileId: string; content: string }) {
   const formatted = useMemo(() => {
     try {
       return JSON.stringify(JSON.parse(content), null, 2);
@@ -281,19 +344,19 @@ function JsonBody({ content }: { content: string }) {
     }
   }, [content]);
   return (
-    <ScrollArea className="h-full">
+    <MemoizedScrollArea fileId={fileId} className="h-full">
       <pre className="whitespace-pre px-4 py-3 font-mono text-xs leading-relaxed">{formatted}</pre>
-    </ScrollArea>
+    </MemoizedScrollArea>
   );
 }
 
-function TextBody({ content }: { content: string }) {
+function TextBody({ fileId, content }: { fileId: string; content: string }) {
   return (
-    <ScrollArea className="h-full">
+    <MemoizedScrollArea fileId={fileId} className="h-full">
       <pre className="whitespace-pre-wrap break-words px-4 py-3 font-mono text-xs leading-relaxed">
         {content}
       </pre>
-    </ScrollArea>
+    </MemoizedScrollArea>
   );
 }
 
@@ -361,13 +424,13 @@ function DocxBody({ file, base64 }: { file: PreviewFile; base64: string }) {
     );
   }
   return (
-    <ScrollArea className="h-full">
+    <MemoizedScrollArea fileId={file.id} className="h-full">
       <div
         className="preview-markdown px-5 py-4"
         // mammoth выдаёт sanitized HTML без скриптов; всё содержимое — стилизованный текст.
         dangerouslySetInnerHTML={{ __html: data }}
       />
-    </ScrollArea>
+    </MemoizedScrollArea>
   );
 }
 
@@ -475,6 +538,7 @@ function SpreadsheetBody({
       };
     }
   }, [content]);
+  const tableScrollRef = useScrollMemoryRef<HTMLDivElement>(file.id);
   const [activeSheet, setActiveSheet] = useState<string | null>(null);
   const sheets = parsed.preview?.sheets ?? [];
   const selectedSheet = sheets.find((sheet) => sheet.name === activeSheet) ?? sheets[0];
@@ -512,53 +576,56 @@ function SpreadsheetBody({
           ))}
         </div>
       ) : null}
-      <div className="min-h-0 flex-1 overflow-auto">
-        <table className="min-w-full border-separate border-spacing-0 text-xs">
-          <thead>
-            <tr>
-              <th className="sticky left-0 top-0 z-20 h-7 min-w-10 border-b border-r border-border bg-muted px-2 text-muted-foreground" />
-              {Array.from({ length: selectedSheet.renderedCols }, (_, index) => {
-                const label = spreadsheetColumnLabel(index);
-                return (
-                  <th
-                    key={label}
-                    className="sticky top-0 z-10 h-7 min-w-24 border-b border-r border-border bg-muted px-2 text-left font-medium text-muted-foreground"
-                  >
-                    {label}
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {selectedSheet.rows.map((row) => (
-              <tr key={row.key} className="hover:bg-muted/40">
-                <th className="sticky left-0 z-10 h-7 min-w-10 border-b border-r border-border bg-muted px-2 text-right font-medium text-muted-foreground">
-                  {row.number}
-                </th>
-                {Array.from({ length: selectedSheet.renderedCols }, (_, colIndex) => {
-                  const columnLabel = spreadsheetColumnLabel(colIndex);
+      {rowCount === 0 ? (
+        <div className="min-h-0 flex-1">
+          <MetadataPlaceholder file={file} label="Лист пустой" />
+        </div>
+      ) : (
+        <div ref={tableScrollRef} className="min-h-0 flex-1 overflow-auto">
+          <table className="min-w-full border-separate border-spacing-0 text-xs">
+            <thead>
+              <tr>
+                <th className="sticky left-0 top-0 z-20 h-7 min-w-10 border-b border-r border-border bg-muted px-2 text-muted-foreground" />
+                {Array.from({ length: selectedSheet.renderedCols }, (_, index) => {
+                  const label = spreadsheetColumnLabel(index);
                   return (
-                    <td
-                      key={`${row.key}:${columnLabel}`}
-                      className="max-w-80 border-b border-r border-border px-2 py-1 align-top text-foreground"
-                      title={row.cells[colIndex] ?? ""}
+                    <th
+                      key={label}
+                      className="sticky top-0 z-10 h-7 min-w-24 border-b border-r border-border bg-muted px-2 text-left font-medium text-muted-foreground"
                     >
-                      <span className="line-clamp-3 whitespace-pre-wrap break-words">
-                        {row.cells[colIndex] ?? ""}
-                      </span>
-                    </td>
+                      {label}
+                    </th>
                   );
                 })}
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {rowCount === 0 ? (
-          <div className="p-4 text-sm text-muted-foreground">Лист пустой</div>
-        ) : null}
-      </div>
-      {sourceTruncated || truncatedRows || truncatedCols ? (
+            </thead>
+            <tbody>
+              {selectedSheet.rows.map((row) => (
+                <tr key={row.key} className="hover:bg-muted/40">
+                  <th className="sticky left-0 z-10 h-7 min-w-10 border-b border-r border-border bg-muted px-2 text-right font-medium text-muted-foreground">
+                    {row.number}
+                  </th>
+                  {Array.from({ length: selectedSheet.renderedCols }, (_, colIndex) => {
+                    const columnLabel = spreadsheetColumnLabel(colIndex);
+                    return (
+                      <td
+                        key={`${row.key}:${columnLabel}`}
+                        className="max-w-80 border-b border-r border-border px-2 py-1 align-top text-foreground"
+                        title={row.cells[colIndex] ?? ""}
+                      >
+                        <span className="line-clamp-3 whitespace-pre-wrap break-words">
+                          {row.cells[colIndex] ?? ""}
+                        </span>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {rowCount > 0 && (sourceTruncated || truncatedRows || truncatedCols) ? (
         <div className="shrink-0 border-t border-border bg-card px-3 py-2 text-[11px] text-muted-foreground">
           {sourceTruncated ? "Файл был обрезан при чтении. " : null}
           {truncatedRows
@@ -586,9 +653,9 @@ function renderLoadedBody(file: PreviewFile, data: LoadedFileData) {
   if (data.encoding === "utf8") {
     if (file.kind === "md") {
       return (
-        <ScrollArea className="h-full">
+        <MemoizedScrollArea fileId={file.id} className="h-full">
           <MarkdownBody content={data.content} />
-        </ScrollArea>
+        </MemoizedScrollArea>
       );
     }
     if (file.kind === "html") {
@@ -605,10 +672,10 @@ function renderLoadedBody(file: PreviewFile, data: LoadedFileData) {
       return <CsvBody file={file} content={data.content} />;
     }
     if (file.kind === "json") {
-      return <JsonBody content={data.content} />;
+      return <JsonBody fileId={file.id} content={data.content} />;
     }
     if (file.kind === "text" || file.kind === "unknown") {
-      return <TextBody content={data.content} />;
+      return <TextBody fileId={file.id} content={data.content} />;
     }
     if (file.kind === "svg") {
       return <SvgBody file={file} content={data.content} />;
@@ -723,18 +790,18 @@ function Body({ file }: { file: PreviewFile }) {
   switch (file.kind) {
     case "md":
       return (
-        <ScrollArea className="h-full">
+        <MemoizedScrollArea fileId={file.id} className="h-full">
           <MarkdownBody content={file.content} />
-        </ScrollArea>
+        </MemoizedScrollArea>
       );
     case "html":
       return <HtmlBody file={file} />;
     case "csv":
       return <CsvBody file={file} content={file.content} />;
     case "json":
-      return <JsonBody content={file.content} />;
+      return <JsonBody fileId={file.id} content={file.content} />;
     case "text":
-      return <TextBody content={file.content} />;
+      return <TextBody fileId={file.id} content={file.content} />;
     case "svg":
       return <SvgBody file={file} content={file.content} />;
     case "pdf":
@@ -748,21 +815,58 @@ function Body({ file }: { file: PreviewFile }) {
   }
 }
 
-const MAX_VISIBLE_DIR_SEGMENTS = 3;
+interface PathSegment {
+  readonly label: string;
+  readonly path: string;
+  readonly key: string;
+}
 
-function PathBar({ file, onOpenBrowser }: { file: PreviewFile; onOpenBrowser: () => void }) {
+function buildPathSegments(rawPath: string): PathSegment[] {
+  const homeMatch = rawPath.match(/^\/(?:Users|home)\/[^/]+/);
+  const homePrefix = homeMatch ? homeMatch[0] : null;
+  const remainder = homePrefix ? rawPath.slice(homePrefix.length) : rawPath;
+  const remainderParts = remainder.split(/[\\/]/).filter(Boolean);
+  const segments: PathSegment[] = [];
+  let acc = "";
+  if (homePrefix) {
+    acc = homePrefix;
+    segments.push({ label: "~", path: acc, key: "~" });
+  } else if (rawPath.startsWith("/")) {
+    acc = "";
+  }
+  remainderParts.forEach((label, index) => {
+    acc = `${acc}/${label}`;
+    segments.push({ label, path: acc, key: `${label}-${index}` });
+  });
+  return segments;
+}
+
+function PathBar({
+  file,
+  onOpenAt,
+}: {
+  file: PreviewFile;
+  onOpenAt: (path: string | null) => void;
+}) {
   const rawPath = file.path ?? file.name;
-  const displayPath = rawPath.replace(/^\/(?:Users|home)\/[^/]+/, "~");
-  const segments = displayPath.split(/[\\/]/).filter(Boolean);
-  const fileSegment = segments.length > 0 ? segments[segments.length - 1] : file.name;
+  const segments = useMemo(() => buildPathSegments(rawPath), [rawPath]);
+  const fileSegment = segments.length > 0 ? segments[segments.length - 1]! : null;
   const dirSegments = segments.slice(0, -1);
+  const homeSegment = dirSegments[0]?.label === "~" ? dirSegments[0]! : null;
+  const folderTarget = homeSegment?.path ?? file.projectCwd ?? null;
   const [copied, setCopied] = useState(false);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!copied) return;
     const timeout = window.setTimeout(() => setCopied(false), 1500);
     return () => window.clearTimeout(timeout);
   }, [copied]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [rawPath]);
 
   const handleCopyPath = useCallback(async () => {
     try {
@@ -773,58 +877,38 @@ function PathBar({ file, onOpenBrowser }: { file: PreviewFile; onOpenBrowser: ()
     }
   }, [rawPath]);
 
-  const collapsed = dirSegments.length > MAX_VISIBLE_DIR_SEGMENTS;
-  const visibleDirSegments = collapsed
-    ? [
-        { kind: "segment" as const, label: dirSegments[0]!, key: "first" },
-        { kind: "ellipsis" as const, key: "ellipsis" },
-        ...dirSegments.slice(-2).map((label, index) => ({
-          kind: "segment" as const,
-          label,
-          key: `tail-${index}`,
-        })),
-      ]
-    : dirSegments.map((label, index) => ({
-        kind: "segment" as const,
-        label,
-        key: `${label}-${index}`,
-      }));
-
   return (
     <div
       className="flex h-8 shrink-0 items-center gap-1 border-b border-border bg-card px-2 text-xs"
       title={rawPath}
     >
-      <Button
-        size="icon-xs"
-        variant="ghost"
-        onClick={onOpenBrowser}
+      <button
+        type="button"
+        onClick={() => onOpenAt(folderTarget)}
         aria-label="Browse files"
-        className="shrink-0"
+        className="flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
       >
         <FolderIcon className="size-3.5" />
-      </Button>
-      <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden font-mono text-[11px] text-muted-foreground">
-        {visibleDirSegments.map((entry) =>
-          entry.kind === "ellipsis" ? (
-            <span key={entry.key} className="flex shrink-0 items-center gap-0.5">
-              <span className="px-1 py-0.5 opacity-60">…</span>
-              <ChevronRightIcon className="size-3 opacity-40" />
-            </span>
-          ) : (
-            <span key={entry.key} className="flex shrink-0 items-center gap-0.5">
-              <button
-                type="button"
-                onClick={onOpenBrowser}
-                className="rounded px-1 py-0.5 hover:bg-accent hover:text-foreground"
-              >
-                {entry.label}
-              </button>
-              <ChevronRightIcon className="size-3 opacity-40" />
-            </span>
-          ),
-        )}
-        <span className="truncate px-1 py-0.5 font-medium text-foreground">{fileSegment}</span>
+      </button>
+      <div
+        ref={scrollRef}
+        className="scrollbar-hide flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto font-mono text-[11px] text-muted-foreground"
+      >
+        {dirSegments.map((entry) => (
+          <span key={entry.key} className="flex shrink-0 items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => onOpenAt(entry.path)}
+              className="rounded px-1 py-0.5 hover:bg-accent hover:text-foreground"
+            >
+              {entry.label}
+            </button>
+            <ChevronRightIcon className="size-3 opacity-40" />
+          </span>
+        ))}
+        <span className="shrink-0 px-1 py-0.5 font-medium text-foreground">
+          {fileSegment?.label ?? file.name}
+        </span>
       </div>
       <TooltipProvider delay={0} closeDelay={0}>
         <Tooltip>
@@ -868,8 +952,17 @@ function PathBar({ file, onOpenBrowser }: { file: PreviewFile; onOpenBrowser: ()
 }
 
 export function PreviewPane() {
-  const { open, files, activeFileId, setActiveFile, closeFile, setOpen, openBrowser } =
-    usePreviewPane();
+  const {
+    open,
+    files,
+    activeFileId,
+    setActiveFile,
+    closeFile,
+    setOpen,
+    openBrowser,
+    currentChatProjectCwd,
+    currentChatEnvironmentId,
+  } = usePreviewPane();
   const [width, setWidth] = useState<number>(() => readStoredWidth());
   const [maxWidth, setMaxWidth] = useState<number>(() =>
     typeof window !== "undefined" ? Math.max(MIN_PREVIEW_WIDTH, window.innerWidth * 0.6) : 800,
@@ -937,12 +1030,12 @@ export function PreviewPane() {
 
   const active = files.find((f) => f.id === activeFileId) ?? files[0];
 
-  const handleOpenBrowser = () => {
+  const handleOpenAt = (path: string | null) => {
     if (!active) return;
-    const dir = active.path ? active.path.replace(/[\\/][^\\/]*$/, "") : null;
+    const fallback = active.path ? active.path.replace(/[\\/][^\\/]*$/, "") : null;
     openBrowser({
       environmentId: active.environmentId ?? null,
-      startPath: dir || null,
+      startPath: path ?? fallback ?? null,
     });
   };
 
@@ -961,14 +1054,7 @@ export function PreviewPane() {
         className="absolute left-0 top-0 z-30 h-full w-1.5 -translate-x-1/2 cursor-ew-resize hover:bg-primary/30 active:bg-primary/50"
       />
       <header className="relative flex h-9 shrink-0 items-center border-b border-border bg-card pr-2">
-        <div
-          className="scrollbar-hide flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2"
-          style={{
-            maskImage: "linear-gradient(to right, black calc(100% - 1.5rem), transparent 100%)",
-            WebkitMaskImage:
-              "linear-gradient(to right, black calc(100% - 1.5rem), transparent 100%)",
-          }}
-        >
+        <div className="scrollbar-hide flex min-w-0 flex-1 items-center gap-1 overflow-x-auto pl-2">
           {files.map((file) => {
             const Icon = KIND_ICON[file.kind];
             const isActive = file.id === active?.id;
@@ -1008,6 +1094,20 @@ export function PreviewPane() {
               </button>
             );
           })}
+          <button
+            type="button"
+            onClick={() =>
+              openBrowser({
+                environmentId: currentChatEnvironmentId ?? active?.environmentId ?? null,
+                startPath: currentChatProjectCwd ?? null,
+              })
+            }
+            aria-label="Открыть файл из проекта"
+            title="Открыть файл из корня проекта"
+            className="sticky right-0 inline-flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-md bg-card text-muted-foreground before:pointer-events-none before:absolute before:inset-0 before:bg-accent before:opacity-0 hover:text-foreground hover:before:opacity-100 sm:size-6"
+          >
+            <PlusIcon className="relative size-3.5" />
+          </button>
         </div>
         <Button
           size="icon-xs"
@@ -1019,7 +1119,7 @@ export function PreviewPane() {
           <XIcon />
         </Button>
       </header>
-      {active ? <PathBar file={active} onOpenBrowser={handleOpenBrowser} /> : null}
+      {active ? <PathBar file={active} onOpenAt={handleOpenAt} /> : null}
       <div className="min-h-0 flex-1">{active ? <Body file={active} /> : null}</div>
     </aside>
   );

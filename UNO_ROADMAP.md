@@ -1,5 +1,7 @@
 # Uno Work Roadmap
 
+> Status legend: ✅ done · 🟡 in progress · ⏳ not started · ⏭ deferred
+
 ## Goal
 
 Build a polished open-source app for the UNO community of vibe coders. The app should make local
@@ -23,47 +25,65 @@ open-source project.
 
 ## Phase 0: Foundation
 
-- Decide license and governance model for the open-source release.
-- Keep the Uno fork delta documented separately from upstream T3 Code.
-- Write public docs: README, install guide, development guide, provider guide, security policy.
-- Define privacy and telemetry stance: what is local, what can be sent to UNO, and how users opt out.
-- Document the provider/harness adapter contract for contributors.
+- ⏳ Decide license and governance model for the open-source release.
+- ✅ Keep the Uno fork delta documented separately from upstream T3 Code (`UNO_FORK.md`).
+- 🟡 Write public docs: README, install guide, development guide, provider guide, security policy. _(README inherited from upstream; Uno-specific install/dev/security docs not yet written.)_
+- ⏳ Define privacy and telemetry stance: what is local, what can be sent to UNO, and how users opt out.
+- ⏳ Document the provider/harness adapter contract for contributors.
 
 ## Phase 1: MVP Product Polish
 
-### Excel Preview
+### Excel Preview ✅
 
-- Add real `.xlsx` preview support.
-- Read workbook data through server-side RPC.
-- Render workbook sheets, table cells, large rows/columns, loading states, and read errors.
-- Support enough formatting to inspect spreadsheets comfortably.
-- Defer full Excel editing until after the preview is stable.
+- ✅ Real `.xlsx` preview via `xlsx@0.18` (`SpreadsheetBody` renders parsed workbooks).
+- ✅ Workbook data read through server-side RPC (`WorkspaceFileSystem`).
+- ✅ Sheet rendering with table cells, loading and error states.
+- ⏭ Full Excel editing — deferred per plan.
 
-### Environment Selector Integration
+### Preview Pane Coverage Beyond Spec
 
-- Connect the bottom-left Uno environment dropdown to the existing T3 environment model.
-- Remove the current parallel environment state.
-- Make thread lists strictly scoped to the selected environment.
-- Reuse existing T3 environment creation, switching, renaming, and persistence behavior.
-- Keep the new Uno UI, but make it a real facade over the existing environment system.
+- ✅ `svg` (sandboxed iframe — blocks JS-in-SVG XSS).
+- ✅ `docx` (lazy `mammoth.browser` `convertToHtml`).
+- ✅ `text/plain` (`.txt` mapped to text on client and server, MIME table updated).
+- ✅ `csv` with stable keyed entries (no index-as-key warnings on duplicate header rows).
+- ✅ `PathBar` with full path + horizontal scroll, per-segment navigation, project-root folder icon.
+- ✅ Tabs row "+" button — opens file browser at current chat's project cwd.
+- ✅ Mutual exclusion: Diff panel ↔ Preview pane (only one open at a time).
+
+### Environment Selector Integration ✅
+
+- ✅ Bottom-left Uno environment dropdown rewired to real T3 `EnvironmentId`/`ConnectionState`.
+- ✅ Reconnect handler + runtime store + thread-route navigation in `SidebarEnvSwitcher`.
+- ✅ `AddEnvModal` drives real environment creation.
+- ✅ Sidebar threads strictly scoped via `selectSidebarThreadsForEnvironment`.
+- ✅ `NoActiveThreadState` filters projects by selected env (hybrid 0/1/many picker).
+- ✅ `useReconnectEnvironment` hook + `onHeartbeatTimeout` → `connectionState: "error"` so dropdown stops showing green for silently-dropped remote envs.
 
 ### Core UX Hardening
 
-- Polish preview, chat, files, loading, error, and empty states.
-- Hide dev-only controls from normal users.
-- Add predictable keyboard and navigation behavior where it affects daily use.
-- Add a local doctor/diagnostics surface for Codex, Claude, Git, permissions, and runtime issues.
+- 🟡 Polish preview, chat, files, loading, error, and empty states. _(Preview polished; chat/files/loading/error states still inherited from upstream — pending an audit pass.)_
+- ✅ Hide dev-only controls from normal users (`devMode` toggle gates ProjectScripts, OpenInPicker, GitActions, Terminal, Diff, BranchToolbar, "No Git" badge).
+- ⏳ Predictable keyboard and navigation behavior where it affects daily use.
+- ⏳ Local doctor/diagnostics surface for Codex, Claude, Git, permissions, and runtime issues.
+
+### Tests
+
+- ✅ `selectSidebarThreadsForEnvironment` env-scoped sidebar test.
+- ✅ `detectFileKind` unit tests for every kind (incl. docx/svg recategorisation).
+- ✅ `PreviewPaneContext` tests.
+- 🟡 Env switching/reconnect integration coverage — partial; expand alongside Phase 2 CI.
 
 ## Phase 2: Desktop Release
 
-- Build distributable desktop apps, starting with macOS arm64/x64.
-- Add Windows and Linux builds after the macOS path is stable.
-- Set up release CI with `bun fmt`, `bun lint`, `bun typecheck`, `bun run test`, and app build
-  checks.
-- Publish artifacts through GitHub Releases.
-- Add signing/notarization where needed, especially for macOS.
-- Decide whether auto-updates are needed for the first public release or can follow shortly after.
-- Add first-run setup checks for installed/authenticated providers.
+> Inherited from upstream T3: `apps/desktop` (Electron 40 + electron-updater), `scripts/build-desktop-artifact.ts`, `.github/workflows/release.yml` (stable + nightly schedules + smoke tests). Brand already swapped to "Work" / "Work (Nightly)".
+
+- ⏳ Verify desktop build works on this fork end-to-end (`bun dev:desktop`, then `scripts/build-desktop-artifact.ts` for macOS arm64/x64).
+- ⏳ Add Windows and Linux builds after the macOS path is stable.
+- 🟡 Release CI with `bun fmt`, `bun lint`, `bun typecheck`, `bun run test`, and app build checks. _(Workflows inherited; need to re-point release targets to Uno fork repo and re-run on our branch.)_
+- ⏳ Publish artifacts through GitHub Releases of the fork (currently inherits T3 release config).
+- ⏳ Signing/notarization for macOS — requires Apple Developer account + signing identity in CI secrets.
+- ⏳ Decide whether auto-updates are needed for the first public release or can follow shortly after. _(`electron-updater` already wired in upstream — just needs an update-server URL we control.)_
+- ⏳ Add first-run setup checks for installed/authenticated providers.
 
 ## Phase 3: Onboarding And Feedback
 
@@ -150,8 +170,18 @@ open-source project.
 
 ## Near-Term Sprint
 
-1. Implement Excel preview.
-2. Replace the parallel Uno environment dropdown state with the real T3 environment model.
-3. Scope visible chats strictly to the selected environment.
-4. Add/update tests around environment switching and preview behavior.
-5. Run `bun fmt`, `bun lint`, `bun typecheck`, and focused `bun run test` coverage.
+> Phase 1 sprint completed (commits `205a76c2`, `5f1cbb88`, plus uncommitted UX polish).
+
+1. ✅ Implement Excel preview.
+2. ✅ Replace the parallel Uno environment dropdown state with the real T3 environment model.
+3. ✅ Scope visible chats strictly to the selected environment.
+4. 🟡 Add/update tests around environment switching and preview behavior. _(Sidebar selector + preview kinds covered; reconnect/heartbeat integration tests still pending.)_
+5. ✅ Run `bun fmt`, `bun lint`, `bun typecheck`, and focused `bun run test` coverage. _(Per-change validation; keep running before each commit.)_
+
+### Next Sprint — toward Phase 2 cut
+
+1. Commit pending UX polish (`ChatView`, `NoActiveThreadState`, `Sidebar`, `SidebarEnvSwitcher`, `ChatHeader`, `PreviewPane`, `PreviewPaneContext`, `service.ts`, `useReconnectEnvironment.ts`, desktop branding tweak).
+2. Run full `bun run test` baseline; document any pre-existing failures vs. ours.
+3. Smoke-test `bun dev:desktop` (full Electron flow) and `scripts/build-desktop-artifact.ts` locally for macOS.
+4. Decide signing/notarization story (Apple Developer account + CI secrets) before tagging a public macOS build.
+5. Decide auto-update channel (own update server vs. GitHub Releases via electron-updater) for the fork.
