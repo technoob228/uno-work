@@ -135,23 +135,17 @@ export function NoActiveThreadState() {
                 </EmptyHeader>
                 <EmptyContent className="mt-6">
                   {singleProject ? (
-                    <Button
-                      onClick={() => startThreadInProject(singleProject.id)}
-                      size="sm"
-                      className="[&_svg]:translate-y-[0.5px]"
-                    >
+                    <Button onClick={() => startThreadInProject(singleProject.id)} size="sm">
                       <PlusIcon className="size-4" />
-                      <span className="leading-none">
-                        New thread in <span className="font-medium">{singleProject.name}</span>
-                      </span>
+                      New thread in <span className="font-medium">{singleProject.name}</span>
                     </Button>
                   ) : (
                     <Menu>
                       <MenuTrigger
                         render={
-                          <Button size="sm" className="[&_svg]:translate-y-[0.5px]">
+                          <Button size="sm">
                             <PlusIcon className="size-4" />
-                            <span className="leading-none">New thread</span>
+                            New thread
                             <ChevronDownIcon className="size-3.5 opacity-70" />
                           </Button>
                         }
