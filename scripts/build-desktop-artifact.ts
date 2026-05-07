@@ -569,7 +569,7 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const buildConfig: Record<string, unknown> = {
     appId: "com.unotools.work",
     productName: resolveDesktopProductName(version),
-    artifactName: "Uno Work.${ext}",
+    artifactName: "Uno-Work.${ext}",
     directories: {
       buildResources: "apps/desktop/resources",
     },
