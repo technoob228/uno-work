@@ -84,7 +84,7 @@ export function NoActiveThreadState() {
         </header>
 
         <Empty className="flex-1">
-          <div className="w-full max-w-lg rounded-3xl border border-border/55 bg-card/20 px-8 py-12 shadow-sm/5">
+          <div className="flex w-full max-w-lg flex-col items-center rounded-3xl border border-border/55 bg-card/20 px-8 py-12 shadow-sm/5">
             {canReconnect ? (
               <>
                 <EmptyHeader className="max-w-none">

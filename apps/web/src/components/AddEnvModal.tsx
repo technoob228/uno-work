@@ -11,6 +11,7 @@ import {
 import { type ReactNode, memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { DesktopDiscoveredSshHost, DesktopSshEnvironmentTarget } from "@t3tools/contracts";
 
+import { APP_BASE_NAME } from "../branding";
 import { readHostedPairingRequest } from "../hostedPairing";
 import { cn } from "../lib/utils";
 import { getPairingTokenFromUrl } from "../pairingUrl";
@@ -249,7 +250,7 @@ function ChoiceStep({ onClose, setStep }: { onClose: () => void; setStep: (step:
           </div>
           <div className="font-medium text-sm">Remote link / SSH</div>
           <div className="text-muted-foreground text-xs leading-relaxed">
-            Pair an existing T3 Code backend or connect through an SSH-managed tunnel.
+            Pair an existing {APP_BASE_NAME} backend or connect through an SSH-managed tunnel.
           </div>
           <Badge variant="outline" className="mt-auto self-start text-[10px] text-muted-foreground">
             Bring your own
