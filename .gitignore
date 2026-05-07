@@ -8,7 +8,10 @@ apps/*/dist
 .astro
 packages/*/dist
 .env
-.env.local
+.env.*
+*.csv
+*.pem
+*.key
 build/
 .logs/
 release/

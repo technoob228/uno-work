@@ -59,7 +59,7 @@ bun fmt && bun lint && bun typecheck  # перед коммитом
 - `kind === "text"` (код) → старый Diff (TanStack Router search params).
 - Всё остальное (md/html/pdf/csv/json/image/xlsx/unknown) → `usePreviewPane().openFile(...)`.
 
-**Важно про путь:** `node.path` из `ChangedFilesTree` — project-relative (`test.html`). FileBrowser передаёт **абсолютный** путь. Поэтому в `onOpenTurnDiff` мы вручную джойним с `gitCwd` (корень проекта, с учётом worktree). Без этого Electron резолвит относительный путь от своего `cwd` (`~/uno-project/uno-work-app/`) и получает ENOENT.
+**Важно про путь:** `node.path` из `ChangedFilesTree` — project-relative (`test.html`). FileBrowser передаёт **абсолютный** путь. Поэтому в `onOpenTurnDiff` мы вручную джойним с `gitCwd` (корень проекта, с учётом worktree). Без этого Electron резолвит относительный путь от своего `cwd` (корень репозитория) и получает ENOENT.
 
 ### 6. Прочее
 
