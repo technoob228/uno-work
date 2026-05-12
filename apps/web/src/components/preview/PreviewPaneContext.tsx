@@ -32,6 +32,14 @@ export interface BrowserContext {
   startPath: string | null;
 }
 
+export interface ProjectPreviewState {
+  open: boolean;
+  files: ReadonlyArray<PreviewFile>;
+  activeFileId: string | null;
+  browserOpen: boolean;
+  browserContext: BrowserContext;
+}
+
 interface PreviewPaneState {
   open: boolean;
   files: ReadonlyArray<PreviewFile>;
@@ -48,98 +56,180 @@ interface PreviewPaneState {
   openBrowser: (context: BrowserContext) => void;
   closeBrowser: () => void;
   setCurrentChatContext: (context: {
+    projectKey: string | null;
     projectCwd: string | null;
     environmentId: EnvironmentId | null;
   }) => void;
 }
 
-const EMPTY_BROWSER_CONTEXT: BrowserContext = { environmentId: null, startPath: null };
+export const EMPTY_BROWSER_CONTEXT: BrowserContext = { environmentId: null, startPath: null };
+
+export const NO_PROJECT_KEY = "__no_project__";
+
+export const DEFAULT_PROJECT_PREVIEW_STATE: ProjectPreviewState = {
+  open: false,
+  files: [],
+  activeFileId: null,
+  browserOpen: false,
+  browserContext: EMPTY_BROWSER_CONTEXT,
+};
+
+export function getProjectPreviewState(
+  states: Readonly<Record<string, ProjectPreviewState>>,
+  key: string,
+): ProjectPreviewState {
+  return states[key] ?? DEFAULT_PROJECT_PREVIEW_STATE;
+}
+
+export function applyProjectPreviewPatch(
+  states: Readonly<Record<string, ProjectPreviewState>>,
+  key: string,
+  patch: Partial<ProjectPreviewState>,
+): Record<string, ProjectPreviewState> {
+  const current = getProjectPreviewState(states, key);
+  return {
+    ...states,
+    [key]: { ...current, ...patch },
+  };
+}
 
 const Ctx = createContext<PreviewPaneState | null>(null);
 
 export function PreviewPaneProvider({ children }: { children: ReactNode }) {
-  const [open, setOpen] = useState(true);
-  const [files, setFiles] = useState<ReadonlyArray<PreviewFile>>([]);
-  const [activeFileId, setActiveFileId] = useState<string | null>(null);
-  const [browserOpen, setBrowserOpen] = useState(false);
-  const [browserContext, setBrowserContext] = useState<BrowserContext>(EMPTY_BROWSER_CONTEXT);
+  const [statesByProjectKey, setStatesByProjectKey] = useState<Record<string, ProjectPreviewState>>(
+    {},
+  );
+  const [currentProjectKey, setCurrentProjectKey] = useState<string>(NO_PROJECT_KEY);
   const [currentChatProjectCwd, setCurrentChatProjectCwd] = useState<string | null>(null);
   const [currentChatEnvironmentId, setCurrentChatEnvironmentId] = useState<EnvironmentId | null>(
     null,
   );
 
-  const openFile = useCallback((file: PreviewFile) => {
-    setFiles((prev) => {
-      if (prev.some((f) => f.id === file.id)) return prev;
-      return [...prev, file];
-    });
-    setActiveFileId(file.id);
-    setOpen(true);
-  }, []);
+  const updateCurrentState = useCallback(
+    (updater: (prev: ProjectPreviewState) => ProjectPreviewState) => {
+      setStatesByProjectKey((prev) => {
+        const current = getProjectPreviewState(prev, currentProjectKey);
+        const next = updater(current);
+        if (next === current) return prev;
+        return { ...prev, [currentProjectKey]: next };
+      });
+    },
+    [currentProjectKey],
+  );
+
+  const setOpen = useCallback(
+    (open: boolean) => {
+      updateCurrentState((current) => (current.open === open ? current : { ...current, open }));
+    },
+    [updateCurrentState],
+  );
+
+  const toggleOpen = useCallback(() => {
+    updateCurrentState((current) => ({ ...current, open: !current.open }));
+  }, [updateCurrentState]);
+
+  const openFile = useCallback(
+    (file: PreviewFile) => {
+      updateCurrentState((current) => ({
+        ...current,
+        files: current.files.some((f) => f.id === file.id)
+          ? current.files
+          : [...current.files, file],
+        activeFileId: file.id,
+        open: true,
+      }));
+    },
+    [updateCurrentState],
+  );
 
   const closeFile = useCallback(
     (id: string) => {
-      setFiles((prev) => {
-        const next = prev.filter((f) => f.id !== id);
-        const closed = prev.find((f) => f.id === id);
-        if (closed?.blobUrl) URL.revokeObjectURL(closed.blobUrl);
-        return next;
-      });
-      setActiveFileId((prev) => {
-        if (prev !== id) return prev;
-        const remaining = files.filter((f) => f.id !== id);
-        return remaining[0]?.id ?? null;
+      updateCurrentState((current) => {
+        const closed = current.files.find((f) => f.id === id);
+        if (!closed) return current;
+        if (closed.blobUrl) URL.revokeObjectURL(closed.blobUrl);
+        const nextFiles = current.files.filter((f) => f.id !== id);
+        const nextActiveId =
+          current.activeFileId === id ? (nextFiles[0]?.id ?? null) : current.activeFileId;
+        return {
+          ...current,
+          files: nextFiles,
+          activeFileId: nextActiveId,
+        };
       });
       forgetScrollPosition(id);
     },
-    [files],
+    [updateCurrentState],
   );
 
-  const openBrowser = useCallback((context: BrowserContext) => {
-    setBrowserContext(context);
-    setBrowserOpen(true);
-  }, []);
+  const setActiveFile = useCallback(
+    (id: string) => {
+      updateCurrentState((current) =>
+        current.activeFileId === id ? current : { ...current, activeFileId: id },
+      );
+    },
+    [updateCurrentState],
+  );
+
+  const openBrowser = useCallback(
+    (context: BrowserContext) => {
+      updateCurrentState((current) => ({
+        ...current,
+        browserOpen: true,
+        browserContext: context,
+      }));
+    },
+    [updateCurrentState],
+  );
 
   const closeBrowser = useCallback(() => {
-    setBrowserOpen(false);
-  }, []);
+    updateCurrentState((current) =>
+      current.browserOpen ? { ...current, browserOpen: false } : current,
+    );
+  }, [updateCurrentState]);
 
   const setCurrentChatContext = useCallback(
-    (context: { projectCwd: string | null; environmentId: EnvironmentId | null }) => {
+    (context: {
+      projectKey: string | null;
+      projectCwd: string | null;
+      environmentId: EnvironmentId | null;
+    }) => {
+      setCurrentProjectKey(context.projectKey ?? NO_PROJECT_KEY);
       setCurrentChatProjectCwd(context.projectCwd);
       setCurrentChatEnvironmentId(context.environmentId);
     },
     [],
   );
 
+  const currentState = getProjectPreviewState(statesByProjectKey, currentProjectKey);
+
   const value = useMemo<PreviewPaneState>(
     () => ({
-      open,
-      files,
-      activeFileId,
-      browserOpen,
-      browserContext,
+      open: currentState.open,
+      files: currentState.files,
+      activeFileId: currentState.activeFileId,
+      browserOpen: currentState.browserOpen,
+      browserContext: currentState.browserContext,
       currentChatProjectCwd,
       currentChatEnvironmentId,
       setOpen,
-      toggleOpen: () => setOpen((v) => !v),
+      toggleOpen,
       openFile,
       closeFile,
-      setActiveFile: setActiveFileId,
+      setActiveFile,
       openBrowser,
       closeBrowser,
       setCurrentChatContext,
     }),
     [
-      open,
-      files,
-      activeFileId,
-      browserOpen,
-      browserContext,
+      currentState,
       currentChatProjectCwd,
       currentChatEnvironmentId,
+      setOpen,
+      toggleOpen,
       openFile,
       closeFile,
+      setActiveFile,
       openBrowser,
       closeBrowser,
       setCurrentChatContext,

@@ -1634,12 +1634,20 @@ export default function ChatView(props: ChatViewProps) {
       })
     : null;
   const gitStatusQuery = useGitStatus({ environmentId, cwd: gitCwd });
+  const previewProjectKey = useMemo(
+    () =>
+      activeProject
+        ? deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings)
+        : null,
+    [activeProject, projectGroupingSettings],
+  );
   useEffect(() => {
     setCurrentChatContext({
+      projectKey: previewProjectKey,
       projectCwd: activeProject?.cwd ?? null,
       environmentId,
     });
-  }, [activeProject?.cwd, environmentId, setCurrentChatContext]);
+  }, [previewProjectKey, activeProject?.cwd, environmentId, setCurrentChatContext]);
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();
   // Prefer an instance-id match so a custom Codex instance (e.g.
