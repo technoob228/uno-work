@@ -241,6 +241,9 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
       throw new Error("installUpdate not implemented in test");
     },
     onUpdateState: () => () => undefined,
+    getUnoCodeInstallState: async () => ({ status: "idle" as const }),
+    retryUnoCodeInstall: async () => undefined,
+    onUnoCodeInstallState: () => () => undefined,
     ...overrides,
   };
 }

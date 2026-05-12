@@ -393,6 +393,9 @@ const createDesktopBridgeStub = (overrides?: {
       .fn()
       .mockResolvedValue({ accepted: false, completed: false, state: idleUpdateState }),
     onUpdateState: () => () => {},
+    getUnoCodeInstallState: vi.fn().mockResolvedValue({ status: "idle" }),
+    retryUnoCodeInstall: vi.fn().mockResolvedValue(undefined),
+    onUnoCodeInstallState: () => () => {},
   };
 };
 

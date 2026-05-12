@@ -13,6 +13,9 @@ const UPDATE_SET_CHANNEL_CHANNEL = "desktop:update-set-channel";
 const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
+const UNO_CODE_STATE_CHANNEL = "desktop:uno-code-state";
+const UNO_CODE_GET_STATE_CHANNEL = "desktop:uno-code-get-state";
+const UNO_CODE_RETRY_INSTALL_CHANNEL = "desktop:uno-code-retry-install";
 const GET_APP_BRANDING_CHANNEL = "desktop:get-app-branding";
 const GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL = "desktop:get-local-environment-bootstrap";
 const GET_CLIENT_SETTINGS_CHANNEL = "desktop:get-client-settings";
@@ -142,6 +145,19 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.on(UPDATE_STATE_CHANNEL, wrappedListener);
     return () => {
       ipcRenderer.removeListener(UPDATE_STATE_CHANNEL, wrappedListener);
+    };
+  },
+  getUnoCodeInstallState: () => ipcRenderer.invoke(UNO_CODE_GET_STATE_CHANNEL),
+  retryUnoCodeInstall: () => ipcRenderer.invoke(UNO_CODE_RETRY_INSTALL_CHANNEL),
+  onUnoCodeInstallState: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
+      if (typeof state !== "object" || state === null) return;
+      listener(state as Parameters<typeof listener>[0]);
+    };
+
+    ipcRenderer.on(UNO_CODE_STATE_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(UNO_CODE_STATE_CHANNEL, wrappedListener);
     };
   },
 } satisfies DesktopBridge);

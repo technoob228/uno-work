@@ -65,6 +65,14 @@ import {
 import { DesktopSshEnvironmentBridge, resolveRemoteT3CliPackageSpec } from "./sshEnvironment.ts";
 import { syncShellEnvironment } from "./syncShellEnvironment.ts";
 import { waitForBackendStartupReady } from "./backendStartupReadiness.ts";
+import {
+  getDefaultBinaryPath as getUnoCodeBinaryPath,
+  getDefaultInstallDir as getUnoCodeInstallDir,
+  installUnoCode,
+  isUnoCodeInstalled,
+  UnoCodeInstallError,
+  type InstallProgressEvent,
+} from "./unoCodeInstaller.ts";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState.ts";
 import { doesVersionMatchDesktopUpdateChannel } from "./updateChannels.ts";
 import { ServerListeningDetector } from "./serverListeningDetector.ts";
@@ -99,6 +107,9 @@ const UPDATE_SET_CHANNEL_CHANNEL = "desktop:update-set-channel";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const UPDATE_CHECK_CHANNEL = "desktop:update-check";
+const UNO_CODE_STATE_CHANNEL = "desktop:uno-code-state";
+const UNO_CODE_GET_STATE_CHANNEL = "desktop:uno-code-get-state";
+const UNO_CODE_RETRY_INSTALL_CHANNEL = "desktop:uno-code-retry-install";
 const GET_APP_BRANDING_CHANNEL = "desktop:get-app-branding";
 const GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL = "desktop:get-local-environment-bootstrap";
 const GET_CLIENT_SETTINGS_CHANNEL = "desktop:get-client-settings";
@@ -692,6 +703,20 @@ let updateInstallInFlight = false;
 let updaterConfigured = false;
 let updateState: DesktopUpdateState = initialUpdateState();
 
+type UnoCodeInstallState =
+  | { readonly status: "idle" }
+  | {
+      readonly status: "installing";
+      readonly phase: InstallProgressEvent["phase"];
+      readonly percent?: number;
+      readonly message?: string;
+    }
+  | { readonly status: "installed"; readonly binaryPath: string; readonly version: string }
+  | { readonly status: "failed"; readonly error: string; readonly code?: string };
+
+let unoCodeState: UnoCodeInstallState = { status: "idle" };
+let unoCodeInstallInFlight = false;
+
 const desktopSshEnvironmentBridge = new DesktopSshEnvironmentBridge({
   getMainWindow: () => mainWindow,
   resolveCliRunner: (): RemoteT3RunnerOptions => {
@@ -1195,6 +1220,83 @@ function emitUpdateState(): void {
 function setUpdateState(patch: Partial<DesktopUpdateState>): void {
   updateState = { ...updateState, ...patch };
   emitUpdateState();
+}
+
+function emitUnoCodeState(): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) continue;
+    window.webContents.send(UNO_CODE_STATE_CHANNEL, unoCodeState);
+  }
+}
+
+function setUnoCodeState(next: UnoCodeInstallState): void {
+  unoCodeState = next;
+  emitUnoCodeState();
+}
+
+async function writeOpenCodeBinaryPathToSettings(binaryPath: string): Promise<void> {
+  await FS.promises.mkdir(Path.dirname(SERVER_SETTINGS_PATH), { recursive: true });
+  let existing: Record<string, unknown> = {};
+  try {
+    const content = await FS.promises.readFile(SERVER_SETTINGS_PATH, "utf-8");
+    const parsed: unknown = JSON.parse(content);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      existing = parsed as Record<string, unknown>;
+    }
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") {
+      writeDesktopLogHeader(
+        `uno-code settings read fallback: ${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+    }
+  }
+  const previousOpenCode =
+    existing.opencode && typeof existing.opencode === "object" && !Array.isArray(existing.opencode)
+      ? (existing.opencode as Record<string, unknown>)
+      : {};
+  const next = {
+    ...existing,
+    opencode: { ...previousOpenCode, enabled: true, binaryPath },
+  };
+  await FS.promises.writeFile(SERVER_SETTINGS_PATH, `${JSON.stringify(next, null, 2)}\n`, "utf-8");
+}
+
+async function ensureUnoCodeInstalled(): Promise<void> {
+  if (unoCodeInstallInFlight) return;
+  const binaryPath = getUnoCodeBinaryPath(BASE_DIR);
+  if (await isUnoCodeInstalled(binaryPath)) {
+    setUnoCodeState({ status: "installed", binaryPath, version: "installed" });
+    return;
+  }
+  unoCodeInstallInFlight = true;
+  setUnoCodeState({ status: "installing", phase: "fetching-release" });
+  try {
+    const result = await installUnoCode({
+      installDir: getUnoCodeInstallDir(BASE_DIR),
+      onProgress: (event) => {
+        setUnoCodeState({
+          status: "installing",
+          phase: event.phase,
+          ...(event.percent !== undefined ? { percent: event.percent } : {}),
+          ...(event.message !== undefined ? { message: event.message } : {}),
+        });
+      },
+    });
+    await writeOpenCodeBinaryPathToSettings(result.binaryPath);
+    setUnoCodeState({
+      status: "installed",
+      binaryPath: result.binaryPath,
+      version: result.version,
+    });
+    writeDesktopLogHeader(`uno-code installed version=${result.version} path=${result.binaryPath}`);
+  } catch (cause) {
+    const error = cause instanceof Error ? cause.message : String(cause);
+    const code = cause instanceof UnoCodeInstallError ? cause.code : undefined;
+    setUnoCodeState({ status: "failed", error, ...(code ? { code } : {}) });
+    writeDesktopLogHeader(`uno-code install failed: ${error}`);
+  } finally {
+    unoCodeInstallInFlight = false;
+  }
 }
 
 function createBaseUpdateState(
@@ -1901,6 +2003,14 @@ function registerIpcHandlers(): void {
   ipcMain.removeHandler(UPDATE_GET_STATE_CHANNEL);
   ipcMain.handle(UPDATE_GET_STATE_CHANNEL, async () => updateState);
 
+  ipcMain.removeHandler(UNO_CODE_GET_STATE_CHANNEL);
+  ipcMain.handle(UNO_CODE_GET_STATE_CHANNEL, async () => unoCodeState);
+
+  ipcMain.removeHandler(UNO_CODE_RETRY_INSTALL_CHANNEL);
+  ipcMain.handle(UNO_CODE_RETRY_INSTALL_CHANNEL, async () => {
+    void ensureUnoCodeInstalled();
+  });
+
   ipcMain.removeHandler(UPDATE_SET_CHANNEL_CHANNEL);
   ipcMain.handle(UPDATE_SET_CHANNEL_CHANNEL, async (_event, rawChannel: unknown) => {
     if (rawChannel !== "latest" && rawChannel !== "nightly") {
@@ -2200,6 +2310,7 @@ async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap ipc handlers registered");
   startBackend();
   writeDesktopLogHeader("bootstrap backend start requested");
+  void ensureUnoCodeInstalled();
 
   if (isDevelopment) {
     mainWindow = createWindow();

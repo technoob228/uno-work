@@ -253,7 +253,28 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  getUnoCodeInstallState: () => Promise<UnoCodeInstallState>;
+  retryUnoCodeInstall: () => Promise<void>;
+  onUnoCodeInstallState: (listener: (state: UnoCodeInstallState) => void) => () => void;
 }
+
+export type UnoCodeInstallPhase =
+  | "fetching-release"
+  | "downloading"
+  | "extracting"
+  | "verifying"
+  | "done";
+
+export type UnoCodeInstallState =
+  | { readonly status: "idle" }
+  | {
+      readonly status: "installing";
+      readonly phase: UnoCodeInstallPhase;
+      readonly percent?: number;
+      readonly message?: string;
+    }
+  | { readonly status: "installed"; readonly binaryPath: string; readonly version: string }
+  | { readonly status: "failed"; readonly error: string; readonly code?: string };
 
 /**
  * APIs bound to the local app shell, not to any particular backend environment.
