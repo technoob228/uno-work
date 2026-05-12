@@ -19,8 +19,11 @@ import {
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
 import { useReconnectEnvironment } from "../hooks/useReconnectEnvironment";
+import { useSettings } from "../hooks/useSettings";
 import { selectSidebarThreadsForEnvironment, useStore } from "../store";
 import { buildThreadRouteParams } from "../threadRoutes";
+import { useUiStateStore } from "../uiStateStore";
+import { pickThreadForEnvironmentSwitch } from "./Sidebar.logic";
 import { Menu, MenuPopup, MenuTrigger } from "./ui/menu";
 
 interface EnvironmentOption {
@@ -86,6 +89,7 @@ export function SidebarEnvSwitcher() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
   const setActiveEnvironmentId = useStore((state) => state.setActiveEnvironmentId);
+  const sidebarThreadSortOrder = useSettings((settings) => settings.sidebarThreadSortOrder);
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((state) => state.byId);
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
 
@@ -158,15 +162,15 @@ export function SidebarEnvSwitcher() {
 
   const switchEnvironment = (environmentId: EnvironmentId) => {
     setActiveEnvironmentId(environmentId);
-    const firstThread = selectSidebarThreadsForEnvironment(useStore.getState(), environmentId).find(
-      (thread) => thread.archivedAt === null,
-    );
-    if (firstThread) {
+    const threads = selectSidebarThreadsForEnvironment(useStore.getState(), environmentId);
+    const lastVisitedById = useUiStateStore.getState().threadLastVisitedAtById;
+    const target = pickThreadForEnvironmentSwitch(threads, lastVisitedById, sidebarThreadSortOrder);
+    if (target) {
       void navigate({
         to: "/$environmentId/$threadId",
         params: buildThreadRouteParams({
           environmentId,
-          threadId: firstThread.id,
+          threadId: target.id,
         }),
       });
       return;

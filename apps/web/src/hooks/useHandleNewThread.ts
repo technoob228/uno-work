@@ -76,6 +76,7 @@ function useNewThreadState() {
           setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, storedDraftThread.draftId, {
             threadId: storedDraftThread.threadId,
           });
+          useStore.getState().setActiveEnvironmentId(projectRef.environmentId);
           if (
             currentRouteTarget?.kind === "draft" &&
             currentRouteTarget.draftId === storedDraftThread.draftId
@@ -111,6 +112,7 @@ function useNewThreadState() {
           ...(hasWorktreePathOption ? { worktreePath: options?.worktreePath ?? null } : {}),
           ...(hasEnvModeOption ? { envMode: options?.envMode } : {}),
         });
+        useStore.getState().setActiveEnvironmentId(projectRef.environmentId);
         return Promise.resolve();
       }
 
@@ -127,6 +129,7 @@ function useNewThreadState() {
           runtimeMode: DEFAULT_RUNTIME_MODE,
         });
         applyStickyState(draftId);
+        useStore.getState().setActiveEnvironmentId(projectRef.environmentId);
 
         await router.navigate({
           to: "/draft/$draftId",

@@ -485,6 +485,32 @@ export function getFallbackThreadIdAfterDelete<
     )[0]?.id ?? null
   );
 }
+
+export function pickThreadForEnvironmentSwitch<
+  T extends Pick<Thread, "id" | "archivedAt"> & ThreadSortInput,
+>(
+  threads: readonly T[],
+  lastVisitedById: Record<string, string>,
+  sortOrder: SidebarThreadSortOrder,
+): T | null {
+  const candidates = threads.filter((thread) => thread.archivedAt === null);
+  if (candidates.length === 0) {
+    return null;
+  }
+  const score = (thread: T): number => {
+    const visitedMs = toSortableTimestamp(lastVisitedById[thread.id]);
+    if (visitedMs !== null) return visitedMs;
+    return getThreadSortTimestamp(thread, sortOrder);
+  };
+  return (
+    candidates.toSorted((left, right) => {
+      const rightScore = score(right);
+      const leftScore = score(left);
+      if (rightScore !== leftScore) return rightScore > leftScore ? 1 : -1;
+      return right.id.localeCompare(left.id);
+    })[0] ?? null
+  );
+}
 export function getProjectSortTimestamp(
   project: SidebarProject,
   projectThreads: readonly ThreadSortInput[],

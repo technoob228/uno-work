@@ -12,6 +12,7 @@ import {
   hasUnseenCompletion,
   isContextMenuPointerDown,
   orderItemsByPreferredIds,
+  pickThreadForEnvironmentSwitch,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
@@ -812,6 +813,83 @@ describe("getFallbackThreadIdAfterDelete", () => {
     expect(fallbackThreadId).toBe(ThreadId.make("thread-next"));
   });
 });
+
+describe("pickThreadForEnvironmentSwitch", () => {
+  it("returns null when there are no candidates", () => {
+    expect(pickThreadForEnvironmentSwitch([], {}, "created_at")).toBeNull();
+  });
+
+  it("ignores archived threads", () => {
+    const archived = makeThread({
+      id: ThreadId.make("thread-archived"),
+      createdAt: "2026-03-09T11:00:00.000Z",
+      archivedAt: "2026-03-09T11:30:00.000Z",
+      messages: [],
+    });
+    expect(pickThreadForEnvironmentSwitch([archived], {}, "created_at")).toBeNull();
+  });
+
+  it("prefers a recently visited thread over a newer-but-unvisited one", () => {
+    const visited = makeThread({
+      id: ThreadId.make("thread-visited"),
+      createdAt: "2026-03-09T10:00:00.000Z",
+      updatedAt: "2026-03-09T10:00:00.000Z",
+      messages: [],
+    });
+    const newerUnvisited = makeThread({
+      id: ThreadId.make("thread-newer"),
+      createdAt: "2026-03-09T12:00:00.000Z",
+      updatedAt: "2026-03-09T12:00:00.000Z",
+      messages: [],
+    });
+    const lastVisitedById = {
+      [ThreadId.make("thread-visited")]: "2026-03-09T13:00:00.000Z",
+    };
+    const target = pickThreadForEnvironmentSwitch(
+      [newerUnvisited, visited],
+      lastVisitedById,
+      "created_at",
+    );
+    expect(target?.id).toBe(ThreadId.make("thread-visited"));
+  });
+
+  it("falls back to the most recent thread by sort timestamp when nothing is visited", () => {
+    const older = makeThread({
+      id: ThreadId.make("thread-older"),
+      createdAt: "2026-03-09T10:00:00.000Z",
+      updatedAt: "2026-03-09T10:00:00.000Z",
+      messages: [],
+    });
+    const newer = makeThread({
+      id: ThreadId.make("thread-newer"),
+      createdAt: "2026-03-09T12:00:00.000Z",
+      updatedAt: "2026-03-09T12:00:00.000Z",
+      messages: [],
+    });
+    const target = pickThreadForEnvironmentSwitch([older, newer], {}, "created_at");
+    expect(target?.id).toBe(ThreadId.make("thread-newer"));
+  });
+
+  it("picks the most recently visited among multiple visited threads", () => {
+    const a = makeThread({
+      id: ThreadId.make("thread-a"),
+      createdAt: "2026-03-09T10:00:00.000Z",
+      messages: [],
+    });
+    const b = makeThread({
+      id: ThreadId.make("thread-b"),
+      createdAt: "2026-03-09T10:00:00.000Z",
+      messages: [],
+    });
+    const lastVisitedById = {
+      [ThreadId.make("thread-a")]: "2026-03-09T11:00:00.000Z",
+      [ThreadId.make("thread-b")]: "2026-03-09T13:00:00.000Z",
+    };
+    const target = pickThreadForEnvironmentSwitch([a, b], lastVisitedById, "created_at");
+    expect(target?.id).toBe(ThreadId.make("thread-b"));
+  });
+});
+
 describe("sortProjectsForSidebar", () => {
   it("sorts projects by the most recent user message across their threads", () => {
     const projects = [
