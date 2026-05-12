@@ -65,7 +65,7 @@ const withInstanceIdentity =
 export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv> = {
   driverKind: DRIVER_KIND,
   metadata: {
-    displayName: "OpenCode",
+    displayName: "Uno Code",
     supportsMultipleInstances: true,
   },
   configSchema: OpenCodeSettings,

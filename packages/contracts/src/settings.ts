@@ -272,9 +272,9 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
     binaryPath: makeBinaryPathSetting("opencode").pipe(
       Schema.annotateKey({
         title: "Binary path",
-        description: "Path to the OpenCode binary.",
+        description: "Path to the Uno Code binary.",
         providerSettingsForm: {
-          placeholder: "opencode",
+          placeholder: "uno-code",
           clearWhenEmpty: "omit",
         },
       }),
@@ -283,7 +283,7 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed("")),
       Schema.annotateKey({
         title: "Server URL",
-        description: "Leave blank to let T3 Code spawn the server when needed.",
+        description: "Leave blank to let Uno Work spawn the server when needed.",
         providerSettingsForm: {
           placeholder: "http://127.0.0.1:4096",
           clearWhenEmpty: "omit",

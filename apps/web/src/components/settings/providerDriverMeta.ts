@@ -55,7 +55,7 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
   },
   {
     value: ProviderDriverKind.make("opencode"),
-    label: "OpenCode",
+    label: "Uno Code",
     icon: OpenCodeIcon,
     settingsSchema: OpenCodeSettings,
   },

@@ -264,7 +264,7 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
         },
         [openCodeId]: {
           driver: openCodeDriverKind,
-          displayName: "OpenCode",
+          displayName: "Uno Code",
           enabled: false,
           config: makeOpenCodeConfig({}),
         },
@@ -300,7 +300,7 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       expect(codex?.displayName).toBe("Codex");
       expect(claude?.displayName).toBe("Claude");
       expect(cursor?.displayName).toBe("Cursor");
-      expect(openCode?.displayName).toBe("OpenCode");
+      expect(openCode?.displayName).toBe("Uno Code");
 
       // Every instance owns its own set of closures — no sharing across
       // drivers. `adapter` / `textGeneration` / `snapshot` are all

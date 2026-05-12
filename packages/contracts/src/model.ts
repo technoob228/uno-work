@@ -197,5 +197,5 @@ export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>>
   [CODEX_DRIVER_KIND]: "Codex",
   [CLAUDE_DRIVER_KIND]: "Claude",
   [CURSOR_DRIVER_KIND]: "Cursor",
-  [OPENCODE_DRIVER_KIND]: "OpenCode",
+  [OPENCODE_DRIVER_KIND]: "Uno Code",
 };
