@@ -70,6 +70,7 @@ import {
   getDefaultInstallDir as getUnoCodeInstallDir,
   installUnoCode,
   isUnoCodeInstalled,
+  readUnoCodeVersion,
   UnoCodeInstallError,
   type InstallProgressEvent,
 } from "./unoCodeInstaller.ts";
@@ -1265,7 +1266,8 @@ async function ensureUnoCodeInstalled(): Promise<void> {
   if (unoCodeInstallInFlight) return;
   const binaryPath = getUnoCodeBinaryPath(BASE_DIR);
   if (await isUnoCodeInstalled(binaryPath)) {
-    setUnoCodeState({ status: "installed", binaryPath, version: "installed" });
+    const version = (await readUnoCodeVersion(binaryPath)) ?? "unknown";
+    setUnoCodeState({ status: "installed", binaryPath, version });
     return;
   }
   unoCodeInstallInFlight = true;

@@ -270,3 +270,12 @@ export async function isUnoCodeInstalled(binaryPath: string): Promise<boolean> {
     return false;
   }
 }
+
+export async function readUnoCodeVersion(binaryPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFile(binaryPath, ["--version"]);
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
