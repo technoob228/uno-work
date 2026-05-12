@@ -32,6 +32,7 @@ import {
   setDesktopUpdateStateQueryData,
   useDesktopUpdateState,
 } from "../../lib/desktopUpdateReactQuery";
+import { useDesktopUnoCodeInstallState } from "../../lib/desktopUnoCodeReactQuery";
 import {
   getCustomModelOptionsByInstance,
   resolveAppModelSelectionState,
@@ -339,6 +340,93 @@ function AboutVersionSection() {
         }
       />
     </>
+  );
+}
+
+const UNO_CODE_PHASE_LABEL: Record<string, string> = {
+  "fetching-release": "Fetching release…",
+  downloading: "Downloading…",
+  extracting: "Extracting…",
+  verifying: "Verifying…",
+  done: "Finishing…",
+};
+
+function UnoCodeInstallSection() {
+  const stateQuery = useDesktopUnoCodeInstallState();
+  const state = stateQuery.data ?? null;
+  const [isRetrying, setIsRetrying] = useState(false);
+
+  const handleRetry = useCallback(() => {
+    const bridge = window.desktopBridge;
+    if (!bridge || typeof bridge.retryUnoCodeInstall !== "function") return;
+    setIsRetrying(true);
+    void bridge
+      .retryUnoCodeInstall()
+      .catch((error: unknown) => {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not start install",
+            description: error instanceof Error ? error.message : "Install request failed.",
+          }),
+        );
+      })
+      .finally(() => {
+        setIsRetrying(false);
+      });
+  }, []);
+
+  const status = state?.status ?? "idle";
+
+  let description: string;
+  let statusNode: React.ReactNode = null;
+  let control: React.ReactNode = null;
+
+  if (status === "installed" && state?.status === "installed") {
+    description = "Coding harness ready.";
+    statusNode = (
+      <>
+        <span className="font-mono tabular-nums">v{state.version}</span>
+        <span className="block break-all font-mono text-[11px] text-muted-foreground/80">
+          {state.binaryPath}
+        </span>
+      </>
+    );
+  } else if (status === "installing" && state?.status === "installing") {
+    const percent =
+      typeof state.percent === "number" ? Math.max(0, Math.min(100, state.percent)) : null;
+    const phaseLabel = UNO_CODE_PHASE_LABEL[state.phase] ?? "Installing…";
+    description = "Setting up the coding harness in the background.";
+    statusNode = (
+      <span>
+        {phaseLabel}
+        {percent !== null ? ` ${percent}%` : null}
+      </span>
+    );
+  } else if (status === "failed" && state?.status === "failed") {
+    description = "Install failed. You can retry below.";
+    statusNode = <span className="text-destructive">{state.error}</span>;
+    control = (
+      <Button size="xs" variant="outline" disabled={isRetrying} onClick={handleRetry}>
+        {isRetrying ? "Starting…" : "Retry"}
+      </Button>
+    );
+  } else {
+    description = "Not installed yet. It is fetched in the background on first launch.";
+    control = (
+      <Button size="xs" variant="outline" disabled={isRetrying} onClick={handleRetry}>
+        {isRetrying ? "Starting…" : "Install now"}
+      </Button>
+    );
+  }
+
+  return (
+    <SettingsRow
+      title="Uno Code"
+      description={description}
+      status={statusNode}
+      control={control}
+    />
   );
 }
 
@@ -1335,6 +1423,7 @@ export function GeneralSettingsPanel() {
             description="Current version of the application."
           />
         )}
+        {isElectron ? <UnoCodeInstallSection /> : null}
         <SettingsRow
           title="Diagnostics"
           description={diagnosticsDescription}
