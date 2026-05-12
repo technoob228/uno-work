@@ -70,10 +70,18 @@ function platformAssetName(): string {
     if (arch === "arm64") return `${ASSET_PREFIX}-linux-arm64.tar.gz`;
     if (arch === "x64") return `${ASSET_PREFIX}-linux-x64.tar.gz`;
   }
+  if (platform === "win32") {
+    if (arch === "arm64") return `${ASSET_PREFIX}-windows-arm64.zip`;
+    if (arch === "x64") return `${ASSET_PREFIX}-windows-x64.zip`;
+  }
   throw new UnoCodeInstallError(
     `Uno Code is not available for ${platform}/${arch}.`,
     "unsupported-platform",
   );
+}
+
+function binaryFileName(base: string): string {
+  return process.platform === "win32" ? `${base}.exe` : base;
 }
 
 async function fetchLatestRelease(): Promise<GitHubRelease> {
@@ -163,7 +171,8 @@ async function extractArchive(archivePath: string, destDir: string): Promise<voi
 }
 
 async function findExtractedBinary(extractDir: string): Promise<string> {
-  const direct = Path.join(extractDir, ASSET_PREFIX);
+  const expectedName = binaryFileName(ASSET_PREFIX);
+  const direct = Path.join(extractDir, expectedName);
   try {
     await FS.promises.access(direct, FS.constants.F_OK);
     return direct;
@@ -173,7 +182,7 @@ async function findExtractedBinary(extractDir: string): Promise<string> {
   const entries = await FS.promises.readdir(extractDir, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.isDirectory()) {
-      const nested = Path.join(extractDir, entry.name, ASSET_PREFIX);
+      const nested = Path.join(extractDir, entry.name, expectedName);
       try {
         await FS.promises.access(nested, FS.constants.F_OK);
         return nested;
@@ -183,7 +192,7 @@ async function findExtractedBinary(extractDir: string): Promise<string> {
     }
   }
   throw new UnoCodeInstallError(
-    `Extraction succeeded but no '${ASSET_PREFIX}' binary found in ${extractDir}`,
+    `Extraction succeeded but no '${expectedName}' binary found in ${extractDir}`,
     "extract-failed",
   );
 }
@@ -222,11 +231,13 @@ export async function installUnoCode(opts: InstallerOptions): Promise<InstallRes
   await extractArchive(archivePath, extractDir);
 
   const extracted = await findExtractedBinary(extractDir);
-  const finalBinary = Path.join(extractDir, "uno-code");
+  const finalBinary = Path.join(extractDir, binaryFileName("uno-code"));
   if (extracted !== finalBinary) {
     await FS.promises.rename(extracted, finalBinary);
   }
-  await FS.promises.chmod(finalBinary, 0o755);
+  if (process.platform !== "win32") {
+    await FS.promises.chmod(finalBinary, 0o755);
+  }
   await clearQuarantineMac(finalBinary);
 
   onProgress?.({ phase: "verifying", message: "Verifying binary…" });
@@ -259,12 +270,13 @@ export function getDefaultInstallDir(stateDir: string): string {
 }
 
 export function getDefaultBinaryPath(stateDir: string): string {
-  return Path.join(stateDir, "uno-code", "bin", "uno-code");
+  return Path.join(stateDir, "uno-code", "bin", binaryFileName("uno-code"));
 }
 
 export async function isUnoCodeInstalled(binaryPath: string): Promise<boolean> {
   try {
-    await FS.promises.access(binaryPath, FS.constants.X_OK);
+    const mode = process.platform === "win32" ? FS.constants.F_OK : FS.constants.X_OK;
+    await FS.promises.access(binaryPath, mode);
     return true;
   } catch {
     return false;
