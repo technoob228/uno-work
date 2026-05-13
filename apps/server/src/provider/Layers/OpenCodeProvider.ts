@@ -25,7 +25,7 @@ import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
 
 const PROVIDER = ProviderDriverKind.make("opencode");
 const OPENCODE_PRESENTATION = {
-  displayName: "Uno Code",
+  displayName: "OpenCode",
   showInteractionModeToggle: false,
 } as const;
 const MINIMUM_OPENCODE_VERSION = "1.14.19";
@@ -462,10 +462,10 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
       },
       message:
         connectedCount > 0
-          ? `${connectedCount} upstream provider${connectedCount === 1 ? "" : "s"} connected through ${isExternalServer ? "the configured Uno Code server" : "Uno Code"}.`
+          ? `${connectedCount} upstream provider${connectedCount === 1 ? "" : "s"} connected through ${isExternalServer ? "the configured OpenCode server" : "OpenCode"}.`
           : isExternalServer
-            ? "Connected to the configured Uno Code server, but it did not report any connected upstream providers."
-            : "Uno Code is available, but it did not report any connected upstream providers.",
+            ? "Connected to the configured OpenCode server, but it did not report any connected upstream providers."
+            : "OpenCode is available, but it did not report any connected upstream providers.",
     },
   });
 });

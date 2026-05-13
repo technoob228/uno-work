@@ -36,6 +36,7 @@ import {
 import { Effect, Layer } from "effect";
 
 import { ServerConfig } from "../../config.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { ClaudeDriver } from "../Drivers/ClaudeDriver.ts";
 import { CodexDriver } from "../Drivers/CodexDriver.ts";
 import { CursorDriver } from "../Drivers/CursorDriver.ts";
@@ -226,6 +227,7 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
   }).pipe(
     Layer.provideMerge(infraLayer),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+    Layer.provideMerge(ServerSettingsService.layerTest()),
   );
 
   it.live("boots one instance of every shipped driver from a single config map", () =>
@@ -264,7 +266,7 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
         },
         [openCodeId]: {
           driver: openCodeDriverKind,
-          displayName: "Uno Code",
+          displayName: "OpenCode",
           enabled: false,
           config: makeOpenCodeConfig({}),
         },
@@ -300,7 +302,7 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       expect(codex?.displayName).toBe("Codex");
       expect(claude?.displayName).toBe("Claude");
       expect(cursor?.displayName).toBe("Cursor");
-      expect(openCode?.displayName).toBe("Uno Code");
+      expect(openCode?.displayName).toBe("OpenCode");
 
       // Every instance owns its own set of closures — no sharing across
       // drivers. `adapter` / `textGeneration` / `snapshot` are all

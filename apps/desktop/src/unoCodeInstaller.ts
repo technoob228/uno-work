@@ -5,8 +5,8 @@ import { promisify } from "node:util";
 
 const execFile = promisify(ChildProcess.execFile);
 
-const RELEASE_REPO = "sst/opencode";
-const ASSET_PREFIX = "opencode";
+const RELEASE_REPO = "technoob228/uno-code";
+const ASSET_PREFIX = "uno-code";
 
 export type InstallPhase =
   | "fetching-release"

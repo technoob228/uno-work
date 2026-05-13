@@ -752,6 +752,18 @@ export const OpenCodeIcon: Icon = (props) => (
   </svg>
 );
 
+export const UnoIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect width="32" height="32" rx="6" fill="#5B5BE8" />
+    <path
+      d="M10.5 9V18.2C10.5 20.2987 12.2013 22 14.3 22H17.7C19.7987 22 21.5 20.2987 21.5 18.2V9"
+      stroke="white"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
 export const GithubCopilotIcon: Icon = ({ className, ...props }) => (
   <svg
     {...props}

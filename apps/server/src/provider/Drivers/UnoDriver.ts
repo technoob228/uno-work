@@ -1,23 +1,42 @@
 /**
- * OpenCodeDriver — `ProviderDriver` for the OpenCode runtime.
+ * UnoDriver — first-party Uno harness driver.
  *
- * Mirrors the Codex / Claude drivers: a plain value whose `create()`
- * bundles `snapshot` / `adapter` / `textGeneration` closures over the
- * per-instance `OpenCodeSettings`.
+ * Talks to the same `uno-code` runtime as `OpenCodeDriver` (a rebrand fork of
+ * sst/opencode lives in ~/uno-project/uno-code/), so it reuses
+ * `OpenCodeAdapter`, `OpenCodeProvider` and `OpenCodeRuntime` — the only
+ * differences are:
  *
- * Two instances with different `serverUrl`s therefore talk to independent
- * OpenCode servers; when no `serverUrl` is set, the adapter + text-generation
- * shares spin up their own scoped child processes, and those child
- * processes are released when the registry scope closes.
+ *   - `driverKind = "uno"` and `displayName = "Uno"` so the provider shows up
+ *     as a separate entry in the picker alongside Codex / Claude / Cursor /
+ *     OpenCode;
+ *   - the binary path is pinned to the silently-installed
+ *     `~/.unowork/uno-code/bin/uno-code` (or `.exe` on Windows). Whatever the
+ *     instance config stores for `binaryPath` is ignored — Uno is supposed to
+ *     "just work" without the user picking a binary;
+ *   - the Uno LLM Gateway provider (`provider.uno` pointing at
+ *     `UNO_GATEWAY_BASE_URL` with `apiKey={env:UNO_API_KEY}`) is injected via
+ *     `OPENCODE_CONFIG_CONTENT`, and `UNO_API_KEY` is set from the stored
+ *     `uno.apiKey` server setting. Because our fork resolves XDG to
+ *     `~/.config/uno-code/` (not `~/.config/opencode/`), this config does NOT
+ *     merge with the user's personal opencode config.
  *
- * @module provider/Drivers/OpenCodeDriver
+ * @module provider/Drivers/UnoDriver
  */
-import { OpenCodeSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import { homedir } from "node:os";
+import * as nodePath from "node:path";
+
+import {
+  OpenCodeSettings,
+  ProviderDriverKind,
+  UNO_GATEWAY_BASE_URL,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import { Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGeneration.ts";
 import { ServerConfig } from "../../config.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeOpenCodeAdapter } from "../Layers/OpenCodeAdapter.ts";
 import {
@@ -35,16 +54,43 @@ import {
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 
-const DRIVER_KIND = ProviderDriverKind.make("opencode");
+const DRIVER_KIND = ProviderDriverKind.make("uno");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
 
-export type OpenCodeDriverEnv =
+export type UnoDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
   | FileSystem.FileSystem
   | OpenCodeRuntime
   | Path.Path
   | ProviderEventLoggers
-  | ServerConfig;
+  | ServerConfig
+  | ServerSettingsService;
+
+const UNO_PROVIDER_ID = "uno";
+
+const UNO_BINARY_PATH = nodePath.join(
+  homedir(),
+  ".unowork",
+  "uno-code",
+  "bin",
+  process.platform === "win32" ? "uno-code.exe" : "uno-code",
+);
+
+function buildUnoConfigContent(unoApiKey: string): string {
+  return JSON.stringify({
+    $schema: "https://opencode.ai/config.json",
+    provider: {
+      [UNO_PROVIDER_ID]: {
+        npm: "@ai-sdk/openai-compatible",
+        name: "Uno",
+        options: {
+          baseURL: UNO_GATEWAY_BASE_URL,
+          apiKey: "{env:UNO_API_KEY}",
+        },
+      },
+    },
+  });
+}
 
 const withInstanceIdentity =
   (input: {
@@ -62,11 +108,11 @@ const withInstanceIdentity =
     continuation: { groupKey: input.continuationGroupKey },
   });
 
-export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv> = {
+export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
   driverKind: DRIVER_KIND,
   metadata: {
-    displayName: "OpenCode",
-    supportsMultipleInstances: true,
+    displayName: "Uno",
+    supportsMultipleInstances: false,
   },
   configSchema: OpenCodeSettings,
   defaultConfig: (): OpenCodeSettings => Schema.decodeSync(OpenCodeSettings)({}),
@@ -74,8 +120,18 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
     Effect.gen(function* () {
       const openCodeRuntime = yield* OpenCodeRuntime;
       const serverConfig = yield* ServerConfig;
+      const serverSettingsService = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
-      const processEnv: NodeJS.ProcessEnv = mergeProviderInstanceEnvironment(environment);
+      const serverSettings = yield* serverSettingsService.getSettings.pipe(
+        Effect.orElseSucceed(() => undefined),
+      );
+      const unoApiKey = serverSettings?.uno.apiKey ?? "";
+      const baseProcessEnv = mergeProviderInstanceEnvironment(environment);
+      const processEnv: NodeJS.ProcessEnv = {
+        ...baseProcessEnv,
+        OPENCODE_CONFIG_CONTENT: buildUnoConfigContent(unoApiKey),
+        ...(unoApiKey.length > 0 ? { UNO_API_KEY: unoApiKey } : {}),
+      };
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,
@@ -86,7 +142,11 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
-      const effectiveConfig = { ...config, enabled } satisfies OpenCodeSettings;
+      const effectiveConfig = {
+        ...config,
+        binaryPath: UNO_BINARY_PATH,
+        enabled,
+      } satisfies OpenCodeSettings;
 
       const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
         instanceId,
@@ -114,7 +174,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
             new ProviderDriverError({
               driver: DRIVER_KIND,
               instanceId,
-              detail: `Failed to build OpenCode snapshot: ${cause.message ?? String(cause)}`,
+              detail: `Failed to build Uno snapshot: ${cause.message ?? String(cause)}`,
               cause,
             }),
         ),

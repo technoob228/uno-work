@@ -6,7 +6,7 @@ import {
   ProviderDriverKind,
 } from "@t3tools/contracts";
 import type { Schema } from "effect";
-import { ClaudeAI, CursorIcon, type Icon, OpenAI, OpenCodeIcon } from "../Icons";
+import { ClaudeAI, CursorIcon, type Icon, OpenAI, OpenCodeIcon, UnoIcon } from "../Icons";
 
 type ProviderSettingsSchema = {
   readonly fields: Readonly<Record<string, Schema.Top>>;
@@ -35,6 +35,12 @@ export interface ProviderClientDefinition {
 
 export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
   {
+    value: ProviderDriverKind.make("uno"),
+    label: "Uno",
+    icon: UnoIcon,
+    settingsSchema: OpenCodeSettings,
+  },
+  {
     value: ProviderDriverKind.make("codex"),
     label: "Codex",
     icon: OpenAI,
@@ -55,7 +61,7 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
   },
   {
     value: ProviderDriverKind.make("opencode"),
-    label: "Uno Code",
+    label: "OpenCode",
     icon: OpenCodeIcon,
     settingsSchema: OpenCodeSettings,
   },

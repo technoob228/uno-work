@@ -272,9 +272,9 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
     binaryPath: makeBinaryPathSetting("opencode").pipe(
       Schema.annotateKey({
         title: "Binary path",
-        description: "Path to the Uno Code binary.",
+        description: "Path to the OpenCode binary.",
         providerSettingsForm: {
-          placeholder: "uno-code",
+          placeholder: "opencode",
           clearWhenEmpty: "omit",
         },
       }),
@@ -319,6 +319,13 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+export const UNO_GATEWAY_BASE_URL = "https://api.getuno.xyz/v1";
+
+export const UnoAccountSettings = Schema.Struct({
+  apiKey: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+});
+export type UnoAccountSettings = typeof UnoAccountSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
@@ -355,6 +362,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  uno: UnoAccountSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -430,6 +438,11 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(Schema.String),
       otlpMetricsUrl: Schema.optionalKey(Schema.String),
+    }),
+  ),
+  uno: Schema.optionalKey(
+    Schema.Struct({
+      apiKey: Schema.optionalKey(Schema.String),
     }),
   ),
   providers: Schema.optionalKey(
