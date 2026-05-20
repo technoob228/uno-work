@@ -104,4 +104,38 @@ describe("chatThreadActions", () => {
     expect(didStart).toBe(false);
     expect(handleNewThread).not.toHaveBeenCalled();
   });
+
+  it("invokes onMissingProject when no project context is available", async () => {
+    const handleNewThread = vi.fn<ChatThreadActionContext["handleNewThread"]>(async () => {});
+    const onMissingProject = vi.fn();
+
+    const didStart = await startNewThreadFromContext(
+      createContext({
+        defaultProjectRef: null,
+        handleNewThread,
+        onMissingProject,
+      }),
+    );
+
+    expect(didStart).toBe(false);
+    expect(handleNewThread).not.toHaveBeenCalled();
+    expect(onMissingProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("invokes onMissingProject for the local thread fallback when no project is available", async () => {
+    const handleNewThread = vi.fn<ChatThreadActionContext["handleNewThread"]>(async () => {});
+    const onMissingProject = vi.fn();
+
+    const didStart = await startNewLocalThreadFromContext(
+      createContext({
+        defaultProjectRef: null,
+        handleNewThread,
+        onMissingProject,
+      }),
+    );
+
+    expect(didStart).toBe(false);
+    expect(handleNewThread).not.toHaveBeenCalled();
+    expect(onMissingProject).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1005,6 +1005,7 @@ function OpenCommandPaletteDialog() {
             defaultProjectRef,
             defaultThreadEnvMode: settings.defaultThreadEnvMode,
             handleNewThread,
+            onMissingProject: openAddProjectFlow,
           });
         },
       });
@@ -1018,6 +1019,18 @@ function OpenCommandPaletteDialog() {
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
       groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
+    });
+  } else if (addProjectEnvironmentOptions.length > 0) {
+    actionItems.push({
+      kind: "action",
+      value: "action:new-thread-needs-project",
+      searchTerms: ["new thread", "chat", "create", "draft", "start"],
+      title: "New thread (add a project first)",
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "chat.new",
+      run: async () => {
+        openAddProjectFlow();
+      },
     });
   }
 

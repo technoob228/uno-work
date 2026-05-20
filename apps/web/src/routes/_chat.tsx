@@ -59,6 +59,7 @@ function ChatRouteGlobalShortcuts() {
             defaultEnvMode: appSettings.defaultThreadEnvMode,
           }),
           handleNewThread,
+          onMissingProject: () => useCommandPaletteStore.getState().openAddProject(),
         });
         return;
       }
@@ -74,6 +75,7 @@ function ChatRouteGlobalShortcuts() {
             defaultEnvMode: appSettings.defaultThreadEnvMode,
           }),
           handleNewThread,
+          onMissingProject: () => useCommandPaletteStore.getState().openAddProject(),
         });
       }
     };

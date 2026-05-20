@@ -32,6 +32,7 @@ export interface ChatThreadActionContext {
   readonly defaultProjectRef: ScopedProjectRef | null;
   readonly defaultThreadEnvMode: DraftThreadEnvMode;
   readonly handleNewThread: NewThreadHandler;
+  readonly onMissingProject?: () => void;
 }
 
 export function resolveThreadActionProjectRef(
@@ -78,6 +79,7 @@ export async function startNewThreadFromContext(
 ): Promise<boolean> {
   const projectRef = resolveThreadActionProjectRef(context);
   if (!projectRef) {
+    context.onMissingProject?.();
     return false;
   }
 
@@ -90,6 +92,7 @@ export async function startNewLocalThreadFromContext(
 ): Promise<boolean> {
   const projectRef = resolveThreadActionProjectRef(context);
   if (!projectRef) {
+    context.onMissingProject?.();
     return false;
   }
 
