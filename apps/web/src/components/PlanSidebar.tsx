@@ -257,6 +257,7 @@ const PlanSidebar = memo(function PlanSidebar({
                     text={displayedPlanMarkdown ?? ""}
                     cwd={markdownCwd}
                     isStreaming={false}
+                    environmentId={environmentId}
                   />
                 </div>
               ) : null}

@@ -3,6 +3,7 @@ import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime";
 import {
   Outlet,
   createRootRouteWithContext,
+  redirect,
   type ErrorComponentProps,
   useLocation,
   useNavigate,
@@ -14,7 +15,6 @@ import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
-import { UnoOnboardingDialog } from "../components/UnoOnboardingDialog";
 import {
   SlowRpcAckToastCoordinator,
   WebSocketConnectionCoordinator,
@@ -29,7 +29,11 @@ import {
 } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { readLocalApi } from "../localApi";
-import { useSettings } from "../hooks/useSettings";
+import {
+  ensureClientSettingsHydrated,
+  getClientSettings,
+  useSettings,
+} from "../hooks/useSettings";
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKeyFromPath,
@@ -83,10 +87,21 @@ export const Route = createRootRouteWithContext<{
       };
     }
 
-    const [, authGateState] = await Promise.all([
+    const [, , authGateState] = await Promise.all([
       ensurePrimaryEnvironmentReady(),
+      ensureClientSettingsHydrated(),
       resolveInitialServerAuthGateState(),
     ]);
+
+    if (
+      authGateState.status === "authenticated" &&
+      !getClientSettings().onboardingCompleted &&
+      location.pathname !== "/onboarding" &&
+      location.pathname !== "/pair"
+    ) {
+      throw redirect({ to: "/onboarding", replace: true });
+    }
+
     return {
       authGateState,
     };
@@ -112,7 +127,7 @@ function RootRouteView() {
     };
   }, [pathname]);
 
-  if (pathname === "/pair") {
+  if (pathname === "/pair" || pathname === "/onboarding") {
     return <Outlet />;
   }
 
@@ -139,7 +154,6 @@ function RootRouteView() {
         {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
         {primaryEnvironmentAuthenticated ? <WebSocketConnectionCoordinator /> : null}
         {primaryEnvironmentAuthenticated ? <SlowRpcAckToastCoordinator /> : null}
-        {primaryEnvironmentAuthenticated ? <UnoOnboardingDialog /> : null}
         {primaryEnvironmentAuthenticated ? (
           <WebSocketConnectionSurface>{appShell}</WebSocketConnectionSurface>
         ) : (

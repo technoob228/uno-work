@@ -1,5 +1,6 @@
 import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   defaultInstanceIdForDriver,
@@ -539,6 +540,7 @@ export function GeneralSettingsPanel() {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
+  const navigate = useNavigate();
   const [openingPathByTarget, setOpeningPathByTarget] = useState({
     keybindings: false,
     logsDirectory: false,
@@ -879,9 +881,55 @@ export function GeneralSettingsPanel() {
     });
   };
 
+  const unoApiKey = settings.uno?.apiKey ?? "";
+
   return (
     <SettingsPageContainer>
+      <SettingsSection title="Uno account">
+        <SettingsRow
+          title="API key"
+          description="Used by Uno Code to call the Uno LLM Gateway. Stored in plain text on disk."
+          resetAction={
+            unoApiKey.length > 0 ? (
+              <SettingResetButton
+                label="Uno API key"
+                onClick={() => updateSettings({ uno: { apiKey: "" } })}
+              />
+            ) : null
+          }
+          control={
+            <DraftInput
+              type="password"
+              className="w-full sm:w-72"
+              value={unoApiKey}
+              onCommit={(next) => updateSettings({ uno: { apiKey: next } })}
+              placeholder="sNIh…"
+              spellCheck={false}
+              autoComplete="off"
+              aria-label="Uno API key"
+            />
+          }
+        />
+      </SettingsSection>
+
       <SettingsSection title="General">
+        <SettingsRow
+          title="Welcome tour"
+          description="Replay the setup walkthrough."
+          control={
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => {
+                updateSettings({ onboardingCompleted: false });
+                void navigate({ to: "/onboarding" });
+              }}
+            >
+              Show again
+            </Button>
+          }
+        />
+
         <SettingsRow
           title="Theme"
           description={`Choose how ${APP_BASE_NAME} looks across the app.`}

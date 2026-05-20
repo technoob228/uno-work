@@ -299,8 +299,8 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
         expect(result).toEqual({
           parentPath: cwd,
           entries: [
-            { name: "alpha", fullPath: path.join(cwd, "alpha") },
-            { name: "alpine", fullPath: path.join(cwd, "alpine") },
+            { name: "alpha", fullPath: path.join(cwd, "alpha"), kind: "directory" },
+            { name: "alpine", fullPath: path.join(cwd, "alpine"), kind: "directory" },
           ],
         });
       }),
@@ -324,7 +324,7 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
         expect(directoryResult.entries.map((entry) => entry.name)).toEqual([".config", "config"]);
         expect(hiddenPrefixResult).toEqual({
           parentPath: cwd,
-          entries: [{ name: ".config", fullPath: path.join(cwd, ".config") }],
+          entries: [{ name: ".config", fullPath: path.join(cwd, ".config"), kind: "directory" }],
         });
       }),
     );
@@ -343,7 +343,7 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
 
         expect(result).toEqual({
           parentPath: cwd,
-          entries: [{ name: "packages", fullPath: path.join(cwd, "packages") }],
+          entries: [{ name: "packages", fullPath: path.join(cwd, "packages"), kind: "directory" }],
         });
       }),
     );

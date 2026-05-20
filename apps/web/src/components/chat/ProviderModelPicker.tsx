@@ -141,20 +141,18 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 <span
                   className={cn(
                     "min-w-0 flex-1 overflow-hidden",
-                    triggerSubtitle
-                      ? "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1"
-                      : "truncate",
+                    triggerSubtitle ? "flex items-center gap-1" : "truncate",
                   )}
                 />
               }
             >
               {triggerSubtitle ? (
                 <>
-                  <span className="min-w-0 truncate">{triggerSubtitle}</span>
+                  <span className="max-w-[6rem] shrink-0 truncate">{triggerSubtitle}</span>
                   <span aria-hidden="true" className="shrink-0 opacity-60">
                     ·
                   </span>
-                  <span className="min-w-0 truncate">{triggerTitle}</span>
+                  <span className="min-w-0 flex-1 truncate">{triggerTitle}</span>
                 </>
               ) : (
                 triggerTitle

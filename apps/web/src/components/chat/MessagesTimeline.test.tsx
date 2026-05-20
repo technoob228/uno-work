@@ -1,8 +1,13 @@
 import { EnvironmentId, MessageId } from "@t3tools/contracts";
-import { createRef } from "react";
+import { createRef, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { LegendListRef } from "@legendapp/list/react";
+import { PreviewPaneProvider } from "../preview/PreviewPaneContext";
+
+function withPreviewProvider(children: ReactNode) {
+  return <PreviewPaneProvider>{children}</PreviewPaneProvider>;
+}
 
 vi.mock("@legendapp/list/react", async () => {
   const React = await import("react");
@@ -138,22 +143,24 @@ describe("MessagesTimeline", () => {
   it("renders context compaction entries in the normal work log", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        timelineEntries={[
-          {
-            id: "entry-1",
-            kind: "work",
-            createdAt: "2026-03-17T19:12:28.000Z",
-            entry: {
-              id: "work-1",
+      withPreviewProvider(
+        <MessagesTimeline
+          {...buildProps()}
+          timelineEntries={[
+            {
+              id: "entry-1",
+              kind: "work",
               createdAt: "2026-03-17T19:12:28.000Z",
-              label: "Context compacted",
-              tone: "info",
+              entry: {
+                id: "work-1",
+                createdAt: "2026-03-17T19:12:28.000Z",
+                label: "Context compacted",
+                tone: "info",
+              },
             },
-          },
-        ]}
-      />,
+          ]}
+        />,
+      ),
     );
 
     expect(markup).toContain("Context compacted");
@@ -163,24 +170,26 @@ describe("MessagesTimeline", () => {
   it("formats changed file paths from the workspace root", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        timelineEntries={[
-          {
-            id: "entry-1",
-            kind: "work",
-            createdAt: "2026-03-17T19:12:28.000Z",
-            entry: {
-              id: "work-1",
+      withPreviewProvider(
+        <MessagesTimeline
+          {...buildProps()}
+          timelineEntries={[
+            {
+              id: "entry-1",
+              kind: "work",
               createdAt: "2026-03-17T19:12:28.000Z",
-              label: "Updated files",
-              tone: "tool",
-              changedFiles: ["C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts"],
+              entry: {
+                id: "work-1",
+                createdAt: "2026-03-17T19:12:28.000Z",
+                label: "Updated files",
+                tone: "tool",
+                changedFiles: ["C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts"],
+              },
             },
-          },
-        ]}
-        workspaceRoot="C:/Users/mike/dev-stuff/t3code"
-      />,
+          ]}
+          workspaceRoot="C:/Users/mike/dev-stuff/t3code"
+        />,
+      ),
     );
 
     expect(markup).toContain("t3code/apps/web/src/session-logic.ts");

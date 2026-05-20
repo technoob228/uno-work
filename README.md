@@ -1,63 +1,61 @@
-# T3 Code
+# Uno Work
 
-T3 Code is a minimal web GUI for coding agents (currently Codex, Claude, and OpenCode, more coming soon).
+AI workspace where agents do real work on real files — and you see the result without leaving the app.
 
-## Installation
+Uno Work is not an IDE. It's a desktop app that connects to AI coding agents (harnesses) you already have installed — Claude Code, Codex CLI, Cursor, OpenCode — and adds a visual layer on top: file preview, diff review, project management, and remote environments.
 
-> [!WARNING]
-> T3 Code currently supports Codex, Claude, and OpenCode.
-> Install and authenticate at least one provider before use:
->
-> - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
-> - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
-> - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
+## Download
 
-### Run without installing
+Install the latest desktop app from [GitHub Releases](https://github.com/technoob228/uno-work/releases).
 
-```bash
-npx t3
-```
+| Platform | File |
+|---|---|
+| macOS (Apple Silicon) | `Uno-Work.dmg` |
+| Windows | `Uno-Work.exe` |
+| Linux | `Uno-Work.AppImage` |
 
-### Desktop app
+## Features
 
-Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
+- **Multi-harness support** — use Claude Code, Codex CLI, OpenCode, or Cursor through one interface. Switch between them from the chat header.
+- **Uno Code (bundled)** — a built-in AI coding agent, auto-installed on first launch. Works out of the box with Uno LLM — no API keys required.
+- **Uno LLM** — built-in model access via Uno's LLM Gateway. Bring your own Uno API key and skip third-party subscriptions.
+- **File preview** — view PDF, Excel, Word, HTML, images, JSON, CSV, and SVG inline without leaving the chat.
+- **Dev mode** — toggle to unlock Git/GitHub integration, diff review, project scripts, and terminal access. Hidden by default to keep the UI clean for non-coders.
+- **Remote environments** — connect to remote servers via SSH and work on files as if they were local.
+- **Onboarding wizard** — guided setup on first launch that detects installed harnesses and walks through configuration.
 
-#### Windows (`winget`)
+## Supported harnesses
 
-```bash
-winget install T3Tools.T3Code
-```
+| Harness | Auto-detected | Auth |
+|---|---|---|
+| Uno Code | Bundled (auto-installed) | Uno API key |
+| Claude Code | Yes (if on PATH) | `claude auth login` |
+| Codex CLI | Yes (if on PATH) | `codex login` |
+| OpenCode | Yes (if on PATH) | `opencode auth login` |
+| Cursor | Yes (if on PATH) | Cursor account |
 
-#### macOS (Homebrew)
-
-```bash
-brew install --cask t3-code
-```
-
-#### Arch Linux (AUR)
-
-```bash
-yay -S t3code-bin
-```
-
-## Some notes
-
-We are very very early in this project. Expect bugs.
-
-We are not accepting contributions yet.
-
-Observability guide: [docs/observability.md](./docs/observability.md)
-
-## If you REALLY want to contribute still.... read this first
-
-Before local development, prepare the environment and install dependencies:
+## Development
 
 ```bash
-# Optional: only needed if you use mise for dev tool management.
-mise install
-bun install .
+bun install
+bun dev:desktop    # Electron + web + server (full app)
+bun dev:web        # web + server only (opens in browser)
+bun typecheck      # type-check all packages
 ```
 
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening an issue or PR.
+## Architecture
 
-Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).
+Monorepo with Bun + Turborepo:
+
+- `apps/desktop` — Electron shell
+- `apps/server` — backend (provider orchestration, workspace, Git, SSH)
+- `apps/web` — React frontend (TanStack Router, Tailwind, shadcn/ui)
+- `packages/contracts` — shared types and schemas (Effect Schema)
+
+Based on [T3 Code](https://github.com/pingdotgg/t3code) by Ping.gg.
+
+## Contact
+
+- Website: [getuno.xyz](https://getuno.xyz)
+- Support: [hello@getuno.xyz](mailto:hello@getuno.xyz)
+- Telegram: [@get_uno_support](https://t.me/get_uno_support)

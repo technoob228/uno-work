@@ -3,8 +3,8 @@ import Layout from "../layouts/Layout.astro";
 import { RELEASES_URL } from "../lib/releases";
 ---
 
-<Layout title="Download — T3 Code" description="Download T3 Code for macOS, Windows, or Linux.">
-  <h1 class="heading">Download T3 Code</h1>
+<Layout title="Download — Uno Work" description="Download Uno Work for macOS, Windows, or Linux.">
+  <h1 class="heading">Download Uno Work</h1>
   <p class="subheading">
     <span id="version-label">Loading latest release&hellip;</span>
     <a id="changelog-link" class="changelog-link" href="#" target="_blank" rel="noopener noreferrer" style="display:none">View changelog<span aria-hidden="true"> &#8599;</span></a>
@@ -60,7 +60,7 @@ import { RELEASES_URL } from "../lib/releases";
 
   <p class="releases-link">
     Looking for older versions? Check the
-    <a href="https://github.com/pingdotgg/t3code/releases" target="_blank" rel="noopener noreferrer">
+    <a href="https://github.com/technoob228/uno-work/releases" target="_blank" rel="noopener noreferrer">
       GitHub releases page<span aria-hidden="true"> &#8599;</span>
     </a>
   </p>
@@ -130,7 +130,7 @@ import { RELEASES_URL } from "../lib/releases";
 
   .subheading {
     font-size: 0.9rem;
-    color: var(--fg-dim);
+    color: var(--text-faint);
     margin-bottom: 3.5rem;
     opacity: 0;
     animation: fade-in 1s ease-out 0.1s forwards;
@@ -140,17 +140,17 @@ import { RELEASES_URL } from "../lib/releases";
   }
 
   .changelog-link {
-    color: var(--fg-muted);
+    color: var(--text-muted);
     font-size: 0.8rem;
     text-decoration: underline;
-    text-decoration-color: rgba(161, 161, 170, 0.4);
+    text-decoration-color: var(--line-strong);
     text-underline-offset: 3px;
     transition: color 0.3s ease, text-decoration-color 0.3s ease;
   }
 
   .changelog-link:hover {
-    color: var(--fg);
-    text-decoration-color: var(--fg);
+    color: var(--text);
+    text-decoration-color: var(--text);
   }
 
   /* ── Platforms ── */
@@ -176,13 +176,13 @@ import { RELEASES_URL } from "../lib/releases";
     align-items: center;
     gap: 0.6rem;
     padding-bottom: 0.5rem;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--line);
   }
 
   .platform-icon {
     width: 1.15em;
     height: 1.15em;
-    color: var(--fg-muted);
+    color: var(--text-muted);
     flex-shrink: 0;
   }
 
@@ -206,15 +206,16 @@ import { RELEASES_URL } from "../lib/releases";
     gap: 0.2rem;
     padding: 0.85rem 1rem;
     border-radius: 10px;
-    border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.02);
-    transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+    border: 1px solid var(--line);
+    background: var(--bg-panel);
+    transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   }
 
   .download-card:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.15);
+    background: var(--uno-violet-tint);
+    border-color: var(--uno-violet-border);
     transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(91, 91, 232, 0.1);
   }
 
   .download-card:active {
@@ -224,11 +225,12 @@ import { RELEASES_URL } from "../lib/releases";
   .card-arch {
     font-weight: 600;
     font-size: 0.95rem;
+    color: var(--text);
   }
 
   .card-format {
     font-size: 0.8rem;
-    color: var(--fg-dim);
+    color: var(--text-faint);
   }
 
   /* ── Releases link ── */
@@ -236,22 +238,22 @@ import { RELEASES_URL } from "../lib/releases";
   .releases-link {
     margin-top: 3rem;
     font-size: 0.825rem;
-    color: var(--fg-dim);
+    color: var(--text-faint);
     opacity: 0;
     animation: fade-in 1s ease-out 0.35s forwards;
   }
 
   .releases-link a {
-    color: var(--fg-muted);
+    color: var(--text-muted);
     text-decoration: underline;
-    text-decoration-color: rgba(161, 161, 170, 0.4);
+    text-decoration-color: var(--line-strong);
     text-underline-offset: 3px;
     transition: color 0.3s ease, text-decoration-color 0.3s ease;
   }
 
   .releases-link a:hover {
-    color: var(--fg);
-    text-decoration-color: var(--fg);
+    color: var(--text);
+    text-decoration-color: var(--text);
   }
 
   /* ── Mobile ── */

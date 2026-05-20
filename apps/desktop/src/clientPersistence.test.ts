@@ -54,6 +54,7 @@ const clientSettings: ClientSettings = {
   confirmThreadDelete: false,
   diffIgnoreWhitespace: true,
   diffWordWrap: true,
+  onboardingCompleted: false,
   favorites: [],
   providerModelPreferences: {},
   sidebarProjectGroupingMode: "repository_path",

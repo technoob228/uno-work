@@ -132,6 +132,17 @@ export function getClientSettings(): ClientSettings {
   return getClientSettingsSnapshot();
 }
 
+/**
+ * Trigger and await hydration of client settings from persistent storage.
+ * Safe to call multiple times — hydration is memoized via the internal
+ * `clientSettingsHydrationPromise`. Use this from router `beforeLoad` hooks
+ * where you need `getClientSettings()` to return persisted (not default)
+ * values before any React subscriber has mounted.
+ */
+export function ensureClientSettingsHydrated(): Promise<void> {
+  return hydrateClientSettings();
+}
+
 export function useSettings<T = UnifiedSettings>(selector?: (s: UnifiedSettings) => T): T {
   const serverSettings = useServerSettings();
   const clientSettings = useSyncExternalStore(

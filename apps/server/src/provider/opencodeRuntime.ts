@@ -330,14 +330,15 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
       const timeoutMs = input.timeoutMs ?? DEFAULT_OPENCODE_SERVER_TIMEOUT_MS;
       const args = ["serve", `--hostname=${hostname}`, `--port=${port}`];
 
+      const baseEnv = input.environment ?? process.env;
       const child = yield* spawner
         .spawn(
           ChildProcess.make(input.binaryPath, args, {
             detached: process.platform !== "win32",
             shell: process.platform === "win32",
             env: {
-              ...(input.environment ?? process.env),
-              OPENCODE_CONFIG_CONTENT: JSON.stringify({}),
+              ...baseEnv,
+              OPENCODE_CONFIG_CONTENT: baseEnv.OPENCODE_CONFIG_CONTENT ?? JSON.stringify({}),
             },
           }),
         )

@@ -18,6 +18,7 @@ import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -56,6 +57,7 @@ interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
   isStreaming?: boolean;
+  environmentId?: EnvironmentId | undefined;
 }
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
@@ -276,6 +278,7 @@ interface MarkdownFileLinkProps {
   label: string;
   theme: "light" | "dark";
   className?: string | undefined;
+  environmentId?: EnvironmentId | undefined;
 }
 
 const MARKDOWN_LINK_HREF_PATTERN = /\[[^\]]*]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
@@ -366,6 +369,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   label,
   theme,
   className,
+  environmentId,
 }: MarkdownFileLinkProps) {
   const { openFile } = usePreviewPane();
   const previewKind = useMemo(() => detectFileKind(filePath), [filePath]);
@@ -401,11 +405,21 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         kind: previewKind,
         content: "",
         path: targetPath || displayPath,
+        ...(environmentId ? { environmentId } : {}),
       });
       return;
     }
     openInEditor();
-  }, [canPreview, filePath, targetPath, displayPath, previewKind, openFile, openInEditor]);
+  }, [
+    canPreview,
+    filePath,
+    targetPath,
+    displayPath,
+    previewKind,
+    environmentId,
+    openFile,
+    openInEditor,
+  ]);
 
   const handleCopy = useCallback((value: string, title: string) => {
     if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
@@ -524,11 +538,12 @@ function areMarkdownFileLinkPropsEqual(
     previous.filePath === next.filePath &&
     previous.label === next.label &&
     previous.theme === next.theme &&
-    previous.className === next.className
+    previous.className === next.className &&
+    previous.environmentId === next.environmentId
   );
 }
 
-function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
+function ChatMarkdown({ text, cwd, isStreaming = false, environmentId }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const markdownFileLinkMetaByHref = useMemo(() => {
@@ -582,6 +597,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
             label={labelParts.join(" · ")}
             theme={resolvedTheme}
             className={props.className}
+            environmentId={environmentId}
           />
         );
       },
@@ -609,6 +625,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
     }),
     [
       diffThemeName,
+      environmentId,
       fileLinkParentSuffixByPath,
       isStreaming,
       markdownFileLinkMetaByHref,

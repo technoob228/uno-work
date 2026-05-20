@@ -409,6 +409,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   text={messageText}
                   cwd={ctx.markdownCwd}
                   isStreaming={Boolean(row.message.streaming)}
+                  environmentId={ctx.activeThreadEnvironmentId}
                 />
                 <AssistantChangedFilesSection
                   turnSummary={row.assistantTurnDiffSummary}

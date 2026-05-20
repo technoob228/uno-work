@@ -25,7 +25,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import * as XLSX from "xlsx";
@@ -34,6 +34,7 @@ import { cn } from "../../lib/utils";
 import { openInPreferredEditor } from "../../editorPreferences";
 import { readEnvironmentApi } from "../../environmentApi";
 import { readLocalApi } from "../../localApi";
+import { useStore } from "../../store";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -728,6 +729,10 @@ function renderLoadedBody(file: PreviewFile, data: LoadedFileData) {
 function LoadedBody({ file }: { file: PreviewFile }) {
   const path = file.path;
   const environmentId = file.environmentId;
+  const queryClient = useQueryClient();
+  const turnDiffSummaryByThreadId = useStore((s) =>
+    environmentId ? s.environmentStateById[environmentId]?.turnDiffSummaryByThreadId : undefined,
+  );
 
   const { data, isPending, isError, error } = useQuery({
     queryKey: ["previewReadFile", environmentId, path],
@@ -740,6 +745,11 @@ function LoadedBody({ file }: { file: PreviewFile }) {
     enabled: Boolean(path && environmentId),
     staleTime: 30_000,
   });
+
+  useEffect(() => {
+    if (!path || !environmentId) return;
+    queryClient.invalidateQueries({ queryKey: ["previewReadFile", environmentId, path] });
+  }, [turnDiffSummaryByThreadId, environmentId, path, queryClient]);
 
   const blobUrl = useMemo(() => {
     if (!data || data.encoding !== "base64") return undefined;

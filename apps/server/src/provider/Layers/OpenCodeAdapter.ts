@@ -673,29 +673,41 @@ export function makeOpenCodeAdapter(
         }
 
         case "message.part.delta": {
-          const existingPart = context.partById.get(event.properties.partID);
-          if (!existingPart) {
-            break;
-          }
-          const role = messageRoleForPart(context, existingPart);
-          if (role !== "assistant") {
-            break;
-          }
-          const streamKind = resolveTextStreamKind(existingPart);
           const delta = event.properties.delta;
-          if (delta.length === 0) {
+          if (typeof delta !== "string" || delta.length === 0) {
             break;
+          }
+          const existingPart = context.partById.get(event.properties.partID);
+          // New uno-code (>=1.14.48) emits `message.part.delta` without a
+          // preceding `message.part.updated`, so `partById` may be empty.
+          // Fall back to the event's `field` to pick the stream kind; for
+          // text/reasoning the role is always assistant.
+          let streamKind: "assistant_text" | "reasoning_text";
+          if (existingPart) {
+            const role = messageRoleForPart(context, existingPart);
+            if (role !== "assistant") {
+              break;
+            }
+            streamKind = resolveTextStreamKind(existingPart);
+          } else {
+            const field = (event.properties as { readonly field?: unknown }).field;
+            if (field === "reasoning") {
+              streamKind = "reasoning_text";
+            } else if (field === "text") {
+              streamKind = "assistant_text";
+            } else {
+              break;
+            }
           }
           const previousText =
             context.emittedTextByPartId.get(event.properties.partID) ??
-            textFromPart(existingPart) ??
-            "";
+            (existingPart ? (textFromPart(existingPart) ?? "") : "");
           const { nextText, deltaToEmit } = appendOpenCodeAssistantTextDelta(previousText, delta);
           if (deltaToEmit.length === 0) {
             break;
           }
           context.emittedTextByPartId.set(event.properties.partID, nextText);
-          if (existingPart.type === "text" || existingPart.type === "reasoning") {
+          if (existingPart && (existingPart.type === "text" || existingPart.type === "reasoning")) {
             context.partById.set(event.properties.partID, {
               ...existingPart,
               text: nextText,
