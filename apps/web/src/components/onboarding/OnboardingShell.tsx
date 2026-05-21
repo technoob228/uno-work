@@ -41,7 +41,7 @@ export function OnboardingShell({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background text-foreground">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-5">
+      <header className="drag-region flex h-14 shrink-0 items-center gap-3 border-b border-border pl-[90px] pr-5 wco:pl-[calc(env(titlebar-area-x)+1em)]">
         <div className="flex items-center gap-2 font-semibold tracking-tight">
           <UnoIcon className="size-5" />
           <span>Uno Work</span>
