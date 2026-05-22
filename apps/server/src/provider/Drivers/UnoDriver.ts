@@ -9,10 +9,11 @@
  *   - `driverKind = "uno"` and `displayName = "Uno"` so the provider shows up
  *     as a separate entry in the picker alongside Codex / Claude / Cursor /
  *     OpenCode;
- *   - the binary path is pinned to the silently-installed
- *     `~/.unowork/uno-code/bin/uno-code` (or `.exe` on Windows). Whatever the
- *     instance config stores for `binaryPath` is ignored — Uno is supposed to
- *     "just work" without the user picking a binary;
+ *   - the binary path defaults to the silently-installed
+ *     `~/.unowork/uno-code/bin/uno-code` (or `.exe` on Windows) when the
+ *     instance config leaves `binaryPath` blank. A user can still point at a
+ *     custom binary via Settings — important for the bring-your-own-binary
+ *     fallback when the GitHub release for the current version is missing;
  *   - the Uno LLM Gateway provider (`provider.uno` pointing at
  *     `UNO_GATEWAY_BASE_URL` with `apiKey={env:UNO_API_KEY}`) is injected via
  *     `OPENCODE_CONFIG_CONTENT`, and `UNO_API_KEY` is set from the stored
@@ -250,7 +251,7 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
       });
       const effectiveConfig = {
         ...config,
-        binaryPath: UNO_BINARY_PATH,
+        binaryPath: config.binaryPath?.trim() || UNO_BINARY_PATH,
         enabled,
       } satisfies OpenCodeSettings;
 

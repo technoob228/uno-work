@@ -39,7 +39,7 @@ function OnboardingRouteView() {
   }, []);
 
   const finishAndOpenProjectPicker = () => {
-    updateSettings({ onboardingCompleted: true });
+    void updateSettings({ onboardingCompleted: true });
     openAddProjectRef.current = true;
     void navigate({ to: "/", replace: true });
   };
@@ -53,7 +53,7 @@ function OnboardingRouteView() {
   };
 
   const handleSkip = () => {
-    updateSettings({ onboardingCompleted: true });
+    void updateSettings({ onboardingCompleted: true });
     void navigate({ to: "/", replace: true });
   };
 

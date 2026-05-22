@@ -21,7 +21,12 @@ import {
 import { ensureLocalApi } from "~/localApi";
 import { Struct } from "effect";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
-import { applySettingsUpdated, getServerConfig, useServerSettings } from "~/rpc/serverState";
+import {
+  applySettingsUpdated,
+  getServerConfig,
+  useServerSettings,
+  whenServerConfigReady,
+} from "~/rpc/serverState";
 
 const CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE = "[CLIENT_SETTINGS]";
 
@@ -169,29 +174,42 @@ export function useSettings<T = UnifiedSettings>(selector?: (s: UnifiedSettings)
  * persisted via RPC. Client keys go through client persistence.
  */
 export function useUpdateSettings() {
-  const updateSettings = useCallback((patch: Partial<UnifiedSettings>) => {
-    const { serverPatch, clientPatch } = splitPatch(patch);
+  const updateSettings = useCallback((patch: Partial<UnifiedSettings>): Promise<void> => {
+    const work = (async () => {
+      const { serverPatch, clientPatch } = splitPatch(patch);
 
-    if (Object.keys(serverPatch).length > 0) {
-      const currentServerConfig = getServerConfig();
-      if (currentServerConfig) {
+      if (Object.keys(serverPatch).length > 0) {
+        // Hydrate server config before optimistic apply — on cold start the
+        // atom is null until the RPC welcome arrives. Without this wait the
+        // optimistic patch is silently skipped and the UI shows stale state
+        // even when the disk write succeeds.
+        const currentServerConfig = getServerConfig() ?? (await whenServerConfigReady());
         applySettingsUpdated(applyServerSettingsPatch(currentServerConfig.settings, serverPatch));
+        // Await the RPC so callers can surface persist failures (toast,
+        // rollback, etc.). Throwing here is intentional.
+        await ensureLocalApi().server.updateSettings(serverPatch);
       }
-      // Fire-and-forget RPC — push will reconcile on success
-      void ensureLocalApi().server.updateSettings(serverPatch);
-    }
 
-    if (Object.keys(clientPatch).length > 0) {
-      persistClientSettings({
-        ...getClientSettingsSnapshot(),
-        ...clientPatch,
-      });
-    }
+      if (Object.keys(clientPatch).length > 0) {
+        persistClientSettings({
+          ...getClientSettingsSnapshot(),
+          ...clientPatch,
+        });
+      }
+    })();
+    // Attach a default error sink so callers that don't await the returned
+    // promise (legacy fire-and-forget sites) don't produce unhandled
+    // rejections. Callers that DO await/catch still receive the thrown error.
+    work.catch((error) => {
+      console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} updateSettings failed`, error);
+    });
+    return work;
   }, []);
 
-  const resetSettings = useCallback(() => {
-    updateSettings(DEFAULT_UNIFIED_SETTINGS);
-  }, [updateSettings]);
+  const resetSettings = useCallback(
+    () => updateSettings(DEFAULT_UNIFIED_SETTINGS),
+    [updateSettings],
+  );
 
   return {
     updateSettings,

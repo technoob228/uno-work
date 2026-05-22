@@ -13,8 +13,8 @@ export function WelcomeStep() {
         AI that works with your machine
       </h1>
       <p className="max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-        Uno Work is where AI works on <b>your</b> computer, with <b>your</b> files, under{" "}
-        <b>your</b> control. Local-first, with optional remote power when you need it.
+        Work on code, text files, and tables with all the context of <b>your</b> data, stored
+        locally on <b>your</b> computer, under <b>your</b> control.
       </p>
       <p className="text-xs text-muted-foreground/70">
         Takes about a minute to set up · You can skip any step

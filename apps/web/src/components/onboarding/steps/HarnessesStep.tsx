@@ -1,10 +1,12 @@
-import { CheckCircle2 } from "lucide-react";
-import { useMemo } from "react";
+import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
 
 import { useServerProviders } from "~/rpc/serverState";
+import { useDesktopUnoCodeInstallState } from "~/lib/desktopUnoCodeReactQuery";
 import { Gemini, GithubCopilotIcon, type Icon } from "../../Icons";
 import { Button } from "../../ui/button";
 import { cn } from "~/lib/utils";
+import { toastManager } from "../../ui/toast";
 import { HARNESS_INSTALL_LINKS, openInstallDocs } from "../harnessInstallLinks";
 import {
   PROVIDER_CLIENT_DEFINITIONS,
@@ -12,7 +14,14 @@ import {
 } from "../../settings/providerDriverMeta";
 import { StepEyebrow, StepLead, StepTitle } from "./stepShared";
 
-type RowVariant = "bundled" | "detected" | "signin" | "install" | "coming-soon";
+type RowVariant =
+  | "bundled"
+  | "bundled-installing"
+  | "bundled-failed"
+  | "detected"
+  | "signin"
+  | "install"
+  | "coming-soon";
 
 interface HarnessRowProps {
   icon: Icon;
@@ -26,6 +35,10 @@ function HarnessRow({ icon: IconComponent, name, variant, onAction }: HarnessRow
     switch (variant) {
       case "bundled":
         return "Installed";
+      case "bundled-installing":
+        return "Installing…";
+      case "bundled-failed":
+        return "Retry";
       case "detected":
         return "Detected";
       case "signin":
@@ -37,13 +50,16 @@ function HarnessRow({ icon: IconComponent, name, variant, onAction }: HarnessRow
     }
   })();
 
-  const isInteractive = variant === "install" || variant === "signin";
+  const isInteractive =
+    variant === "install" || variant === "signin" || variant === "bundled-failed";
 
   return (
     <div
       className={cn(
         "flex items-center gap-3 rounded-lg border px-3 py-2.5",
         variant === "bundled" && "border-primary/30 bg-primary/5",
+        variant === "bundled-installing" && "border-primary/30 bg-primary/5",
+        variant === "bundled-failed" && "border-amber-500/40 bg-amber-500/5",
         variant === "detected" && "border-green-500/30 bg-green-500/5",
         (variant === "install" || variant === "signin") && "border-border bg-card",
         variant === "coming-soon" && "border-border bg-muted/30 opacity-70",
@@ -64,14 +80,35 @@ function HarnessRow({ icon: IconComponent, name, variant, onAction }: HarnessRow
           {statusLabel}
         </span>
       )}
+      {variant === "bundled-installing" && (
+        <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">
+          <Loader2 className="size-3 animate-spin" />
+          {statusLabel}
+        </span>
+      )}
       {variant === "coming-soon" && (
         <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
           {statusLabel}
         </span>
       )}
       {isInteractive && (
-        <Button size="xs" variant="outline" onClick={onAction}>
-          {statusLabel}
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={onAction}
+          className={cn(
+            variant === "bundled-failed" &&
+              "border-amber-500/50 text-amber-700 dark:text-amber-300",
+          )}
+        >
+          {variant === "bundled-failed" ? (
+            <>
+              <AlertTriangle className="mr-1 size-3" />
+              {statusLabel}
+            </>
+          ) : (
+            statusLabel
+          )}
         </Button>
       )}
     </div>
@@ -82,8 +119,13 @@ function resolveVariant(
   definition: ProviderClientDefinition,
   installed: boolean,
   authStatus: string | undefined,
+  unoStatus: "idle" | "installing" | "installed" | "failed",
 ): RowVariant {
-  if (definition.value === "uno") return "bundled";
+  if (definition.value === "uno") {
+    if (unoStatus === "installing") return "bundled-installing";
+    if (unoStatus === "failed") return "bundled-failed";
+    return "bundled";
+  }
   if (installed && authStatus === "authenticated") return "detected";
   if (installed && authStatus !== "authenticated") return "signin";
   return "install";
@@ -91,16 +133,38 @@ function resolveVariant(
 
 export function HarnessesStep() {
   const providers = useServerProviders();
+  const unoCodeQuery = useDesktopUnoCodeInstallState();
+  const unoStatus = unoCodeQuery.data?.status ?? "idle";
+  const unoError = unoCodeQuery.data?.status === "failed" ? unoCodeQuery.data.error : null;
+  const [isRetryingUno, setIsRetryingUno] = useState(false);
+
+  const handleRetryUno = useCallback(() => {
+    const bridge = window.desktopBridge;
+    if (!bridge || typeof bridge.retryUnoCodeInstall !== "function") return;
+    setIsRetryingUno(true);
+    void bridge
+      .retryUnoCodeInstall()
+      .catch((error: unknown) => {
+        toastManager.add({
+          type: "error",
+          title: "Could not start install",
+          description: error instanceof Error ? error.message : "Install request failed.",
+        });
+      })
+      .finally(() => {
+        setIsRetryingUno(false);
+      });
+  }, []);
 
   const rows = useMemo(() => {
     return PROVIDER_CLIENT_DEFINITIONS.map((definition) => {
       const provider = providers.find((p) => p.driver === definition.value);
       const installed = provider?.installed ?? false;
       const authStatus = provider?.auth.status;
-      const variant = resolveVariant(definition, installed, authStatus);
+      const variant = resolveVariant(definition, installed, authStatus, unoStatus);
       return { definition, variant };
     });
-  }, [providers]);
+  }, [providers, unoStatus]);
 
   return (
     <div>
@@ -119,6 +183,10 @@ export function HarnessesStep() {
             name={definition.label}
             variant={variant}
             onAction={() => {
+              if (definition.value === "uno" && variant === "bundled-failed") {
+                if (!isRetryingUno) handleRetryUno();
+                return;
+              }
               const url = HARNESS_INSTALL_LINKS[definition.value];
               if (url) openInstallDocs(url);
             }}
@@ -127,6 +195,12 @@ export function HarnessesStep() {
         <HarnessRow icon={Gemini} name="Gemini CLI" variant="coming-soon" />
         <HarnessRow icon={GithubCopilotIcon} name="GitHub Copilot CLI" variant="coming-soon" />
       </div>
+      {unoError ? (
+        <p className="mt-3 max-w-2xl text-xs text-amber-700 dark:text-amber-300">
+          Uno Code didn’t install: {unoError} You can continue onboarding — set it up later in
+          Settings.
+        </p>
+      ) : null}
       <p className="mt-4 text-xs text-muted-foreground">
         Switch between harnesses any time from the chat header — no lock-in.
       </p>

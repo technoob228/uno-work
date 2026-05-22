@@ -268,6 +268,28 @@ export function useServerConfig(): ServerConfig | null {
   return useAtomValue(serverConfigAtom);
 }
 
+/**
+ * Resolves once the server config has been hydrated from the desktop RPC.
+ * Used by code paths that need a hydrated snapshot before issuing settings
+ * patches — without it, the optimistic apply skips and the user sees a stale
+ * UI even when the patch succeeded on disk. Resolves immediately if hydration
+ * already happened.
+ */
+export function whenServerConfigReady(): Promise<ServerConfig> {
+  const current = getServerConfig();
+  if (current) return Promise.resolve(current);
+  return new Promise<ServerConfig>((resolve) => {
+    const unsubscribe = subscribeLatest(serverConfigAtom, (config) => {
+      unsubscribe();
+      resolve(config);
+    });
+  });
+}
+
+export function useServerConfigReady(): boolean {
+  return useAtomValue(serverConfigAtom) !== null;
+}
+
 export function useServerSettings(): ServerSettings {
   return useAtomValue(serverConfigAtom, selectSettings);
 }

@@ -46,6 +46,7 @@ interface GitHubRelease {
 export type UnoCodeInstallErrorCode =
   | "unsupported-platform"
   | "release-fetch-failed"
+  | "release-not-published"
   | "asset-missing"
   | "download-failed"
   | "extract-failed"
@@ -92,6 +93,12 @@ async function fetchLatestRelease(): Promise<GitHubRelease> {
       Accept: "application/vnd.github+json",
     },
   });
+  if (response.status === 404) {
+    throw new UnoCodeInstallError(
+      "No Uno Code release is available yet. You can point Uno Work at a custom binary in Settings → Providers → Uno.",
+      "release-not-published",
+    );
+  }
   if (!response.ok) {
     throw new UnoCodeInstallError(
       `GitHub API returned ${response.status} ${response.statusText} for ${url}`,
@@ -212,7 +219,7 @@ export async function installUnoCode(opts: InstallerOptions): Promise<InstallRes
   const asset = release.assets.find((a) => a.name === assetName);
   if (!asset) {
     throw new UnoCodeInstallError(
-      `Release ${release.tag_name} has no asset named ${assetName}.`,
+      `No Uno Code build available for ${process.platform}/${process.arch} in release ${release.tag_name} yet. You can point Uno Work at a custom binary in Settings → Providers → Uno.`,
       "asset-missing",
     );
   }

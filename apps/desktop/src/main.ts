@@ -1235,7 +1235,7 @@ function setUnoCodeState(next: UnoCodeInstallState): void {
   emitUnoCodeState();
 }
 
-async function writeOpenCodeBinaryPathToSettings(binaryPath: string): Promise<void> {
+async function writeUnoBinaryPathToSettings(binaryPath: string): Promise<void> {
   await FS.promises.mkdir(Path.dirname(SERVER_SETTINGS_PATH), { recursive: true });
   let existing: Record<string, unknown> = {};
   try {
@@ -1251,13 +1251,24 @@ async function writeOpenCodeBinaryPathToSettings(binaryPath: string): Promise<vo
       );
     }
   }
-  const previousOpenCode =
-    existing.opencode && typeof existing.opencode === "object" && !Array.isArray(existing.opencode)
-      ? (existing.opencode as Record<string, unknown>)
+  const previousProviders =
+    existing.providers &&
+    typeof existing.providers === "object" &&
+    !Array.isArray(existing.providers)
+      ? (existing.providers as Record<string, unknown>)
+      : {};
+  const previousUno =
+    previousProviders.uno &&
+    typeof previousProviders.uno === "object" &&
+    !Array.isArray(previousProviders.uno)
+      ? (previousProviders.uno as Record<string, unknown>)
       : {};
   const next = {
     ...existing,
-    opencode: { ...previousOpenCode, enabled: true, binaryPath },
+    providers: {
+      ...previousProviders,
+      uno: { ...previousUno, enabled: true, binaryPath },
+    },
   };
   await FS.promises.writeFile(SERVER_SETTINGS_PATH, `${JSON.stringify(next, null, 2)}\n`, "utf-8");
 }
@@ -1284,7 +1295,7 @@ async function ensureUnoCodeInstalled(): Promise<void> {
         });
       },
     });
-    await writeOpenCodeBinaryPathToSettings(result.binaryPath);
+    await writeUnoBinaryPathToSettings(result.binaryPath);
     setUnoCodeState({
       status: "installed",
       binaryPath: result.binaryPath,

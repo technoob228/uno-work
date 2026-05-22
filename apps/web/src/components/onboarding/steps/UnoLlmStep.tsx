@@ -1,9 +1,17 @@
-import { CheckCircle2, CreditCard, Globe2, Zap } from "lucide-react";
+import { CheckCircle2, CreditCard, Globe2, Loader2, Zap } from "lucide-react";
 import { useState } from "react";
 
+import {
+  DEFAULT_GIT_TEXT_GENERATION_MODEL,
+  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  ProviderDriverKind,
+  ProviderInstanceId,
+} from "@t3tools/contracts";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
+import { useServerConfigReady } from "~/rpc/serverState";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
+import { toastManager } from "../../ui/toast";
 import {
   FeatureBullet,
   StepEyebrow,
@@ -12,23 +20,65 @@ import {
   TwoColumn,
 } from "./stepShared";
 
+const UNO_INSTANCE_ID = ProviderInstanceId.make("uno");
+const UNO_TEXT_GEN_MODEL =
+  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[ProviderDriverKind.make("uno")] ??
+  DEFAULT_GIT_TEXT_GENERATION_MODEL;
+
 export function UnoLlmStep() {
   const apiKey = useSettings((settings) => settings.uno?.apiKey ?? "");
   const { updateSettings } = useUpdateSettings();
+  const serverReady = useServerConfigReady();
   const [draft, setDraft] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const connected = apiKey.trim().length > 0;
   const masked = connected ? `${apiKey.slice(0, 8)}…` : "sk-uno-…";
 
-  const handleConnect = () => {
+  const handleConnect = async () => {
     const trimmed = draft.trim();
-    if (!trimmed) return;
-    updateSettings({ uno: { apiKey: trimmed } });
-    setDraft("");
+    if (!trimmed || pending) return;
+    setPending(true);
+    setError(null);
+    try {
+      await updateSettings({
+        uno: { apiKey: trimmed },
+        textGenerationModelSelection: {
+          instanceId: UNO_INSTANCE_ID,
+          model: UNO_TEXT_GEN_MODEL,
+        },
+      });
+      setDraft("");
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Update failed.";
+      setError(message);
+      toastManager.add({
+        type: "error",
+        title: "Could not save Uno API key",
+        description: message,
+      });
+    } finally {
+      setPending(false);
+    }
   };
 
-  const handleDisconnect = () => {
-    updateSettings({ uno: { apiKey: "" } });
+  const handleDisconnect = async () => {
+    if (pending) return;
+    setPending(true);
+    setError(null);
+    try {
+      await updateSettings({ uno: { apiKey: "" } });
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Update failed.";
+      toastManager.add({
+        type: "error",
+        title: "Could not disconnect Uno account",
+        description: message,
+      });
+    } finally {
+      setPending(false);
+    }
   };
 
   return (
@@ -65,8 +115,22 @@ export function UnoLlmStep() {
                 <div className="font-mono text-xs text-muted-foreground">{masked}</div>
               </div>
             </div>
-            <Button variant="outline" size="sm" onClick={handleDisconnect}>
-              Disconnect
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void handleDisconnect();
+              }}
+              disabled={pending}
+            >
+              {pending ? (
+                <>
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  Disconnecting…
+                </>
+              ) : (
+                "Disconnect"
+              )}
             </Button>
           </div>
         ) : (
@@ -94,14 +158,37 @@ export function UnoLlmStep() {
                 placeholder="sk-uno-..."
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void handleConnect();
+                  }
+                }}
                 autoComplete="off"
                 spellCheck={false}
+                disabled={pending}
                 className="font-mono text-xs"
               />
-              <Button onClick={handleConnect} disabled={draft.trim().length === 0}>
-                Connect
+              <Button
+                onClick={() => {
+                  void handleConnect();
+                }}
+                disabled={draft.trim().length === 0 || pending || !serverReady}
+              >
+                {pending ? (
+                  <>
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                    Connecting…
+                  </>
+                ) : (
+                  "Connect"
+                )}
               </Button>
             </div>
+            {error ? <p className="text-xs text-destructive">{error}</p> : null}
+            {!serverReady && !pending ? (
+              <p className="text-xs text-muted-foreground">Waiting for local server…</p>
+            ) : null}
             <p className="text-xs text-muted-foreground">
               No account yet?{" "}
               <a

@@ -2,7 +2,12 @@ import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
-import { DEFAULT_GIT_TEXT_GENERATION_MODEL, ProviderOptionSelections } from "./model.ts";
+import {
+  DEFAULT_GIT_TEXT_GENERATION_MODEL,
+  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  ProviderOptionSelections,
+} from "./model.ts";
+import { ProviderDriverKind } from "./providerInstance.ts";
 import { ModelSelection } from "./orchestration.ts";
 import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance.ts";
 
@@ -314,6 +319,56 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
 );
 export type OpenCodeSettings = typeof OpenCodeSettings.Type;
 
+export const UnoProviderSettings = makeProviderSettingsSchema(
+  {
+    enabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    binaryPath: makeBinaryPathSetting("uno-code").pipe(
+      Schema.annotateKey({
+        title: "Binary path",
+        description: "Path to the Uno Code binary.",
+        providerSettingsForm: {
+          placeholder: "uno-code",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    serverUrl: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Server URL",
+        description: "Leave blank to let Uno Work spawn the server when needed.",
+        providerSettingsForm: {
+          placeholder: "http://127.0.0.1:4096",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    serverPassword: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Server password",
+        description: "Stored in plain text on disk.",
+        providerSettingsForm: {
+          control: "password",
+          placeholder: "Optional",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    customModels: Schema.Array(Schema.String).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+  },
+  {
+    order: ["binaryPath", "serverUrl", "serverPassword"],
+  },
+);
+export type UnoProviderSettings = typeof UnoProviderSettings.Type;
+
 export const ObservabilitySettings = Schema.Struct({
   otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
@@ -336,8 +391,10 @@ export const ServerSettings = Schema.Struct({
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
       Effect.succeed({
-        instanceId: ProviderInstanceId.make("codex"),
-        model: DEFAULT_GIT_TEXT_GENERATION_MODEL,
+        instanceId: ProviderInstanceId.make("uno"),
+        model:
+          DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[ProviderDriverKind.make("uno")] ??
+          DEFAULT_GIT_TEXT_GENERATION_MODEL,
       }),
     ),
   ),
@@ -353,7 +410,7 @@ export const ServerSettings = Schema.Struct({
     claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     cursor: CursorSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
-    uno: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    uno: UnoProviderSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   // New driver-agnostic instance map. Keyed by `ProviderInstanceId`; values
   // are `ProviderInstanceConfig` envelopes. The driver-specific config blob
