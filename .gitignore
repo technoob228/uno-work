@@ -26,3 +26,4 @@ __screenshots__/
 .tanstack
 squashfs-root/
 .vercel
+*.zip
