@@ -952,11 +952,7 @@ function LoadedBody({ file }: { file: PreviewFile }) {
   return renderLoadedBody(file, { ...data, ...(blobUrl ? { blobUrl } : {}) });
 }
 
-const FrozenMarkdownPreview = memo(function FrozenMarkdownPreview({
-  source,
-}: {
-  source: string;
-}) {
+const FrozenMarkdownPreview = memo(function FrozenMarkdownPreview({ source }: { source: string }) {
   return <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>;
 });
 
@@ -985,7 +981,12 @@ function EditableBody({
   const path = file.path;
   const hasInlineContent = Boolean(file.content);
 
-  const { data: loaded, isPending, isError, error } = useQuery({
+  const {
+    data: loaded,
+    isPending,
+    isError,
+    error,
+  } = useQuery({
     queryKey: ["previewReadFile", effectiveEnvironmentId, path],
     queryFn: async () => {
       if (!path) return null;

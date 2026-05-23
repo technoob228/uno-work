@@ -191,7 +191,11 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
         const idx = current.files.findIndex((f) => f.id === id);
         if (idx === -1) return current;
         const updated = { ...current.files[idx]!, content };
-        const nextFiles = [...current.files.slice(0, idx), updated, ...current.files.slice(idx + 1)];
+        const nextFiles = [
+          ...current.files.slice(0, idx),
+          updated,
+          ...current.files.slice(idx + 1),
+        ];
         return { ...current, files: nextFiles, editingFileId: null };
       });
     },

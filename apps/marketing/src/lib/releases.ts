@@ -3,7 +3,8 @@ const REPO = "technoob228/uno-work";
 export const RELEASES_URL = `https://github.com/${REPO}/releases`;
 
 const API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
-const CACHE_KEY = "uno-work-latest-release";
+const CACHE_KEY = "uno-work-latest-release-v2";
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
 export interface ReleaseAsset {
   name: string;
@@ -14,6 +15,11 @@ export interface Release {
   tag_name: string;
   html_url: string;
   assets: ReleaseAsset[];
+}
+
+interface CachedRelease {
+  cachedAt: number;
+  release: Release;
 }
 
 export type ReleasePlatform = "mac-arm64" | "mac-x64" | "win-x64" | "linux-x64";
@@ -53,12 +59,17 @@ export function pickReleaseAsset(
 
 export async function fetchLatestRelease(): Promise<Release> {
   const cached = sessionStorage.getItem(CACHE_KEY);
-  if (cached) return JSON.parse(cached);
+  if (cached) {
+    const parsed = JSON.parse(cached) as CachedRelease;
+    if (Date.now() - parsed.cachedAt < CACHE_TTL_MS) {
+      return parsed.release;
+    }
+  }
 
-  const data = await fetch(API_URL).then((r) => r.json());
+  const data = await fetch(API_URL, { cache: "no-store" }).then((r) => r.json());
 
   if (data?.assets) {
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify({ cachedAt: Date.now(), release: data }));
   }
 
   return data;

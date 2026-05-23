@@ -71,9 +71,7 @@ const TOOLS = [
 
 async function callWebSearch(args) {
   if (apiKey.length === 0) {
-    throw new Error(
-      "UNO_API_KEY is not set. Connect your Uno account in Uno Work → Settings.",
-    );
+    throw new Error("UNO_API_KEY is not set. Connect your Uno account in Uno Work → Settings.");
   }
   if (baseUrl.length === 0) {
     throw new Error("UNO_GATEWAY_BASE_URL is not set.");

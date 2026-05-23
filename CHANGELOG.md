@@ -118,7 +118,7 @@ resume, «Continue with …» recovery action).
 ### Bug A — codex как дефолтный text-gen провайдер
 
 На чистой установке UI первым делом показывал ошибку
-*"Codex provider status: Codex CLI not installed"*: schema по умолчанию
+_"Codex provider status: Codex CLI not installed"_: schema по умолчанию
 устанавливала `textGenerationModelSelection.instanceId = codex`, хотя продукт
 называется Uno Work. Пользователь видел «у вас ничего не работает» вместо
 «выберите провайдер».
@@ -159,8 +159,9 @@ custom binary path.
 
 ### Bug C — UnoSettings schema + driver
 
-В model picker'е Uno-провайдер показывал тултип *"OpenCode CLI (`opencode`)
-is not installed"* потому что:
+В model picker'е Uno-провайдер показывал тултип _"OpenCode CLI (`opencode`)
+is not installed"_ потому что:
+
 - В schema под ключом `providers.uno` лежал `OpenCodeSettings` (binaryPath
   по умолчанию = `opencode`).
 - После установки Uno Code путь писался в `providers.opencode.binaryPath`,
@@ -207,12 +208,12 @@ update без `await`. Если онбординг закрывался рань
 
 ### Bug E — Welcome копирайт
 
-Старое: *"Local-first, with optional remote power when you need it"* — не
+Старое: _"Local-first, with optional remote power when you need it"_ — не
 объясняло, что именно делать в приложении.
 
 - `apps/web/src/components/onboarding/steps/WelcomeStep.tsx` — теперь:
-  *"work on code, text files, tables, with all context of your data,
-  stored locally"*.
+  _"work on code, text files, tables, with all context of your data,
+  stored locally"_.
 
 ---
 

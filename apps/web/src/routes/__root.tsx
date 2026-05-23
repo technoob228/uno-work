@@ -29,11 +29,7 @@ import {
 } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { readLocalApi } from "../localApi";
-import {
-  ensureClientSettingsHydrated,
-  getClientSettings,
-  useSettings,
-} from "../hooks/useSettings";
+import { ensureClientSettingsHydrated, getClientSettings, useSettings } from "../hooks/useSettings";
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKeyFromPath,

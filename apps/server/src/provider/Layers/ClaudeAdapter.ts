@@ -2057,10 +2057,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       provider: PROVIDER,
       createdAt: stamp.createdAt,
       threadId: context.session.threadId,
-      ...((() => {
+      ...(() => {
         const id = context.turnState?.turnId ?? context.lastCompletedTurnId;
         return id ? { turnId: asCanonicalTurnId(id) } : {};
-      })()),
+      })(),
       providerRefs: nativeProviderRefs(context),
       raw: {
         source: "claude.sdk.message" as const,

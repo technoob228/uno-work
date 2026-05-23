@@ -127,7 +127,9 @@ async function fetchUnoModelsCatalog(unoApiKey: string): Promise<UnoCatalog> {
       headers: { Authorization: `Bearer ${unoApiKey}` },
     });
     if (!response.ok) return {};
-    const payload = (await response.json()) as { readonly data?: ReadonlyArray<UnoGatewayModelResponse> };
+    const payload = (await response.json()) as {
+      readonly data?: ReadonlyArray<UnoGatewayModelResponse>;
+    };
     const catalog: Record<string, UnoCatalogModel> = {};
     for (const entry of payload.data ?? []) {
       if (typeof entry.id !== "string" || entry.id.length === 0) continue;
@@ -304,8 +306,7 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
       // `opencode` picks up the user's homebrew install (v1.14.x, too old for
       // the Uno gateway), and `uno-code` is not a global command. Treat the
       // fallback markers as "not configured" so we use the bundled binary.
-      const isSchemaFallback =
-        configuredBinary === "opencode" || configuredBinary === "uno-code";
+      const isSchemaFallback = configuredBinary === "opencode" || configuredBinary === "uno-code";
       const isStaleAbsolutePath =
         configuredBinary && nodePath.isAbsolute(configuredBinary) && !existsSync(configuredBinary);
       const effectiveBinary =

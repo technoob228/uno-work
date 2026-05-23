@@ -8,12 +8,7 @@ const execFile = promisify(ChildProcess.execFile);
 const RELEASE_REPO = "technoob228/uno-code";
 const ASSET_PREFIX = "uno-code";
 
-export type InstallPhase =
-  | "fetching-release"
-  | "downloading"
-  | "extracting"
-  | "verifying"
-  | "done";
+export type InstallPhase = "fetching-release" | "downloading" | "extracting" | "verifying" | "done";
 
 export interface InstallProgressEvent {
   phase: InstallPhase;
@@ -259,9 +254,9 @@ export async function installUnoCode(opts: InstallerOptions): Promise<InstallRes
     );
   }
 
-  await FS.promises.rm(Path.dirname(archivePath), { recursive: true, force: true }).catch(
-    () => undefined,
-  );
+  await FS.promises
+    .rm(Path.dirname(archivePath), { recursive: true, force: true })
+    .catch(() => undefined);
 
   onProgress?.({
     phase: "done",

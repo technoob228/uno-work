@@ -12,13 +12,7 @@ import { useServerConfigReady } from "~/rpc/serverState";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { toastManager } from "../../ui/toast";
-import {
-  FeatureBullet,
-  StepEyebrow,
-  StepLead,
-  StepTitle,
-  TwoColumn,
-} from "./stepShared";
+import { FeatureBullet, StepEyebrow, StepLead, StepTitle, TwoColumn } from "./stepShared";
 
 const UNO_INSTANCE_ID = ProviderInstanceId.make("uno");
 const UNO_TEXT_GEN_MODEL =
@@ -88,8 +82,8 @@ export function UnoLlmStep() {
         <StepTitle>One key. 300+ models. Anywhere.</StepTitle>
         <StepLead>
           Uno LLM gives you a single account with access to OpenAI, Anthropic, Google, Mistral,
-          Llama, and 300+ open and closed models. Works from any location — including regions
-          where original providers are blocked.
+          Llama, and 300+ open and closed models. Works from any location — including regions where
+          original providers are blocked.
         </StepLead>
         <ul className="mt-6 grid gap-3">
           <FeatureBullet icon={<Zap className="size-3.5" />}>

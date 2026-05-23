@@ -171,9 +171,9 @@ export function HarnessesStep() {
       <StepEyebrow>Bring your AI</StepEyebrow>
       <StepTitle>Use the AI subscriptions you already have.</StepTitle>
       <StepLead>
-        Uno Work auto-detects accounts and harnesses already installed on your computer. If you
-        have a third-party CLI installed and signed in — like Claude Code or Codex CLI — we plug
-        into it automatically. No re-authentication, no manual setup.
+        Uno Work auto-detects accounts and harnesses already installed on your computer. If you have
+        a third-party CLI installed and signed in — like Claude Code or Codex CLI — we plug into it
+        automatically. No re-authentication, no manual setup.
       </StepLead>
       <div className="mt-6 grid max-w-2xl gap-2">
         {rows.map(({ definition, variant }) => (

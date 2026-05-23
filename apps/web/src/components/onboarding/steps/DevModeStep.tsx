@@ -20,8 +20,8 @@ export function DevModeStep() {
         <StepEyebrow>For coders</StepEyebrow>
         <StepTitle>Coding? Turn on Dev mode.</StepTitle>
         <StepLead>
-          Dev mode unlocks tools designed for software work. Hidden by default to keep the
-          interface clean for non-coders.
+          Dev mode unlocks tools designed for software work. Hidden by default to keep the interface
+          clean for non-coders.
         </StepLead>
         <ul className="mt-6 grid gap-3">
           <FeatureBullet icon={<GitBranch className="size-3.5" />}>

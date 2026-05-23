@@ -3558,9 +3558,7 @@ export default function ChatView(props: ChatViewProps) {
           isElectron
             ? cn(
                 "drag-region flex h-[52px] items-center pr-3 sm:pr-5 wco:h-[env(titlebar-area-height)]",
-                sidebarHidden
-                  ? "pl-[78px] fullscreen:pl-3 sm:fullscreen:pl-5"
-                  : "pl-3 sm:pl-5",
+                sidebarHidden ? "pl-[78px] fullscreen:pl-3 sm:fullscreen:pl-5" : "pl-3 sm:pl-5",
                 reserveTitleBarControlInset &&
                   "wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]",
               )

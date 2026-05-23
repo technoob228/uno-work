@@ -12,10 +12,7 @@ import {
   OpenCodeRuntimeError,
   type OpenCodeRuntimeShape,
 } from "../opencodeRuntime.ts";
-import {
-  checkOpenCodeProviderStatus,
-  type ProviderPresentation,
-} from "./OpenCodeProvider.ts";
+import { checkOpenCodeProviderStatus, type ProviderPresentation } from "./OpenCodeProvider.ts";
 import type { OpenCodeInventory } from "../opencodeRuntime.ts";
 
 const DEFAULT_VERSION_STDOUT = "opencode 1.14.19\n";

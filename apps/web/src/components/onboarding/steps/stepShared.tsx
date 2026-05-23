@@ -11,26 +11,16 @@ export function StepEyebrow({ children }: { children: ReactNode }) {
 }
 
 export function StepTitle({ children }: { children: ReactNode }) {
-  return (
-    <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">{children}</h2>
-  );
+  return <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">{children}</h2>;
 }
 
 export function StepLead({ children }: { children: ReactNode }) {
   return (
-    <p className="mt-3 max-w-xl text-base leading-relaxed text-muted-foreground">
-      {children}
-    </p>
+    <p className="mt-3 max-w-xl text-base leading-relaxed text-muted-foreground">{children}</p>
   );
 }
 
-export function FeatureBullet({
-  icon,
-  children,
-}: {
-  icon: ReactNode;
-  children: ReactNode;
-}) {
+export function FeatureBullet({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
     <li className="flex items-start gap-3 text-sm leading-relaxed">
       <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -54,9 +44,7 @@ export function TwoColumn({
     <div
       className={cn(
         "grid flex-1 items-center gap-10",
-        screenshotEmphasis
-          ? "lg:grid-cols-[1fr_1.55fr]"
-          : "lg:grid-cols-[1fr_1.15fr]",
+        screenshotEmphasis ? "lg:grid-cols-[1fr_1.55fr]" : "lg:grid-cols-[1fr_1.15fr]",
         className,
       )}
     >

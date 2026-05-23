@@ -8,11 +8,11 @@ Uno Work is not an IDE. It's a desktop app that connects to AI coding agents (ha
 
 Install the latest desktop app from [GitHub Releases](https://github.com/technoob228/uno-work/releases).
 
-| Platform | File |
-|---|---|
-| macOS (Apple Silicon) | `Uno-Work.dmg` |
-| Windows | `Uno-Work.exe` |
-| Linux | `Uno-Work.AppImage` |
+| Platform              | File                |
+| --------------------- | ------------------- |
+| macOS (Apple Silicon) | `Uno-Work.dmg`      |
+| Windows               | `Uno-Work.exe`      |
+| Linux                 | `Uno-Work.AppImage` |
 
 ## Features
 
@@ -26,13 +26,13 @@ Install the latest desktop app from [GitHub Releases](https://github.com/technoo
 
 ## Supported harnesses
 
-| Harness | Auto-detected | Auth |
-|---|---|---|
-| Uno Code | Bundled (auto-installed) | Uno API key |
-| Claude Code | Yes (if on PATH) | `claude auth login` |
-| Codex CLI | Yes (if on PATH) | `codex login` |
-| OpenCode | Yes (if on PATH) | `opencode auth login` |
-| Cursor | Yes (if on PATH) | Cursor account |
+| Harness     | Auto-detected            | Auth                  |
+| ----------- | ------------------------ | --------------------- |
+| Uno Code    | Bundled (auto-installed) | Uno API key           |
+| Claude Code | Yes (if on PATH)         | `claude auth login`   |
+| Codex CLI   | Yes (if on PATH)         | `codex login`         |
+| OpenCode    | Yes (if on PATH)         | `opencode auth login` |
+| Cursor      | Yes (if on PATH)         | Cursor account        |
 
 ## Development
 

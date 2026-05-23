@@ -422,12 +422,7 @@ function UnoCodeInstallSection() {
   }
 
   return (
-    <SettingsRow
-      title="Uno Code"
-      description={description}
-      status={statusNode}
-      control={control}
-    />
+    <SettingsRow title="Uno Code" description={description} status={statusNode} control={control} />
   );
 }
 
