@@ -8,6 +8,109 @@
 
 ---
 
+## v0.0.28 — 2026-05-23
+
+Веб-поиск в Uno-харнессе, инлайн-редактор в preview-панели, синхронизация
+fullscreen-состояния окна с фронтом и обновлённый маркетинговый лендинг.
+
+### Feature 1 — Brave-powered web search через bundled MCP-мост
+
+Uno-харнесс получает tool `web_search(query, count?, country?, freshness?)`,
+который проксирует запрос на `POST api.getuno.xyz/v1/search` (Brave Search
+под капотом, биллинг через `users.llm_balance`). Ключ Brave хранится только
+на Gateway — десктоп его не видит.
+
+- `apps/desktop/resources/mcp/uno-search.mjs` — stdio MCP-сервер без
+  внешних зависимостей (≈200 строк, line-delimited JSON-RPC 2.0).
+- `apps/desktop/src/main.ts` — `backendChildEnv()` пробрасывает
+  `UNO_MCP_SEARCH_SCRIPT` + `UNO_MCP_NODE_BIN` (Electron в режиме
+  `ELECTRON_RUN_AS_NODE=1` работает как Node-интерпретатор).
+- `apps/server/src/provider/Drivers/UnoDriver.ts` — при наличии
+  `serverSettings.uno.apiKey` и bundled-скрипта в `OPENCODE_CONFIG_CONTENT`
+  добавляется секция `mcp["uno-search"]` типа `local`.
+- `apps/web/src/components/settings/SettingsPanels.tsx` — в Uno account
+  секции появилась строка **Web search** с бейджем Active/Inactive.
+
+Активируется автоматически когда в Settings привязан Uno API-ключ. Без
+ключа индикатор «Inactive», MCP-секция в конфиге uno-code не появляется.
+
+### Feature 2 — инлайн-редактор в preview-панели
+
+Preview-панель умеет редактировать markdown-документы прямо в overlay-
+панели: кнопка «карандаш» переключает между ReactMarkdown-выводом и
+текстовым редактором, изменения сохраняются через `turndown` обратно в
+исходный файл.
+
+- `apps/web/src/components/preview/PreviewPane.tsx` — режим редактора,
+  `detectFileKind`-экспорт, EnvironmentId-скоупинг для multi-environment
+  set-ups.
+- `apps/web/package.json` — добавлены `turndown` + `@types/turndown`.
+
+### Feature 3 — синхронизация fullscreen-состояния окна с рендером
+
+Renderer получает события `desktop:window-fullscreen-state` и проставляет
+класс `is-fullscreen` на `<html>`. Используется для корректного отступа
+под traffic-light кнопки и для адаптации chrome в полноэкранном режиме.
+
+- `apps/desktop/src/main.ts` + `apps/desktop/src/preload.ts` — IPC-каналы
+  `desktop:window-fullscreen-state` и `desktop:window-fullscreen-get-state`.
+- `apps/web/src/lib/windowFullscreen.ts` — `syncDocumentFullscreenClass()`
+  с теплым стартом и подпиской.
+- `apps/web/src/main.tsx`, `apps/web/src/index.css` — подключение в
+  bootstrap + базовые стили.
+- `packages/contracts/src/ipc.ts` — `getWindowFullscreenState` и
+  `onWindowFullscreenChange` в типах `DesktopBridge`.
+
+### Feature 4 — refresh Uno snapshot после установки uno-code
+
+После того как silent-installer допроливает `uno-code`, Uno-провайдер
+автоматически перечитывает модели — больше не нужно дёргать ручной
+«Re-detect».
+
+- `apps/web/src/lib/desktopUnoCodeReactQuery.ts` — отслеживает переход
+  `pending → installed`, инвалидирует Uno-snapshot ровно один раз.
+
+### Feature 5 — рефакторинг ProviderPresentation
+
+`OpenCodeProvider` экспортирует `ProviderPresentation` — общий интерфейс
+(displayName, binaryCommand, minimumVersion, showInteractionModeToggle)
+для `OpenCodeDriver` и `UnoDriver`. Раньше Uno-driver дублировал константы
+руками; теперь обе ветки используют один источник истины.
+
+- `apps/server/src/provider/Layers/OpenCodeProvider.ts` — вытащен
+  `ProviderPresentation` и сделан параметром
+  `checkOpenCodeProviderStatus`/`makePendingOpenCodeProvider`.
+- `apps/server/src/provider/Drivers/UnoDriver.ts` — переключён на новый
+  параметр; константа `UNO_PRESENTATION` живёт рядом с драйвером.
+
+### Fix — ClaudeAdapter: providerRefs после завершения turn
+
+После того как turn завершался, `context.turnState` сбрасывался в
+`undefined` и `providerRefs.turnId` пропадал — UI терял возможность
+сослаться на последний turn. Сохраняем `lastCompletedTurnId` и
+возвращаем его в `providerRefs`, пока новый turn не стартовал.
+
+- `apps/server/src/provider/Layers/ClaudeAdapter.ts` — добавлено поле
+  `lastCompletedTurnId` в `ClaudeSessionContext`.
+
+### Marketing — обновлённый лендинг и CI
+
+- `apps/marketing/src/pages/index.astro`, `apps/marketing/src/pages/download.astro`,
+  `apps/marketing/src/layouts/Layout.astro` — освежены копирайт и блоки.
+- `apps/marketing/public/favicon.svg`, `apps/marketing/public/logos/*`,
+  `apple-touch-icon.png`, `favicon-*.png`, `favicon.ico`, `icon.png` —
+  единый набор бренд-ассетов.
+- `.github/workflows/marketing-storage.yml` — workflow публикации
+  `apps/marketing` в UNO Storage по push в main.
+
+### Docs — roadmap
+
+`UNO_ROADMAP.md`: добавлен блок **Claude Billing Profiles And Fallback**
+(подписка/Agent SDK/API/Bedrock/Vertex/Uno Gateway, безопасный restart +
+resume, «Continue with …» recovery action).
+
+---
+
 ## v0.0.27 — 2026-05-22
 
 Фикс каскада из 5 багов, ломавших онбординг на чистом маке после v0.0.26.
