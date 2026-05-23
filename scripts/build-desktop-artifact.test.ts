@@ -19,8 +19,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it("switches desktop packaging product names to nightly for nightly builds", () => {
-    assert.equal(resolveDesktopProductName("0.0.17"), "Work");
-    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "Work (Nightly)");
+    assert.equal(resolveDesktopProductName("0.0.17"), "Uno Work");
+    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "Uno Work (Nightly)");
   });
 
   it("switches desktop packaging icons to the nightly artwork for nightly versions", () => {

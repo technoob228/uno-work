@@ -1,4 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
+import * as NodePath from "@effect/platform-node/NodePath";
 import { describe, it, assert, live } from "@effect/vitest";
 import { Effect, Exit, Layer, PubSub, Ref, Schema, Scope, Sink, Stream } from "effect";
 import * as CodexErrors from "effect-codex-app-server/errors";
@@ -699,7 +701,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
       // breaks — the `codex_personal`-never-probes bug we are guarding
       // against — that snapshot never lands in `getProviders` and the
       // assertions below fail.
-      it.effect("propagates real Codex probe failures to the aggregator at boot", () =>
+      live("propagates real Codex probe failures to the aggregator at boot", () =>
         Effect.gen(function* () {
           const missingBinary = `t3code_codex_missing_${process.pid}_${Date.now()}`;
           const serverSettings = yield* makeMutableServerSettingsService(
@@ -750,11 +752,12 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             ),
             Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
             Layer.provideMerge(OpenCodeRuntimeLive),
-            // NO spawner mock — `ChildProcessSpawner` is supplied by the
-            // outer `NodeServices.layer` on `it.layer(...)` and will
-            // genuinely spawn a subprocess. The missing-binary ENOENT is
+            // NO spawner mock — provide real NodeServices inline because
+            // `live` does not inherit the outer `it.layer(...)` services.
+            // The missing-binary ENOENT is
             // what exercises the same failure mode as a misconfigured
             // production `binaryPath`.
+            Layer.provideMerge(NodeServices.layer),
           );
           const runtimeServices = yield* Layer.build(providerRegistryLayer).pipe(
             Scope.provide(scope),
@@ -904,7 +907,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
         }),
       );
 
-      it.effect("includes unavailable instance snapshots in getProviders", () =>
+      live("includes unavailable instance snapshots in getProviders", () =>
         Effect.gen(function* () {
           const serverSettings = yield* makeMutableServerSettingsService(
             Schema.decodeSync(ServerSettings)(
@@ -957,94 +960,91 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
         }),
       );
 
-      it.effect(
-        "keeps cursor disabled and skips probing when the provider setting is disabled",
-        () =>
-          Effect.gen(function* () {
-            const serverSettings = yield* makeMutableServerSettingsService(
-              Schema.decodeSync(ServerSettings)(
-                deepMerge(DEFAULT_SERVER_SETTINGS, {
-                  providers: {
-                    codex: {
-                      enabled: false,
-                    },
-                    cursor: {
-                      enabled: false,
-                    },
-                    uno: {
-                      enabled: false,
-                    },
+      live("keeps cursor disabled and skips probing when the provider setting is disabled", () =>
+        Effect.gen(function* () {
+          const serverSettings = yield* makeMutableServerSettingsService(
+            Schema.decodeSync(ServerSettings)(
+              deepMerge(DEFAULT_SERVER_SETTINGS, {
+                providers: {
+                  codex: {
+                    enabled: false,
                   },
-                }),
-              ),
-            );
-            let cursorSpawned = false;
-            const scope = yield* Scope.make();
-            yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
-            const providerRegistryLayer = ProviderRegistryLive.pipe(
-              Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
-              Layer.provideMerge(Layer.succeed(ServerSettingsService, serverSettings)),
-              Layer.provideMerge(
-                ServerConfig.layerTest(process.cwd(), {
-                  prefix: "t3-provider-registry-",
-                }),
-              ),
-              Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
-              Layer.provideMerge(OpenCodeRuntimeLive),
-              Layer.provideMerge(
-                mockCommandSpawnerLayer((command, args) => {
-                  if (command === "agent") {
-                    cursorSpawned = true;
-                  }
-                  const joined = args.join(" ");
-                  if (joined === "--version") {
-                    return {
-                      stdout: `${command} 1.0.0\n`,
-                      stderr: "",
-                      code: 0,
-                    };
-                  }
-                  if (joined === "auth status") {
-                    return {
-                      stdout: '{"authenticated":true}\n',
-                      stderr: "",
-                      code: 0,
-                    };
-                  }
-                  throw new Error(`Unexpected args: ${command} ${joined}`);
-                }),
-              ),
-            );
-            const runtimeServices = yield* Layer.build(
-              Layer.mergeAll(
-                Layer.succeed(ServerSettingsService, serverSettings),
-                providerRegistryLayer,
-              ),
-            ).pipe(Scope.provide(scope));
+                  cursor: {
+                    enabled: false,
+                  },
+                  uno: {
+                    enabled: false,
+                  },
+                },
+              }),
+            ),
+          );
+          let cursorSpawned = false;
+          const scope = yield* Scope.make();
+          yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+          const providerRegistryLayer = ProviderRegistryLive.pipe(
+            Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+            Layer.provideMerge(Layer.succeed(ServerSettingsService, serverSettings)),
+            Layer.provideMerge(
+              ServerConfig.layerTest(process.cwd(), {
+                prefix: "t3-provider-registry-",
+              }),
+            ),
+            Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+            Layer.provideMerge(OpenCodeRuntimeLive),
+            Layer.provideMerge(NodeFileSystem.layer),
+            Layer.provideMerge(NodePath.layer),
+            Layer.provideMerge(
+              mockCommandSpawnerLayer((command, args) => {
+                if (command === "agent") {
+                  cursorSpawned = true;
+                }
+                const joined = args.join(" ");
+                if (joined === "--version") {
+                  return {
+                    stdout: `${command} 1.0.0\n`,
+                    stderr: "",
+                    code: 0,
+                  };
+                }
+                if (joined === "auth status") {
+                  return {
+                    stdout: '{"authenticated":true}\n',
+                    stderr: "",
+                    code: 0,
+                  };
+                }
+                throw new Error(`Unexpected args: ${command} ${joined}`);
+              }),
+            ),
+          );
+          const runtimeServices = yield* Layer.build(
+            Layer.mergeAll(
+              Layer.succeed(ServerSettingsService, serverSettings),
+              providerRegistryLayer,
+            ),
+          ).pipe(Scope.provide(scope));
 
-            yield* Effect.gen(function* () {
-              const registry = yield* ProviderRegistry;
-              const providers = yield* registry.getProviders;
-              const cursorProvider = providers.find(
-                (provider) => provider.instanceId === ProviderInstanceId.make("cursor"),
-              );
+          yield* Effect.gen(function* () {
+            const registry = yield* ProviderRegistry;
+            const providers = yield* registry.getProviders;
+            const cursorProvider = providers.find(
+              (provider) => provider.instanceId === ProviderInstanceId.make("cursor"),
+            );
 
-              assert.deepStrictEqual(providers.map((provider) => provider.instanceId).toSorted(), [
-                "claudeAgent",
-                "codex",
-                "cursor",
-                "opencode",
-                "uno",
-              ]);
-              assert.strictEqual(cursorProvider?.enabled, false);
-              assert.strictEqual(cursorProvider?.status, "disabled");
-              assert.strictEqual(
-                cursorProvider?.message,
-                "Cursor is disabled in Uno Work settings.",
-              );
-              assert.strictEqual(cursorSpawned, false);
-            }).pipe(Effect.provide(runtimeServices));
-          }),
+            assert.deepStrictEqual(providers.map((provider) => provider.instanceId).toSorted(), [
+              "claudeAgent",
+              "codex",
+              "cursor",
+              "opencode",
+              "uno",
+            ]);
+            assert.strictEqual(cursorProvider?.enabled, false);
+            assert.strictEqual(cursorProvider?.status, "disabled");
+            assert.strictEqual(cursorProvider?.message, "Cursor is disabled in Uno Work settings.");
+            assert.strictEqual(cursorSpawned, false);
+          }).pipe(Effect.provide(runtimeServices));
+        }),
       );
 
       it.effect("skips codex probes entirely when the provider is disabled", () =>

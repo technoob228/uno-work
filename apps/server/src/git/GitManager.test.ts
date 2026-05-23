@@ -1082,11 +1082,6 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           "git@github.com:pingdotgg/codething-mvp.git",
         ]);
         yield* runGit(repoDir, ["config", "remote.origin.pushurl", originDir]);
-        yield* runGit(repoDir, [
-          "config",
-          "remote.my-org/upstream.url",
-          "git@github.com:pingdotgg/codething-mvp.git",
-        ]);
         yield* runGit(repoDir, ["config", "remote.my-org/upstream.pushurl", upstreamDir]);
         yield* runGit(repoDir, ["checkout", "main"]);
         yield* runGit(repoDir, ["branch", "-D", "effect-atom"]);
@@ -1929,11 +1924,6 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           "git@github.com:pingdotgg/codething-mvp.git",
         ]);
         yield* runGit(repoDir, ["config", "remote.origin.pushurl", originDir]);
-        yield* runGit(repoDir, [
-          "config",
-          "remote.my-org/upstream.url",
-          "git@github.com:pingdotgg/codething-mvp.git",
-        ]);
         yield* runGit(repoDir, ["config", "remote.my-org/upstream.pushurl", upstreamDir]);
         yield* runGit(repoDir, ["checkout", "main"]);
         yield* runGit(repoDir, ["branch", "-D", "effect-atom"]);
