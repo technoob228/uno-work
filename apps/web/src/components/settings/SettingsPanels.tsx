@@ -910,6 +910,26 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+
+        <SettingsRow
+          title="Web search"
+          description={
+            unoApiKey.length > 0
+              ? "Enabled — Uno harness exposes a `web_search` tool (Brave-powered). Each query is billed against your Uno LLM balance."
+              : "Add an API key above to let the Uno harness search the web through Uno's billed proxy."
+          }
+          control={
+            <span
+              className={
+                unoApiKey.length > 0
+                  ? "rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400"
+                  : "rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+              }
+            >
+              {unoApiKey.length > 0 ? "Active" : "Inactive"}
+            </span>
+          }
+        />
       </SettingsSection>
 
       <SettingsSection title="General">

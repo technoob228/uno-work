@@ -5,9 +5,13 @@ interface Props {
 }
 
 const {
-  title = "Uno Work",
+  title = "Uno Work - AI that works with your machine",
   description = "Uno Work — AI that works with your machine. Local-first, with a built-in preview pane and optional remote power.",
 } = Astro.props;
+
+const siteUrl = "https://uno4.work";
+const canonicalUrl = new URL(Astro.url.pathname, siteUrl).toString();
+const socialImageUrl = new URL("/screenshot.jpeg", siteUrl).toString();
 ---
 
 <html lang="en">
@@ -15,12 +19,26 @@ const {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content={description} />
+    <meta name="theme-color" content="#5B5BE8" />
+    <link rel="canonical" href={canonicalUrl} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Uno Work" />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={socialImageUrl} />
+    <meta property="og:image:alt" content="Uno Work app interface with projects, chat, and file preview" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={socialImageUrl} />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32" />
     <link rel="icon" type="image/png" href="/favicon-16x16.png" sizes="16x16" />

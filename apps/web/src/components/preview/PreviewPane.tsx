@@ -12,11 +12,13 @@ import {
   GlobeIcon,
   ImageIcon,
   Loader2Icon,
+  PencilIcon,
   PlusIcon,
   TableIcon,
   XIcon,
 } from "lucide-react";
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -25,9 +27,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import TurndownService from "turndown";
 import * as XLSX from "xlsx";
 
 import { cn } from "../../lib/utils";
@@ -39,7 +43,13 @@ import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
-import { type PreviewFile, type PreviewFileKind, usePreviewPane } from "./PreviewPaneContext";
+import {
+  detectFileKind,
+  type PreviewFile,
+  type PreviewFileKind,
+  usePreviewPane,
+} from "./PreviewPaneContext";
+import { useSidebar } from "../ui/sidebar";
 import { getScrollPosition, setScrollPosition } from "./previewScrollMemory";
 
 const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
@@ -69,6 +79,31 @@ const KIND_LABEL: Record<PreviewFileKind, string> = {
   text: "Text",
   unknown: "File",
 };
+
+const KIND_EDITABLE: ReadonlySet<PreviewFileKind> = new Set<PreviewFileKind>([
+  "md",
+  "html",
+  "text",
+]);
+
+function computeRelativePath(absolutePath: string, projectCwd: string): string | null {
+  const normalizedCwd = projectCwd.replace(/[\\/]+$/, "");
+  if (!absolutePath.startsWith(normalizedCwd)) return null;
+  return absolutePath.slice(normalizedCwd.length).replace(/^[\\/]+/, "");
+}
+
+function resolveWriteTarget(file: PreviewFile): { cwd: string; relativePath: string } | null {
+  if (!file.path) return null;
+  if (file.projectCwd) {
+    const rel = computeRelativePath(file.path, file.projectCwd);
+    if (rel !== null) return { cwd: file.projectCwd, relativePath: rel };
+  }
+  const match = file.path.match(/^(.*)[\\/]([^\\/]+)$/);
+  if (!match) return null;
+  const [, parentDir, basename] = match;
+  if (!parentDir || !basename) return null;
+  return { cwd: parentDir, relativePath: basename };
+}
 
 const PREVIEW_WIDTH_STORAGE_KEY = "preview_pane_width";
 const DEFAULT_PREVIEW_WIDTH = 24 * 16;
@@ -137,12 +172,138 @@ function MemoizedScrollArea({
   );
 }
 
-function MarkdownBody({ content }: { content: string }) {
+function resolveRelativeFilePath(baseAbsolutePath: string, href: string): string | null {
+  const parentMatch = baseAbsolutePath.match(/^(.*)[\\/][^\\/]+$/);
+  if (!parentMatch) return null;
+  const baseDir = parentMatch[1] ?? "";
+  const cleanHref = href.split(/[?#]/)[0] ?? "";
+  if (!cleanHref) return null;
+  const segments = `${baseDir}/${cleanHref}`.split(/[\\/]+/);
+  const resolved: string[] = [];
+  for (const seg of segments) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") {
+      resolved.pop();
+      continue;
+    }
+    resolved.push(seg);
+  }
+  if (resolved.length === 0) return null;
+  return (baseAbsolutePath.startsWith("/") ? "/" : "") + resolved.join("/");
+}
+
+function MarkdownBody({ file, content }: { file: PreviewFile; content: string }) {
+  const { openFile, currentChatEnvironmentId } = usePreviewPane();
+  const fileEnv = file.environmentId ?? currentChatEnvironmentId ?? null;
+
+  const components = useMemo<Components>(
+    () => ({
+      a({ href, children, ...rest }) {
+        const isExternal = !!href && /^[a-z][a-z0-9+.-]*:/i.test(href);
+        const isAnchor = !!href && href.startsWith("#");
+        if (!href || isExternal || isAnchor) {
+          return (
+            <a href={href} {...rest}>
+              {children}
+            </a>
+          );
+        }
+        const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          if (!file.path) return;
+          const absolute = resolveRelativeFilePath(file.path, href);
+          if (!absolute) return;
+          event.preventDefault();
+          const name = absolute.split(/[\\/]/).pop() ?? absolute;
+          openFile({
+            id: absolute,
+            name,
+            kind: detectFileKind(name),
+            content: "",
+            path: absolute,
+            ...(fileEnv ? { environmentId: fileEnv } : {}),
+            ...(file.projectCwd ? { projectCwd: file.projectCwd } : {}),
+          });
+        };
+        return (
+          <a href={href} onClick={handleClick} {...rest}>
+            {children}
+          </a>
+        );
+      },
+    }),
+    [file.path, file.projectCwd, fileEnv, openFile],
+  );
+
   return (
     <div className="preview-markdown px-5 py-4">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        {content}
+      </ReactMarkdown>
     </div>
   );
+}
+
+const HTML_EDIT_INJECT_ATTR = "data-preview-edit-inject";
+
+const HTML_PREVIEW_STYLE_TAG = `<style ${HTML_EDIT_INJECT_ATTR}>html,body{overflow:auto !important;margin:0;}body{min-width:max-content;}</style>`;
+
+function wrapHtmlForPreview(content: string): string {
+  if (/<head[^>]*>/i.test(content)) {
+    return content.replace(/<head[^>]*>/i, (match) => `${match}${HTML_PREVIEW_STYLE_TAG}`);
+  }
+  if (/<html[^>]*>/i.test(content)) {
+    return content.replace(
+      /<html[^>]*>/i,
+      (match) => `${match}<head>${HTML_PREVIEW_STYLE_TAG}</head>`,
+    );
+  }
+  return HTML_PREVIEW_STYLE_TAG + content;
+}
+
+const HTML_EDIT_MARKED_ATTR = "data-preview-edit-marked";
+
+function setupEditableHtmlFrame(iframe: HTMLIFrameElement): void {
+  const doc = iframe.contentDocument;
+  if (!doc || !doc.body) return;
+  if (doc.body.hasAttribute(HTML_EDIT_MARKED_ATTR)) return;
+  doc.body.setAttribute(HTML_EDIT_MARKED_ATTR, "");
+  const style = doc.createElement("style");
+  style.setAttribute(HTML_EDIT_INJECT_ATTR, "");
+  style.textContent =
+    "[contenteditable]:focus{outline:1px dashed rgba(99,102,241,.6);outline-offset:-1px;}";
+  doc.head.appendChild(style);
+
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  const seen = new Set<Element>();
+  let node: Node | null = walker.nextNode();
+  while (node) {
+    if ((node.textContent ?? "").trim()) {
+      const parent = node.parentElement;
+      if (
+        parent &&
+        !seen.has(parent) &&
+        parent.tagName !== "SCRIPT" &&
+        parent.tagName !== "STYLE" &&
+        !parent.hasAttribute("contenteditable")
+      ) {
+        seen.add(parent);
+        parent.setAttribute("contenteditable", "plaintext-only");
+        parent.setAttribute(HTML_EDIT_MARKED_ATTR, "");
+      }
+    }
+    node = walker.nextNode();
+  }
+}
+
+function extractEditedHtml(doc: Document): string {
+  doc.querySelectorAll(`[${HTML_EDIT_MARKED_ATTR}]`).forEach((el) => {
+    el.removeAttribute("contenteditable");
+    el.removeAttribute(HTML_EDIT_MARKED_ATTR);
+  });
+  doc.querySelectorAll(`[${HTML_EDIT_INJECT_ATTR}]`).forEach((node) => node.remove());
+  const doctype = doc.doctype ? `<!DOCTYPE ${doc.doctype.name}>\n` : "";
+  return doctype + doc.documentElement.outerHTML;
 }
 
 function HtmlBody({ file }: { file: PreviewFile }) {
@@ -151,7 +312,12 @@ function HtmlBody({ file }: { file: PreviewFile }) {
     return <iframe title={file.name} src={src} sandbox="" className="h-full w-full border-0" />;
   }
   return (
-    <iframe title={file.name} srcDoc={file.content} sandbox="" className="h-full w-full border-0" />
+    <iframe
+      title={file.name}
+      srcDoc={wrapHtmlForPreview(file.content)}
+      sandbox=""
+      className="h-full w-full border-0"
+    />
   );
 }
 
@@ -655,7 +821,7 @@ function renderLoadedBody(file: PreviewFile, data: LoadedFileData) {
     if (file.kind === "md") {
       return (
         <MemoizedScrollArea fileId={file.id} className="h-full">
-          <MarkdownBody content={data.content} />
+          <MarkdownBody file={file} content={data.content} />
         </MemoizedScrollArea>
       );
     }
@@ -663,7 +829,7 @@ function renderLoadedBody(file: PreviewFile, data: LoadedFileData) {
       return (
         <iframe
           title={file.name}
-          srcDoc={data.content}
+          srcDoc={wrapHtmlForPreview(data.content)}
           sandbox=""
           className="h-full w-full border-0"
         />
@@ -786,11 +952,207 @@ function LoadedBody({ file }: { file: PreviewFile }) {
   return renderLoadedBody(file, { ...data, ...(blobUrl ? { blobUrl } : {}) });
 }
 
+const FrozenMarkdownPreview = memo(function FrozenMarkdownPreview({
+  source,
+}: {
+  source: string;
+}) {
+  return <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>;
+});
+
+function canEditFile(file: PreviewFile, fallbackEnvId: EnvironmentId | null): boolean {
+  if (!KIND_EDITABLE.has(file.kind)) return false;
+  if (!file.path) return false;
+  const env = file.environmentId ?? fallbackEnvId ?? null;
+  if (!env) return false;
+  return resolveWriteTarget(file) !== null;
+}
+
+function EditableBody({
+  file,
+  effectiveEnvironmentId,
+}: {
+  file: PreviewFile;
+  effectiveEnvironmentId: EnvironmentId;
+}) {
+  const { applyEditedContent, cancelEditing } = usePreviewPane();
+  const queryClient = useQueryClient();
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const path = file.path;
+  const hasInlineContent = Boolean(file.content);
+
+  const { data: loaded, isPending, isError, error } = useQuery({
+    queryKey: ["previewReadFile", effectiveEnvironmentId, path],
+    queryFn: async () => {
+      if (!path) return null;
+      const api = readEnvironmentApi(effectiveEnvironmentId);
+      if (!api) throw new Error("Environment is unavailable");
+      return api.filesystem.readFile({ path });
+    },
+    enabled: Boolean(path && !hasInlineContent),
+    staleTime: 30_000,
+  });
+
+  const initialContent = useMemo(() => {
+    if (hasInlineContent) return file.content;
+    if (loaded && loaded.encoding === "utf8") return loaded.content;
+    return null;
+  }, [file.content, hasInlineContent, loaded]);
+
+  const handleCancel = useCallback(() => {
+    cancelEditing();
+  }, [cancelEditing]);
+
+  const handleSave = useCallback(async () => {
+    const target = resolveWriteTarget(file);
+    if (!path || !target) return;
+    let newContent = "";
+    if (file.kind === "md" && editorRef.current) {
+      const html = editorRef.current.innerHTML;
+      const td = new TurndownService({
+        headingStyle: "atx",
+        codeBlockStyle: "fenced",
+        bulletListMarker: "-",
+      });
+      newContent = td.turndown(html);
+    } else if (file.kind === "html") {
+      const doc = iframeRef.current?.contentDocument;
+      if (!doc) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to save file",
+            description: "Editor iframe is not ready",
+          }),
+        );
+        return;
+      }
+      newContent = extractEditedHtml(doc);
+    } else if (file.kind === "text" && textareaRef.current) {
+      newContent = textareaRef.current.value;
+    } else {
+      return;
+    }
+    setSaving(true);
+    try {
+      const api = readEnvironmentApi(effectiveEnvironmentId);
+      if (!api) throw new Error("Environment is unavailable");
+      await api.projects.writeFile({
+        cwd: target.cwd,
+        relativePath: target.relativePath,
+        contents: newContent,
+      });
+      queryClient.setQueryData<LoadedFileData | null>(
+        ["previewReadFile", effectiveEnvironmentId, path],
+        (prev) => (prev ? { ...prev, content: newContent, encoding: "utf8" } : prev),
+      );
+      applyEditedContent(file.id, newContent);
+      toastManager.add({ type: "success", title: "Saved", description: file.name });
+    } catch (err) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Failed to save file",
+          description: err instanceof Error ? err.message : "Error",
+        }),
+      );
+    } finally {
+      setSaving(false);
+    }
+  }, [applyEditedContent, effectiveEnvironmentId, file, path, queryClient]);
+
+  if (!hasInlineContent && isPending) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        <Loader2Icon className="mr-2 size-4 animate-spin" />
+        Loading file...
+      </div>
+    );
+  }
+  if (isError) {
+    return (
+      <MetadataPlaceholder
+        file={file}
+        label={error instanceof Error ? error.message : "Failed to read file"}
+      />
+    );
+  }
+  if (initialContent === null) {
+    return <MetadataPlaceholder file={file} label="No content available to edit" />;
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center justify-end gap-2 border-b border-border bg-card px-3 py-2">
+        <span className="mr-auto text-xs text-muted-foreground">
+          {file.kind === "md"
+            ? "Edit mode — click text to change"
+            : file.kind === "html"
+              ? "Edit mode — click text inside HTML to change"
+              : "Edit mode — raw source"}
+        </span>
+        <Button size="sm" variant="outline" onClick={handleCancel} disabled={saving}>
+          Cancel
+        </Button>
+        <Button size="sm" onClick={handleSave} disabled={saving}>
+          {saving ? <Loader2Icon className="mr-1.5 size-3.5 animate-spin" /> : null}
+          Save
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto">
+        {file.kind === "md" ? (
+          <div
+            ref={editorRef}
+            contentEditable
+            suppressContentEditableWarning
+            spellCheck={false}
+            className="preview-markdown min-h-full px-5 py-4 outline-none focus:outline-none focus:ring-1 focus:ring-primary/40"
+          >
+            <FrozenMarkdownPreview source={initialContent} />
+          </div>
+        ) : null}
+        {file.kind === "html" ? (
+          <iframe
+            ref={iframeRef}
+            title={file.name}
+            srcDoc={wrapHtmlForPreview(initialContent)}
+            sandbox="allow-same-origin"
+            onLoad={(e) => setupEditableHtmlFrame(e.currentTarget)}
+            className="h-full w-full border-0"
+          />
+        ) : null}
+        {file.kind === "text" ? (
+          <textarea
+            ref={textareaRef}
+            defaultValue={initialContent}
+            spellCheck={false}
+            className="h-full w-full resize-none border-0 bg-transparent p-3 font-mono text-xs outline-none"
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function Body({ file }: { file: PreviewFile }) {
+  const { currentChatEnvironmentId, editingFileId } = usePreviewPane();
+  const effectiveEnvironmentId = file.environmentId ?? currentChatEnvironmentId ?? undefined;
   const hasInlineContent = Boolean(file.content) || Boolean(file.blobUrl);
 
-  if (!hasInlineContent && file.path && file.environmentId) {
-    return <LoadedBody file={file} />;
+  if (editingFileId === file.id && effectiveEnvironmentId && KIND_EDITABLE.has(file.kind)) {
+    return <EditableBody file={file} effectiveEnvironmentId={effectiveEnvironmentId} />;
+  }
+
+  if (!hasInlineContent && file.path && effectiveEnvironmentId) {
+    const fileWithEnv =
+      file.environmentId === effectiveEnvironmentId
+        ? file
+        : { ...file, environmentId: effectiveEnvironmentId };
+    return <LoadedBody file={fileWithEnv} />;
   }
 
   if (!hasInlineContent) {
@@ -801,7 +1163,7 @@ function Body({ file }: { file: PreviewFile }) {
     case "md":
       return (
         <MemoizedScrollArea fileId={file.id} className="h-full">
-          <MarkdownBody content={file.content} />
+          <MarkdownBody file={file} content={file.content} />
         </MemoizedScrollArea>
       );
     case "html":
@@ -858,6 +1220,7 @@ function PathBar({
   file: PreviewFile;
   onOpenAt: (path: string | null) => void;
 }) {
+  const { currentChatEnvironmentId, editingFileId, startEditing } = usePreviewPane();
   const rawPath = file.path ?? file.name;
   const segments = useMemo(() => buildPathSegments(rawPath), [rawPath]);
   const fileSegment = segments.length > 0 ? segments[segments.length - 1]! : null;
@@ -866,6 +1229,7 @@ function PathBar({
   const folderTarget = homeSegment?.path ?? file.projectCwd ?? null;
   const [copied, setCopied] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const canEdit = canEditFile(file, currentChatEnvironmentId) && editingFileId !== file.id;
 
   useEffect(() => {
     if (!copied) return;
@@ -921,6 +1285,23 @@ function PathBar({
         </span>
       </div>
       <TooltipProvider delay={0} closeDelay={0}>
+        {canEdit ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={() => startEditing(file.id)}
+                  aria-label="Edit file"
+                  className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <PencilIcon className="size-3.5" />
+                </button>
+              }
+            />
+            <TooltipPopup side="bottom">Edit file</TooltipPopup>
+          </Tooltip>
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -973,19 +1354,25 @@ export function PreviewPane() {
     currentChatProjectCwd,
     currentChatEnvironmentId,
   } = usePreviewPane();
+  const { open: sidebarOpen, openMobile, isMobile } = useSidebar();
+  const sidebarVisible = isMobile ? openMobile : sidebarOpen;
+  const maxWidthRatio = sidebarVisible ? 0.6 : 0.8;
   const [width, setWidth] = useState<number>(() => readStoredWidth());
   const [maxWidth, setMaxWidth] = useState<number>(() =>
-    typeof window !== "undefined" ? Math.max(MIN_PREVIEW_WIDTH, window.innerWidth * 0.6) : 800,
+    typeof window !== "undefined"
+      ? Math.max(MIN_PREVIEW_WIDTH, window.innerWidth * maxWidthRatio)
+      : 800,
   );
   const dragStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
-    const onResize = () => {
-      setMaxWidth(Math.max(MIN_PREVIEW_WIDTH, window.innerWidth * 0.6));
+    const updateMaxWidth = () => {
+      setMaxWidth(Math.max(MIN_PREVIEW_WIDTH, window.innerWidth * maxWidthRatio));
     };
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
+    updateMaxWidth();
+    window.addEventListener("resize", updateMaxWidth);
+    return () => window.removeEventListener("resize", updateMaxWidth);
+  }, [maxWidthRatio]);
 
   const persistWidth = useCallback((next: number) => {
     if (typeof window === "undefined") return;
@@ -1044,7 +1431,7 @@ export function PreviewPane() {
     if (!active) return;
     const fallback = active.path ? active.path.replace(/[\\/][^\\/]*$/, "") : null;
     openBrowser({
-      environmentId: active.environmentId ?? null,
+      environmentId: active.environmentId ?? currentChatEnvironmentId ?? null,
       startPath: path ?? fallback ?? null,
     });
   };

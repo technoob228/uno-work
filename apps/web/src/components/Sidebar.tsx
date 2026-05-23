@@ -2387,14 +2387,17 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron: boolean;
 }) {
   const wordmark = (
-    <div className="flex items-center gap-2">
-      <SidebarTrigger className="shrink-0 md:hidden" />
+    <div className="flex min-w-0 flex-1 items-center gap-2">
+      <Tooltip>
+        <TooltipTrigger render={<SidebarTrigger className="size-7 shrink-0" />} />
+        <TooltipPopup side="bottom">Hide sidebar</TooltipPopup>
+      </Tooltip>
       <Tooltip>
         <TooltipTrigger
           render={
             <Link
               aria-label="Go to threads"
-              className="ml-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
+              className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
               to="/"
             >
               <span
@@ -2403,10 +2406,10 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
               >
                 U
               </span>
-              <span className="truncate text-sm font-semibold tracking-tight text-foreground">
+              <span className="min-w-0 truncate text-sm font-semibold tracking-tight text-foreground">
                 {APP_BASE_NAME}
               </span>
-              <span className="rounded-full bg-primary/12 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-primary">
+              <span className="shrink-0 rounded-full bg-primary/12 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-primary">
                 {APP_STAGE_LABEL}
               </span>
             </Link>
@@ -2420,7 +2423,7 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
   );
 
   return isElectron ? (
-    <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px] wco:h-[env(titlebar-area-height)] wco:pl-[calc(env(titlebar-area-x)+1em)]">
+    <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 overflow-hidden px-4 py-0 pl-[78px] fullscreen:pl-4 wco:h-[env(titlebar-area-height)] wco:pl-[calc(env(titlebar-area-x)+1em)]">
       {wordmark}
     </SidebarHeader>
   ) : (

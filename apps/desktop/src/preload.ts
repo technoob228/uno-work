@@ -7,6 +7,8 @@ const SET_THEME_CHANNEL = "desktop:set-theme";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
 const MENU_ACTION_CHANNEL = "desktop:menu-action";
+const WINDOW_FULLSCREEN_STATE_CHANNEL = "desktop:window-fullscreen-state";
+const WINDOW_FULLSCREEN_GET_STATE_CHANNEL = "desktop:window-fullscreen-get-state";
 const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 const UPDATE_SET_CHANNEL_CHANNEL = "desktop:update-set-channel";
@@ -129,6 +131,20 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.on(MENU_ACTION_CHANNEL, wrappedListener);
     return () => {
       ipcRenderer.removeListener(MENU_ACTION_CHANNEL, wrappedListener);
+    };
+  },
+  getWindowFullscreenState: () => {
+    const result = ipcRenderer.sendSync(WINDOW_FULLSCREEN_GET_STATE_CHANNEL);
+    return result === true;
+  },
+  onWindowFullscreenChange: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, isFullscreen: unknown) => {
+      listener(isFullscreen === true);
+    };
+
+    ipcRenderer.on(WINDOW_FULLSCREEN_STATE_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(WINDOW_FULLSCREEN_STATE_CHANNEL, wrappedListener);
     };
   },
   getUpdateState: () => ipcRenderer.invoke(UPDATE_GET_STATE_CHANNEL),

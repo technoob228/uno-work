@@ -38,6 +38,7 @@ export interface ProjectPreviewState {
   activeFileId: string | null;
   browserOpen: boolean;
   browserContext: BrowserContext;
+  editingFileId: string | null;
 }
 
 interface PreviewPaneState {
@@ -46,6 +47,7 @@ interface PreviewPaneState {
   activeFileId: string | null;
   browserOpen: boolean;
   browserContext: BrowserContext;
+  editingFileId: string | null;
   currentChatProjectCwd: string | null;
   currentChatEnvironmentId: EnvironmentId | null;
   setOpen: (open: boolean) => void;
@@ -55,6 +57,9 @@ interface PreviewPaneState {
   setActiveFile: (id: string) => void;
   openBrowser: (context: BrowserContext) => void;
   closeBrowser: () => void;
+  startEditing: (id: string) => void;
+  cancelEditing: () => void;
+  applyEditedContent: (id: string, content: string) => void;
   setCurrentChatContext: (context: {
     projectKey: string | null;
     projectCwd: string | null;
@@ -72,6 +77,7 @@ export const DEFAULT_PROJECT_PREVIEW_STATE: ProjectPreviewState = {
   activeFileId: null,
   browserOpen: false,
   browserContext: EMPTY_BROWSER_CONTEXT,
+  editingFileId: null,
 };
 
 export function getProjectPreviewState(
@@ -151,13 +157,43 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
         const nextFiles = current.files.filter((f) => f.id !== id);
         const nextActiveId =
           current.activeFileId === id ? (nextFiles[0]?.id ?? null) : current.activeFileId;
+        const nextEditingId = current.editingFileId === id ? null : current.editingFileId;
         return {
           ...current,
           files: nextFiles,
           activeFileId: nextActiveId,
+          editingFileId: nextEditingId,
         };
       });
       forgetScrollPosition(id);
+    },
+    [updateCurrentState],
+  );
+
+  const startEditing = useCallback(
+    (id: string) => {
+      updateCurrentState((current) =>
+        current.editingFileId === id ? current : { ...current, editingFileId: id },
+      );
+    },
+    [updateCurrentState],
+  );
+
+  const cancelEditing = useCallback(() => {
+    updateCurrentState((current) =>
+      current.editingFileId === null ? current : { ...current, editingFileId: null },
+    );
+  }, [updateCurrentState]);
+
+  const applyEditedContent = useCallback(
+    (id: string, content: string) => {
+      updateCurrentState((current) => {
+        const idx = current.files.findIndex((f) => f.id === id);
+        if (idx === -1) return current;
+        const updated = { ...current.files[idx]!, content };
+        const nextFiles = [...current.files.slice(0, idx), updated, ...current.files.slice(idx + 1)];
+        return { ...current, files: nextFiles, editingFileId: null };
+      });
     },
     [updateCurrentState],
   );
@@ -210,6 +246,7 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       activeFileId: currentState.activeFileId,
       browserOpen: currentState.browserOpen,
       browserContext: currentState.browserContext,
+      editingFileId: currentState.editingFileId,
       currentChatProjectCwd,
       currentChatEnvironmentId,
       setOpen,
@@ -219,6 +256,9 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       setActiveFile,
       openBrowser,
       closeBrowser,
+      startEditing,
+      cancelEditing,
+      applyEditedContent,
       setCurrentChatContext,
     }),
     [
@@ -232,6 +272,9 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       setActiveFile,
       openBrowser,
       closeBrowser,
+      startEditing,
+      cancelEditing,
+      applyEditedContent,
       setCurrentChatContext,
     ],
   );

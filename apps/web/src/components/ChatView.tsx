@@ -185,6 +185,7 @@ import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { Button } from "./ui/button";
+import { useSidebar } from "./ui/sidebar";
 import {
   buildVersionMismatchDismissalKey,
   dismissVersionMismatch,
@@ -612,6 +613,8 @@ export default function ChatView(props: ChatViewProps) {
   } = props;
   const draftId = routeKind === "draft" ? props.draftId : null;
   const devMode = useDevMode();
+  const { open: sidebarOpen, openMobile, isMobile } = useSidebar();
+  const sidebarHidden = isElectron && !(isMobile ? openMobile : sidebarOpen);
   const { openFile: openPreviewFile, setCurrentChatContext } = usePreviewPane();
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
@@ -1129,11 +1132,6 @@ export default function ChatView(props: ChatViewProps) {
     activeThread?.modelSelection.instanceId ??
     activeProject?.defaultModelSelection?.instanceId ??
     null;
-  const lockedProvider = deriveLockedProvider({
-    thread: activeThread,
-    selectedProvider: selectedProviderByThreadId,
-    threadProvider,
-  });
   const primaryServerConfig = useServerConfig();
   const activeEnvRuntimeState = useSavedEnvironmentRuntimeStore((s) =>
     activeThread?.environmentId ? s.byId[activeThread.environmentId] : null,
@@ -1145,6 +1143,12 @@ export default function ChatView(props: ChatViewProps) {
     primaryEnvironmentId && activeThread?.environmentId === primaryEnvironmentId
       ? primaryServerConfig
       : (activeEnvRuntimeState?.serverConfig ?? primaryServerConfig);
+  const lockedProvider = deriveLockedProvider({
+    thread: activeThread,
+    selectedProvider: selectedProviderByThreadId,
+    threadProvider,
+    providerStatuses: serverConfig?.providers,
+  });
   const versionMismatch = resolveServerConfigVersionMismatch(serverConfig);
   const versionMismatchDismissKey =
     versionMismatch && activeThread
@@ -3553,7 +3557,10 @@ export default function ChatView(props: ChatViewProps) {
           "border-b border-border",
           isElectron
             ? cn(
-                "drag-region flex h-[52px] items-center px-3 sm:px-5 wco:h-[env(titlebar-area-height)]",
+                "drag-region flex h-[52px] items-center pr-3 sm:pr-5 wco:h-[env(titlebar-area-height)]",
+                sidebarHidden
+                  ? "pl-[78px] fullscreen:pl-3 sm:fullscreen:pl-5"
+                  : "pl-3 sm:pl-5",
                 reserveTitleBarControlInset &&
                   "wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]",
               )

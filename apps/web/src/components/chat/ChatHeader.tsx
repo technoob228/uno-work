@@ -14,7 +14,7 @@ import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import { Toggle } from "../ui/toggle";
-import { SidebarTrigger } from "../ui/sidebar";
+import { SidebarTrigger, useSidebar } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { usePreviewPane } from "../preview/PreviewPaneContext";
@@ -85,6 +85,8 @@ export const ChatHeader = memo(function ChatHeader({
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const devMode = useDevMode();
+  const { isMobile, open, openMobile } = useSidebar();
+  const sidebarVisible = isMobile ? openMobile : open;
   const {
     open: previewOpen,
     files: previewFiles,
@@ -100,7 +102,14 @@ export const ChatHeader = memo(function ChatHeader({
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
-        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+        {!sidebarVisible && (
+          <TooltipProvider delay={0} closeDelay={0}>
+            <Tooltip>
+              <TooltipTrigger render={<SidebarTrigger className="size-7 shrink-0" />} />
+              <TooltipPopup side="bottom">Show sidebar</TooltipPopup>
+            </Tooltip>
+          </TooltipProvider>
+        )}
         <h2
           className="min-w-0 shrink truncate text-sm font-medium text-foreground"
           title={activeThreadTitle}
@@ -235,28 +244,24 @@ export const ChatHeader = memo(function ChatHeader({
           />
           <TooltipPopup side="bottom">Открыть файловый браузер</TooltipPopup>
         </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Toggle
-                className="shrink-0"
-                pressed={previewOpen && previewFiles.length > 0}
-                onPressedChange={togglePreview}
-                aria-label="Toggle preview pane"
-                variant="outline"
-                size="xs"
-                disabled={previewFiles.length === 0}
-              >
-                <PanelRightIcon className="size-3" />
-              </Toggle>
-            }
-          />
-          <TooltipPopup side="bottom">
-            {previewFiles.length === 0
-              ? "Откройте файл (md/html/pdf/таблицу) — превью появится здесь"
-              : "Переключить панель превью"}
-          </TooltipPopup>
-        </Tooltip>
+        {previewFiles.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={togglePreview}
+                  aria-label="Toggle preview pane"
+                  aria-pressed={previewOpen}
+                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <PanelRightIcon className="size-3" />
+                </button>
+              }
+            />
+            <TooltipPopup side="bottom">Переключить панель превью</TooltipPopup>
+          </Tooltip>
+        )}
       </div>
     </div>
   );

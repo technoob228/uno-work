@@ -169,6 +169,7 @@ interface ClaudeSessionContext {
   }>;
   readonly inFlightTools: Map<number, ToolInFlight>;
   turnState: ClaudeTurnState | undefined;
+  lastCompletedTurnId: TurnId | undefined;
   lastKnownContextWindow: number | undefined;
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
   lastAssistantUuid: string | undefined;
@@ -1565,6 +1566,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     });
 
     const updatedAt = yield* nowIso;
+    context.lastCompletedTurnId = turnState.turnId;
     context.turnState = undefined;
     context.session = {
       ...context.session,
@@ -2055,7 +2057,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       provider: PROVIDER,
       createdAt: stamp.createdAt,
       threadId: context.session.threadId,
-      ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+      ...((() => {
+        const id = context.turnState?.turnId ?? context.lastCompletedTurnId;
+        return id ? { turnId: asCanonicalTurnId(id) } : {};
+      })()),
       providerRefs: nativeProviderRefs(context),
       raw: {
         source: "claude.sdk.message" as const,
@@ -2969,6 +2974,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         turns: [],
         inFlightTools,
         turnState: undefined,
+        lastCompletedTurnId: undefined,
         lastKnownContextWindow: undefined,
         lastKnownTokenUsage: undefined,
         lastAssistantUuid: resumeState?.resumeSessionAt,

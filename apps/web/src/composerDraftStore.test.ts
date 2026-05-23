@@ -1162,6 +1162,33 @@ describe("composerDraftStore modelSelection", () => {
     );
   });
 
+  it("updates model options for the uno provider", () => {
+    const UNO_INSTANCE = ProviderInstanceId.make("uno");
+    const store = useComposerDraftStore.getState();
+
+    store.setModelOptions(threadRef, providerModelOptions({ uno: { reasoningEffort: "high" } }));
+
+    const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(draft?.modelSelectionByProvider[UNO_INSTANCE]?.options).toEqual(
+      createModelSelection(
+        UNO_INSTANCE,
+        "uno/claude-sonnet-4-6",
+        toSelections({ reasoningEffort: "high" }),
+      ).options,
+    );
+
+    store.setModelOptions(threadRef, providerModelOptions({ uno: { reasoningEffort: "low" } }));
+
+    const updated = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(updated?.modelSelectionByProvider[UNO_INSTANCE]?.options).toEqual(
+      createModelSelection(
+        UNO_INSTANCE,
+        "uno/claude-sonnet-4-6",
+        toSelections({ reasoningEffort: "low" }),
+      ).options,
+    );
+  });
+
   it("preserves other provider options when switching the active model selection", () => {
     const store = useComposerDraftStore.getState();
 

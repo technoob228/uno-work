@@ -156,6 +156,24 @@ open-source project.
 - Add auth/API key handling and diagnostics.
 - Keep pricing out of the app unless it becomes product-relevant later.
 
+### Claude Billing Profiles And Fallback
+
+- ⏳ Add explicit Claude billing profiles for the Claude harness: subscription/interactive,
+  Agent SDK credits, Anthropic API, Bedrock, Vertex, and Uno Gateway where protocol-compatible.
+- ⏳ Support safe Claude runtime restart + resume when switching billing backend. Model switches can
+  stay in-session, but auth/backend changes must restart the Claude Agent SDK query with a new env.
+- ⏳ Preserve the same Uno Work thread during a Claude billing-profile switch: reuse cwd, runtime
+  mode, model selection, and Claude resume cursor when the selected profiles share compatible
+  Claude home/session state.
+- ⏳ Add a visible "Continue with ..." recovery action for cases such as subscription limits,
+  exhausted Agent SDK credits, missing API credits, or Bedrock/Vertex auth errors.
+- ⏳ Add a Claude subscription terminal mode for users who specifically want to consume normal
+  interactive Claude Code subscription limits. Treat it as an embedded terminal workflow, not as a
+  fully managed Agent SDK session, unless Anthropic provides an approved integration path.
+- ⏳ Document the product boundary: fully managed Uno Work sessions use Agent SDK/API-style billing;
+  ordinary Claude subscription limits are available through real interactive Claude Code or an
+  approved Anthropic integration.
+
 ## Cross-Cutting Work
 
 - Security model for local and remote execution.

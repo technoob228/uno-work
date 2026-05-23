@@ -23,6 +23,7 @@
  *
  * @module provider/Drivers/UnoDriver
  */
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import * as nodePath from "node:path";
 
@@ -43,6 +44,7 @@ import { makeOpenCodeAdapter } from "../Layers/OpenCodeAdapter.ts";
 import {
   checkOpenCodeProviderStatus,
   makePendingOpenCodeProvider,
+  type ProviderPresentation,
 } from "../Layers/OpenCodeProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
@@ -57,6 +59,13 @@ import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment
 
 const DRIVER_KIND = ProviderDriverKind.make("uno");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
+
+const UNO_PRESENTATION: ProviderPresentation = {
+  displayName: "Uno",
+  binaryCommand: "uno-code",
+  minimumVersion: "1.14.48",
+  showInteractionModeToggle: false,
+} as const;
 
 export type UnoDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -136,6 +145,18 @@ async function fetchUnoModelsCatalog(unoApiKey: string): Promise<UnoCatalog> {
   }
 }
 
+interface UnoSearchBridge {
+  readonly nodeBin: string;
+  readonly scriptPath: string;
+}
+
+function resolveUnoSearchBridge(): UnoSearchBridge | undefined {
+  const scriptPath = process.env.UNO_MCP_SEARCH_SCRIPT?.trim();
+  const nodeBin = process.env.UNO_MCP_NODE_BIN?.trim() || process.execPath;
+  if (!scriptPath || !existsSync(scriptPath)) return undefined;
+  return { nodeBin, scriptPath };
+}
+
 function buildUnoConfigContent(unoApiKey: string, models: UnoCatalog): string {
   // opencode's config schema only accepts `{ name }`-shaped model entries;
   // strip the local tier metadata before injecting via OPENCODE_CONFIG_CONTENT.
@@ -143,7 +164,7 @@ function buildUnoConfigContent(unoApiKey: string, models: UnoCatalog): string {
   for (const [id, model] of Object.entries(models)) {
     opencodeModels[id] = { name: model.name };
   }
-  return JSON.stringify({
+  const config: Record<string, unknown> = {
     $schema: "https://opencode.ai/config.json",
     provider: {
       [UNO_PROVIDER_ID]: {
@@ -156,7 +177,33 @@ function buildUnoConfigContent(unoApiKey: string, models: UnoCatalog): string {
         models: opencodeModels,
       },
     },
-  });
+  };
+
+  // Bundled Uno web-search MCP bridge — only enabled when the user is
+  // signed in (apiKey present) and the desktop shell pointed us at the
+  // bundled script via env. The bridge process inherits UNO_API_KEY and
+  // UNO_GATEWAY_BASE_URL so `/v1/search` calls are authenticated against
+  // the user's Uno LLM balance.
+  const searchBridge = resolveUnoSearchBridge();
+  if (unoApiKey.length > 0 && searchBridge) {
+    config.mcp = {
+      "uno-search": {
+        type: "local",
+        command: [searchBridge.nodeBin, searchBridge.scriptPath],
+        environment: {
+          UNO_API_KEY: unoApiKey,
+          UNO_GATEWAY_BASE_URL,
+          // Reuse Electron's binary as a Node interpreter for the bundled
+          // `.mjs` script. Without this flag Electron spawns a windowed
+          // GUI instance instead of the MCP server.
+          ELECTRON_RUN_AS_NODE: "1",
+        },
+        enabled: true,
+      },
+    };
+  }
+
+  return JSON.stringify(config);
 }
 
 const UNO_DEFAULT_DISPLAY_NAME = "Uno";
@@ -249,9 +296,25 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
+      const configuredBinary = config.binaryPath?.trim();
+      // `makeBinaryPathSetting` (settings.ts:94) substitutes an empty/missing
+      // `binaryPath` with the schema's fallback string — "opencode" for
+      // `OpenCodeSettings` and "uno-code" for `UnoProviderSettings`. For the
+      // Uno driver we never want either of those resolved via PATH: spawning
+      // `opencode` picks up the user's homebrew install (v1.14.x, too old for
+      // the Uno gateway), and `uno-code` is not a global command. Treat the
+      // fallback markers as "not configured" so we use the bundled binary.
+      const isSchemaFallback =
+        configuredBinary === "opencode" || configuredBinary === "uno-code";
+      const isStaleAbsolutePath =
+        configuredBinary && nodePath.isAbsolute(configuredBinary) && !existsSync(configuredBinary);
+      const effectiveBinary =
+        !configuredBinary || isSchemaFallback || isStaleAbsolutePath
+          ? UNO_BINARY_PATH
+          : configuredBinary;
       const effectiveConfig = {
         ...config,
-        binaryPath: config.binaryPath?.trim() || UNO_BINARY_PATH,
+        binaryPath: effectiveBinary,
         enabled,
       } satisfies OpenCodeSettings;
 
@@ -268,6 +331,7 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         effectiveConfig,
         serverConfig.cwd,
         processEnv,
+        UNO_PRESENTATION,
       ).pipe(
         Effect.map(filterUnoModels),
         Effect.map(sortByCatalog),
@@ -280,7 +344,9 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,
         initialSnapshot: (settings) =>
-          stampIdentity(sortByCatalog(filterUnoModels(makePendingOpenCodeProvider(settings)))),
+          stampIdentity(
+            sortByCatalog(filterUnoModels(makePendingOpenCodeProvider(settings, UNO_PRESENTATION))),
+          ),
         checkProvider,
         refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
       }).pipe(

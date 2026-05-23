@@ -24,11 +24,20 @@ import {
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
 
 const PROVIDER = ProviderDriverKind.make("opencode");
-const OPENCODE_PRESENTATION = {
+
+export interface ProviderPresentation {
+  readonly displayName: string;
+  readonly binaryCommand: string;
+  readonly minimumVersion: string;
+  readonly showInteractionModeToggle: boolean;
+}
+
+const OPENCODE_PRESENTATION: ProviderPresentation = {
   displayName: "OpenCode",
+  binaryCommand: "opencode",
+  minimumVersion: "1.14.19",
   showInteractionModeToggle: false,
 } as const;
-const MINIMUM_OPENCODE_VERSION = "1.14.19";
 
 class OpenCodeProbeError extends Data.TaggedError("OpenCodeProbeError")<{
   readonly cause: unknown;
@@ -65,9 +74,11 @@ function formatOpenCodeProbeError(input: {
   readonly cause: unknown;
   readonly isExternalServer: boolean;
   readonly serverUrl: string;
+  readonly presentation: ProviderPresentation;
 }): { readonly installed: boolean; readonly message: string } {
   const detail = normalizedErrorMessage(input.cause);
   const lower = detail?.toLowerCase() ?? "";
+  const { displayName, binaryCommand } = input.presentation;
 
   if (input.isExternalServer) {
     if (
@@ -78,7 +89,7 @@ function formatOpenCodeProbeError(input: {
     ) {
       return {
         installed: true,
-        message: "OpenCode server rejected authentication. Check the server URL and password.",
+        message: `${displayName} server rejected authentication. Check the server URL and password.`,
       };
     }
 
@@ -93,44 +104,42 @@ function formatOpenCodeProbeError(input: {
     ) {
       return {
         installed: true,
-        message: `Couldn't reach the configured OpenCode server at ${input.serverUrl}. Check that the server is running and the URL is correct.`,
+        message: `Couldn't reach the configured ${displayName} server at ${input.serverUrl}. Check that the server is running and the URL is correct.`,
       };
     }
 
     return {
       installed: true,
-      message: detail ?? "Failed to connect to the configured OpenCode server.",
+      message: detail ?? `Failed to connect to the configured ${displayName} server.`,
     };
   }
 
   if (lower.includes("enoent") || lower.includes("notfound")) {
     return {
       installed: false,
-      message: "OpenCode CLI (`opencode`) is not installed or not on PATH.",
+      message: `${displayName} CLI (\`${binaryCommand}\`) is not installed or not on PATH.`,
     };
   }
 
   if (lower.includes("quarantine")) {
     return {
       installed: true,
-      message:
-        "macOS is blocking the OpenCode binary (quarantine). Run `xattr -d com.apple.quarantine $(which opencode)` to fix this.",
+      message: `macOS is blocking the ${displayName} binary (quarantine). Run \`xattr -d com.apple.quarantine $(which ${binaryCommand})\` to fix this.`,
     };
   }
 
   if (lower.includes("invalid code signature") || lower.includes("corrupted")) {
     return {
       installed: true,
-      message:
-        "macOS killed the OpenCode process due to an invalid code signature. The binary may be corrupted — try reinstalling OpenCode.",
+      message: `macOS killed the ${displayName} process due to an invalid code signature. The binary may be corrupted — try reinstalling ${displayName}.`,
     };
   }
 
   return {
     installed: true,
     message: detail
-      ? `Failed to execute OpenCode CLI health check: ${detail}`
-      : "Failed to execute OpenCode CLI health check.",
+      ? `Failed to execute ${displayName} CLI health check: ${detail}`
+      : `Failed to execute ${displayName} CLI health check.`,
   };
 }
 
@@ -250,8 +259,10 @@ function flattenOpenCodeModels(input: OpenCodeInventory): ReadonlyArray<ServerPr
 
 export const makePendingOpenCodeProvider = (
   openCodeSettings: OpenCodeSettings,
+  presentation: ProviderPresentation = OPENCODE_PRESENTATION,
 ): ServerProviderDraft => {
   const checkedAt = new Date().toISOString();
+  const { displayName } = presentation;
   const models = providerModelsFromSettings(
     [],
     PROVIDER,
@@ -261,7 +272,7 @@ export const makePendingOpenCodeProvider = (
 
   if (!openCodeSettings.enabled) {
     return buildServerProvider({
-      presentation: OPENCODE_PRESENTATION,
+      presentation,
       enabled: false,
       checkedAt,
       models,
@@ -272,14 +283,14 @@ export const makePendingOpenCodeProvider = (
         auth: { status: "unknown" },
         message:
           openCodeSettings.serverUrl.trim().length > 0
-            ? "OpenCode is disabled in Uno Work settings. A server URL is configured."
-            : "OpenCode is disabled in Uno Work settings.",
+            ? `${displayName} is disabled in Uno Work settings. A server URL is configured.`
+            : `${displayName} is disabled in Uno Work settings.`,
       },
     });
   }
 
   return buildServerProvider({
-    presentation: OPENCODE_PRESENTATION,
+    presentation,
     enabled: true,
     checkedAt,
     models,
@@ -288,7 +299,7 @@ export const makePendingOpenCodeProvider = (
       version: null,
       status: "warning",
       auth: { status: "unknown" },
-      message: "OpenCode provider status has not been checked in this session yet.",
+      message: `${displayName} provider status has not been checked in this session yet.`,
     },
   });
 };
@@ -297,20 +308,23 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
   openCodeSettings: OpenCodeSettings,
   cwd: string,
   environment: NodeJS.ProcessEnv = process.env,
+  presentation: ProviderPresentation = OPENCODE_PRESENTATION,
 ): Effect.fn.Return<ServerProviderDraft, never, OpenCodeRuntime> {
   const openCodeRuntime = yield* OpenCodeRuntime;
   const checkedAt = new Date().toISOString();
   const customModels = openCodeSettings.customModels;
   const isExternalServer = openCodeSettings.serverUrl.trim().length > 0;
+  const { displayName, binaryCommand, minimumVersion } = presentation;
 
   const fallback = (cause: unknown, version: string | null = null) => {
     const failure = formatOpenCodeProbeError({
       cause,
       isExternalServer,
       serverUrl: openCodeSettings.serverUrl,
+      presentation,
     });
     return buildServerProvider({
-      presentation: OPENCODE_PRESENTATION,
+      presentation,
       enabled: openCodeSettings.enabled,
       checkedAt,
       models: providerModelsFromSettings(
@@ -331,7 +345,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
 
   if (!openCodeSettings.enabled) {
     return buildServerProvider({
-      presentation: OPENCODE_PRESENTATION,
+      presentation,
       enabled: false,
       checkedAt,
       models: providerModelsFromSettings(
@@ -346,8 +360,8 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
         status: "warning",
         auth: { status: "unknown" },
         message: isExternalServer
-          ? "OpenCode is disabled in Uno Work settings. A server URL is configured."
-          : "OpenCode is disabled in Uno Work settings.",
+          ? `${displayName} is disabled in Uno Work settings. A server URL is configured.`
+          : `${displayName} is disabled in Uno Work settings.`,
       },
     });
   }
@@ -370,19 +384,20 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
     if (versionExit._tag === "Failure") {
       return fallback(Cause.squash(versionExit.cause));
     }
-    version = parseGenericCliVersion(versionExit.value.stdout) ?? null;
+    version =
+      parseGenericCliVersion(`${versionExit.value.stdout}\n${versionExit.value.stderr}`) ?? null;
 
     if (!version) {
       return fallback(
         new Error(
-          `Unable to determine OpenCode version from \`opencode --version\` output. T3 Code requires OpenCode v${MINIMUM_OPENCODE_VERSION} or newer.`,
+          `Unable to determine ${displayName} version from \`${binaryCommand} --version\` output. T3 Code requires ${displayName} v${minimumVersion} or newer.`,
         ),
         null,
       );
     }
-    if (compareCliVersions(version, MINIMUM_OPENCODE_VERSION) < 0) {
+    if (compareCliVersions(version, minimumVersion) < 0) {
       return buildServerProvider({
-        presentation: OPENCODE_PRESENTATION,
+        presentation,
         enabled: openCodeSettings.enabled,
         checkedAt,
         models: providerModelsFromSettings(
@@ -396,7 +411,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
           version,
           status: "error",
           auth: { status: "unknown" },
-          message: `OpenCode v${version} is too old. Upgrade to v${MINIMUM_OPENCODE_VERSION} or newer.`,
+          message: `${displayName} v${version} is too old. Upgrade to v${minimumVersion} or newer.`,
         },
       });
     }
@@ -448,7 +463,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
   );
   const connectedCount = inventoryExit.value.providerList.connected.length;
   return buildServerProvider({
-    presentation: OPENCODE_PRESENTATION,
+    presentation,
     enabled: true,
     checkedAt,
     models,
@@ -462,10 +477,10 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
       },
       message:
         connectedCount > 0
-          ? `${connectedCount} upstream provider${connectedCount === 1 ? "" : "s"} connected through ${isExternalServer ? "the configured OpenCode server" : "OpenCode"}.`
+          ? `${connectedCount} upstream provider${connectedCount === 1 ? "" : "s"} connected through ${isExternalServer ? `the configured ${displayName} server` : displayName}.`
           : isExternalServer
-            ? "Connected to the configured OpenCode server, but it did not report any connected upstream providers."
-            : "OpenCode is available, but it did not report any connected upstream providers.",
+            ? `Connected to the configured ${displayName} server, but it did not report any connected upstream providers.`
+            : `${displayName} is available, but it did not report any connected upstream providers.`,
     },
   });
 });

@@ -3,6 +3,8 @@
 @custom-variant dark (&:is(.dark, .dark *));
 /* Window Controls Overlay: active when Electron exposes native titlebar control geometry. */
 @custom-variant wco (&:is(.wco, .wco *));
+/* Active when the Electron window is in native fullscreen (traffic lights hidden on macOS). */
+@custom-variant fullscreen (&:is(.is-fullscreen, .is-fullscreen *));
 
 @theme inline {
   --animate-skeleton: skeleton 2s -1s infinite linear;

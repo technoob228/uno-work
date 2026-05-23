@@ -121,9 +121,9 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
     server: {
       getConfig: () =>
         rpcClient ? rpcClient.server.getConfig() : Promise.reject(unavailableLocalBackendError()),
-      refreshProviders: () =>
+      refreshProviders: (input) =>
         rpcClient
-          ? rpcClient.server.refreshProviders()
+          ? rpcClient.server.refreshProviders(input)
           : Promise.reject(unavailableLocalBackendError()),
       upsertKeybinding: (input) =>
         rpcClient
@@ -157,10 +157,12 @@ export function readLocalApi(): LocalApi | undefined {
   }
 
   const primaryEnvironment = getPrimaryKnownEnvironment();
-  cachedApi = primaryEnvironment
-    ? createLocalApi(getPrimaryEnvironmentConnection().client)
-    : createBrowserLocalApi();
-  return cachedApi;
+  if (primaryEnvironment) {
+    cachedApi = createLocalApi(getPrimaryEnvironmentConnection().client);
+    return cachedApi;
+  }
+
+  return createBrowserLocalApi();
 }
 
 export function ensureLocalApi(): LocalApi {

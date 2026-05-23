@@ -243,9 +243,28 @@ export function deriveLockedProvider(input: {
   thread: Thread | null | undefined;
   selectedProvider: string | null;
   threadProvider: string | null;
+  providerStatuses?:
+    | ReadonlyArray<{
+        readonly instanceId: string;
+        readonly driver: ProviderDriverKind;
+      }>
+    | undefined;
 }): ProviderDriverKind | null {
   if (!threadHasStarted(input.thread)) {
     return null;
+  }
+  // `session.provider` reflects the adapter family persisted at session start
+  // (e.g. always "opencode" for the OpenCodeAdapter). When a driver wraps that
+  // adapter — UnoDriver wrapping OpenCodeAdapter is the live case — the
+  // adapter family no longer matches the actual driver kind. Trust the
+  // instance id when we can resolve it against the current snapshot map,
+  // since the instance is the canonical routing key.
+  const sessionInstanceId = input.thread?.session?.providerInstanceId ?? null;
+  if (sessionInstanceId && input.providerStatuses) {
+    const match = input.providerStatuses.find((p) => p.instanceId === sessionInstanceId);
+    if (match) {
+      return match.driver;
+    }
   }
   const sessionProvider = input.thread?.session?.provider ?? null;
   if (sessionProvider) {

@@ -16,7 +16,7 @@
     },
     "apps/desktop": {
       "name": "@t3tools/desktop",
-      "version": "0.0.22",
+      "version": "0.0.27",
       "dependencies": {
         "@effect/platform-node": "catalog:",
         "effect": "catalog:",
@@ -49,7 +49,7 @@
     },
     "apps/server": {
       "name": "t3",
-      "version": "0.0.22",
+      "version": "0.0.27",
       "bin": {
         "t3": "./dist/bin.mjs",
       },
@@ -82,7 +82,7 @@
     },
     "apps/web": {
       "name": "@t3tools/web",
-      "version": "0.0.22",
+      "version": "0.0.27",
       "dependencies": {
         "@base-ui/react": "^1.2.0",
         "@dnd-kit/core": "^6.3.1",
@@ -112,6 +112,7 @@
         "react-markdown": "^10.1.0",
         "remark-gfm": "^4.0.1",
         "tailwind-merge": "^3.4.0",
+        "turndown": "^7.2.4",
         "xlsx": "^0.18.5",
         "zustand": "^5.0.11",
       },
@@ -123,6 +124,7 @@
         "@types/babel__core": "^7.20.5",
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",
+        "@types/turndown": "^5.0.6",
         "@vitejs/plugin-react": "^6.0.0",
         "@vitest/browser-playwright": "^4.0.18",
         "babel-plugin-react-compiler": "^19.0.0-beta-e552027-20250112",
@@ -596,6 +598,8 @@
 
     "@lexical/yjs": ["@lexical/yjs@0.41.0", "", { "dependencies": { "@lexical/offset": "0.41.0", "@lexical/selection": "0.41.0", "lexical": "0.41.0" }, "peerDependencies": { "yjs": ">=13.5.22" } }, "sha512-PaKTxSbVC4fpqUjQ7vUL9RkNF1PjL8TFl5jRe03PqoPYpE33buf3VXX6+cOUEfv9+uknSqLCPHoBS/4jN3a97w=="],
 
+    "@mixmark-io/domino": ["@mixmark-io/domino@2.2.0", "", {}, "sha512-Y28PR25bHXUg88kCV7nivXrP2Nj2RueZ3/l/jdx6J9f8J4nsEGcgX0Qe6lt7Pa+J79+kPiJU3LguR6O/6zrLOw=="],
+
     "@modelcontextprotocol/sdk": ["@modelcontextprotocol/sdk@1.29.0", "", { "dependencies": { "@hono/node-server": "^1.19.9", "ajv": "^8.17.1", "ajv-formats": "^3.0.1", "content-type": "^1.0.5", "cors": "^2.8.5", "cross-spawn": "^7.0.5", "eventsource": "^3.0.2", "eventsource-parser": "^3.0.0", "express": "^5.2.1", "express-rate-limit": "^8.2.1", "hono": "^4.11.4", "jose": "^6.1.3", "json-schema-typed": "^8.0.2", "pkce-challenge": "^5.0.0", "raw-body": "^3.0.0", "zod": "^3.25 || ^4.0", "zod-to-json-schema": "^3.25.1" }, "peerDependencies": { "@cfworker/json-schema": "^4.1.1" }, "optionalPeers": ["@cfworker/json-schema"] }, "sha512-zo37mZA9hJWpULgkRpowewez1y6ML5GsXJPY8FI0tBBCd77HEvza4jDqRKOXgHNn867PVGCyTdzqpz0izu5ZjQ=="],
 
     "@msgpackr-extract/msgpackr-extract-darwin-arm64": ["@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3", "", { "os": "darwin", "cpu": "arm64" }, "sha512-QZHtlVgbAdy2zAqNA9Gu1UpIuI8Xvsd1v8ic6B2pZmeFnFcMWiPLfWXh7TVw4eGEZ/C9TH281KwhVoeQUKbyjw=="],
@@ -897,6 +901,8 @@
     "@types/responselike": ["@types/responselike@1.0.3", "", { "dependencies": { "@types/node": "*" } }, "sha512-H/+L+UkTV33uf49PH5pCAUBVPNj2nDBXTN+qS1dOwyyg24l3CcicicCA7ca+HMvJBZcFgl5r8e+RR6elsb4Lyw=="],
 
     "@types/statuses": ["@types/statuses@2.0.6", "", {}, "sha512-xMAgYwceFhRA2zY+XbEA7mxYbA093wdiW8Vu6gZPGWy9cmOyU9XesH1tNcEWsKFd5Vzrqx5T3D38PWx1FIIXkA=="],
+
+    "@types/turndown": ["@types/turndown@5.0.6", "", {}, "sha512-ru00MoyeeouE5BX4gRL+6m/BsDfbRayOskWqUvh7CLGW+UXxHQItqALa38kKnOiZPqJrtzJUgAC2+F0rL1S4Pg=="],
 
     "@types/unist": ["@types/unist@3.0.3", "", {}, "sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q=="],
 
@@ -1991,6 +1997,8 @@
     "turbo-windows-64": ["turbo-windows-64@2.8.17", "", { "os": "win32", "cpu": "x64" }, "sha512-EijeQ6zszDMmGZLP2vT2RXTs/GVi9rM0zv2/G4rNu2SSRSGFapgZdxgW4b5zUYLVaSkzmkpWlGfPfj76SW9yUg=="],
 
     "turbo-windows-arm64": ["turbo-windows-arm64@2.8.17", "", { "os": "win32", "cpu": "arm64" }, "sha512-crpfeMPkfECd4V1PQ/hMoiyVcOy04+bWedu/if89S15WhOalHZ2BYUi6DOJhZrszY+mTT99OwpOsj4wNfb/GHQ=="],
+
+    "turndown": ["turndown@7.2.4", "", { "dependencies": { "@mixmark-io/domino": "^2.2.0" } }, "sha512-I8yFsfRzmzK0WV1pNNOA4A7y4RDfFxPRxb3t+e3ui14qSGOxGtiSP6GjeX+Y6CHb7HYaFj7ECUD7VE5kQMZWGQ=="],
 
     "type-fest": ["type-fest@5.4.4", "", { "dependencies": { "tagged-tag": "^1.0.0" } }, "sha512-JnTrzGu+zPV3aXIUhnyWJj4z/wigMsdYajGLIYakqyOW1nPllzXEJee0QQbHj+CTIQtXGlAjuK0UY+2xTyjVAw=="],
 

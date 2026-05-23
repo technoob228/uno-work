@@ -102,6 +102,8 @@ const SET_THEME_CHANNEL = "desktop:set-theme";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
 const MENU_ACTION_CHANNEL = "desktop:menu-action";
+const WINDOW_FULLSCREEN_STATE_CHANNEL = "desktop:window-fullscreen-state";
+const WINDOW_FULLSCREEN_GET_STATE_CHANNEL = "desktop:window-fullscreen-get-state";
 const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 const UPDATE_SET_CHANNEL_CHANNEL = "desktop:update-set-channel";
@@ -327,6 +329,19 @@ function backendChildEnv(): NodeJS.ProcessEnv {
   delete env.T3CODE_DESKTOP_HTTPS_ENDPOINTS;
   delete env.T3CODE_TAILSCALE_SERVE;
   delete env.T3CODE_TAILSCALE_SERVE_PORT;
+
+  // Hand the backend a path to the bundled MCP bridges shipped with the
+  // Electron app. UnoDriver inlines these into OPENCODE_CONFIG_CONTENT so
+  // uno-code can spawn them as stdio MCP servers when the user is signed
+  // in. process.execPath inside Electron points at the Electron binary;
+  // when paired with ELECTRON_RUN_AS_NODE=1 (set in UnoDriver) it acts as
+  // a Node interpreter for the bundled `.mjs` script.
+  const unoSearchScript = resolveResourcePath(Path.join("mcp", "uno-search.mjs"));
+  if (unoSearchScript) {
+    env.UNO_MCP_SEARCH_SCRIPT = unoSearchScript;
+    env.UNO_MCP_NODE_BIN = process.execPath;
+  }
+
   return env;
 }
 
@@ -1235,44 +1250,6 @@ function setUnoCodeState(next: UnoCodeInstallState): void {
   emitUnoCodeState();
 }
 
-async function writeUnoBinaryPathToSettings(binaryPath: string): Promise<void> {
-  await FS.promises.mkdir(Path.dirname(SERVER_SETTINGS_PATH), { recursive: true });
-  let existing: Record<string, unknown> = {};
-  try {
-    const content = await FS.promises.readFile(SERVER_SETTINGS_PATH, "utf-8");
-    const parsed: unknown = JSON.parse(content);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      existing = parsed as Record<string, unknown>;
-    }
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") {
-      writeDesktopLogHeader(
-        `uno-code settings read fallback: ${cause instanceof Error ? cause.message : String(cause)}`,
-      );
-    }
-  }
-  const previousProviders =
-    existing.providers &&
-    typeof existing.providers === "object" &&
-    !Array.isArray(existing.providers)
-      ? (existing.providers as Record<string, unknown>)
-      : {};
-  const previousUno =
-    previousProviders.uno &&
-    typeof previousProviders.uno === "object" &&
-    !Array.isArray(previousProviders.uno)
-      ? (previousProviders.uno as Record<string, unknown>)
-      : {};
-  const next = {
-    ...existing,
-    providers: {
-      ...previousProviders,
-      uno: { ...previousUno, enabled: true, binaryPath },
-    },
-  };
-  await FS.promises.writeFile(SERVER_SETTINGS_PATH, `${JSON.stringify(next, null, 2)}\n`, "utf-8");
-}
-
 async function ensureUnoCodeInstalled(): Promise<void> {
   if (unoCodeInstallInFlight) return;
   const binaryPath = getUnoCodeBinaryPath(BASE_DIR);
@@ -1295,7 +1272,6 @@ async function ensureUnoCodeInstalled(): Promise<void> {
         });
       },
     });
-    await writeUnoBinaryPathToSettings(result.binaryPath);
     setUnoCodeState({
       status: "installed",
       binaryPath: result.binaryPath,
@@ -1769,6 +1745,12 @@ function registerIpcHandlers(): void {
     } as const;
   });
 
+  ipcMain.removeAllListeners(WINDOW_FULLSCREEN_GET_STATE_CHANNEL);
+  ipcMain.on(WINDOW_FULLSCREEN_GET_STATE_CHANNEL, (event) => {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    event.returnValue = senderWindow ? senderWindow.isFullScreen() : false;
+  });
+
   ipcMain.removeHandler(GET_CLIENT_SETTINGS_CHANNEL);
   ipcMain.handle(GET_CLIENT_SETTINGS_CHANNEL, async () => readClientSettings(CLIENT_SETTINGS_PATH));
 
@@ -2234,6 +2216,13 @@ function createWindow(): BrowserWindow {
     event.preventDefault();
     window.setTitle(APP_DISPLAY_NAME);
   });
+
+  const emitFullscreenState = (isFullscreen: boolean) => {
+    if (window.isDestroyed()) return;
+    window.webContents.send(WINDOW_FULLSCREEN_STATE_CHANNEL, isFullscreen);
+  };
+  window.on("enter-full-screen", () => emitFullscreenState(true));
+  window.on("leave-full-screen", () => emitFullscreenState(false));
   window.webContents.on("did-finish-load", () => {
     window.setTitle(APP_DISPLAY_NAME);
     emitUpdateState();

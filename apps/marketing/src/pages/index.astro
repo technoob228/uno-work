@@ -7,8 +7,10 @@ import { RELEASES_URL } from "../lib/releases";
   <section class="hero">
     <span class="eyebrow">AI that works with your machine</span>
     <h1 class="tagline">
-      AI works on <em>your</em> computer,<br />
-      with <em>your</em> files, under <em>your</em> control.
+      AI works on <em>your</em><br class="mobile-break" /> computer,<br class="desktop-break" /><br
+        class="mobile-break"
+      />
+      with <em>your</em> files,<br class="mobile-break" /> under <em>your</em> control.
     </h1>
     <p class="subhead">
       Uno Work is local-first, with a built-in preview pane and optional remote power when you need it.
@@ -34,19 +36,27 @@ import { RELEASES_URL } from "../lib/releases";
     <p class="social-eyebrow">Used by teams at</p>
     <ul class="social-list">
       <li class="social-item">
-        <span class="social-mark social-mark--uno">U</span>
+        <span class="social-mark social-mark--logo">
+          <img src="/favicon.svg" alt="" aria-hidden="true" />
+        </span>
         <span class="social-name">Uno</span>
       </li>
       <li class="social-item">
-        <span class="social-mark">UA</span>
+        <span class="social-mark social-mark--logo social-mark--unlimited">
+          <img src="/logos/unlimited-ai.svg" alt="" aria-hidden="true" />
+        </span>
         <span class="social-name">Unlimited&nbsp;AI</span>
       </li>
       <li class="social-item">
-        <span class="social-mark">E</span>
-        <span class="social-name">ecorouter</span>
+        <span class="social-mark social-mark--logo">
+          <img src="/logos/ecorouter.svg" alt="" aria-hidden="true" />
+        </span>
+        <span class="social-name">EcoRouter</span>
       </li>
       <li class="social-item">
-        <span class="social-mark">P</span>
+        <span class="social-mark social-mark--logo social-mark--productera">
+          <img src="/logos/productera-mark.svg" alt="" aria-hidden="true" />
+        </span>
         <span class="social-name">Productera</span>
       </li>
     </ul>
@@ -262,43 +272,24 @@ import { RELEASES_URL } from "../lib/releases";
 </Layout>
 
 <script>
-  import { fetchLatestRelease, RELEASES_URL, type ReleaseAsset } from "../lib/releases";
+  import { fetchLatestRelease, pickReleaseAsset, RELEASES_URL, type ReleasePlatform } from "../lib/releases";
 
-  type Platform = { os: "mac" | "win" | "linux"; label: string; arch?: string };
+  type Platform = { os: "mac" | "win" | "linux"; label: string; releasePlatform: ReleasePlatform };
 
   function detectPlatform(): Platform | null {
     const ua = navigator.userAgent;
-    if (/Win/i.test(ua)) return { os: "win", label: "Download for Windows" };
+    if (/Win/i.test(ua)) {
+      return { os: "win", label: "Download for Windows", releasePlatform: "win-x64" };
+    }
     if (/Mac/i.test(ua)) {
       return {
         os: "mac",
         label: `Download for macOS`,
-        arch: "arm64",
+        releasePlatform: "mac-arm64",
       };
     }
-    if (/Linux/i.test(ua)) return { os: "linux", label: "Download for Linux" };
-    return null;
-  }
-
-  function pickAsset(assets: ReleaseAsset[], platform: Platform): string | null {
-    if (platform.os === "win") {
-      return (
-        assets.find((a) => a.name.endsWith("-x64.exe"))
-          ?.browser_download_url ?? null
-      );
-    }
-    if (platform.os === "mac") {
-      const preferred = assets.find((a) =>
-        a.name.endsWith(`-${platform.arch}.dmg`),
-      );
-      const fallback = assets.find((a) => a.name.endsWith(".dmg"));
-      return (preferred ?? fallback)?.browser_download_url ?? null;
-    }
-    if (platform.os === "linux") {
-      return (
-        assets.find((a) => a.name.endsWith(".AppImage"))
-          ?.browser_download_url ?? null
-      );
+    if (/Linux/i.test(ua)) {
+      return { os: "linux", label: "Download for Linux", releasePlatform: "linux-x64" };
     }
     return null;
   }
@@ -316,9 +307,9 @@ import { RELEASES_URL } from "../lib/releases";
 
     try {
       const release = await fetchLatestRelease();
-      const url = pickAsset(release.assets ?? [], platform);
-      if (url) {
-        btn.href = url;
+      const asset = pickReleaseAsset(release.assets ?? [], platform.releasePlatform);
+      if (asset) {
+        btn.href = asset.browser_download_url;
         btn.removeAttribute("target");
         btn.removeAttribute("rel");
       }
@@ -364,14 +355,20 @@ import { RELEASES_URL } from "../lib/releases";
     font-size: clamp(2.1rem, 5vw, 3.5rem);
     letter-spacing: -0.025em;
     line-height: 1.1;
+    max-width: 100%;
     margin: 0 0 1.25rem;
     opacity: 0;
+    text-wrap: balance;
     animation: fade-in 1s ease-out 0.05s forwards;
   }
 
   .tagline em {
     font-style: normal;
     color: var(--uno-violet);
+  }
+
+  .mobile-break {
+    display: none;
   }
 
   .subhead {
@@ -584,11 +581,34 @@ import { RELEASES_URL } from "../lib/releases";
     place-items: center;
   }
 
-  .social-mark--uno {
-    background: linear-gradient(135deg, var(--uno-violet) 0%, #8C8CFF 100%);
-    color: #fff;
+  .social-mark--logo {
+    overflow: hidden;
+    background: transparent;
     border-color: transparent;
-    box-shadow: 0 1px 2px rgba(91, 91, 232, 0.3);
+    box-shadow: 0 1px 2px rgba(24, 24, 27, 0.08);
+  }
+
+  .social-mark--logo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .social-mark--productera {
+    width: 44px;
+    background: var(--bg-panel);
+    border-color: var(--line);
+    box-shadow: none;
+  }
+
+  .social-mark--productera img {
+    width: 28px;
+    height: auto;
+    object-fit: contain;
+  }
+
+  .social-mark--unlimited {
+    border-color: #E6E600;
   }
 
   .social-name {
@@ -984,6 +1004,29 @@ import { RELEASES_URL } from "../lib/releases";
       padding-top: 5vh;
     }
 
+    .eyebrow {
+      font-size: 0.64rem;
+      letter-spacing: 0.08em;
+      white-space: normal;
+    }
+
+    .tagline {
+      font-size: 2rem;
+    }
+
+    .desktop-break {
+      display: none;
+    }
+
+    .mobile-break {
+      display: block;
+    }
+
+    .subhead {
+      font-size: 0.95rem;
+      max-width: 280px;
+    }
+
     .screenshot-wrap {
       width: 95vw;
       padding: 0;
@@ -1002,7 +1045,9 @@ import { RELEASES_URL } from "../lib/releases";
     }
 
     .social-list {
-      gap: 1.25rem 2rem;
+      display: grid;
+      grid-template-columns: repeat(2, max-content);
+      gap: 1rem 1.25rem;
     }
   }
 </style>

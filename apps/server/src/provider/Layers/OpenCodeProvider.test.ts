@@ -12,7 +12,10 @@ import {
   OpenCodeRuntimeError,
   type OpenCodeRuntimeShape,
 } from "../opencodeRuntime.ts";
-import { checkOpenCodeProviderStatus } from "./OpenCodeProvider.ts";
+import {
+  checkOpenCodeProviderStatus,
+  type ProviderPresentation,
+} from "./OpenCodeProvider.ts";
 import type { OpenCodeInventory } from "../opencodeRuntime.ts";
 
 const DEFAULT_VERSION_STDOUT = "opencode 1.14.19\n";
@@ -30,6 +33,7 @@ const runtimeMock = {
   state: {
     runVersionError: null as Error | null,
     versionStdout: DEFAULT_VERSION_STDOUT,
+    versionStderr: "",
     inventoryError: null as Error | null,
     closeCalls: 0,
     inventory: {
@@ -40,6 +44,7 @@ const runtimeMock = {
   reset() {
     this.state.runVersionError = null;
     this.state.versionStdout = DEFAULT_VERSION_STDOUT;
+    this.state.versionStderr = "";
     this.state.inventoryError = null;
     this.state.closeCalls = 0;
     this.state.inventory = {
@@ -79,7 +84,11 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
             cause: runtimeMock.state.runVersionError,
           }),
         )
-      : Effect.succeed({ stdout: runtimeMock.state.versionStdout, stderr: "", code: 0 }),
+      : Effect.succeed({
+          stdout: runtimeMock.state.versionStdout,
+          stderr: runtimeMock.state.versionStderr,
+          code: 0,
+        }),
   createOpenCodeSdkClient: () =>
     ({}) as unknown as ReturnType<OpenCodeRuntimeShape["createOpenCodeSdkClient"]>,
   loadOpenCodeInventory: () =>
@@ -196,6 +205,81 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
       yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd());
 
       assert.equal(runtimeMock.state.closeCalls, 1);
+    }),
+  );
+
+  it.effect("parses version from stderr when stdout is empty", () =>
+    Effect.gen(function* () {
+      // Our uno-code fork prints `--version` on stderr; the previous
+      // implementation looked at stdout only and reported the version as
+      // missing, which surfaced as "Unable to determine OpenCode version" even
+      // though the binary was healthy.
+      runtimeMock.state.versionStdout = "";
+      runtimeMock.state.versionStderr = "1.14.48-uno.1\n";
+      runtimeMock.state.inventory = {
+        providerList: { connected: ["uno"], all: [], default: {} },
+        agents: [],
+      };
+
+      const snapshot = yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd());
+
+      assert.equal(snapshot.installed, true);
+      // parseGenericCliVersion normalises "1.14.48-uno.1" → "1.14.48".
+      assert.equal(snapshot.version, "1.14.48");
+      assert.ok(snapshot.message);
+      assert.ok(!snapshot.message.includes("Unable to determine"));
+    }),
+  );
+
+  it.effect("uses provided presentation labels for stale-version messages", () =>
+    Effect.gen(function* () {
+      const unoPresentation: ProviderPresentation = {
+        displayName: "Uno",
+        binaryCommand: "uno-code",
+        minimumVersion: "1.14.48",
+        showInteractionModeToggle: false,
+      };
+      runtimeMock.state.versionStdout = "1.14.0\n";
+
+      const snapshot = yield* checkOpenCodeProviderStatus(
+        makeOpenCodeSettings(),
+        process.cwd(),
+        process.env,
+        unoPresentation,
+      );
+
+      assert.equal(snapshot.status, "error");
+      assert.ok(snapshot.message);
+      assert.ok(
+        snapshot.message.includes("Uno"),
+        `expected message to mention "Uno", got: ${snapshot.message}`,
+      );
+      assert.ok(
+        !snapshot.message.includes("OpenCode"),
+        `expected message to not mention "OpenCode", got: ${snapshot.message}`,
+      );
+    }),
+  );
+
+  it.effect("uses provided presentation labels for ENOENT messages", () =>
+    Effect.gen(function* () {
+      const unoPresentation: ProviderPresentation = {
+        displayName: "Uno",
+        binaryCommand: "uno-code",
+        minimumVersion: "1.14.48",
+        showInteractionModeToggle: false,
+      };
+      runtimeMock.state.runVersionError = new Error("spawn uno-code ENOENT");
+
+      const snapshot = yield* checkOpenCodeProviderStatus(
+        makeOpenCodeSettings(),
+        process.cwd(),
+        process.env,
+        unoPresentation,
+      );
+
+      assert.equal(snapshot.installed, false);
+      assert.equal(snapshot.message, "Uno CLI (`uno-code`) is not installed or not on PATH.");
     }),
   );
 });

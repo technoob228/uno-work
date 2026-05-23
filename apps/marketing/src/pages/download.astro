@@ -1,6 +1,6 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import { RELEASES_URL } from "../lib/releases";
+import { RELEASES_URL, type ReleasePlatform } from "../lib/releases";
 ---
 
 <Layout title="Download — Uno Work" description="Download Uno Work for macOS, Windows, or Linux.">
@@ -18,11 +18,11 @@ import { RELEASES_URL } from "../lib/releases";
         <h2 class="platform-name">macOS</h2>
       </div>
       <div class="download-cards">
-        <a class="download-card" data-asset="arm64.dmg" href={RELEASES_URL}>
+        <a class="download-card" data-platform={"mac-arm64" satisfies ReleasePlatform} href={RELEASES_URL}>
           <span class="card-arch">Apple Silicon (arm64)</span>
           <span class="card-format">.dmg</span>
         </a>
-        <a class="download-card" data-asset="x64.dmg" href={RELEASES_URL}>
+        <a class="download-card" data-platform={"mac-x64" satisfies ReleasePlatform} href={RELEASES_URL}>
           <span class="card-arch">Intel (x64)</span>
           <span class="card-format">.dmg</span>
         </a>
@@ -36,7 +36,7 @@ import { RELEASES_URL } from "../lib/releases";
         <h2 class="platform-name">Windows</h2>
       </div>
       <div class="download-cards">
-        <a class="download-card" data-asset="x64.exe" href={RELEASES_URL}>
+        <a class="download-card" data-platform={"win-x64" satisfies ReleasePlatform} href={RELEASES_URL}>
           <span class="card-arch">Windows 10, 11</span>
           <span class="card-format">.exe</span>
         </a>
@@ -50,7 +50,7 @@ import { RELEASES_URL } from "../lib/releases";
         <h2 class="platform-name">Linux</h2>
       </div>
       <div class="download-cards">
-        <a class="download-card" data-asset="x86_64.AppImage" href={RELEASES_URL}>
+        <a class="download-card" data-platform={"linux-x64" satisfies ReleasePlatform} href={RELEASES_URL}>
           <span class="card-arch">x86_64</span>
           <span class="card-format">AppImage</span>
         </a>
@@ -67,7 +67,7 @@ import { RELEASES_URL } from "../lib/releases";
 </Layout>
 
 <script>
-  import { fetchLatestRelease, RELEASES_URL } from "../lib/releases";
+  import { fetchLatestRelease, pickReleaseAsset, RELEASES_URL, type ReleasePlatform } from "../lib/releases";
 
   async function init() {
     const versionLabel = document.getElementById("version-label");
@@ -87,10 +87,10 @@ import { RELEASES_URL } from "../lib/releases";
       }
 
       cards.forEach((card) => {
-        const suffix = card.dataset.asset;
-        if (!suffix) return;
+        const platform = card.dataset.platform as ReleasePlatform | undefined;
+        if (!platform) return;
 
-        const match = (release.assets ?? []).find((a) => a.name.endsWith(`-${suffix}`));
+        const match = pickReleaseAsset(release.assets ?? [], platform);
         if (match) {
           card.href = match.browser_download_url;
         } else {

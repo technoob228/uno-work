@@ -971,6 +971,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
                     cursor: {
                       enabled: false,
                     },
+                    uno: {
+                      enabled: false,
+                    },
                   },
                 }),
               ),
@@ -1031,6 +1034,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
                 "codex",
                 "cursor",
                 "opencode",
+                "uno",
               ]);
               assert.strictEqual(cursorProvider?.enabled, false);
               assert.strictEqual(cursorProvider?.status, "disabled");

@@ -1,0 +1,64 @@
+name: Marketing Storage
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/marketing-storage.yml"
+      - "apps/marketing/**"
+      - "package.json"
+      - "bun.lock"
+      - "turbo.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketing-storage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy Uno Work marketing to UNO Storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build marketing site
+        run: bun run build:marketing
+
+      - name: Package static site
+        run: |
+          cd apps/marketing/dist
+          zip -r ../../../uno-work-marketing.zip .
+
+      - name: Deploy to UNO Storage
+        env:
+          UNO_API_KEY: ${{ secrets.UNO_API_KEY }}
+        run: |
+          test -n "$UNO_API_KEY"
+          response="$(
+            curl -fsS https://api.getuno.xyz/api/v1/deploy \
+              -H "Authorization: Bearer $UNO_API_KEY" \
+              -F "files=@uno-work-marketing.zip" \
+              -F "slug=uno4-work"
+          )"
+          echo "$response"
+          echo "$response" | jq -e '.url == "https://storage.getuno.xyz/uno4-work/"'

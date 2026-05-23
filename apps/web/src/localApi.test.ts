@@ -225,6 +225,8 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
     showContextMenu: async () => null,
     openExternal: async () => true,
     onMenuAction: () => () => undefined,
+    getWindowFullscreenState: () => false,
+    onWindowFullscreenChange: () => () => undefined,
     getUpdateState: async () => {
       throw new Error("getUpdateState not implemented in test");
     },
@@ -513,8 +515,11 @@ describe("wsApi", () => {
 
     const api = createLocalApi(rpcClientMock as never);
 
-    await expect(api.server.refreshProviders()).resolves.toEqual({ providers: nextProviders });
-    expect(rpcClientMock.server.refreshProviders).toHaveBeenCalledWith();
+    const refreshInput = { instanceId: ProviderInstanceId.make("uno") };
+    await expect(api.server.refreshProviders(refreshInput)).resolves.toEqual({
+      providers: nextProviders,
+    });
+    expect(rpcClientMock.server.refreshProviders).toHaveBeenCalledWith(refreshInput);
   });
 
   it("forwards server settings updates directly to the RPC client", async () => {
