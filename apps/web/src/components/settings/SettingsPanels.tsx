@@ -347,6 +347,7 @@ function AboutVersionSection() {
 const UNO_CODE_PHASE_LABEL: Record<string, string> = {
   "fetching-release": "Fetching release…",
   downloading: "Downloading…",
+  validating: "Verifying download integrity…",
   extracting: "Extracting…",
   verifying: "Verifying…",
   done: "Finishing…",
@@ -388,6 +389,11 @@ function UnoCodeInstallSection() {
     statusNode = (
       <>
         <span className="font-mono tabular-nums">v{state.version}</span>
+        {state.checksumVerified ? (
+          <span className="ml-2 text-[11px] text-emerald-600 dark:text-emerald-400">
+            Verified ✓
+          </span>
+        ) : null}
         <span className="block break-all font-mono text-[11px] text-muted-foreground/80">
           {state.binaryPath}
         </span>

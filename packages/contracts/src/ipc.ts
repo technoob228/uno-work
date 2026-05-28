@@ -263,6 +263,7 @@ export interface DesktopBridge {
 export type UnoCodeInstallPhase =
   | "fetching-release"
   | "downloading"
+  | "validating"
   | "extracting"
   | "verifying"
   | "done";
@@ -275,7 +276,12 @@ export type UnoCodeInstallState =
       readonly percent?: number;
       readonly message?: string;
     }
-  | { readonly status: "installed"; readonly binaryPath: string; readonly version: string }
+  | {
+      readonly status: "installed";
+      readonly binaryPath: string;
+      readonly version: string;
+      readonly checksumVerified?: boolean;
+    }
   | { readonly status: "failed"; readonly error: string; readonly code?: string };
 
 /**

@@ -727,11 +727,20 @@ type UnoCodeInstallState =
       readonly percent?: number;
       readonly message?: string;
     }
-  | { readonly status: "installed"; readonly binaryPath: string; readonly version: string }
+  | {
+      readonly status: "installed";
+      readonly binaryPath: string;
+      readonly version: string;
+      readonly checksumVerified?: boolean;
+    }
   | { readonly status: "failed"; readonly error: string; readonly code?: string };
 
 let unoCodeState: UnoCodeInstallState = { status: "idle" };
 let unoCodeInstallInFlight = false;
+let unoCodeAutoRetryCount = 0;
+const UNO_CODE_MAX_AUTO_RETRIES = 3;
+// Codes where retrying cannot help: no point auto-retrying in the background.
+const UNO_CODE_TERMINAL_CODES = new Set(["unsupported-platform", "release-not-published", "asset-missing"]);
 
 const desktopSshEnvironmentBridge = new DesktopSshEnvironmentBridge({
   getMainWindow: () => mainWindow,
@@ -1254,9 +1263,15 @@ async function ensureUnoCodeInstalled(): Promise<void> {
   if (unoCodeInstallInFlight) return;
   const binaryPath = getUnoCodeBinaryPath(BASE_DIR);
   if (await isUnoCodeInstalled(binaryPath)) {
-    const version = (await readUnoCodeVersion(binaryPath)) ?? "unknown";
-    setUnoCodeState({ status: "installed", binaryPath, version });
-    return;
+    // Don't trust file existence alone — a partial/corrupt binary that still has
+    // the exec bit would otherwise be marked "installed" and fail at runtime.
+    const version = await readUnoCodeVersion(binaryPath);
+    if (version) {
+      setUnoCodeState({ status: "installed", binaryPath, version });
+      unoCodeAutoRetryCount = 0;
+      return;
+    }
+    writeDesktopLogHeader("uno-code binary present but --version failed; reinstalling");
   }
   unoCodeInstallInFlight = true;
   setUnoCodeState({ status: "installing", phase: "fetching-release" });
@@ -1276,16 +1291,36 @@ async function ensureUnoCodeInstalled(): Promise<void> {
       status: "installed",
       binaryPath: result.binaryPath,
       version: result.version,
+      checksumVerified: result.checksumVerified,
     });
-    writeDesktopLogHeader(`uno-code installed version=${result.version} path=${result.binaryPath}`);
+    unoCodeAutoRetryCount = 0;
+    writeDesktopLogHeader(
+      `uno-code installed version=${result.version} path=${result.binaryPath} checksumVerified=${result.checksumVerified}`,
+    );
   } catch (cause) {
     const error = cause instanceof Error ? cause.message : String(cause);
     const code = cause instanceof UnoCodeInstallError ? cause.code : undefined;
     setUnoCodeState({ status: "failed", error, ...(code ? { code } : {}) });
     writeDesktopLogHeader(`uno-code install failed: ${error}`);
+    unoCodeInstallInFlight = false;
+    scheduleUnoCodeAutoRetry(code);
+    return;
   } finally {
     unoCodeInstallInFlight = false;
   }
+}
+
+// Auto-retry transient install failures in the background so users don't have to
+// click Retry manually. Terminal codes (unsupported platform, no release, no
+// asset) are left for the user.
+function scheduleUnoCodeAutoRetry(code: string | undefined): void {
+  if (code && UNO_CODE_TERMINAL_CODES.has(code)) return;
+  if (unoCodeAutoRetryCount >= UNO_CODE_MAX_AUTO_RETRIES) return;
+  unoCodeAutoRetryCount += 1;
+  const delayMs = 30_000 * unoCodeAutoRetryCount;
+  setTimeout(() => {
+    if (unoCodeState.status === "failed") void ensureUnoCodeInstalled();
+  }, delayMs);
 }
 
 function createBaseUpdateState(
@@ -2003,6 +2038,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.removeHandler(UNO_CODE_RETRY_INSTALL_CHANNEL);
   ipcMain.handle(UNO_CODE_RETRY_INSTALL_CHANNEL, async () => {
+    unoCodeAutoRetryCount = 0;
     void ensureUnoCodeInstalled();
   });
 
