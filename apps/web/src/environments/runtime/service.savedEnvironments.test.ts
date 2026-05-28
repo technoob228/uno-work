@@ -323,4 +323,26 @@ describe("saved environment startup", () => {
     stop();
     await resetEnvironmentServiceForTests();
   });
+
+  it("retries a failed initial saved connection with backoff until it succeeds", async () => {
+    mockFetchRemoteSessionState
+      .mockRejectedValueOnce(new Error("network blip"))
+      .mockResolvedValue({ authenticated: true, role: "owner" });
+
+    const { startEnvironmentConnectionService, resetEnvironmentServiceForTests } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    await vi.runAllTimersAsync();
+
+    const savedConnectionCalls = mockCreateEnvironmentConnection.mock.calls.filter(
+      ([input]) => input.kind === "saved",
+    );
+    // First attempt fails, the scheduled backoff retry opens a second connection.
+    expect(savedConnectionCalls.length).toBeGreaterThanOrEqual(2);
+    expect(mockFetchRemoteSessionState).toHaveBeenCalledTimes(2);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
 });

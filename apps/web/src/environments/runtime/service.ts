@@ -64,6 +64,7 @@ import {
 import { useTerminalStateStore } from "~/terminalStateStore";
 import { useUiStateStore } from "~/uiStateStore";
 import type { WsProtocolCloseContext } from "../../rpc/protocol";
+import { getWsReconnectDelayMsForRetry } from "../../rpc/wsConnectionState";
 import { getServerConfig } from "../../rpc/serverState";
 import { WsTransport } from "../../rpc/wsTransport";
 import { createWsRpcClient, type WsRpcClient } from "../../rpc/wsRpcClient";
@@ -142,6 +143,14 @@ const BROWSER_RESUME_RECONNECT_COOLDOWN_MS = 2_000;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
 const NOOP = () => undefined;
 const SSH_HTTP_STATUS_RE = /^\[ssh_http:(\d+)\]\s/u;
+
+// Saved environments — desktop-SSH ones especially — can fail to connect on a
+// cold launch (SSH bridge not up yet, remote server still starting) or drop
+// mid-session (server restart, flaky network). A single failure must not leave
+// the environment stuck "disconnected" until a manual reconnect, so we retry on
+// the same exponential backoff schedule as the WS transport.
+const savedEnvironmentReconnectTimers = new Map<EnvironmentId, ReturnType<typeof setTimeout>>();
+const savedEnvironmentReconnectRetries = new Map<EnvironmentId, number>();
 
 function createDeferredPromise<T>() {
   let resolve: ((value: T) => void) | null = null;
@@ -843,6 +852,7 @@ function setRuntimeConnected(environmentId: EnvironmentId) {
     lastErrorAt: null,
   });
   useSavedEnvironmentRegistryStore.getState().markConnected(environmentId, connectedAt);
+  clearSavedEnvironmentReconnect(environmentId, { resetBackoff: true });
 }
 
 function setRuntimeDisconnected(environmentId: EnvironmentId, reason?: string | null) {
@@ -1197,6 +1207,7 @@ function createSavedEnvironmentClient(
             lastError: appendVersionMismatchHint("WebSocket heartbeat timed out.", mismatch),
             lastErrorAt: isoNow(),
           });
+          scheduleSavedEnvironmentReconnect(environmentId);
         },
         onClose: (
           details: { readonly code: number; readonly reason: string },
@@ -1214,6 +1225,7 @@ function createSavedEnvironmentClient(
               ),
             ),
           );
+          scheduleSavedEnvironmentReconnect(environmentId);
         },
       },
     ),
@@ -1478,13 +1490,95 @@ async function syncSavedEnvironmentConnections(
     staleEnvironmentIds.map((environmentId) => disconnectSavedEnvironment(environmentId)),
   );
   await Promise.all(
-    records.map((record) => ensureSavedEnvironmentConnection(record).catch(() => undefined)),
+    records.map((record) =>
+      ensureSavedEnvironmentConnection(record)
+        .then(() => {
+          clearSavedEnvironmentReconnect(record.environmentId, { resetBackoff: true });
+        })
+        .catch((error) => {
+          if (isSavedEnvironmentConnectionCancelledError(error)) {
+            return;
+          }
+          scheduleSavedEnvironmentReconnect(record.environmentId);
+        }),
+    ),
   );
 }
 
 function stopActiveService() {
   activeService?.stop();
   activeService = null;
+  clearAllSavedEnvironmentReconnects();
+}
+
+function clearSavedEnvironmentReconnect(
+  environmentId: EnvironmentId,
+  options?: { readonly resetBackoff?: boolean },
+): void {
+  const timer = savedEnvironmentReconnectTimers.get(environmentId);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    savedEnvironmentReconnectTimers.delete(environmentId);
+  }
+  if (options?.resetBackoff) {
+    savedEnvironmentReconnectRetries.delete(environmentId);
+  }
+}
+
+function clearAllSavedEnvironmentReconnects(): void {
+  for (const timer of savedEnvironmentReconnectTimers.values()) {
+    clearTimeout(timer);
+  }
+  savedEnvironmentReconnectTimers.clear();
+  savedEnvironmentReconnectRetries.clear();
+}
+
+function scheduleSavedEnvironmentReconnect(environmentId: EnvironmentId): void {
+  if (!activeService) {
+    return;
+  }
+  // Removed or intentionally disconnected environments must not auto-reconnect.
+  if (!getSavedEnvironmentRecord(environmentId)) {
+    clearSavedEnvironmentReconnect(environmentId, { resetBackoff: true });
+    return;
+  }
+  // An attempt is already in flight, or a retry is already queued.
+  if (
+    pendingSavedEnvironmentConnections.has(environmentId) ||
+    savedEnvironmentReconnectTimers.has(environmentId)
+  ) {
+    return;
+  }
+
+  const retry = savedEnvironmentReconnectRetries.get(environmentId) ?? 0;
+  const delay = getWsReconnectDelayMsForRetry(retry);
+  if (delay === null) {
+    // Exhausted automatic retries; keep the last error for a manual reconnect.
+    return;
+  }
+  savedEnvironmentReconnectRetries.set(environmentId, retry + 1);
+
+  const timer = setTimeout(() => {
+    savedEnvironmentReconnectTimers.delete(environmentId);
+    if (!activeService || !getSavedEnvironmentRecord(environmentId)) {
+      return;
+    }
+    void reconnectSavedEnvironment(environmentId)
+      .then(() => {
+        clearSavedEnvironmentReconnect(environmentId, { resetBackoff: true });
+      })
+      .catch((error) => {
+        if (isSavedEnvironmentConnectionCancelledError(error)) {
+          clearSavedEnvironmentReconnect(environmentId, { resetBackoff: true });
+          return;
+        }
+        scheduleSavedEnvironmentReconnect(environmentId);
+      });
+  }, delay);
+  if (typeof timer === "object" && timer !== null && "unref" in timer) {
+    (timer as unknown as { unref: () => void }).unref();
+  }
+  savedEnvironmentReconnectTimers.set(environmentId, timer);
 }
 
 function reconnectEnvironmentConnectionsAfterBrowserResume(reason: string): void {
@@ -1566,6 +1660,7 @@ export function getPrimaryEnvironmentConnection(): EnvironmentConnection {
 }
 
 export async function disconnectSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
+  clearSavedEnvironmentReconnect(environmentId, { resetBackoff: true });
   const record = getSavedEnvironmentRecord(environmentId);
   const pendingConnection = pendingSavedEnvironmentConnections.get(environmentId);
   if (pendingConnection) {
