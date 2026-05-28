@@ -43,6 +43,23 @@ import {
 
 const PROVIDER = ProviderDriverKind.make("opencode");
 
+// Persisted across app restarts via ProviderSessionDirectory so a resumed
+// thread reconnects to its existing OpenCode session (preserving history)
+// instead of silently starting a fresh one — see startSession/sendTurn.
+interface OpenCodeResumeCursor {
+  readonly openCodeSessionId: string;
+}
+
+function readOpenCodeResumeCursor(resumeCursor: unknown): string | undefined {
+  if (!resumeCursor || typeof resumeCursor !== "object") return undefined;
+  const id = (resumeCursor as { openCodeSessionId?: unknown }).openCodeSessionId;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
+function makeOpenCodeResumeCursor(openCodeSessionId: string): OpenCodeResumeCursor {
+  return { openCodeSessionId };
+}
+
 interface OpenCodeTurnSnapshot {
   readonly id: TurnId;
   readonly items: Array<unknown>;
@@ -1054,23 +1071,42 @@ export function makeOpenCodeAdapter(
                 directory,
                 ...(server.external && serverPassword ? { serverPassword } : {}),
               });
-              const openCodeSession = yield* runOpenCodeSdk("session.create", () =>
-                client.session.create({
-                  title: `T3 Code ${input.threadId}`,
-                  permission: buildOpenCodePermissionRules(input.runtimeMode),
-                }),
-              );
-              if (!openCodeSession.data) {
-                return yield* new OpenCodeRuntimeError({
-                  operation: "session.create",
-                  detail: "OpenCode session.create returned no session payload.",
-                });
+              // Resume the prior OpenCode session when the thread carries a
+              // cursor and the server still has it. OpenCode keeps conversation
+              // history server-side keyed by session id, so reconnecting here is
+              // what preserves context across app restarts / thread resumes.
+              const resumeSessionId = readOpenCodeResumeCursor(input.resumeCursor);
+              const resumedSession = resumeSessionId
+                ? yield* runOpenCodeSdk("session.get", () =>
+                    client.session.get({ sessionID: resumeSessionId }),
+                  ).pipe(
+                    Effect.map((result) => result.data),
+                    // A stale cursor (server pruned the session) must not block
+                    // startup — fall back to creating a fresh session.
+                    Effect.orElseSucceed(() => undefined),
+                  )
+                : undefined;
+              let openCodeSession = resumedSession;
+              if (!openCodeSession) {
+                const created = yield* runOpenCodeSdk("session.create", () =>
+                  client.session.create({
+                    title: `T3 Code ${input.threadId}`,
+                    permission: buildOpenCodePermissionRules(input.runtimeMode),
+                  }),
+                );
+                if (!created.data) {
+                  return yield* new OpenCodeRuntimeError({
+                    operation: "session.create",
+                    detail: "OpenCode session.create returned no session payload.",
+                  });
+                }
+                openCodeSession = created.data;
               }
               return {
                 sessionScope,
                 server,
                 client,
-                openCodeSession: openCodeSession.data,
+                openCodeSession,
               };
             }).pipe(Effect.provideService(Scope.Scope, sessionScope)),
           );
@@ -1105,6 +1141,7 @@ export function makeOpenCodeAdapter(
           cwd: directory,
           ...(input.modelSelection ? { model: input.modelSelection.model } : {}),
           threadId: input.threadId,
+          resumeCursor: makeOpenCodeResumeCursor(started.openCodeSession.id),
           createdAt,
           updatedAt: createdAt,
         };
@@ -1261,6 +1298,7 @@ export function makeOpenCodeAdapter(
       return {
         threadId: input.threadId,
         turnId,
+        resumeCursor: makeOpenCodeResumeCursor(context.openCodeSessionId),
       };
     });
 
