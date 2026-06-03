@@ -243,10 +243,10 @@ import { RELEASES_URL } from "../lib/releases";
       </div>
 
       <div class="enterprise-cta">
-        <a href="https://t.me/get_uno_support" target="_blank" rel="noopener noreferrer" class="enterprise-button">
+        <button type="button" class="enterprise-button" id="sales-open">
           Talk to sales
           <span aria-hidden="true">&rarr;</span>
-        </a>
+        </button>
         <div class="enterprise-contacts">
           <a href="https://t.me/get_uno_support" target="_blank" rel="noopener noreferrer" class="enterprise-link">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0Zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.231-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635Z"/></svg>
@@ -258,6 +258,76 @@ import { RELEASES_URL } from "../lib/releases";
           </a>
         </div>
       </div>
+
+      <dialog id="sales-dialog" class="sales-dialog">
+        <button type="button" class="sales-dialog-close" id="sales-close" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+
+        <div class="sales-dialog-inner">
+          <span class="sales-eyebrow">Talk to sales</span>
+          <h3 class="sales-title">Tell us about your team.</h3>
+          <p class="sales-sub">
+            We'll reply within one business day with a setup proposal — models, infra, access, rollout.
+          </p>
+
+          <form class="sales-form" id="sales-form">
+            <div class="sales-form-row">
+              <label>
+                <span class="label-text">Name</span>
+                <input type="text" name="name" required />
+              </label>
+              <label>
+                <span class="label-text">Work email</span>
+                <input type="email" name="email" required />
+              </label>
+            </div>
+
+            <div class="sales-form-row">
+              <label>
+                <span class="label-text">Company</span>
+                <input type="text" name="company" required />
+              </label>
+              <label>
+                <span class="label-text">Team size</span>
+                <select name="team_size" required>
+                  <option value="">Select…</option>
+                  <option>1-10</option>
+                  <option>11-50</option>
+                  <option>51-200</option>
+                  <option>200+</option>
+                </select>
+              </label>
+            </div>
+
+            <fieldset class="sales-checks">
+              <legend class="label-text">What matters to you</legend>
+              <label class="check-item"><input type="checkbox" name="needs" value="Self-hosted in our perimeter" /><span>Self-hosted in our perimeter</span></label>
+              <label class="check-item"><input type="checkbox" name="needs" value="Custom / private models" /><span>Custom or private models</span></label>
+              <label class="check-item"><input type="checkbox" name="needs" value="SSO & granular access" /><span>SSO & granular access</span></label>
+              <label class="check-item"><input type="checkbox" name="needs" value="Integration with internal infra" /><span>Integration with internal infra (repos, DBs, CI, tickets)</span></label>
+              <label class="check-item"><input type="checkbox" name="needs" value="Sandboxed dev environments" /><span>Sandboxed dev environments per engineer</span></label>
+              <label class="check-item"><input type="checkbox" name="needs" value="Spend controls & audit" /><span>Spend controls & full audit</span></label>
+            </fieldset>
+
+            <label>
+              <span class="label-text">What do you want to do with Uno Work?</span>
+              <textarea name="message" rows="4" required placeholder="Briefly — current stack, what you're trying to solve, timeline if any"></textarea>
+            </label>
+
+            <label>
+              <span class="label-text">Preferred contact <span class="label-hint">(optional)</span></span>
+              <input type="text" name="contact" placeholder="Telegram @, phone, or other" />
+            </label>
+
+            <button type="submit" class="sales-submit">Send</button>
+            <p class="sales-note">
+              Opens your mail client with everything pre-filled. Or write to
+              <a href="mailto:michael@getuno.xyz?subject=Uno%20Work%20for%20business">michael@getuno.xyz</a> directly.
+            </p>
+          </form>
+        </div>
+      </dialog>
     </div>
   </section>
 
@@ -319,6 +389,65 @@ import { RELEASES_URL } from "../lib/releases";
   }
 
   init();
+</script>
+
+<script>
+  const dialog = document.getElementById("sales-dialog") as HTMLDialogElement | null;
+  const openBtn = document.getElementById("sales-open");
+  const closeBtn = document.getElementById("sales-close");
+  const form = document.getElementById("sales-form") as HTMLFormElement | null;
+
+  openBtn?.addEventListener("click", () => dialog?.showModal());
+  closeBtn?.addEventListener("click", () => dialog?.close());
+
+  dialog?.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+
+  form?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!form.checkValidity()) {
+      form.reportValidity();
+      return;
+    }
+
+    const data = new FormData(form);
+    const name = String(data.get("name") ?? "").trim() || "Lead";
+    const company = String(data.get("company") ?? "").trim();
+
+    const needs = data.getAll("needs").map(String);
+
+    const lines: string[] = [
+      `Name: ${name}`,
+      `Email: ${data.get("email")}`,
+      `Company: ${company}`,
+      `Team size: ${data.get("team_size")}`,
+      "",
+    ];
+
+    if (needs.length) {
+      lines.push("What matters:");
+      for (const need of needs) lines.push(`  • ${need}`);
+      lines.push("");
+    }
+
+    const message = String(data.get("message") ?? "").trim();
+    if (message) {
+      lines.push("Goals / context:", message, "");
+    }
+
+    const contact = String(data.get("contact") ?? "").trim();
+    if (contact) {
+      lines.push(`Preferred contact: ${contact}`);
+    }
+
+    const subject = company
+      ? `Uno Work for business — ${company}`
+      : "Uno Work for business";
+    const body = lines.join("\n");
+
+    window.location.href = `mailto:michael@getuno.xyz?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  });
 </script>
 
 <style>
@@ -912,15 +1041,258 @@ import { RELEASES_URL } from "../lib/releases";
     background: #fff;
     color: #18181B;
     padding: 0.85rem 1.65rem;
+    border: none;
     border-radius: 999px;
     font-weight: 600;
     font-size: 0.95rem;
+    font-family: inherit;
+    cursor: pointer;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
   }
 
   .enterprise-button:hover {
     transform: translateY(-1px);
     box-shadow: 0 8px 24px rgba(255, 255, 255, 0.2);
+  }
+
+  /* ── Sales dialog ── */
+
+  .sales-dialog {
+    width: min(580px, calc(100vw - 2rem));
+    max-height: calc(100vh - 4rem);
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    background: var(--bg-panel);
+    color: var(--text);
+    box-shadow: 0 30px 80px rgba(20, 20, 30, 0.25);
+    overflow: hidden;
+  }
+
+  .sales-dialog::backdrop {
+    background: rgba(20, 20, 30, 0.55);
+    backdrop-filter: blur(4px);
+  }
+
+  .sales-dialog-inner {
+    padding: 2rem 2rem 1.75rem;
+    max-height: calc(100vh - 4rem);
+    overflow-y: auto;
+  }
+
+  .sales-dialog-close {
+    position: absolute;
+    top: 0.85rem;
+    right: 0.85rem;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: none;
+    background: var(--bg-subtle);
+    color: var(--text-muted);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    z-index: 2;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+
+  .sales-dialog-close:hover {
+    background: var(--line);
+    color: var(--text);
+  }
+
+  .sales-dialog-close svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .sales-eyebrow {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--uno-violet);
+    background: var(--uno-violet-tint);
+    border: 1px solid var(--uno-violet-border);
+    padding: 0.3rem 0.7rem;
+    border-radius: 999px;
+    margin-bottom: 1rem;
+  }
+
+  .sales-title {
+    font-size: 1.45rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    margin: 0 0 0.5rem;
+  }
+
+  .sales-sub {
+    font-size: 0.92rem;
+    line-height: 1.55;
+    color: var(--text-muted);
+    margin: 0 0 1.5rem;
+  }
+
+  .sales-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+
+  .sales-form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.65rem;
+  }
+
+  .sales-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    font-size: 0.82rem;
+    color: var(--text);
+  }
+
+  .label-text {
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .label-hint {
+    font-weight: 400;
+    color: var(--text-faint);
+  }
+
+  .sales-form input,
+  .sales-form select,
+  .sales-form textarea {
+    font: inherit;
+    font-size: 0.88rem;
+    color: var(--text);
+    background: var(--bg-panel);
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    width: 100%;
+  }
+
+  .sales-form textarea {
+    resize: vertical;
+    min-height: 80px;
+    font-family: inherit;
+  }
+
+  .sales-form input:focus,
+  .sales-form select:focus,
+  .sales-form textarea:focus {
+    outline: none;
+    border-color: var(--uno-violet);
+    box-shadow: 0 0 0 3px var(--uno-violet-tint);
+  }
+
+  .sales-form input::placeholder,
+  .sales-form textarea::placeholder {
+    color: var(--text-faint);
+  }
+
+  .sales-checks {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    padding: 0.85rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    background: var(--bg-subtle);
+  }
+
+  .sales-checks legend {
+    padding: 0 0.4rem;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .check-item {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: flex-start !important;
+    gap: 0.55rem !important;
+    font-size: 0.86rem !important;
+    color: var(--text-muted) !important;
+    cursor: pointer;
+  }
+
+  .check-item input[type="checkbox"] {
+    width: 16px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    accent-color: var(--uno-violet);
+    cursor: pointer;
+  }
+
+  .check-item:hover {
+    color: var(--text);
+  }
+
+  .sales-submit {
+    margin-top: 0.4rem;
+    background: var(--uno-violet);
+    color: #fff;
+    border: none;
+    padding: 0.85rem 1.5rem;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.93rem;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+    box-shadow: 0 4px 14px rgba(91, 91, 232, 0.25);
+  }
+
+  .sales-submit:hover {
+    background: var(--uno-violet-soft);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px rgba(91, 91, 232, 0.32);
+  }
+
+  .sales-submit:active {
+    transform: translateY(0);
+  }
+
+  .sales-note {
+    font-size: 0.75rem;
+    color: var(--text-faint);
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  .sales-note a {
+    color: var(--uno-violet);
+    text-decoration: underline;
+    text-decoration-color: var(--uno-violet-border);
+    text-underline-offset: 2px;
+  }
+
+  .sales-note a:hover {
+    text-decoration-color: var(--uno-violet);
+  }
+
+  @media (max-width: 640px) {
+    .sales-dialog-inner {
+      padding: 1.5rem 1.25rem 1.25rem;
+    }
+
+    .sales-form-row {
+      grid-template-columns: 1fr;
+    }
+
+    .sales-title {
+      font-size: 1.25rem;
+    }
   }
 
   .enterprise-contacts {
