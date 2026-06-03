@@ -300,15 +300,17 @@ import { RELEASES_URL } from "../lib/releases";
               </label>
             </div>
 
-            <fieldset class="sales-checks">
-              <legend class="label-text">What matters to you</legend>
-              <label class="check-item"><input type="checkbox" name="needs" value="Self-hosted in our perimeter" /><span>Self-hosted in our perimeter</span></label>
-              <label class="check-item"><input type="checkbox" name="needs" value="Custom / private models" /><span>Custom or private models</span></label>
-              <label class="check-item"><input type="checkbox" name="needs" value="SSO & granular access" /><span>SSO & granular access</span></label>
-              <label class="check-item"><input type="checkbox" name="needs" value="Integration with internal infra" /><span>Integration with internal infra (repos, DBs, CI, tickets)</span></label>
-              <label class="check-item"><input type="checkbox" name="needs" value="Sandboxed dev environments" /><span>Sandboxed dev environments per engineer</span></label>
-              <label class="check-item"><input type="checkbox" name="needs" value="Spend controls & audit" /><span>Spend controls & full audit</span></label>
-            </fieldset>
+            <div class="sales-group">
+              <span class="label-text">What matters to you</span>
+              <div class="sales-checks">
+                <label class="check-item"><input type="checkbox" name="needs" value="Self-hosted in our perimeter" /><span>Self-hosted in our perimeter</span></label>
+                <label class="check-item"><input type="checkbox" name="needs" value="Custom / private models" /><span>Custom or private models</span></label>
+                <label class="check-item"><input type="checkbox" name="needs" value="SSO & granular access" /><span>SSO & granular access</span></label>
+                <label class="check-item"><input type="checkbox" name="needs" value="Integration with internal infra" /><span>Integration with internal infra (repos, DBs, CI, tickets)</span></label>
+                <label class="check-item"><input type="checkbox" name="needs" value="Sandboxed dev environments" /><span>Sandboxed dev environments per engineer</span></label>
+                <label class="check-item"><input type="checkbox" name="needs" value="Spend controls & audit" /><span>Spend controls & full audit</span></label>
+              </div>
+            </div>
 
             <label>
               <span class="label-text">What do you want to do with Uno Work?</span>
@@ -1058,6 +1060,9 @@ import { RELEASES_URL } from "../lib/releases";
   /* ── Sales dialog ── */
 
   .sales-dialog {
+    position: fixed;
+    inset: 0;
+    margin: auto;
     width: min(580px, calc(100vw - 2rem));
     max-height: calc(100vh - 4rem);
     padding: 0;
@@ -1199,6 +1204,12 @@ import { RELEASES_URL } from "../lib/releases";
     color: var(--text-faint);
   }
 
+  .sales-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
   .sales-checks {
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
@@ -1207,13 +1218,6 @@ import { RELEASES_URL } from "../lib/releases";
     flex-direction: column;
     gap: 0.5rem;
     background: var(--bg-subtle);
-  }
-
-  .sales-checks legend {
-    padding: 0 0.4rem;
-    font-size: 0.78rem;
-    font-weight: 500;
-    color: var(--text);
   }
 
   .check-item {
