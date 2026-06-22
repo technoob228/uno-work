@@ -19,9 +19,11 @@ export interface SelectableModelOption {
 
 export function createModelCapabilities(input: {
   optionDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
+  metadata?: ModelCapabilities["metadata"];
 }): ModelCapabilities {
   return {
     optionDescriptors: input.optionDescriptors.map(cloneDescriptor),
+    ...(input.metadata ? { metadata: input.metadata } : {}),
   };
 }
 

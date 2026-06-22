@@ -5,6 +5,7 @@ import {
   MessageId,
   type OrchestrationEvent,
   type OrchestrationMessage,
+  type OrchestrationSessionErrorClass,
   type OrchestrationProposedPlanId,
   CheckpointRef,
   isToolLifecycleItemType,
@@ -21,6 +22,10 @@ import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import {
+  classifyOrchestrationErrorDetail,
+  normalizeUnoBillingErrorMessage,
+} from "../../provider/unoBilling.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { isGitRepository } from "../../git/Utils.ts";
@@ -35,6 +40,19 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
   CommandId.make(`provider:${event.eventId}:${tag}:${crypto.randomUUID()}`);
+
+function toOrchestrationSessionErrorClass(
+  value: string | undefined,
+  fallback: string,
+): OrchestrationSessionErrorClass {
+  return value === "billing_error" ||
+    value === "provider_error" ||
+    value === "transport_error" ||
+    value === "validation_error" ||
+    value === "unknown"
+    ? value
+    : classifyOrchestrationErrorDetail(fallback);
+}
 
 interface AssistantSegmentState {
   baseKey: string;
@@ -1257,7 +1275,7 @@ const make = Effect.gen(function* () {
               return activeTurnId !== null ? "running" : "ready";
           }
         })();
-        const lastError =
+        const rawLastError =
           event.type === "session.state.changed" && event.payload.state === "error"
             ? (event.payload.reason ?? thread.session?.lastError ?? "Provider session error")
             : event.type === "turn.completed" &&
@@ -1266,6 +1284,9 @@ const make = Effect.gen(function* () {
               : status === "ready"
                 ? null
                 : (thread.session?.lastError ?? null);
+        const lastError = rawLastError ? normalizeUnoBillingErrorMessage(rawLastError) : null;
+        const lastErrorClass =
+          lastError === null ? null : classifyOrchestrationErrorDetail(rawLastError);
 
         if (shouldApplyThreadLifecycle) {
           if (event.type === "turn.started" && acceptedTurnStartedSourcePlan !== null) {
@@ -1302,6 +1323,7 @@ const make = Effect.gen(function* () {
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               activeTurnId: nextActiveTurnId,
               lastError,
+              lastErrorClass,
               updatedAt: now,
             },
             createdAt: now,
@@ -1531,7 +1553,7 @@ const make = Effect.gen(function* () {
       }
 
       if (event.type === "runtime.error") {
-        const runtimeErrorMessage = event.payload.message;
+        const runtimeErrorMessage = normalizeUnoBillingErrorMessage(event.payload.message);
 
         const shouldApplyRuntimeError = !STRICT_PROVIDER_LIFECYCLE_GUARD
           ? true
@@ -1552,6 +1574,10 @@ const make = Effect.gen(function* () {
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               activeTurnId: eventTurnId ?? null,
               lastError: runtimeErrorMessage,
+              lastErrorClass: toOrchestrationSessionErrorClass(
+                event.payload.class,
+                runtimeErrorMessage,
+              ),
               updatedAt: now,
             },
             createdAt: now,

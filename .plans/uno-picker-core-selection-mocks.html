@@ -1,0 +1,1159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Uno Work Model Picker Core Selection Mocks</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f7fa;
+        --panel: #ffffff;
+        --panel-soft: #f8fafc;
+        --panel-blue: #eff6ff;
+        --line: #d9e1ea;
+        --line-strong: #b9c7d8;
+        --text: #20242b;
+        --muted: #687282;
+        --muted-2: #8a94a3;
+        --blue: #2563eb;
+        --blue-soft: #dbeafe;
+        --green: #0f8f65;
+        --green-soft: #dcfce7;
+        --amber: #a15c07;
+        --amber-soft: #fef3c7;
+        --purple: #6d28d9;
+        --purple-soft: #ede9fe;
+        --red: #b91c1c;
+        --red-soft: #fee2e2;
+        --shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+        --radius: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(245, 247, 250, 0.98)),
+          radial-gradient(circle at 12% 4%, rgba(37, 99, 235, 0.12), transparent 330px);
+        color: var(--text);
+        font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+      }
+
+      .page {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 28px 20px 64px;
+      }
+
+      .header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 18px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 24px;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        margin: 6px 0 0;
+        max-width: 780px;
+        color: var(--muted);
+      }
+
+      .jump {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .jump a {
+        height: 30px;
+        display: inline-flex;
+        align-items: center;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #fff;
+        color: var(--muted);
+        text-decoration: none;
+      }
+
+      .variant {
+        margin-top: 18px;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.78);
+        box-shadow: 0 8px 26px rgba(15, 23, 42, 0.06);
+      }
+
+      .variant-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 14px;
+        margin-bottom: 12px;
+      }
+
+      .variant-title h2 {
+        margin: 0;
+        font-size: 17px;
+      }
+
+      .variant-title p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .shell {
+        position: relative;
+        min-height: 680px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: linear-gradient(180deg, #fff, #f8fafc);
+        overflow: hidden;
+      }
+
+      .rail {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 82px;
+        border-right: 1px solid var(--line);
+        background: rgba(248, 250, 252, 0.86);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 18px;
+        padding: 24px 10px;
+      }
+
+      .rail-icon {
+        width: 42px;
+        height: 42px;
+        border-radius: 10px;
+        border: 1px solid transparent;
+        display: grid;
+        place-items: center;
+        color: var(--muted);
+        font-weight: 800;
+        font-size: 18px;
+      }
+
+      .rail-icon.active {
+        color: var(--blue);
+        background: var(--blue-soft);
+        border-color: #9fc0ff;
+        box-shadow: 0 8px 18px rgba(37, 99, 235, 0.16);
+      }
+
+      .chat {
+        margin-left: 82px;
+        min-height: 680px;
+        padding: 24px;
+        display: grid;
+        grid-template-rows: 1fr auto;
+      }
+
+      .msg {
+        width: max-content;
+        max-width: 560px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fff;
+        color: var(--muted);
+        margin-bottom: 10px;
+      }
+
+      .msg.user {
+        margin-left: auto;
+        color: #1d4ed8;
+        background: #eef6ff;
+        border-color: #c9defd;
+      }
+
+      .composer {
+        height: 56px;
+        border: 1px solid var(--line);
+        background: #fff;
+        border-radius: 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 12px;
+        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
+      }
+
+      .composer-model {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 36px;
+        min-width: 236px;
+        padding: 0 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        color: var(--text);
+        font-weight: 720;
+      }
+
+      .composer-input {
+        flex: 1;
+        color: var(--muted-2);
+        font-size: 16px;
+      }
+
+      .picker {
+        position: absolute;
+        top: 40px;
+        left: 122px;
+        width: min(900px, calc(100% - 154px));
+        max-height: 606px;
+        overflow: hidden;
+        border: 1px solid var(--line-strong);
+        border-radius: 18px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .picker.compact {
+        width: min(780px, calc(100% - 154px));
+      }
+
+      .top {
+        padding: 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .searchline {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .search {
+        height: 44px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 14px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fff;
+        color: var(--muted-2);
+        font-size: 18px;
+      }
+
+      .select,
+      .button,
+      .chip,
+      .tier {
+        height: 34px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
+      .select {
+        min-width: 176px;
+        justify-content: space-between;
+        color: var(--text);
+        font-weight: 720;
+      }
+
+      .select.provider {
+        min-width: 210px;
+        border-color: #9fc0ff;
+        background: var(--blue-soft);
+        color: #1d4ed8;
+      }
+
+      .button.primary {
+        background: var(--blue);
+        color: #fff;
+        border-color: var(--blue);
+        font-weight: 800;
+      }
+
+      .button.strong {
+        background: var(--blue-soft);
+        color: #1d4ed8;
+        border-color: #9fc0ff;
+        font-weight: 800;
+      }
+
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+        margin-top: 12px;
+      }
+
+      .tier {
+        border-color: transparent;
+        background: transparent;
+      }
+
+      .tier.active {
+        border-color: var(--line);
+        background: #eef2f7;
+        color: var(--text);
+        font-weight: 800;
+      }
+
+      .chip {
+        height: 30px;
+        padding: 0 10px;
+        font-size: 13px;
+      }
+
+      .chip.active {
+        border-color: #9fc0ff;
+        background: var(--blue-soft);
+        color: #1d4ed8;
+        font-weight: 800;
+      }
+
+      .chip.green {
+        border-color: #9be5c4;
+        background: var(--green-soft);
+        color: var(--green);
+        font-weight: 800;
+      }
+
+      .chip.amber {
+        border-color: #f7cf73;
+        background: var(--amber-soft);
+        color: var(--amber);
+        font-weight: 800;
+      }
+
+      .active-strip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--line);
+        background: linear-gradient(90deg, rgba(219, 234, 254, 0.86), rgba(255, 255, 255, 0));
+      }
+
+      .active-label {
+        font-size: 12px;
+        font-weight: 900;
+        color: #1d4ed8;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .clear {
+        margin-left: auto;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .models {
+        max-height: 420px;
+        overflow: auto;
+        padding: 10px;
+      }
+
+      .model-row {
+        display: grid;
+        grid-template-columns: minmax(250px, 1fr) 176px 120px 122px;
+        align-items: center;
+        gap: 10px;
+        min-height: 72px;
+        padding: 10px 12px;
+        border: 1px solid transparent;
+        border-radius: 12px;
+      }
+
+      .model-row.header-row {
+        min-height: 34px;
+        color: var(--muted);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-weight: 800;
+        background: var(--panel-soft);
+        border-color: var(--line);
+        position: sticky;
+        top: 0;
+        z-index: 2;
+      }
+
+      .model-row + .model-row {
+        margin-top: 4px;
+      }
+
+      .model-row:not(.header-row):hover,
+      .model-row.selected {
+        border-color: var(--line);
+        background: var(--panel-soft);
+      }
+
+      .model-row.selected {
+        border-color: #9fc0ff;
+        background: #f0f6ff;
+      }
+
+      .model-name {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-weight: 850;
+      }
+
+      .family {
+        color: var(--muted);
+        margin-top: 4px;
+        font-size: 13px;
+      }
+
+      .logo {
+        width: 26px;
+        height: 26px;
+        border-radius: 7px;
+        display: grid;
+        place-items: center;
+        color: #fff;
+        font-weight: 900;
+        font-size: 12px;
+        flex: 0 0 auto;
+      }
+
+      .openai {
+        background: #111827;
+      }
+
+      .anthropic {
+        background: #d97706;
+      }
+
+      .google {
+        background: #16a34a;
+      }
+
+      .openrouter {
+        background: #0ea5e9;
+      }
+
+      .xai {
+        background: #4b5563;
+      }
+
+      .uno {
+        background: #5b5ce2;
+      }
+
+      .cap-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+      }
+
+      .cap {
+        min-height: 42px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        display: grid;
+        place-items: center;
+        padding: 5px;
+        color: var(--muted);
+        background: #fff;
+        text-align: center;
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .cap.yes {
+        border-color: #9be5c4;
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .cap.warn {
+        border-color: #f7cf73;
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+
+      .cap.no {
+        background: #f8fafc;
+        color: #a3acb8;
+      }
+
+      .badge {
+        height: 24px;
+        display: inline-flex;
+        align-items: center;
+        padding: 0 8px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        background: #fff;
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      .badge.frontier {
+        border-color: #d8b4fe;
+        background: var(--purple-soft);
+        color: var(--purple);
+      }
+
+      .badge.strong {
+        border-color: #9fc0ff;
+        background: var(--blue-soft);
+        color: #1d4ed8;
+      }
+
+      .badge.average {
+        border-color: #cbd5e1;
+        background: #f8fafc;
+        color: #475569;
+      }
+
+      .price {
+        color: var(--text);
+        font-weight: 850;
+      }
+
+      .price small {
+        display: block;
+        color: var(--muted);
+        font-weight: 600;
+        margin-top: 3px;
+      }
+
+      .chev {
+        width: 12px;
+        height: 12px;
+        border-right: 2px solid currentColor;
+        border-bottom: 2px solid currentColor;
+        transform: rotate(45deg);
+        margin-top: -4px;
+        opacity: 0.65;
+      }
+
+      .note {
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--line);
+        background: #fff;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .note strong {
+        color: var(--text);
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 250px 1fr;
+        min-height: 520px;
+      }
+
+      .side {
+        border-right: 1px solid var(--line);
+        padding: 12px;
+        background: var(--panel-soft);
+      }
+
+      .side-title {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin: 0 0 8px;
+      }
+
+      .side-card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fff;
+        padding: 10px;
+        margin-bottom: 10px;
+      }
+
+      .side-row {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-height: 38px;
+        border-radius: 9px;
+        padding: 6px 8px;
+        color: var(--text);
+      }
+
+      .side-row.selected {
+        background: var(--blue-soft);
+        color: #1d4ed8;
+        font-weight: 850;
+      }
+
+      .side-count {
+        margin-left: auto;
+        color: var(--muted-2);
+        font-size: 12px;
+      }
+
+      .cards {
+        padding: 12px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        overflow: auto;
+        max-height: 430px;
+      }
+
+      .model-card {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: #fff;
+        padding: 12px;
+      }
+
+      .model-card.selected {
+        border-color: #9fc0ff;
+        background: #f0f6ff;
+      }
+
+      .card-top {
+        display: flex;
+        gap: 9px;
+        align-items: flex-start;
+        justify-content: space-between;
+      }
+
+      .card-name {
+        font-weight: 900;
+        margin-bottom: 3px;
+      }
+
+      .card-provider {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .cap-list {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+        margin-top: 12px;
+      }
+
+      .card-price {
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+        display: flex;
+        justify-content: space-between;
+        color: var(--muted);
+      }
+
+      .card-price strong {
+        color: var(--text);
+      }
+
+      .preset-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+      }
+
+      .preset {
+        height: 34px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #fff;
+        color: var(--muted);
+        font-weight: 750;
+      }
+
+      .preset.active {
+        border-color: #9fc0ff;
+        background: var(--blue-soft);
+        color: #1d4ed8;
+      }
+
+      .compact .model-row {
+        grid-template-columns: minmax(260px, 1fr) 174px 98px;
+      }
+
+      .compact .hide-compact {
+        display: none;
+      }
+
+      @media (max-width: 900px) {
+        .header,
+        .variant-title {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .rail {
+          display: none;
+        }
+
+        .chat {
+          margin-left: 0;
+          padding: 12px;
+        }
+
+        .picker,
+        .picker.compact {
+          left: 12px;
+          right: 12px;
+          width: auto;
+        }
+
+        .searchline,
+        .split {
+          grid-template-columns: 1fr;
+        }
+
+        .side {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .cards {
+          grid-template-columns: 1fr;
+        }
+
+        .model-row,
+        .compact .model-row {
+          grid-template-columns: 1fr;
+        }
+
+        .model-row.header-row {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <div class="header">
+        <div>
+          <h1>Core model picker mocks</h1>
+          <p class="subtitle">
+            These versions optimize for the key questions: model capabilities, provider, model
+            family, tier, and estimated request price.
+          </p>
+        </div>
+        <nav class="jump" aria-label="Mock variants">
+          <a href="#variant-a">A Table</a>
+          <a href="#variant-b">B Cards</a>
+          <a href="#variant-c">C Task-first</a>
+        </nav>
+      </div>
+
+      <section id="variant-a" class="variant">
+        <div class="variant-title">
+          <h2>A. Comparison table</h2>
+          <p>Best when users compare capabilities and price directly.</p>
+        </div>
+        <div class="shell">
+          <aside class="rail">
+            <div class="rail-icon">C</div>
+            <div class="rail-icon">O</div>
+            <div class="rail-icon active">U</div>
+            <div class="rail-icon">G</div>
+          </aside>
+          <section class="chat">
+            <div>
+              <div class="msg">I need Claude or Gemini, but it must accept screenshots.</div>
+              <div class="msg user">Also show me what one request roughly costs.</div>
+            </div>
+            <div class="composer">
+              <span class="composer-model"><span class="logo google">G</span> Google · Gemini 2.5 Pro</span>
+              <span class="composer-input">Ask Uno Work...</span>
+            </div>
+          </section>
+
+          <div class="picker">
+            <div class="top">
+              <div class="searchline">
+                <div class="search">Search models, e.g. Gemini, Claude, GPT...</div>
+                <div class="select provider">Provider: Any <span class="chev"></span></div>
+                <div class="select">Family: Any <span class="chev"></span></div>
+              </div>
+              <div class="toolbar">
+                <span class="tier active">All tiers</span>
+                <span class="tier">Frontier</span>
+                <span class="tier">Strong</span>
+                <span class="tier">Average</span>
+                <span style="flex: 1"></span>
+                <span class="select">Sort: Recommended <span class="chev"></span></span>
+              </div>
+            </div>
+            <div class="active-strip">
+              <span class="active-label">Capabilities</span>
+              <span class="chip green">Tools</span>
+              <span class="chip active">Image input</span>
+              <span class="chip">Image generation</span>
+              <span class="clear">Show all models</span>
+            </div>
+            <div class="note">
+              Price estimate uses <strong>medium request</strong>: 8k input tokens + 2k output tokens.
+            </div>
+            <div class="models">
+              <div class="model-row header-row">
+                <div>Provider and model</div>
+                <div>Capabilities</div>
+                <div>Tier</div>
+                <div>Est. price</div>
+              </div>
+              <div class="model-row selected">
+                <div>
+                  <div class="model-name"><span class="logo google">G</span> Gemini 2.5 Pro</div>
+                  <div class="family">Google · Gemini family</div>
+                </div>
+                <div class="cap-grid">
+                  <div class="cap yes">Tools</div>
+                  <div class="cap yes">Image input</div>
+                  <div class="cap no">Image gen</div>
+                </div>
+                <div><span class="badge frontier">Frontier</span></div>
+                <div class="price">~$0.035<small>medium request</small></div>
+              </div>
+              <div class="model-row">
+                <div>
+                  <div class="model-name"><span class="logo anthropic">A</span> Claude Sonnet 4.5</div>
+                  <div class="family">Anthropic · Claude family</div>
+                </div>
+                <div class="cap-grid">
+                  <div class="cap yes">Tools</div>
+                  <div class="cap yes">Image input</div>
+                  <div class="cap no">Image gen</div>
+                </div>
+                <div><span class="badge frontier">Frontier</span></div>
+                <div class="price">~$0.054<small>medium request</small></div>
+              </div>
+              <div class="model-row">
+                <div>
+                  <div class="model-name"><span class="logo openai">O</span> GPT-5</div>
+                  <div class="family">OpenAI · GPT family</div>
+                </div>
+                <div class="cap-grid">
+                  <div class="cap yes">Tools</div>
+                  <div class="cap yes">Image input</div>
+                  <div class="cap warn">Image gen via tool</div>
+                </div>
+                <div><span class="badge frontier">Frontier</span></div>
+                <div class="price">~$0.045<small>medium request</small></div>
+              </div>
+              <div class="model-row">
+                <div>
+                  <div class="model-name"><span class="logo openai">I</span> GPT Image</div>
+                  <div class="family">OpenAI · Image generation</div>
+                </div>
+                <div class="cap-grid">
+                  <div class="cap no">Tools</div>
+                  <div class="cap yes">Image input</div>
+                  <div class="cap yes">Image gen</div>
+                </div>
+                <div><span class="badge strong">Image</span></div>
+                <div class="price">~$0.040<small>per image</small></div>
+              </div>
+              <div class="model-row">
+                <div>
+                  <div class="model-name"><span class="logo xai">X</span> Grok 4</div>
+                  <div class="family">xAI · Grok family</div>
+                </div>
+                <div class="cap-grid">
+                  <div class="cap yes">Tools</div>
+                  <div class="cap warn">Unknown</div>
+                  <div class="cap no">Image gen</div>
+                </div>
+                <div><span class="badge strong">Strong</span></div>
+                <div class="price">~$0.030<small>medium request</small></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="variant-b" class="variant">
+        <div class="variant-title">
+          <h2>B. Capability cards</h2>
+          <p>Best when we want the important capabilities to be readable without scanning columns.</p>
+        </div>
+        <div class="shell">
+          <aside class="rail">
+            <div class="rail-icon">C</div>
+            <div class="rail-icon">O</div>
+            <div class="rail-icon active">U</div>
+            <div class="rail-icon">G</div>
+          </aside>
+          <section class="chat">
+            <div>
+              <div class="msg">Give me a model that can use tools and read images.</div>
+            </div>
+            <div class="composer">
+              <span class="composer-model"><span class="logo anthropic">A</span> Claude · Sonnet</span>
+              <span class="composer-input">Ask Uno Work...</span>
+            </div>
+          </section>
+
+          <div class="picker">
+            <div class="top">
+              <div class="searchline">
+                <div class="search">Search by provider or model family...</div>
+                <div class="select provider">Provider: Anthropic <span class="chev"></span></div>
+                <div class="select">Family: Claude <span class="chev"></span></div>
+              </div>
+              <div class="toolbar">
+                <span class="tier">All</span>
+                <span class="tier active">Frontier</span>
+                <span class="tier">Strong</span>
+                <span class="tier">Average</span>
+                <span style="flex: 1"></span>
+                <span class="button strong">Price estimate: Medium</span>
+              </div>
+            </div>
+            <div class="split">
+              <aside class="side">
+                <p class="side-title">Provider</p>
+                <div class="side-card">
+                  <div class="side-row"><span class="logo uno">U</span> Any provider <span class="side-count">143</span></div>
+                  <div class="side-row selected"><span class="logo anthropic">A</span> Anthropic <span class="side-count">8</span></div>
+                  <div class="side-row"><span class="logo google">G</span> Google <span class="side-count">9</span></div>
+                  <div class="side-row"><span class="logo openai">O</span> OpenAI <span class="side-count">18</span></div>
+                  <div class="side-row"><span class="logo openrouter">R</span> OpenRouter <span class="side-count">94</span></div>
+                </div>
+                <p class="side-title">Must have</p>
+                <div class="side-card">
+                  <div class="chip green">Tools</div>
+                  <div class="chip active" style="margin-left: 6px">Image input</div>
+                  <div style="height: 8px"></div>
+                  <div class="chip">Image generation</div>
+                </div>
+                <p class="side-title">Tier</p>
+                <div class="side-card">
+                  <div class="chip active">Frontier</div>
+                  <div class="chip">Strong</div>
+                  <div class="chip">Average</div>
+                </div>
+              </aside>
+              <div>
+                <div class="active-strip">
+                  <span class="active-label">Selected filters</span>
+                  <span class="chip active">Anthropic</span>
+                  <span class="chip active">Claude</span>
+                  <span class="chip green">Tools</span>
+                  <span class="chip active">Image input</span>
+                  <span class="clear">Clear</span>
+                </div>
+                <div class="cards">
+                  <div class="model-card selected">
+                    <div class="card-top">
+                      <div>
+                        <div class="model-name"><span class="logo anthropic">A</span> Claude Sonnet 4.5</div>
+                        <div class="card-provider">Anthropic · Claude family</div>
+                      </div>
+                      <span class="badge frontier">Frontier</span>
+                    </div>
+                    <div class="cap-list">
+                      <div class="cap yes">Tools</div>
+                      <div class="cap yes">Image input</div>
+                      <div class="cap no">Image gen</div>
+                    </div>
+                    <div class="card-price"><span>Medium request</span><strong>~$0.054</strong></div>
+                  </div>
+                  <div class="model-card">
+                    <div class="card-top">
+                      <div>
+                        <div class="model-name"><span class="logo anthropic">A</span> Claude Opus</div>
+                        <div class="card-provider">Anthropic · Claude family</div>
+                      </div>
+                      <span class="badge frontier">Frontier</span>
+                    </div>
+                    <div class="cap-list">
+                      <div class="cap yes">Tools</div>
+                      <div class="cap yes">Image input</div>
+                      <div class="cap no">Image gen</div>
+                    </div>
+                    <div class="card-price"><span>Medium request</span><strong>~$0.180</strong></div>
+                  </div>
+                  <div class="model-card">
+                    <div class="card-top">
+                      <div>
+                        <div class="model-name"><span class="logo openrouter">R</span> Claude via Router</div>
+                        <div class="card-provider">OpenRouter · Claude family</div>
+                      </div>
+                      <span class="badge frontier">Frontier</span>
+                    </div>
+                    <div class="cap-list">
+                      <div class="cap yes">Tools</div>
+                      <div class="cap yes">Image input</div>
+                      <div class="cap no">Image gen</div>
+                    </div>
+                    <div class="card-price"><span>Medium request</span><strong>~$0.058</strong></div>
+                  </div>
+                  <div class="model-card">
+                    <div class="card-top">
+                      <div>
+                        <div class="model-name"><span class="logo anthropic">A</span> Claude Haiku</div>
+                        <div class="card-provider">Anthropic · Claude family</div>
+                      </div>
+                      <span class="badge strong">Strong</span>
+                    </div>
+                    <div class="cap-list">
+                      <div class="cap yes">Tools</div>
+                      <div class="cap yes">Image input</div>
+                      <div class="cap no">Image gen</div>
+                    </div>
+                    <div class="card-price"><span>Medium request</span><strong>~$0.009</strong></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="variant-c" class="variant">
+        <div class="variant-title">
+          <h2>C. Task-first capability presets</h2>
+          <p>Best if the first question is capability: tools, image input, or image generation.</p>
+        </div>
+        <div class="shell">
+          <aside class="rail">
+            <div class="rail-icon">C</div>
+            <div class="rail-icon">O</div>
+            <div class="rail-icon active">U</div>
+            <div class="rail-icon">G</div>
+          </aside>
+          <section class="chat">
+            <div>
+              <div class="msg">Need a model for image generation, but show chat models too.</div>
+            </div>
+            <div class="composer">
+              <span class="composer-model"><span class="logo openai">I</span> GPT Image</span>
+              <span class="composer-input">Ask Uno Work...</span>
+            </div>
+          </section>
+
+          <div class="picker compact">
+            <div class="top">
+              <div class="searchline" style="grid-template-columns: 1fr auto">
+                <div class="search">Search models...</div>
+                <div class="select provider">Provider: Any <span class="chev"></span></div>
+              </div>
+              <div class="preset-row">
+                <span class="preset">Coding + tools</span>
+                <span class="preset">Read images</span>
+                <span class="preset active">Generate images</span>
+                <span class="preset">Cheapest strong</span>
+              </div>
+              <div class="toolbar">
+                <span class="tier active">All tiers</span>
+                <span class="tier">Frontier</span>
+                <span class="tier">Strong</span>
+                <span class="tier">Average</span>
+                <span style="flex: 1"></span>
+                <span class="select">Family: Any <span class="chev"></span></span>
+              </div>
+            </div>
+            <div class="active-strip">
+              <span class="active-label">Need</span>
+              <span class="chip active">Image generation</span>
+              <span class="chip amber">May require image model/tool</span>
+              <span class="clear">Clear</span>
+            </div>
+            <div class="note">
+              Separate capability: <strong>Image input</strong> means the model can read images.
+              <strong>Image generation</strong> means it can create images or route to an image tool.
+            </div>
+            <div class="models">
+              <div class="model-row header-row">
+                <div>Provider and model</div>
+                <div>Capabilities</div>
+                <div>Est. price</div>
+              </div>
+              <div class="model-row selected">
+                <div>
+                  <div class="model-name"><span class="logo openai">I</span> GPT Image</div>
+                  <div class="family">OpenAI · Image generation</div>
+                </div>
+                <div class="cap-grid">
+                  <div class="cap no">Tools</div>
+                  <div class="cap yes">Image input</div>
+                  <div class="cap yes">Image gen</div>
+                </div>
+                <div class="price">~$0.040<small>per image</small></div>
+              </div>
+              <div class="model-row">
+                <div>
+                  <div class="model-name"><span class="logo openai">O</span> GPT-5</div>
+                  <div class="family">OpenAI · GPT family</div>
+                </div>
+                <div class="cap-grid">
+                  <div class="cap yes">Tools</div>
+                  <div class="cap yes">Image input</div>
+                  <div class="cap warn">Image gen via tool</div>
+                </div>
+                <div class="price">~$0.045<small>medium request</small></div>
+              </div>
+              <div class="model-row">
+                <div>
+                  <div class="model-name"><span class="logo google">G</span> Gemini Image</div>
+                  <div class="family">Google · Gemini family</div>
+                </div>
+                <div class="cap-grid">
+                  <div class="cap no">Tools</div>
+                  <div class="cap yes">Image input</div>
+                  <div class="cap yes">Image gen</div>
+                </div>
+                <div class="price">~$0.030<small>per image</small></div>
+              </div>
+              <div class="model-row">
+                <div>
+                  <div class="model-name"><span class="logo google">G</span> Gemini 2.5 Pro</div>
+                  <div class="family">Google · Gemini family</div>
+                </div>
+                <div class="cap-grid">
+                  <div class="cap yes">Tools</div>
+                  <div class="cap yes">Image input</div>
+                  <div class="cap no">Image gen</div>
+                </div>
+                <div class="price">~$0.035<small>medium request</small></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

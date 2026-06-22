@@ -71,6 +71,7 @@ export interface WsRpcClient {
   readonly filesystem: {
     readonly browse: RpcUnaryMethod<typeof WS_METHODS.filesystemBrowse>;
     readonly readFile: RpcUnaryMethod<typeof WS_METHODS.filesystemReadFile>;
+    readonly watchFile: RpcInputStreamMethod<typeof WS_METHODS.subscribeFileChanges>;
   };
   readonly sourceControl: {
     readonly lookupRepository: RpcUnaryMethod<typeof WS_METHODS.sourceControlLookupRepository>;
@@ -128,6 +129,14 @@ export interface WsRpcClient {
     readonly discoverSourceControl: RpcUnaryNoArgMethod<
       typeof WS_METHODS.serverDiscoverSourceControl
     >;
+    readonly createUnoLlmTopUpAction: RpcUnaryMethod<typeof WS_METHODS.unoCreateLlmTopUpAction>;
+    readonly createUnoVideoUpload: RpcUnaryMethod<typeof WS_METHODS.unoVideoCreateUpload>;
+    readonly completeUnoVideoUpload: RpcUnaryMethod<typeof WS_METHODS.unoVideoCompleteUpload>;
+    readonly createUnoVideoJob: RpcUnaryMethod<typeof WS_METHODS.unoVideoCreateJob>;
+    readonly getUnoVideoJob: RpcUnaryMethod<typeof WS_METHODS.unoVideoGetJob>;
+    readonly cancelUnoVideoJob: RpcUnaryMethod<typeof WS_METHODS.unoVideoCancelJob>;
+    readonly getUnoVideoDigest: RpcUnaryMethod<typeof WS_METHODS.unoVideoGetDigest>;
+    readonly packUnoVideoDigest: RpcUnaryMethod<typeof WS_METHODS.unoVideoPackDigest>;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
     readonly subscribeAuthAccess: RpcStreamMethod<typeof WS_METHODS.subscribeAuthAccess>;
@@ -138,6 +147,9 @@ export interface WsRpcClient {
     readonly getFullThreadDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getFullThreadDiff>;
     readonly subscribeShell: RpcStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeShell>;
     readonly subscribeThread: RpcInputStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeThread>;
+  };
+  readonly browser: {
+    readonly subscribeBridge: RpcStreamMethod<typeof WS_METHODS.subscribeBrowserBridge>;
   };
 }
 
@@ -171,6 +183,11 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       browse: (input) => transport.request((client) => client[WS_METHODS.filesystemBrowse](input)),
       readFile: (input) =>
         transport.request((client) => client[WS_METHODS.filesystemReadFile](input)),
+      watchFile: (input, listener, options) =>
+        transport.subscribe((client) => client[WS_METHODS.subscribeFileChanges](input), listener, {
+          ...options,
+          tag: WS_METHODS.subscribeFileChanges,
+        }),
     },
     sourceControl: {
       lookupRepository: (input) =>
@@ -244,6 +261,22 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.serverUpdateSettings]({ patch })),
       discoverSourceControl: () =>
         transport.request((client) => client[WS_METHODS.serverDiscoverSourceControl]({})),
+      createUnoLlmTopUpAction: (input) =>
+        transport.request((client) => client[WS_METHODS.unoCreateLlmTopUpAction](input)),
+      createUnoVideoUpload: (input) =>
+        transport.request((client) => client[WS_METHODS.unoVideoCreateUpload](input)),
+      completeUnoVideoUpload: (input) =>
+        transport.request((client) => client[WS_METHODS.unoVideoCompleteUpload](input)),
+      createUnoVideoJob: (input) =>
+        transport.request((client) => client[WS_METHODS.unoVideoCreateJob](input)),
+      getUnoVideoJob: (input) =>
+        transport.request((client) => client[WS_METHODS.unoVideoGetJob](input)),
+      cancelUnoVideoJob: (input) =>
+        transport.request((client) => client[WS_METHODS.unoVideoCancelJob](input)),
+      getUnoVideoDigest: (input) =>
+        transport.request((client) => client[WS_METHODS.unoVideoGetDigest](input)),
+      packUnoVideoDigest: (input) =>
+        transport.request((client) => client[WS_METHODS.unoVideoPackDigest](input)),
       subscribeConfig: (listener, options) =>
         transport.subscribe((client) => client[WS_METHODS.subscribeServerConfig]({}), listener, {
           ...options,
@@ -279,6 +312,13 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
           listener,
           { ...options, tag: ORCHESTRATION_WS_METHODS.subscribeThread },
         ),
+    },
+    browser: {
+      subscribeBridge: (listener, options) =>
+        transport.subscribe((client) => client[WS_METHODS.subscribeBrowserBridge]({}), listener, {
+          ...options,
+          tag: WS_METHODS.subscribeBrowserBridge,
+        }),
     },
   };
 }

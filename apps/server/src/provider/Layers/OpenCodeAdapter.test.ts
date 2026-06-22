@@ -25,6 +25,7 @@ import {
   appendOpenCodeAssistantTextDelta,
   makeOpenCodeAdapter,
   mergeOpenCodeAssistantText,
+  visibleUnoAssistantTextFromRaw,
 } from "./OpenCodeAdapter.ts";
 
 // Test-local service tag so the rest of the file can keep using `yield* OpenCodeAdapter`.
@@ -389,6 +390,54 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect(
+    "clears active turn state when interrupting a turn without an OpenCode idle event",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* OpenCodeAdapter;
+        const threadId = asThreadId("thread-interrupt-without-idle");
+        const eventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.threadId === threadId),
+          Stream.take(4),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+
+        yield* adapter.startSession({
+          provider: ProviderDriverKind.make("opencode"),
+          threadId,
+          runtimeMode: "full-access",
+        });
+        const { turnId } = yield* adapter.sendTurn({
+          threadId,
+          input: "Stop me",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("opencode"),
+            model: "openai/gpt-5",
+          },
+        });
+
+        let sessions = yield* adapter.listSessions();
+        let session = sessions.find((entry) => entry.threadId === threadId);
+        assert.equal(session?.status, "running");
+        assert.equal(session?.activeTurnId, turnId);
+
+        yield* adapter.interruptTurn(threadId, turnId);
+        sessions = yield* adapter.listSessions();
+        session = sessions.find((entry) => entry.threadId === threadId);
+
+        assert.equal(session?.status, "ready");
+        assert.equal(session?.activeTurnId, undefined);
+        assert.deepEqual(runtimeMock.state.abortCalls, ["http://127.0.0.1:9999/session"]);
+
+        const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+        assert.deepEqual(
+          events.map((event) => event.type),
+          ["session.started", "thread.started", "turn.started", "turn.aborted"],
+        );
+      }),
+  );
+
   it.effect("passes agent and variant options for the adapter's bound custom instance id", () => {
     const customInstanceId = ProviderInstanceId.make("opencode_zen");
     const adapterLayer = Layer.effect(
@@ -437,6 +486,98 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         variant: "high",
         parts: [{ type: "text", text: "Fix it" }],
       });
+    }).pipe(Effect.provide(adapterLayer));
+  });
+
+  it.effect("adds a final-answer marker instruction for Uno Kimi turns", () => {
+    const unoInstanceId = ProviderInstanceId.make("uno");
+    const adapterLayer = Layer.effect(
+      OpenCodeAdapter,
+      Effect.gen(function* () {
+        return yield* makeOpenCodeAdapter(openCodeAdapterTestSettings, {
+          instanceId: unoInstanceId,
+        });
+      }),
+    ).pipe(
+      Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(providerSessionDirectoryTestLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    return Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-uno-kimi-marker");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId,
+        input: "Проверь статус",
+        modelSelection: createModelSelection(unoInstanceId, "uno/moonshotai/kimi-k2.6"),
+      });
+
+      assert.deepEqual(runtimeMock.state.promptCalls.at(-1), {
+        sessionID: "http://127.0.0.1:9999/session",
+        model: {
+          providerID: "uno",
+          modelID: "moonshotai/kimi-k2.6",
+        },
+        parts: [
+          {
+            type: "text",
+            text: [
+              "For this turn, do not include internal reasoning in the user-visible answer.",
+              "Begin the final user-visible answer with <uno_final_answer> on its own line.",
+              "Do not write anything user-visible before that marker.",
+              "",
+              "Проверь статус",
+            ].join("\n"),
+          },
+        ],
+      });
+    }).pipe(Effect.provide(adapterLayer));
+  });
+
+  it.effect("routes Uno image-generation models outside OpenCode promptAsync", () => {
+    const unoInstanceId = ProviderInstanceId.make("uno");
+    const adapterLayer = Layer.effect(
+      OpenCodeAdapter,
+      Effect.gen(function* () {
+        return yield* makeOpenCodeAdapter(openCodeAdapterTestSettings, {
+          instanceId: unoInstanceId,
+        });
+      }),
+    ).pipe(
+      Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(providerSessionDirectoryTestLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    return Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("uno"),
+        threadId: asThreadId("thread-uno-image-generation"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: asThreadId("thread-uno-image-generation"),
+        input: "сделай картинку буэнос айреса район палермо летом",
+        modelSelection: createModelSelection(unoInstanceId, "uno/openai/gpt-image-1"),
+      });
+      yield* sleep(10);
+
+      assert.equal(runtimeMock.state.promptCalls.length, 0);
+      const [session] = yield* adapter.listSessions();
+      assert.equal(session?.lastError, "Uno API key is missing.");
     }).pipe(Effect.provide(adapterLayer));
   });
 
@@ -577,6 +718,30 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       );
       assert.equal(secondUpdate.latestText, "Hello world!");
     }),
+  );
+
+  it.effect(
+    "extracts visible Uno answers after the final-answer marker or Kimi-style preamble",
+    () =>
+      Effect.sync(() => {
+        assert.equal(
+          visibleUnoAssistantTextFromRaw(
+            [
+              "The user is asking for an update. I should answer directly.",
+              "<uno_final_answer>",
+              "Понял, проверяю.",
+            ].join("\n"),
+          ),
+          "Понял, проверяю.",
+        );
+
+        assert.equal(
+          visibleUnoAssistantTextFromRaw(
+            "The user is reacting to my previous answer. I should clarify. Use bash tool with loops.Понял, давай проверим.",
+          ),
+          "Понял, давай проверим.",
+        );
+      }),
   );
 
   it.effect("writes provider-native observability records using the session thread id", () =>

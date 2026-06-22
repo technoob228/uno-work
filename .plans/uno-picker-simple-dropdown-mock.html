@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Uno Work Model Picker - Simple Dropdown Mock</title>
+    <style>
+      :root {
+        --bg: #f7f7f6;
+        --panel: #ffffff;
+        --line: #dededb;
+        --line-strong: #c9c9c4;
+        --text: #20201f;
+        --muted: #70706c;
+        --soft: #f1f1ef;
+        --soft-2: #e9e9e5;
+        --accent: #6257e8;
+        --accent-soft: #eceafe;
+        --green: #1e8a52;
+        --green-soft: #e8f6ee;
+        --amber: #9a6a08;
+        --amber-soft: #fff5d9;
+        --red: #b93a2d;
+        --red-soft: #fdebe8;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(1120px, calc(100vw - 40px));
+        margin: 36px auto;
+      }
+
+      .note {
+        margin: 0 0 14px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .picker {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+        box-shadow:
+          0 24px 80px rgba(22, 22, 20, 0.1),
+          0 2px 8px rgba(22, 22, 20, 0.05);
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+        padding: 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .search {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 10px;
+        height: 48px;
+        padding: 0 14px;
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        background: #fff;
+        color: var(--muted);
+        font-size: 18px;
+      }
+
+      .search svg {
+        width: 22px;
+        height: 22px;
+        flex: 0 0 auto;
+        color: #9b9b96;
+      }
+
+      .selected {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 240px;
+        height: 48px;
+        padding: 0 14px;
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        background: var(--soft);
+        color: var(--text);
+        font-weight: 650;
+      }
+
+      .filters {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--line);
+        background: #fbfbfa;
+      }
+
+      .dropdown {
+        position: relative;
+        min-width: 0;
+      }
+
+      .dropdown-button {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        width: 100%;
+        height: 44px;
+        padding: 0 12px;
+        border: 1px solid var(--line-strong);
+        border-radius: 11px;
+        background: #fff;
+        color: var(--text);
+        font: inherit;
+        text-align: left;
+      }
+
+      .dropdown.active .dropdown-button {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+        box-shadow: 0 0 0 3px rgba(98, 87, 232, 0.12);
+      }
+
+      .label {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0;
+        line-height: 1.1;
+        text-transform: uppercase;
+      }
+
+      .value {
+        display: block;
+        overflow: hidden;
+        margin-top: 2px;
+        color: var(--text);
+        font-size: 15px;
+        font-weight: 650;
+        line-height: 1.15;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .chev {
+        width: 9px;
+        height: 9px;
+        flex: 0 0 auto;
+        border-right: 1.7px solid #6f6f6a;
+        border-bottom: 1.7px solid #6f6f6a;
+        transform: rotate(45deg) translateY(-2px);
+      }
+
+      .menu {
+        position: absolute;
+        z-index: 5;
+        top: calc(100% + 8px);
+        left: 0;
+        width: min(320px, 88vw);
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        background: #fff;
+        box-shadow:
+          0 18px 48px rgba(30, 30, 28, 0.14),
+          0 2px 8px rgba(30, 30, 28, 0.06);
+      }
+
+      .menu.right {
+        right: 0;
+        left: auto;
+      }
+
+      .option {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 10px;
+        align-items: center;
+        min-height: 38px;
+        padding: 8px 10px;
+        border-radius: 9px;
+      }
+
+      .option:hover,
+      .option.active {
+        background: var(--soft);
+      }
+
+      .check {
+        display: grid;
+        width: 18px;
+        height: 18px;
+        place-items: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 5px;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .option.active .check {
+        border-color: var(--accent);
+        background: var(--accent);
+      }
+
+      .option-title {
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      .option-sub {
+        margin-top: 2px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .count {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .content {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+
+      .summary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--line);
+        background: #fff;
+      }
+
+      .summary-title {
+        margin-right: 2px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 28px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--soft);
+        color: #4d4d49;
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .pill.accent {
+        border-color: rgba(98, 87, 232, 0.25);
+        background: var(--accent-soft);
+        color: #4036b7;
+      }
+
+      .models {
+        display: grid;
+        gap: 0;
+      }
+
+      .head,
+      .row {
+        display: grid;
+        grid-template-columns: minmax(260px, 1.4fr) minmax(280px, 1fr) 120px 150px;
+        gap: 16px;
+        align-items: center;
+        padding: 12px 16px;
+      }
+
+      .head {
+        border-bottom: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .row {
+        min-height: 84px;
+        border-bottom: 1px solid var(--line);
+        background: #fff;
+      }
+
+      .row:hover {
+        background: #fbfbff;
+      }
+
+      .row.selected-row {
+        background: #f5f4ff;
+        box-shadow: inset 3px 0 0 var(--accent);
+      }
+
+      .model {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .logo {
+        display: grid;
+        width: 36px;
+        height: 36px;
+        flex: 0 0 auto;
+        place-items: center;
+        border-radius: 10px;
+        color: #fff;
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .google {
+        background: #3174f0;
+      }
+
+      .anthropic {
+        background: #c86f4d;
+      }
+
+      .openai {
+        background: #151515;
+      }
+
+      .router {
+        background: #655cf0;
+      }
+
+      .groq {
+        background: #e15b35;
+      }
+
+      .model-title {
+        overflow: hidden;
+        color: var(--text);
+        font-size: 15px;
+        font-weight: 760;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .model-sub {
+        overflow: hidden;
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 13px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .caps {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .cap {
+        display: inline-flex;
+        align-items: center;
+        min-height: 26px;
+        padding: 0 8px;
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .yes {
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .warn {
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+
+      .no {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .tier {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: max-content;
+        min-width: 78px;
+        min-height: 30px;
+        padding: 0 10px;
+        border-radius: 999px;
+        background: #eeeeeb;
+        font-size: 13px;
+        font-weight: 760;
+      }
+
+      .tier.frontier {
+        background: #eceafe;
+        color: #4036b7;
+      }
+
+      .tier.strong {
+        background: #e8f6ee;
+        color: #1e8a52;
+      }
+
+      .tier.average {
+        background: #f1f1ef;
+        color: #555550;
+      }
+
+      .price {
+        font-size: 15px;
+        font-weight: 780;
+      }
+
+      .price small {
+        display: block;
+        margin-top: 2px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 16px;
+        background: #fbfbfa;
+      }
+
+      .hint {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .button {
+        min-height: 38px;
+        padding: 0 14px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #fff;
+        color: var(--text);
+        font: inherit;
+        font-weight: 700;
+      }
+
+      .button.primary {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: #fff;
+      }
+
+      @media (max-width: 920px) {
+        main {
+          width: min(100vw - 24px, 720px);
+          margin: 18px auto;
+        }
+
+        .topbar {
+          grid-template-columns: 1fr;
+        }
+
+        .selected {
+          min-width: 0;
+        }
+
+        .filters {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .head {
+          display: none;
+        }
+
+        .row {
+          grid-template-columns: 1fr;
+          gap: 10px;
+          align-items: start;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .filters {
+          grid-template-columns: 1fr;
+        }
+
+        .footer {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .actions {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="note">
+        Simplified direction: one search field, four dropdown filters, then a
+        readable model list with capabilities, tier, and estimated request cost.
+      </p>
+
+      <section class="picker" aria-label="Model picker mock">
+        <div class="topbar">
+          <div class="search">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="m21 21-4.2-4.2m1.2-5.3a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+              />
+            </svg>
+            Search models, providers, Gemini, Claude, GPT...
+          </div>
+
+          <div class="selected">
+            <span class="logo google">G</span>
+            Google Gemini 2.5 Pro
+          </div>
+        </div>
+
+        <div class="filters">
+          <div class="dropdown active">
+            <button class="dropdown-button" type="button">
+              <span>
+                <span class="label">Provider</span>
+                <span class="value">All providers</span>
+              </span>
+              <span class="chev"></span>
+            </button>
+            <div class="menu">
+              <div class="option active">
+                <span class="check">✓</span>
+                <span>
+                  <span class="option-title">All providers</span>
+                  <span class="option-sub">Show native and routed models</span>
+                </span>
+                <span class="count">128</span>
+              </div>
+              <div class="option">
+                <span class="check"></span>
+                <span>
+                  <span class="option-title">Google</span>
+                  <span class="option-sub">Gemini models</span>
+                </span>
+                <span class="count">18</span>
+              </div>
+              <div class="option">
+                <span class="check"></span>
+                <span>
+                  <span class="option-title">Anthropic</span>
+                  <span class="option-sub">Claude models</span>
+                </span>
+                <span class="count">9</span>
+              </div>
+              <div class="option">
+                <span class="check"></span>
+                <span>
+                  <span class="option-title">OpenAI</span>
+                  <span class="option-sub">GPT and image models</span>
+                </span>
+                <span class="count">15</span>
+              </div>
+              <div class="option">
+                <span class="check"></span>
+                <span>
+                  <span class="option-title">OpenRouter</span>
+                  <span class="option-sub">Many providers through one key</span>
+                </span>
+                <span class="count">61</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="dropdown">
+            <button class="dropdown-button" type="button">
+              <span>
+                <span class="label">Model family</span>
+                <span class="value">Gemini, Claude, GPT...</span>
+              </span>
+              <span class="chev"></span>
+            </button>
+          </div>
+
+          <div class="dropdown">
+            <button class="dropdown-button" type="button">
+              <span>
+                <span class="label">Tools</span>
+                <span class="value">Tools + images</span>
+              </span>
+              <span class="chev"></span>
+            </button>
+          </div>
+
+          <div class="dropdown">
+            <button class="dropdown-button" type="button">
+              <span>
+                <span class="label">Tier</span>
+                <span class="value">All tiers</span>
+              </span>
+              <span class="chev"></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="summary">
+          <span class="summary-title">Active filters:</span>
+          <span class="pill accent">Tools</span>
+          <span class="pill accent">Image input</span>
+          <span class="pill">Image generation optional</span>
+          <span class="pill">Any tier</span>
+        </div>
+
+        <div class="content">
+          <div class="models">
+            <div class="head">
+              <div>Model</div>
+              <div>Available tools</div>
+              <div>Tier</div>
+              <div>Est. price</div>
+            </div>
+
+            <div class="row selected-row">
+              <div class="model">
+                <span class="logo google">G</span>
+                <div>
+                  <div class="model-title">Gemini 2.5 Pro</div>
+                  <div class="model-sub">Google · Gemini family</div>
+                </div>
+              </div>
+              <div class="caps">
+                <span class="cap yes">Tools</span>
+                <span class="cap yes">Image input</span>
+                <span class="cap no">No image gen</span>
+              </div>
+              <div><span class="tier frontier">Frontier</span></div>
+              <div class="price">$0.03-0.06<small>medium request</small></div>
+            </div>
+
+            <div class="row">
+              <div class="model">
+                <span class="logo anthropic">A</span>
+                <div>
+                  <div class="model-title">Claude Sonnet 4.5</div>
+                  <div class="model-sub">Anthropic · Claude family</div>
+                </div>
+              </div>
+              <div class="caps">
+                <span class="cap yes">Tools</span>
+                <span class="cap yes">Image input</span>
+                <span class="cap no">No image gen</span>
+              </div>
+              <div><span class="tier frontier">Frontier</span></div>
+              <div class="price">$0.04-0.08<small>medium request</small></div>
+            </div>
+
+            <div class="row">
+              <div class="model">
+                <span class="logo openai">O</span>
+                <div>
+                  <div class="model-title">GPT-5</div>
+                  <div class="model-sub">OpenAI · GPT family</div>
+                </div>
+              </div>
+              <div class="caps">
+                <span class="cap yes">Tools</span>
+                <span class="cap yes">Image input</span>
+                <span class="cap warn">Image gen via tool</span>
+              </div>
+              <div><span class="tier frontier">Frontier</span></div>
+              <div class="price">$0.04-0.09<small>medium request</small></div>
+            </div>
+
+            <div class="row">
+              <div class="model">
+                <span class="logo openai">O</span>
+                <div>
+                  <div class="model-title">GPT Image</div>
+                  <div class="model-sub">OpenAI · image generation</div>
+                </div>
+              </div>
+              <div class="caps">
+                <span class="cap no">No agent tools</span>
+                <span class="cap yes">Image input</span>
+                <span class="cap yes">Image gen</span>
+              </div>
+              <div><span class="tier strong">Strong</span></div>
+              <div class="price">$0.02-0.05<small>per image</small></div>
+            </div>
+
+            <div class="row">
+              <div class="model">
+                <span class="logo router">R</span>
+                <div>
+                  <div class="model-title">Claude via OpenRouter</div>
+                  <div class="model-sub">OpenRouter · Claude family</div>
+                </div>
+              </div>
+              <div class="caps">
+                <span class="cap yes">Tools</span>
+                <span class="cap warn">Image input unknown</span>
+                <span class="cap no">No image gen</span>
+              </div>
+              <div><span class="tier strong">Strong</span></div>
+              <div class="price">$0.03-0.07<small>medium request</small></div>
+            </div>
+
+            <div class="row">
+              <div class="model">
+                <span class="logo groq">G</span>
+                <div>
+                  <div class="model-title">Llama 4 Scout</div>
+                  <div class="model-sub">Groq · Llama family</div>
+                </div>
+              </div>
+              <div class="caps">
+                <span class="cap yes">Tools</span>
+                <span class="cap no">No image input</span>
+                <span class="cap no">No image gen</span>
+              </div>
+              <div><span class="tier average">Average</span></div>
+              <div class="price">$0.002-0.01<small>medium request</small></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="footer">
+          <div class="hint">
+            Price is an estimate for comparison, not exact billing.
+          </div>
+          <div class="actions">
+            <button class="button" type="button">Cancel</button>
+            <button class="button primary" type="button">Use Gemini 2.5 Pro</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

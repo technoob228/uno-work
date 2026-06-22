@@ -106,7 +106,14 @@ import { detectFileKind, usePreviewPane } from "./preview/PreviewPaneContext";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ChevronUpIcon,
+  MessageSquareTextIcon,
+  TriangleAlertIcon,
+  WifiOffIcon,
+  XIcon,
+} from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
@@ -130,6 +137,7 @@ import {
 import { buildDraftThreadRouteParams } from "../threadRoutes";
 import {
   type ComposerImageAttachment,
+  type ComposerVideoAttachment,
   type DraftThreadEnvMode,
   useComposerDraftStore,
   type DraftId,
@@ -151,6 +159,7 @@ import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
+import { UnoBillingTopUpBanner } from "./chat/UnoBillingTopUpBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
@@ -165,6 +174,7 @@ import {
   type LocalDispatchSnapshot,
   PullRequestDialogState,
   cloneComposerImageForRetry,
+  cloneComposerVideoForRetry,
   deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
@@ -331,6 +341,15 @@ function formatOutgoingPrompt(params: {
   const promptEffort = resolvePromptInjectedEffort(caps, params.effort);
   return applyClaudePromptEffortPrefix(params.text, promptEffort);
 }
+
+function formatFocusPreviewMessageText(message: ChatMessage | undefined): string {
+  const text = message?.text.trim() ?? "";
+  if (!text) return "No messages yet";
+  return text.replace(/\s+/g, " ").slice(0, 240);
+}
+
+const FOCUS_CHAT_PREVIEW_BOTTOM = "5.75rem";
+
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
 
@@ -614,8 +633,12 @@ export default function ChatView(props: ChatViewProps) {
   const draftId = routeKind === "draft" ? props.draftId : null;
   const devMode = useDevMode();
   const { open: sidebarOpen, openMobile, isMobile } = useSidebar();
-  const sidebarHidden = isElectron && !(isMobile ? openMobile : sidebarOpen);
-  const { openFile: openPreviewFile, setCurrentChatContext } = usePreviewPane();
+  const sidebarVisible = isMobile ? openMobile : sidebarOpen;
+  const sidebarHidden = isElectron && !sidebarVisible;
+  const { openFile: openPreviewFile, previewLayoutMode, setCurrentChatContext } = usePreviewPane();
+  const isPreviewFocusMode = previewLayoutMode === "focus";
+  const [focusChatPanelMode, setFocusChatPanelMode] = useState<"peek" | "expanded">("peek");
+  const focusChatPreviewScrollRef = useRef<HTMLDivElement | null>(null);
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -684,6 +707,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const promptRef = useRef("");
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
+  const composerVideosRef = useRef<ComposerVideoAttachment[]>([]);
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([]);
   const localComposerRef = useRef<ChatComposerHandle | null>(null);
   const composerRef = useComposerHandleContext() ?? localComposerRef;
@@ -2649,6 +2673,7 @@ export default function ChatView(props: ChatViewProps) {
     if (!sendCtx) return;
     const {
       images: composerImages,
+      videos: composerVideos,
       terminalContexts: composerTerminalContexts,
       selectedProvider: ctxSelectedProvider,
       selectedModel: ctxSelectedModel,
@@ -2664,10 +2689,16 @@ export default function ChatView(props: ChatViewProps) {
       hasSendableContent,
     } = deriveComposerSendState({
       prompt: promptForSend,
-      imageCount: composerImages.length,
+      imageCount: composerImages.length + composerVideos.length,
       terminalContexts: composerTerminalContexts,
     });
-    if (showPlanFollowUpPrompt && activeProposedPlan) {
+    if (
+      showPlanFollowUpPrompt &&
+      activeProposedPlan &&
+      composerImages.length === 0 &&
+      composerVideos.length === 0 &&
+      sendableComposerTerminalContexts.length === 0
+    ) {
       const followUp = resolvePlanFollowUpSubmission({
         draftText: trimmed,
         planMarkdown: activeProposedPlan.planMarkdown,
@@ -2682,7 +2713,9 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     const standaloneSlashCommand =
-      composerImages.length === 0 && sendableComposerTerminalContexts.length === 0
+      composerImages.length === 0 &&
+      composerVideos.length === 0 &&
+      sendableComposerTerminalContexts.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand) {
@@ -2708,6 +2741,18 @@ export default function ChatView(props: ChatViewProps) {
       }
       return;
     }
+    const pendingVideo = composerVideos.find(
+      (video) => video.status !== "ready" || !video.digestId || !video.jobId || !video.digest,
+    );
+    if (pendingVideo) {
+      setThreadError(
+        activeThread.id,
+        pendingVideo.status === "failed"
+          ? `Video '${pendingVideo.name}' failed. Retry or remove it before sending.`
+          : `Wait until video '${pendingVideo.name}' finishes processing before sending.`,
+      );
+      return;
+    }
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
@@ -2729,6 +2774,7 @@ export default function ChatView(props: ChatViewProps) {
     beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
 
     const composerImagesSnapshot = [...composerImages];
+    const composerVideosSnapshot = [...composerVideos];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
     const messageTextForSend = appendTerminalContextsToPrompt(
       promptForSend,
@@ -2743,16 +2789,22 @@ export default function ChatView(props: ChatViewProps) {
       effort: ctxSelectedPromptEffort,
       text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
     });
-    const turnAttachmentsPromise = Promise.all(
-      composerImagesSnapshot.map(async (image) => ({
+    const turnAttachmentsPromise = Promise.all([
+      ...composerImagesSnapshot.map(async (image) => ({
         type: "image" as const,
         name: image.name,
         mimeType: image.mimeType,
         sizeBytes: image.sizeBytes,
         dataUrl: await readFileAsDataUrl(image.file),
       })),
-    );
-    const optimisticAttachments = composerImagesSnapshot.map((image) => ({
+      ...composerVideosSnapshot.map(async (video) => ({
+        type: "video_digest" as const,
+        digestId: video.digestId!,
+        jobId: video.jobId!,
+        name: video.name,
+      })),
+    ]);
+    const optimisticImageAttachments = composerImagesSnapshot.map((image) => ({
       type: "image" as const,
       id: image.id,
       name: image.name,
@@ -2760,6 +2812,20 @@ export default function ChatView(props: ChatViewProps) {
       sizeBytes: image.sizeBytes,
       previewUrl: image.previewUrl,
     }));
+    const optimisticVideoAttachments = composerVideosSnapshot.map((video) => ({
+      type: "video_digest" as const,
+      id: video.id,
+      name: video.name,
+      sourceMimeType: video.digest!.source.mimeType,
+      sourceSizeBytes: video.digest!.source.sizeBytes,
+      durationMs: video.digest!.source.durationMs,
+      digestId: video.digestId!,
+      jobId: video.jobId!,
+      frameCount: video.digest!.frames.length,
+      transcriptSegmentCount: video.digest!.transcript.segments.length,
+      posterPreviewUrl: video.previewUrl,
+    }));
+    const optimisticAttachments = [...optimisticImageAttachments, ...optimisticVideoAttachments];
     // Scroll to the current end *before* adding the optimistic message.
     // This sets LegendList's internal isAtEnd=true so maintainScrollAtEnd
     // automatically pins to the new item when the data changes.
@@ -2796,6 +2862,7 @@ export default function ChatView(props: ChatViewProps) {
     }
     promptRef.current = "";
     clearComposerDraftContent(composerDraftTarget);
+    composerRef.current?.clearVideoAttachments();
     composerRef.current?.resetCursorState();
 
     let turnStartSucceeded = false;
@@ -2807,10 +2874,19 @@ export default function ChatView(props: ChatViewProps) {
           firstComposerImageName = firstComposerImage.name;
         }
       }
+      let firstComposerVideoName: string | null = null;
+      if (composerVideosSnapshot.length > 0) {
+        const firstComposerVideo = composerVideosSnapshot[0];
+        if (firstComposerVideo) {
+          firstComposerVideoName = firstComposerVideo.name;
+        }
+      }
       let titleSeed = trimmed;
       if (!titleSeed) {
         if (firstComposerImageName) {
           titleSeed = `Image: ${firstComposerImageName}`;
+        } else if (firstComposerVideoName) {
+          titleSeed = `Video: ${firstComposerVideoName}`;
         } else if (composerTerminalContextsSnapshot.length > 0) {
           titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
         } else {
@@ -2898,6 +2974,7 @@ export default function ChatView(props: ChatViewProps) {
         !turnStartSucceeded &&
         promptRef.current.length === 0 &&
         composerImagesRef.current.length === 0 &&
+        composerVideosRef.current.length === 0 &&
         composerTerminalContextsRef.current.length === 0
       ) {
         setOptimisticUserMessages((existing) => {
@@ -2910,10 +2987,13 @@ export default function ChatView(props: ChatViewProps) {
         });
         promptRef.current = promptForSend;
         const retryComposerImages = composerImagesSnapshot.map(cloneComposerImageForRetry);
+        const retryComposerVideos = composerVideosSnapshot.map(cloneComposerVideoForRetry);
         composerImagesRef.current = retryComposerImages;
+        composerVideosRef.current = retryComposerVideos;
         composerTerminalContextsRef.current = composerTerminalContextsSnapshot;
         setComposerDraftPrompt(composerDraftTarget, promptForSend);
         addComposerDraftImages(composerDraftTarget, retryComposerImages);
+        composerRef.current?.setVideoAttachments(retryComposerVideos);
         setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
         composerRef.current?.resetCursorState({
           cursor: collapseExpandedComposerCursor(promptForSend, promptForSend.length),
@@ -2935,10 +3015,13 @@ export default function ChatView(props: ChatViewProps) {
   const onInterrupt = async () => {
     const api = readEnvironmentApi(environmentId);
     if (!api || !activeThread) return;
+    const activeTurnId =
+      activeThread.session?.activeTurnId ?? activeLatestTurn?.turnId ?? undefined;
     await api.orchestration.dispatchCommand({
       type: "thread.turn.interrupt",
       commandId: newCommandId(),
       threadId: activeThread.id,
+      ...(activeTurnId !== undefined ? { turnId: activeTurnId } : {}),
       createdAt: new Date().toISOString(),
     });
   };
@@ -3544,6 +3627,29 @@ export default function ChatView(props: ChatViewProps) {
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
 
+  const focusPreviewMessages = useMemo(() => {
+    const messages = activeThread?.messages ?? [];
+    return messages
+      .filter((message) => message.role === "user" || message.role === "assistant")
+      .slice(-2);
+  }, [activeThread?.messages]);
+  const latestFocusPreviewMessage = focusPreviewMessages[focusPreviewMessages.length - 1];
+
+  useEffect(() => {
+    if (!isPreviewFocusMode || focusChatPanelMode !== "expanded") {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const scrollElement = focusChatPreviewScrollRef.current;
+      if (scrollElement) {
+        scrollElement.scrollTop = scrollElement.scrollHeight;
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusChatPanelMode, focusPreviewMessages, isPreviewFocusMode]);
+
   // Empty state: no active thread
   if (!activeThread) {
     return <NoActiveThreadState />;
@@ -3552,54 +3658,66 @@ export default function ChatView(props: ChatViewProps) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
       {/* Top bar */}
-      <header
-        className={cn(
-          "border-b border-border",
-          isElectron
-            ? cn(
-                "drag-region flex h-[52px] items-center pr-3 sm:pr-5 wco:h-[env(titlebar-area-height)]",
-                sidebarHidden ? "pl-[78px] fullscreen:pl-3 sm:fullscreen:pl-5" : "pl-3 sm:pl-5",
-                reserveTitleBarControlInset &&
-                  "wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]",
-              )
-            : "pb-2 pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-2 sm:pb-3 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-3",
-        )}
-      >
-        <ChatHeader
-          activeThreadEnvironmentId={activeThread.environmentId}
-          activeThreadId={activeThread.id}
-          {...(routeKind === "draft" && draftId ? { draftId } : {})}
-          activeThreadTitle={activeThread.title}
-          activeProjectName={activeProject?.name}
-          isGitRepo={isGitRepo}
-          openInCwd={gitCwd}
-          activeProjectScripts={activeProject?.scripts}
-          preferredScriptId={
-            activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
-          }
-          keybindings={keybindings}
-          availableEditors={availableEditors}
-          terminalAvailable={activeProject !== undefined}
-          terminalOpen={terminalState.terminalOpen}
-          terminalToggleShortcutLabel={terminalToggleShortcutLabel}
-          diffToggleShortcutLabel={diffPanelShortcutLabel}
-          gitCwd={gitCwd}
-          diffOpen={diffOpen}
-          onRunProjectScript={runProjectScript}
-          onAddProjectScript={saveProjectScript}
-          onUpdateProjectScript={updateProjectScript}
-          onDeleteProjectScript={deleteProjectScript}
-          onToggleTerminal={toggleTerminalVisibility}
-          onToggleDiff={onToggleDiff}
-        />
-      </header>
+      {!isPreviewFocusMode ? (
+        <header
+          className={cn(
+            "border-b border-border",
+            isElectron
+              ? cn(
+                  "drag-region flex h-[52px] items-center pr-3 sm:pr-5 wco:h-[env(titlebar-area-height)]",
+                  sidebarHidden ? "pl-[78px] fullscreen:pl-3 sm:fullscreen:pl-5" : "pl-3 sm:pl-5",
+                  reserveTitleBarControlInset &&
+                    "wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]",
+                )
+              : "pb-2 pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-2 sm:pb-3 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-3",
+          )}
+        >
+          <ChatHeader
+            activeThreadEnvironmentId={activeThread.environmentId}
+            activeThreadId={activeThread.id}
+            {...(routeKind === "draft" && draftId ? { draftId } : {})}
+            activeThreadTitle={activeThread.title}
+            activeProjectName={activeProject?.name}
+            isGitRepo={isGitRepo}
+            openInCwd={gitCwd}
+            activeProjectScripts={activeProject?.scripts}
+            preferredScriptId={
+              activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
+            }
+            keybindings={keybindings}
+            availableEditors={availableEditors}
+            terminalAvailable={activeProject !== undefined}
+            terminalOpen={terminalState.terminalOpen}
+            terminalToggleShortcutLabel={terminalToggleShortcutLabel}
+            diffToggleShortcutLabel={diffPanelShortcutLabel}
+            gitCwd={gitCwd}
+            diffOpen={diffOpen}
+            onRunProjectScript={runProjectScript}
+            onAddProjectScript={saveProjectScript}
+            onUpdateProjectScript={updateProjectScript}
+            onDeleteProjectScript={deleteProjectScript}
+            onToggleTerminal={toggleTerminalVisibility}
+            onToggleDiff={onToggleDiff}
+          />
+        </header>
+      ) : null}
 
       {/* Error banner */}
-      <ProviderStatusBanner status={activeProviderStatus} />
-      <ThreadErrorBanner
-        error={activeThread.error}
-        onDismiss={() => setThreadError(activeThread.id, null)}
-      />
+      {!isPreviewFocusMode ? (
+        <>
+          <ProviderStatusBanner status={activeProviderStatus} />
+          <UnoBillingTopUpBanner
+            active={activeThread.session?.lastErrorClass === "billing_error"}
+            sessionUpdatedAt={activeThread.session?.updatedAt ?? null}
+          />
+          <ThreadErrorBanner
+            error={
+              activeThread.session?.lastErrorClass === "billing_error" ? null : activeThread.error
+            }
+            onDismiss={() => setThreadError(activeThread.id, null)}
+          />
+        </>
+      ) : null}
       {/* Main content area with optional plan sidebar */}
       <div className="flex min-h-0 min-w-0 flex-1">
         {/* Chat column */}
@@ -3634,7 +3752,7 @@ export default function ChatView(props: ChatViewProps) {
 
             {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
             {showScrollToBottom && (
-              <div className="pointer-events-none absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5">
+              <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 flex -translate-x-1/2 justify-center">
                 <button
                   type="button"
                   onClick={() => scrollToEnd(true)}
@@ -3647,6 +3765,97 @@ export default function ChatView(props: ChatViewProps) {
             )}
           </div>
 
+          {isPreviewFocusMode ? (
+            <div
+              className="pointer-events-none fixed right-0 z-[69] px-4 sm:px-6"
+              style={{
+                left: sidebarVisible ? "var(--sidebar-width)" : "0px",
+                bottom: FOCUS_CHAT_PREVIEW_BOTTOM,
+              }}
+              data-focus-chat-preview="true"
+            >
+              <div className="pointer-events-auto mx-auto w-full max-w-[76rem]">
+                {focusChatPanelMode === "expanded" ? (
+                  <div
+                    className="max-h-[min(18rem,32vh)] overflow-hidden rounded-2xl border border-border/70 bg-card/92 shadow-2xl shadow-black/12 backdrop-blur-xl"
+                    data-focus-chat-preview-panel="expanded"
+                  >
+                    <div className="flex h-10 items-center gap-2 border-b border-border/60 px-4">
+                      <MessageSquareTextIcon className="size-4 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                        Latest conversation
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        type="button"
+                        onClick={() => setFocusChatPanelMode("peek")}
+                        aria-label="Collapse chat preview"
+                      >
+                        <ChevronDownIcon />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        type="button"
+                        onClick={() => setFocusChatPanelMode("peek")}
+                        aria-label="Hide expanded chat preview"
+                      >
+                        <XIcon />
+                      </Button>
+                    </div>
+                    <div
+                      ref={focusChatPreviewScrollRef}
+                      className="max-h-[calc(min(18rem,32vh)-2.5rem)] overflow-y-auto px-4 py-3"
+                    >
+                      {focusPreviewMessages.length > 0 ? (
+                        <div className="flex min-h-full flex-col justify-end gap-3">
+                          {focusPreviewMessages.map((message) => (
+                            <div
+                              key={message.id}
+                              className={cn(
+                                "max-w-[82%] rounded-2xl px-3 py-2 text-sm leading-5",
+                                message.role === "user"
+                                  ? "ml-auto bg-primary text-primary-foreground"
+                                  : "bg-muted text-foreground",
+                              )}
+                            >
+                              <div className="mb-1 text-[11px] font-medium opacity-65">
+                                {message.role === "user" ? "You" : "Assistant"}
+                              </div>
+                              <div className="whitespace-pre-wrap break-words">
+                                {message.text.trim() || "(empty)"}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="py-8 text-center text-muted-foreground text-sm">
+                          No messages yet
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setFocusChatPanelMode("expanded")}
+                    className="flex h-9 w-full items-center gap-2 rounded-full border border-border/65 bg-card/86 px-3.5 text-left text-sm shadow-xl shadow-black/8 backdrop-blur-xl hover:bg-card"
+                    aria-label="Expand chat preview"
+                    data-focus-chat-preview-panel="peek"
+                  >
+                    <MessageSquareTextIcon className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="shrink-0 text-muted-foreground text-xs">Latest turn</span>
+                    <span className="min-w-0 flex-1 truncate text-foreground/80">
+                      {formatFocusPreviewMessageText(latestFocusPreviewMessage)}
+                    </span>
+                    <ChevronUpIcon className="size-4 shrink-0 text-muted-foreground" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : null}
+
           {/* Input bar */}
           <div
             className={cn(
@@ -3654,9 +3863,16 @@ export default function ChatView(props: ChatViewProps) {
               isGitRepo
                 ? "pb-[calc(env(safe-area-inset-bottom)+0.25rem)]"
                 : "pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
+              isPreviewFocusMode &&
+                "pointer-events-none fixed bottom-2 right-0 z-[70] border-0 bg-transparent px-4 pb-0 pt-0 sm:bottom-3 sm:px-6",
             )}
+            style={
+              isPreviewFocusMode
+                ? { left: sidebarVisible ? "var(--sidebar-width)" : "0px" }
+                : undefined
+            }
           >
-            <div className="relative isolate">
+            <div className={cn("relative isolate", isPreviewFocusMode && "pointer-events-auto")}>
               <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
               <div className="relative z-10">
                 <ChatComposer
@@ -3671,6 +3887,7 @@ export default function ChatView(props: ChatViewProps) {
                   activeThread={activeThread}
                   isServerThread={isServerThread}
                   isLocalDraftThread={isLocalDraftThread}
+                  forceCompact={isPreviewFocusMode}
                   phase={phase}
                   isConnecting={isConnecting}
                   isSendBusy={isSendBusy}
@@ -3705,6 +3922,7 @@ export default function ChatView(props: ChatViewProps) {
                   gitCwd={gitCwd}
                   promptRef={promptRef}
                   composerImagesRef={composerImagesRef}
+                  composerVideosRef={composerVideosRef}
                   composerTerminalContextsRef={composerTerminalContextsRef}
                   shouldAutoScrollRef={isAtEndRef}
                   scheduleStickToBottom={scrollToEnd}

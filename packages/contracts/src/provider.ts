@@ -31,6 +31,15 @@ const ProviderSessionStatus = Schema.Literals([
   "closed",
 ]);
 
+export const ProviderSessionErrorClass = Schema.Literals([
+  "billing_error",
+  "provider_error",
+  "transport_error",
+  "validation_error",
+  "unknown",
+]);
+export type ProviderSessionErrorClass = typeof ProviderSessionErrorClass.Type;
+
 export const ProviderSession = Schema.Struct({
   provider: ProviderDriverKind,
   // Optional during the driver/instance migration. Once every producer
@@ -47,6 +56,7 @@ export const ProviderSession = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   lastError: Schema.optional(TrimmedNonEmptyString),
+  lastErrorClass: Schema.optional(ProviderSessionErrorClass),
 });
 export type ProviderSession = typeof ProviderSession.Type;
 
@@ -64,6 +74,15 @@ export const ProviderSessionStartInput = Schema.Struct({
 });
 export type ProviderSessionStartInput = typeof ProviderSessionStartInput.Type;
 
+export const ProviderContextMessage = Schema.Struct({
+  role: Schema.Literals(["user", "assistant", "system"]),
+  text: Schema.String.check(Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_INPUT_CHARS)),
+  attachments: Schema.optional(
+    Schema.Array(ChatAttachment).check(Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_ATTACHMENTS)),
+  ),
+});
+export type ProviderContextMessage = typeof ProviderContextMessage.Type;
+
 export const ProviderSendTurnInput = Schema.Struct({
   threadId: ThreadId,
   input: Schema.optional(
@@ -74,6 +93,9 @@ export const ProviderSendTurnInput = Schema.Struct({
   ),
   modelSelection: Schema.optional(ModelSelection),
   interactionMode: Schema.optional(ProviderInteractionMode),
+  contextMessages: Schema.optional(
+    Schema.Array(ProviderContextMessage).check(Schema.isMaxLength(50)),
+  ),
 });
 export type ProviderSendTurnInput = typeof ProviderSendTurnInput.Type;
 

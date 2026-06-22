@@ -30,13 +30,17 @@ import * as nodePath from "node:path";
 import {
   OpenCodeSettings,
   ProviderDriverKind,
+  UNO_CODE_MINIMUM_VERSION,
   UNO_GATEWAY_BASE_URL,
+  type ModelCapabilitiesMetadata,
   type ServerProvider,
 } from "@t3tools/contracts";
 import { Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGeneration.ts";
+import { BrowserBridge } from "../../browserBridge.ts";
+import { writeBrowserInstructionsFile } from "../browserInstructions.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderDriverError } from "../Errors.ts";
@@ -63,8 +67,8 @@ const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
 const UNO_PRESENTATION: ProviderPresentation = {
   displayName: "Uno",
   binaryCommand: "uno-code",
-  minimumVersion: "1.14.48",
-  showInteractionModeToggle: false,
+  minimumVersion: UNO_CODE_MINIMUM_VERSION,
+  showInteractionModeToggle: true,
 } as const;
 
 export type UnoDriverEnv =
@@ -73,10 +77,14 @@ export type UnoDriverEnv =
   | OpenCodeRuntime
   | Path.Path
   | ProviderEventLoggers
+  | BrowserBridge
   | ServerConfig
   | ServerSettingsService;
 
 const UNO_PROVIDER_ID = "uno";
+const UNO_RUSSIA_PROVIDER_ID = "uno-russia";
+const UNO_RUSSIA_GATEWAY_BASE_URL = `${UNO_GATEWAY_BASE_URL}/russia`;
+const UNO_IMAGE_GENERATION_AGENT_ID = "uno-image-generation";
 
 const UNO_BINARY_PATH = nodePath.join(
   homedir(),
@@ -87,6 +95,7 @@ const UNO_BINARY_PATH = nodePath.join(
 );
 
 type UnoModelTier = "frontier" | "strong" | "cheap";
+type UnoModelRoute = "default" | "russia";
 
 const TIER_RANK: Record<UnoModelTier, number> = {
   frontier: 0,
@@ -110,41 +119,340 @@ const PINNED_RANK = new Map<string, number>(PINNED_MODEL_IDS.map((id, idx) => [i
 interface UnoCatalogModel {
   readonly name: string;
   readonly tier: UnoModelTier;
+  readonly modelId: string;
+  readonly route: UnoModelRoute;
+  readonly availableRoutes: ReadonlyArray<UnoModelRoute>;
+  readonly provider: string;
+  readonly contextLength: number | undefined;
+  readonly supportsStreaming: boolean | undefined;
+  readonly supportsTools: boolean | undefined;
+  readonly supportsVision: boolean | undefined;
+  readonly supportsImageOutput: boolean | undefined;
+  readonly inputModalities: ReadonlyArray<string> | undefined;
+  readonly outputModalities: ReadonlyArray<string> | undefined;
+  readonly pricingKnown: boolean | undefined;
+  readonly pricing: {
+    readonly promptPer1MUsd: number | undefined;
+    readonly completionPer1MUsd: number | undefined;
+    readonly blendedPer1MUsd: number | undefined;
+    readonly estimatedSeriousTaskUsd: number | undefined;
+  };
 }
 
 type UnoCatalog = Record<string, UnoCatalogModel>;
 
+const UNO_DEFAULT_MODEL_OPTIONS = {
+  // The Uno Gateway can expose upstream reasoning by default for some models.
+  // Keep chat output answer-only unless the user explicitly selects a reasoning
+  // variant that overrides this option.
+  reasoningEffort: "none",
+} as const;
+
+type UnoOpenCodeModelConfig = {
+  readonly name: string;
+  readonly options?: typeof UNO_DEFAULT_MODEL_OPTIONS;
+};
+
+function shouldOmitDefaultReasoningDisable(model: UnoCatalogModel): boolean {
+  const modelId = model.modelId.toLowerCase();
+  const name = model.name.toLowerCase();
+  const provider = model.provider.toLowerCase();
+  const searchable = `${provider}/${modelId} ${name}`;
+
+  return (
+    provider === "moonshotai" ||
+    searchable.includes("kimi") ||
+    searchable.includes("thinking") ||
+    searchable.includes("reasoning") ||
+    searchable.includes("minimax-m2") ||
+    searchable.includes("step-3.5") ||
+    /qwen3.*thinking/u.test(searchable) ||
+    /gemini-3(?:[._/ -]|$)/u.test(searchable)
+  );
+}
+
+function defaultModelOptionsForUnoModel(
+  model: UnoCatalogModel,
+): typeof UNO_DEFAULT_MODEL_OPTIONS | undefined {
+  return shouldOmitDefaultReasoningDisable(model) ? undefined : UNO_DEFAULT_MODEL_OPTIONS;
+}
+
 interface UnoGatewayModelResponse {
   readonly id?: unknown;
   readonly display_name?: unknown;
+  readonly owned_by?: unknown;
   readonly tier?: unknown;
+  readonly context_length?: unknown;
+  readonly supports_streaming?: unknown;
+  readonly supports_tools?: unknown;
+  readonly supports_vision?: unknown;
+  readonly supports_image_input?: unknown;
+  readonly supports_image_output?: unknown;
+  readonly supports_image_generation?: unknown;
+  readonly supports_images?: unknown;
+  readonly supports_attachments?: unknown;
+  readonly input_modalities?: unknown;
+  readonly output_modalities?: unknown;
+  readonly inputModalities?: unknown;
+  readonly outputModalities?: unknown;
+  readonly modalities?: unknown;
+  readonly pricing_known?: unknown;
+  readonly pricing?: unknown;
+}
+
+function parsePricePer1M(value: unknown): number | undefined {
+  if (typeof value !== "string" && typeof value !== "number") return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return undefined;
+  return parsed * 1_000_000;
+}
+
+function extractProvider(modelId: string, ownedBy: unknown): string {
+  if (modelId.includes("/")) {
+    return modelId.split("/")[0] ?? "unknown";
+  }
+  return typeof ownedBy === "string" && ownedBy.trim().length > 0 ? ownedBy.trim() : "unknown";
+}
+
+function parseGatewayBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+  return undefined;
+}
+
+function parseFirstGatewayBoolean(...values: ReadonlyArray<unknown>): boolean | undefined {
+  for (const value of values) {
+    const parsed = parseGatewayBoolean(value);
+    if (parsed !== undefined) return parsed;
+  }
+  return undefined;
+}
+
+function normalizeGatewayModality(value: string): string | null {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-");
+  if (!normalized) return null;
+  if (
+    normalized === "images" ||
+    normalized === "image-url" ||
+    normalized === "input-image" ||
+    normalized === "output-image" ||
+    normalized === "vision"
+  ) {
+    return "image";
+  }
+  if (normalized === "input-text" || normalized === "output-text") return "text";
+  return normalized;
+}
+
+function parseGatewayModalityList(value: unknown): ReadonlyArray<string> | undefined {
+  const rawValues =
+    typeof value === "string"
+      ? value.includes(",")
+        ? value.split(",")
+        : [value]
+      : Array.isArray(value)
+        ? value
+        : [];
+  const modalities = new Set<string>();
+  for (const rawValue of rawValues) {
+    if (typeof rawValue !== "string") continue;
+    const normalized = normalizeGatewayModality(rawValue);
+    if (normalized) modalities.add(normalized);
+  }
+  return modalities.size > 0 ? [...modalities] : undefined;
+}
+
+function parseGatewayModalities(entry: UnoGatewayModelResponse): {
+  readonly input: ReadonlyArray<string> | undefined;
+  readonly output: ReadonlyArray<string> | undefined;
+} {
+  const nested =
+    entry.modalities && typeof entry.modalities === "object" && !Array.isArray(entry.modalities)
+      ? (entry.modalities as Record<string, unknown>)
+      : undefined;
+  return {
+    input:
+      parseGatewayModalityList(entry.input_modalities) ??
+      parseGatewayModalityList(entry.inputModalities) ??
+      parseGatewayModalityList(nested?.input) ??
+      parseGatewayModalityList(nested?.input_modalities) ??
+      parseGatewayModalityList(nested?.inputModalities),
+    output:
+      parseGatewayModalityList(entry.output_modalities) ??
+      parseGatewayModalityList(entry.outputModalities) ??
+      parseGatewayModalityList(nested?.output) ??
+      parseGatewayModalityList(nested?.output_modalities) ??
+      parseGatewayModalityList(nested?.outputModalities),
+  };
+}
+
+function modalitiesIncludeImage(values: ReadonlyArray<string> | undefined): boolean {
+  return values?.some((value) => value.toLowerCase() === "image") === true;
+}
+
+function inferKnownImageInputSupport(
+  modelId: string,
+  name: string,
+  provider: string,
+): boolean | undefined {
+  const haystack = `${modelId} ${name} ${provider}`.toLowerCase();
+  if (
+    /\b(?:gpt-4o|gpt-5|o3|o4|gemini|claude|llava|pixtral)\b/.test(haystack) ||
+    /(?:^|[/:_-])(?:vl|vision)(?:$|[/:_-])/.test(haystack) ||
+    /qwen.*(?:vl|vision)/.test(haystack)
+  ) {
+    return true;
+  }
+  return undefined;
+}
+
+function inferKnownImageOutputSupport(
+  modelId: string,
+  name: string,
+  provider: string,
+): boolean | undefined {
+  const haystack = `${modelId} ${name} ${provider}`.toLowerCase();
+  if (
+    /(?:gpt-image|gpt-[\w.]+[-_ ]image|dall[-_ ]?e|imagen|gemini.*image|nano[-_ ]?banana|flux|stable[-_ ]?diffusion|sdxl|recraft|ideogram|seedream|image[-_ ]?gen|image[-_ ]?generation|image[-_ ]?preview)/.test(
+      haystack,
+    )
+  ) {
+    return true;
+  }
+  return undefined;
+}
+
+function normalizeUnoCatalogEntry(
+  route: UnoModelRoute,
+  entry: UnoGatewayModelResponse,
+): UnoCatalogModel | undefined {
+  if (typeof entry.id !== "string" || entry.id.length === 0) return undefined;
+  const name =
+    typeof entry.display_name === "string" && entry.display_name.length > 0
+      ? entry.display_name
+      : entry.id;
+  const tier: UnoModelTier =
+    entry.tier === "frontier" || entry.tier === "strong" ? entry.tier : "cheap";
+  const provider = extractProvider(entry.id, entry.owned_by);
+  const modalities = parseGatewayModalities(entry);
+  const explicitImageInput = parseFirstGatewayBoolean(
+    entry.supports_vision,
+    entry.supports_image_input,
+    entry.supports_images,
+    entry.supports_attachments,
+  );
+  const supportsImageInput = modalitiesIncludeImage(modalities.input)
+    ? true
+    : (explicitImageInput ?? inferKnownImageInputSupport(entry.id, name, provider));
+  const explicitImageOutput = parseFirstGatewayBoolean(
+    entry.supports_image_output,
+    entry.supports_image_generation,
+  );
+  const supportsImageOutput = modalitiesIncludeImage(modalities.output)
+    ? true
+    : (explicitImageOutput ?? inferKnownImageOutputSupport(entry.id, name, provider));
+  const inputModalities =
+    modalities.input ?? (supportsImageInput === true ? ["text", "image"] : undefined);
+  const outputModalities =
+    modalities.output ?? (supportsImageOutput === true ? ["text", "image"] : undefined);
+  const pricing = entry.pricing && typeof entry.pricing === "object" ? entry.pricing : {};
+  const promptPer1MUsd = parsePricePer1M((pricing as { readonly prompt?: unknown }).prompt);
+  const completionPer1MUsd = parsePricePer1M(
+    (pricing as { readonly completion?: unknown }).completion,
+  );
+  const blendedPer1MUsd =
+    promptPer1MUsd !== undefined && completionPer1MUsd !== undefined
+      ? promptPer1MUsd * 0.85 + completionPer1MUsd * 0.15
+      : undefined;
+  const estimatedSeriousTaskUsd =
+    promptPer1MUsd !== undefined && completionPer1MUsd !== undefined
+      ? (promptPer1MUsd / 1_000_000) * 120_000 + (completionPer1MUsd / 1_000_000) * 8_000
+      : undefined;
+  return {
+    name,
+    tier,
+    modelId: entry.id,
+    route,
+    availableRoutes: [route],
+    provider,
+    contextLength:
+      typeof entry.context_length === "number" && Number.isFinite(entry.context_length)
+        ? entry.context_length
+        : undefined,
+    supportsStreaming: parseGatewayBoolean(entry.supports_streaming),
+    supportsTools: parseGatewayBoolean(entry.supports_tools),
+    supportsVision: supportsImageInput,
+    supportsImageOutput,
+    inputModalities,
+    outputModalities,
+    pricingKnown: typeof entry.pricing_known === "boolean" ? entry.pricing_known : undefined,
+    pricing: {
+      promptPer1MUsd,
+      completionPer1MUsd,
+      blendedPer1MUsd,
+      estimatedSeriousTaskUsd,
+    },
+  };
+}
+
+function catalogKey(route: UnoModelRoute, modelId: string): string {
+  return `${route === "russia" ? UNO_RUSSIA_PROVIDER_ID : UNO_PROVIDER_ID}/${modelId}`;
+}
+
+async function fetchUnoRouteModels(input: {
+  readonly unoApiKey: string;
+  readonly route: UnoModelRoute;
+  readonly url: string;
+}): Promise<UnoCatalog> {
+  const response = await fetch(`${input.url}/models`, {
+    headers: { Authorization: `Bearer ${input.unoApiKey}` },
+  });
+  if (!response.ok) return {};
+  const payload = (await response.json()) as unknown;
+  const rows: ReadonlyArray<UnoGatewayModelResponse> = Array.isArray(payload)
+    ? (payload as ReadonlyArray<UnoGatewayModelResponse>)
+    : payload && typeof payload === "object" && "data" in payload && Array.isArray(payload.data)
+      ? (payload.data as ReadonlyArray<UnoGatewayModelResponse>)
+      : [];
+  const catalog: Record<string, UnoCatalogModel> = {};
+  for (const entry of rows) {
+    const normalized = normalizeUnoCatalogEntry(input.route, entry);
+    if (!normalized) continue;
+    catalog[catalogKey(input.route, normalized.modelId)] = normalized;
+  }
+  return catalog;
 }
 
 async function fetchUnoModelsCatalog(unoApiKey: string): Promise<UnoCatalog> {
   if (unoApiKey.length === 0) return {};
-  try {
-    const response = await fetch(`${UNO_GATEWAY_BASE_URL}/models`, {
-      headers: { Authorization: `Bearer ${unoApiKey}` },
-    });
-    if (!response.ok) return {};
-    const payload = (await response.json()) as {
-      readonly data?: ReadonlyArray<UnoGatewayModelResponse>;
-    };
-    const catalog: Record<string, UnoCatalogModel> = {};
-    for (const entry of payload.data ?? []) {
-      if (typeof entry.id !== "string" || entry.id.length === 0) continue;
-      const name =
-        typeof entry.display_name === "string" && entry.display_name.length > 0
-          ? entry.display_name
-          : entry.id;
-      const tier: UnoModelTier =
-        entry.tier === "frontier" || entry.tier === "strong" ? entry.tier : "cheap";
-      catalog[entry.id] = { name, tier };
-    }
-    return catalog;
-  } catch {
-    return {};
+  const [defaultCatalog, russiaCatalog] = await Promise.all([
+    fetchUnoRouteModels({ unoApiKey, route: "default", url: UNO_GATEWAY_BASE_URL }).catch(
+      () => ({}),
+    ),
+    fetchUnoRouteModels({ unoApiKey, route: "russia", url: UNO_RUSSIA_GATEWAY_BASE_URL }).catch(
+      () => ({}),
+    ),
+  ]);
+  const availableRoutesByModel = new Map<string, UnoModelRoute[]>();
+  for (const model of [...Object.values(defaultCatalog), ...Object.values(russiaCatalog)]) {
+    const routes = availableRoutesByModel.get(model.modelId) ?? [];
+    if (!routes.includes(model.route)) routes.push(model.route);
+    availableRoutesByModel.set(model.modelId, routes);
   }
+  const merged = { ...defaultCatalog, ...russiaCatalog };
+  for (const [key, model] of Object.entries(merged)) {
+    merged[key] = {
+      ...model,
+      availableRoutes: availableRoutesByModel.get(model.modelId) ?? [model.route],
+    };
+  }
+  return merged;
 }
 
 interface UnoSearchBridge {
@@ -159,26 +467,63 @@ function resolveUnoSearchBridge(): UnoSearchBridge | undefined {
   return { nodeBin, scriptPath };
 }
 
-function buildUnoConfigContent(unoApiKey: string, models: UnoCatalog): string {
+function buildUnoConfigContent(
+  unoApiKey: string,
+  models: UnoCatalog,
+  instructionsFilePath?: string,
+): string {
   // opencode's config schema only accepts `{ name }`-shaped model entries;
   // strip the local tier metadata before injecting via OPENCODE_CONFIG_CONTENT.
-  const opencodeModels: Record<string, { readonly name: string }> = {};
-  for (const [id, model] of Object.entries(models)) {
-    opencodeModels[id] = { name: model.name };
+  const opencodeModelsByProvider: Record<
+    typeof UNO_PROVIDER_ID | typeof UNO_RUSSIA_PROVIDER_ID,
+    Record<string, UnoOpenCodeModelConfig>
+  > = {
+    [UNO_PROVIDER_ID]: {},
+    [UNO_RUSSIA_PROVIDER_ID]: {},
+  };
+  for (const model of Object.values(models)) {
+    const providerId = model.route === "russia" ? UNO_RUSSIA_PROVIDER_ID : UNO_PROVIDER_ID;
+    const options = defaultModelOptionsForUnoModel(model);
+    opencodeModelsByProvider[providerId][model.modelId] = {
+      name: model.name,
+      ...(options ? { options } : {}),
+    };
   }
   const config: Record<string, unknown> = {
     $schema: "https://opencode.ai/config.json",
+    agent: {
+      [UNO_IMAGE_GENERATION_AGENT_ID]: {
+        description: "Generate images without exposing coding tools to image-generation models.",
+        mode: "primary",
+        hidden: true,
+        permission: {
+          "*": "deny",
+        },
+      },
+    },
     provider: {
       [UNO_PROVIDER_ID]: {
         npm: "@ai-sdk/openai-compatible",
-        name: "Uno",
+        name: "Uno Global",
         options: {
           baseURL: UNO_GATEWAY_BASE_URL,
           apiKey: "{env:UNO_API_KEY}",
         },
-        models: opencodeModels,
+        models: opencodeModelsByProvider[UNO_PROVIDER_ID],
+      },
+      [UNO_RUSSIA_PROVIDER_ID]: {
+        npm: "@ai-sdk/openai-compatible",
+        name: "Uno Russia",
+        options: {
+          baseURL: UNO_RUSSIA_GATEWAY_BASE_URL,
+          apiKey: "{env:UNO_API_KEY}",
+        },
+        models: opencodeModelsByProvider[UNO_RUSSIA_PROVIDER_ID],
       },
     },
+    // Инструкции про встроенный браузер (путь к файлу). opencode дописывает
+    // их к собственным инструкциям проекта.
+    ...(instructionsFilePath ? { instructions: [instructionsFilePath] } : {}),
   };
 
   // Bundled Uno web-search MCP bridge — only enabled when the user is
@@ -210,25 +555,88 @@ function buildUnoConfigContent(unoApiKey: string, models: UnoCatalog): string {
 
 const UNO_DEFAULT_DISPLAY_NAME = "Uno";
 
+function isUnoModelSlug(slug: string): boolean {
+  return slug.startsWith(`${UNO_PROVIDER_ID}/`) || slug.startsWith(`${UNO_RUSSIA_PROVIDER_ID}/`);
+}
+
+function metadataForCatalogModel(model: UnoCatalogModel): ModelCapabilitiesMetadata {
+  const inputModalities =
+    model.inputModalities ?? (model.supportsVision ? ["text", "image"] : ["text"]);
+  const outputModalities =
+    model.outputModalities ?? (model.supportsImageOutput ? ["text", "image"] : ["text"]);
+  const supportsVision = modalitiesIncludeImage(inputModalities) ? true : model.supportsVision;
+
+  return {
+    tier: model.tier,
+    routes: [...model.availableRoutes],
+    defaultRoute: model.route,
+    ...(model.contextLength !== undefined ? { contextLength: model.contextLength } : {}),
+    supports: {
+      ...(model.supportsStreaming !== undefined ? { streaming: model.supportsStreaming } : {}),
+      ...(model.supportsTools !== undefined ? { tools: model.supportsTools } : {}),
+      ...(supportsVision !== undefined
+        ? { vision: supportsVision, attachments: supportsVision }
+        : {}),
+    },
+    pricing: {
+      ...(model.pricing.promptPer1MUsd !== undefined
+        ? { promptPer1MUsd: model.pricing.promptPer1MUsd }
+        : {}),
+      ...(model.pricing.completionPer1MUsd !== undefined
+        ? { completionPer1MUsd: model.pricing.completionPer1MUsd }
+        : {}),
+      ...(model.pricing.blendedPer1MUsd !== undefined
+        ? { blendedPer1MUsd: model.pricing.blendedPer1MUsd }
+        : {}),
+      ...(model.pricing.estimatedSeriousTaskUsd !== undefined
+        ? { estimatedSeriousTaskUsd: model.pricing.estimatedSeriousTaskUsd }
+        : {}),
+    },
+    modalities: {
+      input: inputModalities,
+      output: outputModalities,
+    },
+  };
+}
+
 const filterUnoModels = (snapshot: ServerProviderDraft): ServerProviderDraft => ({
   ...snapshot,
-  // Drop opencode-zen models AND strip `subProvider` from our own rows.
-  // Both `provider.uno.name` (subProvider source) and `displayName` resolve
-  // to "Uno", so leaving subProvider in place renders as "Uno · Uno" in
-  // the picker trigger and combobox row.
-  models: snapshot.models
-    .filter((model) => model.slug.startsWith(`${UNO_PROVIDER_ID}/`))
-    .map(({ subProvider: _drop, ...rest }) => rest),
+  models: snapshot.models.filter((model) => isUnoModelSlug(model.slug)),
 });
 
-const stripUnoPrefix = (slug: string): string =>
-  slug.startsWith(`${UNO_PROVIDER_ID}/`) ? slug.slice(UNO_PROVIDER_ID.length + 1) : slug;
+const stripUnoPrefix = (slug: string): string => {
+  if (slug.startsWith(`${UNO_RUSSIA_PROVIDER_ID}/`)) {
+    return slug.slice(UNO_RUSSIA_PROVIDER_ID.length + 1);
+  }
+  return slug.startsWith(`${UNO_PROVIDER_ID}/`) ? slug.slice(UNO_PROVIDER_ID.length + 1) : slug;
+};
+
+const withCatalogMetadata =
+  (catalog: UnoCatalog) =>
+  (snapshot: ServerProviderDraft): ServerProviderDraft => ({
+    ...snapshot,
+    models: snapshot.models.map(({ subProvider: _drop, ...model }) => {
+      const catalogModel = catalog[model.slug];
+      const metadata = catalogModel
+        ? metadataForCatalogModel(catalogModel)
+        : model.capabilities?.metadata;
+      return {
+        ...model,
+        name: catalogModel?.name ?? model.name,
+        ...(catalogModel?.provider ? { subProvider: catalogModel.provider } : {}),
+        capabilities: {
+          ...model.capabilities,
+          ...(metadata ? { metadata } : {}),
+        },
+      };
+    }),
+  });
 
 const sortUnoModels =
   (catalog: UnoCatalog) =>
   (snapshot: ServerProviderDraft): ServerProviderDraft => ({
     ...snapshot,
-    models: [...snapshot.models].sort((a, b) => {
+    models: snapshot.models.toSorted((a, b) => {
       const aId = stripUnoPrefix(a.slug);
       const bId = stripUnoPrefix(b.slug);
 
@@ -238,14 +646,27 @@ const sortUnoModels =
       if (aPinned !== undefined) return -1;
       if (bPinned !== undefined) return 1;
 
-      const aTier = catalog[aId]?.tier ?? "cheap";
-      const bTier = catalog[bId]?.tier ?? "cheap";
+      const aTier = catalog[a.slug]?.tier ?? "cheap";
+      const bTier = catalog[b.slug]?.tier ?? "cheap";
       const tierDiff = TIER_RANK[aTier] - TIER_RANK[bTier];
       if (tierDiff !== 0) return tierDiff;
+
+      const aRoute = catalog[a.slug]?.route ?? "default";
+      const bRoute = catalog[b.slug]?.route ?? "default";
+      if (aRoute !== bRoute) return aRoute === "default" ? -1 : 1;
 
       return aId.localeCompare(bId);
     }),
   });
+
+export const __unoDriverTest = {
+  buildUnoConfigContent,
+  catalogKey,
+  fetchUnoModelsCatalog,
+  metadataForCatalogModel,
+  normalizeUnoCatalogEntry,
+  sortUnoModels,
+} as const;
 
 const withInstanceIdentity =
   (input: {
@@ -282,10 +703,17 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
       );
       const unoApiKey = serverSettings?.uno.apiKey ?? "";
       const unoCatalog = yield* Effect.promise(() => fetchUnoModelsCatalog(unoApiKey));
-      const baseProcessEnv = mergeProviderInstanceEnvironment(environment);
+      const browserBridge = yield* BrowserBridge;
+      const instructionsFilePath = writeBrowserInstructionsFile({
+        stateDir: serverConfig.stateDir,
+        baseUrl: browserBridge.baseUrl,
+      });
+      const baseProcessEnv = browserBridge.applyEnvironment(
+        mergeProviderInstanceEnvironment(environment),
+      );
       const processEnv: NodeJS.ProcessEnv = {
         ...baseProcessEnv,
-        OPENCODE_CONFIG_CONTENT: buildUnoConfigContent(unoApiKey, unoCatalog),
+        OPENCODE_CONFIG_CONTENT: buildUnoConfigContent(unoApiKey, unoCatalog, instructionsFilePath),
         ...(unoApiKey.length > 0 ? { UNO_API_KEY: unoApiKey } : {}),
       };
       const continuationIdentity = defaultProviderContinuationIdentity({
@@ -335,6 +763,7 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         UNO_PRESENTATION,
       ).pipe(
         Effect.map(filterUnoModels),
+        Effect.map(withCatalogMetadata(unoCatalog)),
         Effect.map(sortByCatalog),
         Effect.map(stampIdentity),
         Effect.provideService(OpenCodeRuntime, openCodeRuntime),
@@ -346,7 +775,11 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         haveSettingsChanged: () => false,
         initialSnapshot: (settings) =>
           stampIdentity(
-            sortByCatalog(filterUnoModels(makePendingOpenCodeProvider(settings, UNO_PRESENTATION))),
+            sortByCatalog(
+              withCatalogMetadata(unoCatalog)(
+                filterUnoModels(makePendingOpenCodeProvider(settings, UNO_PRESENTATION)),
+              ),
+            ),
           ),
         checkProvider,
         refreshInterval: SNAPSHOT_REFRESH_INTERVAL,

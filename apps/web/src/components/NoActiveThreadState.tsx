@@ -1,11 +1,26 @@
-import { scopeProjectRef } from "@t3tools/client-runtime";
-import type { ProjectId } from "@t3tools/contracts";
-import { ChevronDownIcon, FolderIcon, FolderPlusIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
+import { scopeThreadRef } from "@t3tools/client-runtime";
+import { useNavigate } from "@tanstack/react-router";
+import {
+  ChevronDownIcon,
+  FolderIcon,
+  FolderPlusIcon,
+  MessageSquareIcon,
+  RefreshCwIcon,
+} from "lucide-react";
+import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { Button } from "./ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
+import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
+  MenuTrigger,
+} from "./ui/menu";
 import { SidebarInset, SidebarTrigger } from "./ui/sidebar";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { isElectron } from "../env";
@@ -14,12 +29,19 @@ import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
-import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useReconnectEnvironment } from "../hooks/useReconnectEnvironment";
-import { selectProjectsForEnvironment, useStore } from "../store";
+import { sortThreads } from "../lib/threadSort";
+import {
+  selectProjectsForEnvironment,
+  selectSidebarThreadsForEnvironment,
+  useStore,
+} from "../store";
+import { buildThreadRouteParams } from "../threadRoutes";
+import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
 
 export function NoActiveThreadState() {
+  const navigate = useNavigate();
   const activeEnvironmentId = useStore((store) => store.activeEnvironmentId);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const selectedEnvId = activeEnvironmentId ?? primaryEnvironmentId;
@@ -44,19 +66,57 @@ export function NoActiveThreadState() {
   const projectsInEnv = useStore(
     useShallow((store) => selectProjectsForEnvironment(store, selectedEnvId)),
   );
-  const { handleNewThread } = useNewThreadHandler();
+  const threadsInEnv = useStore(
+    useShallow((store) => selectSidebarThreadsForEnvironment(store, selectedEnvId)),
+  );
   const openAddProject = useCommandPaletteStore((store) => store.openAddProject);
 
   const onReconnect = () => {
     if (selectedEnvId) void reconnect(selectedEnvId);
   };
 
-  const startThreadInProject = (projectId: ProjectId) => {
-    if (!selectedEnvId) return;
-    void handleNewThread(scopeProjectRef(selectedEnvId, projectId));
+  const singleProject = projectsInEnv.length === 1 ? projectsInEnv[0] : null;
+  const activeThreads = useMemo(
+    () =>
+      sortThreads(
+        threadsInEnv.filter((thread) => thread.archivedAt === null),
+        "updated_at",
+      ),
+    [threadsInEnv],
+  );
+  const activeThreadsByProjectId = useMemo(() => {
+    const next = new Map<string, SidebarThreadSummary[]>();
+    for (const thread of activeThreads) {
+      const existing = next.get(thread.projectId);
+      if (existing) {
+        existing.push(thread);
+      } else {
+        next.set(thread.projectId, [thread]);
+      }
+    }
+    return next;
+  }, [activeThreads]);
+  const singleProjectThreads = singleProject
+    ? (activeThreadsByProjectId.get(singleProject.id) ?? [])
+    : [];
+  const hasActiveThreads = activeThreads.length > 0;
+
+  const openThread = (thread: SidebarThreadSummary) => {
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
+    });
   };
 
-  const singleProject = projectsInEnv.length === 1 ? projectsInEnv[0] : null;
+  const renderThreadItem = (thread: SidebarThreadSummary) => (
+    <MenuItem key={thread.id} onClick={() => openThread(thread)}>
+      <MessageSquareIcon className="size-3.5 text-muted-foreground" />
+      <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+      {thread.branch ? (
+        <span className="max-w-24 truncate text-xs text-muted-foreground">#{thread.branch}</span>
+      ) : null}
+    </MenuItem>
+  );
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -130,39 +190,62 @@ export function NoActiveThreadState() {
                     Pick a thread to continue
                   </EmptyTitle>
                   <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-                    Select an existing thread or create a new one to get started.
+                    Select an active thread to get started.
                   </EmptyDescription>
                 </EmptyHeader>
                 <EmptyContent className="mt-6">
-                  {singleProject ? (
-                    <Button onClick={() => startThreadInProject(singleProject.id)} size="sm">
-                      <PlusIcon className="size-4" />
-                      New thread in <span className="font-medium">{singleProject.name}</span>
-                    </Button>
+                  {!hasActiveThreads ? (
+                    <div className="text-sm text-muted-foreground">No active threads.</div>
+                  ) : singleProject ? (
+                    <Menu>
+                      <MenuTrigger
+                        render={
+                          <Button size="sm">
+                            <MessageSquareIcon className="size-4" />
+                            Pick thread
+                            <ChevronDownIcon className="size-3.5 opacity-70" />
+                          </Button>
+                        }
+                      />
+                      <MenuPopup align="center" side="bottom" sideOffset={6} className="min-w-72">
+                        <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                          {singleProject.name}
+                        </div>
+                        {singleProjectThreads.map(renderThreadItem)}
+                      </MenuPopup>
+                    </Menu>
                   ) : (
                     <Menu>
                       <MenuTrigger
                         render={
                           <Button size="sm">
-                            <PlusIcon className="size-4" />
-                            New thread
+                            <MessageSquareIcon className="size-4" />
+                            Pick thread
                             <ChevronDownIcon className="size-3.5 opacity-70" />
                           </Button>
                         }
                       />
-                      <MenuPopup align="center" side="bottom" sideOffset={6} className="min-w-56">
+                      <MenuPopup align="center" side="bottom" sideOffset={6} className="min-w-64">
                         <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
                           Pick a project
                         </div>
-                        {projectsInEnv.map((project) => (
-                          <MenuItem
-                            key={project.id}
-                            onClick={() => startThreadInProject(project.id)}
-                          >
-                            <FolderIcon className="size-3.5 text-muted-foreground" />
-                            <span className="truncate">{project.name}</span>
-                          </MenuItem>
-                        ))}
+                        {projectsInEnv.map((project) => {
+                          const projectThreads = activeThreadsByProjectId.get(project.id) ?? [];
+                          if (projectThreads.length === 0) {
+                            return null;
+                          }
+                          return (
+                            <MenuSub key={project.id}>
+                              <MenuSubTrigger>
+                                <FolderIcon className="size-3.5 text-muted-foreground" />
+                                <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                              </MenuSubTrigger>
+                              <MenuSubPopup className="min-w-72">
+                                {projectThreads.map(renderThreadItem)}
+                              </MenuSubPopup>
+                            </MenuSub>
+                          );
+                        })}
                       </MenuPopup>
                     </Menu>
                   )}

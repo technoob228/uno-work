@@ -45,6 +45,20 @@ type TraitsPersistence =
 
 const ULTRATHINK_PROMPT_PREFIX = "Ultrathink:\n";
 
+export function isInteractionModeAgentDescriptor(descriptor: ProviderOptionDescriptor): boolean {
+  if (descriptor.type !== "select" || descriptor.id !== "agent") {
+    return false;
+  }
+  const optionIds = new Set(descriptor.options.map((option) => option.id));
+  return optionIds.has("build") && optionIds.has("plan");
+}
+
+export function filterInteractionModeDuplicateDescriptors(
+  descriptors: ReadonlyArray<ProviderOptionDescriptor>,
+): ReadonlyArray<ProviderOptionDescriptor> {
+  return descriptors.filter((descriptor) => !isInteractionModeAgentDescriptor(descriptor));
+}
+
 function replaceDescriptorCurrentValue(
   descriptors: ReadonlyArray<ProviderOptionDescriptor>,
   descriptorId: string,
@@ -84,10 +98,12 @@ function getSelectedTraits(
   allowPromptInjectedEffort: boolean,
 ) {
   const caps = getProviderModelCapabilities(models, model, provider);
-  const descriptors = getProviderOptionDescriptors({
-    caps,
-    selections: modelOptions,
-  });
+  const descriptors = filterInteractionModeDuplicateDescriptors(
+    getProviderOptionDescriptors({
+      caps,
+      selections: modelOptions,
+    }),
+  );
   const selectDescriptors = descriptors.filter(
     (descriptor): descriptor is Extract<ProviderOptionDescriptor, { type: "select" }> =>
       descriptor.type === "select",

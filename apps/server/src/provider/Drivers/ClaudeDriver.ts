@@ -17,6 +17,8 @@ import { Cache, Duration, Effect, FileSystem, Path, Schema, Stream } from "effec
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeClaudeTextGeneration } from "../../textGeneration/ClaudeTextGeneration.ts";
+import { BrowserBridge } from "../../browserBridge.ts";
+import { buildBrowserInstructions } from "../browserInstructions.ts";
 import { ServerConfig } from "../../config.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeClaudeAdapter } from "../Layers/ClaudeAdapter.ts";
@@ -45,6 +47,7 @@ export type ClaudeDriverEnv =
   | FileSystem.FileSystem
   | Path.Path
   | ProviderEventLoggers
+  | BrowserBridge
   | ServerConfig;
 
 const withInstanceIdentity =
@@ -76,7 +79,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const path = yield* Path.Path;
       const eventLoggers = yield* ProviderEventLoggers;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const browserBridge = yield* BrowserBridge;
+      const processEnv = browserBridge.applyEnvironment(
+        mergeProviderInstanceEnvironment(environment),
+      );
+      const browserInstructions = buildBrowserInstructions(browserBridge.baseUrl);
       const fallbackContinuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,
@@ -94,6 +101,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         instanceId,
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+        ...(browserInstructions ? { appendSystemPrompt: browserInstructions } : {}),
       };
       const adapter = yield* makeClaudeAdapter(effectiveConfig, adapterOptions);
       const textGeneration = yield* makeClaudeTextGeneration(effectiveConfig, processEnv);

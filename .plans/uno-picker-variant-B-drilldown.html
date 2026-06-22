@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Variant B — Drill-down</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0a0a0a;
+        --panel: #18181b;
+        --panel-2: #1f1f23;
+        --panel-3: #25252a;
+        --border: #27272a;
+        --border-soft: #2a2a2e;
+        --text: #fafafa;
+        --text-2: #e4e4e7;
+        --muted: #8a8e94;
+        --muted-2: #a1a1aa;
+        --accent: #6ee7c7;
+        --accent-bg: #14302a;
+        --accent-border: #2f6e5d;
+        --frontier-bg: #2b1f33;
+        --frontier-fg: #d8b4fe;
+        --strong-bg: #16263a;
+        --strong-fg: #93c5fd;
+        --cheap-bg: #15281f;
+        --cheap-fg: #86efac;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text);
+        font: 13.5px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif; }
+      .app { min-height: 100vh; padding: 22px 24px 80px; }
+      .doc-note { max-width: 940px; margin: 0 auto 18px; padding: 12px 16px;
+        background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+        color: var(--muted-2); font-size: 12.5px; }
+      .doc-note b { color: var(--accent); }
+      .stage { max-width: 940px; margin: 0 auto;
+        display: grid; grid-template-rows: auto 1fr auto; gap: 12px; }
+      .topbar { display: flex; align-items: center; justify-content: space-between;
+        padding: 10px 14px; background: var(--panel); border: 1px solid var(--border);
+        border-radius: 10px; }
+      .crumb { display: inline-flex; align-items: center; gap: 8px; color: var(--muted-2); }
+      .crumb b { color: var(--text); font-weight: 600; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+      .trigger { display: inline-flex; align-items: center; gap: 8px; height: 32px;
+        padding: 0 12px; border-radius: 8px; border: 1px solid var(--border);
+        background: var(--panel-2); color: var(--text); cursor: pointer; font: inherit; }
+      .trigger .h { color: var(--muted-2); margin-right: 6px; padding-right: 8px;
+        border-right: 1px solid var(--border); }
+      .trigger .route { font-size: 11px; padding: 2px 6px; border-radius: 999px;
+        background: var(--strong-bg); color: var(--strong-fg); margin-left: 4px; }
+      .chev { width: 12px; height: 12px; opacity: 0.7; }
+
+      .composer { background: var(--panel); border: 1px solid var(--border);
+        border-radius: 10px; overflow: hidden; }
+      .composer textarea { width: 100%; min-height: 64px; resize: vertical; border: 0;
+        outline: 0; padding: 12px 14px; background: transparent; color: var(--text); font: inherit; }
+      .composer-tools { display: flex; align-items: center; justify-content: space-between;
+        gap: 10px; padding: 8px 10px; border-top: 1px solid var(--border); }
+      .iconbtn { width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--border);
+        background: var(--panel-2); color: var(--muted-2); display: inline-flex; align-items: center;
+        justify-content: center; cursor: pointer; font: inherit; }
+      .primary { border: 1px solid var(--accent-border); background: var(--accent-bg);
+        color: #d6fff2; padding: 0 12px; height: 30px; border-radius: 6px; cursor: pointer; font: inherit; }
+      .mini-trigger { display: inline-flex; align-items: center; gap: 6px; height: 30px;
+        padding: 0 10px; border-radius: 6px; border: 1px solid var(--border);
+        background: var(--panel-2); color: var(--text); cursor: pointer; font: inherit; }
+      .mini-trigger .h { color: var(--muted-2); margin-right: 4px; padding-right: 6px;
+        border-right: 1px solid var(--border); font-size: 11px; }
+      .left-tools, .right-tools { display: flex; align-items: center; gap: 6px; }
+
+      .popover { display: grid; grid-template-columns: 180px 1fr;
+        background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+        min-height: 480px; max-height: 600px; overflow: hidden;
+        box-shadow: 0 24px 48px rgba(0,0,0,0.5); }
+      .pop-side { background: var(--panel); border-right: 1px solid var(--border);
+        padding: 8px 6px; overflow-y: auto; }
+      .pop-side .heading { font-size: 10.5px; text-transform: uppercase;
+        letter-spacing: 0.06em; color: var(--muted); padding: 8px 8px 4px; }
+      .side-btn { display: flex; align-items: center; gap: 8px; width: 100%;
+        background: transparent; border: 1px solid transparent; color: var(--text-2);
+        padding: 7px 8px; border-radius: 6px; cursor: pointer; font: inherit; text-align: left; }
+      .side-btn:hover { background: var(--panel-2); }
+      .side-btn.active { background: var(--panel-2); border-color: var(--border); color: var(--text); }
+      .side-ico { width: 18px; height: 18px; border-radius: 5px; background: var(--panel-3);
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: 10px; color: var(--muted-2); font-weight: 600; }
+      .side-ico.uno { background: #14302a; color: var(--accent); }
+      .side-ico.codex { background: #1a2a16; color: #a3d075; }
+      .side-ico.claude { background: #2a1f16; color: #e7a468; }
+      .side-ico.cursor { background: #181a2a; color: #9ea3ff; }
+      .side-ico.fav { background: #2a2316; color: #f3bd5b; }
+      .side-count { margin-left: auto; font-size: 10.5px; color: var(--muted); }
+
+      .pop-main { display: flex; flex-direction: column; min-height: 0; }
+      .pop-header { display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+        border-bottom: 1px solid var(--border); }
+      .pop-header .back-btn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+        background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+        color: var(--muted-2); cursor: pointer; font: inherit; font-size: 12px; }
+      .pop-header h2 { margin: 0; font-size: 14.5px; font-weight: 600; }
+      .pop-header .sub { color: var(--muted); font-size: 12px; margin-left: auto; }
+
+      .cats { padding: 12px; display: grid; gap: 8px; }
+      .cat { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center;
+        padding: 14px; background: var(--panel-2); border: 1px solid var(--border);
+        border-radius: 10px; cursor: pointer; }
+      .cat:hover { border-color: var(--accent-border); background: #1d2825; }
+      .cat .cat-title { font-weight: 600; font-size: 14px; color: var(--text); }
+      .cat .cat-meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+      .cat .cat-r { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+      .cat .cat-arrow { color: var(--muted-2); font-size: 18px; }
+      .badge { font-size: 10.5px; padding: 2px 7px; border-radius: 999px; color: var(--text-2);
+        background: var(--panel-3); display: inline-block; }
+      .badge.tier-frontier { background: var(--frontier-bg); color: var(--frontier-fg); }
+      .badge.tier-strong { background: var(--strong-bg); color: var(--strong-fg); }
+      .badge.tier-cheap { background: var(--cheap-bg); color: var(--cheap-fg); }
+      .badge.route { background: #1a2530; color: #93c5fd; }
+      .badge.route.ru { background: #2a1a1a; color: #f0a0a0; }
+      .badge.price { background: transparent; color: var(--accent); border: 1px dashed var(--accent-border); }
+      .badge.unknown { color: var(--muted); border: 1px dashed var(--border-soft); background: transparent; }
+      .badge.cap { background: var(--panel-3); color: var(--muted-2); }
+
+      .pop-search { display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+        border-bottom: 1px solid var(--border); }
+      .pop-search input { flex: 1; height: 30px; border-radius: 6px; border: 1px solid var(--border);
+        background: var(--bg); color: var(--text); padding: 0 10px; outline: none; font: inherit; }
+      .pop-search svg { width: 14px; height: 14px; color: var(--muted); }
+
+      .pop-list { flex: 1; overflow-y: auto; padding: 6px 8px 10px; }
+      .row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center;
+        padding: 10px 10px; border-radius: 8px; cursor: pointer; }
+      .row:hover { background: var(--panel-2); }
+      .row.selected { background: var(--panel-2); border: 1px solid var(--accent-border); }
+      .name { font-weight: 600; color: var(--text); }
+      .vendor { color: var(--muted); font-size: 11px; margin-top: 2px; }
+      .badges { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+
+      .footer-hint { padding: 8px 12px; border-top: 1px solid var(--border);
+        font-size: 11px; color: var(--muted); display: flex; gap: 14px; justify-content: space-between; }
+      .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px;
+        padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted-2);
+        background: var(--panel-2); }
+
+      .panel-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .panel-row > section { background: var(--panel); border: 1px solid var(--border);
+        border-radius: 10px; overflow: hidden; min-height: 380px; display: flex; flex-direction: column; }
+      .panel-row .panel-label { font-size: 11px; color: var(--accent); padding: 8px 12px;
+        background: #112621; border-bottom: 1px solid var(--accent-border); text-transform: uppercase;
+        letter-spacing: 0.08em; }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="doc-note">
+        <b>Variant B — Drill-down (двухшаговый).</b> Клик по провайдеру в сайдбаре открывает
+        не модели, а <i>категории внутри провайдера</i> — карточки «Frontier · Russia»,
+        «Frontier · Global» и т.д. Клик по категории — список её моделей с кнопкой
+        «← Back». Иерархия выражена сильно, но +1 клик до модели. Ниже показаны оба состояния
+        side-by-side для сравнения.
+      </div>
+
+      <div class="stage">
+        <div class="topbar">
+          <div class="crumb"><span class="dot"></span> <b>uno-work-app</b>
+            <span style="opacity:0.5">/ thread #1245</span></div>
+          <button class="trigger">
+            <span class="side-ico uno" style="width:14px;height:14px;font-size:9px">U</span>
+            <span class="h">Uno</span> GPT-5.1 Codex
+            <span class="route">RU</span>
+            <svg class="chev" viewBox="0 0 20 20" fill="currentColor"><path d="M5 8l5 5 5-5z"/></svg>
+          </button>
+        </div>
+
+        <div class="panel-row">
+          <section>
+            <div class="panel-label">Step 1 — categories inside Uno Gateway</div>
+            <div class="popover" style="border:0;border-radius:0;box-shadow:none;min-height:auto;flex:1">
+              <aside class="pop-side">
+                <div class="heading">Quick</div>
+                <button class="side-btn"><span class="side-ico fav">★</span> Favorites
+                  <span class="side-count">3</span></button>
+                <div class="heading">Harnesses</div>
+                <button class="side-btn"><span class="side-ico codex">C</span> Codex</button>
+                <button class="side-btn"><span class="side-ico codex">C</span> Codex Personal</button>
+                <button class="side-btn"><span class="side-ico claude">A</span> Claude</button>
+                <button class="side-btn active"><span class="side-ico uno">U</span> Uno Gateway
+                  <span class="side-count">10</span></button>
+                <button class="side-btn"><span class="side-ico cursor">⌘</span> Cursor</button>
+              </aside>
+              <div class="pop-main">
+                <div class="pop-header">
+                  <h2>Uno Gateway</h2>
+                  <span class="sub">10 models · 5 categories</span>
+                </div>
+                <div class="cats">
+                  <div class="cat">
+                    <div>
+                      <div class="cat-title">Frontier · Russia <span class="badge tier-frontier" style="margin-left:6px;">2 models</span></div>
+                      <div class="cat-meta">GPT-5.1 Codex · Claude Opus 4.5</div>
+                    </div>
+                    <div class="cat-r">
+                      <span class="badge price">$1.88–$2.26</span>
+                      <span class="cat-arrow">›</span>
+                    </div>
+                  </div>
+                  <div class="cat">
+                    <div>
+                      <div class="cat-title">Frontier · Global <span class="badge tier-frontier" style="margin-left:6px;">2 models</span></div>
+                      <div class="cat-meta">GPT-5.1 Codex · Claude Opus 4.5</div>
+                    </div>
+                    <div class="cat-r">
+                      <span class="badge price">$1.88–$2.26</span>
+                      <span class="cat-arrow">›</span>
+                    </div>
+                  </div>
+                  <div class="cat">
+                    <div>
+                      <div class="cat-title">Strong · Russia <span class="badge tier-strong" style="margin-left:6px;">2 models</span></div>
+                      <div class="cat-meta">Claude Sonnet 4.6 · Gemini 2.5 Pro</div>
+                    </div>
+                    <div class="cat-r">
+                      <span class="badge price">$0.45–$0.65</span>
+                      <span class="cat-arrow">›</span>
+                    </div>
+                  </div>
+                  <div class="cat">
+                    <div>
+                      <div class="cat-title">Strong · Global <span class="badge tier-strong" style="margin-left:6px;">2 models</span></div>
+                      <div class="cat-meta">Claude Sonnet 4.6 · Gemini 2.5 Pro</div>
+                    </div>
+                    <div class="cat-r">
+                      <span class="badge price">$0.45–$0.65</span>
+                      <span class="cat-arrow">›</span>
+                    </div>
+                  </div>
+                  <div class="cat">
+                    <div>
+                      <div class="cat-title">Average <span class="badge tier-cheap" style="margin-left:6px;">2 models</span></div>
+                      <div class="cat-meta">Kimi K2 Thinking · DeepSeek V3.1</div>
+                    </div>
+                    <div class="cat-r">
+                      <span class="badge unknown">price unknown</span>
+                      <span class="cat-arrow">›</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <div class="panel-label">Step 2 — drilled into «Frontier · Russia»</div>
+            <div class="popover" style="border:0;border-radius:0;box-shadow:none;min-height:auto;flex:1">
+              <aside class="pop-side">
+                <div class="heading">Quick</div>
+                <button class="side-btn"><span class="side-ico fav">★</span> Favorites</button>
+                <div class="heading">Harnesses</div>
+                <button class="side-btn"><span class="side-ico codex">C</span> Codex</button>
+                <button class="side-btn"><span class="side-ico codex">C</span> Codex Personal</button>
+                <button class="side-btn"><span class="side-ico claude">A</span> Claude</button>
+                <button class="side-btn active"><span class="side-ico uno">U</span> Uno Gateway</button>
+                <button class="side-btn"><span class="side-ico cursor">⌘</span> Cursor</button>
+              </aside>
+              <div class="pop-main">
+                <div class="pop-header">
+                  <button class="back-btn">← Categories</button>
+                  <h2 style="margin-left:4px;">Frontier · Russia</h2>
+                  <span class="sub">2 models</span>
+                </div>
+                <div class="pop-search">
+                  <svg viewBox="0 0 20 20" fill="currentColor"><circle cx="9" cy="9" r="6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M14 14l4 4" stroke="currentColor" stroke-width="1.6" fill="none"/></svg>
+                  <input placeholder="Search within Frontier · Russia…" />
+                </div>
+                <div class="pop-list">
+                  <div class="row selected">
+                    <div>
+                      <div class="name">GPT-5.1 Codex</div>
+                      <div class="vendor">openai · uno-russia/gpt-5.1-codex</div>
+                    </div>
+                    <div class="badges">
+                      <span class="badge cap">Tools</span>
+                      <span class="badge price">~$1.88</span>
+                    </div>
+                  </div>
+                  <div class="row">
+                    <div>
+                      <div class="name">Claude Opus 4.5</div>
+                      <div class="vendor">anthropic · uno-russia/claude-opus-4.5</div>
+                    </div>
+                    <div class="badges">
+                      <span class="badge cap">Tools</span>
+                      <span class="badge cap">Vision</span>
+                      <span class="badge price">~$2.26</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="footer-hint">
+                  <div><span class="kbd">Esc</span> back · <span class="kbd">Enter</span> select</div>
+                  <div>Continuation: <b style="color:var(--accent)">same Uno session</b></div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="composer" style="margin-top:8px;">
+          <textarea placeholder="Ask anything, @tag files, / for commands"></textarea>
+          <div class="composer-tools">
+            <div class="left-tools">
+              <button class="iconbtn" title="Attach">+</button>
+              <button class="mini-trigger">
+                <span class="side-ico uno" style="width:14px;height:14px;font-size:9px">U</span>
+                <span class="h">Uno</span> GPT-5.1 Codex · RU
+                <svg class="chev" viewBox="0 0 20 20" fill="currentColor"><path d="M5 8l5 5 5-5z"/></svg>
+              </button>
+            </div>
+            <div class="right-tools">
+              <button class="iconbtn" title="Plan mode">P</button>
+              <button class="primary">Send ⏎</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

@@ -14,6 +14,29 @@ bun fmt && bun lint && bun typecheck  # перед коммитом
 
 `bun --filter '@t3tools/desktop' dev` напрямую **не работает** — `VITE_DEV_SERVER_URL` инжектится только через корневой `dev-runner`.
 
+Если приложение надо оставить запущенным после ответа агента, не держать его в интерактивном PTY tool-session. Запускать как user launchd job:
+
+```bash
+launchctl submit -l xyz.unowork.dev -o /tmp/uno-work-dev.log -e /tmp/uno-work-dev.err -- /bin/zsh -lc "cd '$PWD' && exec $(command -v bun) dev:desktop"
+```
+
+Остановить такой dev-запуск:
+
+```bash
+launchctl remove xyz.unowork.dev
+```
+
+После `bun dev:desktop` не считать запуск успешным только по Vite URL. Обязательный smoke:
+
+```bash
+curl -I http://127.0.0.1:5733/
+curl http://127.0.0.1:13773/.well-known/t3/environment
+```
+
+Если Electron показывает белый экран, полностью остановить и заново запустить `bun dev:desktop`. После изменений в `apps/desktop/src/main.ts` не полагаться на hot-restart watcher: он может оставить `dev-electron` живым без корректно поднятого окна/backend. Для диагностики смотреть процессы `dev-electron`, `--t3code-dev-root` и `apps/server/dist/bin.mjs`; браузерная проверка `5733` сама по себе не доказывает, что desktop shell жив. Успешный desktop smoke должен показать в Electron-логе `[desktop] renderer snapshot` с `content-ready` и `rootTextLength > 0`.
+
+Dev Electron включает локальный CDP endpoint для Playwright: `http://127.0.0.1:9223`. Он нужен агентам, чтобы управлять уже открытым Uno Work/browser-pane через `chromium.connectOverCDP(...)`, а не отдельным браузером без профиля. Порт слушает только localhost; переопределить или отключить можно через `UNO_WORK_ELECTRON_REMOTE_DEBUGGING_PORT` (`0`/`false`/`off` отключает).
+
 ## Делта относительно апстрима
 
 ### 1. Brand: «T3 Code» / «Uno Work» → «Work»
@@ -61,7 +84,17 @@ bun fmt && bun lint && bun typecheck  # перед коммитом
 
 **Важно про путь:** `node.path` из `ChangedFilesTree` — project-relative (`test.html`). FileBrowser передаёт **абсолютный** путь. Поэтому в `onOpenTurnDiff` мы вручную джойним с `gitCwd` (корень проекта, с учётом worktree). Без этого Electron резолвит относительный путь от своего `cwd` (корень репозитория) и получает ENOENT.
 
-### 6. Прочее
+### 6. Встроенный браузер (в панели preview)
+
+Браузерные вкладки живут в той же правой панели, что и preview файлов (как в Codex Desktop).
+
+- **Контракты:** `PreviewFileKind` получил `"browser"`; в `packages/contracts/src/server.ts` — `BrowserBridgeStreamEvent`; RPC `subscribeBrowserBridge` в `rpc.ts`; типы кредов + `browserProfileScope` в `ipc.ts`/`settings.ts`.
+- **Web:** `apps/web/src/components/preview/BrowserPane.tsx` — Electron `<webview>` с тулбаром (назад/вперёд/обновить/адресная строка/автозаполнение/открыть внешне), все вкладки смонтированы (скрытые `display:none`). `browserUrl.ts` — нормализация ввода в URL (+ тесты). `PreviewPaneContext` — `openUrl`/`updateBrowserTab`, `currentProjectKey`. Иконка-глобус в `ChatHeader`, меню «файл/страница» на «+», скролл активной вкладки в табстрипе. `BrowserBridgeListener.tsx` подписывается на bridge-события и на `onBrowserOpenUrlRequest`.
+- **Electron:** `webviewTag: true`, `will-attach-webview` снимает preload/nodeIntegration с гостя, `did-attach-webview` уводит `target=_blank` в новую вкладку. IPC кредов в `main.ts`/`preload.ts`; хранилище `browserCredentials.ts` (пароли через safeStorage, + тесты).
+- **Мост модель→браузер:** `apps/server/src/browserBridge.ts` + endpoint `POST /api/browser/open` (Bearer-токен из env подпроцесса) в `http.ts`; пуш через WS `subscribeBrowserBridge` (`ws.ts`). Env `UNO_WORK_BRIDGE_URL`/`UNO_WORK_BRIDGE_TOKEN` инжектятся во все драйверы. Инструкции про браузер (+ ссылка на `getuno.xyz/llms.txt`) — `provider/browserInstructions.ts`: Claude через `systemPrompt.append`, Codex через `developer_instructions`, OpenCode/Uno через `instructions`-файл в `OPENCODE_CONFIG_CONTENT`.
+- **Настройки:** раздел «Browser» (`settings.browser.tsx` + `BrowserSettingsPanel.tsx`) — выбор профиля (аккаунт/проект) и менеджер сохранённых входов.
+
+### 7. Прочее
 
 - `apps/web/src/components/AddEnvModal.tsx`, `SidebarEnvSwitcher.tsx` — кастомные обёртки над свитчером сред.
 - `apps/web/src/index.css` — кастомные стили (Uno-палитра / акценты).

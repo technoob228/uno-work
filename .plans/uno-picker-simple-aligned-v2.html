@@ -1,0 +1,834 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Uno Work Model Picker - Simple Aligned V2</title>
+    <style>
+      :root {
+        --background: #fafafa;
+        --popover: #ffffff;
+        --muted: #f4f4f5;
+        --muted-2: #eeeeef;
+        --border: #e3e3e4;
+        --border-strong: #d4d4d5;
+        --foreground: #27272a;
+        --muted-foreground: #71717a;
+        --faint: #a1a1aa;
+        --primary: #5b5ce2;
+        --primary-soft: #efefff;
+        --green: #16844f;
+        --green-soft: #e9f7ef;
+        --amber: #996b0f;
+        --amber-soft: #fff5d6;
+        --red: #b64033;
+        --red-soft: #fcecea;
+        --shadow: 0 18px 60px rgba(24, 24, 27, 0.14), 0 2px 8px rgba(24, 24, 27, 0.06);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(250, 250, 250, 0.94)),
+          var(--background);
+        color: var(--foreground);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      .frame {
+        display: grid;
+        min-height: 100vh;
+        place-items: center;
+        padding: 32px;
+      }
+
+      .app-underlay {
+        position: relative;
+        width: min(1120px, calc(100vw - 32px));
+        min-height: 720px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        background: #fff;
+        box-shadow: 0 20px 80px rgba(24, 24, 27, 0.08);
+      }
+
+      .left-app-rail {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 88px;
+        border-right: 1px solid var(--border);
+        background: #f8f8f8;
+      }
+
+      .rail-dot {
+        display: grid;
+        width: 44px;
+        height: 44px;
+        margin: 18px auto;
+        place-items: center;
+        border-radius: 12px;
+        color: #3f3f46;
+      }
+
+      .rail-dot.active {
+        background: #fff;
+        color: var(--primary);
+        box-shadow: 0 4px 16px rgba(24, 24, 27, 0.1);
+      }
+
+      .composer-strip {
+        position: absolute;
+        right: 64px;
+        bottom: 24px;
+        left: 120px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: 56px;
+        padding: 0 14px;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.92);
+        color: var(--faint);
+      }
+
+      .composer-model {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        max-width: 260px;
+        min-height: 38px;
+        padding: 0 12px;
+        border-radius: 13px;
+        background: var(--muted);
+        color: var(--muted-foreground);
+        font-weight: 650;
+      }
+
+      .picker {
+        position: absolute;
+        top: 56px;
+        left: 112px;
+        display: grid;
+        grid-template-columns: 64px minmax(0, 1fr);
+        width: min(860px, calc(100vw - 180px));
+        height: 600px;
+        overflow: visible;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: var(--popover);
+        box-shadow: var(--shadow);
+      }
+
+      .provider-rail {
+        overflow: hidden;
+        border-right: 1px solid var(--border);
+        border-radius: 18px 0 0 18px;
+        background: #f7f7f8;
+      }
+
+      .provider-rail-inner {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        align-items: center;
+        padding: 10px 8px;
+      }
+
+      .provider-button {
+        position: relative;
+        display: grid;
+        width: 44px;
+        height: 44px;
+        place-items: center;
+        border: 0;
+        border-radius: 12px;
+        background: transparent;
+        color: #3f3f46;
+      }
+
+      .provider-button.active {
+        background: #fff;
+        color: var(--primary);
+        box-shadow: 0 2px 8px rgba(24, 24, 27, 0.1);
+      }
+
+      .provider-button.active::after {
+        position: absolute;
+        top: 50%;
+        right: -9px;
+        width: 3px;
+        height: 22px;
+        border-radius: 999px 0 0 999px;
+        background: var(--primary);
+        content: "";
+        transform: translateY(-50%);
+      }
+
+      .provider-button.muted {
+        opacity: 0.48;
+      }
+
+      .glyph {
+        display: grid;
+        width: 24px;
+        height: 24px;
+        place-items: center;
+        border-radius: 7px;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .glyph.star {
+        font-size: 22px;
+      }
+
+      .glyph.uno,
+      .logo.uno {
+        background: #6257e8;
+        color: #fff;
+      }
+
+      .glyph.google,
+      .logo.google {
+        background: #2f74ee;
+        color: #fff;
+      }
+
+      .glyph.anthropic,
+      .logo.anthropic {
+        background: #c47052;
+        color: #fff;
+      }
+
+      .glyph.openai,
+      .logo.openai {
+        background: #19191b;
+        color: #fff;
+      }
+
+      .glyph.router,
+      .logo.router {
+        background: #6b5df5;
+        color: #fff;
+      }
+
+      .main {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        overflow: hidden;
+        border-radius: 0 18px 18px 0;
+      }
+
+      .search-wrap {
+        padding: 14px 16px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .search {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        height: 44px;
+        padding: 0 12px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        background: var(--muted);
+        color: var(--muted-foreground);
+        font-size: 15px;
+      }
+
+      .search svg {
+        width: 18px;
+        height: 18px;
+        color: var(--faint);
+      }
+
+      .filter-row {
+        display: grid;
+        grid-template-columns: 1.2fr 1.35fr 1fr 1.15fr;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .filter {
+        position: relative;
+      }
+
+      .filter-button {
+        display: flex;
+        width: 100%;
+        height: 38px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 0 10px;
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        background: #fff;
+        color: var(--foreground);
+        font: inherit;
+        text-align: left;
+      }
+
+      .filter.active .filter-button {
+        border-color: rgba(91, 92, 226, 0.35);
+        background: var(--primary-soft);
+      }
+
+      .filter-label {
+        display: block;
+        color: var(--muted-foreground);
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .filter-value {
+        display: block;
+        overflow: hidden;
+        margin-top: 2px;
+        color: var(--foreground);
+        font-size: 12px;
+        font-weight: 650;
+        line-height: 1.05;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .chevron {
+        width: 8px;
+        height: 8px;
+        flex: 0 0 auto;
+        border-right: 1.5px solid var(--muted-foreground);
+        border-bottom: 1.5px solid var(--muted-foreground);
+        transform: rotate(45deg) translateY(-2px);
+      }
+
+      .dropdown {
+        position: absolute;
+        z-index: 5;
+        top: calc(100% + 7px);
+        right: 0;
+        width: 214px;
+        padding: 6px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: #fff;
+        box-shadow: 0 14px 40px rgba(24, 24, 27, 0.15), 0 2px 8px rgba(24, 24, 27, 0.06);
+      }
+
+      .menu-option {
+        display: grid;
+        grid-template-columns: 18px 1fr;
+        gap: 8px;
+        align-items: center;
+        min-height: 34px;
+        padding: 7px 8px;
+        border-radius: 8px;
+        font-size: 12px;
+      }
+
+      .menu-option.active,
+      .menu-option:hover {
+        background: var(--muted);
+      }
+
+      .check {
+        display: grid;
+        width: 16px;
+        height: 16px;
+        place-items: center;
+        border: 1px solid var(--border-strong);
+        border-radius: 5px;
+        color: transparent;
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .menu-option.active .check {
+        border-color: var(--primary);
+        background: var(--primary);
+        color: #fff;
+      }
+
+      .list-wrap {
+        position: relative;
+        min-height: 0;
+        flex: 1;
+        background: var(--muted);
+      }
+
+      .list {
+        position: relative;
+        height: 100%;
+        overflow: hidden;
+        padding: 7px 8px;
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: minmax(190px, 1fr) minmax(210px, 1.15fr) 92px 104px;
+        gap: 10px;
+        align-items: center;
+        min-height: 76px;
+        padding: 10px 12px;
+        border-radius: 11px;
+        color: var(--foreground);
+      }
+
+      .row + .row {
+        border-top: 1px solid rgba(212, 212, 216, 0.55);
+      }
+
+      .row:hover,
+      .row.selected {
+        background: #fff;
+      }
+
+      .row.selected {
+        box-shadow: inset 3px 0 0 var(--primary), 0 1px 4px rgba(24, 24, 27, 0.05);
+      }
+
+      .model-cell {
+        display: flex;
+        min-width: 0;
+        align-items: flex-start;
+        gap: 9px;
+      }
+
+      .star {
+        width: 18px;
+        flex: 0 0 auto;
+        color: #d6a217;
+        font-size: 16px;
+        line-height: 1;
+      }
+
+      .model-text {
+        min-width: 0;
+      }
+
+      .model-title {
+        overflow: hidden;
+        color: var(--foreground);
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.25;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .model-sub {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 5px;
+        margin-top: 3px;
+        color: var(--muted-foreground);
+        font-size: 12px;
+        line-height: 1.2;
+      }
+
+      .logo {
+        display: grid;
+        width: 14px;
+        height: 14px;
+        flex: 0 0 auto;
+        place-items: center;
+        border-radius: 4px;
+        font-size: 8px;
+        font-weight: 800;
+      }
+
+      .capabilities {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        min-height: 23px;
+        padding: 0 7px;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.75);
+        color: var(--muted-foreground);
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .tag.yes {
+        border-color: rgba(22, 132, 79, 0.2);
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .tag.warn {
+        border-color: rgba(153, 107, 15, 0.24);
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+
+      .tag.no {
+        border-color: rgba(182, 64, 51, 0.22);
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .tier {
+        display: inline-flex;
+        width: max-content;
+        min-height: 24px;
+        align-items: center;
+        justify-content: center;
+        padding: 0 8px;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.75);
+        color: var(--muted-foreground);
+        font-size: 10px;
+        font-weight: 760;
+      }
+
+      .tier.frontier {
+        border-color: rgba(91, 92, 226, 0.22);
+        background: var(--primary-soft);
+        color: #4b46bd;
+      }
+
+      .tier.strong {
+        border-color: rgba(22, 132, 79, 0.2);
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .price {
+        color: var(--foreground);
+        font-size: 12px;
+        font-weight: 760;
+        text-align: right;
+      }
+
+      .price small {
+        display: block;
+        margin-top: 3px;
+        color: var(--muted-foreground);
+        font-size: 10px;
+        font-weight: 500;
+      }
+
+      .bottom-note {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        min-height: 42px;
+        padding: 0 16px;
+        border-top: 1px solid var(--border);
+        background: #fff;
+        color: var(--muted-foreground);
+        font-size: 11px;
+      }
+
+      .active-summary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        align-items: center;
+      }
+
+      .summary-pill {
+        border: 1px solid rgba(91, 92, 226, 0.22);
+        border-radius: 999px;
+        background: var(--primary-soft);
+        color: #4b46bd;
+        padding: 3px 7px;
+        font-weight: 700;
+      }
+
+      @media (max-width: 840px) {
+        .frame {
+          padding: 16px;
+        }
+
+        .app-underlay {
+          min-height: 760px;
+        }
+
+        .picker {
+          top: 24px;
+          left: 24px;
+          grid-template-columns: 1fr;
+          width: calc(100vw - 80px);
+          height: 660px;
+        }
+
+        .provider-rail {
+          display: none;
+        }
+
+        .main {
+          border-radius: 18px;
+        }
+
+        .filter-row {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .row {
+          grid-template-columns: 1fr;
+          gap: 7px;
+        }
+
+        .price {
+          text-align: left;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <div class="app-underlay">
+        <div class="left-app-rail">
+          <div class="rail-dot">★</div>
+          <div class="rail-dot">G</div>
+          <div class="rail-dot active">U</div>
+          <div class="rail-dot">O</div>
+        </div>
+
+        <section class="picker" aria-label="Simple aligned model picker mock">
+          <aside class="provider-rail" aria-label="Provider shortcuts">
+            <div class="provider-rail-inner">
+              <button class="provider-button" type="button" aria-label="Favorites">
+                <span class="glyph star">★</span>
+              </button>
+              <button class="provider-button active" type="button" aria-label="Uno">
+                <span class="glyph uno">U</span>
+              </button>
+              <button class="provider-button" type="button" aria-label="Google">
+                <span class="glyph google">G</span>
+              </button>
+              <button class="provider-button" type="button" aria-label="Anthropic">
+                <span class="glyph anthropic">A</span>
+              </button>
+              <button class="provider-button" type="button" aria-label="OpenAI">
+                <span class="glyph openai">O</span>
+              </button>
+              <button class="provider-button muted" type="button" aria-label="OpenRouter">
+                <span class="glyph router">R</span>
+              </button>
+            </div>
+          </aside>
+
+          <div class="main">
+            <div class="search-wrap">
+              <div class="search">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="m21 21-4.2-4.2m1.2-5.3a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                </svg>
+                Search models, Gemini, Claude, GPT...
+              </div>
+
+              <div class="filter-row">
+                <div class="filter">
+                  <button class="filter-button" type="button">
+                    <span>
+                      <span class="filter-label">Provider</span>
+                      <span class="filter-value">All providers</span>
+                    </span>
+                    <span class="chevron"></span>
+                  </button>
+                </div>
+
+                <div class="filter active">
+                  <button class="filter-button" type="button">
+                    <span>
+                      <span class="filter-label">Tools</span>
+                      <span class="filter-value">Tools + image input</span>
+                    </span>
+                    <span class="chevron"></span>
+                  </button>
+                </div>
+
+                <div class="filter">
+                  <button class="filter-button" type="button">
+                    <span>
+                      <span class="filter-label">Tier</span>
+                      <span class="filter-value">All tiers</span>
+                    </span>
+                    <span class="chevron"></span>
+                  </button>
+                </div>
+
+                <div class="filter active">
+                  <button class="filter-button" type="button">
+                    <span>
+                      <span class="filter-label">Sort</span>
+                      <span class="filter-value">Price low-high</span>
+                    </span>
+                    <span class="chevron"></span>
+                  </button>
+                  <div class="dropdown" aria-label="Sort menu">
+                    <div class="menu-option">
+                      <span class="check"></span>
+                      <span>Recommended</span>
+                    </div>
+                    <div class="menu-option active">
+                      <span class="check">✓</span>
+                      <span>Price low-high</span>
+                    </div>
+                    <div class="menu-option">
+                      <span class="check"></span>
+                      <span>Price high-low</span>
+                    </div>
+                    <div class="menu-option">
+                      <span class="check"></span>
+                      <span>Tier best-first</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="list-wrap">
+              <div class="list">
+                <div class="row selected">
+                  <div class="model-cell">
+                    <span class="star">★</span>
+                    <div class="model-text">
+                      <div class="model-title">Gemini 2.5 Pro</div>
+                      <div class="model-sub">
+                        <span class="logo google">G</span>
+                        Google
+                      </div>
+                    </div>
+                  </div>
+                  <div class="capabilities">
+                    <span class="tag yes">Tools</span>
+                    <span class="tag yes">Image input</span>
+                    <span class="tag no">No image gen</span>
+                  </div>
+                  <div><span class="tier frontier">Frontier</span></div>
+                  <div class="price">$0.03-0.06<small>request</small></div>
+                </div>
+
+                <div class="row">
+                  <div class="model-cell">
+                    <span class="star">☆</span>
+                    <div class="model-text">
+                      <div class="model-title">Claude Sonnet 4.5</div>
+                      <div class="model-sub">
+                        <span class="logo anthropic">A</span>
+                        Anthropic
+                      </div>
+                    </div>
+                  </div>
+                  <div class="capabilities">
+                    <span class="tag yes">Tools</span>
+                    <span class="tag yes">Image input</span>
+                    <span class="tag no">No image gen</span>
+                  </div>
+                  <div><span class="tier frontier">Frontier</span></div>
+                  <div class="price">$0.04-0.08<small>request</small></div>
+                </div>
+
+                <div class="row">
+                  <div class="model-cell">
+                    <span class="star">☆</span>
+                    <div class="model-text">
+                      <div class="model-title">GPT-5</div>
+                      <div class="model-sub">
+                        <span class="logo openai">O</span>
+                        OpenAI
+                      </div>
+                    </div>
+                  </div>
+                  <div class="capabilities">
+                    <span class="tag yes">Tools</span>
+                    <span class="tag yes">Image input</span>
+                    <span class="tag warn">Image gen via tool</span>
+                  </div>
+                  <div><span class="tier frontier">Frontier</span></div>
+                  <div class="price">$0.04-0.09<small>request</small></div>
+                </div>
+
+                <div class="row">
+                  <div class="model-cell">
+                    <span class="star">☆</span>
+                    <div class="model-text">
+                      <div class="model-title">GPT Image</div>
+                      <div class="model-sub">
+                        <span class="logo openai">O</span>
+                        OpenAI
+                      </div>
+                    </div>
+                  </div>
+                  <div class="capabilities">
+                    <span class="tag no">No agent tools</span>
+                    <span class="tag yes">Image input</span>
+                    <span class="tag yes">Image gen</span>
+                  </div>
+                  <div><span class="tier strong">Strong</span></div>
+                  <div class="price">$0.02-0.05<small>image</small></div>
+                </div>
+
+                <div class="row">
+                  <div class="model-cell">
+                    <span class="star">☆</span>
+                    <div class="model-text">
+                      <div class="model-title">Claude via OpenRouter</div>
+                      <div class="model-sub">
+                        <span class="logo router">R</span>
+                        OpenRouter
+                      </div>
+                    </div>
+                  </div>
+                  <div class="capabilities">
+                    <span class="tag yes">Tools</span>
+                    <span class="tag warn">Image input unknown</span>
+                    <span class="tag no">No image gen</span>
+                  </div>
+                  <div><span class="tier strong">Strong</span></div>
+                  <div class="price">$0.03-0.07<small>request</small></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="bottom-note">
+              <div class="active-summary">
+                <span>Active:</span>
+                <span class="summary-pill">Tools</span>
+                <span class="summary-pill">Image input</span>
+              </div>
+              <span>Prices are estimates for comparison.</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="composer-strip">
+          <span>Ask Uno Work...</span>
+          <span class="composer-model"><span class="glyph uno">U</span> Gemini 2.5 Pro</span>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

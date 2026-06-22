@@ -8,6 +8,7 @@ import type {
   ServerProviderModel,
   ServerProviderState,
 } from "@t3tools/contracts";
+import { extractNumericCliVersion } from "@t3tools/contracts";
 import { Effect, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { normalizeModelSlug } from "@t3tools/shared/model";
@@ -107,8 +108,9 @@ export function extractAuthBoolean(value: unknown): boolean | undefined {
 }
 
 export function parseGenericCliVersion(output: string): string | null {
-  const match = output.match(/\b(\d+\.\d+\.\d+)\b/);
-  return match?.[1] ?? null;
+  // Delegates to the shared helper so the desktop installer and the server
+  // extract the same numeric `X.Y.Z` core (prerelease suffixes ignored).
+  return extractNumericCliVersion(output);
 }
 
 export function providerModelsFromSettings(

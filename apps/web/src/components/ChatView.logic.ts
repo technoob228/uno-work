@@ -9,7 +9,11 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { type ChatMessage, type SessionPhase, type Thread, type ThreadSession } from "../types";
-import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
+import {
+  type ComposerImageAttachment,
+  type ComposerVideoAttachment,
+  type DraftThreadState,
+} from "../composerDraftStore";
 import { Schema } from "effect";
 import { selectThreadByRef, useStore } from "../store";
 import {
@@ -115,10 +119,11 @@ export function revokeUserMessagePreviewUrls(message: ChatMessage): void {
     return;
   }
   for (const attachment of message.attachments) {
-    if (attachment.type !== "image") {
-      continue;
+    if (attachment.type === "image") {
+      revokeBlobPreviewUrl(attachment.previewUrl);
+    } else {
+      revokeBlobPreviewUrl(attachment.posterPreviewUrl);
     }
-    revokeBlobPreviewUrl(attachment.previewUrl);
   }
 }
 
@@ -128,9 +133,10 @@ export function collectUserMessageBlobPreviewUrls(message: ChatMessage): string[
   }
   const previewUrls: string[] = [];
   for (const attachment of message.attachments) {
-    if (attachment.type !== "image") continue;
-    if (!attachment.previewUrl || !attachment.previewUrl.startsWith("blob:")) continue;
-    previewUrls.push(attachment.previewUrl);
+    const previewUrl =
+      attachment.type === "image" ? attachment.previewUrl : attachment.posterPreviewUrl;
+    if (!previewUrl || !previewUrl.startsWith("blob:")) continue;
+    previewUrls.push(previewUrl);
   }
   return previewUrls;
 }
@@ -177,6 +183,22 @@ export function cloneComposerImageForRetry(
     };
   } catch {
     return image;
+  }
+}
+
+export function cloneComposerVideoForRetry(
+  video: ComposerVideoAttachment,
+): ComposerVideoAttachment {
+  if (typeof URL === "undefined" || !video.previewUrl.startsWith("blob:")) {
+    return video;
+  }
+  try {
+    return {
+      ...video,
+      previewUrl: URL.createObjectURL(video.file),
+    };
+  } catch {
+    return video;
   }
 }
 

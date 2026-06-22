@@ -197,6 +197,46 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
     }),
   );
 
+  it.effect("labels Uno reasoning variants as effort", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.inventory = {
+        providerList: {
+          connected: ["uno"],
+          all: [
+            {
+              id: "uno",
+              name: "Uno",
+              models: {
+                "openai/gpt-5.5": {
+                  id: "openai/gpt-5.5",
+                  name: "GPT-5.5",
+                  variants: {
+                    none: {},
+                    low: {},
+                    medium: {},
+                    high: {},
+                  },
+                },
+              },
+            },
+          ],
+          default: {},
+        },
+        agents: [],
+      };
+
+      const snapshot = yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd());
+      const model = snapshot.models.find((entry) => entry.slug === "uno/openai/gpt-5.5");
+
+      assert.ok(model);
+      const variantDescriptor = model.capabilities?.optionDescriptors?.find(
+        (descriptor) => descriptor.id === "variant" && descriptor.type === "select",
+      );
+      assert.ok(variantDescriptor && variantDescriptor.type === "select");
+      assert.equal(variantDescriptor.label, "Effort");
+    }),
+  );
+
   it.effect("closes the local OpenCode server scope after provider refresh", () =>
     Effect.gen(function* () {
       yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd());

@@ -1,4 +1,3 @@
-import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import React, {
   Children,
@@ -25,9 +24,11 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { openInPreferredEditor } from "../editorPreferences";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
+import { getCodeHighlighterPromise } from "../lib/codeHighlighter";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from "../markdown-links";
+import { extractTerminalLinks } from "../terminal-links";
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
 import { detectFileKind, usePreviewPane } from "./preview/PreviewPaneContext";
@@ -67,7 +68,6 @@ const highlightedCodeCache = new LRUCache<string>(
   MAX_HIGHLIGHT_CACHE_ENTRIES,
   MAX_HIGHLIGHT_CACHE_MEMORY_BYTES,
 );
-const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
 
 function extractFenceLanguage(className: string | undefined): string {
   const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
@@ -117,27 +117,6 @@ function createHighlightCacheKey(code: string, language: string, themeName: Diff
 
 function estimateHighlightedSize(html: string, code: string): number {
   return Math.max(html.length * 2, code.length * 3);
-}
-
-function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
-  const cached = highlighterPromiseCache.get(language);
-  if (cached) return cached;
-
-  const promise = getSharedHighlighter({
-    themes: [resolveDiffThemeName("dark"), resolveDiffThemeName("light")],
-    langs: [language as SupportedLanguages],
-    preferredHighlighter: "shiki-js",
-  }).catch((err) => {
-    highlighterPromiseCache.delete(language);
-    if (language === "text") {
-      // "text" itself failed — Shiki cannot initialize at all, surface the error
-      throw err;
-    }
-    // Language not supported by Shiki — fall back to "text"
-    return getHighlighterPromise("text");
-  });
-  highlighterPromiseCache.set(language, promise);
-  return promise;
 }
 
 function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNode }) {
@@ -240,7 +219,7 @@ function UncachedShikiCodeBlock({
   cacheKey,
   isStreaming,
 }: UncachedShikiCodeBlockProps) {
-  const highlighter = use(getHighlighterPromise(language));
+  const highlighter = use(getCodeHighlighterPromise(language));
   const highlightedHtml = useMemo(() => {
     try {
       return highlighter.codeToHtml(code, { lang: language, theme: themeName });
@@ -286,6 +265,8 @@ const MARKDOWN_FILE_LINK_CLASS_NAME =
   "chat-markdown-file-link relative top-[2px] max-w-full no-underline";
 const MARKDOWN_FILE_LINK_ICON_CLASS_NAME = "chat-markdown-file-link-icon size-3.5 shrink-0";
 const MARKDOWN_FILE_LINK_LABEL_CLASS_NAME = "chat-markdown-file-link-label truncate";
+const MARKDOWN_SAFE_IMAGE_DATA_URL_REGEX =
+  /^data:image\/(?:png|jpeg|jpg|webp|gif|avif|bmp);base64,[a-z0-9+/=\r\n ]+$/i;
 
 function pathParentSegments(path: string): string[] {
   const normalized = path.replaceAll("\\", "/");
@@ -359,6 +340,60 @@ function extractMarkdownLinkHrefs(text: string): string[] {
 
 function normalizeMarkdownLinkHrefKey(href: string): string {
   return rewriteMarkdownFileUriHref(href.trim()) ?? href.trim();
+}
+
+function isSafeMarkdownImageSrc(src: string | undefined): src is string {
+  if (!src) return false;
+  return MARKDOWN_SAFE_IMAGE_DATA_URL_REGEX.test(src) || /^https?:\/\//i.test(src);
+}
+
+function escapeMarkdownLinkLabel(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll("[", "\\[").replaceAll("]", "\\]");
+}
+
+function isInsideInlineCode(line: string, index: number): boolean {
+  const prefix = line.slice(0, index);
+  return (prefix.match(/`/g)?.length ?? 0) % 2 === 1;
+}
+
+function isInsideExistingMarkdownLink(line: string, start: number, end: number): boolean {
+  const lastLinkOpen = line.lastIndexOf("](", start);
+  const lastLinkClose = line.lastIndexOf(")", start);
+  if (lastLinkOpen > lastLinkClose) return true;
+  const previous = line[start - 1];
+  const next = line[end];
+  return previous === "(" || previous === "[" || next === ")" || next === "]";
+}
+
+function autolinkPlainFilePaths(text: string, cwd: string | undefined): string {
+  if (!cwd) return text;
+  let inFence = false;
+  return text
+    .split("\n")
+    .map((line) => {
+      if (/^\s*```/.test(line)) {
+        inFence = !inFence;
+        return line;
+      }
+      if (inFence) return line;
+      const matches = extractTerminalLinks(line).filter((match) => {
+        if (match.kind !== "path") return false;
+        if (isInsideInlineCode(line, match.start)) return false;
+        if (isInsideExistingMarkdownLink(line, match.start, match.end)) return false;
+        return resolveMarkdownFileLinkMeta(match.text, cwd) !== null;
+      });
+      if (matches.length === 0) return line;
+      let output = "";
+      let cursor = 0;
+      for (const match of matches) {
+        output += line.slice(cursor, match.start);
+        output += `[${escapeMarkdownLinkLabel(match.text)}](${match.text})`;
+        cursor = match.end;
+      }
+      output += line.slice(cursor);
+      return output;
+    })
+    .join("\n");
 }
 
 const MarkdownFileLink = memo(function MarkdownFileLink({
@@ -545,13 +580,15 @@ function areMarkdownFileLinkPropsEqual(
 
 function ChatMarkdown({ text, cwd, isStreaming = false, environmentId }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
+  const { openUrl } = usePreviewPane();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
+  const renderedText = useMemo(() => autolinkPlainFilePaths(text, cwd), [cwd, text]);
   const markdownFileLinkMetaByHref = useMemo(() => {
     const metaByHref = new Map<
       string,
       NonNullable<ReturnType<typeof resolveMarkdownFileLinkMeta>>
     >();
-    for (const href of extractMarkdownLinkHrefs(text)) {
+    for (const href of extractMarkdownLinkHrefs(renderedText)) {
       const normalizedHref = normalizeMarkdownLinkHrefKey(href);
       if (metaByHref.has(normalizedHref)) continue;
       const meta = resolveMarkdownFileLinkMeta(normalizedHref, cwd);
@@ -560,21 +597,61 @@ function ChatMarkdown({ text, cwd, isStreaming = false, environmentId }: ChatMar
       }
     }
     return metaByHref;
-  }, [cwd, text]);
+  }, [cwd, renderedText]);
   const fileLinkParentSuffixByPath = useMemo(() => {
     const filePaths = [...markdownFileLinkMetaByHref.values()].map((meta) => meta.filePath);
     return buildFileLinkParentSuffixByPath(filePaths);
   }, [markdownFileLinkMetaByHref]);
   const markdownUrlTransform = useCallback((href: string) => {
+    if (MARKDOWN_SAFE_IMAGE_DATA_URL_REGEX.test(href)) {
+      return href;
+    }
     return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
   }, []);
   const markdownComponents = useMemo<Components>(
     () => ({
+      img({ node: _node, src, alt }) {
+        if (!isSafeMarkdownImageSrc(src)) {
+          return alt ? <span>{alt}</span> : null;
+        }
+        return (
+          <img
+            src={src}
+            alt={alt ?? ""}
+            loading="lazy"
+            className="my-3 max-h-[640px] max-w-full rounded-lg border border-border bg-muted/20 object-contain shadow-sm"
+          />
+        );
+      },
       a({ node: _node, href, ...props }) {
         const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
         const fileLinkMeta = normalizedHref ? markdownFileLinkMetaByHref.get(normalizedHref) : null;
         if (!fileLinkMeta) {
-          return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
+          const isHttpUrl = !!href && /^https?:\/\//i.test(href);
+          return (
+            <a
+              {...props}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(event) => {
+                props.onClick?.(event);
+                if (
+                  event.defaultPrevented ||
+                  !isHttpUrl ||
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.shiftKey ||
+                  event.altKey ||
+                  event.button !== 0
+                ) {
+                  return;
+                }
+                event.preventDefault();
+                openUrl(href);
+              }}
+            />
+          );
         }
 
         const parentSuffix = fileLinkParentSuffixByPath.get(fileLinkMeta.filePath);
@@ -629,6 +706,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false, environmentId }: ChatMar
       fileLinkParentSuffixByPath,
       isStreaming,
       markdownFileLinkMetaByHref,
+      openUrl,
       resolvedTheme,
     ],
   );
@@ -640,7 +718,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false, environmentId }: ChatMar
         components={markdownComponents}
         urlTransform={markdownUrlTransform}
       >
-        {text}
+        {renderedText}
       </ReactMarkdown>
     </div>
   );

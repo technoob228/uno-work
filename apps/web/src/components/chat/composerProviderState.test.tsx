@@ -137,7 +137,7 @@ describe("getComposerProviderState", () => {
     });
   });
 
-  it("derives promptEffort from the first select descriptor and preserves all others for dispatch", () => {
+  it("derives promptEffort and drops duplicated build/plan agent descriptor", () => {
     const state = getComposerProviderState({
       provider: PROVIDER,
       model: MODEL,
@@ -158,7 +158,7 @@ describe("getComposerProviderState", () => {
 
     expect(state.promptEffort).toBe("high");
     expect(state.modelOptionsForDispatch).toEqual(
-      selections(["effort", "high"], ["contextWindow", "200k"], ["agent", "plan"]),
+      selections(["effort", "high"], ["contextWindow", "200k"]),
     );
   });
 

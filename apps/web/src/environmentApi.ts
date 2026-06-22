@@ -23,6 +23,8 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
     filesystem: {
       browse: rpcClient.filesystem.browse,
       readFile: rpcClient.filesystem.readFile,
+      watchFile: (input, callback, options) =>
+        rpcClient.filesystem.watchFile(input, callback, options),
     },
     sourceControl: {
       lookupRepository: rpcClient.sourceControl.lookupRepository,
@@ -52,6 +54,9 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
         rpcClient.orchestration.subscribeShell(callback, options),
       subscribeThread: (input, callback, options) =>
         rpcClient.orchestration.subscribeThread(input, callback, options),
+    },
+    browser: {
+      subscribeBridge: (callback) => rpcClient.browser.subscribeBridge(callback),
     },
   };
 }

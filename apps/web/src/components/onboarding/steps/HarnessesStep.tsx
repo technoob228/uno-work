@@ -135,7 +135,9 @@ export function HarnessesStep() {
   const providers = useServerProviders();
   const unoCodeQuery = useDesktopUnoCodeInstallState();
   const unoStatus = unoCodeQuery.data?.status ?? "idle";
-  const unoError = unoCodeQuery.data?.status === "failed" ? unoCodeQuery.data.error : null;
+  const unoFailed = unoCodeQuery.data?.status === "failed" ? unoCodeQuery.data : null;
+  const unoError = unoFailed?.error ?? null;
+  const unoWillRetry = unoFailed?.willRetry ?? false;
   const [isRetryingUno, setIsRetryingUno] = useState(false);
 
   const handleRetryUno = useCallback(() => {
@@ -197,8 +199,10 @@ export function HarnessesStep() {
       </div>
       {unoError ? (
         <p className="mt-3 max-w-2xl text-xs text-amber-700 dark:text-amber-300">
-          Uno Code didn’t install: {unoError} You can continue onboarding — set it up later in
-          Settings.
+          Uno Code didn’t install: {unoError}{" "}
+          {unoWillRetry
+            ? "Retrying automatically — you can keep going."
+            : "You can continue onboarding — set it up later in Settings."}
         </p>
       ) : null}
       <p className="mt-4 text-xs text-muted-foreground">

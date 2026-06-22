@@ -18,6 +18,8 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGeneration.ts";
 import { ServerConfig } from "../../config.ts";
+import { BrowserBridge } from "../../browserBridge.ts";
+import { writeBrowserInstructionsFile } from "../browserInstructions.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeOpenCodeAdapter } from "../Layers/OpenCodeAdapter.ts";
 import {
@@ -44,6 +46,7 @@ export type OpenCodeDriverEnv =
   | OpenCodeRuntime
   | Path.Path
   | ProviderEventLoggers
+  | BrowserBridge
   | ServerConfig;
 
 const withInstanceIdentity =
@@ -75,7 +78,23 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       const openCodeRuntime = yield* OpenCodeRuntime;
       const serverConfig = yield* ServerConfig;
       const eventLoggers = yield* ProviderEventLoggers;
-      const processEnv: NodeJS.ProcessEnv = mergeProviderInstanceEnvironment(environment);
+      const browserBridge = yield* BrowserBridge;
+      const instructionsFilePath = writeBrowserInstructionsFile({
+        stateDir: serverConfig.stateDir,
+        baseUrl: browserBridge.baseUrl,
+      });
+      const processEnv: NodeJS.ProcessEnv = browserBridge.applyEnvironment(
+        mergeProviderInstanceEnvironment(environment),
+      );
+      // Инструкции про браузер задаём через OPENCODE_CONFIG_CONTENT.instructions
+      // (путь к файлу). opencode мержит этот источник с пользовательским
+      // конфигом, дописывая наш файл к их собственным инструкциям.
+      if (instructionsFilePath && !processEnv.OPENCODE_CONFIG_CONTENT) {
+        processEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify({
+          $schema: "https://opencode.ai/config.json",
+          instructions: [instructionsFilePath],
+        });
+      }
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,

@@ -1,6 +1,7 @@
 import {
   EventId,
   type OpenCodeSettings,
+  type ProviderContextMessage,
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderRuntimeEvent,
@@ -11,13 +12,17 @@ import {
   type ToolLifecycleItemType,
   TurnId,
   type UserInputQuestion,
+  UNO_GATEWAY_BASE_URL,
 } from "@t3tools/contracts";
-import { Cause, Effect, Exit, Queue, Random, Ref, Scope, Stream } from "effect";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { Cause, Deferred, Effect, Exit, Option, Queue, Random, Ref, Scope, Stream } from "effect";
 import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { inferImageExtension, parseBase64DataUrl } from "../../imageMime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
   ProviderAdapterProcessError,
@@ -26,6 +31,7 @@ import {
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
 } from "../Errors.ts";
+import { classifyProviderErrorDetail, normalizeUnoBillingErrorMessage } from "../unoBilling.ts";
 import { type OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
 import {
   buildOpenCodePermissionRules,
@@ -42,6 +48,15 @@ import {
 } from "../opencodeRuntime.ts";
 
 const PROVIDER = ProviderDriverKind.make("opencode");
+const OPENCODE_STALE_TURN_WAIT = "2 seconds";
+const UNO_RUSSIA_GATEWAY_BASE_URL = `${UNO_GATEWAY_BASE_URL}/russia`;
+const UNO_IMAGE_CONTEXT_MAX_CHARS = 24_000;
+const UNO_FINAL_ANSWER_MARKER = "<uno_final_answer>";
+
+type UnoGatewayMessage = {
+  readonly role: "system" | "user" | "assistant";
+  readonly content: string;
+};
 
 interface OpenCodeTurnSnapshot {
   readonly id: TurnId;
@@ -66,10 +81,13 @@ interface OpenCodeSessionContext {
   readonly messageRoleById: Map<string, "user" | "assistant">;
   readonly partById: Map<string, Part>;
   readonly emittedTextByPartId: Map<string, string>;
+  readonly visibleTextByPartId: Map<string, string>;
   readonly completedAssistantPartIds: Set<string>;
   readonly turns: Array<OpenCodeTurnSnapshot>;
+  promptIdle: Deferred.Deferred<void> | undefined;
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
+  activeModel: ReturnType<typeof parseOpenCodeModelSlug> | undefined;
   activeVariant: string | undefined;
   /**
    * One-shot guard flipped by `stopOpenCodeContext` / `emitUnexpectedExit`.
@@ -347,6 +365,45 @@ export function appendOpenCodeAssistantTextDelta(
   };
 }
 
+function markerPrefixLengthAtEnd(value: string, marker: string): number {
+  const lowerValue = value.toLowerCase();
+  const lowerMarker = marker.toLowerCase();
+  const maxLength = Math.min(lowerValue.length, lowerMarker.length - 1);
+  for (let length = maxLength; length > 0; length -= 1) {
+    if (lowerValue.endsWith(lowerMarker.slice(0, length))) {
+      return length;
+    }
+  }
+  return 0;
+}
+
+function findCyrillicAnswerBoundary(rawText: string): number {
+  const reasoningCue =
+    /\b(?:the user|i should|we need|let's|actually|given|need to|i need|we should|use .*tool)\b/iu;
+  if (!reasoningCue.test(rawText.slice(0, 1_500))) {
+    return -1;
+  }
+  const searchStart = Math.min(Math.max(80, rawText.length > 500 ? 180 : 80), rawText.length);
+  const cyrillicMatch = /[А-ЯЁ][А-ЯЁа-яё]/u.exec(rawText.slice(searchStart));
+  return cyrillicMatch ? searchStart + cyrillicMatch.index : -1;
+}
+
+export function visibleUnoAssistantTextFromRaw(rawText: string): string {
+  const markerIndex = rawText.toLowerCase().indexOf(UNO_FINAL_ANSWER_MARKER);
+  if (markerIndex >= 0) {
+    return rawText
+      .slice(markerIndex + UNO_FINAL_ANSWER_MARKER.length)
+      .replace(/^[\s:：\-–—]+/u, "");
+  }
+
+  if (markerPrefixLengthAtEnd(rawText, UNO_FINAL_ANSWER_MARKER) > 0) {
+    return "";
+  }
+
+  const fallbackBoundary = findCyrillicAnswerBoundary(rawText);
+  return fallbackBoundary >= 0 ? rawText.slice(fallbackBoundary).replace(/^\s+/u, "") : "";
+}
+
 function isoFromEpochMs(value: number | undefined): string | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     return undefined;
@@ -363,6 +420,26 @@ function messageRoleForPart(
     return known;
   }
   return part.type === "tool" ? "assistant" : undefined;
+}
+
+function resolveVisibleAssistantDelta(input: {
+  readonly context: OpenCodeSessionContext;
+  readonly partId: string;
+  readonly streamKind: "assistant_text" | "reasoning_text";
+  readonly rawLatestText: string;
+  readonly rawDeltaToEmit: string;
+}): string {
+  if (
+    input.streamKind !== "assistant_text" ||
+    !isUnoLeakyReasoningModel(input.context.activeModel)
+  ) {
+    return input.rawDeltaToEmit;
+  }
+
+  const previousVisible = input.context.visibleTextByPartId.get(input.partId) ?? "";
+  const latestVisible = visibleUnoAssistantTextFromRaw(input.rawLatestText);
+  input.context.visibleTextByPartId.set(input.partId, latestVisible);
+  return latestVisible.slice(commonPrefixLength(previousVisible, latestVisible));
 }
 
 function detailFromToolPart(part: Extract<Part, { type: "tool" }>): string | undefined {
@@ -401,6 +478,314 @@ function sessionErrorMessage(error: unknown): string {
     : "OpenCode session failed.";
 }
 
+function isUnoImageGenerationModel(
+  model: ReturnType<typeof parseOpenCodeModelSlug> | null,
+): boolean {
+  if (!model || (model.providerID !== "uno" && model.providerID !== "uno-russia")) {
+    return false;
+  }
+  return /(?:gpt-image|gpt-[\w.]+[-_ ]image|dall[-_ ]?e|imagen|gemini.*image|nano[-_ ]?banana|flux|stable[-_ ]?diffusion|sdxl|recraft|ideogram|seedream|image[-_ ]?gen|image[-_ ]?generation|image[-_ ]?preview)/i.test(
+    model.modelID,
+  );
+}
+
+function isUnoLeakyReasoningModel(model: ReturnType<typeof parseOpenCodeModelSlug> | undefined) {
+  if (!model || (model.providerID !== "uno" && model.providerID !== "uno-russia")) {
+    return false;
+  }
+  const modelId = model.modelID.toLowerCase();
+  return (
+    modelId.includes("kimi") ||
+    modelId.includes("thinking") ||
+    modelId.includes("reasoning") ||
+    modelId.includes("minimax-m2") ||
+    modelId.includes("step-3.5") ||
+    /qwen3.*thinking/u.test(modelId) ||
+    /gemini-3(?:[._/ -]|$)/u.test(modelId)
+  );
+}
+
+function imageMarkdownFromUrl(url: string, index: number): string {
+  return `![Generated image ${index + 1}](${url})`;
+}
+
+function generatedImagePathLine(filePath: string): string {
+  return `Saved: ${filePath}`;
+}
+
+async function saveGeneratedImageDataUrl(input: {
+  readonly directory: string;
+  readonly threadId: ThreadId;
+  readonly turnId: TurnId;
+  readonly url: string;
+  readonly index: number;
+}): Promise<string | null> {
+  const parsed = parseBase64DataUrl(input.url);
+  if (!parsed || !parsed.mimeType.toLowerCase().startsWith("image/")) {
+    return null;
+  }
+  const extension = inferImageExtension({
+    mimeType: parsed.mimeType,
+    fileName: `generated-image-${input.index + 1}`,
+  });
+  const outputDir = path.join(input.directory, "uno-generated-images");
+  await fs.mkdir(outputDir, { recursive: true });
+  const safeThreadId = String(input.threadId).replace(/[^a-z0-9_-]+/gi, "-");
+  const safeTurnId = String(input.turnId).replace(/[^a-z0-9_-]+/gi, "-");
+  const outputPath = path.join(
+    outputDir,
+    `${safeThreadId}-${safeTurnId}-${input.index + 1}${extension}`,
+  );
+  await fs.writeFile(outputPath, Buffer.from(parsed.base64, "base64"));
+  return outputPath;
+}
+
+function appendUnoImageGenerationPartsFromMessage(
+  message: unknown,
+  output: { readonly textParts: string[]; readonly imageUrls: string[] },
+): void {
+  if (!message || typeof message !== "object") {
+    return;
+  }
+
+  const content = "content" in message ? message.content : undefined;
+  if (typeof content === "string" && content.trim().length > 0) {
+    output.textParts.push(content.trim());
+  } else if (Array.isArray(content)) {
+    for (const part of content) {
+      if (!part || typeof part !== "object") continue;
+      if ("text" in part && typeof part.text === "string" && part.text.trim().length > 0) {
+        output.textParts.push(part.text.trim());
+      }
+      const imageUrl =
+        "image_url" in part &&
+        part.image_url &&
+        typeof part.image_url === "object" &&
+        "url" in part.image_url &&
+        typeof part.image_url.url === "string"
+          ? part.image_url.url
+          : null;
+      if (imageUrl) {
+        output.imageUrls.push(imageUrl);
+      }
+    }
+  }
+
+  const images = "images" in message && Array.isArray(message.images) ? message.images : [];
+  for (const image of images) {
+    if (!image || typeof image !== "object") continue;
+    const imageUrl =
+      "image_url" in image &&
+      image.image_url &&
+      typeof image.image_url === "object" &&
+      "url" in image.image_url &&
+      typeof image.image_url.url === "string"
+        ? image.image_url.url
+        : null;
+    if (imageUrl) {
+      output.imageUrls.push(imageUrl);
+    }
+  }
+}
+
+function extractUnoImageGenerationOutput(response: unknown): {
+  readonly textParts: ReadonlyArray<string>;
+  readonly imageUrls: ReadonlyArray<string>;
+} {
+  const output = { textParts: [] as string[], imageUrls: [] as string[] };
+  const choices =
+    response &&
+    typeof response === "object" &&
+    "choices" in response &&
+    Array.isArray(response.choices)
+      ? response.choices
+      : [];
+  for (const choice of choices) {
+    if (!choice || typeof choice !== "object") continue;
+    appendUnoImageGenerationPartsFromMessage(
+      "message" in choice ? choice.message : undefined,
+      output,
+    );
+    appendUnoImageGenerationPartsFromMessage("delta" in choice ? choice.delta : undefined, output);
+  }
+
+  const uniqueImageUrls = [...new Set(output.imageUrls)];
+  return {
+    textParts: output.textParts,
+    imageUrls: uniqueImageUrls,
+  };
+}
+
+async function materializeUnoImageGenerationMarkdown(input: {
+  readonly context: OpenCodeSessionContext;
+  readonly turnId: TurnId;
+  readonly response: unknown;
+}): Promise<string> {
+  const output = extractUnoImageGenerationOutput(input.response);
+  const parts = [...output.textParts];
+  for (const [index, url] of output.imageUrls.entries()) {
+    parts.push(imageMarkdownFromUrl(url, index));
+    const savedPath = await saveGeneratedImageDataUrl({
+      directory: input.context.directory,
+      threadId: input.context.session.threadId,
+      turnId: input.turnId,
+      url,
+      index,
+    });
+    if (savedPath) {
+      parts.push(generatedImagePathLine(savedPath));
+    }
+  }
+  return parts.join("\n\n").trim();
+}
+
+function contextMessageToUnoGatewayMessage(
+  message: ProviderContextMessage,
+): UnoGatewayMessage | null {
+  const content = message.text.trim();
+  if (content.length === 0) {
+    return null;
+  }
+  return { role: message.role, content };
+}
+
+function fitUnoGatewayMessagesToContextLimit(
+  messages: ReadonlyArray<UnoGatewayMessage>,
+): ReadonlyArray<UnoGatewayMessage> {
+  const kept: UnoGatewayMessage[] = [];
+  let totalLength = 0;
+  for (const message of messages.toReversed()) {
+    const nextLength = totalLength + message.content.length;
+    if (kept.length > 0 && nextLength > UNO_IMAGE_CONTEXT_MAX_CHARS) {
+      break;
+    }
+    kept.push(message);
+    totalLength = nextLength;
+  }
+  return kept.toReversed();
+}
+
+function buildUnoImageGenerationMessages(input: {
+  readonly contextMessages?: ReadonlyArray<ProviderContextMessage> | undefined;
+  readonly prompt: string;
+}): ReadonlyArray<UnoGatewayMessage> {
+  const fromContext =
+    input.contextMessages?.slice(-16).flatMap((message) => {
+      const normalized = contextMessageToUnoGatewayMessage(message);
+      return normalized ? [normalized] : [];
+    }) ?? [];
+  const messages =
+    fromContext.length > 0
+      ? fromContext
+      : ([{ role: "user", content: input.prompt }] satisfies ReadonlyArray<UnoGatewayMessage>);
+  const lastMessage = messages.at(-1);
+  const prompt = input.prompt.trim();
+  const withCurrentPrompt =
+    prompt.length > 0 && lastMessage?.content.trim() !== prompt
+      ? [...messages, { role: "user" as const, content: prompt }]
+      : messages;
+  return fitUnoGatewayMessagesToContextLimit(withCurrentPrompt);
+}
+
+function buildGeneratedImageContextPrefix(
+  contextMessages: ReadonlyArray<ProviderContextMessage> | undefined,
+): string | null {
+  const generatedImageMessages =
+    contextMessages
+      ?.filter(
+        (message) =>
+          message.role === "assistant" &&
+          (message.text.includes("binary image data omitted") ||
+            message.text.includes("uno-generated-images")),
+      )
+      .slice(-3) ?? [];
+  if (generatedImageMessages.length === 0) {
+    return null;
+  }
+  const summaries = generatedImageMessages
+    .map((message, index) => `${index + 1}. ${message.text.trim()}`)
+    .join("\n");
+  return `Previous generated image results in this chat:\n${summaries}`;
+}
+
+function buildOpenCodePromptText(input: {
+  readonly text: string | undefined;
+  readonly contextMessages?: ReadonlyArray<ProviderContextMessage> | undefined;
+  readonly requireFinalAnswerMarker?: boolean | undefined;
+}): string | undefined {
+  const text = input.text?.trim();
+  if (!text) {
+    return undefined;
+  }
+  const userText = input.requireFinalAnswerMarker
+    ? [
+        "For this turn, do not include internal reasoning in the user-visible answer.",
+        `Begin the final user-visible answer with ${UNO_FINAL_ANSWER_MARKER} on its own line.`,
+        "Do not write anything user-visible before that marker.",
+        "",
+        text,
+      ].join("\n")
+    : text;
+  const generatedImageContext = buildGeneratedImageContextPrefix(input.contextMessages);
+  if (!generatedImageContext) {
+    return userText;
+  }
+  return `${generatedImageContext}\n\nCurrent user request:\n${userText}`;
+}
+
+async function readUnoImageGenerationResponse(httpResponse: Response): Promise<unknown> {
+  const contentType = httpResponse.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/event-stream") || !httpResponse.body) {
+    return (await httpResponse.json().catch(() => null)) as unknown;
+  }
+
+  const reader = httpResponse.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: unknown[] = [];
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice("data:".length).trim();
+      if (!data || data === "[DONE]") continue;
+      try {
+        chunks.push(JSON.parse(data));
+      } catch {
+        // Ignore malformed keepalive or provider-specific chunks.
+      }
+    }
+  }
+  buffer += decoder.decode();
+  for (const line of buffer.split(/\r?\n/)) {
+    if (!line.startsWith("data:")) continue;
+    const data = line.slice("data:".length).trim();
+    if (!data || data === "[DONE]") continue;
+    try {
+      chunks.push(JSON.parse(data));
+    } catch {
+      // Ignore malformed trailing chunks.
+    }
+  }
+  return {
+    choices: chunks.flatMap((chunk) => {
+      if (!chunk || typeof chunk !== "object" || !("choices" in chunk)) return [];
+      return Array.isArray(chunk.choices) ? chunk.choices : [];
+    }),
+  };
+}
+
+function unoGatewayUrlForModel(model: ReturnType<typeof parseOpenCodeModelSlug>): string | null {
+  if (!model) return null;
+  if (model.providerID === "uno") return UNO_GATEWAY_BASE_URL;
+  if (model.providerID === "uno-russia") return UNO_RUSSIA_GATEWAY_BASE_URL;
+  return null;
+}
+
 function updateProviderSession(
   context: OpenCodeSessionContext,
   patch: Partial<ProviderSession>,
@@ -420,10 +805,17 @@ function updateProviderSession(
   }
   if (options?.clearLastError) {
     delete mutableSession.lastError;
+    delete mutableSession.lastErrorClass;
   }
   context.session = nextSession;
   return nextSession;
 }
+
+const completePromptIdle = (context: OpenCodeSessionContext): Effect.Effect<void> => {
+  const promptIdle = context.promptIdle;
+  context.promptIdle = undefined;
+  return promptIdle ? Deferred.succeed(promptIdle, undefined).pipe(Effect.asVoid) : Effect.void;
+};
 
 const stopOpenCodeContext = Effect.fn("stopOpenCodeContext")(function* (
   context: OpenCodeSessionContext,
@@ -432,6 +824,8 @@ const stopOpenCodeContext = Effect.fn("stopOpenCodeContext")(function* (
   if (yield* Ref.getAndSet(context.stopped, true)) {
     return false;
   }
+
+  yield* completePromptIdle(context);
 
   // Best-effort remote abort. The scope close below tears down the local
   // handles (event-pump fiber, server-exit fiber, event-subscribe fetch),
@@ -514,6 +908,224 @@ export function makeOpenCodeAdapter(
       },
     ) => writeNativeEvent(threadId, event).pipe(Effect.catchCause(() => Effect.void));
 
+    const completeActiveTurn = Effect.fn("completeOpenCodeActiveTurn")(function* (
+      context: OpenCodeSessionContext,
+      input: {
+        readonly state: "completed" | "failed" | "interrupted" | "cancelled";
+        readonly raw?: unknown;
+        readonly errorMessage?: string;
+      },
+    ) {
+      const turnId = context.activeTurnId;
+      if (!turnId) {
+        yield* completePromptIdle(context);
+        return;
+      }
+
+      context.activeTurnId = undefined;
+      context.activeAgent = undefined;
+      context.activeModel = undefined;
+      context.activeVariant = undefined;
+      updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
+      yield* completePromptIdle(context);
+      yield* emit({
+        ...(yield* buildEventBase({
+          threadId: context.session.threadId,
+          turnId,
+          raw: input.raw,
+        })),
+        type: "turn.completed",
+        payload: {
+          state: input.state,
+          ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
+        },
+      });
+    });
+
+    const runUnoImageGenerationTurn = Effect.fn("runUnoImageGenerationTurn")(function* (input: {
+      readonly context: OpenCodeSessionContext;
+      readonly turnId: TurnId;
+      readonly model: NonNullable<ReturnType<typeof parseOpenCodeModelSlug>>;
+      readonly prompt: string;
+      readonly contextMessages?: ReadonlyArray<ProviderContextMessage> | undefined;
+    }) {
+      const gatewayBaseUrl = unoGatewayUrlForModel(input.model);
+      const apiKey = options?.environment?.UNO_API_KEY?.trim();
+      if (!gatewayBaseUrl || !apiKey) {
+        const message = !gatewayBaseUrl
+          ? "Image generation is only available for Uno image-generation models."
+          : "Uno API key is missing.";
+        updateProviderSession(
+          input.context,
+          {
+            status: "error",
+            lastError: message,
+            lastErrorClass: "validation_error",
+          },
+          { clearActiveTurnId: true },
+        );
+        yield* emit({
+          ...(yield* buildEventBase({
+            threadId: input.context.session.threadId,
+            turnId: input.turnId,
+          })),
+          type: "runtime.error",
+          payload: {
+            message,
+            class: "validation_error",
+          },
+        });
+        yield* completeActiveTurn(input.context, { state: "failed", errorMessage: message });
+        return;
+      }
+
+      const responseExit = yield* Effect.exit(
+        Effect.tryPromise({
+          try: async () => {
+            const httpResponse = await fetch(
+              `${gatewayBaseUrl.replace(/\/$/, "")}/chat/completions`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${apiKey}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  model: input.model.modelID,
+                  messages: buildUnoImageGenerationMessages({
+                    contextMessages: input.contextMessages,
+                    prompt: input.prompt,
+                  }),
+                  modalities: ["image", "text"],
+                  stream: true,
+                }),
+              },
+            );
+            const body = await readUnoImageGenerationResponse(httpResponse);
+            if (!httpResponse.ok) {
+              const message =
+                body && typeof body === "object" && "error" in body
+                  ? JSON.stringify(body.error)
+                  : `Uno image generation failed with HTTP ${httpResponse.status}.`;
+              throw new Error(message);
+            }
+            return body;
+          },
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "uno.imageGeneration",
+              detail: cause instanceof Error ? cause.message : String(cause),
+              cause,
+            }),
+        }),
+      );
+      if (Exit.isFailure(responseExit)) {
+        const error = Cause.squash(responseExit.cause);
+        const detail =
+          error &&
+          typeof error === "object" &&
+          "_tag" in error &&
+          error._tag === "ProviderAdapterRequestError" &&
+          "detail" in error &&
+          typeof error.detail === "string"
+            ? error.detail
+            : error instanceof Error
+              ? error.message
+              : String(error);
+        const message = normalizeUnoBillingErrorMessage(detail);
+        updateProviderSession(
+          input.context,
+          {
+            status: "error",
+            lastError: message,
+            lastErrorClass: classifyProviderErrorDetail(detail),
+          },
+          { clearActiveTurnId: true },
+        );
+        yield* emit({
+          ...(yield* buildEventBase({
+            threadId: input.context.session.threadId,
+            turnId: input.turnId,
+          })),
+          type: "runtime.error",
+          payload: {
+            message,
+            class: classifyProviderErrorDetail(detail),
+            detail,
+          },
+        });
+        yield* completeActiveTurn(input.context, { state: "failed", errorMessage: message });
+        return;
+      }
+      const response = responseExit.value;
+
+      const markdown = yield* Effect.promise(() =>
+        materializeUnoImageGenerationMarkdown({
+          context: input.context,
+          turnId: input.turnId,
+          response,
+        }),
+      );
+      if (markdown.length === 0) {
+        const message = "Uno image generation returned no image.";
+        updateProviderSession(
+          input.context,
+          {
+            status: "error",
+            lastError: message,
+            lastErrorClass: "provider_error",
+          },
+          { clearActiveTurnId: true },
+        );
+        yield* emit({
+          ...(yield* buildEventBase({
+            threadId: input.context.session.threadId,
+            turnId: input.turnId,
+            raw: response,
+          })),
+          type: "runtime.error",
+          payload: {
+            message,
+            class: "provider_error",
+            detail: response,
+          },
+        });
+        yield* completeActiveTurn(input.context, { state: "failed", errorMessage: message });
+        return;
+      }
+
+      const itemId = `uno-image:${input.turnId}`;
+      yield* emit({
+        ...(yield* buildEventBase({
+          threadId: input.context.session.threadId,
+          turnId: input.turnId,
+          itemId,
+          raw: response,
+        })),
+        type: "content.delta",
+        payload: {
+          streamKind: "assistant_text",
+          delta: markdown,
+        },
+      });
+      yield* emit({
+        ...(yield* buildEventBase({
+          threadId: input.context.session.threadId,
+          turnId: input.turnId,
+          itemId,
+          raw: response,
+        })),
+        type: "item.completed",
+        payload: {
+          itemType: "assistant_message",
+          status: "completed",
+          detail: markdown,
+        },
+      });
+      yield* completeActiveTurn(input.context, { state: "completed", raw: response });
+    });
+
     const emitUnexpectedExit = Effect.fn("emitUnexpectedExit")(function* (
       context: OpenCodeSessionContext,
       message: string,
@@ -525,6 +1137,7 @@ export function makeOpenCodeAdapter(
       if (yield* Ref.getAndSet(context.stopped, true)) {
         return;
       }
+      yield* completePromptIdle(context);
       const turnId = context.activeTurnId;
       sessions.delete(context.session.threadId);
       // Emit lifecycle events BEFORE tearing down the scope. Both call sites
@@ -585,7 +1198,15 @@ export function makeOpenCodeAdapter(
             : part) satisfies Part,
         );
       }
-      if (deltaToEmit.length > 0) {
+      const streamKind = resolveTextStreamKind(part);
+      const visibleDeltaToEmit = resolveVisibleAssistantDelta({
+        context,
+        partId: part.id,
+        streamKind,
+        rawLatestText: latestText,
+        rawDeltaToEmit: deltaToEmit,
+      });
+      if (visibleDeltaToEmit.length > 0) {
         yield* emit({
           ...(yield* buildEventBase({
             threadId: context.session.threadId,
@@ -599,8 +1220,8 @@ export function makeOpenCodeAdapter(
           })),
           type: "content.delta",
           payload: {
-            streamKind: resolveTextStreamKind(part),
-            delta: deltaToEmit,
+            streamKind,
+            delta: visibleDeltaToEmit,
           },
         });
       }
@@ -713,6 +1334,16 @@ export function makeOpenCodeAdapter(
               text: nextText,
             });
           }
+          const visibleDeltaToEmit = resolveVisibleAssistantDelta({
+            context,
+            partId: event.properties.partID,
+            streamKind,
+            rawLatestText: nextText,
+            rawDeltaToEmit: deltaToEmit,
+          });
+          if (visibleDeltaToEmit.length === 0) {
+            break;
+          }
           yield* emit({
             ...(yield* buildEventBase({
               threadId: context.session.threadId,
@@ -723,7 +1354,7 @@ export function makeOpenCodeAdapter(
             type: "content.delta",
             payload: {
               streamKind,
-              delta: deltaToEmit,
+              delta: visibleDeltaToEmit,
             },
           });
           break;
@@ -898,35 +1529,30 @@ export function makeOpenCodeAdapter(
           }
 
           if (event.properties.status.type === "idle" && turnId) {
-            context.activeTurnId = undefined;
-            updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
-            yield* emit({
-              ...(yield* buildEventBase({
-                threadId: context.session.threadId,
-                turnId,
-                raw: event,
-              })),
-              type: "turn.completed",
-              payload: {
-                state: "completed",
-              },
-            });
+            yield* completeActiveTurn(context, { state: "completed", raw: event });
           }
           break;
         }
 
         case "session.error": {
-          const message = sessionErrorMessage(event.properties.error);
+          const rawMessage = sessionErrorMessage(event.properties.error);
+          const message = normalizeUnoBillingErrorMessage(rawMessage);
+          const errorClass = classifyProviderErrorDetail(rawMessage);
           const activeTurnId = context.activeTurnId;
           context.activeTurnId = undefined;
+          context.activeAgent = undefined;
+          context.activeModel = undefined;
+          context.activeVariant = undefined;
           updateProviderSession(
             context,
             {
               status: "error",
               lastError: message,
+              lastErrorClass: errorClass,
             },
             { clearActiveTurnId: true },
           );
+          yield* completePromptIdle(context);
           if (activeTurnId) {
             yield* emit({
               ...(yield* buildEventBase({
@@ -949,7 +1575,7 @@ export function makeOpenCodeAdapter(
             type: "runtime.error",
             payload: {
               message,
-              class: "provider_error",
+              class: errorClass,
               detail: event.properties.error,
             },
           });
@@ -1119,11 +1745,14 @@ export function makeOpenCodeAdapter(
           pendingQuestions: new Map(),
           partById: new Map(),
           emittedTextByPartId: new Map(),
+          visibleTextByPartId: new Map(),
           messageRoleById: new Map(),
           completedAssistantPartIds: new Set(),
           turns: [],
+          promptIdle: undefined,
           activeTurnId: undefined,
           activeAgent: undefined,
+          activeModel: undefined,
           activeVariant: undefined,
           stopped: yield* Ref.make(false),
           sessionScope: started.sessionScope,
@@ -1152,7 +1781,28 @@ export function makeOpenCodeAdapter(
 
     const sendTurn: OpenCodeAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
       const context = ensureSessionContext(sessions, input.threadId);
+      const previousPromptIdle = context.promptIdle;
+      if (previousPromptIdle !== undefined) {
+        const previousCompleted = yield* Deferred.await(previousPromptIdle).pipe(
+          Effect.timeoutOption(OPENCODE_STALE_TURN_WAIT),
+        );
+        if (Option.isNone(previousCompleted)) {
+          yield* emit({
+            ...(yield* buildEventBase({
+              threadId: input.threadId,
+              turnId: context.activeTurnId,
+            })),
+            type: "runtime.warning",
+            payload: {
+              message: "OpenCode did not report idle for the previous turn; finalizing it.",
+            },
+          });
+          yield* completeActiveTurn(context, { state: "completed" });
+        }
+        ensureSessionContext(sessions, input.threadId);
+      }
       const turnId = TurnId.make(`opencode-turn-${yield* Random.nextUUIDv4}`);
+      const promptIdle = yield* Deferred.make<void>();
       const modelSelection =
         input.modelSelection ??
         (context.session.model
@@ -1191,11 +1841,15 @@ export function makeOpenCodeAdapter(
         });
       }
 
-      const agent = getModelSelectionStringOptionValue(modelSelection, "agent");
+      const selectedAgent = getModelSelectionStringOptionValue(modelSelection, "agent");
+      const isImageGenerationTurn = isUnoImageGenerationModel(parsedModel);
+      const agent = selectedAgent;
       const variant = getModelSelectionStringOptionValue(modelSelection, "variant");
 
+      context.promptIdle = promptIdle;
       context.activeTurnId = turnId;
       context.activeAgent = agent ?? (input.interactionMode === "plan" ? "plan" : undefined);
+      context.activeModel = parsedModel;
       context.activeVariant = variant;
       updateProviderSession(
         context,
@@ -1216,13 +1870,32 @@ export function makeOpenCodeAdapter(
         },
       });
 
+      if (isImageGenerationTurn) {
+        yield* runUnoImageGenerationTurn({
+          context,
+          turnId,
+          model: parsedModel,
+          prompt: text ?? "",
+          contextMessages: input.contextMessages,
+        }).pipe(Effect.forkIn(context.sessionScope));
+        return { threadId: input.threadId, turnId };
+      }
+
+      const promptText = buildOpenCodePromptText({
+        text,
+        contextMessages: input.contextMessages,
+        requireFinalAnswerMarker: isUnoLeakyReasoningModel(parsedModel),
+      });
       yield* runOpenCodeSdk("session.promptAsync", () =>
         context.client.session.promptAsync({
           sessionID: context.openCodeSessionId,
           model: parsedModel,
           ...(context.activeAgent ? { agent: context.activeAgent } : {}),
           ...(context.activeVariant ? { variant: context.activeVariant } : {}),
-          parts: [...(text ? [{ type: "text" as const, text }] : []), ...fileParts],
+          parts: [
+            ...(promptText ? [{ type: "text" as const, text: promptText }] : []),
+            ...fileParts,
+          ],
         }),
       ).pipe(
         Effect.mapError(toRequestError),
@@ -1234,13 +1907,16 @@ export function makeOpenCodeAdapter(
           Effect.gen(function* () {
             context.activeTurnId = undefined;
             context.activeAgent = undefined;
+            context.activeModel = undefined;
             context.activeVariant = undefined;
+            yield* completePromptIdle(context);
             updateProviderSession(
               context,
               {
                 status: "ready",
                 model: modelSelection?.model ?? context.session.model,
-                lastError: requestError.detail,
+                lastError: normalizeUnoBillingErrorMessage(requestError.detail),
+                lastErrorClass: classifyProviderErrorDetail(requestError.detail),
               },
               { clearActiveTurnId: true },
             );
@@ -1251,7 +1927,7 @@ export function makeOpenCodeAdapter(
               })),
               type: "turn.aborted",
               payload: {
-                reason: requestError.detail,
+                reason: normalizeUnoBillingErrorMessage(requestError.detail),
               },
             });
           }),
@@ -1270,11 +1946,18 @@ export function makeOpenCodeAdapter(
         yield* runOpenCodeSdk("session.abort", () =>
           context.client.session.abort({ sessionID: context.openCodeSessionId }),
         ).pipe(Effect.mapError(toRequestError));
-        if (turnId ?? context.activeTurnId) {
+        const activeTurnId = turnId ?? context.activeTurnId;
+        context.activeTurnId = undefined;
+        context.activeAgent = undefined;
+        context.activeModel = undefined;
+        context.activeVariant = undefined;
+        updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
+        yield* completePromptIdle(context);
+        if (activeTurnId) {
           yield* emit({
             ...(yield* buildEventBase({
               threadId,
-              turnId: turnId ?? context.activeTurnId,
+              turnId: activeTurnId,
             })),
             type: "turn.aborted",
             payload: {

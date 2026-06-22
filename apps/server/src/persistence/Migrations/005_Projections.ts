@@ -67,6 +67,7 @@ export default Effect.gen(function* () {
       provider_thread_id TEXT,
       active_turn_id TEXT,
       last_error TEXT,
+      last_error_class TEXT,
       updated_at TEXT NOT NULL
     )
   `;

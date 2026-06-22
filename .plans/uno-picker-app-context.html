@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Uno Work — model picker inside chat window</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --background: #0a0a0a;
+        --card: #0f0f0f;
+        --card-2: #131315;
+        --popover: #111113;
+        --foreground: #f5f5f5;
+        --foreground-2: #d4d4d8;
+        --muted: rgba(255, 255, 255, 0.04);
+        --muted-strong: rgba(255, 255, 255, 0.07);
+        --muted-foreground: #9a9a9a;
+        --muted-foreground-2: #6f6f76;
+        --border: rgba(255, 255, 255, 0.06);
+        --border-strong: rgba(255, 255, 255, 0.12);
+        --input: rgba(255, 255, 255, 0.08);
+        --primary: #8b5cf6;
+        --primary-foreground: #ffffff;
+        --ring: rgba(124, 58, 237, 0.45);
+        --accent-quiet: rgba(139, 92, 246, 0.14);
+        --tier-frontier-bg: rgba(217, 70, 239, 0.10);
+        --tier-frontier-fg: #e9a5f1;
+        --tier-strong-bg: rgba(56, 189, 248, 0.10);
+        --tier-strong-fg: #93cbf7;
+        --tier-cheap-bg: rgba(74, 222, 128, 0.10);
+        --tier-cheap-fg: #86efac;
+        --route-ru-bg: rgba(248, 113, 113, 0.10);
+        --route-ru-fg: #fca5a5;
+        --route-gl-bg: rgba(56, 189, 248, 0.08);
+        --route-gl-fg: #93cbf7;
+        --price-fg: #67e8b9;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        background: var(--background);
+        color: var(--foreground);
+        font: 14px/1.5 "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        height: 100vh; overflow: hidden;
+      }
+
+      /* === APP SHELL ============================================ */
+      .app { display: grid; grid-template-columns: 208px 1fr 384px;
+        height: 100vh; }
+
+      /* === LEFT SIDEBAR (threads list) =========================== */
+      .left { background: var(--card); border-right: 1px solid var(--border);
+        display: flex; flex-direction: column; min-height: 0; }
+      .left .head { height: 52px; padding: 0 12px; display: flex; align-items: center;
+        gap: 8px; -webkit-app-region: drag; border-bottom: 1px solid var(--border); }
+      .traffic { display: flex; gap: 6px; }
+      .traffic span { width: 12px; height: 12px; border-radius: 50%;
+        background: var(--muted-strong); }
+      .traffic .r { background: #ff5f57; }
+      .traffic .y { background: #febc2e; }
+      .traffic .g { background: #28c840; }
+      .brand { margin-left: auto; font-weight: 600; font-size: 13px; color: var(--foreground); }
+      .left .search { padding: 8px 10px; }
+      .left .search input { width: 100%; height: 28px; background: var(--muted);
+        border: 1px solid var(--border); border-radius: 6px; padding: 0 10px;
+        color: var(--foreground); font: 12px/1 inherit; outline: none; }
+      .left .search input::placeholder { color: var(--muted-foreground-2); }
+
+      .left .section-label { font-size: 10px; text-transform: uppercase;
+        letter-spacing: 0.06em; color: var(--muted-foreground-2);
+        padding: 14px 14px 6px; font-weight: 500; }
+      .left .threads { padding: 0 6px; overflow-y: auto; flex: 1; }
+      .thread-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+        border-radius: 6px; cursor: pointer; color: var(--foreground-2); font-size: 13px; }
+      .thread-item:hover { background: var(--muted); }
+      .thread-item.active { background: var(--muted-strong); color: var(--foreground); }
+      .thread-item .ti-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+        background: var(--muted-foreground-2); }
+      .thread-item.active .ti-dot { background: var(--primary); }
+      .thread-item .ti-title { flex: 1; overflow: hidden; text-overflow: ellipsis;
+        white-space: nowrap; }
+      .thread-item .ti-date { color: var(--muted-foreground-2); font-size: 11px; }
+
+      .left .foot { padding: 8px 10px; border-top: 1px solid var(--border);
+        display: flex; align-items: center; gap: 8px; }
+      .left .foot .avatar { width: 24px; height: 24px; border-radius: 50%;
+        background: linear-gradient(135deg, #6366f1, #8b5cf6); display: inline-flex;
+        align-items: center; justify-content: center; font-weight: 600; font-size: 11px;
+        color: #fff; }
+      .left .foot .who { font-size: 12px; color: var(--foreground-2); }
+      .left .foot .gear { margin-left: auto; color: var(--muted-foreground-2);
+        font-size: 14px; cursor: pointer; }
+
+      /* === CENTER (chat) ======================================== */
+      .center { display: flex; flex-direction: column; min-width: 0; min-height: 0;
+        background: var(--background); }
+      .chat-head { height: 52px; padding: 0 16px; border-bottom: 1px solid var(--border);
+        display: flex; align-items: center; gap: 10px; }
+      .chat-head .title { font-weight: 600; font-size: 14px; }
+      .chat-head .sub { color: var(--muted-foreground); font-size: 12px; }
+      .chat-head .branch { margin-left: auto; display: inline-flex; align-items: center;
+        gap: 6px; padding: 4px 10px; background: var(--muted); border: 1px solid var(--border);
+        border-radius: 6px; font-size: 11.5px; color: var(--foreground-2); }
+      .branch .git { color: var(--muted-foreground); }
+
+      .transcript { flex: 1; overflow-y: auto; padding: 18px 0 8px; min-height: 0; }
+      .msg-wrap { max-width: 832px; margin: 0 auto; padding: 0 20px 12px; }
+      .msg-meta { font-size: 11px; color: var(--muted-foreground-2);
+        margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+      .msg-meta .who { color: var(--foreground-2); font-weight: 500; }
+      .msg-text { font-size: 14px; line-height: 1.55; color: var(--foreground); }
+      .switch-divider { max-width: 832px; margin: 6px auto 14px; padding: 0 20px;
+        display: flex; align-items: center; gap: 10px; color: var(--muted-foreground); font-size: 11.5px; }
+      .switch-divider::before, .switch-divider::after { content: ""; flex: 1; height: 1px;
+        background: var(--border); }
+      .switch-divider .sw { display: inline-flex; align-items: center; gap: 6px; }
+      .switch-divider svg { width: 12px; height: 12px; opacity: 0.7; }
+
+      /* === COMPOSER + PICKER ==================================== */
+      .composer-wrap { position: relative; max-width: 832px; width: 100%;
+        margin: 0 auto; padding: 0 20px 16px; }
+
+      /* Composer (matches ChatComposer.tsx: rounded-[22px] outer, [20px] inner) */
+      .composer { padding: 1px; border-radius: 22px;
+        background: linear-gradient(180deg, var(--border-strong), var(--border)); }
+      .composer-inner { background: var(--card); border-radius: 20px;
+        overflow: hidden; }
+      .composer-input { padding: 14px 16px; min-height: 64px;
+        color: var(--foreground); font-size: 14px; line-height: 1.5; }
+      .composer-input .ghost { color: var(--muted-foreground-2); }
+      .composer-row { display: flex; align-items: center; justify-content: space-between;
+        gap: 10px; padding: 0 10px 10px; }
+      .ctools { display: flex; align-items: center; gap: 6px; }
+      .icon-btn { width: 30px; height: 30px; display: inline-flex; align-items: center;
+        justify-content: center; border-radius: 8px; border: 1px solid transparent;
+        background: transparent; color: var(--muted-foreground); cursor: pointer; font: inherit; }
+      .icon-btn:hover { background: var(--muted); color: var(--foreground); }
+      .mode-pill { display: inline-flex; align-items: center; gap: 6px; height: 30px;
+        padding: 0 10px; border-radius: 8px; background: var(--muted);
+        border: 1px solid var(--border); color: var(--foreground-2);
+        font: 12.5px/1 inherit; cursor: pointer; }
+      .mode-pill svg { width: 13px; height: 13px; }
+
+      /* The model trigger (open state) */
+      .model-trigger { display: inline-flex; align-items: center; gap: 0; height: 30px;
+        padding: 0 4px 0 8px; border-radius: 8px; background: var(--muted-strong);
+        border: 1px solid var(--ring); color: var(--foreground);
+        cursor: pointer; font: 12.5px/1 inherit; box-shadow: 0 0 0 3px var(--accent-quiet); }
+      .model-trigger .seg { display: inline-flex; align-items: center; gap: 6px;
+        padding: 0 8px; height: 22px; }
+      .model-trigger .seg + .seg { border-left: 1px solid var(--border-strong); }
+      .model-trigger .seg.harness { color: var(--muted-foreground); }
+      .model-trigger .seg.model { color: var(--foreground); font-weight: 600; }
+      .model-trigger .seg.route .badge { font-size: 10.5px; padding: 1px 6px;
+        border-radius: 999px; background: var(--route-ru-bg); color: var(--route-ru-fg);
+        font-weight: 600; }
+      .model-trigger .chev { width: 12px; height: 12px; margin-left: 4px;
+        color: var(--muted-foreground); }
+
+      .send-btn { display: inline-flex; align-items: center; gap: 6px; height: 30px;
+        padding: 0 12px; border-radius: 8px; background: var(--primary);
+        color: var(--primary-foreground); border: 0; cursor: pointer;
+        font: 12.5px/1 inherit; font-weight: 500; }
+      .send-btn svg { width: 13px; height: 13px; }
+
+      /* Popover above composer — visually appears over transcript bottom */
+      .picker { position: absolute; left: 20px; right: 20px; bottom: calc(100% - 0px);
+        margin-bottom: -8px; }
+      /* In this prototype we render it statically above the composer for clarity */
+      .picker-frame { background: var(--popover); border: 1px solid var(--border-strong);
+        border-radius: 14px; box-shadow: 0 32px 60px rgba(0, 0, 0, 0.55),
+        0 4px 12px rgba(0, 0, 0, 0.35); overflow: hidden;
+        display: grid; grid-template-columns: 168px 1fr; height: 416px; }
+
+      .pk-side { background: var(--card); border-right: 1px solid var(--border);
+        padding: 6px 6px; overflow-y: auto; }
+      .pk-side .label { font-size: 10px; text-transform: uppercase;
+        letter-spacing: 0.06em; color: var(--muted-foreground-2); padding: 10px 8px 4px; }
+      .pk-row { display: flex; align-items: center; gap: 8px; width: 100%;
+        background: transparent; border: 1px solid transparent; color: var(--foreground-2);
+        padding: 6px 8px; border-radius: 6px; cursor: pointer; font: 12.5px/1.2 inherit;
+        text-align: left; }
+      .pk-row:hover { background: var(--muted); }
+      .pk-row.active { background: var(--muted-strong); border-color: var(--border);
+        color: var(--foreground); }
+      .pk-row .pico { width: 18px; height: 18px; border-radius: 5px;
+        background: var(--muted-strong); display: inline-flex; align-items: center;
+        justify-content: center; font-size: 10px; font-weight: 700; }
+      .pico.uno { background: rgba(139, 92, 246, 0.18); color: #c4b5fd; }
+      .pico.codex { background: rgba(34, 197, 94, 0.16); color: #86efac; }
+      .pico.claude { background: rgba(249, 115, 22, 0.16); color: #fdba74; }
+      .pico.cursor { background: rgba(56, 189, 248, 0.16); color: #93cbf7; }
+      .pico.fav { background: rgba(250, 204, 21, 0.16); color: #fde047; }
+      .pk-row .count { margin-left: auto; font-size: 10.5px; color: var(--muted-foreground-2); }
+
+      .pk-main { display: flex; flex-direction: column; min-height: 0; }
+      .pk-search { padding: 10px 12px; border-bottom: 1px solid var(--border);
+        display: flex; align-items: center; gap: 8px; }
+      .pk-search svg { width: 14px; height: 14px; color: var(--muted-foreground-2); }
+      .pk-search input { flex: 1; background: var(--muted); border: 1px solid var(--border);
+        border-radius: 6px; height: 28px; padding: 0 10px; outline: none;
+        color: var(--foreground); font: 12.5px/1 inherit; }
+
+      .pk-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px;
+        border-bottom: 1px solid var(--border); }
+      .chip { display: inline-flex; align-items: center; gap: 4px; height: 22px;
+        padding: 0 8px; border-radius: 999px; font-size: 11px; color: var(--muted-foreground);
+        background: var(--muted); border: 1px solid var(--border); cursor: pointer; }
+      .chip.active { background: var(--accent-quiet); color: #d8c5fd;
+        border-color: var(--ring); }
+      .chip .k { color: var(--muted-foreground-2); font-size: 10.5px; margin-right: 2px; }
+
+      .pk-list { flex: 1; overflow-y: auto; padding: 4px 0 6px; }
+      .grp { padding: 0 12px; }
+      .grp-head { position: sticky; top: 0; z-index: 1;
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 10px 4px 6px; background: var(--popover);
+        font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+        color: var(--muted-foreground); font-weight: 600; }
+      .grp-head .vendors { color: var(--muted-foreground-2); font-weight: 400;
+        text-transform: none; letter-spacing: 0; }
+      .row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center;
+        padding: 8px 10px; border-radius: 8px; cursor: pointer; margin-bottom: 2px; }
+      .row:hover { background: var(--muted); }
+      .row.selected { background: var(--muted-strong); border: 1px solid var(--ring);
+        box-shadow: 0 0 0 3px var(--accent-quiet); }
+      .row .name { font-weight: 600; color: var(--foreground); font-size: 13px;
+        display: flex; align-items: center; gap: 6px; }
+      .row .name .star { color: #fde047; font-size: 11px; }
+      .row .vendor { color: var(--muted-foreground-2); font-size: 11px; margin-top: 2px;
+        font-family: "SF Mono", SFMono-Regular, Consolas, Menlo, monospace; }
+      .badges { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+      .badge { font-size: 10.5px; padding: 2px 7px; border-radius: 999px; color: var(--foreground-2);
+        background: var(--muted-strong); font-weight: 500; }
+      .badge.t-frontier { background: var(--tier-frontier-bg); color: var(--tier-frontier-fg); }
+      .badge.t-strong { background: var(--tier-strong-bg); color: var(--tier-strong-fg); }
+      .badge.t-cheap { background: var(--tier-cheap-bg); color: var(--tier-cheap-fg); }
+      .badge.r-ru { background: var(--route-ru-bg); color: var(--route-ru-fg); }
+      .badge.r-gl { background: var(--route-gl-bg); color: var(--route-gl-fg); }
+      .badge.cap { background: var(--muted-strong); color: var(--muted-foreground); }
+      .badge.price { background: transparent; color: var(--price-fg);
+        border: 1px dashed rgba(103, 232, 185, 0.30); }
+      .badge.unknown { background: transparent; color: var(--muted-foreground-2);
+        border: 1px dashed var(--border-strong); }
+
+      .pk-foot { padding: 8px 12px; border-top: 1px solid var(--border);
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 12px; color: var(--muted-foreground); font-size: 11px; }
+      .kbd { font-family: "SF Mono", monospace; font-size: 10.5px;
+        padding: 1px 5px; border: 1px solid var(--border-strong); border-radius: 4px;
+        color: var(--foreground-2); background: var(--muted); }
+      .pk-foot .cont { color: var(--foreground-2); }
+      .pk-foot .cont b { color: var(--price-fg); font-weight: 600; }
+
+      /* === RIGHT (preview pane) ================================= */
+      .right { background: var(--background); border-left: 1px solid var(--border);
+        display: flex; flex-direction: column; min-height: 0; }
+      .right .head { height: 36px; background: var(--card); border-bottom: 1px solid var(--border);
+        display: flex; align-items: center; padding: 0 8px; gap: 4px; }
+      .right .tab { height: 26px; padding: 0 10px; border-radius: 6px; font-size: 11.5px;
+        color: var(--muted-foreground); display: inline-flex; align-items: center; gap: 6px;
+        cursor: pointer; }
+      .right .tab.active { background: var(--muted-strong); color: var(--foreground); }
+      .pathbar { padding: 8px 12px; border-bottom: 1px solid var(--border);
+        font-family: "SF Mono", monospace; font-size: 11px; color: var(--muted-foreground); }
+      .right .body { flex: 1; overflow-y: auto; padding: 12px 14px;
+        font-family: "SF Mono", monospace; font-size: 12px; line-height: 1.6;
+        color: var(--foreground-2); }
+      .right .ln { color: var(--muted-foreground-2); margin-right: 10px;
+        user-select: none; display: inline-block; width: 20px; text-align: right; }
+
+    </style>
+  </head>
+  <body>
+    <div class="app">
+
+      <!-- ============== LEFT SIDEBAR ============== -->
+      <aside class="left">
+        <div class="head">
+          <div class="traffic"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <div class="brand">uno-work</div>
+        </div>
+        <div class="search">
+          <input placeholder="Search threads…" />
+        </div>
+
+        <div class="section-label">Project · uno-work-app</div>
+        <div class="threads">
+          <div class="thread-item active"><span class="ti-dot"></span>
+            <span class="ti-title">Stripe webhooks parser</span>
+            <span class="ti-date">now</span></div>
+          <div class="thread-item"><span class="ti-dot"></span>
+            <span class="ti-title">Migration 030 rollout</span>
+            <span class="ti-date">2h</span></div>
+          <div class="thread-item"><span class="ti-dot"></span>
+            <span class="ti-title">Model picker UX</span>
+            <span class="ti-date">yesterday</span></div>
+          <div class="thread-item"><span class="ti-dot"></span>
+            <span class="ti-title">UnoDriver tier metadata</span>
+            <span class="ti-date">2d</span></div>
+        </div>
+
+        <div class="section-label">Project · fishcode</div>
+        <div class="threads" style="flex:0 0 auto">
+          <div class="thread-item"><span class="ti-dot"></span>
+            <span class="ti-title">VPS balance audit</span>
+            <span class="ti-date">3d</span></div>
+        </div>
+
+        <div class="foot">
+          <span class="avatar">M</span>
+          <span class="who">Mikhail</span>
+          <span class="gear">⚙</span>
+        </div>
+      </aside>
+
+      <!-- ============== CENTER (CHAT) ============== -->
+      <main class="center">
+        <header class="chat-head">
+          <div class="title">Stripe webhooks parser</div>
+          <div class="sub">· uno-work-app</div>
+          <div class="branch"><span class="git">git:</span> feat/stripe-webhook · clean</div>
+        </header>
+
+        <div class="transcript">
+          <div class="msg-wrap">
+            <div class="msg-meta"><span class="who">Mikhail</span> · 18:42</div>
+            <div class="msg-text">Глянь, как лучше парсить <code>invoice.payment_succeeded</code> —
+              нужно отделить product_id от subscription_id и сохранить в нашу таблицу
+              <code>transactions</code>.</div>
+          </div>
+          <div class="msg-wrap">
+            <div class="msg-meta"><span class="who">Codex (GPT-5.1)</span> · 18:42</div>
+            <div class="msg-text">Стандартный путь — взять <code>data.object.lines.data[0]</code>:
+              там <code>price.product</code> и <code>subscription</code>. Записывай через
+              <code>add-balance</code> CLI, не голым SQL.</div>
+          </div>
+          <div class="switch-divider">
+            <span class="sw">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+                <path d="M3 8a5 5 0 1 0 1.5-3.5"/><path d="M2 3v3h3"/></svg>
+              Switched to Claude Opus 4.5 · RU
+            </span>
+          </div>
+          <div class="msg-wrap">
+            <div class="msg-meta"><span class="who">Mikhail</span> · 18:44</div>
+            <div class="msg-text">А теперь напиши тест на это — Anthropic обычно
+              аккуратнее с edge-кейсами.</div>
+          </div>
+        </div>
+
+        <div class="composer-wrap">
+          <!-- Picker popover (open state, anchored to model trigger) -->
+          <div class="picker">
+            <div class="picker-frame">
+              <aside class="pk-side">
+                <div class="label">Quick</div>
+                <button class="pk-row"><span class="pico fav">★</span> Favorites
+                  <span class="count">3</span></button>
+
+                <div class="label">Harnesses</div>
+                <button class="pk-row"><span class="pico codex">C</span> Codex
+                  <span class="count">8</span></button>
+                <button class="pk-row"><span class="pico codex">C</span> Codex Personal
+                  <span class="count">8</span></button>
+                <button class="pk-row"><span class="pico claude">A</span> Claude
+                  <span class="count">12</span></button>
+                <button class="pk-row active"><span class="pico uno">U</span> Uno Gateway
+                  <span class="count">10</span></button>
+                <button class="pk-row"><span class="pico cursor">⌘</span> Cursor
+                  <span class="count">6</span></button>
+              </aside>
+
+              <div class="pk-main">
+                <div class="pk-search">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <circle cx="9" cy="9" r="6"/><path d="M14 14l4 4"/></svg>
+                  <input placeholder="Search models inside Uno Gateway…" />
+                </div>
+                <div class="pk-chips">
+                  <span class="chip"><span class="k">Region</span> All</span>
+                  <span class="chip active">Russia</span>
+                  <span class="chip">Global</span>
+                  <span class="chip"><span class="k">Tier</span> All</span>
+                  <span class="chip">Frontier</span>
+                  <span class="chip">Strong</span>
+                  <span class="chip">Average</span>
+                  <span class="chip"><span class="k">Caps</span> Tools</span>
+                  <span class="chip"><span class="k">Price</span> Known</span>
+                </div>
+
+                <div class="pk-list">
+                  <div class="grp">
+                    <div class="grp-head">Frontier · Russia
+                      <span class="vendors">openai · anthropic</span></div>
+                    <div class="row">
+                      <div>
+                        <div class="name">GPT-5.1 Codex <span class="star">★</span></div>
+                        <div class="vendor">openai · uno-russia/gpt-5.1-codex</div>
+                      </div>
+                      <div class="badges">
+                        <span class="badge t-frontier">Frontier</span>
+                        <span class="badge r-ru">RU</span>
+                        <span class="badge cap">Tools</span>
+                        <span class="badge price">~$1.88</span>
+                      </div>
+                    </div>
+                    <div class="row selected">
+                      <div>
+                        <div class="name">Claude Opus 4.5</div>
+                        <div class="vendor">anthropic · uno-russia/claude-opus-4.5</div>
+                      </div>
+                      <div class="badges">
+                        <span class="badge t-frontier">Frontier</span>
+                        <span class="badge r-ru">RU</span>
+                        <span class="badge cap">Tools</span>
+                        <span class="badge cap">Vision</span>
+                        <span class="badge price">~$2.26</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="grp">
+                    <div class="grp-head">Frontier · Global
+                      <span class="vendors">openai · anthropic</span></div>
+                    <div class="row">
+                      <div>
+                        <div class="name">GPT-5.1 Codex</div>
+                        <div class="vendor">openai · uno/gpt-5.1-codex</div>
+                      </div>
+                      <div class="badges">
+                        <span class="badge t-frontier">Frontier</span>
+                        <span class="badge r-gl">GL</span>
+                        <span class="badge cap">Tools</span>
+                        <span class="badge price">~$1.88</span>
+                      </div>
+                    </div>
+                    <div class="row">
+                      <div>
+                        <div class="name">Claude Opus 4.5</div>
+                        <div class="vendor">anthropic · uno/claude-opus-4.5</div>
+                      </div>
+                      <div class="badges">
+                        <span class="badge t-frontier">Frontier</span>
+                        <span class="badge r-gl">GL</span>
+                        <span class="badge cap">Tools</span>
+                        <span class="badge cap">Vision</span>
+                        <span class="badge price">~$2.26</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="grp">
+                    <div class="grp-head">Strong · Russia
+                      <span class="vendors">anthropic · google</span></div>
+                    <div class="row">
+                      <div>
+                        <div class="name">Claude Sonnet 4.6</div>
+                        <div class="vendor">anthropic · uno-russia/claude-sonnet-4-6</div>
+                      </div>
+                      <div class="badges">
+                        <span class="badge t-strong">Strong</span>
+                        <span class="badge r-ru">RU</span>
+                        <span class="badge cap">Tools</span>
+                        <span class="badge cap">Vision</span>
+                        <span class="badge price">~$0.65</span>
+                      </div>
+                    </div>
+                    <div class="row">
+                      <div>
+                        <div class="name">Gemini 2.5 Pro</div>
+                        <div class="vendor">google · uno-russia/gemini-2.5-pro</div>
+                      </div>
+                      <div class="badges">
+                        <span class="badge t-strong">Strong</span>
+                        <span class="badge r-ru">RU</span>
+                        <span class="badge cap">Vision</span>
+                        <span class="badge price">~$0.45</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="grp">
+                    <div class="grp-head">Average
+                      <span class="vendors">moonshot · deepseek</span></div>
+                    <div class="row">
+                      <div>
+                        <div class="name">Kimi K2 Thinking</div>
+                        <div class="vendor">moonshot · uno-russia/kimi-k2-thinking</div>
+                      </div>
+                      <div class="badges">
+                        <span class="badge t-cheap">Average</span>
+                        <span class="badge r-ru">RU</span>
+                        <span class="badge cap">Streaming</span>
+                        <span class="badge unknown">price unknown</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="pk-foot">
+                  <div>↑↓ navigate · <span class="kbd">⏎</span> select ·
+                    <span class="kbd">Esc</span> close</div>
+                  <div class="cont">Continuation: <b>same Uno session</b> — no reset</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Composer (matches ChatComposer.tsx: rounded-[22px] outer, [20px] inner) -->
+          <div class="composer">
+            <div class="composer-inner">
+              <div class="composer-input">
+                <span class="ghost">Ask anything, @tag files, / for commands…</span>
+              </div>
+              <div class="composer-row">
+                <div class="ctools">
+                  <button class="icon-btn" title="Attach">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                      stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                  </button>
+                  <button class="mode-pill">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <path d="M12 8V4H8M4 8V4h4M4 16v4h4M20 8V4h-4M20 16v4h-4M16 12H8"/></svg>
+                    Plan
+                  </button>
+                  <button class="model-trigger">
+                    <span class="seg harness">
+                      <span class="pico uno" style="width:14px;height:14px;font-size:9px">U</span>
+                      Uno</span>
+                    <span class="seg model">Claude Opus 4.5</span>
+                    <span class="seg route"><span class="badge">RU</span></span>
+                    <svg class="chev" viewBox="0 0 20 20" fill="currentColor"><path d="M5 8l5 5 5-5z"/></svg>
+                  </button>
+                </div>
+                <button class="send-btn">
+                  Send
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- ============== RIGHT (PREVIEW) ============== -->
+      <aside class="right">
+        <div class="head">
+          <div class="tab active">stripe-webhook.ts</div>
+          <div class="tab">migrations/030.sql</div>
+        </div>
+        <div class="pathbar">apps/server/src/integrations/stripe-webhook.ts</div>
+        <div class="body">
+<span class="ln">1</span>import { Effect } from "effect";
+<span class="ln">2</span>import { StripeWebhookSchema } from "./schema";
+<span class="ln">3</span>
+<span class="ln">4</span>export const parseInvoicePayment = Effect.fn(
+<span class="ln">5</span>&nbsp;&nbsp;"parseInvoicePayment",
+<span class="ln">6</span>)(function* (payload) {
+<span class="ln">7</span>&nbsp;&nbsp;const line = payload.data.object.lines.data[0];
+<span class="ln">8</span>&nbsp;&nbsp;return {
+<span class="ln">9</span>&nbsp;&nbsp;&nbsp;&nbsp;productId: line.price.product,
+<span class="ln">10</span>&nbsp;&nbsp;&nbsp;subscriptionId: line.subscription,
+<span class="ln">11</span>&nbsp;&nbsp;};
+<span class="ln">12</span>});
+        </div>
+      </aside>
+    </div>
+  </body>
+</html>

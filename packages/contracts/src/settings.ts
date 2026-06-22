@@ -5,6 +5,7 @@ import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
 import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  UnoModelRoute,
   ProviderOptionSelections,
 } from "./model.ts";
 import { ProviderDriverKind } from "./providerInstance.ts";
@@ -33,13 +34,32 @@ export const SidebarProjectGroupingMode = Schema.Literals([
 export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type;
 export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository";
 
+// Cookie/session profile used by the built-in browser pane: one shared
+// profile for the whole account, or an isolated profile per project.
+export const BrowserProfileScope = Schema.Literals(["account", "project"]);
+export type BrowserProfileScope = typeof BrowserProfileScope.Type;
+export const DEFAULT_BROWSER_PROFILE_SCOPE: BrowserProfileScope = "account";
+
+export const BrowserAutomationLevel = Schema.Literals(["off", "safe", "full"]);
+export type BrowserAutomationLevel = typeof BrowserAutomationLevel.Type;
+export const DEFAULT_BROWSER_AUTOMATION_LEVEL: BrowserAutomationLevel = "full";
+
 export const ClientSettingsSchema = Schema.Struct({
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  browserAutomationLevel: BrowserAutomationLevel.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_AUTOMATION_LEVEL)),
+  ),
+  browserProfileScope: BrowserProfileScope.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_PROFILE_SCOPE)),
+  ),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffIgnoreWhitespace: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffWordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   onboardingCompleted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  unoLastModelRoute: UnoModelRoute.pipe(
+    Schema.withDecodingDefault(Effect.succeed("default" as const)),
+  ),
   // Model favorites. Historically keyed by provider kind, now
   // widened to `ProviderInstanceId` so users can favorite a specific model
   // on a custom provider instance (e.g. "Codex Personal · gpt-5") without
@@ -523,10 +543,13 @@ export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
 export const ClientSettingsPatch = Schema.Struct({
   autoOpenPlanSidebar: Schema.optionalKey(Schema.Boolean),
+  browserAutomationLevel: Schema.optionalKey(BrowserAutomationLevel),
+  browserProfileScope: Schema.optionalKey(BrowserProfileScope),
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
   diffWordWrap: Schema.optionalKey(Schema.Boolean),
+  unoLastModelRoute: Schema.optionalKey(UnoModelRoute),
   favorites: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({

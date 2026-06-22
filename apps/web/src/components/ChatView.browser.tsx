@@ -209,6 +209,7 @@ function createMockEnvironmentApi(input: {
       readFile: (() => {
         throw new Error("Not implemented in browser test.");
       }) as EnvironmentApi["filesystem"]["readFile"],
+      watchFile: (() => () => {}) as EnvironmentApi["filesystem"]["watchFile"],
     },
     sourceControl: {} as EnvironmentApi["sourceControl"],
     vcs: {} as EnvironmentApi["vcs"],
@@ -224,6 +225,9 @@ function createMockEnvironmentApi(input: {
       subscribeShell: (() => () => undefined) as EnvironmentApi["orchestration"]["subscribeShell"],
       subscribeThread: (() => () =>
         undefined) as EnvironmentApi["orchestration"]["subscribeThread"],
+    },
+    browser: {
+      subscribeBridge: (() => () => undefined) as EnvironmentApi["browser"]["subscribeBridge"],
     },
   };
 }

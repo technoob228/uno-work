@@ -11,11 +11,21 @@ import {
 } from "effect/unstable/http";
 import { OtlpTracer } from "effect/unstable/observability";
 
+import { timingSafeEqual } from "node:crypto";
+
 import {
   ATTACHMENTS_ROUTE_PREFIX,
   normalizeAttachmentRelativePath,
   resolveAttachmentRelativePath,
 } from "./attachmentPaths.ts";
+import {
+  BROWSER_BRIDGE_COMMAND_PATH,
+  BROWSER_BRIDGE_COMMAND_RESULT_PATH,
+  BROWSER_BRIDGE_OPEN_PATH,
+  BrowserBridge,
+  isAllowedBridgeCommand,
+  isAllowedBridgeUrl,
+} from "./browserBridge.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { decodeOtlpTraceRecords } from "./observability/TraceRecord.ts";
@@ -121,6 +131,97 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
         ),
       );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+function isBridgeTokenAuthorized(authorizationHeader: string | undefined, token: string): boolean {
+  const presented = authorizationHeader?.replace(/^Bearer\s+/i, "").trim() ?? "";
+  if (presented.length === 0 || presented.length !== token.length) {
+    return false;
+  }
+  return timingSafeEqual(Buffer.from(presented, "utf8"), Buffer.from(token, "utf8"));
+}
+
+/**
+ * Endpoint для харнессов: открыть URL во встроенном браузере приложения.
+ * Авторизация — bridge-токеном из env подпроцесса (не сессией пользователя):
+ * запрос приходит от curl внутри агентской сессии, а не из web-клиента.
+ */
+export const browserBridgeOpenRouteLayer = HttpRouter.add(
+  "POST",
+  BROWSER_BRIDGE_OPEN_PATH,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const browserBridge = yield* BrowserBridge;
+    if (!isBridgeTokenAuthorized(request.headers["authorization"], browserBridge.token)) {
+      return HttpServerResponse.text("Unauthorized", { status: 401 });
+    }
+
+    const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
+    const rawUrl = body && typeof body === "object" ? (body as { url?: unknown }).url : undefined;
+    if (!isAllowedBridgeUrl(rawUrl)) {
+      return HttpServerResponse.text('Invalid url: expected http(s) URL in {"url":...}', {
+        status: 400,
+      });
+    }
+
+    yield* browserBridge.publishOpenUrl(rawUrl);
+    return HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 });
+  }),
+);
+
+export const browserBridgeCommandRouteLayer = HttpRouter.add(
+  "POST",
+  BROWSER_BRIDGE_COMMAND_PATH,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const browserBridge = yield* BrowserBridge;
+    if (!isBridgeTokenAuthorized(request.headers["authorization"], browserBridge.token)) {
+      return HttpServerResponse.text("Unauthorized", { status: 401 });
+    }
+
+    const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
+    const rawInput =
+      body && typeof body === "object" && "input" in body
+        ? (body as { input?: unknown }).input
+        : body;
+    if (!isAllowedBridgeCommand(rawInput)) {
+      return HttpServerResponse.text("Invalid browser command payload.", { status: 400 });
+    }
+
+    const result = yield* browserBridge.publishCommand(rawInput);
+    return HttpServerResponse.jsonUnsafe(result, { status: result.ok ? 200 : 502 });
+  }),
+);
+
+export const browserBridgeCommandResultRouteLayer = HttpRouter.add(
+  "POST",
+  BROWSER_BRIDGE_COMMAND_RESULT_PATH,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
+    if (typeof body !== "object" || body === null) {
+      return HttpServerResponse.text("Invalid result payload.", { status: 400 });
+    }
+    const input = body as Record<string, unknown>;
+    if (
+      typeof input.commandId !== "string" ||
+      typeof input.responseToken !== "string" ||
+      typeof input.ok !== "boolean" ||
+      (input.error !== undefined && typeof input.error !== "string")
+    ) {
+      return HttpServerResponse.text("Invalid result payload.", { status: 400 });
+    }
+
+    const browserBridge = yield* BrowserBridge;
+    const accepted = yield* browserBridge.resolveCommandResult({
+      commandId: input.commandId,
+      responseToken: input.responseToken,
+      ok: input.ok,
+      ...(input.data !== undefined ? { data: input.data } : {}),
+      ...(input.error !== undefined ? { error: input.error } : {}),
+    });
+    return HttpServerResponse.jsonUnsafe({ ok: accepted }, { status: accepted ? 200 : 404 });
+  }),
 );
 
 export const attachmentsRouteLayer = HttpRouter.add(

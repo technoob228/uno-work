@@ -27,6 +27,8 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
 import { ServerConfig } from "../../config.ts";
+import { BrowserBridge } from "../../browserBridge.ts";
+import { buildBrowserInstructions } from "../browserInstructions.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
 import { checkCodexProviderStatus, makePendingCodexProvider } from "../Layers/CodexProvider.ts";
@@ -54,6 +56,7 @@ export type CodexDriverEnv =
   | FileSystem.FileSystem
   | Path.Path
   | ProviderEventLoggers
+  | BrowserBridge
   | ServerConfig;
 
 /**
@@ -90,7 +93,11 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const eventLoggers = yield* ProviderEventLoggers;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const browserBridge = yield* BrowserBridge;
+      const processEnv = browserBridge.applyEnvironment(
+        mergeProviderInstanceEnvironment(environment),
+      );
+      const browserInstructions = buildBrowserInstructions(browserBridge.baseUrl);
       const homeLayout = yield* resolveCodexHomeLayout(config);
       const continuationIdentity = codexContinuationIdentity(homeLayout);
       const stampIdentity = withInstanceIdentity({
@@ -126,6 +133,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         instanceId,
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+        ...(browserInstructions ? { appendDeveloperInstructions: browserInstructions } : {}),
       });
       const textGeneration = yield* makeCodexTextGeneration(effectiveConfig, processEnv);
 

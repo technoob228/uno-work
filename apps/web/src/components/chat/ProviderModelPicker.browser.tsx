@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 import { ProviderModelPicker } from "./ProviderModelPicker";
+import { resetModelPickerFilterStoreForTests } from "./modelPickerFilterState";
 import { getCustomModelOptionsByInstance } from "../../modelSelection";
 import {
   deriveProviderInstanceEntries,
@@ -213,6 +214,7 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
 const CODEX_INSTANCE_ID = ProviderInstanceId.make("codex");
 const CLAUDE_INSTANCE_ID = ProviderInstanceId.make("claudeAgent");
 const OPENCODE_INSTANCE_ID = ProviderInstanceId.make("opencode");
+const UNO_INSTANCE_ID = ProviderInstanceId.make("uno");
 
 function buildCodexProvider(models: ServerProvider["models"]): ServerProvider {
   return {
@@ -321,11 +323,13 @@ function getSidebarProviderOrder() {
 describe("ProviderModelPicker", () => {
   beforeEach(async () => {
     // Reset test environment before each test
+    resetModelPickerFilterStoreForTests();
     await __resetLocalApiForTests();
   });
 
   afterEach(async () => {
     document.body.innerHTML = "";
+    resetModelPickerFilterStoreForTests();
     await __resetLocalApiForTests();
   });
 
@@ -787,6 +791,91 @@ describe("ProviderModelPicker", () => {
 
       await vi.waitFor(() => {
         expect(document.querySelector(".model-picker-list")).toBeNull();
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps Uno capability filters after selecting a model and reopening", async () => {
+    const providers: ReadonlyArray<ServerProvider> = [
+      {
+        driver: ProviderDriverKind.make("uno"),
+        instanceId: UNO_INSTANCE_ID,
+        displayName: "Uno",
+        enabled: true,
+        installed: true,
+        version: "1.0.0",
+        status: "ready",
+        auth: { status: "authenticated" },
+        checkedAt: new Date().toISOString(),
+        slashCommands: [],
+        skills: [],
+        models: [
+          {
+            slug: "openai/gpt-image-1",
+            name: "GPT Image 1",
+            subProvider: "openai",
+            isCustom: false,
+            capabilities: createModelCapabilities({
+              optionDescriptors: [],
+              metadata: {
+                modalities: { input: ["text"], output: ["image"] },
+                supports: { tools: false, streaming: false },
+                tier: "strong",
+              },
+            }),
+          },
+          {
+            slug: "openai/gpt-5",
+            name: "GPT-5",
+            subProvider: "openai",
+            isCustom: false,
+            capabilities: createModelCapabilities({
+              optionDescriptors: [],
+              metadata: {
+                modalities: { input: ["text"], output: ["text"] },
+                supports: { tools: true, streaming: true },
+                tier: "frontier",
+              },
+            }),
+          },
+        ],
+      },
+    ];
+    const mounted = await mountPicker({
+      activeInstanceId: UNO_INSTANCE_ID,
+      model: "openai/gpt-5",
+      lockedProvider: null,
+      providers,
+    });
+
+    try {
+      await page.getByRole("button").click();
+      await page.getByLabelText("Capabilities filter").click();
+      await page.getByText("Image generation").click();
+      await userEvent.keyboard("{Escape}");
+
+      await vi.waitFor(() => {
+        const listText = getModelPickerListText();
+        expect(listText).toContain("GPT Image 1");
+        expect(listText).not.toContain("GPT-5");
+      });
+
+      await page.getByText("GPT Image 1").click();
+      await vi.waitFor(() => {
+        expect(document.querySelector(".model-picker-list")).toBeNull();
+      });
+
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        expect(page.getByLabelText("Capabilities filter").element().textContent).toContain(
+          "Image generation",
+        );
+        const listText = getModelPickerListText();
+        expect(listText).toContain("GPT Image 1");
+        expect(listText).not.toContain("GPT-5");
       });
     } finally {
       await mounted.cleanup();

@@ -4,10 +4,12 @@ import {
   EventId,
   type ModelSelection,
   type OrchestrationEvent,
+  type ProviderContextMessage,
   ProviderDriverKind,
   type ProjectId,
   type OrchestrationSession,
   ThreadId,
+  type ProviderInteractionMode,
   type ProviderSession,
   type RuntimeMode,
   type TurnId,
@@ -19,6 +21,7 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
+import { classifyOrchestrationErrorDetail as classifyProviderErrorDetail } from "../../provider/unoBilling.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -48,6 +51,62 @@ type ProviderIntentEvent = Extract<
 function toNonEmptyProviderInput(value: string | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : undefined;
+}
+
+const GENERATED_IMAGE_MARKDOWN_REGEX =
+  /!\[([^\]]*)]\(data:image\/[^;,\s)]+(?:;[^,)]+)*;base64,[a-z0-9+/=\r\n ]+\)/gi;
+const DATA_IMAGE_URL_REGEX = /data:image\/[^;,\s)]+(?:;[^,)]+)*;base64,[a-z0-9+/=\r\n ]+/gi;
+const PROVIDER_CONTEXT_TEXT_MAX_CHARS = 20_000;
+
+function sanitizeProviderContextText(value: string): string {
+  let generatedImageIndex = 0;
+  const compacted = value
+    .replace(GENERATED_IMAGE_MARKDOWN_REGEX, (_match, altText: string | undefined) => {
+      generatedImageIndex += 1;
+      const label = altText?.trim() || `Generated image ${generatedImageIndex}`;
+      return `[${label} displayed in this chat; binary image data omitted]`;
+    })
+    .replace(DATA_IMAGE_URL_REGEX, "[inline image data omitted]");
+  if (compacted.length <= PROVIDER_CONTEXT_TEXT_MAX_CHARS) {
+    return compacted;
+  }
+  return `${compacted.slice(0, PROVIDER_CONTEXT_TEXT_MAX_CHARS)}\n[message truncated]`;
+}
+
+function buildProviderContextMessages(input: {
+  readonly messages: ReadonlyArray<{
+    readonly role: "user" | "assistant" | "system";
+    readonly text: string;
+    readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
+  }>;
+  readonly currentMessageText: string;
+  readonly currentAttachments: ReadonlyArray<ChatAttachment>;
+}): ReadonlyArray<ProviderContextMessage> {
+  const messages = input.messages.slice(-49).map((message) => {
+    const text = sanitizeProviderContextText(message.text);
+    if (message.attachments && message.attachments.length > 0) {
+      return {
+        role: message.role,
+        text,
+        attachments: [...message.attachments],
+      } satisfies ProviderContextMessage;
+    }
+    return {
+      role: message.role,
+      text,
+    } satisfies ProviderContextMessage;
+  });
+  const lastUserMessage = messages.toReversed().find((message) => message.role === "user");
+  if (lastUserMessage?.text.trim() !== input.currentMessageText.trim()) {
+    messages.push({
+      role: "user",
+      text: sanitizeProviderContextText(input.currentMessageText),
+      ...(input.currentAttachments.length > 0
+        ? { attachments: [...input.currentAttachments] }
+        : {}),
+    });
+  }
+  return messages.slice(-50);
 }
 
 function mapProviderSessionStatusToOrchestrationStatus(
@@ -264,6 +323,7 @@ const make = Effect.gen(function* () {
         status: session.status === "stopped" ? "stopped" : "ready",
         activeTurnId: null,
         lastError: input.detail,
+        lastErrorClass: classifyProviderErrorDetail(input.detail),
         updatedAt: input.createdAt,
       },
       createdAt: input.createdAt,
@@ -424,6 +484,7 @@ const make = Effect.gen(function* () {
             // Provider turn ids are not orchestration turn ids.
             activeTurnId: null,
             lastError: session.lastError ?? null,
+            lastErrorClass: session.lastErrorClass ?? null,
             updatedAt: session.updatedAt,
           },
           createdAt,
@@ -507,7 +568,7 @@ const make = Effect.gen(function* () {
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
-    readonly interactionMode?: "default" | "plan";
+    readonly interactionMode?: ProviderInteractionMode;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
@@ -526,6 +587,11 @@ const make = Effect.gen(function* () {
     }
     const normalizedInput = toNonEmptyProviderInput(input.messageText);
     const normalizedAttachments = input.attachments ?? [];
+    const contextMessages = buildProviderContextMessages({
+      messages: thread.messages,
+      currentMessageText: input.messageText,
+      currentAttachments: normalizedAttachments,
+    });
     const activeSession = yield* providerService
       .listSessions()
       .pipe(
@@ -560,6 +626,7 @@ const make = Effect.gen(function* () {
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+      ...(contextMessages.length > 0 ? { contextMessages } : {}),
     };
   });
 
@@ -798,8 +865,37 @@ const make = Effect.gen(function* () {
       });
     }
 
+    const activeTurnId = event.payload.turnId ?? thread.session?.activeTurnId ?? null;
+    yield* setThreadSession({
+      threadId: thread.id,
+      session: {
+        ...thread.session,
+        status: "ready",
+        activeTurnId: null,
+        updatedAt: event.payload.createdAt,
+      },
+      createdAt: event.payload.createdAt,
+    });
+
     // Orchestration turn ids are not provider turn ids, so interrupt by session.
-    yield* providerService.interruptTurn({ threadId: event.payload.threadId });
+    yield* providerService
+      .interruptTurn({
+        threadId: event.payload.threadId,
+        ...(activeTurnId !== null ? { turnId: activeTurnId } : {}),
+      })
+      .pipe(
+        Effect.catchCause((cause) =>
+          appendProviderFailureActivity({
+            threadId: event.payload.threadId,
+            kind: "provider.turn.interrupt.failed",
+            summary: "Provider turn interrupt failed",
+            detail: Cause.pretty(cause),
+            turnId: activeTurnId,
+            createdAt: event.payload.createdAt,
+          }),
+        ),
+        Effect.forkScoped,
+      );
   });
 
   const processApprovalResponseRequested = Effect.fn("processApprovalResponseRequested")(function* (
@@ -915,6 +1011,7 @@ const make = Effect.gen(function* () {
         runtimeMode: thread.session?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
         activeTurnId: null,
         lastError: thread.session?.lastError ?? null,
+        lastErrorClass: thread.session?.lastErrorClass ?? null,
         updatedAt: now,
       },
       createdAt: now,

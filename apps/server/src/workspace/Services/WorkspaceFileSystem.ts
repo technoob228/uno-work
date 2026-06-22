@@ -7,11 +7,13 @@
  * @module WorkspaceFileSystem
  */
 import { Schema, Context } from "effect";
-import type { Effect } from "effect";
+import type { Effect, Stream } from "effect";
 
 import type {
   FilesystemReadFileInput,
   FilesystemReadFileResult,
+  FilesystemWatchFileEvent,
+  FilesystemWatchFileInput,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "@t3tools/contracts";
@@ -30,6 +32,16 @@ export class WorkspaceFileSystemError extends Schema.TaggedErrorClass<WorkspaceF
 
 export class WorkspaceReadFileError extends Schema.TaggedErrorClass<WorkspaceReadFileError>()(
   "WorkspaceReadFileError",
+  {
+    path: Schema.String,
+    operation: Schema.String,
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class WorkspaceWatchFileError extends Schema.TaggedErrorClass<WorkspaceWatchFileError>()(
+  "WorkspaceWatchFileError",
   {
     path: Schema.String,
     operation: Schema.String,
@@ -62,6 +74,15 @@ export interface WorkspaceFileSystemShape {
   readonly readFile: (
     input: FilesystemReadFileInput,
   ) => Effect.Effect<FilesystemReadFileResult, WorkspaceReadFileError>;
+
+  /**
+   * Watch a file by absolute path. Emits an event whenever the file changes on
+   * disk (including atomic replace-by-rename writes) until the stream is
+   * interrupted by the subscriber.
+   */
+  readonly watchFile: (
+    input: FilesystemWatchFileInput,
+  ) => Stream.Stream<FilesystemWatchFileEvent, WorkspaceWatchFileError>;
 }
 
 /**

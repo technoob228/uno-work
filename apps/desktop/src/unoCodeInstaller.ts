@@ -3,6 +3,12 @@ import * as FS from "node:fs";
 import * as Path from "node:path";
 import { promisify } from "node:util";
 
+import {
+  UNO_CODE_MINIMUM_VERSION,
+  compareCliVersions,
+  extractNumericCliVersion,
+} from "@t3tools/contracts";
+
 const execFile = promisify(ChildProcess.execFile);
 
 const RELEASE_REPO = "technoob228/uno-code";
@@ -292,4 +298,115 @@ export async function readUnoCodeVersion(binaryPath: string): Promise<string | n
   } catch {
     return null;
   }
+}
+
+export type InstallDecisionReason = "missing" | "outdated" | "up-to-date";
+
+export interface InstallDecision {
+  /** Whether a (re)install should run. */
+  readonly install: boolean;
+  readonly reason: InstallDecisionReason;
+  /** Numeric version of the binary currently on disk, or null if absent/unreadable. */
+  readonly installedVersion: string | null;
+  /** Numeric target the decision compared against. */
+  readonly targetVersion: string | null;
+}
+
+/**
+ * Numeric `X.Y.Z` core of a GitHub release tag like `uno-v1.14.48-uno.1`.
+ *
+ * Unlike {@link extractNumericCliVersion} (which mirrors the server's
+ * word-boundary-anchored regex for `--version` output), a tag carries a `v`
+ * prefix glued to the digits (`...-v1.14.48`) with no word boundary, so this
+ * uses an unanchored match.
+ */
+export function releaseTagToNumericVersion(tag: string): string | null {
+  const match = tag.match(/(\d+\.\d+\.\d+)/);
+  return match?.[1] ?? null;
+}
+
+/** Fetch the numeric version of the latest GitHub release (throws on network/API error). */
+export async function fetchLatestUnoCodeReleaseVersion(): Promise<string | null> {
+  const release = await fetchLatestRelease();
+  return releaseTagToNumericVersion(release.tag_name);
+}
+
+/**
+ * Pure decision: given whether the binary exists and its raw `--version`
+ * output, decide whether to (re)install. Split out from IO so it can be unit
+ * tested without spawning a real binary.
+ *
+ * Comparison uses the numeric `X.Y.Z` core only (via
+ * {@link extractNumericCliVersion}), exactly like the server-side provider gate
+ * ({@link parseGenericCliVersion}), so prerelease suffixes (`-uno.1`,
+ * `-uno.dev`) never produce a false "outdated" signal.
+ *
+ * Note: by semver prerelease rules `1.14.48-uno.dev` and `1.14.48-uno.1` share
+ * the numeric core `1.14.48`, so a locally-built dev binary is treated as the
+ * same version as the release and is NOT force-replaced. Intentional — the
+ * numeric version matches, so there is nothing to upgrade.
+ */
+export function decideInstall(opts: {
+  readonly exists: boolean;
+  readonly installedVersionRaw: string | null;
+  readonly targetVersion?: string;
+}): InstallDecision {
+  const targetNumeric =
+    extractNumericCliVersion(opts.targetVersion ?? UNO_CODE_MINIMUM_VERSION) ??
+    extractNumericCliVersion(UNO_CODE_MINIMUM_VERSION);
+
+  if (!opts.exists) {
+    return {
+      install: true,
+      reason: "missing",
+      installedVersion: null,
+      targetVersion: targetNumeric,
+    };
+  }
+
+  const installedNumeric = opts.installedVersionRaw
+    ? extractNumericCliVersion(opts.installedVersionRaw)
+    : null;
+  if (!installedNumeric) {
+    // Binary present but won't report a parseable version — treat as broken and
+    // reinstall rather than trusting a corrupt/partial download.
+    return {
+      install: true,
+      reason: "outdated",
+      installedVersion: opts.installedVersionRaw,
+      targetVersion: targetNumeric,
+    };
+  }
+
+  if (targetNumeric && compareCliVersions(installedNumeric, targetNumeric) < 0) {
+    return {
+      install: true,
+      reason: "outdated",
+      installedVersion: installedNumeric,
+      targetVersion: targetNumeric,
+    };
+  }
+
+  return {
+    install: false,
+    reason: "up-to-date",
+    installedVersion: installedNumeric,
+    targetVersion: targetNumeric,
+  };
+}
+
+/**
+ * Decide whether uno-code needs to be installed or upgraded at startup.
+ *
+ * `targetVersion` is the desired version to compare against — typically the
+ * numeric core of the latest GitHub release tag, falling back to
+ * `UNO_CODE_MINIMUM_VERSION` when offline. See {@link decideInstall}.
+ */
+export async function needsInstallOrUpgrade(
+  binaryPath: string,
+  targetVersion: string = UNO_CODE_MINIMUM_VERSION,
+): Promise<InstallDecision> {
+  const exists = await isUnoCodeInstalled(binaryPath);
+  const installedVersionRaw = exists ? await readUnoCodeVersion(binaryPath) : null;
+  return decideInstall({ exists, installedVersionRaw, targetVersion });
 }

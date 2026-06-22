@@ -649,6 +649,36 @@ label:has(> select#reasoning-effort) select {
   background: color-mix(in srgb, var(--muted) 78%, var(--background)) !important;
 }
 
+/* Preview pane: подсвеченный исходный код (IDE-like) */
+.preview-code-shiki pre.shiki {
+  margin: 0;
+  padding: 0.75rem 0;
+  background: transparent !important;
+  font-size: 0.75rem;
+  line-height: 1.7;
+}
+
+.preview-code-shiki code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  counter-reset: preview-code-line;
+}
+
+.preview-code-shiki .line::before {
+  counter-increment: preview-code-line;
+  content: counter(preview-code-line);
+  display: inline-block;
+  width: 2.75rem;
+  margin-right: 0.875rem;
+  padding-right: 0.625rem;
+  text-align: right;
+  border-right: 1px solid var(--border);
+  color: var(--muted-foreground);
+  opacity: 0.55;
+  user-select: none;
+}
+
 .chat-markdown table {
   width: 100%;
   border-collapse: collapse;

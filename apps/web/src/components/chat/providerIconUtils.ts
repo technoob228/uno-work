@@ -1,4 +1,4 @@
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { type ModelCapabilities, ProviderDriverKind } from "@t3tools/contracts";
 import { ClaudeAI, CursorIcon, Icon, OpenAI, OpenCodeIcon, UnoIcon } from "../Icons";
 import { PROVIDER_OPTIONS } from "../../session-logic";
 
@@ -26,6 +26,7 @@ export type ModelEsque = {
   name: string;
   shortName?: string | undefined;
   subProvider?: string | undefined;
+  capabilities?: ModelCapabilities | null | undefined;
 };
 
 export function getDisplayModelName(
@@ -43,6 +44,17 @@ export function getTriggerDisplayModelName(model: ModelEsque): string {
 }
 
 export function getTriggerDisplayModelLabel(model: ModelEsque): string {
-  const title = getTriggerDisplayModelName(model);
-  return model.subProvider ? `${model.subProvider} · ${title}` : title;
+  const modelName = getTriggerDisplayModelName(model);
+  const subProvider = model.subProvider?.trim();
+  if (!subProvider) return modelName;
+
+  const normalizedName = modelName.toLocaleLowerCase();
+  const normalizedProvider = subProvider.toLocaleLowerCase();
+  if (
+    normalizedName.startsWith(`${normalizedProvider}:`) ||
+    normalizedName.startsWith(`${normalizedProvider} ·`)
+  ) {
+    return modelName;
+  }
+  return `${subProvider} · ${modelName}`;
 }

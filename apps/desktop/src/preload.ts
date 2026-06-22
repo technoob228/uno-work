@@ -40,6 +40,12 @@ const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";
 const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
+const BROWSER_CREDENTIALS_LIST_CHANNEL = "desktop:browser-credentials-list";
+const BROWSER_CREDENTIALS_SAVE_CHANNEL = "desktop:browser-credentials-save";
+const BROWSER_CREDENTIALS_DELETE_CHANNEL = "desktop:browser-credentials-delete";
+const BROWSER_CREDENTIALS_REVEAL_CHANNEL = "desktop:browser-credentials-reveal";
+const BROWSER_CLEAR_DATA_CHANNEL = "desktop:browser-clear-data";
+const BROWSER_OPEN_URL_CHANNEL = "desktop:browser-open-url";
 const SSH_PASSWORD_PROMPT_CANCELLED_RESULT = "ssh-password-prompt-cancelled";
 
 function unwrapEnsureSshEnvironmentResult(result: unknown) {
@@ -161,6 +167,23 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.on(UPDATE_STATE_CHANNEL, wrappedListener);
     return () => {
       ipcRenderer.removeListener(UPDATE_STATE_CHANNEL, wrappedListener);
+    };
+  },
+  listBrowserCredentials: () => ipcRenderer.invoke(BROWSER_CREDENTIALS_LIST_CHANNEL),
+  saveBrowserCredential: (input) => ipcRenderer.invoke(BROWSER_CREDENTIALS_SAVE_CHANNEL, input),
+  deleteBrowserCredential: (id) => ipcRenderer.invoke(BROWSER_CREDENTIALS_DELETE_CHANNEL, id),
+  revealBrowserCredentialPassword: (id) =>
+    ipcRenderer.invoke(BROWSER_CREDENTIALS_REVEAL_CHANNEL, id),
+  clearBrowserData: (input) => ipcRenderer.invoke(BROWSER_CLEAR_DATA_CHANNEL, input),
+  onBrowserOpenUrlRequest: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, url: unknown) => {
+      if (typeof url !== "string" || url.length === 0) return;
+      listener(url);
+    };
+
+    ipcRenderer.on(BROWSER_OPEN_URL_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(BROWSER_OPEN_URL_CHANNEL, wrappedListener);
     };
   },
   getUnoCodeInstallState: () => ipcRenderer.invoke(UNO_CODE_GET_STATE_CHANNEL),

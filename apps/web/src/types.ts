@@ -2,6 +2,7 @@ import type {
   EnvironmentId,
   ModelSelection,
   OrchestrationLatestTurn,
+  OrchestrationSessionErrorClass,
   OrchestrationProposedPlanId,
   RepositoryIdentity,
   OrchestrationSessionStatus,
@@ -41,7 +42,21 @@ export interface ChatImageAttachment {
   previewUrl?: string;
 }
 
-export type ChatAttachment = ChatImageAttachment;
+export interface ChatVideoDigestAttachment {
+  type: "video_digest";
+  id: string;
+  name: string;
+  sourceMimeType: string;
+  sourceSizeBytes: number;
+  durationMs: number;
+  digestId: string;
+  jobId: string;
+  frameCount: number;
+  transcriptSegmentCount: number;
+  posterPreviewUrl?: string;
+}
+
+export type ChatAttachment = ChatImageAttachment | ChatVideoDigestAttachment;
 
 export interface ChatMessage {
   id: MessageId;
@@ -166,5 +181,6 @@ export interface ThreadSession {
   createdAt: string;
   updatedAt: string;
   lastError?: string;
+  lastErrorClass?: OrchestrationSessionErrorClass;
   orchestrationStatus: OrchestrationSessionStatus;
 }

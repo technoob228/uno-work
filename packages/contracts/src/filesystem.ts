@@ -66,3 +66,25 @@ export class FilesystemReadFileError extends Schema.TaggedErrorClass<FilesystemR
     cause: Schema.optional(Schema.Defect),
   },
 ) {}
+
+export const FilesystemWatchFileInput = Schema.Struct({
+  path: TrimmedNonEmptyString.check(Schema.isMaxLength(FILESYSTEM_PATH_MAX_LENGTH)),
+});
+export type FilesystemWatchFileInput = typeof FilesystemWatchFileInput.Type;
+
+export const FilesystemWatchFileEventKind = Schema.Literals(["changed", "removed"]);
+export type FilesystemWatchFileEventKind = typeof FilesystemWatchFileEventKind.Type;
+
+export const FilesystemWatchFileEvent = Schema.Struct({
+  path: TrimmedNonEmptyString,
+  kind: FilesystemWatchFileEventKind,
+});
+export type FilesystemWatchFileEvent = typeof FilesystemWatchFileEvent.Type;
+
+export class FilesystemWatchFileError extends Schema.TaggedErrorClass<FilesystemWatchFileError>()(
+  "FilesystemWatchFileError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}

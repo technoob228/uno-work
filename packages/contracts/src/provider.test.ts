@@ -151,6 +151,22 @@ describe("ProviderSendTurnInput", () => {
     expect(getOptionValue(parsed.modelSelection?.options, "effort")).toBe("ultrathink");
     expect(getOptionValue(parsed.modelSelection?.options, "fastMode")).toBe(true);
   });
+
+  it("accepts compact context messages", () => {
+    const parsed = decodeProviderSendTurnInput({
+      threadId: "thread-1",
+      input: "where is it?",
+      contextMessages: [
+        { role: "user", text: "generate an image" },
+        {
+          role: "assistant",
+          text: "[Generated image 1 displayed in this chat; binary image data omitted]",
+        },
+      ],
+    });
+
+    expect(parsed.contextMessages?.map((message) => message.role)).toEqual(["user", "assistant"]);
+  });
 });
 
 describe("providerInstanceId routing key (slice-2 invariant)", () => {

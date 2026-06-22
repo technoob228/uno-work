@@ -72,6 +72,7 @@ export interface AppModelOption {
   name: string;
   shortName?: string;
   subProvider?: string;
+  capabilities?: ServerProvider["models"][number]["capabilities"];
   isCustom: boolean;
 }
 
@@ -83,6 +84,7 @@ function toAppModelOption(model: ServerProvider["models"][number]): AppModelOpti
   };
   if (model.shortName) option.shortName = model.shortName;
   if (model.subProvider) option.subProvider = model.subProvider;
+  if (model.capabilities) option.capabilities = model.capabilities;
   return option;
 }
 

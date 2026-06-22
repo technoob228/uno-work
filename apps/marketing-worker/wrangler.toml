@@ -1,0 +1,4 @@
+name = "uno-marketing-leads"
+main = "src/index.ts"
+compatibility_date = "2026-06-03"
+workers_dev = true

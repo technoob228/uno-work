@@ -50,11 +50,14 @@ function makeSecretStorage(available: boolean): DesktopSecretStorage {
 
 const clientSettings: ClientSettings = {
   autoOpenPlanSidebar: false,
+  browserAutomationLevel: "full",
+  browserProfileScope: "account",
   confirmThreadArchive: true,
   confirmThreadDelete: false,
   diffIgnoreWhitespace: true,
   diffWordWrap: true,
   onboardingCompleted: false,
+  unoLastModelRoute: "default",
   favorites: [],
   providerModelPreferences: {},
   sidebarProjectGroupingMode: "repository_path",

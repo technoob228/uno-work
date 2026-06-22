@@ -19,8 +19,11 @@ import {
   OrchestrationReplayEventsError,
   FilesystemBrowseError,
   FilesystemReadFileError,
+  FilesystemWatchFileError,
   ThreadId,
   type TerminalEvent,
+  UnoBillingRpcError,
+  UNO_GATEWAY_BASE_URL,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -42,6 +45,7 @@ import {
 } from "./observability/RpcInstrumentation.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
+import { BrowserBridge } from "./browserBridge.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
@@ -75,6 +79,15 @@ import {
   type SessionCredentialChange,
 } from "./auth/Services/SessionCredentialService.ts";
 import { respondToAuthError } from "./auth/http.ts";
+import {
+  cancelUnoVideoJob,
+  completeUnoVideoUpload,
+  createUnoVideoJob,
+  createUnoVideoUpload,
+  getUnoVideoDigest,
+  getUnoVideoJob,
+  packUnoVideoDigest,
+} from "./unoVideoGateway.ts";
 
 function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   OrchestrationEvent,
@@ -155,6 +168,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const providerRegistry = yield* ProviderRegistry;
       const config = yield* ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents;
+      const browserBridge = yield* BrowserBridge;
       const serverSettings = yield* ServerSettingsService;
       const startup = yield* ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries;
@@ -557,6 +571,105 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         };
       });
 
+      const createUnoLlmTopUpAction = (input: { readonly amount?: number | undefined }) =>
+        Effect.gen(function* () {
+          const amount =
+            typeof input.amount === "number" && Number.isFinite(input.amount) && input.amount > 0
+              ? input.amount
+              : 10;
+          const settings = yield* serverSettings.getSettings.pipe(
+            Effect.mapError(
+              () =>
+                new UnoBillingRpcError({
+                  message: "Unable to read Uno billing settings.",
+                }),
+            ),
+          );
+          const apiKey = settings.uno.apiKey.trim();
+          if (apiKey.length === 0) {
+            return yield* new UnoBillingRpcError({
+              message: "Connect your Uno account before topping up LLM credits.",
+            });
+          }
+          const apiBaseUrl = UNO_GATEWAY_BASE_URL.replace(/\/v1\/?$/, "");
+          const authHeaders = {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          };
+          const buyResponse = yield* Effect.tryPromise({
+            try: () =>
+              fetch(`${apiBaseUrl}/llm/credits/buy`, {
+                method: "POST",
+                headers: authHeaders,
+                body: JSON.stringify({ amount }),
+              }),
+            catch: (cause) =>
+              new UnoBillingRpcError({
+                message: cause instanceof Error ? cause.message : String(cause),
+              }),
+          });
+          if (buyResponse.ok) {
+            const body = (yield* Effect.tryPromise({
+              try: () => buyResponse.json(),
+              catch: () =>
+                new UnoBillingRpcError({ message: "Uno credits purchase response was invalid." }),
+            })) as {
+              readonly llm_balance?: unknown;
+              readonly charged_from_balance?: unknown;
+            };
+            return {
+              kind: "credits_bought" as const,
+              llmBalance: typeof body.llm_balance === "number" ? body.llm_balance : 0,
+              chargedFromBalance:
+                typeof body.charged_from_balance === "number" ? body.charged_from_balance : amount,
+            };
+          }
+          if (buyResponse.status !== 402) {
+            const detail = yield* Effect.promise(() =>
+              buyResponse.text().catch(() => `HTTP ${buyResponse.status}`),
+            );
+            return yield* new UnoBillingRpcError({
+              message: detail || `Uno credits purchase failed with HTTP ${buyResponse.status}.`,
+            });
+          }
+          const linkResponse = yield* Effect.tryPromise({
+            try: () =>
+              fetch(`${apiBaseUrl}/pay/create-link`, {
+                method: "POST",
+                headers: authHeaders,
+                body: JSON.stringify({ amount }),
+              }),
+            catch: (cause) =>
+              new UnoBillingRpcError({
+                message: cause instanceof Error ? cause.message : String(cause),
+              }),
+          });
+          if (!linkResponse.ok) {
+            const detail = yield* Effect.promise(() =>
+              linkResponse.text().catch(() => `HTTP ${linkResponse.status}`),
+            );
+            return yield* new UnoBillingRpcError({
+              message:
+                detail || `Uno payment link creation failed with HTTP ${linkResponse.status}.`,
+            });
+          }
+          const body = (yield* Effect.tryPromise({
+            try: () => linkResponse.json(),
+            catch: () =>
+              new UnoBillingRpcError({ message: "Uno payment link response was invalid." }),
+          })) as { readonly payment_url?: unknown; readonly amount?: unknown };
+          if (typeof body.payment_url !== "string" || body.payment_url.length === 0) {
+            return yield* new UnoBillingRpcError({
+              message: "Uno payment link response did not include a payment URL.",
+            });
+          }
+          return {
+            kind: "payment_link" as const,
+            paymentUrl: body.payment_url,
+            amount: typeof body.amount === "number" ? body.amount : amount,
+          };
+        });
+
       const refreshGitStatus = (cwd: string) =>
         vcsStatusBroadcaster
           .refreshStatus(cwd)
@@ -567,7 +680,18 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
             Effect.gen(function* () {
-              const normalizedCommand = yield* normalizeDispatchCommand(command);
+              const needsVideoMaterialization =
+                command.type === "thread.turn.start" &&
+                command.message.attachments.some(
+                  (attachment) => attachment.type === "video_digest",
+                );
+              const unoApiKey = needsVideoMaterialization
+                ? yield* serverSettings.getSettings.pipe(
+                    Effect.map((settings) => settings.uno.apiKey),
+                    Effect.catch(() => Effect.succeed("")),
+                  )
+                : null;
+              const normalizedCommand = yield* normalizeDispatchCommand(command, { unoApiKey });
               const shouldStopSessionAfterArchive =
                 normalizedCommand.type === "thread.archive"
                   ? yield* projectionSnapshotQuery
@@ -819,6 +943,38 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               "rpc.aggregate": "server",
             },
           ),
+        [WS_METHODS.unoCreateLlmTopUpAction]: (input) =>
+          observeRpcEffect(WS_METHODS.unoCreateLlmTopUpAction, createUnoLlmTopUpAction(input), {
+            "rpc.aggregate": "uno",
+          }),
+        [WS_METHODS.unoVideoCreateUpload]: (input) =>
+          observeRpcEffect(WS_METHODS.unoVideoCreateUpload, createUnoVideoUpload(input), {
+            "rpc.aggregate": "uno-video",
+          }),
+        [WS_METHODS.unoVideoCompleteUpload]: (input) =>
+          observeRpcEffect(WS_METHODS.unoVideoCompleteUpload, completeUnoVideoUpload(input), {
+            "rpc.aggregate": "uno-video",
+          }),
+        [WS_METHODS.unoVideoCreateJob]: (input) =>
+          observeRpcEffect(WS_METHODS.unoVideoCreateJob, createUnoVideoJob(input), {
+            "rpc.aggregate": "uno-video",
+          }),
+        [WS_METHODS.unoVideoGetJob]: (input) =>
+          observeRpcEffect(WS_METHODS.unoVideoGetJob, getUnoVideoJob(input), {
+            "rpc.aggregate": "uno-video",
+          }),
+        [WS_METHODS.unoVideoCancelJob]: (input) =>
+          observeRpcEffect(WS_METHODS.unoVideoCancelJob, cancelUnoVideoJob(input), {
+            "rpc.aggregate": "uno-video",
+          }),
+        [WS_METHODS.unoVideoGetDigest]: (input) =>
+          observeRpcEffect(WS_METHODS.unoVideoGetDigest, getUnoVideoDigest(input), {
+            "rpc.aggregate": "uno-video",
+          }),
+        [WS_METHODS.unoVideoPackDigest]: (input) =>
+          observeRpcEffect(WS_METHODS.unoVideoPackDigest, packUnoVideoDigest(input), {
+            "rpc.aggregate": "uno-video",
+          }),
         [WS_METHODS.sourceControlLookupRepository]: (input) =>
           observeRpcEffect(
             WS_METHODS.sourceControlLookupRepository,
@@ -900,6 +1056,20 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               Effect.mapError(
                 (cause) =>
                   new FilesystemReadFileError({
+                    message: cause.detail,
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.subscribeFileChanges]: (input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeFileChanges,
+            workspaceFileSystem.watchFile(input).pipe(
+              Stream.mapError(
+                (cause) =>
+                  new FilesystemWatchFileError({
                     message: cause.detail,
                     cause,
                   }),
@@ -1142,6 +1312,12 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               );
             }),
             { "rpc.aggregate": "auth" },
+          ),
+        [WS_METHODS.subscribeBrowserBridge]: (_input) =>
+          observeRpcStreamEffect(
+            WS_METHODS.subscribeBrowserBridge,
+            Effect.succeed(browserBridge.stream),
+            { "rpc.aggregate": "browser" },
           ),
       });
     }),

@@ -16,6 +16,13 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import {
+  PROVIDER_SEND_TURN_MAX_VIDEO_BYTES,
+  PROVIDER_SEND_TURN_MAX_VIDEO_DURATION_MS,
+  UnoVideoJobId,
+  VideoDigestId,
+  VideoMimeType,
+} from "./video.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -115,7 +122,7 @@ export const RuntimeMode = Schema.Literals([
 ]);
 export type RuntimeMode = typeof RuntimeMode.Type;
 export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
-export const ProviderInteractionMode = Schema.Literals(["default", "plan"]);
+export const ProviderInteractionMode = Schema.Literals(["default", "plan", "image"]);
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = "default";
 export const ProviderRequestKind = Schema.Literals(["command", "file-read", "file-change"]);
@@ -156,6 +163,25 @@ export const ChatImageAttachment = Schema.Struct({
 });
 export type ChatImageAttachment = typeof ChatImageAttachment.Type;
 
+export const ChatVideoDigestAttachment = Schema.Struct({
+  type: Schema.Literal("video_digest"),
+  id: ChatAttachmentId,
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
+  sourceMimeType: VideoMimeType,
+  sourceSizeBytes: NonNegativeInt.check(
+    Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_VIDEO_BYTES),
+  ),
+  durationMs: NonNegativeInt.check(
+    Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_VIDEO_DURATION_MS),
+  ),
+  digestId: VideoDigestId,
+  jobId: UnoVideoJobId,
+  frameCount: NonNegativeInt,
+  transcriptSegmentCount: NonNegativeInt,
+  posterPreviewUrl: Schema.optional(Schema.String),
+});
+export type ChatVideoDigestAttachment = typeof ChatVideoDigestAttachment.Type;
+
 const UploadChatImageAttachment = Schema.Struct({
   type: Schema.Literal("image"),
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
@@ -167,9 +193,20 @@ const UploadChatImageAttachment = Schema.Struct({
 });
 export type UploadChatImageAttachment = typeof UploadChatImageAttachment.Type;
 
-export const ChatAttachment = Schema.Union([ChatImageAttachment]);
+export const UploadChatVideoDigestAttachment = Schema.Struct({
+  type: Schema.Literal("video_digest"),
+  digestId: VideoDigestId,
+  jobId: UnoVideoJobId,
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
+});
+export type UploadChatVideoDigestAttachment = typeof UploadChatVideoDigestAttachment.Type;
+
+export const ChatAttachment = Schema.Union([ChatImageAttachment, ChatVideoDigestAttachment]);
 export type ChatAttachment = typeof ChatAttachment.Type;
-const UploadChatAttachment = Schema.Union([UploadChatImageAttachment]);
+const UploadChatAttachment = Schema.Union([
+  UploadChatImageAttachment,
+  UploadChatVideoDigestAttachment,
+]);
 export type UploadChatAttachment = typeof UploadChatAttachment.Type;
 
 export const ProjectScriptIcon = Schema.Literals([
@@ -251,6 +288,15 @@ export const OrchestrationSessionStatus = Schema.Literals([
 ]);
 export type OrchestrationSessionStatus = typeof OrchestrationSessionStatus.Type;
 
+export const OrchestrationSessionErrorClass = Schema.Literals([
+  "billing_error",
+  "provider_error",
+  "transport_error",
+  "validation_error",
+  "unknown",
+]);
+export type OrchestrationSessionErrorClass = typeof OrchestrationSessionErrorClass.Type;
+
 export const OrchestrationSession = Schema.Struct({
   threadId: ThreadId,
   status: OrchestrationSessionStatus,
@@ -259,6 +305,7 @@ export const OrchestrationSession = Schema.Struct({
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
   activeTurnId: Schema.NullOr(TurnId),
   lastError: Schema.NullOr(TrimmedNonEmptyString),
+  lastErrorClass: Schema.optional(Schema.NullOr(OrchestrationSessionErrorClass)),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationSession = typeof OrchestrationSession.Type;

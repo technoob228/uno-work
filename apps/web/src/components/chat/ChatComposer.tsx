@@ -2,6 +2,7 @@ import type {
   ApprovalRequestId,
   EnvironmentId,
   ModelSelection,
+  ModelCapabilities,
   ProjectEntry,
   ProviderApprovalDecision,
   ProviderInteractionMode,
@@ -17,6 +18,9 @@ import {
   ProviderInstanceId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  PROVIDER_SEND_TURN_MAX_VIDEO_BYTES,
+  type UnoVideoJobResult,
+  type VideoMimeType,
 } from "@t3tools/contracts";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import {
@@ -44,6 +48,7 @@ import {
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import {
   type ComposerImageAttachment,
+  type ComposerVideoAttachment,
   type DraftId,
   type PersistedComposerImageAttachment,
   useComposerDraftStore,
@@ -88,7 +93,11 @@ import { toastManager } from "../ui/toast";
 import {
   BotIcon,
   CircleAlertIcon,
+  FileVideoIcon,
   ListTodoIcon,
+  LoaderCircleIcon,
+  PaperclipIcon,
+  RotateCcwIcon,
   type LucideIcon,
   LockIcon,
   LockOpenIcon,
@@ -96,7 +105,11 @@ import {
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
-import { getProviderInteractionModeToggle } from "../../providerModels";
+import {
+  getProviderInteractionModeToggle,
+  getProviderModelCapabilities,
+} from "../../providerModels";
+import { modelCannotRunCodingAgent } from "./modelCapabilities";
 import {
   deriveProviderInstanceEntries,
   resolveProviderDriverKindForInstanceSelection,
@@ -112,8 +125,92 @@ import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { readLocalApi } from "../../localApi";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
+const VIDEO_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_VIDEO_BYTES / (1024 * 1024 * 1024))}GB`;
+const VIDEO_MIME_TYPES = ["video/mp4", "video/quicktime", "video/webm"] as const;
+const VIDEO_JOB_POLL_INTERVAL_MS = 2_000;
+
+function isSupportedVideoMimeType(mimeType: string): mimeType is VideoMimeType {
+  return VIDEO_MIME_TYPES.includes(mimeType as VideoMimeType);
+}
+
+function inferVideoMimeType(file: File): VideoMimeType | null {
+  if (isSupportedVideoMimeType(file.type)) {
+    return file.type;
+  }
+  const lowerName = file.name.toLowerCase();
+  if (lowerName.endsWith(".mp4")) return "video/mp4";
+  if (lowerName.endsWith(".mov")) return "video/quicktime";
+  if (lowerName.endsWith(".webm")) return "video/webm";
+  return null;
+}
+
+type ImageAttachmentSupport = "supported" | "unsupported" | "unknown";
+
+function deriveImageAttachmentSupport(
+  capabilities: ModelCapabilities | null | undefined,
+): ImageAttachmentSupport {
+  const metadata = capabilities?.metadata;
+  if (!metadata) return "unknown";
+  const supports = metadata.supports;
+  const supportsImages =
+    supports?.attachments === true ||
+    supports?.vision === true ||
+    metadata.modalities?.input?.some((modality) => modality.toLowerCase() === "image") === true;
+  if (supportsImages) return "supported";
+
+  const hasKnownNegativeSupport = supports?.attachments === false || supports?.vision === false;
+  const modalitiesExcludeImages =
+    Array.isArray(metadata.modalities?.input) &&
+    !metadata.modalities.input.some((modality) => modality.toLowerCase() === "image");
+  if (hasKnownNegativeSupport || modalitiesExcludeImages) return "unsupported";
+  return "unknown";
+}
+
+function formatVideoProgressLabel(video: ComposerVideoAttachment): string {
+  if (video.status === "ready") return "Ready";
+  if (video.status === "failed") return video.error ?? "Failed";
+  if (video.status === "cancelled") return "Cancelled";
+  if (video.status === "processing") return video.stage?.replace(/_/g, " ") ?? "Processing";
+  return "Uploading";
+}
+
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        window.clearTimeout(timeout);
+        reject(new DOMException("Aborted", "AbortError"));
+      },
+      { once: true },
+    );
+  });
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function interactionModeLabel(mode: ProviderInteractionMode): string {
+  if (mode === "plan") return "Plan";
+  return "Build";
+}
+
+function interactionModeTitle(mode: ProviderInteractionMode): string {
+  if (mode === "plan") return "Plan mode - click to return to build mode";
+  return "Build mode - click to enter plan mode";
+}
+
+function InteractionModeIcon(props: { className?: string }) {
+  return <BotIcon className={props.className} />;
+}
 
 const runtimeModeConfig: Record<
   RuntimeMode,
@@ -207,13 +304,13 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             onClick={props.onToggleInteractionMode}
             title={
               props.interactionMode === "plan"
-                ? "Plan mode — click to return to normal build mode"
-                : "Default mode — click to enter plan mode"
+                ? "Plan mode — click to return to build mode"
+                : "Build mode — click to enter plan mode"
             }
           >
-            <BotIcon />
+            <InteractionModeIcon />
             <span className="sr-only sm:not-sr-only">
-              {props.interactionMode === "plan" ? "Plan" : "Build"}
+              {interactionModeLabel(props.interactionMode)}
             </span>
           </Button>
 
@@ -358,10 +455,13 @@ export interface ChatComposerHandle {
   }) => void;
   /** Insert a terminal context from the terminal drawer. */
   addTerminalContext: (selection: TerminalContextSelection) => void;
+  clearVideoAttachments: () => void;
+  setVideoAttachments: (videos: ComposerVideoAttachment[]) => void;
   /** Get the current prompt/effort/model state for use in send. */
   getSendContext: () => {
     prompt: string;
     images: ComposerImageAttachment[];
+    videos: ComposerVideoAttachment[];
     terminalContexts: TerminalContextDraft[];
     selectedPromptEffort: string | null;
     selectedModelOptionsForDispatch: unknown;
@@ -389,6 +489,7 @@ export interface ChatComposerProps {
   activeThread: Thread | undefined;
   isServerThread: boolean;
   isLocalDraftThread: boolean;
+  forceCompact?: boolean;
 
   // Session phase
   phase: SessionPhase;
@@ -448,6 +549,7 @@ export interface ChatComposerProps {
   // Refs the parent needs kept in sync
   promptRef: React.MutableRefObject<string>;
   composerImagesRef: React.MutableRefObject<ComposerImageAttachment[]>;
+  composerVideosRef: React.MutableRefObject<ComposerVideoAttachment[]>;
   composerTerminalContextsRef: React.MutableRefObject<TerminalContextDraft[]>;
 
   // Scroll
@@ -502,6 +604,7 @@ export const ChatComposer = memo(
       activeThread,
       isServerThread: _isServerThread,
       isLocalDraftThread: _isLocalDraftThread,
+      forceCompact = false,
       phase,
       isConnecting,
       isSendBusy,
@@ -536,6 +639,7 @@ export const ChatComposer = memo(
       gitCwd,
       promptRef,
       composerImagesRef,
+      composerVideosRef,
       composerTerminalContextsRef,
       shouldAutoScrollRef,
       scheduleStickToBottom,
@@ -564,6 +668,7 @@ export const ChatComposer = memo(
     const composerDraft = useComposerThreadDraft(composerDraftTarget);
     const prompt = composerDraft.prompt;
     const composerImages = composerDraft.images;
+    const [composerVideos, setComposerVideos] = useState<ComposerVideoAttachment[]>([]);
     const composerTerminalContexts = composerDraft.terminalContexts;
     const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
 
@@ -735,6 +840,26 @@ export const ChatComposer = memo(
 
     const selectedPromptEffort = composerProviderState.promptEffort;
     const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
+    const selectedModelCapabilities = useMemo(
+      () => getProviderModelCapabilities(selectedProviderModels, selectedModel, selectedProvider),
+      [selectedModel, selectedProvider, selectedProviderModels],
+    );
+    const hasKnownUnsupportedCodingTools =
+      selectedProvider === "uno" && modelCannotRunCodingAgent(selectedModelCapabilities);
+    const imageAttachmentSupport = useMemo(
+      () => deriveImageAttachmentSupport(selectedModelCapabilities),
+      [selectedModelCapabilities],
+    );
+    const hasKnownUnsupportedImageAttachments =
+      imageAttachmentSupport === "unsupported" && composerImages.length > 0;
+    const hasUnknownImageAttachmentSupport =
+      imageAttachmentSupport === "unknown" && composerImages.length > 0;
+    const imageAttachmentTooltip =
+      imageAttachmentSupport === "unsupported"
+        ? "Attach video, or switch to a vision model for images."
+        : imageAttachmentSupport === "unknown"
+          ? "Image support is unknown for this model."
+          : "Attach images or video";
     const composerProviderControls = useMemo(
       () => ({
         showInteractionModeToggle: getProviderInteractionModeToggle(
@@ -797,7 +922,7 @@ export const ChatComposer = memo(
     const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
     const [isComposerFocused, setIsComposerFocused] = useState(false);
     const isMobileViewport = useMediaQuery("max-sm");
-    const isComposerCollapsedMobile = isMobileViewport && !isComposerFocused;
+    const isComposerCollapsedMobile = (isMobileViewport || forceCompact) && !isComposerFocused;
 
     // ------------------------------------------------------------------
     // Refs
@@ -805,6 +930,7 @@ export const ChatComposer = memo(
     const composerEditorRef = useRef<ComposerPromptEditorHandle>(null);
     const composerFormRef = useRef<HTMLFormElement>(null);
     const composerSurfaceRef = useRef<HTMLDivElement>(null);
+    const imageAttachmentInputRef = useRef<HTMLInputElement>(null);
     const composerFormHeightRef = useRef(0);
     const composerSelectLockRef = useRef(false);
     const composerMenuOpenRef = useRef(false);
@@ -815,6 +941,7 @@ export const ChatComposer = memo(
     const mobileComposerExpandReleaseFrameRef = useRef<number | null>(null);
     const mobileComposerExpandInFlightRef = useRef(false);
     const dragDepthRef = useRef(0);
+    const videoAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
 
     // ------------------------------------------------------------------
     // Derived: composer send state
@@ -823,10 +950,10 @@ export const ChatComposer = memo(
       () =>
         deriveComposerSendState({
           prompt,
-          imageCount: composerImages.length,
+          imageCount: composerImages.length + composerVideos.length,
           terminalContexts: composerTerminalContexts,
         }),
-      [composerImages.length, composerTerminalContexts, prompt],
+      [composerImages.length, composerTerminalContexts, composerVideos.length, prompt],
     );
 
     // ------------------------------------------------------------------
@@ -1053,7 +1180,12 @@ export const ChatComposer = memo(
       [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
     );
     const collapsedComposerPrimaryActionDisabled =
-      phase === "running" || isSendBusy || isConnecting || !composerSendState.hasSendableContent;
+      phase === "running" ||
+      isSendBusy ||
+      isConnecting ||
+      hasKnownUnsupportedCodingTools ||
+      hasKnownUnsupportedImageAttachments ||
+      !composerSendState.hasSendableContent;
     const collapsedComposerPrimaryActionLabel = "Send message";
     const showMobilePendingAnswerActions =
       isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
@@ -1125,8 +1257,23 @@ export const ChatComposer = memo(
     }, [composerImages, composerImagesRef]);
 
     useEffect(() => {
+      composerVideosRef.current = composerVideos;
+    }, [composerVideos, composerVideosRef]);
+
+    useEffect(() => {
       composerTerminalContextsRef.current = composerTerminalContexts;
     }, [composerTerminalContexts, composerTerminalContextsRef]);
+
+    const cleanupComposerVideos = useCallback(() => {
+      for (const controller of videoAbortControllersRef.current.values()) {
+        controller.abort();
+      }
+      videoAbortControllersRef.current.clear();
+      for (const video of composerVideosRef.current) {
+        URL.revokeObjectURL(video.previewUrl);
+      }
+      composerVideosRef.current = [];
+    }, [composerVideosRef]);
 
     // ------------------------------------------------------------------
     // Composer menu highlight sync
@@ -1213,7 +1360,9 @@ export const ChatComposer = memo(
       setComposerTrigger(detectComposerTrigger(promptRef.current, promptRef.current.length));
       dragDepthRef.current = 0;
       setIsDragOverComposer(false);
-    }, [draftId, activeThreadId, promptRef]);
+      cleanupComposerVideos();
+      setComposerVideos([]);
+    }, [draftId, activeThreadId, cleanupComposerVideos, promptRef]);
 
     // ------------------------------------------------------------------
     // Footer compact layout observation
@@ -1619,12 +1768,37 @@ export const ChatComposer = memo(
 
     const submitComposer = useCallback(
       (event?: { preventDefault: () => void }) => {
+        if (hasKnownUnsupportedCodingTools) {
+          event?.preventDefault();
+          toastManager.add({
+            type: "error",
+            title: "Selected model cannot use coding tools.",
+            description:
+              "Switch to a tool-capable text model before sending Build or Plan requests.",
+          });
+          return;
+        }
+        if (hasKnownUnsupportedImageAttachments) {
+          event?.preventDefault();
+          toastManager.add({
+            type: "error",
+            title: "Selected model cannot read attached images.",
+            description: "Switch to a model with Images/Vision support or remove the images.",
+          });
+          return;
+        }
         onSend(event);
         if (shouldBlurMobileComposerOnSubmit()) {
           blurMobileComposerAfterSend();
         }
       },
-      [blurMobileComposerAfterSend, onSend, shouldBlurMobileComposerOnSubmit],
+      [
+        blurMobileComposerAfterSend,
+        hasKnownUnsupportedCodingTools,
+        hasKnownUnsupportedImageAttachments,
+        onSend,
+        shouldBlurMobileComposerOnSubmit,
+      ],
     );
     const expandMobileComposer = useCallback(() => {
       if (composerBlurFrameRef.current !== null) {
@@ -1685,11 +1859,210 @@ export const ChatComposer = memo(
       return false;
     };
 
+    const setComposerVideosState = useCallback(
+      (
+        updater: (
+          videos: ReadonlyArray<ComposerVideoAttachment>,
+        ) => ReadonlyArray<ComposerVideoAttachment>,
+      ) => {
+        setComposerVideos((current) => {
+          const next = [...updater(current)];
+          composerVideosRef.current = next;
+          return next;
+        });
+      },
+      [composerVideosRef],
+    );
+
+    const patchComposerVideo = useCallback(
+      (videoId: string, patch: Partial<ComposerVideoAttachment>) => {
+        setComposerVideosState((videos) =>
+          videos.map((video) => (video.id === videoId ? { ...video, ...patch } : video)),
+        );
+      },
+      [setComposerVideosState],
+    );
+
+    const processComposerVideo = useCallback(
+      async (video: ComposerVideoAttachment, controller: AbortController) => {
+        const api = readLocalApi();
+        if (!api) {
+          throw new Error("Local backend API is unavailable.");
+        }
+
+        const upload = await api.server.createUnoVideoUpload({
+          fileName: video.name,
+          mimeType: video.mimeType,
+          sizeBytes: video.sizeBytes,
+          ...(activeThreadId ? { threadHint: activeThreadId } : {}),
+        });
+        patchComposerVideo(video.id, {
+          uploadId: upload.uploadId,
+          status: "uploading",
+          progress: 5,
+        });
+
+        const uploadParts = upload.parts.toSorted(
+          (left, right) => left.partNumber - right.partNumber,
+        );
+        const completedParts: Array<{
+          partNumber: (typeof upload.parts)[number]["partNumber"];
+          etag: string;
+        }> = [];
+        for (let index = 0; index < uploadParts.length; index += 1) {
+          const part = uploadParts[index];
+          if (!part) continue;
+          const start =
+            uploadParts.length === 1 ? 0 : Math.max(0, (part.partNumber - 1) * upload.maxPartBytes);
+          const end =
+            uploadParts.length === 1
+              ? video.file.size
+              : Math.min(video.file.size, start + upload.maxPartBytes);
+          const body = video.file.slice(start, end, video.mimeType);
+          const response = await fetch(part.uploadUrl, {
+            method: "PUT",
+            body,
+            headers: { "Content-Type": video.mimeType },
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            throw new Error(`Video upload failed with HTTP ${response.status}.`);
+          }
+          const etag = response.headers.get("ETag")?.replace(/^"|"$/g, "").trim();
+          if (!etag) {
+            throw new Error("Video upload response did not include an ETag.");
+          }
+          completedParts.push({ partNumber: part.partNumber, etag });
+          patchComposerVideo(video.id, {
+            progress: Math.min(50, Math.round(((index + 1) / uploadParts.length) * 50)),
+          });
+        }
+
+        const completed = await api.server.completeUnoVideoUpload({
+          uploadId: upload.uploadId,
+          parts: completedParts,
+        });
+        patchComposerVideo(video.id, {
+          videoId: completed.videoId,
+          sourceArtifactId: completed.sourceArtifactId,
+          status: "processing",
+          stage: "queued",
+          progress: 55,
+        });
+
+        const job = await api.server.createUnoVideoJob({
+          videoId: completed.videoId,
+          purpose: "llm_context",
+          profile: "ui_review",
+          quality: "high",
+        });
+        patchComposerVideo(video.id, {
+          jobId: job.jobId,
+          jobStatus: job.status,
+          status: "processing",
+          stage: "queued",
+          progress: 58,
+        });
+
+        let latestJob: UnoVideoJobResult | null = null;
+        while (!controller.signal.aborted) {
+          latestJob = await api.server.getUnoVideoJob({ jobId: job.jobId });
+          const jobPercent =
+            latestJob.progress > 1 ? latestJob.progress : Math.round(latestJob.progress * 100);
+          patchComposerVideo(video.id, {
+            jobStatus: latestJob.status,
+            stage: latestJob.stage,
+            progress: Math.min(98, 55 + Math.round(Math.max(0, Math.min(100, jobPercent)) * 0.43)),
+            ...(latestJob.digestId ? { digestId: latestJob.digestId } : {}),
+          });
+
+          if (latestJob.status === "complete") {
+            if (!latestJob.digestId) {
+              throw new Error("Video processing completed without a digest id.");
+            }
+            const digest = await api.server.getUnoVideoDigest({ digestId: latestJob.digestId });
+            patchComposerVideo(video.id, {
+              status: "ready",
+              progress: 100,
+              stage: "complete",
+              digestId: latestJob.digestId,
+              digest,
+              error: undefined,
+            });
+            return;
+          }
+
+          if (latestJob.status === "failed") {
+            throw new Error(latestJob.error ?? "Video processing failed.");
+          }
+          if (latestJob.status === "cancelled") {
+            patchComposerVideo(video.id, {
+              status: "cancelled",
+              stage: "cancelled",
+              jobStatus: "cancelled",
+              error: "Video processing was cancelled.",
+            });
+            return;
+          }
+
+          await delay(VIDEO_JOB_POLL_INTERVAL_MS, controller.signal);
+        }
+      },
+      [activeThreadId, patchComposerVideo],
+    );
+
+    const startComposerVideoProcessing = useCallback(
+      (video: ComposerVideoAttachment) => {
+        const controller = new AbortController();
+        videoAbortControllersRef.current.set(video.id, controller);
+        void processComposerVideo(video, controller)
+          .catch((error: unknown) => {
+            if (isAbortError(error)) {
+              patchComposerVideo(video.id, {
+                status: "cancelled",
+                stage: "cancelled",
+                error: "Video processing was cancelled.",
+              });
+              return;
+            }
+            const message = error instanceof Error ? error.message : "Video processing failed.";
+            patchComposerVideo(video.id, {
+              status: "failed",
+              error: message,
+            });
+            toastManager.add({
+              type: "error",
+              title: "Video processing failed.",
+              description: message,
+            });
+          })
+          .finally(() => {
+            videoAbortControllersRef.current.delete(video.id);
+          });
+      },
+      [patchComposerVideo, processComposerVideo],
+    );
+
     // ------------------------------------------------------------------
     // Callbacks: images
     // ------------------------------------------------------------------
     const addComposerImages = (files: File[]) => {
       if (!activeThreadId || files.length === 0) return;
+      if (imageAttachmentSupport === "unsupported") {
+        toastManager.add({
+          type: "error",
+          title: "Selected model does not support image input.",
+          description: "Switch to a model with Images/Vision support or attach video instead.",
+        });
+        return;
+      }
+      if (imageAttachmentSupport === "unknown") {
+        toastManager.add({
+          type: "warning",
+          title: "Image support is unknown for this model.",
+          description: "The image will be sent, but the provider may ignore it.",
+        });
+      }
       if (pendingUserInputs.length > 0) {
         toastManager.add({
           type: "error",
@@ -1737,16 +2110,120 @@ export const ChatComposer = memo(
       removeComposerImageFromDraft(imageId);
     };
 
+    const addComposerVideos = (files: File[]) => {
+      if (!activeThreadId || files.length === 0) return;
+      if (pendingUserInputs.length > 0) {
+        toastManager.add({
+          type: "error",
+          title: "Attach videos after answering plan questions.",
+        });
+        return;
+      }
+
+      const nextVideos: ComposerVideoAttachment[] = [];
+      let nextAttachmentCount = composerImagesRef.current.length + composerVideosRef.current.length;
+      let error: string | null = null;
+      for (const file of files) {
+        const mimeType = inferVideoMimeType(file);
+        if (!mimeType) {
+          error = `Unsupported file type for '${file.name}'. Attach MP4, MOV, or WebM video.`;
+          continue;
+        }
+        if (file.size > PROVIDER_SEND_TURN_MAX_VIDEO_BYTES) {
+          error = `'${file.name}' exceeds the ${VIDEO_SIZE_LIMIT_LABEL} video limit.`;
+          continue;
+        }
+        if (nextAttachmentCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
+          error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} files per message.`;
+          break;
+        }
+        const previewUrl = URL.createObjectURL(file);
+        const video: ComposerVideoAttachment = {
+          type: "video",
+          id: randomUUID(),
+          name: file.name || "video",
+          mimeType,
+          sizeBytes: file.size,
+          previewUrl,
+          file,
+          status: "uploading",
+          progress: 0,
+        };
+        nextVideos.push(video);
+        nextAttachmentCount += 1;
+      }
+
+      if (nextVideos.length > 0) {
+        setComposerVideosState((videos) => [...videos, ...nextVideos]);
+        for (const video of nextVideos) {
+          startComposerVideoProcessing(video);
+        }
+      }
+      setThreadError(activeThreadId, error);
+    };
+
+    const removeComposerVideo = (videoId: string) => {
+      const current = composerVideosRef.current.find((video) => video.id === videoId);
+      videoAbortControllersRef.current.get(videoId)?.abort();
+      videoAbortControllersRef.current.delete(videoId);
+      if (current?.jobId) {
+        const api = readLocalApi();
+        void api?.server.cancelUnoVideoJob({ jobId: current.jobId }).catch(() => undefined);
+      }
+      if (current?.previewUrl) {
+        URL.revokeObjectURL(current.previewUrl);
+      }
+      setComposerVideosState((videos) => videos.filter((video) => video.id !== videoId));
+    };
+
+    const retryComposerVideo = (videoId: string) => {
+      const current = composerVideosRef.current.find((video) => video.id === videoId);
+      if (!current) return;
+      videoAbortControllersRef.current.get(videoId)?.abort();
+      videoAbortControllersRef.current.delete(videoId);
+      const retryVideo: ComposerVideoAttachment = {
+        type: "video",
+        id: current.id,
+        name: current.name,
+        mimeType: current.mimeType,
+        sizeBytes: current.sizeBytes,
+        previewUrl: current.previewUrl,
+        file: current.file,
+        status: "uploading",
+        progress: 0,
+      };
+      setComposerVideosState((videos) =>
+        videos.map((video) => (video.id === videoId ? retryVideo : video)),
+      );
+      startComposerVideoProcessing(retryVideo);
+    };
+
+    const addComposerFiles = (files: File[]) => {
+      if (files.length === 0) return;
+      const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+      const videoFiles = files.filter((file) => inferVideoMimeType(file) !== null);
+      if (imageFiles.length > 0) {
+        addComposerImages(imageFiles);
+      }
+      if (videoFiles.length > 0) {
+        addComposerVideos(videoFiles);
+      }
+      if (imageFiles.length === 0 && videoFiles.length === 0) {
+        setThreadError(
+          activeThreadId,
+          "Unsupported attachment type. Attach images, MP4, MOV, or WebM video.",
+        );
+      }
+    };
+
     // ------------------------------------------------------------------
     // Callbacks: paste / drag
     // ------------------------------------------------------------------
     const onComposerPaste = (event: React.ClipboardEvent<HTMLElement>) => {
       const files = Array.from(event.clipboardData.files);
       if (files.length === 0) return;
-      const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-      if (imageFiles.length === 0) return;
       event.preventDefault();
-      addComposerImages(imageFiles);
+      addComposerFiles(files);
     };
 
     const onComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
@@ -1780,7 +2257,13 @@ export const ChatComposer = memo(
       dragDepthRef.current = 0;
       setIsDragOverComposer(false);
       const files = Array.from(event.dataTransfer.files);
-      addComposerImages(files);
+      addComposerFiles(files);
+      focusComposer();
+    };
+    const onImageAttachmentInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(event.currentTarget.files ?? []);
+      event.currentTarget.value = "";
+      addComposerFiles(files);
       focusComposer();
     };
     const handleInterruptPrimaryAction = useCallback(() => {
@@ -1822,6 +2305,7 @@ export const ChatComposer = memo(
 
     useEffect(() => {
       return () => {
+        cleanupComposerVideos();
         if (composerBlurFrameRef.current !== null) {
           window.cancelAnimationFrame(composerBlurFrameRef.current);
         }
@@ -1832,7 +2316,7 @@ export const ChatComposer = memo(
           window.cancelAnimationFrame(mobileComposerExpandReleaseFrameRef.current);
         }
       };
-    }, []);
+    }, [cleanupComposerVideos]);
 
     // ------------------------------------------------------------------
     // Imperative handle
@@ -1909,9 +2393,17 @@ export const ChatComposer = memo(
             composerEditorRef.current?.focusAt(nextCollapsedCursor);
           });
         },
+        clearVideoAttachments: () => {
+          cleanupComposerVideos();
+          setComposerVideosState(() => []);
+        },
+        setVideoAttachments: (videos: ComposerVideoAttachment[]) => {
+          setComposerVideosState(() => videos);
+        },
         getSendContext: () => ({
           prompt: promptRef.current,
           images: composerImagesRef.current,
+          videos: composerVideosRef.current,
           terminalContexts: composerTerminalContextsRef.current,
           selectedPromptEffort,
           selectedModelOptionsForDispatch,
@@ -1929,7 +2421,9 @@ export const ChatComposer = memo(
         insertComposerDraftTerminalContext,
         promptRef,
         composerImagesRef,
+        composerVideosRef,
         composerTerminalContextsRef,
+        cleanupComposerVideos,
         isComposerModelPickerOpen,
         readComposerSnapshot,
         selectedModel,
@@ -1938,11 +2432,185 @@ export const ChatComposer = memo(
         selectedPromptEffort,
         selectedProvider,
         selectedProviderModels,
+        setComposerVideosState,
       ],
     );
 
     // Render
     // ------------------------------------------------------------------
+    const showFocusPreviewCompactComposer =
+      forceCompact && !isComposerApprovalState && pendingUserInputs.length === 0;
+
+    if (showFocusPreviewCompactComposer) {
+      const runtimeModeOption = runtimeModeConfig[runtimeMode];
+      const RuntimeModeIcon = runtimeModeOption.icon;
+
+      return (
+        <form
+          ref={composerFormRef}
+          onSubmit={submitComposer}
+          className="mx-auto w-full min-w-0 max-w-[76rem]"
+          data-chat-composer-form="true"
+          data-chat-composer-focus-strip="true"
+        >
+          <div className="flex h-[52px] min-w-0 items-center gap-2 rounded-full border border-border/70 bg-card/92 px-3 shadow-2xl shadow-black/12 backdrop-blur-xl">
+            <input
+              ref={imageAttachmentInputRef}
+              type="file"
+              accept="image/*,video/mp4,video/quicktime,video/webm"
+              multiple
+              className="hidden"
+              onChange={onImageAttachmentInputChange}
+            />
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label="Attach files"
+                    onClick={() => imageAttachmentInputRef.current?.click()}
+                    className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
+                  >
+                    <PaperclipIcon className="size-4" />
+                  </button>
+                }
+              />
+              <TooltipPopup side="top">{imageAttachmentTooltip}</TooltipPopup>
+            </Tooltip>
+
+            <input
+              type="text"
+              value={prompt}
+              className={cn(
+                "min-w-0 flex-1 bg-transparent px-1 text-sm outline-none",
+                prompt.trim() ? "text-foreground" : "text-muted-foreground/45",
+              )}
+              onChange={(event) => {
+                const nextPrompt = event.currentTarget.value;
+                onPromptChange(nextPrompt, nextPrompt.length, nextPrompt.length, false, []);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  submitComposer();
+                }
+              }}
+              placeholder="Ask anything, attach files, @tag files/folders, or use /"
+              aria-label="Message"
+              disabled={isConnecting || environmentUnavailable !== null}
+            />
+
+            <div className="hidden min-w-0 shrink-0 items-center gap-1 md:flex">
+              <ProviderModelPicker
+                compact
+                activeInstanceId={selectedInstanceId}
+                model={selectedModelForPickerWithCustomFallback}
+                lockedProvider={lockedProvider}
+                lockedContinuationGroupKey={lockedContinuationGroupKey}
+                instanceEntries={providerInstanceEntries}
+                keybindings={keybindings}
+                modelOptionsByInstance={modelOptionsByInstance}
+                terminalOpen={terminalOpen}
+                open={isComposerModelPickerOpen}
+                {...(composerProviderState.modelPickerIconClassName
+                  ? { activeProviderIconClassName: composerProviderState.modelPickerIconClassName }
+                  : {})}
+                onOpenChange={setIsComposerModelPickerOpen}
+                onInstanceModelChange={onProviderModelSelect}
+              />
+
+              {composerProviderControls.showInteractionModeToggle ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  type="button"
+                  onClick={toggleInteractionMode}
+                  className="h-9 shrink-0 rounded-full px-3 text-muted-foreground hover:text-foreground"
+                  title={interactionModeTitle(interactionMode)}
+                >
+                  <InteractionModeIcon className="size-4" />
+                  {interactionModeLabel(interactionMode)}
+                </Button>
+              ) : null}
+
+              <Select
+                value={runtimeMode}
+                onValueChange={(value) => handleRuntimeModeChange(value!)}
+              >
+                <SelectTrigger
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 shrink-0 rounded-full px-3 text-muted-foreground hover:text-foreground"
+                  aria-label="Runtime mode"
+                  title={runtimeModeOption.description}
+                >
+                  <RuntimeModeIcon className="size-4" />
+                  <SelectValue>{runtimeModeOption.label}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup alignItemWithTrigger={false}>
+                  {runtimeModeOptions.map((mode) => {
+                    const option = runtimeModeConfig[mode];
+                    const OptionIcon = option.icon;
+                    return (
+                      <SelectItem key={mode} value={mode} className="min-w-64 py-2">
+                        <div className="grid min-w-0 gap-0.5">
+                          <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                            <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                            {option.label}
+                          </span>
+                          <span className="text-muted-foreground text-xs leading-4">
+                            {option.description}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectPopup>
+              </Select>
+            </div>
+
+            <div className="flex shrink-0 items-center md:hidden">
+              <CompactComposerControlsMenu
+                activePlan={showPlanSidebarToggle}
+                interactionMode={interactionMode}
+                planSidebarLabel={planSidebarLabel}
+                planSidebarOpen={planSidebarOpen}
+                runtimeMode={runtimeMode}
+                showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
+                traitsMenuContent={providerTraitsMenuContent}
+                onToggleInteractionMode={toggleInteractionMode}
+                onInteractionModeChange={handleInteractionModeChange}
+                onTogglePlanSidebar={togglePlanSidebar}
+                onRuntimeModeChange={handleRuntimeModeChange}
+              />
+            </div>
+
+            <button
+              type="button"
+              className="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm disabled:cursor-not-allowed disabled:opacity-35"
+              disabled={collapsedComposerPrimaryActionDisabled}
+              aria-label={collapsedComposerPrimaryActionLabel}
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                event.stopPropagation();
+                submitComposer();
+              }}
+            >
+              <svg width="17" height="17" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M8 3L8 13M8 3L4 7M8 3L12 7"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+        </form>
+      );
+    }
+
     return (
       <form
         ref={composerFormRef}
@@ -2162,9 +2830,27 @@ export const ChatComposer = memo(
               )}
 
               {!isComposerCollapsedMobile &&
+              !isComposerApprovalState &&
+              pendingUserInputs.length === 0 &&
+              (hasKnownUnsupportedImageAttachments || hasUnknownImageAttachmentSupport) ? (
+                <div
+                  className={cn(
+                    "mb-3 rounded-md border px-3 py-2 text-xs leading-snug",
+                    hasKnownUnsupportedImageAttachments
+                      ? "border-destructive/40 bg-destructive/10 text-destructive"
+                      : "border-amber-500/35 bg-amber-500/10 text-amber-700 dark:text-amber-200",
+                  )}
+                >
+                  {hasKnownUnsupportedImageAttachments
+                    ? "Selected model cannot read attached images. Choose an Images/Vision model or remove the images before sending."
+                    : "Image support for this model is unknown. The image will be sent, but the provider may ignore it."}
+                </div>
+              ) : null}
+
+              {!isComposerCollapsedMobile &&
                 !isComposerApprovalState &&
                 pendingUserInputs.length === 0 &&
-                composerImages.length > 0 && (
+                (composerImages.length > 0 || composerVideos.length > 0) && (
                   <div className="mb-3 flex flex-wrap gap-2">
                     {composerImages.map((image) => (
                       <div
@@ -2226,6 +2912,62 @@ export const ChatComposer = memo(
                         </Button>
                       </div>
                     ))}
+                    {composerVideos.map((video) => (
+                      <div
+                        key={video.id}
+                        className="relative h-20 w-32 overflow-hidden rounded-lg border border-border/80 bg-background"
+                      >
+                        <video
+                          src={video.previewUrl}
+                          muted
+                          playsInline
+                          className="h-full w-full object-cover"
+                        />
+                        <div className="absolute inset-x-0 bottom-0 bg-background/90 px-1.5 py-1">
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            {video.status === "uploading" || video.status === "processing" ? (
+                              <LoaderCircleIcon className="size-3 shrink-0 animate-spin text-muted-foreground" />
+                            ) : (
+                              <FileVideoIcon className="size-3 shrink-0 text-muted-foreground" />
+                            )}
+                            <span className="min-w-0 flex-1 truncate text-[10px] text-foreground/80">
+                              {formatVideoProgressLabel(video)}
+                            </span>
+                          </div>
+                          <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className={cn(
+                                "h-full rounded-full transition-[width]",
+                                video.status === "failed" || video.status === "cancelled"
+                                  ? "bg-destructive"
+                                  : "bg-primary",
+                              )}
+                              style={{ width: `${Math.max(4, Math.min(100, video.progress))}%` }}
+                            />
+                          </div>
+                        </div>
+                        {video.status === "failed" || video.status === "cancelled" ? (
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="absolute left-1 top-1 bg-background/80 hover:bg-background/90"
+                            onClick={() => retryComposerVideo(video.id)}
+                            aria-label={`Retry ${video.name}`}
+                          >
+                            <RotateCcwIcon />
+                          </Button>
+                        ) : null}
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          className="absolute right-1 top-1 bg-background/80 hover:bg-background/90"
+                          onClick={() => removeComposerVideo(video.id)}
+                          aria-label={`Remove ${video.name}`}
+                        >
+                          <XIcon />
+                        </Button>
+                      </div>
+                    ))}
                   </div>
                 )}
 
@@ -2266,8 +3008,8 @@ export const ChatComposer = memo(
                                   : "disconnected"
                               }`
                             : phase === "disconnected"
-                              ? "Ask for follow-up changes or attach images"
-                              : "Ask anything, @tag files/folders, or use / to show available commands"
+                              ? "Ask for follow-up changes or attach files"
+                              : "Ask anything, attach files, @tag files/folders, or use / to show available commands"
                   }
                   disabled={
                     isConnecting ||
@@ -2321,6 +3063,33 @@ export const ChatComposer = memo(
                 )}
               >
                 <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <input
+                    ref={imageAttachmentInputRef}
+                    type="file"
+                    accept="image/*,video/mp4,video/quicktime,video/webm"
+                    multiple
+                    className="hidden"
+                    onChange={onImageAttachmentInputChange}
+                  />
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span className="inline-flex shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            type="button"
+                            aria-label="Attach files"
+                            className="text-muted-foreground/70 hover:text-foreground/80"
+                            onClick={() => imageAttachmentInputRef.current?.click()}
+                          >
+                            <PaperclipIcon />
+                          </Button>
+                        </span>
+                      }
+                    />
+                    <TooltipPopup side="top">{imageAttachmentTooltip}</TooltipPopup>
+                  </Tooltip>
                   <ProviderModelPicker
                     compact={isComposerFooterCompact}
                     activeInstanceId={selectedInstanceId}
@@ -2354,6 +3123,7 @@ export const ChatComposer = memo(
                       showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
                       traitsMenuContent={providerTraitsMenuContent}
                       onToggleInteractionMode={toggleInteractionMode}
+                      onInteractionModeChange={handleInteractionModeChange}
                       onTogglePlanSidebar={togglePlanSidebar}
                       onRuntimeModeChange={handleRuntimeModeChange}
                     />
@@ -2406,7 +3176,9 @@ export const ChatComposer = memo(
                     isConnecting={isConnecting}
                     isEnvironmentUnavailable={environmentUnavailable !== null}
                     isPreparingWorktree={isPreparingWorktree}
-                    hasSendableContent={composerSendState.hasSendableContent}
+                    hasSendableContent={
+                      composerSendState.hasSendableContent && !hasKnownUnsupportedImageAttachments
+                    }
                     preserveComposerFocusOnPointerDown={isMobileViewport}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                     onInterrupt={handleInterruptPrimaryAction}

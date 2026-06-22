@@ -38,6 +38,7 @@ const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   image: ImageIcon,
   svg: ImageIcon,
   text: FileCode2Icon,
+  browser: GlobeIcon,
   unknown: FileIcon,
 };
 
@@ -52,6 +53,7 @@ const KIND_BG: Record<PreviewFileKind, string> = {
   image: "bg-pink-500/16 text-pink-700 dark:text-pink-300",
   svg: "bg-pink-500/16 text-pink-700 dark:text-pink-300",
   text: "bg-slate-500/16 text-slate-700 dark:text-slate-300",
+  browser: "bg-indigo-500/16 text-indigo-700 dark:text-indigo-300",
   unknown: "bg-muted text-muted-foreground",
 };
 

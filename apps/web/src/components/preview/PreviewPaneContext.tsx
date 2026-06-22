@@ -1,7 +1,12 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import type { EnvironmentId } from "@t3tools/contracts";
 
+import { browserTabNameForUrl } from "./browserUrl";
 import { forgetScrollPosition } from "./previewScrollMemory";
+
+// Монотонный счётчик id браузерных вкладок: вкладки с одинаковым URL можно
+// открыть повторно после закрытия, поэтому id не выводится из URL.
+let browserTabCounter = 0;
 
 export type PreviewFileKind =
   | "md"
@@ -14,6 +19,7 @@ export type PreviewFileKind =
   | "image"
   | "svg"
   | "text"
+  | "browser"
   | "unknown";
 
 export interface PreviewFile {
@@ -25,6 +31,12 @@ export interface PreviewFile {
   path?: string;
   projectCwd?: string;
   environmentId?: EnvironmentId;
+  /** Текущий URL для вкладок `kind === "browser"`. Пустая строка = новая вкладка. */
+  url?: string;
+}
+
+export function isBrowserTab(file: Pick<PreviewFile, "kind">): boolean {
+  return file.kind === "browser";
 }
 
 export interface BrowserContext {
@@ -34,25 +46,37 @@ export interface BrowserContext {
 
 export interface ProjectPreviewState {
   open: boolean;
+  previewLayoutMode: "sidebar" | "focus";
   files: ReadonlyArray<PreviewFile>;
   activeFileId: string | null;
   browserOpen: boolean;
   browserContext: BrowserContext;
   editingFileId: string | null;
+  /** Файлы, показанные как исходный код вместо превью (для DUAL_VIEW_KINDS). */
+  sourceViewFileIds: ReadonlyArray<string>;
 }
 
 interface PreviewPaneState {
   open: boolean;
+  previewLayoutMode: "sidebar" | "focus";
   files: ReadonlyArray<PreviewFile>;
   activeFileId: string | null;
   browserOpen: boolean;
   browserContext: BrowserContext;
   editingFileId: string | null;
+  sourceViewFileIds: ReadonlyArray<string>;
+  toggleSourceView: (id: string) => void;
+  currentProjectKey: string;
   currentChatProjectCwd: string | null;
   currentChatEnvironmentId: EnvironmentId | null;
   setOpen: (open: boolean) => void;
   toggleOpen: () => void;
+  setPreviewLayoutMode: (mode: "sidebar" | "focus") => void;
+  togglePreviewLayoutMode: () => void;
   openFile: (file: PreviewFile) => void;
+  /** Открыть URL в браузерной вкладке (без аргумента — пустая «новая вкладка»). */
+  openUrl: (url?: string) => void;
+  updateBrowserTab: (id: string, patch: { url?: string; name?: string }) => void;
   closeFile: (id: string) => void;
   setActiveFile: (id: string) => void;
   openBrowser: (context: BrowserContext) => void;
@@ -73,12 +97,27 @@ export const NO_PROJECT_KEY = "__no_project__";
 
 export const DEFAULT_PROJECT_PREVIEW_STATE: ProjectPreviewState = {
   open: false,
+  previewLayoutMode: "sidebar",
   files: [],
   activeFileId: null,
   browserOpen: false,
   browserContext: EMPTY_BROWSER_CONTEXT,
   editingFileId: null,
+  sourceViewFileIds: [],
 };
+
+/** Форматы, у которых есть и rendered-превью, и осмысленный исходник. */
+export const DUAL_VIEW_KINDS: ReadonlySet<PreviewFileKind> = new Set<PreviewFileKind>([
+  "md",
+  "html",
+  "svg",
+  "csv",
+  "json",
+]);
+
+export function toggleSourceViewIds(ids: ReadonlyArray<string>, id: string): ReadonlyArray<string> {
+  return ids.includes(id) ? ids.filter((existing) => existing !== id) : [...ids, id];
+}
 
 export function getProjectPreviewState(
   states: Readonly<Record<string, ProjectPreviewState>>,
@@ -134,6 +173,25 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
     updateCurrentState((current) => ({ ...current, open: !current.open }));
   }, [updateCurrentState]);
 
+  const setPreviewLayoutMode = useCallback(
+    (previewLayoutMode: "sidebar" | "focus") => {
+      updateCurrentState((current) =>
+        current.previewLayoutMode === previewLayoutMode
+          ? current
+          : { ...current, previewLayoutMode },
+      );
+    },
+    [updateCurrentState],
+  );
+
+  const togglePreviewLayoutMode = useCallback(() => {
+    updateCurrentState((current) => ({
+      ...current,
+      previewLayoutMode: current.previewLayoutMode === "focus" ? "sidebar" : "focus",
+      open: true,
+    }));
+  }, [updateCurrentState]);
+
   const openFile = useCallback(
     (file: PreviewFile) => {
       updateCurrentState((current) => ({
@@ -144,6 +202,57 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
         activeFileId: file.id,
         open: true,
       }));
+    },
+    [updateCurrentState],
+  );
+
+  const openUrl = useCallback(
+    (url?: string) => {
+      const trimmed = url?.trim() ?? "";
+      updateCurrentState((current) => {
+        // Уже открытая вкладка с тем же URL — просто фокусируем её.
+        const existing = trimmed
+          ? current.files.find((f) => isBrowserTab(f) && f.url === trimmed)
+          : undefined;
+        if (existing) {
+          return { ...current, activeFileId: existing.id, open: true };
+        }
+        const id = `browser-${++browserTabCounter}`;
+        const tab: PreviewFile = {
+          id,
+          name: trimmed ? browserTabNameForUrl(trimmed) : "Новая вкладка",
+          kind: "browser",
+          content: "",
+          url: trimmed,
+        };
+        return {
+          ...current,
+          files: [...current.files, tab],
+          activeFileId: id,
+          open: true,
+        };
+      });
+    },
+    [updateCurrentState],
+  );
+
+  const updateBrowserTab = useCallback(
+    (id: string, patch: { url?: string; name?: string }) => {
+      updateCurrentState((current) => {
+        const idx = current.files.findIndex((f) => f.id === id && isBrowserTab(f));
+        if (idx === -1) return current;
+        const existing = current.files[idx]!;
+        const updated: PreviewFile = {
+          ...existing,
+          ...(patch.url !== undefined ? { url: patch.url } : {}),
+          ...(patch.name !== undefined && patch.name.length > 0 ? { name: patch.name } : {}),
+        };
+        if (updated.url === existing.url && updated.name === existing.name) return current;
+        return {
+          ...current,
+          files: [...current.files.slice(0, idx), updated, ...current.files.slice(idx + 1)],
+        };
+      });
     },
     [updateCurrentState],
   );
@@ -163,9 +272,20 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
           files: nextFiles,
           activeFileId: nextActiveId,
           editingFileId: nextEditingId,
+          sourceViewFileIds: current.sourceViewFileIds.filter((existing) => existing !== id),
         };
       });
       forgetScrollPosition(id);
+    },
+    [updateCurrentState],
+  );
+
+  const toggleSourceView = useCallback(
+    (id: string) => {
+      updateCurrentState((current) => ({
+        ...current,
+        sourceViewFileIds: toggleSourceViewIds(current.sourceViewFileIds, id),
+      }));
     },
     [updateCurrentState],
   );
@@ -246,16 +366,24 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
   const value = useMemo<PreviewPaneState>(
     () => ({
       open: currentState.open,
+      previewLayoutMode: currentState.previewLayoutMode,
       files: currentState.files,
       activeFileId: currentState.activeFileId,
       browserOpen: currentState.browserOpen,
       browserContext: currentState.browserContext,
       editingFileId: currentState.editingFileId,
+      sourceViewFileIds: currentState.sourceViewFileIds,
+      toggleSourceView,
+      currentProjectKey,
       currentChatProjectCwd,
       currentChatEnvironmentId,
       setOpen,
       toggleOpen,
+      setPreviewLayoutMode,
+      togglePreviewLayoutMode,
       openFile,
+      openUrl,
+      updateBrowserTab,
       closeFile,
       setActiveFile,
       openBrowser,
@@ -267,11 +395,17 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
     }),
     [
       currentState,
+      currentProjectKey,
       currentChatProjectCwd,
       currentChatEnvironmentId,
+      toggleSourceView,
       setOpen,
       toggleOpen,
+      setPreviewLayoutMode,
+      togglePreviewLayoutMode,
       openFile,
+      openUrl,
+      updateBrowserTab,
       closeFile,
       setActiveFile,
       openBrowser,

@@ -290,6 +290,73 @@ export const ServerLifecycleStreamEvent = Schema.Union([
 ]);
 export type ServerLifecycleStreamEvent = typeof ServerLifecycleStreamEvent.Type;
 
+/**
+ * Events pushed to clients when a harness (or any local process holding the
+ * bridge token) asks the app to open a URL in the built-in browser pane.
+ */
+export const BrowserBridgeOpenUrlEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("openUrl"),
+  sequence: NonNegativeInt,
+  url: Schema.String,
+});
+export type BrowserBridgeOpenUrlEvent = typeof BrowserBridgeOpenUrlEvent.Type;
+
+export const BrowserAutomationCommandName = Schema.Literals([
+  "openUrl",
+  "state",
+  "screenshot",
+  "click",
+  "clickText",
+  "type",
+  "press",
+  "navigate",
+  "reload",
+  "back",
+  "forward",
+  "evaluate",
+]);
+export type BrowserAutomationCommandName = typeof BrowserAutomationCommandName.Type;
+
+export const BrowserAutomationCommandInput = Schema.Struct({
+  command: BrowserAutomationCommandName,
+  url: Schema.optional(Schema.String),
+  selector: Schema.optional(Schema.String),
+  text: Schema.optional(Schema.String),
+  value: Schema.optional(Schema.String),
+  key: Schema.optional(Schema.String),
+  script: Schema.optional(Schema.String),
+  x: Schema.optional(Schema.Number),
+  y: Schema.optional(Schema.Number),
+  timeoutMs: Schema.optional(NonNegativeInt),
+});
+export type BrowserAutomationCommandInput = typeof BrowserAutomationCommandInput.Type;
+
+export const BrowserAutomationCommandResult = Schema.Struct({
+  ok: Schema.Boolean,
+  commandId: Schema.String,
+  data: Schema.optional(Schema.Unknown),
+  error: Schema.optional(Schema.String),
+});
+export type BrowserAutomationCommandResult = typeof BrowserAutomationCommandResult.Type;
+
+export const BrowserBridgeCommandEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("command"),
+  sequence: NonNegativeInt,
+  commandId: Schema.String,
+  responseToken: Schema.String,
+  resultUrl: Schema.String,
+  input: BrowserAutomationCommandInput,
+});
+export type BrowserBridgeCommandEvent = typeof BrowserBridgeCommandEvent.Type;
+
+export const BrowserBridgeStreamEvent = Schema.Union([
+  BrowserBridgeOpenUrlEvent,
+  BrowserBridgeCommandEvent,
+]);
+export type BrowserBridgeStreamEvent = typeof BrowserBridgeStreamEvent.Type;
+
 export const ServerProviderUpdatedPayload = Schema.Struct({
   providers: ServerProviders,
 });

@@ -14,6 +14,15 @@ import {
   type ScopedProjectRef,
   type ScopedThreadRef,
   ThreadId,
+  type UnoVideoId,
+  type UnoVideoArtifactId,
+  type UnoVideoJobId,
+  type UnoVideoJobStage,
+  type UnoVideoJobStatus,
+  type UnoVideoUploadId,
+  type VideoDigest,
+  type VideoDigestId,
+  type VideoMimeType,
 } from "@t3tools/contracts";
 import {
   parseScopedProjectKey,
@@ -49,6 +58,12 @@ const DraftThreadEnvModeSchema = Schema.Literals(["local", "worktree"]);
 const isRuntimeMode = Schema.is(RuntimeMode);
 export type DraftThreadEnvMode = typeof DraftThreadEnvModeSchema.Type;
 
+function normalizeVisibleInteractionMode(interactionMode: unknown): ProviderInteractionMode | null {
+  if (interactionMode === "plan") return "plan";
+  if (interactionMode === "default" || interactionMode === "image") return "default";
+  return null;
+}
+
 export const DraftId = Schema.String.pipe(Schema.brand("DraftId"));
 export type DraftId = typeof DraftId.Type;
 
@@ -78,6 +93,27 @@ export type PersistedComposerImageAttachment = typeof PersistedComposerImageAtta
 export interface ComposerImageAttachment extends Omit<ChatImageAttachment, "previewUrl"> {
   previewUrl: string;
   file: File;
+}
+
+export interface ComposerVideoAttachment {
+  type: "video";
+  id: string;
+  name: string;
+  mimeType: VideoMimeType;
+  sizeBytes: number;
+  previewUrl: string;
+  file: File;
+  status: "uploading" | "processing" | "ready" | "failed" | "cancelled";
+  progress: number;
+  stage?: UnoVideoJobStage;
+  error?: string | undefined;
+  uploadId?: UnoVideoUploadId;
+  videoId?: UnoVideoId;
+  sourceArtifactId?: UnoVideoArtifactId;
+  jobId?: UnoVideoJobId;
+  jobStatus?: UnoVideoJobStatus;
+  digestId?: VideoDigestId;
+  digest?: VideoDigest;
 }
 
 const PersistedTerminalContextDraft = Schema.Struct({
@@ -1182,7 +1218,9 @@ function createDraftThreadState(
     createdAt: options?.createdAt ?? existingThread?.createdAt ?? new Date().toISOString(),
     runtimeMode: options?.runtimeMode ?? existingThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
     interactionMode:
-      options?.interactionMode ?? existingThread?.interactionMode ?? DEFAULT_INTERACTION_MODE,
+      normalizeVisibleInteractionMode(options?.interactionMode) ??
+      normalizeVisibleInteractionMode(existingThread?.interactionMode) ??
+      DEFAULT_INTERACTION_MODE,
     branch: nextBranch,
     worktreePath: nextWorktreePath,
     envMode:
@@ -1357,10 +1395,8 @@ function normalizePersistedDraftThreads(
           ? candidateDraftThread.runtimeMode
           : DEFAULT_RUNTIME_MODE,
         interactionMode:
-          candidateDraftThread.interactionMode === "plan" ||
-          candidateDraftThread.interactionMode === "default"
-            ? candidateDraftThread.interactionMode
-            : DEFAULT_INTERACTION_MODE,
+          normalizeVisibleInteractionMode(candidateDraftThread.interactionMode) ??
+          DEFAULT_INTERACTION_MODE,
         branch: typeof branch === "string" ? branch : null,
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
@@ -1477,10 +1513,7 @@ function normalizePersistedDraftsByThreadId(
     const runtimeMode = isRuntimeMode(draftCandidate.runtimeMode)
       ? draftCandidate.runtimeMode
       : null;
-    const interactionMode =
-      draftCandidate.interactionMode === "plan" || draftCandidate.interactionMode === "default"
-        ? draftCandidate.interactionMode
-        : null;
+    const interactionMode = normalizeVisibleInteractionMode(draftCandidate.interactionMode);
     const prompt = ensureInlineTerminalContextPlaceholders(
       promptCandidate,
       terminalContexts.length,
@@ -2566,8 +2599,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           if (threadKey.length === 0) {
             return;
           }
-          const nextInteractionMode =
-            interactionMode === "plan" || interactionMode === "default" ? interactionMode : null;
+          const nextInteractionMode = normalizeVisibleInteractionMode(interactionMode);
           set((state) => {
             const existing = state.draftsByThreadKey[threadKey];
             if (!existing && nextInteractionMode === null) {

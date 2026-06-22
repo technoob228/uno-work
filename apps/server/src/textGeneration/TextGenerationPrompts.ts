@@ -139,10 +139,18 @@ interface PromptFromMessageInput {
   additionalInstructions?: string | undefined;
 }
 
+function describeAttachment(attachment: ChatAttachment): string {
+  if (attachment.type === "image") {
+    return `- ${attachment.name} (${attachment.mimeType}, ${attachment.sizeBytes} bytes)`;
+  }
+
+  return `- ${attachment.name} (${attachment.sourceMimeType}, ${attachment.sourceSizeBytes} bytes, ${Math.round(
+    attachment.durationMs / 1000,
+  )}s, ${attachment.frameCount} frames, ${attachment.transcriptSegmentCount} transcript segments)`;
+}
+
 function buildPromptFromMessage(input: PromptFromMessageInput): string {
-  const attachmentLines = (input.attachments ?? []).map(
-    (attachment) => `- ${attachment.name} (${attachment.mimeType}, ${attachment.sizeBytes} bytes)`,
-  );
+  const attachmentLines = (input.attachments ?? []).map(describeAttachment);
 
   const promptSections = [
     input.instruction,

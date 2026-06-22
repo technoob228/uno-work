@@ -14,8 +14,10 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  net,
   protocol,
   safeStorage,
+  session,
   shell,
 } from "electron";
 import type { MenuItemConstructorOptions, OpenDialogOptions } from "electron";
@@ -30,6 +32,7 @@ import type {
   DesktopUpdateActionResult,
   DesktopUpdateCheckResult,
   DesktopUpdateState,
+  BrowserClearDataInput,
 } from "@t3tools/contracts";
 import { autoUpdater } from "electron-updater";
 
@@ -56,6 +59,12 @@ import {
   writeSavedEnvironmentRegistry,
   writeSavedEnvironmentSecret,
 } from "./clientPersistence.ts";
+import {
+  deleteBrowserCredential,
+  listBrowserCredentials,
+  revealBrowserCredentialPassword,
+  saveBrowserCredential,
+} from "./browserCredentials.ts";
 import { isBackendReadinessAborted, waitForHttpReady } from "./backendReadiness.ts";
 import { showDesktopConfirmDialog } from "./confirmDialog.ts";
 import {
@@ -66,13 +75,15 @@ import { DesktopSshEnvironmentBridge, resolveRemoteT3CliPackageSpec } from "./ss
 import { syncShellEnvironment } from "./syncShellEnvironment.ts";
 import { waitForBackendStartupReady } from "./backendStartupReadiness.ts";
 import {
+  fetchLatestUnoCodeReleaseVersion,
   getDefaultBinaryPath as getUnoCodeBinaryPath,
   getDefaultInstallDir as getUnoCodeInstallDir,
   installUnoCode,
-  isUnoCodeInstalled,
+  needsInstallOrUpgrade,
   readUnoCodeVersion,
   UnoCodeInstallError,
   type InstallProgressEvent,
+  type UnoCodeInstallErrorCode,
 } from "./unoCodeInstaller.ts";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState.ts";
 import { doesVersionMatchDesktopUpdateChannel } from "./updateChannels.ts";
@@ -91,10 +102,23 @@ import {
 } from "./updateMachine.ts";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch.ts";
 import { resolveDesktopAppBranding } from "./appBranding.ts";
-import { bindFirstRevealTrigger, type RevealSubscription } from "./windowReveal.ts";
 import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider.ts";
 
 syncShellEnvironment();
+
+function handleStdIoError(error: NodeJS.ErrnoException): void {
+  if (error.code === "EPIPE") {
+    return;
+  }
+  throw error;
+}
+
+function installStdIoBrokenPipeGuards(): void {
+  process.stdout.on("error", handleStdIoError);
+  process.stderr.on("error", handleStdIoError);
+}
+
+installStdIoBrokenPipeGuards();
 
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
@@ -126,11 +150,18 @@ const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";
 const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
+const BROWSER_CREDENTIALS_LIST_CHANNEL = "desktop:browser-credentials-list";
+const BROWSER_CREDENTIALS_SAVE_CHANNEL = "desktop:browser-credentials-save";
+const BROWSER_CREDENTIALS_DELETE_CHANNEL = "desktop:browser-credentials-delete";
+const BROWSER_CREDENTIALS_REVEAL_CHANNEL = "desktop:browser-credentials-reveal";
+const BROWSER_CLEAR_DATA_CHANNEL = "desktop:browser-clear-data";
+const BROWSER_OPEN_URL_CHANNEL = "desktop:browser-open-url";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".unowork");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
 const CLIENT_SETTINGS_PATH = Path.join(STATE_DIR, "client-settings.json");
 const SAVED_ENVIRONMENT_REGISTRY_PATH = Path.join(STATE_DIR, "saved-environments.json");
+const BROWSER_CREDENTIALS_PATH = Path.join(STATE_DIR, "browser-credentials.json");
 const DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
@@ -139,6 +170,8 @@ const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 // "/Users/julius/Development/Work/codething-mvp/apps/server/dist/bin.mjs"
 const DEV_REMOTE_T3_SERVER_ENTRY_PATH =
   process.env.T3CODE_DEV_REMOTE_T3_SERVER_ENTRY_PATH?.trim() ?? "";
+const DEV_REMOTE_DEBUGGING_PORT_ENV = "UNO_WORK_ELECTRON_REMOTE_DEBUGGING_PORT";
+const DEFAULT_DEV_REMOTE_DEBUGGING_PORT = 9223;
 const desktopAppBranding: DesktopAppBranding = resolveDesktopAppBranding({
   isDevelopment,
   appVersion: app.getVersion(),
@@ -315,6 +348,41 @@ function resolveDesktopDevServerUrl(): string {
   }
 
   return devServerUrl;
+}
+
+function resolveDevRemoteDebuggingPort(rawPort: string | undefined): number | null {
+  const trimmedPort = rawPort?.trim();
+  if (!trimmedPort) {
+    return DEFAULT_DEV_REMOTE_DEBUGGING_PORT;
+  }
+
+  if (trimmedPort === "0" || trimmedPort === "false" || trimmedPort === "off") {
+    return null;
+  }
+
+  const parsedPort = Number.parseInt(trimmedPort, 10);
+  if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65_535) {
+    console.warn(
+      `[desktop] ignoring invalid ${DEV_REMOTE_DEBUGGING_PORT_ENV}=${JSON.stringify(trimmedPort)}`,
+    );
+    return DEFAULT_DEV_REMOTE_DEBUGGING_PORT;
+  }
+
+  return parsedPort;
+}
+
+function configureDevRemoteDebugging(): void {
+  if (!isDevelopment) return;
+
+  const port = resolveDevRemoteDebuggingPort(process.env[DEV_REMOTE_DEBUGGING_PORT_ENV]);
+  if (port === null) return;
+
+  app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
+  app.commandLine.appendSwitch("remote-debugging-port", String(port));
+  console.info("[desktop] dev remote debugging enabled", {
+    url: `http://127.0.0.1:${port}`,
+    env: DEV_REMOTE_DEBUGGING_PORT_ENV,
+  });
 }
 
 function backendChildEnv(): NodeJS.ProcessEnv {
@@ -555,6 +623,7 @@ async function waitForBackendWindowReady(baseUrl: string): Promise<"listening" |
     listeningPromise: backendListeningDetector?.promise ?? null,
     waitForHttpReady: () =>
       waitForBackendHttpReady(baseUrl, {
+        path: "/.well-known/t3/environment",
         timeoutMs: 60_000,
       }),
     cancelHttpWait: cancelBackendReadinessWait,
@@ -563,7 +632,7 @@ async function waitForBackendWindowReady(baseUrl: string): Promise<"listening" |
 
 function ensureInitialBackendWindowOpen(): void {
   const existingWindow = mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
-  if (isDevelopment || existingWindow !== null || backendInitialWindowOpenInFlight !== null) {
+  if (existingWindow !== null || backendInitialWindowOpenInFlight !== null) {
     return;
   }
 
@@ -728,10 +797,37 @@ type UnoCodeInstallState =
       readonly message?: string;
     }
   | { readonly status: "installed"; readonly binaryPath: string; readonly version: string }
-  | { readonly status: "failed"; readonly error: string; readonly code?: string };
+  | {
+      readonly status: "failed";
+      readonly error: string;
+      readonly code?: string;
+      readonly willRetry?: boolean;
+      readonly nextRetryAt?: number;
+    };
 
 let unoCodeState: UnoCodeInstallState = { status: "idle" };
 let unoCodeInstallInFlight = false;
+// Exponential backoff retry for transient install failures (no network, GitHub
+// hiccup). Mirrors the backend restart backoff (`scheduleBackendRestart`).
+let unoCodeRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let unoCodeRetryAttempt = 0;
+const UNO_CODE_RETRY_BASE_MS = 30_000;
+const UNO_CODE_RETRY_MAX_MS = 30 * 60_000;
+
+// Error codes worth retrying automatically: a binary may appear once the
+// network recovers or GitHub stops rate-limiting. "Permanent" codes
+// (unsupported-platform, asset-missing) stay failed until a manual retry.
+const UNO_CODE_TRANSIENT_ERROR_CODES = new Set<UnoCodeInstallErrorCode>([
+  "release-fetch-failed",
+  "release-not-published",
+  "download-failed",
+  "extract-failed",
+  "verify-failed",
+]);
+
+function isTransientUnoCodeError(code: string | undefined): boolean {
+  return code !== undefined && UNO_CODE_TRANSIENT_ERROR_CODES.has(code as UnoCodeInstallErrorCode);
+}
 
 const desktopSshEnvironmentBridge = new DesktopSshEnvironmentBridge({
   getMainWindow: () => mainWindow,
@@ -1250,16 +1346,93 @@ function setUnoCodeState(next: UnoCodeInstallState): void {
   emitUnoCodeState();
 }
 
+function clearUnoCodeRetryTimer(): void {
+  if (unoCodeRetryTimer) {
+    clearTimeout(unoCodeRetryTimer);
+    unoCodeRetryTimer = null;
+  }
+}
+
+function scheduleUnoCodeRetry(): void {
+  if (isQuitting || unoCodeRetryTimer || unoCodeInstallInFlight) return;
+  const delayMs = Math.min(
+    UNO_CODE_RETRY_BASE_MS * 2 ** unoCodeRetryAttempt,
+    UNO_CODE_RETRY_MAX_MS,
+  );
+  unoCodeRetryAttempt += 1;
+  const nextRetryAt = Date.now() + delayMs;
+  // Annotate the failed state so the renderer can show "retrying automatically…"
+  // instead of a dead end.
+  if (unoCodeState.status === "failed") {
+    setUnoCodeState({ ...unoCodeState, willRetry: true, nextRetryAt });
+  }
+  writeDesktopLogHeader(
+    `uno-code install retry scheduled in ${delayMs}ms attempt=${unoCodeRetryAttempt}`,
+  );
+  unoCodeRetryTimer = setTimeout(() => {
+    unoCodeRetryTimer = null;
+    void ensureUnoCodeInstalled();
+  }, delayMs);
+  unoCodeRetryTimer.unref();
+}
+
+/**
+ * Kick an immediate retry when we're parked in a transient failure and an
+ * external signal suggests it may now succeed (network came back, user focused
+ * the window). Cheap and idempotent.
+ */
+function retryUnoCodeIfTransientlyFailed(trigger: string): void {
+  if (unoCodeInstallInFlight) return;
+  if (unoCodeState.status !== "failed" || !isTransientUnoCodeError(unoCodeState.code)) return;
+  if (!net.isOnline()) return;
+  writeDesktopLogHeader(`uno-code install retry triggered by ${trigger}`);
+  clearUnoCodeRetryTimer();
+  unoCodeRetryAttempt = 0;
+  void ensureUnoCodeInstalled();
+}
+
 async function ensureUnoCodeInstalled(): Promise<void> {
   if (unoCodeInstallInFlight) return;
+  clearUnoCodeRetryTimer();
   const binaryPath = getUnoCodeBinaryPath(BASE_DIR);
-  if (await isUnoCodeInstalled(binaryPath)) {
-    const version = (await readUnoCodeVersion(binaryPath)) ?? "unknown";
+
+  // Resolve the upgrade target: numeric version of the latest GitHub release.
+  // When offline we keep `targetVersion` undefined so `needsInstallOrUpgrade`
+  // falls back to the pinned minimum — an already-good binary is then reported
+  // as installed rather than failing just because GitHub is unreachable.
+  let targetVersion: string | undefined;
+  let releaseLookupError: unknown;
+  try {
+    targetVersion = (await fetchLatestUnoCodeReleaseVersion()) ?? undefined;
+  } catch (cause) {
+    releaseLookupError = cause;
+  }
+
+  const decision = await needsInstallOrUpgrade(binaryPath, targetVersion);
+  if (!decision.install) {
+    const version =
+      decision.installedVersion ?? (await readUnoCodeVersion(binaryPath)) ?? "unknown";
+    unoCodeRetryAttempt = 0;
     setUnoCodeState({ status: "installed", binaryPath, version });
     return;
   }
+
+  // We must (re)install but couldn't even resolve the release — that's a
+  // transient network/API failure. Surface it and schedule a backoff retry.
+  if (releaseLookupError) {
+    const error =
+      releaseLookupError instanceof Error ? releaseLookupError.message : String(releaseLookupError);
+    const code =
+      releaseLookupError instanceof UnoCodeInstallError ? releaseLookupError.code : undefined;
+    setUnoCodeState({ status: "failed", error, ...(code ? { code } : {}) });
+    writeDesktopLogHeader(`uno-code release lookup failed: ${error}`);
+    if (isTransientUnoCodeError(code) || code === undefined) scheduleUnoCodeRetry();
+    return;
+  }
+
   unoCodeInstallInFlight = true;
   setUnoCodeState({ status: "installing", phase: "fetching-release" });
+  let retryAfterFailure = false;
   try {
     const result = await installUnoCode({
       installDir: getUnoCodeInstallDir(BASE_DIR),
@@ -1272,6 +1445,7 @@ async function ensureUnoCodeInstalled(): Promise<void> {
         });
       },
     });
+    unoCodeRetryAttempt = 0;
     setUnoCodeState({
       status: "installed",
       binaryPath: result.binaryPath,
@@ -1283,9 +1457,12 @@ async function ensureUnoCodeInstalled(): Promise<void> {
     const code = cause instanceof UnoCodeInstallError ? cause.code : undefined;
     setUnoCodeState({ status: "failed", error, ...(code ? { code } : {}) });
     writeDesktopLogHeader(`uno-code install failed: ${error}`);
+    retryAfterFailure = isTransientUnoCodeError(code) || code === undefined;
   } finally {
     unoCodeInstallInFlight = false;
   }
+  // Schedule after the finally so the in-flight guard is already cleared.
+  if (retryAfterFailure) scheduleUnoCodeRetry();
 }
 
 function createBaseUpdateState(
@@ -1833,6 +2010,82 @@ function registerIpcHandlers(): void {
 
   desktopSshEnvironmentBridge.registerIpcHandlers(ipcMain);
 
+  ipcMain.removeHandler(BROWSER_CREDENTIALS_LIST_CHANNEL);
+  ipcMain.handle(BROWSER_CREDENTIALS_LIST_CHANNEL, async () =>
+    listBrowserCredentials(BROWSER_CREDENTIALS_PATH),
+  );
+
+  ipcMain.removeHandler(BROWSER_CREDENTIALS_SAVE_CHANNEL);
+  ipcMain.handle(BROWSER_CREDENTIALS_SAVE_CHANNEL, async (_event, rawInput: unknown) => {
+    if (
+      typeof rawInput !== "object" ||
+      rawInput === null ||
+      typeof (rawInput as { origin?: unknown }).origin !== "string" ||
+      typeof (rawInput as { username?: unknown }).username !== "string" ||
+      typeof (rawInput as { password?: unknown }).password !== "string"
+    ) {
+      throw new Error("Invalid browser credential payload.");
+    }
+    return saveBrowserCredential({
+      storePath: BROWSER_CREDENTIALS_PATH,
+      credential: rawInput as Parameters<typeof saveBrowserCredential>[0]["credential"],
+      secretStorage: getDesktopSecretStorage(),
+    });
+  });
+
+  ipcMain.removeHandler(BROWSER_CREDENTIALS_DELETE_CHANNEL);
+  ipcMain.handle(BROWSER_CREDENTIALS_DELETE_CHANNEL, async (_event, rawId: unknown) => {
+    if (typeof rawId !== "string" || rawId.length === 0) {
+      return;
+    }
+    deleteBrowserCredential(BROWSER_CREDENTIALS_PATH, rawId);
+  });
+
+  ipcMain.removeHandler(BROWSER_CREDENTIALS_REVEAL_CHANNEL);
+  ipcMain.handle(BROWSER_CREDENTIALS_REVEAL_CHANNEL, async (_event, rawId: unknown) => {
+    if (typeof rawId !== "string" || rawId.length === 0) {
+      return null;
+    }
+    return revealBrowserCredentialPassword({
+      storePath: BROWSER_CREDENTIALS_PATH,
+      id: rawId,
+      secretStorage: getDesktopSecretStorage(),
+    });
+  });
+
+  ipcMain.removeHandler(BROWSER_CLEAR_DATA_CHANNEL);
+  ipcMain.handle(BROWSER_CLEAR_DATA_CHANNEL, async (_event, rawInput: unknown) => {
+    if (
+      typeof rawInput !== "object" ||
+      rawInput === null ||
+      typeof (rawInput as { partition?: unknown }).partition !== "string"
+    ) {
+      throw new Error("Invalid browser clear-data payload.");
+    }
+    const input = rawInput as BrowserClearDataInput;
+    if (input.origin !== undefined) {
+      const parsedOrigin = new URL(input.origin);
+      if (parsedOrigin.protocol !== "http:" && parsedOrigin.protocol !== "https:") {
+        throw new Error("Invalid browser clear-data origin.");
+      }
+    }
+
+    const browserSession = session.fromPartition(input.partition);
+    const tasks: Promise<void>[] = [];
+    if (input.cache !== false) {
+      tasks.push(browserSession.clearCache());
+    }
+    if (input.cookies !== false) {
+      tasks.push(
+        browserSession.clearStorageData({
+          ...(input.origin ? { origin: input.origin } : {}),
+          storages: ["cookies"],
+        }),
+      );
+    }
+    await Promise.all(tasks);
+  });
+
   ipcMain.removeHandler(GET_SERVER_EXPOSURE_STATE_CHANNEL);
   ipcMain.handle(GET_SERVER_EXPOSURE_STATE_CHANNEL, async () => getDesktopServerExposureState());
 
@@ -2154,6 +2407,8 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Браузерная панель превью рендерит страницы через <webview>.
+      webviewTag: true,
     },
   });
 
@@ -2212,6 +2467,29 @@ function createWindow(): BrowserWindow {
     return { action: "deny" };
   });
 
+  // <webview> браузерной панели: гостевой контент не должен получить preload
+  // или Node-доступ, а window.open/target=_blank превращаем в новую вкладку
+  // встроенного браузера (через push в renderer).
+  window.webContents.on("will-attach-webview", (_event, webPreferences) => {
+    delete webPreferences.preload;
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+  });
+  window.webContents.on("did-attach-webview", (_event, guestContents) => {
+    guestContents.setWindowOpenHandler(({ url }) => {
+      const safeUrl = getSafeExternalUrl(url);
+      if (safeUrl && !window.isDestroyed()) {
+        window.webContents.send(BROWSER_OPEN_URL_CHANNEL, safeUrl);
+      }
+      return { action: "deny" };
+    });
+    guestContents.on("will-navigate", (event, url) => {
+      if (!getSafeExternalUrl(url)) {
+        event.preventDefault();
+      }
+    });
+  });
+
   window.on("page-title-updated", (event) => {
     event.preventDefault();
     window.setTitle(APP_DISPLAY_NAME);
@@ -2221,24 +2499,121 @@ function createWindow(): BrowserWindow {
     if (window.isDestroyed()) return;
     window.webContents.send(WINDOW_FULLSCREEN_STATE_CHANNEL, isFullscreen);
   };
+  const logRendererSnapshot = (reason: string) => {
+    if (window.isDestroyed()) return;
+    void window.webContents
+      .executeJavaScript(
+        `(() => ({
+          location: window.location.href,
+          title: document.title,
+          bodyTextLength: document.body?.innerText?.trim()?.length ?? 0,
+          bodyChildCount: document.body?.children?.length ?? 0,
+          rootTextLength: document.querySelector("#root")?.textContent?.trim()?.length ?? 0,
+          rootChildCount: document.querySelector("#root")?.children?.length ?? 0,
+          bootShellExists: Boolean(document.querySelector("#boot-shell")),
+          hasNativeApi: Boolean(window.nativeApi),
+          hasDesktopBridge: Boolean(window.desktopBridge),
+        }))()`,
+        true,
+      )
+      .then((snapshot) => {
+        console.info("[desktop] renderer snapshot", { reason, snapshot });
+      })
+      .catch((error: unknown) => {
+        console.error("[desktop] renderer snapshot failed", {
+          reason,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+  };
+  let revealRequested = false;
+  const revealWhenRendererHasContent = (reason: string) => {
+    if (revealRequested || window.isDestroyed()) return;
+    revealRequested = true;
+    const startedAt = Date.now();
+    const timeoutMs = 10_000;
+    const pollMs = 100;
+
+    const poll = () => {
+      if (window.isDestroyed()) return;
+      void window.webContents
+        .executeJavaScript(
+          `(() => {
+            const root = document.querySelector("#root");
+            return Boolean(root && (root.children.length > 0 || (root.textContent ?? "").trim().length > 0));
+          })()`,
+          true,
+        )
+        .then((hasContent) => {
+          if (hasContent === true) {
+            logRendererSnapshot(`${reason}:content-ready`);
+            revealWindow(window);
+            return;
+          }
+
+          if (Date.now() - startedAt >= timeoutMs) {
+            logRendererSnapshot(`${reason}:content-timeout`);
+            revealWindow(window);
+            return;
+          }
+
+          setTimeout(poll, pollMs).unref();
+        })
+        .catch((error: unknown) => {
+          if (Date.now() - startedAt >= timeoutMs) {
+            console.error("[desktop] renderer content wait failed", {
+              reason,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            revealWindow(window);
+            return;
+          }
+
+          setTimeout(poll, pollMs).unref();
+        });
+    };
+
+    poll();
+  };
   window.on("enter-full-screen", () => emitFullscreenState(true));
   window.on("leave-full-screen", () => emitFullscreenState(false));
+  window.once("ready-to-show", () => {
+    console.info("[desktop] main window ready-to-show", { url: window.webContents.getURL() });
+  });
+  window.webContents.on("dom-ready", () => {
+    console.info("[desktop] main window dom-ready", { url: window.webContents.getURL() });
+    logRendererSnapshot("dom-ready");
+  });
   window.webContents.on("did-finish-load", () => {
     window.setTitle(APP_DISPLAY_NAME);
     emitUpdateState();
+    console.info("[desktop] main window did-finish-load", { url: window.webContents.getURL() });
+    logRendererSnapshot("did-finish-load");
+    revealWhenRendererHasContent("did-finish-load");
   });
-
-  // On Linux/Wayland with `show: false`, Electron's `ready-to-show` only
-  // fires after `show()` is called, deadlocking the standard "wait for
-  // ready, then show" pattern. Add `did-finish-load` as a Linux-only
-  // fallback so the window still surfaces once the renderer has loaded
-  // the page. Other platforms keep the no-flash `ready-to-show` path,
-  // since `did-finish-load` typically fires before the first paint there.
-  const revealSubscribers: RevealSubscription[] = [(fire) => window.once("ready-to-show", fire)];
-  if (process.platform === "linux") {
-    revealSubscribers.push((fire) => window.webContents.once("did-finish-load", fire));
-  }
-  bindFirstRevealTrigger(revealSubscribers, () => revealWindow(window));
+  window.webContents.on("console-message", (event) => {
+    const details = event as Electron.Event<Electron.WebContentsConsoleMessageEventParams>;
+    console.info("[desktop] renderer console", {
+      level: details.level,
+      message: details.message,
+      line: details.lineNumber,
+      sourceId: details.sourceId,
+    });
+  });
+  window.webContents.on(
+    "did-fail-load",
+    (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
+      if (!isMainFrame) return;
+      console.error("[desktop] main window failed to load", {
+        errorCode,
+        errorDescription,
+        validatedUrl,
+      });
+    },
+  );
+  window.webContents.on("render-process-gone", (_event, details) => {
+    console.error("[desktop] main window renderer process gone", details);
+  });
 
   if (isDevelopment) {
     void window.loadURL(resolveDesktopDevServerUrl());
@@ -2265,6 +2640,7 @@ function createWindow(): BrowserWindow {
 app.setPath("userData", resolveUserDataPath());
 
 configureAppIdentity();
+configureDevRemoteDebugging();
 
 async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap start");
@@ -2313,26 +2689,6 @@ async function bootstrap(): Promise<void> {
   startBackend();
   writeDesktopLogHeader("bootstrap backend start requested");
   void ensureUnoCodeInstalled();
-
-  if (isDevelopment) {
-    mainWindow = createWindow();
-    writeDesktopLogHeader("bootstrap main window created");
-    void waitForBackendWindowReady(backendHttpUrl)
-      .then((source) => {
-        writeDesktopLogHeader(`bootstrap backend ready source=${source}`);
-      })
-      .catch((error) => {
-        if (isBackendReadinessAborted(error)) {
-          return;
-        }
-        writeDesktopLogHeader(
-          `bootstrap backend readiness warning message=${formatErrorMessage(error)}`,
-        );
-        console.warn("[desktop] backend readiness check timed out during dev bootstrap", error);
-      });
-    return;
-  }
-
   ensureInitialBackendWindowOpen();
 }
 
@@ -2341,10 +2697,18 @@ app.on("before-quit", () => {
   updateInstallInFlight = false;
   writeDesktopLogHeader("before-quit received");
   clearUpdatePollTimer();
+  clearUnoCodeRetryTimer();
   cancelBackendReadinessWait();
   stopBackend();
   void desktopSshEnvironmentBridge.dispose().catch(() => undefined);
   restoreStdIoCapture?.();
+});
+
+// When the user returns to the app (focus) or the network recovers, give a
+// stalled transient install an immediate nudge rather than waiting for the
+// backoff timer.
+app.on("browser-window-focus", () => {
+  retryUnoCodeIfTransientlyFailed("window-focus");
 });
 
 app
@@ -2363,13 +2727,10 @@ app
     });
 
     app.on("activate", () => {
+      retryUnoCodeIfTransientlyFailed("app-activate");
       const existingWindow = mainWindow ?? BrowserWindow.getAllWindows()[0];
       if (existingWindow) {
         revealWindow(existingWindow);
-        return;
-      }
-      if (isDevelopment) {
-        mainWindow = createWindow();
         return;
       }
       ensureInitialBackendWindowOpen();

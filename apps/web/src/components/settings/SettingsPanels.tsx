@@ -405,8 +405,19 @@ function UnoCodeInstallSection() {
       </span>
     );
   } else if (status === "failed" && state?.status === "failed") {
-    description = "Install failed. You can retry below.";
-    statusNode = <span className="text-destructive">{state.error}</span>;
+    description = state.willRetry
+      ? "Install failed — retrying automatically. You can also retry now."
+      : "Install failed. You can retry below.";
+    statusNode = (
+      <span className="text-destructive">
+        {state.error}
+        {state.willRetry ? (
+          <span className="mt-0.5 block text-[11px] text-muted-foreground">
+            Automatic retry scheduled.
+          </span>
+        ) : null}
+      </span>
+    );
     control = (
       <Button size="xs" variant="outline" disabled={isRetrying} onClick={handleRetry}>
         {isRetrying ? "Starting…" : "Retry"}

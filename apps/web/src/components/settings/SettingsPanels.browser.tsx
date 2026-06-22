@@ -398,6 +398,12 @@ const createDesktopBridgeStub = (overrides?: {
     getUnoCodeInstallState: vi.fn().mockResolvedValue({ status: "idle" }),
     retryUnoCodeInstall: vi.fn().mockResolvedValue(undefined),
     onUnoCodeInstallState: () => () => {},
+    listBrowserCredentials: vi.fn().mockResolvedValue([]),
+    saveBrowserCredential: vi.fn().mockResolvedValue(null),
+    deleteBrowserCredential: vi.fn().mockResolvedValue(undefined),
+    revealBrowserCredentialPassword: vi.fn().mockResolvedValue(null),
+    clearBrowserData: vi.fn().mockResolvedValue(undefined),
+    onBrowserOpenUrlRequest: () => () => {},
   };
 };
 

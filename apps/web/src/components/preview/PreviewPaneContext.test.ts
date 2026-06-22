@@ -4,8 +4,10 @@ import {
   applyProjectPreviewPatch,
   DEFAULT_PROJECT_PREVIEW_STATE,
   detectFileKind,
+  DUAL_VIEW_KINDS,
   getProjectPreviewState,
   NO_PROJECT_KEY,
+  toggleSourceViewIds,
   type PreviewFile,
   type ProjectPreviewState,
 } from "./PreviewPaneContext";
@@ -112,6 +114,30 @@ describe("applyProjectPreviewPatch", () => {
     expect(stateB).toBe(DEFAULT_PROJECT_PREVIEW_STATE);
     expect(stateB.open).toBe(false);
     expect(stateB.files).toEqual([]);
+  });
+});
+
+describe("toggleSourceViewIds", () => {
+  it("adds an id that is not present", () => {
+    expect(toggleSourceViewIds([], "a")).toEqual(["a"]);
+    expect(toggleSourceViewIds(["a"], "b")).toEqual(["a", "b"]);
+  });
+
+  it("removes an id that is present", () => {
+    expect(toggleSourceViewIds(["a", "b"], "a")).toEqual(["b"]);
+    expect(toggleSourceViewIds(["a"], "a")).toEqual([]);
+  });
+});
+
+describe("DUAL_VIEW_KINDS", () => {
+  it("covers formats with both a rendered preview and meaningful source", () => {
+    expect(DUAL_VIEW_KINDS.has("md")).toBe(true);
+    expect(DUAL_VIEW_KINDS.has("html")).toBe(true);
+    expect(DUAL_VIEW_KINDS.has("svg")).toBe(true);
+    expect(DUAL_VIEW_KINDS.has("csv")).toBe(true);
+    expect(DUAL_VIEW_KINDS.has("json")).toBe(true);
+    expect(DUAL_VIEW_KINDS.has("text")).toBe(false);
+    expect(DUAL_VIEW_KINDS.has("image")).toBe(false);
   });
 });
 

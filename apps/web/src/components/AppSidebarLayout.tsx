@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import ThreadSidebar from "./Sidebar";
+import { BrowserBridgeListener } from "./preview/BrowserBridgeListener";
 import { FileBrowser } from "./preview/FileBrowser";
 import { PreviewPane } from "./preview/PreviewPane";
 import { PreviewPaneProvider } from "./preview/PreviewPaneContext";
@@ -77,6 +78,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <PreviewPane />
       </SidebarProvider>
       <FileBrowser />
+      <BrowserBridgeListener />
     </PreviewPaneProvider>
   );
 }

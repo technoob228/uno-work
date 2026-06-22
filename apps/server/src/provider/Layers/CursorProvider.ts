@@ -44,6 +44,7 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
 const CURSOR_ACP_MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
 const CURSOR_ACP_MODEL_CAPABILITY_TIMEOUT = "4 seconds";
 const CURSOR_ACP_MODEL_DISCOVERY_CONCURRENCY = 4;
+const CURSOR_ACP_CAPABILITY_ENRICHMENT_ENV = "T3CODE_CURSOR_ACP_CAPABILITY_ENRICHMENT";
 const CURSOR_PARAMETERIZED_MODEL_PICKER_MIN_VERSION_DATE = 2026_04_08;
 export const CURSOR_PARAMETERIZED_MODEL_PICKER_CAPABILITIES = {
   _meta: {
@@ -1202,6 +1203,13 @@ export function hasUncapturedCursorModels(snapshot: Pick<ServerProvider, "models
   return snapshot.models.some((model) => !model.isCustom && !hasCursorModelCapabilities(model));
 }
 
+export function isCursorCapabilityEnrichmentEnabled(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const value = environment[CURSOR_ACP_CAPABILITY_ENRICHMENT_ENV]?.trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
+}
+
 /**
  * Background capability enrichment for a Cursor snapshot.
  *
@@ -1221,16 +1229,18 @@ export const enrichCursorSnapshot = (input: {
 }): Effect.Effect<void, never, ChildProcessSpawner.ChildProcessSpawner> => {
   const { settings, snapshot, publishSnapshot } = input;
   const stampIdentity = input.stampIdentity ?? ((value) => value);
+  const environment = input.environment ?? process.env;
 
   if (
     !settings.enabled ||
     snapshot.auth.status === "unauthenticated" ||
-    !hasUncapturedCursorModels(snapshot)
+    !hasUncapturedCursorModels(snapshot) ||
+    !isCursorCapabilityEnrichmentEnabled(environment)
   ) {
     return Effect.void;
   }
 
-  return discoverCursorModelCapabilitiesViaAcp(settings, snapshot.models, input.environment).pipe(
+  return discoverCursorModelCapabilitiesViaAcp(settings, snapshot.models, environment).pipe(
     Effect.flatMap((discoveredModels) => {
       if (discoveredModels.length === 0) {
         return Effect.void;

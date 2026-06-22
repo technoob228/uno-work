@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Uno Harness Model Picker Prototype</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101112;
+        --panel: #17191b;
+        --panel-2: #1f2326;
+        --line: #343a40;
+        --text: #eff2f4;
+        --muted: #9aa3ad;
+        --accent: #8fd3c8;
+        --warn: #f3bd5b;
+        --danger-bg: #2a2119;
+        --green-bg: #1c2b27;
+        --blue-bg: #1d2733;
+        --pink-bg: #31242d;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.4 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+      }
+
+      .app {
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--line);
+        background: #141618;
+      }
+
+      .project {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+
+      .model-trigger {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 34px;
+        padding: 0 11px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        color: var(--text);
+      }
+
+      main {
+        display: grid;
+        place-items: start center;
+        padding: 28px 18px;
+      }
+
+      .chat {
+        width: min(960px, 100%);
+      }
+
+      .billing {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 14px;
+        border: 1px solid #8a6b32;
+        border-radius: 8px;
+        background: var(--danger-bg);
+        color: #f5dfb7;
+        margin-bottom: 16px;
+      }
+
+      button {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel-2);
+        color: var(--text);
+        height: 32px;
+        padding: 0 10px;
+        font: inherit;
+      }
+
+      .primary {
+        border-color: #78bfb4;
+        background: #17312e;
+        color: #d9fffa;
+      }
+
+      .composer {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        overflow: hidden;
+      }
+
+      .composer textarea {
+        width: 100%;
+        min-height: 96px;
+        resize: vertical;
+        border: 0;
+        outline: 0;
+        padding: 14px;
+        background: transparent;
+        color: var(--text);
+        font: inherit;
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px;
+        border-top: 1px solid var(--line);
+      }
+
+      .left-tools,
+      .right-tools {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .icon {
+        width: 34px;
+        padding: 0;
+      }
+
+      .disabled {
+        opacity: 0.45;
+      }
+
+      .popover {
+        width: min(960px, 100%);
+        margin-top: 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        display: grid;
+        grid-template-columns: 1fr 310px;
+        overflow: hidden;
+        box-shadow: 0 20px 80px rgb(0 0 0 / 0.35);
+      }
+
+      .picker-main {
+        padding: 14px;
+        border-right: 1px solid var(--line);
+      }
+
+      .search {
+        width: 100%;
+        height: 36px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #111315;
+        color: var(--text);
+        padding: 0 12px;
+      }
+
+      .filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0 10px;
+        color: var(--muted);
+        background: #141719;
+      }
+
+      .chip.active {
+        border-color: #78bfb4;
+        color: #d9fffa;
+        background: #18312e;
+      }
+
+      .model-list {
+        display: grid;
+        gap: 6px;
+      }
+
+      .model-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+        align-items: center;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #151719;
+      }
+
+      .model-row.selected {
+        border-color: #78bfb4;
+        background: #17201f;
+      }
+
+      .model-name {
+        font-weight: 600;
+      }
+
+      .vendor {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .badges {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+
+      .badge {
+        border-radius: 999px;
+        padding: 3px 7px;
+        font-size: 11px;
+        color: #dce4e8;
+        background: var(--blue-bg);
+      }
+
+      .frontier {
+        background: var(--pink-bg);
+      }
+
+      .cheap {
+        background: var(--green-bg);
+      }
+
+      .price {
+        color: var(--accent);
+      }
+
+      .details {
+        padding: 14px;
+        background: #141719;
+      }
+
+      .details h2 {
+        margin: 0 0 4px;
+        font-size: 18px;
+      }
+
+      .details dl {
+        display: grid;
+        grid-template-columns: 120px 1fr;
+        gap: 8px;
+        margin: 16px 0;
+      }
+
+      dt {
+        color: var(--muted);
+      }
+
+      dd {
+        margin: 0;
+      }
+
+      .effort {
+        display: grid;
+        gap: 8px;
+        margin-top: 18px;
+      }
+
+      .segments {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .segment {
+        height: 32px;
+        border: 0;
+        border-right: 1px solid var(--line);
+        border-radius: 0;
+        background: transparent;
+        color: var(--muted);
+      }
+
+      .segment:last-child {
+        border-right: 0;
+      }
+
+      .segment.active {
+        background: #18312e;
+        color: #d9fffa;
+      }
+
+      @media (max-width: 760px) {
+        .popover {
+          grid-template-columns: 1fr;
+        }
+
+        .picker-main {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .badges {
+          justify-content: flex-start;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <div class="project">
+          <span class="dot"></span>
+          <strong>uno-work-app</strong>
+        </div>
+        <button class="model-trigger">Uno · GPT-5.1 Codex · Russia ▾</button>
+      </header>
+
+      <main>
+        <section class="chat">
+          <div class="billing">
+            <span>Uno LLM credits are empty.</span>
+            <button class="primary">Top up</button>
+          </div>
+
+          <div class="composer">
+            <textarea placeholder="Ask anything, @tag files/folders, or use /"></textarea>
+            <div class="toolbar">
+              <div class="left-tools">
+                <button class="icon" title="Attach images">+</button>
+                <button class="icon disabled" title="Selected model does not support image input.">
+                  Img
+                </button>
+                <button class="model-trigger">GPT-5.1 Codex · Russia</button>
+              </div>
+              <div class="right-tools">
+                <button>Build</button>
+                <button class="primary">Send</button>
+              </div>
+            </div>
+          </div>
+
+          <section class="popover" aria-label="Model picker">
+            <div class="picker-main">
+              <input class="search" value="codex" aria-label="Search models" />
+              <div class="filters">
+                <span class="chip active">Tier: Frontier</span>
+                <span class="chip">Strong</span>
+                <span class="chip">Average</span>
+                <span class="chip active">Region: Russia</span>
+                <span class="chip">Global</span>
+                <span class="chip active">Tools</span>
+                <span class="chip">Vision</span>
+                <span class="chip">Streaming</span>
+                <span class="chip active">Known price</span>
+                <span class="chip">Sort: Cost</span>
+              </div>
+
+              <div class="model-list">
+                <div class="model-row selected">
+                  <div>
+                    <div class="model-name">GPT-5.1 Codex</div>
+                    <div class="vendor">openai · uno-russia/gpt-5.1-codex</div>
+                  </div>
+                  <div class="badges">
+                    <span class="badge frontier">Frontier</span>
+                    <span class="badge">Russia</span>
+                    <span class="badge">Tools</span>
+                    <span class="badge price">~$1.88/request</span>
+                  </div>
+                </div>
+                <div class="model-row">
+                  <div>
+                    <div class="model-name">Claude Opus 4.5</div>
+                    <div class="vendor">anthropic · uno/claude-opus-4.5</div>
+                  </div>
+                  <div class="badges">
+                    <span class="badge frontier">Frontier</span>
+                    <span class="badge">Global</span>
+                    <span class="badge">Vision</span>
+                    <span class="badge price">~$2.26/request</span>
+                  </div>
+                </div>
+                <div class="model-row">
+                  <div>
+                    <div class="model-name">Kimi K2 Thinking</div>
+                    <div class="vendor">moonshot · uno-russia/kimi-k2-thinking</div>
+                  </div>
+                  <div class="badges">
+                    <span class="badge cheap">Average</span>
+                    <span class="badge">Russia</span>
+                    <span class="badge">Streaming</span>
+                    <span class="badge">Price unknown</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <aside class="details">
+              <h2>GPT-5.1 Codex</h2>
+              <div class="vendor">Uno Gateway · Russia route</div>
+              <dl>
+                <dt>Context</dt>
+                <dd>400k tokens</dd>
+                <dt>Input</dt>
+                <dd>$1.25 / 1M</dd>
+                <dt>Output</dt>
+                <dd>$10.00 / 1M</dd>
+                <dt>Blend</dt>
+                <dd>$2.56 / 1M</dd>
+                <dt>Features</dt>
+                <dd>Streaming, tools, image input</dd>
+              </dl>
+
+              <div class="effort">
+                <strong>Effort</strong>
+                <div class="segments">
+                  <button class="segment">None</button>
+                  <button class="segment">Low</button>
+                  <button class="segment active">Medium</button>
+                  <button class="segment">High</button>
+                </div>
+              </div>
+            </aside>
+          </section>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

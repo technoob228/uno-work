@@ -91,6 +91,42 @@ export const ProviderOptionSelections = Schema.Union([
 ]);
 export type ProviderOptionSelections = typeof ProviderOptionSelections.Type;
 
+export const UnoModelTier = Schema.Literals(["frontier", "strong", "cheap"]);
+export type UnoModelTier = typeof UnoModelTier.Type;
+
+export const UnoModelRoute = Schema.Literals(["default", "russia"]);
+export type UnoModelRoute = typeof UnoModelRoute.Type;
+
+export const ModelCapabilitiesMetadata = Schema.Struct({
+  tier: Schema.optional(UnoModelTier),
+  routes: Schema.optional(Schema.Array(UnoModelRoute)),
+  defaultRoute: Schema.optional(UnoModelRoute),
+  contextLength: Schema.optional(Schema.Number),
+  supports: Schema.optional(
+    Schema.Struct({
+      streaming: Schema.optional(Schema.Boolean),
+      tools: Schema.optional(Schema.Boolean),
+      vision: Schema.optional(Schema.Boolean),
+      attachments: Schema.optional(Schema.Boolean),
+    }),
+  ),
+  pricing: Schema.optional(
+    Schema.Struct({
+      promptPer1MUsd: Schema.optional(Schema.Number),
+      completionPer1MUsd: Schema.optional(Schema.Number),
+      blendedPer1MUsd: Schema.optional(Schema.Number),
+      estimatedSeriousTaskUsd: Schema.optional(Schema.Number),
+    }),
+  ),
+  modalities: Schema.optional(
+    Schema.Struct({
+      input: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+      output: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+    }),
+  ),
+});
+export type ModelCapabilitiesMetadata = typeof ModelCapabilitiesMetadata.Type;
+
 function coerceLegacyOptionsObjectToArray(
   record: Record<string, unknown>,
 ): ReadonlyArray<ProviderOptionSelection> {
@@ -122,6 +158,7 @@ function canonicalSelectionsToLegacyObject(
 
 export const ModelCapabilities = Schema.Struct({
   optionDescriptors: Schema.optional(Schema.Array(ProviderOptionDescriptor)),
+  metadata: Schema.optional(ModelCapabilitiesMetadata),
 });
 export type ModelCapabilities = typeof ModelCapabilities.Type;
 
@@ -165,7 +202,12 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
     "gpt-5.3-spark": "gpt-5.3-codex-spark",
   },
   [CLAUDE_DRIVER_KIND]: {
-    opus: "claude-opus-4-7",
+    fable: "claude-fable-5",
+    "fable-5": "claude-fable-5",
+    "claude-fable-5": "claude-fable-5",
+    opus: "claude-opus-4-8",
+    "opus-4.8": "claude-opus-4-8",
+    "claude-opus-4.8": "claude-opus-4-8",
     "opus-4.7": "claude-opus-4-7",
     "claude-opus-4.7": "claude-opus-4-7",
     "opus-4.6": "claude-opus-4-6",

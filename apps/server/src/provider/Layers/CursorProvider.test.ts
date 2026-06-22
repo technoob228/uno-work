@@ -14,6 +14,7 @@ import {
   checkCursorProviderStatus,
   discoverCursorModelCapabilitiesViaAcp,
   discoverCursorModelsViaAcp,
+  isCursorCapabilityEnrichmentEnabled,
   getCursorFallbackModels,
   getCursorParameterizedModelPickerUnsupportedMessage,
   parseCursorAboutOutput,
@@ -567,6 +568,19 @@ describe("discoverCursorModelsViaAcp", () => {
 });
 
 describe("discoverCursorModelCapabilitiesViaAcp", () => {
+  it("keeps background capability enrichment opt-in", () => {
+    expect(isCursorCapabilityEnrichmentEnabled({})).toBe(false);
+    expect(
+      isCursorCapabilityEnrichmentEnabled({ T3CODE_CURSOR_ACP_CAPABILITY_ENRICHMENT: "0" }),
+    ).toBe(false);
+    expect(
+      isCursorCapabilityEnrichmentEnabled({ T3CODE_CURSOR_ACP_CAPABILITY_ENRICHMENT: "1" }),
+    ).toBe(true);
+    expect(
+      isCursorCapabilityEnrichmentEnabled({ T3CODE_CURSOR_ACP_CAPABILITY_ENRICHMENT: "true" }),
+    ).toBe(true);
+  });
+
   it("closes all ACP probe runtimes after capability enrichment completes", async () => {
     const { exitLogPath, wrapperPath } = await runNode(
       makeExitLogFixture("cursor-capabilities-exit-log-"),

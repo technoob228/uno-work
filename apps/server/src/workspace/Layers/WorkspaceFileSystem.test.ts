@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, describe, expect } from "@effect/vitest";
-import { Effect, FileSystem, Layer, Path } from "effect";
+import { Effect, Fiber, FileSystem, Layer, Path, Stream } from "effect";
 
 import { ServerConfig } from "../../config.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
@@ -133,5 +133,53 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
         expect(escapedStat).toBeNull();
       }),
     );
+
+    it.effect("writes binary contents when encoding is base64", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const original = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff]);
+
+        yield* workspaceFileSystem.writeFile({
+          cwd,
+          relativePath: "data/table.xlsx",
+          contents: original.toString("base64"),
+          encoding: "base64",
+        });
+
+        const saved = yield* fileSystem
+          .readFile(path.join(cwd, "data/table.xlsx"))
+          .pipe(Effect.orDie);
+        expect(Buffer.from(saved)).toEqual(original);
+      }),
+    );
   });
+});
+
+describe("WorkspaceFileSystemLive watchFile", () => {
+  // Отдельный it.live вне it.layer: watchFile использует Stream.debounce и
+  // реальные события fs.watch — под TestClock из it.effect событие не уйдёт
+  // никогда, а it.live не наследует слои из обёртки it.layer.
+  it.live("emits a changed event when the watched file is rewritten", () =>
+    Effect.gen(function* () {
+      const workspaceFileSystem = yield* WorkspaceFileSystem;
+      const cwd = yield* makeTempDir;
+      const path = yield* Path.Path;
+      yield* writeTextFile(cwd, "data.csv", "a,b\n1,2\n");
+      const absolutePath = path.join(cwd, "data.csv");
+
+      const firstEvent = yield* workspaceFileSystem
+        .watchFile({ path: absolutePath })
+        .pipe(Stream.take(1), Stream.runCollect, Effect.forkChild);
+
+      // Даём watcher'у успеть зарегистрироваться, затем меняем файл.
+      yield* Effect.sleep("150 millis");
+      yield* writeTextFile(cwd, "data.csv", "a,b\n1,3\n");
+
+      const events = yield* Fiber.join(firstEvent).pipe(Effect.timeout("5 seconds"), Effect.orDie);
+      expect(events).toEqual([{ path: absolutePath, kind: "changed" }]);
+    }).pipe(Effect.provide(TestLayer)),
+  );
 });

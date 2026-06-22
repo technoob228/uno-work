@@ -55,6 +55,8 @@ const rpcClientMock = {
   },
   filesystem: {
     browse: vi.fn(),
+    readFile: vi.fn(),
+    watchFile: vi.fn(() => () => undefined),
   },
   sourceControl: {
     lookupRepository: vi.fn(),
@@ -100,6 +102,9 @@ const rpcClientMock = {
       registerListener(shellStreamListeners, listener),
     ),
     subscribeThread: vi.fn(() => () => undefined),
+  },
+  browser: {
+    subscribeBridge: vi.fn(() => () => undefined),
   },
 };
 
@@ -246,6 +251,12 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
     getUnoCodeInstallState: async () => ({ status: "idle" as const }),
     retryUnoCodeInstall: async () => undefined,
     onUnoCodeInstallState: () => () => undefined,
+    listBrowserCredentials: async () => [],
+    saveBrowserCredential: async () => null,
+    deleteBrowserCredential: async () => undefined,
+    revealBrowserCredentialPassword: async () => null,
+    clearBrowserData: async () => undefined,
+    onBrowserOpenUrlRequest: () => () => undefined,
     ...overrides,
   };
 }
@@ -579,11 +590,14 @@ describe("wsApi", () => {
   it("reads and writes persistence through the desktop bridge when available", async () => {
     const clientSettings = {
       autoOpenPlanSidebar: false,
+      browserAutomationLevel: "full" as const,
+      browserProfileScope: "account" as const,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
       diffIgnoreWhitespace: true,
       diffWordWrap: true,
       onboardingCompleted: false,
+      unoLastModelRoute: "default" as const,
       favorites: [],
       providerModelPreferences: {},
       sidebarProjectGroupingMode: "repository_path" as const,
@@ -641,11 +655,14 @@ describe("wsApi", () => {
     const api = createLocalApi(rpcClientMock as never);
     const clientSettings = {
       autoOpenPlanSidebar: false,
+      browserAutomationLevel: "full" as const,
+      browserProfileScope: "account" as const,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
       diffIgnoreWhitespace: true,
       diffWordWrap: true,
       onboardingCompleted: false,
+      unoLastModelRoute: "default" as const,
       favorites: [],
       providerModelPreferences: {},
       sidebarProjectGroupingMode: "repository_path" as const,

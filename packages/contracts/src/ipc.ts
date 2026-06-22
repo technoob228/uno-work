@@ -23,6 +23,8 @@ import type {
   FilesystemBrowseResult,
   FilesystemReadFileInput,
   FilesystemReadFileResult,
+  FilesystemWatchFileEvent,
+  FilesystemWatchFileInput,
 } from "./filesystem.ts";
 import type {
   ProjectSearchEntriesInput,
@@ -32,6 +34,7 @@ import type {
 } from "./project.ts";
 import type { ProviderInstanceId } from "./providerInstance.ts";
 import type {
+  BrowserBridgeStreamEvent,
   ServerConfig,
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingResult,
@@ -67,6 +70,7 @@ import type { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { EditorId } from "./editor.ts";
 import type { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import type { ClientSettings, ServerSettings, ServerSettingsPatch } from "./settings.ts";
+import type { UnoCreateLlmTopUpActionResult } from "./rpc.ts";
 import type {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
@@ -76,6 +80,22 @@ import type {
   SourceControlRepositoryInfo,
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
+import type {
+  UnoVideoCancelJobInput,
+  UnoVideoCancelJobResult,
+  UnoVideoCompleteUploadInput,
+  UnoVideoCompleteUploadResult,
+  UnoVideoCreateJobInput,
+  UnoVideoCreateJobResult,
+  UnoVideoCreateUploadInput,
+  UnoVideoCreateUploadResult,
+  UnoVideoGetDigestInput,
+  UnoVideoGetJobInput,
+  UnoVideoJobResult,
+  VideoContextPack,
+  VideoContextPackInput,
+  VideoDigest,
+} from "./video.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -197,6 +217,41 @@ export interface DesktopServerExposureState {
   tailscaleServePort: number;
 }
 
+export type BrowserCredentialScope = "account" | "project";
+
+/**
+ * Site credential metadata for the built-in browser. The password itself is
+ * never returned by list calls — it is stored encrypted (Electron safeStorage)
+ * and only decrypted on demand via `revealBrowserCredentialPassword`.
+ */
+export interface BrowserCredentialRecord {
+  readonly id: string;
+  /** Origin the credential applies to, e.g. "https://github.com". */
+  readonly origin: string;
+  readonly username: string;
+  readonly scope: BrowserCredentialScope;
+  /** Logical project key when scope is "project". */
+  readonly projectKey?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface BrowserCredentialInput {
+  readonly id?: string;
+  readonly origin: string;
+  readonly username: string;
+  readonly password: string;
+  readonly scope: BrowserCredentialScope;
+  readonly projectKey?: string;
+}
+
+export interface BrowserClearDataInput {
+  readonly partition: string;
+  readonly origin?: string;
+  readonly cookies?: boolean;
+  readonly cache?: boolean;
+}
+
 export interface PickFolderOptions {
   initialPath?: string | null;
 }
@@ -258,6 +313,15 @@ export interface DesktopBridge {
   getUnoCodeInstallState: () => Promise<UnoCodeInstallState>;
   retryUnoCodeInstall: () => Promise<void>;
   onUnoCodeInstallState: (listener: (state: UnoCodeInstallState) => void) => () => void;
+  listBrowserCredentials: () => Promise<readonly BrowserCredentialRecord[]>;
+  /** Returns null when OS-level encryption is unavailable. */
+  saveBrowserCredential: (input: BrowserCredentialInput) => Promise<BrowserCredentialRecord | null>;
+  deleteBrowserCredential: (id: string) => Promise<void>;
+  /** Returns the decrypted password, or null if missing/undecryptable. */
+  revealBrowserCredentialPassword: (id: string) => Promise<string | null>;
+  clearBrowserData: (input: BrowserClearDataInput) => Promise<void>;
+  /** Fired when a page inside the embedded browser asks to open a new window. */
+  onBrowserOpenUrlRequest: (listener: (url: string) => void) => () => void;
 }
 
 export type UnoCodeInstallPhase =
@@ -276,7 +340,15 @@ export type UnoCodeInstallState =
       readonly message?: string;
     }
   | { readonly status: "installed"; readonly binaryPath: string; readonly version: string }
-  | { readonly status: "failed"; readonly error: string; readonly code?: string };
+  | {
+      readonly status: "failed";
+      readonly error: string;
+      readonly code?: string;
+      /** True when the desktop shell will retry the install automatically (transient error). */
+      readonly willRetry?: boolean;
+      /** Epoch ms of the next scheduled automatic retry, when {@link willRetry} is set. */
+      readonly nextRetryAt?: number;
+    };
 
 /**
  * APIs bound to the local app shell, not to any particular backend environment.
@@ -328,6 +400,18 @@ export interface LocalApi {
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
     discoverSourceControl: () => Promise<SourceControlDiscoveryResult>;
+    createUnoLlmTopUpAction: (input?: {
+      readonly amount?: number;
+    }) => Promise<UnoCreateLlmTopUpActionResult>;
+    createUnoVideoUpload: (input: UnoVideoCreateUploadInput) => Promise<UnoVideoCreateUploadResult>;
+    completeUnoVideoUpload: (
+      input: UnoVideoCompleteUploadInput,
+    ) => Promise<UnoVideoCompleteUploadResult>;
+    createUnoVideoJob: (input: UnoVideoCreateJobInput) => Promise<UnoVideoCreateJobResult>;
+    getUnoVideoJob: (input: UnoVideoGetJobInput) => Promise<UnoVideoJobResult>;
+    cancelUnoVideoJob: (input: UnoVideoCancelJobInput) => Promise<UnoVideoCancelJobResult>;
+    getUnoVideoDigest: (input: UnoVideoGetDigestInput) => Promise<VideoDigest>;
+    packUnoVideoDigest: (input: VideoContextPackInput) => Promise<VideoContextPack>;
   };
 }
 
@@ -357,6 +441,13 @@ export interface EnvironmentApi {
   filesystem: {
     browse: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;
     readFile: (input: FilesystemReadFileInput) => Promise<FilesystemReadFileResult>;
+    watchFile: (
+      input: FilesystemWatchFileInput,
+      callback: (event: FilesystemWatchFileEvent) => void,
+      options?: {
+        onResubscribe?: () => void;
+      },
+    ) => () => void;
   };
   sourceControl: {
     lookupRepository: (
@@ -411,5 +502,9 @@ export interface EnvironmentApi {
         onResubscribe?: () => void;
       },
     ) => () => void;
+  };
+  browser: {
+    /** Live "open this URL in the built-in browser pane" pushes from harnesses. */
+    subscribeBridge: (callback: (event: BrowserBridgeStreamEvent) => void) => () => void;
   };
 }

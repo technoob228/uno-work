@@ -151,6 +151,10 @@ function titleCaseSlug(value: string): string {
     .join(" ");
 }
 
+function isReasoningVariantProvider(providerID: string): boolean {
+  return providerID === "uno" || providerID === "uno-russia";
+}
+
 function inferDefaultVariant(
   providerID: string,
   variants: ReadonlyArray<string>,
@@ -202,7 +206,7 @@ function openCodeCapabilitiesForModel(input: {
         ? [
             {
               id: "variant",
-              label: "Variant",
+              label: isReasoningVariantProvider(input.providerID) ? "Effort" : "Variant",
               type: "select" as const,
               options: variantOptions,
               ...(defaultVariant ? { currentValue: defaultVariant } : {}),

@@ -11,6 +11,9 @@ import {
   FilesystemReadFileInput,
   FilesystemReadFileResult,
   FilesystemReadFileError,
+  FilesystemWatchFileInput,
+  FilesystemWatchFileEvent,
+  FilesystemWatchFileError,
 } from "./filesystem.ts";
 import {
   GitActionProgressEvent,
@@ -72,6 +75,7 @@ import {
   TerminalWriteInput,
 } from "./terminal.ts";
 import {
+  BrowserBridgeStreamEvent,
   ServerConfigStreamEvent,
   ServerConfig,
   ServerLifecycleStreamEvent,
@@ -91,6 +95,23 @@ import {
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
+import {
+  UnoVideoCancelJobInput,
+  UnoVideoCancelJobResult,
+  UnoVideoCompleteUploadInput,
+  UnoVideoCompleteUploadResult,
+  UnoVideoCreateJobInput,
+  UnoVideoCreateJobResult,
+  UnoVideoCreateUploadInput,
+  UnoVideoCreateUploadResult,
+  UnoVideoGetDigestInput,
+  UnoVideoGetJobInput,
+  UnoVideoJobResult,
+  UnoVideoRpcError,
+  VideoContextPack,
+  VideoContextPackInput,
+  VideoDigest,
+} from "./video.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -138,17 +159,29 @@ export const WS_METHODS = {
   serverUpdateSettings: "server.updateSettings",
   serverDiscoverSourceControl: "server.discoverSourceControl",
 
+  // Uno account / billing methods
+  unoCreateLlmTopUpAction: "uno.createLlmTopUpAction",
+  unoVideoCreateUpload: "uno.video.createUpload",
+  unoVideoCompleteUpload: "uno.video.completeUpload",
+  unoVideoCreateJob: "uno.video.createJob",
+  unoVideoGetJob: "uno.video.getJob",
+  unoVideoCancelJob: "uno.video.cancelJob",
+  unoVideoGetDigest: "uno.video.getDigest",
+  unoVideoPackDigest: "uno.video.packDigest",
+
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
   sourceControlCloneRepository: "sourceControl.cloneRepository",
   sourceControlPublishRepository: "sourceControl.publishRepository",
 
   // Streaming subscriptions
+  subscribeFileChanges: "subscribeFileChanges",
   subscribeVcsStatus: "subscribeVcsStatus",
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
+  subscribeBrowserBridge: "subscribeBrowserBridge",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -191,6 +224,80 @@ export const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSetting
 export const WsServerDiscoverSourceControlRpc = Rpc.make(WS_METHODS.serverDiscoverSourceControl, {
   payload: Schema.Struct({}),
   success: SourceControlDiscoveryResult,
+});
+
+export const UnoCreateLlmTopUpActionInput = Schema.Struct({
+  amount: Schema.optional(Schema.Number),
+});
+export type UnoCreateLlmTopUpActionInput = typeof UnoCreateLlmTopUpActionInput.Type;
+
+export const UnoCreateLlmTopUpActionResult = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("credits_bought"),
+    llmBalance: Schema.Number,
+    chargedFromBalance: Schema.Number,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("payment_link"),
+    paymentUrl: Schema.String,
+    amount: Schema.Number,
+  }),
+]);
+export type UnoCreateLlmTopUpActionResult = typeof UnoCreateLlmTopUpActionResult.Type;
+
+export class UnoBillingRpcError extends Schema.TaggedErrorClass<UnoBillingRpcError>()(
+  "UnoBillingRpcError",
+  {
+    message: Schema.String,
+  },
+) {}
+
+export const WsUnoCreateLlmTopUpActionRpc = Rpc.make(WS_METHODS.unoCreateLlmTopUpAction, {
+  payload: UnoCreateLlmTopUpActionInput,
+  success: UnoCreateLlmTopUpActionResult,
+  error: UnoBillingRpcError,
+});
+
+export const WsUnoVideoCreateUploadRpc = Rpc.make(WS_METHODS.unoVideoCreateUpload, {
+  payload: UnoVideoCreateUploadInput,
+  success: UnoVideoCreateUploadResult,
+  error: UnoVideoRpcError,
+});
+
+export const WsUnoVideoCompleteUploadRpc = Rpc.make(WS_METHODS.unoVideoCompleteUpload, {
+  payload: UnoVideoCompleteUploadInput,
+  success: UnoVideoCompleteUploadResult,
+  error: UnoVideoRpcError,
+});
+
+export const WsUnoVideoCreateJobRpc = Rpc.make(WS_METHODS.unoVideoCreateJob, {
+  payload: UnoVideoCreateJobInput,
+  success: UnoVideoCreateJobResult,
+  error: UnoVideoRpcError,
+});
+
+export const WsUnoVideoGetJobRpc = Rpc.make(WS_METHODS.unoVideoGetJob, {
+  payload: UnoVideoGetJobInput,
+  success: UnoVideoJobResult,
+  error: UnoVideoRpcError,
+});
+
+export const WsUnoVideoCancelJobRpc = Rpc.make(WS_METHODS.unoVideoCancelJob, {
+  payload: UnoVideoCancelJobInput,
+  success: UnoVideoCancelJobResult,
+  error: UnoVideoRpcError,
+});
+
+export const WsUnoVideoGetDigestRpc = Rpc.make(WS_METHODS.unoVideoGetDigest, {
+  payload: UnoVideoGetDigestInput,
+  success: VideoDigest,
+  error: UnoVideoRpcError,
+});
+
+export const WsUnoVideoPackDigestRpc = Rpc.make(WS_METHODS.unoVideoPackDigest, {
+  payload: VideoContextPackInput,
+  success: VideoContextPack,
+  error: UnoVideoRpcError,
 });
 
 export const WsSourceControlLookupRepositoryRpc = Rpc.make(
@@ -244,6 +351,13 @@ export const WsFilesystemReadFileRpc = Rpc.make(WS_METHODS.filesystemReadFile, {
   payload: FilesystemReadFileInput,
   success: FilesystemReadFileResult,
   error: FilesystemReadFileError,
+});
+
+export const WsSubscribeFileChangesRpc = Rpc.make(WS_METHODS.subscribeFileChanges, {
+  payload: FilesystemWatchFileInput,
+  success: FilesystemWatchFileEvent,
+  error: FilesystemWatchFileError,
+  stream: true,
 });
 
 export const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {
@@ -416,6 +530,12 @@ export const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServer
   stream: true,
 });
 
+export const WsSubscribeBrowserBridgeRpc = Rpc.make(WS_METHODS.subscribeBrowserBridge, {
+  payload: Schema.Struct({}),
+  success: BrowserBridgeStreamEvent,
+  stream: true,
+});
+
 export const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess, {
   payload: Schema.Struct({}),
   success: AuthAccessStreamEvent,
@@ -429,6 +549,14 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsServerDiscoverSourceControlRpc,
+  WsUnoCreateLlmTopUpActionRpc,
+  WsUnoVideoCreateUploadRpc,
+  WsUnoVideoCompleteUploadRpc,
+  WsUnoVideoCreateJobRpc,
+  WsUnoVideoGetJobRpc,
+  WsUnoVideoCancelJobRpc,
+  WsUnoVideoGetDigestRpc,
+  WsUnoVideoPackDigestRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
@@ -437,6 +565,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsFilesystemReadFileRpc,
+  WsSubscribeFileChangesRpc,
   WsSubscribeVcsStatusRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
@@ -459,6 +588,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,
+  WsSubscribeBrowserBridgeRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,

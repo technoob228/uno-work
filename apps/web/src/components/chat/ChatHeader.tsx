@@ -9,7 +9,14 @@ import { scopeThreadRef } from "@t3tools/client-runtime";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
-import { CodeIcon, DiffIcon, FolderIcon, PanelRightIcon, TerminalSquareIcon } from "lucide-react";
+import {
+  CodeIcon,
+  DiffIcon,
+  FolderIcon,
+  GlobeIcon,
+  PanelRightIcon,
+  TerminalSquareIcon,
+} from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
@@ -19,6 +26,9 @@ import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { usePreviewPane } from "../preview/PreviewPaneContext";
 import { toggleDevMode, useDevMode } from "../../devMode";
+
+const HEADER_ICON_BUTTON_CLASS =
+  "inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-md border border-input px-[calc(--spacing(1)-1px)] text-muted-foreground shadow-xs/5 hover:bg-accent hover:text-foreground sm:h-6 sm:min-w-6";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -92,6 +102,7 @@ export const ChatHeader = memo(function ChatHeader({
     files: previewFiles,
     toggleOpen: togglePreview,
     openBrowser,
+    openUrl,
   } = usePreviewPane();
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
@@ -236,13 +247,28 @@ export const ChatHeader = memo(function ChatHeader({
                   })
                 }
                 aria-label="Browse files"
-                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-input text-muted-foreground hover:bg-accent hover:text-foreground"
+                className={HEADER_ICON_BUTTON_CLASS}
               >
                 <FolderIcon className="size-3" />
               </button>
             }
           />
           <TooltipPopup side="bottom">Открыть файловый браузер</TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                onClick={() => openUrl()}
+                aria-label="Открыть браузер"
+                className={HEADER_ICON_BUTTON_CLASS}
+              >
+                <GlobeIcon className="size-3" />
+              </button>
+            }
+          />
+          <TooltipPopup side="bottom">Открыть браузер</TooltipPopup>
         </Tooltip>
         {previewFiles.length > 0 && (
           <Tooltip>
@@ -253,7 +279,7 @@ export const ChatHeader = memo(function ChatHeader({
                   onClick={togglePreview}
                   aria-label="Toggle preview pane"
                   aria-pressed={previewOpen}
-                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className={HEADER_ICON_BUTTON_CLASS}
                 >
                   <PanelRightIcon className="size-3" />
                 </button>

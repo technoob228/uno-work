@@ -8,6 +8,7 @@
  * @module CodexAdapterLive
  */
 import {
+  type ChatImageAttachment,
   type CanonicalItemType,
   type CanonicalRequestType,
   type CodexSettings,
@@ -69,6 +70,8 @@ export interface CodexAdapterLiveOptions {
   >;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  /** Доп. инструкции, добавляемые к developer_instructions каждого хода. */
+  readonly appendDeveloperInstructions?: string;
 }
 
 interface CodexAdapterSessionContext {
@@ -1373,6 +1376,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           cwd: input.cwd ?? process.cwd(),
           binaryPath: codexConfig.binaryPath,
           ...(options?.environment ? { environment: options.environment } : {}),
+          ...(options?.appendDeveloperInstructions
+            ? { appendDeveloperInstructions: options.appendDeveloperInstructions }
+            : {}),
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
           ...(Schema.is(CodexResumeCursorSchema)(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
@@ -1457,7 +1463,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
   const resolveAttachment = Effect.fn("resolveAttachment")(function* (
     input: ProviderSendTurnInput,
-    attachment: NonNullable<ProviderSendTurnInput["attachments"]>[number],
+    attachment: ChatImageAttachment,
   ) {
     const attachmentPath = resolveAttachmentPath({
       attachmentsDir: serverConfig.attachmentsDir,
@@ -1489,7 +1495,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
   const sendTurn: CodexAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
     const codexAttachments = yield* Effect.forEach(
-      input.attachments ?? [],
+      (input.attachments ?? []).filter(
+        (attachment): attachment is ChatImageAttachment => attachment.type === "image",
+      ),
       (attachment) => resolveAttachment(input, attachment),
       { concurrency: 1 },
     );

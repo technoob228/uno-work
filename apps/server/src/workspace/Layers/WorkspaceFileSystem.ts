@@ -1,14 +1,19 @@
 import * as OS from "node:os";
+import * as NFS from "node:fs";
 import fsPromises from "node:fs/promises";
 
-import { Effect, FileSystem, Layer, Path } from "effect";
+import { Cause, Duration, Effect, FileSystem, Layer, Path, Queue, Stream } from "effect";
 
-import { FILESYSTEM_READ_FILE_DEFAULT_MAX_BYTES } from "@t3tools/contracts";
+import {
+  FILESYSTEM_READ_FILE_DEFAULT_MAX_BYTES,
+  type FilesystemWatchFileEvent,
+} from "@t3tools/contracts";
 
 import {
   WorkspaceFileSystem,
   WorkspaceFileSystemError,
   WorkspaceReadFileError,
+  WorkspaceWatchFileError,
   type WorkspaceFileSystemShape,
 } from "../Services/WorkspaceFileSystem.ts";
 import { WorkspaceEntries } from "../Services/WorkspaceEntries.ts";
@@ -144,7 +149,14 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
           }),
       ),
     );
-    yield* fileSystem.writeFileString(target.absolutePath, input.contents).pipe(
+    const write =
+      input.encoding === "base64"
+        ? fileSystem.writeFile(
+            target.absolutePath,
+            new Uint8Array(Buffer.from(input.contents, "base64")),
+          )
+        : fileSystem.writeFileString(target.absolutePath, input.contents);
+    yield* write.pipe(
       Effect.mapError(
         (cause) =>
           new WorkspaceFileSystemError({
@@ -224,7 +236,68 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
     },
   );
 
-  return { writeFile, readFile } satisfies WorkspaceFileSystemShape;
+  // Наблюдаем родительскую директорию, а не сам файл: редакторы и атомарные
+  // записи (rename поверх файла) ломают watch, повешенный на сам inode.
+  //
+  // Важно для перформанса: watch строго НЕ рекурсивный. effect-овский
+  // fileSystem.watch включает recursive:true, из-за чего watch на файле в
+  // корне проекта потянул бы за собой node_modules и всё поддерево (тысячи
+  // лишних событий, упор в лимит inotify на Linux). Здесь следим только за
+  // содержимым самой директории файла.
+  const watchFile: WorkspaceFileSystemShape["watchFile"] = (input) => {
+    const expanded = expandHomePath(input.path, path);
+    const absolutePath = path.resolve(expanded);
+    const parentDir = path.dirname(absolutePath);
+    const fileName = path.basename(absolutePath);
+
+    const rawEvents = Stream.callback<string, WorkspaceWatchFileError>((queue) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          const watcher = NFS.watch(parentDir, { recursive: false }, (_event, changed) => {
+            // На части платформ имя файла может прийти null — на всякий случай
+            // будим только когда событие относится к нашему файлу.
+            const changedName = changed == null ? fileName : changed.toString();
+            if (changedName === fileName) {
+              Queue.offerUnsafe(queue, absolutePath);
+            }
+          });
+          watcher.on("error", (error) => {
+            Queue.failCauseUnsafe(
+              queue,
+              Cause.fail(
+                new WorkspaceWatchFileError({
+                  path: absolutePath,
+                  operation: "workspaceFileSystem.watchFile",
+                  detail: `Watcher error for '${absolutePath}': ${
+                    error instanceof Error ? error.message : String(error)
+                  }`,
+                  cause: error,
+                }),
+              ),
+            );
+          });
+          return watcher;
+        }),
+        (watcher) => Effect.sync(() => watcher.close()),
+      ),
+    );
+
+    return rawEvents.pipe(
+      Stream.debounce(Duration.millis(80)),
+      Stream.mapEffect(() =>
+        Effect.promise(async (): Promise<FilesystemWatchFileEvent> => {
+          try {
+            const stat = await fsPromises.stat(absolutePath);
+            return { path: absolutePath, kind: stat.isFile() ? "changed" : "removed" };
+          } catch {
+            return { path: absolutePath, kind: "removed" };
+          }
+        }),
+      ),
+    );
+  };
+
+  return { writeFile, readFile, watchFile } satisfies WorkspaceFileSystemShape;
 });
 
 export const WorkspaceFileSystemLive = Layer.effect(WorkspaceFileSystem, makeWorkspaceFileSystem);

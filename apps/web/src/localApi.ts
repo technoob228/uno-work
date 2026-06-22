@@ -139,6 +139,38 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
         rpcClient
           ? rpcClient.server.discoverSourceControl()
           : Promise.reject(unavailableLocalBackendError()),
+      createUnoLlmTopUpAction: (input) =>
+        rpcClient
+          ? rpcClient.server.createUnoLlmTopUpAction(input ?? {})
+          : Promise.reject(unavailableLocalBackendError()),
+      createUnoVideoUpload: (input) =>
+        rpcClient
+          ? rpcClient.server.createUnoVideoUpload(input)
+          : Promise.reject(unavailableLocalBackendError()),
+      completeUnoVideoUpload: (input) =>
+        rpcClient
+          ? rpcClient.server.completeUnoVideoUpload(input)
+          : Promise.reject(unavailableLocalBackendError()),
+      createUnoVideoJob: (input) =>
+        rpcClient
+          ? rpcClient.server.createUnoVideoJob(input)
+          : Promise.reject(unavailableLocalBackendError()),
+      getUnoVideoJob: (input) =>
+        rpcClient
+          ? rpcClient.server.getUnoVideoJob(input)
+          : Promise.reject(unavailableLocalBackendError()),
+      cancelUnoVideoJob: (input) =>
+        rpcClient
+          ? rpcClient.server.cancelUnoVideoJob(input)
+          : Promise.reject(unavailableLocalBackendError()),
+      getUnoVideoDigest: (input) =>
+        rpcClient
+          ? rpcClient.server.getUnoVideoDigest(input)
+          : Promise.reject(unavailableLocalBackendError()),
+      packUnoVideoDigest: (input) =>
+        rpcClient
+          ? rpcClient.server.packUnoVideoDigest(input)
+          : Promise.reject(unavailableLocalBackendError()),
     },
   };
 }

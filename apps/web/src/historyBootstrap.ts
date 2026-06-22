@@ -20,16 +20,29 @@ function messageRoleLabel(message: ChatMessage): "USER" | "ASSISTANT" {
 
 function attachmentSummary(message: ChatMessage): string | null {
   const imageAttachments = message.attachments?.filter((attachment) => attachment.type === "image");
-  const count = imageAttachments?.length ?? 0;
-  if (count === 0) {
+  const videoAttachments = message.attachments?.filter(
+    (attachment) => attachment.type === "video_digest",
+  );
+  const imageCount = imageAttachments?.length ?? 0;
+  const videoCount = videoAttachments?.length ?? 0;
+  if (imageCount === 0 && videoCount === 0) {
     return null;
   }
 
-  const names = imageAttachments?.slice(0, 3).map((image) => image.name) ?? [];
-  const namesSummary = names.join(", ");
-  const extraCount = count - names.length;
-  const extraSummary = extraCount > 0 ? ` (+${extraCount} more)` : "";
-  return `[Attached image${count === 1 ? "" : "s"}: ${namesSummary}${extraSummary}]`;
+  const summaries: string[] = [];
+  if (imageCount > 0) {
+    const names = imageAttachments?.slice(0, 3).map((image) => image.name) ?? [];
+    const namesSummary = names.join(", ");
+    const extraCount = imageCount - names.length;
+    const extraSummary = extraCount > 0 ? ` (+${extraCount} more)` : "";
+    summaries.push(`Attached image${imageCount === 1 ? "" : "s"}: ${namesSummary}${extraSummary}`);
+  }
+  for (const video of videoAttachments ?? []) {
+    summaries.push(
+      `Attached video digest: ${video.name}, ${Math.round(video.durationMs / 1000)}s, ${video.frameCount} frames, ${video.transcriptSegmentCount} transcript segments`,
+    );
+  }
+  return `[${summaries.join("; ")}]`;
 }
 
 function buildMessageBlock(message: ChatMessage): string {

@@ -7,6 +7,21 @@
 - All of `bun fmt`, `bun lint`, and `bun typecheck` must pass before considering tasks completed.
 - NEVER run `bun test`. Always use `bun run test` (runs Vitest).
 
+## Desktop Dev Startup
+
+- Use `bun dev:desktop` from the repo root for the full Uno Work app. `bun dev`/`bun dev:web` is not a desktop-app smoke test.
+- If the user needs the app to stay running after the agent replies, do not leave it attached to an interactive tool PTY. Start it as a user launchd job, for example from the repo root:
+  `launchctl submit -l xyz.unowork.dev -o /tmp/uno-work-dev.log -e /tmp/uno-work-dev.err -- /bin/zsh -lc "cd '$PWD' && exec $(command -v bun) dev:desktop"`.
+  Stop that persistent dev job with `launchctl remove xyz.unowork.dev`.
+- Do not report the app as running just because Vite responds. Confirm both endpoints:
+  - Web: `curl -I http://127.0.0.1:5733/`
+  - Desktop backend: `curl http://127.0.0.1:13773/.well-known/t3/environment`
+- If the Electron window is blank/white, restart the whole `bun dev:desktop` process. Do not rely on the desktop hot-restart watcher after `apps/desktop/src/main.ts` changes.
+- When diagnosing a desktop blank screen, inspect Electron/backend logs and process state for `dev-electron`, `--t3code-dev-root`, and `apps/server/dist/bin.mjs`; checking `http://127.0.0.1:5733/` in a browser is not enough.
+- A successful desktop renderer smoke should include a `[desktop] renderer snapshot` log with `content-ready` and `rootTextLength > 0`.
+- In desktop dev, Playwright can connect to the running Electron app at `http://127.0.0.1:9223` via CDP. Use this for Uno Work/browser-pane automation before launching a separate browser. Override/disable with `UNO_WORK_ELECTRON_REMOTE_DEBUGGING_PORT`.
+- Avoid running the installed `Uno Work.app` and the dev Electron window interchangeably. They are separate processes and usually use different backend ports.
+
 ## Project Snapshot
 
 T3 Code is a minimal web GUI for using coding agents like Codex and Claude.

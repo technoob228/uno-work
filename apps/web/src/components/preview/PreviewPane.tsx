@@ -2,8 +2,10 @@ import {
   BracesIcon,
   CheckIcon,
   ChevronRightIcon,
+  CodeXmlIcon,
   CopyIcon,
   ExternalLinkIcon,
+  EyeIcon,
   FileCode2Icon,
   FileIcon,
   FileSpreadsheetIcon,
@@ -12,21 +14,15 @@ import {
   GlobeIcon,
   ImageIcon,
   Loader2Icon,
+  Maximize2Icon,
+  Minimize2Icon,
+  PanelLeftOpenIcon,
   PencilIcon,
   PlusIcon,
   TableIcon,
   XIcon,
 } from "lucide-react";
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -45,16 +41,22 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import {
   detectFileKind,
+  DUAL_VIEW_KINDS,
+  isBrowserTab,
   type PreviewFile,
   type PreviewFileKind,
   usePreviewPane,
 } from "./PreviewPaneContext";
+import { BrowserViews } from "./BrowserPane";
 import { useSidebar } from "../ui/sidebar";
-import { getScrollPosition, setScrollPosition } from "./previewScrollMemory";
+import { CodeFileView } from "./CodeFileView";
+import { MemoizedScrollArea, useScrollMemoryRef } from "./previewScrollArea";
+import { TableEditableBody } from "./TableEditor";
+import { parseDelimitedRows, resolveWriteTarget, spreadsheetColumnLabel } from "./previewFileUtils";
 
 const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   md: FileTextIcon,
-  html: GlobeIcon,
+  html: FileCode2Icon,
   pdf: FileIcon,
   xlsx: FileSpreadsheetIcon,
   docx: FileTextIcon,
@@ -63,6 +65,7 @@ const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   image: ImageIcon,
   svg: ImageIcon,
   text: FileCode2Icon,
+  browser: GlobeIcon,
   unknown: FileIcon,
 };
 
@@ -77,6 +80,7 @@ const KIND_LABEL: Record<PreviewFileKind, string> = {
   image: "Image",
   svg: "SVG",
   text: "Text",
+  browser: "Браузер",
   unknown: "File",
 };
 
@@ -84,26 +88,9 @@ const KIND_EDITABLE: ReadonlySet<PreviewFileKind> = new Set<PreviewFileKind>([
   "md",
   "html",
   "text",
+  "csv",
+  "xlsx",
 ]);
-
-function computeRelativePath(absolutePath: string, projectCwd: string): string | null {
-  const normalizedCwd = projectCwd.replace(/[\\/]+$/, "");
-  if (!absolutePath.startsWith(normalizedCwd)) return null;
-  return absolutePath.slice(normalizedCwd.length).replace(/^[\\/]+/, "");
-}
-
-function resolveWriteTarget(file: PreviewFile): { cwd: string; relativePath: string } | null {
-  if (!file.path) return null;
-  if (file.projectCwd) {
-    const rel = computeRelativePath(file.path, file.projectCwd);
-    if (rel !== null) return { cwd: file.projectCwd, relativePath: rel };
-  }
-  const match = file.path.match(/^(.*)[\\/]([^\\/]+)$/);
-  if (!match) return null;
-  const [, parentDir, basename] = match;
-  if (!parentDir || !basename) return null;
-  return { cwd: parentDir, relativePath: basename };
-}
 
 const PREVIEW_WIDTH_STORAGE_KEY = "preview_pane_width";
 const DEFAULT_PREVIEW_WIDTH = 24 * 16;
@@ -117,59 +104,6 @@ function readStoredWidth(): number {
   if (!raw) return DEFAULT_PREVIEW_WIDTH;
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : DEFAULT_PREVIEW_WIDTH;
-}
-
-function attachScrollMemory(el: HTMLElement, fileId: string): () => void {
-  const saved = getScrollPosition(fileId);
-  if (saved !== undefined) {
-    el.scrollTop = saved;
-  }
-  let frame = 0;
-  const onScroll = () => {
-    cancelAnimationFrame(frame);
-    frame = requestAnimationFrame(() => {
-      setScrollPosition(fileId, el.scrollTop);
-    });
-  };
-  el.addEventListener("scroll", onScroll, { passive: true });
-  return () => {
-    cancelAnimationFrame(frame);
-    el.removeEventListener("scroll", onScroll);
-  };
-}
-
-function useScrollMemoryRef<T extends HTMLElement>(fileId: string) {
-  const ref = useRef<T | null>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    return attachScrollMemory(el, fileId);
-  }, [fileId]);
-  return ref;
-}
-
-function MemoizedScrollArea({
-  fileId,
-  className,
-  children,
-}: {
-  fileId: string;
-  className?: string;
-  children: ReactNode;
-}) {
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  useLayoutEffect(() => {
-    const root = rootRef.current;
-    if (!root) return;
-    const viewport = root.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
-    if (!viewport) return;
-    return attachScrollMemory(viewport, fileId);
-  }, [fileId]);
-  return (
-    <div ref={rootRef} className="h-full min-h-0">
-      <ScrollArea className={className}>{children}</ScrollArea>
-    </div>
-  );
 }
 
 function resolveRelativeFilePath(baseAbsolutePath: string, href: string): string | null {
@@ -380,50 +314,6 @@ function base64ToBlobUrl(base64: string, mimeType: string): string {
   return URL.createObjectURL(blob);
 }
 
-function parseDelimitedRows(input: string, delimiter: string): string[][] {
-  const rows: string[][] = [];
-  let current: string[] = [];
-  let field = "";
-  let inQuotes = false;
-  for (let i = 0; i < input.length; i += 1) {
-    const ch = input[i];
-    if (inQuotes) {
-      if (ch === '"' && input[i + 1] === '"') {
-        field += '"';
-        i += 1;
-      } else if (ch === '"') {
-        inQuotes = false;
-      } else {
-        field += ch;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inQuotes = true;
-      continue;
-    }
-    if (ch === delimiter) {
-      current.push(field);
-      field = "";
-      continue;
-    }
-    if (ch === "\n" || ch === "\r") {
-      if (ch === "\r" && input[i + 1] === "\n") i += 1;
-      current.push(field);
-      rows.push(current);
-      current = [];
-      field = "";
-      continue;
-    }
-    field += ch;
-  }
-  if (field.length > 0 || current.length > 0) {
-    current.push(field);
-    rows.push(current);
-  }
-  return rows.filter((row) => row.length > 1 || (row[0] ?? "").length > 0);
-}
-
 const CSV_MAX_ROWS = 500;
 
 function keyedCsvEntries<T extends ReadonlyArray<string>>(entries: ReadonlyArray<T>) {
@@ -502,7 +392,7 @@ function CsvBody({ file, content }: { file: PreviewFile; content: string }) {
   );
 }
 
-function JsonBody({ fileId, content }: { fileId: string; content: string }) {
+function JsonBody({ file, content }: { file: PreviewFile; content: string }) {
   const formatted = useMemo(() => {
     try {
       return JSON.stringify(JSON.parse(content), null, 2);
@@ -510,20 +400,39 @@ function JsonBody({ fileId, content }: { fileId: string; content: string }) {
       return content;
     }
   }, [content]);
-  return (
-    <MemoizedScrollArea fileId={fileId} className="h-full">
-      <pre className="whitespace-pre px-4 py-3 font-mono text-xs leading-relaxed">{formatted}</pre>
-    </MemoizedScrollArea>
-  );
+  return <CodeFileView fileId={file.id} fileName={file.name} content={formatted} language="json" />;
 }
 
-function TextBody({ fileId, content }: { fileId: string; content: string }) {
+/** Язык исходника для форматов с двойным представлением (превью ↔ код). */
+const SOURCE_VIEW_LANGUAGE: Partial<Record<PreviewFileKind, string>> = {
+  md: "md",
+  html: "html",
+  svg: "xml",
+  csv: "csv",
+  json: "json",
+};
+
+function decodeBase64Utf8(base64: string): string | null {
+  try {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+function SourceCodeBody({ file, content }: { file: PreviewFile; content: string }) {
   return (
-    <MemoizedScrollArea fileId={fileId} className="h-full">
-      <pre className="whitespace-pre-wrap break-words px-4 py-3 font-mono text-xs leading-relaxed">
-        {content}
-      </pre>
-    </MemoizedScrollArea>
+    <CodeFileView
+      fileId={`${file.id}#source`}
+      fileName={file.name}
+      content={content}
+      language={SOURCE_VIEW_LANGUAGE[file.kind]}
+    />
   );
 }
 
@@ -615,17 +524,6 @@ interface SpreadsheetSheetPreview {
 
 interface SpreadsheetPreview {
   sheets: SpreadsheetSheetPreview[];
-}
-
-function spreadsheetColumnLabel(index: number): string {
-  let value = index + 1;
-  let label = "";
-  while (value > 0) {
-    const remainder = (value - 1) % 26;
-    label = String.fromCharCode(65 + remainder) + label;
-    value = Math.floor((value - 1) / 26);
-  }
-  return label;
 }
 
 function spreadsheetCellText(value: unknown): string {
@@ -816,7 +714,14 @@ interface LoadedFileData {
   truncated?: boolean | undefined;
 }
 
-function renderLoadedBody(file: PreviewFile, data: LoadedFileData) {
+function renderLoadedBody(file: PreviewFile, data: LoadedFileData, sourceView: boolean) {
+  if (sourceView && DUAL_VIEW_KINDS.has(file.kind)) {
+    const sourceText = data.encoding === "utf8" ? data.content : decodeBase64Utf8(data.content);
+    if (sourceText !== null) {
+      return <SourceCodeBody file={file} content={sourceText} />;
+    }
+  }
+
   if (data.encoding === "utf8") {
     if (file.kind === "md") {
       return (
@@ -839,10 +744,10 @@ function renderLoadedBody(file: PreviewFile, data: LoadedFileData) {
       return <CsvBody file={file} content={data.content} />;
     }
     if (file.kind === "json") {
-      return <JsonBody fileId={file.id} content={data.content} />;
+      return <JsonBody file={file} content={data.content} />;
     }
     if (file.kind === "text" || file.kind === "unknown") {
-      return <TextBody fileId={file.id} content={data.content} />;
+      return <CodeFileView fileId={file.id} fileName={file.name} content={data.content} />;
     }
     if (file.kind === "svg") {
       return <SvgBody file={file} content={data.content} />;
@@ -892,13 +797,35 @@ function renderLoadedBody(file: PreviewFile, data: LoadedFileData) {
   return <MetadataPlaceholder file={file} label="Формат пока не поддерживается" />;
 }
 
-function LoadedBody({ file }: { file: PreviewFile }) {
+/**
+ * Подписка на изменения файла на диске: пока превью открыто, сервер шлёт
+ * события fs.watch и кэш чтения инвалидируется — превью всегда свежее.
+ */
+function useFileWatchInvalidation(
+  environmentId: EnvironmentId | undefined,
+  path: string | undefined,
+) {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!path || !environmentId) return;
+    const api = readEnvironmentApi(environmentId);
+    if (!api) return;
+    const invalidate = () => {
+      void queryClient.invalidateQueries({ queryKey: ["previewReadFile", environmentId, path] });
+    };
+    return api.filesystem.watchFile({ path }, invalidate, { onResubscribe: invalidate });
+  }, [environmentId, path, queryClient]);
+}
+
+function LoadedBody({ file, sourceView }: { file: PreviewFile; sourceView: boolean }) {
   const path = file.path;
   const environmentId = file.environmentId;
   const queryClient = useQueryClient();
   const turnDiffSummaryByThreadId = useStore((s) =>
     environmentId ? s.environmentStateById[environmentId]?.turnDiffSummaryByThreadId : undefined,
   );
+
+  useFileWatchInvalidation(environmentId, path);
 
   const { data, isPending, isError, error } = useQuery({
     queryKey: ["previewReadFile", environmentId, path],
@@ -949,7 +876,7 @@ function LoadedBody({ file }: { file: PreviewFile }) {
     return <MetadataPlaceholder file={file} label="Нет данных" />;
   }
 
-  return renderLoadedBody(file, { ...data, ...(blobUrl ? { blobUrl } : {}) });
+  return renderLoadedBody(file, { ...data, ...(blobUrl ? { blobUrl } : {}) }, sourceView);
 }
 
 const FrozenMarkdownPreview = memo(function FrozenMarkdownPreview({ source }: { source: string }) {
@@ -1051,7 +978,13 @@ function EditableBody({
         ["previewReadFile", effectiveEnvironmentId, path],
         (prev) => (prev ? { ...prev, content: newContent, encoding: "utf8" } : prev),
       );
-      applyEditedContent(file.id, newContent);
+      // Inline-контент обновляем только если он был: файлы, открытые по path,
+      // должны продолжать читаться с диска (и обновляться по fs.watch).
+      if (hasInlineContent) {
+        applyEditedContent(file.id, newContent);
+      } else {
+        cancelEditing();
+      }
       toastManager.add({ type: "success", title: "Saved", description: file.name });
     } catch (err) {
       toastManager.add(
@@ -1064,7 +997,15 @@ function EditableBody({
     } finally {
       setSaving(false);
     }
-  }, [applyEditedContent, effectiveEnvironmentId, file, path, queryClient]);
+  }, [
+    applyEditedContent,
+    cancelEditing,
+    effectiveEnvironmentId,
+    file,
+    hasInlineContent,
+    path,
+    queryClient,
+  ]);
 
   if (!hasInlineContent && isPending) {
     return (
@@ -1140,11 +1081,15 @@ function EditableBody({
 }
 
 function Body({ file }: { file: PreviewFile }) {
-  const { currentChatEnvironmentId, editingFileId } = usePreviewPane();
+  const { currentChatEnvironmentId, editingFileId, sourceViewFileIds } = usePreviewPane();
   const effectiveEnvironmentId = file.environmentId ?? currentChatEnvironmentId ?? undefined;
   const hasInlineContent = Boolean(file.content) || Boolean(file.blobUrl);
+  const sourceView = DUAL_VIEW_KINDS.has(file.kind) && sourceViewFileIds.includes(file.id);
 
   if (editingFileId === file.id && effectiveEnvironmentId && KIND_EDITABLE.has(file.kind)) {
+    if (file.kind === "csv" || file.kind === "xlsx") {
+      return <TableEditableBody file={file} effectiveEnvironmentId={effectiveEnvironmentId} />;
+    }
     return <EditableBody file={file} effectiveEnvironmentId={effectiveEnvironmentId} />;
   }
 
@@ -1153,11 +1098,15 @@ function Body({ file }: { file: PreviewFile }) {
       file.environmentId === effectiveEnvironmentId
         ? file
         : { ...file, environmentId: effectiveEnvironmentId };
-    return <LoadedBody file={fileWithEnv} />;
+    return <LoadedBody file={fileWithEnv} sourceView={sourceView} />;
   }
 
   if (!hasInlineContent) {
     return <MetadataPlaceholder file={file} label="Нет данных для предпросмотра" />;
+  }
+
+  if (sourceView && file.content) {
+    return <SourceCodeBody file={file} content={file.content} />;
   }
 
   switch (file.kind) {
@@ -1172,9 +1121,9 @@ function Body({ file }: { file: PreviewFile }) {
     case "csv":
       return <CsvBody file={file} content={file.content} />;
     case "json":
-      return <JsonBody fileId={file.id} content={file.content} />;
+      return <JsonBody file={file} content={file.content} />;
     case "text":
-      return <TextBody fileId={file.id} content={file.content} />;
+      return <CodeFileView fileId={file.id} fileName={file.name} content={file.content} />;
     case "svg":
       return <SvgBody file={file} content={file.content} />;
     case "pdf":
@@ -1184,6 +1133,9 @@ function Body({ file }: { file: PreviewFile }) {
     case "docx":
       return <MetadataPlaceholder file={file} label="Word доступен только из файловой системы" />;
     default:
+      if (file.content) {
+        return <CodeFileView fileId={file.id} fileName={file.name} content={file.content} />;
+      }
       return <MetadataPlaceholder file={file} label="Формат не поддерживается" />;
   }
 }
@@ -1221,7 +1173,13 @@ function PathBar({
   file: PreviewFile;
   onOpenAt: (path: string | null) => void;
 }) {
-  const { currentChatEnvironmentId, editingFileId, startEditing } = usePreviewPane();
+  const {
+    currentChatEnvironmentId,
+    editingFileId,
+    startEditing,
+    sourceViewFileIds,
+    toggleSourceView,
+  } = usePreviewPane();
   const rawPath = file.path ?? file.name;
   const segments = useMemo(() => buildPathSegments(rawPath), [rawPath]);
   const fileSegment = segments.length > 0 ? segments[segments.length - 1]! : null;
@@ -1231,6 +1189,11 @@ function PathBar({
   const [copied, setCopied] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const canEdit = canEditFile(file, currentChatEnvironmentId) && editingFileId !== file.id;
+  const isSourceView = sourceViewFileIds.includes(file.id);
+  const canToggleView =
+    DUAL_VIEW_KINDS.has(file.kind) &&
+    (Boolean(file.content) || Boolean(file.path)) &&
+    editingFileId !== file.id;
 
   useEffect(() => {
     if (!copied) return;
@@ -1286,6 +1249,27 @@ function PathBar({
         </span>
       </div>
       <TooltipProvider delay={0} closeDelay={0}>
+        {canToggleView ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={() => toggleSourceView(file.id)}
+                  aria-label={isSourceView ? "Показать превью" : "Показать исходный код"}
+                  className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  {isSourceView ? (
+                    <EyeIcon className="size-3.5" />
+                  ) : (
+                    <CodeXmlIcon className="size-3.5" />
+                  )}
+                </button>
+              }
+            />
+            <TooltipPopup side="bottom">{isSourceView ? "Превью" : "Исходный код"}</TooltipPopup>
+          </Tooltip>
+        ) : null}
         {canEdit ? (
           <Tooltip>
             <TooltipTrigger
@@ -1346,16 +1330,32 @@ function PathBar({
 export function PreviewPane() {
   const {
     open,
+    previewLayoutMode,
     files,
     activeFileId,
     setActiveFile,
     closeFile,
     setOpen,
+    togglePreviewLayoutMode,
     openBrowser,
+    openUrl,
     currentChatProjectCwd,
     currentChatEnvironmentId,
+    toggleSourceView,
   } = usePreviewPane();
-  const { open: sidebarOpen, openMobile, isMobile } = useSidebar();
+  const tabStripRef = useRef<HTMLDivElement | null>(null);
+
+  // Прокручиваем активную вкладку в видимую область: при длинном ряде вкладок
+  // новая вкладка открывалась за правым краем и оставалась невидимой.
+  useEffect(() => {
+    const strip = tabStripRef.current;
+    if (!strip) return;
+    const id = activeFileId ?? files[0]?.id;
+    if (!id) return;
+    const el = strip.querySelector(`[data-preview-tab="${CSS.escape(id)}"]`);
+    el?.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }, [activeFileId, files]);
+  const { open: sidebarOpen, openMobile, isMobile, toggleSidebar } = useSidebar();
   const sidebarVisible = isMobile ? openMobile : sidebarOpen;
   const maxWidthRatio = sidebarVisible ? 0.6 : 0.8;
   const [width, setWidth] = useState<number>(() => readStoredWidth());
@@ -1421,6 +1421,8 @@ export function PreviewPane() {
   );
 
   const clampedWidth = Math.min(maxWidth, Math.max(MIN_PREVIEW_WIDTH, width));
+  const isFocusMode = previewLayoutMode === "focus";
+  const focusLeft = sidebarVisible ? "var(--sidebar-width)" : "0px";
 
   if (!open || files.length === 0) {
     return null;
@@ -1439,35 +1441,72 @@ export function PreviewPane() {
 
   return (
     <aside
-      className="relative flex h-full shrink-0 flex-col border-l border-border bg-background"
-      style={{ width: `${clampedWidth}px` }}
+      className={cn(
+        "flex flex-col border-l border-border bg-background",
+        isFocusMode ? "fixed bottom-0 right-0 top-0 z-50 shadow-2xl" : "relative h-full shrink-0",
+      )}
+      style={isFocusMode ? { left: focusLeft } : { width: `${clampedWidth}px` }}
     >
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        onPointerDown={handleResizePointerDown}
-        onPointerMove={handleResizePointerMove}
-        onPointerUp={handleResizePointerEnd}
-        onPointerCancel={handleResizePointerEnd}
-        className="absolute left-0 top-0 z-30 h-full w-1.5 -translate-x-1/2 cursor-ew-resize hover:bg-primary/30 active:bg-primary/50"
-      />
-      <header className="relative flex h-9 shrink-0 items-center border-b border-border bg-card pr-2">
-        <div className="scrollbar-hide flex min-w-0 flex-1 items-center gap-1 overflow-x-auto pl-2">
+      {!isFocusMode ? (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={handleResizePointerEnd}
+          onPointerCancel={handleResizePointerEnd}
+          className="absolute left-0 top-0 z-30 h-full w-1.5 -translate-x-1/2 cursor-ew-resize hover:bg-primary/30 active:bg-primary/50"
+        />
+      ) : null}
+      <header
+        className={cn(
+          "relative z-40 flex h-9 shrink-0 items-center border-b border-border bg-card pr-2",
+          isFocusMode && "h-[52px] fullscreen:h-9 wco:h-[env(titlebar-area-height)]",
+          isFocusMode &&
+            !sidebarVisible &&
+            "pl-[78px] fullscreen:pl-2 wco:pl-[calc(env(titlebar-area-x)+1em)]",
+        )}
+      >
+        {isFocusMode && !sidebarVisible ? (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            onClick={toggleSidebar}
+            aria-label="Показать левую панель"
+            title="Показать левую панель"
+            className="mr-1 shrink-0"
+          >
+            <PanelLeftOpenIcon />
+          </Button>
+        ) : null}
+        <div
+          ref={tabStripRef}
+          className={cn(
+            "scrollbar-hide flex min-w-0 flex-1 items-center gap-1 overflow-x-auto pl-2",
+            isFocusMode && sidebarVisible && "pl-2",
+            isFocusMode && !sidebarVisible && "pl-0 fullscreen:pl-2",
+          )}
+        >
           {files.map((file) => {
             const Icon = KIND_ICON[file.kind];
             const isActive = file.id === active?.id;
+            const dualView = DUAL_VIEW_KINDS.has(file.kind);
             return (
               <button
                 key={file.id}
                 type="button"
+                data-preview-tab={file.id}
                 onClick={() => setActiveFile(file.id)}
+                onDoubleClick={() => {
+                  if (dualView) toggleSourceView(file.id);
+                }}
                 className={cn(
                   "group inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs",
                   isActive
                     ? "bg-accent text-accent-foreground"
                     : "text-muted-foreground hover:bg-accent/50",
                 )}
-                title={`${KIND_LABEL[file.kind]} — ${file.name}`}
+                title={`${KIND_LABEL[file.kind]} — ${file.name}${dualView ? "\nДвойной клик: код ↔ превью" : ""}`}
               >
                 <Icon className="size-3.5 shrink-0" />
                 <span className="max-w-[8rem] truncate">{file.name}</span>
@@ -1494,19 +1533,41 @@ export function PreviewPane() {
           })}
           <button
             type="button"
-            onClick={() =>
-              openBrowser({
-                environmentId: currentChatEnvironmentId ?? active?.environmentId ?? null,
-                startPath: currentChatProjectCwd ?? null,
-              })
-            }
-            aria-label="Открыть файл из проекта"
-            title="Открыть файл из корня проекта"
+            onClick={async (event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              const choice = await readLocalApi()?.contextMenu.show(
+                [
+                  { id: "file", label: "Открыть файл…" },
+                  { id: "page", label: "Открыть страницу" },
+                ],
+                { x: rect.left, y: rect.bottom + 4 },
+              );
+              if (choice === "file") {
+                openBrowser({
+                  environmentId: currentChatEnvironmentId ?? active?.environmentId ?? null,
+                  startPath: currentChatProjectCwd ?? null,
+                });
+              } else if (choice === "page") {
+                openUrl();
+              }
+            }}
+            aria-label="Открыть файл или страницу"
+            title="Открыть файл или страницу"
             className="sticky right-0 inline-flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-md bg-card text-muted-foreground before:pointer-events-none before:absolute before:inset-0 before:bg-accent before:opacity-0 hover:text-foreground hover:before:opacity-100 sm:size-6"
           >
             <PlusIcon className="relative size-3.5" />
           </button>
         </div>
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          onClick={togglePreviewLayoutMode}
+          aria-label={isFocusMode ? "Вернуть боковую панель" : "Фокус preview"}
+          title={isFocusMode ? "Вернуть боковую панель" : "Фокус preview"}
+          className="relative shrink-0"
+        >
+          {isFocusMode ? <Minimize2Icon /> : <Maximize2Icon />}
+        </Button>
         <Button
           size="icon-xs"
           variant="ghost"
@@ -1517,8 +1578,11 @@ export function PreviewPane() {
           <XIcon />
         </Button>
       </header>
-      {active ? <PathBar file={active} onOpenAt={handleOpenAt} /> : null}
-      <div className="min-h-0 flex-1">{active ? <Body file={active} /> : null}</div>
+      {active && !isBrowserTab(active) ? <PathBar file={active} onOpenAt={handleOpenAt} /> : null}
+      <div className={cn("relative min-h-0 flex-1", isFocusMode && "pb-36")}>
+        {active && !isBrowserTab(active) ? <Body file={active} /> : null}
+        <BrowserViews activeId={active?.id ?? null} />
+      </div>
     </aside>
   );
 }

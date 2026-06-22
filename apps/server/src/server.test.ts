@@ -55,6 +55,7 @@ import { vi } from "vitest";
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
 import type { ServerConfigShape } from "./config.ts";
+import { BrowserBridgeTest } from "./browserBridge.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
@@ -645,6 +646,7 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provideMerge(makeAuthTestLayer()),
+      Layer.provideMerge(BrowserBridgeTest),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provide(layerConfig),
@@ -936,6 +938,37 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       assert.equal(response.status, 200);
       assert.deepEqual(body, testEnvironmentDescriptor);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects unauthorized or invalid browser bridge commands", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const unauthorized = yield* HttpClient.post("/api/browser/command", {
+        body: HttpBody.text(JSON.stringify({ command: "state" }), "application/json"),
+      });
+      assert.equal(unauthorized.status, 401);
+
+      const invalid = yield* HttpClient.post("/api/browser/command", {
+        headers: {
+          authorization: "Bearer test-browser-bridge-token",
+        },
+        body: HttpBody.text(JSON.stringify({ command: "dance" }), "application/json"),
+      });
+      assert.equal(invalid.status, 400);
+
+      const unknownResult = yield* HttpClient.post("/api/browser/command/result", {
+        body: HttpBody.text(
+          JSON.stringify({
+            commandId: "missing-command",
+            responseToken: "missing-token",
+            ok: true,
+          }),
+          "application/json",
+        ),
+      });
+      assert.equal(unknownResult.status, 404);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

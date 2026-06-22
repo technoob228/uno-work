@@ -156,21 +156,40 @@ function mapSession(session: OrchestrationSession): ThreadSession {
     createdAt: session.updatedAt,
     updatedAt: session.updatedAt,
     ...(session.lastError ? { lastError: session.lastError } : {}),
+    ...(session.lastErrorClass ? { lastErrorClass: session.lastErrorClass } : {}),
   };
 }
 
 function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage): ChatMessage {
-  const attachments = message.attachments?.map((attachment) => ({
-    type: "image" as const,
-    id: attachment.id,
-    name: attachment.name,
-    mimeType: attachment.mimeType,
-    sizeBytes: attachment.sizeBytes,
-    previewUrl: resolveEnvironmentHttpUrl({
-      environmentId,
-      pathname: attachmentPreviewRoutePath(attachment.id),
-    }),
-  }));
+  const attachments = message.attachments?.map((attachment) => {
+    if (attachment.type === "image") {
+      return {
+        type: "image" as const,
+        id: attachment.id,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        previewUrl: resolveEnvironmentHttpUrl({
+          environmentId,
+          pathname: attachmentPreviewRoutePath(attachment.id),
+        }),
+      };
+    }
+
+    return {
+      type: "video_digest" as const,
+      id: attachment.id,
+      name: attachment.name,
+      sourceMimeType: attachment.sourceMimeType,
+      sourceSizeBytes: attachment.sourceSizeBytes,
+      durationMs: attachment.durationMs,
+      digestId: attachment.digestId,
+      jobId: attachment.jobId,
+      frameCount: attachment.frameCount,
+      transcriptSegmentCount: attachment.transcriptSegmentCount,
+      ...(attachment.posterPreviewUrl ? { posterPreviewUrl: attachment.posterPreviewUrl } : {}),
+    };
+  });
 
   return {
     id: message.id,
@@ -378,7 +397,8 @@ function threadSessionsEqual(
     left.activeTurnId === right.activeTurnId &&
     left.createdAt === right.createdAt &&
     left.updatedAt === right.updatedAt &&
-    left.lastError === right.lastError
+    left.lastError === right.lastError &&
+    left.lastErrorClass === right.lastErrorClass
   );
 }
 
@@ -1332,19 +1352,36 @@ function applyEnvironmentOrchestrationEvent(
       }));
 
     case "thread.turn-interrupt-requested": {
-      if (event.payload.turnId === undefined) {
-        return state;
-      }
       return updateThreadState(state, event.payload.threadId, (thread) => {
+        const turnId =
+          event.payload.turnId ?? thread.session?.activeTurnId ?? thread.latestTurn?.turnId;
         const latestTurn = thread.latestTurn;
-        if (latestTurn === null || latestTurn.turnId !== event.payload.turnId) {
-          return thread;
+        const updatedSession: ThreadSession | null =
+          thread.session === null
+            ? null
+            : (() => {
+                const { activeTurnId: _activeTurnId, ...session } = thread.session;
+                return {
+                  ...session,
+                  status: session.status === "closed" ? "closed" : "ready",
+                  orchestrationStatus:
+                    session.orchestrationStatus === "stopped" ? "stopped" : "ready",
+                  updatedAt: event.payload.createdAt,
+                };
+              })();
+        if (latestTurn === null || turnId === undefined || latestTurn.turnId !== turnId) {
+          return {
+            ...thread,
+            session: updatedSession,
+            updatedAt: event.occurredAt,
+          };
         }
         return {
           ...thread,
+          session: updatedSession,
           latestTurn: buildLatestTurn({
             previous: latestTurn,
-            turnId: event.payload.turnId,
+            turnId,
             state: "interrupted",
             requestedAt: latestTurn.requestedAt,
             startedAt: latestTurn.startedAt ?? event.payload.createdAt,

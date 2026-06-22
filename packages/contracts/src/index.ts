@@ -1,4 +1,5 @@
 export * from "./baseSchemas.ts";
+export * from "./cliVersion.ts";
 export * from "./auth.ts";
 export * from "./environment.ts";
 export * from "./remoteAccess.ts";
@@ -15,6 +16,7 @@ export * from "./git.ts";
 export * from "./vcs.ts";
 export * from "./sourceControl.ts";
 export * from "./orchestration.ts";
+export * from "./video.ts";
 export * from "./editor.ts";
 export * from "./project.ts";
 export * from "./filesystem.ts";
