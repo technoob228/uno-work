@@ -39,7 +39,7 @@ jobs:
       cli_dist_tag: ${{ steps.release_meta.outputs.cli_dist_tag }}
       is_prerelease: ${{ steps.release_meta.outputs.is_prerelease }}
       make_latest: ${{ steps.release_meta.outputs.make_latest }}
-      ref: ${{ github.sha }}
+      ref: ${{ steps.release_ref.outputs.ref }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -112,6 +112,19 @@ jobs:
               echo "make_latest=false" >> "$GITHUB_OUTPUT"
             fi
           fi
+
+      - id: release_ref
+        name: Resolve release ref
+        shell: bash
+        run: |
+          ref="${GITHUB_SHA}"
+          tag="${{ steps.release_meta.outputs.tag }}"
+
+          if [[ -n "$tag" ]] && git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null; then
+            ref="$(git rev-parse "refs/tags/$tag^{commit}")"
+          fi
+
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       - name: Lint
         run: bun run lint
@@ -360,6 +373,7 @@ jobs:
     steps:
       - id: app_token
         name: Mint release app token
+        if: ${{ secrets.RELEASE_APP_ID != '' && secrets.RELEASE_APP_PRIVATE_KEY != '' }}
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
@@ -450,7 +464,7 @@ jobs:
             release-assets/*.blockmap
             release-assets/*.yml
           fail_on_unmatched_files: true
-          token: ${{ steps.app_token.outputs.token }}
+          token: ${{ steps.app_token.outputs.token || github.token }}
 
       - name: Publish first release
         if: needs.preflight.outputs.previous_tag == ''
@@ -470,7 +484,7 @@ jobs:
             release-assets/*.blockmap
             release-assets/*.yml
           fail_on_unmatched_files: true
-          token: ${{ steps.app_token.outputs.token }}
+          token: ${{ steps.app_token.outputs.token || github.token }}
 
   finalize:
     name: Finalize release
@@ -481,6 +495,7 @@ jobs:
     steps:
       - id: app_token
         name: Mint release app token
+        if: ${{ secrets.RELEASE_APP_ID != '' && secrets.RELEASE_APP_PRIVATE_KEY != '' }}
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
@@ -492,15 +507,21 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ steps.app_token.outputs.token }}
+          token: ${{ steps.app_token.outputs.token || github.token }}
           persist-credentials: true
 
       - id: app_bot
-        name: Resolve GitHub App bot identity
+        name: Resolve release bot identity
         env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token || github.token }}
           APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
         run: |
+          if [[ -z "$APP_SLUG" ]]; then
+            echo "name=github-actions[bot]" >> "$GITHUB_OUTPUT"
+            echo "email=41898282+github-actions[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           user_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
           echo "name=${APP_SLUG}[bot]" >> "$GITHUB_OUTPUT"
           echo "email=${user_id}+${APP_SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
