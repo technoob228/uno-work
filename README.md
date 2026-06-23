@@ -8,11 +8,12 @@ Uno Work is not an IDE. It's a desktop app that connects to AI coding agents (ha
 
 Install the latest desktop app from [GitHub Releases](https://github.com/technoob228/uno-work/releases).
 
-| Platform              | File                |
-| --------------------- | ------------------- |
-| macOS (Apple Silicon) | `Uno-Work.dmg`      |
-| Windows               | `Uno-Work.exe`      |
-| Linux                 | `Uno-Work.AppImage` |
+| Platform              | File                 |
+| --------------------- | -------------------- |
+| macOS (Apple Silicon) | `Uno-Work-arm64.dmg` |
+| macOS (Intel)         | `Uno-Work-x64.dmg`   |
+| Windows               | `Uno-Work.exe`       |
+| Linux                 | `Uno-Work.AppImage`  |
 
 ## Features
 

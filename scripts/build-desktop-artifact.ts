@@ -32,6 +32,7 @@ const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("..", import.meta.url))),
 );
 const encodeJsonString = Schema.encodeEffect(Schema.UnknownFromJsonString);
+const ELECTRON_BUILDER_VERSION = "26.15.3";
 
 interface DesktopBuildIconAssets {
   readonly macIconPng: string;
@@ -558,6 +559,10 @@ export function resolveDesktopProductName(version: string): string {
     : (desktopPackageJson.productName ?? "Uno Work");
 }
 
+export function resolveMacSigningIdentity(signed: boolean): string | undefined {
+  return signed ? undefined : "-";
+}
+
 const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   platform: typeof BuildPlatform.Type,
   target: string,
@@ -588,11 +593,18 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   }
 
   if (platform === "mac") {
-    buildConfig.mac = {
+    const macConfig: Record<string, unknown> = {
       target: target === "dmg" ? [target, "zip"] : [target],
       icon: "icon.icns",
       category: "public.app-category.developer-tools",
     };
+    const identity = resolveMacSigningIdentity(signed);
+    if (identity) {
+      macConfig.identity = identity;
+      macConfig.entitlements = "apps/desktop/resources/entitlements.mac.plist";
+      macConfig.entitlementsInherit = "apps/desktop/resources/entitlements.mac.plist";
+    }
+    buildConfig.mac = macConfig;
   }
 
   if (platform === "linux") {
@@ -625,6 +637,54 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   }
 
   return buildConfig;
+});
+
+const verifyMacAppCodeSignature = Effect.fn("verifyMacAppCodeSignature")(function* (
+  stageDistDir: string,
+) {
+  const findResult = yield* spawnAndCollectOutput(
+    ChildProcess.make("find", [stageDistDir, "-maxdepth", "2", "-type", "d", "-name", "*.app"]),
+  ).pipe(
+    Effect.mapError(
+      (cause) =>
+        new BuildScriptError({
+          message: "Failed to locate macOS app bundle for code signature verification.",
+          cause,
+        }),
+    ),
+  );
+  if (findResult.exitCode !== 0) {
+    return yield* new BuildScriptError({
+      message: `Failed to locate macOS app bundle for code signature verification: ${findResult.stderr}`,
+    });
+  }
+
+  const appPaths = findResult.stdout
+    .split("\n")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (appPaths.length === 0) {
+    return yield* new BuildScriptError({
+      message: `Build completed but no macOS .app bundle was found in ${stageDistDir}.`,
+    });
+  }
+
+  for (const appPath of appPaths) {
+    const verifyResult = yield* spawnAndCollectOutput(
+      ChildProcess.make("codesign", ["--verify", "--deep", "--strict", "--verbose=4", appPath]),
+    );
+    if (verifyResult.exitCode !== 0) {
+      return yield* new BuildScriptError({
+        message: [
+          `macOS app code signature verification failed for ${appPath}.`,
+          verifyResult.stdout.trim(),
+          verifyResult.stderr.trim(),
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      });
+    }
+  }
 });
 
 const assertPlatformBuildResources = Effect.fn("assertPlatformBuildResources")(function* (
@@ -869,7 +929,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       ...commandOutputOptions(options.verbose),
       // Windows needs shell mode to resolve .cmd shims.
       shell: process.platform === "win32",
-    })`bun x --install=fallback electron-builder ${platformConfig.cliFlag} --${options.arch} --publish never`,
+    })`bun x --install=fallback electron-builder@${ELECTRON_BUILDER_VERSION} ${platformConfig.cliFlag} --${options.arch} --publish never`,
   );
 
   const stageDistDir = path.join(stageAppDir, "dist");
@@ -877,6 +937,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     return yield* new BuildScriptError({
       message: `Build completed but dist directory was not found at ${stageDistDir}`,
     });
+  }
+  if (options.platform === "mac") {
+    yield* verifyMacAppCodeSignature(stageDistDir);
   }
 
   const stageEntries = yield* fs.readDirectory(stageDistDir);

@@ -7,7 +7,6 @@ This document covers the unified release workflow for stable and nightly desktop
 - Workflow: `.github/workflows/release.yml`
 - Triggers:
   - push tag matching `v*.*.*` for stable releases
-  - scheduled nightly at `09:00 UTC`
   - manual `workflow_dispatch` for either channel
 - Runs quality gates first: lint, typecheck, test.
 - Builds four artifacts in parallel for both channels:
@@ -24,13 +23,13 @@ This document covers the unified release workflow for stable and nightly desktop
 - Publishes the CLI package (`apps/server`, npm package `t3`) with OIDC trusted publishing from the same workflow file:
   - stable releases publish npm dist-tag `latest`
   - nightly releases publish npm dist-tag `nightly`
-- Signing is optional and auto-detected per platform from secrets.
+- Platform signing is auto-detected from secrets. Until Apple Developer ID signing is configured,
+  macOS release builds must still be ad-hoc signed and must pass `codesign --verify --deep --strict`.
 
 ## Nightly builds
 
 - Workflow: `.github/workflows/release.yml`
 - Triggers:
-  - scheduled every day at `09:00 UTC`
   - manual `workflow_dispatch` with `channel=nightly`
 - Runs the same desktop quality gates and artifact matrix as the tagged release flow.
 - Publishes a GitHub prerelease only:
@@ -63,6 +62,7 @@ This document covers the unified release workflow for stable and nightly desktop
 - macOS metadata note:
   - `electron-updater` reads `latest-mac.yml` on stable and `nightly-mac.yml` on nightly, for both Intel and Apple Silicon.
   - The workflow merges the per-arch mac manifests into one channel-specific mac manifest before publishing the GitHub Release.
+  - Ad-hoc-signed macOS builds are a temporary install path only; do not rely on macOS auto-update until Developer ID signing and notarization are enabled.
 
 ## 0) npm OIDC trusted publishing setup (CLI)
 
@@ -88,13 +88,35 @@ Checklist:
 
 Use this first to validate the release pipeline.
 
-1. Confirm no signing secrets are required for this test.
+1. Confirm no Apple/Azure signing secrets are required for this test.
 2. Create a test tag:
    - `git tag v0.0.0-test.1`
    - `git push origin v0.0.0-test.1`
 3. Wait for `.github/workflows/release.yml` to finish.
 4. Verify the GitHub Release contains all platform artifacts.
 5. Download each artifact and sanity-check installation on each OS.
+6. On macOS, mount the DMG and verify the bundled app before publishing any stable release:
+   - `codesign --verify --deep --strict --verbose=4 "/Volumes/Uno Work/Uno Work.app"`
+   - `codesign -dv --verbose=4 "/Volumes/Uno Work/Uno Work.app"`
+   - Expected before Apple certs: `Signature=adhoc`, `TeamIdentifier=not set`, valid sealed resources.
+   - Block release if macOS says the app is damaged or `codesign` reports missing resources.
+
+## 1.1) Temporary macOS policy before Apple certificates
+
+Until Apple Developer ID signing and notarization are configured, macOS releases are allowed only
+as correctly ad-hoc-signed builds. The build script enforces this by setting `mac.identity: "-"`
+when `--signed` is not passed and by failing if `codesign --verify --deep --strict` does not pass
+for the generated `.app`. The ad-hoc build also uses `apps/desktop/resources/entitlements.mac.plist`
+to allow Electron's runtime requirements without a Developer ID team identifier.
+
+This mode should let users open the app via the standard macOS Gatekeeper override flow:
+
+1. Open the DMG and drag `Uno Work.app` into `/Applications`.
+2. Try to open it once.
+3. If macOS blocks it as an unidentified developer, open System Settings -> Privacy & Security and allow it.
+
+Do not publish a macOS artifact that shows "damaged" on first launch. That means the app bundle is
+not merely untrusted; its local signature/resources are invalid. Rebuild before publishing.
 
 ## 2) Apple signing + notarization setup (macOS)
 
