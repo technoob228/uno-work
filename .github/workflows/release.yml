@@ -415,8 +415,44 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           pattern: desktop-*
-          merge-multiple: true
-          path: release-assets
+          path: release-artifacts
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf release-assets
+          mkdir -p release-assets
+
+          shopt -s nullglob
+          for artifact_dir in release-artifacts/desktop-*; do
+            artifact_name="$(basename "$artifact_dir")"
+
+            for file in "$artifact_dir"/*; do
+              base="$(basename "$file")"
+              if [[ "$base" == "builder-debug.yml" ]]; then
+                continue
+              fi
+
+              case "$artifact_name" in
+                desktop-mac-arm64|desktop-mac-x64)
+                  arch="${artifact_name##*-}"
+                  if [[ "$base" == Uno-Work.* ]]; then
+                    cp "$file" "release-assets/${base/Uno-Work./Uno-Work-${arch}.}"
+                  else
+                    cp "$file" "release-assets/$base"
+                    if [[ "$base" == *-mac*.yml ]]; then
+                      perl -0pi -e "s/Uno-Work\\./Uno-Work-${arch}./g" "release-assets/$base"
+                    fi
+                  fi
+                  ;;
+                *)
+                  cp "$file" "release-assets/$base"
+                  ;;
+              esac
+            done
+          done
 
       - name: Merge macOS updater manifests
         run: |
