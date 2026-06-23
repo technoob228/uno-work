@@ -371,9 +371,22 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      - id: release_auth
+        name: Resolve release auth mode
+        shell: bash
+        env:
+          RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+          RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          if [[ -n "$RELEASE_APP_ID" && -n "$RELEASE_APP_PRIVATE_KEY" ]]; then
+            echo "use_app_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "use_app_token=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - id: app_token
         name: Mint release app token
-        if: ${{ secrets.RELEASE_APP_ID != '' && secrets.RELEASE_APP_PRIVATE_KEY != '' }}
+        if: ${{ steps.release_auth.outputs.use_app_token == 'true' }}
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
@@ -493,9 +506,22 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      - id: release_auth
+        name: Resolve release auth mode
+        shell: bash
+        env:
+          RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+          RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          if [[ -n "$RELEASE_APP_ID" && -n "$RELEASE_APP_PRIVATE_KEY" ]]; then
+            echo "use_app_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "use_app_token=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - id: app_token
         name: Mint release app token
-        if: ${{ secrets.RELEASE_APP_ID != '' && secrets.RELEASE_APP_PRIVATE_KEY != '' }}
+        if: ${{ steps.release_auth.outputs.use_app_token == 'true' }}
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
