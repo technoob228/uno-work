@@ -259,6 +259,10 @@ jobs:
               echo "macOS signing enabled."
               args+=(--signed)
             else
+              if [[ "${{ needs.preflight.outputs.is_prerelease }}" == "false" ]]; then
+                echo "::error::Stable macOS releases require Apple signing/notarization secrets: CSC_LINK, CSC_KEY_PASSWORD, APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER."
+                exit 1
+              fi
               echo "macOS signing disabled (missing one or more Apple signing secrets)."
             fi
           elif [[ "${{ matrix.platform }}" == "win" ]]; then
