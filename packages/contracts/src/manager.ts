@@ -120,7 +120,7 @@ export const isAssistantProjectId = (projectId: string): boolean =>
 export const assistantTokenLabel = (projectId: string): string => `assistant:${projectId}`;
 
 /** Workspace files the settings UI may read/write for an assistant. */
-export const ASSISTANT_EDITABLE_FILES = ["AGENTS.md", "NOTES.md"] as const;
+export const ASSISTANT_EDITABLE_FILES = ["AGENTS.md", "NOTES.md", "ROUTING.md"] as const;
 export const AssistantEditableFileName = Schema.Literals(ASSISTANT_EDITABLE_FILES);
 export type AssistantEditableFileName = typeof AssistantEditableFileName.Type;
 

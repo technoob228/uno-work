@@ -411,11 +411,12 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
 
             <SettingsSection title="Context files" icon={<FileTextIcon className="size-3.5" />}>
               <SettingsRow
-                title="Instructions & notes"
-                description="AGENTS.md is what every harness reads when it runs this assistant's chats; NOTES.md is its durable memory. Edit freely."
+                title="Instructions, notes & routing"
+                description="AGENTS.md is what every harness reads when it runs this assistant's chats; NOTES.md is its durable memory; ROUTING.md maps task types to harness/model/effort and accumulates outcomes. Edit freely."
               >
                 <FileEditor projectId={projectId} name="AGENTS.md" onError={setError} />
                 <FileEditor projectId={projectId} name="NOTES.md" onError={setError} />
+                <FileEditor projectId={projectId} name="ROUTING.md" onError={setError} />
               </SettingsRow>
             </SettingsSection>
 
