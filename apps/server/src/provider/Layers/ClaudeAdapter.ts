@@ -197,6 +197,15 @@ export interface ClaudeAdapterLiveOptions {
   readonly nativeEventLogger?: EventNdjsonLogger;
   /** Дополнительный текст, добавляемый к пресетному системному промпту. */
   readonly appendSystemPrompt?: string;
+  /**
+   * Env-оверлей, вычисляемый per-query по контексту треда (threadId + cwd) —
+   * так browser bridge выдаёт scoped-токен и привязывает запросы харнесса
+   * к его проекту.
+   */
+  readonly bridgeEnvironment?: (context: {
+    readonly threadId?: string;
+    readonly cwd?: string;
+  }) => Record<string, string>;
 }
 
 function isUuid(value: string): boolean {
@@ -2057,6 +2066,17 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return;
     }
 
+    // Extended-thinking token telemetry: the SDK emits one `thinking_tokens`
+    // system message per thinking-token batch while the model reasons before
+    // answering. It is a progress counter, not an event we surface, and it is
+    // not part of the SDK's typed `subtype` union — so intercept it here before
+    // the `switch` to keep it from falling through to `default` and spamming
+    // `runtime.warning` (dozens to thousands per turn). The raw message is
+    // still captured by `logNativeSdkMessage` before this handler runs.
+    if ((message as { subtype?: string }).subtype === "thinking_tokens") {
+      return;
+    }
+
     const stamp = yield* makeEventStamp();
     const base = {
       eventId: stamp.eventId,
@@ -2908,7 +2928,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
-        env: claudeEnvironment,
+        env: {
+          ...claudeEnvironment,
+          ...(options?.bridgeEnvironment?.({
+            ...(threadId ? { threadId } : {}),
+            ...(input.cwd ? { cwd: input.cwd } : {}),
+          }) ?? {}),
+        },
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
       };
