@@ -172,6 +172,57 @@ export function setHermesSessionMode<E>(input: {
     .pipe(Effect.mapError(input.mapError), Effect.asVoid);
 }
 
+/**
+ * Генерирует config.yaml для изолированного per-thread HERMES_HOME.
+ *
+ * Зачем: hermes-грабля №2 — `session/set_model` пересоздаёт агента, и
+ * ACP-переданные mcpServers выпадают из `enabled_toolsets` нового агента
+ * (в `_make_agent` попадают только mcp_servers из config.yaml). Прописывая
+ * серверы в config.yaml, MCP-toolsets переживают ЛЮБОЙ rebuild; заодно
+ * дефолтная модель избавляет от начального set_model.
+ *
+ * Скаляры цитируются как JSON — валидное подмножество YAML, безопасно для
+ * токенов/URL.
+ */
+export function buildHermesConfigYaml(input: {
+  readonly model: string;
+  readonly mcpServers: ReadonlyArray<EffectAcpSchema.McpServer>;
+}): string {
+  const quote = JSON.stringify;
+  const lines: Array<string> = [
+    "model:",
+    `  provider: ${quote(HERMES_GATEWAY_PROVIDER)}`,
+    `  default: ${quote(input.model)}`,
+  ];
+  if (input.mcpServers.length > 0) {
+    lines.push("mcp_servers:");
+    for (const server of input.mcpServers) {
+      lines.push(`  ${quote(server.name)}:`);
+      if ("url" in server) {
+        lines.push(`    url: ${quote(server.url)}`);
+        if (server.headers.length > 0) {
+          lines.push("    headers:");
+          for (const header of server.headers) {
+            lines.push(`      ${quote(header.name)}: ${quote(header.value)}`);
+          }
+        }
+      } else {
+        lines.push(`    command: ${quote(server.command)}`);
+        if (server.args.length > 0) {
+          lines.push(`    args: [${server.args.map((arg) => quote(arg)).join(", ")}]`);
+        }
+        if (server.env.length > 0) {
+          lines.push("    env:");
+          for (const envVariable of server.env) {
+            lines.push(`      ${quote(envVariable.name)}: ${quote(envVariable.value)}`);
+          }
+        }
+      }
+    }
+  }
+  return lines.join("\n") + "\n";
+}
+
 // ── project-level .mcp.json → ACP mcpServers ────────────────────────────
 
 interface McpJsonServerEntry {
