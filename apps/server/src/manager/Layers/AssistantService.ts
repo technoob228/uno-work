@@ -137,10 +137,16 @@ const makeManagerAssistantService = Effect.gen(function* () {
 
       const label = assistantTokenLabel(projectId);
       const existingToken = yield* tokenRepository.getActiveByLabel(label);
-      const mcpConfigExists = yield* fs
-        .exists(mcpConfigPath)
-        .pipe(Effect.orElseSucceed(() => false));
-      if (Option.isNone(existingToken) || !mcpConfigExists) {
+      // The MCP config pins the daemon port; when the port changes between
+      // runs (dev servers probe for a free one) the file goes stale and the
+      // assistant loses its tools — rotate token + config together then.
+      const existingMcpConfig = yield* fs
+        .readFileString(mcpConfigPath)
+        .pipe(Effect.orElseSucceed(() => ""));
+      const mcpConfigCurrent =
+        existingMcpConfig.length > 0 &&
+        existingMcpConfig.includes(`127.0.0.1:${config.port}/api/manager/mcp`);
+      if (Option.isNone(existingToken) || !mcpConfigCurrent) {
         if (Option.isSome(existingToken)) {
           yield* tokenRepository.revoke({
             tokenId: existingToken.value.tokenId,
