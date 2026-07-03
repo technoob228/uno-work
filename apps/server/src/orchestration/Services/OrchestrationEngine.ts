@@ -10,7 +10,11 @@
  *
  * @module OrchestrationEngineService
  */
-import type { OrchestrationCommand, OrchestrationEvent } from "@t3tools/contracts";
+import type {
+  OrchestrationCommand,
+  OrchestrationCommandOrigin,
+  OrchestrationEvent,
+} from "@t3tools/contracts";
 import { Context } from "effect";
 import type { Effect, Stream } from "effect";
 
@@ -35,6 +39,9 @@ export interface OrchestrationEngineShape {
    * Dispatch a validated orchestration command.
    *
    * @param command - Valid orchestration command.
+   * @param options - Optional dispatch metadata. `origin` marks commands
+   *   issued by a non-user actor (manager tool layer) and is stamped into the
+   *   metadata of every event the command produces, forming the audit trail.
    * @returns Effect containing the sequence of the persisted event.
    *
    * Dispatch is serialized through an internal queue and deduplicated via
@@ -42,6 +49,7 @@ export interface OrchestrationEngineShape {
    */
   readonly dispatch: (
     command: OrchestrationCommand,
+    options?: { readonly origin?: OrchestrationCommandOrigin },
   ) => Effect.Effect<{ sequence: number }, OrchestrationDispatchError, never>;
 
   /**

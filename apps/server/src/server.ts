@@ -88,6 +88,24 @@ import {
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
 } from "./orchestration/http.ts";
+import {
+  managerAssistantAccessRouteLayer,
+  managerAssistantFileReadRouteLayer,
+  managerAssistantFileWriteRouteLayer,
+  managerAssistantOverviewRouteLayer,
+  managerAssistantsCreateRouteLayer,
+  managerAssistantsListRouteLayer,
+  managerAssistantTelegramRouteLayer,
+  managerMcpDeleteRouteLayer,
+  managerMcpGetRouteLayer,
+  managerMcpRouteLayer,
+  managerProposalResolveRouteLayer,
+  managerProposalsRouteLayer,
+  managerTokensCreateRouteLayer,
+  managerTokensListRouteLayer,
+  managerTokensRevokeRouteLayer,
+} from "./manager/http.ts";
+import { ManagerAssistantBootstrapLive, ManagerLayerLive } from "./manager/runtimeLayer.ts";
 import { NetService } from "@t3tools/shared/Net";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 
@@ -242,6 +260,13 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
 );
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+  // Assistant bootstrap (project/workspace/token) runs above the manager
+  // layer so it can consume its services during startup.
+  Layer.provideMerge(ManagerAssistantBootstrapLive),
+  // Manager tool layer (MCP surface for the manager brain). Sits above the
+  // orchestration/persistence layers provided further down this pipe so it
+  // shares the same engine and SqlClient instances.
+  Layer.provideMerge(ManagerLayerLive),
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
@@ -306,6 +331,21 @@ export const makeRoutesLayer = Layer.mergeAll(
   browserBridgeCommandRouteLayer,
   browserBridgeCommandResultRouteLayer,
   browserBridgeOpenRouteLayer,
+  managerAssistantAccessRouteLayer,
+  managerAssistantFileReadRouteLayer,
+  managerAssistantFileWriteRouteLayer,
+  managerAssistantOverviewRouteLayer,
+  managerAssistantsCreateRouteLayer,
+  managerAssistantsListRouteLayer,
+  managerAssistantTelegramRouteLayer,
+  managerMcpDeleteRouteLayer,
+  managerMcpGetRouteLayer,
+  managerMcpRouteLayer,
+  managerProposalResolveRouteLayer,
+  managerProposalsRouteLayer,
+  managerTokensCreateRouteLayer,
+  managerTokensListRouteLayer,
+  managerTokensRevokeRouteLayer,
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
   otlpTracesProxyRouteLayer,

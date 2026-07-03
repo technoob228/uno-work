@@ -1006,12 +1006,28 @@ export const ThreadActivityAppendedPayload = Schema.Struct({
   activity: OrchestrationThreadActivity,
 });
 
+/**
+ * `OrchestrationCommandOrigin` — provenance marker for commands dispatched by
+ * a non-user actor (currently only the manager agent's tool layer).
+ *
+ * Stamped into `OrchestrationEventMetadata.origin` for every event produced by
+ * such a command, so the event store doubles as the manager audit trail.
+ * Absent for ordinary user/client commands.
+ */
+export const OrchestrationCommandOrigin = Schema.Struct({
+  kind: Schema.Literal("manager"),
+  tokenId: TrimmedNonEmptyString,
+  proposalId: Schema.optional(TrimmedNonEmptyString),
+});
+export type OrchestrationCommandOrigin = typeof OrchestrationCommandOrigin.Type;
+
 export const OrchestrationEventMetadata = Schema.Struct({
   providerTurnId: Schema.optional(TrimmedNonEmptyString),
   providerItemId: Schema.optional(ProviderItemId),
   adapterKey: Schema.optional(TrimmedNonEmptyString),
   requestId: Schema.optional(ApprovalRequestId),
   ingestedAt: Schema.optional(IsoDateTime),
+  origin: Schema.optional(OrchestrationCommandOrigin),
 });
 export type OrchestrationEventMetadata = typeof OrchestrationEventMetadata.Type;
 

@@ -853,11 +853,17 @@ const tokenOnlyFlag = Flag.boolean("token-only").pipe(
   Flag.withDefault(false),
 );
 
+const pairingRoleFlag = Flag.choice("role", ["owner", "client"]).pipe(
+  Flag.withDescription("Role granted to the session created from this pairing token."),
+  Flag.withDefault("client"),
+);
+
 const pairingCreateCommand = Command.make("create", {
   ...authLocationFlags,
   ttl: ttlFlag,
   label: labelFlag,
   baseUrl: baseUrlFlag,
+  role: pairingRoleFlag,
   json: jsonFlag,
 }).pipe(
   Command.withDescription("Issue a new client pairing token."),
@@ -867,7 +873,7 @@ const pairingCreateCommand = Command.make("create", {
       (authControlPlane) =>
         Effect.gen(function* () {
           const issued = yield* authControlPlane.createPairingLink({
-            role: "client",
+            role: flags.role,
             subject: "one-time-token",
             ...(Option.isSome(flags.ttl) ? { ttl: flags.ttl.value } : {}),
             ...(Option.isSome(flags.label) ? { label: flags.label.value } : {}),

@@ -1,0 +1,389 @@
+import type {
+  ManagerActionProposal,
+  ManagerPendingApprovalSummary,
+  ManagerProposedAction,
+  ManagerScope,
+  ManagerThreadSummary,
+  ManagerWriteReceipt,
+  OrchestrationThreadShell,
+  ProjectId,
+  ThreadId,
+} from "@t3tools/contracts";
+import {
+  MANAGER_PROPOSAL_TTL_MINUTES,
+  MANAGER_READ_THREAD_DETAIL_DEFAULT_MESSAGES,
+  MANAGER_READ_THREAD_DETAIL_MAX_MESSAGE_CHARS,
+  ManagerProposalId,
+} from "@t3tools/contracts";
+import { Effect, Layer, Option } from "effect";
+import * as crypto from "node:crypto";
+
+import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
+import { ManagerActionProposalRepository } from "../../persistence/Services/ManagerActionProposals.ts";
+import {
+  ManagerNotFoundError,
+  ManagerProjectNotAllowedError,
+  ManagerProposalResolutionError,
+  ManagerScopeDeniedError,
+  type ManagerToolError,
+} from "../Errors.ts";
+import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
+import { ManagerApprovalService } from "../Services/ManagerApprovalService.ts";
+import { ManagerBudgetService } from "../Services/ManagerBudgetService.ts";
+import {
+  type ManagerCaller,
+  ManagerToolService,
+  type ManagerToolServiceShape,
+} from "../Services/ManagerToolService.ts";
+
+const UNTRUSTED_OPEN = "<untrusted_thread_output>";
+const UNTRUSTED_CLOSE = "</untrusted_thread_output>";
+
+/**
+ * Wrap attacker-influenced thread content in explicit delimiters. Occurrences
+ * of the closing delimiter inside the content are defanged so injected text
+ * cannot escape the envelope.
+ */
+export function wrapUntrustedContent(text: string): string {
+  const defanged = text.replaceAll("</untrusted_thread_output", "<\\/untrusted_thread_output");
+  return `${UNTRUSTED_OPEN}${defanged}${UNTRUSTED_CLOSE}`;
+}
+
+function requireScope(
+  caller: ManagerCaller,
+  scope: ManagerScope,
+): Effect.Effect<void, ManagerScopeDeniedError> {
+  return caller.scopes.includes(scope)
+    ? Effect.void
+    : Effect.fail(new ManagerScopeDeniedError({ requiredScope: scope }));
+}
+
+function isProjectAllowed(caller: ManagerCaller, projectId: ProjectId): boolean {
+  return caller.projectAllowlist === "all" || caller.projectAllowlist.includes(projectId);
+}
+
+function requireProjectAllowed(
+  caller: ManagerCaller,
+  projectId: ProjectId,
+): Effect.Effect<void, ManagerProjectNotAllowedError> {
+  return isProjectAllowed(caller, projectId)
+    ? Effect.void
+    : Effect.fail(new ManagerProjectNotAllowedError({ projectId }));
+}
+
+function toThreadSummary(shell: OrchestrationThreadShell): ManagerThreadSummary {
+  return {
+    threadId: shell.id,
+    projectId: shell.projectId,
+    title: shell.title,
+    runtimeMode: shell.runtimeMode,
+    sessionStatus: shell.session?.status ?? null,
+    latestTurn: shell.latestTurn,
+    updatedAt: shell.updatedAt,
+    archivedAt: shell.archivedAt,
+    hasPendingApprovals: shell.hasPendingApprovals,
+    hasPendingUserInput: shell.hasPendingUserInput,
+  };
+}
+
+function timingSafeStringEqual(a: string, b: string): boolean {
+  if (a.length === 0 || a.length !== b.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+}
+
+const makeManagerToolService = Effect.gen(function* () {
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const pendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
+  const proposalRepository = yield* ManagerActionProposalRepository;
+  const budgetService = yield* ManagerBudgetService;
+  const approvalService = yield* ManagerApprovalService;
+
+  const getAllowedThreadShell = (caller: ManagerCaller, threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const shell = yield* projectionSnapshotQuery.getThreadShellById(threadId);
+      if (Option.isNone(shell)) {
+        return yield* new ManagerNotFoundError({ entity: "thread", id: threadId });
+      }
+      yield* requireProjectAllowed(caller, shell.value.projectId);
+      return shell.value;
+    });
+
+  const listPendingApprovalsForThreads = (
+    threads: ReadonlyArray<OrchestrationThreadShell>,
+  ): Effect.Effect<ReadonlyArray<ManagerPendingApprovalSummary>, ProjectionRepositoryError> =>
+    Effect.forEach(
+      threads.filter((thread) => thread.hasPendingApprovals),
+      (thread) =>
+        pendingApprovalRepository.listByThreadId({ threadId: thread.id }).pipe(
+          Effect.map((approvals) =>
+            approvals
+              .filter((approval) => approval.status === "pending")
+              .map(
+                (approval): ManagerPendingApprovalSummary => ({
+                  threadId: approval.threadId,
+                  requestId: approval.requestId,
+                  createdAt: approval.createdAt,
+                }),
+              ),
+          ),
+        ),
+      { concurrency: 4 },
+    ).pipe(Effect.map((nested) => nested.flat()));
+
+  const fileProposal = (
+    caller: ManagerCaller,
+    action: ManagerProposedAction,
+  ): Effect.Effect<ManagerWriteReceipt, ManagerToolError> =>
+    Effect.gen(function* () {
+      yield* requireScope(caller, "threads:write");
+      yield* budgetService.checkWriteBudget(caller, action.kind);
+
+      const nowMs = Date.now();
+      const proposal: ManagerActionProposal = {
+        proposalId: ManagerProposalId.make(crypto.randomUUID()),
+        tokenId: caller.tokenId,
+        action,
+        status: "pending",
+        nonce: crypto.randomBytes(16).toString("hex"),
+        requestedAt: new Date(nowMs).toISOString(),
+        expiresAt: new Date(nowMs + MANAGER_PROPOSAL_TTL_MINUTES * 60 * 1_000).toISOString(),
+        resolvedAt: null,
+        resolvedBy: null,
+        resolutionCommandIds: [],
+      };
+      yield* proposalRepository.create(proposal);
+      yield* Effect.logInfo("manager proposal filed").pipe(
+        Effect.annotateLogs({
+          proposalId: proposal.proposalId,
+          tokenId: caller.tokenId,
+          actionKind: action.kind,
+          autoApprove: caller.autoApprove,
+        }),
+      );
+
+      // Auto-approve tier (in-app assistant): execute right away. The
+      // proposal row is still written and resolved as `auto:<tokenId>`, so
+      // the audit trail is identical to the manual path.
+      if (caller.autoApprove && caller.scopes.includes("threads:approve")) {
+        const resolved = yield* approvalService.resolve({
+          proposalId: proposal.proposalId,
+          decision: "approved",
+          resolvedBy: `auto:${caller.tokenId}`,
+        });
+        return {
+          status: "executed",
+          proposalId: resolved.proposalId,
+          commandIds: resolved.resolutionCommandIds,
+        } satisfies ManagerWriteReceipt;
+      }
+
+      return {
+        status: "pending-approval",
+        proposalId: proposal.proposalId,
+        nonce: proposal.nonce,
+        expiresAt: proposal.expiresAt,
+      } satisfies ManagerWriteReceipt;
+    });
+
+  const listThreads: ManagerToolServiceShape["listThreads"] = (caller, input) =>
+    Effect.gen(function* () {
+      yield* requireScope(caller, "threads:read");
+      if (input.projectId !== undefined) {
+        yield* requireProjectAllowed(caller, input.projectId);
+      }
+      const snapshot = yield* projectionSnapshotQuery.getShellSnapshot();
+      const allowedProjects = snapshot.projects.filter(
+        (project) =>
+          isProjectAllowed(caller, project.id) &&
+          (input.projectId === undefined || project.id === input.projectId),
+      );
+      const allowedProjectIds = new Set(allowedProjects.map((project) => project.id));
+      const threads = snapshot.threads.filter(
+        (thread) => allowedProjectIds.has(thread.projectId) && thread.archivedAt === null,
+      );
+      return {
+        projects: allowedProjects.map((project) => ({
+          projectId: project.id,
+          title: project.title,
+        })),
+        threads: threads.map(toThreadSummary),
+      };
+    });
+
+  const getThreadStatus: ManagerToolServiceShape["getThreadStatus"] = (caller, input) =>
+    Effect.gen(function* () {
+      yield* requireScope(caller, "threads:read");
+      const shell = yield* getAllowedThreadShell(caller, input.threadId);
+      const approvals = yield* pendingApprovalRepository
+        .listByThreadId({ threadId: shell.id })
+        .pipe(
+          Effect.map((rows) =>
+            rows
+              .filter((row) => row.status === "pending")
+              .map(
+                (row): ManagerPendingApprovalSummary => ({
+                  threadId: row.threadId,
+                  requestId: row.requestId,
+                  createdAt: row.createdAt,
+                }),
+              ),
+          ),
+        );
+      return { thread: toThreadSummary(shell), pendingApprovals: approvals };
+    });
+
+  const readThreadDetail: ManagerToolServiceShape["readThreadDetail"] = (caller, input) =>
+    Effect.gen(function* () {
+      yield* requireScope(caller, "threads:read");
+      const shell = yield* getAllowedThreadShell(caller, input.threadId);
+      const detail = yield* projectionSnapshotQuery.getThreadDetailById(shell.id);
+      if (Option.isNone(detail)) {
+        return yield* new ManagerNotFoundError({ entity: "thread", id: input.threadId });
+      }
+      const limit = input.lastMessages ?? MANAGER_READ_THREAD_DETAIL_DEFAULT_MESSAGES;
+      const allMessages = detail.value.messages;
+      const selected = allMessages.slice(-limit);
+      return {
+        thread: toThreadSummary(shell),
+        messages: selected.map((message) => {
+          const truncated = message.text.length > MANAGER_READ_THREAD_DETAIL_MAX_MESSAGE_CHARS;
+          const text = truncated
+            ? message.text.slice(0, MANAGER_READ_THREAD_DETAIL_MAX_MESSAGE_CHARS)
+            : message.text;
+          return {
+            role: message.role,
+            // User messages are still wrapped: they may quote agent output and
+            // the manager must treat the whole transcript as data.
+            text: wrapUntrustedContent(text),
+            createdAt: message.createdAt,
+            truncated,
+          };
+        }),
+        omittedMessageCount: Math.max(0, allMessages.length - selected.length),
+      };
+    });
+
+  const listPendingApprovals: ManagerToolServiceShape["listPendingApprovals"] = (caller) =>
+    Effect.gen(function* () {
+      yield* requireScope(caller, "threads:read");
+      const snapshot = yield* projectionSnapshotQuery.getShellSnapshot();
+      const allowedThreads = snapshot.threads.filter(
+        (thread) => isProjectAllowed(caller, thread.projectId) && thread.archivedAt === null,
+      );
+      const approvals = yield* listPendingApprovalsForThreads(allowedThreads);
+      return { approvals };
+    });
+
+  const createThread: ManagerToolServiceShape["createThread"] = (caller, input) =>
+    Effect.gen(function* () {
+      yield* requireProjectAllowed(caller, input.projectId);
+      const project = yield* projectionSnapshotQuery.getProjectShellById(input.projectId);
+      if (Option.isNone(project)) {
+        return yield* new ManagerNotFoundError({ entity: "project", id: input.projectId });
+      }
+      // Hard v1 rule: manager-created threads default to approval-required.
+      // A full-access request is representable but still lands as an explicit
+      // pending proposal like every other write.
+      const runtimeMode = input.runtimeMode ?? "approval-required";
+      return yield* fileProposal(caller, {
+        kind: "create-thread",
+        projectId: input.projectId,
+        title: input.title,
+        prompt: input.prompt,
+        modelSelection: input.modelSelection ?? null,
+        runtimeMode,
+      });
+    });
+
+  const sendTurn: ManagerToolServiceShape["sendTurn"] = (caller, input) =>
+    Effect.gen(function* () {
+      yield* getAllowedThreadShell(caller, input.threadId);
+      return yield* fileProposal(caller, {
+        kind: "send-turn",
+        threadId: input.threadId,
+        prompt: input.prompt,
+      });
+    });
+
+  const interruptTurn: ManagerToolServiceShape["interruptTurn"] = (caller, input) =>
+    Effect.gen(function* () {
+      yield* getAllowedThreadShell(caller, input.threadId);
+      return yield* fileProposal(caller, {
+        kind: "interrupt-turn",
+        threadId: input.threadId,
+      });
+    });
+
+  const respondToRequest: ManagerToolServiceShape["respondToRequest"] = (caller, input) =>
+    Effect.gen(function* () {
+      yield* requireScope(caller, "threads:approve");
+      yield* getAllowedThreadShell(caller, input.threadId);
+      return yield* fileProposal(caller, {
+        kind: "respond-to-request",
+        threadId: input.threadId,
+        requestId: input.requestId,
+        decision: input.decision,
+      });
+    });
+
+  const listProposals: ManagerToolServiceShape["listProposals"] = (caller, input) =>
+    Effect.gen(function* () {
+      yield* requireScope(caller, "threads:read");
+      const proposals = yield* proposalRepository.list(
+        input.status === undefined
+          ? { tokenId: caller.tokenId }
+          : { tokenId: caller.tokenId, status: input.status },
+      );
+      return { proposals };
+    });
+
+  const resolveProposal: ManagerToolServiceShape["resolveProposal"] = (caller, input) =>
+    Effect.gen(function* () {
+      yield* requireScope(caller, "threads:approve");
+      const existing = yield* proposalRepository.getById({ proposalId: input.proposalId });
+      if (Option.isNone(existing)) {
+        return yield* new ManagerNotFoundError({ entity: "proposal", id: input.proposalId });
+      }
+      const proposal = existing.value;
+      // The nonce is single-use by construction: it only ever resolves a
+      // pending proposal, and resolution is a one-way transition.
+      if (!timingSafeStringEqual(input.nonce, proposal.nonce)) {
+        return yield* new ManagerProposalResolutionError({
+          proposalId: input.proposalId,
+          reason: "invalid-nonce",
+        });
+      }
+      // The resolving token must itself be allowed to touch the action's
+      // target project; approve scope does not bypass the allowlist.
+      const action = proposal.action;
+      if (action.kind === "create-thread") {
+        yield* requireProjectAllowed(caller, action.projectId);
+      } else {
+        yield* getAllowedThreadShell(caller, action.threadId);
+      }
+      const resolved = yield* approvalService.resolve({
+        proposalId: input.proposalId,
+        decision: input.decision,
+        resolvedBy: `manager-token:${caller.tokenId}`,
+      });
+      return { proposal: resolved };
+    });
+
+  return {
+    listThreads,
+    getThreadStatus,
+    readThreadDetail,
+    listPendingApprovals,
+    createThread,
+    sendTurn,
+    interruptTurn,
+    respondToRequest,
+    listProposals,
+    resolveProposal,
+  } satisfies ManagerToolServiceShape;
+});
+
+export const ManagerToolServiceLive = Layer.effect(ManagerToolService, makeManagerToolService);

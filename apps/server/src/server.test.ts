@@ -114,6 +114,13 @@ import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
+import { ManagerApprovalService } from "./manager/Services/ManagerApprovalService.ts";
+import { ManagerToolService } from "./manager/Services/ManagerToolService.ts";
+import { ManagerAuthError, ManagerTokenAuthService } from "./manager/Services/ManagerTokenAuth.ts";
+import { ManagerTelegramService } from "./manager/Layers/TelegramConnector.ts";
+import { ManagerAssistantService } from "./manager/Services/AssistantService.ts";
+import { ManagerCapabilityTokenRepository } from "./persistence/Services/ManagerCapabilityTokens.ts";
+import { ManagerConnectorRepository } from "./persistence/Services/ManagerConnectors.ts";
 
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
@@ -567,6 +574,28 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(ManagerToolService)({}),
+          Layer.mock(ManagerApprovalService)({}),
+          Layer.mock(ManagerTokenAuthService)({
+            authenticate: () =>
+              Effect.fail(new ManagerAuthError({ detail: "No manager tokens in router tests." })),
+          }),
+          Layer.mock(ManagerCapabilityTokenRepository)({
+            getActiveByLabel: () => Effect.succeed(Option.none()),
+          }),
+          Layer.mock(ManagerConnectorRepository)({
+            get: () => Effect.succeed(Option.none()),
+          }),
+          Layer.mock(ManagerTelegramService)({
+            getRuntimeStatus: () => Effect.succeed({ botUsername: null, lastError: null }),
+          }),
+          Layer.mock(ManagerAssistantService)({
+            listAssistants: () => Effect.succeed([]),
+          }),
+        ),
+      ),
+      Layer.provide(
         Layer.mock(ProjectionSnapshotQuery)({
           getCommandReadModel: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
           getSnapshot: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
@@ -969,6 +998,30 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       });
       assert.equal(unknownResult.status, 404);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects manager routes without proper credentials", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      // MCP endpoint requires a manager capability token, not a user session.
+      const mcpWithoutToken = yield* HttpClient.post("/api/manager/mcp", {
+        body: HttpBody.text(
+          JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+          "application/json",
+        ),
+      });
+      assert.equal(mcpWithoutToken.status, 401);
+
+      // Owner management routes reject anonymous and token-authed callers.
+      const proposalsAnonymous = yield* HttpClient.get("/api/manager/proposals");
+      assert.equal(proposalsAnonymous.status, 401);
+
+      const tokensWithManagerToken = yield* HttpClient.get("/api/manager/tokens", {
+        headers: { authorization: "Bearer uwm_not-a-session" },
+      });
+      assert.equal(tokensWithManagerToken.status, 401);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

@@ -1,4 +1,5 @@
 import type {
+  OrchestrationCommandOrigin,
   OrchestrationEvent,
   OrchestrationReadModel,
   ProjectId,
@@ -47,6 +48,7 @@ import {
 
 interface CommandEnvelope {
   command: OrchestrationCommand;
+  origin: OrchestrationCommandOrigin | undefined;
   result: Deferred.Deferred<{ sequence: number }, OrchestrationDispatchError>;
   startedAtMs: number;
 }
@@ -146,7 +148,16 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           command: envelope.command,
           readModel: commandReadModel,
         });
-        const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase];
+        const decidedEventBases = Array.isArray(eventBase) ? eventBase : [eventBase];
+        // Stamp non-user provenance (manager tool layer) into every produced
+        // event so the event store doubles as the manager audit trail.
+        const eventBases =
+          envelope.origin === undefined
+            ? decidedEventBases
+            : decidedEventBases.map((nextEvent) => ({
+                ...nextEvent,
+                metadata: { ...nextEvent.metadata, origin: envelope.origin },
+              }));
         const committedCommand = yield* sql
           .withTransaction(
             Effect.gen(function* () {
@@ -290,10 +301,15 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const readEvents: OrchestrationEngineShape["readEvents"] = (fromSequenceExclusive) =>
     eventStore.readFromSequence(fromSequenceExclusive);
 
-  const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
+  const dispatch: OrchestrationEngineShape["dispatch"] = (command, options) =>
     Effect.gen(function* () {
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
-      yield* Queue.offer(commandQueue, { command, result, startedAtMs: Date.now() });
+      yield* Queue.offer(commandQueue, {
+        command,
+        origin: options?.origin,
+        result,
+        startedAtMs: Date.now(),
+      });
       return yield* Deferred.await(result);
     });
 
