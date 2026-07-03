@@ -1041,6 +1041,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
               "claudeAgent",
               "codex",
               "cursor",
+              "hermes",
               "opencode",
               "uno",
             ]);
