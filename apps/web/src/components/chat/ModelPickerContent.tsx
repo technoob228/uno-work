@@ -897,7 +897,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             onSelectInstance={handleSelectInstance}
             instanceEntries={sidebarInstanceEntries}
             showFavorites={!isLocked}
-            showComingSoon={!isLocked}
           />
         )}
 
