@@ -165,6 +165,7 @@ export type ModelCapabilities = typeof ModelCapabilities.Type;
 const CODEX_DRIVER_KIND = ProviderDriverKind.make("codex");
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CURSOR_DRIVER_KIND = ProviderDriverKind.make("cursor");
+const HERMES_DRIVER_KIND = ProviderDriverKind.make("hermes");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 const UNO_DRIVER_KIND = ProviderDriverKind.make("uno");
 
@@ -175,6 +176,9 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [CODEX_DRIVER_KIND]: DEFAULT_MODEL,
   [CLAUDE_DRIVER_KIND]: "claude-sonnet-4-6",
   [CURSOR_DRIVER_KIND]: "auto",
+  // Дешёвый дефолт: Hermes — прежде всего оркестратор, тяжёлые модели
+  // выбираются явно (см. ROUTING.md в воркспейсе ассистента).
+  [HERMES_DRIVER_KIND]: "anthropic/claude-haiku-4.5",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
   [UNO_DRIVER_KIND]: "uno/claude-sonnet-4-6",
 };
