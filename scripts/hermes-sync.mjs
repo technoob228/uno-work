@@ -55,11 +55,14 @@ const mcp = JSON.parse(readFileSync(mcpPath, "utf8")).mcpServers["uno-manager"];
 const hermesConfigPath = join(homedir(), ".hermes", "config.yaml");
 const config = `# Managed by uno-work-app scripts/hermes-sync.mjs — re-run it after
 # changing the Uno API key in app settings or restarting the environment.
+# Verified invocation (env wins over config in Hermes):
+#   OPENAI_API_KEY=<uno key> OPENAI_BASE_URL=https://api.getuno.xyz/v1 \\
+#     hermes --provider openai-api -m anthropic/claude-haiku-4.5 ...
 model:
-  provider: openrouter
+  provider: openai-api
   base_url: https://api.getuno.xyz/v1
-  name: claude-sonnet-4-6
-${unoApiKey ? `  api_key: ${unoApiKey}` : "  # api_key: <empty — set Uno API key in app Settings → Providers → Uno, then re-run>"}
+  name: anthropic/claude-haiku-4.5
+${unoApiKey ? `  api_key: ${unoApiKey}` : "  # api_key: <empty — set Uno API key in app Settings → Uno, then re-run>"}
 
 mcp_servers:
   uno-manager:
@@ -69,6 +72,22 @@ mcp_servers:
 `;
 writeFileSync(hermesConfigPath, config);
 
+// Hermes only reads the openai-api key from the environment, so ship a tiny
+// wrapper: `~/.hermes/uno-hermes <hermes args…>`.
+const wrapperPath = join(homedir(), ".hermes", "uno-hermes");
+writeFileSync(
+  wrapperPath,
+  `#!/bin/sh
+# Managed by uno-work-app scripts/hermes-sync.mjs
+export OPENAI_API_KEY=${unoApiKey || "SET_UNO_KEY_IN_APP_SETTINGS"}
+export OPENAI_BASE_URL=https://api.getuno.xyz/v1
+export HERMES_INFERENCE_MODEL=\${HERMES_INFERENCE_MODEL:-anthropic/claude-haiku-4.5}
+exec hermes --provider openai-api -m "\$HERMES_INFERENCE_MODEL" "$@"
+`,
+  { mode: 0o700 },
+);
+
 console.log(`state dir:   ${stateDir}`);
 console.log(`mcp url:     ${mcp.url}`);
-console.log(`uno api key: ${unoApiKey ? "synced ✓" : "NOT SET — add it in Settings → Providers → Uno and re-run"}`);
+console.log(`uno api key: ${unoApiKey ? "synced ✓" : "NOT SET — add it in Settings → Uno and re-run"}`);
+console.log(`wrapper:     ${wrapperPath} (use it instead of plain \`hermes\`)`);
