@@ -199,6 +199,22 @@ export const CursorIcon: Icon = ({ className, ...props }) => (
   </svg>
 );
 
+export const HermesIcon: Icon = ({ className, ...props }) => (
+  <svg
+    {...props}
+    viewBox="0 0 24 24"
+    className={cn("fill-[#26251E] dark:fill-[#EDECEC]", className)}
+  >
+    {/* Крылатый жезл Гермеса: сфера, стойка и два крыла */}
+    <circle cx="12" cy="4.4" r="2.1" />
+    <rect x="10.9" y="7.4" width="2.2" height="13.2" rx="1.1" />
+    <path d="M10.2 9.6C8.9 7.9 6.4 6.9 3.2 7.1c-.6 0-.9.7-.5 1.1l1.6 1.6c-.5.2-1.2.3-1.9.4-.6.1-.8.8-.3 1.2 1.4 1.1 3.4 1.7 5.2 1.5l2.9-.4z" />
+    <path d="M13.8 9.6c1.3-1.7 3.8-2.7 7-2.5.6 0 .9.7.5 1.1l-1.6 1.6c.5.2 1.2.3 1.9.4.6.1.8.8.3 1.2-1.4 1.1-3.4 1.7-5.2 1.5l-2.9-.4z" />
+    <path d="M10.2 14.3c-1 .9-2.5 1.4-4.3 1.3-.6 0-.9.7-.4 1.1 1.2 1 2.9 1.5 4.7 1.3l0-3.7z" />
+    <path d="M13.8 14.3c1 .9 2.5 1.4 4.3 1.3.6 0 .9.7.4 1.1-1.2 1-2.9 1.5-4.7 1.3l0-3.7z" />
+  </svg>
+);
+
 export const TraeIcon: Icon = (props) => (
   <svg {...props} viewBox="0 0 24 24" fill="currentColor">
     {/* Back rectangle: left strip + bottom strip drawn separately — empty bottom-left corner is the gap between them */}
