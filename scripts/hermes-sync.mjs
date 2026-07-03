@@ -37,7 +37,10 @@ let unoApiKey = "";
 const settingsPath = join(stateDir, "settings.json");
 if (existsSync(settingsPath)) {
   const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+  // Top-level `uno.apiKey` is the app's Uno Gateway key (Settings → Uno);
+  // provider-level keys are legacy fallbacks.
   unoApiKey =
+    settings?.uno?.apiKey?.trim() ||
     settings?.providers?.uno?.apiKey?.trim() ||
     settings?.providerInstances?.uno?.config?.apiKey?.trim() ||
     "";

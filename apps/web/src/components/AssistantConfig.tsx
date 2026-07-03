@@ -29,6 +29,7 @@ import {
   ManagerApiError,
   readAssistantFile,
   saveAssistantTelegram,
+  setAssistantDefaultModel,
   updateAssistantAccess,
   writeAssistantFile,
 } from "../lib/managerApi";
@@ -127,6 +128,9 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
   const [canWrite, setCanWrite] = useState(true);
   const [autoApprove, setAutoApprove] = useState(true);
 
+  const [defaultInstance, setDefaultInstance] = useState("claudeAgent");
+  const [defaultModel, setDefaultModel] = useState("");
+
   const [botToken, setBotToken] = useState("");
   const [chatIds, setChatIds] = useState("");
   const [telegramEnabled, setTelegramEnabled] = useState(false);
@@ -170,6 +174,20 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const handleSaveDefaultModel = useCallback(() => {
+    if (defaultModel.trim().length === 0) return;
+    setNotice(null);
+    void setAssistantDefaultModel({
+      projectId,
+      instanceId: defaultInstance,
+      model: defaultModel.trim(),
+    })
+      .then(() => setNotice("Default harness saved — new chats will start on it."))
+      .catch((cause: unknown) =>
+        setError(cause instanceof Error ? cause.message : "Failed to save default harness."),
+      );
+  }, [projectId, defaultInstance, defaultModel]);
 
   const handleSaveAccess = useCallback(() => {
     setNotice(null);
@@ -268,6 +286,43 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
                 {notice}
               </div>
             ) : null}
+
+            <SettingsSection
+              title="Brain"
+              icon={<BotIcon className="size-3.5" />}
+              headerAction={
+                <Button size="xs" variant="outline" onClick={handleSaveDefaultModel}>
+                  Save
+                </Button>
+              }
+            >
+              <SettingsRow
+                title="Default harness for new chats"
+                description="Which harness/model answers by default. You can always switch a live chat with the model picker in the composer — the assistant's memory lives in its files, so it survives the swap."
+                control={
+                  <span className="flex gap-2">
+                    <select
+                      value={defaultInstance}
+                      onChange={(event) => setDefaultInstance(event.target.value)}
+                      className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                    >
+                      <option value="claudeAgent">Claude</option>
+                      <option value="uno">Uno</option>
+                      <option value="opencode">OpenCode</option>
+                      <option value="codex">Codex</option>
+                      <option value="cursor">Cursor</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={defaultModel}
+                      onChange={(event) => setDefaultModel(event.target.value)}
+                      placeholder="claude-haiku-4-5"
+                      className="w-44 rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
+                    />
+                  </span>
+                }
+              />
+            </SettingsSection>
 
             <SettingsSection
               title="Access & permissions"

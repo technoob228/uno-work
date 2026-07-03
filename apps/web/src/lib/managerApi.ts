@@ -141,6 +141,24 @@ export function writeAssistantFile(input: {
   return managerFetch({ pathname: "/api/manager/assistant/file", method: "POST", body: input });
 }
 
+/** Set the assistant project's default model (new chats + Telegram fallback). */
+export function setAssistantDefaultModel(input: {
+  readonly projectId: string;
+  readonly instanceId: string;
+  readonly model: string;
+}): Promise<{ sequence: number }> {
+  return managerFetch({
+    pathname: "/api/orchestration/dispatch",
+    method: "POST",
+    body: {
+      type: "project.meta.update",
+      commandId: `assistant-default-model:${crypto.randomUUID()}`,
+      projectId: input.projectId,
+      defaultModelSelection: { instanceId: input.instanceId, model: input.model },
+    },
+  });
+}
+
 /** Compact project list for the access picker (owner snapshot route). */
 export async function listProjectsForAccessPicker(): Promise<
   ReadonlyArray<{ id: ProjectId; title: string }>

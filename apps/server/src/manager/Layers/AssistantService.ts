@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 import { Effect, Layer, Option, Path, FileSystem, Schema } from "effect";
 import * as crypto from "node:crypto";
+import * as os from "node:os";
 
 import { ServerConfig } from "../../config.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
@@ -142,10 +143,37 @@ const makeManagerAssistantService = Effect.gen(function* () {
   const toAssistantError = (detail: string) => (cause: unknown) =>
     new ManagerAssistantError({ detail, cause });
 
-  const workspaceRootFor = (projectId: ProjectId): string =>
-    projectId === ASSISTANT_PROJECT_ID
-      ? path.join(config.stateDir, "assistant-workspace")
-      : path.join(config.stateDir, "assistants", projectId);
+  /**
+   * Assistants are plain folders in a place the user can see and open:
+   * ~/UnoWork/Assistants/<name>. The folder carries a `.uno-assistant.json`
+   * marker (projectId + owning environment); if a folder with the same name
+   * belongs to another environment, we suffix rather than fight over it.
+   * Existing assistants keep whatever workspaceRoot their project already
+   * has — the visible location only applies to new ones.
+   */
+  const defaultWorkspaceRootFor = (projectId: ProjectId) =>
+    Effect.gen(function* () {
+      const name =
+        projectId === ASSISTANT_PROJECT_ID
+          ? "home"
+          : projectId.replace(/^assistant-/, "") || projectId;
+      const base = path.join(os.homedir(), "UnoWork", "Assistants");
+      const preferred = path.join(base, name);
+      const markerPath = path.join(preferred, ".uno-assistant.json");
+      const marker = yield* fs.readFileString(markerPath).pipe(Effect.orElseSucceed(() => ""));
+      if (marker.length > 0) {
+        try {
+          const parsed = JSON.parse(marker) as { stateDir?: string; projectId?: string };
+          if (parsed.stateDir !== config.stateDir || parsed.projectId !== projectId) {
+            return path.join(base, `${name}-${crypto.createHash("sha256").update(config.stateDir).digest("hex").slice(0, 6)}`);
+          }
+        } catch {
+          // Unreadable marker — treat the folder as foreign.
+          return path.join(base, `${name}-${crypto.randomUUID().slice(0, 6)}`);
+        }
+      }
+      return preferred;
+    });
 
   const writeFileIfMissing = (filePath: string, content: string) =>
     Effect.gen(function* () {
@@ -160,10 +188,19 @@ const makeManagerAssistantService = Effect.gen(function* () {
     title,
   }) =>
     Effect.gen(function* () {
-      const workspaceRoot = workspaceRootFor(projectId);
+      // Existing assistants keep their registered workspace; only new ones
+      // land in the visible ~/UnoWork/Assistants location.
+      const registeredProject = yield* projectionSnapshotQuery.getProjectShellById(projectId);
+      const workspaceRoot = Option.isSome(registeredProject)
+        ? registeredProject.value.workspaceRoot
+        : yield* defaultWorkspaceRootFor(projectId);
       const mcpConfigPath = path.join(workspaceRoot, ".mcp.json");
 
       yield* fs.makeDirectory(path.join(workspaceRoot, "skills"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(workspaceRoot, ".uno-assistant.json"),
+        `${JSON.stringify({ projectId, stateDir: config.stateDir }, null, 2)}\n`,
+      );
       // Instructions are user-editable: seed once, never overwrite.
       yield* writeFileIfMissing(
         path.join(workspaceRoot, "AGENTS.md"),
@@ -215,8 +252,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
         );
       }
 
-      const existingProject = yield* projectionSnapshotQuery.getProjectShellById(projectId);
-      if (Option.isNone(existingProject)) {
+      if (Option.isNone(registeredProject)) {
         yield* orchestrationEngine.dispatch({
           type: "project.create",
           commandId: CommandId.make(`assistant-ensure:${crypto.randomUUID()}`),
