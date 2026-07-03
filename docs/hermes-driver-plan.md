@@ -1,4 +1,8 @@
-# HermesDriver — план (риски сняты пробами 2026-07-04)
+# HermesDriver — план (риски сняты пробами 2026-07-04; РЕАЛИЗОВАН 2026-07-04)
+
+> Статус: драйвер реализован (`Drivers/HermesDriver.ts`, `Layers/HermesAdapter.ts`,
+> `Layers/HermesProvider.ts`, `acp/HermesAcpSupport.ts`). Ниже — план + две
+> грабли, найденные на реализации (секция «Найдено на реализации»).
 
 Цель: Hermes как шестой встроенный харнесс в пикере провайдеров — дефолтный
 кандидат для чатов ассистента и внешних коннекторов.
@@ -45,6 +49,35 @@
 - Пермишн-маппинг ACP permission requests → наш approval-флоу: взять у
   Cursor как есть, проверить на первом же destructive-туле.
 - TextGeneration: опционально, в v1 не делаем.
+
+## Найдено на реализации (2026-07-04, вторая волна проб)
+
+1. **Угон провайдера в openrouter.** `session/set_model` с `openai-api:<model>`
+   при УЖЕ активном openai-api гонит id через `detect_provider_for_model`;
+   namespaced-модели (`anthropic/…`) находятся в каталоге openrouter → hermes
+   пересоздаёт агента на openrouter с невалидным ключом, все turn'ы падают
+   в 401. Обход: двойной вызов — `openrouter:<model>` (чистая смена, detection
+   не запускается при target≠current), затем `openai-api:<model>`.
+   Код: `applyHermesAcpModelSelection`.
+2. **`set_model` теряет ACP-переданные MCP-серверы.** Смена модели пересоздаёт
+   агента (`_make_agent`), и `enabled_toolsets` нового агента собираются
+   только из config.yaml — mcpServers из `session/new` выпадают (глобальная
+   регистрация остаётся, toolset-имена теряются). Обход: per-thread
+   `HERMES_HOME=<stateDir>/hermes-home-<instanceId>/threads/<threadId>` с
+   config.yaml, куда адаптер пишет `model.default/provider` и `mcp_servers`
+   из project-level `.mcp.json` — toolsets переживают любой rebuild, заодно
+   начальный set_model не нужен, а state.db не делится между конкурентными
+   hermes-процессами. Код: `buildHermesConfigYaml` + startSession.
+3. **Каталог моделей.** С `openai-api` hermes отдаёт в `session/new` живой
+   `/v1/models` гейтвея verbatim — 1000+ моделей (весь апстрим). Пикер
+   строится не из ACP-ответа, а из каталога Uno Gateway (тот же фетч, что у
+   UnoDriver: tier/pricing/modalities), отфильтрованного до agentic-вендоров
+   (`isHermesPickerModel`).
+4. **Режимы/опции.** configOptions всегда пуст; modes — ровно три
+   edit-approval политики (default / accept_edits / dont_ask), plan-режима
+   нет (`showInteractionModeToggle: false`). Маппинг: `full-access` →
+   dont_ask, иначе default. Отдельные optionDescriptors в v1 не заведены
+   (кандидат: select «Edit approval» c accept_edits — решение за Михаилом).
 
 ## Definition of done
 

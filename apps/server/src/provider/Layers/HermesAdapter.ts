@@ -70,6 +70,7 @@ import { parsePermissionRequest } from "../acp/AcpRuntimeModel.ts";
 import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
 import {
   applyHermesAcpModelSelection,
+  buildHermesConfigYaml,
   makeHermesAcpRuntime,
   parseMcpJsonToAcpServers,
   resolveHermesBaseModelId,
@@ -395,9 +396,41 @@ export function makeHermesAdapter(
             .pipe(Effect.orElseSucceed(() => ""));
           const mcpServers = mcpJsonRaw ? parseMcpJsonToAcpServers(mcpJsonRaw) : [];
 
+          // Per-thread HERMES_HOME: серверы MCP и дефолтная модель зашиваются
+          // в config.yaml — так `mcp-*` toolsets переживают agent-rebuild на
+          // session/set_model (ACP-переданные mcpServers его НЕ переживают),
+          // а state.db не делится между конкурентными hermes-процессами.
+          // Resume находит сессию: тот же thread → тот же home.
+          const baseHermesHome =
+            options?.environment?.HERMES_HOME ??
+            nodePath.join(serverConfig.stateDir, `hermes-home-${boundInstanceId}`);
+          const threadHermesHome = nodePath.join(baseHermesHome, "threads", input.threadId);
+          const configuredModel =
+            resolveHermesBaseModelId(hermesModelSelection?.model) ?? HERMES_DEFAULT_MODEL;
+          yield* fileSystem
+            .makeDirectory(threadHermesHome, { recursive: true })
+            .pipe(
+              Effect.andThen(
+                fileSystem.writeFileString(
+                  nodePath.join(threadHermesHome, "config.yaml"),
+                  buildHermesConfigYaml({ model: configuredModel, mcpServers }),
+                ),
+              ),
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapterProcessError({
+                    provider: PROVIDER,
+                    threadId: input.threadId,
+                    detail: `Failed to prepare HERMES_HOME: ${cause.message}`,
+                    cause,
+                  }),
+              ),
+            );
+
           const sessionEnvironment = {
             ...(options?.environment ?? {}),
             ...(options?.bridgeEnvironment?.({ threadId: input.threadId, cwd }) ?? {}),
+            HERMES_HOME: threadHermesHome,
           };
           const acp = yield* makeHermesAcpRuntime({
             hermesSettings: effectiveHermesSettings,
@@ -518,7 +551,10 @@ export function makeHermesAdapter(
             pendingApprovals,
             turns: [],
             lastPlanFingerprint: undefined,
-            lastAppliedModel: undefined,
+            // Свежая сессия стартует на модели из config.yaml — начальный
+            // set_model не нужен. При resume hermes восстанавливает модель
+            // из своей БД сессий, поэтому форсим один set_model-проход.
+            lastAppliedModel: resumeSessionId ? undefined : configuredModel,
             lastAppliedModeId: undefined,
             activeTurnId: undefined,
             stopped: false,

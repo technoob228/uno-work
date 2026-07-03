@@ -5,6 +5,7 @@ import * as EffectAcpErrors from "effect-acp/errors";
 import {
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
+  buildHermesConfigYaml,
   buildHermesSpawnEnvironment,
   parseMcpJsonToAcpServers,
   resolveHermesBaseModelId,
@@ -118,6 +119,47 @@ describe("applyHermesAcpModelSelection", () => {
       ),
     );
     expect(result).toBe("mapped");
+  });
+});
+
+describe("buildHermesConfigYaml", () => {
+  it("pins provider+default model and inlines mcp servers (survives set_model rebuilds)", () => {
+    const yaml = buildHermesConfigYaml({
+      model: "anthropic/claude-haiku-4.5",
+      mcpServers: [
+        {
+          type: "http",
+          name: "uno-manager",
+          url: "http://127.0.0.1:13776/api/manager/mcp",
+          headers: [{ name: "Authorization", value: "Bearer uwm_test" }],
+        },
+        { name: "local", command: "node", args: ["bridge.mjs"], env: [{ name: "K", value: "v" }] },
+      ],
+    });
+    expect(yaml).toBe(
+      [
+        "model:",
+        '  provider: "openai-api"',
+        '  default: "anthropic/claude-haiku-4.5"',
+        "mcp_servers:",
+        '  "uno-manager":',
+        '    url: "http://127.0.0.1:13776/api/manager/mcp"',
+        "    headers:",
+        '      "Authorization": "Bearer uwm_test"',
+        '  "local":',
+        '    command: "node"',
+        '    args: ["bridge.mjs"]',
+        "    env:",
+        '      "K": "v"',
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("omits the mcp_servers block when empty", () => {
+    const yaml = buildHermesConfigYaml({ model: "openai/gpt-5.5", mcpServers: [] });
+    expect(yaml).not.toContain("mcp_servers");
+    expect(yaml).toContain('default: "openai/gpt-5.5"');
   });
 });
 
