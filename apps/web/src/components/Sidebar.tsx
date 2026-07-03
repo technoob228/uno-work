@@ -1,6 +1,7 @@
 import {
   ArchiveIcon,
   ArrowUpDownIcon,
+  BotIcon,
   ChevronRightIcon,
   CloudIcon,
   FolderPlusIcon,
@@ -37,6 +38,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  isAssistantProjectId,
   type ContextMenuItem,
   type DesktopUpdateState,
   ProjectId,
@@ -2557,6 +2559,19 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     [updateSettings],
   );
 
+  // The assistant's home project is rendered as its own "Assistant" section
+  // above the regular projects tree; everything else about it (threads =
+  // chats, expansion, context menus) reuses the standard project row.
+  const navigate = useNavigate();
+  const assistantProjects = useMemo(
+    () => sortedProjects.filter((project) => isAssistantProjectId(project.id)),
+    [sortedProjects],
+  );
+  const regularProjects = useMemo(
+    () => sortedProjects.filter((project) => !isAssistantProjectId(project.id)),
+    [sortedProjects],
+  );
+
   return (
     <SidebarContent className="gap-0">
       <SidebarGroup className="px-2 pt-2 pb-1">
@@ -2582,6 +2597,61 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarGroup>
+      {assistantProjects.length > 0 ? (
+        <SidebarGroup className="px-2 pt-2 pb-0">
+          <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
+            <button
+              type="button"
+              className="flex cursor-pointer items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 transition-colors hover:text-foreground"
+              onClick={() => void navigate({ to: "/assistant" })}
+            >
+              <BotIcon className="size-3" />
+              Assistants
+            </button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label="New assistant"
+                    data-testid="sidebar-assistant-create-trigger"
+                    className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+                    onClick={() => void navigate({ to: "/assistant" })}
+                  />
+                }
+              >
+                <FolderPlusIcon className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipPopup side="right">New assistant</TooltipPopup>
+            </Tooltip>
+          </div>
+          <SidebarMenu>
+            {assistantProjects.map((project) => (
+              <SidebarProjectListRow
+                key={project.projectKey}
+                project={project}
+                isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
+                activeRouteThreadKey={
+                  activeRouteProjectKey === project.projectKey ? routeThreadKey : null
+                }
+                newThreadShortcutLabel={newThreadShortcutLabel}
+                handleNewThread={handleNewThread}
+                archiveThread={archiveThread}
+                deleteThread={deleteThread}
+                threadJumpLabelByKey={threadJumpLabelByKey}
+                attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
+                expandThreadListForProject={expandThreadListForProject}
+                collapseThreadListForProject={collapseThreadListForProject}
+                dragInProgressRef={dragInProgressRef}
+                suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
+                suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
+                isManualProjectSorting={false}
+                dragHandleProps={null}
+              />
+            ))}
+          </SidebarMenu>
+        </SidebarGroup>
+      ) : null}
       {showArm64IntelBuildWarning && arm64IntelBuildWarningDescription ? (
         <SidebarGroup className="px-2 pt-2 pb-0">
           <Alert variant="warning" className="rounded-2xl border-warning/40 bg-warning/8">
@@ -2649,10 +2719,10 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
           >
             <SidebarMenu>
               <SortableContext
-                items={sortedProjects.map((project) => project.projectKey)}
+                items={regularProjects.map((project) => project.projectKey)}
                 strategy={verticalListSortingStrategy}
               >
-                {sortedProjects.map((project) => (
+                {regularProjects.map((project) => (
                   <SortableProjectItem key={project.projectKey} projectId={project.projectKey}>
                     {(dragHandleProps) => (
                       <SidebarProjectItem
@@ -2685,7 +2755,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
           </DndContext>
         ) : (
           <SidebarMenu ref={attachProjectListAutoAnimateRef}>
-            {sortedProjects.map((project) => (
+            {regularProjects.map((project) => (
               <SidebarProjectListRow
                 key={project.projectKey}
                 project={project}
@@ -2711,7 +2781,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
           </SidebarMenu>
         )}
 
-        {projectsLength === 0 && (
+        {regularProjects.length === 0 && (
           <div className="flex flex-col items-center gap-3 px-2 pt-6 pb-3 text-center">
             <div className="flex size-9 items-center justify-center rounded-lg border border-border/60 bg-card/40 text-muted-foreground">
               <FolderPlusIcon className="size-4" />
