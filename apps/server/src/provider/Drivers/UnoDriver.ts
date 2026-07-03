@@ -94,8 +94,8 @@ const UNO_BINARY_PATH = nodePath.join(
   process.platform === "win32" ? "uno-code.exe" : "uno-code",
 );
 
-type UnoModelTier = "frontier" | "strong" | "cheap";
-type UnoModelRoute = "default" | "russia";
+export type UnoModelTier = "frontier" | "strong" | "cheap";
+export type UnoModelRoute = "default" | "russia";
 
 const TIER_RANK: Record<UnoModelTier, number> = {
   frontier: 0,
@@ -116,7 +116,7 @@ const PINNED_MODEL_IDS = [
 
 const PINNED_RANK = new Map<string, number>(PINNED_MODEL_IDS.map((id, idx) => [id, idx]));
 
-interface UnoCatalogModel {
+export interface UnoCatalogModel {
   readonly name: string;
   readonly tier: UnoModelTier;
   readonly modelId: string;
@@ -166,6 +166,9 @@ function shouldOmitDefaultReasoningDisable(model: UnoCatalogModel): boolean {
     searchable.includes("reasoning") ||
     searchable.includes("minimax-m2") ||
     searchable.includes("step-3.5") ||
+    // Fable 5 is reasoning-mandatory: the upstream rejects `reasoning: none`
+    // with a "reasoning required" error, so never force the default disable.
+    searchable.includes("fable") ||
     /qwen3.*thinking/u.test(searchable) ||
     /gemini-3(?:[._/ -]|$)/u.test(searchable)
   );
@@ -177,7 +180,7 @@ function defaultModelOptionsForUnoModel(
   return shouldOmitDefaultReasoningDisable(model) ? undefined : UNO_DEFAULT_MODEL_OPTIONS;
 }
 
-interface UnoGatewayModelResponse {
+export interface UnoGatewayModelResponse {
   readonly id?: unknown;
   readonly display_name?: unknown;
   readonly owned_by?: unknown;
@@ -328,7 +331,7 @@ function inferKnownImageOutputSupport(
   return undefined;
 }
 
-function normalizeUnoCatalogEntry(
+export function normalizeUnoCatalogEntry(
   route: UnoModelRoute,
   entry: UnoGatewayModelResponse,
 ): UnoCatalogModel | undefined {
@@ -559,7 +562,7 @@ function isUnoModelSlug(slug: string): boolean {
   return slug.startsWith(`${UNO_PROVIDER_ID}/`) || slug.startsWith(`${UNO_RUSSIA_PROVIDER_ID}/`);
 }
 
-function metadataForCatalogModel(model: UnoCatalogModel): ModelCapabilitiesMetadata {
+export function metadataForCatalogModel(model: UnoCatalogModel): ModelCapabilitiesMetadata {
   const inputModalities =
     model.inputModalities ?? (model.supportsVision ? ["text", "image"] : ["text"]);
   const outputModalities =

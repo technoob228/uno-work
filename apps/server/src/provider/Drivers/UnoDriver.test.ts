@@ -117,16 +117,22 @@ describe("UnoDriver catalog normalization", () => {
       id: "qwen/qwen3-vl-235b-a22b-thinking",
       display_name: "Qwen3 VL Thinking",
     });
+    const fable = __unoDriverTest.normalizeUnoCatalogEntry("default", {
+      id: "anthropic/claude-fable-5",
+      display_name: "Claude Fable 5",
+    });
 
     expect(openai).not.toBeNull();
     expect(kimi).not.toBeNull();
     expect(thinking).not.toBeNull();
+    expect(fable).not.toBeNull();
 
     const config = JSON.parse(
       __unoDriverTest.buildUnoConfigContent("uno-key", {
         "uno/openai/gpt-5.5": openai!,
         "uno/moonshotai/kimi-k2.6": kimi!,
         "uno/qwen/qwen3-vl-235b-a22b-thinking": thinking!,
+        "uno/anthropic/claude-fable-5": fable!,
       }),
     ) as {
       readonly provider?: {
@@ -143,6 +149,8 @@ describe("UnoDriver catalog normalization", () => {
     expect(models["openai/gpt-5.5"]?.options).toEqual({ reasoningEffort: "none" });
     expect(models["moonshotai/kimi-k2.6"]?.options).toBeUndefined();
     expect(models["qwen/qwen3-vl-235b-a22b-thinking"]?.options).toBeUndefined();
+    // Fable 5 is reasoning-mandatory — never force `reasoning: none`.
+    expect(models["anthropic/claude-fable-5"]?.options).toBeUndefined();
   });
 
   it("uses conservative fallbacks for known vision and image-generation model families", () => {
