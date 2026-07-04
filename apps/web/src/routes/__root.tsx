@@ -305,7 +305,11 @@ function EventRouter() {
     if (!payload) return;
 
     updatePrimaryEnvironmentDescriptor(payload.environment);
-    setActiveEnvironmentId(payload.environment.environmentId);
+    // Welcome переизлучается при каждом реконнекте WS — не перетираем выбор
+    // пользователя, только инициализируем при первом подключении.
+    if (useStore.getState().activeEnvironmentId === null) {
+      setActiveEnvironmentId(payload.environment.environmentId);
+    }
     void (async () => {
       await ensureEnvironmentConnectionBootstrapped(payload.environment.environmentId);
       if (disposedRef.current) {
@@ -417,7 +421,12 @@ function EventRouter() {
     }
 
     updatePrimaryEnvironmentDescriptor(serverConfig.environment);
-    setActiveEnvironmentId(serverConfig.environment.environmentId);
+    // serverConfig получает новый объект при каждом событии конфига
+    // (providerStatuses/settingsUpdated/...) — инициализируем окружение
+    // один раз, дальше выбор пользователя не трогаем.
+    if (useStore.getState().activeEnvironmentId === null) {
+      setActiveEnvironmentId(serverConfig.environment.environmentId);
+    }
   }, [serverConfig, setActiveEnvironmentId]);
 
   useEffect(() => {
