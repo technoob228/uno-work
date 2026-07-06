@@ -311,6 +311,7 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
                       <option value="opencode">OpenCode</option>
                       <option value="codex">Codex</option>
                       <option value="cursor">Cursor</option>
+                      <option value="hermes">Hermes</option>
                     </select>
                     <input
                       type="text"
@@ -451,6 +452,7 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
                       <option value="opencode">OpenCode</option>
                       <option value="codex">Codex</option>
                       <option value="cursor">Cursor</option>
+                      <option value="hermes">Hermes</option>
                     </select>
                     <input
                       type="text"
