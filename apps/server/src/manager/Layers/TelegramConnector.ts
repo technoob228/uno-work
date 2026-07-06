@@ -125,6 +125,8 @@ export interface TurnReplyInputs {
     readonly createdAt: string;
   }>;
   readonly sessionStatus: string | null;
+  /** When `sessionStatus` was written; stale rows predate this request. */
+  readonly sessionUpdatedAtIso: string | null;
   readonly requestedAtIso: string;
   /** Wall-clock of the current poll; keeps the grace-period logic pure. */
   readonly nowIso: string;
@@ -154,8 +156,13 @@ export const resolveTurnReply = (input: TurnReplyInputs): ResolvedTurnReply | nu
       )
       .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt))
       .at(0) ?? null;
+  // «stopped»/«error», записанные ДО этого запроса — протухший статус прошлого
+  // запуска приложения: dispatch как раз (пере)поднимает сессию. Смертью
+  // считаем только статус, проставленный после requestedAtIso.
   const sessionDied =
-    input.sessionStatus !== null && DEAD_SESSION_STATUSES.has(input.sessionStatus);
+    input.sessionStatus !== null &&
+    DEAD_SESSION_STATUSES.has(input.sessionStatus) &&
+    (input.sessionUpdatedAtIso === null || input.sessionUpdatedAtIso >= input.requestedAtIso);
   const stillRunning =
     turn === null || turn.state === "pending" || turn.state === "running";
   if (stillRunning && !sessionDied) {
@@ -593,6 +600,7 @@ const makeTelegramConnector = Effect.gen(function* () {
           turns,
           messages: detail.value.messages,
           sessionStatus: detail.value.session?.status ?? null,
+          sessionUpdatedAtIso: detail.value.session?.updatedAt ?? null,
           requestedAtIso: input.requestedAtIso,
           nowIso: new Date().toISOString(),
         });

@@ -35,6 +35,7 @@ describe("resolveTurnReply", () => {
         turns: [turnRow({ state: "running" })],
         messages: [],
         sessionStatus: "ready",
+        sessionUpdatedAtIso: nowIso,
         requestedAtIso,
         nowIso,
       }),
@@ -47,6 +48,7 @@ describe("resolveTurnReply", () => {
         turns: [turnRow({ turnId: null, state: "pending" })],
         messages: [],
         sessionStatus: "ready",
+        sessionUpdatedAtIso: nowIso,
         requestedAtIso,
         nowIso,
       }),
@@ -62,6 +64,7 @@ describe("resolveTurnReply", () => {
         assistantMessage("the answer", "2026-07-03T23:03:39.350Z"),
       ],
       sessionStatus: "ready",
+      sessionUpdatedAtIso: nowIso,
       requestedAtIso,
       nowIso,
     });
@@ -78,6 +81,7 @@ describe("resolveTurnReply", () => {
         ),
       ],
       sessionStatus: "ready",
+      sessionUpdatedAtIso: nowIso,
       requestedAtIso,
       nowIso,
     });
@@ -98,6 +102,7 @@ describe("resolveTurnReply", () => {
       ],
       messages: [assistantMessage("stale answer", "2026-07-03T22:52:13.378Z")],
       sessionStatus: "ready",
+      sessionUpdatedAtIso: nowIso,
       requestedAtIso,
       nowIso,
     });
@@ -109,6 +114,7 @@ describe("resolveTurnReply", () => {
       turns: [turnRow({ state: "running" })],
       messages: [assistantMessage("partial answer", "2026-07-03T23:03:00.000Z")],
       sessionStatus: "stopped",
+      sessionUpdatedAtIso: nowIso,
       requestedAtIso,
       nowIso,
     });
@@ -118,6 +124,7 @@ describe("resolveTurnReply", () => {
       turns: [turnRow({ state: "running" })],
       messages: [],
       sessionStatus: "error",
+      sessionUpdatedAtIso: nowIso,
       requestedAtIso,
       nowIso,
     });
@@ -127,9 +134,25 @@ describe("resolveTurnReply", () => {
     });
   });
 
+  it("keeps waiting when the dead session status predates this request (app restart)", () => {
+    // After an app restart the previous run's session row still says
+    // "stopped" while the dispatch is spawning a fresh session. Only a death
+    // recorded after the request counts.
+    expect(
+      resolveTurnReply({
+        turns: [turnRow({ turnId: null, state: "pending" })],
+        messages: [],
+        sessionStatus: "stopped",
+        sessionUpdatedAtIso: "2026-07-03T20:00:00.000Z",
+        requestedAtIso,
+        nowIso: "2026-07-03T23:02:50.101Z",
+      }),
+    ).toBeNull();
+  });
+
   it("holds the fallback while a terminal turn is inside the message grace window", () => {
-    // Hermes resolves session/prompt before the assistant text lands in the
-    // projection: the turn row is terminal seconds before the message row.
+    // The turn row can turn terminal before the assistant message row lands
+    // in the projection (event ordering is not guaranteed across tables).
     const instantTurn = turnRow({
       state: "completed",
       completedAt: requestedAtIso,
@@ -140,6 +163,7 @@ describe("resolveTurnReply", () => {
         turns: [instantTurn],
         messages: [],
         sessionStatus: "ready",
+        sessionUpdatedAtIso: nowIso,
         requestedAtIso,
         nowIso: "2026-07-03T23:02:50.101Z",
       }),
@@ -150,6 +174,7 @@ describe("resolveTurnReply", () => {
         turns: [instantTurn],
         messages: [assistantMessage("late answer", "2026-07-03T23:03:01.000Z")],
         sessionStatus: "ready",
+        sessionUpdatedAtIso: nowIso,
         requestedAtIso,
         nowIso: "2026-07-03T23:03:02.101Z",
       }),
@@ -160,6 +185,7 @@ describe("resolveTurnReply", () => {
         turns: [instantTurn],
         messages: [],
         sessionStatus: "ready",
+        sessionUpdatedAtIso: nowIso,
         requestedAtIso,
         nowIso: "2026-07-03T23:04:00.000Z",
       }),
@@ -171,6 +197,7 @@ describe("resolveTurnReply", () => {
       turns: [turnRow({ state: "error" })],
       messages: [],
       sessionStatus: "ready",
+      sessionUpdatedAtIso: nowIso,
       requestedAtIso,
       nowIso,
     });
@@ -195,6 +222,7 @@ describe("resolveTurnReply", () => {
       turns: [turnRow({ state: "completed" })],
       messages: [assistantMessage("x".repeat(5000), "2026-07-03T23:03:39.350Z")],
       sessionStatus: "ready",
+      sessionUpdatedAtIso: nowIso,
       requestedAtIso,
       nowIso,
     });
