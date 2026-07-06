@@ -8,6 +8,8 @@ import {
 } from "./TelegramConnector.ts";
 
 const requestedAtIso = "2026-07-03T23:02:48.101Z";
+// Далеко за пределами TERMINAL_REPLY_GRACE от completedAt дефолтного turnRow.
+const nowIso = "2026-07-03T23:10:00.000Z";
 
 const turnRow = (
   overrides: Partial<TurnReplyInputs["turns"][number]>,
@@ -15,6 +17,7 @@ const turnRow = (
   turnId: TurnId.make("turn-1"),
   state: "completed",
   requestedAt: requestedAtIso,
+  completedAt: "2026-07-03T23:03:35.000Z",
   ...overrides,
 });
 
@@ -33,6 +36,7 @@ describe("resolveTurnReply", () => {
         messages: [],
         sessionStatus: "ready",
         requestedAtIso,
+        nowIso,
       }),
     ).toBeNull();
   });
@@ -44,6 +48,7 @@ describe("resolveTurnReply", () => {
         messages: [],
         sessionStatus: "ready",
         requestedAtIso,
+        nowIso,
       }),
     ).toBeNull();
   });
@@ -58,6 +63,7 @@ describe("resolveTurnReply", () => {
       ],
       sessionStatus: "ready",
       requestedAtIso,
+      nowIso,
     });
     expect(reply).toEqual({ text: "the answer", files: [] });
   });
@@ -73,6 +79,7 @@ describe("resolveTurnReply", () => {
       ],
       sessionStatus: "ready",
       requestedAtIso,
+      nowIso,
     });
     expect(reply).toEqual({
       text: "Here is the report.",
@@ -92,6 +99,7 @@ describe("resolveTurnReply", () => {
       messages: [assistantMessage("stale answer", "2026-07-03T22:52:13.378Z")],
       sessionStatus: "ready",
       requestedAtIso,
+      nowIso,
     });
     expect(reply).toBeNull();
   });
@@ -102,6 +110,7 @@ describe("resolveTurnReply", () => {
       messages: [assistantMessage("partial answer", "2026-07-03T23:03:00.000Z")],
       sessionStatus: "stopped",
       requestedAtIso,
+      nowIso,
     });
     expect(partial).toEqual({ text: "partial answer", files: [] });
 
@@ -110,11 +119,51 @@ describe("resolveTurnReply", () => {
       messages: [],
       sessionStatus: "error",
       requestedAtIso,
+      nowIso,
     });
     expect(bare).toEqual({
       text: "The harness session ended before finishing this turn; check the app for details.",
       files: [],
     });
+  });
+
+  it("holds the fallback while a terminal turn is inside the message grace window", () => {
+    // Hermes resolves session/prompt before the assistant text lands in the
+    // projection: the turn row is terminal seconds before the message row.
+    const instantTurn = turnRow({
+      state: "completed",
+      completedAt: requestedAtIso,
+    });
+    // Poll 2s after completion: no message yet — keep waiting, no fallback.
+    expect(
+      resolveTurnReply({
+        turns: [instantTurn],
+        messages: [],
+        sessionStatus: "ready",
+        requestedAtIso,
+        nowIso: "2026-07-03T23:02:50.101Z",
+      }),
+    ).toBeNull();
+    // Poll 14s after completion: the late message arrived — deliver it.
+    expect(
+      resolveTurnReply({
+        turns: [instantTurn],
+        messages: [assistantMessage("late answer", "2026-07-03T23:03:01.000Z")],
+        sessionStatus: "ready",
+        requestedAtIso,
+        nowIso: "2026-07-03T23:03:02.101Z",
+      }),
+    ).toEqual({ text: "late answer", files: [] });
+    // Grace elapsed with no message: give up with the state fallback.
+    expect(
+      resolveTurnReply({
+        turns: [instantTurn],
+        messages: [],
+        sessionStatus: "ready",
+        requestedAtIso,
+        nowIso: "2026-07-03T23:04:00.000Z",
+      }),
+    ).toEqual({ text: "Turn finished with state: completed.", files: [] });
   });
 
   it("reports the terminal state when the turn produced no assistant text", () => {
@@ -123,6 +172,7 @@ describe("resolveTurnReply", () => {
       messages: [],
       sessionStatus: "ready",
       requestedAtIso,
+      nowIso,
     });
     expect(reply).toEqual({ text: "Turn finished with state: error.", files: [] });
   });
@@ -146,6 +196,7 @@ describe("resolveTurnReply", () => {
       messages: [assistantMessage("x".repeat(5000), "2026-07-03T23:03:39.350Z")],
       sessionStatus: "ready",
       requestedAtIso,
+      nowIso,
     });
     expect(reply?.text).toHaveLength(4000);
   });

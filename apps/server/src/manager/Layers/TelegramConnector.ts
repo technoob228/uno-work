@@ -81,6 +81,11 @@ const POLL_TIMEOUT_SECONDS = 10;
 const IDLE_RECHECK = Duration.seconds(5);
 const REPLY_POLL_INTERVAL = Duration.seconds(2);
 const REPLY_TIMEOUT = Duration.minutes(10);
+// Hermes (ACP) резолвит session/prompt раньше, чем достримит текст ответа:
+// turn в проекции уже терминален, а сообщение ассистента приходит секундами
+// позже. Терминальному turn'у без текста даём этот grace-период на дозапись
+// сообщения, прежде чем сдаться и отправить "Turn finished with state".
+const TERMINAL_REPLY_GRACE = Duration.seconds(45);
 const TELEGRAM_MESSAGE_LIMIT = 4000;
 // When the chat is re-pointed at a new thread (harness switch, archived
 // thread), this many recent messages of the old thread are carried over as a
@@ -111,7 +116,7 @@ export const stripHandoffPreamble = (text: string): string => {
 
 export interface TurnReplyInputs {
   readonly turns: ReadonlyArray<
-    Pick<ProjectionTurn, "turnId" | "state" | "requestedAt">
+    Pick<ProjectionTurn, "turnId" | "state" | "requestedAt" | "completedAt">
   >;
   readonly messages: ReadonlyArray<{
     readonly role: string;
@@ -121,6 +126,8 @@ export interface TurnReplyInputs {
   }>;
   readonly sessionStatus: string | null;
   readonly requestedAtIso: string;
+  /** Wall-clock of the current poll; keeps the grace-period logic pure. */
+  readonly nowIso: string;
 }
 
 export interface ResolvedTurnReply {
@@ -166,6 +173,16 @@ export const resolveTurnReply = (input: TurnReplyInputs): ResolvedTurnReply | nu
   if (lastAssistantMessage !== undefined) {
     const { text, files } = extractOutgoingFiles(lastAssistantMessage.text);
     return { text: text.slice(0, TELEGRAM_MESSAGE_LIMIT), files };
+  }
+  // Turn терминален, а текста ещё нет: если сессия жива, подождём — харнесс
+  // может дописать сообщение после завершения turn'а (hermes так делает всегда).
+  if (!stillRunning && !sessionDied) {
+    const terminalAtIso = turn?.completedAt ?? turn?.requestedAt ?? input.requestedAtIso;
+    const graceEndsAtMs =
+      new Date(terminalAtIso).getTime() + Duration.toMillis(TERMINAL_REPLY_GRACE);
+    if (new Date(input.nowIso).getTime() < graceEndsAtMs) {
+      return null;
+    }
   }
   return {
     text: stillRunning
@@ -577,6 +594,7 @@ const makeTelegramConnector = Effect.gen(function* () {
           messages: detail.value.messages,
           sessionStatus: detail.value.session?.status ?? null,
           requestedAtIso: input.requestedAtIso,
+          nowIso: new Date().toISOString(),
         });
         if (reply === null) continue;
         if (reply.text.trim().length > 0) {
