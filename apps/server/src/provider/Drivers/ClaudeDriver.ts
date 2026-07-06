@@ -100,6 +100,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const adapterOptions = {
         instanceId,
         environment: processEnv,
+        bridgeEnvironment: (context: { readonly threadId?: string; readonly cwd?: string }) =>
+          browserBridge.scopedEnvironment(context),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         ...(browserInstructions ? { appendSystemPrompt: browserInstructions } : {}),
       };

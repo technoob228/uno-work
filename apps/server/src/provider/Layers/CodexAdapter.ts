@@ -72,6 +72,15 @@ export interface CodexAdapterLiveOptions {
   readonly nativeEventLogger?: EventNdjsonLogger;
   /** Доп. инструкции, добавляемые к developer_instructions каждого хода. */
   readonly appendDeveloperInstructions?: string;
+  /**
+   * Env-оверлей, вычисляемый per-session по контексту треда (threadId + cwd) —
+   * browser bridge выдаёт scoped-токен, привязывающий запросы харнесса
+   * к его проекту.
+   */
+  readonly bridgeEnvironment?: (context: {
+    readonly threadId?: string;
+    readonly cwd?: string;
+  }) => Record<string, string>;
 }
 
 interface CodexAdapterSessionContext {
@@ -1370,12 +1379,19 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           yield* Effect.suspend(() => stopSessionInternal(existing));
         }
 
+        const sessionCwd = input.cwd ?? process.cwd();
+        const sessionEnvironment = {
+          ...(options?.environment ?? {}),
+          ...(options?.bridgeEnvironment?.({ threadId: input.threadId, cwd: sessionCwd }) ?? {}),
+        };
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
-          cwd: input.cwd ?? process.cwd(),
+          cwd: sessionCwd,
           binaryPath: codexConfig.binaryPath,
-          ...(options?.environment ? { environment: options.environment } : {}),
+          ...(Object.keys(sessionEnvironment).length > 0
+            ? { environment: sessionEnvironment }
+            : {}),
           ...(options?.appendDeveloperInstructions
             ? { appendDeveloperInstructions: options.appendDeveloperInstructions }
             : {}),

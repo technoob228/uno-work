@@ -132,6 +132,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const adapter = yield* makeCodexAdapter(effectiveConfig, {
         instanceId,
         environment: processEnv,
+        bridgeEnvironment: (context) => browserBridge.scopedEnvironment(context),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         ...(browserInstructions ? { appendDeveloperInstructions: browserInstructions } : {}),
       });

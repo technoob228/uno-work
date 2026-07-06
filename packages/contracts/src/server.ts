@@ -291,6 +291,18 @@ export const ServerLifecycleStreamEvent = Schema.Union([
 export type ServerLifecycleStreamEvent = typeof ServerLifecycleStreamEvent.Type;
 
 /**
+ * Where a bridge request came from: the harness thread and/or its working
+ * directory. Clients use it to route the event into the matching project's
+ * browser pane instead of whichever project is currently on screen. Absent on
+ * requests from legacy tokens or callers that did not identify themselves.
+ */
+export const BrowserBridgeRequestContext = Schema.Struct({
+  threadId: Schema.optional(Schema.String),
+  cwd: Schema.optional(Schema.String),
+});
+export type BrowserBridgeRequestContext = typeof BrowserBridgeRequestContext.Type;
+
+/**
  * Events pushed to clients when a harness (or any local process holding the
  * bridge token) asks the app to open a URL in the built-in browser pane.
  */
@@ -299,6 +311,7 @@ export const BrowserBridgeOpenUrlEvent = Schema.Struct({
   type: Schema.Literal("openUrl"),
   sequence: NonNegativeInt,
   url: Schema.String,
+  context: Schema.optional(BrowserBridgeRequestContext),
 });
 export type BrowserBridgeOpenUrlEvent = typeof BrowserBridgeOpenUrlEvent.Type;
 
@@ -328,6 +341,9 @@ export const BrowserAutomationCommandInput = Schema.Struct({
   script: Schema.optional(Schema.String),
   x: Schema.optional(Schema.Number),
   y: Schema.optional(Schema.Number),
+  // Полностраничный скриншот. Поддержан серверным headless-исполнителем;
+  // клиентский webview снимает только видимую область и игнорирует флаг.
+  fullPage: Schema.optional(Schema.Boolean),
   timeoutMs: Schema.optional(NonNegativeInt),
 });
 export type BrowserAutomationCommandInput = typeof BrowserAutomationCommandInput.Type;
@@ -348,6 +364,7 @@ export const BrowserBridgeCommandEvent = Schema.Struct({
   responseToken: Schema.String,
   resultUrl: Schema.String,
   input: BrowserAutomationCommandInput,
+  context: Schema.optional(BrowserBridgeRequestContext),
 });
 export type BrowserBridgeCommandEvent = typeof BrowserBridgeCommandEvent.Type;
 

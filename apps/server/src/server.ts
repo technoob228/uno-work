@@ -14,6 +14,7 @@ import {
   browserApiCorsLayer,
 } from "./http.ts";
 import { BrowserBridgeLive } from "./browserBridge.ts";
+import { ServerBrowserLive } from "./serverBrowser.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import { OpenLive } from "./open.ts";
@@ -309,6 +310,7 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provideMerge(OpenLive),
   Layer.provideMerge(ServerLifecycleEventsLive),
   Layer.provideMerge(BrowserBridgeLive),
+  Layer.provideMerge(ServerBrowserLive),
   Layer.provide(NetService.layer),
 );
 

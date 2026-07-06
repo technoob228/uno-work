@@ -85,6 +85,15 @@ const ACP_APPROVAL_MODE_ALIASES = ["ask"];
 
 export interface CursorAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
+  /**
+   * Env-оверлей, вычисляемый per-session по контексту треда (threadId + cwd) —
+   * browser bridge выдаёт scoped-токен, привязывающий запросы харнесса
+   * к его проекту.
+   */
+  readonly bridgeEnvironment?: (context: {
+    readonly threadId?: string;
+    readonly cwd?: string;
+  }) => Record<string, string>;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
   /**
@@ -496,9 +505,15 @@ export function makeCursorAdapter(
             ? yield* options.resolveSettings
             : cursorSettings;
 
+          const sessionEnvironment = {
+            ...(options?.environment ?? {}),
+            ...(options?.bridgeEnvironment?.({ threadId: input.threadId, cwd }) ?? {}),
+          };
           const acp = yield* makeCursorAcpRuntime({
             cursorSettings: effectiveCursorSettings,
-            ...(options?.environment ? { environment: options.environment } : {}),
+            ...(Object.keys(sessionEnvironment).length > 0
+              ? { environment: sessionEnvironment }
+              : {}),
             childProcessSpawner,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),

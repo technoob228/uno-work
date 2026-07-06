@@ -44,6 +44,27 @@ export const BrowserAutomationLevel = Schema.Literals(["off", "safe", "full"]);
 export type BrowserAutomationLevel = typeof BrowserAutomationLevel.Type;
 export const DEFAULT_BROWSER_AUTOMATION_LEVEL: BrowserAutomationLevel = "full";
 
+// Who executes browser-bridge commands from harnesses: a connected app client
+// (Electron webview) or the server-side headless Chromium. "auto" prefers a
+// connected client and falls back to the server when nobody is subscribed —
+// the headless/Telegram scenario.
+export const BrowserExecutor = Schema.Literals(["auto", "local", "server"]);
+export type BrowserExecutor = typeof BrowserExecutor.Type;
+export const DEFAULT_BROWSER_EXECUTOR: BrowserExecutor = "auto";
+
+export const ServerBrowserSettings = Schema.Struct({
+  executor: BrowserExecutor.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_EXECUTOR)),
+  ),
+  // Policy gate for the server-side executor. The client-side gate
+  // (ClientSettings.browserAutomationLevel) lives in localStorage and never
+  // reaches the server, so the headless executor needs its own.
+  serverAutomationLevel: BrowserAutomationLevel.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_AUTOMATION_LEVEL)),
+  ),
+});
+export type ServerBrowserSettings = typeof ServerBrowserSettings.Type;
+
 export const ClientSettingsSchema = Schema.Struct({
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   browserAutomationLevel: BrowserAutomationLevel.pipe(
@@ -467,6 +488,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  browser: ServerBrowserSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   uno: UnoAccountSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
@@ -549,6 +571,12 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(Schema.String),
       otlpMetricsUrl: Schema.optionalKey(Schema.String),
+    }),
+  ),
+  browser: Schema.optionalKey(
+    Schema.Struct({
+      executor: Schema.optionalKey(BrowserExecutor),
+      serverAutomationLevel: Schema.optionalKey(BrowserAutomationLevel),
     }),
   ),
   uno: Schema.optionalKey(
