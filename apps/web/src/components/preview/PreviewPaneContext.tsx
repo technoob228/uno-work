@@ -76,7 +76,14 @@ interface PreviewPaneState {
   openFile: (file: PreviewFile) => void;
   /** Открыть URL в браузерной вкладке (без аргумента — пустая «новая вкладка»). */
   openUrl: (url?: string) => void;
-  updateBrowserTab: (id: string, patch: { url?: string; name?: string }) => void;
+  /**
+   * Открыть URL во вкладке конкретного проекта (bridge-события харнессов):
+   * вкладка попадает в бакет своего проекта, текущий вид не трогается.
+   */
+  openUrlInProject: (projectKey: string, url?: string) => void;
+  updateBrowserTab: (projectKey: string, id: string, patch: { url?: string; name?: string }) => void;
+  /** Все бакеты предпросмотра — для постоянно смонтированных webview. */
+  statesByProjectKey: Readonly<Record<string, ProjectPreviewState>>;
   closeFile: (id: string) => void;
   setActiveFile: (id: string) => void;
   openBrowser: (context: BrowserContext) => void;
@@ -150,16 +157,23 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
     null,
   );
 
-  const updateCurrentState = useCallback(
-    (updater: (prev: ProjectPreviewState) => ProjectPreviewState) => {
+  const updateProjectState = useCallback(
+    (projectKey: string, updater: (prev: ProjectPreviewState) => ProjectPreviewState) => {
       setStatesByProjectKey((prev) => {
-        const current = getProjectPreviewState(prev, currentProjectKey);
+        const current = getProjectPreviewState(prev, projectKey);
         const next = updater(current);
         if (next === current) return prev;
-        return { ...prev, [currentProjectKey]: next };
+        return { ...prev, [projectKey]: next };
       });
     },
-    [currentProjectKey],
+    [],
+  );
+
+  const updateCurrentState = useCallback(
+    (updater: (prev: ProjectPreviewState) => ProjectPreviewState) => {
+      updateProjectState(currentProjectKey, updater);
+    },
+    [currentProjectKey, updateProjectState],
   );
 
   const setOpen = useCallback(
@@ -206,10 +220,10 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
     [updateCurrentState],
   );
 
-  const openUrl = useCallback(
-    (url?: string) => {
+  const openUrlInProject = useCallback(
+    (projectKey: string, url?: string) => {
       const trimmed = url?.trim() ?? "";
-      updateCurrentState((current) => {
+      updateProjectState(projectKey, (current) => {
         // Уже открытая вкладка с тем же URL — просто фокусируем её.
         const existing = trimmed
           ? current.files.find((f) => isBrowserTab(f) && f.url === trimmed)
@@ -233,12 +247,19 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
         };
       });
     },
-    [updateCurrentState],
+    [updateProjectState],
+  );
+
+  const openUrl = useCallback(
+    (url?: string) => {
+      openUrlInProject(currentProjectKey, url);
+    },
+    [currentProjectKey, openUrlInProject],
   );
 
   const updateBrowserTab = useCallback(
-    (id: string, patch: { url?: string; name?: string }) => {
-      updateCurrentState((current) => {
+    (projectKey: string, id: string, patch: { url?: string; name?: string }) => {
+      updateProjectState(projectKey, (current) => {
         const idx = current.files.findIndex((f) => f.id === id && isBrowserTab(f));
         if (idx === -1) return current;
         const existing = current.files[idx]!;
@@ -254,7 +275,7 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
         };
       });
     },
-    [updateCurrentState],
+    [updateProjectState],
   );
 
   const closeFile = useCallback(
@@ -383,7 +404,9 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       togglePreviewLayoutMode,
       openFile,
       openUrl,
+      openUrlInProject,
       updateBrowserTab,
+      statesByProjectKey,
       closeFile,
       setActiveFile,
       openBrowser,
@@ -405,7 +428,9 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       togglePreviewLayoutMode,
       openFile,
       openUrl,
+      openUrlInProject,
       updateBrowserTab,
+      statesByProjectKey,
       closeFile,
       setActiveFile,
       openBrowser,

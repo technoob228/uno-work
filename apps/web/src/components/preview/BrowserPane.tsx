@@ -13,8 +13,13 @@ import {
   XIcon,
   MonitorSmartphoneIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { BrowserAutomationCommandInput, BrowserCredentialRecord } from "@t3tools/contracts";
+import {
+  buildClickSelectorScript,
+  buildClickTextScript,
+  buildTypeScript,
+} from "@t3tools/shared/browserAutomationScripts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { isElectron } from "../../env";
@@ -23,7 +28,10 @@ import { readLocalApi } from "../../localApi";
 import { useSettings } from "../../hooks/useSettings";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
-import { setActiveBrowserAutomationHandler } from "./BrowserAutomationRegistry";
+import {
+  clearBrowserAutomationHandler,
+  setBrowserAutomationHandler,
+} from "./BrowserAutomationRegistry";
 import { buildAutofillScript } from "./browserAutofill";
 import { browserPartitionForScope, browserUrlOrigin, normalizeBrowserUrl } from "./browserUrl";
 import { isBrowserTab, usePreviewPane, type PreviewFile } from "./PreviewPaneContext";
@@ -96,56 +104,6 @@ function rememberBrowserUrl(url: string): void {
   );
 }
 
-function buildClickSelectorScript(selector: string): string {
-  return `(() => {
-    const el = document.querySelector(${JSON.stringify(selector)});
-    if (!el) throw new Error("Element not found");
-    el.scrollIntoView({ block: "center", inline: "center" });
-    if (typeof el.click === "function") el.click();
-    return { clicked: true, tagName: el.tagName, text: (el.innerText || el.value || "").slice(0, 200) };
-  })()`;
-}
-
-function buildClickTextScript(text: string): string {
-  return `(() => {
-    const needle = ${JSON.stringify(text)}.trim().toLowerCase();
-    if (!needle) throw new Error("Missing text");
-    const visible = (el) => {
-      const rect = el.getBoundingClientRect();
-      const style = window.getComputedStyle(el);
-      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
-    };
-    const candidates = Array.from(document.querySelectorAll("a,button,input,textarea,select,label,[role='button'],[onclick]"));
-    const el = candidates.find((node) => {
-      if (!visible(node)) return false;
-      const text = (node.innerText || node.getAttribute("aria-label") || node.value || "").trim().toLowerCase();
-      return text.includes(needle);
-    });
-    if (!el) throw new Error("Element text not found");
-    el.scrollIntoView({ block: "center", inline: "center" });
-    if (typeof el.click === "function") el.click();
-    return { clicked: true, tagName: el.tagName, text: (el.innerText || el.value || "").slice(0, 200) };
-  })()`;
-}
-
-function buildTypeScript(selector: string, value: string): string {
-  return `(() => {
-    const el = document.querySelector(${JSON.stringify(selector)});
-    if (!el) throw new Error("Element not found");
-    el.scrollIntoView({ block: "center", inline: "center" });
-    if (typeof el.focus === "function") el.focus();
-    if ("value" in el) {
-      el.value = ${JSON.stringify(value)};
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-    } else {
-      el.textContent = ${JSON.stringify(value)};
-      el.dispatchEvent(new InputEvent("input", { bubbles: true, data: ${JSON.stringify(value)} }));
-    }
-    return { typed: true, tagName: el.tagName };
-  })()`;
-}
-
 export function useBrowserCredentials() {
   return useQuery({
     queryKey: BROWSER_CREDENTIALS_QUERY_KEY,
@@ -180,24 +138,51 @@ function matchCredentialsForOrigin(input: {
 }
 
 /**
- * Все браузерные вкладки держатся смонтированными (скрытые — `display:none`),
+ * Все браузерные вкладки держатся смонтированными (скрытые — `visibility`),
  * чтобы webview не терял состояние страницы при переключении вкладок.
+ * Вкладки чужих (не активных сейчас) проектов тоже остаются жить: команды
+ * харнесса из другого проекта исполняются в их webview, а не в текущем.
  */
 export function BrowserViews({ activeId }: { activeId: string | null }) {
-  const { files } = usePreviewPane();
-  const tabs = files.filter(isBrowserTab);
-  if (tabs.length === 0) return null;
-  return (
-    <>
-      {tabs.map((tab) => (
-        <BrowserView key={tab.id} tab={tab} visible={tab.id === activeId} />
-      ))}
-    </>
-  );
+  const { statesByProjectKey, currentProjectKey } = usePreviewPane();
+  const views: ReactNode[] = [];
+  for (const [projectKey, bucket] of Object.entries(statesByProjectKey)) {
+    const tabs = bucket.files.filter(isBrowserTab);
+    if (tabs.length === 0) continue;
+    // Таргет автоматизации проекта: его активная браузерная вкладка, иначе
+    // последняя открытая — команды работают, даже когда активен файл-превью.
+    const automationTabId =
+      bucket.activeFileId && tabs.some((tab) => tab.id === bucket.activeFileId)
+        ? bucket.activeFileId
+        : tabs[tabs.length - 1]!.id;
+    for (const tab of tabs) {
+      views.push(
+        <BrowserView
+          key={tab.id}
+          tab={tab}
+          projectKey={projectKey}
+          visible={projectKey === currentProjectKey && tab.id === activeId}
+          automationActive={tab.id === automationTabId}
+        />,
+      );
+    }
+  }
+  if (views.length === 0) return null;
+  return <>{views}</>;
 }
 
-function BrowserView({ tab, visible }: { tab: PreviewFile; visible: boolean }) {
-  const { updateBrowserTab, currentProjectKey } = usePreviewPane();
+function BrowserView({
+  tab,
+  projectKey,
+  visible,
+  automationActive,
+}: {
+  tab: PreviewFile;
+  projectKey: string;
+  visible: boolean;
+  automationActive: boolean;
+}) {
+  const { updateBrowserTab } = usePreviewPane();
   const browserProfileScope = useSettings((settings) => settings.browserProfileScope);
   const [webviewNode, setWebviewNode] = useState<ElectronWebviewElement | null>(null);
   const webviewRef = useRef<ElectronWebviewElement | null>(null);
@@ -206,11 +191,12 @@ function BrowserView({ tab, visible }: { tab: PreviewFile; visible: boolean }) {
   // loadURL, иначе каждое обновление url перезагружало бы страницу.
   const [mountSrc, setMountSrc] = useState<string>(() => tab.url ?? "");
   // Партиция фиксируется при создании вкладки — менять partition у живого
-  // webview Electron запрещает.
+  // webview Electron запрещает. Считается от проекта самой вкладки, а не от
+  // активного на экране: куки/сессии не перетекают между проектами.
   const [partition] = useState<string>(() =>
     browserPartitionForScope({
       scope: browserProfileScope,
-      projectKey: currentProjectKey,
+      projectKey,
     }),
   );
   const [addressValue, setAddressValue] = useState<string>(tab.url ?? "");
@@ -232,9 +218,9 @@ function BrowserView({ tab, visible }: { tab: PreviewFile; visible: boolean }) {
       matchCredentialsForOrigin({
         credentials: credentialsQuery.data,
         origin,
-        projectKey: currentProjectKey,
+        projectKey,
       }),
-    [credentialsQuery.data, origin, currentProjectKey],
+    [credentialsQuery.data, origin, projectKey],
   );
 
   // Адресная строка следует за навигацией, пока пользователь её не редактирует.
@@ -258,7 +244,7 @@ function BrowserView({ tab, visible }: { tab: PreviewFile; visible: boolean }) {
       const url = normalizeBrowserUrl(rawInput);
       if (!url) return;
       setLoadError(null);
-      updateBrowserTab(tab.id, { url });
+      updateBrowserTab(projectKey, tab.id, { url });
       const view = webviewRef.current;
       if (view && readyRef.current) {
         void view.loadURL(url).catch(() => {});
@@ -266,7 +252,7 @@ function BrowserView({ tab, visible }: { tab: PreviewFile; visible: boolean }) {
         setMountSrc(url);
       }
     },
-    [tab.id, updateBrowserTab],
+    [projectKey, tab.id, updateBrowserTab],
   );
 
   const attachWebview = useCallback((node: HTMLWebViewElement | null) => {
@@ -294,12 +280,12 @@ function BrowserView({ tab, visible }: { tab: PreviewFile; visible: boolean }) {
       const navigateEvent = event as WebviewNavigateEvent;
       if (navigateEvent.isMainFrame === false) return;
       setLoadError(null);
-      updateBrowserTab(tab.id, { url: navigateEvent.url });
+      updateBrowserTab(projectKey, tab.id, { url: navigateEvent.url });
       syncNavState();
     };
     const onTitleUpdated = (event: Event) => {
       const titleEvent = event as WebviewTitleEvent;
-      updateBrowserTab(tab.id, { name: titleEvent.title });
+      updateBrowserTab(projectKey, tab.id, { name: titleEvent.title });
     };
     const onFailLoad = (event: Event) => {
       const failEvent = event as WebviewFailLoadEvent;
@@ -324,7 +310,7 @@ function BrowserView({ tab, visible }: { tab: PreviewFile; visible: boolean }) {
       view.removeEventListener("page-title-updated", onTitleUpdated);
       view.removeEventListener("did-fail-load", onFailLoad);
     };
-  }, [webviewNode, tab.id, updateBrowserTab]);
+  }, [webviewNode, projectKey, tab.id, updateBrowserTab]);
 
   const autofillCredential = useCallback(async (credential: BrowserCredentialRecord) => {
     const view = webviewRef.current;
@@ -511,15 +497,23 @@ function BrowserView({ tab, visible }: { tab: PreviewFile; visible: boolean }) {
   );
 
   useEffect(() => {
-    if (!visible) return;
-    setActiveBrowserAutomationHandler(handleAutomationCommand);
+    if (!automationActive) return;
+    setBrowserAutomationHandler(projectKey, handleAutomationCommand);
     return () => {
-      setActiveBrowserAutomationHandler(null);
+      clearBrowserAutomationHandler(projectKey, handleAutomationCommand);
     };
-  }, [handleAutomationCommand, visible]);
+  }, [automationActive, handleAutomationCommand, projectKey]);
 
   return (
-    <div className={cn("absolute inset-0 z-10 flex flex-col bg-background", !visible && "hidden")}>
+    <div
+      // Невидимые вкладки прячутся через visibility, а не display: в
+      // display:none-поддереве Electron не аттачит новые <webview>, и фоновые
+      // вкладки (в т.ч. чужих проектов) переставали бы исполнять команды.
+      className={cn(
+        "absolute inset-0 z-10 flex flex-col bg-background",
+        !visible && "invisible pointer-events-none",
+      )}
+    >
       <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border bg-card px-2 text-xs">
         <TooltipProvider delay={300} closeDelay={0}>
           <button
