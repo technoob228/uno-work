@@ -401,6 +401,18 @@ const makeAcpSessionRuntime = (
         if (Exit.isSuccess(resumed)) {
           sessionId = options.resumeSessionId;
           sessionSetupResult = resumed.value;
+          // session/load реплеит всю историю через session/update ДО своего
+          // ответа, так что всё, что сейчас лежит в очереди — реплей, а не
+          // живой трафик: у клиента эта история уже есть. Выбрасываем его
+          // (иначе адаптер переизлучит историю как свежие события, и хвост
+          // реплея припишется первому turn'у). Счётчик сегментов НЕ сбрасываем:
+          // реплей его продвинул ровно на длину истории, и id новых сообщений
+          // не коллизят с уже сохранёнными от прошлых запусков этой сессии.
+          yield* Queue.takeAll(eventQueue);
+          yield* Ref.set(toolCallsRef, new Map());
+          yield* Ref.update(assistantSegmentRef, (state) => ({
+            nextSegmentIndex: state.nextSegmentIndex,
+          }));
         } else {
           const createPayload = {
             cwd: options.cwd,
