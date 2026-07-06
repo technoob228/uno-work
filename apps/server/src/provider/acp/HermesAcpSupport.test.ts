@@ -23,6 +23,7 @@ describe("buildHermesSpawnEnvironment", () => {
       HERMES_INFERENCE_PROVIDER: "openai-api",
       OPENAI_API_KEY: "sk-test",
       OPENAI_BASE_URL: "https://api.getuno.xyz/v1",
+      STT_OPENAI_BASE_URL: "https://api.getuno.xyz/v1",
     });
   });
 });
@@ -141,6 +142,15 @@ describe("buildHermesConfigYaml", () => {
         "model:",
         '  provider: "openai-api"',
         '  default: "anthropic/claude-haiku-4.5"',
+        "providers:",
+        '  "openai-api":',
+        "    request_timeout_seconds: 180",
+        "    stale_timeout_seconds: 120",
+        "stt:",
+        "  enabled: true",
+        '  provider: "openai"',
+        "  openai:",
+        '    model: "openai/whisper-large-v3"',
         "mcp_servers:",
         '  "uno-manager":',
         '    url: "http://127.0.0.1:13776/api/manager/mcp"',
@@ -160,6 +170,14 @@ describe("buildHermesConfigYaml", () => {
     const yaml = buildHermesConfigYaml({ model: "openai/gpt-5.5", mcpServers: [] });
     expect(yaml).not.toContain("mcp_servers");
     expect(yaml).toContain('default: "openai/gpt-5.5"');
+  });
+
+  it("always pins gateway timeouts and the openai stt fallback", () => {
+    const yaml = buildHermesConfigYaml({ model: "openai/gpt-5.5", mcpServers: [] });
+    expect(yaml).toContain("request_timeout_seconds: 180");
+    expect(yaml).toContain("stale_timeout_seconds: 120");
+    expect(yaml).toContain('provider: "openai"');
+    expect(yaml).toContain('model: "openai/whisper-large-v3"');
   });
 });
 

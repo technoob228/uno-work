@@ -74,6 +74,10 @@ export function buildHermesSpawnEnvironment(
     HERMES_INFERENCE_PROVIDER: HERMES_GATEWAY_PROVIDER,
     OPENAI_API_KEY: input.unoApiKey,
     OPENAI_BASE_URL: UNO_GATEWAY_BASE_URL,
+    // STT hermes'а ходит на {STT_OPENAI_BASE_URL}/audio/transcriptions с тем
+    // же OPENAI_API_KEY. Через config.yaml нельзя: stt.openai.base_url hermes
+    // применяет только в паре с stt.openai.api_key, а секрет в файл не пишем.
+    STT_OPENAI_BASE_URL: UNO_GATEWAY_BASE_URL,
   };
 }
 
@@ -184,6 +188,13 @@ export function setHermesSessionMode<E>(input: {
  * Скаляры цитируются как JSON — валидное подмножество YAML, безопасно для
  * токенов/URL.
  */
+/** Стрим, молчащий дольше этого, hermes убивает и ретраит сам (сегодняшний
+ * потолок — 6.5 минут зависшего сокета до ReadError). */
+export const HERMES_GATEWAY_STALE_TIMEOUT_SECONDS = 120;
+export const HERMES_GATEWAY_REQUEST_TIMEOUT_SECONDS = 180;
+/** Неймспейснутый id — голый `whisper-large-v3` hermes подменяет на whisper-1. */
+export const HERMES_STT_MODEL = "openai/whisper-large-v3";
+
 export function buildHermesConfigYaml(input: {
   readonly model: string;
   readonly mcpServers: ReadonlyArray<EffectAcpSchema.McpServer>;
@@ -193,6 +204,17 @@ export function buildHermesConfigYaml(input: {
     "model:",
     `  provider: ${quote(HERMES_GATEWAY_PROVIDER)}`,
     `  default: ${quote(input.model)}`,
+    "providers:",
+    `  ${quote(HERMES_GATEWAY_PROVIDER)}:`,
+    `    request_timeout_seconds: ${HERMES_GATEWAY_REQUEST_TIMEOUT_SECONDS}`,
+    `    stale_timeout_seconds: ${HERMES_GATEWAY_STALE_TIMEOUT_SECONDS}`,
+    // STT-фолбэк самого hermes: без явного provider полез бы в faster-whisper
+    // (150MB модель на диск). base_url приходит из env STT_OPENAI_BASE_URL.
+    "stt:",
+    "  enabled: true",
+    `  provider: "openai"`,
+    "  openai:",
+    `    model: ${quote(HERMES_STT_MODEL)}`,
   ];
   if (input.mcpServers.length > 0) {
     lines.push("mcp_servers:");

@@ -64,6 +64,23 @@ model:
   name: anthropic/claude-haiku-4.5
 ${unoApiKey ? `  api_key: ${unoApiKey}` : "  # api_key: <empty — set Uno API key in app Settings → Uno, then re-run>"}
 
+providers:
+  openai-api:
+    request_timeout_seconds: 180
+    stale_timeout_seconds: 120
+
+${
+  unoApiKey
+    ? `stt:
+  enabled: true
+  provider: openai
+  openai:
+    model: openai/whisper-large-v3
+    base_url: https://api.getuno.xyz/v1
+    api_key: ${unoApiKey}
+`
+    : "# stt: <disabled — set Uno API key in app Settings → Uno, then re-run>\n"
+}
 mcp_servers:
   uno-manager:
     url: ${mcp.url}
@@ -81,6 +98,7 @@ writeFileSync(
 # Managed by uno-work-app scripts/hermes-sync.mjs
 export OPENAI_API_KEY=${unoApiKey || "SET_UNO_KEY_IN_APP_SETTINGS"}
 export OPENAI_BASE_URL=https://api.getuno.xyz/v1
+export STT_OPENAI_BASE_URL=https://api.getuno.xyz/v1
 export HERMES_INFERENCE_MODEL=\${HERMES_INFERENCE_MODEL:-anthropic/claude-haiku-4.5}
 exec hermes --provider openai-api -m "\$HERMES_INFERENCE_MODEL" "$@"
 `,
