@@ -27,6 +27,7 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   ProjectId,
   ThreadId,
+  UNO_GATEWAY_BASE_URL,
   type ChatImageAttachment,
   type ModelSelection,
   type OrchestrationThread,
@@ -37,6 +38,12 @@ import * as fsPromises from "node:fs/promises";
 import * as nodePath from "node:path";
 
 import { createAttachmentId, resolveAttachmentPath } from "../../attachmentStore.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
+import {
+  buildTranscriptMessageText,
+  isTranscribableMedia,
+  transcribeTelegramAudio,
+} from "../telegramTranscription.ts";
 import { ServerConfig } from "../../config.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -81,6 +88,7 @@ const POLL_TIMEOUT_SECONDS = 10;
 const IDLE_RECHECK = Duration.seconds(5);
 const REPLY_POLL_INTERVAL = Duration.seconds(2);
 const REPLY_TIMEOUT = Duration.minutes(10);
+const TYPING_ACTION_INTERVAL = Duration.seconds(4);
 // Hermes (ACP) резолвит session/prompt раньше, чем достримит текст ответа:
 // turn в проекции уже терминален, а сообщение ассистента приходит секундами
 // позже. Терминальному turn'у без текста даём этот grace-период на дозапись
@@ -235,6 +243,7 @@ const makeTelegramConnector = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverConfig = yield* ServerConfig;
+  const serverSettingsService = yield* ServerSettingsService;
 
   // Non-image incoming files land here; the harness reads them by absolute
   // path (Telegram threads always run in full-access mode).
@@ -391,6 +400,15 @@ const makeTelegramConnector = Effect.gen(function* () {
       ),
     );
 
+  // «Печатает…» живёт в Telegram ~5 секунд; ошибки индикатора не должны
+  // трогать ватчер ответа.
+  const sendTelegramTypingAction = (botToken: string, chatId: string) =>
+    fetchJson(telegramApi(botToken, "sendChatAction"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, action: "typing" }),
+    }).pipe(Effect.ignore);
+
   // Resolve a Telegram file_id to raw bytes: getFile → file download endpoint.
   const downloadTelegramFile = (botToken: string, fileId: string) =>
     Effect.gen(function* () {
@@ -523,11 +541,42 @@ const makeTelegramConnector = Effect.gen(function* () {
             ),
           ),
         );
-        notes.push(
-          saved
-            ? buildMediaNote(descriptor, savedPath)
-            : buildMediaFailureNote(descriptor, "failed to save the file on the server"),
-        );
+        if (!saved) {
+          notes.push(buildMediaFailureNote(descriptor, "failed to save the file on the server"));
+          continue;
+        }
+
+        // Голосовые/кружки транскрибируем через гейтвей: транскрипт попадает
+        // в текст сообщения (виден в диалоге приложения и любому харнессу).
+        // Нет ключа / гейтвей недоступен — деградация в заметку с путём.
+        if (isTranscribableMedia(descriptor)) {
+          const settings = yield* serverSettingsService.getSettings.pipe(
+            Effect.orElseSucceed(() => undefined),
+          );
+          const unoApiKey = settings?.uno.apiKey?.trim() ?? "";
+          if (unoApiKey.length > 0) {
+            const transcript = yield* transcribeTelegramAudio({
+              baseUrl: UNO_GATEWAY_BASE_URL,
+              apiKey: unoApiKey,
+              bytes,
+              fileName: descriptor.fileName,
+              mimeType: descriptor.mimeType,
+            }).pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("telegram voice transcription failed").pipe(
+                  Effect.annotateLogs({ chatId: input.chatId, savedPath, cause: cause.message }),
+                  Effect.as(null),
+                ),
+              ),
+            );
+            if (transcript !== null) {
+              notes.push(buildTranscriptMessageText({ descriptor, transcript, savedPath }));
+              continue;
+            }
+          }
+        }
+
+        notes.push(buildMediaNote(descriptor, savedPath));
       }
       return { attachments, notes };
     });
@@ -589,7 +638,12 @@ const makeTelegramConnector = Effect.gen(function* () {
   }) =>
     Effect.gen(function* () {
       const deadline = Date.now() + Duration.toMillis(REPLY_TIMEOUT);
+      let typingSentAtMs = 0;
       while (Date.now() < deadline) {
+        if (Date.now() - typingSentAtMs >= Duration.toMillis(TYPING_ACTION_INTERVAL)) {
+          typingSentAtMs = Date.now();
+          yield* sendTelegramTypingAction(input.botToken, input.chatId);
+        }
         yield* Effect.sleep(REPLY_POLL_INTERVAL);
         const detail = yield* projectionSnapshotQuery.getThreadDetailById(input.threadId);
         if (Option.isNone(detail)) continue;
