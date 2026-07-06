@@ -1327,7 +1327,7 @@ function PathBar({
   );
 }
 
-export function PreviewPane() {
+export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
   const {
     open,
     previewLayoutMode,
@@ -1424,9 +1424,10 @@ export function PreviewPane() {
   const isFocusMode = previewLayoutMode === "focus";
   const focusLeft = sidebarVisible ? "var(--sidebar-width)" : "0px";
 
-  if (!open || files.length === 0) {
-    return null;
-  }
+  // Панель может быть скрыта (закрыта, пустая или подавлена настройками), но
+  // aside остаётся смонтированным: внутри живут webview всех проектов, и
+  // размонтирование убило бы их страницы и сломало команды харнессов.
+  const paneVisible = !suppressed && open && files.length > 0;
 
   const active = files.find((f) => f.id === activeFileId) ?? files[0];
 
@@ -1441,13 +1442,27 @@ export function PreviewPane() {
 
   return (
     <aside
+      aria-hidden={!paneVisible}
       className={cn(
         "flex flex-col border-l border-border bg-background",
-        isFocusMode ? "fixed bottom-0 right-0 top-0 z-50 shadow-2xl" : "relative h-full shrink-0",
+        paneVisible &&
+          (isFocusMode
+            ? "fixed bottom-0 right-0 top-0 z-50 shadow-2xl"
+            : "relative h-full shrink-0"),
+        // Скрытая панель уезжает за экран, сохраняя реальные размеры:
+        // display:none ломает атачмент новых <webview>, а фоновые вкладки
+        // должны оставаться рабочими для команд харнессов.
+        !paneVisible && "pointer-events-none fixed top-0 h-dvh opacity-0",
       )}
-      style={isFocusMode ? { left: focusLeft } : { width: `${clampedWidth}px` }}
+      style={
+        paneVisible
+          ? isFocusMode
+            ? { left: focusLeft }
+            : { width: `${clampedWidth}px` }
+          : { left: -10000, width: `${clampedWidth}px` }
+      }
     >
-      {!isFocusMode ? (
+      {paneVisible && !isFocusMode ? (
         <div
           role="separator"
           aria-orientation="vertical"
@@ -1465,6 +1480,7 @@ export function PreviewPane() {
           isFocusMode &&
             !sidebarVisible &&
             "pl-[78px] fullscreen:pl-2 wco:pl-[calc(env(titlebar-area-x)+1em)]",
+          !paneVisible && "hidden",
         )}
       >
         {isFocusMode && !sidebarVisible ? (
@@ -1578,9 +1594,11 @@ export function PreviewPane() {
           <XIcon />
         </Button>
       </header>
-      {active && !isBrowserTab(active) ? <PathBar file={active} onOpenAt={handleOpenAt} /> : null}
+      {paneVisible && active && !isBrowserTab(active) ? (
+        <PathBar file={active} onOpenAt={handleOpenAt} />
+      ) : null}
       <div className={cn("relative min-h-0 flex-1", isFocusMode && "pb-36")}>
-        {active && !isBrowserTab(active) ? <Body file={active} /> : null}
+        {paneVisible && active && !isBrowserTab(active) ? <Body file={active} /> : null}
         <BrowserViews activeId={active?.id ?? null} />
       </div>
     </aside>
