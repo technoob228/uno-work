@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { Cause, Deferred, Effect, Exit, Layer, Queue, Ref, Scope, Context, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as EffectAcpClient from "effect-acp/client";
@@ -156,6 +158,11 @@ const makeAcpSessionRuntime = (
     const modeStateRef = yield* Ref.make<AcpSessionModeState | undefined>(undefined);
     const toolCallsRef = yield* Ref.make(new Map<string, AcpToolCallState>());
     const assistantSegmentRef = yield* Ref.make<AcpAssistantSegmentState>({ nextSegmentIndex: 0 });
+    // Нумерация сегментов начинается с нуля при каждом запуске рантайма, а
+    // резюмнутая сессия уже сохранила сообщения с теми же индексами в прошлых
+    // запусках (реплей двигает счётчик недетерминированно — соседние сообщения
+    // без tool-границы сливаются). Nonce в id исключает коллизии между запусками.
+    const assistantSegmentRunNonce = randomUUID().slice(0, 8);
     const configOptionsRef = yield* Ref.make(sessionConfigOptionsFromSetup(undefined));
     const startStateRef = yield* Ref.make<AcpStartState>({ _tag: "NotStarted" });
 
@@ -229,6 +236,7 @@ const makeAcpSessionRuntime = (
         modeStateRef,
         toolCallsRef,
         assistantSegmentRef,
+        runNonce: assistantSegmentRunNonce,
         params: notification,
       }),
     );
@@ -587,12 +595,14 @@ const handleSessionUpdate = ({
   modeStateRef,
   toolCallsRef,
   assistantSegmentRef,
+  runNonce,
   params,
 }: {
   readonly queue: Queue.Queue<AcpParsedSessionEvent>;
   readonly modeStateRef: Ref.Ref<AcpSessionModeState | undefined>;
   readonly toolCallsRef: Ref.Ref<Map<string, AcpToolCallState>>;
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
+  readonly runNonce: string;
   readonly params: EffectAcpSchema.SessionNotification;
 }): Effect.Effect<void> =>
   Effect.gen(function* () {
@@ -640,6 +650,7 @@ const handleSessionUpdate = ({
           queue,
           assistantSegmentRef,
           sessionId: params.sessionId,
+          runNonce,
         });
         yield* Queue.offer(queue, {
           ...event,
@@ -677,17 +688,19 @@ function shouldEmitToolCallUpdate(
   return previous === undefined || previous.title !== next.title || previous.detail !== next.detail;
 }
 
-const assistantItemId = (sessionId: string, segmentIndex: number) =>
-  `assistant:${sessionId}:segment:${segmentIndex}`;
+const assistantItemId = (sessionId: string, runNonce: string, segmentIndex: number) =>
+  `assistant:${sessionId}:run:${runNonce}:segment:${segmentIndex}`;
 
 const ensureActiveAssistantSegment = ({
   queue,
   assistantSegmentRef,
   sessionId,
+  runNonce,
 }: {
   readonly queue: Queue.Queue<AcpParsedSessionEvent>;
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
   readonly sessionId: string;
+  readonly runNonce: string;
 }) =>
   Ref.modify<AcpAssistantSegmentState, EnsureActiveAssistantSegmentResult>(
     assistantSegmentRef,
@@ -695,7 +708,7 @@ const ensureActiveAssistantSegment = ({
       if (current.activeItemId) {
         return [{ itemId: current.activeItemId }, current] as const;
       }
-      const itemId = assistantItemId(sessionId, current.nextSegmentIndex);
+      const itemId = assistantItemId(sessionId, runNonce, current.nextSegmentIndex);
       return [
         {
           itemId,
