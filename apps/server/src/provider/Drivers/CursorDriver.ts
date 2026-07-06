@@ -95,6 +95,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
 
       const adapter = yield* makeCursorAdapter(effectiveConfig, {
         environment: processEnv,
+        bridgeEnvironment: (context) => browserBridge.scopedEnvironment(context),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
       });

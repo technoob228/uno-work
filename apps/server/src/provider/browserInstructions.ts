@@ -26,27 +26,27 @@ export function buildBrowserInstructions(baseUrl: string | undefined): string | 
 
 У приложения есть встроенный браузер в правой панели предпросмотра. Ты можешь открыть в нём любую веб-страницу для пользователя — например, чтобы показать документацию, дашборд, локальный dev-сервер или результат деплоя.
 
-Чтобы открыть URL в браузере приложения, отправь POST-запрос на bridge-endpoint. Адрес и токен доступны в переменных окружения \`${BROWSER_BRIDGE_URL_ENV}\` и \`${BROWSER_BRIDGE_TOKEN_ENV}\`:
+Чтобы открыть URL в браузере приложения, отправь POST-запрос на bridge-endpoint. Адрес и токен доступны в переменных окружения \`${BROWSER_BRIDGE_URL_ENV}\` и \`${BROWSER_BRIDGE_TOKEN_ENV}\`. Всегда включай в тело поле \`cwd\` с корнем проекта, над которым работаешь (обычно \`$PWD\`): по нему вкладка привязывается к правильному проекту, даже если пользователь сейчас смотрит другой.
 
 \`\`\`bash
 curl -fsS -X POST "$${BROWSER_BRIDGE_URL_ENV}${BROWSER_BRIDGE_OPEN_PATH}" \\
   -H "Authorization: Bearer $${BROWSER_BRIDGE_TOKEN_ENV}" \\
   -H "Content-Type: application/json" \\
-  -d '{"url":"https://example.com"}'
+  -d "{\\"url\\":\\"https://example.com\\",\\"cwd\\":\\"$PWD\\"}"
 \`\`\`
 
 Открывай страницу, когда пользователь просит «открой … в браузере», когда нужно показать запущенный локально сервис, или когда визуальный результат полезнее текстового описания. Открывай только http(s)-адреса.
 
-Если нужно управлять уже открытой страницей, используй command-endpoint. Он вернёт JSON-результат после выполнения команды в активной вкладке встроенного браузера:
+Если нужно управлять уже открытой страницей, используй command-endpoint. Он вернёт JSON-результат после выполнения команды в активной вкладке встроенного браузера твоего проекта (поле \`cwd\` тоже передавай):
 
 \`\`\`bash
 curl -fsS -X POST "$${BROWSER_BRIDGE_URL_ENV}${BROWSER_BRIDGE_COMMAND_PATH}" \\
   -H "Authorization: Bearer $${BROWSER_BRIDGE_TOKEN_ENV}" \\
   -H "Content-Type: application/json" \\
-  -d '{"command":"state","timeoutMs":5000}'
+  -d "{\\"command\\":\\"state\\",\\"timeoutMs\\":5000,\\"cwd\\":\\"$PWD\\"}"
 \`\`\`
 
-Доступные команды: \`openUrl\`, \`state\`, \`screenshot\`, \`click\`, \`clickText\`, \`type\`, \`press\`, \`navigate\`, \`reload\`, \`back\`, \`forward\`, \`evaluate\`. Предпочитай точные selector/text команды и не выводи в логи пароли, токены или содержимое приватных полей.
+Доступные команды: \`openUrl\`, \`state\`, \`screenshot\`, \`click\`, \`clickText\`, \`type\`, \`press\`, \`navigate\`, \`reload\`, \`back\`, \`forward\`, \`evaluate\`. У \`screenshot\` есть опция \`"fullPage": true\` — полностраничный снимок (работает в серверном headless-браузере; встроенная панель снимает видимую область). Ответ содержит \`data.dataUrl\` (PNG в base64) — можно декодировать в файл и посмотреть. Предпочитай точные selector/text команды и не выводи в логи пароли, токены или содержимое приватных полей.
 
 ## Инфраструктура через Uno
 

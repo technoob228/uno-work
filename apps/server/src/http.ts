@@ -11,7 +11,7 @@ import {
 } from "effect/unstable/http";
 import { OtlpTracer } from "effect/unstable/observability";
 
-import { timingSafeEqual } from "node:crypto";
+import type { BrowserBridgeRequestContext } from "@t3tools/contracts";
 
 import {
   ATTACHMENTS_ROUTE_PREFIX,
@@ -25,7 +25,9 @@ import {
   BrowserBridge,
   isAllowedBridgeCommand,
   isAllowedBridgeUrl,
+  normalizeBridgeRequestContext,
 } from "./browserBridge.ts";
+import { executeBridgeCommand, executeBridgeOpenUrl } from "./browserCommandRouter.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { decodeOtlpTraceRecords } from "./observability/TraceRecord.ts";
@@ -133,12 +135,18 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
-function isBridgeTokenAuthorized(authorizationHeader: string | undefined, token: string): boolean {
-  const presented = authorizationHeader?.replace(/^Bearer\s+/i, "").trim() ?? "";
-  if (presented.length === 0 || presented.length !== token.length) {
-    return false;
-  }
-  return timingSafeEqual(Buffer.from(presented, "utf8"), Buffer.from(token, "utf8"));
+/**
+ * Контекст запроса к bridge: приоритет у контекста scoped-токена (его выдал
+ * сервер, подделать нельзя), `cwd` из тела — fallback для харнессов с общим
+ * per-instance токеном (OpenCode/Uno), где модель подставляет `$PWD` сама.
+ */
+function resolveBridgeRequestContext(
+  authorization: { readonly context: BrowserBridgeRequestContext | undefined },
+  body: unknown,
+): BrowserBridgeRequestContext | undefined {
+  if (authorization.context) return authorization.context;
+  const rawCwd = body && typeof body === "object" ? (body as { cwd?: unknown }).cwd : undefined;
+  return typeof rawCwd === "string" ? normalizeBridgeRequestContext({ cwd: rawCwd }) : undefined;
 }
 
 /**
@@ -152,7 +160,8 @@ export const browserBridgeOpenRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const browserBridge = yield* BrowserBridge;
-    if (!isBridgeTokenAuthorized(request.headers["authorization"], browserBridge.token)) {
+    const authorization = browserBridge.authorize(request.headers["authorization"]);
+    if (!authorization) {
       return HttpServerResponse.text("Unauthorized", { status: 401 });
     }
 
@@ -164,8 +173,14 @@ export const browserBridgeOpenRouteLayer = HttpRouter.add(
       });
     }
 
-    yield* browserBridge.publishOpenUrl(rawUrl);
-    return HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 });
+    const result = yield* executeBridgeOpenUrl(
+      rawUrl,
+      resolveBridgeRequestContext(authorization, body),
+    );
+    return HttpServerResponse.jsonUnsafe(
+      result.ok ? { ok: true } : { ok: false, error: result.error },
+      { status: result.ok ? 200 : 502 },
+    );
   }),
 );
 
@@ -175,7 +190,8 @@ export const browserBridgeCommandRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const browserBridge = yield* BrowserBridge;
-    if (!isBridgeTokenAuthorized(request.headers["authorization"], browserBridge.token)) {
+    const authorization = browserBridge.authorize(request.headers["authorization"]);
+    if (!authorization) {
       return HttpServerResponse.text("Unauthorized", { status: 401 });
     }
 
@@ -188,7 +204,10 @@ export const browserBridgeCommandRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Invalid browser command payload.", { status: 400 });
     }
 
-    const result = yield* browserBridge.publishCommand(rawInput);
+    const result = yield* executeBridgeCommand(
+      rawInput,
+      resolveBridgeRequestContext(authorization, body),
+    );
     return HttpServerResponse.jsonUnsafe(result, { status: result.ok ? 200 : 502 });
   }),
 );

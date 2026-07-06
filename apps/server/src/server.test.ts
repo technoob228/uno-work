@@ -56,6 +56,7 @@ const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
 import type { ServerConfigShape } from "./config.ts";
 import { BrowserBridgeTest } from "./browserBridge.ts";
+import { ServerBrowserTest } from "./serverBrowser.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
@@ -647,6 +648,7 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provideMerge(makeAuthTestLayer()),
       Layer.provideMerge(BrowserBridgeTest),
+      Layer.provideMerge(ServerBrowserTest),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provide(layerConfig),
@@ -969,6 +971,25 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       });
       assert.equal(unknownResult.status, 404);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes authorized bridge commands to the server executor when no client is live", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      // executor=auto (дефолт), подписчиков нет → команда уходит серверному
+      // исполнителю (в тестах — стаб ServerBrowserTest с ошибкой-маркером).
+      const response = yield* HttpClient.post("/api/browser/command", {
+        headers: {
+          authorization: "Bearer test-browser-bridge-token",
+        },
+        body: HttpBody.text(JSON.stringify({ command: "state" }), "application/json"),
+      });
+      assert.equal(response.status, 502);
+      const result = (yield* response.json) as { ok: boolean; error?: string };
+      assert.isFalse(result.ok);
+      assert.include(result.error ?? "", "unavailable in tests");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
