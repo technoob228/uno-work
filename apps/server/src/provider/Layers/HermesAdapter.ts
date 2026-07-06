@@ -193,6 +193,9 @@ export function makeHermesAdapter(
 
     const sessions = new Map<ThreadId, HermesSessionContext>();
     const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
+    // Отдельные локи для session/prompt: prompt держит пермит минуты, а
+    // threadLocks должны оставаться свободными для stopSession/startSession.
+    const promptLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -202,17 +205,20 @@ export function makeHermesAdapter(
     const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
       PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid);
 
-    const getThreadSemaphore = (threadId: string) =>
-      SynchronizedRef.modifyEffect(threadLocksRef, (current) => {
+    const getKeyedSemaphore = (
+      locksRef: SynchronizedRef.SynchronizedRef<Map<string, Semaphore.Semaphore>>,
+      key: string,
+    ) =>
+      SynchronizedRef.modifyEffect(locksRef, (current) => {
         const existing: Option.Option<Semaphore.Semaphore> = Option.fromNullishOr(
-          current.get(threadId),
+          current.get(key),
         );
         return Option.match(existing, {
           onNone: () =>
             Semaphore.make(1).pipe(
               Effect.map((semaphore) => {
                 const next = new Map(current);
-                next.set(threadId, semaphore);
+                next.set(key, semaphore);
                 return [semaphore, next] as const;
               }),
             ),
@@ -221,7 +227,14 @@ export function makeHermesAdapter(
       });
 
     const withThreadLock = <A, E, R>(threadId: string, effect: Effect.Effect<A, E, R>) =>
-      Effect.flatMap(getThreadSemaphore(threadId), (semaphore) => semaphore.withPermit(effect));
+      Effect.flatMap(getKeyedSemaphore(threadLocksRef, threadId), (semaphore) =>
+        semaphore.withPermit(effect),
+      );
+
+    const withPromptLock = <A, E, R>(threadId: string, effect: Effect.Effect<A, E, R>) =>
+      Effect.flatMap(getKeyedSemaphore(promptLocksRef, threadId), (semaphore) =>
+        semaphore.withPermit(effect),
+      );
 
     const logNative = (threadId: ThreadId, method: string, payload: unknown) =>
       Effect.gen(function* () {
@@ -668,17 +681,9 @@ export function makeHermesAdapter(
         const turnModelSelection =
           input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
         const model = turnModelSelection?.model ?? ctx.session.model;
-        const resolvedModel = yield* applyHermesSessionConfiguration({
-          ctx,
-          model,
-        });
-        ctx.activeTurnId = turnId;
-        ctx.lastPlanFingerprint = undefined;
-        ctx.session = {
-          ...ctx.session,
-          activeTurnId: turnId,
-          updatedAt: yield* nowIso,
-        };
+        // Для turn.started модель считаем чисто (тот же резолв, что внутри
+        // applyHermesSessionConfiguration) — сам set_model уедет под лок ниже.
+        const displayModel = resolveHermesBaseModelId(model) ?? HERMES_DEFAULT_MODEL;
 
         yield* offerRuntimeEvent({
           type: "turn.started",
@@ -686,7 +691,7 @@ export function makeHermesAdapter(
           provider: PROVIDER,
           threadId: input.threadId,
           turnId,
-          payload: { model: resolvedModel },
+          payload: { model: displayModel },
         });
 
         const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
@@ -737,41 +742,68 @@ export function makeHermesAdapter(
           });
         }
 
-        const result = yield* ctx.acp
-          .prompt({
-            prompt: promptParts,
-          })
-          .pipe(
-            Effect.mapError((error) =>
-              mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
-            ),
-          );
+        // hermes acp на второй session/prompt при активном turn'е мгновенно
+        // отвечает end_turn с текстом «Queued for the next turn», а реальный
+        // ответ стримит внутри ПЕРВОГО prompt'а — очередь на его стороне
+        // неотключаема. Сериализуем prompt'ы сами: turn честно висит pending,
+        // пока предыдущий не завершится. interruptTurn (acp.cancel) файберы,
+        // ждущие этот семафор, не отменяет.
+        return yield* withPromptLock(
+          input.threadId,
+          Effect.gen(function* () {
+            // Сессия могла быть перезапущена, пока ждали лок.
+            const liveCtx = yield* requireSession(input.threadId);
+            // set_model/set_mode нельзя слать во время чужого активного
+            // turn'а — поэтому конфигурация тоже под локом.
+            const resolvedModel = yield* applyHermesSessionConfiguration({
+              ctx: liveCtx,
+              model,
+            });
+            liveCtx.activeTurnId = turnId;
+            liveCtx.lastPlanFingerprint = undefined;
+            liveCtx.session = {
+              ...liveCtx.session,
+              activeTurnId: turnId,
+              updatedAt: yield* nowIso,
+            };
 
-        ctx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });
-        ctx.session = {
-          ...ctx.session,
-          activeTurnId: turnId,
-          updatedAt: yield* nowIso,
-          model: resolvedModel,
-        };
+            const result = yield* liveCtx.acp
+              .prompt({
+                prompt: promptParts,
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
+                ),
+              );
 
-        yield* offerRuntimeEvent({
-          type: "turn.completed",
-          ...(yield* makeEventStamp()),
-          provider: PROVIDER,
-          threadId: input.threadId,
-          turnId,
-          payload: {
-            state: result.stopReason === "cancelled" ? "cancelled" : "completed",
-            stopReason: result.stopReason ?? null,
-          },
-        });
+            liveCtx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });
+            liveCtx.session = {
+              ...liveCtx.session,
+              activeTurnId: turnId,
+              updatedAt: yield* nowIso,
+              model: resolvedModel,
+            };
 
-        return {
-          threadId: input.threadId,
-          turnId,
-          resumeCursor: ctx.session.resumeCursor,
-        };
+            yield* offerRuntimeEvent({
+              type: "turn.completed",
+              ...(yield* makeEventStamp()),
+              provider: PROVIDER,
+              threadId: input.threadId,
+              turnId,
+              payload: {
+                state: result.stopReason === "cancelled" ? "cancelled" : "completed",
+                stopReason: result.stopReason ?? null,
+              },
+            });
+
+            return {
+              threadId: input.threadId,
+              turnId,
+              resumeCursor: liveCtx.session.resumeCursor,
+            };
+          }),
+        );
       });
 
     const interruptTurn: HermesAdapterShape["interruptTurn"] = (threadId) =>
