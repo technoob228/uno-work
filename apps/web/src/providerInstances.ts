@@ -206,27 +206,54 @@ export function getProviderInstanceModels(
   return getProviderInstanceEntry(providers, instanceId)?.models ?? [];
 }
 
+// An instance we can route a turn to right now: enabled, available, and its
+// harness binary installed on this machine.
+const isInstalledInstance = (entry: ProviderInstanceEntry): boolean =>
+  entry.enabled && entry.isAvailable && entry.installed;
+// An instance the user has enabled and that is not an unavailable shadow (its
+// binary may still be missing). Used as a last resort so a turn can be
+// attempted and the missing-harness hint shown.
+const isSendableInstance = (entry: ProviderInstanceEntry): boolean =>
+  entry.enabled && entry.isAvailable;
+
 /**
  * Resolve the routing key for a selection that may reference an instance
  * id that no longer exists (e.g. a persisted thread selection after the
- * user deleted the custom instance). Returns the first enabled instance
- * as a fallback so downstream code can still send a turn.
+ * user deleted the custom instance) or whose harness binary is not
+ * installed on this machine.
+ *
+ * Prefers an instance whose harness is actually installed so an
+ * uninstalled-but-enabled selection transparently falls back to any
+ * installed harness. Only when nothing is installed do we keep the
+ * enabled-but-uninstalled selection as a last resort, so downstream code
+ * can still surface a single "install this harness" hint.
  */
 export function resolveSelectableProviderInstance(
   providers: ReadonlyArray<ServerProvider>,
   instanceId: ProviderInstanceId | undefined,
 ): ProviderInstanceId | undefined {
-  if (instanceId === undefined) {
-    return deriveProviderInstanceEntries(providers).find(
-      (entry) => entry.enabled && entry.isAvailable,
-    )?.instanceId;
-  }
   const entries = deriveProviderInstanceEntries(providers);
+
+  if (instanceId === undefined) {
+    return (entries.find(isInstalledInstance) ?? entries.find(isSendableInstance))?.instanceId;
+  }
   const requested = entries.find((entry) => entry.instanceId === instanceId);
-  if (requested && requested.enabled && requested.isAvailable) {
+  // 1. Honor the request when its harness is installed and usable.
+  if (requested && isInstalledInstance(requested)) {
     return instanceId;
   }
-  return entries.find((entry) => entry.enabled && entry.isAvailable)?.instanceId;
+  // 2. Otherwise prefer any installed harness over the uninstalled request.
+  const installed = entries.find(isInstalledInstance);
+  if (installed) {
+    return installed.instanceId;
+  }
+  // 3. Nothing installed: keep the enabled selection so a turn can still be
+  //    attempted (and the missing-harness hint shown) instead of returning
+  //    nothing at all.
+  if (requested && isSendableInstance(requested)) {
+    return instanceId;
+  }
+  return entries.find(isSendableInstance)?.instanceId;
 }
 
 /**
