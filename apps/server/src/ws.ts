@@ -468,20 +468,39 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
 
           const bootstrapProgram = Effect.gen(function* () {
             if (bootstrap?.createThread) {
-              yield* orchestrationEngine.dispatch({
-                type: "thread.create",
-                commandId: serverCommandId("bootstrap-thread-create"),
-                threadId: command.threadId,
-                projectId: bootstrap.createThread.projectId,
-                title: bootstrap.createThread.title,
-                modelSelection: bootstrap.createThread.modelSelection,
-                runtimeMode: bootstrap.createThread.runtimeMode,
-                interactionMode: bootstrap.createThread.interactionMode,
-                branch: bootstrap.createThread.branch,
-                worktreePath: bootstrap.createThread.worktreePath,
-                createdAt: bootstrap.createThread.createdAt,
-              });
-              createdThread = true;
+              // A stale/persisted client draft can re-send bootstrap.createThread
+              // with a thread id that was already created (the composer draft
+              // pins its server thread id and survives reloads). Treat an
+              // already-existing thread as a benign no-op and proceed to the
+              // turn instead of aborting the whole send with a hard
+              // "already exists" invariant failure the user sees as an error.
+              const alreadyExists = yield* projectionSnapshotQuery
+                .getThreadShellById(command.threadId)
+                .pipe(
+                  Effect.map(Option.isSome),
+                  Effect.catch(() => Effect.succeed(false)),
+                );
+              if (alreadyExists) {
+                yield* Effect.logWarning(
+                  "bootstrap turn start reused an existing thread id; skipping thread.create",
+                  { threadId: command.threadId },
+                );
+              } else {
+                yield* orchestrationEngine.dispatch({
+                  type: "thread.create",
+                  commandId: serverCommandId("bootstrap-thread-create"),
+                  threadId: command.threadId,
+                  projectId: bootstrap.createThread.projectId,
+                  title: bootstrap.createThread.title,
+                  modelSelection: bootstrap.createThread.modelSelection,
+                  runtimeMode: bootstrap.createThread.runtimeMode,
+                  interactionMode: bootstrap.createThread.interactionMode,
+                  branch: bootstrap.createThread.branch,
+                  worktreePath: bootstrap.createThread.worktreePath,
+                  createdAt: bootstrap.createThread.createdAt,
+                });
+                createdThread = true;
+              }
             }
 
             if (bootstrap?.prepareWorktree) {
