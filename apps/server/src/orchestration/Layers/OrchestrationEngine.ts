@@ -158,6 +158,25 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 ...nextEvent,
                 metadata: { ...nextEvent.metadata, origin: envelope.origin },
               }));
+
+        // Idempotent no-op: the decider can legitimately produce zero events
+        // when the command's effect is already satisfied (e.g. archiving an
+        // already-archived thread). Record an accepted receipt so same-id
+        // replays dedup, and return the current sequence without appending —
+        // the command succeeds instead of failing "produced no events."
+        if (eventBases.length === 0) {
+          yield* commandReceiptRepository.upsert({
+            commandId: envelope.command.commandId,
+            aggregateKind: aggregateRef.aggregateKind,
+            aggregateId: aggregateRef.aggregateId,
+            acceptedAt: new Date().toISOString(),
+            resultSequence: commandReadModel.snapshotSequence,
+            status: "accepted",
+            error: null,
+          });
+          return { sequence: commandReadModel.snapshotSequence };
+        }
+
         const committedCommand = yield* sql
           .withTransaction(
             Effect.gen(function* () {

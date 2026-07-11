@@ -3960,6 +3960,77 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect(
+    "bootstrap turn start reuses an existing thread id without a duplicate thread.create",
+    () =>
+      Effect.gen(function* () {
+        const dispatchedCommands: Array<OrchestrationCommand> = [];
+        const reusedThreadId = ThreadId.make("thread-bootstrap-reuse");
+
+        yield* buildAppUnderTest({
+          layers: {
+            orchestrationEngine: {
+              dispatch: (command) =>
+                Effect.sync(() => {
+                  dispatchedCommands.push(command);
+                  return { sequence: dispatchedCommands.length };
+                }),
+              readEvents: () => Stream.empty,
+            },
+            projectionSnapshotQuery: {
+              getThreadShellById: (threadId) =>
+                Effect.succeed(
+                  threadId === reusedThreadId
+                    ? Option.some(makeDefaultOrchestrationThreadShell({ id: reusedThreadId }))
+                    : Option.none(),
+                ),
+            },
+          },
+        });
+
+        const createdAt = new Date().toISOString();
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const response = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+              type: "thread.turn.start",
+              commandId: CommandId.make("cmd-bootstrap-turn-start-reuse"),
+              threadId: reusedThreadId,
+              message: {
+                messageId: MessageId.make("msg-bootstrap-reuse"),
+                role: "user",
+                text: "hello again",
+                attachments: [],
+              },
+              modelSelection: defaultModelSelection,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              bootstrap: {
+                createThread: {
+                  projectId: defaultProjectId,
+                  title: "Bootstrap Thread",
+                  modelSelection: defaultModelSelection,
+                  runtimeMode: "full-access",
+                  interactionMode: "default",
+                  branch: null,
+                  worktreePath: null,
+                  createdAt,
+                },
+              },
+              createdAt,
+            }),
+          ),
+        );
+
+        // The turn still starts, but no duplicate thread.create is dispatched
+        // for the already-existing thread. The previous behavior rejected the
+        // whole send with an "already exists" invariant failure.
+        assertTrue(dispatchedCommands.every((command) => command.type !== "thread.create"));
+        assertTrue(dispatchedCommands.some((command) => command.type === "thread.turn.start"));
+        assert.equal(response.sequence, dispatchedCommands.length);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("does not misattribute setup activity dispatch failures as setup launch failures", () =>
     Effect.gen(function* () {
       const dispatchedCommands: Array<OrchestrationCommand> = [];

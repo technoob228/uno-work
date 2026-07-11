@@ -1993,6 +1993,28 @@ export function setThreadBranch(
   return commitEnvironmentState(state, threadRef.environmentId, nextEnvironmentState);
 }
 
+// Reflect a server-acknowledged archive/unarchive locally. The authoritative
+// thread-upserted push event normally lands right after and re-applies the
+// same value; this local write keeps the sidebar correct even when the push
+// stream is degraded (the command RPC can succeed while the stream is down),
+// and covers the idempotent-no-op case where re-archiving an already-archived
+// thread produces no event at all.
+export function setThreadArchivedAt(
+  state: AppState,
+  threadRef: ScopedThreadRef,
+  archivedAt: string | null,
+): AppState {
+  const nextEnvironmentState = updateThreadState(
+    getStoredEnvironmentState(state, threadRef.environmentId),
+    threadRef.threadId,
+    (thread) => {
+      if (thread.archivedAt === archivedAt) return thread;
+      return { ...thread, archivedAt };
+    },
+  );
+  return commitEnvironmentState(state, threadRef.environmentId, nextEnvironmentState);
+}
+
 interface AppStore extends AppState {
   setActiveEnvironmentId: (environmentId: EnvironmentId) => void;
   removeEnvironmentState: (environmentId: EnvironmentId) => void;
@@ -2013,6 +2035,7 @@ interface AppStore extends AppState {
     branch: string | null,
     worktreePath: string | null,
   ) => void;
+  setThreadArchivedAt: (threadRef: ScopedThreadRef, archivedAt: string | null) => void;
 }
 
 export const useStore = create<AppStore>((set) => ({
@@ -2034,4 +2057,6 @@ export const useStore = create<AppStore>((set) => ({
   setError: (threadId, error) => set((state) => setError(state, threadId, error)),
   setThreadBranch: (threadRef, branch, worktreePath) =>
     set((state) => setThreadBranch(state, threadRef, branch, worktreePath)),
+  setThreadArchivedAt: (threadRef, archivedAt) =>
+    set((state) => setThreadArchivedAt(state, threadRef, archivedAt)),
 }));

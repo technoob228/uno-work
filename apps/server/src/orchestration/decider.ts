@@ -11,9 +11,7 @@ import {
   requireProject,
   requireProjectAbsent,
   requireThread,
-  requireThreadArchived,
   requireThreadAbsent,
-  requireThreadNotArchived,
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
 
@@ -256,11 +254,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.archive": {
-      yield* requireThreadNotArchived({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      // Idempotent: archiving an already-archived thread is a no-op success,
+      // not an error. The UI can re-send archive after a stale sidebar view or
+      // a reconnect replay without surfacing a hard command-invariant failure.
+      if (thread.archivedAt !== null) {
+        return [];
+      }
       const occurredAt = nowIso();
       return {
         ...withEventBase({
@@ -279,11 +283,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.unarchive": {
-      yield* requireThreadArchived({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      // Idempotent: unarchiving a thread that is not archived is a no-op.
+      if (thread.archivedAt === null) {
+        return [];
+      }
       const occurredAt = nowIso();
       return {
         ...withEventBase({

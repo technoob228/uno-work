@@ -1,7 +1,8 @@
 import { describe, it, assert } from "@effect/vitest";
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { createModelCapabilities } from "@t3tools/shared/model";
-import { Deferred, Effect, Fiber, PubSub, Ref, Stream } from "effect";
+import { Deferred, Duration, Effect, Fiber, PubSub, Ref, Stream } from "effect";
+import { TestClock } from "effect/testing";
 
 import { makeManagedServerProvider } from "./makeManagedServerProvider.ts";
 
@@ -259,6 +260,76 @@ describe("makeManagedServerProvider", () => {
           enrichedSnapshotSecond,
         ]);
         assert.deepStrictEqual(latest, enrichedSnapshotSecond);
+      }),
+    ),
+  );
+
+  it.effect("backs off periodic re-probes while the provider is not installed", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const checkCalls = yield* Ref.make(0);
+        const notInstalledSnapshot: ServerProvider = {
+          ...refreshedSnapshot,
+          installed: false,
+          status: "error",
+          message: "Codex CLI (`codex`) is not installed or not on PATH.",
+        };
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => ({ ...initialSnapshot, installed: false }),
+          checkProvider: Ref.update(checkCalls, (count) => count + 1).pipe(
+            Effect.as(notInstalledSnapshot),
+          ),
+          refreshInterval: "60 seconds",
+        });
+
+        // Let the forked initial probe land.
+        yield* TestClock.adjust(Duration.millis(1));
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+
+        // Nine ticks with a not-installed snapshot: every one is skipped.
+        for (let tick = 0; tick < 9; tick++) {
+          yield* TestClock.adjust(Duration.seconds(60));
+        }
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+
+        // The tenth tick re-probes.
+        yield* TestClock.adjust(Duration.seconds(60));
+        assert.strictEqual(yield* Ref.get(checkCalls), 2);
+
+        // Manual refresh is never gated by the backoff.
+        yield* provider.refresh;
+        assert.strictEqual(yield* Ref.get(checkCalls), 3);
+      }),
+    ),
+  );
+
+  it.effect("keeps the periodic re-probe cadence while the provider is installed", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const checkCalls = yield* Ref.make(0);
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => initialSnapshot,
+          checkProvider: Ref.update(checkCalls, (count) => count + 1).pipe(
+            Effect.as(refreshedSnapshot),
+          ),
+          refreshInterval: "60 seconds",
+        });
+        yield* provider.getSnapshot;
+
+        yield* TestClock.adjust(Duration.millis(1));
+        const initialCalls = yield* Ref.get(checkCalls);
+
+        yield* TestClock.adjust(Duration.seconds(60));
+        assert.strictEqual(yield* Ref.get(checkCalls), initialCalls + 1);
+
+        yield* TestClock.adjust(Duration.seconds(60));
+        assert.strictEqual(yield* Ref.get(checkCalls), initialCalls + 2);
       }),
     ),
   );

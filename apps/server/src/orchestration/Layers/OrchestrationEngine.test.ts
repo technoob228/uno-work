@@ -963,15 +963,21 @@ describe("OrchestrationEngine", () => {
       ),
     ).rejects.toThrow("projection failed");
 
-    await expect(
-      runtime.runPromise(
-        engine.dispatch({
-          type: "thread.archive",
-          commandId: CommandId.make("cmd-thread-archive-sync-retry"),
-          threadId: ThreadId.make("thread-sync"),
-        }),
-      ),
-    ).rejects.toThrow("already archived");
+    // The first archive's event persisted to the store even though its
+    // projection failed. The engine reconciles its read model from the store
+    // before the next command, so the retry sees the thread as already
+    // archived and is an idempotent no-op — no new event is appended. (Before
+    // reconciliation the read model would still show the thread active and the
+    // retry would append a second thread.archived event.)
+    const eventCountBeforeRetry = events.length;
+    await runtime.runPromise(
+      engine.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.make("cmd-thread-archive-sync-retry"),
+        threadId: ThreadId.make("thread-sync"),
+      }),
+    );
+    expect(events.length).toBe(eventCountBeforeRetry);
 
     await runtime.dispose();
   });
