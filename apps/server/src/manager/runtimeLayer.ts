@@ -4,6 +4,7 @@ import { ManagerActionProposalRepositoryLive } from "../persistence/Layers/Manag
 import { ManagerCapabilityTokenRepositoryLive } from "../persistence/Layers/ManagerCapabilityTokens.ts";
 import { ManagerConnectorRepositoryLive } from "../persistence/Layers/ManagerConnectors.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../persistence/Layers/ProjectionPendingApprovals.ts";
+import { RemindersRepositoryLive } from "../persistence/Layers/Reminders.ts";
 import {
   AssistantBootstrapLive,
   ManagerAssistantServiceLive,
@@ -13,12 +14,14 @@ import { ManagerBudgetServiceLive } from "./Layers/ManagerBudgetService.ts";
 import { ManagerTokenAuthServiceLive } from "./Layers/ManagerTokenAuth.ts";
 import { ManagerToolServiceLive } from "./Layers/ManagerToolService.ts";
 import { ManagerTelegramServiceLive } from "./Layers/TelegramConnector.ts";
+import { ManagerSlackServiceLive } from "./Layers/SlackConnector.ts";
 
 const ManagerRepositoriesLive = Layer.mergeAll(
   ManagerActionProposalRepositoryLive,
   ManagerCapabilityTokenRepositoryLive,
   ManagerConnectorRepositoryLive,
   ProjectionPendingApprovalRepositoryLive,
+  RemindersRepositoryLive,
 );
 
 /**
@@ -33,6 +36,7 @@ export const ManagerLayerLive = ManagerToolServiceLive.pipe(
   // provided AFTER it in this pipe.
   Layer.provideMerge(ManagerAssistantServiceLive),
   Layer.provideMerge(ManagerTelegramServiceLive),
+  Layer.provideMerge(ManagerSlackServiceLive),
   Layer.provideMerge(ManagerApprovalServiceLive),
   Layer.provide(ManagerBudgetServiceLive),
   Layer.provideMerge(ManagerTokenAuthServiceLive),

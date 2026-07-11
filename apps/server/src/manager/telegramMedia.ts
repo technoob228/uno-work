@@ -13,10 +13,18 @@
  * {@link extractOutgoingFiles} strips those markers out of the reply text.
  */
 
+import type { NormalizedIncomingMessage } from "./addressing.ts";
+
 export interface TelegramFileSize {
   readonly file_id?: string;
   readonly file_size?: number;
   readonly width?: number;
+}
+
+export interface TelegramMessageEntity {
+  readonly type?: string;
+  readonly offset?: number;
+  readonly length?: number;
 }
 
 export interface TelegramIncomingMessage {
@@ -24,6 +32,27 @@ export interface TelegramIncomingMessage {
     readonly id?: number;
     readonly title?: string;
     readonly username?: string;
+    /** "private" | "group" | "supergroup" | "channel". */
+    readonly type?: string;
+  };
+  /** Sender; used to gate group messages and to never answer other bots. */
+  readonly from?: {
+    readonly id?: number;
+    readonly is_bot?: boolean;
+    readonly username?: string;
+    readonly first_name?: string;
+  };
+  /** Formatting spans of `text` — how @mentions and /commands are detected. */
+  readonly entities?: ReadonlyArray<TelegramMessageEntity>;
+  /** Formatting spans of `caption` (media messages carry mentions here). */
+  readonly caption_entities?: ReadonlyArray<TelegramMessageEntity>;
+  /** The message this one replies to; a reply to the bot counts as addressing it. */
+  readonly reply_to_message?: {
+    readonly from?: {
+      readonly id?: number;
+      readonly is_bot?: boolean;
+      readonly username?: string;
+    };
   };
   readonly text?: string;
   readonly caption?: string;
@@ -265,6 +294,89 @@ export function describeNonFileContent(message: TelegramIncomingMessage): Readon
     );
   }
   return lines;
+}
+
+// ===============================
+// Addressing signals
+// ===============================
+
+/** A private (1:1) chat — the assistant always answers here. */
+export function telegramIsDirectMessage(message: TelegramIncomingMessage): boolean {
+  return message.chat?.type === "private";
+}
+
+/** The sender is another bot — never engage, it invites message loops. */
+export function telegramSenderIsBot(message: TelegramIncomingMessage): boolean {
+  return message.from?.is_bot === true;
+}
+
+function entitiesTargetBot(
+  text: string | undefined,
+  entities: ReadonlyArray<TelegramMessageEntity> | undefined,
+  handle: string,
+): boolean {
+  if (text === undefined || entities === undefined) return false;
+  for (const entity of entities) {
+    if (entity.offset === undefined || entity.length === undefined) continue;
+    const slice = text.slice(entity.offset, entity.offset + entity.length).toLowerCase();
+    if (entity.type === "mention" && slice === handle) return true;
+    // `/status@mybot` — a command explicitly routed to this bot.
+    if (entity.type === "bot_command" && slice.endsWith(handle)) return true;
+  }
+  return false;
+}
+
+/**
+ * Is the bot @-mentioned (or targeted by a `/cmd@bot`) in this message? Reads
+ * the message's own entities first (Telegram always emits them for mentions);
+ * a plain-text fallback covers the rare client that omits them.
+ */
+export function telegramMentionsBot(
+  message: TelegramIncomingMessage,
+  botUsername: string,
+): boolean {
+  const handle = `@${botUsername.toLowerCase()}`;
+  if (
+    entitiesTargetBot(message.text, message.entities, handle) ||
+    entitiesTargetBot(message.caption, message.caption_entities, handle)
+  ) {
+    return true;
+  }
+  const haystack = `${message.text ?? ""}\n${message.caption ?? ""}`.toLowerCase();
+  // `@mybot` not glued to another word (so it never matches `@mybot2`).
+  const escaped = botUsername.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`@${escaped}(?![a-z0-9_])`).test(haystack);
+}
+
+/** Does this message reply to one of the bot's own messages? */
+export function telegramRepliesToBot(
+  message: TelegramIncomingMessage,
+  botUsername: string,
+): boolean {
+  const repliedTo = message.reply_to_message?.from;
+  if (repliedTo === undefined) return false;
+  return repliedTo.username?.toLowerCase() === botUsername.toLowerCase();
+}
+
+/**
+ * Fold a Telegram message into the transport-agnostic shape the addressing
+ * policy consumes. `text` is passed in explicitly because the connector may
+ * have folded a voice transcript into it before deciding. A null bot username
+ * (getMe not yet resolved) conservatively disables mention/reply detection.
+ */
+export function toNormalizedMessage(input: {
+  readonly message: TelegramIncomingMessage;
+  readonly botUsername: string | null;
+  readonly text: string;
+}): NormalizedIncomingMessage {
+  const { message, botUsername } = input;
+  return {
+    isDirectMessage: telegramIsDirectMessage(message),
+    isReplyToBot: botUsername !== null && telegramRepliesToBot(message, botUsername),
+    explicitMention: botUsername !== null && telegramMentionsBot(message, botUsername),
+    senderIsBot: telegramSenderIsBot(message),
+    text: input.text,
+  };
 }
 
 /**

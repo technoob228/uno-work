@@ -10,10 +10,13 @@
  * 2025-06-18 for the initialize / tools/list / tools/call / ping subset.
  */
 import {
+  ManagerCancelReminderInput,
+  ManagerCreateReminderInput,
   ManagerCreateThreadInput,
   ManagerGetThreadStatusInput,
   ManagerInterruptTurnInput,
   ManagerListProposalsInput,
+  ManagerListRemindersInput,
   ManagerListThreadsInput,
   ManagerReadThreadDetailInput,
   ManagerResolveProposalInput,
@@ -231,6 +234,65 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
     run: (tools, caller, args) =>
       decodeArgs(ManagerResolveProposalInput, args).pipe(
         Effect.flatMap((input) => tools.resolveProposal(caller, input)),
+      ),
+  },
+  {
+    name: "create_reminder",
+    description:
+      "Schedule a one-shot reminder: at the due time the daemon pushes the message to the owner's Telegram verbatim (no LLM turn). Use this for 'remind me in N minutes/at TIME' requests. Give either dueInSeconds (relative) or dueAt (absolute ISO). Delivery targets the owner's Telegram chat automatically; it survives restarts.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "The reminder text sent to the user." },
+        dueInSeconds: {
+          type: "integer",
+          minimum: 1,
+          description: "Fire this many seconds from now. Use this OR dueAt.",
+        },
+        dueAt: {
+          type: "string",
+          description: "Absolute ISO-8601 time to fire (UTC). Use this OR dueInSeconds.",
+        },
+        projectId: {
+          type: "string",
+          description: "Optional: target project; defaults to the Telegram-connected one.",
+        },
+        chatId: { type: "string", description: "Optional: target chat id override." },
+      },
+      required: ["message"],
+      additionalProperties: false,
+    },
+    run: (tools, caller, args) =>
+      decodeArgs(ManagerCreateReminderInput, args).pipe(
+        Effect.flatMap((input) => tools.createReminder(caller, input)),
+      ),
+  },
+  {
+    name: "list_reminders",
+    description:
+      "List reminders in the caller's allowed projects. By default only pending ones; set includeInactive to also see delivered/failed/cancelled.",
+    inputSchema: {
+      type: "object",
+      properties: { includeInactive: { type: "boolean" } },
+      additionalProperties: false,
+    },
+    run: (tools, caller, args) =>
+      decodeArgs(ManagerListRemindersInput, args).pipe(
+        Effect.flatMap((input) => tools.listReminders(caller, input)),
+      ),
+  },
+  {
+    name: "cancel_reminder",
+    description: "Cancel a still-pending reminder by its id.",
+    inputSchema: {
+      type: "object",
+      properties: { reminderId: { type: "string" } },
+      required: ["reminderId"],
+      additionalProperties: false,
+    },
+    run: (tools, caller, args) =>
+      decodeArgs(ManagerCancelReminderInput, args).pipe(
+        Effect.flatMap((input) => tools.cancelReminder(caller, input)),
       ),
   },
 ];

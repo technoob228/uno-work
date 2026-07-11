@@ -3,7 +3,10 @@ import {
   ASSISTANT_PROJECT_ID_PREFIX,
   assistantTokenLabel,
   CommandId,
+  DEFAULT_CONNECTOR_ADDRESSING,
+  DEFAULT_SLACK_CONNECTOR_STATUS,
   isAssistantProjectId,
+  ManagerSlackConnectorConfig,
   ManagerTelegramConnectorConfig,
   type ManagerAssistantSummary,
   type ManagerTelegramConnectorStatus,
@@ -26,6 +29,7 @@ import {
 } from "../Services/AssistantService.ts";
 import { ManagerTokenAuthService } from "../Services/ManagerTokenAuth.ts";
 import { ManagerTelegramService } from "./TelegramConnector.ts";
+import { ManagerSlackService } from "./SlackConnector.ts";
 
 const ASSISTANT_INSTRUCTIONS_TEMPLATE = `# Uno Assistant (dispatcher)
 
@@ -41,6 +45,11 @@ small tasks yourself, and remember what matters.
 - When the user asks for work in a project, spawn or steer a thread there via
   those tools instead of doing it in this workspace. This workspace is your
   own context: notes, preferences, skills.
+- For "remind me in N minutes / at TIME" requests, call \`create_reminder\`
+  (pass \`dueInSeconds\` or an absolute \`dueAt\`, plus the \`message\`). The
+  daemon pushes the message to the user's Telegram itself at the due time — do
+  NOT try to sleep or keep the turn open. \`list_reminders\` / \`cancel_reminder\`
+  manage them.
 
 ## Continuity — you are ONE assistant across MANY chats
 
@@ -127,6 +136,7 @@ const emptyTelegramStatus = (input: {
   botUsername: input.botUsername,
   lastError: input.lastError,
   defaultModelSelection: null,
+  addressing: DEFAULT_CONNECTOR_ADDRESSING,
 });
 
 const makeManagerAssistantService = Effect.gen(function* () {
@@ -139,6 +149,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const connectorRepository = yield* ManagerConnectorRepository;
   const telegramService = yield* ManagerTelegramService;
+  const slackService = yield* ManagerSlackService;
 
   const toAssistantError = (detail: string) => (cause: unknown) =>
     new ManagerAssistantError({ detail, cause });
@@ -316,11 +327,44 @@ const makeManagerAssistantService = Effect.gen(function* () {
             botUsername: runtime.botUsername,
             lastError: runtime.lastError,
             defaultModelSelection: decoded.value.defaultModelSelection ?? null,
+            addressing: decoded.value.addressing ?? DEFAULT_CONNECTOR_ADDRESSING,
           };
         } else {
           telegram = {
             ...emptyTelegramStatus(runtime),
             lastError: "Stored Telegram config is invalid; save it again.",
+          };
+        }
+      }
+      const slackRuntime = yield* slackService.getRuntimeStatus(input.projectId);
+      const slackConnector = yield* connectorRepository
+        .get({ projectId: input.projectId, kind: "slack" })
+        .pipe(Effect.mapError(toAssistantError("Failed to read assistant connector.")));
+      let slack = {
+        ...DEFAULT_SLACK_CONNECTOR_STATUS,
+        botUserId: slackRuntime.botUserId,
+        botUserName: slackRuntime.botUserName,
+        lastError: slackRuntime.lastError,
+      };
+      if (Option.isSome(slackConnector)) {
+        const decoded = Schema.decodeUnknownExit(ManagerSlackConnectorConfig)(
+          slackConnector.value.config,
+        );
+        if (decoded._tag === "Success") {
+          slack = {
+            configured: true,
+            enabled: decoded.value.enabled,
+            allowedChannelIds: decoded.value.allowedChannelIds,
+            botUserId: slackRuntime.botUserId,
+            botUserName: slackRuntime.botUserName,
+            lastError: slackRuntime.lastError,
+            defaultModelSelection: decoded.value.defaultModelSelection ?? null,
+            addressing: decoded.value.addressing ?? DEFAULT_CONNECTOR_ADDRESSING,
+          };
+        } else {
+          slack = {
+            ...DEFAULT_SLACK_CONNECTOR_STATUS,
+            lastError: "Stored Slack config is invalid; save it again.",
           };
         }
       }
@@ -334,6 +378,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
         workspaceRoot: input.workspaceRoot,
         token: Option.getOrNull(token),
         telegram,
+        slack,
         skills: [...skills].filter((entry) => !entry.startsWith(".")).sort(),
       };
     });

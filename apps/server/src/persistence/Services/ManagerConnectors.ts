@@ -11,7 +11,10 @@ import type { Effect } from "effect";
 
 import type { ManagerRepositoryError } from "../Errors.ts";
 
-export const ManagerConnectorKind = Schema.Literals(["telegram"]);
+// Both connector tables carry this as a column, so a new kind slots into
+// storage without a migration. Slack is wired at the contract/persistence
+// layer; its live poller Layer lands separately.
+export const ManagerConnectorKind = Schema.Literals(["telegram", "slack"]);
 export type ManagerConnectorKind = typeof ManagerConnectorKind.Type;
 
 export const ManagerConnectorRecord = Schema.Struct({

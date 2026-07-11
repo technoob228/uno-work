@@ -50,9 +50,12 @@ describe("buildTranscriptMessageText", () => {
       transcript: "перезапусти треды",
       savedPath: "/state/telegram-files/1/voice.ogg",
     });
-    expect(text).toBe(
-      "🎤 (3s): перезапусти треды\n[Telegram voice message saved at /state/telegram-files/1/voice.ogg]",
+    expect(text).toMatch(
+      /^🎤 \(3s\): перезапусти треды\n\[Telegram voice message saved at \/state\/telegram-files\/1\/voice\.ogg\./,
     );
+    // The note must tell the harness how to analyze the raw audio (delivery
+    // is not in the normalized transcript).
+    expect(text).toContain("input_audio");
   });
 });
 

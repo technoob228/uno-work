@@ -40,7 +40,10 @@ export const parseTranscriptionResponse = (body: unknown): string | null => {
 
 /**
  * Transcript goes first (it IS the user's message); the file path stays as a
- * bracketed note so the harness can still reach the raw audio.
+ * bracketed note so the harness can still reach the raw audio — the transcript
+ * is whisper's normalized text, so anything about HOW it was said
+ * (pronunciation, accent, hesitation) is only in the audio file. The note
+ * says so, and names the gateway route that can actually listen to it.
  */
 export const buildTranscriptMessageText = (input: {
   readonly descriptor: TelegramMediaDescriptor;
@@ -51,7 +54,7 @@ export const buildTranscriptMessageText = (input: {
     input.descriptor.durationSec !== null ? ` (${input.descriptor.durationSec}s)` : "";
   return `🎤${duration}: ${input.transcript}\n[Telegram ${
     input.descriptor.kind === "video_note" ? "video note" : "voice message"
-  } saved at ${input.savedPath}]`;
+  } saved at ${input.savedPath}. The transcript above is auto-normalized text; to analyze delivery (pronunciation, accent, tone), send the audio file itself to an audio-capable model via the Uno Gateway chat/completions (e.g. google/gemini-3.1-pro-preview with an input_audio content part).]`;
 };
 
 export const transcribeTelegramAudio = (input: {

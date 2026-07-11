@@ -44,6 +44,12 @@ import {
   isTranscribableMedia,
   transcribeTelegramAudio,
 } from "../telegramTranscription.ts";
+import {
+  DEFAULT_ADDRESSING_CONFIG,
+  decideAddressing,
+  type AddressingReason,
+} from "../addressing.ts";
+import { classifyWake } from "../wakeClassifier.ts";
 import { ServerConfig } from "../../config.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -61,6 +67,7 @@ import {
   extractOutgoingFiles,
   isImageLikeMedia,
   pickTelegramUploadMethod,
+  toNormalizedMessage,
   TELEGRAM_BOT_DOWNLOAD_LIMIT_BYTES,
   TELEGRAM_BOT_UPLOAD_LIMIT_BYTES,
   TELEGRAM_SEND_FILE_HINT,
@@ -77,6 +84,17 @@ export interface ManagerTelegramServiceShape {
   readonly getRuntimeStatus: (
     projectId: ProjectId,
   ) => Effect.Effect<ManagerTelegramRuntimeStatus>;
+  /**
+   * Proactively push text to a Telegram chat (reminders, notifications) — not
+   * a reply to an inbound message. Resolves the bot token from the project's
+   * connector config. Returns whether Telegram accepted the message; never
+   * fails, so callers can treat a `false` as "delivery failed" and move on.
+   */
+  readonly sendText: (input: {
+    readonly projectId: ProjectId;
+    readonly chatId: string;
+    readonly text: string;
+  }) => Effect.Effect<boolean>;
 }
 
 export class ManagerTelegramService extends Context.Service<
@@ -267,6 +285,24 @@ const makeTelegramConnector = Effect.gen(function* () {
       ),
     );
 
+  // Last time the bot replied to a chat, keyed `${projectId}:${chatId}`. Feeds
+  // the addressing "hot window": for a few seconds after a reply, follow-ups
+  // from that chat land without re-addressing the bot.
+  const hotWindowRef = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
+  const hotWindowKey = (projectId: ProjectId, chatId: string): string =>
+    `${projectId}:${chatId}`;
+  const markHotWindow = (key: string) =>
+    Ref.update(hotWindowRef, (map) => new Map(map).set(key, Date.now()));
+  const isWithinHotWindow = (key: string, windowSec: number) =>
+    windowSec <= 0
+      ? Effect.succeed(false)
+      : Ref.get(hotWindowRef).pipe(
+          Effect.map((map) => {
+            const last = map.get(key);
+            return last !== undefined && Date.now() - last <= windowSec * 1000;
+          }),
+        );
+
   const sameHarnessAndModel = (a: ModelSelection, b: ModelSelection): boolean =>
     a.instanceId === b.instanceId && a.model === b.model;
 
@@ -380,6 +416,47 @@ const makeTelegramConnector = Effect.gen(function* () {
       return { threadId, handoffContext };
     });
 
+  // Transcribe the first transcribable audio of a message BEFORE the addressing
+  // gate, so "Антоха, посмотри" spoken aloud in a smart-wake group can be
+  // matched/classified. Returns the transcript + its file_id (reused by the
+  // media pipeline to avoid a second STT) or null on any failure.
+  const transcribeAudioForGating = (input: {
+    readonly botToken: string;
+    readonly media: ReadonlyArray<TelegramMediaDescriptor>;
+  }) =>
+    Effect.gen(function* () {
+      const target = input.media.find(
+        (descriptor) =>
+          isTranscribableMedia(descriptor) &&
+          (descriptor.sizeBytes === null ||
+            descriptor.sizeBytes <= TELEGRAM_BOT_DOWNLOAD_LIMIT_BYTES),
+      );
+      if (target === undefined) {
+        return null;
+      }
+      const settings = yield* serverSettingsService.getSettings.pipe(
+        Effect.orElseSucceed(() => undefined),
+      );
+      const unoApiKey = settings?.uno.apiKey?.trim() ?? "";
+      if (unoApiKey.length === 0) {
+        return null;
+      }
+      const bytes = yield* downloadTelegramFile(input.botToken, target.fileId).pipe(
+        Effect.catch(() => Effect.succeed(null)),
+      );
+      if (bytes === null) {
+        return null;
+      }
+      const transcript = yield* transcribeTelegramAudio({
+        baseUrl: UNO_GATEWAY_BASE_URL,
+        apiKey: unoApiKey,
+        bytes,
+        fileName: target.fileName,
+        mimeType: target.mimeType,
+      }).pipe(Effect.catch(() => Effect.succeed(null)));
+      return transcript === null ? null : { fileId: target.fileId, transcript };
+    });
+
   // Send a message and surface Telegram-side rejections into the log instead
   // of silently dropping them.
   const sendTelegramText = (botToken: string, chatId: string, text: string) =>
@@ -445,6 +522,11 @@ const makeTelegramConnector = Effect.gen(function* () {
     readonly threadId: ThreadId;
     readonly chatId: string;
     readonly media: ReadonlyArray<TelegramMediaDescriptor>;
+    /**
+     * Transcripts already computed while gating the message (voice in a
+     * smart-wake group), keyed by file_id, so we never pay the STT twice.
+     */
+    readonly precomputedTranscripts?: ReadonlyMap<string, string>;
   }) =>
     Effect.gen(function* () {
       const attachments: Array<ChatImageAttachment> = [];
@@ -550,29 +632,33 @@ const makeTelegramConnector = Effect.gen(function* () {
         // в текст сообщения (виден в диалоге приложения и любому харнессу).
         // Нет ключа / гейтвей недоступен — деградация в заметку с путём.
         if (isTranscribableMedia(descriptor)) {
-          const settings = yield* serverSettingsService.getSettings.pipe(
-            Effect.orElseSucceed(() => undefined),
-          );
-          const unoApiKey = settings?.uno.apiKey?.trim() ?? "";
-          if (unoApiKey.length > 0) {
-            const transcript = yield* transcribeTelegramAudio({
-              baseUrl: UNO_GATEWAY_BASE_URL,
-              apiKey: unoApiKey,
-              bytes,
-              fileName: descriptor.fileName,
-              mimeType: descriptor.mimeType,
-            }).pipe(
-              Effect.catch((cause) =>
-                Effect.logWarning("telegram voice transcription failed").pipe(
-                  Effect.annotateLogs({ chatId: input.chatId, savedPath, cause: cause.message }),
-                  Effect.as(null),
-                ),
-              ),
+          // Reuse the transcript computed during addressing gating, if any.
+          let transcript = input.precomputedTranscripts?.get(descriptor.fileId) ?? null;
+          if (transcript === null) {
+            const settings = yield* serverSettingsService.getSettings.pipe(
+              Effect.orElseSucceed(() => undefined),
             );
-            if (transcript !== null) {
-              notes.push(buildTranscriptMessageText({ descriptor, transcript, savedPath }));
-              continue;
+            const unoApiKey = settings?.uno.apiKey?.trim() ?? "";
+            if (unoApiKey.length > 0) {
+              transcript = yield* transcribeTelegramAudio({
+                baseUrl: UNO_GATEWAY_BASE_URL,
+                apiKey: unoApiKey,
+                bytes,
+                fileName: descriptor.fileName,
+                mimeType: descriptor.mimeType,
+              }).pipe(
+                Effect.catch((cause) =>
+                  Effect.logWarning("telegram voice transcription failed").pipe(
+                    Effect.annotateLogs({ chatId: input.chatId, savedPath, cause: cause.message }),
+                    Effect.as(null),
+                  ),
+                ),
+              );
             }
+          }
+          if (transcript !== null) {
+            notes.push(buildTranscriptMessageText({ descriptor, transcript, savedPath }));
+            continue;
           }
         }
 
@@ -635,6 +721,8 @@ const makeTelegramConnector = Effect.gen(function* () {
     readonly chatId: string;
     readonly threadId: ThreadId;
     readonly requestedAtIso: string;
+    /** Marked with "now" once a real reply lands, opening the hot window. */
+    readonly hotKey: string;
   }) =>
     Effect.gen(function* () {
       const deadline = Date.now() + Duration.toMillis(REPLY_TIMEOUT);
@@ -667,6 +755,7 @@ const makeTelegramConnector = Effect.gen(function* () {
         for (const file of reply.files) {
           yield* sendTelegramFile(input.botToken, input.chatId, file);
         }
+        yield* markHotWindow(input.hotKey);
         return;
       }
       yield* sendTelegramText(
@@ -706,6 +795,70 @@ const makeTelegramConnector = Effect.gen(function* () {
         );
         return;
       }
+
+      // --- Addressing gate. Decide whether the bot should react BEFORE
+      // creating a thread: a private chat always passes; a group needs an
+      // @mention / reply / a (fuzzy) name / an active hot window, or — only if
+      // the owner opted in — the smart classifier. Non-addressed group chatter
+      // never spawns a thread or a harness session.
+      const addressing = config.addressing ?? DEFAULT_ADDRESSING_CONFIG;
+      const botUsername = (yield* getRuntime(projectId)).botUsername;
+      const hotKey = hotWindowKey(projectId, chatId);
+      const withinHotWindow = yield* isWithinHotWindow(hotKey, addressing.hotWindowSec);
+
+      let effectiveText = text;
+      const precomputedTranscripts = new Map<string, string>();
+      let normalized = toNormalizedMessage({ message, botUsername, text: effectiveText });
+      let decision = decideAddressing(normalized, addressing, { withinHotWindow });
+
+      // Voice in a group carries no @mention; to catch a spoken name/intent we
+      // must transcribe first. Per the owner's choice this happens ONLY with
+      // smartWake on (a reply-to-bot already passes the cheap check above), so
+      // we never burn STT on every group voice note.
+      if (
+        !decision.addressed &&
+        !normalized.isDirectMessage &&
+        addressing.smartWake &&
+        media.some(isTranscribableMedia)
+      ) {
+        const gating = yield* transcribeAudioForGating({ botToken: config.botToken, media });
+        if (gating !== null) {
+          precomputedTranscripts.set(gating.fileId, gating.transcript);
+          effectiveText = [effectiveText, gating.transcript]
+            .filter((part) => part.length > 0)
+            .join("\n");
+          normalized = toNormalizedMessage({ message, botUsername, text: effectiveText });
+          decision = decideAddressing(normalized, addressing, { withinHotWindow });
+        }
+      }
+
+      // Smart tier: cheap checks missed and the owner opted in. Degrades to
+      // "stay silent" on any gateway failure — the safe default in a group.
+      if (!decision.addressed && decision.needsSmartCheck) {
+        const settings = yield* serverSettingsService.getSettings.pipe(
+          Effect.orElseSucceed(() => undefined),
+        );
+        const unoApiKey = settings?.uno.apiKey?.trim() ?? "";
+        if (unoApiKey.length > 0) {
+          const addressed = yield* classifyWake({
+            baseUrl: UNO_GATEWAY_BASE_URL,
+            apiKey: unoApiKey,
+            names: addressing.names,
+            text: effectiveText,
+          }).pipe(Effect.catch(() => Effect.succeed(false)));
+          if (addressed) {
+            decision = { addressed: true, reason: "smart" satisfies AddressingReason };
+          }
+        }
+      }
+
+      if (!decision.addressed) {
+        yield* Effect.logDebug("telegram message not addressed to the bot; ignored").pipe(
+          Effect.annotateLogs({ projectId, chatId }),
+        );
+        return;
+      }
+
       const chatLabel = message.chat?.title ?? message.chat?.username ?? chatId;
       const { threadId, handoffContext } = yield* ensureThreadForChat({
         projectId,
@@ -715,7 +868,13 @@ const makeTelegramConnector = Effect.gen(function* () {
       });
       const ingested =
         media.length > 0
-          ? yield* ingestIncomingMedia({ botToken: config.botToken, threadId, chatId, media })
+          ? yield* ingestIncomingMedia({
+              botToken: config.botToken,
+              threadId,
+              chatId,
+              media,
+              precomputedTranscripts,
+            })
           : { attachments: [], notes: [] };
       const bodyParts = [text, ...nonFileLines, ...ingested.notes].filter(
         (part) => part.length > 0,
@@ -751,6 +910,7 @@ const makeTelegramConnector = Effect.gen(function* () {
           chatId,
           threadId,
           requestedAtIso,
+          hotKey,
         }),
       );
     });
@@ -829,6 +989,45 @@ const makeTelegramConnector = Effect.gen(function* () {
     );
   });
 
+  // Proactive push (reminders/notifications): resolve the bot token from the
+  // project's connector row and send. Every failure degrades to `false` +
+  // a log line so a scheduler can decide delivered vs failed on its own.
+  const sendText: ManagerTelegramServiceShape["sendText"] = (input) =>
+    Effect.gen(function* () {
+      const record = yield* connectorRepository
+        .get({ projectId: input.projectId, kind: "telegram" })
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      if (Option.isNone(record)) {
+        yield* Effect.logWarning("telegram push skipped: no connector").pipe(
+          Effect.annotateLogs({ projectId: input.projectId, chatId: input.chatId }),
+        );
+        return false;
+      }
+      const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(
+        record.value.config,
+      );
+      if (decoded._tag !== "Success") {
+        yield* Effect.logWarning("telegram push skipped: invalid connector config").pipe(
+          Effect.annotateLogs({ projectId: input.projectId }),
+        );
+        return false;
+      }
+      if (!decoded.value.enabled) {
+        yield* Effect.logWarning("telegram push skipped: connector disabled").pipe(
+          Effect.annotateLogs({ projectId: input.projectId }),
+        );
+        return false;
+      }
+      return yield* sendTelegramText(
+        decoded.value.botToken,
+        input.chatId,
+        input.text.slice(0, TELEGRAM_MESSAGE_LIMIT),
+      ).pipe(
+        Effect.map((resp) => resp.ok === true),
+        Effect.catch(() => Effect.succeed(false)),
+      );
+    });
+
   yield* Effect.forkScoped(Effect.forever(pollCycle));
 
   return {
@@ -839,6 +1038,7 @@ const makeTelegramConnector = Effect.gen(function* () {
           lastError: runtime.lastError,
         })),
       ),
+    sendText,
   } satisfies ManagerTelegramServiceShape;
 });
 

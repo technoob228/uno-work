@@ -10,6 +10,10 @@
  * @module ManagerToolService
  */
 import type {
+  ManagerCancelReminderInput,
+  ManagerCancelReminderResult,
+  ManagerCreateReminderInput,
+  ManagerCreateReminderResult,
   ManagerCreateThreadInput,
   ManagerGetThreadStatusInput,
   ManagerGetThreadStatusResult,
@@ -17,6 +21,8 @@ import type {
   ManagerListPendingApprovalsResult,
   ManagerListProposalsInput,
   ManagerListProposalsResult,
+  ManagerListRemindersInput,
+  ManagerListRemindersResult,
   ManagerListThreadsInput,
   ManagerListThreadsResult,
   ManagerProjectAllowlist,
@@ -86,6 +92,18 @@ export interface ManagerToolServiceShape {
     caller: ManagerCaller,
     input: ManagerResolveProposalInput,
   ) => Effect.Effect<ManagerResolveProposalResult, ManagerToolError>;
+  readonly createReminder: (
+    caller: ManagerCaller,
+    input: ManagerCreateReminderInput,
+  ) => Effect.Effect<ManagerCreateReminderResult, ManagerToolError>;
+  readonly listReminders: (
+    caller: ManagerCaller,
+    input: ManagerListRemindersInput,
+  ) => Effect.Effect<ManagerListRemindersResult, ManagerToolError>;
+  readonly cancelReminder: (
+    caller: ManagerCaller,
+    input: ManagerCancelReminderInput,
+  ) => Effect.Effect<ManagerCancelReminderResult, ManagerToolError>;
 }
 
 export class ManagerToolService extends Context.Service<

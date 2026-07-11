@@ -1,0 +1,50 @@
+# Slack App manifest for the Uno assistant connector.
+#
+# Setup (one-time, per workspace):
+#   1. https://api.slack.com/apps → Create New App → From an app manifest.
+#   2. Pick your workspace, paste this YAML, create the app.
+#   3. Install to Workspace → copy the Bot User OAuth Token (xoxb-…).
+#   4. Basic Information → App-Level Tokens → Generate a token with the
+#      `connections:write` scope → copy it (xapp-…).
+#   5. In Uno Work: Assistant settings → Slack bot → paste both tokens, list the
+#      channel/DM ids the bot may act in, save, enable.
+#   6. Invite the bot to any channel it should watch: `/invite @UnoAssistant`.
+#
+# Rename `display_information.name` / the bot display name to taste. The bot
+# answers by @mention out of the box; to also wake it by name or via the smart
+# classifier in channels, keep the `message.channels`/`message.groups` event
+# subscriptions below (they deliver every channel message the bot can see).
+display_information:
+  name: Uno Assistant
+  description: Uno Work assistant — talk to your coordinator from Slack.
+  background_color: "#101014"
+features:
+  bot_user:
+    display_name: Uno Assistant
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - chat:write
+      - im:history
+      - im:read
+      - im:write
+      - mpim:history
+      - channels:history
+      - groups:history
+      - users:read
+      - files:read
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.im
+      - message.mpim
+      - message.channels
+      - message.groups
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false

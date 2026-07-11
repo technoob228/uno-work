@@ -29,6 +29,7 @@ import {
   ManagerApiError,
   readAssistantFile,
   saveAssistantTelegram,
+  saveAssistantSlack,
   setAssistantDefaultModel,
   updateAssistantAccess,
   writeAssistantFile,
@@ -137,6 +138,24 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
   const [telegramInstance, setTelegramInstance] = useState("uno");
   const [telegramModel, setTelegramModel] = useState("");
 
+  // Addressing: when the bot reacts in group chats.
+  const [botNames, setBotNames] = useState("");
+  const [requireMention, setRequireMention] = useState(true);
+  const [smartWake, setSmartWake] = useState(false);
+  const [hotWindowSec, setHotWindowSec] = useState("0");
+
+  // Slack connector.
+  const [slackBotToken, setSlackBotToken] = useState("");
+  const [slackAppToken, setSlackAppToken] = useState("");
+  const [slackChannels, setSlackChannels] = useState("");
+  const [slackEnabled, setSlackEnabled] = useState(false);
+  const [slackInstance, setSlackInstance] = useState("uno");
+  const [slackModel, setSlackModel] = useState("");
+  const [slackNames, setSlackNames] = useState("");
+  const [slackRequireMention, setSlackRequireMention] = useState(true);
+  const [slackSmartWake, setSlackSmartWake] = useState(false);
+  const [slackHotWindowSec, setSlackHotWindowSec] = useState("0");
+
   const refresh = useCallback(async () => {
     try {
       const [nextAssistant, nextProjects] = await Promise.all([
@@ -163,6 +182,23 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
         setTelegramInstance(nextAssistant.telegram.defaultModelSelection.instanceId);
         setTelegramModel(nextAssistant.telegram.defaultModelSelection.model);
       }
+      const addressing = nextAssistant.telegram.addressing;
+      setBotNames(addressing.names.join(", "));
+      setRequireMention(addressing.requireMentionInGroups);
+      setSmartWake(addressing.smartWake);
+      setHotWindowSec(String(addressing.hotWindowSec));
+
+      setSlackEnabled(nextAssistant.slack.enabled);
+      setSlackChannels(nextAssistant.slack.allowedChannelIds.join(", "));
+      if (nextAssistant.slack.defaultModelSelection !== null) {
+        setSlackInstance(nextAssistant.slack.defaultModelSelection.instanceId);
+        setSlackModel(nextAssistant.slack.defaultModelSelection.model);
+      }
+      const slackAddressing = nextAssistant.slack.addressing;
+      setSlackNames(slackAddressing.names.join(", "));
+      setSlackRequireMention(slackAddressing.requireMentionInGroups);
+      setSlackSmartWake(slackAddressing.smartWake);
+      setSlackHotWindowSec(String(slackAddressing.hotWindowSec));
       setError(null);
     } catch (cause) {
       setError(
@@ -223,6 +259,15 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
         telegramModel.trim().length > 0
           ? { instanceId: telegramInstance, model: telegramModel.trim() }
           : null,
+      addressing: {
+        names: botNames
+          .split(/[,;\n]+/)
+          .map((name) => name.trim())
+          .filter((name) => name.length > 0),
+        requireMentionInGroups: requireMention,
+        smartWake,
+        hotWindowSec: Math.max(0, Math.trunc(Number(hotWindowSec) || 0)),
+      },
     })
       .then(() => {
         setBotToken("");
@@ -232,7 +277,68 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
       .catch((cause: unknown) =>
         setError(cause instanceof Error ? cause.message : "Failed to save Telegram connector."),
       );
-  }, [projectId, botToken, chatIds, telegramEnabled, telegramInstance, telegramModel, refresh]);
+  }, [
+    projectId,
+    botToken,
+    chatIds,
+    telegramEnabled,
+    telegramInstance,
+    telegramModel,
+    botNames,
+    requireMention,
+    smartWake,
+    hotWindowSec,
+    refresh,
+  ]);
+
+  const handleSaveSlack = useCallback(() => {
+    setNotice(null);
+    void saveAssistantSlack({
+      projectId,
+      ...(slackBotToken.trim().length > 0 ? { botToken: slackBotToken.trim() } : {}),
+      ...(slackAppToken.trim().length > 0 ? { appToken: slackAppToken.trim() } : {}),
+      allowedChannelIds: slackChannels
+        .split(/[\s,;]+/)
+        .map((channelId) => channelId.trim())
+        .filter((channelId) => channelId.length > 0),
+      enabled: slackEnabled,
+      defaultModelSelection:
+        slackModel.trim().length > 0
+          ? { instanceId: slackInstance, model: slackModel.trim() }
+          : null,
+      addressing: {
+        names: slackNames
+          .split(/[,;\n]+/)
+          .map((name) => name.trim())
+          .filter((name) => name.length > 0),
+        requireMentionInGroups: slackRequireMention,
+        smartWake: slackSmartWake,
+        hotWindowSec: Math.max(0, Math.trunc(Number(slackHotWindowSec) || 0)),
+      },
+    })
+      .then(() => {
+        setSlackBotToken("");
+        setSlackAppToken("");
+        setNotice("Slack connector saved.");
+        void refresh();
+      })
+      .catch((cause: unknown) =>
+        setError(cause instanceof Error ? cause.message : "Failed to save Slack connector."),
+      );
+  }, [
+    projectId,
+    slackBotToken,
+    slackAppToken,
+    slackChannels,
+    slackEnabled,
+    slackInstance,
+    slackModel,
+    slackNames,
+    slackRequireMention,
+    slackSmartWake,
+    slackHotWindowSec,
+    refresh,
+  ]);
 
   const toggleProject = useCallback((id: string) => {
     setSelectedProjects((current) => {
@@ -244,6 +350,7 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
   }, []);
 
   const telegram = assistant?.telegram ?? null;
+  const slack = assistant?.slack ?? null;
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -462,6 +569,192 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
                       className="w-44 rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
                     />
                   </span>
+                }
+              />
+              <SettingsRow
+                title="Bot names"
+                description="Names the bot answers to in groups (comma-separated). Matched loosely, so “Антоха” also answers to “Антон”. Private chats always get a reply."
+                control={
+                  <input
+                    type="text"
+                    value={botNames}
+                    onChange={(event) => setBotNames(event.target.value)}
+                    placeholder="Антоха, Антон"
+                    className="w-64 rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
+                  />
+                }
+              />
+              <SettingsRow
+                title="Only reply when addressed (groups)"
+                description="In group chats, react only to an @mention, a reply to the bot, or one of its names above. Turn off to answer every message (only for a chat dedicated to the bot)."
+                control={
+                  <Toggle
+                    checked={requireMention}
+                    onChange={setRequireMention}
+                    label="Require addressing in groups"
+                  />
+                }
+              />
+              <SettingsRow
+                title="Smart wake"
+                description="When the name isn't literally said, let an LLM decide if the message is aimed at the bot. Costs one cheap call per unmatched group message; also enables catching the name in group voice messages."
+                control={
+                  <Toggle checked={smartWake} onChange={setSmartWake} label="Smart wake" />
+                }
+              />
+              <SettingsRow
+                title="Follow-up window (seconds)"
+                description="After the bot replies, keep answering the same chat without re-addressing it for this many seconds. 0 disables it."
+                control={
+                  <input
+                    type="number"
+                    min={0}
+                    value={hotWindowSec}
+                    onChange={(event) => setHotWindowSec(event.target.value)}
+                    placeholder="0"
+                    className="w-24 rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
+                  />
+                }
+              />
+            </SettingsSection>
+
+            <SettingsSection
+              title="Slack"
+              icon={<SendIcon className="size-3.5" />}
+              headerAction={
+                <Button size="xs" variant="outline" onClick={handleSaveSlack}>
+                  Save
+                </Button>
+              }
+            >
+              <SettingsRow
+                title="Slack bot"
+                description={
+                  slack?.configured
+                    ? `Bot ${slack.botUserName ? `@${slack.botUserName}` : "configured"} · ${
+                        slack.enabled ? "enabled" : "disabled"
+                      }${slack.lastError ? ` · error: ${slack.lastError}` : ""}`
+                    : "Socket Mode bot: create the app from docs/slack-app-manifest.yaml, then paste both tokens."
+                }
+                control={
+                  <Toggle checked={slackEnabled} onChange={setSlackEnabled} label="Slack enabled" />
+                }
+              />
+              <SettingsRow
+                title="Bot token (xoxb-…)"
+                description={
+                  slack?.configured ? "Leave empty to keep the current token." : "Bot User OAuth Token."
+                }
+                control={
+                  <input
+                    type="password"
+                    value={slackBotToken}
+                    onChange={(event) => setSlackBotToken(event.target.value)}
+                    placeholder="xoxb-…"
+                    className="w-64 rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
+                  />
+                }
+              />
+              <SettingsRow
+                title="App token (xapp-…)"
+                description={
+                  slack?.configured
+                    ? "Leave empty to keep the current token."
+                    : "App-Level Token with connections:write (for Socket Mode)."
+                }
+                control={
+                  <input
+                    type="password"
+                    value={slackAppToken}
+                    onChange={(event) => setSlackAppToken(event.target.value)}
+                    placeholder="xapp-…"
+                    className="w-64 rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
+                  />
+                }
+              />
+              <SettingsRow
+                title="Allowed channel ids"
+                description="Channel and/or DM ids the bot may act in (comma-separated). Invite the bot to each channel with /invite."
+                control={
+                  <input
+                    type="text"
+                    value={slackChannels}
+                    onChange={(event) => setSlackChannels(event.target.value)}
+                    placeholder="C0123ABCD, D0456WXYZ"
+                    className="w-64 rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
+                  />
+                }
+              />
+              <SettingsRow
+                title="Default harness for Slack"
+                description="Slack threads of this assistant always start on this harness/model — pick one that is authorized here."
+                control={
+                  <span className="flex gap-2">
+                    <select
+                      value={slackInstance}
+                      onChange={(event) => setSlackInstance(event.target.value)}
+                      className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                    >
+                      <option value="uno">Uno</option>
+                      <option value="claudeAgent">Claude</option>
+                      <option value="opencode">OpenCode</option>
+                      <option value="codex">Codex</option>
+                      <option value="cursor">Cursor</option>
+                      <option value="hermes">Hermes</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={slackModel}
+                      onChange={(event) => setSlackModel(event.target.value)}
+                      placeholder="uno/claude-sonnet-4-6"
+                      className="w-44 rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
+                    />
+                  </span>
+                }
+              />
+              <SettingsRow
+                title="Bot names"
+                description="Names the bot answers to in channels (comma-separated). Matched loosely. DMs always get a reply."
+                control={
+                  <input
+                    type="text"
+                    value={slackNames}
+                    onChange={(event) => setSlackNames(event.target.value)}
+                    placeholder="Антоха, Антон"
+                    className="w-64 rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
+                  />
+                }
+              />
+              <SettingsRow
+                title="Only reply when addressed (channels)"
+                description="In channels, react only to an @mention, a live bot thread, or one of its names. Off = answer every message the bot can see."
+                control={
+                  <Toggle
+                    checked={slackRequireMention}
+                    onChange={setSlackRequireMention}
+                    label="Require addressing in channels"
+                  />
+                }
+              />
+              <SettingsRow
+                title="Smart wake"
+                description="When the name isn't literally said, let an LLM decide if the message is aimed at the bot. Costs one cheap call per unmatched channel message."
+                control={
+                  <Toggle checked={slackSmartWake} onChange={setSlackSmartWake} label="Smart wake" />
+                }
+              />
+              <SettingsRow
+                title="Follow-up window (seconds)"
+                description="After the bot replies, keep answering the same thread without re-addressing it for this many seconds. 0 disables it."
+                control={
+                  <input
+                    type="number"
+                    min={0}
+                    value={slackHotWindowSec}
+                    onChange={(event) => setSlackHotWindowSec(event.target.value)}
+                    placeholder="0"
+                    className="w-24 rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
+                  />
                 }
               />
             </SettingsSection>

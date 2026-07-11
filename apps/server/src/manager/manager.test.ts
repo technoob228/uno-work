@@ -23,6 +23,8 @@ import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSna
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { ManagerActionProposalRepositoryLive } from "../persistence/Layers/ManagerActionProposals.ts";
 import { ManagerCapabilityTokenRepositoryLive } from "../persistence/Layers/ManagerCapabilityTokens.ts";
+import { ManagerConnectorRepositoryLive } from "../persistence/Layers/ManagerConnectors.ts";
+import { RemindersRepositoryLive } from "../persistence/Layers/Reminders.ts";
 import { ProjectionPendingApprovalRepository } from "../persistence/Services/ProjectionPendingApprovals.ts";
 import { ManagerApprovalServiceLive } from "./Layers/ManagerApprovalService.ts";
 import { ManagerBudgetServiceLive } from "./Layers/ManagerBudgetService.ts";
@@ -183,6 +185,8 @@ const makeTestLayer = (dispatched: Ref.Ref<ReadonlyArray<DispatchedCommand>>) =>
   const repositories = Layer.mergeAll(
     ManagerActionProposalRepositoryLive,
     ManagerCapabilityTokenRepositoryLive,
+    ManagerConnectorRepositoryLive,
+    RemindersRepositoryLive,
   ).pipe(Layer.provideMerge(SqlitePersistenceMemory));
 
   return Layer.mergeAll(ManagerToolServiceLive, ManagerTokenAuthServiceLive).pipe(

@@ -15,6 +15,8 @@ import {
   ManagerCreateTokenInput,
   ManagerOwnerResolveProposalInput,
   ManagerProposalStatus,
+  ManagerConnectorAddressingConfig,
+  ManagerSlackConnectorConfig,
   ManagerTelegramConnectorConfig,
   ManagerTokenId,
   ModelSelection,
@@ -281,6 +283,7 @@ const TelegramConfigPayload = Schema.Struct({
   allowedChatIds: Schema.Array(Schema.String),
   enabled: Schema.Boolean,
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
+  addressing: Schema.optional(ManagerConnectorAddressingConfig),
 });
 
 export const managerAssistantTelegramRouteLayer = HttpRouter.add(
@@ -316,6 +319,13 @@ export const managerAssistantTelegramRouteLayer = HttpRouter.add(
         existingConfig !== null && existingConfig._tag === "Success"
           ? (existingConfig.value.defaultModelSelection ?? null)
           : null;
+      // Preserve the addressing block across saves that don't touch it (the
+      // settings UI may PUT before it learns to send this field).
+      const previousAddressing =
+        existingConfig !== null && existingConfig._tag === "Success"
+          ? existingConfig.value.addressing
+          : undefined;
+      const mergedAddressing = input.addressing ?? previousAddressing;
       const config = {
         botToken,
         allowedChatIds: input.allowedChatIds
@@ -326,6 +336,7 @@ export const managerAssistantTelegramRouteLayer = HttpRouter.add(
           input.defaultModelSelection !== undefined
             ? input.defaultModelSelection
             : previousModelSelection,
+        ...(mergedAddressing !== undefined ? { addressing: mergedAddressing } : {}),
       } satisfies ManagerTelegramConnectorConfig;
       yield* connectorRepository.upsert({
         projectId: input.projectId,
@@ -336,6 +347,78 @@ export const managerAssistantTelegramRouteLayer = HttpRouter.add(
       const assistant = yield* assistants.getAssistant(input.projectId);
       return HttpServerResponse.jsonUnsafe({ telegram: assistant.telegram }, { status: 200 });
     }).pipe(Effect.catch(respondServerError("assistant:telegram")));
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+const SlackConfigPayload = Schema.Struct({
+  projectId: ProjectId,
+  botToken: Schema.optional(Schema.String),
+  appToken: Schema.optional(Schema.String),
+  allowedChannelIds: Schema.Array(Schema.String),
+  enabled: Schema.Boolean,
+  defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
+  addressing: Schema.optional(ManagerConnectorAddressingConfig),
+});
+
+export const managerAssistantSlackRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/slack",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const connectorRepository = yield* ManagerConnectorRepository;
+    const assistants = yield* ManagerAssistantService;
+    const input = yield* HttpServerRequest.schemaBodyJson(SlackConfigPayload).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid Slack payload.", status: 400 })),
+    );
+    return yield* Effect.gen(function* () {
+      const existing = yield* connectorRepository.get({
+        projectId: input.projectId,
+        kind: "slack",
+      });
+      const existingDecoded = Option.isSome(existing)
+        ? Schema.decodeUnknownExit(ManagerSlackConnectorConfig)(existing.value.config)
+        : null;
+      const existingConfig =
+        existingDecoded !== null && existingDecoded._tag === "Success"
+          ? existingDecoded.value
+          : null;
+      // Both tokens are optional on update (keep the stored ones), required first time.
+      const botToken = input.botToken?.trim() || existingConfig?.botToken;
+      const appToken = input.appToken?.trim() || existingConfig?.appToken;
+      if (
+        botToken === undefined ||
+        botToken.length === 0 ||
+        appToken === undefined ||
+        appToken.length === 0
+      ) {
+        return HttpServerResponse.jsonUnsafe(
+          { error: "Both a bot token (xoxb-…) and an app token (xapp-…) are required for setup." },
+          { status: 400 },
+        );
+      }
+      const mergedAddressing = input.addressing ?? existingConfig?.addressing;
+      const config = {
+        botToken,
+        appToken,
+        allowedChannelIds: input.allowedChannelIds
+          .map((channelId) => channelId.trim())
+          .filter((channelId) => channelId.length > 0),
+        enabled: input.enabled,
+        defaultModelSelection:
+          input.defaultModelSelection !== undefined
+            ? input.defaultModelSelection
+            : (existingConfig?.defaultModelSelection ?? null),
+        ...(mergedAddressing !== undefined ? { addressing: mergedAddressing } : {}),
+      } satisfies ManagerSlackConnectorConfig;
+      yield* connectorRepository.upsert({
+        projectId: input.projectId,
+        kind: "slack",
+        config,
+        updatedAt: new Date().toISOString(),
+      });
+      const assistant = yield* assistants.getAssistant(input.projectId);
+      return HttpServerResponse.jsonUnsafe({ slack: assistant.slack }, { status: 200 });
+    }).pipe(Effect.catch(respondServerError("assistant:slack")));
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

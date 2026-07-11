@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 
+import { DEFAULT_ADDRESSING_CONFIG, decideAddressing } from "./addressing.ts";
 import {
   collectTelegramMedia,
   describeNonFileContent,
@@ -7,6 +8,11 @@ import {
   isImageLikeMedia,
   pickTelegramUploadMethod,
   sanitizeFileName,
+  telegramIsDirectMessage,
+  telegramMentionsBot,
+  telegramRepliesToBot,
+  telegramSenderIsBot,
+  toNormalizedMessage,
 } from "./telegramMedia.ts";
 
 describe("collectTelegramMedia", () => {
@@ -136,5 +142,105 @@ describe("sanitizeFileName", () => {
   it("falls back when the name is empty after cleaning", () => {
     expect(sanitizeFileName("///", "fallback.bin")).toBe("fallback.bin");
     expect(sanitizeFileName("", "fallback.bin")).toBe("fallback.bin");
+  });
+});
+
+describe("telegram addressing signals", () => {
+  it("recognizes a private chat as a direct message", () => {
+    expect(telegramIsDirectMessage({ chat: { id: 1, type: "private" } })).toBe(true);
+    expect(telegramIsDirectMessage({ chat: { id: -1, type: "supergroup" } })).toBe(false);
+  });
+
+  it("flags messages sent by other bots", () => {
+    expect(telegramSenderIsBot({ from: { id: 7, is_bot: true } })).toBe(true);
+    expect(telegramSenderIsBot({ from: { id: 7, is_bot: false } })).toBe(false);
+    expect(telegramSenderIsBot({})).toBe(false);
+  });
+
+  it("detects an @mention via entities", () => {
+    const message = {
+      text: "эй @MyBot глянь",
+      entities: [{ type: "mention", offset: 4, length: 6 }],
+    };
+    expect(telegramMentionsBot(message, "mybot")).toBe(true);
+    expect(telegramMentionsBot(message, "otherbot")).toBe(false);
+  });
+
+  it("detects a /command@bot and a caption mention", () => {
+    expect(
+      telegramMentionsBot(
+        { text: "/status@MyBot", entities: [{ type: "bot_command", offset: 0, length: 13 }] },
+        "mybot",
+      ),
+    ).toBe(true);
+    expect(
+      telegramMentionsBot(
+        { caption: "смотри @MyBot", caption_entities: [{ type: "mention", offset: 7, length: 6 }] },
+        "mybot",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not treat @mybot2 as a mention of @mybot (word boundary)", () => {
+    expect(telegramMentionsBot({ text: "пинг @mybot2" }, "mybot")).toBe(false);
+    expect(telegramMentionsBot({ text: "пинг @mybot!" }, "mybot")).toBe(true);
+  });
+
+  it("detects a reply to the bot's own message", () => {
+    expect(
+      telegramRepliesToBot({ reply_to_message: { from: { username: "MyBot", is_bot: true } } }, "mybot"),
+    ).toBe(true);
+    expect(
+      telegramRepliesToBot({ reply_to_message: { from: { username: "someone" } } }, "mybot"),
+    ).toBe(false);
+    expect(telegramRepliesToBot({}, "mybot")).toBe(false);
+  });
+
+  it("keeps a caption-less private voice message addressed through the gate (voice regression)", () => {
+    // A voice message carries no text — the addressing gate must still let a
+    // private (1:1) chat through, or transcription would never run for it.
+    const voiceInDm = {
+      chat: { id: 42, type: "private" as const },
+      from: { id: 42, is_bot: false },
+      voice: { file_id: "v", duration: 5 },
+    };
+    const normalized = toNormalizedMessage({ message: voiceInDm, botUsername: "mybot", text: "" });
+    expect(normalized.isDirectMessage).toBe(true);
+    expect(decideAddressing(normalized, DEFAULT_ADDRESSING_CONFIG)).toEqual({
+      addressed: true,
+      reason: "direct",
+    });
+  });
+
+  it("gates the same voice message in a group without a name/mention", () => {
+    const voiceInGroup = {
+      chat: { id: -100, type: "supergroup" as const },
+      from: { id: 7, is_bot: false },
+      voice: { file_id: "v", duration: 5 },
+    };
+    const normalized = toNormalizedMessage({ message: voiceInGroup, botUsername: "mybot", text: "" });
+    expect(decideAddressing(normalized, DEFAULT_ADDRESSING_CONFIG)).toEqual({
+      addressed: false,
+      needsSmartCheck: false,
+    });
+  });
+
+  it("normalizes a group message and disables mention/reply when the bot username is unknown", () => {
+    const message = {
+      chat: { id: -100, type: "supergroup" as const },
+      from: { id: 5, is_bot: false },
+      text: "@MyBot привет",
+      entities: [{ type: "mention", offset: 0, length: 6 }],
+    };
+    expect(toNormalizedMessage({ message, botUsername: "mybot", text: "@MyBot привет" })).toEqual({
+      isDirectMessage: false,
+      isReplyToBot: false,
+      explicitMention: true,
+      senderIsBot: false,
+      text: "@MyBot привет",
+    });
+    expect(
+      toNormalizedMessage({ message, botUsername: null, text: "@MyBot привет" }).explicitMention,
+    ).toBe(false);
   });
 });

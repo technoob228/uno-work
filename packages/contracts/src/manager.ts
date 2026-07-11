@@ -137,6 +137,40 @@ export const ManagerAssistantAccessInput = Schema.Struct({
 });
 export type ManagerAssistantAccessInput = typeof ManagerAssistantAccessInput.Type;
 
+/**
+ * When the assistant should react to an inbound message. Shared by every
+ * connector kind (Telegram today, Slack next): a 1:1 chat always reacts; a
+ * group/channel stays silent unless the bot is @-mentioned, replied to, or
+ * called by one of `names` (fuzzy — "Антоха" also answers to "Антон"). The
+ * enforcement lives in `apps/server/src/manager/addressing.ts`. Every field
+ * carries a decoding default so connector rows saved before this block existed
+ * keep decoding.
+ */
+export const ManagerConnectorAddressingConfig = Schema.Struct({
+  /** Wake names / aliases the bot answers to, e.g. `["Антоха", "Антон"]`. */
+  names: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  /** Require an explicit address in groups/channels. Off = answer everything. */
+  requireMentionInGroups: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(true)),
+  ),
+  /** Let the daemon run an LLM classifier when the cheap checks miss. */
+  smartWake: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** Seconds after a reply during which follow-ups need no re-addressing. */
+  hotWindowSec: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+});
+export type ManagerConnectorAddressingConfig =
+  typeof ManagerConnectorAddressingConfig.Type;
+
+/** The defaults applied to a connector with no explicit addressing block. */
+export const DEFAULT_CONNECTOR_ADDRESSING: ManagerConnectorAddressingConfig = {
+  names: [],
+  requireMentionInGroups: true,
+  smartWake: false,
+  hotWindowSec: 0,
+};
+
 export const ManagerTelegramConnectorConfig = Schema.Struct({
   botToken: TrimmedNonEmptyString,
   /** Personal user chat ids and/or group chat ids (as strings, may be negative for groups). */
@@ -148,8 +182,39 @@ export const ManagerTelegramConnectorConfig = Schema.Struct({
    * what saves you from Telegram spawning a harness you never authorized.
    */
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  /** When to react. Absent on legacy rows → connector applies the defaults. */
+  addressing: Schema.optionalKey(ManagerConnectorAddressingConfig),
 });
 export type ManagerTelegramConnectorConfig = typeof ManagerTelegramConnectorConfig.Type;
+
+/**
+ * Slack connector config. Slack runs over Socket Mode, so it needs two tokens:
+ * `botToken` (`xoxb-…`, calls the Web API) and `appToken` (`xapp-…`, opens the
+ * event socket). Shares the addressing block with Telegram; the live poller
+ * Layer is implemented separately.
+ */
+export const ManagerSlackConnectorConfig = Schema.Struct({
+  botToken: TrimmedNonEmptyString,
+  appToken: TrimmedNonEmptyString,
+  /** Channel ids and/or DM ids the bot may act in. */
+  allowedChannelIds: Schema.Array(TrimmedNonEmptyString),
+  enabled: Schema.Boolean,
+  defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  addressing: Schema.optionalKey(ManagerConnectorAddressingConfig),
+});
+export type ManagerSlackConnectorConfig = typeof ManagerSlackConnectorConfig.Type;
+
+/**
+ * Session key for a Slack conversation, stored as the connector `chat_id`.
+ * Thread-first: a channel message opens a session keyed by its own `ts` (the
+ * bot replies in that thread), replies within a thread reuse the parent's
+ * `thread_ts`, and a DM keys on the channel alone. This is what stops a whole
+ * channel from collapsing into one shared context.
+ */
+export const slackChatKey = (channelId: string, threadTs?: string | null): string =>
+  threadTs !== undefined && threadTs !== null && threadTs.length > 0
+    ? `${channelId}:${threadTs}`
+    : channelId;
 
 /** Telegram connector as exposed to clients: token is never echoed back. */
 export const ManagerTelegramConnectorStatus = Schema.Struct({
@@ -159,14 +224,43 @@ export const ManagerTelegramConnectorStatus = Schema.Struct({
   botUsername: Schema.NullOr(TrimmedNonEmptyString),
   lastError: Schema.NullOr(Schema.String),
   defaultModelSelection: Schema.NullOr(ModelSelection),
+  /** Current addressing rules, echoed back so the settings UI can render them. */
+  addressing: ManagerConnectorAddressingConfig,
 });
 export type ManagerTelegramConnectorStatus = typeof ManagerTelegramConnectorStatus.Type;
+
+/** Slack connector as exposed to clients: tokens are never echoed back. */
+export const ManagerSlackConnectorStatus = Schema.Struct({
+  configured: Schema.Boolean,
+  enabled: Schema.Boolean,
+  allowedChannelIds: Schema.Array(TrimmedNonEmptyString),
+  /** Resolved from `auth.test` once the socket connects. */
+  botUserId: Schema.NullOr(TrimmedNonEmptyString),
+  botUserName: Schema.NullOr(TrimmedNonEmptyString),
+  lastError: Schema.NullOr(Schema.String),
+  defaultModelSelection: Schema.NullOr(ModelSelection),
+  addressing: ManagerConnectorAddressingConfig,
+});
+export type ManagerSlackConnectorStatus = typeof ManagerSlackConnectorStatus.Type;
 
 export const ManagerAssistantOverview = Schema.Struct({
   token: Schema.NullOr(ManagerCapabilityTokenDescriptor),
   telegram: ManagerTelegramConnectorStatus,
+  slack: ManagerSlackConnectorStatus,
 });
 export type ManagerAssistantOverview = typeof ManagerAssistantOverview.Type;
+
+/** Defaults applied to a Slack connector that has no row yet. */
+export const DEFAULT_SLACK_CONNECTOR_STATUS: ManagerSlackConnectorStatus = {
+  configured: false,
+  enabled: false,
+  allowedChannelIds: [],
+  botUserId: null,
+  botUserName: null,
+  lastError: null,
+  defaultModelSelection: null,
+  addressing: DEFAULT_CONNECTOR_ADDRESSING,
+};
 
 export const ManagerAssistantSummary = Schema.Struct({
   projectId: ProjectId,
@@ -174,6 +268,7 @@ export const ManagerAssistantSummary = Schema.Struct({
   workspaceRoot: TrimmedNonEmptyString,
   token: Schema.NullOr(ManagerCapabilityTokenDescriptor),
   telegram: ManagerTelegramConnectorStatus,
+  slack: ManagerSlackConnectorStatus,
   /** Names of skill files under the workspace `skills/` directory. */
   skills: Schema.Array(Schema.String),
 });
@@ -427,3 +522,83 @@ export const ManagerOwnerResolveProposalInput = Schema.Struct({
   decision: ManagerProposalDecision,
 });
 export type ManagerOwnerResolveProposalInput = typeof ManagerOwnerResolveProposalInput.Type;
+
+// ===============================
+// Reminders
+// ===============================
+
+/**
+ * A one-shot reminder: at `dueAt`, the daemon pushes `message` to a Telegram
+ * chat. Unlike a manager reply, delivery is deterministic (the text is sent
+ * verbatim by the scheduler, no LLM turn), and the row is durable — it
+ * survives restarts and fires as soon as the daemon is running again if its
+ * due time passed while it was down.
+ */
+export const ReminderStatus = Schema.Literals([
+  "pending",
+  "delivered",
+  "failed",
+  "cancelled",
+]);
+export type ReminderStatus = typeof ReminderStatus.Type;
+
+export const Reminder = Schema.Struct({
+  reminderId: TrimmedNonEmptyString,
+  projectId: ProjectId,
+  chatId: TrimmedNonEmptyString,
+  message: TrimmedNonEmptyString,
+  dueAt: IsoDateTime,
+  status: ReminderStatus,
+  createdAt: IsoDateTime,
+  /** Origin of the reminder: `manager-token:<id>` or `owner`. */
+  createdBy: TrimmedNonEmptyString,
+  deliveredAt: Schema.NullOr(IsoDateTime),
+  failureReason: Schema.NullOr(Schema.String),
+});
+export type Reminder = typeof Reminder.Type;
+
+/** Guardrail: reject absurd delays so a typo can't schedule years out. */
+export const MANAGER_REMINDER_MAX_DELAY_SECONDS = 60 * 60 * 24 * 30; // 30 days
+
+export const ManagerCreateReminderInput = Schema.Struct({
+  message: TrimmedNonEmptyString,
+  /** Fire this many seconds from now. Mutually exclusive with `dueAt`. */
+  dueInSeconds: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(MANAGER_REMINDER_MAX_DELAY_SECONDS)),
+  ),
+  /** Absolute ISO time to fire. Mutually exclusive with `dueInSeconds`. */
+  dueAt: Schema.optional(IsoDateTime),
+  /** Target project; defaults to the caller's Telegram-connected project. */
+  projectId: Schema.optional(ProjectId),
+  /** Target chat; defaults to that project's first allowlisted chat. */
+  chatId: Schema.optional(TrimmedNonEmptyString),
+});
+export type ManagerCreateReminderInput = typeof ManagerCreateReminderInput.Type;
+
+export const ManagerCreateReminderResult = Schema.Struct({
+  reminderId: TrimmedNonEmptyString,
+  dueAt: IsoDateTime,
+  chatId: TrimmedNonEmptyString,
+});
+export type ManagerCreateReminderResult = typeof ManagerCreateReminderResult.Type;
+
+export const ManagerListRemindersInput = Schema.Struct({
+  /** Include delivered/failed/cancelled reminders too (default: only pending). */
+  includeInactive: Schema.optional(Schema.Boolean),
+});
+export type ManagerListRemindersInput = typeof ManagerListRemindersInput.Type;
+
+export const ManagerListRemindersResult = Schema.Struct({
+  reminders: Schema.Array(Reminder),
+});
+export type ManagerListRemindersResult = typeof ManagerListRemindersResult.Type;
+
+export const ManagerCancelReminderInput = Schema.Struct({
+  reminderId: TrimmedNonEmptyString,
+});
+export type ManagerCancelReminderInput = typeof ManagerCancelReminderInput.Type;
+
+export const ManagerCancelReminderResult = Schema.Struct({
+  cancelled: Schema.Boolean,
+});
+export type ManagerCancelReminderResult = typeof ManagerCancelReminderResult.Type;

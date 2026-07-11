@@ -13,6 +13,7 @@ import type {
   ManagerCreateTokenResult,
   ManagerProposalDecision,
   ManagerProposalId,
+  ManagerSlackConnectorStatus,
   ManagerTelegramConnectorStatus,
   ManagerTokenId,
   ProjectId,
@@ -116,9 +117,36 @@ export function saveAssistantTelegram(input: {
   readonly allowedChatIds: ReadonlyArray<string>;
   readonly enabled: boolean;
   readonly defaultModelSelection?: { instanceId: string; model: string } | null;
+  readonly addressing?: {
+    readonly names: ReadonlyArray<string>;
+    readonly requireMentionInGroups: boolean;
+    readonly smartWake: boolean;
+    readonly hotWindowSec: number;
+  };
 }): Promise<{ telegram: ManagerTelegramConnectorStatus }> {
   return managerFetch({
     pathname: "/api/manager/assistant/telegram",
+    method: "POST",
+    body: input,
+  });
+}
+
+export function saveAssistantSlack(input: {
+  readonly projectId: string;
+  readonly botToken?: string;
+  readonly appToken?: string;
+  readonly allowedChannelIds: ReadonlyArray<string>;
+  readonly enabled: boolean;
+  readonly defaultModelSelection?: { instanceId: string; model: string } | null;
+  readonly addressing?: {
+    readonly names: ReadonlyArray<string>;
+    readonly requireMentionInGroups: boolean;
+    readonly smartWake: boolean;
+    readonly hotWindowSec: number;
+  };
+}): Promise<{ slack: ManagerSlackConnectorStatus }> {
+  return managerFetch({
+    pathname: "/api/manager/assistant/slack",
     method: "POST",
     body: input,
   });

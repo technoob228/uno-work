@@ -33,12 +33,23 @@ export class ManagerProjectNotAllowedError extends Schema.TaggedErrorClass<Manag
 export class ManagerNotFoundError extends Schema.TaggedErrorClass<ManagerNotFoundError>()(
   "ManagerNotFoundError",
   {
-    entity: Schema.Literals(["project", "thread", "proposal"]),
+    entity: Schema.Literals(["project", "thread", "proposal", "reminder"]),
     id: Schema.String,
   },
 ) {
   override get message(): string {
     return `Unknown ${this.entity}: ${this.id}.`;
+  }
+}
+
+export class ManagerInvalidRequestError extends Schema.TaggedErrorClass<ManagerInvalidRequestError>()(
+  "ManagerInvalidRequestError",
+  {
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return this.detail;
   }
 }
 
@@ -83,6 +94,7 @@ export type ManagerToolError =
   | ManagerScopeDeniedError
   | ManagerProjectNotAllowedError
   | ManagerNotFoundError
+  | ManagerInvalidRequestError
   | ManagerBudgetExceededError
   | ManagerProposalResolutionError
   | ManagerExecutionError

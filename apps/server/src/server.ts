@@ -97,6 +97,7 @@ import {
   managerAssistantsCreateRouteLayer,
   managerAssistantsListRouteLayer,
   managerAssistantTelegramRouteLayer,
+  managerAssistantSlackRouteLayer,
   managerMcpDeleteRouteLayer,
   managerMcpGetRouteLayer,
   managerMcpRouteLayer,
@@ -107,6 +108,7 @@ import {
   managerTokensRevokeRouteLayer,
 } from "./manager/http.ts";
 import { ManagerAssistantBootstrapLive, ManagerLayerLive } from "./manager/runtimeLayer.ts";
+import { ReminderSchedulerLive } from "./reminders/Layers/ReminderScheduler.ts";
 import { NetService } from "@t3tools/shared/Net";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 
@@ -262,8 +264,11 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // Assistant bootstrap (project/workspace/token) runs above the manager
-  // layer so it can consume its services during startup.
-  Layer.provideMerge(ManagerAssistantBootstrapLive),
+  // layer so it can consume its services during startup. The reminder
+  // scheduler is merged in here (rather than as its own pipe step, which would
+  // exceed `.pipe`'s 20-arg limit); both need ManagerLayerLive + persistence
+  // provided further down this pipe to satisfy their requirements.
+  Layer.provideMerge(Layer.mergeAll(ManagerAssistantBootstrapLive, ReminderSchedulerLive)),
   // Manager tool layer (MCP surface for the manager brain). Sits above the
   // orchestration/persistence layers provided further down this pipe so it
   // shares the same engine and SqlClient instances.
@@ -340,6 +345,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   managerAssistantsCreateRouteLayer,
   managerAssistantsListRouteLayer,
   managerAssistantTelegramRouteLayer,
+  managerAssistantSlackRouteLayer,
   managerMcpDeleteRouteLayer,
   managerMcpGetRouteLayer,
   managerMcpRouteLayer,

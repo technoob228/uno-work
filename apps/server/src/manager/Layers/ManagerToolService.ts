@@ -7,6 +7,7 @@ import type {
   ManagerWriteReceipt,
   OrchestrationThreadShell,
   ProjectId,
+  Reminder,
   ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -14,14 +15,18 @@ import {
   MANAGER_READ_THREAD_DETAIL_DEFAULT_MESSAGES,
   MANAGER_READ_THREAD_DETAIL_MAX_MESSAGE_CHARS,
   ManagerProposalId,
+  ManagerTelegramConnectorConfig,
 } from "@t3tools/contracts";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer, Option, Schema } from "effect";
 import * as crypto from "node:crypto";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
 import { ManagerActionProposalRepository } from "../../persistence/Services/ManagerActionProposals.ts";
+import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
+import { RemindersRepository } from "../../persistence/Services/Reminders.ts";
 import {
+  ManagerInvalidRequestError,
   ManagerNotFoundError,
   ManagerProjectNotAllowedError,
   ManagerProposalResolutionError,
@@ -100,6 +105,8 @@ const makeManagerToolService = Effect.gen(function* () {
   const proposalRepository = yield* ManagerActionProposalRepository;
   const budgetService = yield* ManagerBudgetService;
   const approvalService = yield* ManagerApprovalService;
+  const remindersRepository = yield* RemindersRepository;
+  const connectorRepository = yield* ManagerConnectorRepository;
 
   const getAllowedThreadShell = (caller: ManagerCaller, threadId: ThreadId) =>
     Effect.gen(function* () {
@@ -372,6 +379,110 @@ const makeManagerToolService = Effect.gen(function* () {
       return { proposal: resolved };
     });
 
+  // Pick the (projectId, chatId) a reminder should be delivered to. Explicit
+  // args win; otherwise fall back to the first enabled Telegram connector the
+  // caller can access. Reminders are self-notifications, so this stays outside
+  // the proposal/approval flow — they touch no threads and no prod.
+  const resolveReminderTarget = (
+    caller: ManagerCaller,
+    input: { readonly projectId?: ProjectId | undefined; readonly chatId?: string | undefined },
+  ) =>
+    Effect.gen(function* () {
+      if (input.projectId !== undefined && input.chatId !== undefined) {
+        yield* requireProjectAllowed(caller, input.projectId);
+        return { projectId: input.projectId, chatId: input.chatId };
+      }
+      const connectors = yield* connectorRepository.listByKind("telegram");
+      const candidates = connectors.flatMap((record) => {
+        if (!isProjectAllowed(caller, record.projectId)) return [];
+        if (input.projectId !== undefined && record.projectId !== input.projectId) return [];
+        const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(record.config);
+        if (decoded._tag !== "Success" || !decoded.value.enabled) return [];
+        const firstChat = decoded.value.allowedChatIds[0];
+        if (firstChat === undefined) return [];
+        return [{ projectId: record.projectId, chatId: firstChat }];
+      });
+      const chosen = candidates[0];
+      if (chosen === undefined) {
+        return yield* new ManagerInvalidRequestError({
+          detail:
+            "No enabled Telegram connector is available to deliver the reminder. Configure a bot for a project you can access, or pass projectId and chatId explicitly.",
+        });
+      }
+      return {
+        projectId: input.projectId ?? chosen.projectId,
+        chatId: input.chatId ?? chosen.chatId,
+      };
+    });
+
+  const createReminder: ManagerToolServiceShape["createReminder"] = (caller, input) =>
+    Effect.gen(function* () {
+      yield* requireScope(caller, "threads:write");
+
+      if (input.dueAt === undefined && input.dueInSeconds === undefined) {
+        return yield* new ManagerInvalidRequestError({
+          detail: "Provide either dueInSeconds (relative) or dueAt (absolute ISO time).",
+        });
+      }
+      const nowMs = Date.now();
+      const dueAt =
+        input.dueAt ?? new Date(nowMs + (input.dueInSeconds ?? 0) * 1_000).toISOString();
+      if (new Date(dueAt).getTime() <= nowMs) {
+        return yield* new ManagerInvalidRequestError({
+          detail: "dueAt is in the past; pick a future time.",
+        });
+      }
+
+      const target = yield* resolveReminderTarget(caller, {
+        projectId: input.projectId,
+        chatId: input.chatId,
+      });
+
+      const reminder: Reminder = {
+        reminderId: crypto.randomUUID(),
+        projectId: target.projectId,
+        chatId: target.chatId,
+        message: input.message,
+        dueAt,
+        status: "pending",
+        createdAt: new Date(nowMs).toISOString(),
+        createdBy: `manager-token:${caller.tokenId}`,
+        deliveredAt: null,
+        failureReason: null,
+      };
+      yield* remindersRepository.create(reminder);
+      yield* Effect.logInfo("manager reminder created").pipe(
+        Effect.annotateLogs({
+          reminderId: reminder.reminderId,
+          tokenId: caller.tokenId,
+          projectId: reminder.projectId,
+          dueAt,
+        }),
+      );
+      return { reminderId: reminder.reminderId, dueAt, chatId: reminder.chatId };
+    });
+
+  const listReminders: ManagerToolServiceShape["listReminders"] = (caller, input) =>
+    Effect.gen(function* () {
+      yield* requireScope(caller, "threads:read");
+      const all = yield* remindersRepository.list({
+        includeInactive: input.includeInactive ?? false,
+      });
+      return { reminders: all.filter((reminder) => isProjectAllowed(caller, reminder.projectId)) };
+    });
+
+  const cancelReminder: ManagerToolServiceShape["cancelReminder"] = (caller, input) =>
+    Effect.gen(function* () {
+      yield* requireScope(caller, "threads:write");
+      const existing = yield* remindersRepository.getById({ reminderId: input.reminderId });
+      if (Option.isNone(existing)) {
+        return yield* new ManagerNotFoundError({ entity: "reminder", id: input.reminderId });
+      }
+      yield* requireProjectAllowed(caller, existing.value.projectId);
+      const cancelled = yield* remindersRepository.cancel({ reminderId: input.reminderId });
+      return { cancelled };
+    });
+
   return {
     listThreads,
     getThreadStatus,
@@ -383,6 +494,9 @@ const makeManagerToolService = Effect.gen(function* () {
     respondToRequest,
     listProposals,
     resolveProposal,
+    createReminder,
+    listReminders,
+    cancelReminder,
   } satisfies ManagerToolServiceShape;
 });
 
