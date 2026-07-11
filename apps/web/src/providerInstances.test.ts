@@ -10,6 +10,7 @@ function provider(input: {
   provider: ProviderDriverKind;
   instanceId: string;
   enabled?: boolean;
+  installed?: boolean;
   availability?: ServerProvider["availability"];
   displayName?: string;
 }): ServerProvider {
@@ -18,7 +19,7 @@ function provider(input: {
     driver: input.provider,
     ...(input.displayName ? { displayName: input.displayName } : {}),
     enabled: input.enabled ?? true,
-    installed: true,
+    installed: input.installed ?? true,
     version: null,
     status: "ready",
     ...(input.availability ? { availability: input.availability } : {}),
@@ -90,6 +91,57 @@ describe("resolveSelectableProviderInstance", () => {
     expect(resolveSelectableProviderInstance(providers, disabled)).toBeUndefined();
     expect(resolveSelectableProviderInstance(providers, unavailable)).toBeUndefined();
     expect(resolveSelectableProviderInstance(providers, unknown)).toBeUndefined();
+  });
+
+  it("falls back off an enabled-but-uninstalled request to an installed harness", () => {
+    const uninstalled = ProviderInstanceId.make("codex");
+    const installed = ProviderInstanceId.make("claudeAgent");
+    const providers = [
+      provider({
+        provider: ProviderDriverKind.make("codex"),
+        instanceId: uninstalled,
+        installed: false,
+      }),
+      provider({ provider: ProviderDriverKind.make("claudeAgent"), instanceId: installed }),
+    ];
+
+    expect(resolveSelectableProviderInstance(providers, uninstalled)).toBe(installed);
+  });
+
+  it("prefers an installed harness when no instance is requested", () => {
+    const uninstalled = ProviderInstanceId.make("codex");
+    const installed = ProviderInstanceId.make("opencode");
+    const providers = [
+      provider({
+        provider: ProviderDriverKind.make("codex"),
+        instanceId: uninstalled,
+        installed: false,
+      }),
+      provider({ provider: ProviderDriverKind.make("opencode"), instanceId: installed }),
+    ];
+
+    expect(resolveSelectableProviderInstance(providers, undefined)).toBe(installed);
+  });
+
+  it("keeps the enabled request when nothing is installed", () => {
+    const uninstalled = ProviderInstanceId.make("codex");
+    const alsoUninstalled = ProviderInstanceId.make("claudeAgent");
+    const providers = [
+      provider({
+        provider: ProviderDriverKind.make("codex"),
+        instanceId: uninstalled,
+        installed: false,
+      }),
+      provider({
+        provider: ProviderDriverKind.make("claudeAgent"),
+        instanceId: alsoUninstalled,
+        installed: false,
+      }),
+    ];
+
+    // No harness is installed — surface the requested one so the UI can show a
+    // single "install this harness" hint rather than resolving to nothing.
+    expect(resolveSelectableProviderInstance(providers, uninstalled)).toBe(uninstalled);
   });
 });
 
