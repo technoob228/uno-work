@@ -23,6 +23,7 @@ import {
   selectSidebarThreadsForEnvironment,
   selectThreadByRef,
   selectThreadExistsByRef,
+  setThreadArchivedAt,
   setThreadBranch,
   selectThreadsAcrossEnvironments,
   type AppState,
@@ -497,6 +498,58 @@ describe("setThreadBranch", () => {
     expect(
       environmentStateOf(next, remoteEnvironmentId).threadShellById[sharedThreadId]?.worktreePath,
     ).toBe("/tmp/remote-worktree");
+  });
+});
+
+describe("setThreadArchivedAt", () => {
+  it("sets and clears archivedAt on the scoped thread only", () => {
+    const sharedThreadId = ThreadId.make("thread-shared");
+    const localThread = makeThread({
+      id: sharedThreadId,
+      environmentId: localEnvironmentId,
+    });
+    const remoteThread = makeThread({
+      id: sharedThreadId,
+      environmentId: remoteEnvironmentId,
+    });
+    const state: AppState = {
+      activeEnvironmentId: localEnvironmentId,
+      environmentStateById: {
+        [localEnvironmentId]: environmentStateOf(makeState(localThread), localEnvironmentId),
+        [remoteEnvironmentId]: environmentStateOf(makeState(remoteThread), remoteEnvironmentId),
+      },
+    };
+
+    const archivedAt = "2026-02-27T00:00:05.000Z";
+    const archived = setThreadArchivedAt(
+      state,
+      scopeThreadRef(remoteEnvironmentId, sharedThreadId),
+      archivedAt,
+    );
+    expect(
+      environmentStateOf(archived, remoteEnvironmentId).threadShellById[sharedThreadId]?.archivedAt,
+    ).toBe(archivedAt);
+    expect(
+      environmentStateOf(archived, localEnvironmentId).threadShellById[sharedThreadId]?.archivedAt,
+    ).toBeNull();
+
+    const unarchived = setThreadArchivedAt(
+      archived,
+      scopeThreadRef(remoteEnvironmentId, sharedThreadId),
+      null,
+    );
+    expect(
+      environmentStateOf(unarchived, remoteEnvironmentId).threadShellById[sharedThreadId]
+        ?.archivedAt,
+    ).toBeNull();
+  });
+
+  it("preserves state identity when the value is unchanged", () => {
+    const thread = makeThread();
+    const state = makeState(thread);
+    expect(setThreadArchivedAt(state, scopeThreadRef(localEnvironmentId, thread.id), null)).toBe(
+      state,
+    );
   });
 });
 

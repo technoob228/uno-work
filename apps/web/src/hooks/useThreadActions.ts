@@ -73,6 +73,12 @@ export function useThreadActions() {
         commandId: newCommandId(),
         threadId: threadRef.threadId,
       });
+      // The dispatch is server-acknowledged; reflect it locally instead of
+      // relying solely on the push stream, which can be down while the RPC
+      // still works, or produce no event at all when the archive was an
+      // idempotent no-op. The authoritative thread-upserted event re-applies
+      // the same state when it arrives.
+      useStore.getState().setThreadArchivedAt(threadRef, new Date().toISOString());
       const currentRouteThreadRef = getCurrentRouteThreadRef();
 
       if (
@@ -93,6 +99,7 @@ export function useThreadActions() {
       commandId: newCommandId(),
       threadId: target.threadId,
     });
+    useStore.getState().setThreadArchivedAt(target, null);
   }, []);
 
   const deleteThread = useCallback(

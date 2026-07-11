@@ -10,6 +10,10 @@ interface ProviderSnapshotState {
   readonly enrichmentGeneration: number;
 }
 
+// While a provider binary is missing, only every Nth periodic tick actually
+// re-probes (e.g. every ~10 minutes at the default 60s interval).
+const NOT_INSTALLED_REFRESH_BACKOFF_TICKS = 10;
+
 export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(function* <
   Settings,
 >(input: {
@@ -130,9 +134,29 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     Effect.asVoid(applySnapshot(nextSettings)),
   ).pipe(Effect.forkScoped);
 
+  // Back off the periodic re-probe while the provider binary is not
+  // installed: probing spawns the binary, so a missing harness fails with
+  // ENOENT on every tick and turns into permanent log spam on machines that
+  // simply don't have it. Settings changes and manual refresh() still probe
+  // immediately, so installing the binary is picked up on the next backoff
+  // tick at the latest.
+  const notInstalledTicksRef = yield* Ref.make(0);
   yield* Effect.forever(
     Effect.sleep(input.refreshInterval ?? "60 seconds").pipe(
-      Effect.flatMap(() => refreshSnapshot()),
+      Effect.flatMap(() =>
+        Effect.gen(function* () {
+          const { snapshot } = yield* Ref.get(snapshotStateRef);
+          if (!snapshot.installed) {
+            const ticks = yield* Ref.updateAndGet(notInstalledTicksRef, (count) => count + 1);
+            if (ticks % NOT_INSTALLED_REFRESH_BACKOFF_TICKS !== 0) {
+              return;
+            }
+          } else {
+            yield* Ref.set(notInstalledTicksRef, 0);
+          }
+          yield* refreshSnapshot();
+        }),
+      ),
       Effect.ignoreCause({ log: true }),
     ),
   ).pipe(Effect.forkScoped);
