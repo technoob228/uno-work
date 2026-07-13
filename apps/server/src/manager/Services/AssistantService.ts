@@ -33,7 +33,17 @@ export interface ManagerAssistantServiceShape {
   readonly ensureAssistant: (input: {
     readonly projectId: ProjectId;
     readonly title: string;
+    /** Workspace folder to register for a NEW assistant; existing assistants keep theirs. */
+    readonly workspaceRoot?: string;
   }) => Effect.Effect<void, ManagerAssistantError>;
+  /**
+   * Adopt user-created folders in ~/UnoWork/Assistants: a folder containing
+   * AGENTS.md (and no foreign marker) becomes an assistant in place.
+   */
+  readonly scanWorkspaceFolders: () => Effect.Effect<
+    { readonly adopted: ReadonlyArray<ProjectId> },
+    ManagerAssistantError
+  >;
   /** Create a new assistant from a human name; returns its project id. */
   readonly createAssistant: (input: {
     readonly name: string;

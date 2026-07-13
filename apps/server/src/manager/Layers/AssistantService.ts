@@ -13,6 +13,7 @@ import {
   ProjectId,
 } from "@t3tools/contracts";
 import { Effect, Layer, Option, Path, FileSystem, Schema } from "effect";
+import * as Semaphore from "effect/Semaphore";
 import * as crypto from "node:crypto";
 import * as os from "node:os";
 
@@ -154,6 +155,9 @@ const makeManagerAssistantService = Effect.gen(function* () {
   const toAssistantError = (detail: string) => (cause: unknown) =>
     new ManagerAssistantError({ detail, cause });
 
+  const assistantsBaseDir = path.join(os.homedir(), "UnoWork", "Assistants");
+  const scanSemaphore = yield* Semaphore.make(1);
+
   /**
    * Assistants are plain folders in a place the user can see and open:
    * ~/UnoWork/Assistants/<name>. The folder carries a `.uno-assistant.json`
@@ -168,7 +172,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
         projectId === ASSISTANT_PROJECT_ID
           ? "home"
           : projectId.replace(/^assistant-/, "") || projectId;
-      const base = path.join(os.homedir(), "UnoWork", "Assistants");
+      const base = assistantsBaseDir;
       const preferred = path.join(base, name);
       const markerPath = path.join(preferred, ".uno-assistant.json");
       const marker = yield* fs.readFileString(markerPath).pipe(Effect.orElseSucceed(() => ""));
@@ -197,14 +201,16 @@ const makeManagerAssistantService = Effect.gen(function* () {
   const ensureAssistant: ManagerAssistantServiceShape["ensureAssistant"] = ({
     projectId,
     title,
+    workspaceRoot: requestedRoot,
   }) =>
     Effect.gen(function* () {
       // Existing assistants keep their registered workspace; only new ones
-      // land in the visible ~/UnoWork/Assistants location.
+      // land in the visible ~/UnoWork/Assistants location (or the folder a
+      // caller adopts explicitly).
       const registeredProject = yield* projectionSnapshotQuery.getProjectShellById(projectId);
       const workspaceRoot = Option.isSome(registeredProject)
         ? registeredProject.value.workspaceRoot
-        : yield* defaultWorkspaceRootFor(projectId);
+        : (requestedRoot ?? (yield* defaultWorkspaceRootFor(projectId)));
       const mcpConfigPath = path.join(workspaceRoot, ".mcp.json");
 
       yield* fs.makeDirectory(path.join(workspaceRoot, "skills"), { recursive: true });
@@ -301,6 +307,96 @@ const makeManagerAssistantService = Effect.gen(function* () {
       return { projectId: candidate };
     });
 
+  type FolderMarker =
+    | { readonly kind: "none" }
+    | { readonly kind: "foreign" }
+    | { readonly kind: "owned"; readonly projectId: string };
+
+  const readFolderMarker = (dir: string): Effect.Effect<FolderMarker> =>
+    Effect.gen(function* () {
+      const raw = yield* fs
+        .readFileString(path.join(dir, ".uno-assistant.json"))
+        .pipe(Effect.orElseSucceed(() => ""));
+      if (raw.length === 0) return { kind: "none" } as const;
+      try {
+        const parsed = JSON.parse(raw) as { projectId?: string; stateDir?: string };
+        return parsed.stateDir === config.stateDir && typeof parsed.projectId === "string"
+          ? ({ kind: "owned", projectId: parsed.projectId } as const)
+          : ({ kind: "foreign" } as const);
+      } catch {
+        return { kind: "foreign" } as const;
+      }
+    });
+
+  /**
+   * A user-created folder becomes an assistant only when it declares intent
+   * via AGENTS.md; folders marked by another environment are left alone.
+   * A folder whose marker points at a project this environment no longer
+   * knows (fresh DB) is re-registered in place, keeping the user's files.
+   * Returns the adopted project id, or null when there is nothing to do.
+   */
+  const adoptFolder = (dir: string, folderName: string) =>
+    Effect.gen(function* () {
+      const marker = yield* readFolderMarker(dir);
+      if (marker.kind === "foreign") return null;
+      if (marker.kind === "owned") {
+        if (!isAssistantProjectId(marker.projectId)) return null;
+        const projectId = ProjectId.make(marker.projectId);
+        const registered = yield* projectionSnapshotQuery
+          .getProjectShellById(projectId)
+          .pipe(Effect.mapError(toAssistantError("Failed to check existing assistants.")));
+        if (Option.isSome(registered)) return null;
+        yield* ensureAssistant({ projectId, title: folderName, workspaceRoot: dir });
+        return projectId;
+      }
+      const hasInstructions = yield* fs
+        .exists(path.join(dir, "AGENTS.md"))
+        .pipe(Effect.orElseSucceed(() => false));
+      if (!hasInstructions) return null;
+      const base = slugifyAssistantName(folderName);
+      let candidate = ProjectId.make(`${ASSISTANT_PROJECT_ID_PREFIX}${base}`);
+      const existing = yield* projectionSnapshotQuery
+        .getProjectShellById(candidate)
+        .pipe(Effect.mapError(toAssistantError("Failed to check existing assistants.")));
+      if (Option.isSome(existing)) {
+        candidate = ProjectId.make(
+          `${ASSISTANT_PROJECT_ID_PREFIX}${base}-${crypto.randomUUID().slice(0, 6)}`,
+        );
+      }
+      yield* ensureAssistant({ projectId: candidate, title: folderName, workspaceRoot: dir });
+      return candidate;
+    });
+
+  const scanWorkspaceFolders: ManagerAssistantServiceShape["scanWorkspaceFolders"] = () =>
+    scanSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const entries = yield* fs
+          .readDirectory(assistantsBaseDir)
+          .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
+        const adopted: ProjectId[] = [];
+        for (const entry of [...entries].filter((name) => !name.startsWith(".")).sort()) {
+          const dir = path.join(assistantsBaseDir, entry);
+          const info = yield* fs.stat(dir).pipe(Effect.orElseSucceed(() => null));
+          if (info === null || info.type !== "Directory") continue;
+          const projectId = yield* adoptFolder(dir, entry).pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("assistant folder adoption failed").pipe(
+                Effect.annotateLogs({ dir, cause }),
+                Effect.as(null),
+              ),
+            ),
+          );
+          if (projectId !== null) {
+            adopted.push(projectId);
+            yield* Effect.logInfo("assistant adopted from folder").pipe(
+              Effect.annotateLogs({ dir, projectId }),
+            );
+          }
+        }
+        return { adopted };
+      }),
+    );
+
   const summarize = (input: {
     readonly projectId: ProjectId;
     readonly title: string;
@@ -385,6 +481,14 @@ const makeManagerAssistantService = Effect.gen(function* () {
 
   const listAssistants: ManagerAssistantServiceShape["listAssistants"] = () =>
     Effect.gen(function* () {
+      // Folder adoption piggybacks on listing: dropping a folder with
+      // AGENTS.md into ~/UnoWork/Assistants is enough — the next list
+      // picks it up. Best-effort: a scan failure must not break listing.
+      yield* scanWorkspaceFolders().pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("assistant folder scan failed").pipe(Effect.annotateLogs({ cause })),
+        ),
+      );
       const snapshot = yield* projectionSnapshotQuery
         .getShellSnapshot()
         .pipe(Effect.mapError(toAssistantError("Failed to load projects.")));
@@ -457,6 +561,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
   return {
     ensureAssistant,
     createAssistant,
+    scanWorkspaceFolders,
     listAssistants,
     getAssistant,
     readWorkspaceFile,
@@ -474,6 +579,7 @@ export const AssistantBootstrapLive = Layer.effectDiscard(
   Effect.gen(function* () {
     const assistants = yield* ManagerAssistantService;
     yield* assistants.ensureAssistant({ projectId: ASSISTANT_PROJECT_ID, title: "Assistant" });
+    yield* assistants.scanWorkspaceFolders();
     // Legacy single-assistant token label from before per-assistant scoping.
     const tokenRepository = yield* ManagerCapabilityTokenRepository;
     const legacy = yield* tokenRepository.getActiveByLabel("assistant-inapp");
