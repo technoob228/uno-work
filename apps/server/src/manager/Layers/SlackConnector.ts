@@ -24,15 +24,22 @@ import {
   CommandId,
   ManagerSlackConnectorConfig,
   MessageId,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   ProjectId,
   slackChatKey,
   ThreadId,
   UNO_GATEWAY_BASE_URL,
+  type ChatImageAttachment,
   type ModelSelection,
 } from "@t3tools/contracts";
 import { Context, Data, Duration, Effect, Layer, Option, Ref, Schema } from "effect";
 import * as crypto from "node:crypto";
+import * as fsPromises from "node:fs/promises";
+import * as nodePath from "node:path";
 
+import { createAttachmentId, resolveAttachmentPath } from "../../attachmentStore.ts";
+import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -41,6 +48,18 @@ import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/Projectio
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { DEFAULT_ADDRESSING_CONFIG, decideAddressing } from "../addressing.ts";
 import type { AddressingReason } from "../addressing.ts";
+import {
+  buildMediaFailureNote,
+  buildMediaNote,
+  isImageLikeMedia,
+  sanitizeFileName,
+  type TelegramMediaDescriptor,
+} from "../telegramMedia.ts";
+import {
+  buildTranscriptMessageText,
+  isTranscribableMedia,
+  transcribeTelegramAudio,
+} from "../telegramTranscription.ts";
 import { classifyWake } from "../wakeClassifier.ts";
 import { resolveTurnReply } from "./TelegramConnector.ts";
 
@@ -84,6 +103,15 @@ class SlackConnectorError extends Data.TaggedError("SlackConnectorError")<{
   readonly message: string;
 }> {}
 
+/** A file attached to a Slack message (`file_share` subtype). */
+interface SlackRawFile {
+  readonly id?: string;
+  readonly name?: string;
+  readonly mimetype?: string;
+  readonly size?: number;
+  readonly url_private_download?: string;
+}
+
 /** The loosely-typed slice of a Slack event we read. */
 interface SlackRawEvent {
   readonly type?: string;
@@ -95,6 +123,43 @@ interface SlackRawEvent {
   readonly channel_type?: string;
   readonly subtype?: string;
   readonly bot_id?: string;
+  readonly files?: ReadonlyArray<SlackRawFile>;
+}
+
+// Slack file downloads are authenticated with the bot token; cap what we pull.
+const SLACK_FILE_DOWNLOAD_LIMIT_BYTES = 100 * 1024 * 1024;
+
+/**
+ * Standing instruction appended to every Slack-originated turn — same marker
+ * the Telegram connector uses, so harness behavior carries over.
+ */
+const SLACK_SEND_FILE_HINT =
+  "[slack: to attach a file to your Slack reply, put [[send-file: /absolute/path]] on its own line]";
+
+/**
+ * Map a Slack file onto the connector-neutral media descriptor so the shared
+ * note/transcription helpers apply. Audio becomes "voice" (transcribable),
+ * video "video", images "photo"-like via mime, the rest "document".
+ */
+function toMediaDescriptor(file: SlackRawFile): TelegramMediaDescriptor | null {
+  if (file.url_private_download === undefined || file.id === undefined) {
+    return null;
+  }
+  const mimeType = file.mimetype ?? null;
+  const kind =
+    mimeType !== null && mimeType.startsWith("audio/")
+      ? ("voice" as const)
+      : mimeType !== null && mimeType.startsWith("video/")
+        ? ("video" as const)
+        : ("document" as const);
+  return {
+    kind,
+    fileId: file.id,
+    fileName: sanitizeFileName(file.name ?? "", kind === "voice" ? "audio.m4a" : "file.bin"),
+    mimeType,
+    durationSec: null,
+    sizeBytes: file.size ?? null,
+  };
 }
 
 interface SlackRuntime {
@@ -113,6 +178,11 @@ const makeSlackConnector = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  const serverConfig = yield* ServerConfig;
+
+  // Non-image incoming files land here; the harness reads them by absolute
+  // path (Slack threads always run in full-access mode).
+  const slackFilesDir = nodePath.join(serverConfig.stateDir, "slack-files");
 
   // Run per-event Effects from the imperative socket callbacks.
   const runtimeContext = yield* Effect.context<never>();
@@ -157,6 +227,192 @@ const makeSlackConnector = Effect.gen(function* () {
           ...(threadTs !== undefined ? { thread_ts: threadTs } : {}),
         }),
       catch: (cause) => new SlackConnectorError({ message: String(cause) }),
+    });
+
+  // Download a Slack file (authenticated with the bot token) into raw bytes.
+  const downloadSlackFile = (botToken: string, url: string) =>
+    Effect.tryPromise({
+      try: async () => {
+        const response = await fetch(url, {
+          headers: { authorization: `Bearer ${botToken}` },
+        });
+        if (!response.ok) {
+          throw new Error(`file download failed with status ${response.status}`);
+        }
+        return new Uint8Array(await response.arrayBuffer());
+      },
+      catch: (cause) =>
+        new SlackConnectorError({ message: `Slack file download failed: ${String(cause)}` }),
+    });
+
+  // Mirror of the Telegram media pipeline: images become vision attachments,
+  // audio is transcribed through the gateway, everything else lands on disk
+  // and is described to the harness by absolute path. Failures degrade to
+  // notes so the turn still runs.
+  const ingestSlackFiles = (input: {
+    readonly botToken: string;
+    readonly threadId: ThreadId;
+    readonly channel: string;
+    readonly files: ReadonlyArray<SlackRawFile>;
+  }) =>
+    Effect.gen(function* () {
+      const attachments: Array<ChatImageAttachment> = [];
+      const notes: Array<string> = [];
+      for (const file of input.files) {
+        const descriptor = toMediaDescriptor(file);
+        if (descriptor === null) continue;
+        if (
+          descriptor.sizeBytes !== null &&
+          descriptor.sizeBytes > SLACK_FILE_DOWNLOAD_LIMIT_BYTES
+        ) {
+          notes.push(
+            buildMediaFailureNote(descriptor, "the file exceeds the 100 MB download cap"),
+          );
+          continue;
+        }
+        const downloaded = yield* downloadSlackFile(
+          input.botToken,
+          file.url_private_download ?? "",
+        ).pipe(
+          Effect.map((bytes) => ({ ok: true as const, bytes })),
+          Effect.catch((cause) =>
+            Effect.succeed({ ok: false as const, reason: cause.message }),
+          ),
+        );
+        if (!downloaded.ok) {
+          notes.push(buildMediaFailureNote(descriptor, downloaded.reason));
+          continue;
+        }
+        const bytes = downloaded.bytes;
+
+        if (
+          isImageLikeMedia(descriptor) &&
+          descriptor.mimeType !== null &&
+          bytes.byteLength > 0 &&
+          bytes.byteLength <= PROVIDER_SEND_TURN_MAX_IMAGE_BYTES &&
+          attachments.length < PROVIDER_SEND_TURN_MAX_ATTACHMENTS
+        ) {
+          const attachmentId = createAttachmentId(input.threadId);
+          if (attachmentId !== null) {
+            const attachment = {
+              type: "image" as const,
+              id: attachmentId,
+              name: descriptor.fileName,
+              mimeType: descriptor.mimeType.toLowerCase(),
+              sizeBytes: bytes.byteLength,
+            } satisfies ChatImageAttachment;
+            const attachmentPath = resolveAttachmentPath({
+              attachmentsDir: serverConfig.attachmentsDir,
+              attachment,
+            });
+            if (attachmentPath !== null) {
+              const stored = yield* Effect.tryPromise({
+                try: async () => {
+                  await fsPromises.mkdir(nodePath.dirname(attachmentPath), { recursive: true });
+                  await fsPromises.writeFile(attachmentPath, bytes);
+                },
+                catch: (cause) => new SlackConnectorError({ message: String(cause) }),
+              }).pipe(
+                Effect.map(() => true),
+                Effect.catch(() => Effect.succeed(false)),
+              );
+              if (stored) {
+                attachments.push(attachment);
+                continue;
+              }
+            }
+          }
+        }
+
+        const directory = nodePath.join(slackFilesDir, input.channel);
+        const savedPath = nodePath.join(
+          directory,
+          `${crypto.randomUUID().slice(0, 8)}-${descriptor.fileName}`,
+        );
+        const saved = yield* Effect.tryPromise({
+          try: async () => {
+            await fsPromises.mkdir(directory, { recursive: true });
+            await fsPromises.writeFile(savedPath, bytes);
+          },
+          catch: (cause) => new SlackConnectorError({ message: String(cause) }),
+        }).pipe(
+          Effect.map(() => true),
+          Effect.catch(() => Effect.succeed(false)),
+        );
+        if (!saved) {
+          notes.push(buildMediaFailureNote(descriptor, "failed to save the file on the server"));
+          continue;
+        }
+
+        if (isTranscribableMedia(descriptor)) {
+          const unoApiKey = yield* getUnoApiKey;
+          if (unoApiKey.length > 0) {
+            const transcript = yield* transcribeTelegramAudio({
+              baseUrl: UNO_GATEWAY_BASE_URL,
+              apiKey: unoApiKey,
+              bytes,
+              fileName: descriptor.fileName,
+              mimeType: descriptor.mimeType,
+            }).pipe(Effect.catch(() => Effect.succeed(null)));
+            if (transcript !== null) {
+              notes.push(buildTranscriptMessageText({ descriptor, transcript, savedPath }));
+              continue;
+            }
+          }
+        }
+
+        notes.push(buildMediaNote(descriptor, savedPath));
+      }
+      return { attachments, notes };
+    });
+
+  // Upload a `[[send-file: …]]` artifact back into the conversation. Failures
+  // are reported into the chat so the user isn't left waiting.
+  const sendSlackFile = (input: {
+    readonly web: WebClient;
+    readonly channel: string;
+    readonly threadTs: string | undefined;
+    readonly filePath: string;
+  }) =>
+    Effect.gen(function* () {
+      const failure = yield* Effect.tryPromise({
+        try: async () => {
+          const stat = await fsPromises.stat(input.filePath);
+          if (!stat.isFile()) {
+            throw new Error("not a regular file");
+          }
+          const fileName = nodePath.basename(input.filePath);
+          if (input.threadTs !== undefined) {
+            await input.web.files.uploadV2({
+              channel_id: input.channel,
+              thread_ts: input.threadTs,
+              file: input.filePath,
+              filename: fileName,
+            });
+          } else {
+            await input.web.files.uploadV2({
+              channel_id: input.channel,
+              file: input.filePath,
+              filename: fileName,
+            });
+          }
+        },
+        catch: (cause) => (cause instanceof Error ? cause.message : String(cause)),
+      }).pipe(
+        Effect.map(() => null),
+        Effect.catch((reason) => Effect.succeed(reason)),
+      );
+      if (failure !== null) {
+        yield* Effect.logWarning("slack file upload failed").pipe(
+          Effect.annotateLogs({ channel: input.channel, filePath: input.filePath, failure }),
+        );
+        yield* postMessage(
+          input.web,
+          input.channel,
+          `Could not send ${input.filePath}: ${failure}`,
+          input.threadTs,
+        );
+      }
     });
 
   const ensureThreadForChat = (input: {
@@ -241,8 +497,19 @@ const makeSlackConnector = Effect.gen(function* () {
           nowIso: new Date().toISOString(),
         });
         if (reply === null) continue;
-        const text = reply.text.trim().length > 0 ? reply.text : "Done.";
-        yield* postMessage(input.web, input.channel, text, input.threadTs);
+        if (reply.text.trim().length > 0) {
+          yield* postMessage(input.web, input.channel, reply.text, input.threadTs);
+        } else if (reply.files.length === 0) {
+          yield* postMessage(input.web, input.channel, "Done.", input.threadTs);
+        }
+        for (const filePath of reply.files) {
+          yield* sendSlackFile({
+            web: input.web,
+            channel: input.channel,
+            threadTs: input.threadTs,
+            filePath,
+          });
+        }
         yield* markHotWindow(input.hotKey);
         return;
       }
@@ -271,10 +538,11 @@ const makeSlackConnector = Effect.gen(function* () {
       const channel = event.channel;
       const ts = event.ts;
       if (channel === undefined || ts === undefined) return;
-      // Skip edits, joins, bot_message, file shares — only plain new messages.
-      if (event.subtype !== undefined) return;
+      // Skip edits, joins, bot_message — only plain new messages and file shares.
+      if (event.subtype !== undefined && event.subtype !== "file_share") return;
       const rawText = typeof event.text === "string" ? event.text : "";
-      if (rawText.trim().length === 0) return;
+      const files = event.files ?? [];
+      if (rawText.trim().length === 0 && files.length === 0) return;
       if (!config.allowedChannelIds.includes(channel)) {
         yield* Effect.logDebug("slack message from non-allowlisted channel ignored").pipe(
           Effect.annotateLogs({ projectId, channel }),
@@ -329,6 +597,15 @@ const makeSlackConnector = Effect.gen(function* () {
 
       const title = isDM ? `Slack DM ${channel}` : `Slack: ${channel}`;
       const threadId = yield* ensureThreadForChat({ projectId, chatKey, title, config });
+      const ingested =
+        files.length > 0
+          ? yield* ingestSlackFiles({ botToken: config.botToken, threadId, channel, files })
+          : { attachments: [], notes: [] };
+      const bodyParts = [cleanedText, ...ingested.notes].filter((part) => part.length > 0);
+      if (bodyParts.length === 0) {
+        bodyParts.push("[The user sent the attached image(s) without a caption.]");
+      }
+      const body = [...bodyParts, SLACK_SEND_FILE_HINT].join("\n\n");
       const requestedAtIso = new Date().toISOString();
       yield* orchestrationEngine.dispatch({
         type: "thread.turn.start",
@@ -337,8 +614,8 @@ const makeSlackConnector = Effect.gen(function* () {
         message: {
           messageId: MessageId.make(crypto.randomUUID()),
           role: "user",
-          text: cleanedText,
-          attachments: [],
+          text: body,
+          attachments: ingested.attachments,
         },
         runtimeMode: "full-access",
         interactionMode: "default",
