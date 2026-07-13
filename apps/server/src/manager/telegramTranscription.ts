@@ -54,7 +54,7 @@ export const buildTranscriptMessageText = (input: {
     input.descriptor.durationSec !== null ? ` (${input.descriptor.durationSec}s)` : "";
   return `🎤${duration}: ${input.transcript}\n[Telegram ${
     input.descriptor.kind === "video_note" ? "video note" : "voice message"
-  } saved at ${input.savedPath}. The transcript above is auto-normalized text; to analyze delivery (pronunciation, accent, tone), send the audio file itself to an audio-capable model via the Uno Gateway chat/completions (e.g. google/gemini-3.1-pro-preview with an input_audio content part).]`;
+  } saved at ${input.savedPath}. The transcript above is auto-normalized text, not evidence of pronunciation. Before giving any pronunciation feedback, always send the saved audio itself once to google/gemini-3.1-pro-preview via Uno Gateway chat/completions with an input_audio part. Ask it for: exact transcript, confidence (low/medium/high), at most one observed pronunciation issue only if it can actually hear one, and a separately labelled general tip. Never infer that the pronunciation was clean/correct merely because transcription succeeded, and never present a general tip as an observed error. If its confidence is low or it reports no observed issue, say only that the phrase was understood and offer an optional general tip.]`;
 };
 
 export const transcribeTelegramAudio = (input: {

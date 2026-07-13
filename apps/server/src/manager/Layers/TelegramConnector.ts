@@ -74,6 +74,7 @@ import {
   type TelegramIncomingMessage,
   type TelegramMediaDescriptor,
 } from "../telegramMedia.ts";
+import { renderTelegramHtml } from "../telegramMarkdown.ts";
 
 export interface ManagerTelegramRuntimeStatus {
   readonly botUsername: string | null;
@@ -463,7 +464,11 @@ const makeTelegramConnector = Effect.gen(function* () {
     fetchJson(telegramApi(botToken, "sendMessage"), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text }),
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: renderTelegramHtml(text),
+        parse_mode: "HTML",
+      }),
     }).pipe(
       Effect.tap((response) =>
         response.ok === true
