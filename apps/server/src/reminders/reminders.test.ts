@@ -15,6 +15,7 @@ const projectId = ProjectId.make("assistant-home");
 const makeReminder = (overrides: Partial<Reminder> & Pick<Reminder, "reminderId" | "dueAt">): Reminder => ({
   projectId,
   chatId: "123456",
+  connector: "telegram",
   message: "ping",
   status: "pending",
   createdAt: "2026-07-08T00:00:00.000Z",
@@ -71,6 +72,25 @@ it.layer(NodeServices.layer)("reminders repository", (it) => {
 
       const stored = yield* repo.getById({ reminderId: "r2" });
       expect(Option.isSome(stored) && stored.value.status).toBe("cancelled");
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("round-trips the delivery connector (slack thread chat key)", () =>
+    Effect.gen(function* () {
+      const repo = yield* RemindersRepository;
+      yield* repo.create(
+        makeReminder({
+          reminderId: "slack-r",
+          dueAt: PAST,
+          connector: "slack",
+          chatId: "C0123ABCD:1700000000.000100",
+        }),
+      );
+
+      const due = yield* repo.listDue({ now: NOW });
+      expect(due).toHaveLength(1);
+      expect(due[0]?.connector).toBe("slack");
+      expect(due[0]?.chatId).toBe("C0123ABCD:1700000000.000100");
     }).pipe(Effect.provide(testLayer)),
   );
 

@@ -216,6 +216,21 @@ export const slackChatKey = (channelId: string, threadTs?: string | null): strin
     ? `${channelId}:${threadTs}`
     : channelId;
 
+/** Inverse of {@link slackChatKey}: split a stored chat key back into its parts. */
+export const parseSlackChatKey = (
+  chatKey: string,
+): { readonly channelId: string; readonly threadTs: string | null } => {
+  const separator = chatKey.indexOf(":");
+  if (separator === -1) {
+    return { channelId: chatKey, threadTs: null };
+  }
+  const threadTs = chatKey.slice(separator + 1);
+  return {
+    channelId: chatKey.slice(0, separator),
+    threadTs: threadTs.length > 0 ? threadTs : null,
+  };
+};
+
 /** Telegram connector as exposed to clients: token is never echoed back. */
 export const ManagerTelegramConnectorStatus = Schema.Struct({
   configured: Schema.Boolean,
@@ -542,10 +557,22 @@ export const ReminderStatus = Schema.Literals([
 ]);
 export type ReminderStatus = typeof ReminderStatus.Type;
 
+/** Which messenger delivers the reminder. Rows predating the field are Telegram. */
+export const ReminderConnectorKind = Schema.Literals(["telegram", "slack"]);
+export type ReminderConnectorKind = typeof ReminderConnectorKind.Type;
+
 export const Reminder = Schema.Struct({
   reminderId: TrimmedNonEmptyString,
   projectId: ProjectId,
+  /**
+   * Delivery target within the connector: a Telegram chat id, or a Slack
+   * channel id / `channel:thread_ts` chat key (thread reminders land in the
+   * thread they were asked in).
+   */
   chatId: TrimmedNonEmptyString,
+  connector: ReminderConnectorKind.pipe(
+    Schema.withDecodingDefault(Effect.succeed("telegram" as const)),
+  ),
   message: TrimmedNonEmptyString,
   dueAt: IsoDateTime,
   status: ReminderStatus,
@@ -572,6 +599,11 @@ export const ManagerCreateReminderInput = Schema.Struct({
   projectId: Schema.optional(ProjectId),
   /** Target chat; defaults to that project's first allowlisted chat. */
   chatId: Schema.optional(TrimmedNonEmptyString),
+  /**
+   * Which messenger to deliver through. Default: the first configured
+   * connector (Telegram wins when both are set up).
+   */
+  connector: Schema.optional(ReminderConnectorKind),
 });
 export type ManagerCreateReminderInput = typeof ManagerCreateReminderInput.Type;
 

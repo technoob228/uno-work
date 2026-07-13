@@ -239,7 +239,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     name: "create_reminder",
     description:
-      "Schedule a one-shot reminder: at the due time the daemon pushes the message to the owner's Telegram verbatim (no LLM turn). Use this for 'remind me in N minutes/at TIME' requests. Give either dueInSeconds (relative) or dueAt (absolute ISO). Delivery targets the owner's Telegram chat automatically; it survives restarts.",
+      "Schedule a one-shot reminder: at the due time the daemon pushes the message to the owner's messenger verbatim (no LLM turn). Use this for 'remind me in N minutes/at TIME' requests. Give either dueInSeconds (relative) or dueAt (absolute ISO). Delivery targets the owner's first configured connector automatically (Telegram first, then Slack); it survives restarts.",
     inputSchema: {
       type: "object",
       properties: {
@@ -255,9 +255,19 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
         },
         projectId: {
           type: "string",
-          description: "Optional: target project; defaults to the Telegram-connected one.",
+          description: "Optional: target project; defaults to the connector-configured one.",
         },
-        chatId: { type: "string", description: "Optional: target chat id override." },
+        chatId: {
+          type: "string",
+          description:
+            "Optional: target chat override — a Telegram chat id, or a Slack channel id / channel:thread_ts key.",
+        },
+        connector: {
+          type: "string",
+          enum: ["telegram", "slack"],
+          description:
+            "Optional: which messenger delivers it. Default: Telegram if configured, else Slack.",
+        },
       },
       required: ["message"],
       additionalProperties: false,

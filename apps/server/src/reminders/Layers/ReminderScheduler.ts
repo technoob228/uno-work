@@ -1,6 +1,8 @@
+import { parseSlackChatKey } from "@t3tools/contracts";
 import { Duration, Effect, Layer, Schedule } from "effect";
 
 import { ManagerTelegramService } from "../../manager/Layers/TelegramConnector.ts";
+import { ManagerSlackService } from "../../manager/Layers/SlackConnector.ts";
 import { RemindersRepository } from "../../persistence/Services/Reminders.ts";
 import {
   ReminderScheduler,
@@ -19,6 +21,7 @@ const makeReminderScheduler = (options?: ReminderSchedulerLiveOptions) =>
   Effect.gen(function* () {
     const reminders = yield* RemindersRepository;
     const telegram = yield* ManagerTelegramService;
+    const slack = yield* ManagerSlackService;
 
     const sweepIntervalMs = Math.max(1, options?.sweepIntervalMs ?? DEFAULT_SWEEP_INTERVAL_MS);
     const batchSize = Math.max(1, options?.batchSize ?? DEFAULT_BATCH_SIZE);
@@ -31,11 +34,24 @@ const makeReminderScheduler = (options?: ReminderSchedulerLiveOptions) =>
       }
       for (const reminder of due) {
         const text = `⏰ Напоминание: ${reminder.message}`;
-        const delivered = yield* telegram.sendText({
-          projectId: reminder.projectId,
-          chatId: reminder.chatId,
-          text,
-        });
+        let delivered: boolean;
+        if (reminder.connector === "slack") {
+          // Slack reminders store the chat key (`channel` or `channel:thread_ts`),
+          // so a reminder asked inside a thread lands back in that thread.
+          const target = parseSlackChatKey(reminder.chatId);
+          delivered = yield* slack.sendText({
+            projectId: reminder.projectId,
+            channelId: target.channelId,
+            text,
+            ...(target.threadTs !== null ? { threadTs: target.threadTs } : {}),
+          });
+        } else {
+          delivered = yield* telegram.sendText({
+            projectId: reminder.projectId,
+            chatId: reminder.chatId,
+            text,
+          });
+        }
         if (delivered) {
           yield* reminders.markDelivered({
             reminderId: reminder.reminderId,
@@ -44,15 +60,17 @@ const makeReminderScheduler = (options?: ReminderSchedulerLiveOptions) =>
           yield* Effect.logInfo("reminder.delivered", {
             reminderId: reminder.reminderId,
             chatId: reminder.chatId,
+            connector: reminder.connector,
           });
         } else {
           yield* reminders.markFailed({
             reminderId: reminder.reminderId,
-            failureReason: "telegram delivery failed",
+            failureReason: `${reminder.connector} delivery failed`,
           });
           yield* Effect.logWarning("reminder.delivery-failed", {
             reminderId: reminder.reminderId,
             chatId: reminder.chatId,
+            connector: reminder.connector,
           });
         }
       }

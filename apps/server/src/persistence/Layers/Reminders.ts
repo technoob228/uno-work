@@ -1,4 +1,4 @@
-import { ProjectId, Reminder, ReminderStatus } from "@t3tools/contracts";
+import { ProjectId, Reminder, ReminderConnectorKind, ReminderStatus } from "@t3tools/contracts";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import { Effect, Layer, Option, Schema } from "effect";
@@ -24,6 +24,7 @@ const ReminderDbRow = Schema.Struct({
   reminderId: Schema.String,
   projectId: ProjectId,
   chatId: Schema.String,
+  connector: ReminderConnectorKind,
   message: Schema.String,
   dueAt: Schema.String,
   status: ReminderStatus,
@@ -38,6 +39,7 @@ function toReminder(row: typeof ReminderDbRow.Type): Reminder {
     reminderId: row.reminderId,
     projectId: row.projectId,
     chatId: row.chatId,
+    connector: row.connector,
     message: row.message,
     dueAt: row.dueAt,
     status: row.status,
@@ -68,6 +70,7 @@ const makeRemindersRepository = Effect.gen(function* () {
           reminder_id,
           project_id,
           chat_id,
+          connector,
           message,
           due_at,
           status,
@@ -80,6 +83,7 @@ const makeRemindersRepository = Effect.gen(function* () {
           ${input.reminderId},
           ${input.projectId},
           ${input.chatId},
+          ${input.connector},
           ${input.message},
           ${input.dueAt},
           ${input.status},
@@ -100,6 +104,7 @@ const makeRemindersRepository = Effect.gen(function* () {
           reminder_id AS "reminderId",
           project_id AS "projectId",
           chat_id AS "chatId",
+          connector AS "connector",
           message AS "message",
           due_at AS "dueAt",
           status AS "status",
@@ -124,6 +129,7 @@ const makeRemindersRepository = Effect.gen(function* () {
           reminder_id AS "reminderId",
           project_id AS "projectId",
           chat_id AS "chatId",
+          connector AS "connector",
           message AS "message",
           due_at AS "dueAt",
           status AS "status",
@@ -146,6 +152,7 @@ const makeRemindersRepository = Effect.gen(function* () {
           reminder_id AS "reminderId",
           project_id AS "projectId",
           chat_id AS "chatId",
+          connector AS "connector",
           message AS "message",
           due_at AS "dueAt",
           status AS "status",

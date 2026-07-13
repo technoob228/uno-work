@@ -15,7 +15,9 @@ import {
   MANAGER_READ_THREAD_DETAIL_DEFAULT_MESSAGES,
   MANAGER_READ_THREAD_DETAIL_MAX_MESSAGE_CHARS,
   ManagerProposalId,
+  ManagerSlackConnectorConfig,
   ManagerTelegramConnectorConfig,
+  type ReminderConnectorKind,
 } from "@t3tools/contracts";
 import { Effect, Layer, Option, Schema } from "effect";
 import * as crypto from "node:crypto";
@@ -379,39 +381,76 @@ const makeManagerToolService = Effect.gen(function* () {
       return { proposal: resolved };
     });
 
-  // Pick the (projectId, chatId) a reminder should be delivered to. Explicit
-  // args win; otherwise fall back to the first enabled Telegram connector the
-  // caller can access. Reminders are self-notifications, so this stays outside
-  // the proposal/approval flow — they touch no threads and no prod.
+  // Pick the (projectId, chatId, connector) a reminder should be delivered
+  // to. Explicit args win; otherwise fall back to the first enabled connector
+  // the caller can access — Telegram first, then Slack (unless the caller
+  // pinned `connector`). Reminders are self-notifications, so this stays
+  // outside the proposal/approval flow — they touch no threads and no prod.
   const resolveReminderTarget = (
     caller: ManagerCaller,
-    input: { readonly projectId?: ProjectId | undefined; readonly chatId?: string | undefined },
+    input: {
+      readonly projectId?: ProjectId | undefined;
+      readonly chatId?: string | undefined;
+      readonly connector?: ReminderConnectorKind | undefined;
+    },
   ) =>
     Effect.gen(function* () {
       if (input.projectId !== undefined && input.chatId !== undefined) {
         yield* requireProjectAllowed(caller, input.projectId);
-        return { projectId: input.projectId, chatId: input.chatId };
+        return {
+          projectId: input.projectId,
+          chatId: input.chatId,
+          connector: input.connector ?? "telegram",
+        };
       }
-      const connectors = yield* connectorRepository.listByKind("telegram");
-      const candidates = connectors.flatMap((record) => {
-        if (!isProjectAllowed(caller, record.projectId)) return [];
-        if (input.projectId !== undefined && record.projectId !== input.projectId) return [];
-        const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(record.config);
-        if (decoded._tag !== "Success" || !decoded.value.enabled) return [];
-        const firstChat = decoded.value.allowedChatIds[0];
-        if (firstChat === undefined) return [];
-        return [{ projectId: record.projectId, chatId: firstChat }];
-      });
+      const candidates: Array<{
+        projectId: ProjectId;
+        chatId: string;
+        connector: ReminderConnectorKind;
+      }> = [];
+      if (input.connector !== "slack") {
+        const telegramConnectors = yield* connectorRepository.listByKind("telegram");
+        for (const record of telegramConnectors) {
+          if (!isProjectAllowed(caller, record.projectId)) continue;
+          if (input.projectId !== undefined && record.projectId !== input.projectId) continue;
+          const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(record.config);
+          if (decoded._tag !== "Success" || !decoded.value.enabled) continue;
+          const firstChat = decoded.value.allowedChatIds[0];
+          if (firstChat === undefined) continue;
+          candidates.push({
+            projectId: record.projectId,
+            chatId: firstChat,
+            connector: "telegram",
+          });
+        }
+      }
+      if (input.connector !== "telegram") {
+        const slackConnectors = yield* connectorRepository.listByKind("slack");
+        for (const record of slackConnectors) {
+          if (!isProjectAllowed(caller, record.projectId)) continue;
+          if (input.projectId !== undefined && record.projectId !== input.projectId) continue;
+          const decoded = Schema.decodeUnknownExit(ManagerSlackConnectorConfig)(record.config);
+          if (decoded._tag !== "Success" || !decoded.value.enabled) continue;
+          const firstChannel = decoded.value.allowedChannelIds[0];
+          if (firstChannel === undefined) continue;
+          candidates.push({
+            projectId: record.projectId,
+            chatId: firstChannel,
+            connector: "slack",
+          });
+        }
+      }
       const chosen = candidates[0];
       if (chosen === undefined) {
         return yield* new ManagerInvalidRequestError({
           detail:
-            "No enabled Telegram connector is available to deliver the reminder. Configure a bot for a project you can access, or pass projectId and chatId explicitly.",
+            "No enabled Telegram or Slack connector is available to deliver the reminder. Configure a bot for a project you can access, or pass projectId and chatId explicitly.",
         });
       }
       return {
         projectId: input.projectId ?? chosen.projectId,
         chatId: input.chatId ?? chosen.chatId,
+        connector: chosen.connector,
       };
     });
 
@@ -436,12 +475,14 @@ const makeManagerToolService = Effect.gen(function* () {
       const target = yield* resolveReminderTarget(caller, {
         projectId: input.projectId,
         chatId: input.chatId,
+        connector: input.connector,
       });
 
       const reminder: Reminder = {
         reminderId: crypto.randomUUID(),
         projectId: target.projectId,
         chatId: target.chatId,
+        connector: target.connector,
         message: input.message,
         dueAt,
         status: "pending",
