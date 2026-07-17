@@ -16,6 +16,7 @@ import {
 } from "./http.ts";
 import { BrowserBridgeLive } from "./browserBridge.ts";
 import { HealthCheck } from "./health.ts";
+import { SelfWatchdogLive } from "./selfWatchdog.ts";
 import { ServerBrowserLive } from "./serverBrowser.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
@@ -270,7 +271,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // scheduler is merged in here (rather than as its own pipe step, which would
   // exceed `.pipe`'s 20-arg limit); both need ManagerLayerLive + persistence
   // provided further down this pipe to satisfy their requirements.
-  Layer.provideMerge(Layer.mergeAll(ManagerAssistantBootstrapLive, ReminderSchedulerLive)),
+  Layer.provideMerge(
+    Layer.mergeAll(ManagerAssistantBootstrapLive, ReminderSchedulerLive, SelfWatchdogLive),
+  ),
   // Manager tool layer (MCP surface for the manager brain). Sits above the
   // orchestration/persistence layers provided further down this pipe so it
   // shares the same engine and SqlClient instances.

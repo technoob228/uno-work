@@ -388,6 +388,43 @@ wait_for_pid_exit() {
     sleep 0.1
   done
 }
+supports_user_systemd() {
+  command -v systemctl >/dev/null 2>&1 || return 1
+  SYSTEMD_STATE="$(systemctl --user is-system-running 2>/dev/null || true)"
+  case "$SYSTEMD_STATE" in
+    running|degraded|maintenance|starting) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+install_systemd_unit() {
+  UNIT_DIR="$HOME/.config/systemd/user"
+  UNIT_FILE="$UNIT_DIR/t3-server.service"
+  UNIT_NEXT="$STATE_DIR/t3-server.service.next.$$"
+  mkdir -p "$UNIT_DIR"
+  cat >"$UNIT_NEXT" <<UNIT
+[Unit]
+Description=T3 remote server (managed by desktop ssh-launch)
+
+[Service]
+ExecStart=$RUNNER_FILE serve --host 127.0.0.1 --port $REMOTE_PORT --base-dir $DEFAULT_SERVER_HOME
+Restart=always
+RestartSec=2
+Environment=T3CODE_NO_BROWSER=1
+Environment=T3_WATCHDOG_EXIT=1
+
+[Install]
+WantedBy=default.target
+UNIT
+  UNIT_CHANGED=0
+  if [ ! -f "$UNIT_FILE" ] || ! cmp -s "$UNIT_NEXT" "$UNIT_FILE"; then
+    UNIT_CHANGED=1
+  fi
+  mv "$UNIT_NEXT" "$UNIT_FILE"
+  if [ "$UNIT_CHANGED" -eq 1 ]; then
+    systemctl --user daemon-reload 2>/dev/null || true
+  fi
+  return 0
+}
 resolve_default_runtime_port() {
   node - "$DEFAULT_RUNTIME_FILE" <<'NODE'
 const fs = require("node:fs");
@@ -436,6 +473,16 @@ if [ "$REMOTE_MANAGED" = "external" ]; then
     REMOTE_PID=""
     REMOTE_PORT=""
     REMOTE_MANAGED=""
+  elif [ "$RUNNER_CHANGED" -eq 1 ] && supports_user_systemd && systemctl --user is-active t3-server >/dev/null 2>&1; then
+    # New CLI version: restart the systemd-managed daemon once so it picks up
+    # the fresh runner. Genuinely external (user-run) servers are untouched.
+    install_systemd_unit
+    systemctl --user restart t3-server 2>/dev/null || true
+    if ! wait_ready "@@T3_READY_TIMEOUT_MS@@"; then
+      printf 'Remote T3 server did not come back after a systemd restart on 127.0.0.1:%s.\\n' "$REMOTE_PORT" >&2
+      journalctl --user -u t3-server -n 40 --no-pager >&2 2>/dev/null || true
+      exit 1
+    fi
   fi
 elif [ -n "$REMOTE_PID" ] && [ -n "$REMOTE_PORT" ] && kill -0 "$REMOTE_PID" 2>/dev/null; then
   if [ "$RUNNER_CHANGED" -eq 1 ]; then
@@ -456,24 +503,44 @@ else
   REMOTE_PORT=""
   REMOTE_MANAGED=""
 fi
-if [ -z "$REMOTE_PID" ] || [ -z "$REMOTE_PORT" ]; then
+if [ -z "$REMOTE_PID" ] && [ "$REMOTE_MANAGED" != "external" ]; then
   REMOTE_PORT="$(pick_port)" || true
   if [ -z "$REMOTE_PORT" ]; then
     printf 'Failed to find an available port on the remote host. Ensure node is available on PATH.\\n' >&2
     exit 1
   fi
-  nohup env T3CODE_NO_BROWSER=1 "$RUNNER_FILE" serve --host 127.0.0.1 --port "$REMOTE_PORT" --base-dir "$DEFAULT_SERVER_HOME" >>"$LOG_FILE" 2>&1 < /dev/null &
-  REMOTE_PID="$!"
-  printf '%s\\n' "$REMOTE_PID" >"$PID_FILE"
-  printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
-  printf 'managed\\n' >"$MANAGED_FILE"
-  if ! wait_ready "@@T3_READY_TIMEOUT_MS@@"; then
-    printf 'Remote T3 server did not become ready on 127.0.0.1:%s.\\n' "$REMOTE_PORT" >&2
-    tail -n 80 "$LOG_FILE" >&2 2>/dev/null || true
-    kill "$REMOTE_PID" 2>/dev/null || true
-    wait_for_pid_exit "$REMOTE_PID"
-    rm -f "$PID_FILE" "$PORT_FILE" "$MANAGED_FILE"
-    exit 1
+  if supports_user_systemd; then
+    # Prefer systemd supervision: Restart=always keeps the daemon alive
+    # through crashes and (with linger) logouts, independent of any desktop.
+    loginctl enable-linger "$(id -un)" 2>/dev/null || true
+    install_systemd_unit
+    systemctl --user enable t3-server >/dev/null 2>&1 || true
+    systemctl --user restart t3-server 2>/dev/null || true
+    if wait_ready "@@T3_READY_TIMEOUT_MS@@"; then
+      printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
+      printf 'external\\n' >"$MANAGED_FILE"
+      rm -f "$PID_FILE"
+      REMOTE_MANAGED="external"
+    else
+      printf 'systemd-managed T3 server did not become ready; falling back to direct launch.\\n' >&2
+      journalctl --user -u t3-server -n 40 --no-pager >&2 2>/dev/null || true
+      systemctl --user disable --now t3-server >/dev/null 2>&1 || true
+    fi
+  fi
+  if [ "$REMOTE_MANAGED" != "external" ]; then
+    nohup env T3CODE_NO_BROWSER=1 "$RUNNER_FILE" serve --host 127.0.0.1 --port "$REMOTE_PORT" --base-dir "$DEFAULT_SERVER_HOME" >>"$LOG_FILE" 2>&1 < /dev/null &
+    REMOTE_PID="$!"
+    printf '%s\\n' "$REMOTE_PID" >"$PID_FILE"
+    printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
+    printf 'managed\\n' >"$MANAGED_FILE"
+    if ! wait_ready "@@T3_READY_TIMEOUT_MS@@"; then
+      printf 'Remote T3 server did not become ready on 127.0.0.1:%s.\\n' "$REMOTE_PORT" >&2
+      tail -n 80 "$LOG_FILE" >&2 2>/dev/null || true
+      kill "$REMOTE_PID" 2>/dev/null || true
+      wait_for_pid_exit "$REMOTE_PID"
+      rm -f "$PID_FILE" "$PORT_FILE" "$MANAGED_FILE"
+      exit 1
+    fi
   fi
 fi
 printf '{"remotePort":%s,"serverKind":"%s"}\\n' "$REMOTE_PORT" "\${REMOTE_MANAGED:-managed}"
