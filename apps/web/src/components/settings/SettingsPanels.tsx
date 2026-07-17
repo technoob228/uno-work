@@ -909,7 +909,7 @@ export function GeneralSettingsPanel() {
               className="w-full sm:w-72"
               value={unoApiKey}
               onCommit={(next) => updateSettings({ uno: { apiKey: next } })}
-              placeholder="sNIh…"
+              placeholder="Paste your Uno API key…"
               spellCheck={false}
               autoComplete="off"
               aria-label="Uno API key"
