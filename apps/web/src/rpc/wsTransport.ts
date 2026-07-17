@@ -20,7 +20,11 @@ import {
   type WsRpcProtocolClient,
   type WsRpcProtocolSocketUrlProvider,
 } from "./protocol";
-import { isTransportConnectionErrorMessage } from "./transportError";
+import {
+  isTransportConnectionErrorMessage,
+  isTransportInterruptErrorMessage,
+  TransportConnectionLostError,
+} from "./transportError";
 
 interface SubscribeOptions {
   readonly retryDelay?: Duration.Input;
@@ -33,6 +37,7 @@ interface RequestOptions {
 }
 
 const DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS = Duration.millis(250);
+const AUTO_RECOVERY_DEBOUNCE_MS = 5_000;
 const NOOP: () => void = () => undefined;
 
 interface TransportSession {
@@ -60,6 +65,9 @@ export class WsTransport {
   private disposed = false;
   private hasReportedTransportDisconnect = false;
   private intentionalCloseDepth = 0;
+  private connectionHealthy = true;
+  private autoRecovery: Promise<void> | null = null;
+  private lastAutoRecoveryStartedAt = 0;
   private reconnectChain: Promise<void> = Promise.resolve();
   private nextSessionId = 0;
   private activeSessionId = 0;
@@ -84,9 +92,14 @@ export class WsTransport {
       throw new Error("Transport disposed");
     }
 
+    await this.recoverBeforeRequest();
     const session = this.session;
     const client = await session.clientPromise;
-    return await session.runtime.runPromise(Effect.suspend(() => execute(client)));
+    try {
+      return await session.runtime.runPromise(Effect.suspend(() => execute(client)));
+    } catch (error) {
+      throw this.mapRequestError(error, session);
+    }
   }
 
   async requestStream<TValue>(
@@ -97,19 +110,24 @@ export class WsTransport {
       throw new Error("Transport disposed");
     }
 
+    await this.recoverBeforeRequest();
     const session = this.session;
     const client = await session.clientPromise;
-    await session.runtime.runPromise(
-      Stream.runForEach(connect(client), (value) =>
-        Effect.sync(() => {
-          try {
-            listener(value);
-          } catch {
-            // Swallow listener errors so the stream can finish cleanly.
-          }
-        }),
-      ),
-    );
+    try {
+      await session.runtime.runPromise(
+        Stream.runForEach(connect(client), (value) =>
+          Effect.sync(() => {
+            try {
+              listener(value);
+            } catch {
+              // Swallow listener errors so the stream can finish cleanly.
+            }
+          }),
+        ),
+      );
+    } catch (error) {
+      throw this.mapRequestError(error, session);
+    }
   }
 
   subscribe<TValue>(
@@ -187,6 +205,12 @@ export class WsTransport {
             });
           }
           this.hasReportedTransportDisconnect = true;
+          if (!this.connectionHealthy) {
+            // Keep the transport self-healing even after the protocol layer
+            // exhausted its internal retry budget; debounced to one reconnect
+            // per AUTO_RECOVERY_DEBOUNCE_MS.
+            void this.ensureAutoRecovery().catch(() => undefined);
+          }
           await sleep(retryDelayMs);
         }
       }
@@ -231,6 +255,63 @@ export class WsTransport {
     await this.closeSession(this.session);
   }
 
+  /**
+   * When the socket is known dead before a request is written, reconnecting
+   * first is idempotency-safe: the request has not reached the server yet, so
+   * it is simply issued on the fresh session once the reconnect settles.
+   */
+  private async recoverBeforeRequest(): Promise<void> {
+    if (this.connectionHealthy) {
+      return;
+    }
+    await this.ensureAutoRecovery().catch(() => undefined);
+  }
+
+  /**
+   * Starts (or joins) a single transport-level reconnect. Debounced so bursts
+   * of failing requests and repeated sends against a dead server do not churn
+   * one session per call.
+   */
+  private ensureAutoRecovery(): Promise<void> {
+    if (this.autoRecovery) {
+      return this.autoRecovery;
+    }
+    if (Date.now() - this.lastAutoRecoveryStartedAt < AUTO_RECOVERY_DEBOUNCE_MS) {
+      return Promise.resolve();
+    }
+    this.lastAutoRecoveryStartedAt = Date.now();
+    const recovery = this.reconnect().finally(() => {
+      if (this.autoRecovery === recovery) {
+        this.autoRecovery = null;
+      }
+    });
+    this.autoRecovery = recovery;
+    return recovery;
+  }
+
+  /**
+   * Requests must never surface raw socket defects (`RpcClientDefect: Unknown
+   * socket error` and friends). Connection-shaped failures become the typed
+   * TransportConnectionLostError and kick off an automatic reconnect; requests
+   * interrupted because the session was replaced underneath them map the same
+   * way. Everything else (application errors) passes through untouched.
+   */
+  private mapRequestError(error: unknown, session: TransportSession): unknown {
+    const message = formatErrorMessage(error);
+    if (isTransportConnectionErrorMessage(message)) {
+      if (!this.disposed && session === this.session) {
+        this.connectionHealthy = false;
+        void this.ensureAutoRecovery().catch(() => undefined);
+      }
+      return new TransportConnectionLostError(error);
+    }
+    const interruptedBySessionTeardown = this.disposed || session !== this.session;
+    if (interruptedBySessionTeardown && isTransportInterruptErrorMessage(message)) {
+      return new TransportConnectionLostError(error);
+    }
+    return error;
+  }
+
   private closeSession(session: TransportSession) {
     this.intentionalCloseDepth += 1;
     return session.runtime.runPromise(Scope.close(session.clientScope, Exit.void)).finally(() => {
@@ -243,6 +324,7 @@ export class WsTransport {
     const sessionId = this.nextSessionId + 1;
     this.nextSessionId = sessionId;
     this.activeSessionId = sessionId;
+    this.connectionHealthy = true;
     const runtime = ManagedRuntime.make(
       Layer.mergeAll(
         createWsRpcProtocolLayer(this.url, {
@@ -252,6 +334,20 @@ export class WsTransport {
             this.disposed ||
             this.intentionalCloseDepth > 0 ||
             this.lifecycleHandlers?.isCloseIntentional?.() === true,
+          onOpen: () => {
+            this.connectionHealthy = true;
+            this.lifecycleHandlers?.onOpen?.();
+          },
+          onError: (message) => {
+            this.connectionHealthy = false;
+            this.lifecycleHandlers?.onError?.(message);
+          },
+          onClose: (details, context) => {
+            if (!context.intentional) {
+              this.connectionHealthy = false;
+            }
+            this.lifecycleHandlers?.onClose?.(details, context);
+          },
           onHeartbeatPong: () => {
             this.lastHeartbeatPongAt = Date.now();
             this.lifecycleHandlers?.onHeartbeatPong?.();
