@@ -17,7 +17,7 @@ import {
   resetWsConnectionStateForTests,
 } from "../rpc/wsConnectionState";
 import { TRANSPORT_CONNECTION_LOST_MESSAGE } from "./transportError";
-import { WsTransport } from "./wsTransport";
+import { getSubscriptionRetryDelayMs, WsTransport } from "./wsTransport";
 
 type WsEventType = "open" | "message" | "close" | "error";
 type WsEvent = { code?: number; data?: unknown; reason?: string; type?: string };
@@ -1350,6 +1350,115 @@ describe("WsTransport", () => {
     });
 
     expect(callOrder).toEqual(["close:start", "close:done", "runtime:dispose"]);
+  });
+
+  it("reports consecutive never-opened connection attempts to onRecoveryFailed", async () => {
+    const onRecoveryFailed = vi.fn();
+    const transport = createTransport("ws://localhost:3020", undefined, { onRecoveryFailed });
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const firstSocket = getSocket();
+    firstSocket.error();
+    firstSocket.close(1006, "unreachable");
+
+    await waitFor(() => {
+      expect(onRecoveryFailed).toHaveBeenCalledWith(1);
+    });
+    // error + close on the same attempt count once.
+    expect(onRecoveryFailed).toHaveBeenCalledTimes(1);
+
+    // The protocol layer retries internally; the next dead attempt counts too.
+    await waitFor(() => {
+      expect(sockets.length).toBeGreaterThanOrEqual(2);
+    }, 3_000);
+    const secondSocket = getSocket();
+    secondSocket.error();
+    secondSocket.close(1006, "still unreachable");
+
+    await waitFor(() => {
+      expect(onRecoveryFailed).toHaveBeenCalledWith(2);
+    });
+
+    await transport.dispose();
+  }, 10_000);
+
+  it("resets the recovery failure streak once a connection opens", async () => {
+    const onRecoveryFailed = vi.fn();
+    const transport = createTransport("ws://localhost:3020", undefined, { onRecoveryFailed });
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const firstSocket = getSocket();
+    firstSocket.error();
+    firstSocket.close(1006, "unreachable");
+
+    await waitFor(() => {
+      expect(onRecoveryFailed).toHaveBeenCalledWith(1);
+    });
+
+    await waitFor(() => {
+      expect(sockets.length).toBeGreaterThanOrEqual(2);
+    }, 3_000);
+    getSocket().open();
+
+    await waitFor(() => {
+      expect(getWsConnectionStatus()).toMatchObject({ phase: "connected" });
+    });
+
+    // A fresh failure after a successful open starts the streak over at 1.
+    await transport.reconnect();
+    await waitFor(() => {
+      expect(sockets.length).toBeGreaterThanOrEqual(3);
+    });
+    const nextSocket = getSocket();
+    nextSocket.error();
+    nextSocket.close(1006, "down again");
+
+    await waitFor(() => {
+      expect(onRecoveryFailed).toHaveBeenLastCalledWith(1);
+    });
+
+    await transport.dispose();
+  }, 10_000);
+
+  it("counts a rejected socket url provider as a recovery failure", async () => {
+    const onRecoveryFailed = vi.fn();
+    const transport = createTransport(
+      async () => {
+        throw new Error("Failed to reach SSH forwarded endpoint");
+      },
+      undefined,
+      { onRecoveryFailed },
+    );
+
+    // Force the socket layer to build; the url provider rejection surfaces
+    // through lifecycle.onError while the request keeps retrying internally.
+    void transport
+      .request((client) => client[WS_METHODS.serverGetSettings]({}))
+      .catch(() => undefined);
+
+    await waitFor(() => {
+      expect(onRecoveryFailed).toHaveBeenCalled();
+    }, 5_000);
+
+    await transport.dispose();
+  }, 10_000);
+
+  it("backs off subscription retries only while the connection is unhealthy", () => {
+    // Healthy: flat base cadence regardless of streak.
+    expect(getSubscriptionRetryDelayMs(250, 1, true)).toBe(250);
+    expect(getSubscriptionRetryDelayMs(250, 5, true)).toBe(250);
+    // Unhealthy: exponential growth capped at 5s.
+    expect(getSubscriptionRetryDelayMs(250, 1, false)).toBe(250);
+    expect(getSubscriptionRetryDelayMs(250, 2, false)).toBe(500);
+    expect(getSubscriptionRetryDelayMs(250, 3, false)).toBe(1_000);
+    expect(getSubscriptionRetryDelayMs(250, 6, false)).toBe(5_000);
+    expect(getSubscriptionRetryDelayMs(250, 50, false)).toBe(5_000);
   });
 
   it("propagates OTLP trace ids for ws transport requests when client tracing is enabled", async () => {

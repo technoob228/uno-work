@@ -160,7 +160,7 @@ export function createWsRpcProtocolLayer(
   const lifecycle = composeLifecycleHandlers(handlers);
   const resolvedUrl =
     typeof url === "function"
-      ? Effect.promise(() => url()).pipe(
+      ? Effect.tryPromise(() => url()).pipe(
           Effect.map((rawUrl) => resolveWsRpcSocketUrl(rawUrl)),
           Effect.tapError((error) =>
             Effect.sync(() => {

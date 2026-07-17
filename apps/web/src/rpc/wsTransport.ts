@@ -36,9 +36,39 @@ interface RequestOptions {
   readonly timeout?: Option.Option<Duration.Input>;
 }
 
+export interface WsTransportOptions {
+  /**
+   * Called after each connection attempt that dies before reaching open (or
+   * whose socket url cannot be issued at all), with the number of consecutive
+   * failures so far. Resets to zero once a session opens. Gives the owner a
+   * hook to escalate beyond transport-level recovery (e.g. respawn an ssh
+   * tunnel) once WS-level reconnects are clearly not enough.
+   */
+  readonly onRecoveryFailed?: (consecutiveFailures: number) => void;
+}
+
 const DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS = Duration.millis(250);
 const AUTO_RECOVERY_DEBOUNCE_MS = 5_000;
+const MAX_UNHEALTHY_SUBSCRIPTION_RETRY_DELAY_MS = 5_000;
 const NOOP: () => void = () => undefined;
+
+/**
+ * While the connection is healthy a failed stream retries at its base cadence
+ * (the failure is request-shaped, not connection-shaped). Once the transport
+ * knows the connection is down, retries back off exponentially so a dead
+ * environment does not spin every subscription at 4 attempts/second.
+ */
+export function getSubscriptionRetryDelayMs(
+  baseDelayMs: number,
+  failureStreak: number,
+  connectionHealthy: boolean,
+): number {
+  if (connectionHealthy || failureStreak <= 1) {
+    return baseDelayMs;
+  }
+  const exponent = Math.min(failureStreak - 1, 6);
+  return Math.min(baseDelayMs * 2 ** exponent, MAX_UNHEALTHY_SUBSCRIPTION_RETRY_DELAY_MS);
+}
 
 interface TransportSession {
   readonly clientPromise: Promise<WsRpcProtocolClient>;
@@ -62,12 +92,14 @@ function formatErrorMessage(error: unknown): string {
 export class WsTransport {
   private readonly url: WsRpcProtocolSocketUrlProvider;
   private readonly lifecycleHandlers: WsProtocolLifecycleHandlers | undefined;
+  private readonly options: WsTransportOptions | undefined;
   private disposed = false;
   private hasReportedTransportDisconnect = false;
   private intentionalCloseDepth = 0;
   private connectionHealthy = true;
   private autoRecovery: Promise<void> | null = null;
   private lastAutoRecoveryStartedAt = 0;
+  private consecutiveRecoveryFailures = 0;
   private reconnectChain: Promise<void> = Promise.resolve();
   private nextSessionId = 0;
   private activeSessionId = 0;
@@ -78,9 +110,11 @@ export class WsTransport {
   constructor(
     url: WsRpcProtocolSocketUrlProvider,
     lifecycleHandlers?: WsProtocolLifecycleHandlers,
+    options?: WsTransportOptions,
   ) {
     this.url = url;
     this.lifecycleHandlers = lifecycleHandlers;
+    this.options = options;
     this.session = this.createSession();
   }
 
@@ -141,6 +175,7 @@ export class WsTransport {
 
     let active = true;
     let hasReceivedValue = false;
+    let transportFailureStreak = 0;
     const retryDelayMs = Duration.toMillis(
       Duration.fromInputUnsafe(options?.retryDelay ?? DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS),
     );
@@ -176,11 +211,13 @@ export class WsTransport {
             () => {
               this.hasReportedTransportDisconnect = false;
               hasReceivedValue = true;
+              transportFailureStreak = 0;
             },
           );
           cancelCurrentStream = runningStream.cancel;
           await runningStream.completed;
           cancelCurrentStream = NOOP;
+          transportFailureStreak = 0;
         } catch (error) {
           cancelCurrentStream = NOOP;
           if (!active || this.disposed) {
@@ -205,13 +242,16 @@ export class WsTransport {
             });
           }
           this.hasReportedTransportDisconnect = true;
+          transportFailureStreak += 1;
           if (!this.connectionHealthy) {
             // Keep the transport self-healing even after the protocol layer
             // exhausted its internal retry budget; debounced to one reconnect
             // per AUTO_RECOVERY_DEBOUNCE_MS.
             void this.ensureAutoRecovery().catch(() => undefined);
           }
-          await sleep(retryDelayMs);
+          await sleep(
+            getSubscriptionRetryDelayMs(retryDelayMs, transportFailureStreak, this.connectionHealthy),
+          );
         }
       }
     })();
@@ -320,11 +360,38 @@ export class WsTransport {
     });
   }
 
+  /**
+   * Consecutive-failure accounting for the escalation hook: a failure is a
+   * connection attempt that dies before ever opening (or whose socket url
+   * cannot be issued). Guarded per attempt so error+close on the same socket
+   * counts once; any successful open resets the streak.
+   */
+  private noteRecoveryFailure(): void {
+    this.consecutiveRecoveryFailures += 1;
+    try {
+      this.options?.onRecoveryFailed?.(this.consecutiveRecoveryFailures);
+    } catch {
+      // Escalation listeners must never break transport recovery.
+    }
+  }
+
   private createSession(): TransportSession {
     const sessionId = this.nextSessionId + 1;
     this.nextSessionId = sessionId;
     this.activeSessionId = sessionId;
     this.connectionHealthy = true;
+    let attemptOpened = false;
+    let attemptFailureNoted = false;
+    const noteAttemptFailure = () => {
+      if (attemptOpened || attemptFailureNoted) {
+        return;
+      }
+      if (this.disposed || this.activeSessionId !== sessionId) {
+        return;
+      }
+      attemptFailureNoted = true;
+      this.noteRecoveryFailure();
+    };
     const runtime = ManagedRuntime.make(
       Layer.mergeAll(
         createWsRpcProtocolLayer(this.url, {
@@ -334,17 +401,26 @@ export class WsTransport {
             this.disposed ||
             this.intentionalCloseDepth > 0 ||
             this.lifecycleHandlers?.isCloseIntentional?.() === true,
+          onAttempt: (socketUrl) => {
+            attemptOpened = false;
+            attemptFailureNoted = false;
+            this.lifecycleHandlers?.onAttempt?.(socketUrl);
+          },
           onOpen: () => {
             this.connectionHealthy = true;
+            attemptOpened = true;
+            this.consecutiveRecoveryFailures = 0;
             this.lifecycleHandlers?.onOpen?.();
           },
           onError: (message) => {
             this.connectionHealthy = false;
+            noteAttemptFailure();
             this.lifecycleHandlers?.onError?.(message);
           },
           onClose: (details, context) => {
             if (!context.intentional) {
               this.connectionHealthy = false;
+              noteAttemptFailure();
             }
             this.lifecycleHandlers?.onClose?.(details, context);
           },
@@ -366,10 +442,15 @@ export class WsTransport {
       ),
     );
     const clientScope = runtime.runSync(Scope.make());
+    const clientPromise = runtime.runPromise(Scope.provide(clientScope)(makeWsRpcProtocolClient));
+    // A client that cannot even be constructed (e.g. the socket url provider
+    // rejects because a dead tunnel cannot issue a ws token) counts as a
+    // failed attempt for the escalation hook.
+    clientPromise.catch(() => noteAttemptFailure());
     return {
       runtime,
       clientScope,
-      clientPromise: runtime.runPromise(Scope.provide(clientScope)(makeWsRpcProtocolClient)),
+      clientPromise,
     };
   }
 
