@@ -1,6 +1,7 @@
 import type {
   DesktopSshEnvironmentBootstrap,
   DesktopSshEnvironmentTarget,
+  DesktopSshTunnelState,
 } from "@t3tools/contracts";
 import { type NetError, NetService } from "@t3tools/shared/Net";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
@@ -56,6 +57,15 @@ const SSH_READY_PROBE_TIMEOUT_MS = 1_000;
 const TUNNEL_SHUTDOWN_TIMEOUT_MS = 2_000;
 const REMOTE_READY_TIMEOUT_MS = 60_000;
 const REMOTE_REUSE_READY_TIMEOUT_MS = 2_000;
+const SUPERVISOR_BACKOFF_BASE_MS = 1_000;
+const SUPERVISOR_BACKOFF_MAX_MS = 60_000;
+
+/** Exponential 1s→60s with ±25% jitter, driven by attempt count (not wall clock). */
+function supervisorBackoffDelayMs(attempt: number): number {
+  const exponent = Math.min(Math.max(attempt, 1) - 1, 6);
+  const base = Math.min(SUPERVISOR_BACKOFF_BASE_MS * 2 ** exponent, SUPERVISOR_BACKOFF_MAX_MS);
+  return Math.round(base * (0.75 + Math.random() * 0.5));
+}
 
 export interface RemoteT3RunnerOptions {
   readonly packageSpec?: string;
@@ -65,17 +75,26 @@ export interface RemoteT3RunnerOptions {
 export interface SshEnvironmentManagerOptions {
   readonly resolveCliPackageSpec?: () => string;
   readonly resolveCliRunner?: () => RemoteT3RunnerOptions;
+  readonly onTunnelStateChange?: (state: DesktopSshTunnelState) => void;
 }
 
+/**
+ * A tunnel entry owns one environment connection. Its identity (and
+ * `entryScope`) is stable for the lifetime of the connection, while the ssh
+ * process behind it is replaceable: the supervisor swaps `process`/`childScope`
+ * (and, after a port fallback, the ports and base urls) in place on respawn so
+ * `tunnels.get(key)` keeps returning the same entry.
+ */
 interface SshTunnelEntry {
   readonly key: string;
   readonly target: DesktopSshEnvironmentTarget;
-  readonly remotePort: number;
+  remotePort: number;
   readonly remoteServerKind: "external" | "managed" | null;
-  readonly localPort: number;
-  readonly httpBaseUrl: string;
-  readonly wsBaseUrl: string;
-  readonly process: ChildProcessSpawner.ChildProcessHandle;
+  localPort: number;
+  httpBaseUrl: string;
+  wsBaseUrl: string;
+  process: ChildProcessSpawner.ChildProcessHandle;
+  childScope: Scope.Closeable;
   readonly scope: Scope.Scope;
 }
 
@@ -149,6 +168,8 @@ export interface SshEnvironmentManagerShape {
   readonly disconnectEnvironment: (
     target: DesktopSshEnvironmentTarget,
   ) => Effect.Effect<void, SshEnvironmentEffectError, SshEnvironmentEffectContext>;
+  /** Cuts short every supervisor backoff sleep (e.g. after a system resume). */
+  readonly resumeSupervision: () => Effect.Effect<void>;
 }
 
 const RemoteLaunchResult = Schema.Struct({
@@ -909,7 +930,12 @@ const reserveLocalTunnelPort = Effect.fn("ssh/tunnel.reserveLocalTunnelPort")(fu
   return yield* net.reserveLoopbackPort();
 });
 
-const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: {
+/**
+ * Spawns one ssh tunnel process inside its own closeable scope and waits for
+ * the forwarded endpoint to answer. The child scope lets a supervisor replace
+ * the process later without disturbing the owning entry scope.
+ */
+const spawnTunnelProcess = Effect.fn("ssh/tunnel.spawnTunnelProcess")(function* (input: {
   readonly key: string;
   readonly resolvedTarget: DesktopSshEnvironmentTarget;
   readonly remotePort: number;
@@ -919,14 +945,16 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
   readonly authOptions: SshAuthOptions;
   readonly remoteServerKind: "external" | "managed" | null;
 }): Effect.fn.Return<
-  SshTunnelEntry,
+  {
+    readonly child: ChildProcessSpawner.ChildProcessHandle;
+    readonly childScope: Scope.Closeable;
+  },
   SshCommandError | SshInvalidTargetError | SshReadinessError,
   | ChildProcessSpawner.ChildProcessSpawner
   | FileSystem.FileSystem
   | Path.Path
   | HttpClient.HttpClient
   | NetService
-  | Scope.Scope
 > {
   const hostSpec = yield* buildSshHostSpecEffect(input.resolvedTarget);
   const childEnvironment = yield* buildSshChildEnvironment({
@@ -966,7 +994,6 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
   ];
   const tunnelCommand = ["ssh", ...args];
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const scope = yield* Scope.Scope;
   yield* Effect.logDebug("ssh.tunnel.spawn.start", {
     ...sshTargetLogFields(input.resolvedTarget),
     command: tunnelCommand,
@@ -975,6 +1002,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
     remoteServerKind: input.remoteServerKind,
     httpBaseUrl: input.httpBaseUrl,
   });
+  const childScope = yield* Scope.make("sequential");
   const child = yield* spawner
     .spawn(
       ChildProcess.make("ssh", args, {
@@ -987,6 +1015,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
       }),
     )
     .pipe(
+      Effect.provideService(Scope.Scope, childScope),
       Effect.mapError(
         (cause) =>
           new SshCommandError({
@@ -1000,6 +1029,9 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
             cause,
           }),
       ),
+      Effect.onExit((exit) =>
+        Exit.isSuccess(exit) ? Effect.void : Scope.close(childScope, Exit.void).pipe(Effect.ignore),
+      ),
     );
   yield* Effect.logDebug("ssh.tunnel.spawn.succeeded", {
     ...sshTargetLogFields(input.resolvedTarget),
@@ -1009,17 +1041,6 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
     remotePort: input.remotePort,
     httpBaseUrl: input.httpBaseUrl,
   });
-  const tunnelEntry: SshTunnelEntry = {
-    key: input.key,
-    target: input.resolvedTarget,
-    remotePort: input.remotePort,
-    remoteServerKind: input.remoteServerKind,
-    localPort: input.localPort,
-    httpBaseUrl: input.httpBaseUrl,
-    wsBaseUrl: input.wsBaseUrl,
-    process: child,
-    scope,
-  };
   const exitFailure = Effect.all(
     [collectProcessOutput(child.stderr), child.exitCode.pipe(Effect.map(Number))],
     { concurrency: "unbounded" },
@@ -1124,9 +1145,48 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
               killSignal: "SIGTERM",
               forceKillAfter: TUNNEL_SHUTDOWN_TIMEOUT_MS,
             })
-            .pipe(Effect.ignore),
+            .pipe(
+              Effect.ignore,
+              Effect.andThen(Scope.close(childScope, Exit.void).pipe(Effect.ignore)),
+            ),
     ),
   );
+  return { child, childScope };
+});
+
+const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: {
+  readonly key: string;
+  readonly resolvedTarget: DesktopSshEnvironmentTarget;
+  readonly remotePort: number;
+  readonly localPort: number;
+  readonly httpBaseUrl: string;
+  readonly wsBaseUrl: string;
+  readonly authOptions: SshAuthOptions;
+  readonly remoteServerKind: "external" | "managed" | null;
+}): Effect.fn.Return<
+  SshTunnelEntry,
+  SshCommandError | SshInvalidTargetError | SshReadinessError,
+  | ChildProcessSpawner.ChildProcessSpawner
+  | FileSystem.FileSystem
+  | Path.Path
+  | HttpClient.HttpClient
+  | NetService
+  | Scope.Scope
+> {
+  const scope = yield* Scope.Scope;
+  const spawned = yield* spawnTunnelProcess(input);
+  const tunnelEntry: SshTunnelEntry = {
+    key: input.key,
+    target: input.resolvedTarget,
+    remotePort: input.remotePort,
+    remoteServerKind: input.remoteServerKind,
+    localPort: input.localPort,
+    httpBaseUrl: input.httpBaseUrl,
+    wsBaseUrl: input.wsBaseUrl,
+    process: spawned.child,
+    childScope: spawned.childScope,
+    scope,
+  };
   return tunnelEntry;
 });
 
@@ -1140,6 +1200,46 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     Deferred.Deferred<SshTunnelEntry, SshEnvironmentEffectError>
   >();
   const authSecrets = new Map<string, string>();
+  const supervisorWakeSignals = new Set<Deferred.Deferred<void>>();
+
+  const emitTunnelState = (
+    entry: SshTunnelEntry,
+    state: DesktopSshTunnelState["state"],
+    details?: { readonly attempt?: number; readonly error?: string },
+  ) =>
+    Effect.sync(() => {
+      try {
+        options.onTunnelStateChange?.({
+          target: entry.target,
+          state,
+          attempt: details?.attempt ?? 0,
+          localPort: entry.localPort,
+          httpBaseUrl: entry.httpBaseUrl,
+          wsBaseUrl: entry.wsBaseUrl,
+          error: details?.error ?? null,
+        });
+      } catch {
+        // State listeners must never break tunnel management.
+      }
+    });
+
+  /**
+   * Backoff sleep that a system resume can cut short: waking from sleep should
+   * retry immediately instead of sitting out the remainder of a 60s delay.
+   */
+  const supervisedSleep = Effect.fn("ssh/tunnel.supervisedSleep")(function* (delayMs: number) {
+    const wake = yield* Deferred.make<void>();
+    supervisorWakeSignals.add(wake);
+    yield* Effect.raceFirst(Effect.sleep(Duration.millis(delayMs)), Deferred.await(wake)).pipe(
+      Effect.ensuring(Effect.sync(() => supervisorWakeSignals.delete(wake))),
+    );
+  });
+
+  const resumeSupervision = Effect.fn("ssh/tunnel.resumeSupervision")(function* () {
+    const signals = [...supervisorWakeSignals];
+    supervisorWakeSignals.clear();
+    yield* Effect.forEach(signals, (wake) => Deferred.succeed(wake, undefined).pipe(Effect.ignore));
+  });
 
   const closeTunnelEntry = Effect.fn("ssh/tunnel.closeTunnelEntry")(function* (
     entry: SshTunnelEntry,
@@ -1292,6 +1392,131 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     });
   });
 
+  /**
+   * Replaces the entry's dead ssh process with a fresh one, preferring the
+   * same local port so the renderer's persisted urls stay valid. Strictly
+   * non-interactive: uses the cached password (replayed via askpass) or key
+   * auth in batch mode — never opens a prompt.
+   */
+  const respawnTunnelProcess = Effect.fn("ssh/tunnel.respawnTunnelProcess")(function* (
+    entry: SshTunnelEntry,
+    authOptions: SshAuthOptions,
+    runner?: RemoteT3RunnerOptions,
+  ): Effect.fn.Return<void, SshEnvironmentEffectError, SshEnvironmentEffectContext> {
+    const remoteLaunch = yield* launchOrReuseRemoteServer(entry.target, authOptions, runner);
+    const net = yield* NetService;
+    let localPort = entry.localPort;
+    const canReusePort = yield* net
+      .canListenOnHost(localPort, "127.0.0.1")
+      .pipe(Effect.orElseSucceed(() => false));
+    if (!canReusePort) {
+      localPort = yield* reserveLocalTunnelPort();
+      yield* Effect.logWarning("ssh.tunnel.supervisor.localPort.migrated", {
+        ...sshTargetLogFields(entry.target),
+        key: entry.key,
+        previousLocalPort: entry.localPort,
+        localPort,
+      });
+    }
+    const httpBaseUrl = `http://127.0.0.1:${localPort}/`;
+    const wsBaseUrl = `ws://127.0.0.1:${localPort}/`;
+    const spawned = yield* spawnTunnelProcess({
+      key: entry.key,
+      resolvedTarget: entry.target,
+      remotePort: remoteLaunch.remotePort,
+      localPort,
+      httpBaseUrl,
+      wsBaseUrl,
+      authOptions,
+      remoteServerKind: entry.remoteServerKind,
+    });
+    const previousChildScope = entry.childScope;
+    entry.process = spawned.child;
+    entry.childScope = spawned.childScope;
+    entry.remotePort = remoteLaunch.remotePort;
+    entry.localPort = localPort;
+    entry.httpBaseUrl = httpBaseUrl;
+    entry.wsBaseUrl = wsBaseUrl;
+    yield* Scope.close(previousChildScope, Exit.void).pipe(Effect.ignore);
+  });
+
+  /**
+   * Watches the entry's ssh process for the lifetime of the entry: on
+   * unexpected exit, respawns it with exponential backoff (1s→60s, jittered).
+   * Auth failures halt supervision (`auth-required`) so a dead cached password
+   * never turns into a prompt storm; a manual reconnect re-arms everything.
+   * Every step re-checks `tunnels.get(key) === entry` so an entry the user
+   * disconnected is never resurrected.
+   */
+  const superviseTunnelEntry = Effect.fn("ssh/tunnel.superviseTunnelEntry")(function* (
+    entry: SshTunnelEntry,
+    runner?: RemoteT3RunnerOptions,
+  ): Effect.fn.Return<void, never, SshEnvironmentEffectContext> {
+    for (;;) {
+      yield* Effect.exit(entry.process.exitCode);
+      if (tunnels.get(entry.key) !== entry) {
+        return;
+      }
+      yield* Effect.logWarning("ssh.tunnel.supervisor.process.exited", {
+        ...sshTargetLogFields(entry.target),
+        key: entry.key,
+        localPort: entry.localPort,
+        remotePort: entry.remotePort,
+      });
+      let attempt = 0;
+      for (;;) {
+        attempt += 1;
+        yield* emitTunnelState(entry, "reconnecting", { attempt });
+        yield* supervisedSleep(supervisorBackoffDelayMs(attempt));
+        if (tunnels.get(entry.key) !== entry) {
+          return;
+        }
+        const authSecret = authSecrets.get(entry.key) ?? null;
+        const authOptions: SshAuthOptions =
+          authSecret === null
+            ? { batchMode: "yes", interactiveAuth: false }
+            : { authSecret, batchMode: "no", interactiveAuth: true };
+        const respawnResult = yield* respawnTunnelProcess(entry, authOptions, runner).pipe(
+          Effect.map(() => ({ ok: true as const, error: null })),
+          Effect.catch((error) => Effect.succeed({ ok: false as const, error })),
+        );
+        if (tunnels.get(entry.key) !== entry) {
+          return;
+        }
+        if (respawnResult.ok) {
+          yield* Effect.logInfo("ssh.tunnel.supervisor.respawned", {
+            ...sshTargetLogFields(entry.target),
+            key: entry.key,
+            attempt,
+            localPort: entry.localPort,
+            remotePort: entry.remotePort,
+          });
+          yield* emitTunnelState(entry, "up");
+          break;
+        }
+        const failureError = respawnResult.error;
+        const failureMessage =
+          failureError instanceof Error ? failureError.message : String(failureError);
+        yield* Effect.logWarning("ssh.tunnel.supervisor.respawn.failed", {
+          ...sshTargetLogFields(entry.target),
+          key: entry.key,
+          attempt,
+          cause: failureError,
+        });
+        if (isSshAuthFailure(failureError)) {
+          authSecrets.delete(entry.key);
+          yield* Effect.logWarning("ssh.tunnel.supervisor.authRequired", {
+            ...sshTargetLogFields(entry.target),
+            key: entry.key,
+          });
+          yield* emitTunnelState(entry, "auth-required", { attempt, error: failureMessage });
+          return;
+        }
+        yield* emitTunnelState(entry, "reconnecting", { attempt, error: failureMessage });
+      }
+    }
+  });
+
   const createTunnelEntry = Effect.fn("ssh/tunnel.ensureTunnelEntry.create")(function* (input: {
     readonly key: string;
     readonly resolvedTarget: DesktopSshEnvironmentTarget;
@@ -1361,6 +1586,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
           remotePort: tunnelEntry.remotePort,
         });
         tunnels.delete(tunnelEntry.key);
+        yield* emitTunnelState(tunnelEntry, "down");
         const authSecret = authSecrets.get(tunnelEntry.key) ?? null;
         yield* Effect.all(
           [
@@ -1388,6 +1614,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
           ],
           { concurrency: "unbounded" },
         ).pipe(Effect.ignore);
+        yield* Scope.close(tunnelEntry.childScope, Exit.void).pipe(Effect.ignore);
         yield* Effect.logDebug("ssh.environment.tunnel.finalizer.succeeded", {
           ...sshTargetLogFields(tunnelEntry.target),
           key: tunnelEntry.key,
@@ -1396,6 +1623,11 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
         });
       }).pipe(Effect.ignore),
     );
+    yield* superviseTunnelEntry(tunnelEntry, input.runner).pipe(
+      Effect.ignoreCause({ log: true }),
+      Effect.forkIn(entryScope),
+    );
+    yield* emitTunnelState(tunnelEntry, "up");
     yield* Effect.logDebug("ssh.environment.tunnel.create.succeeded", {
       ...sshTargetLogFields(input.resolvedTarget),
       key: input.key,
@@ -1572,7 +1804,11 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     });
   });
 
-  return SshEnvironmentManager.of({ ensureEnvironment, disconnectEnvironment });
+  return SshEnvironmentManager.of({
+    ensureEnvironment,
+    disconnectEnvironment,
+    resumeSupervision: () => resumeSupervision(),
+  });
 });
 
 export class SshEnvironmentManager extends Context.Service<

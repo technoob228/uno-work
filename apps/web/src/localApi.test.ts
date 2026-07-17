@@ -201,6 +201,7 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
       throw new Error("issueSshWebSocketToken not implemented in test");
     },
     onSshPasswordPrompt: () => () => undefined,
+    onSshTunnelState: () => () => undefined,
     resolveSshPasswordPrompt: async () => undefined,
     getServerExposureState: async () => ({
       mode: "local-only",

@@ -10,6 +10,7 @@ import type {
   DesktopDiscoveredSshHost,
   DesktopSshEnvironmentTarget,
   DesktopSshPasswordPromptRequest,
+  DesktopSshTunnelState,
   ExecutionEnvironmentDescriptor,
 } from "@t3tools/contracts";
 import {
@@ -37,6 +38,7 @@ const FETCH_SSH_SESSION_STATE_CHANNEL = "desktop:fetch-ssh-session-state";
 const ISSUE_SSH_WEBSOCKET_TOKEN_CHANNEL = "desktop:issue-ssh-websocket-token";
 const SSH_PASSWORD_PROMPT_CHANNEL = "desktop:ssh-password-prompt";
 const RESOLVE_SSH_PASSWORD_PROMPT_CHANNEL = "desktop:resolve-ssh-password-prompt";
+const SSH_TUNNEL_STATE_CHANNEL = "desktop:ssh-tunnel-state";
 const DEFAULT_SSH_PASSWORD_PROMPT_TIMEOUT_MS = 3 * 60 * 1000;
 const SSH_PASSWORD_PROMPT_CANCELLED_RESULT = "ssh-password-prompt-cancelled";
 
@@ -44,6 +46,7 @@ interface DesktopSshEnvironmentManagerOptions {
   readonly passwordProvider?: (request: SshPasswordRequest) => Promise<string | null>;
   readonly resolveCliPackageSpec?: () => string;
   readonly resolveCliRunner?: () => RemoteT3RunnerOptions;
+  readonly onTunnelStateChange?: (state: DesktopSshTunnelState) => void;
 }
 
 const sshRuntime = ManagedRuntime.make(
@@ -69,6 +72,9 @@ function createDesktopSshRuntime(
         ...(options.resolveCliRunner === undefined
           ? {}
           : { resolveCliRunner: options.resolveCliRunner }),
+        ...(options.onTunnelStateChange === undefined
+          ? {}
+          : { onTunnelStateChange: options.onTunnelStateChange }),
       }),
     ),
   );
@@ -126,6 +132,14 @@ export class DesktopSshEnvironmentManager {
     await this.runtime.runPromise(
       Effect.service(SshEnvironmentManager).pipe(
         Effect.flatMap((manager) => manager.disconnectEnvironment(target)),
+      ),
+    );
+  }
+
+  async resumeSupervision(): Promise<void> {
+    await this.runtime.runPromise(
+      Effect.service(SshEnvironmentManager).pipe(
+        Effect.flatMap((manager) => manager.resumeSupervision()),
       ),
     );
   }
@@ -227,6 +241,7 @@ export class DesktopSshEnvironmentBridge {
       options.passwordPromptTimeoutMs ?? DEFAULT_SSH_PASSWORD_PROMPT_TIMEOUT_MS;
     this.manager = new DesktopSshEnvironmentManager({
       passwordProvider: (request) => this.requestPasswordFromRenderer(request),
+      onTunnelStateChange: (state) => this.sendTunnelStateToRenderer(state),
       ...(options.resolveCliPackageSpec === undefined
         ? {}
         : { resolveCliPackageSpec: options.resolveCliPackageSpec }),
@@ -234,6 +249,26 @@ export class DesktopSshEnvironmentBridge {
         ? {}
         : { resolveCliRunner: options.resolveCliRunner }),
     });
+  }
+
+  /**
+   * Wakes tunnel supervisors out of their backoff sleep (call on
+   * powerMonitor "resume" so reconnects do not wait out stale delays).
+   */
+  notifySystemResume(): void {
+    void this.manager.resumeSupervision().catch(() => undefined);
+  }
+
+  private sendTunnelStateToRenderer(state: DesktopSshTunnelState): void {
+    const window = this.options.getMainWindow();
+    if (!window || window.isDestroyed()) {
+      return;
+    }
+    try {
+      window.webContents.send(SSH_TUNNEL_STATE_CHANNEL, state);
+    } catch {
+      // A tearing-down window must not break tunnel supervision.
+    }
   }
 
   registerIpcHandlers(ipcMain: DesktopSshBridgeIpcMain): void {

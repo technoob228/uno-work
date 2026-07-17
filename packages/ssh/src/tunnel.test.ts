@@ -292,3 +292,198 @@ describe("ssh tunnel scripts", () => {
     }).pipe(Effect.provide(layer), Effect.scoped);
   });
 });
+
+interface ControllableProcess {
+  readonly handle: ChildProcessSpawner.ChildProcessHandle;
+  readonly exit: (code: number) => void;
+}
+
+function makeControllableProcess(): ControllableProcess {
+  let finish: ((exitCode: ChildProcessSpawner.ExitCode) => void) | null = null;
+  const listeners: Array<(exitCode: ChildProcessSpawner.ExitCode) => void> = [];
+  let exited: ChildProcessSpawner.ExitCode | null = null;
+  const handle = ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(123),
+    stdout: Stream.empty,
+    stderr: Stream.empty,
+    all: Stream.empty,
+    exitCode: Effect.callback<ChildProcessSpawner.ExitCode>((resume) => {
+      if (exited !== null) {
+        resume(Effect.succeed(exited));
+        return Effect.void;
+      }
+      const listener = (exitCode: ChildProcessSpawner.ExitCode) => resume(Effect.succeed(exitCode));
+      listeners.push(listener);
+      return Effect.sync(() => {
+        const index = listeners.indexOf(listener);
+        if (index >= 0) listeners.splice(index, 1);
+      });
+    }),
+    isRunning: Effect.sync(() => exited === null),
+    kill: () =>
+      Effect.sync(() => {
+        exit(143);
+      }),
+    stdin: Sink.drain,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+    unref: Effect.succeed(Effect.void),
+  });
+  const exit = (code: number) => {
+    if (exited !== null) return;
+    exited = ChildProcessSpawner.ExitCode(code);
+    for (const listener of [...listeners]) {
+      listener(exited);
+    }
+    listeners.length = 0;
+    finish = null;
+  };
+  void finish;
+  return { handle, exit };
+}
+
+const makeFailingProcess = (stderr: string, exitCode: number) => {
+  const stderrStream = Stream.make(new TextEncoder().encode(stderr));
+  return ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(124),
+    stdout: Stream.empty,
+    stderr: stderrStream,
+    all: stderrStream,
+    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(exitCode)),
+    isRunning: Effect.succeed(false),
+    kill: () => Effect.void,
+    stdin: Sink.drain,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+    unref: Effect.succeed(Effect.void),
+  });
+};
+
+describe("ssh tunnel supervision", () => {
+  const target = {
+    alias: "devbox",
+    hostname: "devbox.example.com",
+    username: "julius",
+    port: 2222,
+  } as const;
+
+  interface SupervisionHarness {
+    readonly tunnelProcesses: ControllableProcess[];
+    readonly spawnedTunnelCount: () => number;
+    readonly states: Array<{ state: string; localPort: number | null }>;
+    readonly layer: Layer.Layer<
+      | SshEnvironmentManager
+      | ChildProcessSpawner.ChildProcessSpawner
+      | HttpClient.HttpClient
+      | NetService
+      | SshPasswordPrompt,
+      unknown,
+      unknown
+    >;
+  }
+
+  function makeSupervisionHarness(options?: {
+    readonly failLaunchAfterFirst?: string;
+  }): SupervisionHarness {
+    const tunnelProcesses: ControllableProcess[] = [];
+    const states: Array<{ state: string; localPort: number | null }> = [];
+    let launchCount = 0;
+    const spawner = ChildProcessSpawner.make((command) =>
+      Effect.sync(() => {
+        const args = commandArgs(command);
+        if (args.includes("-N")) {
+          const controllable = makeControllableProcess();
+          tunnelProcesses.push(controllable);
+          return controllable.handle;
+        }
+        if (args.includes("sh") && args.includes("--")) {
+          launchCount += 1;
+          if (launchCount > 1 && options?.failLaunchAfterFirst !== undefined) {
+            return makeFailingProcess(options.failLaunchAfterFirst, 255);
+          }
+          return makeSuccessfulProcess('{"remotePort":3773}\n');
+        }
+        return makeSuccessfulProcess("\n");
+      }),
+    );
+    const layer = Layer.mergeAll(
+      NodeServices.layer,
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Layer.succeed(HttpClient.HttpClient, testHttpClient),
+      Layer.succeed(NetService, testNetService),
+      SshPasswordPrompt.disabledLayer,
+      SshEnvironmentManager.layer({
+        onTunnelStateChange: (state) => {
+          states.push({ state: state.state, localPort: state.localPort });
+        },
+      }),
+    ) as SupervisionHarness["layer"];
+    return {
+      tunnelProcesses,
+      spawnedTunnelCount: () => tunnelProcesses.length,
+      states,
+      layer,
+    };
+  }
+
+  it.effect("respawns a dead tunnel process on the same local port", () => {
+    const harness = makeSupervisionHarness();
+    return Effect.gen(function* () {
+      const manager = yield* SshEnvironmentManager;
+      const first = yield* manager.ensureEnvironment(target);
+      assert.equal(first.httpBaseUrl, "http://127.0.0.1:41773/");
+      assert.equal(harness.spawnedTunnelCount(), 1);
+
+      harness.tunnelProcesses[0]?.exit(255);
+      // Let the supervisor observe the exit, then sit out the jittered backoff.
+      yield* TestClock.adjust(Duration.seconds(3));
+
+      assert.equal(harness.spawnedTunnelCount(), 2);
+      const reconnecting = harness.states.filter((entry) => entry.state === "reconnecting");
+      assert.isAtLeast(reconnecting.length, 1);
+      const upStates = harness.states.filter((entry) => entry.state === "up");
+      assert.isAtLeast(upStates.length, 2);
+      assert.equal(upStates.at(-1)?.localPort, 41_773);
+    }).pipe(Effect.provide(harness.layer), Effect.scoped);
+  });
+
+  it.effect("halts supervision with auth-required instead of prompting", () => {
+    const harness = makeSupervisionHarness({
+      failLaunchAfterFirst: "Permission denied (publickey,password).",
+    });
+    return Effect.gen(function* () {
+      const manager = yield* SshEnvironmentManager;
+      yield* manager.ensureEnvironment(target);
+      assert.equal(harness.spawnedTunnelCount(), 1);
+
+      harness.tunnelProcesses[0]?.exit(255);
+      yield* TestClock.adjust(Duration.seconds(3));
+
+      // Launch failed with an auth error: no new tunnel process, supervision halted.
+      assert.equal(harness.spawnedTunnelCount(), 1);
+      assert.equal(harness.states.at(-1)?.state, "auth-required");
+
+      // No further attempts even after a long wait.
+      yield* TestClock.adjust(Duration.minutes(5));
+      assert.equal(harness.spawnedTunnelCount(), 1);
+    }).pipe(Effect.provide(harness.layer), Effect.scoped);
+  });
+
+  it.effect("does not resurrect a tunnel the user disconnected", () => {
+    const harness = makeSupervisionHarness();
+    return Effect.gen(function* () {
+      const manager = yield* SshEnvironmentManager;
+      yield* manager.ensureEnvironment(target);
+      assert.equal(harness.spawnedTunnelCount(), 1);
+
+      yield* manager.disconnectEnvironment(target);
+      yield* TestClock.adjust(Duration.minutes(2));
+
+      assert.equal(harness.spawnedTunnelCount(), 1);
+      assert.equal(
+        harness.states.filter((entry) => entry.state === "down").length,
+        1,
+      );
+    }).pipe(Effect.provide(harness.layer), Effect.scoped);
+  });
+});

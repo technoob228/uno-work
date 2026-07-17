@@ -15,6 +15,7 @@ import {
   nativeImage,
   nativeTheme,
   net,
+  powerMonitor,
   protocol,
   safeStorage,
   session,
@@ -2719,6 +2720,12 @@ app
     configureApplicationMenu();
     registerDesktopProtocol();
     configureAutoUpdater();
+
+    // Waking from sleep should retry dead ssh tunnels immediately instead of
+    // waiting out whatever backoff delay their supervisors were sleeping on.
+    powerMonitor.on("resume", () => {
+      desktopSshEnvironmentBridge.notifySystemResume();
+    });
     void bootstrap().catch((error) => {
       if (isBackendReadinessAborted(error) && isQuitting) {
         return;

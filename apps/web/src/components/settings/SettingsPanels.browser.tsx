@@ -345,6 +345,7 @@ const createDesktopBridgeStub = (overrides?: {
       expiresAt: "2026-05-01T12:05:00.000Z",
     }),
     onSshPasswordPrompt: vi.fn(() => () => {}),
+    onSshTunnelState: vi.fn(() => () => {}),
     resolveSshPasswordPrompt: vi.fn().mockResolvedValue(undefined),
     getServerExposureState: vi.fn().mockResolvedValue(
       overrides?.serverExposureState ?? {

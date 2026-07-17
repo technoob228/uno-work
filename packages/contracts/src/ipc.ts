@@ -197,6 +197,30 @@ export interface DesktopSshPasswordPromptRequest {
   expiresAt: string;
 }
 
+export type DesktopSshTunnelStateKind =
+  /** Tunnel process is running and the forwarded endpoint answered. */
+  | "up"
+  /** Tunnel died; the desktop supervisor is respawning it with backoff. */
+  | "reconnecting"
+  /**
+   * Supervisor stopped: reconnecting needs credentials the desktop cannot
+   * supply non-interactively. A manual reconnect is required.
+   */
+  | "auth-required"
+  /** Tunnel is down and no further automatic attempts are scheduled. */
+  | "down";
+
+export interface DesktopSshTunnelState {
+  target: DesktopSshEnvironmentTarget;
+  state: DesktopSshTunnelStateKind;
+  /** Consecutive failed respawn attempts (0 when up). */
+  attempt: number;
+  localPort: number | null;
+  httpBaseUrl: string | null;
+  wsBaseUrl: string | null;
+  error: string | null;
+}
+
 export interface PersistedSavedEnvironmentRecord {
   environmentId: EnvironmentId;
   label: string;
@@ -286,6 +310,7 @@ export interface DesktopBridge {
   ) => Promise<AuthWebSocketTokenResult>;
   onSshPasswordPrompt: (listener: (request: DesktopSshPasswordPromptRequest) => void) => () => void;
   resolveSshPasswordPrompt: (requestId: string, password: string | null) => Promise<void>;
+  onSshTunnelState: (listener: (state: DesktopSshTunnelState) => void) => () => void;
   getServerExposureState: () => Promise<DesktopServerExposureState>;
   setServerExposureMode: (mode: DesktopServerExposureMode) => Promise<DesktopServerExposureState>;
   setTailscaleServeEnabled: (input: {
