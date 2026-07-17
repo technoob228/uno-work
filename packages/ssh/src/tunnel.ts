@@ -59,6 +59,8 @@ const REMOTE_READY_TIMEOUT_MS = 60_000;
 const REMOTE_REUSE_READY_TIMEOUT_MS = 2_000;
 const SUPERVISOR_BACKOFF_BASE_MS = 1_000;
 const SUPERVISOR_BACKOFF_MAX_MS = 60_000;
+const HEALTH_PROBE_INTERVAL_MS = 30_000;
+const HEALTH_PROBE_TIMEOUT_MS = 5_000;
 
 /** Exponential 1s→60s with ±25% jitter, driven by attempt count (not wall clock). */
 function supervisorBackoffDelayMs(attempt: number): number {
@@ -1458,9 +1460,15 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     runner?: RemoteT3RunnerOptions,
   ): Effect.fn.Return<void, never, SshEnvironmentEffectContext> {
     for (;;) {
-      yield* Effect.exit(entry.process.exitCode);
+      const watchedChild = entry.process;
+      yield* Effect.exit(watchedChild.exitCode);
       if (tunnels.get(entry.key) !== entry) {
         return;
+      }
+      if (entry.process !== watchedChild) {
+        // Someone else (the health monitor) already swapped in a fresh
+        // process; go back to watching the current one.
+        continue;
       }
       yield* Effect.logWarning("ssh.tunnel.supervisor.process.exited", {
         ...sshTargetLogFields(entry.target),
@@ -1519,6 +1527,89 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
         }
         yield* emitTunnelState(entry, "reconnecting", { attempt, error: failureMessage });
       }
+    }
+  });
+
+  /**
+   * Periodic end-to-end health probe through the tunnel. `/api/health`
+   * exercises a real database write on the remote, so this catches half-dead
+   * daemons (HTTP up, persistence broken) that a plain liveness check would
+   * miss — the failure mode that silenced the Telegram assistant for two
+   * days. Two consecutive failures with a live ssh process trigger a
+   * non-interactive remote daemon restart; a dead ssh process is the tunnel
+   * supervisor's job, not ours.
+   */
+  const monitorTunnelEntryHealth = Effect.fn("ssh/tunnel.monitorTunnelEntryHealth")(function* (
+    entry: SshTunnelEntry,
+    runner?: RemoteT3RunnerOptions,
+  ): Effect.fn.Return<void, never, SshEnvironmentEffectContext> {
+    let consecutiveFailures = 0;
+    for (;;) {
+      yield* supervisedSleep(HEALTH_PROBE_INTERVAL_MS);
+      if (tunnels.get(entry.key) !== entry) {
+        return;
+      }
+      const probeExit = yield* Effect.exit(
+        waitForHttpReady({
+          baseUrl: entry.httpBaseUrl,
+          path: "/api/health",
+          timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
+        }),
+      );
+      if (tunnels.get(entry.key) !== entry) {
+        return;
+      }
+      if (Exit.isSuccess(probeExit)) {
+        consecutiveFailures = 0;
+        continue;
+      }
+      consecutiveFailures += 1;
+      yield* Effect.logWarning("ssh.tunnel.health.probe.failed", {
+        ...sshTargetLogFields(entry.target),
+        key: entry.key,
+        localPort: entry.localPort,
+        consecutiveFailures,
+        cause: probeExit.cause,
+      });
+      if (consecutiveFailures < 2) {
+        continue;
+      }
+      const processRunning = yield* entry.process.isRunning.pipe(Effect.orElseSucceed(() => false));
+      if (!processRunning) {
+        // Dead tunnel process: the supervisor is already respawning it.
+        continue;
+      }
+      yield* emitTunnelState(entry, "reconnecting", { attempt: consecutiveFailures });
+      const authSecret = authSecrets.get(entry.key) ?? null;
+      const authOptions: SshAuthOptions =
+        authSecret === null
+          ? { batchMode: "yes", interactiveAuth: false }
+          : { authSecret, batchMode: "no", interactiveAuth: true };
+      const restartExit = yield* Effect.exit(
+        stopRemoteServer(entry.target, authOptions).pipe(
+          Effect.ignore,
+          Effect.andThen(respawnTunnelProcess(entry, authOptions, runner)),
+        ),
+      );
+      if (tunnels.get(entry.key) !== entry) {
+        return;
+      }
+      if (Exit.isSuccess(restartExit)) {
+        yield* Effect.logInfo("ssh.tunnel.health.remoteRestarted", {
+          ...sshTargetLogFields(entry.target),
+          key: entry.key,
+          localPort: entry.localPort,
+          remotePort: entry.remotePort,
+        });
+        yield* emitTunnelState(entry, "up");
+        consecutiveFailures = 0;
+        continue;
+      }
+      yield* Effect.logWarning("ssh.tunnel.health.remoteRestart.failed", {
+        ...sshTargetLogFields(entry.target),
+        key: entry.key,
+        cause: restartExit.cause,
+      });
     }
   });
 
@@ -1635,6 +1726,10 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       Effect.ignoreCause({ log: true }),
       Effect.forkIn(entryScope),
     );
+    yield* monitorTunnelEntryHealth(tunnelEntry, input.runner).pipe(
+      Effect.ignoreCause({ log: true }),
+      Effect.forkIn(entryScope),
+    );
     yield* emitTunnelState(tunnelEntry, "up");
     yield* Effect.logDebug("ssh.environment.tunnel.create.succeeded", {
       ...sshTargetLogFields(input.resolvedTarget),
@@ -1660,8 +1755,11 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
         localPort: entry.localPort,
         remotePort: entry.remotePort,
       });
+      // `/api/health` proves the remote can still write its database; older
+      // servers without the route answer 200 from the static catch-all, which
+      // degrades this to the previous plain liveness check.
       const readinessExit = yield* Effect.exit(
-        waitForHttpReady({ baseUrl: entry.httpBaseUrl, timeoutMs: 2_000 }),
+        waitForHttpReady({ baseUrl: entry.httpBaseUrl, path: "/api/health", timeoutMs: 2_000 }),
       );
       if (Exit.isSuccess(readinessExit)) {
         yield* Effect.logDebug("ssh.environment.tunnel.reused", {

@@ -58,6 +58,7 @@ import type { ServerConfigShape } from "./config.ts";
 import { BrowserBridgeTest } from "./browserBridge.ts";
 import { ServerBrowserTest } from "./serverBrowser.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
+import { HealthCheck, HealthProbeError, type HealthCheckShape } from "./health.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
 import {
@@ -343,6 +344,7 @@ const buildAppUnderTest = (options?: {
     serverRuntimeStartup?: Partial<ServerRuntimeStartupShape>;
     serverEnvironment?: Partial<ServerEnvironmentShape>;
     repositoryIdentityResolver?: Partial<RepositoryIdentityResolverShape>;
+    healthCheck?: Partial<HealthCheckShape>;
   };
 }) =>
   Effect.gen(function* () {
@@ -641,6 +643,12 @@ const buildAppUnderTest = (options?: {
 
     const appLayer = servedRoutesLayer.pipe(
       Layer.provide(
+        Layer.mock(HealthCheck)({
+          probe: Effect.succeed(0),
+          ...options?.layers?.healthCheck,
+        }),
+      ),
+      Layer.provide(
         Layer.mock(BrowserTraceCollector)({
           record: () => Effect.void,
           ...options?.layers?.browserTraceCollector,
@@ -869,6 +877,37 @@ const getWsServerUrl = (
   });
 
 it.layer(NodeServices.layer)("server router seam", (it) => {
+  it.effect("answers /api/health with 200 while the database probe succeeds", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const response = yield* HttpClient.get("/api/health");
+      assert.equal(response.status, 200);
+      const body = (yield* response.json) as { ok: boolean; db: string };
+      assert.deepEqual(body, { ok: true, db: "ok" });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("answers /api/health with 503 when the database probe fails", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          healthCheck: {
+            probe: Effect.fail(
+              new HealthProbeError({ detail: "database is on fire" }),
+            ),
+          },
+        },
+      });
+
+      const response = yield* HttpClient.get("/api/health");
+      assert.equal(response.status, 503);
+      const body = (yield* response.json) as { ok: boolean; message: string };
+      assert.equal(body.ok, false);
+      assert.include(body.message, "database is on fire");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("serves static index content for GET / when staticDir is configured", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

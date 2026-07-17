@@ -30,13 +30,54 @@ export class PersistenceDecodeError extends Schema.TaggedErrorClass<PersistenceD
   }
 }
 
+/**
+ * Flattens an error chain (message, nested causes, sqlite error codes) into
+ * one line. Without this the actual SQLite failure (SQLITE_READONLY, disk
+ * full, locked WAL) hides inside `cause` objects that loggers do not
+ * serialize, leaving incidents undiagnosable from logs alone.
+ */
+export function describeSqlCause(error: unknown, depth = 0): string {
+  if (depth > 3 || error === null || error === undefined) {
+    return "";
+  }
+  if (typeof error !== "object") {
+    return String(error);
+  }
+  const parts: Array<string> = [];
+  const message = (error as { message?: unknown }).message;
+  if (typeof message === "string" && message.length > 0) {
+    parts.push(message);
+  }
+  const code = (error as { code?: unknown }).code;
+  if (typeof code === "string" || typeof code === "number") {
+    parts.push(`code=${String(code)}`);
+  }
+  const errno = (error as { errno?: unknown }).errno;
+  if (typeof errno === "number") {
+    parts.push(`errno=${errno}`);
+  }
+  const cause = (error as { cause?: unknown }).cause;
+  if (cause !== undefined && cause !== error) {
+    const nested = describeSqlCause(cause, depth + 1);
+    if (nested.length > 0 && !parts.includes(nested)) {
+      parts.push(`caused by: ${nested}`);
+    }
+  }
+  return parts.join(" ");
+}
+
 export function toPersistenceSqlError(operation: string) {
-  return (cause: unknown): PersistenceSqlError =>
-    new PersistenceSqlError({
+  return (cause: unknown): PersistenceSqlError => {
+    const causeDetail = describeSqlCause(cause);
+    return new PersistenceSqlError({
       operation,
-      detail: `Failed to execute ${operation}`,
+      detail:
+        causeDetail.length > 0
+          ? `Failed to execute ${operation}: ${causeDetail}`
+          : `Failed to execute ${operation}`,
       cause,
     });
+  };
 }
 
 export function toPersistenceDecodeError(operation: string) {

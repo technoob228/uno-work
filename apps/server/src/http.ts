@@ -30,6 +30,7 @@ import {
 import { executeBridgeCommand, executeBridgeOpenUrl } from "./browserCommandRouter.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
+import { HealthCheck } from "./health.ts";
 import { decodeOtlpTraceRecords } from "./observability/TraceRecord.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
@@ -78,6 +79,35 @@ export const serverEnvironmentRouteLayer = HttpRouter.add(
       Effect.flatMap((serverEnvironment) => serverEnvironment.getDescriptor),
     );
     return HttpServerResponse.jsonUnsafe(descriptor, { status: 200 });
+  }),
+);
+
+/**
+ * Unauthenticated liveness probe that exercises a real database write.
+ * Exposes nothing but ok/error; 503 means the daemon is up but persistence
+ * is broken — exactly the half-dead state supervisors must restart.
+ */
+export const healthRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/health",
+  Effect.gen(function* () {
+    const healthCheck = yield* HealthCheck;
+    const probeResult = yield* healthCheck.probe.pipe(
+      Effect.map(() => null),
+      Effect.catch((error) => Effect.succeed(error)),
+    );
+    if (probeResult === null) {
+      return HttpServerResponse.jsonUnsafe({ ok: true, db: "ok" }, { status: 200 });
+    }
+    yield* Effect.logWarning("health.probe.failed", { cause: probeResult });
+    return HttpServerResponse.jsonUnsafe(
+      {
+        ok: false,
+        db: "error",
+        message: probeResult instanceof Error ? probeResult.message : String(probeResult),
+      },
+      { status: 503 },
+    );
   }),
 );
 

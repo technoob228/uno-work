@@ -7,6 +7,7 @@ import {
   browserBridgeCommandResultRouteLayer,
   browserBridgeCommandRouteLayer,
   browserBridgeOpenRouteLayer,
+  healthRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,
@@ -14,6 +15,7 @@ import {
   browserApiCorsLayer,
 } from "./http.ts";
 import { BrowserBridgeLive } from "./browserBridge.ts";
+import { HealthCheck } from "./health.ts";
 import { ServerBrowserLive } from "./serverBrowser.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
@@ -279,7 +281,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(VcsLayerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),
-  Layer.provideMerge(TerminalLayerLive),
+  // Health probe shares the persistence SqlClient provided below; merged with
+  // the terminal layer to stay inside `.pipe`'s 20-arg limit.
+  Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, HealthCheck.layer)),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),
@@ -356,6 +360,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   managerTokensRevokeRouteLayer,
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
+  healthRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,
