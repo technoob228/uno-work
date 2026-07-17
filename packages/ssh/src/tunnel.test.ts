@@ -367,24 +367,7 @@ describe("ssh tunnel supervision", () => {
     port: 2222,
   } as const;
 
-  interface SupervisionHarness {
-    readonly tunnelProcesses: ControllableProcess[];
-    readonly spawnedTunnelCount: () => number;
-    readonly states: Array<{ state: string; localPort: number | null }>;
-    readonly layer: Layer.Layer<
-      | SshEnvironmentManager
-      | ChildProcessSpawner.ChildProcessSpawner
-      | HttpClient.HttpClient
-      | NetService
-      | SshPasswordPrompt,
-      unknown,
-      unknown
-    >;
-  }
-
-  function makeSupervisionHarness(options?: {
-    readonly failLaunchAfterFirst?: string;
-  }): SupervisionHarness {
+  function makeSupervisionHarness(options?: { readonly failLaunchAfterFirst?: string }) {
     const tunnelProcesses: ControllableProcess[] = [];
     const states: Array<{ state: string; localPort: number | null }> = [];
     let launchCount = 0;
@@ -417,7 +400,7 @@ describe("ssh tunnel supervision", () => {
           states.push({ state: state.state, localPort: state.localPort });
         },
       }),
-    ) as SupervisionHarness["layer"];
+    );
     return {
       tunnelProcesses,
       spawnedTunnelCount: () => tunnelProcesses.length,

@@ -295,7 +295,7 @@ export interface DesktopBridge {
   discoverSshHosts: () => Promise<readonly DesktopDiscoveredSshHost[]>;
   ensureSshEnvironment: (
     target: DesktopSshEnvironmentTarget,
-    options?: { issuePairingToken?: boolean },
+    options?: { issuePairingToken?: boolean; nonInteractive?: boolean },
   ) => Promise<DesktopSshEnvironmentBootstrap>;
   disconnectSshEnvironment: (target: DesktopSshEnvironmentTarget) => Promise<void>;
   fetchSshEnvironmentDescriptor: (httpBaseUrl: string) => Promise<ExecutionEnvironmentDescriptor>;

@@ -119,7 +119,7 @@ export class DesktopSshEnvironmentManager {
 
   async ensureEnvironment(
     target: DesktopSshEnvironmentTarget,
-    options?: { readonly issuePairingToken?: boolean },
+    options?: { readonly issuePairingToken?: boolean; readonly nonInteractive?: boolean },
   ) {
     return await this.runtime.runPromise(
       Effect.service(SshEnvironmentManager).pipe(
@@ -287,10 +287,16 @@ export class DesktopSshEnvironmentBridge {
         rawOptions !== null &&
         "issuePairingToken" in rawOptions &&
         (rawOptions as { issuePairingToken?: unknown }).issuePairingToken === true;
+      const nonInteractive =
+        typeof rawOptions === "object" &&
+        rawOptions !== null &&
+        "nonInteractive" in rawOptions &&
+        (rawOptions as { nonInteractive?: unknown }).nonInteractive === true;
 
       try {
         return await this.manager.ensureEnvironment(target, {
           issuePairingToken,
+          nonInteractive,
         });
       } catch (error) {
         if (isSshPasswordPromptCancellation(error)) {

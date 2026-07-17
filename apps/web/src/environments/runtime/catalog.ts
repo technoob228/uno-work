@@ -263,7 +263,12 @@ export async function removeSavedEnvironmentBearerToken(
   await ensureLocalApi().persistence.removeSavedEnvironmentSecret(environmentId);
 }
 
-export type SavedEnvironmentConnectionState = "connecting" | "connected" | "disconnected" | "error";
+export type SavedEnvironmentConnectionState =
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "disconnected"
+  | "error";
 
 export type SavedEnvironmentAuthState = "authenticated" | "requires-auth" | "unknown";
 

@@ -2,6 +2,7 @@ import {
   type AuthSessionRole,
   type DesktopSshEnvironmentBootstrap,
   type DesktopSshEnvironmentTarget,
+  type DesktopSshTunnelState,
   type EnvironmentId,
   type OrchestrationEvent,
   type OrchestrationShellSnapshot,
@@ -54,6 +55,13 @@ import {
   writeSavedEnvironmentBearerToken,
 } from "./catalog";
 import { createEnvironmentConnection, type EnvironmentConnection } from "./connection";
+import {
+  configureSelfHeal,
+  healSavedEnvironment,
+  markSelfHealAuthRequired,
+  resetSelfHeal,
+  resetSelfHealBackoffs,
+} from "./selfHeal";
 import {
   useStore,
   selectProjectsAcrossEnvironments,
@@ -693,16 +701,50 @@ async function persistSavedEnvironmentRegistryRollback(
   });
 }
 
+export class SshAuthRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SshAuthRequiredError";
+  }
+}
+
+export function isSshAuthRequiredError(error: unknown): boolean {
+  if (error instanceof SshAuthRequiredError) {
+    return true;
+  }
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    message.includes("permission denied (") ||
+    message.includes("authentication failed") ||
+    message.includes("authentication cancelled") ||
+    message.includes("too many authentication failures")
+  );
+}
+
 async function resolveDesktopSshEnvironmentBootstrap(
   target: DesktopSshEnvironmentTarget,
-  options?: { readonly issuePairingToken?: boolean },
+  options?: { readonly issuePairingToken?: boolean; readonly nonInteractive?: boolean },
 ): Promise<DesktopSshEnvironmentBootstrap> {
   const desktopBridge = window.desktopBridge;
   if (!desktopBridge) {
     throw new Error("SSH launch is only available in the desktop app.");
   }
 
-  return await desktopBridge.ensureSshEnvironment(target, options);
+  const bootstrap = await desktopBridge.ensureSshEnvironment(target, options);
+  // The desktop bridge reports a cancelled/unavailable password prompt as a
+  // typed result instead of an exception; surface it as an auth failure so
+  // callers (and self-healing) can distinguish it from transport errors.
+  if (
+    typeof bootstrap === "object" &&
+    bootstrap !== null &&
+    (bootstrap as { type?: unknown }).type === "ssh-password-prompt-cancelled"
+  ) {
+    throw new SshAuthRequiredError(
+      (bootstrap as { message?: string }).message ??
+        `SSH authentication is required for ${target.alias || target.hostname}.`,
+    );
+  }
+  return bootstrap;
 }
 
 function getDesktopSshBridge() {
@@ -738,7 +780,7 @@ async function resolveDesktopSshWebSocketConnectionUrl(
 
 async function prepareSavedEnvironmentRecordForConnection(
   record: SavedEnvironmentRecord,
-  options?: { readonly issuePairingToken?: boolean },
+  options?: { readonly issuePairingToken?: boolean; readonly nonInteractive?: boolean },
 ): Promise<{
   readonly record: SavedEnvironmentRecord;
   readonly pairingToken: string | null;
@@ -779,7 +821,10 @@ async function prepareSavedEnvironmentRecordForConnection(
   };
 }
 
-async function issueDesktopSshBearerSession(record: SavedEnvironmentRecord): Promise<{
+async function issueDesktopSshBearerSession(
+  record: SavedEnvironmentRecord,
+  options?: { readonly nonInteractive?: boolean },
+): Promise<{
   readonly record: SavedEnvironmentRecord;
   readonly bearerToken: string;
   readonly role: AuthSessionRole | null;
@@ -787,6 +832,7 @@ async function issueDesktopSshBearerSession(record: SavedEnvironmentRecord): Pro
   const registrySnapshot = snapshotSavedEnvironmentRegistry([record.environmentId]);
   const prepared = await prepareSavedEnvironmentRecordForConnection(record, {
     issuePairingToken: true,
+    ...(options?.nonInteractive === undefined ? {} : { nonInteractive: options.nonInteractive }),
   });
   if (!prepared.pairingToken) {
     await persistSavedEnvironmentRegistryRollback(registrySnapshot);
@@ -829,6 +875,13 @@ function setRuntimeConnecting(environmentId: EnvironmentId) {
     connectionState: "connecting",
     lastError: null,
     lastErrorAt: null,
+  });
+}
+
+function setRuntimeReconnecting(environmentId: EnvironmentId, lastError?: string | null) {
+  useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
+    connectionState: "reconnecting",
+    ...(lastError === undefined ? {} : { lastError, lastErrorAt: lastError ? isoNow() : null }),
   });
 }
 
@@ -1154,17 +1207,25 @@ function createSavedEnvironmentClient(
         if (!record) {
           throw new Error(`Saved environment ${environmentId} not found.`);
         }
-        return record.desktopSsh
-          ? await resolveDesktopSshWebSocketConnectionUrl(
-              record.wsBaseUrl,
-              record.httpBaseUrl,
-              bearerToken,
-            )
-          : await resolveRemoteWebSocketConnectionUrl({
-              wsBaseUrl: record.wsBaseUrl,
-              httpBaseUrl: record.httpBaseUrl,
-              bearerToken,
-            });
+        try {
+          return record.desktopSsh
+            ? await resolveDesktopSshWebSocketConnectionUrl(
+                record.wsBaseUrl,
+                record.httpBaseUrl,
+                bearerToken,
+              )
+            : await resolveRemoteWebSocketConnectionUrl({
+                wsBaseUrl: record.wsBaseUrl,
+                httpBaseUrl: record.httpBaseUrl,
+                bearerToken,
+              });
+        } catch (error) {
+          // A ws token that cannot be issued usually means the forwarded port
+          // is dead — WS-level retries cannot fix that. Escalate to the full
+          // heal path (re-ensures the tunnel) and keep the failure visible.
+          void healSavedEnvironment(environmentId, "ws-token-issue-failed");
+          throw error;
+        }
       },
       {
         getConnectionLabel: () => getSavedEnvironmentRecord(environmentId)?.label ?? null,
@@ -1214,6 +1275,15 @@ function createSavedEnvironmentClient(
               ),
             ),
           );
+        },
+      },
+      {
+        onRecoveryFailed: (consecutiveFailures) => {
+          // WS-level recovery keeps failing: after three dead attempts assume
+          // the transport target itself is gone and escalate to a full heal.
+          if (consecutiveFailures >= 3) {
+            void healSavedEnvironment(environmentId, "transport-recovery-failed");
+          }
         },
       },
     ),
@@ -1493,8 +1563,22 @@ function reconnectEnvironmentConnectionsAfterBrowserResume(reason: string): void
     return;
   }
   lastBrowserResumeReconnectAt = now;
+  resetSelfHealBackoffs();
 
   for (const connection of environmentConnections.values()) {
+    // Saved environments that are not connected need the full heal path (it
+    // re-ensures a possibly dead ssh tunnel); a bare WS reconnect against a
+    // dead forwarded port would spin forever.
+    const runtimeState =
+      connection.kind === "saved"
+        ? useSavedEnvironmentRuntimeStore.getState().byId[connection.environmentId]?.connectionState
+        : null;
+    if (connection.kind === "saved" && runtimeState !== "connected") {
+      void healSavedEnvironment(connection.environmentId, `browser-resume:${reason}`, {
+        immediate: true,
+      });
+      continue;
+    }
     void connection.reconnect().catch((error) => {
       console.warn("Environment reconnect after browser resume failed", {
         environmentId: connection.environmentId,
@@ -1503,6 +1587,60 @@ function reconnectEnvironmentConnectionsAfterBrowserResume(reason: string): void
       });
     });
   }
+}
+
+function findSavedEnvironmentIdBySshTarget(
+  target: DesktopSshEnvironmentTarget,
+): EnvironmentId | null {
+  for (const record of listSavedEnvironmentRecords()) {
+    if (record.desktopSsh && isDesktopSshTargetEqual(record.desktopSsh, target)) {
+      return record.environmentId;
+    }
+  }
+  return null;
+}
+
+/**
+ * Desktop tunnel supervisor events are the push-based primary trigger for
+ * self-healing: the desktop already respawned (or gave up on) the tunnel, the
+ * renderer just has to follow — refresh persisted ports and reconnect the WS.
+ */
+function subscribeDesktopSshTunnelState(): () => void {
+  if (typeof window === "undefined") {
+    return NOOP;
+  }
+  const bridge = window.desktopBridge;
+  if (!bridge?.onSshTunnelState) {
+    return NOOP;
+  }
+
+  return bridge.onSshTunnelState((state: DesktopSshTunnelState) => {
+    const environmentId = findSavedEnvironmentIdBySshTarget(state.target);
+    if (!environmentId) {
+      return;
+    }
+    switch (state.state) {
+      case "reconnecting":
+        setRuntimeReconnecting(environmentId, state.error);
+        break;
+      case "down":
+        // Entry closed on the desktop side (disconnect or teardown); the
+        // disconnect flow already updates runtime state. Nothing to heal.
+        break;
+      case "auth-required":
+        markSelfHealAuthRequired(environmentId);
+        useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
+          connectionState: "error",
+          lastError:
+            "SSH authentication is required. Reconnect manually to enter the password.",
+          lastErrorAt: isoNow(),
+        });
+        break;
+      case "up":
+        void healSavedEnvironment(environmentId, "tunnel-up", { immediate: true });
+        break;
+    }
+  });
 }
 
 function subscribeBrowserResumeReconnects(): () => void {
@@ -1585,11 +1723,15 @@ export async function disconnectSavedEnvironment(environmentId: EnvironmentId): 
   }
 }
 
-export async function reconnectSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
+async function performSavedEnvironmentReconnect(
+  environmentId: EnvironmentId,
+  options: { readonly interactive: boolean },
+): Promise<void> {
   const record = getSavedEnvironmentRecord(environmentId);
   if (!record) {
     throw new Error("Saved environment not found.");
   }
+  const nonInteractive = !options.interactive;
 
   const connection = environmentConnections.get(environmentId);
   if (!connection) {
@@ -1609,7 +1751,7 @@ export async function reconnectSavedEnvironment(environmentId: EnvironmentId): P
   setRuntimeConnecting(environmentId);
   try {
     if (record.desktopSsh) {
-      await prepareSavedEnvironmentRecordForConnection(record);
+      await prepareSavedEnvironmentRecordForConnection(record, { nonInteractive });
     }
     await connection.reconnect();
   } catch (error) {
@@ -1617,6 +1759,7 @@ export async function reconnectSavedEnvironment(environmentId: EnvironmentId): P
       try {
         const issued = await issueDesktopSshBearerSession(
           getSavedEnvironmentRecord(environmentId) ?? record,
+          { nonInteractive },
         );
         await removeConnection(environmentId).catch(() => false);
         await ensureSavedEnvironmentConnection(issued.record, {
@@ -1636,6 +1779,26 @@ export async function reconnectSavedEnvironment(environmentId: EnvironmentId): P
     throw error;
   }
 }
+
+export async function reconnectSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
+  // A manual reconnect re-arms self-healing: auth prompts are allowed again
+  // and the backoff ladder starts over.
+  resetSelfHeal(environmentId);
+  await performSavedEnvironmentReconnect(environmentId, { interactive: true });
+}
+
+configureSelfHeal({
+  performReconnect: (environmentId) =>
+    performSavedEnvironmentReconnect(environmentId, { interactive: false }),
+  isAuthRequiredError: isSshAuthRequiredError,
+  onAuthRequired: (environmentId) => {
+    useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
+      connectionState: "error",
+      lastError: "SSH authentication is required. Reconnect manually to enter the password.",
+      lastErrorAt: isoNow(),
+    });
+  },
+});
 
 export async function removeSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
   await disconnectSavedEnvironment(environmentId);
@@ -1793,6 +1956,7 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
     .catch(() => undefined);
 
   const unsubscribeBrowserResumeReconnects = subscribeBrowserResumeReconnects();
+  const unsubscribeSshTunnelState = subscribeDesktopSshTunnelState();
 
   activeService = {
     queryClient,
@@ -1801,6 +1965,7 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
     stop: () => {
       unsubscribeSavedEnvironments();
       unsubscribeBrowserResumeReconnects();
+      unsubscribeSshTunnelState();
       queryInvalidationThrottler.cancel();
     },
   };

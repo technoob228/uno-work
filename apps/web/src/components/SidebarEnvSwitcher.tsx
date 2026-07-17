@@ -56,6 +56,7 @@ const GROUP_LABELS: Record<EnvironmentOption["kind"], string> = {
 const STATUS_DOT_CLASS: Record<EnvironmentConnectionState, string> = {
   connected: "bg-emerald-500",
   connecting: "bg-amber-500",
+  reconnecting: "bg-amber-500 animate-pulse",
   disconnected: "bg-muted-foreground/40",
   error: "bg-red-500",
 };

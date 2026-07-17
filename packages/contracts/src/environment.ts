@@ -36,6 +36,7 @@ export type ExecutionEnvironmentDescriptor = typeof ExecutionEnvironmentDescript
 export const EnvironmentConnectionState = Schema.Literals([
   "connecting",
   "connected",
+  "reconnecting",
   "disconnected",
   "error",
 ]);

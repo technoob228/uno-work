@@ -146,6 +146,8 @@ function sshRunnerLogFields(runner: RemoteT3RunnerOptions | undefined) {
 interface SshAuthOperationInput<T> {
   readonly key: string;
   readonly target: DesktopSshEnvironmentTarget;
+  /** When false, an auth failure surfaces immediately instead of prompting. */
+  readonly allowPrompt?: boolean;
   readonly operation: (
     authOptions: SshAuthOptions,
   ) => Effect.Effect<T, SshEnvironmentEffectError, SshEnvironmentEffectContext>;
@@ -159,7 +161,7 @@ interface SshAuthAttemptInput<T> extends SshAuthOperationInput<T> {
 export interface SshEnvironmentManagerShape {
   readonly ensureEnvironment: (
     target: DesktopSshEnvironmentTarget,
-    options?: { readonly issuePairingToken?: boolean },
+    options?: { readonly issuePairingToken?: boolean; readonly nonInteractive?: boolean },
   ) => Effect.Effect<
     DesktopSshEnvironmentBootstrap,
     SshEnvironmentEffectError,
@@ -1339,12 +1341,15 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
         promptCount: input.promptCount,
         cause: input.error,
       });
+      if (input.authSecret !== null) {
+        authSecrets.delete(input.key);
+      }
+      if (input.allowPrompt === false) {
+        return yield* input.error;
+      }
       const promptService = yield* SshPasswordPrompt;
       if (!promptService.isAvailable) {
         return yield* input.error;
-      }
-      if (input.authSecret !== null) {
-        authSecrets.delete(input.key);
       }
       if (input.promptCount >= 2) {
         return yield* input.error;
@@ -1521,6 +1526,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     readonly key: string;
     readonly resolvedTarget: DesktopSshEnvironmentTarget;
     readonly runner?: RemoteT3RunnerOptions;
+    readonly allowPrompt?: boolean;
   }): Effect.fn.Return<SshTunnelEntry, SshEnvironmentEffectError, SshEnvironmentEffectContext> {
     yield* Effect.logDebug("ssh.environment.tunnel.create.start", {
       ...sshTargetLogFields(input.resolvedTarget),
@@ -1530,6 +1536,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     const remoteLaunch = yield* runWithSshAuth({
       key: input.key,
       target: input.resolvedTarget,
+      ...(input.allowPrompt === undefined ? {} : { allowPrompt: input.allowPrompt }),
       operation: (authOptions) =>
         launchOrReuseRemoteServer(input.resolvedTarget, authOptions, input.runner),
     });
@@ -1553,6 +1560,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     const tunnelEntry = yield* runWithSshAuth({
       key: input.key,
       target: input.resolvedTarget,
+      ...(input.allowPrompt === undefined ? {} : { allowPrompt: input.allowPrompt }),
       operation: (authOptions) =>
         startSshTunnel({
           key: input.key,
@@ -1641,6 +1649,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     key: string,
     resolvedTarget: DesktopSshEnvironmentTarget,
     runner?: RemoteT3RunnerOptions,
+    allowPrompt?: boolean,
   ): Effect.fn.Return<SshTunnelEntry, SshEnvironmentEffectError, SshEnvironmentEffectContext> {
     let entry = tunnels.get(key) ?? null;
 
@@ -1691,6 +1700,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       key,
       resolvedTarget,
       ...(runner === undefined ? {} : { runner }),
+      ...(allowPrompt === undefined ? {} : { allowPrompt }),
     }).pipe(
       Effect.tapError((cause) =>
         Effect.logWarning("ssh.environment.tunnel.create.failed", {
@@ -1711,7 +1721,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
 
   const ensureEnvironment = Effect.fn("ssh/tunnel.ensureEnvironment")(function* (
     target: DesktopSshEnvironmentTarget,
-    requestOptions?: { readonly issuePairingToken?: boolean },
+    requestOptions?: { readonly issuePairingToken?: boolean; readonly nonInteractive?: boolean },
   ): Effect.fn.Return<
     DesktopSshEnvironmentBootstrap,
     SshEnvironmentEffectError,
@@ -1740,12 +1750,14 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       ...sshRunnerLogFields(runner),
       key,
     });
-    const entry = yield* ensureTunnelEntry(key, resolvedTarget, runner);
+    const allowPrompt = requestOptions?.nonInteractive === true ? false : undefined;
+    const entry = yield* ensureTunnelEntry(key, resolvedTarget, runner, allowPrompt);
 
     const pairingResult = requestOptions?.issuePairingToken
       ? yield* runWithSshAuth({
           key,
           target: entry.target,
+          ...(allowPrompt === undefined ? {} : { allowPrompt }),
           operation: (authOptions) => issueRemotePairingToken(entry.target, authOptions, runner),
         })
       : null;
