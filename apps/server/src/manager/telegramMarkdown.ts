@@ -38,7 +38,8 @@ const renderNonCode = (value: string): string => {
   for (const match of value.matchAll(link)) {
     const index = match.index ?? 0;
     output += renderEmphasis(value.slice(cursor, index));
-    const [, label, href] = match;
+    const label = match[1] ?? "";
+    const href = match[2] ?? "";
     output += isSafeLink(href)
       ? `<a href="${escapeHtml(href)}">${renderEmphasis(label)}</a>`
       : renderEmphasis(match[0]);
@@ -85,11 +86,11 @@ export const renderTelegramHtml = (markdown: string): string => {
     const bullet = /^\s*[-+*]\s+(.+)$/.exec(line);
     const numbered = /^\s*(\d+)\.\s+(.+)$/.exec(line);
     if (heading) {
-      output.push(`<b>${renderInline(heading[1])}</b>`);
+      output.push(`<b>${renderInline(heading[1] ?? "")}</b>`);
     } else if (bullet) {
-      output.push(`• ${renderInline(bullet[1])}`);
+      output.push(`• ${renderInline(bullet[1] ?? "")}`);
     } else if (numbered) {
-      output.push(`${numbered[1]}. ${renderInline(numbered[2])}`);
+      output.push(`${numbered[1] ?? ""}. ${renderInline(numbered[2] ?? "")}`);
     } else {
       output.push(renderInline(line));
     }
