@@ -72,9 +72,7 @@ export interface RemindersRepositoryShape {
     input: MarkReminderFailedInput,
   ) => Effect.Effect<void, ManagerRepositoryError>;
   /** Conditional pending -> cancelled. Returns false if it was not pending. */
-  readonly cancel: (
-    input: CancelReminderInput,
-  ) => Effect.Effect<boolean, ManagerRepositoryError>;
+  readonly cancel: (input: CancelReminderInput) => Effect.Effect<boolean, ManagerRepositoryError>;
 }
 
 export class RemindersRepository extends Context.Service<

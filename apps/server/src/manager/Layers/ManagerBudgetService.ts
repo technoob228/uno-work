@@ -49,4 +49,7 @@ const makeManagerBudgetService = Effect.gen(function* () {
   return { checkWriteBudget } satisfies ManagerBudgetServiceShape;
 });
 
-export const ManagerBudgetServiceLive = Layer.effect(ManagerBudgetService, makeManagerBudgetService);
+export const ManagerBudgetServiceLive = Layer.effect(
+  ManagerBudgetService,
+  makeManagerBudgetService,
+);

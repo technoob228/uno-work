@@ -86,9 +86,7 @@ export const classifyWake = (input: {
             messages: buildWakeMessages({
               names: input.names,
               text: input.text,
-              ...(input.recentContext !== undefined
-                ? { recentContext: input.recentContext }
-                : {}),
+              ...(input.recentContext !== undefined ? { recentContext: input.recentContext } : {}),
             }),
           }),
         });

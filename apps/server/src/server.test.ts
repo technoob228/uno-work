@@ -893,9 +893,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       yield* buildAppUnderTest({
         layers: {
           healthCheck: {
-            probe: Effect.fail(
-              new HealthProbeError({ detail: "database is on fire" }),
-            ),
+            probe: Effect.fail(new HealthProbeError({ detail: "database is on fire" })),
           },
         },
       });

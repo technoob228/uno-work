@@ -16,10 +16,7 @@ import { ServerBrowser } from "./serverBrowser.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 
 it("decides the executor target from settings and subscriber presence", () => {
-  assert.equal(
-    decideBrowserExecutorTarget({ executor: "server", hasSubscribers: true }),
-    "server",
-  );
+  assert.equal(decideBrowserExecutorTarget({ executor: "server", hasSubscribers: true }), "server");
   assert.equal(
     decideBrowserExecutorTarget({ executor: "server", hasSubscribers: false }),
     "server",

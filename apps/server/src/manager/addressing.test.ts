@@ -8,9 +8,7 @@ import {
   type NormalizedIncomingMessage,
 } from "./addressing.ts";
 
-const message = (
-  overrides: Partial<NormalizedIncomingMessage>,
-): NormalizedIncomingMessage => ({
+const message = (overrides: Partial<NormalizedIncomingMessage>): NormalizedIncomingMessage => ({
   isDirectMessage: false,
   isReplyToBot: false,
   explicitMention: false,
@@ -65,10 +63,7 @@ describe("decideAddressing", () => {
 
   it("never answers another bot, even in a DM", () => {
     expect(
-      decideAddressing(
-        message({ isDirectMessage: true, senderIsBot: true }),
-        config(),
-      ),
+      decideAddressing(message({ isDirectMessage: true, senderIsBot: true }), config()),
     ).toEqual({ addressed: false, needsSmartCheck: false });
   });
 
@@ -95,10 +90,7 @@ describe("decideAddressing", () => {
 
   it("answers when called by name in a group", () => {
     expect(
-      decideAddressing(
-        message({ text: "Антон, посмотри логи" }),
-        config({ names: ["Антоха"] }),
-      ),
+      decideAddressing(message({ text: "Антон, посмотри логи" }), config({ names: ["Антоха"] })),
     ).toEqual({ addressed: true, reason: "name" });
   });
 
@@ -131,9 +123,10 @@ describe("decideAddressing", () => {
       decideAddressing(message({ text: "глянь плиз кто-нибудь" }), config({ smartWake: true })),
     ).toEqual({ addressed: false, needsSmartCheck: true });
     // No text (e.g. a caption-less photo) — nothing for the classifier to read.
-    expect(
-      decideAddressing(message({ text: "   " }), config({ smartWake: true })),
-    ).toEqual({ addressed: false, needsSmartCheck: false });
+    expect(decideAddressing(message({ text: "   " }), config({ smartWake: true }))).toEqual({
+      addressed: false,
+      needsSmartCheck: false,
+    });
   });
 
   it("prefers a deterministic hit over the smart tier", () => {

@@ -9,7 +9,6 @@ export interface ReminderSchedulerShape {
   readonly start: () => Effect.Effect<void, never, Scope.Scope>;
 }
 
-export class ReminderScheduler extends Context.Service<
-  ReminderScheduler,
-  ReminderSchedulerShape
->()("t3/reminders/Services/ReminderScheduler") {}
+export class ReminderScheduler extends Context.Service<ReminderScheduler, ReminderSchedulerShape>()(
+  "t3/reminders/Services/ReminderScheduler",
+) {}

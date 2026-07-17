@@ -463,10 +463,7 @@ describe("ssh tunnel supervision", () => {
       yield* TestClock.adjust(Duration.minutes(2));
 
       assert.equal(harness.spawnedTunnelCount(), 1);
-      assert.equal(
-        harness.states.filter((entry) => entry.state === "down").length,
-        1,
-      );
+      assert.equal(harness.states.filter((entry) => entry.state === "down").length, 1);
     }).pipe(Effect.provide(harness.layer), Effect.scoped);
   });
 });

@@ -60,15 +60,13 @@ describe("collectTelegramMedia", () => {
   });
 
   it("distinguishes static, animated, and video stickers", () => {
-    expect(collectTelegramMedia({ sticker: { file_id: "s1" } })[0]?.fileName).toBe(
-      "sticker.webp",
-    );
+    expect(collectTelegramMedia({ sticker: { file_id: "s1" } })[0]?.fileName).toBe("sticker.webp");
     expect(
       collectTelegramMedia({ sticker: { file_id: "s2", is_animated: true } })[0]?.fileName,
     ).toBe("sticker.tgs");
-    expect(
-      collectTelegramMedia({ sticker: { file_id: "s3", is_video: true } })[0]?.fileName,
-    ).toBe("sticker.webm");
+    expect(collectTelegramMedia({ sticker: { file_id: "s3", is_video: true } })[0]?.fileName).toBe(
+      "sticker.webm",
+    );
   });
 
   it("returns nothing for a plain text message", () => {
@@ -188,7 +186,10 @@ describe("telegram addressing signals", () => {
 
   it("detects a reply to the bot's own message", () => {
     expect(
-      telegramRepliesToBot({ reply_to_message: { from: { username: "MyBot", is_bot: true } } }, "mybot"),
+      telegramRepliesToBot(
+        { reply_to_message: { from: { username: "MyBot", is_bot: true } } },
+        "mybot",
+      ),
     ).toBe(true);
     expect(
       telegramRepliesToBot({ reply_to_message: { from: { username: "someone" } } }, "mybot"),
@@ -218,7 +219,11 @@ describe("telegram addressing signals", () => {
       from: { id: 7, is_bot: false },
       voice: { file_id: "v", duration: 5 },
     };
-    const normalized = toNormalizedMessage({ message: voiceInGroup, botUsername: "mybot", text: "" });
+    const normalized = toNormalizedMessage({
+      message: voiceInGroup,
+      botUsername: "mybot",
+      text: "",
+    });
     expect(decideAddressing(normalized, DEFAULT_ADDRESSING_CONFIG)).toEqual({
       addressed: false,
       needsSmartCheck: false,

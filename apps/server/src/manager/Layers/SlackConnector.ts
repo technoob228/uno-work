@@ -70,9 +70,7 @@ export interface ManagerSlackRuntimeStatus {
 }
 
 export interface ManagerSlackServiceShape {
-  readonly getRuntimeStatus: (
-    projectId: ProjectId,
-  ) => Effect.Effect<ManagerSlackRuntimeStatus>;
+  readonly getRuntimeStatus: (projectId: ProjectId) => Effect.Effect<ManagerSlackRuntimeStatus>;
   /**
    * Proactively post text to a Slack channel/DM (reminders, notifications).
    * Resolves the bot token from the live connection. Never fails; a `false`
@@ -265,9 +263,7 @@ const makeSlackConnector = Effect.gen(function* () {
           descriptor.sizeBytes !== null &&
           descriptor.sizeBytes > SLACK_FILE_DOWNLOAD_LIMIT_BYTES
         ) {
-          notes.push(
-            buildMediaFailureNote(descriptor, "the file exceeds the 100 MB download cap"),
-          );
+          notes.push(buildMediaFailureNote(descriptor, "the file exceeds the 100 MB download cap"));
           continue;
         }
         const downloaded = yield* downloadSlackFile(
@@ -275,9 +271,7 @@ const makeSlackConnector = Effect.gen(function* () {
           file.url_private_download ?? "",
         ).pipe(
           Effect.map((bytes) => ({ ok: true as const, bytes })),
-          Effect.catch((cause) =>
-            Effect.succeed({ ok: false as const, reason: cause.message }),
-          ),
+          Effect.catch((cause) => Effect.succeed({ ok: false as const, reason: cause.message })),
         );
         if (!downloaded.ok) {
           notes.push(buildMediaFailureNote(descriptor, downloaded.reason));
@@ -781,7 +775,6 @@ const makeSlackConnector = Effect.gen(function* () {
   } satisfies ManagerSlackServiceShape;
 });
 
-export const ManagerSlackServiceLive = Layer.effect(
-  ManagerSlackService,
-  makeSlackConnector,
-).pipe(Layer.provide(ProjectionTurnRepositoryLive));
+export const ManagerSlackServiceLive = Layer.effect(ManagerSlackService, makeSlackConnector).pipe(
+  Layer.provide(ProjectionTurnRepositoryLive),
+);

@@ -44,9 +44,7 @@ const makeManagerApprovalService = Effect.gen(function* () {
 
       switch (action.kind) {
         case "create-thread": {
-          const projectShell = yield* projectionSnapshotQuery.getProjectShellById(
-            action.projectId,
-          );
+          const projectShell = yield* projectionSnapshotQuery.getProjectShellById(action.projectId);
           if (Option.isNone(projectShell)) {
             return yield* new ManagerExecutionError({
               proposalId: proposal.proposalId,
@@ -182,11 +180,7 @@ const makeManagerApprovalService = Effect.gen(function* () {
       ),
     );
 
-  const resolve: ManagerApprovalServiceShape["resolve"] = ({
-    proposalId,
-    decision,
-    resolvedBy,
-  }) =>
+  const resolve: ManagerApprovalServiceShape["resolve"] = ({ proposalId, decision, resolvedBy }) =>
     Effect.gen(function* () {
       const existing = yield* proposalRepository.getById({ proposalId });
       if (Option.isNone(existing)) {

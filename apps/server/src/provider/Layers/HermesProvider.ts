@@ -236,7 +236,7 @@ export function parseHermesVersionOutput(result: CommandResult): HermesVersionRe
     version: null,
     status: "error",
     message:
-      "Could not determine Hermes Agent version. Install with `uv tool install \"hermes-agent[acp]\" --with \"mcp>=1.9\"`.",
+      'Could not determine Hermes Agent version. Install with `uv tool install "hermes-agent[acp]" --with "mcp>=1.9"`.',
   };
 }
 

@@ -9,7 +9,11 @@ import { chromium } from "playwright-core";
 
 import type { ServerConfigShape } from "./config.ts";
 import { ServerConfig } from "./config.ts";
-import { SERVER_BROWSER_EXECUTABLE_ENV, ServerBrowser, ServerBrowserLive } from "./serverBrowser.ts";
+import {
+  SERVER_BROWSER_EXECUTABLE_ENV,
+  ServerBrowser,
+  ServerBrowserLive,
+} from "./serverBrowser.ts";
 
 /**
  * Интеграционный тест с реальным headless Chromium. Пропускается, когда

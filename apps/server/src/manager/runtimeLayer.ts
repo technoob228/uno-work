@@ -5,10 +5,7 @@ import { ManagerCapabilityTokenRepositoryLive } from "../persistence/Layers/Mana
 import { ManagerConnectorRepositoryLive } from "../persistence/Layers/ManagerConnectors.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../persistence/Layers/ProjectionPendingApprovals.ts";
 import { RemindersRepositoryLive } from "../persistence/Layers/Reminders.ts";
-import {
-  AssistantBootstrapLive,
-  ManagerAssistantServiceLive,
-} from "./Layers/AssistantService.ts";
+import { AssistantBootstrapLive, ManagerAssistantServiceLive } from "./Layers/AssistantService.ts";
 import { ManagerApprovalServiceLive } from "./Layers/ManagerApprovalService.ts";
 import { ManagerBudgetServiceLive } from "./Layers/ManagerBudgetService.ts";
 import { ManagerTokenAuthServiceLive } from "./Layers/ManagerTokenAuth.ts";

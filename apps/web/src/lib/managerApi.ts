@@ -76,7 +76,9 @@ export function listManagerTokens(): Promise<{
   return managerFetch({ pathname: "/api/manager/tokens" });
 }
 
-export function createManagerToken(input: ManagerCreateTokenInput): Promise<ManagerCreateTokenResult> {
+export function createManagerToken(
+  input: ManagerCreateTokenInput,
+): Promise<ManagerCreateTokenResult> {
   return managerFetch({ pathname: "/api/manager/tokens", method: "POST", body: input });
 }
 

@@ -73,7 +73,10 @@ export function AssistantSettingsPanel() {
         />
       </SettingsSection>
 
-      <SettingsSection title="External brains (advanced)" icon={<KeyRoundIcon className="size-3.5" />}>
+      <SettingsSection
+        title="External brains (advanced)"
+        icon={<KeyRoundIcon className="size-3.5" />}
+      >
         {tokens === null ? (
           <SettingsRow title="Loading…" description="" />
         ) : externalTokens.length === 0 ? (

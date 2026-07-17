@@ -48,8 +48,10 @@ export const HERMES_MODE_DONT_ASK = "dont_ask";
 
 type HermesAcpRuntimeSettings = Pick<HermesSettings, "binaryPath">;
 
-export interface HermesAcpRuntimeInput
-  extends Omit<AcpSessionRuntimeOptions, "authMethodId" | "clientCapabilities" | "spawn"> {
+export interface HermesAcpRuntimeInput extends Omit<
+  AcpSessionRuntimeOptions,
+  "authMethodId" | "clientCapabilities" | "spawn"
+> {
   readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly hermesSettings: HermesAcpRuntimeSettings | null | undefined;
   readonly environment?: NodeJS.ProcessEnv;

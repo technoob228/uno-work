@@ -1631,8 +1631,7 @@ function subscribeDesktopSshTunnelState(): () => void {
         markSelfHealAuthRequired(environmentId);
         useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
           connectionState: "error",
-          lastError:
-            "SSH authentication is required. Reconnect manually to enter the password.",
+          lastError: "SSH authentication is required. Reconnect manually to enter the password.",
           lastErrorAt: isoNow(),
         });
         break;

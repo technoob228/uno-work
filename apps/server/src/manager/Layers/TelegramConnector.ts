@@ -82,9 +82,7 @@ export interface ManagerTelegramRuntimeStatus {
 }
 
 export interface ManagerTelegramServiceShape {
-  readonly getRuntimeStatus: (
-    projectId: ProjectId,
-  ) => Effect.Effect<ManagerTelegramRuntimeStatus>;
+  readonly getRuntimeStatus: (projectId: ProjectId) => Effect.Effect<ManagerTelegramRuntimeStatus>;
   /**
    * Proactively push text to a Telegram chat (reminders, notifications) — not
    * a reply to an inbound message. Resolves the bot token from the project's
@@ -178,8 +176,7 @@ export const resolveTurnReply = (input: TurnReplyInputs): ResolvedTurnReply | nu
   const turn =
     [...input.turns]
       .filter(
-        (candidate) =>
-          candidate.turnId !== null && candidate.requestedAt >= input.requestedAtIso,
+        (candidate) => candidate.turnId !== null && candidate.requestedAt >= input.requestedAtIso,
       )
       .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt))
       .at(0) ?? null;
@@ -190,8 +187,7 @@ export const resolveTurnReply = (input: TurnReplyInputs): ResolvedTurnReply | nu
     input.sessionStatus !== null &&
     DEAD_SESSION_STATUSES.has(input.sessionStatus) &&
     (input.sessionUpdatedAtIso === null || input.sessionUpdatedAtIso >= input.requestedAtIso);
-  const stillRunning =
-    turn === null || turn.state === "pending" || turn.state === "running";
+  const stillRunning = turn === null || turn.state === "pending" || turn.state === "running";
   if (stillRunning && !sessionDied) {
     return null;
   }
@@ -281,8 +277,7 @@ const makeTelegramConnector = Effect.gen(function* () {
   const getRuntime = (projectId: ProjectId) =>
     Ref.get(runtimesRef).pipe(
       Effect.map(
-        (runtimes) =>
-          runtimes.get(projectId) ?? { offset: 0, botUsername: null, lastError: null },
+        (runtimes) => runtimes.get(projectId) ?? { offset: 0, botUsername: null, lastError: null },
       ),
     );
 
@@ -290,8 +285,7 @@ const makeTelegramConnector = Effect.gen(function* () {
   // the addressing "hot window": for a few seconds after a reply, follow-ups
   // from that chat land without re-addressing the bot.
   const hotWindowRef = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
-  const hotWindowKey = (projectId: ProjectId, chatId: string): string =>
-    `${projectId}:${chatId}`;
+  const hotWindowKey = (projectId: ProjectId, chatId: string): string => `${projectId}:${chatId}`;
   const markHotWindow = (key: string) =>
     Ref.update(hotWindowRef, (map) => new Map(map).set(key, Date.now()));
   const isWithinHotWindow = (key: string, windowSec: number) =>
@@ -513,7 +507,9 @@ const makeTelegramConnector = Effect.gen(function* () {
           return new Uint8Array(await response.arrayBuffer());
         },
         catch: (cause) =>
-          new TelegramConnectorError({ message: `Telegram file download failed: ${String(cause)}` }),
+          new TelegramConnectorError({
+            message: `Telegram file download failed: ${String(cause)}`,
+          }),
       });
     });
 
@@ -891,9 +887,7 @@ const makeTelegramConnector = Effect.gen(function* () {
       const messageText =
         handoffContext === null
           ? body
-          : [HANDOFF_PREAMBLE_START, handoffContext, HANDOFF_PREAMBLE_END, "", body].join(
-              "\n",
-            );
+          : [HANDOFF_PREAMBLE_START, handoffContext, HANDOFF_PREAMBLE_END, "", body].join("\n");
       const requestedAtIso = new Date().toISOString();
       yield* orchestrationEngine.dispatch({
         type: "thread.turn.start",
@@ -973,9 +967,9 @@ const makeTelegramConnector = Effect.gen(function* () {
     );
 
   const pollCycle = Effect.gen(function* () {
-    const records = yield* connectorRepository.listByKind("telegram").pipe(
-      Effect.orElseSucceed(() => []),
-    );
+    const records = yield* connectorRepository
+      .listByKind("telegram")
+      .pipe(Effect.orElseSucceed(() => []));
     const enabled = records.flatMap((record) => {
       const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(record.config);
       return decoded._tag === "Success" && decoded.value.enabled
@@ -987,11 +981,10 @@ const makeTelegramConnector = Effect.gen(function* () {
       return;
     }
     // Poll all enabled bots concurrently; each long-polls up to 10s.
-    yield* Effect.forEach(
-      enabled,
-      ({ projectId, config }) => pollConnector(projectId, config),
-      { concurrency: 4, discard: true },
-    );
+    yield* Effect.forEach(enabled, ({ projectId, config }) => pollConnector(projectId, config), {
+      concurrency: 4,
+      discard: true,
+    });
   });
 
   // Proactive push (reminders/notifications): resolve the bot token from the
@@ -1008,9 +1001,7 @@ const makeTelegramConnector = Effect.gen(function* () {
         );
         return false;
       }
-      const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(
-        record.value.config,
-      );
+      const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(record.value.config);
       if (decoded._tag !== "Success") {
         yield* Effect.logWarning("telegram push skipped: invalid connector config").pipe(
           Effect.annotateLogs({ projectId: input.projectId }),

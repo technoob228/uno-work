@@ -90,9 +90,7 @@ export class HealthCheck extends Context.Service<HealthCheck, HealthCheckShape>(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       return HealthCheck.of({
-        probe: runHealthHeartbeatProbe.pipe(
-          Effect.provideService(SqlClient.SqlClient, sql),
-        ),
+        probe: runHealthHeartbeatProbe.pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       });
     }),
   );

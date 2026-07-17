@@ -110,7 +110,9 @@ async function runCommand(page: Page, input: BrowserAutomationCommandInput): Pro
         return page.evaluate(buildClickSelectorScript(input.selector));
       }
       if (input.x === undefined || input.y === undefined) {
-        throw new ServerBrowserCommandError({ message: "Click requires selector or x/y coordinates." });
+        throw new ServerBrowserCommandError({
+          message: "Click requires selector or x/y coordinates.",
+        });
       }
       await page.mouse.click(input.x, input.y);
       return { clicked: true, x: input.x, y: input.y };
@@ -126,7 +128,8 @@ async function runCommand(page: Page, input: BrowserAutomationCommandInput): Pro
       return { typed: true };
     }
     case "press":
-      if (!input.key) throw new ServerBrowserCommandError({ message: "press requires key support." });
+      if (!input.key)
+        throw new ServerBrowserCommandError({ message: "press requires key support." });
       await page.keyboard.press(input.key);
       return { pressed: input.key };
     case "reload":

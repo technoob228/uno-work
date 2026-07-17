@@ -173,9 +173,7 @@ export function nameIsMentioned(text: string, names: ReadonlyArray<string>): boo
     .filter((name) => name.length > 0);
   if (normalizedNames.length === 0) return false;
   const tokens = tokenize(text);
-  return tokens.some((token) =>
-    normalizedNames.some((name) => tokenMatchesName(token, name)),
-  );
+  return tokens.some((token) => normalizedNames.some((name) => tokenMatchesName(token, name)));
 }
 
 /**

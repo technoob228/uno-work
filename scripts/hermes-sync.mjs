@@ -107,5 +107,7 @@ exec hermes --provider openai-api -m "\$HERMES_INFERENCE_MODEL" "$@"
 
 console.log(`state dir:   ${stateDir}`);
 console.log(`mcp url:     ${mcp.url}`);
-console.log(`uno api key: ${unoApiKey ? "synced ✓" : "NOT SET — add it in Settings → Uno and re-run"}`);
+console.log(
+  `uno api key: ${unoApiKey ? "synced ✓" : "NOT SET — add it in Settings → Uno and re-run"}`,
+);
 console.log(`wrapper:     ${wrapperPath} (use it instead of plain \`hermes\`)`);

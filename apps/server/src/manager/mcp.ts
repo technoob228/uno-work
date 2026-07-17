@@ -30,11 +30,7 @@ import type { ManagerToolError } from "./Errors.ts";
 import type { ManagerCaller, ManagerToolServiceShape } from "./Services/ManagerToolService.ts";
 
 const LATEST_PROTOCOL_VERSION = "2025-06-18";
-const SUPPORTED_PROTOCOL_VERSIONS = new Set([
-  "2024-11-05",
-  "2025-03-26",
-  LATEST_PROTOCOL_VERSION,
-]);
+const SUPPORTED_PROTOCOL_VERSIONS = new Set(["2024-11-05", "2025-03-26", LATEST_PROTOCOL_VERSION]);
 
 export const MANAGER_MCP_SERVER_INFO = {
   name: "uno-manager",

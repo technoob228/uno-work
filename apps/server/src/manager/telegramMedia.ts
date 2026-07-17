@@ -248,11 +248,7 @@ export function collectTelegramMedia(
           ? "sticker.tgs"
           : "sticker.webp";
     const mimeType =
-      sticker.is_video === true
-        ? "video/webm"
-        : sticker.is_animated === true
-          ? null
-          : "image/webp";
+      sticker.is_video === true ? "video/webm" : sticker.is_animated === true ? null : "image/webp";
     media.push({
       kind: "sticker",
       fileId: sticker.file_id,
@@ -418,10 +414,7 @@ export function buildMediaNote(descriptor: TelegramMediaDescriptor, savedPath: s
 }
 
 /** Note injected when a media file could not be fetched from Telegram. */
-export function buildMediaFailureNote(
-  descriptor: TelegramMediaDescriptor,
-  reason: string,
-): string {
+export function buildMediaFailureNote(descriptor: TelegramMediaDescriptor, reason: string): string {
   return `[Telegram attachment: ${describeMedia(descriptor)} could not be downloaded: ${reason}]`;
 }
 

@@ -60,9 +60,7 @@ describe("resolveTurnReply", () => {
     // session goes idle, so the reply must be derived from the turn rows.
     const reply = resolveTurnReply({
       turns: [turnRow({ state: "completed" })],
-      messages: [
-        assistantMessage("the answer", "2026-07-03T23:03:39.350Z"),
-      ],
+      messages: [assistantMessage("the answer", "2026-07-03T23:03:39.350Z")],
       sessionStatus: "ready",
       sessionUpdatedAtIso: nowIso,
       requestedAtIso,

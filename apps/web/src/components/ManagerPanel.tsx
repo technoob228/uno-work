@@ -68,7 +68,10 @@ function minutesUntil(iso: string): number {
   return Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 60_000));
 }
 
-const STATUS_BADGE: Record<ManagerActionProposal["status"], "warning" | "success" | "error" | "outline"> = {
+const STATUS_BADGE: Record<
+  ManagerActionProposal["status"],
+  "warning" | "success" | "error" | "outline"
+> = {
   pending: "warning",
   approved: "success",
   denied: "error",
@@ -152,9 +155,7 @@ export function ManagerPanel() {
       setError(null);
     } catch (cause) {
       setError(
-        cause instanceof ManagerApiError
-          ? cause.message
-          : "Failed to load assistant proposals.",
+        cause instanceof ManagerApiError ? cause.message : "Failed to load assistant proposals.",
       );
     }
   }, []);
@@ -262,7 +263,10 @@ export function ManagerPanel() {
                     size="xs"
                     variant="outline"
                     render={
-                      <Link to="/assistant/$projectId" params={{ projectId: assistant.projectId }} />
+                      <Link
+                        to="/assistant/$projectId"
+                        params={{ projectId: assistant.projectId }}
+                      />
                     }
                   >
                     <Settings2Icon className="size-3.5" />

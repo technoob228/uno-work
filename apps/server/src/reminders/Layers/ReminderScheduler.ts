@@ -4,10 +4,7 @@ import { Duration, Effect, Layer, Schedule } from "effect";
 import { ManagerTelegramService } from "../../manager/Layers/TelegramConnector.ts";
 import { ManagerSlackService } from "../../manager/Layers/SlackConnector.ts";
 import { RemindersRepository } from "../../persistence/Services/Reminders.ts";
-import {
-  ReminderScheduler,
-  type ReminderSchedulerShape,
-} from "../Services/ReminderScheduler.ts";
+import { ReminderScheduler, type ReminderSchedulerShape } from "../Services/ReminderScheduler.ts";
 
 const DEFAULT_SWEEP_INTERVAL_MS = 30 * 1000;
 const DEFAULT_BATCH_SIZE = 50;
@@ -80,9 +77,7 @@ const makeReminderScheduler = (options?: ReminderSchedulerLiveOptions) =>
       Effect.gen(function* () {
         yield* Effect.forkScoped(
           sweep.pipe(
-            Effect.catch((error: unknown) =>
-              Effect.logWarning("reminder.sweep-failed", { error }),
-            ),
+            Effect.catch((error: unknown) => Effect.logWarning("reminder.sweep-failed", { error })),
             Effect.catchDefect((defect: unknown) =>
               Effect.logWarning("reminder.sweep-defect", { defect }),
             ),

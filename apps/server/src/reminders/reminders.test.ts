@@ -12,7 +12,9 @@ const testLayer = RemindersRepositoryLive.pipe(Layer.provideMerge(SqlitePersiste
 
 const projectId = ProjectId.make("assistant-home");
 
-const makeReminder = (overrides: Partial<Reminder> & Pick<Reminder, "reminderId" | "dueAt">): Reminder => ({
+const makeReminder = (
+  overrides: Partial<Reminder> & Pick<Reminder, "reminderId" | "dueAt">,
+): Reminder => ({
   projectId,
   chatId: "123456",
   connector: "telegram",

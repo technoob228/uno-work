@@ -81,7 +81,11 @@ interface PreviewPaneState {
    * вкладка попадает в бакет своего проекта, текущий вид не трогается.
    */
   openUrlInProject: (projectKey: string, url?: string) => void;
-  updateBrowserTab: (projectKey: string, id: string, patch: { url?: string; name?: string }) => void;
+  updateBrowserTab: (
+    projectKey: string,
+    id: string,
+    patch: { url?: string; name?: string },
+  ) => void;
   /** Все бакеты предпросмотра — для постоянно смонтированных webview. */
   statesByProjectKey: Readonly<Record<string, ProjectPreviewState>>;
   closeFile: (id: string) => void;

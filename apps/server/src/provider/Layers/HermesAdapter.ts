@@ -210,9 +210,7 @@ export function makeHermesAdapter(
       key: string,
     ) =>
       SynchronizedRef.modifyEffect(locksRef, (current) => {
-        const existing: Option.Option<Semaphore.Semaphore> = Option.fromNullishOr(
-          current.get(key),
-        );
+        const existing: Option.Option<Semaphore.Semaphore> = Option.fromNullishOr(current.get(key));
         return Option.match(existing, {
           onNone: () =>
             Semaphore.make(1).pipe(
@@ -420,25 +418,23 @@ export function makeHermesAdapter(
           const threadHermesHome = nodePath.join(baseHermesHome, "threads", input.threadId);
           const configuredModel =
             resolveHermesBaseModelId(hermesModelSelection?.model) ?? HERMES_DEFAULT_MODEL;
-          yield* fileSystem
-            .makeDirectory(threadHermesHome, { recursive: true })
-            .pipe(
-              Effect.andThen(
-                fileSystem.writeFileString(
-                  nodePath.join(threadHermesHome, "config.yaml"),
-                  buildHermesConfigYaml({ model: configuredModel, mcpServers }),
-                ),
+          yield* fileSystem.makeDirectory(threadHermesHome, { recursive: true }).pipe(
+            Effect.andThen(
+              fileSystem.writeFileString(
+                nodePath.join(threadHermesHome, "config.yaml"),
+                buildHermesConfigYaml({ model: configuredModel, mcpServers }),
               ),
-              Effect.mapError(
-                (cause) =>
-                  new ProviderAdapterProcessError({
-                    provider: PROVIDER,
-                    threadId: input.threadId,
-                    detail: `Failed to prepare HERMES_HOME: ${cause.message}`,
-                    cause,
-                  }),
-              ),
-            );
+            ),
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapterProcessError({
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  detail: `Failed to prepare HERMES_HOME: ${cause.message}`,
+                  cause,
+                }),
+            ),
+          );
 
           const sessionEnvironment = {
             ...(options?.environment ?? {}),

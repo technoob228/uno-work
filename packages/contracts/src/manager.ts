@@ -148,20 +148,15 @@ export type ManagerAssistantAccessInput = typeof ManagerAssistantAccessInput.Typ
  */
 export const ManagerConnectorAddressingConfig = Schema.Struct({
   /** Wake names / aliases the bot answers to, e.g. `["Антоха", "Антон"]`. */
-  names: Schema.Array(TrimmedNonEmptyString).pipe(
-    Schema.withDecodingDefault(Effect.succeed([])),
-  ),
+  names: Schema.Array(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   /** Require an explicit address in groups/channels. Off = answer everything. */
-  requireMentionInGroups: Schema.Boolean.pipe(
-    Schema.withDecodingDefault(Effect.succeed(true)),
-  ),
+  requireMentionInGroups: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /** Let the daemon run an LLM classifier when the cheap checks miss. */
   smartWake: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /** Seconds after a reply during which follow-ups need no re-addressing. */
   hotWindowSec: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
 });
-export type ManagerConnectorAddressingConfig =
-  typeof ManagerConnectorAddressingConfig.Type;
+export type ManagerConnectorAddressingConfig = typeof ManagerConnectorAddressingConfig.Type;
 
 /** The defaults applied to a connector with no explicit addressing block. */
 export const DEFAULT_CONNECTOR_ADDRESSING: ManagerConnectorAddressingConfig = {
@@ -549,12 +544,7 @@ export type ManagerOwnerResolveProposalInput = typeof ManagerOwnerResolveProposa
  * survives restarts and fires as soon as the daemon is running again if its
  * due time passed while it was down.
  */
-export const ReminderStatus = Schema.Literals([
-  "pending",
-  "delivered",
-  "failed",
-  "cancelled",
-]);
+export const ReminderStatus = Schema.Literals(["pending", "delivered", "failed", "cancelled"]);
 export type ReminderStatus = typeof ReminderStatus.Type;
 
 /** Which messenger delivers the reminder. Rows predating the field are Telegram. */

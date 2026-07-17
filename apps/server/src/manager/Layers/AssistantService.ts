@@ -180,7 +180,10 @@ const makeManagerAssistantService = Effect.gen(function* () {
         try {
           const parsed = JSON.parse(marker) as { stateDir?: string; projectId?: string };
           if (parsed.stateDir !== config.stateDir || parsed.projectId !== projectId) {
-            return path.join(base, `${name}-${crypto.createHash("sha256").update(config.stateDir).digest("hex").slice(0, 6)}`);
+            return path.join(
+              base,
+              `${name}-${crypto.createHash("sha256").update(config.stateDir).digest("hex").slice(0, 6)}`,
+            );
           }
         } catch {
           // Unreadable marker — treat the folder as foreign.
@@ -540,9 +543,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
   }) =>
     Effect.gen(function* () {
       const filePath = yield* resolveEditablePath(projectId, name);
-      const content = yield* fs
-        .readFileString(filePath)
-        .pipe(Effect.orElseSucceed(() => ""));
+      const content = yield* fs.readFileString(filePath).pipe(Effect.orElseSucceed(() => ""));
       return { content };
     });
 

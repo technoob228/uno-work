@@ -287,7 +287,4 @@ const makeRemindersRepository = Effect.gen(function* () {
   } satisfies RemindersRepositoryShape;
 });
 
-export const RemindersRepositoryLive = Layer.effect(
-  RemindersRepository,
-  makeRemindersRepository,
-);
+export const RemindersRepositoryLive = Layer.effect(RemindersRepository, makeRemindersRepository);

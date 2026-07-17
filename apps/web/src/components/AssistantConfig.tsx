@@ -370,12 +370,7 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
             <span className="text-sm font-medium text-foreground">
               {assistant?.title ?? "Assistant"} — settings
             </span>
-            <Button
-              size="xs"
-              variant="ghost"
-              className="ml-auto"
-              render={<Link to="/assistant" />}
-            >
+            <Button size="xs" variant="ghost" className="ml-auto" render={<Link to="/assistant" />}>
               All assistants
             </Button>
           </div>
@@ -519,7 +514,9 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
               <SettingsRow
                 title="Bot token"
                 description={
-                  telegram?.configured ? "Leave empty to keep the current token." : "Required for the first setup."
+                  telegram?.configured
+                    ? "Leave empty to keep the current token."
+                    : "Required for the first setup."
                 }
                 control={
                   <input
@@ -598,9 +595,7 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
               <SettingsRow
                 title="Smart wake"
                 description="When the name isn't literally said, let an LLM decide if the message is aimed at the bot. Costs one cheap call per unmatched group message; also enables catching the name in group voice messages."
-                control={
-                  <Toggle checked={smartWake} onChange={setSmartWake} label="Smart wake" />
-                }
+                control={<Toggle checked={smartWake} onChange={setSmartWake} label="Smart wake" />}
               />
               <SettingsRow
                 title="Follow-up window (seconds)"
@@ -643,7 +638,9 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
               <SettingsRow
                 title="Bot token (xoxb-…)"
                 description={
-                  slack?.configured ? "Leave empty to keep the current token." : "Bot User OAuth Token."
+                  slack?.configured
+                    ? "Leave empty to keep the current token."
+                    : "Bot User OAuth Token."
                 }
                 control={
                   <input
@@ -740,7 +737,11 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
                 title="Smart wake"
                 description="When the name isn't literally said, let an LLM decide if the message is aimed at the bot. Costs one cheap call per unmatched channel message."
                 control={
-                  <Toggle checked={slackSmartWake} onChange={setSlackSmartWake} label="Smart wake" />
+                  <Toggle
+                    checked={slackSmartWake}
+                    onChange={setSlackSmartWake}
+                    label="Smart wake"
+                  />
                 }
               />
               <SettingsRow

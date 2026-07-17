@@ -250,7 +250,11 @@ export class WsTransport {
             void this.ensureAutoRecovery().catch(() => undefined);
           }
           await sleep(
-            getSubscriptionRetryDelayMs(retryDelayMs, transportFailureStreak, this.connectionHealthy),
+            getSubscriptionRetryDelayMs(
+              retryDelayMs,
+              transportFailureStreak,
+              this.connectionHealthy,
+            ),
           );
         }
       }

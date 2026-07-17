@@ -70,7 +70,9 @@ export interface ManagerCapabilityTokenRepositoryShape {
   readonly updateAccess: (
     input: UpdateManagerTokenAccessInput,
   ) => Effect.Effect<boolean, ManagerRepositoryError>;
-  readonly revoke: (input: RevokeManagerTokenInput) => Effect.Effect<boolean, ManagerRepositoryError>;
+  readonly revoke: (
+    input: RevokeManagerTokenInput,
+  ) => Effect.Effect<boolean, ManagerRepositoryError>;
 }
 
 export class ManagerCapabilityTokenRepository extends Context.Service<

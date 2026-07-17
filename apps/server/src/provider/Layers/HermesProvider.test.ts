@@ -58,14 +58,10 @@ describe("isHermesPickerModel", () => {
 
   it("drops tool-less and non-text models", () => {
     expect(
-      isHermesPickerModel(
-        catalogModel({ modelId: "openai/gpt-image-1", supportsTools: false }),
-      ),
+      isHermesPickerModel(catalogModel({ modelId: "openai/gpt-image-1", supportsTools: false })),
     ).toBe(false);
     expect(
-      isHermesPickerModel(
-        catalogModel({ modelId: "openai/sora-x", outputModalities: ["video"] }),
-      ),
+      isHermesPickerModel(catalogModel({ modelId: "openai/sora-x", outputModalities: ["video"] })),
     ).toBe(false);
   });
 });

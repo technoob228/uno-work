@@ -45,9 +45,7 @@ const respondUnauthorized = Effect.succeed(
 
 const respondServerError = (context: string) => (cause: unknown) =>
   Effect.logError(`manager http route failed: ${context}`, { cause }).pipe(
-    Effect.as(
-      HttpServerResponse.jsonUnsafe({ error: "Internal server error." }, { status: 500 }),
-    ),
+    Effect.as(HttpServerResponse.jsonUnsafe({ error: "Internal server error." }, { status: 500 })),
   );
 
 const authenticateOwnerSession = Effect.gen(function* () {
@@ -74,7 +72,9 @@ export const managerMcpRouteLayer = HttpRouter.add(
     const authOutcome = yield* tokenAuth.authenticate(request.headers["authorization"]).pipe(
       Effect.map((caller) => ({ kind: "caller" as const, caller })),
       Effect.catchTag("ManagerAuthError", () =>
-        respondUnauthorized.pipe(Effect.map((response) => ({ kind: "response" as const, response }))),
+        respondUnauthorized.pipe(
+          Effect.map((response) => ({ kind: "response" as const, response })),
+        ),
       ),
       Effect.catch((cause) =>
         respondServerError("mcp:authenticate")(cause).pipe(
@@ -145,7 +145,9 @@ export const managerProposalsRouteLayer = HttpRouter.add(
       rawStatus === undefined
         ? undefined
         : yield* Schema.decodeUnknownEffect(ManagerProposalStatus)(rawStatus).pipe(
-            Effect.mapError(() => new AuthError({ message: "Invalid status filter.", status: 400 })),
+            Effect.mapError(
+              () => new AuthError({ message: "Invalid status filter.", status: 400 }),
+            ),
           );
     return yield* approvalService.listAll({ status }).pipe(
       Effect.map((proposals) => HttpServerResponse.jsonUnsafe({ proposals }, { status: 200 })),
@@ -175,11 +177,17 @@ export const managerProposalResolveRouteLayer = HttpRouter.add(
         Effect.map((proposal) => HttpServerResponse.jsonUnsafe({ proposal }, { status: 200 })),
         Effect.catchTags({
           ManagerNotFoundError: (error) =>
-            Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 404 })),
+            Effect.succeed(
+              HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 404 }),
+            ),
           ManagerProposalResolutionError: (error) =>
-            Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 409 })),
+            Effect.succeed(
+              HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 409 }),
+            ),
           ManagerExecutionError: (error) =>
-            Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 502 })),
+            Effect.succeed(
+              HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 502 }),
+            ),
         }),
         Effect.catch(respondServerError("proposals:resolve")),
       );
@@ -509,9 +517,12 @@ export const managerTokensRevokeRouteLayer = HttpRouter.add(
       Effect.map((revoked) =>
         revoked
           ? HttpServerResponse.jsonUnsafe({ revoked: true }, { status: 200 })
-          : HttpServerResponse.jsonUnsafe({ error: "Unknown or already revoked token." }, {
-              status: 404,
-            }),
+          : HttpServerResponse.jsonUnsafe(
+              { error: "Unknown or already revoked token." },
+              {
+                status: 404,
+              },
+            ),
       ),
       Effect.catch(respondServerError("tokens:revoke")),
     );
