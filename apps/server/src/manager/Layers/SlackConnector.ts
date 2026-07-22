@@ -93,6 +93,16 @@ const RECONCILE_INTERVAL = Duration.seconds(5);
 const REPLY_POLL_INTERVAL = Duration.seconds(2);
 const REPLY_TIMEOUT = Duration.minutes(10);
 const SLACK_MESSAGE_LIMIT = 3900;
+// Post a "working on it" ack if the reply is not ready quickly, so channel
+// users see the mention landed (thread creation + a model turn take a while).
+const ACK_DELAY = Duration.seconds(10);
+const ACK_TEXT = "⏳ On it — I'll post the result in this thread.";
+// When a session opens mid-thread, this much backlog is handed to the
+// assistant as context: the root message plus the most recent replies.
+const BACKLOG_FETCH_LIMIT = 100;
+const BACKLOG_MAX_MESSAGES = 25;
+const BACKLOG_MESSAGE_CHAR_LIMIT = 1500;
+const BACKLOG_TOTAL_CHAR_LIMIT = 6000;
 // Dedup window: Slack delivers the same message as both `app_mention` and
 // `message.channels`, and retries on missed acks; keyed by channel:ts.
 const SEEN_TTL_MS = 5 * 60 * 1000;
@@ -163,12 +173,77 @@ function toMediaDescriptor(file: SlackRawFile): TelegramMediaDescriptor | null {
 interface SlackRuntime {
   readonly appToken: string;
   readonly botToken: string;
+  /** Full connector config as JSON — the reconcile loop restarts the
+   * connection when ANY of it changes (allowlist, addressing, model), not
+   * just the tokens, because the live event handler captures it by value. */
+  readonly configJson: string;
   botUserId: string | null;
   botUserName: string | null;
   lastError: string | null;
   client: SocketModeClient | null;
   web: WebClient | null;
 }
+
+/**
+ * Fetch the backlog of a Slack thread the bot was just called into: the root
+ * message plus the most recent replies, minus the triggering message itself.
+ * Uses the history scopes the app manifest already requests. Failures
+ * degrade to "no context" — the mention is still answered.
+ */
+const fetchThreadBacklog = (input: {
+  readonly web: WebClient;
+  readonly channel: string;
+  readonly threadTs: string;
+  readonly excludeTs: string;
+  readonly botUserId: string;
+}): Effect.Effect<ReadonlyArray<string>> =>
+  Effect.tryPromise({
+    try: () =>
+      input.web.conversations.replies({
+        channel: input.channel,
+        ts: input.threadTs,
+        limit: BACKLOG_FETCH_LIMIT,
+      }),
+    catch: (cause) => new SlackConnectorError({ message: String(cause) }),
+  }).pipe(
+    Effect.map((result) => {
+      const all = (result.messages ?? []) as ReadonlyArray<{
+        readonly ts?: string;
+        readonly user?: string;
+        readonly bot_id?: string;
+        readonly text?: string;
+      }>;
+      // conversations.replies returns oldest-first with the root message
+      // first; keep the root and the most recent replies.
+      const root = all.length > 0 ? [all[0]] : [];
+      const replies = all.slice(1).slice(-(BACKLOG_MAX_MESSAGES - root.length));
+      const lines: Array<string> = [];
+      let used = 0;
+      for (const message of [...root, ...replies]) {
+        if (message === undefined) continue;
+        if (message.ts === undefined || message.ts === input.excludeTs) continue;
+        const text = (message.text ?? "").trim();
+        if (text.length === 0) continue;
+        const author =
+          message.user === input.botUserId
+            ? "you (the assistant)"
+            : message.user !== undefined
+              ? `<@${message.user}>`
+              : "another bot";
+        const line = `${author}: ${text.slice(0, BACKLOG_MESSAGE_CHAR_LIMIT)}`;
+        if (used + line.length > BACKLOG_TOTAL_CHAR_LIMIT) break;
+        lines.push(line);
+        used += line.length;
+      }
+      return lines;
+    }),
+    Effect.catch((cause) =>
+      Effect.logWarning("slack thread backlog fetch failed").pipe(
+        Effect.annotateLogs({ channel: input.channel, cause: String(cause) }),
+        Effect.andThen(Effect.succeed([] as ReadonlyArray<string>)),
+      ),
+    ),
+  );
 
 const makeSlackConnector = Effect.gen(function* () {
   const connectorRepository = yield* ManagerConnectorRepository;
@@ -475,10 +550,21 @@ const makeSlackConnector = Effect.gen(function* () {
   }) =>
     Effect.gen(function* () {
       const deadline = Date.now() + Duration.toMillis(REPLY_TIMEOUT);
+      const ackAt = Date.now() + Duration.toMillis(ACK_DELAY);
+      let acked = false;
+      const maybeAck = Effect.gen(function* () {
+        if (!acked && Date.now() >= ackAt) {
+          acked = true;
+          yield* postMessage(input.web, input.channel, ACK_TEXT, input.threadTs);
+        }
+      });
       while (Date.now() < deadline) {
         yield* Effect.sleep(REPLY_POLL_INTERVAL);
         const detail = yield* projectionSnapshotQuery.getThreadDetailById(input.threadId);
-        if (Option.isNone(detail)) continue;
+        if (Option.isNone(detail)) {
+          yield* maybeAck;
+          continue;
+        }
         const turns = yield* projectionTurnRepository.listByThreadId({
           threadId: input.threadId,
         });
@@ -490,7 +576,10 @@ const makeSlackConnector = Effect.gen(function* () {
           requestedAtIso: input.requestedAtIso,
           nowIso: new Date().toISOString(),
         });
-        if (reply === null) continue;
+        if (reply === null) {
+          yield* maybeAck;
+          continue;
+        }
         if (reply.text.trim().length > 0) {
           yield* postMessage(input.web, input.channel, reply.text, input.threadTs);
         } else if (reply.files.length === 0) {
@@ -591,6 +680,13 @@ const makeSlackConnector = Effect.gen(function* () {
 
       const title = isDM ? `Slack DM ${channel}` : `Slack: ${channel}`;
       const threadId = yield* ensureThreadForChat({ projectId, chatKey, title, config });
+      // First contact inside an existing Slack thread: the session has no
+      // history yet, but the humans in the thread do — hand it over so the
+      // assistant is not blind to the message it was called under.
+      const backlog =
+        Option.isNone(existing) && !isDM && threadTs !== null
+          ? yield* fetchThreadBacklog({ web, channel, threadTs, excludeTs: ts, botUserId })
+          : [];
       const ingested =
         files.length > 0
           ? yield* ingestSlackFiles({ botToken: config.botToken, threadId, channel, files })
@@ -599,7 +695,18 @@ const makeSlackConnector = Effect.gen(function* () {
       if (bodyParts.length === 0) {
         bodyParts.push("[The user sent the attached image(s) without a caption.]");
       }
-      const body = [...bodyParts, SLACK_SEND_FILE_HINT].join("\n\n");
+      const contextBlock =
+        backlog.length > 0
+          ? [
+              "[Slack thread context — earlier messages in this thread, oldest first:]",
+              ...backlog,
+            ].join("\n")
+          : null;
+      const body = [
+        ...(contextBlock !== null ? [contextBlock] : []),
+        ...bodyParts,
+        SLACK_SEND_FILE_HINT,
+      ].join("\n\n");
       const requestedAtIso = new Date().toISOString();
       yield* orchestrationEngine.dispatch({
         type: "thread.turn.start",
@@ -672,6 +779,7 @@ const makeSlackConnector = Effect.gen(function* () {
         runtimes.set(projectId, {
           appToken: config.appToken,
           botToken: config.botToken,
+          configJson: JSON.stringify(config),
           botUserId: null,
           botUserName: null,
           lastError: "auth.test failed — check the bot token.",
@@ -698,6 +806,7 @@ const makeSlackConnector = Effect.gen(function* () {
       runtimes.set(projectId, {
         appToken: config.appToken,
         botToken: config.botToken,
+        configJson: JSON.stringify(config),
         botUserId,
         botUserName,
         lastError: started ? null : "Socket Mode connection failed — check the app token.",
@@ -720,11 +829,7 @@ const makeSlackConnector = Effect.gen(function* () {
     // Tear down disabled/removed connectors and ones whose tokens changed.
     for (const [projectId, runtime] of [...runtimes]) {
       const config = enabled.get(projectId);
-      if (
-        config === undefined ||
-        config.appToken !== runtime.appToken ||
-        config.botToken !== runtime.botToken
-      ) {
+      if (config === undefined || JSON.stringify(config) !== runtime.configJson) {
         stopConnection(projectId);
       }
     }
