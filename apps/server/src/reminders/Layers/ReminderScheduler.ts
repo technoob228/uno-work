@@ -30,7 +30,7 @@ const makeReminderScheduler = (options?: ReminderSchedulerLiveOptions) =>
         return;
       }
       for (const reminder of due) {
-        const text = `⏰ Напоминание: ${reminder.message}`;
+        const text = `⏰ Reminder: ${reminder.message}`;
         let delivered: boolean;
         if (reminder.connector === "slack") {
           // Slack reminders store the chat key (`channel` or `channel:thread_ts`),
