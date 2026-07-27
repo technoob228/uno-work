@@ -139,6 +139,9 @@ describe("buildHermesConfigYaml", () => {
     });
     expect(yaml).toBe(
       [
+        "agent:",
+        "  api_max_retries: 8",
+        "  intent_ack_continuation: true",
         "model:",
         '  provider: "openai-api"',
         '  default: "anthropic/claude-haiku-4.5"',
@@ -178,6 +181,12 @@ describe("buildHermesConfigYaml", () => {
     expect(yaml).toContain("stale_timeout_seconds: 120");
     expect(yaml).toContain('provider: "openai"');
     expect(yaml).toContain('model: "openai/whisper-large-v3"');
+  });
+
+  it("raises agent retries above the default so a provider 429 does not eat the turn", () => {
+    const yaml = buildHermesConfigYaml({ model: "openai/gpt-5.5", mcpServers: [] });
+    expect(yaml).toContain("api_max_retries: 8");
+    expect(yaml).toContain("intent_ack_continuation: true");
   });
 });
 

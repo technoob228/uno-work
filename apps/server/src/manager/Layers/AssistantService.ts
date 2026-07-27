@@ -22,7 +22,12 @@ import { OrchestrationEngineService } from "../../orchestration/Services/Orchest
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerCapabilityTokenRepository } from "../../persistence/Services/ManagerCapabilityTokens.ts";
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
-import { getAutoBootstrapDefaultModelSelection } from "../../serverRuntimeStartup.ts";
+import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import {
+  FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION,
+  isUnusableAutoBootstrapDefault,
+  selectAutoBootstrapModelSelection,
+} from "../../provider/autoBootstrapModelSelection.ts";
 import {
   ManagerAssistantError,
   ManagerAssistantService,
@@ -151,6 +156,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
   const connectorRepository = yield* ManagerConnectorRepository;
   const telegramService = yield* ManagerTelegramService;
   const slackService = yield* ManagerSlackService;
+  const providerRegistry = yield* ProviderRegistry;
 
   const toAssistantError = (detail: string) => (cause: unknown) =>
     new ManagerAssistantError({ detail, cause });
@@ -273,18 +279,49 @@ const makeManagerAssistantService = Effect.gen(function* () {
       }
 
       if (Option.isNone(registeredProject)) {
+        // Start the assistant on a harness this machine can actually run —
+        // threads it spawns without an explicit model inherit this default.
+        const bootProviders = yield* providerRegistry.getProviders;
         yield* orchestrationEngine.dispatch({
           type: "project.create",
           commandId: CommandId.make(`assistant-ensure:${crypto.randomUUID()}`),
           projectId,
           title,
           workspaceRoot,
-          defaultModelSelection: getAutoBootstrapDefaultModelSelection(),
+          defaultModelSelection:
+            selectAutoBootstrapModelSelection(bootProviders) ??
+            FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION,
           createdAt: new Date().toISOString(),
         });
         yield* Effect.logInfo("assistant project created").pipe(
           Effect.annotateLogs({ projectId, workspaceRoot }),
         );
+      } else {
+        // An assistant created before its harnesses were probed can be pinned
+        // to a default the machine cannot run — every thread spawned without
+        // an explicit model then fails. Re-point it, but only while it still
+        // carries the server's own fallback: a default the user picked is
+        // never overwritten.
+        const providers = yield* providerRegistry.getProviders;
+        if (
+          isUnusableAutoBootstrapDefault(
+            registeredProject.value.defaultModelSelection ?? null,
+            providers,
+          )
+        ) {
+          const repaired = selectAutoBootstrapModelSelection(providers);
+          if (repaired !== null) {
+            yield* orchestrationEngine.dispatch({
+              type: "project.meta.update",
+              commandId: CommandId.make(`assistant-default-model:${crypto.randomUUID()}`),
+              projectId,
+              defaultModelSelection: repaired,
+            });
+            yield* Effect.logInfo("assistant default model re-pointed to a usable harness").pipe(
+              Effect.annotateLogs({ projectId, ...repaired }),
+            );
+          }
+        }
       }
     }).pipe(
       Effect.catch((cause) =>

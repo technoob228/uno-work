@@ -33,7 +33,12 @@ import { ServerSettingsService } from "./serverSettings.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
+import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper.ts";
+import {
+  FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION,
+  selectAutoBootstrapModelSelection,
+} from "./provider/autoBootstrapModelSelection.ts";
 import { ReminderScheduler } from "./reminders/Services/ReminderScheduler.ts";
 import {
   formatHeadlessServeOutput,
@@ -155,9 +160,20 @@ export const launchStartupHeartbeat = recordStartupHeartbeat.pipe(
   Effect.asVoid,
 );
 
-export const getAutoBootstrapDefaultModelSelection = (): ModelSelection => ({
-  instanceId: ProviderInstanceId.make("codex"),
-  model: DEFAULT_MODEL,
+/**
+ * Default model for projects the server creates on its own. Follows what is
+ * actually installed and authenticated on this machine — see
+ * {@link selectAutoBootstrapModelSelection}. Falls back to the historical
+ * codex pair when the provider snapshot is unusable or not probed yet.
+ */
+export const getAutoBootstrapDefaultModelSelection: Effect.Effect<
+  ModelSelection,
+  never,
+  ProviderRegistry
+> = Effect.gen(function* () {
+  const providerRegistry = yield* ProviderRegistry;
+  const providers = yield* providerRegistry.getProviders;
+  return selectAutoBootstrapModelSelection(providers) ?? FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION;
 });
 
 export const resolveWelcomeBase = Effect.gen(function* () {
@@ -192,7 +208,7 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
         const createdAt = new Date().toISOString();
         nextProjectId = ProjectId.make(crypto.randomUUID());
         const bootstrapProjectTitle = path.basename(serverConfig.cwd) || "project";
-        nextProjectDefaultModelSelection = getAutoBootstrapDefaultModelSelection();
+        nextProjectDefaultModelSelection = yield* getAutoBootstrapDefaultModelSelection;
         yield* orchestrationEngine.dispatch({
           type: "project.create",
           commandId: CommandId.make(crypto.randomUUID()),
@@ -205,7 +221,8 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
       } else {
         nextProjectId = existingProject.value.id;
         nextProjectDefaultModelSelection =
-          existingProject.value.defaultModelSelection ?? getAutoBootstrapDefaultModelSelection();
+          existingProject.value.defaultModelSelection ??
+          (yield* getAutoBootstrapDefaultModelSelection);
       }
 
       const existingThreadId =

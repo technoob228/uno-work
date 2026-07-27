@@ -58,7 +58,7 @@ import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnap
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import { RepositoryIdentityResolverLive } from "./project/Layers/RepositoryIdentityResolver.ts";
-import { getAutoBootstrapDefaultModelSelection } from "./serverRuntimeStartup.ts";
+import { FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION } from "./provider/autoBootstrapModelSelection.ts";
 import {
   clearPersistedServerRuntimeState,
   readPersistedServerRuntimeState,
@@ -1060,7 +1060,10 @@ const projectAddCommand = Command.make("add", {
           projectId,
           title,
           workspaceRoot,
-          defaultModelSelection: getAutoBootstrapDefaultModelSelection(),
+          // The offline CLI runtime deliberately has no provider stack (no
+          // probes, no spawns), so it cannot ask what is authenticated here —
+          // it uses the plain fallback and the user picks a model in the app.
+          defaultModelSelection: FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION,
           createdAt: new Date().toISOString(),
         });
         return `Added project ${projectId} (${title}) at ${workspaceRoot}.`;
