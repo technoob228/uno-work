@@ -1,9 +1,22 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { DEFAULT_MODEL, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_MODEL,
+  ProjectId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProvider,
+  type ServerProviderAuthStatus,
+  ThreadId,
+} from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Option, Ref, Stream } from "effect";
 
 import { ServerConfig } from "./config.ts";
+import {
+  ProviderRegistry,
+  type ProviderRegistryShape,
+} from "./provider/Services/ProviderRegistry.ts";
+import { FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION } from "./provider/autoBootstrapModelSelection.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -19,12 +32,75 @@ import {
   ServerRuntimeStartupError,
 } from "./serverRuntimeStartup.ts";
 
-it("uses the canonical Codex default for auto-bootstrapped model selection", () => {
-  assert.deepStrictEqual(getAutoBootstrapDefaultModelSelection(), {
-    instanceId: ProviderInstanceId.make("codex"),
-    model: DEFAULT_MODEL,
-  });
+const makeProviderSnapshot = (input: {
+  readonly instanceId: string;
+  readonly driver: string;
+  readonly authStatus: ServerProviderAuthStatus;
+  readonly models: ReadonlyArray<string>;
+}): ServerProvider => ({
+  instanceId: ProviderInstanceId.make(input.instanceId),
+  driver: ProviderDriverKind.make(input.driver),
+  enabled: true,
+  installed: true,
+  version: "1.0.0",
+  status: "ready",
+  auth: { status: input.authStatus },
+  checkedAt: "2026-01-01T00:00:00.000Z",
+  models: input.models.map((slug) => ({
+    slug,
+    name: slug,
+    isCustom: false,
+    capabilities: null,
+  })),
+  slashCommands: [],
+  skills: [],
 });
+
+/** Stub registry: `providers` is what the machine reports as configured. */
+const provideProviderRegistry = (providers: ReadonlyArray<ServerProvider>) =>
+  Effect.provideService(ProviderRegistry, {
+    getProviders: Effect.succeed(providers),
+    refresh: () => Effect.succeed(providers),
+    refreshInstance: () => Effect.succeed(providers),
+    streamChanges: Stream.empty,
+  } satisfies ProviderRegistryShape);
+
+it.effect("falls back to the canonical Codex default when nothing is authenticated", () =>
+  Effect.gen(function* () {
+    const selection = yield* getAutoBootstrapDefaultModelSelection.pipe(
+      provideProviderRegistry([]),
+    );
+    assert.deepStrictEqual(selection, {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: DEFAULT_MODEL,
+    });
+  }),
+);
+
+it.effect("prefers a harness that is actually authenticated on this machine", () =>
+  Effect.gen(function* () {
+    const selection = yield* getAutoBootstrapDefaultModelSelection.pipe(
+      provideProviderRegistry([
+        makeProviderSnapshot({
+          instanceId: "codex",
+          driver: "codex",
+          authStatus: "unauthenticated",
+          models: ["gpt-5.4"],
+        }),
+        makeProviderSnapshot({
+          instanceId: "claudeAgent",
+          driver: "claude",
+          authStatus: "authenticated",
+          models: ["claude-sonnet-4-6"],
+        }),
+      ]),
+    );
+    assert.deepStrictEqual(selection, {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "claude-sonnet-4-6",
+    });
+  }),
+);
 
 it.effect("enqueueCommand waits for readiness and then drains queued work", () =>
   Effect.scoped(
@@ -142,7 +218,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and threa
               id: bootstrapProjectId,
               title: "Startup Project",
               workspaceRoot: "/tmp/startup-project",
-              defaultModelSelection: getAutoBootstrapDefaultModelSelection(),
+              defaultModelSelection: FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION,
               scripts: [],
               createdAt: "2026-01-01T00:00:00.000Z",
               updatedAt: "2026-01-01T00:00:00.000Z",
@@ -163,6 +239,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and threa
           ),
         streamDomainEvents: Stream.empty,
       } satisfies OrchestrationEngineShape),
+      provideProviderRegistry([]),
       Effect.provide(NodeServices.layer),
     );
 
@@ -203,6 +280,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when 
           ),
         streamDomainEvents: Stream.empty,
       } satisfies OrchestrationEngineShape),
+      provideProviderRegistry([]),
       Effect.provide(NodeServices.layer),
     );
 
