@@ -98,7 +98,11 @@ const readBody = async (response: Response): Promise<unknown> => {
   }
 };
 
+/** Narrow fetch signature — Bun's global type carries an extra `preconnect`. */
+export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
 const fetchWithTimeout = (
+  fetchImpl: FetchLike,
   url: string,
   init: RequestInit,
   timeoutMs: number,
@@ -108,7 +112,7 @@ const fetchWithTimeout = (
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const response = yield* Effect.tryPromise({
-      try: () => fetch(url, { ...init, signal: controller.signal }),
+      try: () => fetchImpl(url, { ...init, signal: controller.signal }),
       catch: (cause) =>
         new DictationRpcError({
           kind: "gateway",
@@ -204,6 +208,7 @@ const transcribeAudio = (input: {
   readonly audio: Uint8Array;
   readonly mimeType: string;
   readonly language: string;
+  readonly fetchImpl: FetchLike;
 }): Effect.Effect<string, DictationRpcError> =>
   Effect.gen(function* () {
     const form = new FormData();
@@ -221,6 +226,7 @@ const transcribeAudio = (input: {
     }
 
     const { body } = yield* fetchWithTimeout(
+      input.fetchImpl,
       gatewayUrl("/audio/transcriptions"),
       { method: "POST", headers: { Authorization: `Bearer ${input.apiKey}` }, body: form },
       TRANSCRIBE_TIMEOUT_MS,
@@ -241,9 +247,11 @@ const cleanupTranscript = (input: {
   readonly glossary: readonly string[];
   readonly language: string;
   readonly projectName: string | undefined;
+  readonly fetchImpl: FetchLike;
 }): Effect.Effect<string, DictationRpcError> =>
   Effect.gen(function* () {
     const { body } = yield* fetchWithTimeout(
+      input.fetchImpl,
       gatewayUrl("/chat/completions"),
       {
         method: "POST",
@@ -320,11 +328,19 @@ const readDictationConfig = Effect.gen(function* () {
   return { apiKey, dictation } as const;
 });
 
-export const transcribeDictation = (
-  input: DictationTranscribeInput,
-): Effect.Effect<DictationTranscribeResult, DictationRpcError, ServerSettingsService> =>
+/**
+ * The whole pipeline with its two collaborators (settings, network) passed in,
+ * so tests can drive both gateway hops without a live gateway.
+ */
+export const runDictationPipeline = (options: {
+  readonly apiKey: string;
+  readonly dictation: DictationSettings;
+  readonly input: DictationTranscribeInput;
+  readonly fetchImpl?: FetchLike;
+}): Effect.Effect<DictationTranscribeResult, DictationRpcError> =>
   Effect.gen(function* () {
-    const { apiKey, dictation } = yield* readDictationConfig;
+    const { apiKey, dictation, input } = options;
+    const fetchImpl = options.fetchImpl ?? fetch;
     const audio = yield* decodeAudio(input.audioBase64);
 
     const transcribeStartedAt = Date.now();
@@ -333,6 +349,7 @@ export const transcribeDictation = (
       audio,
       mimeType: input.mimeType,
       language: dictation.language,
+      fetchImpl,
     });
     const transcribedAt = Date.now();
     const transcribeMs = transcribedAt - transcribeStartedAt;
@@ -365,6 +382,7 @@ export const transcribeDictation = (
         input.projectPath !== undefined && input.projectPath.length > 0
           ? basename(input.projectPath)
           : undefined,
+      fetchImpl,
     }).pipe(
       Effect.map((text) => ({ ok: true, text }) as const),
       Effect.catch((error: DictationRpcError) =>
@@ -398,3 +416,10 @@ export const transcribeDictation = (
       cleanupMs,
     } satisfies DictationTranscribeResult;
   });
+
+export const transcribeDictation = (
+  input: DictationTranscribeInput,
+): Effect.Effect<DictationTranscribeResult, DictationRpcError, ServerSettingsService> =>
+  Effect.flatMap(readDictationConfig, ({ apiKey, dictation }) =>
+    runDictationPipeline({ apiKey, dictation, input }),
+  );
