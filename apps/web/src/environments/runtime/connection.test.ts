@@ -13,6 +13,7 @@ function createTestClient() {
 
   const client = {
     dispose: vi.fn(async () => undefined),
+    isConnectionHealthy: vi.fn(() => true),
     reconnect: vi.fn(async () => {
       shellResubscribe?.();
     }),
@@ -163,6 +164,80 @@ describe("createEnvironmentConnection", () => {
       expect.objectContaining({ snapshotSequence: 1 }),
       environmentId,
     );
+
+    await connection.dispose();
+  });
+
+  it("marks an environment synchronized only after its shell snapshot arrives", async () => {
+    const environmentId = EnvironmentId.make("env-1");
+    const { client, emitShellSnapshot } = createTestClient();
+    const onSynchronized = vi.fn();
+
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-1",
+        label: "Remote env",
+        source: "manual",
+        target: {
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
+        },
+        environmentId,
+      },
+      client,
+      applyShellEvent: vi.fn(),
+      syncShellSnapshot: vi.fn(),
+      applyTerminalEvent: vi.fn(),
+      onSynchronized,
+    });
+
+    await connection.ensureBootstrapped();
+    expect(onSynchronized).toHaveBeenCalledTimes(1);
+    expect(connection.isConnectionHealthy()).toBe(true);
+
+    emitShellSnapshot(2);
+    expect(onSynchronized).toHaveBeenCalledTimes(2);
+
+    await connection.dispose();
+  });
+
+  it("marks an environment as synchronizing while a shell subscription is being restored", async () => {
+    const environmentId = EnvironmentId.make("env-1");
+    const { client, emitShellSnapshot } = createTestClient();
+    const onSynchronizing = vi.fn();
+    const onSynchronized = vi.fn();
+
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-1",
+        label: "Remote env",
+        source: "manual",
+        target: {
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
+        },
+        environmentId,
+      },
+      client,
+      applyShellEvent: vi.fn(),
+      syncShellSnapshot: vi.fn(),
+      applyTerminalEvent: vi.fn(),
+      onSynchronizing,
+      onSynchronized,
+    });
+
+    await connection.ensureBootstrapped();
+    expect(onSynchronized).toHaveBeenCalledTimes(1);
+
+    const reconnect = connection.reconnect();
+    expect(onSynchronizing).toHaveBeenCalledTimes(1);
+    expect(onSynchronized).toHaveBeenCalledTimes(1);
+
+    emitShellSnapshot(2);
+    await reconnect;
+    expect(onSynchronized).toHaveBeenCalledTimes(2);
 
     await connection.dispose();
   });

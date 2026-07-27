@@ -25,6 +25,18 @@ export interface WsProtocolCloseContext {
 export interface WsProtocolLifecycleHandlers {
   readonly getConnectionLabel?: () => string | null;
   readonly getVersionMismatchHint?: () => string | null;
+  /**
+   * Whether this socket owns the app-wide connection indicator. Saved remote
+   * environments keep their own runtime state and must not overwrite the
+   * primary environment's status.
+   */
+  readonly trackGlobalConnectionState?: boolean;
+  /**
+   * Raw WebSocket open is not sufficient for environment connections: their
+   * shell subscription still has to deliver a fresh snapshot. Those callers
+   * mark the connection ready after synchronization instead.
+   */
+  readonly markConnectedOnOpen?: boolean;
   readonly isCloseIntentional?: () => boolean;
   readonly isActive?: () => boolean;
   readonly onAttempt?: (socketUrl: string) => void;
@@ -92,21 +104,28 @@ type ComposedWsProtocolLifecycleHandlers = Required<
 function defaultLifecycleHandlers(
   handlers?: WsProtocolLifecycleHandlers,
 ): ComposedWsProtocolLifecycleHandlers {
+  const tracksGlobalConnectionState = handlers?.trackGlobalConnectionState !== false;
   return {
     isActive: () => true,
     onAttempt: (socketUrl) => {
-      recordWsConnectionAttempt(socketUrl, resolveConnectionMetadata(handlers));
+      if (tracksGlobalConnectionState) {
+        recordWsConnectionAttempt(socketUrl, resolveConnectionMetadata(handlers));
+      }
     },
     onOpen: () => {
-      recordWsConnectionOpened(resolveConnectionMetadata(handlers));
+      if (tracksGlobalConnectionState && handlers?.markConnectedOnOpen !== false) {
+        recordWsConnectionOpened(resolveConnectionMetadata(handlers));
+      }
     },
     onError: (message) => {
       clearAllTrackedRpcRequests();
-      recordWsConnectionErrored(message, resolveConnectionMetadata(handlers));
+      if (tracksGlobalConnectionState) {
+        recordWsConnectionErrored(message, resolveConnectionMetadata(handlers));
+      }
     },
     onClose: (details, context) => {
       clearAllTrackedRpcRequests();
-      if (context.intentional) {
+      if (context.intentional || !tracksGlobalConnectionState) {
         return;
       }
       recordWsConnectionClosed(details, resolveConnectionMetadata(handlers));
@@ -305,10 +324,12 @@ export function createWsRpcProtocolLayer(
       onPingTimeout: Effect.sync(() => {
         if (lifecycle.isActive()) {
           clearAllTrackedRpcRequests();
-          recordWsConnectionErrored(
-            "WebSocket heartbeat timed out.",
-            resolveConnectionMetadata(handlers),
-          );
+          if (handlers?.trackGlobalConnectionState !== false) {
+            recordWsConnectionErrored(
+              "WebSocket heartbeat timed out.",
+              resolveConnectionMetadata(handlers),
+            );
+          }
           handlers?.onHeartbeatTimeout?.();
         }
       }),

@@ -35,6 +35,25 @@ const baseRemoteStatus: VcsStatusRemoteResult = {
 };
 
 describe("wsRpcClient", () => {
+  it("opts idempotent orchestration commands into connection-loss replay", async () => {
+    const request = vi.fn(async () => ({ sequence: 1 }));
+    const transport = {
+      dispose: vi.fn(async () => undefined),
+      isConnectionHealthy: vi.fn(() => true),
+      reconnect: vi.fn(async () => undefined),
+      request,
+      requestStream: vi.fn(),
+      subscribe: vi.fn(() => () => undefined),
+    };
+
+    const client = createWsRpcClient(transport as unknown as WsTransport);
+    await client.orchestration.dispatchCommand({} as never);
+
+    expect(request).toHaveBeenCalledWith(expect.any(Function), {
+      retryOnConnectionLoss: true,
+    });
+  });
+
   it("reduces vcs status stream events into flat status snapshots", () => {
     const subscribe = vi.fn(<TValue>(_connect: unknown, listener: (value: TValue) => void) => {
       for (const event of [

@@ -189,6 +189,7 @@ describe("retainThreadDetailSubscription", () => {
         knownEnvironment: input.knownEnvironment,
         client: input.client,
         ensureBootstrapped: vi.fn(async () => undefined),
+        isConnectionHealthy: vi.fn(() => true),
         reconnect,
         dispose: vi.fn(async () => undefined),
       };
@@ -382,7 +383,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("reconnects environment streams when the browser resumes from the background", async () => {
+  it("keeps a healthy connection on a brief background transition", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
     const windowTarget = new EventTarget();
@@ -407,6 +408,14 @@ describe("retainThreadDetailSubscription", () => {
     visibilityState = "hidden";
     documentTarget.dispatchEvent(new Event("visibilitychange"));
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    visibilityState = "visible";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    visibilityState = "hidden";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(15_000);
 
     visibilityState = "visible";
     documentTarget.dispatchEvent(new Event("visibilitychange"));

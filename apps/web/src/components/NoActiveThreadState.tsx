@@ -39,6 +39,7 @@ import {
 import { buildThreadRouteParams } from "../threadRoutes";
 import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
+import { formatElapsedAgoLabel } from "../timestampFormat";
 
 export function NoActiveThreadState() {
   const navigate = useNavigate();
@@ -53,12 +54,19 @@ export function NoActiveThreadState() {
     selectedEnvId ? store.byId[selectedEnvId] : undefined,
   );
 
-  const connectionState = runtime?.connectionState;
+  const connectionState = runtime?.connectionState ?? (registryRecord ? "disconnected" : undefined);
+  const isEnvironmentUnavailable =
+    registryRecord != null && connectionState !== undefined && connectionState !== "connected";
   const canReconnect =
     selectedEnvId != null &&
-    registryRecord != null &&
+    isEnvironmentUnavailable &&
     (connectionState === "disconnected" || connectionState === "error");
+  const isAutomaticallyReconnecting =
+    connectionState === "connecting" || connectionState === "reconnecting";
   const envName = runtime?.descriptor?.label ?? registryRecord?.label ?? "this environment";
+  const cachedChatStatus = runtime?.lastSynchronizedAt
+    ? `Cached chats were last synchronized ${formatElapsedAgoLabel(runtime.lastSynchronizedAt)}.`
+    : "No fresh chat snapshot has been received yet.";
 
   const { reconnect, reconnectingId } = useReconnectEnvironment();
   const isReconnecting = selectedEnvId != null && reconnectingId === selectedEnvId;
@@ -145,24 +153,41 @@ export function NoActiveThreadState() {
 
         <Empty className="flex-1">
           <div className="flex w-full max-w-lg flex-col items-center rounded-3xl border border-border/55 bg-card/20 px-8 py-12 shadow-sm/5">
-            {canReconnect ? (
+            {isEnvironmentUnavailable ? (
               <>
                 <EmptyHeader className="max-w-none">
                   <EmptyTitle className="text-foreground text-xl">
-                    Environment disconnected
+                    {isAutomaticallyReconnecting
+                      ? "Synchronizing environment"
+                      : "Environment disconnected"}
                   </EmptyTitle>
                   <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-                    Reconnect{" "}
-                    <span className="font-medium text-foreground">&ldquo;{envName}&rdquo;</span> to
-                    load threads.
+                    <span className="font-medium text-foreground">&ldquo;{envName}&rdquo;</span>{" "}
+                    {isAutomaticallyReconnecting
+                      ? "is reconnecting and verifying its current chat state."
+                      : "must reconnect before its threads can be trusted."}{" "}
+                    {cachedChatStatus}
                   </EmptyDescription>
                 </EmptyHeader>
-                <EmptyContent className="mt-6">
-                  <Button onClick={onReconnect} disabled={isReconnecting} size="sm">
-                    <RefreshCwIcon className={cn("size-4", isReconnecting && "animate-spin")} />
-                    {isReconnecting ? "Reconnecting..." : "Reconnect"}
-                  </Button>
-                </EmptyContent>
+                {canReconnect || isAutomaticallyReconnecting ? (
+                  <EmptyContent className="mt-6">
+                    <Button
+                      onClick={onReconnect}
+                      disabled={isReconnecting || isAutomaticallyReconnecting}
+                      size="sm"
+                    >
+                      <RefreshCwIcon
+                        className={cn(
+                          "size-4",
+                          (isReconnecting || isAutomaticallyReconnecting) && "animate-spin",
+                        )}
+                      />
+                      {isReconnecting || isAutomaticallyReconnecting
+                        ? "Synchronizing..."
+                        : "Reconnect"}
+                    </Button>
+                  </EmptyContent>
+                ) : null}
               </>
             ) : projectsInEnv.length === 0 ? (
               <>

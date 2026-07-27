@@ -73,6 +73,7 @@ import { useTerminalStateStore } from "~/terminalStateStore";
 import { useUiStateStore } from "~/uiStateStore";
 import type { WsProtocolCloseContext } from "../../rpc/protocol";
 import { getServerConfig } from "../../rpc/serverState";
+import { recordWsConnectionOpened } from "../../rpc/wsConnectionState";
 import { WsTransport } from "../../rpc/wsTransport";
 import { createWsRpcClient, type WsRpcClient } from "../../rpc/wsRpcClient";
 import { appendVersionMismatchHint, resolveServerConfigVersionMismatch } from "../../versionSkew";
@@ -147,6 +148,7 @@ let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
 const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 15 * 60 * 1000;
 const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
 const BROWSER_RESUME_RECONNECT_COOLDOWN_MS = 2_000;
+const BROWSER_RESUME_FORCE_RECONNECT_AFTER_MS = 15_000;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
 const NOOP = () => undefined;
 const SSH_HTTP_STATUS_RE = /^\[ssh_http:(\d+)\]\s/u;
@@ -871,8 +873,10 @@ async function issueDesktopSshBearerSession(
 }
 
 function setRuntimeConnecting(environmentId: EnvironmentId) {
+  const runtime = useSavedEnvironmentRuntimeStore.getState().byId?.[environmentId];
   useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
-    connectionState: "connecting",
+    connectionState: runtime?.lastSynchronizedAt ? "reconnecting" : "connecting",
+    connectedAt: null,
     lastError: null,
     lastErrorAt: null,
   });
@@ -881,6 +885,7 @@ function setRuntimeConnecting(environmentId: EnvironmentId) {
 function setRuntimeReconnecting(environmentId: EnvironmentId, lastError?: string | null) {
   useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
     connectionState: "reconnecting",
+    connectedAt: null,
     ...(lastError === undefined ? {} : { lastError, lastErrorAt: lastError ? isoNow() : null }),
   });
 }
@@ -892,6 +897,7 @@ function setRuntimeConnected(environmentId: EnvironmentId) {
     authState: "authenticated",
     connectedAt,
     disconnectedAt: null,
+    lastSynchronizedAt: connectedAt,
     lastError: null,
     lastErrorAt: null,
   });
@@ -901,6 +907,7 @@ function setRuntimeConnected(environmentId: EnvironmentId) {
 function setRuntimeDisconnected(environmentId: EnvironmentId, reason?: string | null) {
   useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
     connectionState: "disconnected",
+    connectedAt: null,
     disconnectedAt: isoNow(),
     ...(reason && reason.trim().length > 0
       ? {
@@ -914,6 +921,7 @@ function setRuntimeDisconnected(environmentId: EnvironmentId, reason?: string | 
 function setRuntimeError(environmentId: EnvironmentId, error: unknown) {
   useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
     connectionState: "error",
+    connectedAt: null,
     ...getRuntimeErrorFields(error),
   });
 }
@@ -1190,6 +1198,9 @@ function createPrimaryEnvironmentClient(
       getConnectionLabel: () => connectionLabel,
       getVersionMismatchHint: () =>
         resolveServerConfigVersionMismatch(getServerConfig())?.hint ?? null,
+      // The raw socket can be open while shell/thread subscriptions are still
+      // stale. The environment connection marks it connected after snapshot.
+      markConnectedOnOpen: false,
     }),
   );
 }
@@ -1233,11 +1244,12 @@ function createSavedEnvironmentClient(
           resolveServerConfigVersionMismatch(
             useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
           )?.hint ?? null,
+        // Saved environments expose per-environment runtime state. Letting
+        // them mutate the global atom makes one remote socket masquerade as
+        // the primary connection (or disconnect it).
+        trackGlobalConnectionState: false,
         onAttempt: () => {
           setRuntimeConnecting(environmentId);
-        },
-        onOpen: () => {
-          setRuntimeConnected(environmentId);
         },
         onError: (message: string) => {
           const mismatch = resolveServerConfigVersionMismatch(
@@ -1245,6 +1257,7 @@ function createSavedEnvironmentClient(
           );
           useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
             connectionState: "error",
+            connectedAt: null,
             lastError: appendVersionMismatchHint(message, mismatch),
             lastErrorAt: isoNow(),
           });
@@ -1255,6 +1268,7 @@ function createSavedEnvironmentClient(
           );
           useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
             connectionState: "error",
+            connectedAt: null,
             lastError: appendVersionMismatchHint("WebSocket heartbeat timed out.", mismatch),
             lastErrorAt: isoNow(),
           });
@@ -1364,6 +1378,13 @@ function createPrimaryEnvironmentConnection(): EnvironmentConnection {
       kind: "primary",
       knownEnvironment,
       client: createPrimaryEnvironmentClient(knownEnvironment),
+      onSynchronized: () => {
+        const mismatch = resolveServerConfigVersionMismatch(getServerConfig());
+        recordWsConnectionOpened({
+          connectionLabel: knownEnvironment.label,
+          versionMismatchHint: mismatch?.hint ?? null,
+        });
+      },
       ...createEnvironmentConnectionHandlers(),
     }),
   );
@@ -1459,6 +1480,12 @@ async function ensureSavedEnvironmentConnection(
           useSavedEnvironmentRuntimeStore.getState().patch(activeRecord.environmentId, {
             descriptor: payload.environment,
           });
+        },
+        onSynchronizing: () => {
+          setRuntimeReconnecting(activeRecord.environmentId);
+        },
+        onSynchronized: () => {
+          setRuntimeConnected(activeRecord.environmentId);
         },
         ...createEnvironmentConnectionHandlers(),
       });
@@ -1557,7 +1584,10 @@ function stopActiveService() {
   activeService = null;
 }
 
-function reconnectEnvironmentConnectionsAfterBrowserResume(reason: string): void {
+function reconnectEnvironmentConnectionsAfterBrowserResume(
+  reason: string,
+  options: { readonly force: boolean },
+): void {
   const now = Date.now();
   if (now - lastBrowserResumeReconnectAt < BROWSER_RESUME_RECONNECT_COOLDOWN_MS) {
     return;
@@ -1573,6 +1603,10 @@ function reconnectEnvironmentConnectionsAfterBrowserResume(reason: string): void
       connection.kind === "saved"
         ? useSavedEnvironmentRuntimeStore.getState().byId[connection.environmentId]?.connectionState
         : null;
+    const runtimeReportsHealthy = runtimeState === null || runtimeState === "connected";
+    if (!options.force && connection.isConnectionHealthy() && runtimeReportsHealthy) {
+      continue;
+    }
     if (connection.kind === "saved" && runtimeState !== "connected") {
       void healSavedEnvironment(connection.environmentId, `browser-resume:${reason}`, {
         immediate: true,
@@ -1653,15 +1687,22 @@ function subscribeBrowserResumeReconnects(): () => void {
       return;
     }
     if (document.visibilityState === "visible" && lastBrowserHiddenAt !== null) {
+      const hiddenDurationMs = Date.now() - lastBrowserHiddenAt;
       lastBrowserHiddenAt = null;
-      reconnectEnvironmentConnectionsAfterBrowserResume("visibilitychange");
+      reconnectEnvironmentConnectionsAfterBrowserResume("visibilitychange", {
+        force: hiddenDurationMs >= BROWSER_RESUME_FORCE_RECONNECT_AFTER_MS,
+      });
     }
   };
 
   const handlePageShow = (event: PageTransitionEvent) => {
     if (event.persisted || lastBrowserHiddenAt !== null) {
+      const hiddenDurationMs =
+        lastBrowserHiddenAt === null ? 0 : Math.max(0, Date.now() - lastBrowserHiddenAt);
       lastBrowserHiddenAt = null;
-      reconnectEnvironmentConnectionsAfterBrowserResume("pageshow");
+      reconnectEnvironmentConnectionsAfterBrowserResume("pageshow", {
+        force: event.persisted || hiddenDurationMs >= BROWSER_RESUME_FORCE_RECONNECT_AFTER_MS,
+      });
     }
   };
 

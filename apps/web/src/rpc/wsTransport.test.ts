@@ -689,6 +689,132 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("replays idempotent unary requests after an ambiguous connection loss", async () => {
+    const transport = createTransport("ws://localhost:3020");
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const firstSocket = getSocket();
+    firstSocket.open();
+
+    const requestPromise = transport.request(
+      (client) =>
+        client[WS_METHODS.serverUpsertKeybinding]({
+          command: "terminal.toggle",
+          key: "ctrl+k",
+        }),
+      { retryOnConnectionLoss: true },
+    );
+
+    await waitFor(() => {
+      expect(firstSocket.sent).toHaveLength(1);
+    });
+
+    firstSocket.close(1006, "ack lost");
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(2);
+    });
+    const secondSocket = getSocket();
+    secondSocket.open();
+
+    await waitFor(() => {
+      expect(secondSocket.sent).toHaveLength(1);
+    });
+    const replayedRequest = JSON.parse(secondSocket.sent[0] ?? "{}") as { id: string };
+    secondSocket.serverMessage(
+      JSON.stringify({
+        _tag: "Exit",
+        requestId: replayedRequest.id,
+        exit: {
+          _tag: "Success",
+          value: {
+            keybindings: [],
+            issues: [],
+          },
+        },
+      }),
+    );
+
+    await expect(requestPromise).resolves.toEqual({ keybindings: [], issues: [] });
+    await transport.dispose();
+  });
+
+  it("reuses an explicit resume reconnect when replaying an interrupted request", async () => {
+    const transport = createTransport("ws://localhost:3020");
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    const firstSocket = getSocket();
+    firstSocket.open();
+
+    const requestPromise = transport.request(
+      (client) =>
+        client[WS_METHODS.serverUpsertKeybinding]({
+          command: "terminal.toggle",
+          key: "ctrl+k",
+        }),
+      { retryOnConnectionLoss: true },
+    );
+    await waitFor(() => {
+      expect(firstSocket.sent).toHaveLength(1);
+    });
+
+    await transport.reconnect();
+    await waitFor(() => {
+      expect(sockets).toHaveLength(2);
+    });
+    const resumedSocket = getSocket();
+    resumedSocket.open();
+
+    await waitFor(() => {
+      expect(resumedSocket.sent).toHaveLength(1);
+    });
+    expect(sockets).toHaveLength(2);
+
+    const replayedRequest = JSON.parse(resumedSocket.sent[0] ?? "{}") as { id: string };
+    resumedSocket.serverMessage(
+      JSON.stringify({
+        _tag: "Exit",
+        requestId: replayedRequest.id,
+        exit: {
+          _tag: "Success",
+          value: {
+            keybindings: [],
+            issues: [],
+          },
+        },
+      }),
+    );
+
+    await expect(requestPromise).resolves.toEqual({ keybindings: [], issues: [] });
+    await transport.dispose();
+  });
+
+  it("does not let a saved environment mutate the global connection indicator", async () => {
+    const transport = createTransport("ws://remote.example.test", {
+      trackGlobalConnectionState: false,
+    });
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    const socket = getSocket();
+    socket.open();
+    socket.close(1006, "remote vpn reset");
+
+    expect(getWsConnectionStatus()).toMatchObject({
+      attemptCount: 0,
+      hasConnected: false,
+      phase: "idle",
+    });
+
+    await transport.dispose();
+  });
+
   it("delivers unary requests issued while the connection is known dead after auto-reconnect", async () => {
     const transport = createTransport("ws://localhost:3020");
 

@@ -55,6 +55,7 @@ interface GitRunStackedActionOptions {
 export interface WsRpcClient {
   readonly dispose: () => Promise<void>;
   readonly reconnect: () => Promise<void>;
+  readonly isConnectionHealthy: () => boolean;
   readonly terminal: {
     readonly open: RpcUnaryMethod<typeof WS_METHODS.terminalOpen>;
     readonly write: RpcUnaryMethod<typeof WS_METHODS.terminalWrite>;
@@ -160,6 +161,7 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       resetWsReconnectBackoff();
       await transport.reconnect();
     },
+    isConnectionHealthy: () => transport.isConnectionHealthy(),
     terminal: {
       open: (input) => transport.request((client) => client[WS_METHODS.terminalOpen](input)),
       write: (input) => transport.request((client) => client[WS_METHODS.terminalWrite](input)),
@@ -295,7 +297,12 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
     },
     orchestration: {
       dispatchCommand: (input) =>
-        transport.request((client) => client[ORCHESTRATION_WS_METHODS.dispatchCommand](input)),
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.dispatchCommand](input), {
+          // Every orchestration command carries commandId and the server
+          // persists command receipts, so replay after an ambiguous socket
+          // failure is safe and cannot start the same turn twice.
+          retryOnConnectionLoss: true,
+        }),
       getTurnDiff: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getTurnDiff](input)),
       getFullThreadDiff: (input) =>

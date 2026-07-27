@@ -22,6 +22,7 @@ import { useReconnectEnvironment } from "../hooks/useReconnectEnvironment";
 import { useSettings } from "../hooks/useSettings";
 import { selectSidebarThreadsForEnvironment, useStore } from "../store";
 import { buildThreadRouteParams } from "../threadRoutes";
+import { formatElapsedAgoLabel } from "../timestampFormat";
 import { useUiStateStore } from "../uiStateStore";
 import { pickThreadForEnvironmentSwitch } from "./Sidebar.logic";
 import { Menu, MenuPopup, MenuTrigger } from "./ui/menu";
@@ -83,6 +84,29 @@ function formatSavedEnvironmentMeta(input: {
   }
 }
 
+function formatSavedEnvironmentStatusMeta(input: {
+  readonly connectionState: EnvironmentConnectionState;
+  readonly lastSynchronizedAt: string | null;
+  readonly details: string;
+}): string {
+  const lastSync = input.lastSynchronizedAt
+    ? formatElapsedAgoLabel(input.lastSynchronizedAt)
+    : null;
+
+  switch (input.connectionState) {
+    case "connected":
+      return `Synced · ${input.details}`;
+    case "connecting":
+      return `Connecting · ${input.details}`;
+    case "reconnecting":
+      return `${lastSync ? `Reconnecting · cached ${lastSync}` : "Reconnecting"} · ${input.details}`;
+    case "error":
+      return `${lastSync ? `Error · cached ${lastSync}` : "Connection error"} · ${input.details}`;
+    case "disconnected":
+      return `${lastSync ? `Offline · cached ${lastSync}` : "Offline · never synced"} · ${input.details}`;
+  }
+}
+
 export function SidebarEnvSwitcher() {
   const navigate = useNavigate();
   const [addEnvOpen, setAddEnvOpen] = useState(false);
@@ -117,21 +141,27 @@ export function SidebarEnvSwitcher() {
       .map((record) => {
         const runtime = savedEnvironmentRuntimeById[record.environmentId];
         const descriptor = runtime?.descriptor;
+        const details = descriptor
+          ? formatPlatformMeta(descriptor.platform.os, descriptor.platform.arch)
+          : formatSavedEnvironmentMeta({
+              httpBaseUrl: record.httpBaseUrl,
+              ...(record.desktopSsh?.alias
+                ? {
+                    desktopSshAlias: record.desktopSsh.alias,
+                  }
+                : {}),
+            });
+        const connectionState = runtime?.connectionState ?? "disconnected";
         return {
           id: record.environmentId,
           name: descriptor?.label ?? record.label,
-          meta: descriptor
-            ? formatPlatformMeta(descriptor.platform.os, descriptor.platform.arch)
-            : formatSavedEnvironmentMeta({
-                httpBaseUrl: record.httpBaseUrl,
-                ...(record.desktopSsh?.alias
-                  ? {
-                      desktopSshAlias: record.desktopSsh.alias,
-                    }
-                  : {}),
-              }),
+          meta: formatSavedEnvironmentStatusMeta({
+            connectionState,
+            lastSynchronizedAt: runtime?.lastSynchronizedAt ?? null,
+            details,
+          }),
           kind: "custom" as const,
-          connectionState: runtime?.connectionState ?? "disconnected",
+          connectionState,
         };
       });
 

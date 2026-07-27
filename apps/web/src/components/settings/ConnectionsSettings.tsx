@@ -22,7 +22,11 @@ import { DateTime } from "effect";
 import { APP_BASE_NAME } from "../../branding";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
-import { formatElapsedDurationLabel, formatExpiresInLabel } from "../../timestampFormat";
+import {
+  formatElapsedAgoLabel,
+  formatElapsedDurationLabel,
+  formatExpiresInLabel,
+} from "../../timestampFormat";
 import { resolveDesktopPairingUrl, resolveHostedPairingUrl } from "./pairingUrls";
 import {
   SettingsPageContainer,
@@ -175,23 +179,27 @@ function getSavedBackendStatusTooltip(
   nowMs: number,
 ) {
   const connectionState = runtime?.connectionState ?? "disconnected";
+  const lastSynchronizedAt = runtime?.lastSynchronizedAt ?? null;
+  const cachedStatus = lastSynchronizedAt
+    ? `Chats last synchronized ${formatElapsedAgoLabel(lastSynchronizedAt, nowMs)}.`
+    : "No chat snapshot has been synchronized yet.";
 
   if (connectionState === "connected") {
     const connectedAt = runtime?.connectedAt ?? record.lastConnectedAt;
-    return connectedAt ? `Connected for ${formatElapsedDurationLabel(connectedAt, nowMs)}` : null;
+    return connectedAt
+      ? `Chats are current. Connected for ${formatElapsedDurationLabel(connectedAt, nowMs)}.`
+      : "Chats are current.";
   }
 
-  if (connectionState === "connecting") {
-    return null;
+  if (connectionState === "connecting" || connectionState === "reconnecting") {
+    return `${connectionState === "reconnecting" ? "Reconnecting" : "Connecting"}… ${cachedStatus}`;
   }
 
   if (connectionState === "error") {
-    return runtime?.lastError ?? "An unknown connection error occurred.";
+    return `${runtime?.lastError ?? "An unknown connection error occurred."}\n${cachedStatus}`;
   }
 
-  return record.lastConnectedAt
-    ? `Last connected at ${formatAccessTimestamp(record.lastConnectedAt)}`
-    : "Not connected yet.";
+  return cachedStatus;
 }
 
 function formatDesktopSshTarget(target: NonNullable<SavedEnvironmentRecord["desktopSsh"]>): string {
@@ -1275,12 +1283,14 @@ function SavedBackendListRow({
   const connectionState = runtime?.connectionState ?? "disconnected";
   const isConnected = connectionState === "connected";
   const isConnecting =
-    connectionState === "connecting" || reconnectingEnvironmentId === environmentId;
+    connectionState === "connecting" ||
+    connectionState === "reconnecting" ||
+    reconnectingEnvironmentId === environmentId;
   const isDisconnecting = disconnectingEnvironmentId === environmentId;
   const stateDotClassName =
     connectionState === "connected"
       ? "bg-success"
-      : connectionState === "connecting"
+      : connectionState === "connecting" || connectionState === "reconnecting"
         ? "bg-warning"
         : connectionState === "error"
           ? "bg-destructive"
@@ -1307,7 +1317,9 @@ function SavedBackendListRow({
               tooltipText={statusTooltip}
               dotClassName={stateDotClassName}
               pingClassName={
-                connectionState === "connecting" ? "bg-warning/60 duration-2000" : null
+                connectionState === "connecting" || connectionState === "reconnecting"
+                  ? "bg-warning/60 duration-2000"
+                  : null
               }
             />
             <h3 className="text-sm font-medium text-foreground">{displayLabel}</h3>

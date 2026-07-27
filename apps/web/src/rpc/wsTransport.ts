@@ -34,6 +34,11 @@ interface SubscribeOptions {
 
 interface RequestOptions {
   readonly timeout?: Option.Option<Duration.Input>;
+  /**
+   * Replays a request after a connection-shaped failure. Only use this for
+   * operations that carry a server-side idempotency key.
+   */
+  readonly retryOnConnectionLoss?: boolean;
 }
 
 export interface WsTransportOptions {
@@ -48,7 +53,8 @@ export interface WsTransportOptions {
 }
 
 const DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS = Duration.millis(250);
-const AUTO_RECOVERY_DEBOUNCE_MS = 5_000;
+const AUTO_RECOVERY_DEBOUNCE_MS = 1_000;
+const DEFAULT_CONNECTION_RETRY_LIMIT = 3;
 const MAX_UNHEALTHY_SUBSCRIPTION_RETRY_DELAY_MS = 5_000;
 const NOOP: () => void = () => undefined;
 
@@ -120,19 +126,38 @@ export class WsTransport {
 
   async request<TSuccess>(
     execute: (client: WsRpcProtocolClient) => Effect.Effect<TSuccess, Error, never>,
-    _options?: RequestOptions,
+    options?: RequestOptions,
   ): Promise<TSuccess> {
     if (this.disposed) {
       throw new Error("Transport disposed");
     }
 
-    await this.recoverBeforeRequest();
-    const session = this.session;
-    const client = await session.clientPromise;
-    try {
-      return await session.runtime.runPromise(Effect.suspend(() => execute(client)));
-    } catch (error) {
-      throw this.mapRequestError(error, session);
+    const retryLimit = options?.retryOnConnectionLoss ? DEFAULT_CONNECTION_RETRY_LIMIT : 0;
+    let retryCount = 0;
+
+    for (;;) {
+      await this.recoverBeforeRequest();
+      const session = this.session;
+      try {
+        const client = await session.clientPromise;
+        return await session.runtime.runPromise(Effect.suspend(() => execute(client)));
+      } catch (error) {
+        const mappedError = this.mapRequestError(error, session);
+        if (
+          !(mappedError instanceof TransportConnectionLostError) ||
+          retryCount >= retryLimit ||
+          this.disposed
+        ) {
+          throw mappedError;
+        }
+        retryCount += 1;
+        // An explicit reconnect (for example after laptop resume) may already
+        // have replaced this request's session. In that case replay directly
+        // on the replacement instead of tearing it down a second time.
+        if (session === this.session) {
+          await this.ensureAutoRecovery();
+        }
+      }
     }
   }
 
@@ -289,6 +314,10 @@ export class WsTransport {
 
   isHeartbeatFresh(maxAgeMs = 15_000): boolean {
     return this.lastHeartbeatPongAt > 0 && Date.now() - this.lastHeartbeatPongAt <= maxAgeMs;
+  }
+
+  isConnectionHealthy(): boolean {
+    return !this.disposed && this.connectionHealthy;
   }
 
   async dispose() {

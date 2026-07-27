@@ -74,6 +74,18 @@ describe("environment runtime catalog stores", () => {
     expect(useSavedEnvironmentRuntimeStore.getState().byId).toEqual({});
   });
 
+  it("starts saved environments without a confirmed synchronization timestamp", () => {
+    const environmentId = EnvironmentId.make("environment-1");
+
+    useSavedEnvironmentRuntimeStore.getState().ensure(environmentId);
+
+    expect(useSavedEnvironmentRuntimeStore.getState().byId[environmentId]).toMatchObject({
+      connectionState: "disconnected",
+      connectedAt: null,
+      lastSynchronizedAt: null,
+    });
+  });
+
   it("does not throw when local api lookup fails during registry persistence", async () => {
     vi.unstubAllGlobals();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});

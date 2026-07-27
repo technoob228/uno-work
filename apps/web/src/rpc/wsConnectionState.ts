@@ -6,9 +6,9 @@ import { appAtomRegistry } from "./atomRegistry";
 export type WsConnectionUiState = "connected" | "connecting" | "error" | "offline" | "reconnecting";
 export type WsReconnectPhase = "attempting" | "exhausted" | "idle" | "waiting";
 
-export const WS_RECONNECT_INITIAL_DELAY_MS = 1_000;
+export const WS_RECONNECT_INITIAL_DELAY_MS = 250;
 export const WS_RECONNECT_BACKOFF_FACTOR = 2;
-export const WS_RECONNECT_MAX_DELAY_MS = 64_000;
+export const WS_RECONNECT_MAX_DELAY_MS = 2_000;
 export const WS_RECONNECT_MAX_RETRIES = 7;
 export const WS_RECONNECT_MAX_ATTEMPTS = WS_RECONNECT_MAX_RETRIES + 1;
 

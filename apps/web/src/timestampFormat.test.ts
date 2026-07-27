@@ -1,11 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  formatElapsedAgoLabel,
   formatElapsedDurationLabel,
   formatExpiresInLabel,
   formatRelativeTimeUntilLabel,
   getTimestampFormatOptions,
 } from "./timestampFormat";
+
+describe("formatElapsedAgoLabel", () => {
+  const nowMs = new Date("2026-04-07T12:00:00.000Z").getTime();
+
+  it("does not append ago to just now", () => {
+    expect(formatElapsedAgoLabel("2026-04-07T11:59:58.000Z", nowMs)).toBe("just now");
+  });
+
+  it("formats older timestamps as elapsed time ago", () => {
+    expect(formatElapsedAgoLabel("2026-04-07T11:59:30.000Z", nowMs)).toBe("30s ago");
+  });
+});
 
 describe("getTimestampFormatOptions", () => {
   it("omits hour12 when locale formatting is requested", () => {

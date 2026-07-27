@@ -93,6 +93,11 @@ export function formatElapsedDurationLabel(isoDate: string, nowMs: number = Date
   return `${days}d`;
 }
 
+export function formatElapsedAgoLabel(isoDate: string, nowMs: number = Date.now()): string {
+  const elapsed = formatElapsedDurationLabel(isoDate, nowMs);
+  return elapsed === "just now" ? elapsed : `${elapsed} ago`;
+}
+
 /**
  * Relative time until an ISO instant (e.g. expiry). Mirrors {@link formatRelativeTime} but for future times.
  */

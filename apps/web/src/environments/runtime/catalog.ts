@@ -282,6 +282,14 @@ export interface SavedEnvironmentRuntimeState {
   readonly serverConfig: ServerConfig | null;
   readonly connectedAt: string | null;
   readonly disconnectedAt: string | null;
+  /**
+   * The last time a full orchestration shell snapshot was received.
+   *
+   * An open WebSocket alone is not enough to make cached threads current.
+   * The UI only treats an environment as synchronized after this timestamp
+   * advances.
+   */
+  readonly lastSynchronizedAt: string | null;
 }
 
 interface SavedEnvironmentRuntimeStoreState {
@@ -305,6 +313,7 @@ const DEFAULT_SAVED_ENVIRONMENT_RUNTIME_STATE: SavedEnvironmentRuntimeState = Ob
   serverConfig: null,
   connectedAt: null,
   disconnectedAt: null,
+  lastSynchronizedAt: null,
 });
 
 function createDefaultSavedEnvironmentRuntimeState(): SavedEnvironmentRuntimeState {

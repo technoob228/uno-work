@@ -16,6 +16,7 @@ export interface EnvironmentConnection {
   readonly knownEnvironment: KnownEnvironment;
   readonly client: WsRpcClient;
   readonly ensureBootstrapped: () => Promise<void>;
+  readonly isConnectionHealthy: () => boolean;
   readonly reconnect: () => Promise<void>;
   readonly dispose: () => Promise<void>;
 }
@@ -38,6 +39,8 @@ interface EnvironmentConnectionInput extends OrchestrationHandlers {
   readonly client: WsRpcClient;
   readonly refreshMetadata?: () => Promise<void>;
   readonly onConfigSnapshot?: (config: ServerConfig) => void;
+  readonly onSynchronizing?: () => void;
+  readonly onSynchronized?: () => void;
   readonly onWelcome?: (payload: ServerLifecycleWelcomePayload) => void;
 }
 
@@ -128,6 +131,7 @@ export function createEnvironmentConnection(
     (item: Parameters<Parameters<WsRpcClient["orchestration"]["subscribeShell"]>[0]>[0]) => {
       if (item.kind === "snapshot") {
         input.syncShellSnapshot(item.snapshot, environmentId);
+        input.onSynchronized?.();
         bootstrapGate.resolve();
         return;
       }
@@ -139,6 +143,7 @@ export function createEnvironmentConnection(
           return;
         }
         bootstrapGate.reset();
+        input.onSynchronizing?.();
       },
     },
   );
@@ -163,6 +168,7 @@ export function createEnvironmentConnection(
     knownEnvironment: input.knownEnvironment,
     client: input.client,
     ensureBootstrapped: () => bootstrapGate.wait(),
+    isConnectionHealthy: () => input.client.isConnectionHealthy(),
     reconnect: async () => {
       bootstrapGate.reset();
       try {
