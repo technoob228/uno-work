@@ -1,16 +1,25 @@
 /**
- * App-level assistant settings: only the environment-wide bits live here —
+ * Assistant settings that belong to an *environment* rather than to this app:
  * capability tokens for EXTERNAL brains (e.g. a Hermes sidecar over MCP).
  * Everything about a specific assistant (access, connectors, context files)
  * lives in that assistant's own settings: sidebar → Assistants → gear.
+ *
+ * Capability tokens are rows in one daemon's database, so this panel is bound
+ * to an explicit environment and says which one it is reading.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { BotIcon, KeyRoundIcon } from "lucide-react";
-import type { ManagerCapabilityTokenDescriptor, ManagerTokenId } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ManagerCapabilityTokenDescriptor,
+  ManagerTokenId,
+} from "@t3tools/contracts";
 import { isAssistantProjectId } from "@t3tools/contracts";
 
-import { listManagerTokens, ManagerApiError, revokeManagerToken } from "../../lib/managerApi";
+import { EnvironmentScopeBanner } from "../../environments/scope/EnvironmentScopeBanner";
+import { useEnvironmentScope } from "../../environments/scope/scopes";
+import { listManagerTokens, revokeManagerToken } from "../../lib/managerApi";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
@@ -20,7 +29,13 @@ const isAssistantOwnedToken = (token: ManagerCapabilityTokenDescriptor): boolean
   token.label === "assistant-inapp" ||
   isAssistantProjectId(token.label.replace(/^assistant:/, ""));
 
-export function AssistantSettingsPanel() {
+export function AssistantSettingsPanel({
+  environmentId,
+}: {
+  readonly environmentId: EnvironmentId;
+}) {
+  const scope = useEnvironmentScope(environmentId);
+  const canMutate = scope?.availability.canMutate ?? false;
   const [tokens, setTokens] = useState<ReadonlyArray<ManagerCapabilityTokenDescriptor> | null>(
     null,
   );
@@ -28,15 +43,13 @@ export function AssistantSettingsPanel() {
 
   const refresh = useCallback(async () => {
     try {
-      const result = await listManagerTokens();
+      const result = await listManagerTokens({ environmentId });
       setTokens(result.tokens);
       setError(null);
     } catch (cause) {
-      setError(
-        cause instanceof ManagerApiError ? cause.message : "Failed to load assistant tokens.",
-      );
+      setError(cause instanceof Error ? cause.message : "Failed to load assistant tokens.");
     }
-  }, []);
+  }, [environmentId]);
 
   useEffect(() => {
     void refresh();
@@ -44,9 +57,10 @@ export function AssistantSettingsPanel() {
 
   const handleRevoke = useCallback(
     (tokenId: ManagerTokenId) => {
-      void revokeManagerToken(tokenId).finally(() => void refresh());
+      if (!canMutate) return;
+      void revokeManagerToken({ environmentId, tokenId }).finally(() => void refresh());
     },
-    [refresh],
+    [canMutate, environmentId, refresh],
   );
 
   const externalTokens = (tokens ?? []).filter(
@@ -55,6 +69,7 @@ export function AssistantSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      <EnvironmentScopeBanner scope={scope} environmentId={environmentId} />
       {error ? (
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
           {error}
@@ -103,6 +118,7 @@ export function AssistantSettingsPanel() {
                 <Button
                   size="xs"
                   variant="destructive-outline"
+                  disabled={!canMutate}
                   onClick={() => handleRevoke(token.tokenId)}
                 >
                   Revoke

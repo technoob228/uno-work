@@ -23,8 +23,8 @@ import { Route as SettingsArchivedRouteImport } from './routes/settings.archived
 import { Route as ChatAssistantRouteImport } from './routes/_chat.assistant'
 import { Route as ChatAssistantIndexRouteImport } from './routes/_chat.assistant.index'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
-import { Route as ChatAssistantProjectIdRouteImport } from './routes/_chat.assistant.$projectId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
+import { Route as ChatAssistantEnvironmentIdProjectIdRouteImport } from './routes/_chat.assistant.$environmentId.$projectId'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -95,16 +95,17 @@ const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
   path: '/draft/$draftId',
   getParentRoute: () => ChatRoute,
 } as any)
-const ChatAssistantProjectIdRoute = ChatAssistantProjectIdRouteImport.update({
-  id: '/$projectId',
-  path: '/$projectId',
-  getParentRoute: () => ChatAssistantRoute,
-} as any)
 const ChatEnvironmentIdThreadIdRoute =
   ChatEnvironmentIdThreadIdRouteImport.update({
     id: '/$environmentId/$threadId',
     path: '/$environmentId/$threadId',
     getParentRoute: () => ChatRoute,
+  } as any)
+const ChatAssistantEnvironmentIdProjectIdRoute =
+  ChatAssistantEnvironmentIdProjectIdRouteImport.update({
+    id: '/$environmentId/$projectId',
+    path: '/$environmentId/$projectId',
+    getParentRoute: () => ChatAssistantRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -120,9 +121,9 @@ export interface FileRoutesByFullPath {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
-  '/assistant/$projectId': typeof ChatAssistantProjectIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/assistant/': typeof ChatAssistantIndexRoute
+  '/assistant/$environmentId/$projectId': typeof ChatAssistantEnvironmentIdProjectIdRoute
 }
 export interface FileRoutesByTo {
   '/onboarding': typeof OnboardingRoute
@@ -136,9 +137,9 @@ export interface FileRoutesByTo {
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
-  '/assistant/$projectId': typeof ChatAssistantProjectIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/assistant': typeof ChatAssistantIndexRoute
+  '/assistant/$environmentId/$projectId': typeof ChatAssistantEnvironmentIdProjectIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -155,9 +156,9 @@ export interface FileRoutesById {
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
-  '/_chat/assistant/$projectId': typeof ChatAssistantProjectIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/_chat/assistant/': typeof ChatAssistantIndexRoute
+  '/_chat/assistant/$environmentId/$projectId': typeof ChatAssistantEnvironmentIdProjectIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -174,9 +175,9 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/source-control'
     | '/$environmentId/$threadId'
-    | '/assistant/$projectId'
     | '/draft/$draftId'
     | '/assistant/'
+    | '/assistant/$environmentId/$projectId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/onboarding'
@@ -190,9 +191,9 @@ export interface FileRouteTypes {
     | '/settings/source-control'
     | '/'
     | '/$environmentId/$threadId'
-    | '/assistant/$projectId'
     | '/draft/$draftId'
     | '/assistant'
+    | '/assistant/$environmentId/$projectId'
   id:
     | '__root__'
     | '/_chat'
@@ -208,9 +209,9 @@ export interface FileRouteTypes {
     | '/settings/source-control'
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
-    | '/_chat/assistant/$projectId'
     | '/_chat/draft/$draftId'
     | '/_chat/assistant/'
+    | '/_chat/assistant/$environmentId/$projectId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -320,13 +321,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatDraftDraftIdRouteImport
       parentRoute: typeof ChatRoute
     }
-    '/_chat/assistant/$projectId': {
-      id: '/_chat/assistant/$projectId'
-      path: '/$projectId'
-      fullPath: '/assistant/$projectId'
-      preLoaderRoute: typeof ChatAssistantProjectIdRouteImport
-      parentRoute: typeof ChatAssistantRoute
-    }
     '/_chat/$environmentId/$threadId': {
       id: '/_chat/$environmentId/$threadId'
       path: '/$environmentId/$threadId'
@@ -334,17 +328,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatEnvironmentIdThreadIdRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/_chat/assistant/$environmentId/$projectId': {
+      id: '/_chat/assistant/$environmentId/$projectId'
+      path: '/$environmentId/$projectId'
+      fullPath: '/assistant/$environmentId/$projectId'
+      preLoaderRoute: typeof ChatAssistantEnvironmentIdProjectIdRouteImport
+      parentRoute: typeof ChatAssistantRoute
+    }
   }
 }
 
 interface ChatAssistantRouteChildren {
-  ChatAssistantProjectIdRoute: typeof ChatAssistantProjectIdRoute
   ChatAssistantIndexRoute: typeof ChatAssistantIndexRoute
+  ChatAssistantEnvironmentIdProjectIdRoute: typeof ChatAssistantEnvironmentIdProjectIdRoute
 }
 
 const ChatAssistantRouteChildren: ChatAssistantRouteChildren = {
-  ChatAssistantProjectIdRoute: ChatAssistantProjectIdRoute,
   ChatAssistantIndexRoute: ChatAssistantIndexRoute,
+  ChatAssistantEnvironmentIdProjectIdRoute:
+    ChatAssistantEnvironmentIdProjectIdRoute,
 }
 
 const ChatAssistantRouteWithChildren = ChatAssistantRoute._addFileChildren(

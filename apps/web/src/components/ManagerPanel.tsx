@@ -3,23 +3,29 @@
  * sidebar entry. Shows pending write proposals filed by the manager brain
  * with Approve/Deny controls, plus a short history of resolved ones.
  *
- * Chat with the manager happens through its own connectors (Telegram) for
- * now; this panel is the in-app approval and observability surface.
+ * Assistants belong to a daemon, so this lists the ones on the environment
+ * currently selected in the sidebar and says which that is. Every row links
+ * on with that environment in the path, so the settings page it opens can
+ * never drift to another machine.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { BotIcon, PlusIcon, RefreshCwIcon, Settings2Icon } from "lucide-react";
 import type {
+  EnvironmentId,
   ManagerActionProposal,
   ManagerAssistantSummary,
   ManagerProposalId,
 } from "@t3tools/contracts";
 
+import { EnvironmentScopeBanner } from "../environments/scope/EnvironmentScopeBanner";
+import { useEnvironmentScope } from "../environments/scope/scopes";
+import { usePrimaryEnvironmentId } from "../environments/primary";
+import { useStore } from "../store";
 import {
   createAssistant,
   listAssistants,
   listManagerProposals,
-  ManagerApiError,
   resolveManagerProposal,
 } from "../lib/managerApi";
 import { Badge } from "./ui/badge";
@@ -137,6 +143,14 @@ function ProposalCard({
 
 export function ManagerPanel() {
   const navigate = useNavigate();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
+  // This is a listing, not an editor: the sidebar's selection is the right
+  // source here. Every link out of it pins the id into the URL so the pages
+  // that DO write can never be ambiguous.
+  const environmentId = activeEnvironmentId ?? primaryEnvironmentId;
+  const scope = useEnvironmentScope(environmentId);
+  const canMutate = scope?.availability.canMutate ?? false;
   const [proposals, setProposals] = useState<ReadonlyArray<ManagerActionProposal> | null>(null);
   const [assistants, setAssistants] = useState<ReadonlyArray<ManagerAssistantSummary>>([]);
   const [newAssistantName, setNewAssistantName] = useState("");
@@ -145,37 +159,37 @@ export function ManagerPanel() {
   const [busyProposalId, setBusyProposalId] = useState<ManagerProposalId | null>(null);
 
   const refresh = useCallback(async () => {
+    if (environmentId === null) return;
     try {
       const [proposalsResult, assistantsResult] = await Promise.all([
-        listManagerProposals(),
-        listAssistants(),
+        listManagerProposals({ environmentId }),
+        listAssistants({ environmentId }),
       ]);
       setProposals(proposalsResult.proposals);
       setAssistants(assistantsResult.assistants);
       setError(null);
     } catch (cause) {
-      setError(
-        cause instanceof ManagerApiError ? cause.message : "Failed to load assistant proposals.",
-      );
+      setError(cause instanceof Error ? cause.message : "Failed to load assistant proposals.");
     }
-  }, []);
+  }, [environmentId]);
 
   const handleCreateAssistant = useCallback(() => {
+    if (environmentId === null || !canMutate) return;
     const name = newAssistantName.trim() || "Assistant";
     setCreating(true);
-    void createAssistant(name)
+    void createAssistant({ environmentId, name })
       .then((result) => {
         setNewAssistantName("");
         void navigate({
-          to: "/assistant/$projectId",
-          params: { projectId: result.projectId },
+          to: "/assistant/$environmentId/$projectId",
+          params: { environmentId, projectId: result.projectId },
         });
       })
       .catch((cause: unknown) =>
         setError(cause instanceof Error ? cause.message : "Failed to create assistant."),
       )
       .finally(() => setCreating(false));
-  }, [newAssistantName, navigate]);
+  }, [canMutate, environmentId, newAssistantName, navigate]);
 
   useEffect(() => {
     void refresh();
@@ -185,8 +199,9 @@ export function ManagerPanel() {
 
   const handleResolve = useCallback(
     (proposalId: ManagerProposalId, decision: "approved" | "denied") => {
+      if (environmentId === null || !canMutate) return;
       setBusyProposalId(proposalId);
-      void resolveManagerProposal({ proposalId, decision })
+      void resolveManagerProposal({ environmentId, proposalId, decision })
         .catch((cause: unknown) => {
           setError(cause instanceof Error ? cause.message : "Failed to resolve proposal.");
         })
@@ -195,7 +210,7 @@ export function ManagerPanel() {
           void refresh();
         });
     },
-    [refresh],
+    [canMutate, environmentId, refresh],
   );
 
   const pending = useMemo(
@@ -226,6 +241,9 @@ export function ManagerPanel() {
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
+            {environmentId ? (
+              <EnvironmentScopeBanner scope={scope} environmentId={environmentId} />
+            ) : null}
             {error ? (
               <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
                 {error}
@@ -264,8 +282,11 @@ export function ManagerPanel() {
                     variant="outline"
                     render={
                       <Link
-                        to="/assistant/$projectId"
-                        params={{ projectId: assistant.projectId }}
+                        to="/assistant/$environmentId/$projectId"
+                        params={{
+                          environmentId: environmentId as EnvironmentId,
+                          projectId: assistant.projectId,
+                        }}
                       />
                     }
                   >
@@ -285,7 +306,7 @@ export function ManagerPanel() {
                   placeholder="New assistant name…"
                   className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
                 />
-                <Button size="xs" disabled={creating} onClick={handleCreateAssistant}>
+                <Button size="xs" disabled={creating || !canMutate} onClick={handleCreateAssistant}>
                   <PlusIcon className="size-3.5" />
                   Create
                 </Button>

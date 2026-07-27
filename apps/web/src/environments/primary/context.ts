@@ -68,6 +68,15 @@ export function readPrimaryEnvironmentDescriptor(): ExecutionEnvironmentDescript
   return usePrimaryEnvironmentBootstrapStore.getState().descriptor;
 }
 
+/**
+ * Reactive read of the primary descriptor. `readPrimaryEnvironmentDescriptor`
+ * is the non-hook twin; components that render the environment's label or
+ * platform need to re-render when bootstrap fills it in.
+ */
+export function usePrimaryEnvironmentDescriptor(): ExecutionEnvironmentDescriptor | null {
+  return usePrimaryEnvironmentBootstrapStore((state) => state.descriptor);
+}
+
 export function usePrimaryEnvironmentId(): EnvironmentId | null {
   return usePrimaryEnvironmentBootstrapStore((state) => state.descriptor?.environmentId ?? null);
 }

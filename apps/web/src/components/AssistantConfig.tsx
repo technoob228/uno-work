@@ -1,12 +1,19 @@
 /**
- * Per-assistant configuration view (`/assistant/$projectId`): access &
- * permissions, connectors (this assistant's own Telegram bot), editable
- * context files (AGENTS.md / NOTES.md) and the skills present in its
- * workspace. This is the assistant's own settings — app-wide settings stay
- * under /settings.
+ * Per-assistant configuration view (`/assistant/$environmentId/$projectId`).
+ *
+ * The assistant lives on exactly one daemon, and every read and write on this
+ * page — overview, access token, Telegram, Slack, context files, default
+ * harness — goes to the environment named in the URL. That id is a route
+ * param rather than "whatever environment is active" on purpose: the active
+ * environment can change while this page is mounted, and a bot token saved
+ * against the wrong daemon looks like a success and does nothing.
+ *
+ * While the environment is not confirmed live the page is read-only: what is
+ * on screen is the last sync, and a save that cannot reach its daemon is the
+ * exact failure this design exists to prevent.
  */
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   BotIcon,
@@ -17,6 +24,7 @@ import {
 } from "lucide-react";
 import type {
   AssistantEditableFileName,
+  EnvironmentId,
   ManagerAssistantSummary,
   ManagerScope,
   ProjectId,
@@ -26,7 +34,6 @@ import { isAssistantProjectId } from "@t3tools/contracts";
 import {
   getAssistant,
   listProjectsForAccessPicker,
-  ManagerApiError,
   readAssistantFile,
   saveAssistantTelegram,
   saveAssistantSlack,
@@ -34,6 +41,8 @@ import {
   updateAssistantAccess,
   writeAssistantFile,
 } from "../lib/managerApi";
+import { EnvironmentScopeBanner } from "../environments/scope/EnvironmentScopeBanner";
+import { useEnvironmentScope } from "../environments/scope/scopes";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { SidebarInset, SidebarTrigger } from "./ui/sidebar";
@@ -69,12 +78,16 @@ function Toggle({
 }
 
 function FileEditor({
+  environmentId,
   projectId,
   name,
+  readOnly,
   onError,
 }: {
+  environmentId: EnvironmentId;
   projectId: string;
   name: AssistantEditableFileName;
+  readOnly: boolean;
   onError: (message: string) => void;
 }) {
   const [content, setContent] = useState<string | null>(null);
@@ -83,29 +96,29 @@ function FileEditor({
   useEffect(() => {
     setContent(null);
     setDirty(false);
-    void readAssistantFile({ projectId, name })
+    void readAssistantFile({ environmentId, projectId, name })
       .then((result) => setContent(result.content))
       .catch(() => onError(`Failed to read ${name}.`));
-  }, [projectId, name, onError]);
+  }, [environmentId, projectId, name, onError]);
 
   const save = useCallback(() => {
     if (content === null) return;
-    void writeAssistantFile({ projectId, name, content })
+    void writeAssistantFile({ environmentId, projectId, name, content })
       .then(() => setDirty(false))
       .catch(() => onError(`Failed to save ${name}.`));
-  }, [projectId, name, content, onError]);
+  }, [environmentId, projectId, name, content, onError]);
 
   return (
     <div className="space-y-2 pb-4">
       <div className="flex items-center justify-between">
         <span className="font-mono text-[11px] text-muted-foreground">{name}</span>
-        <Button size="xs" variant="outline" disabled={!dirty} onClick={save}>
+        <Button size="xs" variant="outline" disabled={!dirty || readOnly} onClick={save}>
           {dirty ? "Save" : "Saved"}
         </Button>
       </div>
       <textarea
         value={content ?? "Loading…"}
-        disabled={content === null}
+        disabled={content === null || readOnly}
         onChange={(event) => {
           setContent(event.target.value);
           setDirty(true);
@@ -117,8 +130,19 @@ function FileEditor({
   );
 }
 
-export function AssistantConfig({ projectId }: { projectId: string }) {
-  const navigate = useNavigate();
+export function AssistantConfig({
+  environmentId,
+  projectId,
+}: {
+  environmentId: EnvironmentId;
+  projectId: string;
+}) {
+  const scope = useEnvironmentScope(environmentId);
+  // No scope means the URL names an environment this device no longer knows;
+  // no live connection means read-only. Either way, writes are refused here
+  // rather than being retried somewhere they would succeed.
+  const canMutate = scope?.availability.canMutate ?? false;
+  const environmentLabel = scope?.label ?? "this environment";
   const [assistant, setAssistant] = useState<ManagerAssistantSummary | null>(null);
   const [projects, setProjects] = useState<ReadonlyArray<{ id: ProjectId; title: string }>>([]);
   const [error, setError] = useState<string | null>(null);
@@ -159,8 +183,8 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
   const refresh = useCallback(async () => {
     try {
       const [nextAssistant, nextProjects] = await Promise.all([
-        getAssistant(projectId),
-        listProjectsForAccessPicker(),
+        getAssistant({ environmentId, projectId }),
+        listProjectsForAccessPicker({ environmentId }),
       ]);
       setAssistant(nextAssistant);
       setProjects(nextProjects.filter((project) => !isAssistantProjectId(project.id)));
@@ -201,53 +225,72 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
       setSlackHotWindowSec(String(slackAddressing.hotWindowSec));
       setError(null);
     } catch (cause) {
-      setError(
-        cause instanceof ManagerApiError ? cause.message : "Failed to load assistant settings.",
-      );
+      setError(cause instanceof Error ? cause.message : "Failed to load assistant settings.");
     }
-  }, [projectId]);
+  }, [environmentId, projectId]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
   const handleSaveDefaultModel = useCallback(() => {
+    // The button is disabled too; this is the guard that actually holds.
+    if (!canMutate) return;
     if (defaultModel.trim().length === 0) return;
     setNotice(null);
     void setAssistantDefaultModel({
+      environmentId,
       projectId,
       instanceId: defaultInstance,
       model: defaultModel.trim(),
     })
-      .then(() => setNotice("Default harness saved — new chats will start on it."))
+      .then(() =>
+        setNotice(`Default harness saved on ${environmentLabel} — new chats will start on it.`),
+      )
       .catch((cause: unknown) =>
         setError(cause instanceof Error ? cause.message : "Failed to save default harness."),
       );
-  }, [projectId, defaultInstance, defaultModel]);
+  }, [canMutate, environmentId, environmentLabel, projectId, defaultInstance, defaultModel]);
 
   const handleSaveAccess = useCallback(() => {
+    // The button is disabled too; this is the guard that actually holds.
+    if (!canMutate) return;
     setNotice(null);
     const scopes: ManagerScope[] = canWrite
       ? ["threads:read", "threads:write", "threads:approve"]
       : ["threads:read"];
     void updateAssistantAccess({
+      environmentId,
       projectId,
       projectAllowlist: allowAll ? "all" : [...selectedProjects],
       scopes,
       autoApprove,
     })
       .then(() => {
-        setNotice("Access saved.");
+        setNotice(`Access saved on ${environmentLabel}.`);
         void refresh();
       })
       .catch((cause: unknown) =>
         setError(cause instanceof Error ? cause.message : "Failed to save access."),
       );
-  }, [projectId, allowAll, selectedProjects, canWrite, autoApprove, refresh]);
+  }, [
+    canMutate,
+    environmentId,
+    environmentLabel,
+    projectId,
+    allowAll,
+    selectedProjects,
+    canWrite,
+    autoApprove,
+    refresh,
+  ]);
 
   const handleSaveTelegram = useCallback(() => {
+    // The button is disabled too; this is the guard that actually holds.
+    if (!canMutate) return;
     setNotice(null);
     void saveAssistantTelegram({
+      environmentId,
       projectId,
       ...(botToken.trim().length > 0 ? { botToken: botToken.trim() } : {}),
       allowedChatIds: chatIds
@@ -271,13 +314,16 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
     })
       .then(() => {
         setBotToken("");
-        setNotice("Telegram connector saved.");
+        setNotice(`Telegram connector saved on ${environmentLabel}.`);
         void refresh();
       })
       .catch((cause: unknown) =>
         setError(cause instanceof Error ? cause.message : "Failed to save Telegram connector."),
       );
   }, [
+    canMutate,
+    environmentId,
+    environmentLabel,
     projectId,
     botToken,
     chatIds,
@@ -292,8 +338,11 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
   ]);
 
   const handleSaveSlack = useCallback(() => {
+    // The button is disabled too; this is the guard that actually holds.
+    if (!canMutate) return;
     setNotice(null);
     void saveAssistantSlack({
+      environmentId,
       projectId,
       ...(slackBotToken.trim().length > 0 ? { botToken: slackBotToken.trim() } : {}),
       ...(slackAppToken.trim().length > 0 ? { appToken: slackAppToken.trim() } : {}),
@@ -319,13 +368,16 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
       .then(() => {
         setSlackBotToken("");
         setSlackAppToken("");
-        setNotice("Slack connector saved.");
+        setNotice(`Slack connector saved on ${environmentLabel}.`);
         void refresh();
       })
       .catch((cause: unknown) =>
         setError(cause instanceof Error ? cause.message : "Failed to save Slack connector."),
       );
   }, [
+    canMutate,
+    environmentId,
+    environmentLabel,
     projectId,
     slackBotToken,
     slackAppToken,
@@ -370,6 +422,7 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
             <span className="text-sm font-medium text-foreground">
               {assistant?.title ?? "Assistant"} — settings
             </span>
+            <span className="truncate text-xs text-muted-foreground">· {environmentLabel}</span>
             <Button size="xs" variant="ghost" className="ml-auto" render={<Link to="/assistant" />}>
               All assistants
             </Button>
@@ -378,6 +431,7 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
+            <EnvironmentScopeBanner scope={scope} environmentId={environmentId} />
             {error ? (
               <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
                 {error}
@@ -393,7 +447,12 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
               title="Brain"
               icon={<BotIcon className="size-3.5" />}
               headerAction={
-                <Button size="xs" variant="outline" onClick={handleSaveDefaultModel}>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={!canMutate}
+                  onClick={handleSaveDefaultModel}
+                >
                   Save
                 </Button>
               }
@@ -431,7 +490,12 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
               title="Access & permissions"
               icon={<ShieldCheckIcon className="size-3.5" />}
               headerAction={
-                <Button size="xs" variant="outline" onClick={handleSaveAccess}>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={!canMutate}
+                  onClick={handleSaveAccess}
+                >
                   Save
                 </Button>
               }
@@ -489,7 +553,12 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
               title="Connectors"
               icon={<SendIcon className="size-3.5" />}
               headerAction={
-                <Button size="xs" variant="outline" onClick={handleSaveTelegram}>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={!canMutate}
+                  onClick={handleSaveTelegram}
+                >
                   Save
                 </Button>
               }
@@ -617,7 +686,7 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
               title="Slack"
               icon={<SendIcon className="size-3.5" />}
               headerAction={
-                <Button size="xs" variant="outline" onClick={handleSaveSlack}>
+                <Button size="xs" variant="outline" disabled={!canMutate} onClick={handleSaveSlack}>
                   Save
                 </Button>
               }
@@ -765,9 +834,16 @@ export function AssistantConfig({ projectId }: { projectId: string }) {
                 title="Instructions, notes & routing"
                 description="AGENTS.md is what every harness reads when it runs this assistant's chats; NOTES.md is its durable memory; ROUTING.md maps task types to harness/model/effort and accumulates outcomes. Edit freely."
               >
-                <FileEditor projectId={projectId} name="AGENTS.md" onError={setError} />
-                <FileEditor projectId={projectId} name="NOTES.md" onError={setError} />
-                <FileEditor projectId={projectId} name="ROUTING.md" onError={setError} />
+                {(["AGENTS.md", "NOTES.md", "ROUTING.md"] as const).map((name) => (
+                  <FileEditor
+                    key={name}
+                    environmentId={environmentId}
+                    projectId={projectId}
+                    name={name}
+                    readOnly={!canMutate}
+                    onError={setError}
+                  />
+                ))}
               </SettingsRow>
             </SettingsSection>
 
