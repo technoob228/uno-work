@@ -46,6 +46,9 @@ import {
   replaceTextRange,
 } from "../../composer-logic";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
+import { insertDictatedText } from "../../dictation/dictationText";
+import { useDictation } from "../../hooks/useDictation";
+import { shortcutLabelForCommand } from "../../keybindings";
 import {
   type ComposerImageAttachment,
   type ComposerVideoAttachment,
@@ -71,6 +74,7 @@ import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommand
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
+import { ComposerDictationButton } from "./ComposerDictationButton";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
@@ -117,6 +121,7 @@ import {
   type ProviderInstanceEntry,
 } from "../../providerInstances";
 import { type AppModelOption, getAppModelOptionsForInstance } from "../../modelSelection";
+import type { DictationTranscribeResult } from "@t3tools/contracts";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import type { SessionPhase, Thread } from "../../types";
 import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
@@ -441,6 +446,8 @@ export interface ChatComposerHandle {
   openModelPicker: () => void;
   toggleModelPicker: () => void;
   isModelPickerOpen: () => boolean;
+  /** Start dictation, or stop the current take and transcribe it. */
+  toggleDictation: () => void;
   readSnapshot: () => {
     value: string;
     cursor: number;
@@ -1611,6 +1618,59 @@ export const ChatComposer = memo(
       };
     }, [composerCursor, composerTerminalContexts, promptRef]);
 
+    // ------------------------------------------------------------------
+    // Dictation
+    // ------------------------------------------------------------------
+    const dictationSettings = settings.dictation;
+    const dictationAutoSend = dictationSettings.autoSend;
+
+    const handleDictationTranscript = useCallback(
+      (result: DictationTranscribeResult) => {
+        const snapshot = readComposerSnapshot();
+        const { insertion } = insertDictatedText({
+          value: snapshot.value,
+          cursor: snapshot.cursor,
+          transcript: result.text,
+        });
+        if (insertion.length === 0) return;
+        const applied = applyPromptReplacement(snapshot.cursor, snapshot.cursor, insertion);
+        if (!applied || !dictationAutoSend) return;
+        // Let the editor commit the inserted text before the send path reads it.
+        window.requestAnimationFrame(() => {
+          onSend();
+        });
+      },
+      [applyPromptReplacement, dictationAutoSend, onSend, readComposerSnapshot],
+    );
+
+    const dictation = useDictation({
+      enabled: dictationSettings.enabled,
+      ...(gitCwd !== null ? { projectPath: gitCwd } : {}),
+      onTranscript: handleDictationTranscript,
+    });
+
+    const dictationStatus = dictation.status;
+    const cancelDictation = dictation.cancel;
+    const toggleDictation = dictation.toggle;
+
+    // Escape aborts a take without sending anything to the gateway.
+    useEffect(() => {
+      if (dictationStatus !== "recording") return;
+      const handler = (event: globalThis.KeyboardEvent) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        cancelDictation();
+      };
+      window.addEventListener("keydown", handler, true);
+      return () => window.removeEventListener("keydown", handler, true);
+    }, [cancelDictation, dictationStatus]);
+
+    const dictationShortcutLabel = useMemo(
+      () => shortcutLabelForCommand(keybindings, "composer.dictation.toggle"),
+      [keybindings],
+    );
+
     const resolveActiveComposerTrigger = useCallback((): {
       snapshot: { value: string; cursor: number; expandedCursor: number };
       trigger: ComposerTrigger | null;
@@ -2337,6 +2397,9 @@ export const ChatComposer = memo(
           setIsComposerModelPickerOpen((open) => !open);
         },
         isModelPickerOpen: () => isComposerModelPickerOpen,
+        toggleDictation: () => {
+          toggleDictation();
+        },
         readSnapshot: () => {
           return readComposerSnapshot();
         },
@@ -2426,6 +2489,7 @@ export const ChatComposer = memo(
         cleanupComposerVideos,
         isComposerModelPickerOpen,
         readComposerSnapshot,
+        toggleDictation,
         selectedModel,
         selectedModelOptionsForDispatch,
         selectedModelSelection,
@@ -3165,6 +3229,17 @@ export const ChatComposer = memo(
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
+                  {dictationSettings.enabled && dictation.supported ? (
+                    <ComposerDictationButton
+                      status={dictationStatus}
+                      elapsedMs={dictation.elapsedMs}
+                      level={dictation.level}
+                      disabled={isConnecting || environmentUnavailable !== null}
+                      shortcutLabel={dictationShortcutLabel}
+                      preserveComposerFocusOnPointerDown={isMobileViewport}
+                      onToggle={toggleDictation}
+                    />
+                  ) : null}
                   <ComposerFooterPrimaryActions
                     compact={isComposerPrimaryActionsCompact}
                     activeContextWindow={activeContextWindow}

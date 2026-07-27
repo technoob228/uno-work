@@ -28,6 +28,8 @@ import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
 import { isElectron } from "../../env";
 import { useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
+import { shortcutLabelForCommand } from "../../keybindings";
+import { DictationSettingsSection } from "./DictationSettingsSection";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import {
   setDesktopUpdateStateQueryData,
@@ -71,6 +73,7 @@ import {
 import { ProjectFavicon } from "../ProjectFavicon";
 import {
   useServerAvailableEditors,
+  useServerKeybindings,
   useServerKeybindingsConfigPath,
   useServerObservability,
   useServerProviders,
@@ -888,6 +891,11 @@ export function GeneralSettingsPanel() {
   };
 
   const unoApiKey = settings.uno?.apiKey ?? "";
+  const serverKeybindings = useServerKeybindings();
+  const dictationShortcutLabel = shortcutLabelForCommand(
+    serverKeybindings,
+    "composer.dictation.toggle",
+  );
 
   return (
     <SettingsPageContainer>
@@ -937,6 +945,8 @@ export function GeneralSettingsPanel() {
           }
         />
       </SettingsSection>
+
+      <DictationSettingsSection shortcutLabel={dictationShortcutLabel} />
 
       <SettingsSection title="General">
         <SettingsRow

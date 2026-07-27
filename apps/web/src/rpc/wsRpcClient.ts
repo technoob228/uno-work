@@ -138,6 +138,7 @@ export interface WsRpcClient {
     readonly cancelUnoVideoJob: RpcUnaryMethod<typeof WS_METHODS.unoVideoCancelJob>;
     readonly getUnoVideoDigest: RpcUnaryMethod<typeof WS_METHODS.unoVideoGetDigest>;
     readonly packUnoVideoDigest: RpcUnaryMethod<typeof WS_METHODS.unoVideoPackDigest>;
+    readonly transcribeDictation: RpcUnaryMethod<typeof WS_METHODS.dictationTranscribe>;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
     readonly subscribeAuthAccess: RpcStreamMethod<typeof WS_METHODS.subscribeAuthAccess>;
@@ -279,6 +280,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.unoVideoGetDigest](input)),
       packUnoVideoDigest: (input) =>
         transport.request((client) => client[WS_METHODS.unoVideoPackDigest](input)),
+      transcribeDictation: (input) =>
+        transport.request((client) => client[WS_METHODS.dictationTranscribe](input)),
       subscribeConfig: (listener, options) =>
         transport.subscribe((client) => client[WS_METHODS.subscribeServerConfig]({}), listener, {
           ...options,

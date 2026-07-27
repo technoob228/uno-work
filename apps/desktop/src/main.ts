@@ -20,6 +20,7 @@ import {
   safeStorage,
   session,
   shell,
+  systemPreferences,
 } from "electron";
 import type { MenuItemConstructorOptions, OpenDialogOptions } from "electron";
 import type {
@@ -2467,6 +2468,31 @@ function createWindow(): BrowserWindow {
     }
     return { action: "deny" };
   });
+
+  // Диктовка в композере просит микрофон. На macOS доступ выдаёт TCC, поэтому
+  // системное разрешение запрашиваем до того, как ответить рендереру, иначе
+  // getUserMedia падает без единого диалога. Камера приложению не нужна.
+  window.webContents.session.setPermissionRequestHandler(
+    (_webContents, permission, callback, details) => {
+      if (permission !== "media") {
+        callback(true);
+        return;
+      }
+      const mediaTypes = "mediaTypes" in details ? (details.mediaTypes ?? []) : [];
+      if (!mediaTypes.includes("audio") || mediaTypes.includes("video")) {
+        callback(false);
+        return;
+      }
+      if (process.platform !== "darwin") {
+        callback(true);
+        return;
+      }
+      systemPreferences
+        .askForMediaAccess("microphone")
+        .then((granted) => callback(granted))
+        .catch(() => callback(false));
+    },
+  );
 
   // <webview> браузерной панели: гостевой контент не должен получить preload
   // или Node-доступ, а window.open/target=_blank превращаем в новую вкладку

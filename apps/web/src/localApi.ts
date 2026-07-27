@@ -171,6 +171,10 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
         rpcClient
           ? rpcClient.server.packUnoVideoDigest(input)
           : Promise.reject(unavailableLocalBackendError()),
+      transcribeDictation: (input) =>
+        rpcClient
+          ? rpcClient.server.transcribeDictation(input)
+          : Promise.reject(unavailableLocalBackendError()),
     },
   };
 }

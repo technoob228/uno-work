@@ -88,6 +88,7 @@ import {
   getUnoVideoJob,
   packUnoVideoDigest,
 } from "./unoVideoGateway.ts";
+import { transcribeDictation } from "./dictation/dictationGateway.ts";
 
 function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   OrchestrationEvent,
@@ -993,6 +994,10 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         [WS_METHODS.unoVideoPackDigest]: (input) =>
           observeRpcEffect(WS_METHODS.unoVideoPackDigest, packUnoVideoDigest(input), {
             "rpc.aggregate": "uno-video",
+          }),
+        [WS_METHODS.dictationTranscribe]: (input) =>
+          observeRpcEffect(WS_METHODS.dictationTranscribe, transcribeDictation(input), {
+            "rpc.aggregate": "dictation",
           }),
         [WS_METHODS.sourceControlLookupRepository]: (input) =>
           observeRpcEffect(

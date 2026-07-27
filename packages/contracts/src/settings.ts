@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
+import { DEFAULT_DICTATION_CLEANUP_MODEL, DictationLanguage } from "./dictation.ts";
 import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
@@ -448,6 +449,26 @@ export const UnoAccountSettings = Schema.Struct({
 });
 export type UnoAccountSettings = typeof UnoAccountSettings.Type;
 
+export const DictationSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** "auto" detects the language; explicit codes pin it (see dictation.ts). */
+  language: DictationLanguage.pipe(Schema.withDecodingDefault(Effect.succeed("auto" as const))),
+  /**
+   * Second pass that repairs project jargon and punctuation using a glossary.
+   * The speech model cannot know repo-specific words, so this is where
+   * "worktree"/"typecheck"/branch names get restored.
+   */
+  cleanupEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  cleanupModel: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_DICTATION_CLEANUP_MODEL)),
+  ),
+  /** Free-form user vocabulary: comma- or newline-separated terms. */
+  vocabulary: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  /** Send the message as soon as the transcript lands instead of inserting it. */
+  autoSend: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+});
+export type DictationSettings = typeof DictationSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
@@ -490,6 +511,7 @@ export const ServerSettings = Schema.Struct({
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   browser: ServerBrowserSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   uno: UnoAccountSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  dictation: DictationSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -582,6 +604,16 @@ export const ServerSettingsPatch = Schema.Struct({
   uno: Schema.optionalKey(
     Schema.Struct({
       apiKey: Schema.optionalKey(Schema.String),
+    }),
+  ),
+  dictation: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      language: Schema.optionalKey(DictationLanguage),
+      cleanupEnabled: Schema.optionalKey(Schema.Boolean),
+      cleanupModel: Schema.optionalKey(Schema.String),
+      vocabulary: Schema.optionalKey(Schema.String),
+      autoSend: Schema.optionalKey(Schema.Boolean),
     }),
   ),
   providers: Schema.optionalKey(
