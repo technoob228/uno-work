@@ -16,6 +16,8 @@ import {
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
+  resolveSidebarProjectScope,
+  resolveSidebarThreadEnvironmentAvailability,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
@@ -1046,5 +1048,98 @@ describe("sortProjectsForSidebar", () => {
     );
 
     expect(timestamp).toBe(Date.parse("2026-03-09T10:10:00.000Z"));
+  });
+});
+
+describe("resolveSidebarProjectScope", () => {
+  it("unions every environment when the scope is 'all'", () => {
+    expect(
+      resolveSidebarProjectScope({
+        scope: "all",
+        activeEnvironmentId: "env-a",
+        primaryEnvironmentId: "env-b",
+      }),
+    ).toEqual({ kind: "all-environments" });
+  });
+
+  it("prefers the active environment, falling back to the primary one", () => {
+    expect(
+      resolveSidebarProjectScope({
+        scope: "active",
+        activeEnvironmentId: "env-a",
+        primaryEnvironmentId: "env-b",
+      }),
+    ).toEqual({ kind: "environment", environmentId: "env-a" });
+
+    expect(
+      resolveSidebarProjectScope({
+        scope: "active",
+        activeEnvironmentId: null,
+        primaryEnvironmentId: "env-b",
+      }),
+    ).toEqual({ kind: "environment", environmentId: "env-b" });
+  });
+
+  it("renders nothing rather than everything when no environment is selected", () => {
+    expect(
+      resolveSidebarProjectScope({
+        scope: "active",
+        activeEnvironmentId: null,
+        primaryEnvironmentId: null,
+      }),
+    ).toEqual({ kind: "none" });
+  });
+});
+
+describe("resolveSidebarThreadEnvironmentAvailability", () => {
+  const base = {
+    isPrimaryEnvironment: false,
+    environmentLabel: "prod-1",
+    lastSynchronizedAt: "2026-03-09T10:00:00.000Z",
+  };
+
+  it("treats the primary environment as always live", () => {
+    expect(
+      resolveSidebarThreadEnvironmentAvailability({
+        ...base,
+        isPrimaryEnvironment: true,
+        connectionState: "disconnected",
+        lastSynchronizedAt: null,
+      }).status,
+    ).toBe("live");
+  });
+
+  it("does not call a connected-but-unsynchronized environment live", () => {
+    const availability = resolveSidebarThreadEnvironmentAvailability({
+      ...base,
+      connectionState: "connected",
+      lastSynchronizedAt: null,
+    });
+    expect(availability.status).toBe("stale");
+    expect(availability.reason).toContain("prod-1");
+  });
+
+  it("maps every connection state to a reason the row can display", () => {
+    expect(
+      resolveSidebarThreadEnvironmentAvailability({ ...base, connectionState: "connected" }).status,
+    ).toBe("live");
+    expect(
+      resolveSidebarThreadEnvironmentAvailability({ ...base, connectionState: "connecting" })
+        .status,
+    ).toBe("connecting");
+    expect(
+      resolveSidebarThreadEnvironmentAvailability({ ...base, connectionState: "reconnecting" })
+        .status,
+    ).toBe("connecting");
+    expect(
+      resolveSidebarThreadEnvironmentAvailability({ ...base, connectionState: "disconnected" })
+        .status,
+    ).toBe("offline");
+    expect(
+      resolveSidebarThreadEnvironmentAvailability({ ...base, connectionState: "error" }).status,
+    ).toBe("offline");
+    expect(
+      resolveSidebarThreadEnvironmentAvailability({ ...base, connectionState: null }).status,
+    ).toBe("offline");
   });
 });

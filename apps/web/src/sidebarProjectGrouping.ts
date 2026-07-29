@@ -8,7 +8,16 @@ import {
 } from "./logicalProject";
 import type { Project } from "./types";
 
-export type EnvironmentPresence = "local-only" | "remote-only" | "mixed";
+/**
+ * Where a logical project's members live, relative to the *primary*
+ * environment — the machine the person is sitting at.
+ *
+ * `"unknown"` is not a cosmetic fourth case. Until the primary environment
+ * resolves (startup, reconnect, the desktop being reopened after it was
+ * closed) there is no anchor to measure "local" against, and reporting
+ * `"local-only"` there would have the UI assert that remote work is local.
+ */
+export type EnvironmentPresence = "local-only" | "remote-only" | "mixed" | "unknown";
 
 export interface SidebarProjectGroupMember extends Project {
   physicalProjectKey: string;
@@ -22,6 +31,15 @@ export interface SidebarProjectSnapshot extends Project {
   environmentPresence: EnvironmentPresence;
   memberProjects: readonly SidebarProjectGroupMember[];
   memberProjectRefs: readonly ScopedProjectRef[];
+  /**
+   * Environments other than the primary one this group spans, in display form.
+   *
+   * When `environmentPresence` is `"unknown"` there is no primary to subtract,
+   * so this lists every environment the group spans. Members whose label has
+   * not loaded yet fall back to their `environmentId` rather than being
+   * dropped: a badge that says "also on 3f2a…" is honest, a badge that silently
+   * omits an environment is not.
+   */
   remoteEnvironmentLabels: readonly string[];
 }
 
@@ -37,6 +55,26 @@ export function buildPhysicalToLogicalProjectKeyMap(input: {
     );
   }
   return mapping;
+}
+
+/**
+ * Total order over group members, so the row a group renders (name, cwd,
+ * favicon, target of a click) does not depend on the order projects happened to
+ * arrive in. Without this the representative is `members[0]` in arrival order
+ * and a group's displayed metadata can hop between environments on reconnect.
+ */
+function compareMembers(left: SidebarProjectGroupMember, right: SidebarProjectGroupMember): number {
+  if (left.environmentId !== right.environmentId) {
+    return left.environmentId < right.environmentId ? -1 : 1;
+  }
+  if (left.id === right.id) {
+    return 0;
+  }
+  return left.id < right.id ? -1 : 1;
+}
+
+function dedupe(values: ReadonlyArray<string>): string[] {
+  return values.filter((value, index) => values.indexOf(value) === index);
 }
 
 export function buildSidebarProjectSnapshots(input: {
@@ -60,9 +98,15 @@ export function buildSidebarProjectSnapshots(input: {
       groupedMembers.set(logicalKey, [member]);
     }
   }
+  for (const members of groupedMembers.values()) {
+    members.sort(compareMembers);
+  }
 
   const result: SidebarProjectSnapshot[] = [];
   const seen = new Set<string>();
+  // The outer loop still walks `input.projects` so row order follows the
+  // caller's sort; only the choice of representative *within* a group is
+  // normalised above.
   for (const project of input.projects) {
     const logicalKey = deriveLogicalProjectKeyFromSettings(project, input.settings);
     if (seen.has(logicalKey)) {
@@ -79,21 +123,32 @@ export function buildSidebarProjectSnapshots(input: {
       continue;
     }
 
-    const hasLocal =
-      input.primaryEnvironmentId !== null &&
-      members.some((member) => member.environmentId === input.primaryEnvironmentId);
-    const hasRemote =
-      input.primaryEnvironmentId !== null
-        ? members.some((member) => member.environmentId !== input.primaryEnvironmentId)
-        : false;
-    const remoteEnvironmentLabels = members
-      .filter(
-        (member) =>
-          input.primaryEnvironmentId !== null &&
-          member.environmentId !== input.primaryEnvironmentId,
-      )
-      .flatMap((member) => (member.environmentLabel ? [member.environmentLabel] : []))
-      .filter((label, index, labels) => labels.indexOf(label) === index);
+    const describeEnvironment = (member: SidebarProjectGroupMember): string =>
+      member.environmentLabel ?? member.environmentId;
+
+    const environmentPresence: EnvironmentPresence = (() => {
+      if (input.primaryEnvironmentId === null) {
+        return "unknown";
+      }
+      const hasLocal = members.some(
+        (member) => member.environmentId === input.primaryEnvironmentId,
+      );
+      const hasRemote = members.some(
+        (member) => member.environmentId !== input.primaryEnvironmentId,
+      );
+      if (hasLocal && hasRemote) return "mixed";
+      return hasRemote ? "remote-only" : "local-only";
+    })();
+
+    const remoteEnvironmentLabels = dedupe(
+      members
+        .filter(
+          (member) =>
+            input.primaryEnvironmentId === null ||
+            member.environmentId !== input.primaryEnvironmentId,
+        )
+        .map(describeEnvironment),
+    );
 
     result.push({
       ...representative,
@@ -106,8 +161,7 @@ export function buildSidebarProjectSnapshots(input: {
             })
           : representative.name,
       groupedProjectCount: members.length,
-      environmentPresence:
-        hasLocal && hasRemote ? "mixed" : hasRemote ? "remote-only" : "local-only",
+      environmentPresence,
       memberProjects: members,
       memberProjectRefs: members.map((member) => scopeProjectRef(member.environmentId, member.id)),
       remoteEnvironmentLabels,

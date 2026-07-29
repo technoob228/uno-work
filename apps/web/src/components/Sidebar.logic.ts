@@ -1,5 +1,10 @@
 import * as React from "react";
-import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+import type {
+  SidebarEnvironmentScope,
+  SidebarProjectSortOrder,
+  SidebarThreadSortOrder,
+} from "@t3tools/contracts/settings";
+import type { EnvironmentPresence } from "../sidebarProjectGrouping";
 import {
   getThreadSortTimestamp,
   sortThreads,
@@ -142,6 +147,108 @@ export function useThreadJumpHintVisibility(): {
     showThreadJumpHints,
     updateThreadJumpHintsVisibility,
   };
+}
+
+/**
+ * What the sidebar should read from, given the user's environment-scope
+ * setting and what is currently connected.
+ *
+ * `"none"` is distinct from `"all-environments"`: with scope `"active"` and no
+ * environment selected yet the sidebar must render empty, not everything.
+ */
+export type SidebarProjectScopeResolution<TEnvironmentId extends string = string> =
+  | { kind: "environment"; environmentId: TEnvironmentId }
+  | { kind: "all-environments" }
+  | { kind: "none" };
+
+export function resolveSidebarProjectScope<TEnvironmentId extends string>(input: {
+  scope: SidebarEnvironmentScope;
+  activeEnvironmentId: TEnvironmentId | null;
+  primaryEnvironmentId: TEnvironmentId | null;
+}): SidebarProjectScopeResolution<TEnvironmentId> {
+  if (input.scope === "all") {
+    return { kind: "all-environments" };
+  }
+  const environmentId = input.activeEnvironmentId ?? input.primaryEnvironmentId;
+  return environmentId === null ? { kind: "none" } : { kind: "environment", environmentId };
+}
+
+/**
+ * Whether a sidebar row's environment can be trusted to reflect reality.
+ *
+ * With `sidebarEnvironmentScope: "all"` the sidebar shows work from
+ * environments that may be down, so a row has to say so rather than looking
+ * identical to a live one. Rows are never hidden — a disappearing thread reads
+ * as "that work is gone", which is the opposite of the truth.
+ */
+export type SidebarEnvironmentAvailability =
+  | { status: "live"; reason: null }
+  | { status: "connecting"; reason: string }
+  | { status: "stale"; reason: string }
+  | { status: "offline"; reason: string };
+
+export function resolveSidebarThreadEnvironmentAvailability(input: {
+  isPrimaryEnvironment: boolean;
+  environmentLabel: string;
+  connectionState:
+    | "connecting"
+    | "connected"
+    | "reconnecting"
+    | "disconnected"
+    | "error"
+    | null
+    | undefined;
+  lastSynchronizedAt: string | null;
+}): SidebarEnvironmentAvailability {
+  if (input.isPrimaryEnvironment) {
+    return { status: "live", reason: null };
+  }
+  switch (input.connectionState) {
+    case "connected":
+      // An open socket is not freshness: until a shell snapshot has landed the
+      // rows are whatever was cached from the previous session.
+      return input.lastSynchronizedAt === null
+        ? { status: "stale", reason: `${input.environmentLabel}: waiting for the first snapshot` }
+        : { status: "live", reason: null };
+    case "connecting":
+      return { status: "connecting", reason: `${input.environmentLabel} is connecting` };
+    case "reconnecting":
+      return { status: "connecting", reason: `${input.environmentLabel} is reconnecting` };
+    case "error":
+      return { status: "offline", reason: `${input.environmentLabel} failed to connect` };
+    case "disconnected":
+      return { status: "offline", reason: `${input.environmentLabel} is disconnected` };
+    default:
+      return { status: "offline", reason: `${input.environmentLabel} is not connected` };
+  }
+}
+
+export function environmentPresenceAriaLabel(presence: EnvironmentPresence): string {
+  switch (presence) {
+    case "remote-only":
+      return "Remote project";
+    case "mixed":
+      return "Available in multiple environments";
+    case "unknown":
+      return "Environment not yet known";
+    case "local-only":
+      return "Local project";
+  }
+}
+
+export function environmentPresenceTooltipPrefix(presence: EnvironmentPresence): string {
+  switch (presence) {
+    case "remote-only":
+      return "Remote environment:";
+    case "mixed":
+      return "Also in:";
+    case "unknown":
+      // Deliberately not "Remote": until the primary environment resolves we do
+      // not know which of these is the machine the person is sitting at.
+      return "In:";
+    case "local-only":
+      return "Local environment:";
+  }
 }
 
 export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {

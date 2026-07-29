@@ -10,6 +10,12 @@
   --animate-skeleton: skeleton 2s -1s infinite linear;
   --color-warning-foreground: var(--warning-foreground);
   --color-warning: var(--warning);
+  --color-machine-1: var(--machine-1-base);
+  --color-machine-1-ink: var(--machine-1-ink);
+  --color-machine-2: var(--machine-2-base);
+  --color-machine-2-ink: var(--machine-2-ink);
+  --color-machine-3: var(--machine-3-base);
+  --color-machine-3-ink: var(--machine-3-ink);
   --color-success-foreground: var(--success-foreground);
   --color-success: var(--success);
   --color-info-foreground: var(--info-foreground);
@@ -115,6 +121,29 @@
   --warning: var(--color-amber-500);
   --warning-foreground: var(--color-amber-700);
 
+  /* Machine identity hues.
+   *
+   * Categorical colours for telling one machine (environment) from another in
+   * the sidebar. Three slots, assigned in fixed order and never cycled — this
+   * set was validated against both surfaces for colour-vision separation
+   * (worst all-pairs ΔE 13.7 light / 15.3 dark, OKLab ×100) and ≥3:1 contrast.
+   * A fourth hue cannot clear those floors, and violet — the obvious candidate —
+   * is indistinguishable from slot 1 under deuteranopia besides already being
+   * --primary. Machines past the third therefore get a neutral chip; the
+   * monogram, not the hue, is what carries identity.
+   *
+   * `-base` is only ever used to mix the chip's tinted background; `-ink` is the
+   * text colour, stepped per surface. Status colours (live/stale/offline) are
+   * reserved and never drawn from here. */
+  --machine-1-base: var(--color-blue-500);
+  --machine-1-ink: var(--color-blue-700);
+  /* teal-600, not -700: the darker step falls under the chroma floor and reads
+     as grey next to the neutral chip. */
+  --machine-2-base: var(--color-teal-500);
+  --machine-2-ink: var(--color-teal-600);
+  --machine-3-base: var(--color-orange-500);
+  --machine-3-ink: var(--color-orange-700);
+
   @variant dark {
     color-scheme: dark;
     --background: color-mix(in srgb, var(--color-neutral-950) 95%, var(--color-white));
@@ -143,6 +172,11 @@
     --success-foreground: var(--color-emerald-400);
     --warning: var(--color-amber-500);
     --warning-foreground: var(--color-amber-400);
+    /* Own steps for the dark surface, validated as a set against it — not an
+       automatic flip of the light values. */
+    --machine-1-ink: var(--color-blue-400);
+    --machine-2-ink: var(--color-teal-400);
+    --machine-3-ink: var(--color-orange-400);
   }
 }
 
