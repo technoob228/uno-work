@@ -834,15 +834,12 @@ const makeSlackConnector = Effect.gen(function* () {
       }
     }
     // (Re)start connectors without a live client (new, or previously failed).
+    // `startConnection` never fails — a bad token or a refused Socket Mode
+    // handshake is recorded as the runtime's `lastError` and surfaced in the
+    // connector status, so there is nothing here to catch.
     for (const [projectId, config] of enabled) {
       if (runtimes.get(projectId)?.client == null) {
-        yield* startConnection(projectId, config).pipe(
-          Effect.catch((cause) =>
-            Effect.logWarning("slack connection start failed").pipe(
-              Effect.annotateLogs({ projectId, cause: String(cause) }),
-            ),
-          ),
-        );
+        yield* startConnection(projectId, config);
       }
     }
   });
