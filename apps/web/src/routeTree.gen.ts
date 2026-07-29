@@ -22,9 +22,18 @@ import { Route as SettingsAssistantRouteImport } from './routes/settings.assista
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as ChatAssistantRouteImport } from './routes/_chat.assistant'
 import { Route as ChatAssistantIndexRouteImport } from './routes/_chat.assistant.index'
+import { Route as SettingsEnvironmentEnvironmentIdRouteImport } from './routes/settings.environment.$environmentId'
+import { Route as SettingsAppGeneralRouteImport } from './routes/settings.app.general'
+import { Route as SettingsAppConnectionsRouteImport } from './routes/settings.app.connections'
+import { Route as SettingsAppBrowserRouteImport } from './routes/settings.app.browser'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
-import { Route as ChatAssistantProjectIdRouteImport } from './routes/_chat.assistant.$projectId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
+import { Route as SettingsEnvironmentEnvironmentIdSourceControlRouteImport } from './routes/settings.environment.$environmentId.source-control'
+import { Route as SettingsEnvironmentEnvironmentIdProvidersRouteImport } from './routes/settings.environment.$environmentId.providers'
+import { Route as SettingsEnvironmentEnvironmentIdGeneralRouteImport } from './routes/settings.environment.$environmentId.general'
+import { Route as SettingsEnvironmentEnvironmentIdAssistantsRouteImport } from './routes/settings.environment.$environmentId.assistants'
+import { Route as SettingsEnvironmentEnvironmentIdArchivedRouteImport } from './routes/settings.environment.$environmentId.archived'
+import { Route as ChatAssistantEnvironmentIdProjectIdRouteImport } from './routes/_chat.assistant.$environmentId.$projectId'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -90,21 +99,73 @@ const ChatAssistantIndexRoute = ChatAssistantIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ChatAssistantRoute,
 } as any)
+const SettingsEnvironmentEnvironmentIdRoute =
+  SettingsEnvironmentEnvironmentIdRouteImport.update({
+    id: '/environment/$environmentId',
+    path: '/environment/$environmentId',
+    getParentRoute: () => SettingsRoute,
+  } as any)
+const SettingsAppGeneralRoute = SettingsAppGeneralRouteImport.update({
+  id: '/app/general',
+  path: '/app/general',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsAppConnectionsRoute = SettingsAppConnectionsRouteImport.update({
+  id: '/app/connections',
+  path: '/app/connections',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsAppBrowserRoute = SettingsAppBrowserRouteImport.update({
+  id: '/app/browser',
+  path: '/app/browser',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
   id: '/draft/$draftId',
   path: '/draft/$draftId',
   getParentRoute: () => ChatRoute,
-} as any)
-const ChatAssistantProjectIdRoute = ChatAssistantProjectIdRouteImport.update({
-  id: '/$projectId',
-  path: '/$projectId',
-  getParentRoute: () => ChatAssistantRoute,
 } as any)
 const ChatEnvironmentIdThreadIdRoute =
   ChatEnvironmentIdThreadIdRouteImport.update({
     id: '/$environmentId/$threadId',
     path: '/$environmentId/$threadId',
     getParentRoute: () => ChatRoute,
+  } as any)
+const SettingsEnvironmentEnvironmentIdSourceControlRoute =
+  SettingsEnvironmentEnvironmentIdSourceControlRouteImport.update({
+    id: '/source-control',
+    path: '/source-control',
+    getParentRoute: () => SettingsEnvironmentEnvironmentIdRoute,
+  } as any)
+const SettingsEnvironmentEnvironmentIdProvidersRoute =
+  SettingsEnvironmentEnvironmentIdProvidersRouteImport.update({
+    id: '/providers',
+    path: '/providers',
+    getParentRoute: () => SettingsEnvironmentEnvironmentIdRoute,
+  } as any)
+const SettingsEnvironmentEnvironmentIdGeneralRoute =
+  SettingsEnvironmentEnvironmentIdGeneralRouteImport.update({
+    id: '/general',
+    path: '/general',
+    getParentRoute: () => SettingsEnvironmentEnvironmentIdRoute,
+  } as any)
+const SettingsEnvironmentEnvironmentIdAssistantsRoute =
+  SettingsEnvironmentEnvironmentIdAssistantsRouteImport.update({
+    id: '/assistants',
+    path: '/assistants',
+    getParentRoute: () => SettingsEnvironmentEnvironmentIdRoute,
+  } as any)
+const SettingsEnvironmentEnvironmentIdArchivedRoute =
+  SettingsEnvironmentEnvironmentIdArchivedRouteImport.update({
+    id: '/archived',
+    path: '/archived',
+    getParentRoute: () => SettingsEnvironmentEnvironmentIdRoute,
+  } as any)
+const ChatAssistantEnvironmentIdProjectIdRoute =
+  ChatAssistantEnvironmentIdProjectIdRouteImport.update({
+    id: '/$environmentId/$projectId',
+    path: '/$environmentId/$projectId',
+    getParentRoute: () => ChatAssistantRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -120,9 +181,18 @@ export interface FileRoutesByFullPath {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
-  '/assistant/$projectId': typeof ChatAssistantProjectIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/settings/app/browser': typeof SettingsAppBrowserRoute
+  '/settings/app/connections': typeof SettingsAppConnectionsRoute
+  '/settings/app/general': typeof SettingsAppGeneralRoute
+  '/settings/environment/$environmentId': typeof SettingsEnvironmentEnvironmentIdRouteWithChildren
   '/assistant/': typeof ChatAssistantIndexRoute
+  '/assistant/$environmentId/$projectId': typeof ChatAssistantEnvironmentIdProjectIdRoute
+  '/settings/environment/$environmentId/archived': typeof SettingsEnvironmentEnvironmentIdArchivedRoute
+  '/settings/environment/$environmentId/assistants': typeof SettingsEnvironmentEnvironmentIdAssistantsRoute
+  '/settings/environment/$environmentId/general': typeof SettingsEnvironmentEnvironmentIdGeneralRoute
+  '/settings/environment/$environmentId/providers': typeof SettingsEnvironmentEnvironmentIdProvidersRoute
+  '/settings/environment/$environmentId/source-control': typeof SettingsEnvironmentEnvironmentIdSourceControlRoute
 }
 export interface FileRoutesByTo {
   '/onboarding': typeof OnboardingRoute
@@ -136,9 +206,18 @@ export interface FileRoutesByTo {
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
-  '/assistant/$projectId': typeof ChatAssistantProjectIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/settings/app/browser': typeof SettingsAppBrowserRoute
+  '/settings/app/connections': typeof SettingsAppConnectionsRoute
+  '/settings/app/general': typeof SettingsAppGeneralRoute
+  '/settings/environment/$environmentId': typeof SettingsEnvironmentEnvironmentIdRouteWithChildren
   '/assistant': typeof ChatAssistantIndexRoute
+  '/assistant/$environmentId/$projectId': typeof ChatAssistantEnvironmentIdProjectIdRoute
+  '/settings/environment/$environmentId/archived': typeof SettingsEnvironmentEnvironmentIdArchivedRoute
+  '/settings/environment/$environmentId/assistants': typeof SettingsEnvironmentEnvironmentIdAssistantsRoute
+  '/settings/environment/$environmentId/general': typeof SettingsEnvironmentEnvironmentIdGeneralRoute
+  '/settings/environment/$environmentId/providers': typeof SettingsEnvironmentEnvironmentIdProvidersRoute
+  '/settings/environment/$environmentId/source-control': typeof SettingsEnvironmentEnvironmentIdSourceControlRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -155,9 +234,18 @@ export interface FileRoutesById {
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
-  '/_chat/assistant/$projectId': typeof ChatAssistantProjectIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/settings/app/browser': typeof SettingsAppBrowserRoute
+  '/settings/app/connections': typeof SettingsAppConnectionsRoute
+  '/settings/app/general': typeof SettingsAppGeneralRoute
+  '/settings/environment/$environmentId': typeof SettingsEnvironmentEnvironmentIdRouteWithChildren
   '/_chat/assistant/': typeof ChatAssistantIndexRoute
+  '/_chat/assistant/$environmentId/$projectId': typeof ChatAssistantEnvironmentIdProjectIdRoute
+  '/settings/environment/$environmentId/archived': typeof SettingsEnvironmentEnvironmentIdArchivedRoute
+  '/settings/environment/$environmentId/assistants': typeof SettingsEnvironmentEnvironmentIdAssistantsRoute
+  '/settings/environment/$environmentId/general': typeof SettingsEnvironmentEnvironmentIdGeneralRoute
+  '/settings/environment/$environmentId/providers': typeof SettingsEnvironmentEnvironmentIdProvidersRoute
+  '/settings/environment/$environmentId/source-control': typeof SettingsEnvironmentEnvironmentIdSourceControlRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -174,9 +262,18 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/source-control'
     | '/$environmentId/$threadId'
-    | '/assistant/$projectId'
     | '/draft/$draftId'
+    | '/settings/app/browser'
+    | '/settings/app/connections'
+    | '/settings/app/general'
+    | '/settings/environment/$environmentId'
     | '/assistant/'
+    | '/assistant/$environmentId/$projectId'
+    | '/settings/environment/$environmentId/archived'
+    | '/settings/environment/$environmentId/assistants'
+    | '/settings/environment/$environmentId/general'
+    | '/settings/environment/$environmentId/providers'
+    | '/settings/environment/$environmentId/source-control'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/onboarding'
@@ -190,9 +287,18 @@ export interface FileRouteTypes {
     | '/settings/source-control'
     | '/'
     | '/$environmentId/$threadId'
-    | '/assistant/$projectId'
     | '/draft/$draftId'
+    | '/settings/app/browser'
+    | '/settings/app/connections'
+    | '/settings/app/general'
+    | '/settings/environment/$environmentId'
     | '/assistant'
+    | '/assistant/$environmentId/$projectId'
+    | '/settings/environment/$environmentId/archived'
+    | '/settings/environment/$environmentId/assistants'
+    | '/settings/environment/$environmentId/general'
+    | '/settings/environment/$environmentId/providers'
+    | '/settings/environment/$environmentId/source-control'
   id:
     | '__root__'
     | '/_chat'
@@ -208,9 +314,18 @@ export interface FileRouteTypes {
     | '/settings/source-control'
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
-    | '/_chat/assistant/$projectId'
     | '/_chat/draft/$draftId'
+    | '/settings/app/browser'
+    | '/settings/app/connections'
+    | '/settings/app/general'
+    | '/settings/environment/$environmentId'
     | '/_chat/assistant/'
+    | '/_chat/assistant/$environmentId/$projectId'
+    | '/settings/environment/$environmentId/archived'
+    | '/settings/environment/$environmentId/assistants'
+    | '/settings/environment/$environmentId/general'
+    | '/settings/environment/$environmentId/providers'
+    | '/settings/environment/$environmentId/source-control'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -313,19 +428,40 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatAssistantIndexRouteImport
       parentRoute: typeof ChatAssistantRoute
     }
+    '/settings/environment/$environmentId': {
+      id: '/settings/environment/$environmentId'
+      path: '/environment/$environmentId'
+      fullPath: '/settings/environment/$environmentId'
+      preLoaderRoute: typeof SettingsEnvironmentEnvironmentIdRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/app/general': {
+      id: '/settings/app/general'
+      path: '/app/general'
+      fullPath: '/settings/app/general'
+      preLoaderRoute: typeof SettingsAppGeneralRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/app/connections': {
+      id: '/settings/app/connections'
+      path: '/app/connections'
+      fullPath: '/settings/app/connections'
+      preLoaderRoute: typeof SettingsAppConnectionsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/app/browser': {
+      id: '/settings/app/browser'
+      path: '/app/browser'
+      fullPath: '/settings/app/browser'
+      preLoaderRoute: typeof SettingsAppBrowserRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/_chat/draft/$draftId': {
       id: '/_chat/draft/$draftId'
       path: '/draft/$draftId'
       fullPath: '/draft/$draftId'
       preLoaderRoute: typeof ChatDraftDraftIdRouteImport
       parentRoute: typeof ChatRoute
-    }
-    '/_chat/assistant/$projectId': {
-      id: '/_chat/assistant/$projectId'
-      path: '/$projectId'
-      fullPath: '/assistant/$projectId'
-      preLoaderRoute: typeof ChatAssistantProjectIdRouteImport
-      parentRoute: typeof ChatAssistantRoute
     }
     '/_chat/$environmentId/$threadId': {
       id: '/_chat/$environmentId/$threadId'
@@ -334,17 +470,60 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatEnvironmentIdThreadIdRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/settings/environment/$environmentId/source-control': {
+      id: '/settings/environment/$environmentId/source-control'
+      path: '/source-control'
+      fullPath: '/settings/environment/$environmentId/source-control'
+      preLoaderRoute: typeof SettingsEnvironmentEnvironmentIdSourceControlRouteImport
+      parentRoute: typeof SettingsEnvironmentEnvironmentIdRoute
+    }
+    '/settings/environment/$environmentId/providers': {
+      id: '/settings/environment/$environmentId/providers'
+      path: '/providers'
+      fullPath: '/settings/environment/$environmentId/providers'
+      preLoaderRoute: typeof SettingsEnvironmentEnvironmentIdProvidersRouteImport
+      parentRoute: typeof SettingsEnvironmentEnvironmentIdRoute
+    }
+    '/settings/environment/$environmentId/general': {
+      id: '/settings/environment/$environmentId/general'
+      path: '/general'
+      fullPath: '/settings/environment/$environmentId/general'
+      preLoaderRoute: typeof SettingsEnvironmentEnvironmentIdGeneralRouteImport
+      parentRoute: typeof SettingsEnvironmentEnvironmentIdRoute
+    }
+    '/settings/environment/$environmentId/assistants': {
+      id: '/settings/environment/$environmentId/assistants'
+      path: '/assistants'
+      fullPath: '/settings/environment/$environmentId/assistants'
+      preLoaderRoute: typeof SettingsEnvironmentEnvironmentIdAssistantsRouteImport
+      parentRoute: typeof SettingsEnvironmentEnvironmentIdRoute
+    }
+    '/settings/environment/$environmentId/archived': {
+      id: '/settings/environment/$environmentId/archived'
+      path: '/archived'
+      fullPath: '/settings/environment/$environmentId/archived'
+      preLoaderRoute: typeof SettingsEnvironmentEnvironmentIdArchivedRouteImport
+      parentRoute: typeof SettingsEnvironmentEnvironmentIdRoute
+    }
+    '/_chat/assistant/$environmentId/$projectId': {
+      id: '/_chat/assistant/$environmentId/$projectId'
+      path: '/$environmentId/$projectId'
+      fullPath: '/assistant/$environmentId/$projectId'
+      preLoaderRoute: typeof ChatAssistantEnvironmentIdProjectIdRouteImport
+      parentRoute: typeof ChatAssistantRoute
+    }
   }
 }
 
 interface ChatAssistantRouteChildren {
-  ChatAssistantProjectIdRoute: typeof ChatAssistantProjectIdRoute
   ChatAssistantIndexRoute: typeof ChatAssistantIndexRoute
+  ChatAssistantEnvironmentIdProjectIdRoute: typeof ChatAssistantEnvironmentIdProjectIdRoute
 }
 
 const ChatAssistantRouteChildren: ChatAssistantRouteChildren = {
-  ChatAssistantProjectIdRoute: ChatAssistantProjectIdRoute,
   ChatAssistantIndexRoute: ChatAssistantIndexRoute,
+  ChatAssistantEnvironmentIdProjectIdRoute:
+    ChatAssistantEnvironmentIdProjectIdRoute,
 }
 
 const ChatAssistantRouteWithChildren = ChatAssistantRoute._addFileChildren(
@@ -367,6 +546,33 @@ const ChatRouteChildren: ChatRouteChildren = {
 
 const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
 
+interface SettingsEnvironmentEnvironmentIdRouteChildren {
+  SettingsEnvironmentEnvironmentIdArchivedRoute: typeof SettingsEnvironmentEnvironmentIdArchivedRoute
+  SettingsEnvironmentEnvironmentIdAssistantsRoute: typeof SettingsEnvironmentEnvironmentIdAssistantsRoute
+  SettingsEnvironmentEnvironmentIdGeneralRoute: typeof SettingsEnvironmentEnvironmentIdGeneralRoute
+  SettingsEnvironmentEnvironmentIdProvidersRoute: typeof SettingsEnvironmentEnvironmentIdProvidersRoute
+  SettingsEnvironmentEnvironmentIdSourceControlRoute: typeof SettingsEnvironmentEnvironmentIdSourceControlRoute
+}
+
+const SettingsEnvironmentEnvironmentIdRouteChildren: SettingsEnvironmentEnvironmentIdRouteChildren =
+  {
+    SettingsEnvironmentEnvironmentIdArchivedRoute:
+      SettingsEnvironmentEnvironmentIdArchivedRoute,
+    SettingsEnvironmentEnvironmentIdAssistantsRoute:
+      SettingsEnvironmentEnvironmentIdAssistantsRoute,
+    SettingsEnvironmentEnvironmentIdGeneralRoute:
+      SettingsEnvironmentEnvironmentIdGeneralRoute,
+    SettingsEnvironmentEnvironmentIdProvidersRoute:
+      SettingsEnvironmentEnvironmentIdProvidersRoute,
+    SettingsEnvironmentEnvironmentIdSourceControlRoute:
+      SettingsEnvironmentEnvironmentIdSourceControlRoute,
+  }
+
+const SettingsEnvironmentEnvironmentIdRouteWithChildren =
+  SettingsEnvironmentEnvironmentIdRoute._addFileChildren(
+    SettingsEnvironmentEnvironmentIdRouteChildren,
+  )
+
 interface SettingsRouteChildren {
   SettingsArchivedRoute: typeof SettingsArchivedRoute
   SettingsAssistantRoute: typeof SettingsAssistantRoute
@@ -374,6 +580,10 @@ interface SettingsRouteChildren {
   SettingsConnectionsRoute: typeof SettingsConnectionsRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
+  SettingsAppBrowserRoute: typeof SettingsAppBrowserRoute
+  SettingsAppConnectionsRoute: typeof SettingsAppConnectionsRoute
+  SettingsAppGeneralRoute: typeof SettingsAppGeneralRoute
+  SettingsEnvironmentEnvironmentIdRoute: typeof SettingsEnvironmentEnvironmentIdRouteWithChildren
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
@@ -383,6 +593,11 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsConnectionsRoute: SettingsConnectionsRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,
+  SettingsAppBrowserRoute: SettingsAppBrowserRoute,
+  SettingsAppConnectionsRoute: SettingsAppConnectionsRoute,
+  SettingsAppGeneralRoute: SettingsAppGeneralRoute,
+  SettingsEnvironmentEnvironmentIdRoute:
+    SettingsEnvironmentEnvironmentIdRouteWithChildren,
 }
 
 const SettingsRouteWithChildren = SettingsRoute._addFileChildren(

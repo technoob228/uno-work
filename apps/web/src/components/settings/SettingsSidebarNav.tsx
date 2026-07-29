@@ -1,4 +1,4 @@
-import { useCallback, type ComponentType } from "react";
+import { useCallback, useMemo, type ComponentType } from "react";
 import {
   ArchiveIcon,
   ArrowLeftIcon,
@@ -6,9 +6,18 @@ import {
   GitBranchIcon,
   GlobeIcon,
   Link2Icon,
+  PlugIcon,
   Settings2Icon,
 } from "lucide-react";
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
+
+import {
+  appSettingsPath,
+  environmentSettingsPath,
+  parseSettingsScopeLocation,
+  type AppSettingsSection,
+  type EnvironmentSettingsSection,
+} from "./settingsScopeRoutes";
 
 import {
   SidebarContent,
@@ -21,33 +30,56 @@ import {
   useSidebar,
 } from "../ui/sidebar";
 
-export type SettingsSectionPath =
-  | "/settings/general"
-  | "/settings/assistant"
-  | "/settings/source-control"
-  | "/settings/connections"
-  | "/settings/browser"
-  | "/settings/archived";
-
-export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
+/**
+ * The nav lists the sections of whichever scope the URL names: this device's
+ * own settings, or one environment's. A section from the other scope is never
+ * shown, so there is no way to click from "my theme" straight into a daemon's
+ * providers without noticing the machine changed.
+ */
+const APP_NAV_ITEMS: ReadonlyArray<{
   label: string;
-  to: SettingsSectionPath;
+  section: AppSettingsSection;
   icon: ComponentType<{ className?: string }>;
 }> = [
-  { label: "General", to: "/settings/general", icon: Settings2Icon },
-  { label: "Assistant", to: "/settings/assistant", icon: BotIcon },
-  { label: "Source Control", to: "/settings/source-control", icon: GitBranchIcon },
-  { label: "Connections", to: "/settings/connections", icon: Link2Icon },
-  { label: "Browser", to: "/settings/browser", icon: GlobeIcon },
-  { label: "Archive", to: "/settings/archived", icon: ArchiveIcon },
+  { label: "General", section: "general", icon: Settings2Icon },
+  { label: "Connections", section: "connections", icon: Link2Icon },
+  { label: "Browser", section: "browser", icon: GlobeIcon },
+];
+
+const ENVIRONMENT_NAV_ITEMS: ReadonlyArray<{
+  label: string;
+  section: EnvironmentSettingsSection;
+  icon: ComponentType<{ className?: string }>;
+}> = [
+  { label: "General", section: "general", icon: Settings2Icon },
+  { label: "Providers", section: "providers", icon: PlugIcon },
+  { label: "Assistants", section: "assistants", icon: BotIcon },
+  { label: "Source Control", section: "source-control", icon: GitBranchIcon },
+  { label: "Archive", section: "archived", icon: ArchiveIcon },
 ];
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   const { isMobile, setOpenMobile } = useSidebar();
+  const location = useMemo(() => parseSettingsScopeLocation(pathname), [pathname]);
+  const items = useMemo(() => {
+    const environmentId = location.environmentId;
+    if (location.kind === "environment" && environmentId) {
+      return ENVIRONMENT_NAV_ITEMS.map((item) => ({
+        label: item.label,
+        icon: item.icon,
+        to: environmentSettingsPath(environmentId, item.section),
+      }));
+    }
+    return APP_NAV_ITEMS.map((item) => ({
+      label: item.label,
+      icon: item.icon,
+      to: appSettingsPath(item.section),
+    }));
+  }, [location.environmentId, location.kind]);
   const handleSectionClick = useCallback(
-    (to: SettingsSectionPath) => {
+    (to: string) => {
       if (isMobile) {
         setOpenMobile(false);
       }
@@ -71,7 +103,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
       <SidebarContent className="overflow-x-hidden">
         <SidebarGroup className="px-2 py-3">
           <SidebarMenu>
-            {SETTINGS_NAV_ITEMS.map((item) => {
+            {items.map((item) => {
               const Icon = item.icon;
               const isActive = pathname === item.to;
               return (
