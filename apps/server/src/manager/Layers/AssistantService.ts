@@ -132,6 +132,27 @@ function slugifyAssistantName(name: string): string {
   return slug.length > 0 ? slug : "assistant";
 }
 
+/**
+ * Contents of a folder's `.uno-assistant.json` marker.
+ *
+ * Parsed by hand rather than through a schema because the only question ever
+ * asked of it is "did *this* environment write it", and a file that will not
+ * parse answers that exactly as well as a well-formed foreign one does.
+ */
+type AssistantFolderMarkerFile = {
+  readonly stateDir?: string;
+  readonly projectId?: string;
+};
+
+/** `null` for anything that is not readable JSON — callers treat it as foreign. */
+function parseAssistantFolderMarker(raw: string): AssistantFolderMarkerFile | null {
+  try {
+    return JSON.parse(raw) as AssistantFolderMarkerFile;
+  } catch {
+    return null;
+  }
+}
+
 const emptyTelegramStatus = (input: {
   readonly botUsername: string | null;
   readonly lastError: string | null;
@@ -183,17 +204,16 @@ const makeManagerAssistantService = Effect.gen(function* () {
       const markerPath = path.join(preferred, ".uno-assistant.json");
       const marker = yield* fs.readFileString(markerPath).pipe(Effect.orElseSucceed(() => ""));
       if (marker.length > 0) {
-        try {
-          const parsed = JSON.parse(marker) as { stateDir?: string; projectId?: string };
-          if (parsed.stateDir !== config.stateDir || parsed.projectId !== projectId) {
-            return path.join(
-              base,
-              `${name}-${crypto.createHash("sha256").update(config.stateDir).digest("hex").slice(0, 6)}`,
-            );
-          }
-        } catch {
+        const parsed = parseAssistantFolderMarker(marker);
+        if (parsed === null) {
           // Unreadable marker — treat the folder as foreign.
           return path.join(base, `${name}-${crypto.randomUUID().slice(0, 6)}`);
+        }
+        if (parsed.stateDir !== config.stateDir || parsed.projectId !== projectId) {
+          return path.join(
+            base,
+            `${name}-${crypto.createHash("sha256").update(config.stateDir).digest("hex").slice(0, 6)}`,
+          );
         }
       }
       return preferred;
@@ -358,14 +378,11 @@ const makeManagerAssistantService = Effect.gen(function* () {
         .readFileString(path.join(dir, ".uno-assistant.json"))
         .pipe(Effect.orElseSucceed(() => ""));
       if (raw.length === 0) return { kind: "none" } as const;
-      try {
-        const parsed = JSON.parse(raw) as { projectId?: string; stateDir?: string };
-        return parsed.stateDir === config.stateDir && typeof parsed.projectId === "string"
-          ? ({ kind: "owned", projectId: parsed.projectId } as const)
-          : ({ kind: "foreign" } as const);
-      } catch {
-        return { kind: "foreign" } as const;
-      }
+      const parsed = parseAssistantFolderMarker(raw);
+      if (parsed === null) return { kind: "foreign" } as const;
+      return parsed.stateDir === config.stateDir && typeof parsed.projectId === "string"
+        ? ({ kind: "owned", projectId: parsed.projectId } as const)
+        : ({ kind: "foreign" } as const);
     });
 
   /**
