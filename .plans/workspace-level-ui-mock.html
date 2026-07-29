@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="ru" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Uno Work — Workspace level (дизайн-мок v2)</title>
+<style>
+/* ─────────────────────────────────────────────────────────────
+   Токены приложения — 1:1 из apps/web/src/index.css
+   ───────────────────────────────────────────────────────────── */
+:root{
+  color-scheme: light;
+  --radius: 0.625rem;
+  --sidebar-width: 16rem;
+
+  --color-white:#fff; --color-black:#000;
+  --color-neutral-100: oklch(0.97 0 0);
+  --color-neutral-500: oklch(0.556 0 0);
+  --color-neutral-800: oklch(0.268 0 0);
+  --color-neutral-950: oklch(0.145 0 0);
+  --color-red-400: oklch(0.704 0.191 22.216);
+  --color-red-500: oklch(0.637 0.237 25.331);
+  --color-red-700: oklch(0.505 0.213 27.518);
+  --color-blue-500: oklch(0.623 0.214 259.815);
+  --color-blue-700: oklch(0.488 0.243 264.376);
+  --color-emerald-500: oklch(0.696 0.17 162.48);
+  --color-emerald-700: oklch(0.508 0.118 165.612);
+  --color-amber-400: oklch(0.828 0.189 84.429);
+  --color-amber-500: oklch(0.769 0.188 70.08);
+  --color-amber-700: oklch(0.555 0.163 48.998);
+
+  --background: var(--color-white);
+  --app-chrome-background: var(--background);
+  --foreground: var(--color-neutral-800);
+  --card: var(--color-white);
+  --popover: var(--color-white);
+  --primary: oklch(0.55 0.22 273);
+  --primary-foreground: var(--color-white);
+  --muted: color-mix(in srgb, var(--color-black) 4%, transparent);
+  --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-black));
+  --accent: color-mix(in srgb, var(--color-black) 4%, transparent);
+  --destructive: var(--color-red-500);
+  --destructive-foreground: var(--color-red-700);
+  --border: color-mix(in srgb, var(--color-black) 8%, transparent);
+  --input: color-mix(in srgb, var(--color-black) 10%, transparent);
+  --info: var(--color-blue-500);         --info-foreground: var(--color-blue-700);
+  --success: var(--color-emerald-500);   --success-foreground: var(--color-emerald-700);
+  --warning: var(--color-amber-500);     --warning-foreground: var(--color-amber-700);
+
+  /* ── Идентичность компьютера — палитра прогнана валидатором ──
+     3 слота, назначаются в фиксированном порядке и НЕ циклятся.
+     Монограмма — основной носитель идентичности, цвет — подкрепление.
+     light: CVD ΔE 13.7 · normal-vision 25.0 · контраст ≥3:1 — все гейты PASS */
+  --m1-ink:#1d4ed8; --m1-base:#3b82f6;   /* синий      */
+  --m2-ink:#0d9488; --m2-base:#14b8a6;   /* бирюзовый  */
+  --m3-ink:#c2410c; --m3-base:#f97316;   /* оранжевый  */
+}
+html.dark{
+  color-scheme: dark;
+  --background: color-mix(in srgb, var(--color-neutral-950) 95%, var(--color-white));
+  --app-chrome-background: var(--background);
+  --foreground: var(--color-neutral-100);
+  --card: color-mix(in srgb, var(--background) 98%, var(--color-white));
+  --popover: color-mix(in srgb, var(--background) 98%, var(--color-white));
+  --primary: oklch(0.65 0.22 273);
+  --muted: color-mix(in srgb, var(--color-white) 4%, transparent);
+  --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
+  --accent: color-mix(in srgb, var(--color-white) 4%, transparent);
+  --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
+  --destructive-foreground: var(--color-red-400);
+  --border: color-mix(in srgb, var(--color-white) 6%, transparent);
+  --input: color-mix(in srgb, var(--color-white) 8%, transparent);
+  --warning-foreground: var(--color-amber-400);
+  /* dark: CVD ΔE 15.3 · normal-vision 17.8 · контраст ≥3:1 — PASS */
+  --m1-ink:#60a5fa; --m2-ink:#2dd4bf; --m3-ink:#fb923c;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:"DM Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  background:color-mix(in srgb, var(--background) 88%, var(--color-black));
+  color:var(--foreground); font-size:13px; line-height:1.45;
+  padding:26px 26px 80px; display:flex; flex-direction:column; align-items:center; gap:16px;
+}
+html:not(.dark) body{background:color-mix(in srgb, var(--background) 94%, var(--color-black))}
+code,.mono{font-family:"SF Mono","SFMono-Regular",Consolas,Menlo,monospace}
+
+.mockhead{width:1280px;display:flex;align-items:flex-end;gap:14px;margin-bottom:4px}
+.mockhead h1{font-size:17px;font-weight:600;letter-spacing:-.01em}
+.mockhead p{font-size:12px;color:var(--muted-foreground);max-width:820px;margin-top:5px}
+.mockhead .sp{flex:1}
+.tbtn{border:1px solid var(--border);background:var(--card);color:var(--foreground);
+  border-radius:calc(var(--radius) - 2px);padding:6px 11px;font:inherit;font-size:12px;cursor:pointer}
+.tbtn:hover{background:var(--accent)}
+
+.screen{width:1280px;display:flex;flex-direction:column;gap:10px}
+.screen > .cap{display:flex;align-items:baseline;gap:9px}
+.screen > .cap b{font-size:13.5px;font-weight:600}
+.screen > .cap .n{font-size:11px;font-weight:700;color:var(--primary-foreground);background:var(--primary);
+  border-radius:6px;padding:1px 7px;flex:none}
+.screen > .cap span{font-size:12px;color:var(--muted-foreground)}
+
+.win{background:var(--app-chrome-background);border:1px solid var(--border);
+  border-radius:calc(var(--radius) + 4px);overflow:hidden;position:relative;
+  box-shadow:0 20px 46px -12px rgba(0,0,0,.45)}
+html:not(.dark) .win{box-shadow:0 20px 46px -18px rgba(0,0,0,.2)}
+.win::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.035;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size:256px 256px}
+.titlebar{height:38px;display:flex;align-items:center;gap:8px;padding:0 13px;border-bottom:1px solid var(--border)}
+.tl{width:11px;height:11px;border-radius:50%}
+.tl.r{background:#ff5f57}.tl.y{background:#febc2e}.tl.g{background:#28c840}
+.titlebar .path{margin-left:12px;font-size:11.5px;color:var(--muted-foreground)}
+.body{display:flex;min-height:0}
+
+/* ── сайдбар ── */
+.sb{width:var(--sidebar-width);flex:none;border-right:1px solid var(--border);
+  display:flex;flex-direction:column;padding:8px;gap:1px;min-height:0}
+.sbcol{width:var(--sidebar-width);border:1px solid var(--border);border-radius:var(--radius);
+  background:var(--app-chrome-background);padding:8px;display:flex;flex-direction:column;gap:1px;position:relative;overflow:hidden}
+.sbcol::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.035;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:256px 256px}
+.sb-top{display:flex;align-items:center;gap:6px;padding:2px 4px 8px}
+.wsbtn{flex:1;display:flex;align-items:center;gap:7px;border:1px solid var(--border);
+  background:var(--card);border-radius:calc(var(--radius) - 2px);padding:5px 8px;min-width:0}
+.wsbtn .nm{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wsbtn .sc{font-size:10.5px;color:var(--muted-foreground);white-space:nowrap}
+.iconbtn{width:26px;height:26px;flex:none;display:grid;place-items:center;border-radius:calc(var(--radius) - 4px);color:var(--muted-foreground)}
+.iconbtn:hover{background:var(--accent);color:var(--foreground)}
+.sb-label{display:flex;align-items:center;gap:6px;padding:9px 8px 4px;font-size:10.5px;font-weight:600;
+  letter-spacing:.05em;text-transform:uppercase;color:var(--muted-foreground)}
+.sb-label .sp{flex:1}
+.row{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:calc(var(--radius) - 3px);min-width:0;cursor:default}
+.row:hover{background:var(--accent)}
+.row.on{background:var(--accent);font-weight:600}
+.row.sel{background:color-mix(in srgb, var(--primary) 16%, transparent)}
+.row .ic{flex:none;color:var(--muted-foreground);display:grid;place-items:center}
+.row .tx{flex:1;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .sub{font-size:10.5px;color:var(--muted-foreground);white-space:nowrap;flex:none}
+.l2{padding-left:24px}
+.l3{padding-left:40px}
+.l2 .tx,.l3 .tx{font-size:12px;color:color-mix(in srgb,var(--foreground) 86%, transparent)}
+.dim{opacity:.5}
+.subhead{display:flex;align-items:center;gap:6px;padding:5px 8px 3px 22px;font-size:10px;font-weight:600;
+  letter-spacing:.04em;text-transform:uppercase;color:var(--muted-foreground)}
+.subhead .ln{flex:1;height:1px;background:var(--border)}
+
+/* ── чип компьютера: монограмма + цвет ── */
+.mchip{width:19px;height:19px;flex:none;border-radius:5px;display:grid;place-items:center;
+  font-size:9.5px;font-weight:700;letter-spacing:-.03em;font-family:"DM Sans",system-ui,sans-serif}
+.mchip.m1{color:var(--m1-ink);background:color-mix(in srgb,var(--m1-base) 16%,transparent)}
+.mchip.m2{color:var(--m2-ink);background:color-mix(in srgb,var(--m2-base) 16%,transparent)}
+.mchip.m3{color:var(--m3-ink);background:color-mix(in srgb,var(--m3-base) 16%,transparent)}
+.mchip.m0{color:var(--muted-foreground);background:var(--muted)}
+.mchip.big{width:26px;height:26px;border-radius:7px;font-size:11.5px}
+.mchip.stack{margin-left:-6px;box-shadow:0 0 0 1.5px var(--app-chrome-background)}
+.mstack{display:flex;align-items:center;padding-left:6px;flex:none}
+
+.pill{font-size:10px;font-weight:600;border-radius:20px;padding:1.5px 7px;white-space:nowrap;flex:none;
+  border:1px solid var(--border);color:var(--muted-foreground);background:var(--muted)}
+.pill.live{color:var(--success-foreground);background:color-mix(in srgb,var(--success) 14%,transparent);
+  border-color:color-mix(in srgb,var(--success) 30%,transparent)}
+.pill.stale{color:var(--warning-foreground);background:color-mix(in srgb,var(--warning) 15%,transparent);
+  border-color:color-mix(in srgb,var(--warning) 32%,transparent)}
+.pill.off{background:transparent;border-style:dashed}
+.pill.err{color:var(--destructive-foreground);background:color-mix(in srgb,var(--destructive) 13%,transparent);
+  border-color:color-mix(in srgb,var(--destructive) 30%,transparent)}
+.pill.info{color:var(--info-foreground);background:color-mix(in srgb,var(--info) 13%,transparent);
+  border-color:color-mix(in srgb,var(--info) 30%,transparent)}
+.pill.acc{color:var(--primary);background:color-mix(in srgb,var(--primary) 14%,transparent);
+  border-color:color-mix(in srgb,var(--primary) 30%,transparent)}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.dot.live{background:var(--success)}.dot.stale{background:var(--warning)}
+.dot.off{background:var(--muted-foreground);opacity:.45}.dot.err{background:var(--destructive)}
+.hd{width:9px;height:9px;border-radius:50%;flex:none;box-shadow:0 0 0 1.5px var(--app-chrome-background);
+  margin-left:-5px;align-self:flex-end}
+
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.mhead{height:44px;display:flex;align-items:center;gap:9px;padding:0 15px;border-bottom:1px solid var(--border)}
+.mhead b{font-size:13px;font-weight:600}
+.mbody{flex:1;min-height:0;overflow:hidden;padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+
+.card{border:1px solid var(--border);background:var(--card);border-radius:var(--radius);overflow:hidden}
+.card > .h{display:flex;align-items:center;gap:8px;padding:10px 13px;border-bottom:1px solid var(--border)}
+.card > .h b{font-size:12.5px;font-weight:600}.card > .h .sp{flex:1}
+.card > .h .hint{font-size:11px;color:var(--muted-foreground)}
+.tr{display:flex;align-items:center;gap:10px;padding:9px 13px;border-bottom:1px solid var(--border)}
+.tr:last-child{border-bottom:none}
+.tr:hover{background:var(--accent)}
+.tr .who{display:flex;flex-direction:column;gap:2px;min-width:0}
+.tr .who b{font-size:12.5px;font-weight:600}
+.tr .who span{font-size:10.5px;color:var(--muted-foreground)}
+.tr .sp{flex:1}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.kv{display:flex;flex-direction:column;gap:3px;padding:11px 13px}
+.kv .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted-foreground);font-weight:600}
+.kv .v{font-size:14px;font-weight:600}
+.kv .v small{font-size:11px;font-weight:400;color:var(--muted-foreground)}
+
+.btn{border:1px solid var(--border);background:var(--card);color:var(--foreground);border-radius:calc(var(--radius) - 3px);
+  padding:5px 10px;font-size:11.5px;font-weight:500;cursor:default;white-space:nowrap}
+.btn:hover{background:var(--accent)}
+.btn.pri{background:var(--primary);border-color:transparent;color:var(--primary-foreground)}
+.btn.dgr{color:var(--destructive-foreground);border-color:color-mix(in srgb,var(--destructive) 28%,transparent)}
+.sw{width:32px;height:18px;border-radius:20px;background:var(--input);position:relative;flex:none}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--muted-foreground)}
+.sw.on{background:var(--primary)}.sw.on::after{left:16px;background:#fff}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:calc(var(--radius) - 3px);overflow:hidden;flex:none}
+.seg div{padding:4px 10px;font-size:11.5px;color:var(--muted-foreground);white-space:nowrap}
+.seg div.on{background:var(--primary);color:var(--primary-foreground);font-weight:600}
+
+.menu{background:var(--popover);border:1px solid var(--border);border-radius:var(--radius);padding:5px;min-width:262px}
+.menu .mi{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:calc(var(--radius) - 4px);font-size:12px}
+.menu .mi:hover{background:var(--accent)}
+.menu .mt{padding:7px 8px 3px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-foreground)}
+.menu .sep{height:1px;background:var(--border);margin:4px 0}
+.menu .ck{width:14px;flex:none;color:var(--primary)}
+.menu .mi .note{margin-left:auto;font-size:10px;color:var(--muted-foreground)}
+
+.msg{display:flex;flex-direction:column;gap:5px;max-width:660px}
+.msg .who{font-size:10.5px;font-weight:600;color:var(--muted-foreground);display:flex;align-items:center;gap:6px}
+.bub{border:1px solid var(--border);background:var(--card);border-radius:var(--radius);padding:9px 12px;font-size:12.5px}
+.msg.me{align-self:flex-end}.msg.me .who{align-self:flex-end}
+.msg.me .bub{background:var(--primary);color:var(--primary-foreground);border-color:transparent}
+.toolcall{border:1px solid var(--border);border-radius:calc(var(--radius) - 2px);background:var(--muted);
+  padding:8px 11px;display:flex;flex-direction:column;gap:6px;max-width:660px}
+.toolcall .t{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600}
+.toolcall .t .nm{font-family:"SF Mono",Menlo,monospace;font-size:11px}
+.toolcall .res{font-size:11.5px;color:var(--muted-foreground);display:flex;flex-direction:column;gap:4px}
+.toolcall .res .l{display:flex;align-items:center;gap:7px}
+.approve{border:1px solid color-mix(in srgb,var(--warning) 40%,transparent);
+  background:color-mix(in srgb,var(--warning) 9%,transparent);border-radius:var(--radius);padding:11px 13px;
+  display:flex;flex-direction:column;gap:9px;max-width:680px}
+.approve .t{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600}
+.approve .meta{font-size:11.5px;color:var(--muted-foreground);display:flex;flex-direction:column;gap:2px}
+.approve .acts{display:flex;gap:7px;align-items:center}
+.composer{border-top:1px solid var(--border);padding:11px 15px}
+.cbox{border:1px solid var(--input);border-radius:var(--radius);padding:9px 11px;font-size:12.5px;color:var(--muted-foreground)}
+
+.layers{display:flex;flex-direction:column;gap:8px}
+.layer{border:1px solid var(--border);border-radius:calc(var(--radius) - 2px);overflow:hidden}
+.layer > .lh{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--muted)}
+.layer > .lh b{font-size:12px;font-weight:600}.layer > .lh .sp{flex:1}
+.layer > .lb{padding:9px 11px;font-family:"SF Mono",Menlo,monospace;font-size:11px;color:var(--muted-foreground);
+  white-space:pre-wrap;border-top:1px solid var(--border)}
+.layer.ed > .lb{color:var(--foreground);background:color-mix(in srgb,var(--primary) 5%,transparent)}
+.note{font-size:11.5px;color:var(--muted-foreground);display:flex;gap:7px;align-items:flex-start}
+.note svg{flex:none;margin-top:1px}
+
+.ann{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted-foreground);
+  border-left:2px solid var(--border);padding:2px 0 2px 11px}
+.ann b{color:var(--foreground);font-weight:600}
+.ann .q{color:var(--warning-foreground)}
+.four{display:grid;grid-template-columns:repeat(4,var(--sidebar-width));gap:14px;justify-content:start}
+.vt{font-size:12px;font-weight:600;margin-bottom:7px;display:flex;align-items:center;gap:6px;height:32px}
+.vt .tag{font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:5px;background:var(--muted);color:var(--muted-foreground)}
+.vt .tag.d{background:color-mix(in srgb,var(--primary) 15%,transparent);color:var(--primary)}
+</style>
+</head>
+<body>
+
+<div class="mockhead">
+  <div>
+    <h1>Workspace level — дизайн интерфейса, v2</h1>
+    <p>На реальных токенах <code>apps/web/src/index.css</code> (DM Sans, radius 10px, сайдбар 16rem, те же <code>--primary/--success/--warning/--destructive</code>, шум 3.5%). Изменения против v1: у каждого компьютера короткая <b>монограмма + цвет</b>, а группировка стала <b>осью с четырьмя режимами</b> — то, что было «вариант A / вариант B», теперь два из них.</p>
+  </div>
+  <div class="sp"></div>
+  <button class="tbtn" onclick="document.documentElement.classList.toggle('dark')">Тема: dark / light</button>
+</div>
+
+<!-- ═══════════ 1. ЧЕТЫРЕ РЕЖИМА ГРУППИРОВКИ ═══════════ -->
+<div class="screen">
+  <div class="cap"><span class="n">1</span><b>Группировка: проекты × компьютеры</b>
+    <span>одни и те же данные — 4 машины, 3 репозитория — в четырёх режимах</span></div>
+
+  <div class="four">
+    <!-- A: по проектам -->
+    <div>
+      <div class="vt">По проектам <span class="tag d">дефолт</span></div>
+      <div class="sbcol">
+        <div class="sb-label">Проекты</div>
+        <div class="row on"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></span>
+          <span class="tx">uno-work-app</span>
+          <span class="mstack"><i class="mchip m0 stack">MB</i><i class="mchip m1 stack">HK</i><i class="mchip m2 stack">CM</i></span></div>
+        <div class="row l2 sel"><span class="tx">dictation: кнопка</span><i class="mchip m0">MB</i></div>
+        <div class="row l2"><span class="tx">workspace: план</span><i class="mchip m0">MB</i></div>
+        <div class="row l2"><span class="tx">e2e на проде</span><i class="mchip m1">HK</i></div>
+        <div class="row l2"><span class="tx">починить autoupdate</span>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--muted-foreground)"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+          <i class="mchip m2">CM</i><span class="pill stale">12м</span></div>
+        <div class="row"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></span>
+          <span class="tx">fishcode</span><span class="mstack"><i class="mchip m1 stack">HK</i></span></div>
+        <div class="row dim"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></span>
+          <span class="tx">seersite</span><span class="mstack"><i class="mchip m3 stack">VP</i></span><span class="pill off">offline</span></div>
+        <div class="row"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></span>
+          <span class="tx">uno-console</span><span class="mstack"><i class="mchip m0 stack">MB</i></span></div>
+      </div>
+    </div>
+
+    <!-- B: по компьютерам -->
+    <div>
+      <div class="vt">По компьютерам <span class="tag">зеркало A</span></div>
+      <div class="sbcol">
+        <div class="sb-label">Компьютеры</div>
+        <div class="row on"><i class="mchip m0">MB</i><span class="tx">Этот Mac</span><i class="dot live"></i></div>
+        <div class="row l2 sel"><span class="tx">dictation: кнопка</span><span class="sub">uno-work-app</span></div>
+        <div class="row l2"><span class="tx">workspace: план</span><span class="sub">uno-work-app</span></div>
+        <div class="row l2"><span class="tx">секреты в консоли</span><span class="sub">uno-console</span></div>
+        <div class="row on"><i class="mchip m1">HK</i><span class="tx">hostkey81337</span><i class="dot live"></i></div>
+        <div class="row l2"><span class="tx">e2e на проде</span><span class="sub">uno-work-app</span></div>
+        <div class="row l2"><span class="tx">миграция 070</span><span class="sub">fishcode</span></div>
+        <div class="row on"><i class="mchip m2">CM</i><span class="tx">cozy-maple</span><i class="dot stale"></i><span class="pill stale">12м</span></div>
+        <div class="row l2"><span class="tx">починить autoupdate</span><span class="sub">uno-work-app</span></div>
+        <div class="row dim"><i class="mchip m3">VP</i><span class="tx">vm-pico</span><i class="dot off"></i><span class="pill off">3ч</span></div>
+        <div class="row l2 dim"><span class="tx">лендинг seersite</span><span class="sub">seersite</span></div>
+      </div>
+    </div>
+
+    <!-- C: проекты → компьютеры -->
+    <div>
+      <div class="vt">Проекты, внутри компьютеры</div>
+      <div class="sbcol">
+        <div class="sb-label">Проекты</div>
+        <div class="row on"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></span>
+          <span class="tx">uno-work-app</span><span class="sub">3 комп.</span></div>
+        <div class="subhead"><i class="mchip m0" style="width:15px;height:15px;font-size:8px">MB</i>этот mac<span class="ln"></span></div>
+        <div class="row l3 sel"><span class="tx">dictation: кнопка</span></div>
+        <div class="row l3"><span class="tx">workspace: план</span></div>
+        <div class="subhead"><i class="mchip m1" style="width:15px;height:15px;font-size:8px">HK</i>hostkey81337<span class="ln"></span></div>
+        <div class="row l3"><span class="tx">e2e на проде</span></div>
+        <div class="subhead"><i class="mchip m2" style="width:15px;height:15px;font-size:8px">CM</i>cozy-maple<span class="ln"></span><span class="pill stale">12м</span></div>
+        <div class="row l3"><span class="tx">починить autoupdate</span>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--muted-foreground)"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+        <div class="row"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></span>
+          <span class="tx">fishcode</span><span class="sub">1 комп.</span></div>
+        <div class="row dim"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></span>
+          <span class="tx">seersite</span><span class="pill off">offline</span></div>
+      </div>
+    </div>
+
+    <!-- D: компьютеры → проекты -->
+    <div>
+      <div class="vt">Компьютеры, внутри проекты</div>
+      <div class="sbcol">
+        <div class="sb-label">Компьютеры</div>
+        <div class="row on"><i class="mchip m0">MB</i><span class="tx">Этот Mac</span><i class="dot live"></i></div>
+        <div class="subhead" style="text-transform:none;letter-spacing:0">uno-work-app<span class="ln"></span></div>
+        <div class="row l3 sel"><span class="tx">dictation: кнопка</span></div>
+        <div class="row l3"><span class="tx">workspace: план</span></div>
+        <div class="subhead" style="text-transform:none;letter-spacing:0">uno-console<span class="ln"></span></div>
+        <div class="row l3"><span class="tx">секреты в консоли</span></div>
+        <div class="row on"><i class="mchip m1">HK</i><span class="tx">hostkey81337</span><i class="dot live"></i></div>
+        <div class="subhead" style="text-transform:none;letter-spacing:0">uno-work-app<span class="ln"></span></div>
+        <div class="row l3"><span class="tx">e2e на проде</span></div>
+        <div class="subhead" style="text-transform:none;letter-spacing:0">fishcode<span class="ln"></span></div>
+        <div class="row l3"><span class="tx">миграция 070</span></div>
+        <div class="row on"><i class="mchip m2">CM</i><span class="tx">cozy-maple</span><i class="dot stale"></i></div>
+        <div class="subhead" style="text-transform:none;letter-spacing:0">uno-work-app<span class="ln"></span></div>
+        <div class="row l3"><span class="tx">починить autoupdate</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ann">
+    <div><b>Одна ось, четыре значения.</b> Первый уровень — проект или компьютер; второй — либо ничего (тогда «другая» сущность показывается маркером на строке чата), либо вторая сущность подзаголовками. A и B — зеркала друг друга: в A на чате чип компьютера, в B — имя проекта. Существующая настройка «схлопывать проекты по репозиторию / по репозиторию+пути / раздельно» остаётся отдельной осью и работает во всех четырёх.</div>
+    <div><b>Стек чипов на строке проекта</b> (режим A) заменяет «3 env» словами: сразу видно, на каких машинах живёт репозиторий, в фиксированном порядке.</div>
+    <div><b>Сортировка</b> применяется на каждом уровне отдельно: компьютеры — по активности / по имени / вручную; проекты — как сейчас; чаты — как сейчас.</div>
+  </div>
+</div>
+
+<!-- ═══════════ 2. МЕНЮ ГРУППИРОВКИ ═══════════ -->
+<div class="screen">
+  <div class="cap"><span class="n">2</span><b>Меню группировки и сортировки</b>
+    <span>всё в уже существующем меню сайдбара — новых элементов в шапке нет</span></div>
+  <div style="display:flex;gap:16px;align-items:flex-start">
+    <div class="menu" style="min-width:286px">
+      <div class="mt">Показывать</div>
+      <div class="mi"><span class="ck"></span>Только этот компьютер</div>
+      <div class="mi"><span class="ck"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m5 13 4 4L19 7"/></svg></span>Весь workspace<span class="note">4 комп.</span></div>
+      <div class="sep"></div>
+      <div class="mt">Группировать</div>
+      <div class="mi"><span class="ck"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m5 13 4 4L19 7"/></svg></span>По проектам</div>
+      <div class="mi"><span class="ck"></span>По компьютерам</div>
+      <div class="mi"><span class="ck"></span>По проектам, внутри компьютеры</div>
+      <div class="mi"><span class="ck"></span>По компьютерам, внутри проекты</div>
+      <div class="sep"></div>
+      <div class="mt">Считать одним проектом</div>
+      <div class="mi"><span class="ck"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m5 13 4 4L19 7"/></svg></span>Один репозиторий<span class="note">по git-remote</span></div>
+      <div class="mi"><span class="ck"></span>Репозиторий и путь</div>
+      <div class="mi"><span class="ck"></span>Каждую папку отдельно</div>
+      <div class="sep"></div>
+      <div class="mt">Сортировка</div>
+      <div class="mi"><span class="ck"></span>Компьютеры: по активности</div>
+      <div class="mi"><span class="ck"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m5 13 4 4L19 7"/></svg></span>Компьютеры: вручную</div>
+      <div class="mi"><span class="ck"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m5 13 4 4L19 7"/></svg></span>Чаты: по активности</div>
+      <div class="sep"></div>
+      <div class="mi"><span class="ck"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m5 13 4 4L19 7"/></svg></span>Показывать недоступные<span class="note">приглушённо</span></div>
+    </div>
+
+    <div class="card" style="flex:1;max-width:660px">
+      <div class="h"><b>Как это ложится на настройки</b><span class="sp"></span><span class="hint">клиентские, как sidebarProjectGroupingMode</span></div>
+      <div class="tr"><div class="who"><b>Показывать</b><span class="mono">sidebarEnvironmentScope: "active" | "workspace"</span></div></div>
+      <div class="tr"><div class="who"><b>Группировать</b><span class="mono">sidebarGroupBy: "project" | "machine" | "project_machine" | "machine_project"</span></div></div>
+      <div class="tr"><div class="who"><b>Считать одним проектом</b><span class="mono">sidebarProjectGroupingMode — уже есть, не меняется</span></div></div>
+      <div class="tr"><div class="who"><b>Сортировка</b><span class="mono">sidebarMachineSortOrder — новое; project/thread уже есть</span></div></div>
+      <div class="tr"><div class="who"><b>Недоступные</b><span class="mono">sidebarShowUnreachable: boolean</span></div></div>
+    </div>
+  </div>
+  <div class="ann">
+    <div><b>Почему «компьютеры», а не «окружения».</b> В UI — твоё слово: компьютер конкретен, окружение абстрактно. Внутри кода останутся <code>environmentId</code> и member — это деталь реализации, наружу не лезет.</div>
+    <div class="q"><b>Вопрос:</b> «По проектам» дефолтом (как сейчас) или «По компьютерам»? И нужны ли оба двухуровневых режима, или хватит одного — «проекты, внутри компьютеры»?</div>
+  </div>
+</div>
+
+<!-- ═══════════ 3. ИДЕНТИЧНОСТЬ КОМПЬЮТЕРА ═══════════ -->
+<div class="screen">
+  <div class="cap"><span class="n">3</span><b>Монограмма и цвет компьютера</b>
+    <span>короткое обозначение вместо полного имени — назначается автоматически, правится вручную</span></div>
+  <div class="win">
+    <div class="titlebar"><i class="tl r"></i><i class="tl y"></i><i class="tl g"></i><span class="path">Workspace — UNO — Компьютеры</span></div>
+    <div class="body" style="height:452px">
+      <div class="sb">
+        <div class="sb-top"><div class="wsbtn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--primary)"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
+          <div style="min-width:0"><div class="nm">UNO</div><div class="sc">весь workspace · 4 комп.</div></div></div></div>
+        <div class="row sel"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h18"/></svg></span><span class="tx">Workspace</span><span class="pill stale">2 из 5</span></div>
+        <div class="sb-label">Компьютеры</div>
+        <div class="row"><i class="mchip m0">MB</i><span class="tx">Этот Mac</span><i class="dot live"></i></div>
+        <div class="row"><i class="mchip m1">HK</i><span class="tx">hostkey81337</span><i class="dot live"></i></div>
+        <div class="row"><i class="mchip m2">CM</i><span class="tx">cozy-maple</span><i class="dot stale"></i></div>
+        <div class="row dim"><i class="mchip m3">VP</i><span class="tx">vm-pico</span><i class="dot off"></i></div>
+        <div style="flex:1"></div>
+      </div>
+      <div class="main">
+        <div class="mhead"><b>Компьютеры workspace</b><div style="flex:1"></div>
+          <button class="btn">Проверить всех</button><button class="btn pri">Добавить компьютер</button></div>
+        <div class="mbody">
+          <div class="card">
+            <div class="h"><b>Обозначения</b><span class="sp"></span><span class="hint">монограмма — 2 символа, цвет — из палитры на 3 слота</span></div>
+            <div class="tr"><i class="mchip m0 big">MB</i>
+              <div class="who"><b>Этот Mac</b><span>вы здесь · inbound-tunneled</span></div><div class="sp"></div>
+              <i class="dot live"></i><span class="pill live">live</span>
+              <button class="btn">Переименовать</button><button class="btn">Цвет</button></div>
+            <div class="tr"><i class="mchip m1 big">HK</i>
+              <div class="who"><b>hostkey81337</b><span>82.26.93.86 · inbound-direct · home-реестр</span></div><div class="sp"></div>
+              <i class="dot live"></i><span class="pill live">live · 8 с</span>
+              <button class="btn">Переименовать</button><button class="btn">Цвет</button></div>
+            <div class="tr"><i class="mchip m2 big">CM</i>
+              <div class="who"><b>cozy-maple</b><span>31.207.47.184 · inbound-direct</span></div><div class="sp"></div>
+              <i class="dot stale"></i><span class="pill stale">данные 12 м назад</span>
+              <button class="btn">Почему?</button><button class="btn">Цвет</button></div>
+            <div class="tr dim"><i class="mchip m3 big">VP</i>
+              <div class="who"><b>vm-pico</b><span>151.243.176.173 · inbound-direct</span></div><div class="sp"></div>
+              <i class="dot off"></i><span class="pill off">offline · 3 ч</span>
+              <button class="btn">Почему?</button><button class="btn">Цвет</button></div>
+            <div class="tr"><i class="mchip m0 big">SV</i>
+              <div class="who"><b>seersite-vps</b><span>ожидает зачисления · токен не доставлен</span></div><div class="sp"></div>
+              <i class="dot err"></i><span class="pill err">нет доверия</span>
+              <button class="btn pri">Дозачислить по SSH</button></div>
+          </div>
+
+          <div class="grid3">
+            <div class="card kv"><span class="k">Монограмма</span><span class="v" style="font-size:12.5px">из имени, 2 символа <small>HK, CM, VP; конфликт → правишь руками</small></span></div>
+            <div class="card kv"><span class="k">Цвет</span><span class="v" style="font-size:12.5px">3 слота по порядку <small>4-й и далее — нейтральный чип</small></span></div>
+            <div class="card kv"><span class="k">Здоровье</span><span class="v" style="font-size:12.5px">отдельной точкой <small>зелёный / жёлтый / серый — не смешивается с цветом</small></span></div>
+          </div>
+
+          <div class="note"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+            <span>Цвет закрепляется за компьютером один раз и не переназначается при появлении или удалении других — иначе привычные чипы перекрашивались бы. Палитра прогнана валидатором: 3 оттенка проходят все жёсткие проверки в обеих темах, включая цветоаномалии. Фиолетовый не берём — он неотличим от синего при дейтеранопии и занят акцентом приложения.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="ann">
+    <div><b>Почему монограмма главная, а цвет вспомогательный.</b> Так идентичность никогда не держится на одном цвете: при 5+ компьютерах оттенки кончаются, а буквы — нет. Полное имя остаётся в подсказке при наведении и в панели Workspace.</div>
+    <div class="q"><b>Вопрос:</b> монограмма из 2 символов или разрешить до 3 («HK1», «PRD»)? И достаточно ли выбора из 3 цветов, или добавить ручной выбор из более широкой палитры с предупреждением о различимости?</div>
+  </div>
+</div>
+
+<!-- ═══════════ 4. ПАНЕЛЬ WORKSPACE ═══════════ -->
+<div class="screen">
+  <div class="cap"><span class="n">4</span><b>Панель Workspace</b>
+    <span>состояние манифеста и реестра, активные claim'ы, расход на кросс-env</span></div>
+  <div class="win">
+    <div class="titlebar"><i class="tl r"></i><i class="tl y"></i><i class="tl g"></i><span class="path">Workspace — UNO</span></div>
+    <div class="body" style="height:430px">
+      <div class="sb">
+        <div class="sb-top"><div class="wsbtn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--primary)"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
+          <div style="min-width:0"><div class="nm">UNO</div><div class="sc">весь workspace · 4 комп.</div></div></div></div>
+        <div class="row sel"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h18"/></svg></span><span class="tx">Workspace</span><span class="pill stale">2 из 5</span></div>
+        <div class="sb-label">Проекты</div>
+        <div class="row"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></span><span class="tx">uno-work-app</span>
+          <span class="mstack"><i class="mchip m0 stack">MB</i><i class="mchip m1 stack">HK</i><i class="mchip m2 stack">CM</i></span></div>
+        <div class="row"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></span><span class="tx">fishcode</span>
+          <span class="mstack"><i class="mchip m1 stack">HK</i></span></div>
+        <div style="flex:1"></div>
+      </div>
+      <div class="main">
+        <div class="mhead"><b>Workspace «UNO»</b><span class="pill stale">деградация: 2 из 5 недоступны</span>
+          <div style="flex:1"></div><button class="btn">Правила</button><button class="btn pri">Добавить компьютер</button></div>
+        <div class="mbody">
+          <div class="grid3">
+            <div class="card kv"><span class="k">Реестр</span><span class="v">Home-демон <small>hostkey81337 · HK</small></span></div>
+            <div class="card kv"><span class="k">Ревизия</span><span class="v">epoch 47 <small>обновлён 40 с назад</small></span></div>
+            <div class="card kv"><span class="k">Подпись</span><span class="v" style="color:var(--success-foreground)">проверена <small>ключ на этом Mac</small></span></div>
+          </div>
+          <div class="grid2">
+            <div class="card">
+              <div class="h"><b>Активные claim'ы</b><span class="sp"></span><span class="hint">кто что держит</span></div>
+              <div class="tr"><i class="mchip m2">CM</i><div class="who"><b>uno-work-app · autoupdate</b><span>истекает 14:32</span></div><div class="sp"></div><button class="btn">Показать</button></div>
+              <div class="tr"><i class="mchip m1">HK</i><div class="who"><b>fishcode · миграция 070</b><span>истекает 14:48</span></div><div class="sp"></div><button class="btn">Показать</button></div>
+            </div>
+            <div class="card">
+              <div class="h"><b>Расход на кросс-env</b><span class="sp"></span><span class="hint">лимиты на workspace, не на токен</span></div>
+              <div class="tr"><div class="who"><b>Кросс-env turn'ы</b><span>за час</span></div><div class="sp"></div><b>7 / 20</b></div>
+              <div class="tr"><div class="who"><b>Одновременных</b><span>сейчас</span></div><div class="sp"></div><b>2 / 4</b></div>
+              <div class="tr"><div class="who"><b>Приём команд от других</b><span>общий выключатель</span></div><div class="sp"></div><span class="sw on"></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="ann">
+    <div><b>Деградация громкая.</b> Состояние в шапке панели и бейдж в сайдбаре; у stale/offline есть «Почему?» с фактической последней ошибкой и временем последнего успеха. На молчаливых отказах мы уже наступали с туннелями.</div>
+    <div><b>«Отобрать claim» убрал</b> из списка одной кнопкой — вместо неё «Показать», а отбор живёт внутри, с подтверждением. Слишком легко нажать не то.</div>
+  </div>
+</div>
+
+<!-- ═══════════ 5. ПРАВИЛА КООРДИНАЦИИ ═══════════ -->
+<div class="screen">
+  <div class="cap"><span class="n">5</span><b>Правила координации</b>
+    <span>кто может координировать кого, откуда и через что — гранты, а не свободный текст</span></div>
+  <div class="win">
+    <div class="titlebar"><i class="tl r"></i><i class="tl y"></i><i class="tl g"></i><span class="path">Настройки — Workspace — Правила</span></div>
+    <div class="body" style="height:418px">
+      <div class="sb">
+        <div class="sb-label">Настройки</div>
+        <div class="row"><span class="tx">Провайдеры</span></div>
+        <div class="row"><span class="tx">Соединения</span></div>
+        <div class="row on"><span class="tx">Workspace</span></div>
+        <div class="row"><span class="tx">Ассистенты</span></div>
+        <div style="flex:1"></div>
+      </div>
+      <div class="main">
+        <div class="mhead"><b>Workspace «UNO»</b><div style="flex:1"></div>
+          <div class="seg"><div>Компьютеры</div><div class="on">Правила</div><div>Реестр</div></div></div>
+        <div class="mbody">
+          <div class="card">
+            <div class="h"><b>Кросс-env запись</b><span class="sp"></span></div>
+            <div class="tr"><div class="who"><b>Как другой компьютер может писать сюда</b><span>по умолчанию — только заявкой, которую ты подтверждаешь</span></div>
+              <div class="sp"></div><div class="seg"><div>Нельзя</div><div class="on">Только заявкой</div><div>Сразу</div></div></div>
+            <div class="tr"><div class="who"><b>Пределы цепочки</b><span>защита от «HK пихает CM, CM пихает HK» всю ночь</span></div>
+              <div class="sp"></div><span class="pill">макс. 3 пересылки</span><span class="pill">своё эхо отбрасывать</span></div>
+          </div>
+          <div class="card">
+            <div class="h"><b>Гранты</b><span class="sp"></span><span class="hint">нет подходящего разрешения → запрещено</span>
+              <button class="btn pri">Добавить</button></div>
+            <div class="tr"><div class="who"><b>Любой → любой</b><span>репозитории: все · транспорт: напрямую</span></div><div class="sp"></div>
+              <span class="pill live">видеть чаты</span><span class="pill live">видеть статус</span><button class="btn">Править</button></div>
+            <div class="tr"><i class="mchip m0">MB</i>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--muted-foreground)"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+              <i class="mchip m1">HK</i><i class="mchip m2">CM</i>
+              <div class="who"><b></b><span>uno-work-app · напрямую</span></div><div class="sp"></div>
+              <span class="pill acc">создавать чаты</span><span class="pill acc">писать</span><span class="pill">нужен claim</span><button class="btn">Править</button></div>
+            <div class="tr"><i class="mchip m1">HK</i>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--muted-foreground)"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+              <i class="mchip m0">MB</i>
+              <div class="who"><b></b><span>uno-work-app · через реестр (Mac за NAT)</span></div><div class="sp"></div>
+              <span class="pill live">читать транскрипт</span><span class="pill stale">с подтверждением</span><button class="btn">Править</button></div>
+            <div class="tr"><div class="who"><b>Любой → seersite-vps</b><span>запрет перекрывает разрешения</span></div><div class="sp"></div>
+              <span class="pill err">запрещено всё</span><button class="btn">Править</button></div>
+          </div>
+          <div class="card">
+            <div class="h"><b>Что компьютер вправе узнать</b><span class="sp"></span><span class="hint">сокращённый скоуп workspace</span></div>
+            <div class="tr"><i class="mchip m2">CM</i><div class="who"><b>cozy-maple</b><span>видит только репозиторий seersite</span></div><div class="sp"></div>
+              <span class="pill">1 из 4 проектов</span><button class="btn">Править</button></div>
+            <div class="tr"><div class="who"><b>Остальные</b><span>видят весь workspace</span></div><div class="sp"></div>
+              <span class="pill live">полный доступ</span><button class="btn">Править</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="ann">
+    <div><b>Грант читается фразой:</b> кто → кому → над чем → что можно → каким транспортом. Чипы компьютеров делают строку читаемой без чтения имён.</div>
+    <div><b>Транспорт показан намеренно.</b> Mac за NAT нельзя дёрнуть напрямую — только через реестр. Спрячешь это — каждый решит, что сломалось.</div>
+  </div>
+</div>
+
+<!-- ═══════════ 6. ЗАЯВКА ОТ ДРУГОГО КОМПЬЮТЕРА ═══════════ -->
+<div class="screen">
+  <div class="cap"><span class="n">6</span><b>Заявка от другого компьютера</b>
+    <span>подтверждение кросс-env записи и происхождение действия</span></div>
+  <div class="win">
+    <div class="titlebar"><i class="tl r"></i><i class="tl y"></i><i class="tl g"></i><span class="path">uno-work-app — dictation</span></div>
+    <div class="body" style="height:400px">
+      <div class="sb">
+        <div class="sb-top"><div class="wsbtn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--primary)"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
+          <div style="min-width:0"><div class="nm">UNO</div><div class="sc">весь workspace · 4 комп.</div></div></div></div>
+        <div class="row"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h18"/></svg></span><span class="tx">Workspace</span><span class="pill err">1</span></div>
+        <div class="sb-label">Проекты</div>
+        <div class="row on"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></span><span class="tx">uno-work-app</span>
+          <span class="mstack"><i class="mchip m0 stack">MB</i><i class="mchip m1 stack">HK</i></span></div>
+        <div class="row l2 sel"><span class="tx">dictation: кнопка</span><i class="mchip m0">MB</i></div>
+        <div class="row l2"><span class="tx">e2e на проде</span><i class="mchip m1">HK</i></div>
+        <div style="flex:1"></div>
+      </div>
+      <div class="main">
+        <div class="mhead"><i class="mchip m0">MB</i><b>dictation: кнопка в композере</b><div style="flex:1"></div><span class="pill">claude · opus</span></div>
+        <div class="mbody">
+          <div class="msg"><div class="who"><i class="mchip m0" style="width:15px;height:15px;font-size:8px">MB</i>Claude</div>
+            <div class="bub">Кнопка добавлена, типы зелёные.</div></div>
+          <div class="approve">
+            <div class="t"><i class="mchip m1">HK</i>hostkey81337 просит отправить сообщение в этот чат</div>
+            <div class="meta">
+              <div>Подпись проверена · грант «писать» · claim <code class="mono">uno-work-app|dictation</code> держит HK до 14:41</div>
+              <div>Причина: «e2e упали на dictationGateway — прошу поправить локально»</div>
+              <div>Пересылок: 1 из 3 · заявка истекает через 28 мин</div>
+            </div>
+            <div class="acts"><button class="btn pri">Разрешить один раз</button><button class="btn">Показать, что придёт</button>
+              <button class="btn dgr">Отклонить</button><div style="flex:1"></div><span class="pill">7 / 20 за час</span></div>
+          </div>
+          <div class="toolcall">
+            <div class="t"><i class="mchip m1" style="width:15px;height:15px;font-size:8px">HK</i>
+              <span class="nm">текст из другого окружения</span><span class="pill stale">недоверенный</span></div>
+            <div class="res"><div class="l">Вывод чужого агента показывается как данные, а не как указание. Названия проектов и обозначения оттуда тоже обезвреживаются.</div></div>
+          </div>
+        </div>
+        <div class="composer"><div class="cbox">Сообщение…</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="ann">
+    <div><b>Тот же механизм заявок, что у ассистента</b> (nonce, TTL 30 мин, CAS) — политика подтверждения и бюджеты остаются на машине, которая будет исполнять код.</div>
+    <div class="q"><b>Вопрос:</b> нужна ли кнопка «Разрешить всегда для HK в этом репозитории», или сознательно только разовое?</div>
+  </div>
+</div>
+
+<!-- ═══════════ 7. ИНСТРУКЦИИ ПО СЛОЯМ ═══════════ -->
+<div class="screen">
+  <div class="cap"><span class="n">7</span><b>Инструкции для агентов по слоям</b>
+    <span>на сервере другой пайплайн тестирования — видно и правится</span></div>
+  <div class="win">
+    <div class="titlebar"><i class="tl r"></i><i class="tl y"></i><i class="tl g"></i><span class="path">Workspace — hostkey81337 — Инструкции</span></div>
+    <div class="body" style="height:452px">
+      <div class="sb">
+        <div class="sb-label">Компьютеры</div>
+        <div class="row"><i class="mchip m0">MB</i><span class="tx">Этот Mac</span><i class="dot live"></i></div>
+        <div class="row on"><i class="mchip m1">HK</i><span class="tx">hostkey81337</span><i class="dot live"></i></div>
+        <div class="row"><i class="mchip m2">CM</i><span class="tx">cozy-maple</span><i class="dot stale"></i></div>
+        <div class="row dim"><i class="mchip m3">VP</i><span class="tx">vm-pico</span><i class="dot off"></i></div>
+        <div style="flex:1"></div>
+      </div>
+      <div class="main">
+        <div class="mhead"><i class="mchip m1">HK</i><b>hostkey81337 — инструкции</b><div style="flex:1"></div>
+          <button class="btn">Показать итог</button><button class="btn pri">Сохранить</button></div>
+        <div class="mbody">
+          <div class="layers">
+            <div class="layer"><div class="lh">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm12-12a9 9 0 0 1-9 9"/></svg>
+              <b>1 · Репозиторий</b><span class="sp"></span><span class="pill">AGENTS.md из git · только чтение</span></div>
+              <div class="lb">Монорепозиторий bun+turbo. Всегда `bun run test`, никогда `bun test`.
+Перед готовностью: bun fmt · bun lint · bun typecheck.</div></div>
+            <div class="layer"><div class="lh">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
+              <b>2 · Workspace</b><span class="sp"></span><span class="pill info">из манифеста · правится в правилах</span></div>
+              <div class="lb">Прод трогают только через заявку. Балансы и VPS клиентов — человек на гейте.</div></div>
+            <div class="layer ed"><div class="lh">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+              <b>3 · Этот компьютер</b><span class="sp"></span><span class="pill acc">перекрывает workspace</span></div>
+              <div class="lb">Здесь нет AVX2 — Uno Code не запускается, использовать OpenCode через Uno Gateway.
+e2e гонять `bun run test:e2e:server` (headless, без Electron).
+Демон под systemd `t3-server.service` — после правок сервера обязательно rebuild + restart.</div></div>
+          </div>
+          <div class="note"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+            <span>Слитый текст кладётся в <code>.t3code/UNO_WORKSPACE.md</code> (генерируется, в gitignore), а в <code>AGENTS.md</code> добавляются три строки-указатель между маркерами. Удалил маркеры — мы их не возвращаем. Твой текст вне маркеров не трогается никогда.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="ann">
+    <div><b>Порядок:</b> репозиторий (git) → workspace (манифест) → компьютер (локально, <b>перекрывает</b> манифест). Четвёртый слой «проект» из v1 убрал — вернём, когда появится реальная нужда.</div>
+  </div>
+</div>
+
+<div class="mockhead" style="margin-top:8px">
+  <div>
+    <h1 style="font-size:14px">Открытые вопросы к ревью</h1>
+    <p>1) Дефолт группировки — «по проектам» или «по компьютерам»? 2) Нужны ли оба двухуровневых режима или хватит «проекты, внутри компьютеры»? 3) Монограмма 2 или до 3 символов? 4) Хватает ли 3 цветов + нейтральный, или нужен ручной выбор из широкой палитры? 5) Нужна ли «Разрешить всегда» в заявке? Остальное — свободные правки по виду и формулировкам.</p>
+  </div>
+</div>
+
+</body>
+</html>

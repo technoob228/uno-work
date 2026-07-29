@@ -34,6 +34,79 @@ export const SidebarProjectGroupingMode = Schema.Literals([
 export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type;
 export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository";
 
+/**
+ * Which environments the sidebar draws from.
+ *
+ * `"active"` keeps the historical behaviour — one environment at a time.
+ * `"all"` unions every connected environment and leans on repository-based
+ * grouping so the same repo checked out locally and on a server reads as one
+ * project rather than two unrelated ones.
+ */
+export const SidebarEnvironmentScope = Schema.Literals(["active", "all"]);
+export type SidebarEnvironmentScope = typeof SidebarEnvironmentScope.Type;
+export const DEFAULT_SIDEBAR_ENVIRONMENT_SCOPE: SidebarEnvironmentScope = "active";
+
+/**
+ * How the sidebar tree is built out of the two things a chat belongs to: a
+ * project and the machine it runs on.
+ *
+ * `"project"` and `"machine"` are mirrors of one another — the same two-level
+ * renderer with the roles swapped. Whichever dimension is *not* the grouping
+ * one is carried as a marker on the chat row (a machine chip, or the project
+ * name), so it is never lost. The `*_machine` / `*_project` variants spend a
+ * third level of nesting to make that dimension a sub-heading instead.
+ *
+ * Orthogonal to `SidebarProjectGroupingMode`, which decides what counts as one
+ * project in the first place; both apply in all four modes.
+ */
+export const SidebarGroupBy = Schema.Literals([
+  "project",
+  "machine",
+  "project_machine",
+  "machine_project",
+]);
+export type SidebarGroupBy = typeof SidebarGroupBy.Type;
+export const DEFAULT_SIDEBAR_GROUP_BY: SidebarGroupBy = "project";
+
+export const SidebarMachineSortOrder = Schema.Literals(["activity", "name", "manual"]);
+export type SidebarMachineSortOrder = typeof SidebarMachineSortOrder.Type;
+export const DEFAULT_SIDEBAR_MACHINE_SORT_ORDER: SidebarMachineSortOrder = "activity";
+
+/**
+ * How many distinct hues machines can be told apart by.
+ *
+ * Three, because that is what survives validation: a fourth hue puts a pair on
+ * screen that readers with the commonest colour-vision deficiencies cannot
+ * separate, and violet — the obvious next candidate — is indistinguishable from
+ * the blue slot under deuteranopia *and* already carries the app accent. So the
+ * monogram is the identity, the hue is reinforcement, and machines past the
+ * third get a neutral chip rather than a generated colour.
+ */
+export const SIDEBAR_MACHINE_COLOR_SLOT_COUNT = 3;
+
+/** `0` is the neutral chip; `1…3` are the validated hues, assigned in order. */
+export const SidebarMachineColorSlot = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).check(
+  Schema.isLessThanOrEqualTo(SIDEBAR_MACHINE_COLOR_SLOT_COUNT),
+);
+export type SidebarMachineColorSlot = typeof SidebarMachineColorSlot.Type;
+
+export const SIDEBAR_MACHINE_MONOGRAM_MAX_LENGTH = 3;
+
+/**
+ * Per-machine display identity, keyed by environment id.
+ *
+ * Persisted rather than derived because the colour has to follow the machine,
+ * not its position in the current list: recomputing slots when a machine is
+ * added or removed would repaint chips the user had already learned. Empty
+ * fields mean "keep the derived value" — this record only carries overrides and
+ * the pinned slot assignment.
+ */
+export const SidebarMachineIdentity = Schema.Struct({
+  monogram: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  colorSlot: SidebarMachineColorSlot.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+});
+export type SidebarMachineIdentity = typeof SidebarMachineIdentity.Type;
+
 // Cookie/session profile used by the built-in browser pane: one shared
 // profile for the whole account, or an isolated profile per project.
 export const BrowserProfileScope = Schema.Literals(["account", "project"]);
@@ -106,6 +179,25 @@ export const ClientSettingsSchema = Schema.Struct({
       modelOrder: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
     }),
   ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  sidebarEnvironmentScope: SidebarEnvironmentScope.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_ENVIRONMENT_SCOPE)),
+  ),
+  sidebarGroupBy: SidebarGroupBy.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_GROUP_BY)),
+  ),
+  sidebarMachineSortOrder: SidebarMachineSortOrder.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_MACHINE_SORT_ORDER)),
+  ),
+  sidebarMachineIdentity: Schema.Record(TrimmedNonEmptyString, SidebarMachineIdentity).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  sidebarMachineOrder: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  // Rows from unreachable machines are dimmed rather than removed by default:
+  // a thread that vanishes reads as "that work is gone", which is the opposite
+  // of what an offline machine means. Users who want the shorter list opt out.
+  sidebarShowUnreachable: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
   ),
@@ -632,6 +724,14 @@ export const ClientSettingsPatch = Schema.Struct({
       }),
     ),
   ),
+  sidebarEnvironmentScope: Schema.optionalKey(SidebarEnvironmentScope),
+  sidebarGroupBy: Schema.optionalKey(SidebarGroupBy),
+  sidebarMachineSortOrder: Schema.optionalKey(SidebarMachineSortOrder),
+  sidebarMachineIdentity: Schema.optionalKey(
+    Schema.Record(TrimmedNonEmptyString, SidebarMachineIdentity),
+  ),
+  sidebarMachineOrder: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+  sidebarShowUnreachable: Schema.optionalKey(Schema.Boolean),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
   sidebarProjectGroupingOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),

@@ -60,6 +60,14 @@ const clientSettings: ClientSettings = {
   unoLastModelRoute: "default",
   favorites: [],
   providerModelPreferences: {},
+  sidebarEnvironmentScope: "all",
+  sidebarGroupBy: "project_machine",
+  sidebarMachineSortOrder: "name",
+  sidebarMachineIdentity: {
+    "environment-1": { monogram: "R1", colorSlot: 2 },
+  },
+  sidebarMachineOrder: ["environment-1"],
+  sidebarShowUnreachable: true,
   sidebarProjectGroupingMode: "repository_path",
   sidebarProjectGroupingOverrides: {
     "environment-1:/tmp/project-a": "separate",
