@@ -16,7 +16,11 @@ import { formatElapsedAgoLabel } from "~/timestampFormat";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 
-import { environmentAvailabilityLabel, environmentSyncSummary } from "./availability";
+import {
+  environmentAvailabilityLabel,
+  environmentMutationBlockMessage,
+  environmentSyncSummary,
+} from "./availability";
 import type { EnvironmentScopeInfo } from "./scopes";
 
 const STATUS_DOT: Record<string, string> = {
@@ -78,6 +82,11 @@ export function EnvironmentScopeBanner({
       <span className="text-[11px] text-muted-foreground">
         {environmentSyncSummary({ status, elapsedLabel })}
       </span>
+      {scope.availability.mutationBlock === "client-session" ? (
+        <span className="text-[11px] text-amber-700 dark:text-amber-400">
+          {environmentMutationBlockMessage("client-session")}
+        </span>
+      ) : null}
       {scope.availability.canReconnect ? (
         <Button
           size="xs"

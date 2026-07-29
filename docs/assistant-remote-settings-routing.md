@@ -105,8 +105,38 @@ Thread the target through every manager operation in `managerApi.ts`, including:
 - New Telegram threads use the connector's explicit model selection.
 - `bun fmt`, `bun lint`, and `bun typecheck` pass after implementation.
 
+## The session role, and why routing alone was not enough
+
+Addressing the right daemon is necessary but not sufficient: the request also
+has to be allowed. Every route under `/api/manager/*` and `/api/orchestration/*`
+calls `authenticateOwnerSession` and refuses anything that is not an **owner**
+session.
+
+The desktop obtains a saved environment's session by running
+`t3 auth pairing create` over SSH and trading the credential for a bearer
+session. That CLI flag defaults to `client`. So a correctly targeted, perfectly
+authenticated remote request still came back `403` — reads worked, every write
+failed. Confirmed on a live environment (`hostkey81337`), whose only session
+was `role: "client"`, issued 2026-07-11 and valid until 2026-08-10.
+
+Two changes follow:
+
+1. `REMOTE_PAIRING_SCRIPT` passes `--role owner`. Anyone who can run that script
+   already has shell access to the machine that owns the daemon, so the
+   elevation grants nothing they did not already have; without it the desktop
+   cannot manage the very daemon it launched.
+2. Sessions issued before that fix do not expire for weeks, so a connection
+   that authenticates as `client` is traded once for a fresh session
+   (`didRetryForOwnerRole`). If the daemon still returns a client session, the
+   environment is shown as view-only and mutations are refused up front rather
+   than failing as a `403` after the save button.
+
 ## Related files
 
+- `apps/web/src/environments/settings/serverSettings.ts`
+- `apps/web/src/environments/scope/availability.ts`
+- `apps/web/src/components/settings/settingsScopeRoutes.ts`
+- `packages/ssh/src/tunnel.ts`
 - `apps/web/src/lib/managerApi.ts`
 - `apps/web/src/components/AssistantConfig.tsx`
 - `apps/web/src/routes/_chat.assistant.$projectId.tsx`

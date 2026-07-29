@@ -18,6 +18,7 @@
  * @module environments/scope/scopes
  */
 import type {
+  AuthSessionRole,
   EnvironmentConnectionState,
   EnvironmentId,
   ExecutionEnvironmentDescriptor,
@@ -34,6 +35,11 @@ export interface EnvironmentScopeInfo {
   /** Where the daemon runs, from the user's point of view. */
   readonly placement: "local" | "remote";
   readonly connectionState: EnvironmentConnectionState;
+  /**
+   * Role of the session this device holds on the environment. `null` for the
+   * primary daemon, whose cookie session owns it by construction.
+   */
+  readonly sessionRole: AuthSessionRole | null;
   readonly availability: EnvironmentAvailability;
   /** Last confirmed sync, ISO. `null` for "never". */
   readonly lastSynchronizedAt: string | null;
@@ -79,6 +85,7 @@ export function useEnvironmentScopes(): ReadonlyArray<EnvironmentScopeInfo> {
             // The renderer is served by this daemon; if it were gone the app
             // would not be rendering this page at all.
             connectionState: "connected",
+            sessionRole: null,
             availability: describeEnvironmentAvailability("connected"),
             lastSynchronizedAt: null,
             lastError: null,
@@ -92,12 +99,14 @@ export function useEnvironmentScopes(): ReadonlyArray<EnvironmentScopeInfo> {
       .map((record): EnvironmentScopeInfo => {
         const runtime = savedRuntime[record.environmentId];
         const connectionState = runtime?.connectionState ?? "disconnected";
+        const sessionRole = runtime?.role ?? null;
         return {
           environmentId: record.environmentId,
           label: runtime?.descriptor?.label ?? record.label,
           placement: "remote",
           connectionState,
-          availability: describeEnvironmentAvailability(connectionState),
+          sessionRole,
+          availability: describeEnvironmentAvailability(connectionState, { sessionRole }),
           lastSynchronizedAt: runtime?.lastSynchronizedAt ?? null,
           lastError: runtime?.lastError ?? null,
         };

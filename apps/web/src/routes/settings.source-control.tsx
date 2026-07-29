@@ -1,7 +1,17 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { SourceControlSettingsPanel } from "../components/settings/SourceControlSettings";
+import { readPrimaryEnvironmentDescriptor } from "../environments/primary/context";
 
 export const Route = createFileRoute("/settings/source-control")({
-  component: SourceControlSettingsPanel,
+  beforeLoad: () => {
+    const primary = readPrimaryEnvironmentDescriptor();
+    if (!primary) {
+      throw redirect({ to: "/settings/app/general", replace: true });
+    }
+    throw redirect({
+      to: "/settings/environment/$environmentId/source-control",
+      params: { environmentId: primary.environmentId },
+      replace: true,
+    });
+  },
 });

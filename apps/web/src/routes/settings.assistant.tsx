@@ -1,19 +1,21 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { AssistantSettingsPanel } from "../components/settings/AssistantSettingsPanel";
-import { usePrimaryEnvironmentId } from "../environments/primary";
+import { readPrimaryEnvironmentDescriptor } from "../environments/primary/context";
 
 /**
- * Capability tokens are daemon state, so the panel needs an environment. This
- * app-scoped route names the primary one explicitly — the same daemon it has
- * always read, now stated rather than inferred from the request origin.
+ * Assistants belong to a daemon, so the old environment-less path resolves to
+ * the primary one explicitly rather than staying ambiguous.
  */
-function AssistantSettingsRoute() {
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  if (!primaryEnvironmentId) return null;
-  return <AssistantSettingsPanel environmentId={primaryEnvironmentId} />;
-}
-
 export const Route = createFileRoute("/settings/assistant")({
-  component: AssistantSettingsRoute,
+  beforeLoad: () => {
+    const primary = readPrimaryEnvironmentDescriptor();
+    if (!primary) {
+      throw redirect({ to: "/settings/app/general", replace: true });
+    }
+    throw redirect({
+      to: "/settings/environment/$environmentId/assistants",
+      params: { environmentId: primary.environmentId },
+      replace: true,
+    });
+  },
 });

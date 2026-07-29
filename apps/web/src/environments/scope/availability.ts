@@ -12,14 +12,23 @@
  *     write that cannot reach its daemon is exactly the failure this whole
  *     area exists to prevent.
  *
+ * The session's role cuts across all three: a daemon can be reachable and in
+ * sync while the session we hold on it is client-only, which every manager and
+ * orchestration route refuses. That is a live connection the user still cannot
+ * write through, so it is surfaced here rather than discovered as a 403 after
+ * the save button.
+ *
  * Kept pure and transport-free so both the header chip and the mutation
  * guards derive from one rule instead of each re-deciding.
  *
  * @module environments/scope/availability
  */
-import type { EnvironmentConnectionState } from "@t3tools/contracts";
+import type { AuthSessionRole, EnvironmentConnectionState } from "@t3tools/contracts";
 
 export type EnvironmentAvailabilityStatus = "connected" | "reconnecting" | "offline";
+
+/** Why writes are refused, when they are. */
+export type EnvironmentMutationBlock = "not-connected" | "client-session";
 
 export interface EnvironmentAvailability {
   readonly status: EnvironmentAvailabilityStatus;
@@ -29,9 +38,26 @@ export interface EnvironmentAvailability {
   readonly showsCachedData: boolean;
   /** Offering a manual reconnect makes sense in this state. */
   readonly canReconnect: boolean;
+  readonly mutationBlock: EnvironmentMutationBlock | null;
 }
 
 export function describeEnvironmentAvailability(
+  connectionState: EnvironmentConnectionState,
+  options?: { readonly sessionRole?: AuthSessionRole | null },
+): EnvironmentAvailability {
+  const base = describeConnectionAvailability(connectionState);
+  if (!base.canMutate) return base;
+
+  // `undefined` means the caller does not track roles (the primary daemon,
+  // whose cookie session is the owner by construction); only an explicitly
+  // non-owner role downgrades a live connection.
+  const sessionRole = options?.sessionRole;
+  if (sessionRole === undefined || sessionRole === "owner") return base;
+
+  return { ...base, canMutate: false, canReconnect: true, mutationBlock: "client-session" };
+}
+
+function describeConnectionAvailability(
   connectionState: EnvironmentConnectionState,
 ): EnvironmentAvailability {
   switch (connectionState) {
@@ -41,6 +67,7 @@ export function describeEnvironmentAvailability(
         canMutate: true,
         showsCachedData: false,
         canReconnect: false,
+        mutationBlock: null,
       };
     case "connecting":
     case "reconnecting":
@@ -49,6 +76,7 @@ export function describeEnvironmentAvailability(
         canMutate: false,
         showsCachedData: true,
         canReconnect: false,
+        mutationBlock: "not-connected",
       };
     case "disconnected":
     case "error":
@@ -57,8 +85,20 @@ export function describeEnvironmentAvailability(
         canMutate: false,
         showsCachedData: true,
         canReconnect: true,
+        mutationBlock: "not-connected",
       };
   }
+}
+
+const MUTATION_BLOCK_MESSAGE: Record<EnvironmentMutationBlock, string> = {
+  "not-connected": "Reconnect this environment to change its settings.",
+  "client-session":
+    "This device holds a view-only session on this environment. Reconnect it to manage its settings.",
+};
+
+/** What to tell the user instead of letting them press a doomed save button. */
+export function environmentMutationBlockMessage(block: EnvironmentMutationBlock): string {
+  return MUTATION_BLOCK_MESSAGE[block];
 }
 
 const STATUS_LABEL: Record<EnvironmentAvailabilityStatus, string> = {

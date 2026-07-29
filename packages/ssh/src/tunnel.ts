@@ -556,7 +556,11 @@ cat >"$RUNNER_FILE" <<'SH'
 SH
 chmod 700 "$RUNNER_FILE"
 PAIRING_BASE_DIR="$DEFAULT_SERVER_HOME"
-"$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --json
+# --role owner: whoever can run this script already has shell access to the
+# machine that owns the daemon, and the desktop needs an owner session to reach
+# the manager and orchestration routes. The CLI defaults to "client", which
+# reads fine but makes every remote settings write fail with 403.
+"$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --role owner --json
 `;
 
 export const REMOTE_STOP_SCRIPT = `set -eu

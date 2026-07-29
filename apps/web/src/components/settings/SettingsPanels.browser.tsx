@@ -18,11 +18,14 @@ import { page } from "vitest/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
+import { writePrimaryEnvironmentDescriptor } from "../../environments/primary/context";
 import { __resetLocalApiForTests } from "../../localApi";
 import { AppAtomRegistryProvider, resetAppAtomRegistryForTests } from "../../rpc/atomRegistry";
 import { resetServerStateForTests, setServerConfigSnapshot } from "../../rpc/serverState";
 import { useUiStateStore } from "../../uiStateStore";
 import { ConnectionsSettings } from "./ConnectionsSettings";
+import { EnvironmentGeneralSettings } from "./EnvironmentGeneralSettings";
+import { EnvironmentProvidersPanel } from "./EnvironmentProvidersPanel";
 import { GeneralSettingsPanel } from "./SettingsPanels";
 import { SourceControlSettingsPanel } from "./SourceControlSettings";
 
@@ -136,6 +139,12 @@ vi.mock("../../environments/runtime", () => {
       server: {
         subscribeAuthAccess: (listener: Parameters<typeof authAccessHarness.subscribe>[0]) =>
           authAccessHarness.subscribe(listener),
+        // Source control discovery is addressed per environment now, so it
+        // arrives over this connection rather than through the local api.
+        discoverSourceControl: () =>
+          (
+            window.nativeApi as { server: { discoverSourceControl: () => Promise<unknown> } }
+          ).server.discoverSourceControl(),
       },
     },
     ensureBootstrapped: async () => undefined,
@@ -423,6 +432,9 @@ describe("GeneralSettingsPanel observability", () => {
     useUiStateStore.setState({ defaultAdvertisedEndpointKey: null });
     authAccessHarness.reset();
     mockConnectDesktopSshEnvironment.mockReset();
+    // Environment-scoped panels resolve "is this the local daemon?" from the
+    // primary descriptor, so the tests have to say which environment they are.
+    writePrimaryEnvironmentDescriptor(createBaseServerConfig().environment);
   });
 
   afterEach(async () => {
@@ -438,6 +450,7 @@ describe("GeneralSettingsPanel observability", () => {
     resetServerStateForTests();
     await __resetLocalApiForTests();
     authAccessHarness.reset();
+    writePrimaryEnvironmentDescriptor(null);
   });
 
   it("hides owner pairing tools in browser-served loopback builds without remote exposure", async () => {
@@ -678,16 +691,16 @@ describe("GeneralSettingsPanel observability", () => {
     await expect.element(page.getByText("http://127.0.0.1:3773/").first()).toBeInTheDocument();
   });
 
-  it("shows diagnostics inside About with a single logs-folder action", async () => {
+  it("shows diagnostics with a single logs-folder action on the owning environment", async () => {
     setServerConfigSnapshot(createBaseServerConfig());
 
     mounted = await render(
       <AppAtomRegistryProvider>
-        <GeneralSettingsPanel />
+        <EnvironmentGeneralSettings environmentId={EnvironmentId.make("environment-local")} />
       </AppAtomRegistryProvider>,
     );
 
-    await expect.element(page.getByText("About")).toBeInTheDocument();
+    await expect.element(page.getByText("Files on this environment")).toBeInTheDocument();
     await expect.element(page.getByText("Diagnostics")).toBeInTheDocument();
     await expect.element(page.getByText("Open logs folder")).toBeInTheDocument();
     await expect
@@ -1013,7 +1026,7 @@ describe("GeneralSettingsPanel observability", () => {
 
     mounted = await render(
       <AppAtomRegistryProvider>
-        <GeneralSettingsPanel />
+        <EnvironmentGeneralSettings environmentId={EnvironmentId.make("environment-local")} />
       </AppAtomRegistryProvider>,
     );
 
@@ -1028,7 +1041,7 @@ describe("GeneralSettingsPanel observability", () => {
 
     mounted = await render(
       <AppAtomRegistryProvider>
-        <GeneralSettingsPanel />
+        <EnvironmentProvidersPanel environmentId={EnvironmentId.make("environment-local")} />
       </AppAtomRegistryProvider>,
     );
 
@@ -1086,7 +1099,7 @@ describe("SourceControlSettingsPanel discovery states", () => {
 
     mounted = await render(
       <AppAtomRegistryProvider>
-        <SourceControlSettingsPanel />
+        <SourceControlSettingsPanel environmentId={EnvironmentId.make("environment-local")} />
       </AppAtomRegistryProvider>,
     );
 
@@ -1106,7 +1119,7 @@ describe("SourceControlSettingsPanel discovery states", () => {
 
     mounted = await render(
       <AppAtomRegistryProvider>
-        <SourceControlSettingsPanel />
+        <SourceControlSettingsPanel environmentId={EnvironmentId.make("environment-local")} />
       </AppAtomRegistryProvider>,
     );
 
@@ -1140,7 +1153,7 @@ describe("SourceControlSettingsPanel discovery states", () => {
 
     mounted = await render(
       <AppAtomRegistryProvider>
-        <SourceControlSettingsPanel />
+        <SourceControlSettingsPanel environmentId={EnvironmentId.make("environment-local")} />
       </AppAtomRegistryProvider>,
     );
 
@@ -1171,7 +1184,7 @@ describe("SourceControlSettingsPanel discovery states", () => {
 
     mounted = await render(
       <AppAtomRegistryProvider>
-        <SourceControlSettingsPanel />
+        <SourceControlSettingsPanel environmentId={EnvironmentId.make("environment-local")} />
       </AppAtomRegistryProvider>,
     );
 
@@ -1185,7 +1198,7 @@ describe("SourceControlSettingsPanel discovery states", () => {
 
     mounted = await render(
       <AppAtomRegistryProvider>
-        <SourceControlSettingsPanel />
+        <SourceControlSettingsPanel environmentId={EnvironmentId.make("environment-local")} />
       </AppAtomRegistryProvider>,
     );
 
