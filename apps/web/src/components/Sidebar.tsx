@@ -4,6 +4,7 @@ import {
   BotIcon,
   ChevronRightIcon,
   CloudIcon,
+  CloudOffIcon,
   FolderPlusIcon,
   SearchIcon,
   SettingsIcon,
@@ -56,9 +57,20 @@ import {
 } from "@t3tools/client-runtime";
 import { Link, useLocation, useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import {
+  type SidebarEnvironmentScope,
+  type SidebarGroupBy,
+  type SidebarMachineSortOrder,
   type SidebarProjectSortOrder,
   type SidebarThreadSortOrder,
 } from "@t3tools/contracts/settings";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { resolveMachineIdentities } from "../machineIdentity";
+import { MachineChip, MachineChipStack } from "./MachineChip";
+import {
+  MachineIdentityProvider,
+  useMachineIdentities,
+  useMachineIdentity,
+} from "./MachineIdentityContext";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { isElectron } from "../env";
 import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
@@ -66,7 +78,9 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform, newCommandId } from "../lib/utils";
 import {
   selectProjectByRef,
+  selectProjectsAcrossEnvironments,
   selectProjectsForEnvironment,
+  selectSidebarThreadsAcrossEnvironments,
   selectSidebarThreadsForProjectRefs,
   selectSidebarThreadsForEnvironment,
   selectThreadByRef,
@@ -124,6 +138,7 @@ import {
 import { Input } from "./ui/input";
 import {
   Menu,
+  MenuCheckboxItem,
   MenuGroup,
   MenuPopup,
   MenuRadioGroup,
@@ -151,12 +166,16 @@ import {
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import {
+  environmentPresenceAriaLabel,
+  environmentPresenceTooltipPrefix,
   getSidebarThreadIdsToPrewarm,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
+  resolveSidebarProjectScope,
+  resolveSidebarThreadEnvironmentAvailability,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   orderItemsByPreferredIds,
@@ -208,6 +227,29 @@ const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> =
   repository_path: "Group by repository path",
   separate: "Keep separate",
 };
+// "Computer" rather than "environment" throughout the sidebar: it is the
+// concrete thing the user is choosing between. `environmentId` stays the name in
+// code, where it also covers things that are not machines.
+const SIDEBAR_GROUP_BY_LABELS: Record<SidebarGroupBy, string> = {
+  project: "By project",
+  machine: "By computer",
+  project_machine: "By project, then computer",
+  machine_project: "By computer, then project",
+};
+const SIDEBAR_MACHINE_SORT_LABELS: Record<SidebarMachineSortOrder, string> = {
+  activity: "Recently active",
+  name: "Name",
+  manual: "Manual",
+};
+/**
+ * Machine-first grouping is settled in contracts and covered by tests
+ * (`sidebarGrouping.ts`), but the sidebar still renders the project-first tree
+ * only. Grouping by computer has to split a logical project — one repository
+ * checked out on three machines — into one row per machine, which reaches into
+ * the manual-drag list as well; until that lands, offering the choice would be a
+ * control that does nothing. Machine chips work regardless of this flag.
+ */
+const SIDEBAR_MACHINE_GROUPING_ENABLED = false;
 
 function formatProjectMemberActionLabel(
   member: SidebarProjectGroupMember,
@@ -344,6 +386,31 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const threadEnvironmentLabel = isRemoteThread
     ? (remoteEnvLabel ?? remoteEnvSavedLabel ?? "Remote")
     : null;
+  // In cross-environment mode a row can belong to an environment that is down.
+  // Surface that on the row itself: the alternative is a sidebar that looks
+  // live while the underlying daemon has been unreachable for an hour.
+  const threadEnvironmentConnectionState = useSavedEnvironmentRuntimeStore(
+    (s) => s.byId[thread.environmentId]?.connectionState ?? null,
+  );
+  const threadEnvironmentLastSynchronizedAt = useSavedEnvironmentRuntimeStore(
+    (s) => s.byId[thread.environmentId]?.lastSynchronizedAt ?? null,
+  );
+  const threadMachineIdentity = useMachineIdentity(thread.environmentId);
+  const threadEnvironmentAvailability = useMemo(
+    () =>
+      resolveSidebarThreadEnvironmentAvailability({
+        isPrimaryEnvironment: !isRemoteThread,
+        environmentLabel: threadEnvironmentLabel ?? "Remote",
+        connectionState: threadEnvironmentConnectionState,
+        lastSynchronizedAt: threadEnvironmentLastSynchronizedAt,
+      }),
+    [
+      isRemoteThread,
+      threadEnvironmentConnectionState,
+      threadEnvironmentLabel,
+      threadEnvironmentLastSynchronizedAt,
+    ],
+  );
   // For grouped projects, the thread may belong to a different environment
   // than the representative project.  Look up the thread's own project cwd
   // so git status (and thus PR detection) queries the correct path.
@@ -667,19 +734,37 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             <span className={threadMetaClassName}>
               <span className="inline-flex items-center gap-1">
                 {isRemoteThread && (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span
-                          aria-label={threadEnvironmentLabel ?? "Remote"}
-                          className="inline-flex h-5 items-center justify-center"
-                        />
+                  // Which machine, said in two characters rather than a cloud
+                  // icon that is identical for every remote environment. Health
+                  // stays separate: the chip keeps its identity colour when the
+                  // machine goes down, and the warning icon carries the state.
+                  <span className="inline-flex h-5 items-center gap-1">
+                    <MachineChip
+                      className={
+                        threadEnvironmentAvailability.status === "live" ? undefined : "opacity-60"
                       }
-                    >
-                      <CloudIcon className="block size-3 text-muted-foreground/60" />
-                    </TooltipTrigger>
-                    <TooltipPopup side="top">{threadEnvironmentLabel}</TooltipPopup>
-                  </Tooltip>
+                      detail={threadEnvironmentAvailability.reason}
+                      identity={threadMachineIdentity}
+                      size="sm"
+                    />
+                    {threadEnvironmentAvailability.status === "offline" ? (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <span
+                              aria-label={threadEnvironmentAvailability.reason}
+                              className="inline-flex items-center"
+                            />
+                          }
+                        >
+                          <CloudOffIcon className="block size-3 text-warning" />
+                        </TooltipTrigger>
+                        <TooltipPopup side="top">
+                          {threadEnvironmentAvailability.reason}
+                        </TooltipPopup>
+                      </Tooltip>
+                    ) : null}
+                  </span>
                 )}
                 {jumpLabel ? (
                   <span
@@ -921,6 +1006,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     isManualProjectSorting,
     dragHandleProps,
   } = props;
+  // Chips for the machines this group spans, in slot order so the same
+  // repository always shows the same sequence.
+  const projectMemberEnvironmentIds = useMemo(
+    () => [...new Set(project.memberProjects.map((member) => member.environmentId))],
+    [project.memberProjects],
+  );
+  const projectMachineIdentities = useMachineIdentities(projectMemberEnvironmentIds);
   const threadSortOrder = useSettings<SidebarThreadSortOrder>(
     (settings) => settings.sidebarThreadSortOrder,
   );
@@ -2022,27 +2114,29 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         {/* Environment badge – visible by default, crossfades with the
             "new thread" button on hover using the same pointer-events +
             opacity pattern as the thread row archive/timestamp swap. */}
-        {project.environmentPresence === "remote-only" && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <span
-                  aria-label={
-                    project.environmentPresence === "remote-only"
-                      ? "Remote project"
-                      : "Available in multiple environments"
-                  }
-                  className="pointer-events-none absolute top-1 right-1.5 inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/60 transition-opacity duration-150 max-sm:right-7 group-hover/project-header:opacity-0 group-focus-within/project-header:opacity-0 max-sm:group-hover/project-header:opacity-100 max-sm:group-focus-within/project-header:opacity-100"
-                />
-              }
-            >
-              <CloudIcon className="size-3" />
-            </TooltipTrigger>
-            <TooltipPopup side="top">
-              Remote environment: {project.remoteEnvironmentLabels.join(", ")}
-            </TooltipPopup>
-          </Tooltip>
-        )}
+        {project.environmentPresence !== "local-only" &&
+          project.remoteEnvironmentLabels.length > 0 && (
+            // A stack of machine chips, so "which machines is this repository
+            // checked out on" is answered without opening anything — the cloud
+            // icon it replaces looked the same for one remote machine as for
+            // four. Only shown when the group actually spans a remote machine.
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    aria-label={environmentPresenceAriaLabel(project.environmentPresence)}
+                    className="pointer-events-none absolute top-0.5 right-1 inline-flex h-6 items-center transition-opacity duration-150 max-sm:right-7 group-hover/project-header:opacity-0 group-focus-within/project-header:opacity-0 max-sm:group-hover/project-header:opacity-100 max-sm:group-focus-within/project-header:opacity-100"
+                  />
+                }
+              >
+                <MachineChipStack identities={projectMachineIdentities} />
+              </TooltipTrigger>
+              <TooltipPopup side="top">
+                {environmentPresenceTooltipPrefix(project.environmentPresence)}{" "}
+                {project.remoteEnvironmentLabels.join(", ")}
+              </TooltipPopup>
+            </Tooltip>
+          )}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -2255,17 +2349,40 @@ function ProjectSortMenu({
   projectSortOrder,
   threadSortOrder,
   projectGroupingMode,
+  environmentScope,
+  groupBy,
+  machineSortOrder,
+  showUnreachable,
   onProjectSortOrderChange,
   onThreadSortOrderChange,
   onProjectGroupingModeChange,
+  onEnvironmentScopeChange,
+  onGroupByChange,
+  onMachineSortOrderChange,
+  onShowUnreachableChange,
 }: {
   projectSortOrder: SidebarProjectSortOrder;
   threadSortOrder: SidebarThreadSortOrder;
   projectGroupingMode: SidebarProjectGroupingMode;
+  environmentScope: SidebarEnvironmentScope;
+  groupBy: SidebarGroupBy;
+  machineSortOrder: SidebarMachineSortOrder;
+  showUnreachable: boolean;
   onProjectSortOrderChange: (sortOrder: SidebarProjectSortOrder) => void;
   onThreadSortOrderChange: (sortOrder: SidebarThreadSortOrder) => void;
   onProjectGroupingModeChange: (mode: SidebarProjectGroupingMode) => void;
+  onEnvironmentScopeChange: (scope: SidebarEnvironmentScope) => void;
+  onGroupByChange: (groupBy: SidebarGroupBy) => void;
+  onMachineSortOrderChange: (sortOrder: SidebarMachineSortOrder) => void;
+  onShowUnreachableChange: (showUnreachable: boolean) => void;
 }) {
+  // Grouping by computer, and sorting computers, only mean anything when more
+  // than one computer is on screen. Showing them under scope "active" would
+  // offer controls that provably do nothing.
+  const isCrossEnvironment = environmentScope === "all";
+  const showsGroupBy = isCrossEnvironment && SIDEBAR_MACHINE_GROUPING_ENABLED;
+  const showsMachineLevel =
+    showsGroupBy && (groupBy === "machine" || groupBy === "machine_project");
   return (
     <Menu>
       <Tooltip>
@@ -2341,6 +2458,82 @@ function ProjectSortMenu({
             ))}
           </MenuRadioGroup>
         </MenuGroup>
+        {showsMachineLevel ? (
+          <MenuGroup>
+            <div className="px-2 pt-2 pb-1 font-medium text-muted-foreground sm:text-xs">
+              Sort computers
+            </div>
+            <MenuRadioGroup
+              value={machineSortOrder}
+              onValueChange={(value) => {
+                if (value === "activity" || value === "name" || value === "manual") {
+                  onMachineSortOrderChange(value);
+                }
+              }}
+            >
+              {(
+                Object.entries(SIDEBAR_MACHINE_SORT_LABELS) as Array<
+                  [SidebarMachineSortOrder, string]
+                >
+              ).map(([value, label]) => (
+                <MenuRadioItem key={value} value={value} className="min-h-7 py-1 sm:text-xs">
+                  {label}
+                </MenuRadioItem>
+              ))}
+            </MenuRadioGroup>
+          </MenuGroup>
+        ) : null}
+        <MenuSeparator />
+        <MenuGroup>
+          <MenuCheckboxItem
+            checked={isCrossEnvironment}
+            onCheckedChange={(checked) => {
+              onEnvironmentScopeChange(checked ? "all" : "active");
+            }}
+            className="min-h-7 py-1 sm:text-xs"
+          >
+            Show all computers
+          </MenuCheckboxItem>
+        </MenuGroup>
+        {showsGroupBy ? (
+          <>
+            <MenuGroup>
+              <div className="px-2 pt-2 pb-1 font-medium text-muted-foreground sm:text-xs">
+                Group by
+              </div>
+              <MenuRadioGroup
+                value={groupBy}
+                onValueChange={(value) => {
+                  if (
+                    value === "project" ||
+                    value === "machine" ||
+                    value === "project_machine" ||
+                    value === "machine_project"
+                  ) {
+                    onGroupByChange(value);
+                  }
+                }}
+              >
+                {(Object.entries(SIDEBAR_GROUP_BY_LABELS) as Array<[SidebarGroupBy, string]>).map(
+                  ([value, label]) => (
+                    <MenuRadioItem key={value} value={value} className="min-h-7 py-1 sm:text-xs">
+                      {label}
+                    </MenuRadioItem>
+                  ),
+                )}
+              </MenuRadioGroup>
+            </MenuGroup>
+            <MenuGroup>
+              <MenuCheckboxItem
+                checked={showUnreachable}
+                onCheckedChange={onShowUnreachableChange}
+                className="min-h-7 py-1 sm:text-xs"
+              >
+                Show unreachable computers
+              </MenuCheckboxItem>
+            </MenuGroup>
+          </>
+        ) : null}
       </MenuPopup>
     </Menu>
   );
@@ -2472,6 +2665,10 @@ interface SidebarProjectsContentProps {
   projectSortOrder: SidebarProjectSortOrder;
   threadSortOrder: SidebarThreadSortOrder;
   projectGroupingMode: SidebarProjectGroupingMode;
+  environmentScope: SidebarEnvironmentScope;
+  groupBy: SidebarGroupBy;
+  machineSortOrder: SidebarMachineSortOrder;
+  showUnreachable: boolean;
   updateSettings: ReturnType<typeof useUpdateSettings>["updateSettings"];
   openAddProject: () => void;
   isManualProjectSorting: boolean;
@@ -2512,6 +2709,10 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     projectSortOrder,
     threadSortOrder,
     projectGroupingMode,
+    environmentScope,
+    groupBy,
+    machineSortOrder,
+    showUnreachable,
     updateSettings,
     openAddProject,
     isManualProjectSorting,
@@ -2555,6 +2756,30 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
   const handleProjectGroupingModeChange = useCallback(
     (groupingMode: SidebarProjectGroupingMode) => {
       updateSettings({ sidebarProjectGroupingMode: groupingMode });
+    },
+    [updateSettings],
+  );
+  const handleEnvironmentScopeChange = useCallback(
+    (scope: SidebarEnvironmentScope) => {
+      updateSettings({ sidebarEnvironmentScope: scope });
+    },
+    [updateSettings],
+  );
+  const handleGroupByChange = useCallback(
+    (nextGroupBy: SidebarGroupBy) => {
+      updateSettings({ sidebarGroupBy: nextGroupBy });
+    },
+    [updateSettings],
+  );
+  const handleMachineSortOrderChange = useCallback(
+    (sortOrder: SidebarMachineSortOrder) => {
+      updateSettings({ sidebarMachineSortOrder: sortOrder });
+    },
+    [updateSettings],
+  );
+  const handleShowUnreachableChange = useCallback(
+    (next: boolean) => {
+      updateSettings({ sidebarShowUnreachable: next });
     },
     [updateSettings],
   );
@@ -2685,9 +2910,17 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
               projectSortOrder={projectSortOrder}
               threadSortOrder={threadSortOrder}
               projectGroupingMode={projectGroupingMode}
+              environmentScope={environmentScope}
+              groupBy={groupBy}
+              machineSortOrder={machineSortOrder}
+              showUnreachable={showUnreachable}
               onProjectSortOrderChange={handleProjectSortOrderChange}
               onThreadSortOrderChange={handleThreadSortOrderChange}
               onProjectGroupingModeChange={handleProjectGroupingModeChange}
+              onEnvironmentScopeChange={handleEnvironmentScopeChange}
+              onGroupByChange={handleGroupByChange}
+              onMachineSortOrderChange={handleMachineSortOrderChange}
+              onShowUnreachableChange={handleShowUnreachableChange}
             />
             <Tooltip>
               <TooltipTrigger
@@ -2786,7 +3019,9 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
             <div className="flex size-9 items-center justify-center rounded-lg border border-border/60 bg-card/40 text-muted-foreground">
               <FolderPlusIcon className="size-4" />
             </div>
-            <div className="text-xs text-muted-foreground/80">No projects in this environment</div>
+            <div className="text-xs text-muted-foreground/80">
+              {environmentScope === "all" ? "No projects yet" : "No projects in this environment"}
+            </div>
             <Button size="sm" variant="outline" onClick={openAddProject}>
               <FolderPlusIcon className="size-3.5" />
               Add project
@@ -2802,11 +3037,40 @@ export default function Sidebar() {
   const activeEnvironmentId = useStore((store) => store.activeEnvironmentId);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const selectedEnvironmentId = activeEnvironmentId ?? primaryEnvironmentId;
+  const sidebarEnvironmentScope = useSettings((s) => s.sidebarEnvironmentScope);
+  const sidebarGroupBy = useSettings((s) => s.sidebarGroupBy);
+  const sidebarMachineSortOrder = useSettings((s) => s.sidebarMachineSortOrder);
+  const sidebarShowUnreachable = useSettings((s) => s.sidebarShowUnreachable);
+  const sidebarMachineIdentitySettings = useSettings((s) => s.sidebarMachineIdentity);
+  const sidebarMachineOrderSetting = useSettings((s) => s.sidebarMachineOrder);
+  const projectScope = useMemo(
+    () =>
+      resolveSidebarProjectScope({
+        scope: sidebarEnvironmentScope,
+        activeEnvironmentId,
+        primaryEnvironmentId,
+      }),
+    [activeEnvironmentId, primaryEnvironmentId, sidebarEnvironmentScope],
+  );
   const projects = useStore(
-    useShallow((store) => selectProjectsForEnvironment(store, selectedEnvironmentId)),
+    useShallow((store) =>
+      projectScope.kind === "all-environments"
+        ? selectProjectsAcrossEnvironments(store)
+        : selectProjectsForEnvironment(
+            store,
+            projectScope.kind === "environment" ? projectScope.environmentId : null,
+          ),
+    ),
   );
   const sidebarThreads = useStore(
-    useShallow((store) => selectSidebarThreadsForEnvironment(store, selectedEnvironmentId)),
+    useShallow((store) =>
+      projectScope.kind === "all-environments"
+        ? selectSidebarThreadsAcrossEnvironments(store)
+        : selectSidebarThreadsForEnvironment(
+            store,
+            projectScope.kind === "environment" ? projectScope.environmentId : null,
+          ),
+    ),
   );
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
@@ -2876,23 +3140,98 @@ export default function Sidebar() {
     [orderedProjects],
   );
 
+  const resolveEnvironmentLabel = useCallback(
+    (environmentId: EnvironmentId): string | null => {
+      const rt = savedEnvironmentRuntimeById[environmentId];
+      const saved = savedEnvironmentRegistry[environmentId];
+      return rt?.descriptor?.label ?? saved?.label ?? null;
+    },
+    [savedEnvironmentRegistry, savedEnvironmentRuntimeById],
+  );
+
   const sidebarProjects = useMemo<SidebarProjectSnapshot[]>(() => {
     return buildSidebarProjectSnapshots({
       projects: orderedProjects,
       settings: projectGroupingSettings,
       primaryEnvironmentId,
-      resolveEnvironmentLabel: (environmentId) => {
-        const rt = savedEnvironmentRuntimeById[environmentId];
-        const saved = savedEnvironmentRegistry[environmentId];
-        return rt?.descriptor?.label ?? saved?.label ?? null;
-      },
+      resolveEnvironmentLabel,
+    });
+  }, [orderedProjects, projectGroupingSettings, primaryEnvironmentId, resolveEnvironmentLabel]);
+
+  // Every machine the sidebar could show a chip for: the local backend plus
+  // every saved environment, whether or not it is currently reachable. Offline
+  // machines are included on purpose — their rows stay visible (dimmed), so
+  // their chips have to keep working.
+  const machineEnvironmentIds = useMemo<EnvironmentId[]>(() => {
+    const ids = new Set<EnvironmentId>();
+    if (primaryEnvironmentId !== null) {
+      ids.add(primaryEnvironmentId);
+    }
+    for (const environmentId of Object.keys(savedEnvironmentRegistry) as EnvironmentId[]) {
+      ids.add(environmentId);
+    }
+    for (const project of orderedProjects) {
+      ids.add(project.environmentId);
+    }
+    return [...ids];
+  }, [orderedProjects, primaryEnvironmentId, savedEnvironmentRegistry]);
+
+  const machineIdentityResolution = useMemo(
+    () =>
+      resolveMachineIdentities({
+        machines: machineEnvironmentIds.map((environmentId) => ({
+          environmentId,
+          label: resolveEnvironmentLabel(environmentId),
+        })),
+        persisted: sidebarMachineIdentitySettings,
+        order: sidebarMachineOrderSetting,
+      }),
+    [
+      machineEnvironmentIds,
+      resolveEnvironmentLabel,
+      sidebarMachineIdentitySettings,
+      sidebarMachineOrderSetting,
+    ],
+  );
+
+  // Persist newly assigned hue slots and first-seen order. Without this the
+  // assignment would be recomputed every run and a chip could change colour
+  // when another machine is attached — the one thing the slot model exists to
+  // prevent.
+  const machineIdentityPersistRef = useRef<string>("");
+  useEffect(() => {
+    const { slotsToPin, order } = machineIdentityResolution;
+    const orderChanged =
+      order.length !== sidebarMachineOrderSetting.length ||
+      order.some((environmentId, index) => sidebarMachineOrderSetting[index] !== environmentId);
+    if (slotsToPin.size === 0 && !orderChanged) {
+      return;
+    }
+    // Guard against re-firing before the settings round trip lands, which would
+    // queue the same write repeatedly.
+    const signature = JSON.stringify([[...slotsToPin.entries()], order]);
+    if (machineIdentityPersistRef.current === signature) {
+      return;
+    }
+    machineIdentityPersistRef.current = signature;
+    const nextIdentity: Record<string, { monogram: string; colorSlot: number }> = {
+      ...sidebarMachineIdentitySettings,
+    };
+    for (const [environmentId, colorSlot] of slotsToPin) {
+      nextIdentity[environmentId] = {
+        monogram: sidebarMachineIdentitySettings[environmentId]?.monogram ?? "",
+        colorSlot,
+      };
+    }
+    updateSettings({
+      ...(slotsToPin.size > 0 ? { sidebarMachineIdentity: nextIdentity } : {}),
+      ...(orderChanged ? { sidebarMachineOrder: order } : {}),
     });
   }, [
-    orderedProjects,
-    projectGroupingSettings,
-    primaryEnvironmentId,
-    savedEnvironmentRegistry,
-    savedEnvironmentRuntimeById,
+    machineIdentityResolution,
+    sidebarMachineIdentitySettings,
+    sidebarMachineOrderSetting,
+    updateSettings,
   ]);
 
   const sidebarProjectByKey = useMemo(
@@ -3433,7 +3772,7 @@ export default function Sidebar() {
   }, []);
 
   return (
-    <>
+    <MachineIdentityProvider identities={machineIdentityResolution.identities}>
       <SidebarChromeHeader isElectron={isElectron} />
 
       {isOnSettings ? (
@@ -3449,6 +3788,10 @@ export default function Sidebar() {
             projectSortOrder={sidebarProjectSortOrder}
             threadSortOrder={sidebarThreadSortOrder}
             projectGroupingMode={sidebarProjectGroupingMode}
+            environmentScope={sidebarEnvironmentScope}
+            groupBy={sidebarGroupBy}
+            machineSortOrder={sidebarMachineSortOrder}
+            showUnreachable={sidebarShowUnreachable}
             updateSettings={updateSettings}
             openAddProject={openAddProjectCommandPalette}
             isManualProjectSorting={isManualProjectSorting}
@@ -3481,6 +3824,6 @@ export default function Sidebar() {
           <SidebarChromeFooter />
         </>
       )}
-    </>
+    </MachineIdentityProvider>
   );
 }

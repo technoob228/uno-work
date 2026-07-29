@@ -51,6 +51,7 @@ import {
 } from "../addressing.ts";
 import { classifyWake } from "../wakeClassifier.ts";
 import { ServerConfig } from "../../config.ts";
+import { telegramCommandOrigin } from "../../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
@@ -388,19 +389,22 @@ const makeTelegramConnector = Effect.gen(function* () {
 
       const threadId = ThreadId.make(crypto.randomUUID());
       const createdAt = new Date().toISOString();
-      yield* orchestrationEngine.dispatch({
-        type: "thread.create",
-        commandId: CommandId.make(`telegram:${crypto.randomUUID()}`),
-        threadId,
-        projectId: input.projectId,
-        title: `Telegram: ${input.chatLabel}`,
-        modelSelection,
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        branch: null,
-        worktreePath: null,
-        createdAt,
-      });
+      yield* orchestrationEngine.dispatch(
+        {
+          type: "thread.create",
+          commandId: CommandId.make(`telegram:${crypto.randomUUID()}`),
+          threadId,
+          projectId: input.projectId,
+          title: `Telegram: ${input.chatLabel}`,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        },
+        { origin: telegramCommandOrigin(input.chatId) },
+      );
       yield* connectorRepository.setThreadForChat({
         projectId: input.projectId,
         kind: "telegram",
@@ -889,20 +893,23 @@ const makeTelegramConnector = Effect.gen(function* () {
           ? body
           : [HANDOFF_PREAMBLE_START, handoffContext, HANDOFF_PREAMBLE_END, "", body].join("\n");
       const requestedAtIso = new Date().toISOString();
-      yield* orchestrationEngine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make(`telegram:${crypto.randomUUID()}`),
-        threadId,
-        message: {
-          messageId: MessageId.make(crypto.randomUUID()),
-          role: "user",
-          text: messageText,
-          attachments: ingested.attachments,
+      yield* orchestrationEngine.dispatch(
+        {
+          type: "thread.turn.start",
+          commandId: CommandId.make(`telegram:${crypto.randomUUID()}`),
+          threadId,
+          message: {
+            messageId: MessageId.make(crypto.randomUUID()),
+            role: "user",
+            text: messageText,
+            attachments: ingested.attachments,
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdAt: requestedAtIso,
         },
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        createdAt: requestedAtIso,
-      });
+        { origin: telegramCommandOrigin(chatId) },
+      );
       yield* Effect.forkScoped(
         sendReplyWhenTurnCompletes({
           botToken: config.botToken,

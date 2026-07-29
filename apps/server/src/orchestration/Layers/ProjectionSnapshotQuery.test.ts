@@ -8,7 +8,7 @@ import {
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
@@ -1402,6 +1402,114 @@ it.effect(
       assert.deepStrictEqual(resolveCalls.toSorted(), ["/tmp/deleted-root", "/tmp/shared-root"]);
       assert.equal(fullSnapshot.projects.length, 3);
       assert.equal(fullSnapshot.projects[2]?.repositoryIdentity?.rootPath, "/tmp/deleted-root");
+    }).pipe(Effect.provide(layer));
+  },
+);
+
+// Ф0.1: identity is resolved live but must survive a resolver that goes quiet.
+// Without the stored fallback a transient `null` drops the project back to its
+// physical key, and a cross-environment project group visibly falls apart and
+// reassembles on the next snapshot.
+it.effect(
+  "ProjectionSnapshotQuery persists resolved repository identity and falls back to it when resolution fails",
+  () => {
+    let resolveResult: {
+      readonly canonicalKey: string;
+      readonly locator: {
+        readonly source: "git-remote";
+        readonly remoteName: string;
+        readonly remoteUrl: string;
+      };
+      readonly rootPath: string;
+    } | null = {
+      canonicalKey: "github.com/acme/persisted",
+      locator: {
+        source: "git-remote" as const,
+        remoteName: "origin",
+        remoteUrl: "https://github.com/acme/persisted.git",
+      },
+      rootPath: "/tmp/persisted-root",
+    };
+
+    const layer = OrchestrationProjectionSnapshotQueryLive.pipe(
+      Layer.provideMerge(
+        Layer.succeed(RepositoryIdentityResolver, {
+          resolve: () => Effect.sync(() => resolveResult),
+        }),
+      ),
+      Layer.provideMerge(SqlitePersistenceMemory),
+    );
+
+    return Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_state`;
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-persisted',
+          'Persisted Project',
+          '/tmp/persisted-root',
+          NULL,
+          '[]',
+          '2026-04-04T00:00:00.000Z',
+          '2026-04-04T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* snapshotQuery.getShellSnapshot();
+
+      const stored = yield* sql<{
+        readonly canonicalKey: string | null;
+        readonly identityJson: string | null;
+        readonly resolvedAt: string | null;
+      }>`
+        SELECT
+          repository_canonical_key AS "canonicalKey",
+          repository_identity_json AS "identityJson",
+          repository_identity_resolved_at AS "resolvedAt"
+        FROM projection_projects
+        WHERE project_id = 'project-persisted'
+      `;
+      assert.equal(stored[0]?.canonicalKey, "github.com/acme/persisted");
+      assert.notEqual(stored[0]?.identityJson, null);
+      assert.notEqual(stored[0]?.resolvedAt, null);
+
+      // The resolver now returns nothing — git unavailable, mount asleep.
+      resolveResult = null;
+
+      const degraded = yield* snapshotQuery.getShellSnapshot();
+      assert.equal(
+        degraded.projects[0]?.repositoryIdentity?.canonicalKey,
+        "github.com/acme/persisted",
+      );
+
+      const afterDegraded = yield* sql<{ readonly canonicalKey: string | null }>`
+        SELECT repository_canonical_key AS "canonicalKey"
+        FROM projection_projects
+        WHERE project_id = 'project-persisted'
+      `;
+      assert.equal(afterDegraded[0]?.canonicalKey, "github.com/acme/persisted");
+
+      const shellById = yield* snapshotQuery.getProjectShellById(
+        ProjectId.make("project-persisted"),
+      );
+      assert.equal(
+        Option.getOrNull(shellById)?.repositoryIdentity?.canonicalKey,
+        "github.com/acme/persisted",
+      );
     }).pipe(Effect.provide(layer));
   },
 );

@@ -37,25 +37,13 @@ import {
 } from "../Errors.ts";
 import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { ManagerApprovalService } from "../Services/ManagerApprovalService.ts";
+import { wrapUntrustedContent } from "../../untrustedContent.ts";
 import { ManagerBudgetService } from "../Services/ManagerBudgetService.ts";
 import {
   type ManagerCaller,
   ManagerToolService,
   type ManagerToolServiceShape,
 } from "../Services/ManagerToolService.ts";
-
-const UNTRUSTED_OPEN = "<untrusted_thread_output>";
-const UNTRUSTED_CLOSE = "</untrusted_thread_output>";
-
-/**
- * Wrap attacker-influenced thread content in explicit delimiters. Occurrences
- * of the closing delimiter inside the content are defanged so injected text
- * cannot escape the envelope.
- */
-export function wrapUntrustedContent(text: string): string {
-  const defanged = text.replaceAll("</untrusted_thread_output", "<\\/untrusted_thread_output");
-  return `${UNTRUSTED_OPEN}${defanged}${UNTRUSTED_CLOSE}`;
-}
 
 function requireScope(
   caller: ManagerCaller,

@@ -10,6 +10,7 @@ import {
   OrchestrationThread,
   ProjectScript,
   TurnId,
+  type RepositoryIdentity,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
   type OrchestrationMessage,
@@ -34,7 +35,11 @@ import {
   type ProjectionRepositoryError,
 } from "../../persistence/Errors.ts";
 import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheckpoints.ts";
-import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
+import {
+  ProjectionProject,
+  ProjectionProjectRepository,
+} from "../../persistence/Services/ProjectionProjects.ts";
+import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
 import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionThreadMessages.ts";
@@ -244,7 +249,65 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
 const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
+  const projectionProjectRepository = yield* ProjectionProjectRepository;
   const repositoryIdentityResolutionConcurrency = 4;
+
+  /**
+   * Persist a freshly resolved identity, but only when it actually differs from
+   * what is stored — a snapshot read happens constantly and an unconditional
+   * UPDATE per project per read would be pure write amplification.
+   *
+   * Persistence failures are logged and swallowed: this is a cache refresh
+   * riding along on a read path, and a read must not fail because a write did.
+   */
+  const persistRepositoryIdentityIfChanged = Effect.fn(
+    "ProjectionSnapshotQuery.persistRepositoryIdentityIfChanged",
+  )(function* (input: {
+    readonly projectId: ProjectId;
+    readonly resolved: RepositoryIdentity | null;
+    readonly stored: RepositoryIdentity | null;
+  }) {
+    if (input.resolved === null) {
+      // Last-known-good: a failed resolve never erases a good answer.
+      return;
+    }
+    if (input.stored !== null && JSON.stringify(input.stored) === JSON.stringify(input.resolved)) {
+      return;
+    }
+    yield* projectionProjectRepository
+      .upsertRepositoryIdentity({
+        projectId: input.projectId,
+        repositoryIdentity: input.resolved,
+        resolvedAt: new Date().toISOString(),
+      })
+      .pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("projection.repository-identity.persist-failed", {
+            projectId: input.projectId,
+            cause,
+          }),
+        ),
+      );
+  });
+
+  const readStoredRepositoryIdentities = Effect.fn(
+    "ProjectionSnapshotQuery.readStoredRepositoryIdentities",
+  )(function* () {
+    const rows = yield* projectionProjectRepository.listRepositoryIdentities().pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("projection.repository-identity.read-failed", { cause }).pipe(
+          Effect.as(
+            [] as ReadonlyArray<{
+              readonly projectId: ProjectId;
+              readonly repositoryIdentity: RepositoryIdentity | null;
+            }>,
+          ),
+        ),
+      ),
+    );
+    return new Map(rows.map((row) => [row.projectId, row.repositoryIdentity] as const));
+  });
+
   const resolveRepositoryIdentitiesForProjects = Effect.fn(
     "ProjectionSnapshotQuery.resolveRepositoryIdentitiesForProjects",
   )(function* (
@@ -268,13 +331,56 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         { concurrency: repositoryIdentityResolutionConcurrency },
       ),
     );
+    const storedByProjectId = yield* readStoredRepositoryIdentities();
 
-    return new Map(
-      filteredProjectRows.map((row) => [
-        row.projectId,
-        repositoryIdentityByWorkspaceRoot.get(row.workspaceRoot) ?? null,
-      ]),
+    const effectiveByProjectId = new Map(
+      filteredProjectRows.map((row) => {
+        const resolved = repositoryIdentityByWorkspaceRoot.get(row.workspaceRoot) ?? null;
+        const stored = storedByProjectId.get(row.projectId) ?? null;
+        // Live wins when it has an answer; otherwise fall back to the stored
+        // one. Falling through to `null` is what made cross-environment project
+        // groups visibly break apart and reassemble.
+        return [row.projectId, resolved ?? stored] as const;
+      }),
     );
+
+    yield* Effect.forEach(
+      filteredProjectRows,
+      (row) =>
+        persistRepositoryIdentityIfChanged({
+          projectId: row.projectId,
+          resolved: repositoryIdentityByWorkspaceRoot.get(row.workspaceRoot) ?? null,
+          stored: storedByProjectId.get(row.projectId) ?? null,
+        }),
+      { concurrency: repositoryIdentityResolutionConcurrency, discard: true },
+    );
+
+    return effectiveByProjectId;
+  });
+
+  /**
+   * Single-project variant of the same last-known-good rule, for the by-id
+   * lookups that do not go through a snapshot.
+   */
+  const resolveRepositoryIdentityForProject = Effect.fn(
+    "ProjectionSnapshotQuery.resolveRepositoryIdentityForProject",
+  )(function* (input: { readonly projectId: ProjectId; readonly workspaceRoot: string }) {
+    const resolved = yield* repositoryIdentityResolver.resolve(input.workspaceRoot);
+    const storedRow = yield* projectionProjectRepository
+      .getRepositoryIdentity({ projectId: input.projectId })
+      .pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("projection.repository-identity.read-failed", {
+            projectId: input.projectId,
+            cause,
+          }).pipe(
+            Effect.as(Option.none<{ readonly repositoryIdentity: RepositoryIdentity | null }>()),
+          ),
+        ),
+      );
+    const stored = Option.isSome(storedRow) ? storedRow.value.repositoryIdentity : null;
+    yield* persistRepositoryIdentityIfChanged({ projectId: input.projectId, resolved, stored });
+    return resolved ?? stored;
   });
 
   const listProjectRows = SqlSchema.findAll({
@@ -1391,7 +1497,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         Effect.flatMap((option) =>
           Option.isNone(option)
             ? Effect.succeed(Option.none<OrchestrationProject>())
-            : repositoryIdentityResolver.resolve(option.value.workspaceRoot).pipe(
+            : resolveRepositoryIdentityForProject({
+                projectId: option.value.projectId,
+                workspaceRoot: option.value.workspaceRoot,
+              }).pipe(
                 Effect.map((repositoryIdentity) =>
                   Option.some({
                     id: option.value.projectId,
@@ -1420,13 +1529,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       Effect.flatMap((option) =>
         Option.isNone(option)
           ? Effect.succeed(Option.none<OrchestrationProjectShell>())
-          : repositoryIdentityResolver
-              .resolve(option.value.workspaceRoot)
-              .pipe(
-                Effect.map((repositoryIdentity) =>
-                  Option.some(mapProjectShellRow(option.value, repositoryIdentity)),
-                ),
+          : resolveRepositoryIdentityForProject({
+              projectId: option.value.projectId,
+              workspaceRoot: option.value.workspaceRoot,
+            }).pipe(
+              Effect.map((repositoryIdentity) =>
+                Option.some(mapProjectShellRow(option.value, repositoryIdentity)),
               ),
+            ),
       ),
     );
 
@@ -1697,4 +1807,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
 export const OrchestrationProjectionSnapshotQueryLive = Layer.effect(
   ProjectionSnapshotQuery,
   makeProjectionSnapshotQuery,
+).pipe(
+  // Provided here rather than by every caller: the repository needs only the
+  // SqlClient this layer already requires, so the layer's public requirements
+  // are unchanged and no existing composition site has to be touched.
+  Layer.provide(ProjectionProjectRepositoryLive),
 );
