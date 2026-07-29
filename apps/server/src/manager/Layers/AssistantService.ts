@@ -22,7 +22,12 @@ import { OrchestrationEngineService } from "../../orchestration/Services/Orchest
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerCapabilityTokenRepository } from "../../persistence/Services/ManagerCapabilityTokens.ts";
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
-import { getAutoBootstrapDefaultModelSelection } from "../../serverRuntimeStartup.ts";
+import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import {
+  FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION,
+  isUnusableAutoBootstrapDefault,
+  selectAutoBootstrapModelSelection,
+} from "../../provider/autoBootstrapModelSelection.ts";
 import {
   ManagerAssistantError,
   ManagerAssistantService,
@@ -127,6 +132,27 @@ function slugifyAssistantName(name: string): string {
   return slug.length > 0 ? slug : "assistant";
 }
 
+/**
+ * Contents of a folder's `.uno-assistant.json` marker.
+ *
+ * Parsed by hand rather than through a schema because the only question ever
+ * asked of it is "did *this* environment write it", and a file that will not
+ * parse answers that exactly as well as a well-formed foreign one does.
+ */
+type AssistantFolderMarkerFile = {
+  readonly stateDir?: string;
+  readonly projectId?: string;
+};
+
+/** `null` for anything that is not readable JSON — callers treat it as foreign. */
+function parseAssistantFolderMarker(raw: string): AssistantFolderMarkerFile | null {
+  try {
+    return JSON.parse(raw) as AssistantFolderMarkerFile;
+  } catch {
+    return null;
+  }
+}
+
 const emptyTelegramStatus = (input: {
   readonly botUsername: string | null;
   readonly lastError: string | null;
@@ -151,6 +177,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
   const connectorRepository = yield* ManagerConnectorRepository;
   const telegramService = yield* ManagerTelegramService;
   const slackService = yield* ManagerSlackService;
+  const providerRegistry = yield* ProviderRegistry;
 
   const toAssistantError = (detail: string) => (cause: unknown) =>
     new ManagerAssistantError({ detail, cause });
@@ -177,17 +204,16 @@ const makeManagerAssistantService = Effect.gen(function* () {
       const markerPath = path.join(preferred, ".uno-assistant.json");
       const marker = yield* fs.readFileString(markerPath).pipe(Effect.orElseSucceed(() => ""));
       if (marker.length > 0) {
-        try {
-          const parsed = JSON.parse(marker) as { stateDir?: string; projectId?: string };
-          if (parsed.stateDir !== config.stateDir || parsed.projectId !== projectId) {
-            return path.join(
-              base,
-              `${name}-${crypto.createHash("sha256").update(config.stateDir).digest("hex").slice(0, 6)}`,
-            );
-          }
-        } catch {
+        const parsed = parseAssistantFolderMarker(marker);
+        if (parsed === null) {
           // Unreadable marker — treat the folder as foreign.
           return path.join(base, `${name}-${crypto.randomUUID().slice(0, 6)}`);
+        }
+        if (parsed.stateDir !== config.stateDir || parsed.projectId !== projectId) {
+          return path.join(
+            base,
+            `${name}-${crypto.createHash("sha256").update(config.stateDir).digest("hex").slice(0, 6)}`,
+          );
         }
       }
       return preferred;
@@ -273,18 +299,49 @@ const makeManagerAssistantService = Effect.gen(function* () {
       }
 
       if (Option.isNone(registeredProject)) {
+        // Start the assistant on a harness this machine can actually run —
+        // threads it spawns without an explicit model inherit this default.
+        const bootProviders = yield* providerRegistry.getProviders;
         yield* orchestrationEngine.dispatch({
           type: "project.create",
           commandId: CommandId.make(`assistant-ensure:${crypto.randomUUID()}`),
           projectId,
           title,
           workspaceRoot,
-          defaultModelSelection: getAutoBootstrapDefaultModelSelection(),
+          defaultModelSelection:
+            selectAutoBootstrapModelSelection(bootProviders) ??
+            FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION,
           createdAt: new Date().toISOString(),
         });
         yield* Effect.logInfo("assistant project created").pipe(
           Effect.annotateLogs({ projectId, workspaceRoot }),
         );
+      } else {
+        // An assistant created before its harnesses were probed can be pinned
+        // to a default the machine cannot run — every thread spawned without
+        // an explicit model then fails. Re-point it, but only while it still
+        // carries the server's own fallback: a default the user picked is
+        // never overwritten.
+        const providers = yield* providerRegistry.getProviders;
+        if (
+          isUnusableAutoBootstrapDefault(
+            registeredProject.value.defaultModelSelection ?? null,
+            providers,
+          )
+        ) {
+          const repaired = selectAutoBootstrapModelSelection(providers);
+          if (repaired !== null) {
+            yield* orchestrationEngine.dispatch({
+              type: "project.meta.update",
+              commandId: CommandId.make(`assistant-default-model:${crypto.randomUUID()}`),
+              projectId,
+              defaultModelSelection: repaired,
+            });
+            yield* Effect.logInfo("assistant default model re-pointed to a usable harness").pipe(
+              Effect.annotateLogs({ projectId, ...repaired }),
+            );
+          }
+        }
       }
     }).pipe(
       Effect.catch((cause) =>
@@ -321,14 +378,11 @@ const makeManagerAssistantService = Effect.gen(function* () {
         .readFileString(path.join(dir, ".uno-assistant.json"))
         .pipe(Effect.orElseSucceed(() => ""));
       if (raw.length === 0) return { kind: "none" } as const;
-      try {
-        const parsed = JSON.parse(raw) as { projectId?: string; stateDir?: string };
-        return parsed.stateDir === config.stateDir && typeof parsed.projectId === "string"
-          ? ({ kind: "owned", projectId: parsed.projectId } as const)
-          : ({ kind: "foreign" } as const);
-      } catch {
-        return { kind: "foreign" } as const;
-      }
+      const parsed = parseAssistantFolderMarker(raw);
+      if (parsed === null) return { kind: "foreign" } as const;
+      return parsed.stateDir === config.stateDir && typeof parsed.projectId === "string"
+        ? ({ kind: "owned", projectId: parsed.projectId } as const)
+        : ({ kind: "foreign" } as const);
     });
 
   /**

@@ -22,8 +22,10 @@ const ManagerRepositoriesLive = Layer.mergeAll(
 );
 
 /**
- * Manager tool layer runtime. Requires `SqlClient`, `OrchestrationEngineService`
- * and `ProjectionSnapshotQuery` from the outer runtime (see `server.ts`).
+ * Manager tool layer runtime. Requires `SqlClient`, `OrchestrationEngineService`,
+ * `ProjectionSnapshotQuery` and `ProviderRegistry` (the assistant picks its
+ * default harness from what is actually authenticated) from the outer runtime
+ * (see `server.ts`).
  *
  * Exposes the repositories too: the assistant HTTP routes read connectors and
  * the assistant token directly.

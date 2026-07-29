@@ -77,6 +77,7 @@ import {
   resolveHermesModeId,
   setHermesSessionMode,
 } from "../acp/HermesAcpSupport.ts";
+import { repairHermesSessionHistory } from "../acp/hermesSessionRepair.ts";
 import { type HermesAdapterShape } from "../Services/HermesAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
@@ -435,6 +436,12 @@ export function makeHermesAdapter(
                 }),
             ),
           );
+
+          // A turn that died mid-API-call can leave a duplicated tool-call row
+          // behind; replaying it bricks the thread on `400 assistant message
+          // must not be empty`. Heal it while the database is ours — the
+          // hermes process for this thread is not up yet.
+          yield* repairHermesSessionHistory(threadHermesHome);
 
           const sessionEnvironment = {
             ...(options?.environment ?? {}),

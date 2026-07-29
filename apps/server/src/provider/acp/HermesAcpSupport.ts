@@ -196,6 +196,21 @@ export const HERMES_GATEWAY_STALE_TIMEOUT_SECONDS = 120;
 export const HERMES_GATEWAY_REQUEST_TIMEOUT_SECONDS = 180;
 /** Неймспейснутый id — голый `whisper-large-v3` hermes подменяет на whisper-1. */
 export const HERMES_STT_MODEL = "openai/whisper-large-v3";
+/**
+ * Ретраи hermes на уровне агента. Дефолт (3) сгорает за ~секунду на upstream
+ * 429 из общего пула провайдера: hermes игнорирует `Retry-After` и уходит в
+ * `max_retries_exhausted`, а наружу через ACP отдаёт чистый `end_turn` — turn
+ * выглядит успешным, а пользователь получает обрывок. Больше попыток = шанс
+ * пережить всплеск лимита вместо тихой потери хода.
+ */
+export const HERMES_AGENT_API_MAX_RETRIES = 8;
+/**
+ * Догоняющий nudge, когда модель объявила действие («сейчас посмотрю логи»),
+ * но не позвала ни одного инструмента и закрыла turn. Дефолт `"auto"` ловит
+ * только codex-семейство; `true` включает это для всех, а именно так и
+ * обрывались наблюдавшиеся ходы диспетчера. Ограничено 2 подсказками на ход.
+ */
+export const HERMES_AGENT_INTENT_ACK_CONTINUATION = true;
 
 export function buildHermesConfigYaml(input: {
   readonly model: string;
@@ -203,6 +218,9 @@ export function buildHermesConfigYaml(input: {
 }): string {
   const quote = JSON.stringify;
   const lines: Array<string> = [
+    "agent:",
+    `  api_max_retries: ${HERMES_AGENT_API_MAX_RETRIES}`,
+    `  intent_ack_continuation: ${HERMES_AGENT_INTENT_ACK_CONTINUATION}`,
     "model:",
     `  provider: ${quote(HERMES_GATEWAY_PROVIDER)}`,
     `  default: ${quote(input.model)}`,
