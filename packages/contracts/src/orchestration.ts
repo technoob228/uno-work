@@ -1008,17 +1008,74 @@ export const ThreadActivityAppendedPayload = Schema.Struct({
 
 /**
  * `OrchestrationCommandOrigin` — provenance marker for commands dispatched by
- * a non-user actor (currently only the manager agent's tool layer).
+ * a non-user actor: the manager agent's tool layer, a chat connector, the
+ * assistant bootstrapper, a workspace peer, or the server itself.
  *
  * Stamped into `OrchestrationEventMetadata.origin` for every event produced by
- * such a command, so the event store doubles as the manager audit trail.
- * Absent for ordinary user/client commands.
+ * such a command, so the event store doubles as the non-user audit trail.
+ * Absent for ordinary user/client commands — an absent origin means "a human
+ * did this here", which is only true because every non-user dispatch site
+ * stamps one.
  */
-export const OrchestrationCommandOrigin = Schema.Struct({
+export const OrchestrationManagerCommandOrigin = Schema.Struct({
   kind: Schema.Literal("manager"),
   tokenId: TrimmedNonEmptyString,
   proposalId: Schema.optional(TrimmedNonEmptyString),
 });
+export type OrchestrationManagerCommandOrigin = typeof OrchestrationManagerCommandOrigin.Type;
+
+/**
+ * A command that arrived from another workspace member. `memberId` is the
+ * manifest identity the target authenticated, not a transport identity —
+ * `environmentId` is deliberately absent because it is reassignable.
+ */
+export const OrchestrationPeerCommandOrigin = Schema.Struct({
+  kind: Schema.Literal("peer"),
+  workspaceId: TrimmedNonEmptyString,
+  memberId: TrimmedNonEmptyString,
+  claimId: Schema.optional(TrimmedNonEmptyString),
+  proposalId: Schema.optional(TrimmedNonEmptyString),
+  rootCauseId: Schema.optional(TrimmedNonEmptyString),
+  hopCount: Schema.optional(NonNegativeInt),
+});
+export type OrchestrationPeerCommandOrigin = typeof OrchestrationPeerCommandOrigin.Type;
+
+export const OrchestrationCommandOriginConnectorKind = Schema.Literals(["telegram", "slack"]);
+export type OrchestrationCommandOriginConnectorKind =
+  typeof OrchestrationCommandOriginConnectorKind.Type;
+
+/** A command dispatched on behalf of an external chat surface. */
+export const OrchestrationConnectorCommandOrigin = Schema.Struct({
+  kind: Schema.Literal("connector"),
+  connector: OrchestrationCommandOriginConnectorKind,
+  tokenId: Schema.optional(TrimmedNonEmptyString),
+  externalActorId: Schema.optional(TrimmedNonEmptyString),
+});
+export type OrchestrationConnectorCommandOrigin = typeof OrchestrationConnectorCommandOrigin.Type;
+
+/** A command dispatched by the assistant bootstrapper on the daemon's behalf. */
+export const OrchestrationAssistantCommandOrigin = Schema.Struct({
+  kind: Schema.Literal("assistant"),
+  assistantKey: TrimmedNonEmptyString,
+  tokenId: Schema.optional(TrimmedNonEmptyString),
+});
+export type OrchestrationAssistantCommandOrigin = typeof OrchestrationAssistantCommandOrigin.Type;
+
+/** A command the daemon issued for itself (schedulers, reconciliation, sweeps). */
+export const OrchestrationSystemCommandOrigin = Schema.Struct({
+  kind: Schema.Literal("system"),
+  component: TrimmedNonEmptyString,
+  reason: Schema.optional(TrimmedNonEmptyString),
+});
+export type OrchestrationSystemCommandOrigin = typeof OrchestrationSystemCommandOrigin.Type;
+
+export const OrchestrationCommandOrigin = Schema.Union([
+  OrchestrationManagerCommandOrigin,
+  OrchestrationPeerCommandOrigin,
+  OrchestrationConnectorCommandOrigin,
+  OrchestrationAssistantCommandOrigin,
+  OrchestrationSystemCommandOrigin,
+]);
 export type OrchestrationCommandOrigin = typeof OrchestrationCommandOrigin.Type;
 
 export const OrchestrationEventMetadata = Schema.Struct({

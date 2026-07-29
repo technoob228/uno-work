@@ -383,6 +383,77 @@ it.effect("decodes thread archived and unarchived events", () =>
   }),
 );
 
+const originEventRow = (origin: unknown) => ({
+  sequence: 7,
+  eventId: "event-origin-1",
+  aggregateKind: "thread",
+  aggregateId: "thread-1",
+  type: "thread.unarchived",
+  occurredAt: "2026-01-02T00:00:00.000Z",
+  commandId: "cmd-origin-1",
+  causationEventId: null,
+  correlationId: "cmd-origin-1",
+  metadata: { origin },
+  payload: {
+    threadId: "thread-1",
+    updatedAt: "2026-01-02T00:00:00.000Z",
+  },
+});
+
+// Regression guard for widening `OrchestrationCommandOrigin` from a bare
+// manager struct into a discriminated union: rows written before migration 037
+// carry `origin.kind: "manager"` and must keep decoding unchanged.
+it.effect("decodes pre-union manager origin rows after the origin union widening", () =>
+  Effect.gen(function* () {
+    const decoded = yield* decodeOrchestrationEvent(
+      originEventRow({ kind: "manager", tokenId: "token-1", proposalId: "proposal-1" }),
+    );
+
+    assert.strictEqual(decoded.metadata.origin?.kind, "manager");
+    assert.strictEqual(
+      decoded.metadata.origin?.kind === "manager" ? decoded.metadata.origin.tokenId : null,
+      "token-1",
+    );
+  }),
+);
+
+it.effect("decodes peer, connector, assistant and system origins", () =>
+  Effect.gen(function* () {
+    const peer = yield* decodeOrchestrationEvent(
+      originEventRow({
+        kind: "peer",
+        workspaceId: "ws-1",
+        memberId: "member-1",
+        claimId: "claim-1",
+        hopCount: 2,
+      }),
+    );
+    const connector = yield* decodeOrchestrationEvent(
+      originEventRow({ kind: "connector", connector: "telegram", externalActorId: "42" }),
+    );
+    const assistant = yield* decodeOrchestrationEvent(
+      originEventRow({ kind: "assistant", assistantKey: "assistant-1" }),
+    );
+    const system = yield* decodeOrchestrationEvent(
+      originEventRow({ kind: "system", component: "reminder-scheduler" }),
+    );
+
+    assert.strictEqual(peer.metadata.origin?.kind, "peer");
+    assert.strictEqual(connector.metadata.origin?.kind, "connector");
+    assert.strictEqual(assistant.metadata.origin?.kind, "assistant");
+    assert.strictEqual(system.metadata.origin?.kind, "system");
+  }),
+);
+
+it.effect("rejects an origin with an unknown kind", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeOrchestrationEvent(originEventRow({ kind: "wormhole", tokenId: "token-1" })),
+    );
+    assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
 it.effect("accepts provider-scoped model options in thread.turn.start", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartCommand({

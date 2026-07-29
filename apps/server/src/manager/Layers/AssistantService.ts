@@ -18,6 +18,7 @@ import * as crypto from "node:crypto";
 import * as os from "node:os";
 
 import { ServerConfig } from "../../config.ts";
+import { assistantCommandOrigin } from "../../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerCapabilityTokenRepository } from "../../persistence/Services/ManagerCapabilityTokens.ts";
@@ -273,15 +274,18 @@ const makeManagerAssistantService = Effect.gen(function* () {
       }
 
       if (Option.isNone(registeredProject)) {
-        yield* orchestrationEngine.dispatch({
-          type: "project.create",
-          commandId: CommandId.make(`assistant-ensure:${crypto.randomUUID()}`),
-          projectId,
-          title,
-          workspaceRoot,
-          defaultModelSelection: getAutoBootstrapDefaultModelSelection(),
-          createdAt: new Date().toISOString(),
-        });
+        yield* orchestrationEngine.dispatch(
+          {
+            type: "project.create",
+            commandId: CommandId.make(`assistant-ensure:${crypto.randomUUID()}`),
+            projectId,
+            title,
+            workspaceRoot,
+            defaultModelSelection: getAutoBootstrapDefaultModelSelection(),
+            createdAt: new Date().toISOString(),
+          },
+          { origin: assistantCommandOrigin({ assistantKey: projectId }) },
+        );
         yield* Effect.logInfo("assistant project created").pipe(
           Effect.annotateLogs({ projectId, workspaceRoot }),
         );

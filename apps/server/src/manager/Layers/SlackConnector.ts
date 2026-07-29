@@ -41,6 +41,7 @@ import * as nodePath from "node:path";
 import { createAttachmentId, resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { slackCommandOrigin } from "../../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
@@ -442,19 +443,22 @@ const makeSlackConnector = Effect.gen(function* () {
       }
       const threadId = ThreadId.make(crypto.randomUUID());
       const createdAt = new Date().toISOString();
-      yield* orchestrationEngine.dispatch({
-        type: "thread.create",
-        commandId: CommandId.make(`slack:${crypto.randomUUID()}`),
-        threadId,
-        projectId: input.projectId,
-        title: input.title,
-        modelSelection,
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        branch: null,
-        worktreePath: null,
-        createdAt,
-      });
+      yield* orchestrationEngine.dispatch(
+        {
+          type: "thread.create",
+          commandId: CommandId.make(`slack:${crypto.randomUUID()}`),
+          threadId,
+          projectId: input.projectId,
+          title: input.title,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        },
+        { origin: slackCommandOrigin(input.chatKey) },
+      );
       yield* connectorRepository.setThreadForChat({
         projectId: input.projectId,
         kind: "slack",
@@ -601,20 +605,23 @@ const makeSlackConnector = Effect.gen(function* () {
       }
       const body = [...bodyParts, SLACK_SEND_FILE_HINT].join("\n\n");
       const requestedAtIso = new Date().toISOString();
-      yield* orchestrationEngine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make(`slack:${crypto.randomUUID()}`),
-        threadId,
-        message: {
-          messageId: MessageId.make(crypto.randomUUID()),
-          role: "user",
-          text: body,
-          attachments: ingested.attachments,
+      yield* orchestrationEngine.dispatch(
+        {
+          type: "thread.turn.start",
+          commandId: CommandId.make(`slack:${crypto.randomUUID()}`),
+          threadId,
+          message: {
+            messageId: MessageId.make(crypto.randomUUID()),
+            role: "user",
+            text: body,
+            attachments: ingested.attachments,
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdAt: requestedAtIso,
         },
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        createdAt: requestedAtIso,
-      });
+        { origin: slackCommandOrigin(channel) },
+      );
       // DMs reply flat; channel replies land in the message's thread.
       const replyThreadTs = isDM ? undefined : (threadTs ?? ts);
       yield* watchAndReply({

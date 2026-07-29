@@ -25,6 +25,7 @@ import {
 import { ServerConfig } from "./config.ts";
 import { Keybindings } from "./keybindings.ts";
 import { Open } from "./open.ts";
+import { systemCommandOrigin } from "./orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor.ts";
@@ -193,15 +194,18 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
         nextProjectId = ProjectId.make(crypto.randomUUID());
         const bootstrapProjectTitle = path.basename(serverConfig.cwd) || "project";
         nextProjectDefaultModelSelection = getAutoBootstrapDefaultModelSelection();
-        yield* orchestrationEngine.dispatch({
-          type: "project.create",
-          commandId: CommandId.make(crypto.randomUUID()),
-          projectId: nextProjectId,
-          title: bootstrapProjectTitle,
-          workspaceRoot: serverConfig.cwd,
-          defaultModelSelection: nextProjectDefaultModelSelection,
-          createdAt,
-        });
+        yield* orchestrationEngine.dispatch(
+          {
+            type: "project.create",
+            commandId: CommandId.make(crypto.randomUUID()),
+            projectId: nextProjectId,
+            title: bootstrapProjectTitle,
+            workspaceRoot: serverConfig.cwd,
+            defaultModelSelection: nextProjectDefaultModelSelection,
+            createdAt,
+          },
+          { origin: systemCommandOrigin("runtime-startup", "auto-bootstrap") },
+        );
       } else {
         nextProjectId = existingProject.value.id;
         nextProjectDefaultModelSelection =
@@ -213,19 +217,22 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
       if (Option.isNone(existingThreadId)) {
         const createdAt = new Date().toISOString();
         const createdThreadId = ThreadId.make(crypto.randomUUID());
-        yield* orchestrationEngine.dispatch({
-          type: "thread.create",
-          commandId: CommandId.make(crypto.randomUUID()),
-          threadId: createdThreadId,
-          projectId: nextProjectId,
-          title: "New thread",
-          modelSelection: nextProjectDefaultModelSelection,
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          runtimeMode: "full-access",
-          branch: null,
-          worktreePath: null,
-          createdAt,
-        });
+        yield* orchestrationEngine.dispatch(
+          {
+            type: "thread.create",
+            commandId: CommandId.make(crypto.randomUUID()),
+            threadId: createdThreadId,
+            projectId: nextProjectId,
+            title: "New thread",
+            modelSelection: nextProjectDefaultModelSelection,
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+          },
+          { origin: systemCommandOrigin("runtime-startup", "auto-bootstrap") },
+        );
         bootstrapProjectId = nextProjectId;
         bootstrapThreadId = createdThreadId;
       } else {
