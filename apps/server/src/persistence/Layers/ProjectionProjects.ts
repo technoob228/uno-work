@@ -2,13 +2,16 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import { Effect, Layer, Schema, Struct } from "effect";
 
-import { ModelSelection, ProjectScript } from "@t3tools/contracts";
+import { ModelSelection, ProjectScript, RepositoryIdentity } from "@t3tools/contracts";
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
   DeleteProjectionProjectInput,
   GetProjectionProjectInput,
+  GetProjectionProjectRepositoryIdentityInput,
   ProjectionProject,
   ProjectionProjectRepository,
+  ProjectionProjectRepositoryIdentityRow,
+  UpsertProjectionProjectRepositoryIdentityInput,
   type ProjectionProjectRepositoryShape,
 } from "../Services/ProjectionProjects.ts";
 
@@ -19,6 +22,12 @@ const ProjectionProjectDbRow = ProjectionProject.mapFields(
   }),
 );
 type ProjectionProjectDbRow = typeof ProjectionProjectDbRow.Type;
+
+const ProjectionProjectRepositoryIdentityDbRow = ProjectionProjectRepositoryIdentityRow.mapFields(
+  Struct.assign({
+    repositoryIdentity: Schema.NullOr(Schema.fromJsonString(RepositoryIdentity)),
+  }),
+);
 
 const makeProjectionProjectRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -106,6 +115,50 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
       `,
   });
 
+  const listProjectionProjectRepositoryIdentityRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionProjectRepositoryIdentityDbRow,
+    execute: () =>
+      sql`
+        SELECT
+          project_id AS "projectId",
+          repository_identity_json AS "repositoryIdentity",
+          repository_identity_resolved_at AS "resolvedAt"
+        FROM projection_projects
+        ORDER BY created_at ASC, project_id ASC
+      `,
+  });
+
+  const getProjectionProjectRepositoryIdentityRow = SqlSchema.findOneOption({
+    Request: GetProjectionProjectRepositoryIdentityInput,
+    Result: ProjectionProjectRepositoryIdentityDbRow,
+    execute: ({ projectId }) =>
+      sql`
+        SELECT
+          project_id AS "projectId",
+          repository_identity_json AS "repositoryIdentity",
+          repository_identity_resolved_at AS "resolvedAt"
+        FROM projection_projects
+        WHERE project_id = ${projectId}
+      `,
+  });
+
+  // UPDATE rather than upsert: the projected project row is owned by the
+  // pipeline. If it is not there yet, there is nothing to annotate and
+  // inventing a row would fabricate a project the event stream never created.
+  const updateProjectionProjectRepositoryIdentityRow = SqlSchema.void({
+    Request: UpsertProjectionProjectRepositoryIdentityInput,
+    execute: (input) =>
+      sql`
+        UPDATE projection_projects
+        SET
+          repository_identity_json = ${JSON.stringify(input.repositoryIdentity)},
+          repository_canonical_key = ${input.repositoryIdentity.canonicalKey},
+          repository_identity_resolved_at = ${input.resolvedAt}
+        WHERE project_id = ${input.projectId}
+      `,
+  });
+
   const upsert: ProjectionProjectRepositoryShape["upsert"] = (row) =>
     upsertProjectionProjectRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.upsert:query")),
@@ -126,11 +179,40 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.deleteById:query")),
     );
 
+  const listRepositoryIdentities: ProjectionProjectRepositoryShape["listRepositoryIdentities"] =
+    () =>
+      listProjectionProjectRepositoryIdentityRows().pipe(
+        Effect.mapError(
+          toPersistenceSqlError("ProjectionProjectRepository.listRepositoryIdentities:query"),
+        ),
+      );
+
+  const getRepositoryIdentity: ProjectionProjectRepositoryShape["getRepositoryIdentity"] = (
+    input,
+  ) =>
+    getProjectionProjectRepositoryIdentityRow(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlError("ProjectionProjectRepository.getRepositoryIdentity:query"),
+      ),
+    );
+
+  const upsertRepositoryIdentity: ProjectionProjectRepositoryShape["upsertRepositoryIdentity"] = (
+    input,
+  ) =>
+    updateProjectionProjectRepositoryIdentityRow(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlError("ProjectionProjectRepository.upsertRepositoryIdentity:query"),
+      ),
+    );
+
   return {
     upsert,
     getById,
     listAll,
     deleteById,
+    listRepositoryIdentities,
+    getRepositoryIdentity,
+    upsertRepositoryIdentity,
   } satisfies ProjectionProjectRepositoryShape;
 });
 
