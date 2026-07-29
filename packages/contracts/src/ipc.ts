@@ -32,6 +32,7 @@ import type {
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project.ts";
+import type { DictationTranscribeInput, DictationTranscribeResult } from "./dictation.ts";
 import type { ProviderInstanceId } from "./providerInstance.ts";
 import type {
   BrowserBridgeStreamEvent,
@@ -437,6 +438,7 @@ export interface LocalApi {
     cancelUnoVideoJob: (input: UnoVideoCancelJobInput) => Promise<UnoVideoCancelJobResult>;
     getUnoVideoDigest: (input: UnoVideoGetDigestInput) => Promise<VideoDigest>;
     packUnoVideoDigest: (input: VideoContextPackInput) => Promise<VideoContextPack>;
+    transcribeDictation: (input: DictationTranscribeInput) => Promise<DictationTranscribeResult>;
   };
 }
 

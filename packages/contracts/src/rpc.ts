@@ -112,6 +112,11 @@ import {
   VideoContextPackInput,
   VideoDigest,
 } from "./video.ts";
+import {
+  DictationRpcError,
+  DictationTranscribeInput,
+  DictationTranscribeResult,
+} from "./dictation.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -168,6 +173,9 @@ export const WS_METHODS = {
   unoVideoCancelJob: "uno.video.cancelJob",
   unoVideoGetDigest: "uno.video.getDigest",
   unoVideoPackDigest: "uno.video.packDigest",
+
+  // Dictation (voice input for the composer)
+  dictationTranscribe: "dictation.transcribe",
 
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
@@ -298,6 +306,12 @@ export const WsUnoVideoPackDigestRpc = Rpc.make(WS_METHODS.unoVideoPackDigest, {
   payload: VideoContextPackInput,
   success: VideoContextPack,
   error: UnoVideoRpcError,
+});
+
+export const WsDictationTranscribeRpc = Rpc.make(WS_METHODS.dictationTranscribe, {
+  payload: DictationTranscribeInput,
+  success: DictationTranscribeResult,
+  error: DictationRpcError,
 });
 
 export const WsSourceControlLookupRepositoryRpc = Rpc.make(
@@ -557,6 +571,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoVideoCancelJobRpc,
   WsUnoVideoGetDigestRpc,
   WsUnoVideoPackDigestRpc,
+  WsDictationTranscribeRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,

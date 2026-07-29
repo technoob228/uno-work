@@ -18,6 +18,7 @@ export * from "./sourceControl.ts";
 export * from "./orchestration.ts";
 export * from "./manager.ts";
 export * from "./video.ts";
+export * from "./dictation.ts";
 export * from "./editor.ts";
 export * from "./project.ts";
 export * from "./filesystem.ts";

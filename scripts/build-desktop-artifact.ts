@@ -597,6 +597,11 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       target: target === "dmg" ? [target, "zip"] : [target],
       icon: "icon.icns",
       category: "public.app-category.developer-tools",
+      // Without a usage description macOS kills the app the moment dictation
+      // asks for the microphone.
+      extendInfo: {
+        NSMicrophoneUsageDescription: "Uno Work uses the microphone to dictate chat messages.",
+      },
     };
     const identity = resolveMacSigningIdentity(signed);
     if (identity) {

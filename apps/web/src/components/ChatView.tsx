@@ -2577,6 +2577,13 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "composer.dictation.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        composerRef.current?.toggleDictation();
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
