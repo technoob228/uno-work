@@ -20,6 +20,12 @@ import {
   buildClickTextScript,
   buildTypeScript,
 } from "@t3tools/shared/browserAutomationScripts";
+import {
+  emptyFrameMessage,
+  isEmptyScreenshot,
+  screenshotBytes,
+  type ScreenshotResultData,
+} from "@t3tools/shared/browserScreenshot";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { isElectron } from "../../env";
@@ -52,7 +58,11 @@ interface ElectronWebviewElement extends HTMLElement {
   reloadIgnoringCache?: () => void;
   stop(): void;
   setZoomFactor?: (factor: number) => void;
-  capturePage?: () => Promise<{ toDataURL: () => string }>;
+  capturePage?: () => Promise<{
+    toDataURL: () => string;
+    isEmpty?: () => boolean;
+    getSize?: () => { width: number; height: number };
+  }>;
   insertText?: (text: string) => Promise<void>;
   sendInputEvent?: (event: Record<string, unknown>) => void;
   executeJavaScript(code: string, userGesture?: boolean): Promise<unknown>;
@@ -79,6 +89,8 @@ const BROWSER_RECENTS_STORAGE_KEY = "uno_browser_recent_urls";
 const MAX_BROWSER_RECENTS = 8;
 const DEFAULT_ZOOM_FACTOR = 1;
 const ZOOM_STEP = 0.1;
+const SCREENSHOT_CAPTURE_ATTEMPTS = 3;
+const SCREENSHOT_RETRY_DELAY_MS = 350;
 
 function readBrowserRecents(): readonly string[] {
   if (typeof window === "undefined") return [];
@@ -101,6 +113,45 @@ function rememberBrowserUrl(url: string): void {
   window.localStorage.setItem(
     BROWSER_RECENTS_STORAGE_KEY,
     JSON.stringify([url, ...recents].slice(0, MAX_BROWSER_RECENTS)),
+  );
+}
+
+/**
+ * Снимок видимой области вкладки с валидацией кадра.
+ *
+ * `capturePage()` у скрытой webview (`visibility: hidden`, свёрнутое окно,
+ * выбран другой проект) отдаёт пустой `NativeImage`: `toDataURL()` возвращает
+ * голый префикс без payload. Раньше такой кадр уходил наружу как успех — тут
+ * он распознаётся, пара повторов даёт композитору шанс отрисовать кадр, а в
+ * конце команда честно падает с `empty_frame`.
+ */
+async function capturePanelScreenshot(view: ElectronWebviewElement): Promise<ScreenshotResultData> {
+  if (!view.capturePage) throw new Error("capturePage is unavailable.");
+  let dataUrl = "";
+  let attempt = 0;
+  while (attempt < SCREENSHOT_CAPTURE_ATTEMPTS) {
+    attempt += 1;
+    // Фокус подталкивает Chromium отрисовать кадр, если вкладка не в фокусе.
+    view.focus?.();
+    const image = await view.capturePage();
+    dataUrl = image.toDataURL();
+    const size = image.getSize?.();
+    if (!isEmptyScreenshot(dataUrl) && image.isEmpty?.() !== true) {
+      return {
+        dataUrl,
+        bytes: screenshotBytes(dataUrl),
+        ...(size ? { width: size.width, height: size.height } : {}),
+        fullPage: false,
+        capturedBy: "panel",
+        ...(view.getURL?.() ? { url: view.getURL() } : {}),
+      };
+    }
+    if (attempt < SCREENSHOT_CAPTURE_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, SCREENSHOT_RETRY_DELAY_MS));
+    }
+  }
+  throw new Error(
+    emptyFrameMessage({ capturedBy: "panel", attempts: attempt, bytes: screenshotBytes(dataUrl) }),
   );
 }
 
@@ -369,7 +420,12 @@ function BrowserView({
   }, []);
 
   const captureScreenshot = useCallback(async () => {
-    const dataUrl = await webviewRef.current?.capturePage?.().then((image) => image.toDataURL());
+    const view = webviewRef.current;
+    const dataUrl = view
+      ? await capturePanelScreenshot(view)
+          .then((result) => result.dataUrl)
+          .catch(() => null)
+      : null;
     if (!dataUrl) {
       toastManager.add({
         type: "warning",
@@ -430,11 +486,8 @@ function BrowserView({
             canGoForward: view.canGoForward(),
             loading,
           };
-        case "screenshot": {
-          const dataUrl = await view.capturePage?.().then((image) => image.toDataURL());
-          if (!dataUrl) throw new Error("capturePage is unavailable.");
-          return { dataUrl };
-        }
+        case "screenshot":
+          return capturePanelScreenshot(view);
         case "click":
           if (input.selector) {
             return view.executeJavaScript(buildClickSelectorScript(input.selector), true);

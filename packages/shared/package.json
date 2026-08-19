@@ -32,6 +32,10 @@
       "types": "./src/browserAutomationScripts.ts",
       "import": "./src/browserAutomationScripts.ts"
     },
+    "./browserScreenshot": {
+      "types": "./src/browserScreenshot.ts",
+      "import": "./src/browserScreenshot.ts"
+    },
     "./DrainableWorker": {
       "types": "./src/DrainableWorker.ts",
       "import": "./src/DrainableWorker.ts"

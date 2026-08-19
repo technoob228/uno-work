@@ -1,0 +1,46 @@
+[Unit]
+Description=Uno Work daemon (web mode)
+Documentation=https://uno4.dev/docs/work
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=unowork
+Group=unowork
+WorkingDirectory=/home/unowork
+EnvironmentFile=/etc/uno-work/uno-work.env
+ExecStart=/opt/uno-work/bin/uno-work serve \
+  --mode web \
+  --host ${UNO_WORK_HOST} \
+  --port ${UNO_WORK_PORT} \
+  --base-dir ${UNO_WORK_STATE_DIR} \
+  ${UNO_WORK_WORKSPACE}
+
+# Port 80 is below 1024 and the daemon runs unprivileged.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+Restart=always
+RestartSec=2
+# The daemon has its own watchdog; systemd restarts it when the health probe
+# wedges hard enough to kill the process.
+TimeoutStopSec=20
+KillSignal=SIGTERM
+
+# The agent legitimately writes all over the user's home, so the sandbox is
+# deliberately narrow: protect the OS, not the workspace.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+PrivateTmp=true
+RestrictSUIDSGID=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=uno-work
+
+[Install]
+WantedBy=multi-user.target

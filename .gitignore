@@ -27,3 +27,4 @@ __screenshots__/
 squashfs-root/
 .vercel
 *.zip
+dist-tarball/

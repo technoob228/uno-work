@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { UnoIcon } from "../Icons";
-import { ONBOARDING_STEP_IDS, type OnboardingStepId } from "./useOnboardingState";
+import { type OnboardingStepId } from "./useOnboardingState";
 
 export interface OnboardingShellProps {
   stepId: OnboardingStepId;
@@ -36,7 +36,6 @@ export function OnboardingShell({
   onSkip,
   children,
 }: OnboardingShellProps) {
-  const visibleStepIds = ONBOARDING_STEP_IDS.slice(0, totalSteps);
   const computedContinueLabel = continueLabel ?? (isLast ? "Choose project folder" : "Continue");
 
   return (
@@ -80,9 +79,9 @@ export function OnboardingShell({
 
         <div className="flex flex-1 justify-center">
           <div className="flex items-center gap-1.5">
-            {visibleStepIds.map((id, i) => (
+            {Array.from({ length: totalSteps }, (_unused, i) => (
               <span
-                key={id}
+                key={i}
                 className={cn(
                   "h-1.5 rounded-full transition-all",
                   i === stepIndex

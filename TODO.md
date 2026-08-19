@@ -10,6 +10,14 @@
 
 ## Bigger things
 
+- [ ] **Uno Gateway: API-фасады для чужих харнесов** (бэкенд `fishcode`, не этот репо)
+  - Зачем: чтобы в треде Claude Code или Codex можно было переключиться на модель из нашего Gateway (Kimi, DeepSeek, Qwen…) — например когда кончились лимиты подписки — не меняя харнес и не теряя тред.
+  - Сейчас Gateway отдаёт только `POST /v1/chat/completions`. Этого хватает OpenCode, Hermes и Uno, но не хватает двум главным:
+    - [ ] `POST /v1/messages` — Anthropic Messages API. Нужен Claude Code (`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`). Транслировать: system, content blocks, `tool_use`/`tool_result`, SSE-стриминг, `stop_reason`, `usage`.
+    - [ ] `POST /v1/responses` — OpenAI Responses API. Нужен Codex CLI: в 0.144.1 `wire_api = "chat"` больше не поддерживается («How to fix: set `wire_api = "responses"`»), проверено по бинарю. Транслировать: `input`/`output` items, `reasoning`, `function_call`, свой формат SSE.
+  - Оба — фасады над существующим `/v1/chat/completions`, поэтому каталог моделей, биллинг и лимиты переиспользуются. Побочная выгода: становимся drop-in заменой для любого клиента, который умеет только Anthropic или только Responses.
+  - Продуктовая часть (настройки харнеса, группы в пикере, тост «лимит исчерпан → switch model») и полный дизайн: `~/uno-project/knowledge/uno-work-gateway-models-in-harnesses.md`.
+
 - [ ] Queueing messages
 - [ ] Browser pane performance hardening
   - Проблема: сам bridge/кнопка браузера почти бесплатны, но каждая открытая browser-вкладка в preview pane — это Electron `<webview>` guest renderer. Несколько живых вкладок с тяжёлыми сайтами могут давить на память/CPU и ухудшать отзывчивость всего desktop app.

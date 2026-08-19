@@ -3,6 +3,7 @@ import { memo } from "react";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { CircleAlertIcon } from "lucide-react";
 import { formatProviderDriverKindLabel } from "../../providerModels";
+import { isWebApp } from "../../webMode";
 
 export const ProviderStatusBanner = memo(function ProviderStatusBanner({
   status,
@@ -10,6 +11,14 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
   status: ServerProvider | null;
 }) {
   if (!status || status.status === "ready" || status.status === "disabled") {
+    return null;
+  }
+
+  // В браузерной версии набор харнесов задан образом машины, а не действиями
+  // пользователя. «Codex CLI is not installed» — это факт о нашей сборке, а не
+  // проблема, которую он может решить: показывать её в чате незачем, ставить
+  // харнес всё равно нужно в терминале. Реальные сбои (auth, error) остаются.
+  if (isWebApp && status.installed === false) {
     return null;
   }
 

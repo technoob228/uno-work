@@ -46,7 +46,9 @@ curl -fsS -X POST "$${BROWSER_BRIDGE_URL_ENV}${BROWSER_BRIDGE_COMMAND_PATH}" \\
   -d "{\\"command\\":\\"state\\",\\"timeoutMs\\":5000,\\"cwd\\":\\"$PWD\\"}"
 \`\`\`
 
-Доступные команды: \`openUrl\`, \`state\`, \`screenshot\`, \`click\`, \`clickText\`, \`type\`, \`press\`, \`navigate\`, \`reload\`, \`back\`, \`forward\`, \`evaluate\`. У \`screenshot\` есть опция \`"fullPage": true\` — полностраничный снимок (работает в серверном headless-браузере; встроенная панель снимает видимую область). Ответ содержит \`data.dataUrl\` (PNG в base64) — можно декодировать в файл и посмотреть. Предпочитай точные selector/text команды и не выводи в логи пароли, токены или содержимое приватных полей.
+Доступные команды: \`openUrl\`, \`state\`, \`screenshot\`, \`click\`, \`clickText\`, \`type\`, \`press\`, \`navigate\`, \`reload\`, \`back\`, \`forward\`, \`evaluate\`. Предпочитай точные selector/text команды и не выводи в логи пароли, токены или содержимое приватных полей.
+
+\`screenshot\` возвращает \`data.dataUrl\` (PNG в base64) плюс \`bytes\`, \`width\`, \`height\` и \`capturedBy\` (\`panel\` — вкладка приложения, \`headless\` — серверный Chromium). Пустой кадр — это ошибка \`ok: false\` с текстом \`empty_frame\`, а не «успех» с нулевым PNG; такое бывает, когда панель скрыта или окно свёрнуто, и тогда снимок автоматически переснимается серверным браузером (в ответе появится \`fallbackFrom: "panel"\`, а \`url\` покажет, с какой страницы кадр). Опция \`"fullPage": true\` всегда исполняется серверным headless-браузером — панель полную страницу снимать не умеет.
 
 ## Инфраструктура через Uno
 

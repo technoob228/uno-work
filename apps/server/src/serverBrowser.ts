@@ -11,6 +11,13 @@ import {
   buildClickTextScript,
   buildTypeScript,
 } from "@t3tools/shared/browserAutomationScripts";
+import {
+  emptyFrameMessage,
+  isEmptyScreenshot,
+  pngDataUrl,
+  screenshotBytes,
+  type ScreenshotResultData,
+} from "@t3tools/shared/browserScreenshot";
 import { Context, Data, Duration, Effect, Layer, Option, Ref } from "effect";
 import * as Semaphore from "effect/Semaphore";
 import type { BrowserContext, Page } from "playwright-core";
@@ -102,8 +109,31 @@ async function runCommand(page: Page, input: BrowserAutomationCommandInput): Pro
         loading: false,
       };
     case "screenshot": {
-      const image = await page.screenshot({ type: "png", fullPage: input.fullPage === true });
-      return { dataUrl: `data:image/png;base64,${image.toString("base64")}` };
+      const fullPage = input.fullPage === true;
+      const image = await page.screenshot({ type: "png", fullPage });
+      const dataUrl = pngDataUrl(image.toString("base64"));
+      if (isEmptyScreenshot(dataUrl)) {
+        throw new ServerBrowserCommandError({
+          message: emptyFrameMessage({
+            capturedBy: "headless",
+            attempts: 1,
+            bytes: screenshotBytes(dataUrl),
+          }),
+        });
+      }
+      const size = fullPage
+        ? ((await page.evaluate(
+            "({ width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight })",
+          )) as { width: number; height: number } | null)
+        : page.viewportSize();
+      return {
+        dataUrl,
+        bytes: screenshotBytes(dataUrl),
+        ...(size ? { width: size.width, height: size.height } : {}),
+        fullPage,
+        capturedBy: "headless",
+        url: page.url(),
+      } satisfies ScreenshotResultData;
     }
     case "click": {
       if (input.selector) {

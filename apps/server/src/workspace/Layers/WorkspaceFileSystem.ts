@@ -132,8 +132,12 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
   const writeFile: WorkspaceFileSystemShape["writeFile"] = Effect.fn(
     "WorkspaceFileSystem.writeFile",
   )(function* (input) {
+    // `~` is expanded here for the same reason readFile does it: clients hand
+    // us the project root they were given, and project roots may be stored with
+    // a home-relative prefix. Without this the write lands in a directory
+    // literally named "~" next to the server process.
     const target = yield* workspacePaths.resolveRelativePathWithinRoot({
-      workspaceRoot: input.cwd,
+      workspaceRoot: expandHomePath(input.cwd, path),
       relativePath: input.relativePath,
     });
 

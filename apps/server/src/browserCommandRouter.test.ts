@@ -4,7 +4,12 @@ import type {
   BrowserAutomationCommandResult,
   ServerBrowserSettings,
 } from "@t3tools/contracts";
-import { Effect, Fiber, Layer, Stream } from "effect";
+import {
+  emptyFrameMessage,
+  isEmptyFrameError,
+  PNG_DATA_URL_PREFIX,
+} from "@t3tools/shared/browserScreenshot";
+import { Effect, Fiber, Layer, Scope, Stream } from "effect";
 
 import { BrowserBridge, BrowserBridgeTest } from "./browserBridge.ts";
 import {
@@ -28,13 +33,19 @@ it("decides the executor target from settings and subscriber presence", () => {
 });
 
 /** Фейковый серверный исполнитель: записывает команды, отвечает маркером. */
-function makeFakeServerBrowser() {
+function makeFakeServerBrowser(
+  reply: (input: BrowserAutomationCommandInput) => BrowserAutomationCommandResult = () => ({
+    ok: true,
+    commandId: "fake",
+    data: { via: "server" },
+  }),
+) {
   const calls: BrowserAutomationCommandInput[] = [];
   const layer = Layer.succeed(ServerBrowser, {
     execute: (input) =>
       Effect.sync((): BrowserAutomationCommandResult => {
         calls.push(input);
-        return { ok: true, commandId: "fake", data: { via: "server" } };
+        return reply(input);
       }),
     shutdown: Effect.void,
   });
@@ -118,6 +129,125 @@ it.effect("prefers the connected client when executor=auto and a subscriber is l
 
     assert.isTrue(result.ok);
     assert.deepEqual(result.data, { via: "client" });
+    assert.equal(fake.calls.length, 0);
+  }),
+);
+
+/**
+ * Подключённый клиент-респондер: отвечает на каждое command-событие так же,
+ * как BrowserBridgeListener через /api/browser/command/result. Возвращает
+ * список того, что клиенту прислали.
+ */
+const withConnectedClient = <A, R>(
+  reply: (input: BrowserAutomationCommandInput) => {
+    ok: boolean;
+    data?: unknown;
+    error?: string;
+  },
+  body: (received: BrowserAutomationCommandInput[]) => Effect.Effect<A, never, R>,
+): Effect.Effect<A, never, R | BrowserBridge | Scope.Scope> =>
+  Effect.gen(function* () {
+    const browserBridge = yield* BrowserBridge;
+    const received: BrowserAutomationCommandInput[] = [];
+    const responder = yield* browserBridge.stream.pipe(
+      Stream.runForEach((event) => {
+        if (event.type !== "command") return Effect.void;
+        received.push(event.input);
+        const result = reply(event.input);
+        return browserBridge
+          .resolveCommandResult({
+            commandId: event.commandId,
+            responseToken: event.responseToken,
+            ok: result.ok,
+            ...(result.data !== undefined ? { data: result.data } : {}),
+            ...(result.error !== undefined ? { error: result.error } : {}),
+          })
+          .pipe(Effect.asVoid);
+      }),
+      Effect.forkScoped,
+    );
+    for (let i = 0; i < 10_000; i++) {
+      if ((yield* browserBridge.subscriberCount) > 0) break;
+      yield* Effect.yieldNow;
+    }
+    const outcome = yield* body(received);
+    yield* Fiber.interrupt(responder);
+    return outcome;
+  });
+
+it.effect("routes fullPage screenshots to the headless executor even with a live client", () =>
+  Effect.gen(function* () {
+    const fake = makeFakeServerBrowser();
+    const layers = routerLayers({ browser: { executor: "auto" }, serverBrowser: fake.layer });
+
+    const { result, received } = yield* withConnectedClient(
+      () => ({ ok: true, data: { via: "client" } }),
+      (received) =>
+        executeBridgeCommand({ command: "screenshot", fullPage: true }, undefined).pipe(
+          Effect.map((result) => ({ result, received })),
+        ),
+    ).pipe(Effect.provide(layers));
+
+    assert.isTrue(result.ok);
+    assert.deepEqual(result.data, { via: "server" });
+    // Панель не умеет снимать полную страницу — её вообще не спрашивали.
+    assert.deepEqual(received, []);
+    assert.deepEqual(fake.calls, [{ command: "screenshot", fullPage: true }]);
+  }),
+);
+
+it.effect("retakes a blank panel frame on the headless executor at the panel's URL", () =>
+  Effect.gen(function* () {
+    const fake = makeFakeServerBrowser((input) =>
+      input.command === "screenshot"
+        ? { ok: true, commandId: "fake", data: { dataUrl: `${PNG_DATA_URL_PREFIX}iVBORw0KGgo=` } }
+        : { ok: true, commandId: "fake", data: { via: "server" } },
+    );
+    const layers = routerLayers({ browser: { executor: "auto" }, serverBrowser: fake.layer });
+
+    const { result, received } = yield* withConnectedClient(
+      (input) =>
+        input.command === "screenshot"
+          ? { ok: false, error: emptyFrameMessage({ capturedBy: "panel", attempts: 3, bytes: 0 }) }
+          : { ok: true, data: { url: "https://app.example.com/dashboard" } },
+      (received) =>
+        executeBridgeCommand({ command: "screenshot" }, undefined).pipe(
+          Effect.map((result) => ({ result, received })),
+        ),
+    ).pipe(Effect.provide(layers));
+
+    assert.isTrue(result.ok);
+    assert.equal((result.data as { fallbackFrom?: string }).fallbackFrom, "panel");
+    // Панель спросили о screenshot, затем о текущем URL для headless-дубля.
+    assert.deepEqual(
+      received.map((input) => input.command),
+      ["screenshot", "state"],
+    );
+    assert.deepEqual(fake.calls[0], {
+      command: "openUrl",
+      url: "https://app.example.com/dashboard",
+    });
+    assert.equal(fake.calls[1]?.command, "screenshot");
+  }),
+);
+
+it.effect("reports a blank frame as an error instead of a successful empty PNG", () =>
+  Effect.gen(function* () {
+    const fake = makeFakeServerBrowser();
+    const layers = routerLayers({
+      // Фолбэка нет — клиентский пустой кадр должен стать честной ошибкой.
+      browser: { executor: "auto", serverAutomationLevel: "off" },
+      serverBrowser: fake.layer,
+    });
+
+    const result = yield* withConnectedClient(
+      // Так отвечает клиент старой версии: ok с одним префиксом data URL.
+      () => ({ ok: true, data: { dataUrl: PNG_DATA_URL_PREFIX } }),
+      () => executeBridgeCommand({ command: "screenshot" }, undefined),
+    ).pipe(Effect.provide(layers));
+
+    assert.isFalse(result.ok);
+    assert.isTrue(isEmptyFrameError(result.error));
     assert.equal(fake.calls.length, 0);
   }),
 );

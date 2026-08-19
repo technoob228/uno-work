@@ -1,4 +1,5 @@
 import { scopeThreadRef } from "@t3tools/client-runtime";
+import { isAssistantProjectId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ChevronDownIcon,
@@ -71,8 +72,15 @@ export function NoActiveThreadState() {
   const { reconnect, reconnectingId } = useReconnectEnvironment();
   const isReconnecting = selectedEnvId != null && reconnectingId === selectedEnvId;
 
+  // The assistant's home project is created automatically and lives in its own
+  // sidebar section — counting it here would tell a user with an empty machine
+  // to "pick a thread" instead of offering to add their first project.
   const projectsInEnv = useStore(
-    useShallow((store) => selectProjectsForEnvironment(store, selectedEnvId)),
+    useShallow((store) =>
+      selectProjectsForEnvironment(store, selectedEnvId).filter(
+        (project) => !isAssistantProjectId(project.id),
+      ),
+    ),
   );
   const threadsInEnv = useStore(
     useShallow((store) => selectSidebarThreadsForEnvironment(store, selectedEnvId)),

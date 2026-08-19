@@ -1,3 +1,5 @@
+import * as OS from "node:os";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, describe, expect } from "@effect/vitest";
 import { Effect, Fiber, FileSystem, Layer, Path, Stream } from "effect";
@@ -28,6 +30,8 @@ const TestLayer = Layer.empty.pipe(
   ),
   Layer.provideMerge(NodeServices.layer),
 );
+
+let counter = 0;
 
 const makeTempDir = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -70,6 +74,38 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
         expect(result).toEqual({ relativePath: "plans/effect-rpc.md" });
         expect(saved).toBe("# Plan\n");
       }),
+    );
+
+    it.effect("expands a home-relative workspace root", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const home = OS.homedir();
+        const projectName = `t3code-home-write-${process.pid}-${counter++}`;
+
+        // The second path is where a regression puts the file: a directory
+        // literally named "~" next to the process. Clean both so a failing run
+        // does not leave junk in the repo.
+        yield* Effect.addFinalizer(() =>
+          Effect.forEach(
+            [path.join(home, projectName), path.join(process.cwd(), "~")],
+            (target) =>
+              fileSystem.remove(target, { recursive: true }).pipe(Effect.catchCause(() => Effect.void)),
+          ).pipe(Effect.asVoid),
+        );
+
+        yield* workspaceFileSystem.writeFile({
+          cwd: `~/${projectName}`,
+          relativePath: "README.md",
+          contents: "# Home\n",
+        });
+
+        const saved = yield* fileSystem
+          .readFileString(path.join(home, projectName, "README.md"))
+          .pipe(Effect.orDie);
+        expect(saved).toBe("# Home\n");
+      }).pipe(Effect.scoped),
     );
 
     it.effect("invalidates workspace entry search cache after writes", () =>

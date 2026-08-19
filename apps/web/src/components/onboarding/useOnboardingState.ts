@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 
-export const ONBOARDING_STEP_IDS = [
+/** Desktop flow: permissions, harness installs and other local-machine setup. */
+export const DESKTOP_ONBOARDING_STEP_IDS = [
   "welcome",
   "perms",
   "what",
@@ -10,7 +11,24 @@ export const ONBOARDING_STEP_IDS = [
   "rules",
 ] as const;
 
-export type OnboardingStepId = (typeof ONBOARDING_STEP_IDS)[number];
+/**
+ * Browser flow: the machine is already provisioned, so setup is about what this
+ * thing is and getting the first project onto it.
+ */
+export const WEB_ONBOARDING_STEP_IDS = [
+  "web-welcome",
+  "what",
+  "web-machine",
+  "web-harness",
+  "web-first-project",
+] as const;
+
+/** Kept as the default export name for the desktop flow and its tests. */
+export const ONBOARDING_STEP_IDS = DESKTOP_ONBOARDING_STEP_IDS;
+
+export type OnboardingStepId =
+  | (typeof DESKTOP_ONBOARDING_STEP_IDS)[number]
+  | (typeof WEB_ONBOARDING_STEP_IDS)[number];
 
 export interface OnboardingState {
   stepIndex: number;
@@ -24,25 +42,30 @@ export interface OnboardingState {
   goTo: (stepId: OnboardingStepId) => void;
 }
 
-export function useOnboardingState(): OnboardingState {
+export function useOnboardingState(
+  stepIds: ReadonlyArray<OnboardingStepId> = DESKTOP_ONBOARDING_STEP_IDS,
+): OnboardingState {
   const [stepIndex, setStepIndex] = useState(0);
 
   const next = useCallback(() => {
-    setStepIndex((current) => Math.min(current + 1, ONBOARDING_STEP_IDS.length - 1));
-  }, []);
+    setStepIndex((current) => Math.min(current + 1, stepIds.length - 1));
+  }, [stepIds.length]);
 
   const back = useCallback(() => {
     setStepIndex((current) => Math.max(current - 1, 0));
   }, []);
 
-  const goTo = useCallback((stepId: OnboardingStepId) => {
-    const index = ONBOARDING_STEP_IDS.indexOf(stepId);
-    if (index >= 0) setStepIndex(index);
-  }, []);
+  const goTo = useCallback(
+    (stepId: OnboardingStepId) => {
+      const index = stepIds.indexOf(stepId);
+      if (index >= 0) setStepIndex(index);
+    },
+    [stepIds],
+  );
 
   return useMemo(() => {
-    const stepId = ONBOARDING_STEP_IDS[stepIndex] ?? "welcome";
-    const total = ONBOARDING_STEP_IDS.length;
+    const stepId = stepIds[stepIndex] ?? stepIds[0] ?? "welcome";
+    const total = stepIds.length;
     return {
       stepIndex,
       stepId,
@@ -54,5 +77,5 @@ export function useOnboardingState(): OnboardingState {
       back,
       goTo,
     };
-  }, [stepIndex, next, back, goTo]);
+  }, [stepIndex, stepIds, next, back, goTo]);
 }

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family:
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+      }
+      body {
+        width: 280px;
+        margin: 0;
+        padding: 16px;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 14px;
+      }
+      p {
+        margin: 0 0 12px;
+        font-size: 12px;
+        opacity: 0.7;
+        line-height: 1.45;
+      }
+      button {
+        width: 100%;
+        padding: 8px 12px;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        color: #fff;
+        background: #5b5be8;
+        border: 0;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      button.secondary {
+        margin-top: 8px;
+        color: inherit;
+        background: transparent;
+        border: 1px solid currentColor;
+        font-weight: 500;
+        opacity: 0.75;
+      }
+      #status {
+        margin-top: 12px;
+        font-size: 12px;
+        opacity: 0.7;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Uno Work Companion</h1>
+    <p>
+      The agent can act only in tabs it opened, plus tabs you share here. Nothing else in this
+      browser is visible to it.
+    </p>
+    <button id="share">Share the current tab</button>
+    <button id="revoke" class="secondary">Stop sharing all tabs</button>
+    <div id="status">…</div>
+    <script src="popup.js"></script>
+  </body>
+</html>

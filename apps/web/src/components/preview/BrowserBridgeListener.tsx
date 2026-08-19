@@ -11,6 +11,15 @@ import { useStore } from "../../store";
 import { runBrowserAutomationCommandForProject } from "./BrowserAutomationRegistry";
 import { resolveBridgeEventProjectKey } from "./browserBridgeRouting";
 import { usePreviewPane } from "./PreviewPaneContext";
+import {
+  detectBrowserExtension,
+  isBrowserExtensionConnected,
+  runExtensionBrowserCommand,
+} from "../../browserExtensionBridge";
+import { isWebApp } from "../../webMode";
+
+const EXTENSION_MISSING_MESSAGE =
+  "No browser to drive: install the Uno Work Companion extension to act in this browser, or set the browser executor to the machine's own browser in settings.";
 
 function resolveResultUrl(resultUrl: string): string {
   if (/^https?:\/\//i.test(resultUrl)) return resultUrl;
@@ -63,6 +72,13 @@ export function BrowserBridgeListener() {
   const openUrlInProjectRef = useRef(openUrlInProject);
   openUrlInProjectRef.current = openUrlInProject;
 
+  // Ask the companion extension to announce itself early, so the first bridge
+  // command does not pay for the handshake.
+  useEffect(() => {
+    if (!isWebApp) return;
+    void detectBrowserExtension();
+  }, []);
+
   const [connectionsVersion, setConnectionsVersion] = useState(0);
   useEffect(
     () => subscribeEnvironmentConnections(() => setConnectionsVersion((value) => value + 1)),
@@ -83,6 +99,12 @@ export function BrowserBridgeListener() {
           }) ?? currentProjectKeyRef.current;
 
         if (event.type === "openUrl") {
+          if (isWebApp) {
+            void runExtensionBrowserCommand({ command: "openUrl", url: event.url }).catch(
+              () => undefined,
+            );
+            return;
+          }
           openUrlInProjectRef.current(projectKey, event.url);
           return;
         }
@@ -94,6 +116,16 @@ export function BrowserBridgeListener() {
             }
             if (automationLevel === "safe" && event.input.command === "evaluate") {
               throw new Error("Browser automation safe mode blocks evaluate.");
+            }
+            // The hosted build has no Electron webview: commands run in the
+            // user's own tabs through the companion extension.
+            if (isWebApp) {
+              if (!isBrowserExtensionConnected() && (await detectBrowserExtension()) === null) {
+                throw new Error(EXTENSION_MISSING_MESSAGE);
+              }
+              const data = await runExtensionBrowserCommand(event.input);
+              await postCommandResult(event, { ok: true, data });
+              return;
             }
             if (event.input.command === "openUrl") {
               if (!event.input.url) throw new Error("Missing url.");
