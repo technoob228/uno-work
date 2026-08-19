@@ -61,4 +61,4 @@ jobs:
               -F "slug=uno4-work"
           )"
           echo "$response"
-          echo "$response" | jq -e '.url == "https://storage.getuno.xyz/uno4-work/"'
+          echo "$response" | jq -e '.url == "https://uno4-work.uno4.dev/"'
