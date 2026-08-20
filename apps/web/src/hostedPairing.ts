@@ -1,6 +1,9 @@
 import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "./pairingUrl";
 
-const DEFAULT_HOSTED_APP_URL = "https://app.t3.codes";
+// Hosted static app намеренно без дефолта: форк не раздаёт SPA с общего
+// статик-хоста, и апстримовый https://app.t3.codes здесь означал бы генерацию
+// pairing-ссылок на чужой домен. Пустое значение = hosted-ссылок нет вовсе.
+const DEFAULT_HOSTED_APP_URL = "";
 
 export interface HostedPairingRequest {
   readonly host: string;
@@ -57,8 +60,12 @@ export function buildHostedPairingUrl(input: {
   readonly host: string;
   readonly token: string;
   readonly label?: string | null;
-}): string {
-  const url = new URL("/pair", configuredHostedAppUrl());
+}): string | null {
+  const hostedAppUrl = configuredHostedAppUrl();
+  if (!hostedAppUrl) {
+    return null;
+  }
+  const url = new URL("/pair", hostedAppUrl);
   url.searchParams.set("host", input.host);
 
   const label = input.label?.trim();

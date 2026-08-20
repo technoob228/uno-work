@@ -5,6 +5,7 @@ import {
   HttpBody,
   HttpClient,
   HttpClientResponse,
+  HttpMiddleware,
   HttpRouter,
   HttpServerResponse,
   HttpServerRequest,
@@ -43,11 +44,41 @@ const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" vi
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 
-export const browserApiCorsLayer = HttpRouter.cors({
-  allowedMethods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["authorization", "b3", "traceparent", "content-type"],
-  maxAge: 600,
-});
+// Cross-origin к демону легитимно ходит ровно один клиент: Electron-renderer
+// (origin http://127.0.0.1:<порт>) при подключении к remote environment по
+// bearer-токену. Всё остальное — same-origin. Пустой allowedOrigins в effect
+// означает `*`, и до этой проверки ЛЮБОЙ сайт мог дёргать /api/auth/* и читать
+// ответы. Дополнительные origins (свой хостинг SPA) — через
+// T3CODE_ALLOWED_ORIGINS, список через запятую.
+function isAllowedCorsOrigin(origin: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (isLoopbackHostname(parsed.hostname)) {
+    return true;
+  }
+  const extra = process.env.T3CODE_ALLOWED_ORIGINS;
+  if (!extra) {
+    return false;
+  }
+  return extra
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+    .includes(parsed.origin);
+}
+
+export const browserApiCorsLayer = HttpRouter.middleware(
+  HttpMiddleware.cors({
+    allowedOrigins: isAllowedCorsOrigin,
+    allowedMethods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["authorization", "b3", "traceparent", "content-type"],
+    maxAge: 600,
+  }),
+).layer;
 
 export function isLoopbackHostname(hostname: string): boolean {
   const normalizedHostname = hostname

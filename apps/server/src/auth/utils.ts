@@ -113,12 +113,26 @@ function readRemoteAddressFromSource(source: unknown): string | undefined {
   return normalizeIpAddress(candidate.socket?.remoteAddress ?? candidate.remoteAddress);
 }
 
+// За edge-прокси remoteAddress сокета — это IP самого прокси, и список сессий
+// показывал один адрес на всех. X-Forwarded-For заполняет прокси; подделать его
+// может только клиент, идущий в обход прокси, — тогда врёт лишь его собственная
+// строка в списке устройств, доступа это не даёт.
+function readForwardedFor(raw: string | undefined): string | undefined {
+  if (typeof raw !== "string") {
+    return undefined;
+  }
+  const first = raw.split(",")[0]?.trim();
+  return first ? normalizeIpAddress(first) : undefined;
+}
+
 export function deriveAuthClientMetadata(input: {
   readonly request: HttpServerRequest.HttpServerRequest;
   readonly label?: string;
 }): AuthClientMetadata {
   const userAgent = normalizeNonEmptyString(input.request.headers["user-agent"]);
-  const ipAddress = readRemoteAddressFromSource(input.request.source);
+  const ipAddress =
+    readForwardedFor(input.request.headers["x-forwarded-for"]) ??
+    readRemoteAddressFromSource(input.request.source);
   const os = inferOs(userAgent);
   const browser = inferBrowser(userAgent);
   return {

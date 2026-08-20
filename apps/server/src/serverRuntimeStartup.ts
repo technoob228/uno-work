@@ -434,13 +434,26 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
 
       yield* Effect.logDebug("startup phase: recording startup heartbeat");
       yield* launchStartupHeartbeat;
+      // Под супервизором stdout уезжает в journald, и печатать туда живой
+      // owner-токен на каждом рестарте (Restart=always) нельзя: журнал читают
+      // шире, чем каталог секретов. T3CODE_STARTUP_PAIRING_OUTPUT=0 глушит
+      // выпуск и печать стартового pairing-токена; вход остаётся через
+      // `uno-work auth pairing create` или внешний бутстрап.
+      const startupPairingOutputDisabled =
+        process.env.T3CODE_STARTUP_PAIRING_OUTPUT === "0";
       if (serverConfig.startupPresentation === "headless") {
-        yield* Effect.logDebug("startup phase: headless access info");
-        const accessInfo = yield* issueHeadlessServeAccessInfo();
-        yield* runStartupPhase(
-          "headless.output",
-          Console.log(formatHeadlessServeOutput(accessInfo)),
-        );
+        if (startupPairingOutputDisabled) {
+          yield* Effect.logInfo("Startup pairing output disabled; create tokens on demand.");
+        } else {
+          yield* Effect.logDebug("startup phase: headless access info");
+          const accessInfo = yield* issueHeadlessServeAccessInfo();
+          yield* runStartupPhase(
+            "headless.output",
+            Console.log(formatHeadlessServeOutput(accessInfo)),
+          );
+        }
+      } else if (startupPairingOutputDisabled && serverConfig.mode !== "desktop") {
+        yield* Effect.logInfo("Startup pairing output disabled; create tokens on demand.");
       } else {
         yield* Effect.logDebug("startup phase: browser open check");
         const startupBrowserTarget = yield* resolveStartupBrowserTarget;

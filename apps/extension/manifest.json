@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Uno Work Companion",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Lets Uno Work act in the tabs of this browser — in the sessions you are already signed into.",
   "minimum_chrome_version": "116",
   "permissions": ["tabs", "scripting", "storage"],
@@ -13,6 +13,7 @@
   "content_scripts": [
     {
       "matches": [
+        "https://app.uno4.work/*",
         "https://*.uno4.dev/*",
         "http://localhost/*",
         "http://127.0.0.1/*"

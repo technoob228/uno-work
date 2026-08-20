@@ -85,6 +85,10 @@ export const authBootstrapRouteLayer = HttpRouter.add(
         httpOnly: true,
         path: "/",
         sameSite: "lax",
+        // За TLS-терминирующим прокси (X-Forwarded-Proto: https) кука не должна
+        // ходить по plaintext. Локальный http://127.0.0.1 остаётся без Secure —
+        // иначе Electron и dev-режим потеряют сессию.
+        secure: request.headers["x-forwarded-proto"] === "https",
       }),
     );
   }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),

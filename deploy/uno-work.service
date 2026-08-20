@@ -10,6 +10,9 @@ User=unowork
 Group=unowork
 WorkingDirectory=/home/unowork
 EnvironmentFile=/etc/uno-work/uno-work.env
+# Stdout уходит в journald: стартовый owner pairing-токен там не место.
+# Токены чеканятся по требованию (`uno-work auth pairing create`).
+Environment=T3CODE_STARTUP_PAIRING_OUTPUT=0
 ExecStart=/opt/uno-work/bin/uno-work serve \
   --mode web \
   --host ${UNO_WORK_HOST} \

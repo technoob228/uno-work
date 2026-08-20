@@ -15,6 +15,8 @@ import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_BASE_NAME, APP_VERSION } from "../../branding";
+import { isLoopbackHostname } from "../../environments/primary";
+import { isWebApp } from "../../webMode";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
@@ -888,10 +890,30 @@ export function GeneralSettingsPanel() {
   };
 
   const unoApiKey = settings.uno?.apiKey ?? "";
+  // Кнопка выхода имеет смысл только в браузерной версии за единым входом:
+  // /logout обслуживает прокси (гасит его сессионную куку). В Electron и на
+  // локальном демоне такого маршрута нет.
+  const showWebLogout = isWebApp && !isLoopbackHostname(window.location.hostname);
 
   return (
     <SettingsPageContainer>
       <SettingsSection title="Uno account">
+        {showWebLogout ? (
+          <SettingsRow
+            title="Session"
+            description="Signed in through the Uno console. Logging out returns you to the console."
+            control={
+              <Button
+                variant="outline"
+                onClick={() => {
+                  window.location.href = "/logout";
+                }}
+              >
+                Log out
+              </Button>
+            }
+          />
+        ) : null}
         <SettingsRow
           title="API key"
           description="Used by Uno Code to call the Uno LLM Gateway. Stored in plain text on disk."
