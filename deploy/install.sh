@@ -157,8 +157,10 @@ fi
 systemctl daemon-reload
 systemctl enable --now uno-work >/dev/null
 
+# 30 секунд хватало на быстрой машине, но на слабом боксе демон успевает
+# только прогнать миграции: первый запуск после установки видели ~60 с.
 log "Waiting for the daemon"
-for _ in $(seq 1 30); do
+for _ in $(seq 1 120); do
   if curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
     log "Daemon is up on ${HOST}:${PORT}"
     log "Pair a browser:  uno-work auth pairing create --base-dir ${STATE_DIR} --ttl 10m --role owner --json"
