@@ -62,10 +62,14 @@ install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${STATE_DIR}"
 rm -f "${STATE_DIR}/settings.json"
 
 # 4. Убрать следы, из-за которых клоны выглядели бы одинаково.
-log "Убираю machine-id, SSH host keys, историю и кэши"
+log "Убираю machine-id, историю и кэши"
 : > /etc/machine-id
 rm -f /var/lib/dbus/machine-id
-rm -f /etc/ssh/ssh_host_*
+# SSH host keys НЕ удаляем здесь: съёмка образа сама ходит в гостя по SSH
+# (guest fs sync перед снапшотом), а OpenSSH ≥9.8 перечитывает ключи с диска
+# на каждое соединение — без файлов sshd рвёт коннект, и capture падает.
+# Уникальность ключей у клонов обеспечивает uno-work-identity (см. ниже):
+# он ротирует host keys на первой загрузке клона вместе с ключом кук.
 rm -rf /home/"${SERVICE_USER}"/.bash_history /root/.bash_history
 rm -rf /home/"${SERVICE_USER}"/projects/* 2>/dev/null || true
 rm -rf /var/lib/apt/lists/* /var/log/journal/* 2>/dev/null || true
@@ -133,6 +137,14 @@ if [ -e "${key}" ] && [ -f "${stamp}" ]; then
   rm -rf "${STATE}/userdata/secrets" "${STATE}/userdata/environment-id"
   rotated=1
 fi
+
+# Свежий клон (штампа нет или hostname сменился) не должен наследовать SSH
+# host keys образа: у всех клонов один отпечаток — это подарок для MITM.
+# Ротируем здесь, а не в prepare-image: у эталона sshd обязан работать до
+# самой съёмки (через него идёт guest fs sync).
+rm -f /etc/ssh/ssh_host_*
+ssh-keygen -A >/dev/null 2>&1 || true
+systemctl restart --no-block ssh 2>/dev/null || systemctl restart --no-block sshd 2>/dev/null || true
 
 printf '%s\n' "${host}" > "${stamp}"
 chown "${SERVICE_USER}:${SERVICE_USER}" "${stamp}" 2>/dev/null || true
