@@ -126,7 +126,9 @@ fi
 
 if [ -n "${API_KEY}" ]; then
   log "Writing the Uno gateway key into daemon settings"
-  settings="${STATE_DIR}/settings.json"
+  # Демон читает настройки из <base-dir>/userdata/settings.json (deriveServerPaths),
+  # НЕ из корня base-dir: ключ в ${STATE_DIR}/settings.json он молча игнорирует.
+  settings="${STATE_DIR}/userdata/settings.json"
   sudo -u "${SERVICE_USER}" env HOME="/home/${SERVICE_USER}" python3 - "$settings" "$API_KEY" <<'PY'
 import json, os, sys
 path, key = sys.argv[1], sys.argv[2]

@@ -21,6 +21,7 @@ import {
   CornerLeftUpIcon,
   FolderIcon,
   FolderPlusIcon,
+  FolderUpIcon,
   LinkIcon,
   MessageSquareIcon,
   SettingsIcon,
@@ -74,6 +75,10 @@ import {
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { getLatestThreadForProject } from "../lib/threadSort";
 import { cn, isMacPlatform, isWindowsPlatform, newCommandId, newProjectId } from "../lib/utils";
+import { inferProjectNameFromUpload } from "../firstProject";
+import { pickFolderForUpload, toFirstProjectFiles } from "../firstProjectFiles";
+import { runUploadFirstProject } from "../firstProjectRunner";
+import { isWebApp } from "../webMode";
 import {
   selectProjectsAcrossEnvironments,
   selectSidebarThreadsAcrossEnvironments,
@@ -782,6 +787,84 @@ function OpenCommandPaletteDialog() {
     void navigate({ to: "/settings/source-control" });
   }, [navigate, setOpen]);
 
+  // Загрузка папки с компьютера пользователя — тот же механизм, что в
+  // веб-онбординге (firstProjectRunner): файлы едут в машину по WS, проект
+  // создаётся заранее, мусорные каталоги отсеивает planUpload.
+  const runAddProjectUpload = useCallback(
+    async (environmentId: EnvironmentId, fileList: FileList) => {
+      const api = readEnvironmentApi(environmentId);
+      if (!api) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Upload failed",
+            description: "Environment is not connected.",
+          }),
+        );
+        return;
+      }
+      const files = toFirstProjectFiles(fileList);
+      const projectName = inferProjectNameFromUpload(files);
+      const baseDirectory = settings.addProjectBaseDirectory?.trim() || "~/projects";
+      let createdProjectId: ReturnType<typeof newProjectId> | null = null;
+      toastManager.add(
+        stackedThreadToast({
+          type: "info",
+          title: "Uploading folder…",
+          description: `${files.length} file${files.length === 1 ? "" : "s"} selected.`,
+        }),
+      );
+      try {
+        const result = await runUploadFirstProject(
+          {
+            cloneRepository: (input) => api.sourceControl.cloneRepository(input),
+            writeFile: (input) => api.projects.writeFile(input),
+            createProject: async ({ cwd, title }) => {
+              const projectId = newProjectId();
+              createdProjectId = projectId;
+              await api.orchestration.dispatchCommand({
+                type: "project.create",
+                commandId: newCommandId(),
+                projectId,
+                title,
+                workspaceRoot: cwd,
+                createWorkspaceRootIfMissing: true,
+                createdAt: new Date().toISOString(),
+              });
+            },
+          },
+          { files, baseDirectory, projectName },
+        );
+        const accepted = result.uploadPlan?.accepted.length ?? 0;
+        const skipped = result.uploadPlan?.skipped.length ?? 0;
+        toastManager.add(
+          stackedThreadToast({
+            type: "success",
+            title: `${result.title} is ready`,
+            description:
+              skipped > 0
+                ? `${accepted} files copied, ${skipped} skipped (dependencies, git metadata, oversized).`
+                : `Copied to ${result.cwd}.`,
+          }),
+        );
+        if (createdProjectId) {
+          await handleNewThread(scopeProjectRef(environmentId, createdProjectId), {
+            envMode: settings.defaultThreadEnvMode,
+          }).catch(() => undefined);
+        }
+      } catch (error) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Upload failed",
+            description: errorMessage(error),
+          }),
+        );
+      }
+    },
+    [handleNewThread, settings.addProjectBaseDirectory, settings.defaultThreadEnvMode],
+  );
+
   const buildAddProjectSourceGroups = useCallback(
     (
       environmentId: EnvironmentId,
@@ -801,6 +884,22 @@ function OpenCommandPaletteDialog() {
           },
         },
       ];
+
+      if (isWebApp) {
+        sourceItems.push({
+          kind: "action",
+          value: `action:add-project:${environmentId}:upload`,
+          searchTerms: ["upload", "folder", "computer", "files", "copy"],
+          title: "Upload a folder",
+          description: "Copy a folder from this computer to the machine",
+          icon: <FolderUpIcon className={ITEM_ICON_CLASS} />,
+          run: async () => {
+            pickFolderForUpload((files) => {
+              void runAddProjectUpload(environmentId, files);
+            });
+          },
+        });
+      }
 
       const orderedSources: ReadonlyArray<AddProjectRemoteSource> = [
         "url",
@@ -873,7 +972,7 @@ function OpenCommandPaletteDialog() {
 
       return [{ value: `sources:${environmentId}`, label: "Sources", items: sourceItems }];
     },
-    [openSourceControlSettings, startAddProjectBrowse, startAddProjectClone],
+    [openSourceControlSettings, runAddProjectUpload, startAddProjectBrowse, startAddProjectClone],
   );
 
   const startAddProjectSourceSelection = useCallback(

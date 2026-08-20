@@ -1,5 +1,5 @@
 import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
@@ -11,7 +11,7 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import { DEFAULT_UNIFIED_SETTINGS, UNO_GATEWAY_BASE_URL } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_BASE_NAME, APP_VERSION } from "../../branding";
@@ -353,6 +353,49 @@ const UNO_CODE_PHASE_LABEL: Record<string, string> = {
   verifying: "Verifying…",
   done: "Finishing…",
 };
+
+function UnoGatewayBalance({ apiKey }: { readonly apiKey: string }) {
+  const query = useQuery({
+    queryKey: ["uno-gateway-credits", apiKey],
+    queryFn: async () => {
+      const response = await fetch(`${UNO_GATEWAY_BASE_URL}/credits`, {
+        headers: { authorization: `Bearer ${apiKey}` },
+      });
+      if (!response.ok) {
+        throw new Error(`credits request failed: ${response.status}`);
+      }
+      return (await response.json()) as { readonly llm_balance?: number };
+    },
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  const topUpLink = (
+    <a
+      href="https://console.uno4.dev/llm"
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+    >
+      Top up ↗
+    </a>
+  );
+
+  if (query.isPending) {
+    return <span className="text-xs text-muted-foreground">Loading…</span>;
+  }
+  if (query.isError || typeof query.data?.llm_balance !== "number") {
+    return topUpLink;
+  }
+  return (
+    <span className="flex items-center gap-2">
+      <span className="text-sm font-semibold tabular-nums">
+        ${query.data.llm_balance.toFixed(2)}
+      </span>
+      {topUpLink}
+    </span>
+  );
+}
 
 function UnoCodeInstallSection() {
   const stateQuery = useDesktopUnoCodeInstallState();
@@ -914,9 +957,21 @@ export function GeneralSettingsPanel() {
             }
           />
         ) : null}
+        {unoApiKey.length > 0 ? (
+          <SettingsRow
+            title="Balance"
+            description="Uno LLM Gateway credits. Each model call and web search is billed from this balance."
+            control={<UnoGatewayBalance apiKey={unoApiKey} />}
+          />
+        ) : null}
+
         <SettingsRow
           title="API key"
-          description="Used by Uno Code to call the Uno LLM Gateway. Stored in plain text on disk."
+          description={
+            unoApiKey.length > 0
+              ? "Connected to the Uno LLM Gateway. On managed machines this key is issued automatically."
+              : "Used by Uno Code to call the Uno LLM Gateway. On managed machines it is issued automatically; paste one only for self-hosted setups."
+          }
           resetAction={
             unoApiKey.length > 0 ? (
               <SettingResetButton
@@ -926,16 +981,22 @@ export function GeneralSettingsPanel() {
             ) : null
           }
           control={
-            <DraftInput
-              type="password"
-              className="w-full sm:w-72"
-              value={unoApiKey}
-              onCommit={(next) => updateSettings({ uno: { apiKey: next } })}
-              placeholder="Paste your Uno API key…"
-              spellCheck={false}
-              autoComplete="off"
-              aria-label="Uno API key"
-            />
+            unoApiKey.length > 0 ? (
+              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                Connected
+              </span>
+            ) : (
+              <DraftInput
+                type="password"
+                className="w-full sm:w-72"
+                value={unoApiKey}
+                onCommit={(next) => updateSettings({ uno: { apiKey: next } })}
+                placeholder="Paste your Uno API key…"
+                spellCheck={false}
+                autoComplete="off"
+                aria-label="Uno API key"
+              />
+            )
           }
         />
 

@@ -14,11 +14,11 @@ import {
   runCloneFirstProject,
   runTutorialFirstProject,
   runUploadFirstProject,
-  type FirstProjectFile,
   type FirstProjectResult,
   type FirstProjectRunnerDeps,
 } from "~/firstProjectRunner";
 import { createEnvironmentApi } from "~/environmentApi";
+import { toFirstProjectFiles } from "~/firstProjectFiles";
 import { getPrimaryEnvironmentConnection } from "~/environments/runtime";
 import { useSettings } from "~/hooks/useSettings";
 import { useServerConfig, useServerProviders } from "~/rpc/serverState";
@@ -55,25 +55,6 @@ function ModeCard({ icon: Icon, title, description, onSelect }: ModeCardProps) {
       <span className="text-xs leading-relaxed text-muted-foreground">{description}</span>
     </button>
   );
-}
-
-async function readFileAsBase64(file: File): Promise<string> {
-  const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
-  }
-  return btoa(binary);
-}
-
-function toFirstProjectFiles(fileList: FileList): FirstProjectFile[] {
-  return Array.from(fileList).map((file) => ({
-    rootRelativePath: file.webkitRelativePath || file.name,
-    size: file.size,
-    readBase64: () => readFileAsBase64(file),
-  }));
 }
 
 export function FirstProjectStep({ onProjectReady }: FirstProjectStepProps) {
