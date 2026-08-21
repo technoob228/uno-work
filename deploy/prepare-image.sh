@@ -83,22 +83,39 @@ apt-get clean >/dev/null 2>&1 || true
 # `Connection refused` на 22-м порту: sshd без host keys не стартует. А по SSH
 # в гостя ходит exec-канал ноды — то есть отваливается и /run, и чеканка
 # pairing-токена, ради которой всё затевалось.
-log "Ставлю юнит регенерации SSH host keys (нужен для cold boot)"
+log "Ставлю юнит ротации SSH host keys (до старта sshd, без рестартов)"
+# Ротация ДО старта sshd, а не рестартом после: systemctl restart ssh посреди
+# загрузочной транзакции гоняется с собственным start-джобом ssh.service, и
+# sshd может остаться лежать (поймано на живом клоне: порт 80 жив, 22 refused).
+cat > /usr/local/sbin/uno-work-sshkeys <<'SCRIPT'
+#!/bin/sh
+set -eu
+STATE="${UNO_WORK_STATE_DIR:-/var/lib/uno-work}"
+stamp="${STATE}/.identity-host"
+host="$(hostname)"
+# Штампа нет или hostname другой — это первый бут клона: ключи образа общие
+# для всех клонов, им тут не место. Свой бокс после обычного ребута ключи
+# сохраняет.
+if [ ! -f "${stamp}" ] || [ "$(cat "${stamp}")" != "${host}" ]; then
+  rm -f /etc/ssh/ssh_host_*
+fi
+ssh-keygen -A
+SCRIPT
+chmod 0755 /usr/local/sbin/uno-work-sshkeys
+
 cat > /etc/systemd/system/uno-work-sshkeys.service <<'UNIT'
 [Unit]
-Description=Generate SSH host keys missing from the image
+Description=Rotate SSH host keys inherited from an image clone
 Documentation=https://uno4.dev/docs/work
 DefaultDependencies=no
 After=local-fs.target
-Before=ssh.service sshd.service
-ConditionPathIsReadWrite=/etc
+# Before identity: тот пишет штамп hostname, по которому мы отличаем клон.
+Before=ssh.service sshd.service uno-work-identity.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-# -A создаёт только недостающие типы ключей, поэтому вызов идемпотентен и
-# на боксе клиента, у которого ключи уже есть, не делает ничего.
-ExecStart=/usr/bin/ssh-keygen -A
+ExecStart=/usr/local/sbin/uno-work-sshkeys
 
 [Install]
 WantedBy=multi-user.target
@@ -137,14 +154,6 @@ if [ -e "${key}" ] && [ -f "${stamp}" ]; then
   rm -rf "${STATE}/userdata/secrets" "${STATE}/userdata/environment-id"
   rotated=1
 fi
-
-# Свежий клон (штампа нет или hostname сменился) не должен наследовать SSH
-# host keys образа: у всех клонов один отпечаток — это подарок для MITM.
-# Ротируем здесь, а не в prepare-image: у эталона sshd обязан работать до
-# самой съёмки (через него идёт guest fs sync).
-rm -f /etc/ssh/ssh_host_*
-ssh-keygen -A >/dev/null 2>&1 || true
-systemctl restart --no-block ssh 2>/dev/null || systemctl restart --no-block sshd 2>/dev/null || true
 
 printf '%s\n' "${host}" > "${stamp}"
 chown "${SERVICE_USER}:${SERVICE_USER}" "${stamp}" 2>/dev/null || true
