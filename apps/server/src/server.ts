@@ -111,6 +111,7 @@ import {
   managerTokensRevokeRouteLayer,
 } from "./manager/http.ts";
 import { ManagerAssistantBootstrapLive, ManagerLayerLive } from "./manager/runtimeLayer.ts";
+import { pluginPanelRouteLayer } from "./plugins/http.ts";
 import { PluginRegistryLive } from "./plugins/PluginRegistry.ts";
 import { PluginRuntimeLive } from "./plugins/PluginRuntime.ts";
 import { ReminderSchedulerLive } from "./reminders/Layers/ReminderScheduler.ts";
@@ -375,6 +376,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   orchestrationSnapshotRouteLayer,
   healthRouteLayer,
   otlpTracesProxyRouteLayer,
+  pluginPanelRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,

@@ -1,10 +1,12 @@
 /**
  * Plugins — declarative self-extension manifests for the Uno Work daemon.
  *
- * A plugin is a single JSON file in the daemon's `plugins/` directory. The
- * manifest is intentionally declarative (hooks + crons running shell actions)
- * so an agent session can extend the harness by writing one file — no build
- * step, no dynamic code loading in the daemon process.
+ * A plugin is either a single JSON file in the daemon's `plugins/` directory
+ * (`<id>.json`) or a directory with a `plugin.json` inside (`<id>/plugin.json`
+ * plus arbitrary assets). The manifest is intentionally declarative (hooks +
+ * crons running shell actions, plus an optional static `panel`) so an agent
+ * session can extend the harness by writing files — no build step, no dynamic
+ * code loading in the daemon process.
  */
 import { Effect, Schema } from "effect";
 
@@ -44,10 +46,25 @@ export const PluginCron = Schema.Struct({
 });
 export type PluginCron = typeof PluginCron.Type;
 
+/**
+ * Static panel shipped with the plugin: a tab in the app's right-hand preview
+ * pane rendering `path` (relative to the plugin directory) inside a sandboxed
+ * iframe. Only the directory form of a plugin can declare a panel — a flat
+ * `<id>.json` has nowhere to keep the assets.
+ */
+export const PluginPanel = Schema.Struct({
+  /** Tab title. */
+  title: Schema.String,
+  /** Entry file relative to the plugin directory, e.g. `panel/index.html`. */
+  path: Schema.String,
+});
+export type PluginPanel = typeof PluginPanel.Type;
+
 export const PluginManifest = Schema.Struct({
   name: Schema.String,
   description: Schema.optional(Schema.String),
   version: Schema.optional(Schema.String),
+  panel: Schema.optional(PluginPanel),
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   hooks: Schema.Array(PluginHook).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   crons: Schema.Array(PluginCron).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
@@ -64,11 +81,16 @@ export const ServerPluginRun = Schema.Struct({
 });
 export type ServerPluginRun = typeof ServerPluginRun.Type;
 
-/** Client-facing snapshot of one plugin file (valid or not). */
+/** Client-facing snapshot of one plugin (valid or not). */
 export const ServerPlugin = Schema.Struct({
-  /** Stable id — the file name without `.json`. */
+  /** Stable id — the file name without `.json`, or the directory name. */
   id: Schema.String,
   fileName: Schema.String,
+  /**
+   * Present when the plugin ships a panel; the client opens it at
+   * `/api/plugins/<id>/panel/` (the daemon resolves the manifest entry file).
+   */
+  panel: Schema.optional(Schema.Struct({ title: Schema.String })),
   name: Schema.String,
   description: Schema.optional(Schema.String),
   version: Schema.optional(Schema.String),
