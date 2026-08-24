@@ -3,10 +3,16 @@ import { assert, it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Path } from "effect";
 
 import { ServerConfig } from "../config.ts";
-import { PluginRegistry, PluginRegistryLive, type PluginRegistryShape } from "./PluginRegistry.ts";
+import {
+  makePluginRegistryLive,
+  PluginRegistry,
+  type PluginRegistryShape,
+} from "./PluginRegistry.ts";
 
 const makePluginRegistryLayer = () =>
-  PluginRegistryLive.pipe(
+  // Быстрый страховочный свип: watch-тесты не должны зависеть от того, успел
+  // ли fs.watch форкнутого стрима встать до первой записи файла.
+  makePluginRegistryLive({ sweepIntervalMs: 300 }).pipe(
     Layer.provideMerge(
       Layer.fresh(
         ServerConfig.layerTest(process.cwd(), {
