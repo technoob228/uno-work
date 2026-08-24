@@ -208,6 +208,68 @@ it.layer(NodeServices.layer)("plugin registry", (it) => {
     }).pipe(Effect.provide(makePluginRegistryLayer()), Effect.scoped),
   );
 
+  it.effect("exposes a validated panel.chat and defaults its visibility", () =>
+    Effect.gen(function* () {
+      yield* writePlugin("assistant/plugin.json", {
+        name: "Assistant",
+        panel: { title: "Assistant", path: "index.html", chat: { threadTag: "assistant" } },
+      });
+      yield* writePlugin("assistant/index.html", "<h1>hi</h1>");
+      yield* writePlugin("quiet/plugin.json", {
+        name: "Quiet",
+        panel: {
+          title: "Quiet",
+          path: "index.html",
+          chat: { threadTag: "quiet", visibility: "answers-only" },
+        },
+      });
+      yield* writePlugin("quiet/index.html", "<h1>hi</h1>");
+
+      const registry = yield* PluginRegistry;
+      yield* registry.start;
+      const snapshot = yield* registry.getSnapshot;
+      const byId = new Map(snapshot.plugins.map((plugin) => [plugin.id, plugin]));
+
+      assert.deepEqual(byId.get("assistant")!.panel, {
+        title: "Assistant",
+        chat: { threadTag: "assistant", visibility: "full" },
+      });
+      assert.deepEqual(byId.get("quiet")!.panel, {
+        title: "Quiet",
+        chat: { threadTag: "quiet", visibility: "answers-only" },
+      });
+    }).pipe(Effect.provide(makePluginRegistryLayer()), Effect.scoped),
+  );
+
+  it.effect("rejects panel.chat with an empty tag or an unknown visibility", () =>
+    Effect.gen(function* () {
+      yield* writePlugin("blank/plugin.json", {
+        name: "Blank",
+        panel: { title: "Blank", path: "index.html", chat: { threadTag: "  " } },
+      });
+      yield* writePlugin("blank/index.html", "<h1>hi</h1>");
+      yield* writePlugin("typo/plugin.json", {
+        name: "Typo",
+        panel: {
+          title: "Typo",
+          path: "index.html",
+          chat: { threadTag: "typo", visibility: "answers only" },
+        },
+      });
+      yield* writePlugin("typo/index.html", "<h1>hi</h1>");
+
+      const registry = yield* PluginRegistry;
+      yield* registry.start;
+      const snapshot = yield* registry.getSnapshot;
+      const byId = new Map(snapshot.plugins.map((plugin) => [plugin.id, plugin]));
+
+      assert.equal(byId.get("blank")!.valid, false);
+      assert.include(byId.get("blank")!.error ?? "", `"threadTag" must not be empty`);
+      assert.equal(byId.get("typo")!.valid, false);
+      assert.include(byId.get("typo")!.error ?? "", `unknown "visibility"`);
+    }).pipe(Effect.provide(makePluginRegistryLayer()), Effect.scoped),
+  );
+
   it.effect("marks both forms invalid when a file and a directory claim one id", () =>
     Effect.gen(function* () {
       yield* writePlugin("twin.json", { name: "Twin file" });

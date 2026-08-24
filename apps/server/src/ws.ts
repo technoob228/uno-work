@@ -43,7 +43,7 @@ import {
   observeRpcStream,
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
-import { makePanelThreadSender } from "./plugins/panelThread.ts";
+import { makePanelThreadResolver, makePanelThreadSender } from "./plugins/panelThread.ts";
 import { PluginRegistry } from "./plugins/PluginRegistry.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
@@ -187,11 +187,13 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const serverCommandId = (tag: string) =>
         CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
 
-      const sendPluginPanelToThread = makePanelThreadSender({
+      const panelThreadDeps = {
         registry: pluginRegistry,
         engine: orchestrationEngine,
         projections: projectionSnapshotQuery,
-      });
+      };
+      const sendPluginPanelToThread = makePanelThreadSender(panelThreadDeps);
+      const resolvePluginPanelThread = makePanelThreadResolver(panelThreadDeps);
 
       const loadAuthAccessSnapshot = () =>
         Effect.all({
@@ -985,6 +987,10 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           ),
         [WS_METHODS.pluginsSendToThread]: (input) =>
           observeRpcEffect(WS_METHODS.pluginsSendToThread, sendPluginPanelToThread(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.pluginsResolvePanelThread]: (input) =>
+          observeRpcEffect(WS_METHODS.pluginsResolvePanelThread, resolvePluginPanelThread(input), {
             "rpc.aggregate": "server",
           }),
         [WS_METHODS.unoCreateLlmTopUpAction]: (input) =>

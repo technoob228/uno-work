@@ -49,6 +49,33 @@ export const PluginCron = Schema.Struct({
 export type PluginCron = typeof PluginCron.Type;
 
 /**
+ * How much of the host chat an embedded panel chat shows.
+ *
+ * - `full` — the normal timeline;
+ * - `answers-only` — finished assistant answers only, tool/activity noise hidden
+ *   (approvals and questions live in the composer and stay visible either way);
+ * - `composer-only` — no timeline at all, just the input.
+ */
+export const PLUGIN_PANEL_CHAT_VISIBILITIES = ["full", "answers-only", "composer-only"] as const;
+export const PluginPanelChatVisibility = Schema.Literals(PLUGIN_PANEL_CHAT_VISIBILITIES);
+export type PluginPanelChatVisibility = typeof PluginPanelChatVisibility.Type;
+
+/**
+ * Host chat embedded next to the panel ("custom AI interface"): the plugin
+ * draws its own UI, the chat itself is always rendered by the host.
+ *
+ * `visibility` is `Schema.String` on purpose — a typo has to surface as a
+ * per-plugin validation error in the registry (with the list of valid values),
+ * not as an unreadable schema decode failure for the whole manifest.
+ */
+export const PluginPanelChat = Schema.Struct({
+  /** Same `pluginId + threadTag → threadId` mapping as `plugins.sendToThread`. */
+  threadTag: Schema.String,
+  visibility: Schema.optional(Schema.String),
+});
+export type PluginPanelChat = typeof PluginPanelChat.Type;
+
+/**
  * Static panel shipped with the plugin: a tab in the app's right-hand preview
  * pane rendering `path` (relative to the plugin directory) inside a sandboxed
  * iframe. Only the directory form of a plugin can declare a panel — a flat
@@ -59,6 +86,8 @@ export const PluginPanel = Schema.Struct({
   title: Schema.String,
   /** Entry file relative to the plugin directory, e.g. `panel/index.html`. */
   path: Schema.String,
+  /** Optional embedded host chat rendered next to the panel. */
+  chat: Schema.optional(PluginPanelChat),
 });
 export type PluginPanel = typeof PluginPanel.Type;
 
@@ -92,7 +121,18 @@ export const ServerPlugin = Schema.Struct({
    * Present when the plugin ships a panel; the client opens it at
    * `/api/plugins/<id>/panel/` (the daemon resolves the manifest entry file).
    */
-  panel: Schema.optional(Schema.Struct({ title: Schema.String })),
+  panel: Schema.optional(
+    Schema.Struct({
+      title: Schema.String,
+      /** Present when the panel asks for an embedded host chat (already validated). */
+      chat: Schema.optional(
+        Schema.Struct({
+          threadTag: Schema.String,
+          visibility: PluginPanelChatVisibility,
+        }),
+      ),
+    }),
+  ),
   name: Schema.String,
   description: Schema.optional(Schema.String),
   version: Schema.optional(Schema.String),
@@ -151,3 +191,28 @@ export const PluginSendToThreadResult = Schema.Struct({
   threadTag: Schema.String,
 });
 export type PluginSendToThreadResult = typeof PluginSendToThreadResult.Type;
+
+/**
+ * `plugins.resolvePanelThread` — which thread does the chat embedded next to a
+ * panel talk to?
+ *
+ * Same `pluginId + threadTag → threadId` mapping as `plugins.sendToThread`, so
+ * the panel and its chat always look at one and the same thread. Unlike
+ * `sendToThread` it never starts a turn: it only reuses (or creates) the thread
+ * the embedded chat then renders.
+ */
+export const PluginResolvePanelThreadInput = Schema.Struct({
+  pluginId: Schema.String,
+  projectId: ProjectId,
+  threadTag: Schema.optional(Schema.String),
+});
+export type PluginResolvePanelThreadInput = typeof PluginResolvePanelThreadInput.Type;
+
+export const PluginResolvePanelThreadResult = Schema.Struct({
+  threadId: ThreadId,
+  /** False when an existing thread for this `threadTag` was reused. */
+  created: Schema.Boolean,
+  pluginName: Schema.String,
+  threadTag: Schema.String,
+});
+export type PluginResolvePanelThreadResult = typeof PluginResolvePanelThreadResult.Type;

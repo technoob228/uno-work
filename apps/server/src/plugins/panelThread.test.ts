@@ -12,7 +12,11 @@ import { assert, it } from "@effect/vitest";
 import { Effect, Option } from "effect";
 import { describe } from "vitest";
 
-import { makePanelThreadSender, type PanelThreadSenderDeps } from "./panelThread.ts";
+import {
+  makePanelThreadResolver,
+  makePanelThreadSender,
+  type PanelThreadSenderDeps,
+} from "./panelThread.ts";
 import type { LoadedPlugin } from "./PluginRegistry.ts";
 
 const PROJECT_ID = "project-1" as ProjectId;
@@ -273,6 +277,85 @@ describe("plugins.sendToThread", () => {
       );
       assert.include(projectError.detail, "no longer exists");
       assert.equal(noProject.dispatched.length, 0);
+    }),
+  );
+});
+
+describe("plugins.resolvePanelThread", () => {
+  it.effect("creates the panel thread without starting a turn", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture();
+
+      const result = yield* makePanelThreadResolver(fixture.deps)({
+        pluginId: "deploys",
+        projectId: PROJECT_ID,
+        threadTag: "assistant",
+      });
+
+      assert.equal(result.created, true);
+      assert.equal(result.threadTag, "assistant");
+      assert.equal(result.pluginName, "Deploys");
+      // Ровно одна команда: тред создан, ход НЕ запущен.
+      assert.equal(fixture.dispatched.length, 1);
+      const [create] = fixture.dispatched;
+      assert.equal(create!.command.type, "thread.create");
+      assert.deepEqual(create!.origin, { kind: "plugin", pluginId: "deploys" });
+      if (create!.command.type !== "thread.create") throw new Error("unreachable");
+      assert.equal(create!.command.title, "[Deploys] assistant");
+      // Наследовать не от чего → самый узкий режим.
+      assert.equal(create!.command.runtimeMode, "approval-required");
+      assert.equal(fixture.panelThreads.get("deploys/assistant"), result.threadId);
+    }),
+  );
+
+  it.effect("shares one mapping with sendToThread in both directions", () =>
+    Effect.gen(function* () {
+      // 1) Чат резолвит тред → sendToThread обязан попасть в него же.
+      const threadsById = new Map<string, OrchestrationThreadShell>();
+      const first = makeFixture({ threadsById });
+      const resolved = yield* makePanelThreadResolver(first.deps)({
+        pluginId: "deploys",
+        projectId: PROJECT_ID,
+        threadTag: "assistant",
+      });
+      // Созданный тред теперь живой — как его увидит следующий вызов.
+      threadsById.set(resolved.threadId, threadShell({ id: resolved.threadId }));
+
+      const sent = yield* makePanelThreadSender(first.deps)({
+        pluginId: "deploys",
+        projectId: PROJECT_ID,
+        text: "привет",
+        threadTag: "assistant",
+      });
+      assert.equal(sent.created, false);
+      assert.equal(sent.threadId, resolved.threadId);
+
+      // 2) И наоборот: тред, созданный sendToThread, переиспользует чат.
+      const existing = threadShell({ id: "thread-existing" as ThreadId });
+      const second = makeFixture({
+        panelThreads: new Map([["deploys/panel", "thread-existing" as ThreadId]]),
+        threadsById: new Map([["thread-existing", existing]]),
+      });
+      const reused = yield* makePanelThreadResolver(second.deps)({
+        pluginId: "deploys",
+        projectId: PROJECT_ID,
+      });
+      assert.equal(reused.created, false);
+      assert.equal(reused.threadId, "thread-existing");
+      assert.equal(second.dispatched.length, 0);
+    }),
+  );
+
+  it.effect("refuses panels of disabled plugins", () =>
+    Effect.gen(function* () {
+      const disabled = makeFixture({
+        plugins: [loadedPlugin({ manifest: manifest({ enabled: false }) })],
+      });
+      const error = yield* Effect.flip(
+        makePanelThreadResolver(disabled.deps)({ pluginId: "deploys", projectId: PROJECT_ID }),
+      );
+      assert.include(error.detail, "no enabled panel");
+      assert.equal(disabled.dispatched.length, 0);
     }),
   );
 });

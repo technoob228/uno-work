@@ -1,9 +1,15 @@
 /**
- * `plugins.sendToThread` — панель плагина просит агента что-то сделать.
+ * Треды панелей плагинов: `plugins.sendToThread` и `plugins.resolvePanelThread`.
  *
  * Панель живёт в sandbox-iframe с opaque origin: у неё нет ни сессии, ни
  * представления о тредах. Она зовёт мост приложения (`panelBridge.ts`),
- * приложение добавляет проект своей вкладки и вызывает этот RPC.
+ * приложение добавляет проект своей вкладки и вызывает эти RPC.
+ *
+ * Оба RPC ходят в ОДНУ карту `pluginId + threadTag → threadId` (в памяти
+ * реестра), поэтому встроенный чат панели и её кнопки «спроси агента» смотрят в
+ * один и тот же тред. Разница только в том, что `sendToThread` дополнительно
+ * запускает ход, а `resolvePanelThread` — нет (чат сам отправит сообщение
+ * обычным путём, через композер).
  *
  * Инварианты (граница доверия — манифест, плагин прав не расширяет):
  * - тред создаётся в проекте вкладки, а не в произвольном;
@@ -11,8 +17,8 @@
  *   его собственные, у нового — от первого треда проекта. Если наследовать не
  *   от чего, берём `approval-required` — самый узкий режим (так же поступает
  *   менеджер), а НЕ `DEFAULT_RUNTIME_MODE` (`full-access`);
- * - каждый вызов пишется в историю запусков плагина (`trigger: "panel
- *   sendToThread"`), т.е. виден в Settings → Extensions;
+ * - каждый вызов пишется в историю запусков плагина, т.е. виден в
+ *   Settings → Extensions;
  * - `origin: { kind: "plugin", pluginId }` уходит в метаданные всех событий
  *   команды — event store остаётся аудит-логом.
  */
@@ -20,9 +26,14 @@ import {
   CommandId,
   MessageId,
   type OrchestrationCommandOrigin,
+  type OrchestrationProjectShell,
+  type PluginManifest,
+  type PluginResolvePanelThreadInput,
+  type PluginResolvePanelThreadResult,
   type PluginSendToThreadInput,
   type PluginSendToThreadResult,
   PluginsError,
+  type ProjectId,
   type ProviderInteractionMode,
   type RuntimeMode,
   ThreadId,
@@ -38,6 +49,7 @@ export const DEFAULT_PANEL_THREAD_TAG = "panel";
 /** Самый узкий режим — дефолт, когда наследовать не от чего. */
 const FALLBACK_RUNTIME_MODE: RuntimeMode = "approval-required";
 const PANEL_RUN_TRIGGER = "panel sendToThread";
+const PANEL_CHAT_RUN_TRIGGER = "panel chat";
 const MAX_TEXT_CHARS = 32_000;
 
 export interface PanelThreadSenderDeps {
@@ -54,6 +66,170 @@ export interface PanelThreadSenderDeps {
 
 const commandId = (tag: string) => CommandId.make(`plugin:${tag}:${crypto.randomUUID()}`);
 
+type Dispatch = (
+  command: Parameters<OrchestrationEngineShape["dispatch"]>[0],
+) => Effect.Effect<void, PluginsError>;
+
+interface PanelContext {
+  readonly manifest: PluginManifest;
+  readonly threadTag: string;
+  readonly projectShell: OrchestrationProjectShell;
+  readonly origin: OrchestrationCommandOrigin;
+  readonly dispatch: Dispatch;
+}
+
+interface ResolvedPanelThread {
+  readonly threadId: ThreadId;
+  readonly created: boolean;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+}
+
+function normalizeThreadTag(threadTag: string | undefined): string {
+  return (threadTag ?? DEFAULT_PANEL_THREAD_TAG).trim() || DEFAULT_PANEL_THREAD_TAG;
+}
+
+/**
+ * Общая для обоих RPC проверка: плагин существует, включён, у него есть панель,
+ * проект вкладки жив.
+ */
+function loadPanelContext(
+  deps: PanelThreadSenderDeps,
+  input: {
+    readonly pluginId: string;
+    readonly projectId: ProjectId;
+    readonly threadTag: string | undefined;
+    readonly what: string;
+  },
+): Effect.Effect<PanelContext, PluginsError> {
+  return Effect.gen(function* () {
+    const plugins = yield* deps.registry.getLoadedPlugins;
+    const plugin = plugins.find((candidate) => candidate.id === input.pluginId);
+    const manifest = plugin?.manifest;
+    // Панель выключенного/невалидного плагина открыть нельзя (роут отдаёт
+    // 404), но вкладка может остаться открытой с прошлого раза — проверяем.
+    if (manifest === undefined || !manifest.enabled || manifest.panel === undefined) {
+      return yield* new PluginsError({
+        detail: `${input.what}: plugin "${input.pluginId}" has no enabled panel`,
+      });
+    }
+
+    const projectShell = yield* deps.projections
+      .getProjectShellById(input.projectId)
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new PluginsError({ detail: `${input.what}: failed to read the project`, cause }),
+        ),
+      );
+    if (Option.isNone(projectShell)) {
+      return yield* new PluginsError({
+        detail: `${input.what}: project ${input.projectId} no longer exists`,
+      });
+    }
+
+    const origin: OrchestrationCommandOrigin = { kind: "plugin", pluginId: input.pluginId };
+    const dispatch: Dispatch = (command) =>
+      deps.engine.dispatch(command, { origin }).pipe(
+        Effect.asVoid,
+        Effect.mapError(
+          (cause) =>
+            new PluginsError({
+              detail: `${input.what}: dispatch failed (${command.type})`,
+              cause,
+            }),
+        ),
+      );
+
+    return {
+      manifest,
+      threadTag: normalizeThreadTag(input.threadTag),
+      projectShell: projectShell.value,
+      origin,
+      dispatch,
+    } satisfies PanelContext;
+  });
+}
+
+/**
+ * Единственный источник правды «какой тред у этой панели»: карта реестра, а при
+ * промахе — новый тред в проекте вкладки. Ход НЕ запускается — это забота
+ * вызывающего.
+ */
+function resolveOrCreatePanelThread(
+  deps: PanelThreadSenderDeps,
+  input: {
+    readonly pluginId: string;
+    readonly projectId: ProjectId;
+    readonly what: string;
+    readonly context: PanelContext;
+    readonly createdAt: string;
+  },
+): Effect.Effect<ResolvedPanelThread, PluginsError> {
+  return Effect.gen(function* () {
+    const { context } = input;
+    const existingThreadId = yield* deps.registry.getPanelThreadId({
+      pluginId: input.pluginId,
+      threadTag: context.threadTag,
+    });
+    const existingThread =
+      existingThreadId === undefined
+        ? Option.none()
+        : yield* deps.projections.getThreadShellById(existingThreadId).pipe(
+            // Мёртвый/удалённый тред — не ошибка: просто заводим новый.
+            Effect.orElseSucceed(() => Option.none()),
+          );
+    // Тред из карты годится, только если он всё ещё в том же проекте и не
+    // заархивирован — иначе панель писала бы в чужой/скрытый тред.
+    if (
+      Option.isSome(existingThread) &&
+      existingThread.value.projectId === input.projectId &&
+      existingThread.value.archivedAt === null
+    ) {
+      return {
+        threadId: existingThread.value.id,
+        created: false,
+        runtimeMode: existingThread.value.runtimeMode,
+        interactionMode: existingThread.value.interactionMode,
+      } satisfies ResolvedPanelThread;
+    }
+
+    const modelSelection = context.projectShell.defaultModelSelection;
+    if (modelSelection === null) {
+      return yield* new PluginsError({
+        detail: `${input.what}: the project has no default model — open it once in the app and pick a model`,
+      });
+    }
+
+    const inherited = yield* inheritThreadModes(deps, input.projectId);
+    const threadId = ThreadId.make(crypto.randomUUID());
+    yield* context.dispatch({
+      type: "thread.create",
+      commandId: commandId("create"),
+      threadId,
+      projectId: input.projectId,
+      title: `[${context.manifest.name}] ${context.threadTag}`,
+      modelSelection,
+      runtimeMode: inherited.runtimeMode,
+      interactionMode: inherited.interactionMode,
+      branch: null,
+      worktreePath: null,
+      createdAt: input.createdAt,
+    });
+    yield* deps.registry.setPanelThreadId({
+      pluginId: input.pluginId,
+      threadTag: context.threadTag,
+      threadId,
+    });
+    return {
+      threadId,
+      created: true,
+      runtimeMode: inherited.runtimeMode,
+      interactionMode: inherited.interactionMode,
+    } satisfies ResolvedPanelThread;
+  });
+}
+
 /**
  * Собирает обработчик RPC. Зависимости передаются явно (а не берутся из
  * контекста), чтобы ws.ts оставался тонким, а модуль — тестируемым без всего
@@ -62,134 +238,48 @@ const commandId = (tag: string) => CommandId.make(`plugin:${tag}:${crypto.random
 export function makePanelThreadSender(deps: PanelThreadSenderDeps) {
   return (input: PluginSendToThreadInput): Effect.Effect<PluginSendToThreadResult, PluginsError> =>
     Effect.gen(function* () {
+      const what = "sendToThread";
       const text = input.text.trim();
       if (text.length === 0) {
-        return yield* new PluginsError({ detail: "sendToThread: text must not be empty" });
+        return yield* new PluginsError({ detail: `${what}: text must not be empty` });
       }
       if (text.length > MAX_TEXT_CHARS) {
         return yield* new PluginsError({
-          detail: `sendToThread: text is too long (${text.length} > ${MAX_TEXT_CHARS} chars)`,
-        });
-      }
-      const threadTag =
-        (input.threadTag ?? DEFAULT_PANEL_THREAD_TAG).trim() || DEFAULT_PANEL_THREAD_TAG;
-
-      const plugins = yield* deps.registry.getLoadedPlugins;
-      const plugin = plugins.find((candidate) => candidate.id === input.pluginId);
-      const manifest = plugin?.manifest;
-      // Панель выключенного/невалидного плагина открыть нельзя (роут отдаёт
-      // 404), но вкладка может остаться открытой с прошлого раза — проверяем.
-      if (manifest === undefined || !manifest.enabled || manifest.panel === undefined) {
-        return yield* new PluginsError({
-          detail: `sendToThread: plugin "${input.pluginId}" has no enabled panel`,
+          detail: `${what}: text is too long (${text.length} > ${MAX_TEXT_CHARS} chars)`,
         });
       }
 
-      const projectShell = yield* deps.projections
-        .getProjectShellById(input.projectId)
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new PluginsError({ detail: "sendToThread: failed to read the project", cause }),
-          ),
-        );
-      if (Option.isNone(projectShell)) {
-        return yield* new PluginsError({
-          detail: `sendToThread: project ${input.projectId} no longer exists`,
-        });
-      }
-
-      const existingThreadId = yield* deps.registry.getPanelThreadId({
+      const context = yield* loadPanelContext(deps, {
         pluginId: input.pluginId,
-        threadTag,
+        projectId: input.projectId,
+        threadTag: input.threadTag,
+        what,
       });
-      const existingThread =
-        existingThreadId === undefined
-          ? Option.none()
-          : yield* deps.projections.getThreadShellById(existingThreadId).pipe(
-              // Мёртвый/удалённый тред — не ошибка: просто заводим новый.
-              Effect.orElseSucceed(() => Option.none()),
-            );
-      // Тред из карты годится, только если он всё ещё в том же проекте и не
-      // заархивирован — иначе панель писала бы в чужой/скрытый тред.
-      const reusable =
-        Option.isSome(existingThread) &&
-        existingThread.value.projectId === input.projectId &&
-        existingThread.value.archivedAt === null
-          ? existingThread.value
-          : null;
-
-      const origin: OrchestrationCommandOrigin = { kind: "plugin", pluginId: input.pluginId };
       const createdAt = new Date().toISOString();
-      const message = {
-        messageId: MessageId.make(crypto.randomUUID()),
-        role: "user" as const,
-        text,
-        attachments: [],
-      };
-
-      const dispatch = (
-        command: Parameters<OrchestrationEngineShape["dispatch"]>[0],
-      ): Effect.Effect<void, PluginsError> =>
-        deps.engine.dispatch(command, { origin }).pipe(
-          Effect.asVoid,
-          Effect.mapError(
-            (cause) =>
-              new PluginsError({
-                detail: `sendToThread: dispatch failed (${command.type})`,
-                cause,
-              }),
-          ),
-        );
 
       const outcome = yield* Effect.gen(function* () {
-        if (reusable !== null) {
-          yield* dispatch({
-            type: "thread.turn.start",
-            commandId: commandId("turn"),
-            threadId: reusable.id,
-            message,
-            runtimeMode: reusable.runtimeMode,
-            interactionMode: reusable.interactionMode,
-            createdAt,
-          });
-          return { threadId: reusable.id, created: false };
-        }
-
-        const modelSelection = projectShell.value.defaultModelSelection;
-        if (modelSelection === null) {
-          return yield* new PluginsError({
-            detail:
-              "sendToThread: the project has no default model — open it once in the app and pick a model",
-          });
-        }
-
-        const inherited = yield* inheritThreadModes(deps, input.projectId);
-        const threadId = ThreadId.make(crypto.randomUUID());
-        yield* dispatch({
-          type: "thread.create",
-          commandId: commandId("create"),
-          threadId,
+        const resolved = yield* resolveOrCreatePanelThread(deps, {
+          pluginId: input.pluginId,
           projectId: input.projectId,
-          title: `[${manifest.name}] ${threadTag}`,
-          modelSelection,
-          runtimeMode: inherited.runtimeMode,
-          interactionMode: inherited.interactionMode,
-          branch: null,
-          worktreePath: null,
+          what,
+          context,
           createdAt,
         });
-        yield* dispatch({
+        yield* context.dispatch({
           type: "thread.turn.start",
           commandId: commandId("turn"),
-          threadId,
-          message,
-          runtimeMode: inherited.runtimeMode,
-          interactionMode: inherited.interactionMode,
+          threadId: resolved.threadId,
+          message: {
+            messageId: MessageId.make(crypto.randomUUID()),
+            role: "user" as const,
+            text,
+            attachments: [],
+          },
+          runtimeMode: resolved.runtimeMode,
+          interactionMode: resolved.interactionMode,
           createdAt,
         });
-        yield* deps.registry.setPanelThreadId({ pluginId: input.pluginId, threadTag, threadId });
-        return { threadId, created: true };
+        return resolved;
       }).pipe(
         Effect.tapError((error) =>
           deps.registry.recordRun(input.pluginId, {
@@ -205,11 +295,11 @@ export function makePanelThreadSender(deps: PanelThreadSenderDeps) {
         at: new Date().toISOString(),
         trigger: PANEL_RUN_TRIGGER,
         ok: true,
-        detail: `${outcome.created ? "новый тред" : "тред"} [${threadTag}]: ${text.slice(0, 200)}`,
+        detail: `${outcome.created ? "новый тред" : "тред"} [${context.threadTag}]: ${text.slice(0, 200)}`,
       });
       yield* Effect.logInfo("plugins.panel.sendToThread", {
         pluginId: input.pluginId,
-        threadTag,
+        threadTag: context.threadTag,
         threadId: outcome.threadId,
         created: outcome.created,
       });
@@ -217,9 +307,70 @@ export function makePanelThreadSender(deps: PanelThreadSenderDeps) {
       return {
         threadId: outcome.threadId,
         created: outcome.created,
-        pluginName: manifest.name,
-        threadTag,
+        pluginName: context.manifest.name,
+        threadTag: context.threadTag,
       } satisfies PluginSendToThreadResult;
+    });
+}
+
+/**
+ * `plugins.resolvePanelThread` — тред для чата, встроенного рядом с панелью.
+ * Тот же mapping, что у `sendToThread`, но без запуска хода: сообщения
+ * отправляет обычный композер хоста.
+ */
+export function makePanelThreadResolver(deps: PanelThreadSenderDeps) {
+  return (
+    input: PluginResolvePanelThreadInput,
+  ): Effect.Effect<PluginResolvePanelThreadResult, PluginsError> =>
+    Effect.gen(function* () {
+      const what = "resolvePanelThread";
+      const context = yield* loadPanelContext(deps, {
+        pluginId: input.pluginId,
+        projectId: input.projectId,
+        threadTag: input.threadTag,
+        what,
+      });
+
+      const resolved = yield* resolveOrCreatePanelThread(deps, {
+        pluginId: input.pluginId,
+        projectId: input.projectId,
+        what,
+        context,
+        createdAt: new Date().toISOString(),
+      }).pipe(
+        Effect.tapError((error) =>
+          deps.registry.recordRun(input.pluginId, {
+            at: new Date().toISOString(),
+            trigger: PANEL_CHAT_RUN_TRIGGER,
+            ok: false,
+            detail: error.detail,
+          }),
+        ),
+      );
+
+      // Историю пишем только на создание треда: чат резолвится при каждом
+      // открытии вкладки, и «переиспользовали тред» — не событие.
+      if (resolved.created) {
+        yield* deps.registry.recordRun(input.pluginId, {
+          at: new Date().toISOString(),
+          trigger: PANEL_CHAT_RUN_TRIGGER,
+          ok: true,
+          detail: `новый тред [${context.threadTag}] для чата панели`,
+        });
+      }
+      yield* Effect.logInfo("plugins.panel.resolvePanelThread", {
+        pluginId: input.pluginId,
+        threadTag: context.threadTag,
+        threadId: resolved.threadId,
+        created: resolved.created,
+      });
+
+      return {
+        threadId: resolved.threadId,
+        created: resolved.created,
+        pluginName: context.manifest.name,
+        threadTag: context.threadTag,
+      } satisfies PluginResolvePanelThreadResult;
     });
 }
 
@@ -230,7 +381,7 @@ export function makePanelThreadSender(deps: PanelThreadSenderDeps) {
  */
 function inheritThreadModes(
   deps: PanelThreadSenderDeps,
-  projectId: PluginSendToThreadInput["projectId"],
+  projectId: ProjectId,
 ): Effect.Effect<
   { readonly runtimeMode: RuntimeMode; readonly interactionMode: ProviderInteractionMode },
   never

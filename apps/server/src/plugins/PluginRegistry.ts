@@ -17,7 +17,10 @@
  * reload).
  */
 import {
+  PLUGIN_PANEL_CHAT_VISIBILITIES,
   PluginManifest,
+  type PluginPanelChat,
+  type PluginPanelChatVisibility,
   PluginsError,
   type PluginsSnapshot,
   type ServerPlugin,
@@ -79,6 +82,35 @@ export function cronLabel(cron: PluginManifest["crons"][number]): string {
   if (cron.schedule !== undefined) return cron.schedule;
   if (cron.every !== undefined) return `every ${cron.every}`;
   return "invalid";
+}
+
+/**
+ * `panel.chat` — embedded host chat. `visibility` is a plain string in the
+ * manifest schema on purpose, so a typo produces this readable per-plugin error
+ * (with the list of valid values) instead of a schema decode dump.
+ */
+export function validatePanelChat(chat: PluginPanelChat | undefined): string | undefined {
+  if (chat === undefined) return undefined;
+  if (chat.threadTag.trim().length === 0) {
+    return `panel.chat: "threadTag" must not be empty`;
+  }
+  if (
+    chat.visibility !== undefined &&
+    !(PLUGIN_PANEL_CHAT_VISIBILITIES as ReadonlyArray<string>).includes(chat.visibility)
+  ) {
+    return `panel.chat: unknown "visibility" "${chat.visibility}" (expected one of ${PLUGIN_PANEL_CHAT_VISIBILITIES.join(", ")})`;
+  }
+  return undefined;
+}
+
+/** Manifest value → client-facing literal (already validated at load time). */
+export function panelChatVisibility(
+  chat: PluginPanelChat | undefined,
+): PluginPanelChatVisibility | undefined {
+  if (chat === undefined) return undefined;
+  return (PLUGIN_PANEL_CHAT_VISIBILITIES as ReadonlyArray<string>).includes(chat.visibility ?? "")
+    ? (chat.visibility as PluginPanelChatVisibility)
+    : "full";
 }
 
 /** Validation beyond the schema: cron entries must be actually schedulable. */
@@ -254,6 +286,10 @@ const makePluginRegistry = (options?: PluginRegistryLiveOptions) =>
         if (panel.title.trim().length === 0) {
           return `panel: "title" must not be empty`;
         }
+        const chatError = validatePanelChat(panel.chat);
+        if (chatError !== undefined) {
+          return chatError;
+        }
         const location = resolvePluginPanelLocation({
           pluginDir: entry.directoryPath,
           panelPath: panel.path,
@@ -375,7 +411,21 @@ const makePluginRegistry = (options?: PluginRegistryLiveOptions) =>
             ...(manifest?.version !== undefined ? { version: manifest.version } : {}),
             enabled: manifest?.enabled ?? false,
             valid: manifest !== undefined,
-            ...(manifest?.panel !== undefined ? { panel: { title: manifest.panel.title } } : {}),
+            ...(manifest?.panel !== undefined
+              ? {
+                  panel: {
+                    title: manifest.panel.title,
+                    ...(manifest.panel.chat !== undefined
+                      ? {
+                          chat: {
+                            threadTag: manifest.panel.chat.threadTag,
+                            visibility: panelChatVisibility(manifest.panel.chat) ?? "full",
+                          },
+                        }
+                      : {}),
+                  },
+                }
+              : {}),
             ...(plugin.error !== undefined ? { error: plugin.error } : {}),
             hooks: manifest?.hooks.map((hook) => ({ on: hook.on })) ?? [],
             crons: manifest?.crons.map((cron) => ({ label: cronLabel(cron) })) ?? [],

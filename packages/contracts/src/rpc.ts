@@ -55,6 +55,8 @@ import {
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
 import {
+  PluginResolvePanelThreadInput,
+  PluginResolvePanelThreadResult,
   PluginSendToThreadInput,
   PluginSendToThreadResult,
   PluginsError,
@@ -168,6 +170,7 @@ export const WS_METHODS = {
   serverListPlugins: "server.listPlugins",
   serverSetPluginEnabled: "server.setPluginEnabled",
   pluginsSendToThread: "plugins.sendToThread",
+  pluginsResolvePanelThread: "plugins.resolvePanelThread",
 
   // Uno account / billing methods
   unoCreateLlmTopUpAction: "uno.createLlmTopUpAction",
@@ -252,6 +255,12 @@ export const WsServerSetPluginEnabledRpc = Rpc.make(WS_METHODS.serverSetPluginEn
 export const WsPluginsSendToThreadRpc = Rpc.make(WS_METHODS.pluginsSendToThread, {
   payload: PluginSendToThreadInput,
   success: PluginSendToThreadResult,
+  error: PluginsError,
+});
+
+export const WsPluginsResolvePanelThreadRpc = Rpc.make(WS_METHODS.pluginsResolvePanelThread, {
+  payload: PluginResolvePanelThreadInput,
+  success: PluginResolvePanelThreadResult,
   error: PluginsError,
 });
 
@@ -588,6 +597,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerListPluginsRpc,
   WsServerSetPluginEnabledRpc,
   WsPluginsSendToThreadRpc,
+  WsPluginsResolvePanelThreadRpc,
   WsSubscribePluginsRpc,
   WsUnoCreateLlmTopUpActionRpc,
   WsUnoVideoCreateUploadRpc,
