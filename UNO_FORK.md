@@ -94,7 +94,17 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 - **Мост модель→браузер:** `apps/server/src/browserBridge.ts` + endpoint `POST /api/browser/open` (Bearer-токен из env подпроцесса) в `http.ts`; пуш через WS `subscribeBrowserBridge` (`ws.ts`). Env `UNO_WORK_BRIDGE_URL`/`UNO_WORK_BRIDGE_TOKEN` инжектятся во все драйверы. Инструкции про браузер (+ ссылка на `getuno.xyz/llms.txt`) — `provider/browserInstructions.ts`: Claude через `systemPrompt.append`, Codex через `developer_instructions`, OpenCode/Uno через `instructions`-файл в `OPENCODE_CONFIG_CONTENT`.
 - **Настройки:** раздел «Browser» (`settings.browser.tsx` + `BrowserSettingsPanel.tsx`) — выбор профиля (аккаунт/проект) и менеджер сохранённых входов.
 
-### 7. Прочее
+### 7. Плагины — само-расширяемость (Settings → Extensions)
+
+Агент, работающий внутри Uno Work, может расширять сам harness: один плагин = один JSON-файл в `<baseDir>/userdata/plugins/` (в dev-режиме `<baseDir>/dev/plugins/`). Демон следит за директорией и подхватывает изменения без рестарта. Манифест декларативный: **hooks** (реакция на события оркестрации → shell-команда) и **crons** (`schedule` — 5-польный cron, либо `every` — интервал, минимум 1m). Никакого исполнения чужого JS в процессе демона — только spawn `/bin/sh -c` с таймаутом (дефолт 60 с, максимум 10 мин) и ограничением параллелизма (4).
+
+- **Контракты:** `packages/contracts/src/plugins.ts` (`PluginManifest`, `ServerPlugin`, `PluginsSnapshot`, `PluginsError`); RPC `server.listPlugins` / `server.setPluginEnabled` / `subscribePlugins` в `rpc.ts`.
+- **Сервер:** `apps/server/src/plugins/` — `cron.ts` (парсер + матчинг, тесты), `PluginRegistry.ts` (загрузка/watch/снапшоты, паттерн `serverSettings.ts`), `PluginRuntime.ts` (подписка на `OrchestrationEngine.streamDomainEvents` + 30-сек cron-свип; каждый запуск логируется `plugins.action.completed` и записывается в историю для UI), `pluginInstructions.ts` (блок системного промпта). Путь `pluginsDir` — в `config.ts`; старт — `serverRuntimeStartup.ts`; слои — `server.ts`.
+- **Инструкции агенту** инжектятся во все четыре драйвера рядом с browser-инструкциями (Claude — `appendSystemPrompt`, Codex — `appendDeveloperInstructions`, OpenCode/Uno — общий `uno-browser-instructions.md` через `extraSections`). Благодаря этому «сделай, чтобы приложение …» превращается в плагин без участия человека.
+- **UI:** Settings → Extensions (`settings.extensions.tsx` + `ExtensionsSettingsPanel.tsx`): список плагинов, вкл/выкл (правит `enabled` в файле), ошибки невалидных манифестов, последние запуски (live через `subscribePlugins`).
+- Хуки исполняют команды с env `UNO_PLUGIN_EVENT` (JSON события), `UNO_PLUGIN_EVENT_TYPE`, `UNO_PLUGIN_ID`, `UNO_PLUGIN_TRIGGER`.
+
+### 8. Прочее
 
 - `apps/web/src/components/AddEnvModal.tsx`, `SidebarEnvSwitcher.tsx` — кастомные обёртки над свитчером сред.
 - `apps/web/src/index.css` — кастомные стили (Uno-палитра / акценты).

@@ -130,6 +130,9 @@ export interface WsRpcClient {
     readonly discoverSourceControl: RpcUnaryNoArgMethod<
       typeof WS_METHODS.serverDiscoverSourceControl
     >;
+    readonly listPlugins: RpcUnaryNoArgMethod<typeof WS_METHODS.serverListPlugins>;
+    readonly setPluginEnabled: RpcUnaryMethod<typeof WS_METHODS.serverSetPluginEnabled>;
+    readonly subscribePlugins: RpcStreamMethod<typeof WS_METHODS.subscribePlugins>;
     readonly createUnoLlmTopUpAction: RpcUnaryMethod<typeof WS_METHODS.unoCreateLlmTopUpAction>;
     readonly createUnoVideoUpload: RpcUnaryMethod<typeof WS_METHODS.unoVideoCreateUpload>;
     readonly completeUnoVideoUpload: RpcUnaryMethod<typeof WS_METHODS.unoVideoCompleteUpload>;
@@ -263,6 +266,14 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.serverUpdateSettings]({ patch })),
       discoverSourceControl: () =>
         transport.request((client) => client[WS_METHODS.serverDiscoverSourceControl]({})),
+      listPlugins: () => transport.request((client) => client[WS_METHODS.serverListPlugins]({})),
+      setPluginEnabled: (input) =>
+        transport.request((client) => client[WS_METHODS.serverSetPluginEnabled](input)),
+      subscribePlugins: (listener, options) =>
+        transport.subscribe((client) => client[WS_METHODS.subscribePlugins]({}), listener, {
+          ...options,
+          tag: WS_METHODS.subscribePlugins,
+        }),
       createUnoLlmTopUpAction: (input) =>
         transport.request((client) => client[WS_METHODS.unoCreateLlmTopUpAction](input)),
       createUnoVideoUpload: (input) =>

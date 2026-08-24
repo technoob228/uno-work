@@ -43,6 +43,7 @@ import {
   observeRpcStream,
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
+import { PluginRegistry } from "./plugins/PluginRegistry.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { BrowserBridge } from "./browserBridge.ts";
@@ -166,6 +167,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager;
       const providerRegistry = yield* ProviderRegistry;
+      const pluginRegistry = yield* PluginRegistry;
       const config = yield* ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents;
       const browserBridge = yield* BrowserBridge;
@@ -962,6 +964,18 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               "rpc.aggregate": "server",
             },
           ),
+        [WS_METHODS.serverListPlugins]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverListPlugins, pluginRegistry.getSnapshot, {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverSetPluginEnabled]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverSetPluginEnabled,
+            pluginRegistry.setPluginEnabled(input),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
         [WS_METHODS.unoCreateLlmTopUpAction]: (input) =>
           observeRpcEffect(WS_METHODS.unoCreateLlmTopUpAction, createUnoLlmTopUpAction(input), {
             "rpc.aggregate": "uno",
@@ -1337,6 +1351,15 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             WS_METHODS.subscribeBrowserBridge,
             Effect.succeed(browserBridge.stream),
             { "rpc.aggregate": "browser" },
+          ),
+        [WS_METHODS.subscribePlugins]: (_input) =>
+          observeRpcStreamEffect(
+            WS_METHODS.subscribePlugins,
+            Effect.gen(function* () {
+              const snapshot = yield* pluginRegistry.getSnapshot;
+              return Stream.concat(Stream.make(snapshot), pluginRegistry.streamChanges);
+            }),
+            { "rpc.aggregate": "server" },
           ),
       });
     }),

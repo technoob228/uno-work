@@ -40,6 +40,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGeneration.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
+import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
 import { writeBrowserInstructionsFile } from "../browserInstructions.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -710,6 +711,7 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
       const instructionsFilePath = writeBrowserInstructionsFile({
         stateDir: serverConfig.stateDir,
         baseUrl: browserBridge.baseUrl,
+        extraSections: [buildPluginInstructions(serverConfig.pluginsDir)],
       });
       const baseProcessEnv = browserBridge.applyEnvironment(
         mergeProviderInstanceEnvironment(environment),

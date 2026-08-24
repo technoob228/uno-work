@@ -28,6 +28,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
 import { ServerConfig } from "../../config.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
+import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
 import { buildBrowserInstructions } from "../browserInstructions.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
@@ -94,10 +95,16 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const eventLoggers = yield* ProviderEventLoggers;
       const browserBridge = yield* BrowserBridge;
+      const serverConfig = yield* ServerConfig;
       const processEnv = browserBridge.applyEnvironment(
         mergeProviderInstanceEnvironment(environment),
       );
-      const browserInstructions = buildBrowserInstructions(browserBridge.baseUrl);
+      const harnessInstructionBlocks = [
+        buildBrowserInstructions(browserBridge.baseUrl),
+        buildPluginInstructions(serverConfig.pluginsDir),
+      ].filter((block): block is string => block !== undefined);
+      const harnessInstructions =
+        harnessInstructionBlocks.length > 0 ? harnessInstructionBlocks.join("\n\n") : undefined;
       const homeLayout = yield* resolveCodexHomeLayout(config);
       const continuationIdentity = codexContinuationIdentity(homeLayout);
       const stampIdentity = withInstanceIdentity({
@@ -134,7 +141,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         environment: processEnv,
         bridgeEnvironment: (context) => browserBridge.scopedEnvironment(context),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
-        ...(browserInstructions ? { appendDeveloperInstructions: browserInstructions } : {}),
+        ...(harnessInstructions ? { appendDeveloperInstructions: harnessInstructions } : {}),
       });
       const textGeneration = yield* makeCodexTextGeneration(effectiveConfig, processEnv);
 

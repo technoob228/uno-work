@@ -54,6 +54,7 @@ import {
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
+import { PluginsError, PluginsSnapshot, SetPluginEnabledInput } from "./plugins.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   ProjectSearchEntriesError,
@@ -158,6 +159,8 @@ export const WS_METHODS = {
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
   serverDiscoverSourceControl: "server.discoverSourceControl",
+  serverListPlugins: "server.listPlugins",
+  serverSetPluginEnabled: "server.setPluginEnabled",
 
   // Uno account / billing methods
   unoCreateLlmTopUpAction: "uno.createLlmTopUpAction",
@@ -182,6 +185,7 @@ export const WS_METHODS = {
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
   subscribeBrowserBridge: "subscribeBrowserBridge",
+  subscribePlugins: "subscribePlugins",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -224,6 +228,25 @@ export const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSetting
 export const WsServerDiscoverSourceControlRpc = Rpc.make(WS_METHODS.serverDiscoverSourceControl, {
   payload: Schema.Struct({}),
   success: SourceControlDiscoveryResult,
+});
+
+export const WsServerListPluginsRpc = Rpc.make(WS_METHODS.serverListPlugins, {
+  payload: Schema.Struct({}),
+  success: PluginsSnapshot,
+  error: PluginsError,
+});
+
+export const WsServerSetPluginEnabledRpc = Rpc.make(WS_METHODS.serverSetPluginEnabled, {
+  payload: SetPluginEnabledInput,
+  success: PluginsSnapshot,
+  error: PluginsError,
+});
+
+export const WsSubscribePluginsRpc = Rpc.make(WS_METHODS.subscribePlugins, {
+  payload: Schema.Struct({}),
+  success: PluginsSnapshot,
+  error: PluginsError,
+  stream: true,
 });
 
 export const UnoCreateLlmTopUpActionInput = Schema.Struct({
@@ -549,6 +572,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsServerDiscoverSourceControlRpc,
+  WsServerListPluginsRpc,
+  WsServerSetPluginEnabledRpc,
+  WsSubscribePluginsRpc,
   WsUnoCreateLlmTopUpActionRpc,
   WsUnoVideoCreateUploadRpc,
   WsUnoVideoCompleteUploadRpc,

@@ -58,19 +58,24 @@ curl -fsS -X POST "$${BROWSER_BRIDGE_URL_ENV}${BROWSER_BRIDGE_COMMAND_PATH}" \\
 /**
  * Записывает инструкции в файл и возвращает его путь — для харнессов
  * (OpenCode/Uno), у которых системные инструкции задаются путём к файлу, а не
- * инлайн-текстом. Возвращает undefined, если bridge выключен. Идемпотентно
- * перезаписывает файл при каждом старте инстанса.
+ * инлайн-текстом. `extraSections` — дополнительные блоки (например, инструкции
+ * про плагины), которые пишутся даже если bridge выключен. Возвращает
+ * undefined, если писать нечего. Идемпотентно перезаписывает файл при каждом
+ * старте инстанса.
  */
 export function writeBrowserInstructionsFile(input: {
   readonly stateDir: string;
   readonly baseUrl: string | undefined;
+  readonly extraSections?: ReadonlyArray<string>;
 }): string | undefined {
-  const instructions = buildBrowserInstructions(input.baseUrl);
-  if (!instructions) return undefined;
+  const sections = [buildBrowserInstructions(input.baseUrl), ...(input.extraSections ?? [])].filter(
+    (section): section is string => section !== undefined && section.length > 0,
+  );
+  if (sections.length === 0) return undefined;
   const filePath = Path.join(input.stateDir, "uno-browser-instructions.md");
   try {
     FS.mkdirSync(input.stateDir, { recursive: true });
-    FS.writeFileSync(filePath, `${instructions}\n`, "utf8");
+    FS.writeFileSync(filePath, `${sections.join("\n\n")}\n`, "utf8");
     return filePath;
   } catch {
     return undefined;

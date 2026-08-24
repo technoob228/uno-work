@@ -6,6 +6,7 @@ import {
   GitBranchIcon,
   GlobeIcon,
   Link2Icon,
+  PuzzleIcon,
   Settings2Icon,
 } from "lucide-react";
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
@@ -27,6 +28,7 @@ export type SettingsSectionPath =
   | "/settings/source-control"
   | "/settings/connections"
   | "/settings/browser"
+  | "/settings/extensions"
   | "/settings/archived";
 
 export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
@@ -39,6 +41,7 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   { label: "Source Control", to: "/settings/source-control", icon: GitBranchIcon },
   { label: "Connections", to: "/settings/connections", icon: Link2Icon },
   { label: "Browser", to: "/settings/browser", icon: GlobeIcon },
+  { label: "Extensions", to: "/settings/extensions", icon: PuzzleIcon },
   { label: "Archive", to: "/settings/archived", icon: ArchiveIcon },
 ];
 
