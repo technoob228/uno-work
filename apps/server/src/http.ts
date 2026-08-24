@@ -25,9 +25,11 @@ import {
   BROWSER_BRIDGE_OPEN_PATH,
   BrowserBridge,
   isAllowedBridgeCommand,
+  isAllowedBridgeFilePath,
   isAllowedBridgeUrl,
   normalizeBridgeRequestContext,
 } from "./browserBridge.ts";
+import { expandHomePath } from "./pathExpansion.ts";
 import { executeBridgeCommand, executeBridgeOpenUrl } from "./browserCommandRouter.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
@@ -228,10 +230,49 @@ export const browserBridgeOpenRouteLayer = HttpRouter.add(
 
     const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
     const rawUrl = body && typeof body === "object" ? (body as { url?: unknown }).url : undefined;
+    const rawFile =
+      body && typeof body === "object" ? (body as { file?: unknown }).file : undefined;
+
+    if (rawFile !== undefined) {
+      if (rawUrl !== undefined) {
+        return HttpServerResponse.text('Pass either "url" or "file", not both.', { status: 400 });
+      }
+      if (!isAllowedBridgeFilePath(rawFile)) {
+        return HttpServerResponse.text('Invalid file: expected an absolute path in {"file":...}', {
+          status: 400,
+        });
+      }
+      const filePath = expandHomePath(rawFile.trim());
+      const fs = yield* FileSystem.FileSystem;
+      const stat = yield* fs.stat(filePath).pipe(Effect.catch(() => Effect.succeed(null)));
+      if (stat === null || stat.type !== "File") {
+        return HttpServerResponse.jsonUnsafe(
+          { ok: false, error: `File not found: ${filePath}` },
+          { status: 404 },
+        );
+      }
+      const browserBridgeService = yield* BrowserBridge;
+      const hasSubscribers = yield* browserBridgeService.hasSubscribers;
+      if (!hasSubscribers) {
+        return HttpServerResponse.jsonUnsafe(
+          { ok: false, error: "No connected app window to show the file in." },
+          { status: 502 },
+        );
+      }
+      yield* browserBridgeService.publishOpenFile(
+        filePath,
+        resolveBridgeRequestContext(authorization, body),
+      );
+      return HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 });
+    }
+
     if (!isAllowedBridgeUrl(rawUrl)) {
-      return HttpServerResponse.text('Invalid url: expected http(s) URL in {"url":...}', {
-        status: 400,
-      });
+      return HttpServerResponse.text(
+        'Invalid url: expected http(s) URL in {"url":...} or a file path in {"file":...}',
+        {
+          status: 400,
+        },
+      );
     }
 
     const result = yield* executeBridgeOpenUrl(

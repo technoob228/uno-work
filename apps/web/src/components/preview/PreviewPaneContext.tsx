@@ -74,6 +74,11 @@ interface PreviewPaneState {
   setPreviewLayoutMode: (mode: "sidebar" | "focus") => void;
   togglePreviewLayoutMode: () => void;
   openFile: (file: PreviewFile) => void;
+  /**
+   * Открыть файл во вкладке конкретного проекта (bridge-события харнессов):
+   * вкладка попадает в бакет своего проекта, текущий вид не трогается.
+   */
+  openFileInProject: (projectKey: string, file: PreviewFile) => void;
   /** Открыть URL в браузерной вкладке (без аргумента — пустая «новая вкладка»). */
   openUrl: (url?: string) => void;
   /**
@@ -222,6 +227,20 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       }));
     },
     [updateCurrentState],
+  );
+
+  const openFileInProject = useCallback(
+    (projectKey: string, file: PreviewFile) => {
+      updateProjectState(projectKey, (current) => ({
+        ...current,
+        files: current.files.some((f) => f.id === file.id)
+          ? current.files
+          : [...current.files, file],
+        activeFileId: file.id,
+        open: true,
+      }));
+    },
+    [updateProjectState],
   );
 
   const openUrlInProject = useCallback(
@@ -407,6 +426,7 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       setPreviewLayoutMode,
       togglePreviewLayoutMode,
       openFile,
+      openFileInProject,
       openUrl,
       openUrlInProject,
       updateBrowserTab,
@@ -431,6 +451,7 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       setPreviewLayoutMode,
       togglePreviewLayoutMode,
       openFile,
+      openFileInProject,
       openUrl,
       openUrlInProject,
       updateBrowserTab,
