@@ -1681,9 +1681,16 @@ export default function ChatView(props: ChatViewProps) {
     setCurrentChatContext({
       projectKey: previewProjectKey,
       projectCwd: activeProject?.cwd ?? null,
+      projectId: activeProject?.id ?? null,
       environmentId,
     });
-  }, [previewProjectKey, activeProject?.cwd, environmentId, setCurrentChatContext]);
+  }, [
+    previewProjectKey,
+    activeProject?.cwd,
+    activeProject?.id,
+    environmentId,
+    setCurrentChatContext,
+  ]);
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();
   // Prefer an instance-id match so a custom Codex instance (e.g.

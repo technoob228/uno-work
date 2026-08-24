@@ -55,6 +55,7 @@ import {
   writeSavedEnvironmentBearerToken,
 } from "./catalog";
 import { createEnvironmentConnection, type EnvironmentConnection } from "./connection";
+import { publishShellEvent } from "./shellEventBus";
 import {
   configureSelfHeal,
   healSavedEnvironment,
@@ -1113,6 +1114,13 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
 
   useStore.getState().applyShellEvent(event, environmentId);
   markAppliedProjectionEvent(environmentId, event.sequence);
+  // Fire-after-commit: наблюдатели (мост панельных плагинов) видят уже
+  // применённое событие и ничего не блокируют.
+  publishShellEvent({
+    event,
+    environmentId,
+    removedThreadProjectId: previousThread?.projectId ?? null,
+  });
 
   switch (event.kind) {
     case "project-upserted":

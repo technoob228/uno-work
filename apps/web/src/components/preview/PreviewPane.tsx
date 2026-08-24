@@ -34,7 +34,9 @@ import * as XLSX from "xlsx";
 import { cn } from "../../lib/utils";
 import { openInPreferredEditor } from "../../editorPreferences";
 import { readEnvironmentApi } from "../../environmentApi";
+import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { getPrimaryEnvironmentConnection } from "../../environments/runtime";
+import { subscribeShellEvents } from "../../environments/runtime/shellEventBus";
 import { readLocalApi } from "../../localApi";
 import { useStore } from "../../store";
 import { Button } from "../ui/button";
@@ -47,10 +49,12 @@ import {
   isBrowserTab,
   isPluginPanelTab,
   makePluginPanelFile,
+  pluginIdFromPanelFile,
   type PreviewFile,
   type PreviewFileKind,
   usePreviewPane,
 } from "./PreviewPaneContext";
+import { createPanelBridge, shellEventToPanelEvent } from "./panelBridge";
 import { BrowserViews } from "./BrowserPane";
 import { useSidebar } from "../ui/sidebar";
 import { CodeFileView } from "./CodeFileView";
@@ -1106,21 +1110,162 @@ function EditableBody({
   );
 }
 
+/** Абсолютный путь для `openFile` из панели: относительный резолвим от cwd проекта. */
+function resolvePanelFilePath(rawPath: string, projectCwd: string | null): string {
+  const trimmed = rawPath.trim();
+  if (trimmed.length === 0) throw new Error("path пустой");
+  if (trimmed.split(/[\\/]/).includes("..")) throw new Error("path не должен содержать «..»");
+  if (trimmed.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(trimmed)) return trimmed;
+  if (!projectCwd) throw new Error("относительный path без открытого проекта");
+  return `${projectCwd.replace(/\/+$/, "")}/${trimmed.replace(/^\.\//, "")}`;
+}
+
 /**
  * Панель плагина: статические файлы демона в изолированном iframe.
  * `sandbox="allow-scripts"` БЕЗ `allow-same-origin` — origin документа
  * непрозрачный, поэтому у панели нет доступа ни к DOM приложения, ни к его
  * кукам и хранилищу. Ценой этого субресурсы панели грузятся без сессии — так
  * и задумано, см. `apps/server/src/plugins/http.ts`.
+ *
+ * Общение с приложением — только через postMessage-мост (`panelBridge.ts`).
+ * Сообщения принимаем ИСКЛЮЧИТЕЛЬНО от `contentWindow` своего iframe:
+ * `event.origin` у opaque origin равен строке `"null"` и ничего не доказывает.
  */
 function PluginPanelBody({ file }: { file: PreviewFile }) {
-  if (!file.url) {
+  const {
+    currentProjectKey,
+    currentChatProjectCwd,
+    currentChatProjectId,
+    currentChatEnvironmentId,
+    openFileInProject,
+    openUrlInProject,
+  } = usePreviewPane();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const pluginId = pluginIdFromPanelFile(file);
+  const url = file.url;
+
+  // Мост живёт ровно столько же, сколько документ панели: пересоздать его на
+  // смене контекста значило бы молча потерять подписки, оформленные панелью
+  // (перевыпустить их она не может — про перезапуск моста ей никто не скажет).
+  // Поэтому актуальный контекст читается из ref в момент вызова.
+  const contextRef = useRef({
+    currentProjectKey,
+    currentChatProjectCwd,
+    currentChatProjectId,
+    currentChatEnvironmentId,
+    primaryEnvironmentId,
+    openFileInProject,
+    openUrlInProject,
+  });
+  contextRef.current = {
+    currentProjectKey,
+    currentChatProjectCwd,
+    currentChatProjectId,
+    currentChatEnvironmentId,
+    primaryEnvironmentId,
+    openFileInProject,
+    openUrlInProject,
+  };
+
+  useEffect(() => {
+    const frame = iframeRef.current;
+    if (!frame || !pluginId) return;
+
+    const bridge = createPanelBridge({
+      post: (message) => {
+        // targetOrigin "*" — у песочницы opaque origin, адресовать её иначе нельзя.
+        iframeRef.current?.contentWindow?.postMessage(message, "*");
+      },
+      methods: {
+        openFile: ({ path }) => {
+          const context = contextRef.current;
+          const absolute = resolvePanelFilePath(path, context.currentChatProjectCwd);
+          const name = absolute.split(/[\\/]/).pop() ?? absolute;
+          context.openFileInProject(context.currentProjectKey, {
+            id: absolute,
+            name,
+            kind: detectFileKind(name),
+            content: "",
+            path: absolute,
+            ...(context.currentChatEnvironmentId
+              ? { environmentId: context.currentChatEnvironmentId }
+              : {}),
+            ...(context.currentChatProjectCwd ? { projectCwd: context.currentChatProjectCwd } : {}),
+          });
+        },
+        openUrl: ({ url: target }) => {
+          const context = contextRef.current;
+          context.openUrlInProject(context.currentProjectKey, target);
+        },
+        sendToThread: async ({ text, threadTag }) => {
+          const context = contextRef.current;
+          if (!context.currentChatProjectId) {
+            throw new Error("нет открытого проекта: откройте тред проекта и повторите");
+          }
+          // Панель раздаёт демон основного окружения (URL вкладки
+          // относительный), поэтому и плагин, и тред живут там же. Проект
+          // удалённого окружения этому демону неизвестен — честно отказываем.
+          if (
+            context.currentChatEnvironmentId !== null &&
+            context.primaryEnvironmentId !== null &&
+            context.currentChatEnvironmentId !== context.primaryEnvironmentId
+          ) {
+            throw new Error("панель работает только с проектами основного окружения");
+          }
+          const result = await getPrimaryEnvironmentConnection().client.server.sendPluginToThread({
+            pluginId,
+            projectId: context.currentChatProjectId,
+            text,
+            ...(threadTag !== undefined ? { threadTag } : {}),
+          });
+          toastManager.add(
+            stackedThreadToast({
+              type: "info",
+              title: `Плагин ${result.pluginName} отправил задачу агенту`,
+              description: text.length > 120 ? `${text.slice(0, 120)}…` : text,
+            }),
+          );
+          return { threadId: result.threadId, created: result.created };
+        },
+      },
+    });
+
+    const onMessage = (event: MessageEvent) => {
+      const currentFrame = iframeRef.current;
+      if (!currentFrame || event.source !== currentFrame.contentWindow) return;
+      bridge.handleMessage(event.data);
+    };
+    window.addEventListener("message", onMessage);
+
+    const unsubscribe = subscribeShellEvents((notice) => {
+      const context = contextRef.current;
+      if (
+        context.currentChatEnvironmentId !== null &&
+        notice.environmentId !== context.currentChatEnvironmentId
+      ) {
+        return;
+      }
+      const panelEvent = shellEventToPanelEvent(notice);
+      // События только проекта вкладки: панель не должна видеть чужую работу.
+      if (!panelEvent || panelEvent.projectId !== context.currentChatProjectId) return;
+      bridge.emitEvent(panelEvent);
+    });
+
+    return () => {
+      window.removeEventListener("message", onMessage);
+      unsubscribe();
+    };
+  }, [pluginId, url]);
+
+  if (!url) {
     return <MetadataPlaceholder file={file} label="У панели нет адреса" />;
   }
   return (
     <iframe
+      ref={iframeRef}
       title={file.name}
-      src={file.url}
+      src={url}
       sandbox="allow-scripts"
       className="h-full w-full border-0 bg-white"
     />

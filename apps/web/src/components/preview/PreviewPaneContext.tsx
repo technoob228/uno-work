@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 
 import { browserTabNameForUrl } from "./browserUrl";
 import { forgetScrollPosition } from "./previewScrollMemory";
@@ -44,6 +44,8 @@ export function isPluginPanelTab(file: Pick<PreviewFile, "kind">): boolean {
   return file.kind === "plugin-panel";
 }
 
+const PLUGIN_PANEL_ID_PREFIX = "plugin-panel:";
+
 /**
  * Вкладка панельного плагина. URL относительный: панель раздаёт демон текущего
  * окружения (`/api/plugins/<id>/panel/`), а содержимое рендерится в
@@ -51,12 +53,19 @@ export function isPluginPanelTab(file: Pick<PreviewFile, "kind">): boolean {
  */
 export function makePluginPanelFile(pluginId: string, title: string): PreviewFile {
   return {
-    id: `plugin-panel:${pluginId}`,
+    id: `${PLUGIN_PANEL_ID_PREFIX}${pluginId}`,
     name: title,
     kind: "plugin-panel",
     content: "",
     url: `/api/plugins/${encodeURIComponent(pluginId)}/panel/`,
   };
+}
+
+/** id плагина из вкладки панели — мост должен знать, от чьего имени зовут RPC. */
+export function pluginIdFromPanelFile(file: Pick<PreviewFile, "id" | "kind">): string | null {
+  if (!isPluginPanelTab(file) || !file.id.startsWith(PLUGIN_PANEL_ID_PREFIX)) return null;
+  const pluginId = file.id.slice(PLUGIN_PANEL_ID_PREFIX.length);
+  return pluginId.length > 0 ? pluginId : null;
 }
 
 export interface BrowserContext {
@@ -88,6 +97,8 @@ interface PreviewPaneState {
   toggleSourceView: (id: string) => void;
   currentProjectKey: string;
   currentChatProjectCwd: string | null;
+  /** Проект активного чата — вкладки панелей адресуют оркестрацию по нему. */
+  currentChatProjectId: ProjectId | null;
   currentChatEnvironmentId: EnvironmentId | null;
   setOpen: (open: boolean) => void;
   toggleOpen: () => void;
@@ -123,6 +134,7 @@ interface PreviewPaneState {
   setCurrentChatContext: (context: {
     projectKey: string | null;
     projectCwd: string | null;
+    projectId: ProjectId | null;
     environmentId: EnvironmentId | null;
   }) => void;
 }
@@ -182,6 +194,7 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
   );
   const [currentProjectKey, setCurrentProjectKey] = useState<string>(NO_PROJECT_KEY);
   const [currentChatProjectCwd, setCurrentChatProjectCwd] = useState<string | null>(null);
+  const [currentChatProjectId, setCurrentChatProjectId] = useState<ProjectId | null>(null);
   const [currentChatEnvironmentId, setCurrentChatEnvironmentId] = useState<EnvironmentId | null>(
     null,
   );
@@ -416,10 +429,12 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
     (context: {
       projectKey: string | null;
       projectCwd: string | null;
+      projectId: ProjectId | null;
       environmentId: EnvironmentId | null;
     }) => {
       setCurrentProjectKey(context.projectKey ?? NO_PROJECT_KEY);
       setCurrentChatProjectCwd(context.projectCwd);
+      setCurrentChatProjectId(context.projectId);
       setCurrentChatEnvironmentId(context.environmentId);
     },
     [],
@@ -440,6 +455,7 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       toggleSourceView,
       currentProjectKey,
       currentChatProjectCwd,
+      currentChatProjectId,
       currentChatEnvironmentId,
       setOpen,
       toggleOpen,
@@ -464,6 +480,7 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       currentState,
       currentProjectKey,
       currentChatProjectCwd,
+      currentChatProjectId,
       currentChatEnvironmentId,
       toggleSourceView,
       setOpen,
