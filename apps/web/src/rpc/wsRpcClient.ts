@@ -134,6 +134,8 @@ export interface WsRpcClient {
     readonly setPluginEnabled: RpcUnaryMethod<typeof WS_METHODS.serverSetPluginEnabled>;
     /** Мост панели плагина: «спроси агента» из sandbox-iframe. */
     readonly sendPluginToThread: RpcUnaryMethod<typeof WS_METHODS.pluginsSendToThread>;
+    /** Тред встроенного чата панели — тот же mapping, что у sendToThread. */
+    readonly resolvePluginPanelThread: RpcUnaryMethod<typeof WS_METHODS.pluginsResolvePanelThread>;
     readonly subscribePlugins: RpcStreamMethod<typeof WS_METHODS.subscribePlugins>;
     readonly createUnoLlmTopUpAction: RpcUnaryMethod<typeof WS_METHODS.unoCreateLlmTopUpAction>;
     readonly createUnoVideoUpload: RpcUnaryMethod<typeof WS_METHODS.unoVideoCreateUpload>;
@@ -273,6 +275,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.serverSetPluginEnabled](input)),
       sendPluginToThread: (input) =>
         transport.request((client) => client[WS_METHODS.pluginsSendToThread](input)),
+      resolvePluginPanelThread: (input) =>
+        transport.request((client) => client[WS_METHODS.pluginsResolvePanelThread](input)),
       subscribePlugins: (listener, options) =>
         transport.subscribe((client) => client[WS_METHODS.subscribePlugins]({}), listener, {
           ...options,

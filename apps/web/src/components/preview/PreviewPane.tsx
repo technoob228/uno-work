@@ -55,6 +55,12 @@ import {
   usePreviewPane,
 } from "./PreviewPaneContext";
 import { createPanelBridge, shellEventToPanelEvent } from "./panelBridge";
+import {
+  PluginPanelChat,
+  PluginPanelSplit,
+  usePluginPanels,
+  type PluginPanelDescriptor,
+} from "./PluginPanelChat";
 import { BrowserViews } from "./BrowserPane";
 import { useSidebar } from "../ui/sidebar";
 import { CodeFileView } from "./CodeFileView";
@@ -104,23 +110,6 @@ const KIND_EDITABLE: ReadonlySet<PreviewFileKind> = new Set<PreviewFileKind>([
 
 /** Префикс id пунктов меню «+» для панельных плагинов. */
 const PANEL_MENU_ID_PREFIX = "plugin-panel:";
-
-/**
- * Панельные плагины текущего демона. Читаем лениво, по клику на «+», чтобы не
- * держать ещё одну постоянную подписку ради редко открываемого меню.
- */
-async function listPluginPanels(): Promise<ReadonlyArray<{ id: string; title: string }>> {
-  try {
-    const snapshot = await getPrimaryEnvironmentConnection().client.server.listPlugins();
-    return snapshot.plugins.flatMap((plugin) =>
-      plugin.valid && plugin.enabled && plugin.panel
-        ? [{ id: plugin.id, title: plugin.panel.title }]
-        : [],
-    );
-  } catch {
-    return [];
-  }
-}
 
 const PREVIEW_WIDTH_STORAGE_KEY = "preview_pane_width";
 const DEFAULT_PREVIEW_WIDTH = 24 * 16;
@@ -1141,8 +1130,13 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
     openUrlInProject,
   } = usePreviewPane();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const panels = usePluginPanels();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const pluginId = pluginIdFromPanelFile(file);
+  // Чат объявляет манифест (`panel.chat`). Жизненный цикл моста от него НЕ
+  // зависит: мост создаётся в эффекте ниже по pluginId/url, а чат — просто
+  // соседний элемент split-раскладки.
+  const panelChat = panels.find((panel) => panel.id === pluginId)?.chat;
   const url = file.url;
 
   // Мост живёт ровно столько же, сколько документ панели: пересоздать его на
@@ -1262,12 +1256,28 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
     return <MetadataPlaceholder file={file} label="У панели нет адреса" />;
   }
   return (
-    <iframe
-      ref={iframeRef}
-      title={file.name}
-      src={url}
-      sandbox="allow-scripts"
-      className="h-full w-full border-0 bg-white"
+    <PluginPanelSplit
+      panel={
+        <iframe
+          ref={iframeRef}
+          title={file.name}
+          src={url}
+          sandbox="allow-scripts"
+          className="h-full w-full border-0 bg-white"
+        />
+      }
+      chat={
+        panelChat && pluginId ? (
+          <PluginPanelChat
+            pluginId={pluginId}
+            threadTag={panelChat.threadTag}
+            visibility={panelChat.visibility}
+            projectId={currentChatProjectId}
+            environmentId={currentChatEnvironmentId}
+            primaryEnvironmentId={primaryEnvironmentId}
+          />
+        ) : null
+      }
     />
   );
 }
@@ -1541,6 +1551,9 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
     toggleSourceView,
   } = usePreviewPane();
   const tabStripRef = useRef<HTMLDivElement | null>(null);
+  // Live-список панелей: агент может создать плагин прямо сейчас, и он должен
+  // появиться в меню «+» без переоткрытия (хвост фазы B).
+  const panels = usePluginPanels();
 
   // Прокручиваем активную вкладку в видимую область: при длинном ряде вкладок
   // новая вкладка открывалась за правым краем и оставалась невидимой.
@@ -1748,7 +1761,6 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
             type="button"
             onClick={async (event) => {
               const rect = event.currentTarget.getBoundingClientRect();
-              const panels = await listPluginPanels();
               const choice = await readLocalApi()?.contextMenu.show(
                 [
                   { id: "file", label: "Открыть файл…" },
