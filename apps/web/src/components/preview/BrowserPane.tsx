@@ -29,6 +29,10 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { isElectron } from "../../env";
+import {
+  isBrowserExtensionConnected,
+  runExtensionBrowserCommand,
+} from "../../browserExtensionBridge";
 import { cn } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
 import { useSettings } from "../../hooks/useSettings";
@@ -39,6 +43,7 @@ import {
   setBrowserAutomationHandler,
 } from "./BrowserAutomationRegistry";
 import { buildAutofillScript } from "./browserAutofill";
+import { CompanionExtensionPanel } from "./CompanionExtensionPanel";
 import { browserPartitionForScope, browserUrlOrigin, normalizeBrowserUrl } from "./browserUrl";
 import { isBrowserTab, usePreviewPane, type PreviewFile } from "./PreviewPaneContext";
 
@@ -296,6 +301,15 @@ function BrowserView({
       if (!url) return;
       setLoadError(null);
       updateBrowserTab(projectKey, tab.id, { url });
+      // Веб-режим: webview нет, страницу открывает companion-расширение во
+      // вкладке пользователя. Если расширения нет — панель ниже ведёт по
+      // установке, адрес при этом сохранён в tab.url.
+      if (!isElectron) {
+        if (isBrowserExtensionConnected()) {
+          void runExtensionBrowserCommand({ command: "openUrl", url }).catch(() => {});
+        }
+        return;
+      }
       const view = webviewRef.current;
       if (view && readyRef.current) {
         void view.loadURL(url).catch(() => {});
@@ -792,7 +806,7 @@ function BrowserView({
           </div>
         ) : null}
         {!isElectron ? (
-          <BrowserUnavailableFallback url={currentUrl} onOpenExternal={openExternal} />
+          <CompanionExtensionPanel url={currentUrl} onOpenExternal={openExternal} />
         ) : mountSrc ? (
           <div
             className={cn(
@@ -851,30 +865,6 @@ function NewTabPlaceholder({
             </button>
           ))}
         </div>
-      ) : null}
-    </div>
-  );
-}
-
-function BrowserUnavailableFallback({
-  url,
-  onOpenExternal,
-}: {
-  url: string;
-  onOpenExternal: () => void;
-}) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-muted-foreground">
-      <GlobeIcon className="size-8 opacity-40" />
-      <p className="text-xs">Встроенный браузер доступен только в десктоп-приложении.</p>
-      {url ? (
-        <button
-          type="button"
-          onClick={onOpenExternal}
-          className="rounded-md border border-input px-3 py-1.5 text-xs hover:bg-accent hover:text-foreground"
-        >
-          Открыть в системном браузере
-        </button>
       ) : null}
     </div>
   );

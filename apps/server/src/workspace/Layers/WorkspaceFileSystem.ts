@@ -153,25 +153,32 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
           }),
       ),
     );
-    const write =
-      input.encoding === "base64"
-        ? fileSystem.writeFile(
-            target.absolutePath,
-            new Uint8Array(Buffer.from(input.contents, "base64")),
-          )
-        : fileSystem.writeFileString(target.absolutePath, input.contents);
-    yield* write.pipe(
-      Effect.mapError(
-        (cause) =>
-          new WorkspaceFileSystemError({
-            cwd: input.cwd,
-            relativePath: input.relativePath,
-            operation: "workspaceFileSystem.writeFile",
-            detail: cause.message,
-            cause,
-          }),
-      ),
-    );
+    const toWriteError = (cause: unknown) =>
+      new WorkspaceFileSystemError({
+        cwd: input.cwd,
+        relativePath: input.relativePath,
+        operation: "workspaceFileSystem.writeFile",
+        detail: cause instanceof Error ? cause.message : String(cause),
+        cause,
+      });
+    const write: Effect.Effect<unknown, WorkspaceFileSystemError> =
+      input.mode === "append"
+        ? Effect.tryPromise({
+            try: () =>
+              fsPromises.appendFile(
+                target.absolutePath,
+                Buffer.from(input.contents, input.encoding === "base64" ? "base64" : "utf8"),
+              ),
+            catch: toWriteError,
+          })
+        : (input.encoding === "base64"
+            ? fileSystem.writeFile(
+                target.absolutePath,
+                new Uint8Array(Buffer.from(input.contents, "base64")),
+              )
+            : fileSystem.writeFileString(target.absolutePath, input.contents)
+          ).pipe(Effect.mapError(toWriteError));
+    yield* write;
     yield* workspaceEntries.invalidate(input.cwd);
     return { relativePath: target.relativePath };
   });

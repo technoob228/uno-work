@@ -5,7 +5,6 @@ import ThreadSidebar from "./Sidebar";
 import { BrowserBridgeListener } from "./preview/BrowserBridgeListener";
 import { FileBrowser } from "./preview/FileBrowser";
 import { PreviewPane } from "./preview/PreviewPane";
-import { PreviewPaneProvider } from "./preview/PreviewPaneContext";
 import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
 import {
   clearShortcutModifierState,
@@ -62,8 +61,10 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     };
   }, [navigate]);
 
+  // PreviewPaneProvider живёт выше, в __root: контекст нужен и командной
+  // палитре (она рендерится вне этого layout-а).
   return (
-    <PreviewPaneProvider>
+    <>
       <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
         <Sidebar
           side="left"
@@ -84,6 +85,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       </SidebarProvider>
       <FileBrowser />
       <BrowserBridgeListener />
-    </PreviewPaneProvider>
+    </>
   );
 }

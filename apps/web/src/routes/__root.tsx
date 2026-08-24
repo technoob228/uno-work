@@ -14,6 +14,7 @@ import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
+import { PreviewPaneProvider } from "../components/preview/PreviewPaneContext";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
 import {
   SlowRpcAckToastCoordinator,
@@ -131,12 +132,16 @@ function RootRouteView() {
     return <Outlet />;
   }
 
+  // PreviewPaneProvider выше палитры: команда «Upload files into project»
+  // открывает файловый браузер превью-панели прямо из палитры.
   const appShell = (
-    <CommandPalette>
-      <AppSidebarLayout>
-        <Outlet />
-      </AppSidebarLayout>
-    </CommandPalette>
+    <PreviewPaneProvider>
+      <CommandPalette>
+        <AppSidebarLayout>
+          <Outlet />
+        </AppSidebarLayout>
+      </CommandPalette>
+    </PreviewPaneProvider>
   );
 
   return (

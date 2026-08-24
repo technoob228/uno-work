@@ -8,18 +8,27 @@ import {
   FileIcon,
   FileSpreadsheetIcon,
   FileTextIcon,
+  FileUpIcon,
   FolderIcon,
+  FolderUpIcon,
   GlobeIcon,
   ImageIcon,
   Loader2Icon,
   SearchIcon,
   TableIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { cn } from "../../lib/utils";
 import { readEnvironmentApi } from "../../environmentApi";
+import type { ProjectUploadFile } from "../../projectUpload";
+import {
+  pickFilesForProjectUpload,
+  pickFolderForProjectUpload,
+  readDroppedUploadFiles,
+} from "../../projectUploadPickers";
+import { runProjectUpload } from "../../projectUploadUi";
 import { Button } from "../ui/button";
 import { Dialog, DialogBackdrop, DialogPortal, DialogViewport } from "../ui/dialog";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
@@ -112,16 +121,47 @@ export function FileBrowser() {
   const [currentPath, setCurrentPath] = useState(initialPath);
   const [query, setQuery] = useState("");
   const [showHidden, setShowHidden] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const dragDepthRef = useRef(0);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (browserOpen) {
       setCurrentPath(browserContext.startPath ?? "~");
       setQuery("");
+      setDragOver(false);
+      dragDepthRef.current = 0;
     }
   }, [browserOpen, browserContext.startPath]);
 
   const browseEnvironmentId = browserContext.environmentId;
   const partialPath = ensureTrailingSlash(currentPath);
+
+  // Загрузка с компьютера пользователя в открытую сейчас папку. filterIgnored
+  // включён для папок и дропа (там легко прихватить node_modules), выключен для
+  // явно выбранных файлов.
+  const uploadHere = async (files: ProjectUploadFile[], filterIgnored: boolean) => {
+    if (uploading) return;
+    setUploading(true);
+    try {
+      const uploaded = await runProjectUpload({
+        environmentId: browseEnvironmentId,
+        targetDir: stripTrailingSlash(currentPath),
+        files,
+        filterIgnored,
+      });
+      if (uploaded) {
+        await queryClient.invalidateQueries({
+          queryKey: ["previewFileBrowser", browseEnvironmentId],
+        });
+      }
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const uploadEnabled = browseEnvironmentId !== null && !uploading;
 
   const { data, isPending, isError, error } = useQuery({
     queryKey: ["previewFileBrowser", browseEnvironmentId, partialPath],
@@ -211,7 +251,46 @@ export function FileBrowser() {
             data-slot="dialog-popup"
             className="-translate-y-[calc(1.25rem*var(--nested-dialogs))] relative row-start-2 flex max-h-full min-h-0 w-full min-w-0 max-w-3xl scale-[calc(1-0.1*var(--nested-dialogs))] flex-col rounded-2xl border bg-popover text-popover-foreground opacity-[calc(1-0.1*var(--nested-dialogs))] shadow-lg/5 transition-[scale,opacity,translate] duration-200 ease-in-out will-change-transform data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0"
           >
-            <div className="flex h-[34rem] flex-col">
+            <div
+              className="relative flex h-[34rem] flex-col"
+              onDragEnter={(event) => {
+                if (!uploadEnabled || !event.dataTransfer.types.includes("Files")) return;
+                event.preventDefault();
+                dragDepthRef.current += 1;
+                setDragOver(true);
+              }}
+              onDragOver={(event) => {
+                if (!uploadEnabled || !event.dataTransfer.types.includes("Files")) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "copy";
+              }}
+              onDragLeave={(event) => {
+                if (!event.dataTransfer.types.includes("Files")) return;
+                event.preventDefault();
+                const nextTarget = event.relatedTarget;
+                if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+                dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+                if (dragDepthRef.current === 0) setDragOver(false);
+              }}
+              onDrop={(event) => {
+                if (!event.dataTransfer.types.includes("Files")) return;
+                event.preventDefault();
+                dragDepthRef.current = 0;
+                setDragOver(false);
+                if (!uploadEnabled) return;
+                void readDroppedUploadFiles(event.dataTransfer).then((files) =>
+                  uploadHere(files, true),
+                );
+              }}
+            >
+              {dragOver && (
+                <div className="pointer-events-none absolute inset-1.5 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-primary/60 bg-primary/5">
+                  <div className="rounded-md bg-popover/95 px-3 py-1.5 text-sm text-foreground shadow-sm">
+                    Отпустите — файлы загрузятся в{" "}
+                    <span className="font-mono">{stripTrailingSlash(currentPath)}</span>
+                  </div>
+                </div>
+              )}
               <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-4 pt-4 pb-3">
                 <div className="flex items-center gap-1.5">
                   <Button
@@ -349,6 +428,36 @@ export function FileBrowser() {
                 </div>
               </ScrollArea>
               <div className="flex shrink-0 items-center gap-2 border-t border-border bg-muted/40 px-4 py-2.5 text-xs text-muted-foreground">
+                {browseEnvironmentId && (
+                  <>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={!uploadEnabled}
+                      onClick={() =>
+                        pickFilesForProjectUpload((picked) => void uploadHere(picked, false))
+                      }
+                    >
+                      {uploading ? (
+                        <Loader2Icon className="size-3 animate-spin" />
+                      ) : (
+                        <FileUpIcon className="size-3" />
+                      )}
+                      Загрузить файлы
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={!uploadEnabled}
+                      onClick={() =>
+                        pickFolderForProjectUpload((picked) => void uploadHere(picked, true))
+                      }
+                    >
+                      <FolderUpIcon className="size-3" />
+                      Папку
+                    </Button>
+                  </>
+                )}
                 <span>
                   {folders.length} папок · {files.length} файлов
                 </span>

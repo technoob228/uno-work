@@ -6,7 +6,7 @@
 
 import type { FirstProjectFile } from "./firstProjectRunner";
 
-export async function readFileAsBase64(file: File): Promise<string> {
+export async function readFileAsBase64(file: Blob): Promise<string> {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
   let binary = "";

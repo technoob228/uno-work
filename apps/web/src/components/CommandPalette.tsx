@@ -75,9 +75,14 @@ import {
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { getLatestThreadForProject } from "../lib/threadSort";
 import { cn, isMacPlatform, isWindowsPlatform, newCommandId, newProjectId } from "../lib/utils";
-import { inferProjectNameFromUpload } from "../firstProject";
+import {
+  inferProjectNameFromUpload,
+  joinWorkspacePath,
+  normalizeProjectName,
+  stripUploadRootSegment,
+} from "../firstProject";
 import { pickFolderForUpload, toFirstProjectFiles } from "../firstProjectFiles";
-import { runUploadFirstProject } from "../firstProjectRunner";
+import { runProjectUpload } from "../projectUploadUi";
 import { isWebApp } from "../webMode";
 import {
   selectProjectsAcrossEnvironments,
@@ -103,6 +108,7 @@ import {
   RECENT_THREAD_LIMIT,
 } from "./CommandPalette.logic";
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
+import { usePreviewPane } from "./preview/PreviewPaneContext";
 import { CommandPaletteResults } from "./CommandPaletteResults";
 import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from "./Icons";
 import { ProjectFavicon } from "./ProjectFavicon";
@@ -426,6 +432,11 @@ function OpenCommandPaletteDialog() {
   const primaryEnvironmentLabel = readPrimaryEnvironmentDescriptor()?.label ?? null;
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((state) => state.byId);
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
+  const {
+    openBrowser: openEnvironmentFileBrowser,
+    currentChatEnvironmentId,
+    currentChatProjectCwd,
+  } = usePreviewPane();
 
   const addProjectEnvironmentOptions = useMemo(() => {
     const options: AddProjectEnvironmentOption[] = [];
@@ -787,9 +798,9 @@ function OpenCommandPaletteDialog() {
     void navigate({ to: "/settings/source-control" });
   }, [navigate, setOpen]);
 
-  // Загрузка папки с компьютера пользователя — тот же механизм, что в
-  // веб-онбординге (firstProjectRunner): файлы едут в машину по WS, проект
-  // создаётся заранее, мусорные каталоги отсеивает planUpload.
+  // Загрузка папки с компьютера пользователя. Проект создаётся заранее, а файлы
+  // едут чанковым движком projectUpload — те же большие лимиты и прогресс, что
+  // при загрузке в существующий проект; мусорные каталоги отсеивает план.
   const runAddProjectUpload = useCallback(
     async (environmentId: EnvironmentId, fileList: FileList) => {
       const api = readEnvironmentApi(environmentId);
@@ -806,52 +817,34 @@ function OpenCommandPaletteDialog() {
       const files = toFirstProjectFiles(fileList);
       const projectName = inferProjectNameFromUpload(files);
       const baseDirectory = settings.addProjectBaseDirectory?.trim() || "~/projects";
-      let createdProjectId: ReturnType<typeof newProjectId> | null = null;
-      toastManager.add(
-        stackedThreadToast({
-          type: "info",
-          title: "Uploading folder…",
-          description: `${files.length} file${files.length === 1 ? "" : "s"} selected.`,
-        }),
-      );
+      const title = normalizeProjectName(projectName) || "uploaded-files";
+      const cwd = joinWorkspacePath(baseDirectory, title);
       try {
-        const result = await runUploadFirstProject(
-          {
-            cloneRepository: (input) => api.sourceControl.cloneRepository(input),
-            writeFile: (input) => api.projects.writeFile(input),
-            createProject: async ({ cwd, title }) => {
-              const projectId = newProjectId();
-              createdProjectId = projectId;
-              await api.orchestration.dispatchCommand({
-                type: "project.create",
-                commandId: newCommandId(),
-                projectId,
-                title,
-                workspaceRoot: cwd,
-                createWorkspaceRootIfMissing: true,
-                createdAt: new Date().toISOString(),
-              });
-            },
-          },
-          { files, baseDirectory, projectName },
-        );
-        const accepted = result.uploadPlan?.accepted.length ?? 0;
-        const skipped = result.uploadPlan?.skipped.length ?? 0;
-        toastManager.add(
-          stackedThreadToast({
-            type: "success",
-            title: `${result.title} is ready`,
-            description:
-              skipped > 0
-                ? `${accepted} files copied, ${skipped} skipped (dependencies, git metadata, oversized).`
-                : `Copied to ${result.cwd}.`,
-          }),
-        );
-        if (createdProjectId) {
-          await handleNewThread(scopeProjectRef(environmentId, createdProjectId), {
-            envMode: settings.defaultThreadEnvMode,
-          }).catch(() => undefined);
-        }
+        const projectId = newProjectId();
+        await api.orchestration.dispatchCommand({
+          type: "project.create",
+          commandId: newCommandId(),
+          projectId,
+          title,
+          workspaceRoot: cwd,
+          createWorkspaceRootIfMissing: true,
+          createdAt: new Date().toISOString(),
+        });
+        // Ведущая папка пикера срезается: её имя стало именем проекта.
+        const uploadFiles = Array.from(fileList).map((file) => ({
+          relativePath: stripUploadRootSegment(file.webkitRelativePath || file.name),
+          size: file.size,
+          blob: file as Blob,
+        }));
+        await runProjectUpload({
+          environmentId,
+          targetDir: cwd,
+          files: uploadFiles,
+          filterIgnored: true,
+        });
+        await handleNewThread(scopeProjectRef(environmentId, projectId), {
+          envMode: settings.defaultThreadEnvMode,
+        }).catch(() => undefined);
       } catch (error) {
         toastManager.add(
           stackedThreadToast({
@@ -1161,6 +1154,26 @@ function OpenCommandPaletteDialog() {
       openAddProjectFlow();
     },
   });
+
+  // Загрузка в уже существующий проект: палитра только открывает файловый
+  // браузер активного треда — кнопки «Загрузить файлы/папку» и drag-and-drop
+  // живут там, рядом с целевой папкой.
+  if (currentChatEnvironmentId) {
+    actionItems.push({
+      kind: "action",
+      value: "action:upload-into-project",
+      searchTerms: ["upload", "files", "folder", "copy", "загрузить", "файлы", "папку"],
+      title: "Upload files into project",
+      description: "Open the file browser to upload from this computer",
+      icon: <FolderUpIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        openEnvironmentFileBrowser({
+          environmentId: currentChatEnvironmentId,
+          startPath: currentChatProjectCwd,
+        });
+      },
+    });
+  }
 
   actionItems.push({
     kind: "action",

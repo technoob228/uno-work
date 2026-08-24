@@ -117,12 +117,34 @@ function isIgnoredRelativePath(relativePath: string): boolean {
   return segments.slice(0, -1).some((segment) => UPLOAD_IGNORED_SEGMENTS.has(segment));
 }
 
+export interface UploadPlanLimits {
+  readonly maxFileBytes: number;
+  readonly maxTotalBytes: number;
+  readonly maxFileCount: number;
+  /**
+   * Отсеивать мусорные каталоги (node_modules, .git…). Для перетащенной папки
+   * это нужно всегда; для явно выбранных пользователем файлов — нет: раз он их
+   * выбрал сам, значит они нужны.
+   */
+  readonly filterIgnored: boolean;
+}
+
+const FIRST_PROJECT_UPLOAD_LIMITS: UploadPlanLimits = {
+  maxFileBytes: UPLOAD_MAX_FILE_BYTES,
+  maxTotalBytes: UPLOAD_MAX_TOTAL_BYTES,
+  maxFileCount: UPLOAD_MAX_FILE_COUNT,
+  filterIgnored: true,
+};
+
 /**
  * Decides what actually gets written to the remote machine. Uploads go through
  * one RPC call per file, so the caps here are what keeps a stray `node_modules`
  * drop from hanging the onboarding.
  */
-export function planUpload(candidates: ReadonlyArray<UploadCandidate>): UploadPlan {
+export function planUpload(
+  candidates: ReadonlyArray<UploadCandidate>,
+  limits: UploadPlanLimits = FIRST_PROJECT_UPLOAD_LIMITS,
+): UploadPlan {
   const accepted: UploadPlanEntry[] = [];
   const skipped: UploadSkippedEntry[] = [];
   let totalBytes = 0;
@@ -134,17 +156,17 @@ export function planUpload(candidates: ReadonlyArray<UploadCandidate>): UploadPl
       skipped.push({ relativePath: candidate.relativePath, reason: "unsafe-path" });
       continue;
     }
-    if (isIgnoredRelativePath(relativePath)) {
+    if (limits.filterIgnored && isIgnoredRelativePath(relativePath)) {
       skipped.push({ relativePath, reason: "ignored" });
       continue;
     }
-    if (candidate.size > UPLOAD_MAX_FILE_BYTES) {
+    if (candidate.size > limits.maxFileBytes) {
       skipped.push({ relativePath, reason: "too-large" });
       continue;
     }
     if (
-      accepted.length >= UPLOAD_MAX_FILE_COUNT ||
-      totalBytes + candidate.size > UPLOAD_MAX_TOTAL_BYTES
+      accepted.length >= limits.maxFileCount ||
+      totalBytes + candidate.size > limits.maxTotalBytes
     ) {
       skipped.push({ relativePath, reason: "over-budget" });
       continue;

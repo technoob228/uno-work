@@ -76,6 +76,57 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
       }),
     );
 
+    it.effect("appends base64 chunks to an existing file", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+
+        const chunkA = Buffer.from([0, 1, 2, 255]);
+        const chunkB = Buffer.from([42, 0, 7]);
+        yield* workspaceFileSystem.writeFile({
+          cwd,
+          relativePath: "data/upload.bin",
+          contents: chunkA.toString("base64"),
+          encoding: "base64",
+        });
+        yield* workspaceFileSystem.writeFile({
+          cwd,
+          relativePath: "data/upload.bin",
+          contents: chunkB.toString("base64"),
+          encoding: "base64",
+          mode: "append",
+        });
+
+        const saved = yield* fileSystem
+          .readFile(path.join(cwd, "data/upload.bin"))
+          .pipe(Effect.orDie);
+        expect(Buffer.from(saved)).toEqual(Buffer.concat([chunkA, chunkB]));
+      }),
+    );
+
+    it.effect("append creates the file and parent directories when missing", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+
+        yield* workspaceFileSystem.writeFile({
+          cwd,
+          relativePath: "fresh/dir/chunked.txt",
+          contents: "first",
+          mode: "append",
+        });
+
+        const saved = yield* fileSystem
+          .readFileString(path.join(cwd, "fresh/dir/chunked.txt"))
+          .pipe(Effect.orDie);
+        expect(saved).toBe("first");
+      }),
+    );
+
     it.effect("expands a home-relative workspace root", () =>
       Effect.gen(function* () {
         const workspaceFileSystem = yield* WorkspaceFileSystem;

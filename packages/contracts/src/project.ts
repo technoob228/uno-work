@@ -37,12 +37,21 @@ export class ProjectSearchEntriesError extends Schema.TaggedErrorClass<ProjectSe
 export const ProjectWriteFileEncoding = Schema.Literals(["utf8", "base64"]);
 export type ProjectWriteFileEncoding = typeof ProjectWriteFileEncoding.Type;
 
+export const ProjectWriteFileMode = Schema.Literals(["replace", "append"]);
+export type ProjectWriteFileMode = typeof ProjectWriteFileMode.Type;
+
 export const ProjectWriteFileInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   relativePath: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_WRITE_FILE_PATH_MAX_LENGTH)),
   contents: Schema.String,
   /** Defaults to utf8. Pass base64 to write binary files (e.g. xlsx). */
   encoding: Schema.optional(ProjectWriteFileEncoding),
+  /**
+   * Defaults to replace. Append dописывает contents в конец существующего
+   * файла — так браузерный аплоад шлёт большие файлы чанками, не читая их в
+   * память целиком и не упираясь в размер одного WS-сообщения.
+   */
+  mode: Schema.optional(ProjectWriteFileMode),
 });
 export type ProjectWriteFileInput = typeof ProjectWriteFileInput.Type;
 
