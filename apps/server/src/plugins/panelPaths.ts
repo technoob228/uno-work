@@ -24,7 +24,7 @@ export interface PluginPanelLocation {
   readonly rootDir: string;
 }
 
-function isInsideDirectory(candidate: string, directory: string): boolean {
+export function isInsideDirectory(candidate: string, directory: string): boolean {
   const normalizedDirectory = directory.endsWith(path.sep) ? directory : `${directory}${path.sep}`;
   return candidate === directory || candidate.startsWith(normalizedDirectory);
 }

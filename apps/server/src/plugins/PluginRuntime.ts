@@ -11,6 +11,7 @@
  * registry for the Extensions settings page.
  */
 import type { OrchestrationEvent, PluginShellAction, ServerPluginRun } from "@t3tools/contracts";
+import { hookMatches } from "@t3tools/shared/pluginPatterns";
 import { Context, Duration, Effect, Layer, Option, Ref, Schedule, Stream } from "effect";
 import type { Scope } from "effect";
 import { clamp } from "effect/Number";
@@ -35,12 +36,6 @@ export const PLUGIN_ID_ENV = "UNO_PLUGIN_ID";
 export const PLUGIN_TRIGGER_ENV = "UNO_PLUGIN_TRIGGER";
 export const PLUGIN_EVENT_ENV = "UNO_PLUGIN_EVENT";
 export const PLUGIN_EVENT_TYPE_ENV = "UNO_PLUGIN_EVENT_TYPE";
-
-export function hookMatches(on: string, eventType: string): boolean {
-  if (on === "*") return true;
-  if (on === eventType) return true;
-  return on.endsWith(".*") && eventType.startsWith(on.slice(0, -1));
-}
 
 function truncate(value: string, maxChars: number): string {
   return value.length <= maxChars ? value : `${value.slice(0, maxChars)}… [truncated]`;

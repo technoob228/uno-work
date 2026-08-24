@@ -22,6 +22,7 @@ import {
   type PluginsSnapshot,
   type ServerPlugin,
   type ServerPluginRun,
+  type ThreadId,
 } from "@t3tools/contracts";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import {
@@ -101,6 +102,22 @@ function validateManifest(manifest: PluginManifest): string | undefined {
   return undefined;
 }
 
+/**
+ * Ключ карты «панель → тред». NUL внутри id/тега невозможен (id — имя файла,
+ * тег приходит из манифеста/панели и проверяется вызывающим), поэтому склейка
+ * однозначна.
+ */
+const PANEL_THREAD_KEY_SEPARATOR = "\u0000";
+
+function panelThreadKey(pluginId: string, threadTag: string): string {
+  return `${pluginId}${PANEL_THREAD_KEY_SEPARATOR}${threadTag}`;
+}
+
+function panelThreadPluginId(key: string): string {
+  const separatorIndex = key.indexOf(PANEL_THREAD_KEY_SEPARATOR);
+  return separatorIndex === -1 ? key : key.slice(0, separatorIndex);
+}
+
 /** Directories to watch for manifest edits (the parent watch is not recursive). */
 function pluginDirectoriesOf(plugins: ReadonlyArray<LoadedPlugin>): ReadonlyArray<string> {
   return plugins
@@ -147,6 +164,24 @@ export interface PluginRegistryShape {
   /** Record a hook/cron execution for the settings UI. */
   readonly recordRun: (pluginId: string, run: ServerPluginRun) => Effect.Effect<void>;
 
+  /**
+   * Thread a panel is talking to, per `pluginId + threadTag`. In memory on
+   * purpose: the mapping is a convenience for a live panel session, not state
+   * worth persisting — after a daemon restart the panel simply starts a new
+   * thread. Liveness of the id is the caller's business (the thread may have
+   * been deleted meanwhile).
+   */
+  readonly getPanelThreadId: (input: {
+    readonly pluginId: string;
+    readonly threadTag: string;
+  }) => Effect.Effect<ThreadId | undefined>;
+
+  readonly setPanelThreadId: (input: {
+    readonly pluginId: string;
+    readonly threadTag: string;
+    readonly threadId: ThreadId;
+  }) => Effect.Effect<void>;
+
   /** Stream of snapshot changes (file edits, toggles, recorded runs). */
   readonly streamChanges: Stream.Stream<PluginsSnapshot>;
 }
@@ -164,6 +199,8 @@ const makePluginRegistry = Effect.gen(function* () {
   const stateSemaphore = yield* Semaphore.make(1);
   const pluginsRef = yield* Ref.make<ReadonlyArray<LoadedPlugin>>([]);
   const runsRef = yield* Ref.make<ReadonlyMap<string, ReadonlyArray<ServerPluginRun>>>(new Map());
+  // `pluginId\u0000threadTag` → тред панели (см. getPanelThreadId).
+  const panelThreadsRef = yield* Ref.make<ReadonlyMap<string, ThreadId>>(new Map());
   const changesPubSub = yield* PubSub.unbounded<PluginsSnapshot>();
   const startedRef = yield* Ref.make(false);
   const startedDeferred = yield* Deferred.make<void, PluginsError>();
@@ -391,6 +428,13 @@ const makePluginRegistry = Effect.gen(function* () {
         }
         return next;
       });
+      yield* Ref.update(panelThreadsRef, (threads) => {
+        const next = new Map<string, ThreadId>();
+        for (const [key, threadId] of threads) {
+          if (ids.has(panelThreadPluginId(key))) next.set(key, threadId);
+        }
+        return next;
+      });
       yield* emitSnapshot;
     }),
   );
@@ -486,6 +530,14 @@ const makePluginRegistry = Effect.gen(function* () {
           yield* PubSub.publish(changesPubSub, snapshot);
           return snapshot;
         }),
+      ),
+    getPanelThreadId: ({ pluginId, threadTag }) =>
+      Ref.get(panelThreadsRef).pipe(
+        Effect.map((threads) => threads.get(panelThreadKey(pluginId, threadTag))),
+      ),
+    setPanelThreadId: ({ pluginId, threadTag, threadId }) =>
+      Ref.update(panelThreadsRef, (threads) =>
+        new Map(threads).set(panelThreadKey(pluginId, threadTag), threadId),
       ),
     recordRun: (pluginId, run) =>
       Effect.gen(function* () {

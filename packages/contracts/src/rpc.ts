@@ -54,7 +54,13 @@ import {
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
-import { PluginsError, PluginsSnapshot, SetPluginEnabledInput } from "./plugins.ts";
+import {
+  PluginSendToThreadInput,
+  PluginSendToThreadResult,
+  PluginsError,
+  PluginsSnapshot,
+  SetPluginEnabledInput,
+} from "./plugins.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   ProjectSearchEntriesError,
@@ -161,6 +167,7 @@ export const WS_METHODS = {
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverListPlugins: "server.listPlugins",
   serverSetPluginEnabled: "server.setPluginEnabled",
+  pluginsSendToThread: "plugins.sendToThread",
 
   // Uno account / billing methods
   unoCreateLlmTopUpAction: "uno.createLlmTopUpAction",
@@ -239,6 +246,12 @@ export const WsServerListPluginsRpc = Rpc.make(WS_METHODS.serverListPlugins, {
 export const WsServerSetPluginEnabledRpc = Rpc.make(WS_METHODS.serverSetPluginEnabled, {
   payload: SetPluginEnabledInput,
   success: PluginsSnapshot,
+  error: PluginsError,
+});
+
+export const WsPluginsSendToThreadRpc = Rpc.make(WS_METHODS.pluginsSendToThread, {
+  payload: PluginSendToThreadInput,
+  success: PluginSendToThreadResult,
   error: PluginsError,
 });
 
@@ -574,6 +587,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerDiscoverSourceControlRpc,
   WsServerListPluginsRpc,
   WsServerSetPluginEnabledRpc,
+  WsPluginsSendToThreadRpc,
   WsSubscribePluginsRpc,
   WsUnoCreateLlmTopUpActionRpc,
   WsUnoVideoCreateUploadRpc,

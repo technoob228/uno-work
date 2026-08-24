@@ -10,6 +10,8 @@
  */
 import { Effect, Schema } from "effect";
 
+import { ProjectId, ThreadId } from "./baseSchemas.ts";
+
 /** Shell action executed by a hook or cron. */
 export const PluginShellAction = Schema.Struct({
   kind: Schema.Literal("shell"),
@@ -123,3 +125,29 @@ export const SetPluginEnabledInput = Schema.Struct({
   enabled: Schema.Boolean,
 });
 export type SetPluginEnabledInput = typeof SetPluginEnabledInput.Type;
+
+/**
+ * `plugins.sendToThread` — a plugin panel asks the agent to do something.
+ *
+ * The panel itself has no session and no idea what a thread is: the app takes
+ * the postMessage call from the sandboxed iframe, adds the project of the tab
+ * and forwards it here. `threadTag` lets a panel keep talking to one and the
+ * same thread ("panel" by default) instead of spawning a new one per click.
+ */
+export const PluginSendToThreadInput = Schema.Struct({
+  pluginId: Schema.String,
+  projectId: ProjectId,
+  text: Schema.String,
+  threadTag: Schema.optional(Schema.String),
+});
+export type PluginSendToThreadInput = typeof PluginSendToThreadInput.Type;
+
+export const PluginSendToThreadResult = Schema.Struct({
+  threadId: ThreadId,
+  /** False when an existing thread for this `threadTag` was reused. */
+  created: Schema.Boolean,
+  /** Manifest `name` — the client shows it in the toast. */
+  pluginName: Schema.String,
+  threadTag: Schema.String,
+});
+export type PluginSendToThreadResult = typeof PluginSendToThreadResult.Type;

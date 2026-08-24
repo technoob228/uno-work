@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { cronMatches, cronMinuteKey, parseCronExpression, parseEveryDuration } from "./cron.ts";
-import { hookMatches } from "./PluginRuntime.ts";
 
 const at = (year: number, month: number, day: number, hours: number, minutes: number): Date =>
   new Date(year, month - 1, day, hours, minutes);
@@ -98,13 +97,5 @@ describe("cronMinuteKey", () => {
   });
 });
 
-describe("hookMatches", () => {
-  it("matches exact, wildcard, and prefix patterns", () => {
-    expect(hookMatches("thread.created", "thread.created")).toBe(true);
-    expect(hookMatches("thread.created", "thread.deleted")).toBe(false);
-    expect(hookMatches("*", "project.created")).toBe(true);
-    expect(hookMatches("thread.*", "thread.turn-diff-completed")).toBe(true);
-    expect(hookMatches("thread.*", "project.created")).toBe(false);
-    expect(hookMatches("thread*", "thread.created")).toBe(false);
-  });
-});
+// hookMatches переехал в `@t3tools/shared/pluginPatterns` (общий словарь
+// паттернов для хуков демона и подписок панельного моста) — тесты там же.

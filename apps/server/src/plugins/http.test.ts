@@ -56,6 +56,9 @@ const makeFixture = Effect.gen(function* () {
   yield* fs.writeFileString(path.join(pluginDir, "panel", "index.html"), "<h1>panel</h1>");
   yield* fs.writeFileString(path.join(pluginDir, "panel", "data.json"), `{"ok":true}`);
   yield* fs.writeFileString(path.join(baseDir, "outside.txt"), "outside secret");
+  // Симлинк из панельной папки наружу: текстовая проверка путей его пропускает,
+  // ловить обязана realpath-проверка (субресурсы отдаются без сессии).
+  yield* fs.symlink(path.join(baseDir, "outside.txt"), path.join(pluginDir, "panel", "leak.txt"));
 
   const plugins: ReadonlyArray<LoadedPlugin> = [
     {
@@ -168,6 +171,20 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("plugin panel route"
           `${candidate} must not be served (got ${response.status})`,
         );
       }
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("refuses a symlink that escapes the plugin directory", () =>
+    Effect.gen(function* () {
+      const { get } = yield* makeFixture;
+
+      const navigation = yield* get("/api/plugins/demo/panel/leak.txt");
+      assert.include([400, 404], navigation.status);
+
+      const subresource = yield* get("/api/plugins/demo/panel/leak.txt", {
+        "sec-fetch-dest": "empty",
+      });
+      assert.include([400, 404], subresource.status);
     }).pipe(Effect.scoped),
   );
 

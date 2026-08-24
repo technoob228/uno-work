@@ -27,6 +27,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { respondToAuthError } from "../auth/http.ts";
 import { ServerAuth } from "../auth/Services/ServerAuth.ts";
 import {
+  isInsideDirectory,
   isPanelNavigationRequest,
   parsePluginPanelRequestPath,
   PLUGIN_PANEL_ROUTE_PREFIX,
@@ -49,6 +50,27 @@ const PANEL_CONTENT_SECURITY_POLICY = [
 ].join("; ");
 
 const notFound = HttpServerResponse.text("Not Found", { status: 404 });
+
+/**
+ * Разыменовывает файл и директорию плагина и проверяет, что файл физически
+ * лежит внутри неё. Ошибка realPath (битый симлинк, гонка удаления) — тоже
+ * отказ.
+ */
+const resolveRealPathInsidePlugin = (input: {
+  readonly fileSystem: FileSystem.FileSystem;
+  readonly filePath: string;
+  readonly pluginDir: string;
+}): Effect.Effect<boolean> =>
+  Effect.gen(function* () {
+    const realFilePath = yield* input.fileSystem
+      .realPath(input.filePath)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+    const realPluginDir = yield* input.fileSystem
+      .realPath(input.pluginDir)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+    if (realFilePath === null || realPluginDir === null) return false;
+    return isInsideDirectory(realFilePath, realPluginDir);
+  });
 
 const servePanelAsset = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
@@ -101,6 +123,18 @@ const servePanelAsset = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const fileInfo = yield* fileSystem.stat(filePath).pipe(Effect.catch(() => Effect.succeed(null)));
   if (!fileInfo || fileInfo.type !== "File") {
+    return notFound;
+  }
+
+  // Проверка путей выше — текстовая; симлинк внутри панельной папки увёл бы
+  // чтение наружу (а субресурсы отдаются без сессии). Поэтому сверяем ещё и
+  // фактический путь после разыменования.
+  const resolved = yield* resolveRealPathInsidePlugin({
+    fileSystem,
+    filePath,
+    pluginDir: plugin.directoryPath,
+  });
+  if (!resolved) {
     return notFound;
   }
 
