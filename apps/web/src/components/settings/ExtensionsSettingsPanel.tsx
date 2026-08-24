@@ -1,14 +1,29 @@
 import type { PluginsSnapshot, ServerPlugin } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
 import { AlertTriangleIcon, Loader2Icon, PuzzleIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { getPrimaryEnvironmentConnection } from "../../environments/runtime";
+import { makePluginPanelFile, usePreviewPane } from "../preview/PreviewPaneContext";
 import { toastManager } from "../ui/toast";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
 export function ExtensionsSettingsPanel() {
   const [snapshot, setSnapshot] = useState<PluginsSnapshot | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const { openFile } = usePreviewPane();
+  const navigate = useNavigate();
+
+  // Правая панель в настройках скрыта, поэтому после открытия вкладки уводим
+  // пользователя обратно в чат — иначе «Открыть панель» выглядит как no-op.
+  const handleOpenPanel = useCallback(
+    (plugin: ServerPlugin) => {
+      if (!plugin.panel) return;
+      openFile(makePluginPanelFile(plugin.id, plugin.panel.title));
+      void navigate({ to: "/" });
+    },
+    [navigate, openFile],
+  );
 
   useEffect(() => {
     return getPrimaryEnvironmentConnection().client.server.subscribePlugins((next) => {
@@ -57,6 +72,7 @@ export function ExtensionsSettingsPanel() {
               plugin={plugin}
               toggling={togglingId === plugin.id}
               onToggle={() => void handleToggle(plugin)}
+              onOpenPanel={() => handleOpenPanel(plugin)}
             />
           ))
         )}
@@ -64,10 +80,13 @@ export function ExtensionsSettingsPanel() {
 
       {snapshot !== null ? (
         <p className="px-1 text-xs text-muted-foreground">
-          Один плагин — один JSON-файл в{" "}
+          Плагин — это{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-[11px]">&lt;id&gt;.json</code> или
+          директория{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-[11px]">&lt;id&gt;/plugin.json</code> в{" "}
           <code className="rounded bg-muted px-1 py-0.5 text-[11px]">{snapshot.pluginsDir}</code>.
           Демон подхватывает изменения без рестарта; hooks реагируют на события приложения, crons
-          выполняются по расписанию.
+          выполняются по расписанию, а панель плагина открывается вкладкой в правой панели.
         </p>
       ) : null}
     </SettingsPageContainer>
@@ -78,12 +97,15 @@ function PluginRow({
   plugin,
   toggling,
   onToggle,
+  onOpenPanel,
 }: {
   plugin: ServerPlugin;
   toggling: boolean;
   onToggle: () => void;
+  onOpenPanel: () => void;
 }) {
   const summaryParts = [
+    ...(plugin.panel ? [`панель: ${plugin.panel.title}`] : []),
     ...(plugin.hooks.length > 0
       ? [`hooks: ${plugin.hooks.map((hook) => hook.on).join(", ")}`]
       : []),
@@ -124,32 +146,43 @@ function PluginRow({
       }
       control={
         plugin.valid ? (
-          <button
-            type="button"
-            disabled={toggling}
-            onClick={onToggle}
-            className="inline-flex overflow-hidden rounded-md border border-input text-xs"
-            aria-label={plugin.enabled ? "Выключить плагин" : "Включить плагин"}
-          >
-            <span
-              className={
-                plugin.enabled
-                  ? "bg-accent px-3 py-1.5 text-accent-foreground"
-                  : "px-3 py-1.5 text-muted-foreground"
-              }
+          <span className="flex items-center gap-2">
+            {plugin.panel && plugin.enabled ? (
+              <button
+                type="button"
+                onClick={onOpenPanel}
+                className="rounded-md border border-input px-3 py-1.5 text-xs text-foreground hover:bg-accent"
+              >
+                Открыть панель
+              </button>
+            ) : null}
+            <button
+              type="button"
+              disabled={toggling}
+              onClick={onToggle}
+              className="inline-flex overflow-hidden rounded-md border border-input text-xs"
+              aria-label={plugin.enabled ? "Выключить плагин" : "Включить плагин"}
             >
-              Вкл
-            </span>
-            <span
-              className={
-                plugin.enabled
-                  ? "px-3 py-1.5 text-muted-foreground"
-                  : "bg-accent px-3 py-1.5 text-accent-foreground"
-              }
-            >
-              Выкл
-            </span>
-          </button>
+              <span
+                className={
+                  plugin.enabled
+                    ? "bg-accent px-3 py-1.5 text-accent-foreground"
+                    : "px-3 py-1.5 text-muted-foreground"
+                }
+              >
+                Вкл
+              </span>
+              <span
+                className={
+                  plugin.enabled
+                    ? "px-3 py-1.5 text-muted-foreground"
+                    : "bg-accent px-3 py-1.5 text-accent-foreground"
+                }
+              >
+                Выкл
+              </span>
+            </button>
+          </span>
         ) : null
       }
     />

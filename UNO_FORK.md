@@ -96,13 +96,20 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 
 ### 7. Плагины — само-расширяемость (Settings → Extensions)
 
-Агент, работающий внутри Uno Work, может расширять сам harness: один плагин = один JSON-файл в `<baseDir>/userdata/plugins/` (в dev-режиме `<baseDir>/dev/plugins/`). Демон следит за директорией и подхватывает изменения без рестарта. Манифест декларативный: **hooks** (реакция на события оркестрации → shell-команда) и **crons** (`schedule` — 5-польный cron, либо `every` — интервал, минимум 1m). Никакого исполнения чужого JS в процессе демона — только spawn `/bin/sh -c` с таймаутом (дефолт 60 с, максимум 10 мин) и ограничением параллелизма (4).
+Агент, работающий внутри Uno Work, может расширять сам harness: плагин — это `<id>.json` **или** директория `<id>/plugin.json` (с ассетами рядом) в `<baseDir>/userdata/plugins/` (в dev-режиме `<baseDir>/dev/plugins/`). Демон следит за директорией и подхватывает изменения без рестарта. Манифест декларативный: **hooks** (реакция на события оркестрации → shell-команда) и **crons** (`schedule` — 5-польный cron, либо `every` — интервал, минимум 1m). Никакого исполнения чужого JS в процессе демона — только spawn `/bin/sh -c` с таймаутом (дефолт 60 с, максимум 10 мин) и ограничением параллелизма (4).
 
 - **Контракты:** `packages/contracts/src/plugins.ts` (`PluginManifest`, `ServerPlugin`, `PluginsSnapshot`, `PluginsError`); RPC `server.listPlugins` / `server.setPluginEnabled` / `subscribePlugins` в `rpc.ts`.
 - **Сервер:** `apps/server/src/plugins/` — `cron.ts` (парсер + матчинг, тесты), `PluginRegistry.ts` (загрузка/watch/снапшоты, паттерн `serverSettings.ts`), `PluginRuntime.ts` (подписка на `OrchestrationEngine.streamDomainEvents` + 30-сек cron-свип; каждый запуск логируется `plugins.action.completed` и записывается в историю для UI), `pluginInstructions.ts` (блок системного промпта). Путь `pluginsDir` — в `config.ts`; старт — `serverRuntimeStartup.ts`; слои — `server.ts`.
 - **Инструкции агенту** инжектятся во все четыре драйвера рядом с browser-инструкциями (Claude — `appendSystemPrompt`, Codex — `appendDeveloperInstructions`, OpenCode/Uno — общий `uno-browser-instructions.md` через `extraSections`). Благодаря этому «сделай, чтобы приложение …» превращается в плагин без участия человека.
 - **UI:** Settings → Extensions (`settings.extensions.tsx` + `ExtensionsSettingsPanel.tsx`): список плагинов, вкл/выкл (правит `enabled` в файле), ошибки невалидных манифестов, последние запуски (live через `subscribePlugins`).
 - Хуки исполняют команды с env `UNO_PLUGIN_EVENT` (JSON события), `UNO_PLUGIN_EVENT_TYPE`, `UNO_PLUGIN_ID`, `UNO_PLUGIN_TRIGGER`.
+
+**Панельные плагины (фаза A ТЗ `.plans/20-plugin-panels-custom-ai-ui.md`).** Плагин-директория может объявить `"panel": { "title": ..., "path": "panel/index.html" }` — статическую «софтинку» во вкладке правой панели: агент пишет HTML+inline JS, а cron того же плагина обновляет `data.json` рядом. Никаких localhost-серверов.
+
+- **Раздача:** `apps/server/src/plugins/http.ts` — `GET /api/plugins/:pluginId/panel/*`; `panelPaths.ts` — резолв путей (entry-файл манифеста и его директория как корень, защита от traversal, тесты). Заголовки: MIME по расширению, `X-Content-Type-Options: nosniff`, CSP `self` + inline, `Cache-Control: no-cache`. Плагин выключен/без панели/неизвестен → 404.
+- **Auth-компромисс:** панель рендерится в `<iframe sandbox="allow-scripts">` **без** `allow-same-origin`, поэтому её собственные запросы (`data.json`) не несут сессионную куку в принципе. Навигационные запросы (`Sec-Fetch-Dest: iframe/document` и запросы без заголовка) требуют сессию, субресурсы — нет. Обоснование зафиксировано комментарием в `plugins/http.ts`.
+- **Реестр:** `PluginRegistry.ts` знает обе формы, валидирует `panel` (только директория, относительный путь, файл существует), считает коллизию id ошибкой у обеих форм и перевешивает `fs.watch` на каждую плагин-директорию после reload (плюс дедуп снапшотов — запись `data.json` кроном не будит UI).
+- **UI:** вкладка `kind: "plugin-panel"` (`PreviewPaneContext.makePluginPanelFile` → `/api/plugins/<id>/panel/`), рендер iframe в `PreviewPane.tsx`, кнопка «Открыть панель» в Settings → Extensions и подменю «Панели» в меню «+» табстрипа (список через `server.listPlugins`).
 
 ### 8. Прочее
 

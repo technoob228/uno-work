@@ -12,6 +12,7 @@ import {
   GlobeIcon,
   ImageIcon,
   Loader2Icon,
+  PuzzleIcon,
   SearchIcon,
   TableIcon,
 } from "lucide-react";
@@ -39,6 +40,7 @@ const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   svg: ImageIcon,
   text: FileCode2Icon,
   browser: GlobeIcon,
+  "plugin-panel": PuzzleIcon,
   unknown: FileIcon,
 };
 
@@ -54,6 +56,7 @@ const KIND_BG: Record<PreviewFileKind, string> = {
   svg: "bg-pink-500/16 text-pink-700 dark:text-pink-300",
   text: "bg-slate-500/16 text-slate-700 dark:text-slate-300",
   browser: "bg-indigo-500/16 text-indigo-700 dark:text-indigo-300",
+  "plugin-panel": "bg-violet-500/16 text-violet-700 dark:text-violet-300",
   unknown: "bg-muted text-muted-foreground",
 };
 

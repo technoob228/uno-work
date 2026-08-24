@@ -19,6 +19,7 @@ import {
   PanelLeftOpenIcon,
   PencilIcon,
   PlusIcon,
+  PuzzleIcon,
   TableIcon,
   XIcon,
 } from "lucide-react";
@@ -33,6 +34,7 @@ import * as XLSX from "xlsx";
 import { cn } from "../../lib/utils";
 import { openInPreferredEditor } from "../../editorPreferences";
 import { readEnvironmentApi } from "../../environmentApi";
+import { getPrimaryEnvironmentConnection } from "../../environments/runtime";
 import { readLocalApi } from "../../localApi";
 import { useStore } from "../../store";
 import { Button } from "../ui/button";
@@ -43,6 +45,8 @@ import {
   detectFileKind,
   DUAL_VIEW_KINDS,
   isBrowserTab,
+  isPluginPanelTab,
+  makePluginPanelFile,
   type PreviewFile,
   type PreviewFileKind,
   usePreviewPane,
@@ -66,6 +70,7 @@ const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   svg: ImageIcon,
   text: FileCode2Icon,
   browser: GlobeIcon,
+  "plugin-panel": PuzzleIcon,
   unknown: FileIcon,
 };
 
@@ -81,6 +86,7 @@ const KIND_LABEL: Record<PreviewFileKind, string> = {
   svg: "SVG",
   text: "Text",
   browser: "Браузер",
+  "plugin-panel": "Панель плагина",
   unknown: "File",
 };
 
@@ -91,6 +97,26 @@ const KIND_EDITABLE: ReadonlySet<PreviewFileKind> = new Set<PreviewFileKind>([
   "csv",
   "xlsx",
 ]);
+
+/** Префикс id пунктов меню «+» для панельных плагинов. */
+const PANEL_MENU_ID_PREFIX = "plugin-panel:";
+
+/**
+ * Панельные плагины текущего демона. Читаем лениво, по клику на «+», чтобы не
+ * держать ещё одну постоянную подписку ради редко открываемого меню.
+ */
+async function listPluginPanels(): Promise<ReadonlyArray<{ id: string; title: string }>> {
+  try {
+    const snapshot = await getPrimaryEnvironmentConnection().client.server.listPlugins();
+    return snapshot.plugins.flatMap((plugin) =>
+      plugin.valid && plugin.enabled && plugin.panel
+        ? [{ id: plugin.id, title: plugin.panel.title }]
+        : [],
+    );
+  } catch {
+    return [];
+  }
+}
 
 const PREVIEW_WIDTH_STORAGE_KEY = "preview_pane_width";
 const DEFAULT_PREVIEW_WIDTH = 24 * 16;
@@ -1080,9 +1106,34 @@ function EditableBody({
   );
 }
 
+/**
+ * Панель плагина: статические файлы демона в изолированном iframe.
+ * `sandbox="allow-scripts"` БЕЗ `allow-same-origin` — origin документа
+ * непрозрачный, поэтому у панели нет доступа ни к DOM приложения, ни к его
+ * кукам и хранилищу. Ценой этого субресурсы панели грузятся без сессии — так
+ * и задумано, см. `apps/server/src/plugins/http.ts`.
+ */
+function PluginPanelBody({ file }: { file: PreviewFile }) {
+  if (!file.url) {
+    return <MetadataPlaceholder file={file} label="У панели нет адреса" />;
+  }
+  return (
+    <iframe
+      title={file.name}
+      src={file.url}
+      sandbox="allow-scripts"
+      className="h-full w-full border-0 bg-white"
+    />
+  );
+}
+
 function Body({ file }: { file: PreviewFile }) {
   const { currentChatEnvironmentId, editingFileId, sourceViewFileIds } = usePreviewPane();
   const effectiveEnvironmentId = file.environmentId ?? currentChatEnvironmentId ?? undefined;
+
+  if (file.kind === "plugin-panel") {
+    return <PluginPanelBody file={file} />;
+  }
   const hasInlineContent = Boolean(file.content) || Boolean(file.blobUrl);
   const sourceView = DUAL_VIEW_KINDS.has(file.kind) && sourceViewFileIds.includes(file.id);
 
@@ -1338,6 +1389,7 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
     setOpen,
     togglePreviewLayoutMode,
     openBrowser,
+    openFile,
     openUrl,
     currentChatProjectCwd,
     currentChatEnvironmentId,
@@ -1551,10 +1603,23 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
             type="button"
             onClick={async (event) => {
               const rect = event.currentTarget.getBoundingClientRect();
+              const panels = await listPluginPanels();
               const choice = await readLocalApi()?.contextMenu.show(
                 [
                   { id: "file", label: "Открыть файл…" },
                   { id: "page", label: "Открыть страницу" },
+                  ...(panels.length > 0
+                    ? [
+                        {
+                          id: "panels",
+                          label: "Панели",
+                          children: panels.map((panel) => ({
+                            id: `${PANEL_MENU_ID_PREFIX}${panel.id}`,
+                            label: panel.title,
+                          })),
+                        },
+                      ]
+                    : []),
                 ],
                 { x: rect.left, y: rect.bottom + 4 },
               );
@@ -1565,10 +1630,14 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
                 });
               } else if (choice === "page") {
                 openUrl();
+              } else if (choice?.startsWith(PANEL_MENU_ID_PREFIX)) {
+                const pluginId = choice.slice(PANEL_MENU_ID_PREFIX.length);
+                const panel = panels.find((candidate) => candidate.id === pluginId);
+                if (panel) openFile(makePluginPanelFile(panel.id, panel.title));
               }
             }}
-            aria-label="Открыть файл или страницу"
-            title="Открыть файл или страницу"
+            aria-label="Открыть файл, страницу или панель плагина"
+            title="Открыть файл, страницу или панель плагина"
             className="sticky right-0 inline-flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-md bg-card text-muted-foreground before:pointer-events-none before:absolute before:inset-0 before:bg-accent before:opacity-0 hover:text-foreground hover:before:opacity-100 sm:size-6"
           >
             <PlusIcon className="relative size-3.5" />
@@ -1594,7 +1663,7 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
           <XIcon />
         </Button>
       </header>
-      {paneVisible && active && !isBrowserTab(active) ? (
+      {paneVisible && active && !isBrowserTab(active) && !isPluginPanelTab(active) ? (
         <PathBar file={active} onOpenAt={handleOpenAt} />
       ) : null}
       <div className={cn("relative min-h-0 flex-1", isFocusMode && "pb-36")}>

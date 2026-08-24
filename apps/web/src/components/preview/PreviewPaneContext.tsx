@@ -20,6 +20,7 @@ export type PreviewFileKind =
   | "svg"
   | "text"
   | "browser"
+  | "plugin-panel"
   | "unknown";
 
 export interface PreviewFile {
@@ -37,6 +38,25 @@ export interface PreviewFile {
 
 export function isBrowserTab(file: Pick<PreviewFile, "kind">): boolean {
   return file.kind === "browser";
+}
+
+export function isPluginPanelTab(file: Pick<PreviewFile, "kind">): boolean {
+  return file.kind === "plugin-panel";
+}
+
+/**
+ * Вкладка панельного плагина. URL относительный: панель раздаёт демон текущего
+ * окружения (`/api/plugins/<id>/panel/`), а содержимое рендерится в
+ * изолированном iframe — см. `PreviewPane`.
+ */
+export function makePluginPanelFile(pluginId: string, title: string): PreviewFile {
+  return {
+    id: `plugin-panel:${pluginId}`,
+    name: title,
+    kind: "plugin-panel",
+    content: "",
+    url: `/api/plugins/${encodeURIComponent(pluginId)}/panel/`,
+  };
 }
 
 export interface BrowserContext {
