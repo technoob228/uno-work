@@ -177,7 +177,38 @@
 - Сервер: sendToThread создаёт тред с origin plugin; threadTag реюзает тред.
 - Приёмка: панель с кнопкой «Спроси агента» реально запускает тред.
 
-## Фаза C — Кастомный AI-интерфейс («чат приезжает в панель»)
+## Фаза C — Кастомный AI-интерфейс («чат приезжает в панель») — ✅ СДЕЛАНО
+
+> Реализовано 2026-08-24 на `feat/plugins-v1`. Отклонения от текста ниже:
+> - **C1 — компромисс (разрешён постановкой).** `ChatView` неразделяем без большого рефактора:
+>   одна функция ~3.5к строк, вся обвязка `ChatComposer` (60+ пропсов) вычисляется на месте.
+>   Поэтому `EmbeddedThreadChat` монтирует существующий `ChatView` с флагом `embedded`
+>   (`{ visibility, composer }`), который гасит chrome и эффекты-синглтоны: заголовок,
+>   `BranchToolbar`, plan sidebar, терминалы, глобальные хоткеи, `setCurrentChatContext`,
+>   общий ref композера (`useComposerHandleContext`), автофокус, фокус-режим. Основной чат
+>   не тронут: все ветки под `isEmbedded === false` идентичны прежним.
+> - `permissionPolicy: inherit` реализован как `hideRuntimeModeControl` у `ChatComposer`
+>   (+ `ComposerFooterModeControls`, `CompactComposerControlsMenu`): селектор прав в
+>   встроенном чате скрыт, режим треда остаётся унаследованным.
+> - **Тред** резолвится новым RPC `plugins.resolvePanelThread` (`makePanelThreadResolver`),
+>   а не «sendToThread без текста»: общий код с `sendToThread` вынесен в `loadPanelContext` +
+>   `resolveOrCreatePanelThread`, карта `pluginId+threadTag → threadId` одна.
+> - **`visibility` в манифесте — строка**, а не литерал схемы: типизированный enum давал бы
+>   нечитаемый decode-error на весь манифест. Валидирует реестр (`validatePanelChat`) с
+>   понятной ошибкой; наружу (`ServerPlugin.panel.chat.visibility`) уходит уже литерал,
+>   по умолчанию `"full"`.
+> - **Split вертикальный** (панель сверху, чат снизу): правая панель по умолчанию ~24rem,
+>   деление «слева/справа» там нечитаемо. Пропорция — `localStorage.plugin_panel_chat_split`.
+> - **`answers-only`** оставляет реплики пользователя, ответы ассистента с непустым текстом и
+>   предложенные планы; скрывает `work`-строки и пустые заготовки ответа. Approvals и
+>   вопросы-к-пользователю живут в композере, поэтому видны при любом режиме.
+> - Хвост фазы B закрыт: список панелей в «+»-меню теперь live (`usePluginPanels` →
+>   `subscribePlugins`), разовый `listPlugins` удалён.
+> - **Смоук основного чата в браузере не проходит и без наших правок**: `bun run test:browser`
+>   (`ChatView.browser.tsx`) валит все 75 тестов на общей загрузке (не приходит
+>   `ORCHESTRATION_WS_METHODS.subscribe*`) — проверено на чистом `658a0820`. Прогнаны
+>   `bun run test` в apps/web (1124 ✅) и apps/server (4 pre-existing CORS-падения),
+>   `bun run build` в apps/web.
 
 **Цель Миши:** жить в правой панели: сверху кастомный интерфейс, рядом — компактный чат с фильтром
 шума; центральный чат свёрнут. Харнесс любой.
