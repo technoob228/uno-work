@@ -105,6 +105,14 @@ grep -q '.local/bin' "$HOME/.profile" 2>/dev/null || echo 'export PATH="$HOME/.l
 export PATH="$npm_prefix/bin:$PATH"
 
 curl -fsSL https://console.uno4.dev/cli/uno-code/install.sh | bash || echo "uno-code install failed"
+# UnoDriver ждёт бинарь по фиксированному пути ~/.unowork/uno-code/bin/uno-code
+# (не через PATH), а установщик кладёт его в ~/.local/bin — без этого симлинка
+# демон спавнит uno-code с ENOENT и гейт-харнес не стартует вовсе.
+uno_code_bin="$(command -v uno-code || echo "$HOME/.local/bin/uno-code")"
+if [ -x "$uno_code_bin" ]; then
+  mkdir -p "$HOME/.unowork/uno-code/bin"
+  ln -sf "$uno_code_bin" "$HOME/.unowork/uno-code/bin/uno-code"
+fi
 npm install -g opencode-ai --loglevel=error || echo "opencode install failed"
 
 # Hermes Agent (NousResearch/hermes-agent) ships through PyPI, not npm, and the
