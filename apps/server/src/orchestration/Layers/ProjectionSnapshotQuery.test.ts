@@ -306,6 +306,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           createdAt: "2026-02-24T00:00:02.000Z",
           updatedAt: "2026-02-24T00:00:03.000Z",
           archivedAt: null,
+          pinnedAt: null,
           deletedAt: null,
           messages: [
             {
@@ -416,6 +417,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           createdAt: "2026-02-24T00:00:02.000Z",
           updatedAt: "2026-02-24T00:00:03.000Z",
           archivedAt: null,
+          pinnedAt: null,
           session: {
             threadId: ThreadId.make("thread-1"),
             status: "running",

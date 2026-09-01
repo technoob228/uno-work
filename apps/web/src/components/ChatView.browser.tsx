@@ -364,6 +364,7 @@ function createSnapshotForTargetUser(options: {
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,
         archivedAt: null,
+        pinnedAt: null,
         deletedAt: null,
         messages,
         activities: [],
@@ -429,6 +430,7 @@ function addThreadToSnapshot(
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,
         archivedAt: null,
+        pinnedAt: null,
         deletedAt: null,
         messages: [],
         activities: [],
@@ -778,6 +780,7 @@ function createSnapshotWithSecondaryProject(options?: {
             updatedAt: isoAt(31),
           },
           archivedAt: null,
+          pinnedAt: null,
         },
       ]
     : [];
@@ -810,6 +813,7 @@ function createSnapshotWithSecondaryProject(options?: {
             updatedAt: isoAt(25),
           },
           archivedAt: isoAt(26),
+          pinnedAt: null,
         },
       ]
     : [];

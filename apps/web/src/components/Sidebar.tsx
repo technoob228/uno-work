@@ -5,6 +5,7 @@ import {
   ChevronRightIcon,
   CloudIcon,
   FolderPlusIcon,
+  PinIcon,
   SearchIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -67,8 +68,10 @@ import { isMacPlatform, newCommandId } from "../lib/utils";
 import {
   selectProjectByRef,
   selectProjectsForEnvironment,
+  selectProjectsAcrossEnvironments,
   selectSidebarThreadsForProjectRefs,
   selectSidebarThreadsForEnvironment,
+  selectSidebarThreadsAcrossEnvironments,
   selectThreadByRef,
   useStore,
 } from "../store";
@@ -100,6 +103,7 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarEnvSwitcher } from "./SidebarEnvSwitcher";
+import { SidebarWorkspaceSwitcher } from "./SidebarWorkspaceSwitcher";
 import { Kbd } from "./ui/kbd";
 import {
   getArm64IntelBuildWarningDescription,
@@ -165,12 +169,13 @@ import {
   useThreadJumpHintVisibility,
   ThreadStatusPill,
 } from "./Sidebar.logic";
-import { sortThreads } from "../lib/threadSort";
+import { sortThreadsPinnedFirst } from "../lib/threadSort";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { CommandDialogTrigger } from "./ui/command";
 import { readEnvironmentApi } from "../environmentApi";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
+import { useFeatureFlag } from "../hooks/useFeatureFlags";
 import { useServerKeybindings } from "../rpc/serverState";
 import {
   derivePhysicalProjectKey,
@@ -569,6 +574,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             </Tooltip>
           )}
           {threadStatus && <ThreadStatusLabel status={threadStatus} />}
+          {thread.pinnedAt != null && (
+            <PinIcon
+              aria-label="Pinned"
+              className="size-3 shrink-0 -rotate-45 text-muted-foreground/70"
+            />
+          )}
           {renamingThreadKey === threadKey ? (
             <input
               ref={handleRenameInputRef}
@@ -1108,7 +1119,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         },
       });
     };
-    const visibleProjectThreads = sortThreads(
+    const visibleProjectThreads = sortThreadsPinnedFirst(
       projectThreads.filter((thread) => thread.archivedAt === null),
       threadSortOrder,
     );
@@ -1893,6 +1904,27 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     updateSettings,
   ]);
 
+  const setThreadPinned = useCallback(async (threadRef: ScopedThreadRef, pinned: boolean) => {
+    const api = readEnvironmentApi(threadRef.environmentId);
+    if (!api) return;
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.meta.update",
+        commandId: newCommandId(),
+        threadId: threadRef.threadId,
+        pinnedAt: pinned ? new Date().toISOString() : null,
+      });
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: pinned ? "Failed to pin thread" : "Failed to unpin thread",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    }
+  }, []);
+
   const handleThreadContextMenu = useCallback(
     async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
       const api = readLocalApi();
@@ -1904,9 +1936,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
       );
       const threadWorkspacePath = thread.worktreePath ?? threadProject?.cwd ?? project.cwd ?? null;
+      const isPinned = thread.pinnedAt != null;
       const clicked = await api.contextMenu.show(
         [
           { id: "rename", label: "Rename thread" },
+          { id: "pin", label: isPinned ? "Unpin thread" : "Pin thread" },
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
@@ -1919,6 +1953,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         setRenamingThreadKey(threadKey);
         setRenamingTitle(thread.title);
         renamingCommittedRef.current = false;
+        return;
+      }
+
+      if (clicked === "pin") {
+        await setThreadPinned(threadRef, !isPinned);
         return;
       }
 
@@ -1966,6 +2005,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       markThreadUnread,
       memberProjectByScopedKey,
       project.cwd,
+      setThreadPinned,
     ],
   );
 
@@ -2435,6 +2475,7 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
 
 const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
+  const sidebarInbox = useFeatureFlag("sidebarInbox");
   const { isMobile, setOpenMobile } = useSidebar();
   const handleSettingsClick = useCallback(() => {
     if (isMobile) {
@@ -2446,7 +2487,7 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
     <SidebarFooter className="gap-2 p-2">
       <SidebarUpdatePill />
-      <SidebarEnvSwitcher />
+      {sidebarInbox ? <SidebarWorkspaceSwitcher /> : <SidebarEnvSwitcher />}
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton
@@ -2802,12 +2843,23 @@ export default function Sidebar() {
   const activeEnvironmentId = useStore((store) => store.activeEnvironmentId);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const selectedEnvironmentId = activeEnvironmentId ?? primaryEnvironmentId;
-  const projects = useStore(
+  // Inbox mode (Labs flag `sidebarInbox`) unions every environment into one
+  // list instead of scoping to the active machine. Gated so that with the flag
+  // off — or on but with scope still "active" — the sidebar is byte-for-byte
+  // today's behaviour.
+  const sidebarInbox = useFeatureFlag("sidebarInbox");
+  const sidebarEnvironmentScope = useSettings((s) => s.sidebarEnvironmentScope);
+  const inboxMode = sidebarInbox && sidebarEnvironmentScope === "all";
+  const perEnvironmentProjects = useStore(
     useShallow((store) => selectProjectsForEnvironment(store, selectedEnvironmentId)),
   );
-  const sidebarThreads = useStore(
+  const acrossEnvironmentProjects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const projects = inboxMode ? acrossEnvironmentProjects : perEnvironmentProjects;
+  const perEnvironmentThreads = useStore(
     useShallow((store) => selectSidebarThreadsForEnvironment(store, selectedEnvironmentId)),
   );
+  const acrossEnvironmentThreads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const sidebarThreads = inboxMode ? acrossEnvironmentThreads : perEnvironmentThreads;
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);
@@ -3094,7 +3146,7 @@ export default function Sidebar() {
   const visibleSidebarThreadKeys = useMemo(
     () =>
       sortedProjects.flatMap((project) => {
-        const projectThreads = sortThreads(
+        const projectThreads = sortThreadsPinnedFirst(
           (threadsByProjectKey.get(project.projectKey) ?? []).filter(
             (thread) => thread.archivedAt === null,
           ),

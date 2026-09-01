@@ -57,6 +57,13 @@ export const FEATURE_FLAGS = [
       "The workspaces registry — machines, boxes and rules a person works across, read from the control plane. Turn off to hide the Workspace settings and its nav entry.",
     default: true,
   },
+  {
+    key: "sidebarInbox",
+    label: "Inbox sidebar",
+    description:
+      "Switch the sidebar to an inbox that unions every machine/workspace into one list, with a workspace switcher in the footer. Off keeps the sidebar scoped to the active machine.",
+    default: false,
+  },
 ] as const satisfies readonly FeatureFlagDefinition[];
 
 export type FeatureFlagKey = (typeof FEATURE_FLAGS)[number]["key"];

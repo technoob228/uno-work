@@ -68,6 +68,7 @@ const makeThreadShell = (
   createdAt: nowIso,
   updatedAt: nowIso,
   archivedAt: null,
+  pinnedAt: null,
   session: null,
   latestUserMessageAt: null,
   hasPendingApprovals: false,
@@ -91,6 +92,7 @@ const makeThreadDetail = (shell: OrchestrationThreadShell): OrchestrationThread 
   createdAt: nowIso,
   updatedAt: nowIso,
   archivedAt: null,
+  pinnedAt: null,
   deletedAt: null,
   messages: [
     {

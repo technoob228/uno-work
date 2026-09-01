@@ -7,7 +7,11 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import type { Thread } from "../types";
-import { getLatestThreadForProject, sortThreads } from "./threadSort";
+import {
+  getLatestThreadForProject,
+  sortThreads,
+  sortThreadsPinnedFirst,
+} from "./threadSort";
 
 const LOCAL_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const PROJECT_ID = ProjectId.make("project-1");
@@ -28,6 +32,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     error: null,
     createdAt: "2026-03-09T10:00:00.000Z",
     archivedAt: null,
+    pinnedAt: null,
     updatedAt: "2026-03-09T10:00:00.000Z",
     latestTurn: null,
     branch: null,
@@ -37,6 +42,50 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     ...overrides,
   };
 }
+
+describe("sortThreadsPinnedFirst", () => {
+  it("floats pinned threads above unpinned ones regardless of recency", () => {
+    const sorted = sortThreadsPinnedFirst(
+      [
+        makeThread({
+          id: ThreadId.make("recent-unpinned"),
+          createdAt: "2026-03-09T12:00:00.000Z",
+          updatedAt: "2026-03-09T12:00:00.000Z",
+        }),
+        makeThread({
+          id: ThreadId.make("older-pinned"),
+          createdAt: "2026-03-09T08:00:00.000Z",
+          updatedAt: "2026-03-09T08:00:00.000Z",
+          pinnedAt: "2026-03-09T09:00:00.000Z",
+        }),
+      ],
+      "created_at",
+    );
+    expect(sorted.map((thread) => thread.id)).toEqual(["older-pinned", "recent-unpinned"]);
+  });
+
+  it("orders multiple pinned threads by most-recently pinned first", () => {
+    const sorted = sortThreadsPinnedFirst(
+      [
+        makeThread({
+          id: ThreadId.make("pinned-early"),
+          pinnedAt: "2026-03-09T09:00:00.000Z",
+        }),
+        makeThread({
+          id: ThreadId.make("pinned-late"),
+          pinnedAt: "2026-03-09T11:00:00.000Z",
+        }),
+        makeThread({ id: ThreadId.make("unpinned") }),
+      ],
+      "created_at",
+    );
+    expect(sorted.map((thread) => thread.id)).toEqual([
+      "pinned-late",
+      "pinned-early",
+      "unpinned",
+    ]);
+  });
+});
 
 describe("sortThreads", () => {
   it("sorts threads by the latest user message in recency mode", () => {

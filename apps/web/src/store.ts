@@ -264,6 +264,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     error: sanitizeThreadErrorMessage(thread.session?.lastError),
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt,
+    pinnedAt: thread.pinnedAt,
     updatedAt: thread.updatedAt,
     latestTurn: thread.latestTurn,
     pendingSourceProposedPlan: thread.latestTurn?.sourceProposedPlan,
@@ -295,6 +296,7 @@ function mapThreadShell(
     error: sanitizeThreadErrorMessage(thread.session?.lastError),
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt,
+    pinnedAt: thread.pinnedAt,
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
@@ -313,6 +315,7 @@ function mapThreadShell(
     session,
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt,
+    pinnedAt: thread.pinnedAt,
     updatedAt: thread.updatedAt,
     latestTurn: thread.latestTurn,
     branch: thread.branch,
@@ -343,6 +346,7 @@ function toThreadShell(thread: Thread): ThreadShell {
     error: thread.error,
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt,
+    pinnedAt: thread.pinnedAt,
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
@@ -415,6 +419,7 @@ function sidebarThreadSummariesEqual(
     threadSessionsEqual(left.session, right.session) &&
     left.createdAt === right.createdAt &&
     left.archivedAt === right.archivedAt &&
+    left.pinnedAt === right.pinnedAt &&
     left.updatedAt === right.updatedAt &&
     latestTurnsEqual(left.latestTurn, right.latestTurn) &&
     left.branch === right.branch &&
@@ -440,6 +445,7 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.error === right.error &&
     left.createdAt === right.createdAt &&
     left.archivedAt === right.archivedAt &&
+    left.pinnedAt === right.pinnedAt &&
     left.updatedAt === right.updatedAt &&
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath
@@ -1282,6 +1288,7 @@ function applyEnvironmentOrchestrationEvent(
           createdAt: event.payload.createdAt,
           updatedAt: event.payload.updatedAt,
           archivedAt: null,
+          pinnedAt: null,
           deletedAt: null,
           messages: [],
           proposedPlans: [],

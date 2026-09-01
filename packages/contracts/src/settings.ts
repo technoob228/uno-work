@@ -35,6 +35,16 @@ export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type;
 export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository";
 
 /**
+ * Whether the sidebar shows only the active machine/environment (`active`) or
+ * unions every environment into one inbox-style list (`all`). Device-scoped
+ * and only consulted when the `sidebarInbox` Labs flag is on — with the flag
+ * off the sidebar always behaves as `active`.
+ */
+export const SidebarEnvironmentScope = Schema.Literals(["active", "all"]);
+export type SidebarEnvironmentScope = typeof SidebarEnvironmentScope.Type;
+export const DEFAULT_SIDEBAR_ENVIRONMENT_SCOPE: SidebarEnvironmentScope = "active";
+
+/**
  * How many distinct hues machines can be told apart by in the workspace UI.
  * Three, because a fourth hue puts a pair on screen that the commonest
  * colour-vision deficiencies cannot separate. The monogram is the identity,
@@ -137,6 +147,9 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   sidebarThreadSortOrder: SidebarThreadSortOrder.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_SORT_ORDER)),
+  ),
+  sidebarEnvironmentScope: SidebarEnvironmentScope.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_ENVIRONMENT_SCOPE)),
   ),
   timestampFormat: TimestampFormat.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
@@ -658,6 +671,7 @@ export const ClientSettingsPatch = Schema.Struct({
   ),
   sidebarProjectSortOrder: Schema.optionalKey(SidebarProjectSortOrder),
   sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
+  sidebarEnvironmentScope: Schema.optionalKey(SidebarEnvironmentScope),
   timestampFormat: Schema.optionalKey(TimestampFormat),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;
