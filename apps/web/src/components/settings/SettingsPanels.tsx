@@ -1,18 +1,13 @@
-import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
+import { ArchiveIcon, ArchiveX } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
-  defaultInstanceIdForDriver,
   type DesktopUpdateChannel,
-  ProviderDriverKind,
-  type ProviderInstanceConfig,
-  type ProviderInstanceId,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { DEFAULT_UNIFIED_SETTINGS, UNO_GATEWAY_BASE_URL } from "@t3tools/contracts/settings";
-import { createModelSelection } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_BASE_NAME, APP_VERSION } from "../../branding";
 import { isLoopbackHostname } from "../../environments/primary";
@@ -24,9 +19,6 @@ import {
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "../../components/desktopUpdate.logic";
-import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { TraitsPicker } from "../chat/TraitsPicker";
-import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
 import { isElectron } from "../../env";
 import { useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
@@ -36,14 +28,6 @@ import {
   useDesktopUpdateState,
 } from "../../lib/desktopUpdateReactQuery";
 import { useDesktopUnoCodeInstallState } from "../../lib/desktopUnoCodeReactQuery";
-import {
-  getCustomModelOptionsByInstance,
-  resolveAppModelSelectionState,
-} from "../../modelSelection";
-import {
-  deriveProviderInstanceEntries,
-  sortProviderInstanceEntries,
-} from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -51,36 +35,21 @@ import {
   selectThreadShellsAcrossEnvironments,
   useStore,
 } from "../../store";
-import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
-import { DraftInput } from "../ui/draft-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
-import { ProviderInstanceCard } from "./ProviderInstanceCard";
-import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
-import {
-  buildProviderInstanceUpdatePatch,
-  withoutProviderInstanceFavorites,
-  withoutProviderInstanceKey,
-} from "./SettingsPanels.logic";
+import { DRIVER_OPTIONS } from "./providerDriverMeta";
 import {
   SettingResetButton,
   SettingsPageContainer,
   SettingsRow,
   SettingsSection,
-  useRelativeTimeTick,
 } from "./settingsLayout";
 import { ProjectFavicon } from "../ProjectFavicon";
-import {
-  useServerAvailableEditors,
-  useServerKeybindingsConfigPath,
-  useServerObservability,
-  useServerProviders,
-} from "../../rpc/serverState";
 
 const THEME_OPTIONS = [
   {
@@ -103,33 +72,9 @@ const TIMESTAMP_FORMAT_LABELS = {
   "24-hour": "24-hour",
 } as const;
 
-const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
-
 const PROVIDER_SETTINGS = DRIVER_OPTIONS.map((definition) => ({
   provider: definition.value,
 }));
-
-function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }) {
-  useRelativeTimeTick();
-  const lastCheckedRelative = lastCheckedAt ? formatRelativeTime(lastCheckedAt) : null;
-
-  if (!lastCheckedRelative) {
-    return null;
-  }
-
-  return (
-    <span className="text-[11px] text-muted-foreground/60">
-      {lastCheckedRelative.suffix ? (
-        <>
-          Checked <span className="font-mono tabular-nums">{lastCheckedRelative.value}</span>{" "}
-          {lastCheckedRelative.suffix}
-        </>
-      ) : (
-        <>Checked {lastCheckedRelative.value}</>
-      )}
-    </span>
-  );
-}
 
 function AboutVersionTitle() {
   return (
