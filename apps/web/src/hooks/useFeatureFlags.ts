@@ -30,7 +30,15 @@ export function useSetFeatureFlag(): (key: FeatureFlagKey, value: boolean) => vo
   const overrides = useFeatureFlagOverrides();
   return useCallback(
     (key: FeatureFlagKey, value: boolean) => {
-      void updateSettings({ featureFlags: { ...overrides, [key]: value } });
+      // The inbox sidebar is only visible with the environment scope on "all"
+      // (see Sidebar.tsx `inboxMode`). Flipping the flag without moving the
+      // scope leaves the sidebar exactly as before, which reads as "the toggle
+      // does nothing" — so the flag carries the scope with it both ways.
+      const scope =
+        key === "sidebarInbox"
+          ? { sidebarEnvironmentScope: value ? ("all" as const) : ("active" as const) }
+          : {};
+      void updateSettings({ featureFlags: { ...overrides, [key]: value }, ...scope });
     },
     [overrides, updateSettings],
   );
