@@ -20,6 +20,7 @@ export const WEB_ONBOARDING_STEP_IDS = [
   "what",
   "web-machine",
   "web-harness",
+  "unollm",
   "web-first-project",
 ] as const;
 

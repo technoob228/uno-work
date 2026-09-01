@@ -73,7 +73,8 @@ function SettingsContentLayout() {
             <div className="flex min-h-7 items-center gap-2 sm:min-h-6">
               <SidebarTrigger className="size-7 shrink-0 md:hidden" />
               <span className="text-sm font-medium text-foreground">Settings</span>
-              <SettingsScopeSwitcher pathname={location.pathname} />
+              {/* Browser build is single-environment: no device-vs-environment
+                  scope toggle. The desktop header below keeps it. */}
               {showRestoreDefaults ? (
                 <div className="ms-auto flex items-center gap-2">
                   <RestoreDefaultsButton onRestored={handleRestored} />

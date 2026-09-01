@@ -3,6 +3,7 @@ import {
   ArchiveIcon,
   ArrowLeftIcon,
   BotIcon,
+  CircleUserIcon,
   FlaskConicalIcon,
   GitBranchIcon,
   GlobeIcon,
@@ -16,6 +17,7 @@ import {
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
 
 import { isWebApp } from "../../webMode";
+import { usePrimaryEnvironmentId } from "~/environments/primary";
 import { type FeatureFlagKey, resolveFeatureFlag } from "../../featureFlags";
 import { useFeatureFlagOverrides } from "../../hooks/useFeatureFlags";
 
@@ -98,13 +100,85 @@ const FLAT_APP_NAV_ITEMS: ReadonlyArray<FlatNavItem> = [
   { label: "Extensions", to: "/settings/extensions", icon: PuzzleIcon, flag: "plugins" },
 ];
 
+/**
+ * The browser build talks to exactly one execution environment — the box
+ * daemon that serves the page — so the desktop device-vs-environment split is
+ * meaningless here. Instead of a scope toggle, web mode shows one flat list
+ * that folds the app-scope pages together with that single environment's own
+ * pages (its providers, its Uno account, its assistants). Every environment
+ * entry resolves to the primary environment id, so provider/gateway/model
+ * settings read and write the one daemon that actually runs the harness.
+ */
+type WebNavItem =
+  | {
+      readonly label: string;
+      readonly icon: ComponentType<{ className?: string }>;
+      readonly scope: "app";
+      readonly section: AppSettingsSection;
+      readonly flag?: FeatureFlagKey;
+    }
+  | {
+      readonly label: string;
+      readonly icon: ComponentType<{ className?: string }>;
+      readonly scope: "environment";
+      readonly section: EnvironmentSettingsSection;
+      readonly flag?: FeatureFlagKey;
+    };
+
+const WEB_NAV_ITEMS: ReadonlyArray<WebNavItem> = [
+  { label: "General", icon: Settings2Icon, scope: "app", section: "general" },
+  { label: "Account", icon: CircleUserIcon, scope: "environment", section: "general" },
+  { label: "Providers", icon: PlugIcon, scope: "environment", section: "providers" },
+  { label: "Assistants", icon: BotIcon, scope: "environment", section: "assistants" },
+  { label: "Connections", icon: Link2Icon, scope: "app", section: "connections" },
+  {
+    label: "Source Control",
+    icon: GitBranchIcon,
+    scope: "environment",
+    section: "source-control",
+  },
+  { label: "Browser", icon: GlobeIcon, scope: "app", section: "browser", flag: "browserCompanion" },
+  { label: "Archive", icon: ArchiveIcon, scope: "environment", section: "archived" },
+  { label: "Labs", icon: FlaskConicalIcon, scope: "app", section: "labs" },
+];
+
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   const { isMobile, setOpenMobile } = useSidebar();
   const location = useMemo(() => parseSettingsScopeLocation(pathname), [pathname]);
   const flagOverrides = useFeatureFlagOverrides();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const items = useMemo(() => {
+    const isVisible = (flag: FeatureFlagKey | undefined) =>
+      flag === undefined || resolveFeatureFlag(flagOverrides, flag);
+
+    // Browser build: one flat list, no scope split. Environment pages point at
+    // the single primary environment so the box's providers and Uno gateway
+    // key are reachable and resolve to the daemon that runs the harness.
+    if (isWebApp) {
+      const flatItems = FLAT_APP_NAV_ITEMS.filter((item) => isVisible(item.flag)).map((item) => ({
+        label: item.label,
+        icon: item.icon,
+        to: item.to,
+      }));
+      return [
+        ...WEB_NAV_ITEMS.filter((item) => isVisible(item.flag))
+          // Environment pages need the primary id; before it has bootstrapped
+          // we simply omit them rather than build a broken path.
+          .filter((item) => item.scope === "app" || primaryEnvironmentId !== null)
+          .map((item) => ({
+            label: item.label,
+            icon: item.icon,
+            to:
+              item.scope === "app"
+                ? appSettingsPath(item.section)
+                : environmentSettingsPath(primaryEnvironmentId!, item.section),
+          })),
+        ...flatItems,
+      ];
+    }
+
     const environmentId = location.environmentId;
     if (location.kind === "environment" && environmentId) {
       return ENVIRONMENT_NAV_ITEMS.map((item) => ({
@@ -113,8 +187,6 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         to: environmentSettingsPath(environmentId, item.section),
       }));
     }
-    const isVisible = (flag: FeatureFlagKey | undefined) =>
-      flag === undefined || resolveFeatureFlag(flagOverrides, flag);
     return [
       ...APP_NAV_ITEMS.filter((item) => isVisible(item.flag)).map((item) => ({
         label: item.label,
@@ -127,7 +199,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         to: item.to,
       })),
     ];
-  }, [flagOverrides, location.environmentId, location.kind]);
+  }, [flagOverrides, location.environmentId, location.kind, primaryEnvironmentId]);
   const handleSectionClick = useCallback(
     (to: string) => {
       if (isMobile) {
