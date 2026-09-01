@@ -77,6 +77,14 @@ export const ClientSettingsSchema = Schema.Struct({
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffIgnoreWhitespace: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffWordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Labs / feature-flag overrides. A sparse map from flag key to the user's
+  // on/off choice; absent keys fall back to each flag's declared default in
+  // the app-side registry (apps/web/src/featureFlags.ts). Kept as an open
+  // string→boolean map on purpose so adding a new flag is a one-line registry
+  // entry with no schema change.
+  featureFlags: Schema.Record(Schema.String, Schema.Boolean).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
   onboardingCompleted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   unoLastModelRoute: UnoModelRoute.pipe(
     Schema.withDecodingDefault(Effect.succeed("default" as const)),
@@ -610,6 +618,7 @@ export const ClientSettingsPatch = Schema.Struct({
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
   diffWordWrap: Schema.optionalKey(Schema.Boolean),
+  featureFlags: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
   unoLastModelRoute: Schema.optionalKey(UnoModelRoute),
   favorites: Schema.optionalKey(
     Schema.Array(

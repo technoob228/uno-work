@@ -32,6 +32,7 @@ import TurndownService from "turndown";
 import * as XLSX from "xlsx";
 
 import { cn } from "../../lib/utils";
+import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { openInPreferredEditor } from "../../editorPreferences";
 import { readEnvironmentApi } from "../../environmentApi";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
@@ -1554,6 +1555,8 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
   // Live-список панелей: агент может создать плагин прямо сейчас, и он должен
   // появиться в меню «+» без переоткрытия (хвост фазы B).
   const panels = usePluginPanels();
+  const pluginsEnabled = useFeatureFlag("plugins");
+  const browserCompanionEnabled = useFeatureFlag("browserCompanion");
 
   // Прокручиваем активную вкладку в видимую область: при длинном ряде вкладок
   // новая вкладка открывалась за правым краем и оставалась невидимой.
@@ -1764,8 +1767,10 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
               const choice = await readLocalApi()?.contextMenu.show(
                 [
                   { id: "file", label: "Открыть файл…" },
-                  { id: "page", label: "Открыть страницу" },
-                  ...(panels.length > 0
+                  ...(browserCompanionEnabled
+                    ? [{ id: "page", label: "Открыть страницу" }]
+                    : []),
+                  ...(pluginsEnabled && panels.length > 0
                     ? [
                         {
                           id: "panels",

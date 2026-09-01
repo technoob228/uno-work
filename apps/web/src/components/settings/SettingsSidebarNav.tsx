@@ -3,6 +3,7 @@ import {
   ArchiveIcon,
   ArrowLeftIcon,
   BotIcon,
+  FlaskConicalIcon,
   GitBranchIcon,
   GlobeIcon,
   KeyRoundIcon,
@@ -14,6 +15,8 @@ import {
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
 
 import { isWebApp } from "../../webMode";
+import { type FeatureFlagKey, resolveFeatureFlag } from "../../featureFlags";
+import { useFeatureFlagOverrides } from "../../hooks/useFeatureFlags";
 
 import {
   appSettingsPath,
@@ -44,10 +47,13 @@ const APP_NAV_ITEMS: ReadonlyArray<{
   label: string;
   section: AppSettingsSection;
   icon: ComponentType<{ className?: string }>;
+  /** When set, the entry is hidden unless this feature flag is enabled. */
+  flag?: FeatureFlagKey;
 }> = [
   { label: "General", section: "general", icon: Settings2Icon },
   { label: "Connections", section: "connections", icon: Link2Icon },
-  { label: "Browser", section: "browser", icon: GlobeIcon },
+  { label: "Browser", section: "browser", icon: GlobeIcon, flag: "browserCompanion" },
+  { label: "Labs", section: "labs", icon: FlaskConicalIcon },
 ];
 
 const ENVIRONMENT_NAV_ITEMS: ReadonlyArray<{
@@ -69,12 +75,25 @@ const ENVIRONMENT_NAV_ITEMS: ReadonlyArray<{
  * links; Credentials is web-only, matching the desktop shell where it has no
  * meaning.
  */
-type FlatNavItem = { label: string; to: string; icon: ComponentType<{ className?: string }> };
+type FlatNavItem = {
+  label: string;
+  to: string;
+  icon: ComponentType<{ className?: string }>;
+  /** When set, the entry is hidden unless this feature flag is enabled. */
+  flag?: FeatureFlagKey;
+};
 const FLAT_APP_NAV_ITEMS: ReadonlyArray<FlatNavItem> = [
   ...(isWebApp
-    ? [{ label: "Credentials", to: "/settings/vault", icon: KeyRoundIcon } as FlatNavItem]
+    ? [
+        {
+          label: "Credentials",
+          to: "/settings/vault",
+          icon: KeyRoundIcon,
+          flag: "vault",
+        } as FlatNavItem,
+      ]
     : []),
-  { label: "Extensions", to: "/settings/extensions", icon: PuzzleIcon },
+  { label: "Extensions", to: "/settings/extensions", icon: PuzzleIcon, flag: "plugins" },
 ];
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
@@ -82,6 +101,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const canGoBack = useCanGoBack();
   const { isMobile, setOpenMobile } = useSidebar();
   const location = useMemo(() => parseSettingsScopeLocation(pathname), [pathname]);
+  const flagOverrides = useFeatureFlagOverrides();
   const items = useMemo(() => {
     const environmentId = location.environmentId;
     if (location.kind === "environment" && environmentId) {
@@ -91,19 +111,21 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         to: environmentSettingsPath(environmentId, item.section),
       }));
     }
+    const isVisible = (flag: FeatureFlagKey | undefined) =>
+      flag === undefined || resolveFeatureFlag(flagOverrides, flag);
     return [
-      ...APP_NAV_ITEMS.map((item) => ({
+      ...APP_NAV_ITEMS.filter((item) => isVisible(item.flag)).map((item) => ({
         label: item.label,
         icon: item.icon,
         to: appSettingsPath(item.section),
       })),
-      ...FLAT_APP_NAV_ITEMS.map((item) => ({
+      ...FLAT_APP_NAV_ITEMS.filter((item) => isVisible(item.flag)).map((item) => ({
         label: item.label,
         icon: item.icon,
         to: item.to,
       })),
     ];
-  }, [location.environmentId, location.kind]);
+  }, [flagOverrides, location.environmentId, location.kind]);
   const handleSectionClick = useCallback(
     (to: string) => {
       if (isMobile) {

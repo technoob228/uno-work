@@ -25,6 +25,7 @@ import { SidebarTrigger, useSidebar } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { usePreviewPane } from "../preview/PreviewPaneContext";
+import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { toggleDevMode, useDevMode } from "../../devMode";
 
 const HEADER_ICON_BUTTON_CLASS =
@@ -95,6 +96,7 @@ export const ChatHeader = memo(function ChatHeader({
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const devMode = useDevMode();
+  const browserCompanionEnabled = useFeatureFlag("browserCompanion");
   const { isMobile, open, openMobile } = useSidebar();
   const sidebarVisible = isMobile ? openMobile : open;
   const {
@@ -255,21 +257,23 @@ export const ChatHeader = memo(function ChatHeader({
           />
           <TooltipPopup side="bottom">Открыть файловый браузер</TooltipPopup>
         </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                onClick={() => openUrl()}
-                aria-label="Открыть браузер"
-                className={HEADER_ICON_BUTTON_CLASS}
-              >
-                <GlobeIcon className="size-3" />
-              </button>
-            }
-          />
-          <TooltipPopup side="bottom">Открыть браузер</TooltipPopup>
-        </Tooltip>
+        {browserCompanionEnabled && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={() => openUrl()}
+                  aria-label="Открыть браузер"
+                  className={HEADER_ICON_BUTTON_CLASS}
+                >
+                  <GlobeIcon className="size-3" />
+                </button>
+              }
+            />
+            <TooltipPopup side="bottom">Открыть браузер</TooltipPopup>
+          </Tooltip>
+        )}
         {previewFiles.length > 0 && (
           <Tooltip>
             <TooltipTrigger

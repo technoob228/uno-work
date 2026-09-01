@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CredentialImportItem, CredentialId, CredentialMetadata } from "@t3tools/contracts";
 
 import { ensureLocalApi } from "../../localApi";
+import { useFeatureFlag } from "../../hooks/useFeatureFlags";
+import { FeatureDisabledPanel } from "./FeatureDisabledPanel";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -109,6 +111,7 @@ function parseImportText(text: string): readonly CredentialImportItem[] {
 }
 
 export function VaultSettings() {
+  const vaultEnabled = useFeatureFlag("vault");
   const [credentials, setCredentials] = useState<readonly CredentialMetadata[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -249,6 +252,10 @@ export function VaultSettings() {
   }, [importText, refresh]);
 
   const canSave = form.url.trim().length > 0 && form.username.trim().length > 0;
+
+  if (!vaultEnabled) {
+    return <FeatureDisabledPanel feature="Credentials" />;
+  }
 
   return (
     <SettingsPageContainer>

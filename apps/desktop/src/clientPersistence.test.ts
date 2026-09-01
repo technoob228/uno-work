@@ -56,6 +56,7 @@ const clientSettings: ClientSettings = {
   confirmThreadDelete: false,
   diffIgnoreWhitespace: true,
   diffWordWrap: true,
+  featureFlags: {},
   onboardingCompleted: false,
   unoLastModelRoute: "default",
   favorites: [],

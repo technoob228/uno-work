@@ -12,11 +12,14 @@ import type { BrowserCredentialRecord, BrowserCredentialScope } from "@t3tools/c
 import { isElectron } from "../../env";
 import { useBrowserCredentials, useInvalidateBrowserCredentials } from "../preview/BrowserPane";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
+import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
+import { FeatureDisabledPanel } from "./FeatureDisabledPanel";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
 export function BrowserSettingsPanel() {
+  const browserEnabled = useFeatureFlag("browserCompanion");
   const browserProfileScope = useSettings((settings) => settings.browserProfileScope);
   const browserAutomationLevel = useSettings((settings) => settings.browserAutomationLevel);
   const { updateSettings } = useUpdateSettings();
@@ -34,6 +37,10 @@ export function BrowserSettingsPanel() {
     },
     [invalidateCredentials],
   );
+
+  if (!browserEnabled) {
+    return <FeatureDisabledPanel feature="Browser" />;
+  }
 
   return (
     <SettingsPageContainer>

@@ -25,6 +25,7 @@ import { Route as SettingsArchivedRouteImport } from './routes/settings.archived
 import { Route as ChatAssistantRouteImport } from './routes/_chat.assistant'
 import { Route as ChatAssistantIndexRouteImport } from './routes/_chat.assistant.index'
 import { Route as SettingsEnvironmentEnvironmentIdRouteImport } from './routes/settings.environment.$environmentId'
+import { Route as SettingsAppLabsRouteImport } from './routes/settings.app.labs'
 import { Route as SettingsAppGeneralRouteImport } from './routes/settings.app.general'
 import { Route as SettingsAppConnectionsRouteImport } from './routes/settings.app.connections'
 import { Route as SettingsAppBrowserRouteImport } from './routes/settings.app.browser'
@@ -117,6 +118,11 @@ const SettingsEnvironmentEnvironmentIdRoute =
     path: '/environment/$environmentId',
     getParentRoute: () => SettingsRoute,
   } as any)
+const SettingsAppLabsRoute = SettingsAppLabsRouteImport.update({
+  id: '/app/labs',
+  path: '/app/labs',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsAppGeneralRoute = SettingsAppGeneralRouteImport.update({
   id: '/app/general',
   path: '/app/general',
@@ -199,6 +205,7 @@ export interface FileRoutesByFullPath {
   '/settings/app/browser': typeof SettingsAppBrowserRoute
   '/settings/app/connections': typeof SettingsAppConnectionsRoute
   '/settings/app/general': typeof SettingsAppGeneralRoute
+  '/settings/app/labs': typeof SettingsAppLabsRoute
   '/settings/environment/$environmentId': typeof SettingsEnvironmentEnvironmentIdRouteWithChildren
   '/assistant/': typeof ChatAssistantIndexRoute
   '/assistant/$environmentId/$projectId': typeof ChatAssistantEnvironmentIdProjectIdRoute
@@ -226,6 +233,7 @@ export interface FileRoutesByTo {
   '/settings/app/browser': typeof SettingsAppBrowserRoute
   '/settings/app/connections': typeof SettingsAppConnectionsRoute
   '/settings/app/general': typeof SettingsAppGeneralRoute
+  '/settings/app/labs': typeof SettingsAppLabsRoute
   '/settings/environment/$environmentId': typeof SettingsEnvironmentEnvironmentIdRouteWithChildren
   '/assistant': typeof ChatAssistantIndexRoute
   '/assistant/$environmentId/$projectId': typeof ChatAssistantEnvironmentIdProjectIdRoute
@@ -256,6 +264,7 @@ export interface FileRoutesById {
   '/settings/app/browser': typeof SettingsAppBrowserRoute
   '/settings/app/connections': typeof SettingsAppConnectionsRoute
   '/settings/app/general': typeof SettingsAppGeneralRoute
+  '/settings/app/labs': typeof SettingsAppLabsRoute
   '/settings/environment/$environmentId': typeof SettingsEnvironmentEnvironmentIdRouteWithChildren
   '/_chat/assistant/': typeof ChatAssistantIndexRoute
   '/_chat/assistant/$environmentId/$projectId': typeof ChatAssistantEnvironmentIdProjectIdRoute
@@ -286,6 +295,7 @@ export interface FileRouteTypes {
     | '/settings/app/browser'
     | '/settings/app/connections'
     | '/settings/app/general'
+    | '/settings/app/labs'
     | '/settings/environment/$environmentId'
     | '/assistant/'
     | '/assistant/$environmentId/$projectId'
@@ -313,6 +323,7 @@ export interface FileRouteTypes {
     | '/settings/app/browser'
     | '/settings/app/connections'
     | '/settings/app/general'
+    | '/settings/app/labs'
     | '/settings/environment/$environmentId'
     | '/assistant'
     | '/assistant/$environmentId/$projectId'
@@ -342,6 +353,7 @@ export interface FileRouteTypes {
     | '/settings/app/browser'
     | '/settings/app/connections'
     | '/settings/app/general'
+    | '/settings/app/labs'
     | '/settings/environment/$environmentId'
     | '/_chat/assistant/'
     | '/_chat/assistant/$environmentId/$projectId'
@@ -471,6 +483,13 @@ declare module '@tanstack/react-router' {
       path: '/environment/$environmentId'
       fullPath: '/settings/environment/$environmentId'
       preLoaderRoute: typeof SettingsEnvironmentEnvironmentIdRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/app/labs': {
+      id: '/settings/app/labs'
+      path: '/app/labs'
+      fullPath: '/settings/app/labs'
+      preLoaderRoute: typeof SettingsAppLabsRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/app/general': {
@@ -623,6 +642,7 @@ interface SettingsRouteChildren {
   SettingsAppBrowserRoute: typeof SettingsAppBrowserRoute
   SettingsAppConnectionsRoute: typeof SettingsAppConnectionsRoute
   SettingsAppGeneralRoute: typeof SettingsAppGeneralRoute
+  SettingsAppLabsRoute: typeof SettingsAppLabsRoute
   SettingsEnvironmentEnvironmentIdRoute: typeof SettingsEnvironmentEnvironmentIdRouteWithChildren
 }
 
@@ -638,6 +658,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAppBrowserRoute: SettingsAppBrowserRoute,
   SettingsAppConnectionsRoute: SettingsAppConnectionsRoute,
   SettingsAppGeneralRoute: SettingsAppGeneralRoute,
+  SettingsAppLabsRoute: SettingsAppLabsRoute,
   SettingsEnvironmentEnvironmentIdRoute:
     SettingsEnvironmentEnvironmentIdRouteWithChildren,
 }

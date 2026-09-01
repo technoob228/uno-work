@@ -4,11 +4,14 @@ import { AlertTriangleIcon, Loader2Icon, PuzzleIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { getPrimaryEnvironmentConnection } from "../../environments/runtime";
+import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { makePluginPanelFile, usePreviewPane } from "../preview/PreviewPaneContext";
 import { toastManager } from "../ui/toast";
+import { FeatureDisabledPanel } from "./FeatureDisabledPanel";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
 export function ExtensionsSettingsPanel() {
+  const pluginsEnabled = useFeatureFlag("plugins");
   const [snapshot, setSnapshot] = useState<PluginsSnapshot | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const { openFile } = usePreviewPane();
@@ -51,6 +54,10 @@ export function ExtensionsSettingsPanel() {
   }, []);
 
   const plugins = snapshot?.plugins ?? [];
+
+  if (!pluginsEnabled) {
+    return <FeatureDisabledPanel feature="Plugins" />;
+  }
 
   return (
     <SettingsPageContainer>

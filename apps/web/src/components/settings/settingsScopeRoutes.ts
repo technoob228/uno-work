@@ -19,7 +19,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 
 export type SettingsScopeKind = "app" | "environment";
 
-export type AppSettingsSection = "general" | "connections" | "browser";
+export type AppSettingsSection = "general" | "connections" | "browser" | "labs";
 export type EnvironmentSettingsSection =
   | "general"
   | "providers"
@@ -31,6 +31,7 @@ export const APP_SETTINGS_SECTIONS: ReadonlyArray<AppSettingsSection> = [
   "general",
   "connections",
   "browser",
+  "labs",
 ];
 
 export const ENVIRONMENT_SETTINGS_SECTIONS: ReadonlyArray<EnvironmentSettingsSection> = [
