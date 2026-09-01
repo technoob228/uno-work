@@ -14,15 +14,18 @@
  * half the workspace is worse than one that admits it cannot reach it.
  */
 import type { EnvironmentId, WorkspaceMachine, WorkspaceState } from "@t3tools/contracts";
-import { useQueries } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef } from "react";
 
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
-import { workspaceStateQueryOptions } from "./workspaceReactQuery";
+import {
+  workspaceStateQueryOptions,
+  workspaceSyncMachinesMutationOptions,
+} from "./workspaceReactQuery";
 
 export interface WorkspaceMachineEntry {
   readonly machine: WorkspaceMachine;
@@ -48,6 +51,50 @@ export interface WorkspaceDirectory {
   readonly isLoading: boolean;
   /** Environments connected but whose registry could not be read. */
   readonly unreadableEnvironmentIds: readonly EnvironmentId[];
+}
+
+/**
+ * Make sure the daemon we are talking to is listed in its own registry.
+ *
+ * The registry only fills in when someone presses "Sync connections" in the
+ * Workspace settings, so a fresh box answers "whole workspace · 0 machines"
+ * to the inbox switcher — which reads as broken, not as empty. The daemon
+ * itself is the one machine we know for certain is in the workspace, so it
+ * is registered on sight; other machines still go through the explicit sync.
+ */
+export function useEnsureOwnMachineRegistered(): void {
+  const queryClient = useQueryClient();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const savedLabel = useSavedEnvironmentRegistryStore((state) =>
+    primaryEnvironmentId ? state.byId[primaryEnvironmentId]?.label : undefined,
+  );
+  const stateQuery = useQuery(workspaceStateQueryOptions(primaryEnvironmentId));
+  const syncMachines = useMutation(
+    workspaceSyncMachinesMutationOptions(primaryEnvironmentId, queryClient),
+  );
+  // One attempt per workspace: a registry that refuses the write must not be
+  // hammered on every render.
+  const attemptedForWorkspaceId = useRef<string | null>(null);
+
+  const state = stateQuery.data;
+  const mutate = syncMachines.mutate;
+  useEffect(() => {
+    if (!primaryEnvironmentId || !state) return;
+    if (attemptedForWorkspaceId.current === state.identity.workspaceId) return;
+    if (state.machines.some((machine) => machine.environmentId === primaryEnvironmentId)) return;
+    attemptedForWorkspaceId.current = state.identity.workspaceId;
+    mutate({
+      machines: [
+        {
+          environmentId: primaryEnvironmentId,
+          label: savedLabel?.trim() || "This machine",
+          kind: "local",
+          lastSeenAt: new Date().toISOString(),
+        },
+      ],
+      registryEnvironmentId: primaryEnvironmentId,
+    });
+  }, [mutate, primaryEnvironmentId, savedLabel, state]);
 }
 
 export function useWorkspaces(): WorkspaceDirectory {

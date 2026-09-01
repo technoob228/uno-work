@@ -34,7 +34,11 @@ import {
 } from "../environments/runtime";
 import { useReconnectEnvironment } from "../hooks/useReconnectEnvironment";
 import { useSettings, useUpdateSettings } from "../hooks/useSettings";
-import { useWorkspaces, type WorkspaceSummary } from "../lib/useWorkspaces";
+import {
+  useEnsureOwnMachineRegistered,
+  useWorkspaces,
+  type WorkspaceSummary,
+} from "../lib/useWorkspaces";
 import { selectSidebarThreadsForEnvironment, useStore } from "../store";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
@@ -61,6 +65,7 @@ export function SidebarWorkspaceSwitcher() {
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((state) => state.byId);
   const runtimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
 
+  useEnsureOwnMachineRegistered();
   const { workspaces, isLoading } = useWorkspaces();
 
   const currentEnvironmentId = activeEnvironmentId ?? primaryEnvironmentId ?? null;
