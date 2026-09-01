@@ -180,10 +180,12 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   // выбираются явно (см. ROUTING.md в воркспейсе ассистента).
   [HERMES_DRIVER_KIND]: "anthropic/claude-haiku-4.5",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
-  // The gateway catalog exposes Anthropic under the `~anthropic/…-latest`
-  // aliases; `uno/claude-sonnet-4-6` is not a catalog id and fails with
-  // ProviderModelNotFoundError.
-  [UNO_DRIVER_KIND]: "uno/~anthropic/claude-sonnet-latest",
+  // Gateway catalog ids only (`uno/claude-sonnet-4-6` is not one and fails
+  // with ProviderModelNotFoundError). Anthropic/OpenAI/Google are 403'd at
+  // the OpenRouter account level (ToS block, 2026-08) — until that is
+  // resolved the out-of-the-box default must be a model that answers.
+  // Switch back to `uno/~anthropic/claude-sonnet-latest` once it does.
+  [UNO_DRIVER_KIND]: "uno/moonshotai/kimi-k2.7-code",
 };
 
 /** Per-provider text generation model defaults. */
@@ -194,8 +196,9 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Partial<
   [CLAUDE_DRIVER_KIND]: "claude-haiku-4-5",
   [CURSOR_DRIVER_KIND]: "composer-2",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
-  // Titles/branch names are short throwaway generations — Haiku is plenty.
-  [UNO_DRIVER_KIND]: "uno/~anthropic/claude-haiku-latest",
+  // Titles/branch names are short throwaway generations — cheapest model
+  // that answers (see the note on DEFAULT_MODEL_BY_PROVIDER above).
+  [UNO_DRIVER_KIND]: "uno/~deepseek/deepseek-v4-flash-latest",
 };
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
