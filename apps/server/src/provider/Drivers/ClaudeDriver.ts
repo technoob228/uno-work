@@ -18,6 +18,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeClaudeTextGeneration } from "../../textGeneration/ClaudeTextGeneration.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
+import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
 import { buildBrowserInstructions } from "../browserInstructions.ts";
 import { ServerConfig } from "../../config.ts";
 import { ProviderDriverError } from "../Errors.ts";
@@ -80,10 +81,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const path = yield* Path.Path;
       const eventLoggers = yield* ProviderEventLoggers;
       const browserBridge = yield* BrowserBridge;
+      const serverConfig = yield* ServerConfig;
       const processEnv = browserBridge.applyEnvironment(
         mergeProviderInstanceEnvironment(environment),
       );
-      const browserInstructions = buildBrowserInstructions(browserBridge.baseUrl);
+      const harnessInstructionBlocks = [
+        buildBrowserInstructions(browserBridge.baseUrl),
+        buildPluginInstructions(serverConfig.pluginsDir),
+      ].filter((block): block is string => block !== undefined);
+      const harnessInstructions =
+        harnessInstructionBlocks.length > 0 ? harnessInstructionBlocks.join("\n\n") : undefined;
       const fallbackContinuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,
@@ -103,7 +110,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         bridgeEnvironment: (context: { readonly threadId?: string; readonly cwd?: string }) =>
           browserBridge.scopedEnvironment(context),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
-        ...(browserInstructions ? { appendSystemPrompt: browserInstructions } : {}),
+        ...(harnessInstructions ? { appendSystemPrompt: harnessInstructions } : {}),
       };
       const adapter = yield* makeClaudeAdapter(effectiveConfig, adapterOptions);
       const textGeneration = yield* makeClaudeTextGeneration(effectiveConfig, processEnv);

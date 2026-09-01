@@ -58,6 +58,27 @@ export function isAllowedBridgeUrl(rawUrl: unknown): rawUrl is string {
   }
 }
 
+const MAX_FILE_PATH_LENGTH = 4096;
+
+/**
+ * Путь файла для открытия в панели: абсолютный или `~`-относительный.
+ * Существование не проверяется здесь — это делает HTTP-роут, у которого есть
+ * FileSystem; валидатор отсекает только мусор и относительные пути (их не от
+ * чего резолвить — cwd харнесса серверу неизвестен достоверно).
+ */
+export function isAllowedBridgeFilePath(rawPath: unknown): rawPath is string {
+  if (typeof rawPath !== "string") return false;
+  const trimmed = rawPath.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_FILE_PATH_LENGTH) return false;
+  if (trimmed.includes("\0") || trimmed.includes("\n")) return false;
+  return (
+    trimmed.startsWith("/") ||
+    trimmed === "~" ||
+    trimmed.startsWith("~/") ||
+    /^[A-Za-z]:[\\/]/.test(trimmed)
+  );
+}
+
 function isOptionalString(value: unknown, maxLength: number): value is string | undefined {
   return value === undefined || (typeof value === "string" && value.length <= maxLength);
 }
@@ -169,6 +190,10 @@ export interface BrowserBridgeShape {
     url: string,
     context?: BrowserBridgeRequestContext,
   ) => Effect.Effect<BrowserBridgeStreamEvent>;
+  readonly publishOpenFile: (
+    path: string,
+    context?: BrowserBridgeRequestContext,
+  ) => Effect.Effect<BrowserBridgeStreamEvent>;
   readonly publishCommand: (
     input: BrowserAutomationCommandInput,
     context?: BrowserBridgeRequestContext,
@@ -267,6 +292,20 @@ export const makeBrowserBridge = (input: {
                 type: "openUrl",
                 sequence,
                 url,
+                ...(context ? { context } : {}),
+              }) satisfies BrowserBridgeStreamEvent,
+          ),
+          Effect.tap((event) => PubSub.publish(pubsub, event)),
+        ),
+      publishOpenFile: (path, context?) =>
+        Ref.updateAndGet(sequenceRef, (sequence) => sequence + 1).pipe(
+          Effect.map(
+            (sequence) =>
+              ({
+                version: 1,
+                type: "openFile",
+                sequence,
+                path,
                 ...(context ? { context } : {}),
               }) satisfies BrowserBridgeStreamEvent,
           ),

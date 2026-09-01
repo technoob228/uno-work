@@ -33,6 +33,8 @@ import { ServerSettingsService } from "./serverSettings.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
+import { PluginRegistry } from "./plugins/PluginRegistry.ts";
+import { PluginRuntime } from "./plugins/PluginRuntime.ts";
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper.ts";
 import { ReminderScheduler } from "./reminders/Services/ReminderScheduler.ts";
 import {
@@ -286,6 +288,8 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
   const orchestrationReactor = yield* OrchestrationReactor;
   const providerSessionReaper = yield* ProviderSessionReaper;
   const reminderScheduler = yield* ReminderScheduler;
+  const pluginRegistry = yield* PluginRegistry;
+  const pluginRuntime = yield* PluginRuntime;
   const lifecycleEvents = yield* ServerLifecycleEvents;
   const serverSettings = yield* ServerSettingsService;
   const serverEnvironment = yield* ServerEnvironment;
@@ -327,6 +331,20 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
       ),
     );
 
+    yield* Effect.logDebug("startup phase: starting plugin registry");
+    yield* runStartupPhase(
+      "plugins.start",
+      pluginRegistry.start.pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("failed to start plugin registry", {
+            detail: error.detail,
+            cause: error.cause,
+          }),
+        ),
+        Effect.forkScoped,
+      ),
+    );
+
     yield* Effect.logDebug("startup phase: starting orchestration reactors");
     yield* runStartupPhase(
       "reactors.start",
@@ -334,6 +352,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
         yield* orchestrationReactor.start().pipe(Scope.provide(reactorScope));
         yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
         yield* reminderScheduler.start().pipe(Scope.provide(reactorScope));
+        yield* pluginRuntime.start().pipe(Scope.provide(reactorScope));
       }),
     );
 
@@ -439,8 +458,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
       // шире, чем каталог секретов. T3CODE_STARTUP_PAIRING_OUTPUT=0 глушит
       // выпуск и печать стартового pairing-токена; вход остаётся через
       // `uno-work auth pairing create` или внешний бутстрап.
-      const startupPairingOutputDisabled =
-        process.env.T3CODE_STARTUP_PAIRING_OUTPUT === "0";
+      const startupPairingOutputDisabled = process.env.T3CODE_STARTUP_PAIRING_OUTPUT === "0";
       if (serverConfig.startupPresentation === "headless") {
         if (startupPairingOutputDisabled) {
           yield* Effect.logInfo("Startup pairing output disabled; create tokens on demand.");

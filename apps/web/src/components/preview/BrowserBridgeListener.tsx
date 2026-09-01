@@ -10,7 +10,7 @@ import { useSettings } from "../../hooks/useSettings";
 import { useStore } from "../../store";
 import { runBrowserAutomationCommandForProject } from "./BrowserAutomationRegistry";
 import { resolveBridgeEventProjectKey } from "./browserBridgeRouting";
-import { usePreviewPane } from "./PreviewPaneContext";
+import { detectFileKind, usePreviewPane } from "./PreviewPaneContext";
 import {
   detectBrowserExtension,
   isBrowserExtensionConnected,
@@ -54,7 +54,7 @@ async function postCommandResult(
  *    webview превращается в новую браузерную вкладку.
  */
 export function BrowserBridgeListener() {
-  const { openUrl, openUrlInProject, currentProjectKey } = usePreviewPane();
+  const { openUrl, openUrlInProject, openFileInProject, currentProjectKey } = usePreviewPane();
   const browserAutomationLevel = useSettings((settings) => settings.browserAutomationLevel);
   const groupingSettings = useSettings((settings) => ({
     sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
@@ -71,6 +71,8 @@ export function BrowserBridgeListener() {
   automationLevelRef.current = browserAutomationLevel;
   const openUrlInProjectRef = useRef(openUrlInProject);
   openUrlInProjectRef.current = openUrlInProject;
+  const openFileInProjectRef = useRef(openFileInProject);
+  openFileInProjectRef.current = openFileInProject;
 
   // Ask the companion extension to announce itself early, so the first bridge
   // command does not pay for the handshake.
@@ -106,6 +108,21 @@ export function BrowserBridgeListener() {
             return;
           }
           openUrlInProjectRef.current(projectKey, event.url);
+          return;
+        }
+        if (event.type === "openFile") {
+          // Файлы рендерятся в самой панели (не в webview), поэтому путь один
+          // для Electron и браузерного режима: контент подтянется лениво через
+          // filesystem.readFile окружения-источника.
+          const name = event.path.split(/[\\/]/).findLast(Boolean) ?? event.path;
+          openFileInProjectRef.current(projectKey, {
+            id: event.path,
+            name,
+            kind: detectFileKind(name),
+            content: "",
+            path: event.path,
+            environmentId: connection.environmentId,
+          });
           return;
         }
         void (async () => {

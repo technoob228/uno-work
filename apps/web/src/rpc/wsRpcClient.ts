@@ -130,6 +130,13 @@ export interface WsRpcClient {
     readonly discoverSourceControl: RpcUnaryNoArgMethod<
       typeof WS_METHODS.serverDiscoverSourceControl
     >;
+    readonly listPlugins: RpcUnaryNoArgMethod<typeof WS_METHODS.serverListPlugins>;
+    readonly setPluginEnabled: RpcUnaryMethod<typeof WS_METHODS.serverSetPluginEnabled>;
+    /** Мост панели плагина: «спроси агента» из sandbox-iframe. */
+    readonly sendPluginToThread: RpcUnaryMethod<typeof WS_METHODS.pluginsSendToThread>;
+    /** Тред встроенного чата панели — тот же mapping, что у sendToThread. */
+    readonly resolvePluginPanelThread: RpcUnaryMethod<typeof WS_METHODS.pluginsResolvePanelThread>;
+    readonly subscribePlugins: RpcStreamMethod<typeof WS_METHODS.subscribePlugins>;
     readonly createUnoLlmTopUpAction: RpcUnaryMethod<typeof WS_METHODS.unoCreateLlmTopUpAction>;
     readonly createUnoVideoUpload: RpcUnaryMethod<typeof WS_METHODS.unoVideoCreateUpload>;
     readonly completeUnoVideoUpload: RpcUnaryMethod<typeof WS_METHODS.unoVideoCompleteUpload>;
@@ -269,6 +276,18 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.serverUpdateSettings]({ patch })),
       discoverSourceControl: () =>
         transport.request((client) => client[WS_METHODS.serverDiscoverSourceControl]({})),
+      listPlugins: () => transport.request((client) => client[WS_METHODS.serverListPlugins]({})),
+      setPluginEnabled: (input) =>
+        transport.request((client) => client[WS_METHODS.serverSetPluginEnabled](input)),
+      sendPluginToThread: (input) =>
+        transport.request((client) => client[WS_METHODS.pluginsSendToThread](input)),
+      resolvePluginPanelThread: (input) =>
+        transport.request((client) => client[WS_METHODS.pluginsResolvePanelThread](input)),
+      subscribePlugins: (listener, options) =>
+        transport.subscribe((client) => client[WS_METHODS.subscribePlugins]({}), listener, {
+          ...options,
+          tag: WS_METHODS.subscribePlugins,
+        }),
       createUnoLlmTopUpAction: (input) =>
         transport.request((client) => client[WS_METHODS.unoCreateLlmTopUpAction](input)),
       createUnoVideoUpload: (input) =>

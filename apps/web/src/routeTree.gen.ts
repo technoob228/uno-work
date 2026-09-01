@@ -17,6 +17,7 @@ import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsVaultRouteImport } from './routes/settings.vault'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
+import { Route as SettingsExtensionsRouteImport } from './routes/settings.extensions'
 import { Route as SettingsConnectionsRouteImport } from './routes/settings.connections'
 import { Route as SettingsBrowserRouteImport } from './routes/settings.browser'
 import { Route as SettingsAssistantRouteImport } from './routes/settings.assistant'
@@ -64,6 +65,11 @@ const SettingsSourceControlRoute = SettingsSourceControlRouteImport.update({
 const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
   id: '/general',
   path: '/general',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsExtensionsRoute = SettingsExtensionsRouteImport.update({
+  id: '/extensions',
+  path: '/extensions',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsConnectionsRoute = SettingsConnectionsRouteImport.update({
@@ -123,6 +129,7 @@ export interface FileRoutesByFullPath {
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/connections': typeof SettingsConnectionsRoute
+  '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/settings/vault': typeof SettingsVaultRoute
@@ -139,6 +146,7 @@ export interface FileRoutesByTo {
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/connections': typeof SettingsConnectionsRoute
+  '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/settings/vault': typeof SettingsVaultRoute
@@ -159,6 +167,7 @@ export interface FileRoutesById {
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/connections': typeof SettingsConnectionsRoute
+  '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/settings/vault': typeof SettingsVaultRoute
@@ -180,6 +189,7 @@ export interface FileRouteTypes {
     | '/settings/assistant'
     | '/settings/browser'
     | '/settings/connections'
+    | '/settings/extensions'
     | '/settings/general'
     | '/settings/source-control'
     | '/settings/vault'
@@ -196,6 +206,7 @@ export interface FileRouteTypes {
     | '/settings/assistant'
     | '/settings/browser'
     | '/settings/connections'
+    | '/settings/extensions'
     | '/settings/general'
     | '/settings/source-control'
     | '/settings/vault'
@@ -215,6 +226,7 @@ export interface FileRouteTypes {
     | '/settings/assistant'
     | '/settings/browser'
     | '/settings/connections'
+    | '/settings/extensions'
     | '/settings/general'
     | '/settings/source-control'
     | '/settings/vault'
@@ -288,6 +300,13 @@ declare module '@tanstack/react-router' {
       path: '/general'
       fullPath: '/settings/general'
       preLoaderRoute: typeof SettingsGeneralRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/extensions': {
+      id: '/settings/extensions'
+      path: '/extensions'
+      fullPath: '/settings/extensions'
+      preLoaderRoute: typeof SettingsExtensionsRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/connections': {
@@ -391,6 +410,7 @@ interface SettingsRouteChildren {
   SettingsAssistantRoute: typeof SettingsAssistantRoute
   SettingsBrowserRoute: typeof SettingsBrowserRoute
   SettingsConnectionsRoute: typeof SettingsConnectionsRoute
+  SettingsExtensionsRoute: typeof SettingsExtensionsRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
   SettingsVaultRoute: typeof SettingsVaultRoute
@@ -401,6 +421,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAssistantRoute: SettingsAssistantRoute,
   SettingsBrowserRoute: SettingsBrowserRoute,
   SettingsConnectionsRoute: SettingsConnectionsRoute,
+  SettingsExtensionsRoute: SettingsExtensionsRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,
   SettingsVaultRoute: SettingsVaultRoute,

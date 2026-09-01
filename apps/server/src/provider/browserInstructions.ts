@@ -35,7 +35,20 @@ curl -fsS -X POST "$${BROWSER_BRIDGE_URL_ENV}${BROWSER_BRIDGE_OPEN_PATH}" \\
   -d "{\\"url\\":\\"https://example.com\\",\\"cwd\\":\\"$PWD\\"}"
 \`\`\`
 
-Открывай страницу, когда пользователь просит «открой … в браузере», когда нужно показать запущенный локально сервис, или когда визуальный результат полезнее текстового описания. Открывай только http(s)-адреса.
+Открывай страницу, когда пользователь просит «открой … в браузере», когда нужно показать запущенный локально сервис, или когда визуальный результат полезнее текстового описания. В \`url\` допустимы только http(s)-адреса.
+
+### Показать файл — БЕЗ веб-сервера
+
+Тот же endpoint умеет открывать локальные файлы прямо в правой панели: передай \`file\` (абсолютный путь) вместо \`url\`:
+
+\`\`\`bash
+curl -fsS -X POST "$${BROWSER_BRIDGE_URL_ENV}${BROWSER_BRIDGE_OPEN_PATH}" \\
+  -H "Authorization: Bearer $${BROWSER_BRIDGE_TOKEN_ENV}" \\
+  -H "Content-Type: application/json" \\
+  -d "{\\"file\\":\\"$PWD/report.html\\",\\"cwd\\":\\"$PWD\\"}"
+\`\`\`
+
+Панель сама рендерит markdown, HTML, PDF, CSV, JSON, SVG, изображения и XLSX. Поэтому: **если результат работы — статический файл (отчёт, HTML-страница без backend, документ, диаграмма), НЕ поднимай веб-сервер на localhost — просто открой файл.** Сервер и \`url\` нужны только когда есть настоящий backend или интерактивное приложение с API.
 
 Если нужно управлять уже открытой страницей, используй command-endpoint. Он вернёт JSON-результат после выполнения команды в активной вкладке встроенного браузера твоего проекта (поле \`cwd\` тоже передавай):
 
@@ -58,19 +71,24 @@ curl -fsS -X POST "$${BROWSER_BRIDGE_URL_ENV}${BROWSER_BRIDGE_COMMAND_PATH}" \\
 /**
  * Записывает инструкции в файл и возвращает его путь — для харнессов
  * (OpenCode/Uno), у которых системные инструкции задаются путём к файлу, а не
- * инлайн-текстом. Возвращает undefined, если bridge выключен. Идемпотентно
- * перезаписывает файл при каждом старте инстанса.
+ * инлайн-текстом. `extraSections` — дополнительные блоки (например, инструкции
+ * про плагины), которые пишутся даже если bridge выключен. Возвращает
+ * undefined, если писать нечего. Идемпотентно перезаписывает файл при каждом
+ * старте инстанса.
  */
 export function writeBrowserInstructionsFile(input: {
   readonly stateDir: string;
   readonly baseUrl: string | undefined;
+  readonly extraSections?: ReadonlyArray<string>;
 }): string | undefined {
-  const instructions = buildBrowserInstructions(input.baseUrl);
-  if (!instructions) return undefined;
+  const sections = [buildBrowserInstructions(input.baseUrl), ...(input.extraSections ?? [])].filter(
+    (section): section is string => section !== undefined && section.length > 0,
+  );
+  if (sections.length === 0) return undefined;
   const filePath = Path.join(input.stateDir, "uno-browser-instructions.md");
   try {
     FS.mkdirSync(input.stateDir, { recursive: true });
-    FS.writeFileSync(filePath, `${instructions}\n`, "utf8");
+    FS.writeFileSync(filePath, `${sections.join("\n\n")}\n`, "utf8");
     return filePath;
   } catch {
     return undefined;

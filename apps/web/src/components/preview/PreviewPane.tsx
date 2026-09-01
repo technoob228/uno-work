@@ -19,6 +19,7 @@ import {
   PanelLeftOpenIcon,
   PencilIcon,
   PlusIcon,
+  PuzzleIcon,
   TableIcon,
   XIcon,
 } from "lucide-react";
@@ -33,6 +34,9 @@ import * as XLSX from "xlsx";
 import { cn } from "../../lib/utils";
 import { openInPreferredEditor } from "../../editorPreferences";
 import { readEnvironmentApi } from "../../environmentApi";
+import { usePrimaryEnvironmentId } from "../../environments/primary";
+import { getPrimaryEnvironmentConnection } from "../../environments/runtime";
+import { subscribeShellEvents } from "../../environments/runtime/shellEventBus";
 import { readLocalApi } from "../../localApi";
 import { useStore } from "../../store";
 import { Button } from "../ui/button";
@@ -43,10 +47,20 @@ import {
   detectFileKind,
   DUAL_VIEW_KINDS,
   isBrowserTab,
+  isPluginPanelTab,
+  makePluginPanelFile,
+  pluginIdFromPanelFile,
   type PreviewFile,
   type PreviewFileKind,
   usePreviewPane,
 } from "./PreviewPaneContext";
+import { createPanelBridge, shellEventToPanelEvent } from "./panelBridge";
+import {
+  PluginPanelChat,
+  PluginPanelSplit,
+  usePluginPanels,
+  type PluginPanelDescriptor,
+} from "./PluginPanelChat";
 import { BrowserViews } from "./BrowserPane";
 import { useSidebar } from "../ui/sidebar";
 import { CodeFileView } from "./CodeFileView";
@@ -66,6 +80,7 @@ const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   svg: ImageIcon,
   text: FileCode2Icon,
   browser: GlobeIcon,
+  "plugin-panel": PuzzleIcon,
   unknown: FileIcon,
 };
 
@@ -81,6 +96,7 @@ const KIND_LABEL: Record<PreviewFileKind, string> = {
   svg: "SVG",
   text: "Text",
   browser: "Браузер",
+  "plugin-panel": "Панель плагина",
   unknown: "File",
 };
 
@@ -91,6 +107,9 @@ const KIND_EDITABLE: ReadonlySet<PreviewFileKind> = new Set<PreviewFileKind>([
   "csv",
   "xlsx",
 ]);
+
+/** Префикс id пунктов меню «+» для панельных плагинов. */
+const PANEL_MENU_ID_PREFIX = "plugin-panel:";
 
 const PREVIEW_WIDTH_STORAGE_KEY = "preview_pane_width";
 const DEFAULT_PREVIEW_WIDTH = 24 * 16;
@@ -1080,9 +1099,196 @@ function EditableBody({
   );
 }
 
+/** Абсолютный путь для `openFile` из панели: относительный резолвим от cwd проекта. */
+function resolvePanelFilePath(rawPath: string, projectCwd: string | null): string {
+  const trimmed = rawPath.trim();
+  if (trimmed.length === 0) throw new Error("path пустой");
+  if (trimmed.split(/[\\/]/).includes("..")) throw new Error("path не должен содержать «..»");
+  if (trimmed.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(trimmed)) return trimmed;
+  if (!projectCwd) throw new Error("относительный path без открытого проекта");
+  return `${projectCwd.replace(/\/+$/, "")}/${trimmed.replace(/^\.\//, "")}`;
+}
+
+/**
+ * Панель плагина: статические файлы демона в изолированном iframe.
+ * `sandbox="allow-scripts"` БЕЗ `allow-same-origin` — origin документа
+ * непрозрачный, поэтому у панели нет доступа ни к DOM приложения, ни к его
+ * кукам и хранилищу. Ценой этого субресурсы панели грузятся без сессии — так
+ * и задумано, см. `apps/server/src/plugins/http.ts`.
+ *
+ * Общение с приложением — только через postMessage-мост (`panelBridge.ts`).
+ * Сообщения принимаем ИСКЛЮЧИТЕЛЬНО от `contentWindow` своего iframe:
+ * `event.origin` у opaque origin равен строке `"null"` и ничего не доказывает.
+ */
+function PluginPanelBody({ file }: { file: PreviewFile }) {
+  const {
+    currentProjectKey,
+    currentChatProjectCwd,
+    currentChatProjectId,
+    currentChatEnvironmentId,
+    openFileInProject,
+    openUrlInProject,
+  } = usePreviewPane();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const panels = usePluginPanels();
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const pluginId = pluginIdFromPanelFile(file);
+  // Чат объявляет манифест (`panel.chat`). Жизненный цикл моста от него НЕ
+  // зависит: мост создаётся в эффекте ниже по pluginId/url, а чат — просто
+  // соседний элемент split-раскладки.
+  const panelChat = panels.find((panel) => panel.id === pluginId)?.chat;
+  const url = file.url;
+
+  // Мост живёт ровно столько же, сколько документ панели: пересоздать его на
+  // смене контекста значило бы молча потерять подписки, оформленные панелью
+  // (перевыпустить их она не может — про перезапуск моста ей никто не скажет).
+  // Поэтому актуальный контекст читается из ref в момент вызова.
+  const contextRef = useRef({
+    currentProjectKey,
+    currentChatProjectCwd,
+    currentChatProjectId,
+    currentChatEnvironmentId,
+    primaryEnvironmentId,
+    openFileInProject,
+    openUrlInProject,
+  });
+  contextRef.current = {
+    currentProjectKey,
+    currentChatProjectCwd,
+    currentChatProjectId,
+    currentChatEnvironmentId,
+    primaryEnvironmentId,
+    openFileInProject,
+    openUrlInProject,
+  };
+
+  useEffect(() => {
+    const frame = iframeRef.current;
+    if (!frame || !pluginId) return;
+
+    const bridge = createPanelBridge({
+      post: (message) => {
+        // targetOrigin "*" — у песочницы opaque origin, адресовать её иначе нельзя.
+        iframeRef.current?.contentWindow?.postMessage(message, "*");
+      },
+      methods: {
+        openFile: ({ path }) => {
+          const context = contextRef.current;
+          const absolute = resolvePanelFilePath(path, context.currentChatProjectCwd);
+          const name = absolute.split(/[\\/]/).pop() ?? absolute;
+          context.openFileInProject(context.currentProjectKey, {
+            id: absolute,
+            name,
+            kind: detectFileKind(name),
+            content: "",
+            path: absolute,
+            ...(context.currentChatEnvironmentId
+              ? { environmentId: context.currentChatEnvironmentId }
+              : {}),
+            ...(context.currentChatProjectCwd ? { projectCwd: context.currentChatProjectCwd } : {}),
+          });
+        },
+        openUrl: ({ url: target }) => {
+          const context = contextRef.current;
+          context.openUrlInProject(context.currentProjectKey, target);
+        },
+        sendToThread: async ({ text, threadTag }) => {
+          const context = contextRef.current;
+          if (!context.currentChatProjectId) {
+            throw new Error("нет открытого проекта: откройте тред проекта и повторите");
+          }
+          // Панель раздаёт демон основного окружения (URL вкладки
+          // относительный), поэтому и плагин, и тред живут там же. Проект
+          // удалённого окружения этому демону неизвестен — честно отказываем.
+          if (
+            context.currentChatEnvironmentId !== null &&
+            context.primaryEnvironmentId !== null &&
+            context.currentChatEnvironmentId !== context.primaryEnvironmentId
+          ) {
+            throw new Error("панель работает только с проектами основного окружения");
+          }
+          const result = await getPrimaryEnvironmentConnection().client.server.sendPluginToThread({
+            pluginId,
+            projectId: context.currentChatProjectId,
+            text,
+            ...(threadTag !== undefined ? { threadTag } : {}),
+          });
+          toastManager.add(
+            stackedThreadToast({
+              type: "info",
+              title: `Плагин ${result.pluginName} отправил задачу агенту`,
+              description: text.length > 120 ? `${text.slice(0, 120)}…` : text,
+            }),
+          );
+          return { threadId: result.threadId, created: result.created };
+        },
+      },
+    });
+
+    const onMessage = (event: MessageEvent) => {
+      const currentFrame = iframeRef.current;
+      if (!currentFrame || event.source !== currentFrame.contentWindow) return;
+      bridge.handleMessage(event.data);
+    };
+    window.addEventListener("message", onMessage);
+
+    const unsubscribe = subscribeShellEvents((notice) => {
+      const context = contextRef.current;
+      if (
+        context.currentChatEnvironmentId !== null &&
+        notice.environmentId !== context.currentChatEnvironmentId
+      ) {
+        return;
+      }
+      const panelEvent = shellEventToPanelEvent(notice);
+      // События только проекта вкладки: панель не должна видеть чужую работу.
+      if (!panelEvent || panelEvent.projectId !== context.currentChatProjectId) return;
+      bridge.emitEvent(panelEvent);
+    });
+
+    return () => {
+      window.removeEventListener("message", onMessage);
+      unsubscribe();
+    };
+  }, [pluginId, url]);
+
+  if (!url) {
+    return <MetadataPlaceholder file={file} label="У панели нет адреса" />;
+  }
+  return (
+    <PluginPanelSplit
+      panel={
+        <iframe
+          ref={iframeRef}
+          title={file.name}
+          src={url}
+          sandbox="allow-scripts"
+          className="h-full w-full border-0 bg-white"
+        />
+      }
+      chat={
+        panelChat && pluginId ? (
+          <PluginPanelChat
+            pluginId={pluginId}
+            threadTag={panelChat.threadTag}
+            visibility={panelChat.visibility}
+            projectId={currentChatProjectId}
+            environmentId={currentChatEnvironmentId}
+            primaryEnvironmentId={primaryEnvironmentId}
+          />
+        ) : null
+      }
+    />
+  );
+}
+
 function Body({ file }: { file: PreviewFile }) {
   const { currentChatEnvironmentId, editingFileId, sourceViewFileIds } = usePreviewPane();
   const effectiveEnvironmentId = file.environmentId ?? currentChatEnvironmentId ?? undefined;
+
+  if (file.kind === "plugin-panel") {
+    return <PluginPanelBody file={file} />;
+  }
   const hasInlineContent = Boolean(file.content) || Boolean(file.blobUrl);
   const sourceView = DUAL_VIEW_KINDS.has(file.kind) && sourceViewFileIds.includes(file.id);
 
@@ -1338,12 +1544,16 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
     setOpen,
     togglePreviewLayoutMode,
     openBrowser,
+    openFile,
     openUrl,
     currentChatProjectCwd,
     currentChatEnvironmentId,
     toggleSourceView,
   } = usePreviewPane();
   const tabStripRef = useRef<HTMLDivElement | null>(null);
+  // Live-список панелей: агент может создать плагин прямо сейчас, и он должен
+  // появиться в меню «+» без переоткрытия (хвост фазы B).
+  const panels = usePluginPanels();
 
   // Прокручиваем активную вкладку в видимую область: при длинном ряде вкладок
   // новая вкладка открывалась за правым краем и оставалась невидимой.
@@ -1555,6 +1765,18 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
                 [
                   { id: "file", label: "Открыть файл…" },
                   { id: "page", label: "Открыть страницу" },
+                  ...(panels.length > 0
+                    ? [
+                        {
+                          id: "panels",
+                          label: "Панели",
+                          children: panels.map((panel) => ({
+                            id: `${PANEL_MENU_ID_PREFIX}${panel.id}`,
+                            label: panel.title,
+                          })),
+                        },
+                      ]
+                    : []),
                 ],
                 { x: rect.left, y: rect.bottom + 4 },
               );
@@ -1565,10 +1787,14 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
                 });
               } else if (choice === "page") {
                 openUrl();
+              } else if (choice?.startsWith(PANEL_MENU_ID_PREFIX)) {
+                const pluginId = choice.slice(PANEL_MENU_ID_PREFIX.length);
+                const panel = panels.find((candidate) => candidate.id === pluginId);
+                if (panel) openFile(makePluginPanelFile(panel.id, panel.title));
               }
             }}
-            aria-label="Открыть файл или страницу"
-            title="Открыть файл или страницу"
+            aria-label="Открыть файл, страницу или панель плагина"
+            title="Открыть файл, страницу или панель плагина"
             className="sticky right-0 inline-flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-md bg-card text-muted-foreground before:pointer-events-none before:absolute before:inset-0 before:bg-accent before:opacity-0 hover:text-foreground hover:before:opacity-100 sm:size-6"
           >
             <PlusIcon className="relative size-3.5" />
@@ -1594,7 +1820,7 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
           <XIcon />
         </Button>
       </header>
-      {paneVisible && active && !isBrowserTab(active) ? (
+      {paneVisible && active && !isBrowserTab(active) && !isPluginPanelTab(active) ? (
         <PathBar file={active} onOpenAt={handleOpenAt} />
       ) : null}
       <div className={cn("relative min-h-0 flex-1", isFocusMode && "pb-36")}>

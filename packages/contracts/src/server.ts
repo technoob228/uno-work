@@ -315,6 +315,20 @@ export const BrowserBridgeOpenUrlEvent = Schema.Struct({
 });
 export type BrowserBridgeOpenUrlEvent = typeof BrowserBridgeOpenUrlEvent.Type;
 
+/**
+ * Событие «открой локальный файл в правой панели предпросмотра». Путь —
+ * абсолютный (после серверной нормализации `~`); клиент лениво читает
+ * содержимое через `filesystem.readFile` своего окружения.
+ */
+export const BrowserBridgeOpenFileEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("openFile"),
+  sequence: NonNegativeInt,
+  path: Schema.String,
+  context: Schema.optional(BrowserBridgeRequestContext),
+});
+export type BrowserBridgeOpenFileEvent = typeof BrowserBridgeOpenFileEvent.Type;
+
 export const BrowserAutomationCommandName = Schema.Literals([
   "openUrl",
   "state",
@@ -370,6 +384,7 @@ export type BrowserBridgeCommandEvent = typeof BrowserBridgeCommandEvent.Type;
 
 export const BrowserBridgeStreamEvent = Schema.Union([
   BrowserBridgeOpenUrlEvent,
+  BrowserBridgeOpenFileEvent,
   BrowserBridgeCommandEvent,
 ]);
 export type BrowserBridgeStreamEvent = typeof BrowserBridgeStreamEvent.Type;

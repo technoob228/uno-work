@@ -112,6 +112,9 @@ import {
   managerTokensRevokeRouteLayer,
 } from "./manager/http.ts";
 import { ManagerAssistantBootstrapLive, ManagerLayerLive } from "./manager/runtimeLayer.ts";
+import { pluginPanelRouteLayer } from "./plugins/http.ts";
+import { PluginRegistryLive } from "./plugins/PluginRegistry.ts";
+import { PluginRuntimeLive } from "./plugins/PluginRuntime.ts";
 import { ReminderSchedulerLive } from "./reminders/Layers/ReminderScheduler.ts";
 import { NetService } from "@t3tools/shared/Net";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
@@ -273,7 +276,14 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // exceed `.pipe`'s 20-arg limit); both need ManagerLayerLive + persistence
   // provided further down this pipe to satisfy their requirements.
   Layer.provideMerge(
-    Layer.mergeAll(ManagerAssistantBootstrapLive, ReminderSchedulerLive, SelfWatchdogLive),
+    Layer.mergeAll(
+      ManagerAssistantBootstrapLive,
+      ReminderSchedulerLive,
+      SelfWatchdogLive,
+      // Plugin runtime consumes the registry plus the orchestration engine
+      // provided further down this pipe (same positioning as the manager).
+      PluginRuntimeLive,
+    ),
   ),
   // Manager tool layer (MCP surface for the manager brain). Sits above the
   // orchestration/persistence layers provided further down this pipe so it
@@ -286,8 +296,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(VcsLayerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),
   // Health probe shares the persistence SqlClient provided below; merged with
-  // the terminal layer to stay inside `.pipe`'s 20-arg limit.
-  Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, HealthCheck.layer)),
+  // the terminal layer and the plugin registry (consumed by ws.ts and the
+  // plugin runtime above) to stay inside `.pipe`'s 20-arg limit.
+  Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, HealthCheck.layer, PluginRegistryLive)),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),
@@ -367,6 +378,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   orchestrationSnapshotRouteLayer,
   healthRouteLayer,
   otlpTracesProxyRouteLayer,
+  pluginPanelRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,

@@ -6,6 +6,7 @@ import {
   BrowserBridge,
   BrowserBridgeTest,
   isAllowedBridgeCommand,
+  isAllowedBridgeFilePath,
   makeBrowserBridge,
   normalizeBridgeRequestContext,
 } from "./browserBridge.ts";
@@ -120,6 +121,38 @@ it.effect("scopes bridge tokens to a thread context and resolves it back on auth
     assert.deepEqual(bridge.authorize("Bearer base-token"), { context: undefined });
     assert.isNull(bridge.authorize("Bearer unknown-token"));
     assert.isNull(bridge.authorize(undefined));
+  }),
+);
+
+it.effect("validates bridge file paths", () =>
+  Effect.sync(() => {
+    assert.isTrue(isAllowedBridgeFilePath("/tmp/report.html"));
+    assert.isTrue(isAllowedBridgeFilePath("/Users/me/My Docs/о работе.md"));
+    assert.isTrue(isAllowedBridgeFilePath("~/notes/todo.md"));
+    assert.isTrue(isAllowedBridgeFilePath("~"));
+    assert.isTrue(isAllowedBridgeFilePath("C:\\work\\report.pdf"));
+    assert.isFalse(isAllowedBridgeFilePath("relative/path.md"));
+    assert.isFalse(isAllowedBridgeFilePath("./report.html"));
+    assert.isFalse(isAllowedBridgeFilePath(""));
+    assert.isFalse(isAllowedBridgeFilePath("/tmp/evil\npath"));
+    assert.isFalse(isAllowedBridgeFilePath(42));
+    assert.isFalse(isAllowedBridgeFilePath(undefined));
+    assert.isFalse(isAllowedBridgeFilePath(`/tmp/${"a".repeat(5000)}`));
+  }),
+);
+
+it.effect("publishes openFile events with the request context", () =>
+  Effect.gen(function* () {
+    const bridge = yield* makeBrowserBridge({
+      token: "base-token",
+      baseUrl: "http://127.0.0.1:4100",
+    });
+
+    const event = yield* bridge.publishOpenFile("/tmp/report.html", { cwd: "/tmp/project-a" });
+    assert.equal(event.type, "openFile");
+    if (event.type !== "openFile") throw new Error("Expected openFile event.");
+    assert.equal(event.path, "/tmp/report.html");
+    assert.deepEqual(event.context, { cwd: "/tmp/project-a" });
   }),
 );
 

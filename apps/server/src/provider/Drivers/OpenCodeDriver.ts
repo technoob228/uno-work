@@ -19,6 +19,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGeneration.ts";
 import { ServerConfig } from "../../config.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
+import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
 import { writeBrowserInstructionsFile } from "../browserInstructions.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeOpenCodeAdapter } from "../Layers/OpenCodeAdapter.ts";
@@ -82,6 +83,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       const instructionsFilePath = writeBrowserInstructionsFile({
         stateDir: serverConfig.stateDir,
         baseUrl: browserBridge.baseUrl,
+        extraSections: [buildPluginInstructions(serverConfig.pluginsDir)],
       });
       const processEnv: NodeJS.ProcessEnv = browserBridge.applyEnvironment(
         mergeProviderInstanceEnvironment(environment),

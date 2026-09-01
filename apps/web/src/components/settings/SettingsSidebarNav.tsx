@@ -7,6 +7,7 @@ import {
   GlobeIcon,
   KeyRoundIcon,
   Link2Icon,
+  PuzzleIcon,
   Settings2Icon,
 } from "lucide-react";
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
@@ -31,6 +32,7 @@ export type SettingsSectionPath =
   | "/settings/connections"
   | "/settings/browser"
   | "/settings/vault"
+  | "/settings/extensions"
   | "/settings/archived";
 
 type SettingsNavItem = {
@@ -50,6 +52,7 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<SettingsNavItem> = [
   ...(isWebApp
     ? [{ label: "Credentials", to: "/settings/vault", icon: KeyRoundIcon } as SettingsNavItem]
     : []),
+  { label: "Extensions", to: "/settings/extensions", icon: PuzzleIcon },
   { label: "Archive", to: "/settings/archived", icon: ArchiveIcon },
 ];
 

@@ -43,6 +43,8 @@ import {
   observeRpcStream,
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
+import { makePanelThreadResolver, makePanelThreadSender } from "./plugins/panelThread.ts";
+import { PluginRegistry } from "./plugins/PluginRegistry.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { BrowserBridge } from "./browserBridge.ts";
@@ -167,6 +169,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager;
       const providerRegistry = yield* ProviderRegistry;
+      const pluginRegistry = yield* PluginRegistry;
       const config = yield* ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents;
       const browserBridge = yield* BrowserBridge;
@@ -185,6 +188,14 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const sessions = yield* SessionCredentialService;
       const serverCommandId = (tag: string) =>
         CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
+
+      const panelThreadDeps = {
+        registry: pluginRegistry,
+        engine: orchestrationEngine,
+        projections: projectionSnapshotQuery,
+      };
+      const sendPluginPanelToThread = makePanelThreadSender(panelThreadDeps);
+      const resolvePluginPanelThread = makePanelThreadResolver(panelThreadDeps);
 
       const loadAuthAccessSnapshot = () =>
         Effect.all({
@@ -980,6 +991,26 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.vaultImport, credentialsVault.importItems(items), {
             "rpc.aggregate": "vault",
           }),
+        [WS_METHODS.serverListPlugins]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverListPlugins, pluginRegistry.getSnapshot, {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverSetPluginEnabled]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverSetPluginEnabled,
+            pluginRegistry.setPluginEnabled(input),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
+        [WS_METHODS.pluginsSendToThread]: (input) =>
+          observeRpcEffect(WS_METHODS.pluginsSendToThread, sendPluginPanelToThread(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.pluginsResolvePanelThread]: (input) =>
+          observeRpcEffect(WS_METHODS.pluginsResolvePanelThread, resolvePluginPanelThread(input), {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.unoCreateLlmTopUpAction]: (input) =>
           observeRpcEffect(WS_METHODS.unoCreateLlmTopUpAction, createUnoLlmTopUpAction(input), {
             "rpc.aggregate": "uno",
@@ -1355,6 +1386,15 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             WS_METHODS.subscribeBrowserBridge,
             Effect.succeed(browserBridge.stream),
             { "rpc.aggregate": "browser" },
+          ),
+        [WS_METHODS.subscribePlugins]: (_input) =>
+          observeRpcStreamEffect(
+            WS_METHODS.subscribePlugins,
+            Effect.gen(function* () {
+              const snapshot = yield* pluginRegistry.getSnapshot;
+              return Stream.concat(Stream.make(snapshot), pluginRegistry.streamChanges);
+            }),
+            { "rpc.aggregate": "server" },
           ),
       });
     }),

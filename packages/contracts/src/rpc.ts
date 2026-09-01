@@ -54,6 +54,15 @@ import {
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
+import {
+  PluginResolvePanelThreadInput,
+  PluginResolvePanelThreadResult,
+  PluginSendToThreadInput,
+  PluginSendToThreadResult,
+  PluginsError,
+  PluginsSnapshot,
+  SetPluginEnabledInput,
+} from "./plugins.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   ProjectSearchEntriesError,
@@ -167,6 +176,10 @@ export const WS_METHODS = {
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
   serverDiscoverSourceControl: "server.discoverSourceControl",
+  serverListPlugins: "server.listPlugins",
+  serverSetPluginEnabled: "server.setPluginEnabled",
+  pluginsSendToThread: "plugins.sendToThread",
+  pluginsResolvePanelThread: "plugins.resolvePanelThread",
 
   // Credentials vault methods (web-only Settings panel)
   vaultList: "vault.list",
@@ -197,6 +210,7 @@ export const WS_METHODS = {
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
   subscribeBrowserBridge: "subscribeBrowserBridge",
+  subscribePlugins: "subscribePlugins",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -262,6 +276,37 @@ export const WsVaultImportRpc = Rpc.make(WS_METHODS.vaultImport, {
   payload: CredentialImportPayload,
   success: CredentialImportResult,
   error: CredentialsVaultError,
+});
+
+export const WsServerListPluginsRpc = Rpc.make(WS_METHODS.serverListPlugins, {
+  payload: Schema.Struct({}),
+  success: PluginsSnapshot,
+  error: PluginsError,
+});
+
+export const WsServerSetPluginEnabledRpc = Rpc.make(WS_METHODS.serverSetPluginEnabled, {
+  payload: SetPluginEnabledInput,
+  success: PluginsSnapshot,
+  error: PluginsError,
+});
+
+export const WsPluginsSendToThreadRpc = Rpc.make(WS_METHODS.pluginsSendToThread, {
+  payload: PluginSendToThreadInput,
+  success: PluginSendToThreadResult,
+  error: PluginsError,
+});
+
+export const WsPluginsResolvePanelThreadRpc = Rpc.make(WS_METHODS.pluginsResolvePanelThread, {
+  payload: PluginResolvePanelThreadInput,
+  success: PluginResolvePanelThreadResult,
+  error: PluginsError,
+});
+
+export const WsSubscribePluginsRpc = Rpc.make(WS_METHODS.subscribePlugins, {
+  payload: Schema.Struct({}),
+  success: PluginsSnapshot,
+  error: PluginsError,
+  stream: true,
 });
 
 export const UnoCreateLlmTopUpActionInput = Schema.Struct({
@@ -591,6 +636,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsVaultUpsertRpc,
   WsVaultDeleteRpc,
   WsVaultImportRpc,
+  WsServerListPluginsRpc,
+  WsServerSetPluginEnabledRpc,
+  WsPluginsSendToThreadRpc,
+  WsPluginsResolvePanelThreadRpc,
+  WsSubscribePluginsRpc,
   WsUnoCreateLlmTopUpActionRpc,
   WsUnoVideoCreateUploadRpc,
   WsUnoVideoCompleteUploadRpc,

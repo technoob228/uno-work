@@ -280,6 +280,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   showInteractionModeToggle: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
+  hideRuntimeModeControl?: boolean;
   showPlanToggle: boolean;
   planSidebarLabel: string;
   planSidebarOpen: boolean;
@@ -318,40 +319,42 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
         </>
       ) : null}
 
-      <Select
-        value={props.runtimeMode}
-        onValueChange={(value) => props.onRuntimeModeChange(value!)}
-      >
-        <SelectTrigger
-          variant="ghost"
-          size="sm"
-          className="font-medium"
-          aria-label="Runtime mode"
-          title={runtimeModeOption.description}
+      {props.hideRuntimeModeControl ? null : (
+        <Select
+          value={props.runtimeMode}
+          onValueChange={(value) => props.onRuntimeModeChange(value!)}
         >
-          <RuntimeModeIcon className="size-4" />
-          <SelectValue>{runtimeModeOption.label}</SelectValue>
-        </SelectTrigger>
-        <SelectPopup alignItemWithTrigger={false}>
-          {runtimeModeOptions.map((mode) => {
-            const option = runtimeModeConfig[mode];
-            const OptionIcon = option.icon;
-            return (
-              <SelectItem key={mode} value={mode} className="min-w-64 py-2">
-                <div className="grid min-w-0 gap-0.5">
-                  <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                    <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                    {option.label}
-                  </span>
-                  <span className="text-muted-foreground text-xs leading-4">
-                    {option.description}
-                  </span>
-                </div>
-              </SelectItem>
-            );
-          })}
-        </SelectPopup>
-      </Select>
+          <SelectTrigger
+            variant="ghost"
+            size="sm"
+            className="font-medium"
+            aria-label="Runtime mode"
+            title={runtimeModeOption.description}
+          >
+            <RuntimeModeIcon className="size-4" />
+            <SelectValue>{runtimeModeOption.label}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup alignItemWithTrigger={false}>
+            {runtimeModeOptions.map((mode) => {
+              const option = runtimeModeConfig[mode];
+              const OptionIcon = option.icon;
+              return (
+                <SelectItem key={mode} value={mode} className="min-w-64 py-2">
+                  <div className="grid min-w-0 gap-0.5">
+                    <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                      <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                      {option.label}
+                    </span>
+                    <span className="text-muted-foreground text-xs leading-4">
+                      {option.description}
+                    </span>
+                  </div>
+                </SelectItem>
+              );
+            })}
+          </SelectPopup>
+        </Select>
+      )}
 
       {props.showPlanToggle ? (
         <>
@@ -490,6 +493,12 @@ export interface ChatComposerProps {
   isServerThread: boolean;
   isLocalDraftThread: boolean;
   forceCompact?: boolean;
+  /**
+   * Встроенный чат панели плагина не переключает права треда: плагинная
+   * поверхность может права только сузить, но не расширить (`permissionPolicy:
+   * inherit`). Селектор runtime mode в таком композере скрыт.
+   */
+  hideRuntimeModeControl?: boolean;
 
   // Session phase
   phase: SessionPhase;
@@ -605,6 +614,7 @@ export const ChatComposer = memo(
       isServerThread: _isServerThread,
       isLocalDraftThread: _isLocalDraftThread,
       forceCompact = false,
+      hideRuntimeModeControl = false,
       phase,
       isConnecting,
       isSendBusy,
@@ -2576,6 +2586,7 @@ export const ChatComposer = memo(
                 planSidebarLabel={planSidebarLabel}
                 planSidebarOpen={planSidebarOpen}
                 runtimeMode={runtimeMode}
+                hideRuntimeModeControl={hideRuntimeModeControl}
                 showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
                 traitsMenuContent={providerTraitsMenuContent}
                 onToggleInteractionMode={toggleInteractionMode}
@@ -3122,6 +3133,7 @@ export const ChatComposer = memo(
                       planSidebarLabel={planSidebarLabel}
                       planSidebarOpen={planSidebarOpen}
                       runtimeMode={runtimeMode}
+                      hideRuntimeModeControl={hideRuntimeModeControl}
                       showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
                       traitsMenuContent={providerTraitsMenuContent}
                       onToggleInteractionMode={toggleInteractionMode}
@@ -3146,6 +3158,7 @@ export const ChatComposer = memo(
                         }
                         interactionMode={interactionMode}
                         runtimeMode={runtimeMode}
+                        hideRuntimeModeControl={hideRuntimeModeControl}
                         showPlanToggle={showPlanSidebarToggle}
                         planSidebarLabel={planSidebarLabel}
                         planSidebarOpen={planSidebarOpen}

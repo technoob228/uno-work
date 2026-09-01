@@ -84,6 +84,7 @@ import {
   type ProviderRegistryShape,
 } from "./provider/Services/ProviderRegistry.ts";
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
+import { PluginRegistry, type PluginRegistryShape } from "./plugins/PluginRegistry.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
 import { CredentialsVaultService, type CredentialsVaultShape } from "./credentialsVault.ts";
@@ -347,6 +348,7 @@ const buildAppUnderTest = (options?: {
     serverEnvironment?: Partial<ServerEnvironmentShape>;
     repositoryIdentityResolver?: Partial<RepositoryIdentityResolverShape>;
     healthCheck?: Partial<HealthCheckShape>;
+    pluginRegistry?: Partial<PluginRegistryShape>;
   };
 }) =>
   Effect.gen(function* () {
@@ -587,6 +589,18 @@ const buildAppUnderTest = (options?: {
           dispatch: () => Effect.succeed({ sequence: 0 }),
           streamDomainEvents: Stream.empty,
           ...options?.layers?.orchestrationEngine,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(PluginRegistry)({
+          start: Effect.void,
+          ready: Effect.void,
+          getLoadedPlugins: Effect.succeed([]),
+          getSnapshot: Effect.succeed({ pluginsDir: config.pluginsDir, plugins: [] }),
+          setPluginEnabled: () => Effect.succeed({ pluginsDir: config.pluginsDir, plugins: [] }),
+          recordRun: () => Effect.void,
+          streamChanges: Stream.empty,
+          ...options?.layers?.pluginRegistry,
         }),
       ),
       Layer.provide(
