@@ -631,7 +631,7 @@ export function AssistantConfig({
                       type="text"
                       value={telegramModel}
                       onChange={(event) => setTelegramModel(event.target.value)}
-                      placeholder="uno/claude-sonnet-4-6"
+                      placeholder="uno/~anthropic/claude-sonnet-latest"
                       className="w-44 rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
                     />
                   </span>
@@ -772,7 +772,7 @@ export function AssistantConfig({
                       type="text"
                       value={slackModel}
                       onChange={(event) => setSlackModel(event.target.value)}
-                      placeholder="uno/claude-sonnet-4-6"
+                      placeholder="uno/~anthropic/claude-sonnet-latest"
                       className="w-44 rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
                     />
                   </span>

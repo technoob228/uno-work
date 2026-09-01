@@ -755,6 +755,11 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
       const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
         instanceId,
         environment: processEnv,
+        // uno-code's per-directory `/event` stream is silent (only
+        // `server.connected`); session events only reach `/global/event`.
+        // Without this the turn finishes on the server and the UI shows
+        // "Working…" forever. See OpenCodeAdapterLiveOptions.eventSource.
+        eventSource: "global",
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
       const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, processEnv);

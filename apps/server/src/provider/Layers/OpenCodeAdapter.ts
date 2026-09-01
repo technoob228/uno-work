@@ -111,6 +111,18 @@ export interface OpenCodeAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  /**
+   * Which SSE stream to read session events from.
+   *
+   * `instance` is the per-directory `/event` stream — what stock OpenCode
+   * serves. `global` reads `/global/event` and unwraps each envelope's
+   * `payload`. Our `uno-code` fork (v1.14.x) publishes session events only on
+   * the global stream: its `/event` answers `server.connected` and then goes
+   * silent for every directory scope, so a turn completes on the server while
+   * the UI waits forever. Events are filtered by session id downstream, so the
+   * global stream is safe to consume for one session.
+   */
+  readonly eventSource?: "instance" | "global";
 }
 
 function nowIso(): string {
@@ -847,6 +859,7 @@ export function makeOpenCodeAdapter(
 ) {
   return Effect.gen(function* () {
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("opencode");
+    const eventSource = options?.eventSource ?? "instance";
     const serverConfig = yield* ServerConfig;
     const openCodeRuntime = yield* OpenCodeRuntime;
     const nativeEventLogger =
@@ -1600,22 +1613,47 @@ export function makeOpenCodeAdapter(
 
       // Fibers forked into `context.sessionScope` are interrupted
       // automatically when the scope closes — no bookkeeping required.
-      yield* Effect.flatMap(
-        runOpenCodeSdk("event.subscribe", () =>
-          context.client.event.subscribe(undefined, {
-            signal: eventsAbortController.signal,
-          }),
-        ),
-        (subscription) =>
-          Stream.fromAsyncIterable(
-            subscription.stream,
-            (cause) =>
-              new OpenCodeRuntimeError({
-                operation: "event.subscribe",
-                detail: openCodeRuntimeErrorDetail(cause),
-                cause,
+      const subscribeOperation =
+        eventSource === "global" ? "global.event" : "event.subscribe";
+      const subscribedEvents: Effect.Effect<
+        Stream.Stream<OpenCodeSubscribedEvent, OpenCodeRuntimeError>,
+        OpenCodeRuntimeError
+      > =
+        eventSource === "global"
+          ? runOpenCodeSdk(subscribeOperation, () =>
+              context.client.global.event({ signal: eventsAbortController.signal }),
+            ).pipe(
+              Effect.map((subscription) =>
+                Stream.fromAsyncIterable(
+                  subscription.stream,
+                  (cause) =>
+                    new OpenCodeRuntimeError({
+                      operation: subscribeOperation,
+                      detail: openCodeRuntimeErrorDetail(cause),
+                      cause,
+                    }),
+                ).pipe(Stream.map((envelope) => envelope.payload as OpenCodeSubscribedEvent)),
+              ),
+            )
+          : runOpenCodeSdk(subscribeOperation, () =>
+              context.client.event.subscribe(undefined, {
+                signal: eventsAbortController.signal,
               }),
-          ).pipe(Stream.runForEach((event) => handleSubscribedEvent(context, event))),
+            ).pipe(
+              Effect.map((subscription) =>
+                Stream.fromAsyncIterable(
+                  subscription.stream,
+                  (cause) =>
+                    new OpenCodeRuntimeError({
+                      operation: subscribeOperation,
+                      detail: openCodeRuntimeErrorDetail(cause),
+                      cause,
+                    }),
+                ),
+              ),
+            );
+      yield* Effect.flatMap(subscribedEvents, (events) =>
+        events.pipe(Stream.runForEach((event) => handleSubscribedEvent(context, event))),
       ).pipe(
         Effect.exit,
         Effect.flatMap((exit) =>

@@ -180,7 +180,10 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   // выбираются явно (см. ROUTING.md в воркспейсе ассистента).
   [HERMES_DRIVER_KIND]: "anthropic/claude-haiku-4.5",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
-  [UNO_DRIVER_KIND]: "uno/claude-sonnet-4-6",
+  // The gateway catalog exposes Anthropic under the `~anthropic/…-latest`
+  // aliases; `uno/claude-sonnet-4-6` is not a catalog id and fails with
+  // ProviderModelNotFoundError.
+  [UNO_DRIVER_KIND]: "uno/~anthropic/claude-sonnet-latest",
 };
 
 /** Per-provider text generation model defaults. */
@@ -191,7 +194,8 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Partial<
   [CLAUDE_DRIVER_KIND]: "claude-haiku-4-5",
   [CURSOR_DRIVER_KIND]: "composer-2",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
-  [UNO_DRIVER_KIND]: "uno/claude-sonnet-4-6",
+  // Titles/branch names are short throwaway generations — Haiku is plenty.
+  [UNO_DRIVER_KIND]: "uno/~anthropic/claude-haiku-latest",
 };
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
