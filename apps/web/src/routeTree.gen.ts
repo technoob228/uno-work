@@ -14,6 +14,7 @@ import { Route as PairRouteImport } from './routes/pair'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
+import { Route as SettingsWorkspaceRouteImport } from './routes/settings.workspace'
 import { Route as SettingsVaultRouteImport } from './routes/settings.vault'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
@@ -61,6 +62,11 @@ const ChatIndexRoute = ChatIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => ChatRoute,
+} as any)
+const SettingsWorkspaceRoute = SettingsWorkspaceRouteImport.update({
+  id: '/workspace',
+  path: '/workspace',
+  getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsVaultRoute = SettingsVaultRouteImport.update({
   id: '/vault',
@@ -200,6 +206,7 @@ export interface FileRoutesByFullPath {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/settings/vault': typeof SettingsVaultRoute
+  '/settings/workspace': typeof SettingsWorkspaceRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/settings/app/browser': typeof SettingsAppBrowserRoute
@@ -227,6 +234,7 @@ export interface FileRoutesByTo {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/settings/vault': typeof SettingsVaultRoute
+  '/settings/workspace': typeof SettingsWorkspaceRoute
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
@@ -258,6 +266,7 @@ export interface FileRoutesById {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/settings/vault': typeof SettingsVaultRoute
+  '/settings/workspace': typeof SettingsWorkspaceRoute
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
@@ -290,6 +299,7 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/source-control'
     | '/settings/vault'
+    | '/settings/workspace'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
     | '/settings/app/browser'
@@ -317,6 +327,7 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/source-control'
     | '/settings/vault'
+    | '/settings/workspace'
     | '/'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
@@ -347,6 +358,7 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/source-control'
     | '/settings/vault'
+    | '/settings/workspace'
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
     | '/_chat/draft/$draftId'
@@ -407,6 +419,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof ChatIndexRouteImport
       parentRoute: typeof ChatRoute
+    }
+    '/settings/workspace': {
+      id: '/settings/workspace'
+      path: '/workspace'
+      fullPath: '/settings/workspace'
+      preLoaderRoute: typeof SettingsWorkspaceRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/settings/vault': {
       id: '/settings/vault'
@@ -639,6 +658,7 @@ interface SettingsRouteChildren {
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
   SettingsVaultRoute: typeof SettingsVaultRoute
+  SettingsWorkspaceRoute: typeof SettingsWorkspaceRoute
   SettingsAppBrowserRoute: typeof SettingsAppBrowserRoute
   SettingsAppConnectionsRoute: typeof SettingsAppConnectionsRoute
   SettingsAppGeneralRoute: typeof SettingsAppGeneralRoute
@@ -655,6 +675,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,
   SettingsVaultRoute: SettingsVaultRoute,
+  SettingsWorkspaceRoute: SettingsWorkspaceRoute,
   SettingsAppBrowserRoute: SettingsAppBrowserRoute,
   SettingsAppConnectionsRoute: SettingsAppConnectionsRoute,
   SettingsAppGeneralRoute: SettingsAppGeneralRoute,

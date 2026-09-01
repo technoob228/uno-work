@@ -3,7 +3,9 @@ import {
   type AuthAccessStreamEvent,
   AuthSessionId,
   CommandId,
+  type EnvironmentId as EnvironmentIdType,
   EventId,
+  WorkspaceRpcError,
   type OrchestrationCommand,
   type GitActionProgressEvent,
   type GitManagerServiceError,
@@ -55,6 +57,15 @@ import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths.ts";
+import { WorkspaceService } from "./workspaceRegistry/WorkspaceService.ts";
+import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
+import {
+  GENERATED_INSTRUCTIONS_RELATIVE_PATH,
+  WORKSPACE_INSTRUCTIONS_SCOPE,
+  mergeInstructionLayers,
+  readRepositoryInstructions,
+  writeInstructionFiles,
+} from "./workspaceRegistry/instructionLayers.ts";
 import { VcsStatusBroadcaster } from "./vcs/VcsStatusBroadcaster.ts";
 import { VcsProvisioningService } from "./vcs/VcsProvisioningService.ts";
 import { GitWorkflowService } from "./git/GitWorkflowService.ts";
@@ -186,6 +197,8 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const sourceControlRepositories = yield* SourceControlRepositoryService;
       const bootstrapCredentials = yield* BootstrapCredentialService;
       const sessions = yield* SessionCredentialService;
+      const workspaceRegistry = yield* WorkspaceService;
+      const unoCloud = yield* UnoCloudService;
       const serverCommandId = (tag: string) =>
         CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
 
@@ -707,6 +720,81 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           .refreshStatus(cwd)
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
+      const readInstructionLayers = (input: {
+        readonly environmentId: string;
+        readonly projectPath?: string | undefined;
+      }) =>
+        Effect.gen(function* () {
+          const workspaceText = yield* workspaceRegistry.getInstructionText({
+            scope: WORKSPACE_INSTRUCTIONS_SCOPE,
+          });
+          const machineText = yield* workspaceRegistry.getInstructionText({
+            scope: input.environmentId,
+          });
+          const repositoryText = input.projectPath
+            ? yield* Effect.promise(() => readRepositoryInstructions(input.projectPath ?? "")).pipe(
+                Effect.orElseSucceed(() => ""),
+              )
+            : "";
+          return { repository: repositoryText, workspace: workspaceText, machine: machineText };
+        });
+
+      const getWorkspaceInstructions = (input: {
+        readonly environmentId: EnvironmentIdType;
+        readonly projectPath?: string | undefined;
+      }) =>
+        Effect.gen(function* () {
+          const layers = yield* readInstructionLayers(input);
+          return {
+            environmentId: input.environmentId,
+            layers: [
+              {
+                kind: "repository" as const,
+                text: layers.repository,
+                editable: false,
+                source: input.projectPath ? "AGENTS.md from git" : "no project selected",
+              },
+              {
+                kind: "workspace" as const,
+                text: layers.workspace,
+                editable: true,
+                source: "workspace manifest",
+              },
+              {
+                kind: "machine" as const,
+                text: layers.machine,
+                editable: true,
+                source: "this machine — overrides the workspace",
+              },
+            ],
+            merged: mergeInstructionLayers(layers),
+          };
+        });
+
+      const applyWorkspaceInstructions = (input: {
+        readonly environmentId: EnvironmentIdType;
+        readonly projectPath: string;
+      }) =>
+        Effect.gen(function* () {
+          const layers = yield* readInstructionLayers(input);
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              writeInstructionFiles({
+                projectPath: input.projectPath,
+                layers,
+                createPointerIfMissing: true,
+              }),
+            catch: (cause) =>
+              new WorkspaceRpcError({
+                message:
+                  cause instanceof Error
+                    ? `Unable to write ${GENERATED_INSTRUCTIONS_RELATIVE_PATH}: ${cause.message}`
+                    : `Unable to write ${GENERATED_INSTRUCTIONS_RELATIVE_PATH}.`,
+              }),
+          });
+          return result;
+        });
+
       return WsRpcGroup.of({
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
@@ -990,6 +1078,95 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         [WS_METHODS.vaultImport]: ({ items }) =>
           observeRpcEffect(WS_METHODS.vaultImport, credentialsVault.importItems(items), {
             "rpc.aggregate": "vault",
+          }),
+        [WS_METHODS.workspaceGetState]: (_input) =>
+          observeRpcEffect(WS_METHODS.workspaceGetState, workspaceRegistry.getState, {
+            "rpc.aggregate": "workspace",
+          }),
+        [WS_METHODS.workspaceRename]: (input) =>
+          observeRpcEffect(WS_METHODS.workspaceRename, workspaceRegistry.rename(input), {
+            "rpc.aggregate": "workspace",
+          }),
+        [WS_METHODS.workspaceSyncMachines]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.workspaceSyncMachines,
+            workspaceRegistry.syncMachines(input),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.workspaceUpdateMachine]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.workspaceUpdateMachine,
+            workspaceRegistry.updateMachine(input),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.workspaceRemoveMachine]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.workspaceRemoveMachine,
+            workspaceRegistry.removeMachine(input),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.workspaceSetPolicy]: (input) =>
+          observeRpcEffect(WS_METHODS.workspaceSetPolicy, workspaceRegistry.setPolicy(input), {
+            "rpc.aggregate": "workspace",
+          }),
+        [WS_METHODS.workspaceUpsertGrant]: (input) =>
+          observeRpcEffect(WS_METHODS.workspaceUpsertGrant, workspaceRegistry.upsertGrant(input), {
+            "rpc.aggregate": "workspace",
+          }),
+        [WS_METHODS.workspaceRemoveGrant]: (input) =>
+          observeRpcEffect(WS_METHODS.workspaceRemoveGrant, workspaceRegistry.removeGrant(input), {
+            "rpc.aggregate": "workspace",
+          }),
+        [WS_METHODS.workspaceAcquireClaim]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.workspaceAcquireClaim,
+            workspaceRegistry.acquireClaim(input),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.workspaceReleaseClaim]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.workspaceReleaseClaim,
+            workspaceRegistry.releaseClaim(input),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.workspaceCreateRequest]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.workspaceCreateRequest,
+            workspaceRegistry.createRequest(input),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.workspaceDecideRequest]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.workspaceDecideRequest,
+            workspaceRegistry.decideRequest(input),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.workspaceGetInstructions]: (input) =>
+          observeRpcEffect(WS_METHODS.workspaceGetInstructions, getWorkspaceInstructions(input), {
+            "rpc.aggregate": "workspace",
+          }),
+        [WS_METHODS.workspaceSetInstructions]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.workspaceSetInstructions,
+            workspaceRegistry.setInstructionText(input),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.workspaceApplyInstructions]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.workspaceApplyInstructions,
+            applyWorkspaceInstructions(input),
+            { "rpc.aggregate": "workspace" },
+          ),
+        // Both cloud calls answer with state rather than failing: an
+        // unreachable control plane is reported inside `UnoCloudState.error`,
+        // so the panel keeps rendering the machines it already knows about.
+        [WS_METHODS.unoCloudGetState]: (input) =>
+          observeRpcEffect(WS_METHODS.unoCloudGetState, unoCloud.getState(input), {
+            "rpc.aggregate": "uno-cloud",
+          }),
+        [WS_METHODS.unoCloudBoxPower]: (input) =>
+          observeRpcEffect(WS_METHODS.unoCloudBoxPower, unoCloud.boxPower(input), {
+            "rpc.aggregate": "uno-cloud",
           }),
         [WS_METHODS.serverListPlugins]: (_input) =>
           observeRpcEffect(WS_METHODS.serverListPlugins, pluginRegistry.getSnapshot, {

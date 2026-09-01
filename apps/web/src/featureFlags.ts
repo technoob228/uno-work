@@ -50,6 +50,13 @@ export const FEATURE_FLAGS = [
       "Browser-mode / companion features. Turn off to hide the Browser settings and its nav entry.",
     default: true,
   },
+  {
+    key: "workspace",
+    label: "Workspaces",
+    description:
+      "The workspaces registry — machines, boxes and rules a person works across, read from the control plane. Turn off to hide the Workspace settings and its nav entry.",
+    default: true,
+  },
 ] as const satisfies readonly FeatureFlagDefinition[];
 
 export type FeatureFlagKey = (typeof FEATURE_FLAGS)[number]["key"];

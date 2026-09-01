@@ -49,6 +49,7 @@ import Migration0033 from "./Migrations/033_ManagerAssistantsScoped.ts";
 import Migration0034 from "./Migrations/034_Reminders.ts";
 import Migration0035 from "./Migrations/035_ReminderConnector.ts";
 import Migration0036 from "./Migrations/036_HealthHeartbeat.ts";
+import Migration0038 from "./Migrations/038_Workspace.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -97,6 +98,7 @@ export const migrationEntries = [
   [34, "Reminders", Migration0034],
   [35, "ReminderConnector", Migration0035],
   [36, "HealthHeartbeat", Migration0036],
+  [38, "Workspace", Migration0038],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

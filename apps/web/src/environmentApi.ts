@@ -58,6 +58,27 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
     browser: {
       subscribeBridge: (callback) => rpcClient.browser.subscribeBridge(callback),
     },
+    workspace: {
+      getState: () => rpcClient.workspace.getState(),
+      rename: rpcClient.workspace.rename,
+      syncMachines: rpcClient.workspace.syncMachines,
+      updateMachine: rpcClient.workspace.updateMachine,
+      removeMachine: rpcClient.workspace.removeMachine,
+      setPolicy: rpcClient.workspace.setPolicy,
+      upsertGrant: rpcClient.workspace.upsertGrant,
+      removeGrant: rpcClient.workspace.removeGrant,
+      acquireClaim: rpcClient.workspace.acquireClaim,
+      releaseClaim: rpcClient.workspace.releaseClaim,
+      createRequest: rpcClient.workspace.createRequest,
+      decideRequest: rpcClient.workspace.decideRequest,
+      getInstructions: rpcClient.workspace.getInstructions,
+      setInstructions: rpcClient.workspace.setInstructions,
+      applyInstructions: rpcClient.workspace.applyInstructions,
+    },
+    unoCloud: {
+      getState: (input) => rpcClient.unoCloud.getState(input),
+      boxPower: rpcClient.unoCloud.boxPower,
+    },
   };
 }
 

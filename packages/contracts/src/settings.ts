@@ -34,6 +34,17 @@ export const SidebarProjectGroupingMode = Schema.Literals([
 export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type;
 export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository";
 
+/**
+ * How many distinct hues machines can be told apart by in the workspace UI.
+ * Three, because a fourth hue puts a pair on screen that the commonest
+ * colour-vision deficiencies cannot separate. The monogram is the identity,
+ * the hue is reinforcement, and machines past the third get a neutral chip.
+ */
+export const SIDEBAR_MACHINE_COLOR_SLOT_COUNT = 3;
+
+/** Max characters in a machine monogram badge. */
+export const SIDEBAR_MACHINE_MONOGRAM_MAX_LENGTH = 3;
+
 // Cookie/session profile used by the built-in browser pane: one shared
 // profile for the whole account, or an isolated profile per project.
 export const BrowserProfileScope = Schema.Literals(["account", "project"]);

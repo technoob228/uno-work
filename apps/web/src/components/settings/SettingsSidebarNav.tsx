@@ -7,6 +7,7 @@ import {
   GitBranchIcon,
   GlobeIcon,
   KeyRoundIcon,
+  LayersIcon,
   Link2Icon,
   PlugIcon,
   PuzzleIcon,
@@ -93,6 +94,7 @@ const FLAT_APP_NAV_ITEMS: ReadonlyArray<FlatNavItem> = [
         } as FlatNavItem,
       ]
     : []),
+  { label: "Workspace", to: "/settings/workspace", icon: LayersIcon, flag: "workspace" },
   { label: "Extensions", to: "/settings/extensions", icon: PuzzleIcon, flag: "plugins" },
 ];
 

@@ -1,0 +1,128 @@
+/**
+ * The workspaces this client can see.
+ *
+ * A daemon belongs to exactly one workspace and serves its registry, so the
+ * set of workspaces is "what the connected daemons say they belong to",
+ * deduplicated by `workspaceId`. Two daemons in the same workspace answer with
+ * the same id and collapse into one row — which is the whole point of the
+ * switcher: you pick a *workspace*, not a box.
+ *
+ * Machines come from the registry rather than from the client's connection
+ * list, because a workspace legitimately contains machines this client has
+ * never connected to (an adopted box that is asleep). Those are shown, and
+ * shown as unreachable, rather than hidden — a switcher that silently omits
+ * half the workspace is worse than one that admits it cannot reach it.
+ */
+import type { EnvironmentId, WorkspaceMachine, WorkspaceState } from "@t3tools/contracts";
+import { useQueries } from "@tanstack/react-query";
+import { useMemo } from "react";
+
+import { usePrimaryEnvironmentId } from "../environments/primary";
+import {
+  useSavedEnvironmentRegistryStore,
+  useSavedEnvironmentRuntimeStore,
+} from "../environments/runtime";
+import { workspaceStateQueryOptions } from "./workspaceReactQuery";
+
+export interface WorkspaceMachineEntry {
+  readonly machine: WorkspaceMachine;
+  /** True when this client currently holds a connection to it. */
+  readonly connected: boolean;
+}
+
+export interface WorkspaceSummary {
+  readonly workspaceId: string;
+  readonly name: string;
+  readonly epoch: number;
+  /** The daemon whose registry answered — where mutations are sent. */
+  readonly registryEnvironmentId: EnvironmentId;
+  readonly machines: readonly WorkspaceMachineEntry[];
+  readonly pendingRequestCount: number;
+  /** Machines in the registry this client cannot currently reach. */
+  readonly unreachableCount: number;
+  readonly state: WorkspaceState;
+}
+
+export interface WorkspaceDirectory {
+  readonly workspaces: readonly WorkspaceSummary[];
+  readonly isLoading: boolean;
+  /** Environments connected but whose registry could not be read. */
+  readonly unreadableEnvironmentIds: readonly EnvironmentId[];
+}
+
+export function useWorkspaces(): WorkspaceDirectory {
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const savedRegistry = useSavedEnvironmentRegistryStore((state) => state.byId);
+  const runtimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
+
+  const connectedEnvironmentIds = useMemo<readonly EnvironmentId[]>(() => {
+    const connected = Object.values(savedRegistry)
+      .filter((record) => runtimeById[record.environmentId]?.connectionState === "connected")
+      .map((record) => record.environmentId);
+    return primaryEnvironmentId
+      ? [primaryEnvironmentId, ...connected.filter((id) => id !== primaryEnvironmentId)]
+      : connected;
+  }, [primaryEnvironmentId, runtimeById, savedRegistry]);
+
+  const results = useQueries({
+    queries: connectedEnvironmentIds.map((environmentId) =>
+      workspaceStateQueryOptions(environmentId),
+    ),
+  });
+
+  return useMemo<WorkspaceDirectory>(() => {
+    const byWorkspaceId = new Map<string, WorkspaceSummary>();
+    const unreadable: EnvironmentId[] = [];
+    let isLoading = false;
+
+    results.forEach((result, index) => {
+      const environmentId = connectedEnvironmentIds[index];
+      if (!environmentId) return;
+      if (result.isPending) {
+        isLoading = true;
+        return;
+      }
+      const state = result.data;
+      if (!state) {
+        unreadable.push(environmentId);
+        return;
+      }
+
+      const existing = byWorkspaceId.get(state.identity.workspaceId);
+      // Ties go to the daemon the registry itself names, then to the higher
+      // epoch: a second daemon answering about the same workspace may simply
+      // be behind.
+      const preferIncoming =
+        !existing ||
+        state.identity.registryEnvironmentId === environmentId ||
+        state.identity.epoch > existing.epoch;
+      if (!preferIncoming) return;
+
+      const machines = state.machines.map((machine) => ({
+        machine,
+        connected:
+          machine.environmentId === environmentId ||
+          connectedEnvironmentIds.includes(machine.environmentId),
+      }));
+
+      byWorkspaceId.set(state.identity.workspaceId, {
+        workspaceId: state.identity.workspaceId,
+        name: state.identity.name,
+        epoch: state.identity.epoch,
+        registryEnvironmentId: environmentId,
+        machines,
+        pendingRequestCount: state.pendingRequests.length,
+        unreachableCount: machines.filter((entry) => !entry.connected).length,
+        state,
+      });
+    });
+
+    return {
+      workspaces: [...byWorkspaceId.values()].toSorted((left, right) =>
+        left.name.localeCompare(right.name),
+      ),
+      isLoading,
+      unreadableEnvironmentIds: unreadable,
+    };
+  }, [connectedEnvironmentIds, results]);
+}

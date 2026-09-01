@@ -26,6 +26,9 @@ import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService.ts";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/ProviderSessionRuntime.ts";
+import { WorkspaceRegistryRepositoryLive } from "./persistence/Layers/WorkspaceRegistry.ts";
+import { WorkspaceServiceLive } from "./workspaceRegistry/WorkspaceService.ts";
+import { UnoCloudServiceLive } from "./workspaceRegistry/UnoCloudService.ts";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
 import { ProviderEventLoggersLive } from "./provider/Layers/ProviderEventLoggers.ts";
 import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
@@ -259,6 +262,18 @@ const WorkspaceLayerLive = Layer.mergeAll(
   WorkspaceFileSystemLayerLive,
 );
 
+/**
+ * The workspace registry (machines, grants, claims, cross-environment requests)
+ * and the Uno cloud client for the account behind it. Both sit above
+ * persistence and server settings in the runtime pipe: the registry needs the
+ * same `SqlClient` as everything else, and the cloud client reads the account
+ * API key out of settings.
+ */
+const WorkspaceRegistryLayerLive = Layer.mergeAll(
+  WorkspaceServiceLive.pipe(Layer.provideMerge(WorkspaceRegistryRepositoryLive)),
+  UnoCloudServiceLive,
+);
+
 const AuthLayerLive = ServerAuthLive.pipe(
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provide(ServerSecretStoreLive),
@@ -298,7 +313,14 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // Health probe shares the persistence SqlClient provided below; merged with
   // the terminal layer and the plugin registry (consumed by ws.ts and the
   // plugin runtime above) to stay inside `.pipe`'s 20-arg limit.
-  Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, HealthCheck.layer, PluginRegistryLive)),
+  Layer.provideMerge(
+    Layer.mergeAll(
+      TerminalLayerLive,
+      HealthCheck.layer,
+      PluginRegistryLive,
+      WorkspaceRegistryLayerLive,
+    ),
+  ),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),

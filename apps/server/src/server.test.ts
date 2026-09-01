@@ -108,6 +108,8 @@ import {
 } from "./environment/Services/ServerEnvironment.ts";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
+import { WorkspaceService } from "./workspaceRegistry/WorkspaceService.ts";
+import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriver from "./vcs/VcsDriver.ts";
@@ -623,6 +625,17 @@ const buildAppUnderTest = (options?: {
           Layer.mock(ManagerAssistantService)({
             listAssistants: () => Effect.succeed([]),
           }),
+          // The router tests never exercise the workspace RPCs; they only have
+          // to satisfy the ws layer's requirements.
+          Layer.mock(WorkspaceService)({
+            evaluate: () => ({
+              outcome: "deny" as const,
+              reason: "Router tests do not evaluate workspace policy.",
+              grant: null,
+              requiresClaim: false,
+            }),
+          }),
+          Layer.mock(UnoCloudService)({}),
         ),
       ),
       Layer.provide(

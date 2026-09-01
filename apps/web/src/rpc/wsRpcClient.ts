@@ -165,6 +165,33 @@ export interface WsRpcClient {
     readonly delete: RpcUnaryMethod<typeof WS_METHODS.vaultDelete>;
     readonly import: RpcUnaryMethod<typeof WS_METHODS.vaultImport>;
   };
+  /**
+   * Workspace registry. Every mutating call answers with the full state, so a
+   * caller never has to reconcile a local delta against the daemon's epoch.
+   */
+  readonly workspace: {
+    readonly getState: RpcUnaryNoArgMethod<typeof WS_METHODS.workspaceGetState>;
+    readonly rename: RpcUnaryMethod<typeof WS_METHODS.workspaceRename>;
+    readonly syncMachines: RpcUnaryMethod<typeof WS_METHODS.workspaceSyncMachines>;
+    readonly updateMachine: RpcUnaryMethod<typeof WS_METHODS.workspaceUpdateMachine>;
+    readonly removeMachine: RpcUnaryMethod<typeof WS_METHODS.workspaceRemoveMachine>;
+    readonly setPolicy: RpcUnaryMethod<typeof WS_METHODS.workspaceSetPolicy>;
+    readonly upsertGrant: RpcUnaryMethod<typeof WS_METHODS.workspaceUpsertGrant>;
+    readonly removeGrant: RpcUnaryMethod<typeof WS_METHODS.workspaceRemoveGrant>;
+    readonly acquireClaim: RpcUnaryMethod<typeof WS_METHODS.workspaceAcquireClaim>;
+    readonly releaseClaim: RpcUnaryMethod<typeof WS_METHODS.workspaceReleaseClaim>;
+    readonly createRequest: RpcUnaryMethod<typeof WS_METHODS.workspaceCreateRequest>;
+    readonly decideRequest: RpcUnaryMethod<typeof WS_METHODS.workspaceDecideRequest>;
+    readonly getInstructions: RpcUnaryMethod<typeof WS_METHODS.workspaceGetInstructions>;
+    readonly setInstructions: RpcUnaryMethod<typeof WS_METHODS.workspaceSetInstructions>;
+    readonly applyInstructions: RpcUnaryMethod<typeof WS_METHODS.workspaceApplyInstructions>;
+  };
+  readonly unoCloud: {
+    readonly getState: (
+      input?: RpcInput<typeof WS_METHODS.unoCloudGetState>,
+    ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.unoCloudGetState>>;
+    readonly boxPower: RpcUnaryMethod<typeof WS_METHODS.unoCloudBoxPower>;
+  };
 }
 
 export function createWsRpcClient(transport: WsTransport): WsRpcClient {
@@ -357,6 +384,42 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       upsert: (input) => transport.request((client) => client[WS_METHODS.vaultUpsert](input)),
       delete: (input) => transport.request((client) => client[WS_METHODS.vaultDelete](input)),
       import: (input) => transport.request((client) => client[WS_METHODS.vaultImport](input)),
+    },
+    workspace: {
+      getState: () => transport.request((client) => client[WS_METHODS.workspaceGetState]({})),
+      rename: (input) => transport.request((client) => client[WS_METHODS.workspaceRename](input)),
+      syncMachines: (input) =>
+        transport.request((client) => client[WS_METHODS.workspaceSyncMachines](input)),
+      updateMachine: (input) =>
+        transport.request((client) => client[WS_METHODS.workspaceUpdateMachine](input)),
+      removeMachine: (input) =>
+        transport.request((client) => client[WS_METHODS.workspaceRemoveMachine](input)),
+      setPolicy: (input) =>
+        transport.request((client) => client[WS_METHODS.workspaceSetPolicy](input)),
+      upsertGrant: (input) =>
+        transport.request((client) => client[WS_METHODS.workspaceUpsertGrant](input)),
+      removeGrant: (input) =>
+        transport.request((client) => client[WS_METHODS.workspaceRemoveGrant](input)),
+      acquireClaim: (input) =>
+        transport.request((client) => client[WS_METHODS.workspaceAcquireClaim](input)),
+      releaseClaim: (input) =>
+        transport.request((client) => client[WS_METHODS.workspaceReleaseClaim](input)),
+      createRequest: (input) =>
+        transport.request((client) => client[WS_METHODS.workspaceCreateRequest](input)),
+      decideRequest: (input) =>
+        transport.request((client) => client[WS_METHODS.workspaceDecideRequest](input)),
+      getInstructions: (input) =>
+        transport.request((client) => client[WS_METHODS.workspaceGetInstructions](input)),
+      setInstructions: (input) =>
+        transport.request((client) => client[WS_METHODS.workspaceSetInstructions](input)),
+      applyInstructions: (input) =>
+        transport.request((client) => client[WS_METHODS.workspaceApplyInstructions](input)),
+    },
+    unoCloud: {
+      getState: (input) =>
+        transport.request((client) => client[WS_METHODS.unoCloudGetState](input ?? {})),
+      boxPower: (input) =>
+        transport.request((client) => client[WS_METHODS.unoCloudBoxPower](input)),
     },
   };
 }

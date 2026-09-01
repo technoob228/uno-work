@@ -67,6 +67,28 @@ import type {
   AuthWebSocketTokenResult,
 } from "./auth.ts";
 import type { AdvertisedEndpoint } from "./remoteAccess.ts";
+import type { UnoCloudState, WorkspaceInstructions, WorkspaceState } from "./workspace.ts";
+import type {
+  UnoCloudBoxPowerInput,
+  UnoCloudGetStateInput,
+  WorkspaceAcquireClaimInput,
+  WorkspaceAcquireClaimResult,
+  WorkspaceApplyInstructionsInput,
+  WorkspaceApplyInstructionsResult,
+  WorkspaceCreateRequestInput,
+  WorkspaceCreateRequestResult,
+  WorkspaceDecideRequestInput,
+  WorkspaceGetInstructionsInput,
+  WorkspaceReleaseClaimInput,
+  WorkspaceRenameInput,
+  WorkspaceRemoveGrantInput,
+  WorkspaceRemoveMachineInput,
+  WorkspaceSetInstructionsInput,
+  WorkspaceSetPolicyInput,
+  WorkspaceSyncMachinesInput,
+  WorkspaceUpdateMachineInput,
+  WorkspaceUpsertGrantInput,
+} from "./rpc.ts";
 import { EditorId } from "./editor.ts";
 import type { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import type { ClientSettings, ServerSettings, ServerSettingsPatch } from "./settings.ts";
@@ -554,5 +576,33 @@ export interface EnvironmentApi {
   browser: {
     /** Live "open this URL in the built-in browser pane" pushes from harnesses. */
     subscribeBridge: (callback: (event: BrowserBridgeStreamEvent) => void) => () => void;
+  };
+  /**
+   * Workspace registry, served by whichever daemon holds it. Reachable through
+   * every environment connection because "which machine is the registry" is a
+   * setting, not a property of the transport.
+   */
+  workspace: {
+    getState: () => Promise<WorkspaceState>;
+    rename: (input: WorkspaceRenameInput) => Promise<WorkspaceState>;
+    syncMachines: (input: WorkspaceSyncMachinesInput) => Promise<WorkspaceState>;
+    updateMachine: (input: WorkspaceUpdateMachineInput) => Promise<WorkspaceState>;
+    removeMachine: (input: WorkspaceRemoveMachineInput) => Promise<WorkspaceState>;
+    setPolicy: (input: WorkspaceSetPolicyInput) => Promise<WorkspaceState>;
+    upsertGrant: (input: WorkspaceUpsertGrantInput) => Promise<WorkspaceState>;
+    removeGrant: (input: WorkspaceRemoveGrantInput) => Promise<WorkspaceState>;
+    acquireClaim: (input: WorkspaceAcquireClaimInput) => Promise<WorkspaceAcquireClaimResult>;
+    releaseClaim: (input: WorkspaceReleaseClaimInput) => Promise<WorkspaceState>;
+    createRequest: (input: WorkspaceCreateRequestInput) => Promise<WorkspaceCreateRequestResult>;
+    decideRequest: (input: WorkspaceDecideRequestInput) => Promise<WorkspaceState>;
+    getInstructions: (input: WorkspaceGetInstructionsInput) => Promise<WorkspaceInstructions>;
+    setInstructions: (input: WorkspaceSetInstructionsInput) => Promise<WorkspaceState>;
+    applyInstructions: (
+      input: WorkspaceApplyInstructionsInput,
+    ) => Promise<WorkspaceApplyInstructionsResult>;
+  };
+  unoCloud: {
+    getState: (input?: UnoCloudGetStateInput) => Promise<UnoCloudState>;
+    boxPower: (input: UnoCloudBoxPowerInput) => Promise<UnoCloudState>;
   };
 }

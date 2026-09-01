@@ -20,6 +20,7 @@ export * from "./orchestration.ts";
 export * from "./manager.ts";
 export * from "./plugins.ts";
 export * from "./video.ts";
+export * from "./workspace.ts";
 export * from "./editor.ts";
 export * from "./project.ts";
 export * from "./filesystem.ts";
