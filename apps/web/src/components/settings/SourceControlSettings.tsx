@@ -2,6 +2,7 @@ import { GitPullRequestIcon, RefreshCwIcon } from "lucide-react";
 import { Option } from "effect";
 import { type ReactNode } from "react";
 import type {
+  EnvironmentId,
   SourceControlProviderKind,
   SourceControlDiscoveryResult,
   SourceControlProviderAuth,
@@ -322,15 +323,23 @@ function EmptySourceControlDiscovery({
   );
 }
 
-export function SourceControlSettingsPanel() {
-  const discovery = useSourceControlDiscovery();
+/**
+ * Git and hosting integrations are discovered by scanning a machine, so the
+ * panel is bound to the environment whose machine is being scanned.
+ */
+export function SourceControlSettingsPanel({
+  environmentId,
+}: {
+  readonly environmentId: EnvironmentId;
+}) {
+  const discovery = useSourceControlDiscovery({ environmentId });
 
   const result = discovery.data ?? EMPTY_DISCOVERY_RESULT;
   const hasDiscoveryItems =
     result.versionControlSystems.length > 0 || result.sourceControlProviders.length > 0;
   const isInitialScanPending = discovery.isPending && discovery.data === null;
   const handleScan = () => {
-    void refreshSourceControlDiscovery();
+    void refreshSourceControlDiscovery({ environmentId });
   };
   const scanButton = (
     <Tooltip>

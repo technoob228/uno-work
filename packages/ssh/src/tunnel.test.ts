@@ -134,7 +134,7 @@ describe("ssh tunnel scripts", () => {
     assert.include(buildRemoteLaunchScript({ packageSpec: "t3@nightly" }), "t3@nightly");
     assert.include(
       buildRemotePairingScript(target),
-      '"$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --json',
+      '"$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --role owner --json',
     );
     assert.include(buildRemotePairingScript(target), 'PAIRING_BASE_DIR="$DEFAULT_SERVER_HOME"');
     assert.notInclude(buildRemotePairingScript(target), "server-home");
@@ -159,6 +159,21 @@ describe("ssh tunnel scripts", () => {
       buildRemoteLaunchScript().indexOf('DEFAULT_REMOTE_PORT="$(resolve_default_runtime_port'),
       buildRemoteLaunchScript().indexOf('elif [ -n "$REMOTE_PID" ]'),
     );
+  });
+
+  it("pairs as owner so the desktop can manage the remote daemon it launched", () => {
+    // The CLI defaults this flag to "client", and a client session is refused
+    // by every manager and orchestration route — an assistant's Telegram token
+    // would fail to save against the very environment the desktop started.
+    const script = buildRemotePairingScript({
+      alias: "devbox",
+      hostname: "devbox.example.com",
+      username: "julius",
+      port: 2222,
+    });
+
+    assert.include(script, "--role owner");
+    assert.notInclude(script, "--role client");
   });
 
   it("allows the remote port picker to run without a state file path", () => {

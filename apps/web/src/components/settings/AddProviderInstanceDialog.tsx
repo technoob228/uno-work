@@ -4,12 +4,17 @@ import { CheckIcon } from "lucide-react";
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  type EnvironmentId,
   ProviderInstanceId,
   ProviderDriverKind,
   type ProviderInstanceConfig,
 } from "@t3tools/contracts";
+import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 
-import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
+import {
+  useEnvironmentSettings,
+  useUpdateEnvironmentSettings,
+} from "../../environments/settings/serverSettings";
 import { cn } from "../../lib/utils";
 import { normalizeProviderAccentColor } from "../../providerInstances";
 import { Button } from "../ui/button";
@@ -81,11 +86,22 @@ function validateInstanceId(id: string, existing: ReadonlySet<string>): string |
 interface AddProviderInstanceDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * The environment that will own the new instance. A provider instance is a
+   * path and a credential on one machine, so the dialog has to name the
+   * machine it is writing to instead of assuming the local daemon.
+   */
+  environmentId: EnvironmentId;
 }
 
-export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderInstanceDialogProps) {
-  const settings = useSettings();
-  const { updateSettings } = useUpdateSettings();
+export function AddProviderInstanceDialog({
+  open,
+  onOpenChange,
+  environmentId,
+}: AddProviderInstanceDialogProps) {
+  const environmentSettings = useEnvironmentSettings(environmentId);
+  const { updateSettings } = useUpdateEnvironmentSettings(environmentId);
+  const settings = environmentSettings ?? DEFAULT_UNIFIED_SETTINGS;
 
   const [wizardStep, setWizardStep] = useState(0);
   const [driver, setDriver] = useState<ProviderDriverKind>(DEFAULT_DRIVER_KIND);
@@ -153,7 +169,7 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
     [driver],
   );
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     setHasAttemptedSubmit(true);
     if (instanceIdError !== null) return;
 
@@ -178,7 +194,7 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
       [brandedId]: nextInstance,
     };
     try {
-      updateSettings({ providerInstances: nextMap });
+      await updateSettings({ providerInstances: nextMap });
       toastManager.add({
         type: "success",
         title: "Provider instance added",
@@ -425,7 +441,7 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
                 Next
               </Button>
             ) : (
-              <Button size="sm" onClick={handleSave}>
+              <Button size="sm" onClick={() => void handleSave()}>
                 Add instance
               </Button>
             )}

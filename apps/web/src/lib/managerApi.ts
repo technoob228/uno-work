@@ -1,11 +1,17 @@
 /**
- * Thin client for the daemon's owner-facing manager routes
- * (`/api/manager/*`). Uses same-origin fetch with the session cookie — the
- * app is served by (or dev-proxied to) the environment daemon, so relative
- * URLs hit the right backend.
+ * Client for a daemon's owner-facing manager routes (`/api/manager/*`).
+ *
+ * Every call names the environment it addresses. Assistants live on a
+ * specific daemon and project ids are not unique across daemons, so an
+ * un-targeted call is ambiguous by construction: it used to mean "whichever
+ * backend serves this page", which on a desktop client viewing a remote
+ * environment is the wrong machine. Routing goes through
+ * {@link environmentFetchJson}, which resolves the target from the id and
+ * fails rather than falling back.
  */
 import type {
   AssistantEditableFileName,
+  EnvironmentId,
   ManagerActionProposal,
   ManagerAssistantSummary,
   ManagerCapabilityTokenDescriptor,
@@ -19,165 +25,205 @@ import type {
   ProjectId,
 } from "@t3tools/contracts";
 
-export class ManagerApiError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-    this.name = "ManagerApiError";
-  }
+import { environmentFetchJson } from "~/environments/http/target";
+
+export {
+  EnvironmentHttpError as ManagerApiError,
+  isEnvironmentHttpError as isManagerApiError,
+  isEnvironmentUnavailableError,
+} from "~/environments/http/target";
+
+/** Common head of every manager request: which daemon is being addressed. */
+interface EnvironmentScoped {
+  readonly environmentId: EnvironmentId;
 }
 
-async function managerFetch<T>(input: {
-  readonly pathname: string;
-  readonly method?: "GET" | "POST";
-  readonly body?: unknown;
-}): Promise<T> {
-  const response = await fetch(input.pathname, {
-    method: input.method ?? "GET",
-    credentials: "include",
-    headers: input.body !== undefined ? { "content-type": "application/json" } : {},
-    ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
-  });
-  if (!response.ok) {
-    let detail = `Request failed with status ${response.status}.`;
-    try {
-      const payload = (await response.json()) as { error?: string };
-      if (typeof payload.error === "string") detail = payload.error;
-    } catch {
-      // Non-JSON error body; keep the status message.
-    }
-    throw new ManagerApiError(response.status, detail);
-  }
-  return (await response.json()) as T;
+interface ConnectorAddressing {
+  readonly names: ReadonlyArray<string>;
+  readonly requireMentionInGroups: boolean;
+  readonly smartWake: boolean;
+  readonly hotWindowSec: number;
 }
 
-export function listManagerProposals(): Promise<{
+export function listManagerProposals(input: EnvironmentScoped): Promise<{
   proposals: ReadonlyArray<ManagerActionProposal>;
 }> {
-  return managerFetch({ pathname: "/api/manager/proposals" });
-}
-
-export function resolveManagerProposal(input: {
-  readonly proposalId: ManagerProposalId;
-  readonly decision: ManagerProposalDecision;
-}): Promise<{ proposal: ManagerActionProposal }> {
-  return managerFetch({
-    pathname: "/api/manager/proposals/resolve",
-    method: "POST",
-    body: input,
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/proposals",
   });
 }
 
-export function listManagerTokens(): Promise<{
+export function resolveManagerProposal(
+  input: EnvironmentScoped & {
+    readonly proposalId: ManagerProposalId;
+    readonly decision: ManagerProposalDecision;
+  },
+): Promise<{ proposal: ManagerActionProposal }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/proposals/resolve",
+    method: "POST",
+    body: { proposalId: input.proposalId, decision: input.decision },
+  });
+}
+
+export function listManagerTokens(input: EnvironmentScoped): Promise<{
   tokens: ReadonlyArray<ManagerCapabilityTokenDescriptor>;
 }> {
-  return managerFetch({ pathname: "/api/manager/tokens" });
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/tokens",
+  });
 }
 
 export function createManagerToken(
-  input: ManagerCreateTokenInput,
+  input: EnvironmentScoped & { readonly token: ManagerCreateTokenInput },
 ): Promise<ManagerCreateTokenResult> {
-  return managerFetch({ pathname: "/api/manager/tokens", method: "POST", body: input });
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/tokens",
+    method: "POST",
+    body: input.token,
+  });
 }
 
-export function revokeManagerToken(tokenId: ManagerTokenId): Promise<{ revoked: boolean }> {
-  return managerFetch({
+export function revokeManagerToken(
+  input: EnvironmentScoped & { readonly tokenId: ManagerTokenId },
+): Promise<{ revoked: boolean }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
     pathname: "/api/manager/tokens/revoke",
     method: "POST",
-    body: { tokenId },
+    body: { tokenId: input.tokenId },
   });
 }
 
-export function listAssistants(): Promise<{ assistants: ReadonlyArray<ManagerAssistantSummary> }> {
-  return managerFetch({ pathname: "/api/manager/assistants" });
-}
-
-export function createAssistant(name: string): Promise<{ projectId: ProjectId }> {
-  return managerFetch({ pathname: "/api/manager/assistants", method: "POST", body: { name } });
-}
-
-export function getAssistant(projectId: string): Promise<ManagerAssistantSummary> {
-  return managerFetch({
-    pathname: `/api/manager/assistant?projectId=${encodeURIComponent(projectId)}`,
+export function listAssistants(input: EnvironmentScoped): Promise<{
+  assistants: ReadonlyArray<ManagerAssistantSummary>;
+}> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistants",
   });
 }
 
-export function updateAssistantAccess(input: {
-  readonly projectId: string;
-  readonly projectAllowlist: "all" | ReadonlyArray<string>;
-  readonly scopes?: ReadonlyArray<string>;
-  readonly autoApprove?: boolean;
-}): Promise<{ token: ManagerCapabilityTokenDescriptor | null }> {
-  return managerFetch({ pathname: "/api/manager/assistant/access", method: "POST", body: input });
+export function createAssistant(
+  input: EnvironmentScoped & { readonly name: string },
+): Promise<{ projectId: ProjectId }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistants",
+    method: "POST",
+    body: { name: input.name },
+  });
 }
 
-export function saveAssistantTelegram(input: {
-  readonly projectId: string;
-  readonly botToken?: string;
-  readonly allowedChatIds: ReadonlyArray<string>;
-  readonly enabled: boolean;
-  readonly defaultModelSelection?: { instanceId: string; model: string } | null;
-  readonly addressing?: {
-    readonly names: ReadonlyArray<string>;
-    readonly requireMentionInGroups: boolean;
-    readonly smartWake: boolean;
-    readonly hotWindowSec: number;
-  };
-}): Promise<{ telegram: ManagerTelegramConnectorStatus }> {
-  return managerFetch({
+export function getAssistant(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<ManagerAssistantSummary> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant",
+    searchParams: { projectId: input.projectId },
+  });
+}
+
+export function updateAssistantAccess(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    readonly projectAllowlist: "all" | ReadonlyArray<string>;
+    readonly scopes?: ReadonlyArray<string>;
+    readonly autoApprove?: boolean;
+  },
+): Promise<{ token: ManagerCapabilityTokenDescriptor | null }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/access",
+    method: "POST",
+    body,
+  });
+}
+
+export function saveAssistantTelegram(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    readonly botToken?: string;
+    readonly allowedChatIds: ReadonlyArray<string>;
+    readonly enabled: boolean;
+    readonly defaultModelSelection?: { instanceId: string; model: string } | null;
+    readonly addressing?: ConnectorAddressing;
+  },
+): Promise<{ telegram: ManagerTelegramConnectorStatus }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
     pathname: "/api/manager/assistant/telegram",
     method: "POST",
-    body: input,
+    body,
   });
 }
 
-export function saveAssistantSlack(input: {
-  readonly projectId: string;
-  readonly botToken?: string;
-  readonly appToken?: string;
-  readonly allowedChannelIds: ReadonlyArray<string>;
-  readonly enabled: boolean;
-  readonly defaultModelSelection?: { instanceId: string; model: string } | null;
-  readonly addressing?: {
-    readonly names: ReadonlyArray<string>;
-    readonly requireMentionInGroups: boolean;
-    readonly smartWake: boolean;
-    readonly hotWindowSec: number;
-  };
-}): Promise<{ slack: ManagerSlackConnectorStatus }> {
-  return managerFetch({
+export function saveAssistantSlack(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    readonly botToken?: string;
+    readonly appToken?: string;
+    readonly allowedChannelIds: ReadonlyArray<string>;
+    readonly enabled: boolean;
+    readonly defaultModelSelection?: { instanceId: string; model: string } | null;
+    readonly addressing?: ConnectorAddressing;
+  },
+): Promise<{ slack: ManagerSlackConnectorStatus }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
     pathname: "/api/manager/assistant/slack",
     method: "POST",
-    body: input,
+    body,
   });
 }
 
-export function readAssistantFile(input: {
-  readonly projectId: string;
-  readonly name: AssistantEditableFileName;
-}): Promise<{ content: string }> {
-  return managerFetch({
-    pathname: `/api/manager/assistant/file?projectId=${encodeURIComponent(input.projectId)}&name=${encodeURIComponent(input.name)}`,
+export function readAssistantFile(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    readonly name: AssistantEditableFileName;
+  },
+): Promise<{ content: string }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/file",
+    searchParams: { projectId: input.projectId, name: input.name },
   });
 }
 
-export function writeAssistantFile(input: {
-  readonly projectId: string;
-  readonly name: AssistantEditableFileName;
-  readonly content: string;
-}): Promise<{ saved: boolean }> {
-  return managerFetch({ pathname: "/api/manager/assistant/file", method: "POST", body: input });
+export function writeAssistantFile(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    readonly name: AssistantEditableFileName;
+    readonly content: string;
+  },
+): Promise<{ saved: boolean }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/file",
+    method: "POST",
+    body,
+  });
 }
 
 /** Set the assistant project's default model (new chats + Telegram fallback). */
-export function setAssistantDefaultModel(input: {
-  readonly projectId: string;
-  readonly instanceId: string;
-  readonly model: string;
-}): Promise<{ sequence: number }> {
-  return managerFetch({
+export function setAssistantDefaultModel(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    readonly instanceId: string;
+    readonly model: string;
+  },
+): Promise<{ sequence: number }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
     pathname: "/api/orchestration/dispatch",
     method: "POST",
     body: {
@@ -190,11 +236,14 @@ export function setAssistantDefaultModel(input: {
 }
 
 /** Compact project list for the access picker (owner snapshot route). */
-export async function listProjectsForAccessPicker(): Promise<
-  ReadonlyArray<{ id: ProjectId; title: string }>
-> {
-  const snapshot = await managerFetch<{
+export async function listProjectsForAccessPicker(
+  input: EnvironmentScoped,
+): Promise<ReadonlyArray<{ id: ProjectId; title: string }>> {
+  const snapshot = await environmentFetchJson<{
     projects: ReadonlyArray<{ id: ProjectId; title: string }>;
-  }>({ pathname: "/api/orchestration/snapshot" });
+  }>({
+    environmentId: input.environmentId,
+    pathname: "/api/orchestration/snapshot",
+  });
   return snapshot.projects.map((project) => ({ id: project.id, title: project.title }));
 }

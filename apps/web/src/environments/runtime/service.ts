@@ -1318,7 +1318,7 @@ async function refreshSavedEnvironmentMetadata(
   client: WsRpcClient,
   roleHint?: AuthSessionRole | null,
   configHint?: ServerConfig | null,
-): Promise<void> {
+): Promise<{ readonly role: AuthSessionRole | null }> {
   const record = getSavedEnvironmentRecord(environmentId);
   if (!record) {
     throw new Error(`Saved environment ${environmentId} not found.`);
@@ -1334,15 +1334,17 @@ async function refreshSavedEnvironmentMetadata(
         }),
   ]);
 
+  const role = sessionState.authenticated ? (sessionState.role ?? roleHint ?? null) : null;
   useSavedEnvironmentRuntimeStore.getState().patch(record.environmentId, {
     authState: sessionState.authenticated ? "authenticated" : "requires-auth",
     descriptor: serverConfig.environment,
     serverConfig,
-    role: sessionState.authenticated ? (sessionState.role ?? roleHint ?? null) : null,
+    role,
   });
   useSavedEnvironmentRegistryStore
     .getState()
     .rename(record.environmentId, serverConfig.environment.label);
+  return { role };
 }
 
 function registerConnection(connection: EnvironmentConnection): EnvironmentConnection {
@@ -1409,6 +1411,11 @@ async function ensureSavedEnvironmentConnection(
     readonly bearerToken?: string;
     readonly role?: AuthSessionRole | null;
     readonly serverConfig?: ServerConfig | null;
+    /**
+     * Set once we have already traded a client-only session for a fresh one,
+     * so a daemon that keeps handing out client sessions loops at most once.
+     */
+    readonly didRetryForOwnerRole?: boolean;
   },
 ): Promise<EnvironmentConnection> {
   const existing = environmentConnections.get(record.environmentId);
@@ -1506,13 +1513,34 @@ async function ensureSavedEnvironmentConnection(
               initialConfigSnapshot.promise,
               INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS,
             ));
-          await refreshSavedEnvironmentMetadata(
+          const refreshed = await refreshSavedEnvironmentMetadata(
             activeRecord.environmentId,
             activeBearerToken,
             client,
             roleHint,
             initialServerConfig,
           );
+
+          // A stored session predating the owner-role pairing fix reads fine
+          // but is refused by every manager and orchestration route. Trade it
+          // for a fresh one instead of letting settings writes fail with 403.
+          if (
+            refreshed.role !== "owner" &&
+            activeRecord.desktopSsh &&
+            !options?.didRetryForOwnerRole
+          ) {
+            const upgradedRecord = activeRecord;
+            await removeSavedEnvironmentBearerToken(upgradedRecord.environmentId);
+            const issued = await issueDesktopSshBearerSession(upgradedRecord);
+            await connection.dispose().catch(() => undefined);
+            pendingSavedEnvironmentConnections.delete(upgradedRecord.environmentId);
+            return await ensureSavedEnvironmentConnection(issued.record, {
+              bearerToken: issued.bearerToken,
+              role: issued.role,
+              serverConfig: options?.serverConfig ?? null,
+              didRetryForOwnerRole: true,
+            });
+          }
         } catch (error) {
           const isAuthError = activeRecord.desktopSsh
             ? isSshHttpAuthError(error, 401)

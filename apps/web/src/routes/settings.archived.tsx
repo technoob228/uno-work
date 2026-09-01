@@ -1,7 +1,17 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { ArchivedThreadsPanel } from "../components/settings/SettingsPanels";
+import { readPrimaryEnvironmentDescriptor } from "../environments/primary/context";
 
 export const Route = createFileRoute("/settings/archived")({
-  component: ArchivedThreadsPanel,
+  beforeLoad: () => {
+    const primary = readPrimaryEnvironmentDescriptor();
+    if (!primary) {
+      throw redirect({ to: "/settings/app/general", replace: true });
+    }
+    throw redirect({
+      to: "/settings/environment/$environmentId/archived",
+      params: { environmentId: primary.environmentId },
+      replace: true,
+    });
+  },
 });

@@ -10,6 +10,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
+import { SettingsScopeSwitcher } from "../components/settings/SettingsScopeSwitcher";
 import { Button } from "../components/ui/button";
 import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
 import { isElectron } from "../env";
@@ -35,7 +36,11 @@ function SettingsContentLayout() {
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   const [restoreSignal, setRestoreSignal] = useState(0);
-  const showRestoreDefaults = location.pathname === "/settings/general";
+  // Restoring defaults only ever resets this device's own preferences, so it
+  // is offered on the app scope's general page and nowhere else — a button
+  // that could mean "reset a daemon" depending on the page would be worse
+  // than no button.
+  const showRestoreDefaults = location.pathname === "/settings/app/general";
   const handleRestored = () => setRestoreSignal((value) => value + 1);
   const navigateBackWithinApp = useCallback(() => {
     if (canGoBack) {
@@ -68,6 +73,7 @@ function SettingsContentLayout() {
             <div className="flex min-h-7 items-center gap-2 sm:min-h-6">
               <SidebarTrigger className="size-7 shrink-0 md:hidden" />
               <span className="text-sm font-medium text-foreground">Settings</span>
+              <SettingsScopeSwitcher pathname={location.pathname} />
               {showRestoreDefaults ? (
                 <div className="ms-auto flex items-center gap-2">
                   <RestoreDefaultsButton onRestored={handleRestored} />
@@ -82,6 +88,9 @@ function SettingsContentLayout() {
             <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
               Settings
             </span>
+            <div className="no-drag ms-3">
+              <SettingsScopeSwitcher pathname={location.pathname} />
+            </div>
             {showRestoreDefaults ? (
               <div className="ms-auto flex items-center gap-2">
                 <RestoreDefaultsButton onRestored={handleRestored} />
@@ -112,7 +121,7 @@ export const Route = createFileRoute("/settings")({
     }
 
     if (location.pathname === "/settings") {
-      throw redirect({ to: "/settings/general", replace: true });
+      throw redirect({ to: "/settings/app/general", replace: true });
     }
   },
   component: SettingsRouteLayout,
