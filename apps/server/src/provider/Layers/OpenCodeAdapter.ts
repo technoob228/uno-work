@@ -400,12 +400,32 @@ function findCyrillicAnswerBoundary(rawText: string): number {
   return cyrillicMatch ? searchStart + cyrillicMatch.index : -1;
 }
 
+const UNO_FINAL_ANSWER_CLOSING_MARKER = "</uno_final_answer>";
+
+/**
+ * Some models (Kimi, DeepSeek) treat the opening marker as an XML tag and
+ * echo a closing one after the answer. It is not part of the answer; drop it,
+ * including a partially streamed prefix of it at the very end of the text.
+ */
+function stripFinalAnswerClosingMarker(value: string): string {
+  const closingIndex = value.toLowerCase().indexOf(UNO_FINAL_ANSWER_CLOSING_MARKER);
+  const withoutClosing = closingIndex >= 0 ? value.slice(0, closingIndex) : value;
+  const partialLength = markerPrefixLengthAtEnd(withoutClosing, UNO_FINAL_ANSWER_CLOSING_MARKER);
+  // A lone "<" at the end may be the start of anything; only trim once the
+  // partial tag is unambiguous.
+  const trimmed =
+    partialLength >= 2 ? withoutClosing.slice(0, withoutClosing.length - partialLength) : withoutClosing;
+  return trimmed.replace(/\s+$/u, "");
+}
+
 export function visibleUnoAssistantTextFromRaw(rawText: string): string {
   const markerIndex = rawText.toLowerCase().indexOf(UNO_FINAL_ANSWER_MARKER);
   if (markerIndex >= 0) {
-    return rawText
-      .slice(markerIndex + UNO_FINAL_ANSWER_MARKER.length)
-      .replace(/^[\s:：\-–—]+/u, "");
+    return stripFinalAnswerClosingMarker(
+      rawText
+        .slice(markerIndex + UNO_FINAL_ANSWER_MARKER.length)
+        .replace(/^[\s:：\-–—]+/u, ""),
+    );
   }
 
   if (markerPrefixLengthAtEnd(rawText, UNO_FINAL_ANSWER_MARKER) > 0) {

@@ -741,6 +741,17 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           ),
           "Понял, давай проверим.",
         );
+
+        // Kimi/DeepSeek echo a closing tag after the answer; it must not leak.
+        assert.equal(
+          visibleUnoAssistantTextFromRaw("<uno_final_answer>\nParis </uno_final_answer>"),
+          "Paris",
+        );
+        assert.equal(
+          visibleUnoAssistantTextFromRaw("<uno_final_answer>\nParis </uno_final"),
+          "Paris",
+        );
+        assert.equal(visibleUnoAssistantTextFromRaw("<uno_final_answer>\na < b"), "a < b");
       }),
   );
 

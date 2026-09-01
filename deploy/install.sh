@@ -155,6 +155,33 @@ os.chmod(path, 0o600)
 PY
 fi
 
+# Work-бокс — 2 ГБ RAM без свопа, а демон + два-три uno-code (bun) легко
+# съедают гигабайт. Без свопа упор в память = зависший бокс (SSH без баннера,
+# run-канал BOX_BUSY) — видели 01.09 на боксе 395, лечилось только ребутом.
+# Своп превращает это в замедление, а OOM-killer получает шанс сработать.
+if ! swapon --show --noheadings 2>/dev/null | grep -q .; then
+  log "Adding a 1G swapfile (no swap configured)"
+  if fallocate -l 1G /swapfile 2>/dev/null; then
+    chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
+    grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    echo 'vm.swappiness=20' > /etc/sysctl.d/90-uno-work.conf
+    sysctl -q -w vm.swappiness=20 || true
+  else
+    log "  fallocate failed — continuing without swap"
+  fi
+fi
+
+# Журнал по умолчанию живёт в tmpfs и пропадает при ребуте — после зависшего
+# бокса нечего читать. Persistent-хранилище, ограниченное 200 МБ.
+if ! grep -q '^Storage=persistent' /etc/systemd/journald.conf 2>/dev/null; then
+  log "Making the systemd journal persistent"
+  mkdir -p /var/log/journal
+  sed -i 's/^#\?Storage=.*/Storage=persistent/' /etc/systemd/journald.conf
+  grep -q '^SystemMaxUse=' /etc/systemd/journald.conf \
+    || sed -i 's/^#\?SystemMaxUse=.*/SystemMaxUse=200M/' /etc/systemd/journald.conf
+  systemctl restart systemd-journald || true
+fi
+
 log "Installing the systemd unit"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "${script_dir}/uno-work.service" ]; then
