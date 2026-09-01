@@ -85,6 +85,15 @@ import {
 } from "./server.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
+  CredentialDeletePayload,
+  CredentialImportPayload,
+  CredentialImportResult,
+  CredentialListResult,
+  CredentialMetadata,
+  CredentialUpsertPayload,
+  CredentialsVaultError,
+} from "./credentialsVault.ts";
+import {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
   SourceControlDiscoveryResult,
@@ -159,6 +168,12 @@ export const WS_METHODS = {
   serverUpdateSettings: "server.updateSettings",
   serverDiscoverSourceControl: "server.discoverSourceControl",
 
+  // Credentials vault methods (web-only Settings panel)
+  vaultList: "vault.list",
+  vaultUpsert: "vault.upsert",
+  vaultDelete: "vault.delete",
+  vaultImport: "vault.import",
+
   // Uno account / billing methods
   unoCreateLlmTopUpAction: "uno.createLlmTopUpAction",
   unoVideoCreateUpload: "uno.video.createUpload",
@@ -224,6 +239,29 @@ export const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSetting
 export const WsServerDiscoverSourceControlRpc = Rpc.make(WS_METHODS.serverDiscoverSourceControl, {
   payload: Schema.Struct({}),
   success: SourceControlDiscoveryResult,
+});
+
+export const WsVaultListRpc = Rpc.make(WS_METHODS.vaultList, {
+  payload: Schema.Struct({}),
+  success: CredentialListResult,
+  error: CredentialsVaultError,
+});
+
+export const WsVaultUpsertRpc = Rpc.make(WS_METHODS.vaultUpsert, {
+  payload: CredentialUpsertPayload,
+  success: CredentialMetadata,
+  error: CredentialsVaultError,
+});
+
+export const WsVaultDeleteRpc = Rpc.make(WS_METHODS.vaultDelete, {
+  payload: CredentialDeletePayload,
+  error: CredentialsVaultError,
+});
+
+export const WsVaultImportRpc = Rpc.make(WS_METHODS.vaultImport, {
+  payload: CredentialImportPayload,
+  success: CredentialImportResult,
+  error: CredentialsVaultError,
 });
 
 export const UnoCreateLlmTopUpActionInput = Schema.Struct({
@@ -549,6 +587,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsServerDiscoverSourceControlRpc,
+  WsVaultListRpc,
+  WsVaultUpsertRpc,
+  WsVaultDeleteRpc,
+  WsVaultImportRpc,
   WsUnoCreateLlmTopUpActionRpc,
   WsUnoVideoCreateUploadRpc,
   WsUnoVideoCompleteUploadRpc,

@@ -152,6 +152,12 @@ export interface WsRpcClient {
   readonly browser: {
     readonly subscribeBridge: RpcStreamMethod<typeof WS_METHODS.subscribeBrowserBridge>;
   };
+  readonly vault: {
+    readonly list: RpcUnaryNoArgMethod<typeof WS_METHODS.vaultList>;
+    readonly upsert: RpcUnaryMethod<typeof WS_METHODS.vaultUpsert>;
+    readonly delete: RpcUnaryMethod<typeof WS_METHODS.vaultDelete>;
+    readonly import: RpcUnaryMethod<typeof WS_METHODS.vaultImport>;
+  };
 }
 
 export function createWsRpcClient(transport: WsTransport): WsRpcClient {
@@ -326,6 +332,12 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
           ...options,
           tag: WS_METHODS.subscribeBrowserBridge,
         }),
+    },
+    vault: {
+      list: () => transport.request((client) => client[WS_METHODS.vaultList]({})),
+      upsert: (input) => transport.request((client) => client[WS_METHODS.vaultUpsert](input)),
+      delete: (input) => transport.request((client) => client[WS_METHODS.vaultDelete](input)),
+      import: (input) => transport.request((client) => client[WS_METHODS.vaultImport](input)),
     },
   };
 }

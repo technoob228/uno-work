@@ -48,6 +48,7 @@ import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { BrowserBridge } from "./browserBridge.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
+import { CredentialsVaultService } from "./credentialsVault.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
@@ -170,6 +171,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const lifecycleEvents = yield* ServerLifecycleEvents;
       const browserBridge = yield* BrowserBridge;
       const serverSettings = yield* ServerSettingsService;
+      const credentialsVault = yield* CredentialsVaultService;
       const startup = yield* ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem;
@@ -962,6 +964,22 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               "rpc.aggregate": "server",
             },
           ),
+        [WS_METHODS.vaultList]: (_input) =>
+          observeRpcEffect(WS_METHODS.vaultList, credentialsVault.list, {
+            "rpc.aggregate": "vault",
+          }),
+        [WS_METHODS.vaultUpsert]: (input) =>
+          observeRpcEffect(WS_METHODS.vaultUpsert, credentialsVault.upsert(input), {
+            "rpc.aggregate": "vault",
+          }),
+        [WS_METHODS.vaultDelete]: ({ id }) =>
+          observeRpcEffect(WS_METHODS.vaultDelete, credentialsVault.remove(id), {
+            "rpc.aggregate": "vault",
+          }),
+        [WS_METHODS.vaultImport]: ({ items }) =>
+          observeRpcEffect(WS_METHODS.vaultImport, credentialsVault.importItems(items), {
+            "rpc.aggregate": "vault",
+          }),
         [WS_METHODS.unoCreateLlmTopUpAction]: (input) =>
           observeRpcEffect(WS_METHODS.unoCreateLlmTopUpAction, createUnoLlmTopUpAction(input), {
             "rpc.aggregate": "uno",

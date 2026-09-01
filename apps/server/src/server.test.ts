@@ -86,6 +86,7 @@ import {
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
+import { CredentialsVaultService, type CredentialsVaultShape } from "./credentialsVault.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
 import {
   BrowserTraceCollector,
@@ -327,6 +328,7 @@ const buildAppUnderTest = (options?: {
     keybindings?: Partial<KeybindingsShape>;
     providerRegistry?: Partial<ProviderRegistryShape>;
     serverSettings?: Partial<ServerSettingsShape>;
+    credentialsVault?: Partial<CredentialsVaultShape>;
     open?: Partial<OpenShape>;
     vcsDriver?: Partial<VcsDriver.VcsDriverShape>;
     vcsDriverRegistry?: Partial<VcsDriverRegistry.VcsDriverRegistryShape>;
@@ -540,6 +542,17 @@ const buildAppUnderTest = (options?: {
           updateSettings: () => Effect.succeed(DEFAULT_SERVER_SETTINGS),
           streamChanges: Stream.empty,
           ...options?.layers?.serverSettings,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(CredentialsVaultService)({
+          list: Effect.succeed([]),
+          upsert: () => Effect.die("CredentialsVaultService.upsert not mocked"),
+          remove: () => Effect.void,
+          importItems: () => Effect.succeed({ imported: 0 }),
+          reveal: () => Effect.succeed(null),
+          materializeAll: Effect.succeed([]),
+          ...options?.layers?.credentialsVault,
         }),
       ),
       Layer.provide(

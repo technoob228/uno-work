@@ -172,6 +172,16 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
           ? rpcClient.server.packUnoVideoDigest(input)
           : Promise.reject(unavailableLocalBackendError()),
     },
+    vault: {
+      list: () =>
+        rpcClient ? rpcClient.vault.list() : Promise.reject(unavailableLocalBackendError()),
+      upsert: (payload) =>
+        rpcClient ? rpcClient.vault.upsert(payload) : Promise.reject(unavailableLocalBackendError()),
+      delete: (payload) =>
+        rpcClient ? rpcClient.vault.delete(payload) : Promise.reject(unavailableLocalBackendError()),
+      import: (payload) =>
+        rpcClient ? rpcClient.vault.import(payload) : Promise.reject(unavailableLocalBackendError()),
+    },
   };
 }
 

@@ -14,6 +14,7 @@ import { Route as PairRouteImport } from './routes/pair'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
+import { Route as SettingsVaultRouteImport } from './routes/settings.vault'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsConnectionsRouteImport } from './routes/settings.connections'
@@ -49,6 +50,11 @@ const ChatIndexRoute = ChatIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => ChatRoute,
+} as any)
+const SettingsVaultRoute = SettingsVaultRouteImport.update({
+  id: '/vault',
+  path: '/vault',
+  getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsSourceControlRoute = SettingsSourceControlRouteImport.update({
   id: '/source-control',
@@ -119,6 +125,7 @@ export interface FileRoutesByFullPath {
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
+  '/settings/vault': typeof SettingsVaultRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/assistant/$projectId': typeof ChatAssistantProjectIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
@@ -134,6 +141,7 @@ export interface FileRoutesByTo {
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
+  '/settings/vault': typeof SettingsVaultRoute
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/assistant/$projectId': typeof ChatAssistantProjectIdRoute
@@ -153,6 +161,7 @@ export interface FileRoutesById {
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
+  '/settings/vault': typeof SettingsVaultRoute
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/assistant/$projectId': typeof ChatAssistantProjectIdRoute
@@ -173,6 +182,7 @@ export interface FileRouteTypes {
     | '/settings/connections'
     | '/settings/general'
     | '/settings/source-control'
+    | '/settings/vault'
     | '/$environmentId/$threadId'
     | '/assistant/$projectId'
     | '/draft/$draftId'
@@ -188,6 +198,7 @@ export interface FileRouteTypes {
     | '/settings/connections'
     | '/settings/general'
     | '/settings/source-control'
+    | '/settings/vault'
     | '/'
     | '/$environmentId/$threadId'
     | '/assistant/$projectId'
@@ -206,6 +217,7 @@ export interface FileRouteTypes {
     | '/settings/connections'
     | '/settings/general'
     | '/settings/source-control'
+    | '/settings/vault'
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
     | '/_chat/assistant/$projectId'
@@ -256,6 +268,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof ChatIndexRouteImport
       parentRoute: typeof ChatRoute
+    }
+    '/settings/vault': {
+      id: '/settings/vault'
+      path: '/vault'
+      fullPath: '/settings/vault'
+      preLoaderRoute: typeof SettingsVaultRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/settings/source-control': {
       id: '/settings/source-control'
@@ -374,6 +393,7 @@ interface SettingsRouteChildren {
   SettingsConnectionsRoute: typeof SettingsConnectionsRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
+  SettingsVaultRoute: typeof SettingsVaultRoute
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
@@ -383,6 +403,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsConnectionsRoute: SettingsConnectionsRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,
+  SettingsVaultRoute: SettingsVaultRoute,
 }
 
 const SettingsRouteWithChildren = SettingsRoute._addFileChildren(

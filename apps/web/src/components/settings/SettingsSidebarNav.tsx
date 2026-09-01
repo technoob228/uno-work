@@ -5,10 +5,13 @@ import {
   BotIcon,
   GitBranchIcon,
   GlobeIcon,
+  KeyRoundIcon,
   Link2Icon,
   Settings2Icon,
 } from "lucide-react";
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
+
+import { isWebApp } from "../../webMode";
 
 import {
   SidebarContent,
@@ -27,18 +30,26 @@ export type SettingsSectionPath =
   | "/settings/source-control"
   | "/settings/connections"
   | "/settings/browser"
+  | "/settings/vault"
   | "/settings/archived";
 
-export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
+type SettingsNavItem = {
   label: string;
   to: SettingsSectionPath;
   icon: ComponentType<{ className?: string }>;
-}> = [
+};
+
+export const SETTINGS_NAV_ITEMS: ReadonlyArray<SettingsNavItem> = [
   { label: "General", to: "/settings/general", icon: Settings2Icon },
   { label: "Assistant", to: "/settings/assistant", icon: BotIcon },
   { label: "Source Control", to: "/settings/source-control", icon: GitBranchIcon },
   { label: "Connections", to: "/settings/connections", icon: Link2Icon },
   { label: "Browser", to: "/settings/browser", icon: GlobeIcon },
+  // Credentials vault is a web-only surface: it manages logins for the box the
+  // hosted app is driving, and has no meaning in the desktop shell.
+  ...(isWebApp
+    ? [{ label: "Credentials", to: "/settings/vault", icon: KeyRoundIcon } as SettingsNavItem]
+    : []),
   { label: "Archive", to: "/settings/archived", icon: ArchiveIcon },
 ];
 

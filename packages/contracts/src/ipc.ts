@@ -70,6 +70,13 @@ import type { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { EditorId } from "./editor.ts";
 import type { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import type { ClientSettings, ServerSettings, ServerSettingsPatch } from "./settings.ts";
+import type {
+  CredentialImportItem,
+  CredentialImportResult,
+  CredentialInput,
+  CredentialId,
+  CredentialMetadata,
+} from "./credentialsVault.ts";
 import type { UnoCreateLlmTopUpActionResult } from "./rpc.ts";
 import type {
   SourceControlCloneRepositoryInput,
@@ -437,6 +444,22 @@ export interface LocalApi {
     cancelUnoVideoJob: (input: UnoVideoCancelJobInput) => Promise<UnoVideoCancelJobResult>;
     getUnoVideoDigest: (input: UnoVideoGetDigestInput) => Promise<VideoDigest>;
     packUnoVideoDigest: (input: VideoContextPackInput) => Promise<VideoContextPack>;
+  };
+  /**
+   * Credentials vault (web-only). Website logins managed from Settings instead
+   * of being pasted into chat. Passwords are stored server-side and never
+   * returned by `list` — entries carry metadata only.
+   */
+  vault: {
+    list: () => Promise<readonly CredentialMetadata[]>;
+    upsert: (payload: {
+      readonly id?: CredentialId;
+      readonly input: CredentialInput;
+    }) => Promise<CredentialMetadata>;
+    delete: (payload: { readonly id: CredentialId }) => Promise<void>;
+    import: (payload: {
+      readonly items: readonly CredentialImportItem[];
+    }) => Promise<CredentialImportResult>;
   };
 }
 
