@@ -56,12 +56,15 @@ const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" vi
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 
-// Cross-origin к демону легитимно ходит ровно один клиент: Electron-renderer
+// Cross-origin к демону легитимно ходят два клиента: Electron-renderer
 // (origin http://127.0.0.1:<порт>) при подключении к remote environment по
-// bearer-токену. Всё остальное — same-origin. Пустой allowedOrigins в effect
-// означает `*`, и до этой проверки ЛЮБОЙ сайт мог дёргать /api/auth/* и читать
-// ответы. Дополнительные origins (свой хостинг SPA) — через
-// T3CODE_ALLOWED_ORIGINS, список через запятую.
+// bearer-токену, и браузерный Uno Work на app.uno4.work, который подключает
+// боксы аккаунта напрямую (descriptor → auth bootstrap → WS). Всё остальное —
+// same-origin. Пустой allowedOrigins в effect означает `*`, и до этой проверки
+// ЛЮБОЙ сайт мог дёргать /api/auth/* и читать ответы. Дополнительные origins
+// (свой хостинг SPA) — через T3CODE_ALLOWED_ORIGINS, список через запятую.
+const UNO_WEB_APP_ORIGINS = new Set(["https://app.uno4.work"]);
+
 function isAllowedCorsOrigin(origin: string): boolean {
   let parsed: URL;
   try {
@@ -70,6 +73,9 @@ function isAllowedCorsOrigin(origin: string): boolean {
     return false;
   }
   if (isLoopbackHostname(parsed.hostname)) {
+    return true;
+  }
+  if (UNO_WEB_APP_ORIGINS.has(parsed.origin)) {
     return true;
   }
   const extra = process.env.T3CODE_ALLOWED_ORIGINS;
