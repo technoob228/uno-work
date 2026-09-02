@@ -9,7 +9,9 @@
  */
 import type {
   EnvironmentId,
+  UnoBoxConnection,
   UnoCloudBoxPowerInput,
+  UnoCloudConnectBoxInput,
   WorkspaceAcquireClaimInput,
   WorkspaceApplyInstructionsInput,
   WorkspaceCreateRequestInput,
@@ -314,6 +316,16 @@ export function unoCloudBoxPowerMutationOptions(
     },
     onSuccess: (result) => {
       queryClient.setQueryData(workspaceQueryKeys.unoCloud(environmentId), result);
+    },
+  });
+}
+
+export function unoCloudConnectBoxMutationOptions(environmentId: EnvironmentId | null) {
+  return mutationOptions({
+    mutationKey: ["workspace", "mutation", "connect-box", environmentId] as const,
+    mutationFn: async (payload: UnoCloudConnectBoxInput): Promise<UnoBoxConnection> => {
+      if (environmentId === null) throw new Error("No environment connection.");
+      return ensureEnvironmentApi(environmentId).unoCloud.connectBox(payload);
     },
   });
 }

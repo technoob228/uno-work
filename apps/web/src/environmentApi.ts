@@ -78,6 +78,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
     unoCloud: {
       getState: (input) => rpcClient.unoCloud.getState(input),
       boxPower: rpcClient.unoCloud.boxPower,
+      connectBox: rpcClient.unoCloud.connectBox,
     },
   };
 }

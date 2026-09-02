@@ -67,9 +67,15 @@ import type {
   AuthWebSocketTokenResult,
 } from "./auth.ts";
 import type { AdvertisedEndpoint } from "./remoteAccess.ts";
-import type { UnoCloudState, WorkspaceInstructions, WorkspaceState } from "./workspace.ts";
+import type {
+  UnoBoxConnection,
+  UnoCloudState,
+  WorkspaceInstructions,
+  WorkspaceState,
+} from "./workspace.ts";
 import type {
   UnoCloudBoxPowerInput,
+  UnoCloudConnectBoxInput,
   UnoCloudGetStateInput,
   WorkspaceAcquireClaimInput,
   WorkspaceAcquireClaimResult,
@@ -607,5 +613,6 @@ export interface EnvironmentApi {
   unoCloud: {
     getState: (input?: UnoCloudGetStateInput) => Promise<UnoCloudState>;
     boxPower: (input: UnoCloudBoxPowerInput) => Promise<UnoCloudState>;
+    connectBox: (input: UnoCloudConnectBoxInput) => Promise<UnoBoxConnection>;
   };
 }

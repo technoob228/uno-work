@@ -328,6 +328,21 @@ export const UnoCloudState = Schema.Struct({
 });
 export type UnoCloudState = typeof UnoCloudState.Type;
 
+/**
+ * A one-time pairing handle for a specific box's Uno Work daemon, minted by the
+ * control plane (`POST /api/v1/boxes/{id}/work/session`). Feeding `url` to
+ * `addSavedEnvironment` connects the box as a remote environment — no manual
+ * host/token entry. The link is single-use and short-lived.
+ */
+export const UnoBoxConnection = Schema.Struct({
+  boxId: Schema.Number,
+  /** Full pairing URL, e.g. `https://<host>/pair#token=...`. */
+  url: Schema.String,
+  hostname: Schema.String,
+  expiresAt: Schema.NullOr(Schema.String),
+});
+export type UnoBoxConnection = typeof UnoBoxConnection.Type;
+
 export function parseUnoBoxSshTarget(command: string | null): UnoBoxSshTarget | null {
   if (!command) return null;
   const trimmed = command.trim();

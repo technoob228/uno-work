@@ -9,7 +9,12 @@
  * The API key is the account credential from server settings. There is no
  * separate login: a workspace is "linked" exactly when the daemon has a key.
  */
-import { UNO_CONTROL_PLANE_BASE_URL, type UnoBox, type UnoCloudState } from "@t3tools/contracts";
+import {
+  UNO_CONTROL_PLANE_BASE_URL,
+  type UnoBox,
+  type UnoBoxConnection,
+  type UnoCloudState,
+} from "@t3tools/contracts";
 import { Context, Data, Effect, Layer, Ref } from "effect";
 
 import { ServerSettingsService } from "../serverSettings.ts";
@@ -39,6 +44,14 @@ export interface UnoCloudServiceShape {
     readonly boxId: number;
     readonly action: "wake" | "sleep" | "start" | "stop";
   }) => Effect.Effect<UnoCloudState>;
+  /**
+   * Mint a one-time pairing link for a box's Uno Work daemon so the client can
+   * add it as a remote environment in one click. Fails (rather than folding into
+   * state) because the caller needs the link, not a machine list.
+   */
+  readonly connectBox: (input: {
+    readonly boxId: number;
+  }) => Effect.Effect<UnoBoxConnection, UnoCloudFetchError>;
 }
 
 export class UnoCloudService extends Context.Service<UnoCloudService, UnoCloudServiceShape>()(
@@ -186,7 +199,36 @@ const makeUnoCloudService = Effect.gen(function* () {
       return withError;
     });
 
-  return { getState, boxPower } satisfies UnoCloudServiceShape;
+  const connectBox: UnoCloudServiceShape["connectBox"] = (input) =>
+    Effect.gen(function* () {
+      const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
+      const apiKey = current?.uno.apiKey.trim() ?? "";
+      if (apiKey.length === 0) {
+        return yield* new UnoCloudFetchError({ message: "Connect your Uno account first." });
+      }
+      const raw = yield* fetchJson(`/api/v1/boxes/${input.boxId}/work/session`, apiKey, {
+        method: "POST",
+        body: "{}",
+      });
+      const record = (typeof raw === "object" && raw !== null ? raw : {}) as Record<
+        string,
+        unknown
+      >;
+      const url = asString(record["url"]);
+      if (url.length === 0) {
+        return yield* new UnoCloudFetchError({
+          message: "The control plane did not return a pairing link for this box.",
+        });
+      }
+      return {
+        boxId: input.boxId,
+        url,
+        hostname: asString(record["hostname"]),
+        expiresAt: asNullableString(record["expires_at"]),
+      } satisfies UnoBoxConnection;
+    });
+
+  return { getState, boxPower, connectBox } satisfies UnoCloudServiceShape;
 });
 
 export const UnoCloudServiceLive = Layer.effect(UnoCloudService, makeUnoCloudService);

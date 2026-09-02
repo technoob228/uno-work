@@ -5,6 +5,7 @@ import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import { EnvironmentId } from "./baseSchemas.ts";
 import {
   CrossEnvironmentWriteMode,
+  UnoBoxConnection,
   UnoCloudState,
   WorkspaceCapability,
   WorkspaceClaim,
@@ -243,6 +244,7 @@ export const WS_METHODS = {
   // Uno cloud: the account behind the workspace and its boxes
   unoCloudGetState: "uno.cloud.getState",
   unoCloudBoxPower: "uno.cloud.boxPower",
+  unoCloudConnectBox: "uno.cloud.connectBox",
 
   // Streaming subscriptions
   subscribeFileChanges: "subscribeFileChanges",
@@ -959,6 +961,11 @@ export const UnoCloudBoxPowerInput = Schema.Struct({
 });
 export type UnoCloudBoxPowerInput = typeof UnoCloudBoxPowerInput.Type;
 
+export const UnoCloudConnectBoxInput = Schema.Struct({
+  boxId: Schema.Number,
+});
+export type UnoCloudConnectBoxInput = typeof UnoCloudConnectBoxInput.Type;
+
 export const WsUnoCloudGetStateRpc = Rpc.make(WS_METHODS.unoCloudGetState, {
   payload: UnoCloudGetStateInput,
   success: UnoCloudState,
@@ -968,6 +975,12 @@ export const WsUnoCloudGetStateRpc = Rpc.make(WS_METHODS.unoCloudGetState, {
 export const WsUnoCloudBoxPowerRpc = Rpc.make(WS_METHODS.unoCloudBoxPower, {
   payload: UnoCloudBoxPowerInput,
   success: UnoCloudState,
+  error: UnoCloudRpcError,
+});
+
+export const WsUnoCloudConnectBoxRpc = Rpc.make(WS_METHODS.unoCloudConnectBox, {
+  payload: UnoCloudConnectBoxInput,
+  success: UnoBoxConnection,
   error: UnoCloudRpcError,
 });
 
@@ -999,6 +1012,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsWorkspaceApplyInstructionsRpc,
   WsUnoCloudGetStateRpc,
   WsUnoCloudBoxPowerRpc,
+  WsUnoCloudConnectBoxRpc,
   WsServerListPluginsRpc,
   WsServerSetPluginEnabledRpc,
   WsPluginsSendToThreadRpc,

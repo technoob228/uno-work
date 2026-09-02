@@ -9,11 +9,21 @@ import {
   TerminalIcon,
 } from "lucide-react";
 import { type ReactNode, memo, useCallback, useEffect, useMemo, useState } from "react";
-import type { DesktopDiscoveredSshHost, DesktopSshEnvironmentTarget } from "@t3tools/contracts";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import type {
+  DesktopDiscoveredSshHost,
+  DesktopSshEnvironmentTarget,
+  UnoBox,
+} from "@t3tools/contracts";
 
 import { APP_BASE_NAME } from "../branding";
+import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readHostedPairingRequest } from "../hostedPairing";
 import { cn } from "../lib/utils";
+import {
+  unoCloudConnectBoxMutationOptions,
+  unoCloudStateQueryOptions,
+} from "../lib/workspaceReactQuery";
 import { getPairingTokenFromUrl } from "../pairingUrl";
 import type { SavedEnvironmentRecord } from "../environments/runtime";
 import {
@@ -185,11 +195,9 @@ export function AddEnvModal({ open, onOpenChange }: AddEnvModalProps) {
               <ChoiceStep onClose={() => handleOpenChange(false)} setStep={setStep} />
             )}
             {step === "uno" && (
-              <SubStep
-                title="Spin up an Uno VPS"
-                description="Pick a region and size - we'll have it ready in ~30s."
-                primaryLabel="Provision"
+              <UnoVpsStep
                 onBack={() => setStep("choice")}
+                onClose={() => handleOpenChange(false)}
               />
             )}
             {step === "custom" && (
@@ -711,37 +719,163 @@ function CustomEnvironmentStep({ onBack, onClose }: { onBack: () => void; onClos
   );
 }
 
-function SubStep({
-  title,
-  description,
-  primaryLabel,
-  onBack,
-}: {
-  title: string;
-  description: string;
-  primaryLabel: string;
-  onBack: () => void;
-}) {
+function formatBoxSpecs(box: UnoBox): string {
+  const parts: string[] = [];
+  if (box.ramMb > 0) parts.push(`${Math.round(box.ramMb / 1024)}GB RAM`);
+  if (box.vcpu > 0) parts.push(`${box.vcpu} vCPU`);
+  if (box.diskGb > 0) parts.push(`${box.diskGb}GB disk`);
+  return parts.join(" · ");
+}
+
+interface UnoBoxRowProps {
+  box: UnoBox;
+  connecting: boolean;
+  disabled: boolean;
+  onConnect: (box: UnoBox) => void;
+}
+
+const UnoBoxRow = memo(function UnoBoxRow({
+  box,
+  connecting,
+  disabled,
+  onConnect,
+}: UnoBoxRowProps) {
+  const specs = formatBoxSpecs(box);
+  return (
+    <div className="border-t border-border/60 px-4 py-3 first:border-t-0 sm:px-5">
+      <div className={ITEM_ROW_INNER_CLASSNAME}>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="truncate text-sm font-medium text-foreground">{box.name}</h3>
+            <Badge variant="outline" className="shrink-0 text-[10px] text-muted-foreground">
+              {box.status}
+            </Badge>
+          </div>
+          {specs ? <p className="truncate text-xs text-muted-foreground">{specs}</p> : null}
+        </div>
+        <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={disabled}
+            onClick={() => onConnect(box)}
+          >
+            {connecting ? <RefreshCwIcon className="size-3 animate-spin" /> : null}
+            {connecting ? "Connecting..." : "Connect"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => void }) {
+  const environmentId = usePrimaryEnvironmentId();
+  const cloudQuery = useQuery(unoCloudStateQueryOptions(environmentId));
+  const connectBox = useMutation(unoCloudConnectBoxMutationOptions(environmentId));
+  const [connectingBoxId, setConnectingBoxId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleConnect = useCallback(
+    async (box: UnoBox) => {
+      setConnectingBoxId(box.id);
+      setError(null);
+      try {
+        const connection = await connectBox.mutateAsync({ boxId: box.id });
+        const record = await addSavedEnvironment({
+          label: box.name,
+          pairingUrl: connection.url,
+        });
+        onClose();
+        toastManager.add({
+          type: "success",
+          title: "Machine connected",
+          description: `${record.label} is now in your environment switcher.`,
+        });
+      } catch (caught) {
+        const message =
+          caught instanceof Error ? caught.message : "Failed to connect this box.";
+        setError(message);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not connect box",
+            description: message,
+          }),
+        );
+      } finally {
+        setConnectingBoxId(null);
+      }
+    },
+    [connectBox, onClose],
+  );
+
+  const cloud = cloudQuery.data;
+  const boxes = cloud?.boxes ?? [];
+  const isConnecting = connectingBoxId !== null;
+
   return (
     <>
       <div className="flex flex-col gap-1 border-b border-border p-6">
         <DialogPrimitive.Title className="font-heading font-semibold text-lg leading-none">
-          {title}
+          Connect an Uno box
         </DialogPrimitive.Title>
         <DialogPrimitive.Description className="mt-1 text-muted-foreground text-sm">
-          {description}
+          Pick a machine from your subscription — it links in one click, no pairing to paste.
         </DialogPrimitive.Description>
       </div>
-      <div className="grid place-items-center px-6 py-12 text-center text-muted-foreground text-sm">
-        <em>coming next</em>
-      </div>
+
+      {error ? (
+        <div className="border-b border-destructive/30 bg-destructive/8 px-6 py-3 text-destructive text-xs">
+          {error}
+        </div>
+      ) : cloud && cloud.error && cloud.connected ? (
+        <div className="border-b border-amber-500/30 bg-amber-500/8 px-6 py-3 text-amber-700 text-xs dark:text-amber-400">
+          {cloud.error}
+        </div>
+      ) : null}
+
+      <ScrollArea className="max-h-72">
+        {cloudQuery.isLoading ? (
+          <div className="grid place-items-center px-6 py-12 text-center text-muted-foreground text-sm">
+            <RefreshCwIcon className="size-4 animate-spin" />
+          </div>
+        ) : cloud && !cloud.connected ? (
+          <div className="px-6 py-10 text-center text-muted-foreground text-sm">
+            Connect your Uno account first — add your API key in Settings → Workspace.
+          </div>
+        ) : boxes.length === 0 ? (
+          <div className="px-6 py-10 text-center text-muted-foreground text-sm">
+            No boxes on this account yet.
+          </div>
+        ) : (
+          <div className="py-1">
+            {boxes.map((box) => (
+              <UnoBoxRow
+                key={box.id}
+                box={box}
+                connecting={connectingBoxId === box.id}
+                disabled={isConnecting}
+                onConnect={handleConnect}
+              />
+            ))}
+          </div>
+        )}
+      </ScrollArea>
+
       <div className="flex justify-between gap-2 border-t border-border bg-muted/40 px-6 py-4">
-        <Button variant="ghost" size="sm" onClick={onBack}>
+        <Button variant="ghost" size="sm" onClick={onBack} disabled={isConnecting}>
           <ChevronLeftIcon className="size-3.5" />
           Back
         </Button>
-        <Button size="sm" disabled>
-          {primaryLabel}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => cloudQuery.refetch()}
+          disabled={cloudQuery.isFetching || isConnecting}
+        >
+          <RefreshCwIcon className={cn("size-3.5", cloudQuery.isFetching && "animate-spin")} />
+          Refresh
         </Button>
       </div>
     </>

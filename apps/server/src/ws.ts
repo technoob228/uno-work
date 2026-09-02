@@ -25,6 +25,7 @@ import {
   ThreadId,
   type TerminalEvent,
   UnoBillingRpcError,
+  UnoCloudRpcError,
   UNO_GATEWAY_BASE_URL,
   WS_METHODS,
   WsRpcGroup,
@@ -1169,6 +1170,14 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.unoCloudBoxPower, unoCloud.boxPower(input), {
             "rpc.aggregate": "uno-cloud",
           }),
+        [WS_METHODS.unoCloudConnectBox]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoCloudConnectBox,
+            unoCloud
+              .connectBox(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-cloud" },
+          ),
         [WS_METHODS.serverListPlugins]: (_input) =>
           observeRpcEffect(WS_METHODS.serverListPlugins, pluginRegistry.getSnapshot, {
             "rpc.aggregate": "server",
