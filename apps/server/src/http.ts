@@ -89,6 +89,10 @@ function isAllowedCorsOrigin(origin: string): boolean {
     .includes(parsed.origin);
 }
 
+// `global: true` — иначе middleware вешается только на сматченные маршруты, и
+// preflight OPTIONS (маршрута под него нет) падает в 404 БЕЗ cors-заголовков:
+// браузер режет весь кросс-origin запрос. Глобальный вариант оборачивает роутер
+// целиком, а cors-middleware сам отвечает 204 на OPTIONS до роутинга.
 export const browserApiCorsLayer = HttpRouter.middleware(
   HttpMiddleware.cors({
     allowedOrigins: isAllowedCorsOrigin,
@@ -96,7 +100,8 @@ export const browserApiCorsLayer = HttpRouter.middleware(
     allowedHeaders: ["authorization", "b3", "traceparent", "content-type"],
     maxAge: 600,
   }),
-).layer;
+  { global: true },
+);
 
 export function isLoopbackHostname(hostname: string): boolean {
   const normalizedHostname = hostname
