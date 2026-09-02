@@ -145,6 +145,11 @@ import {
   VideoContextPackInput,
   VideoDigest,
 } from "./video.ts";
+import {
+  UnoTranscribeAudioInput,
+  UnoTranscribeAudioResult,
+  UnoTranscriptionError,
+} from "./transcription.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -211,6 +216,7 @@ export const WS_METHODS = {
   unoVideoCancelJob: "uno.video.cancelJob",
   unoVideoGetDigest: "uno.video.getDigest",
   unoVideoPackDigest: "uno.video.packDigest",
+  unoTranscribeAudio: "uno.transcribeAudio",
 
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
@@ -417,6 +423,12 @@ export const WsUnoVideoPackDigestRpc = Rpc.make(WS_METHODS.unoVideoPackDigest, {
   payload: VideoContextPackInput,
   success: VideoContextPack,
   error: UnoVideoRpcError,
+});
+
+export const WsUnoTranscribeAudioRpc = Rpc.make(WS_METHODS.unoTranscribeAudio, {
+  payload: UnoTranscribeAudioInput,
+  success: UnoTranscribeAudioResult,
+  error: UnoTranscriptionError,
 });
 
 export const WsSourceControlLookupRepositoryRpc = Rpc.make(
@@ -1000,6 +1012,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoVideoCancelJobRpc,
   WsUnoVideoGetDigestRpc,
   WsUnoVideoPackDigestRpc,
+  WsUnoTranscribeAudioRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,

@@ -382,10 +382,45 @@ export const BrowserBridgeCommandEvent = Schema.Struct({
 });
 export type BrowserBridgeCommandEvent = typeof BrowserBridgeCommandEvent.Type;
 
+/**
+ * Запрос секрета от агента: приложение показывает пользователю маскированный
+ * input, значение пишется сервером в env-файл проекта и НИКОГДА не попадает в
+ * транскрипт чата. Событие несёт только метаданные (имя переменной, описание,
+ * целевой файл) — самого значения здесь нет и быть не может.
+ */
+export const BridgeSecretRequestEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("secretRequest"),
+  sequence: NonNegativeInt,
+  requestId: Schema.String,
+  responseToken: Schema.String,
+  /** Имя переменной окружения, например OPENAI_API_KEY. */
+  name: Schema.String,
+  /** Что это и где взять — текст от агента для пользователя. */
+  description: Schema.optional(Schema.String),
+  /** Env-файл относительно корня проекта (.env, .env.local, …). */
+  targetFile: Schema.String,
+  /** Корень проекта, в чей env-файл сервер запишет значение. */
+  cwd: Schema.String,
+  context: Schema.optional(BrowserBridgeRequestContext),
+});
+export type BridgeSecretRequestEvent = typeof BridgeSecretRequestEvent.Type;
+
+/** Запрос секрета закрыт (сохранён/отклонён/таймаут) — клиенты убирают панель. */
+export const BridgeSecretSettledEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("secretSettled"),
+  sequence: NonNegativeInt,
+  requestId: Schema.String,
+});
+export type BridgeSecretSettledEvent = typeof BridgeSecretSettledEvent.Type;
+
 export const BrowserBridgeStreamEvent = Schema.Union([
   BrowserBridgeOpenUrlEvent,
   BrowserBridgeOpenFileEvent,
   BrowserBridgeCommandEvent,
+  BridgeSecretRequestEvent,
+  BridgeSecretSettledEvent,
 ]);
 export type BrowserBridgeStreamEvent = typeof BrowserBridgeStreamEvent.Type;
 

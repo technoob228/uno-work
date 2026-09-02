@@ -73,6 +73,7 @@ import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
+import { ComposerSecretRequestPanel } from "./ComposerSecretRequestPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
@@ -96,8 +97,10 @@ import {
   FileVideoIcon,
   ListTodoIcon,
   LoaderCircleIcon,
+  MicIcon,
   PaperclipIcon,
   RotateCcwIcon,
+  SquareIcon,
   type LucideIcon,
   LockIcon,
   LockOpenIcon,
@@ -126,6 +129,7 @@ import { formatProviderSkillDisplayName } from "../../providerSkillPresentation"
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { readLocalApi } from "../../localApi";
+import { isDictationSupported, useDictation } from "../../hooks/useDictation";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 const VIDEO_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_VIDEO_BYTES / (1024 * 1024 * 1024))}GB`;
@@ -1621,6 +1625,44 @@ export const ChatComposer = memo(
       };
     }, [composerCursor, composerTerminalContexts, promptRef]);
 
+    const insertDictationTranscript = useCallback(
+      (text: string) => {
+        const snapshot = readComposerSnapshot();
+        const needsSpaceBefore =
+          snapshot.cursor > 0 && !/\s/.test(snapshot.value.charAt(snapshot.cursor - 1));
+        applyPromptReplacement(
+          snapshot.cursor,
+          snapshot.cursor,
+          `${needsSpaceBefore ? " " : ""}${text}`,
+        );
+      },
+      [applyPromptReplacement, readComposerSnapshot],
+    );
+
+    const dictation = useDictation({
+      onTranscript: insertDictationTranscript,
+      onError: (message) =>
+        toastManager.add({
+          type: "error",
+          title: "Dictation failed.",
+          description: message,
+        }),
+    });
+    const dictationSupported = isDictationSupported();
+    const toggleDictation = useCallback(() => {
+      if (dictation.state === "recording") {
+        dictation.stop();
+      } else if (dictation.state === "idle") {
+        void dictation.start();
+      }
+    }, [dictation]);
+    const dictationTooltip =
+      dictation.state === "recording"
+        ? "Stop and transcribe"
+        : dictation.state === "transcribing"
+          ? "Transcribing…"
+          : "Dictate";
+
     const resolveActiveComposerTrigger = useCallback((): {
       snapshot: { value: string; cursor: number; expandedCursor: number };
       trigger: ComposerTrigger | null;
@@ -2488,6 +2530,35 @@ export const ChatComposer = memo(
               <TooltipPopup side="top">{imageAttachmentTooltip}</TooltipPopup>
             </Tooltip>
 
+            {dictationSupported ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label={dictationTooltip}
+                      disabled={dictation.state === "transcribing"}
+                      onClick={toggleDictation}
+                      className={cn(
+                        "inline-flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground",
+                        dictation.state === "recording" &&
+                          "animate-pulse text-red-500 hover:text-red-500",
+                      )}
+                    >
+                      {dictation.state === "transcribing" ? (
+                        <LoaderCircleIcon className="size-4 animate-spin" />
+                      ) : dictation.state === "recording" ? (
+                        <SquareIcon className="size-4 fill-current" />
+                      ) : (
+                        <MicIcon className="size-4" />
+                      )}
+                    </button>
+                  }
+                />
+                <TooltipPopup side="top">{dictationTooltip}</TooltipPopup>
+              </Tooltip>
+            ) : null}
+
             <input
               type="text"
               value={prompt}
@@ -2667,6 +2738,7 @@ export const ChatComposer = memo(
               scheduleComposerCollapseCheck();
             }}
           >
+            <ComposerSecretRequestPanel threadId={activeThread?.id} />
             {!isComposerCollapsedMobile &&
               (activePendingApproval ? (
                 <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
@@ -3103,6 +3175,38 @@ export const ChatComposer = memo(
                     />
                     <TooltipPopup side="top">{imageAttachmentTooltip}</TooltipPopup>
                   </Tooltip>
+                  {dictationSupported ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <span className="inline-flex shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              type="button"
+                              aria-label={dictationTooltip}
+                              disabled={dictation.state === "transcribing"}
+                              className={cn(
+                                "text-muted-foreground/70 hover:text-foreground/80",
+                                dictation.state === "recording" &&
+                                  "animate-pulse text-red-500 hover:text-red-500",
+                              )}
+                              onClick={toggleDictation}
+                            >
+                              {dictation.state === "transcribing" ? (
+                                <LoaderCircleIcon className="animate-spin" />
+                              ) : dictation.state === "recording" ? (
+                                <SquareIcon className="fill-current" />
+                              ) : (
+                                <MicIcon />
+                              )}
+                            </Button>
+                          </span>
+                        }
+                      />
+                      <TooltipPopup side="top">{dictationTooltip}</TooltipPopup>
+                    </Tooltip>
+                  ) : null}
                   <ProviderModelPicker
                     compact={isComposerFooterCompact}
                     activeInstanceId={selectedInstanceId}

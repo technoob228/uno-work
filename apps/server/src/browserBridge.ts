@@ -27,6 +27,10 @@ export const BROWSER_BRIDGE_COMMAND_RESULT_PATH = "/api/browser/command/result";
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 const MAX_COMMAND_TIMEOUT_MS = 120_000;
+
+// Запрос секрета ждёт человека, а не браузер — таймауты в минутах.
+const DEFAULT_SECRET_TIMEOUT_MS = 900_000;
+const MAX_SECRET_TIMEOUT_MS = 3_600_000;
 const MAX_SELECTOR_LENGTH = 2_000;
 const MAX_TEXT_LENGTH = 16_000;
 const MAX_SCRIPT_LENGTH = 32_000;
@@ -140,6 +144,30 @@ interface PendingCommandResult {
   readonly deferred: Deferred.Deferred<BrowserAutomationCommandResult>;
 }
 
+/** Что вернётся агенту из `POST /api/secrets/request`. Значения секрета тут нет. */
+export interface SecretRequestOutcome {
+  readonly ok: boolean;
+  readonly name?: string;
+  readonly file?: string;
+  readonly error?: string;
+}
+
+/** Метаданные запроса секрета — по ним result-роут пишет env-файл. */
+export interface PendingSecretRequestMeta {
+  readonly name: string;
+  readonly targetFile: string;
+  readonly cwd: string;
+}
+
+interface PendingSecretRequest extends PendingSecretRequestMeta {
+  readonly responseToken: string;
+  readonly deferred: Deferred.Deferred<SecretRequestOutcome>;
+}
+
+export function secretRequestTimeoutMs(timeoutMs: number | undefined): number {
+  return Math.min(MAX_SECRET_TIMEOUT_MS, Math.max(1_000, timeoutMs ?? DEFAULT_SECRET_TIMEOUT_MS));
+}
+
 const MAX_CONTEXT_CWD_LENGTH = 4096;
 const MAX_CONTEXT_THREAD_ID_LENGTH = 200;
 
@@ -201,6 +229,31 @@ export interface BrowserBridgeShape {
   readonly resolveCommandResult: (
     input: BrowserAutomationCommandResult & { readonly responseToken: string },
   ) => Effect.Effect<boolean>;
+  /**
+   * Запрос секрета от агента: пушит `secretRequest`-событие web-клиентам и
+   * блокируется до сабмита/отказа пользователя или таймаута.
+   */
+  readonly publishSecretRequest: (
+    input: {
+      readonly name: string;
+      readonly description?: string;
+      readonly targetFile: string;
+      readonly cwd: string;
+      readonly timeoutMs?: number;
+    },
+    context?: BrowserBridgeRequestContext,
+  ) => Effect.Effect<SecretRequestOutcome>;
+  /** Метаданные висящего запроса секрета; null — неизвестный id/токен. */
+  readonly peekSecretRequest: (input: {
+    readonly requestId: string;
+    readonly responseToken: string;
+  }) => Effect.Effect<PendingSecretRequestMeta | null>;
+  /** Закрывает запрос секрета и будит ожидающего агента. */
+  readonly completeSecretRequest: (input: {
+    readonly requestId: string;
+    readonly responseToken: string;
+    readonly outcome: SecretRequestOutcome;
+  }) => Effect.Effect<boolean>;
   readonly stream: Stream.Stream<BrowserBridgeStreamEvent>;
   /**
    * Есть ли живые подписчики стрима (подключённые web-клиенты). Счётчик
@@ -230,6 +283,7 @@ export const makeBrowserBridge = (input: {
     const sequenceRef = yield* Ref.make(0);
     const subscriberCountRef = yield* Ref.make(0);
     const pendingCommands = new Map<string, PendingCommandResult>();
+    const pendingSecretRequests = new Map<string, PendingSecretRequest>();
     // Scoped-токены: один на контекст (тред/проект), переживают рестарты
     // харнесса в рамках жизни сервера. Треды конечны — рост карт ограничен.
     const scopedTokenByContextKey = new Map<string, string>();
@@ -357,6 +411,79 @@ export const makeBrowserBridge = (input: {
             ...(input.data !== undefined ? { data: input.data } : {}),
             ...(input.error !== undefined ? { error: input.error } : {}),
           });
+          return true;
+        }),
+      publishSecretRequest: (input, context?) =>
+        Effect.gen(function* () {
+          const requestId = randomBytes(12).toString("hex");
+          const responseToken = randomBytes(24).toString("hex");
+          const deferred = yield* Deferred.make<SecretRequestOutcome>();
+          pendingSecretRequests.set(requestId, {
+            responseToken,
+            deferred,
+            name: input.name,
+            targetFile: input.targetFile,
+            cwd: input.cwd,
+          });
+
+          const sequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
+          yield* PubSub.publish(pubsub, {
+            version: 1,
+            type: "secretRequest",
+            sequence,
+            requestId,
+            responseToken,
+            name: input.name,
+            ...(input.description !== undefined ? { description: input.description } : {}),
+            targetFile: input.targetFile,
+            cwd: input.cwd,
+            ...(context ? { context } : {}),
+          } satisfies BrowserBridgeStreamEvent);
+
+          const timeoutMs = secretRequestTimeoutMs(input.timeoutMs);
+          const maybeOutcome = yield* Deferred.await(deferred).pipe(
+            Effect.timeoutOption(Duration.millis(timeoutMs)),
+            Effect.ensuring(Effect.sync(() => pendingSecretRequests.delete(requestId))),
+          );
+
+          if (Option.isSome(maybeOutcome)) {
+            return maybeOutcome.value;
+          }
+          const settledSequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
+          yield* PubSub.publish(pubsub, {
+            version: 1,
+            type: "secretSettled",
+            sequence: settledSequence,
+            requestId,
+          } satisfies BrowserBridgeStreamEvent);
+          return {
+            ok: false,
+            error: `Secret request timed out after ${timeoutMs}ms — the user didn't respond.`,
+          } satisfies SecretRequestOutcome;
+        }),
+      peekSecretRequest: (input) =>
+        Effect.sync(() => {
+          const pending = pendingSecretRequests.get(input.requestId);
+          if (!pending || pending.responseToken !== input.responseToken) {
+            return null;
+          }
+          return { name: pending.name, targetFile: pending.targetFile, cwd: pending.cwd };
+        }),
+      completeSecretRequest: (input) =>
+        Effect.gen(function* () {
+          const pending = pendingSecretRequests.get(input.requestId);
+          if (!pending || pending.responseToken !== input.responseToken) {
+            return false;
+          }
+          pendingSecretRequests.delete(input.requestId);
+          yield* Deferred.succeed(pending.deferred, input.outcome);
+          const sequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
+          yield* PubSub.publish(pubsub, {
+            version: 1,
+            type: "secretSettled",
+            sequence,
+            requestId: input.requestId,
+          } satisfies BrowserBridgeStreamEvent);
           return true;
         }),
       get stream() {

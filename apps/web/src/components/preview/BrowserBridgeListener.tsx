@@ -11,6 +11,7 @@ import { useStore } from "../../store";
 import { runBrowserAutomationCommandForProject } from "./BrowserAutomationRegistry";
 import { resolveBridgeEventProjectKey } from "./browserBridgeRouting";
 import { detectFileKind, usePreviewPane } from "./PreviewPaneContext";
+import { addSecretRequest, removeSecretRequest } from "../../secretRequestStore";
 import {
   detectBrowserExtension,
   isBrowserExtensionConnected,
@@ -92,6 +93,16 @@ export function BrowserBridgeListener() {
       const api = readEnvironmentApi(connection.environmentId);
       if (!api) return undefined;
       return api.browser.subscribeBridge((event) => {
+        // Секретные события не привязаны к вкладке предпросмотра — им не нужен
+        // projectKey, а у secretSettled и вовсе нет контекста.
+        if (event.type === "secretRequest") {
+          addSecretRequest({ event, environmentId: connection.environmentId });
+          return;
+        }
+        if (event.type === "secretSettled") {
+          removeSecretRequest(event.requestId);
+          return;
+        }
         const projectKey =
           resolveBridgeEventProjectKey({
             context: event.context,

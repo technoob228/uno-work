@@ -125,6 +125,7 @@ import type {
   VideoContextPackInput,
   VideoDigest,
 } from "./video.ts";
+import type { UnoTranscribeAudioInput, UnoTranscribeAudioResult } from "./transcription.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -466,6 +467,8 @@ export interface LocalApi {
     cancelUnoVideoJob: (input: UnoVideoCancelJobInput) => Promise<UnoVideoCancelJobResult>;
     getUnoVideoDigest: (input: UnoVideoGetDigestInput) => Promise<VideoDigest>;
     packUnoVideoDigest: (input: VideoContextPackInput) => Promise<VideoContextPack>;
+    /** Dictation: audio is transcribed server-side via the Uno Gateway. */
+    transcribeAudio: (input: UnoTranscribeAudioInput) => Promise<UnoTranscribeAudioResult>;
   };
   /**
    * Credentials vault (web-only). Website logins managed from Settings instead

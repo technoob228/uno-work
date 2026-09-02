@@ -30,6 +30,16 @@ import {
   normalizeBridgeRequestContext,
 } from "./browserBridge.ts";
 import { expandHomePath } from "./pathExpansion.ts";
+import {
+  isValidSecretName,
+  isValidSecretTargetFile,
+  SECRET_DESCRIPTION_MAX_LENGTH,
+  SECRET_REQUEST_PATH,
+  SECRET_RESULT_PATH,
+  SECRET_VALUE_MAX_LENGTH,
+  upsertEnvContent,
+} from "./secretsEnv.ts";
+import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { executeBridgeCommand, executeBridgeOpenUrl } from "./browserCommandRouter.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
@@ -342,6 +352,180 @@ export const browserBridgeCommandResultRouteLayer = HttpRouter.add(
       ...(input.error !== undefined ? { error: input.error } : {}),
     });
     return HttpServerResponse.jsonUnsafe({ ok: accepted }, { status: accepted ? 200 : 404 });
+  }),
+);
+
+/**
+ * Endpoint для харнессов: запросить у пользователя секрет (API-ключ, пароль)
+ * через маскированный input в приложении. Блокируется до ответа пользователя;
+ * значение пишется сервером в env-файл проекта и в ответ агенту НЕ попадает.
+ * Всегда отвечает 200 с `{ok: boolean}` на обработанный запрос, чтобы агент
+ * прочитал причину отказа из тела, а не из кода ошибки curl.
+ */
+export const secretsRequestRouteLayer = HttpRouter.add(
+  "POST",
+  SECRET_REQUEST_PATH,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const browserBridge = yield* BrowserBridge;
+    const authorization = browserBridge.authorize(request.headers["authorization"]);
+    if (!authorization) {
+      return HttpServerResponse.text("Unauthorized", { status: 401 });
+    }
+
+    const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
+    const input = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    if (!isValidSecretName(input.name)) {
+      return HttpServerResponse.jsonUnsafe(
+        {
+          ok: false,
+          error: 'Invalid "name": expected an env-style variable name (letters, digits, _).',
+        },
+        { status: 400 },
+      );
+    }
+    const targetFile = input.targetFile ?? ".env";
+    if (!isValidSecretTargetFile(targetFile)) {
+      return HttpServerResponse.jsonUnsafe(
+        { ok: false, error: 'Invalid "targetFile": expected .env or .env.<suffix>.' },
+        { status: 400 },
+      );
+    }
+    if (
+      input.description !== undefined &&
+      (typeof input.description !== "string" ||
+        input.description.length > SECRET_DESCRIPTION_MAX_LENGTH)
+    ) {
+      return HttpServerResponse.jsonUnsafe(
+        { ok: false, error: 'Invalid "description".' },
+        { status: 400 },
+      );
+    }
+    if (input.timeoutMs !== undefined && typeof input.timeoutMs !== "number") {
+      return HttpServerResponse.jsonUnsafe(
+        { ok: false, error: 'Invalid "timeoutMs".' },
+        { status: 400 },
+      );
+    }
+
+    const context = resolveBridgeRequestContext(authorization, body);
+    const cwd = context?.cwd;
+    if (!cwd) {
+      return HttpServerResponse.jsonUnsafe(
+        {
+          ok: false,
+          error: 'Missing "cwd": pass the project root so the value lands in its env file.',
+        },
+        { status: 400 },
+      );
+    }
+
+    const hasSubscribers = yield* browserBridge.hasSubscribers;
+    if (!hasSubscribers) {
+      return HttpServerResponse.jsonUnsafe(
+        { ok: false, error: "No connected app window to ask the user in." },
+        { status: 502 },
+      );
+    }
+
+    const outcome = yield* browserBridge.publishSecretRequest(
+      {
+        name: input.name,
+        ...(input.description !== undefined ? { description: input.description } : {}),
+        targetFile,
+        cwd: expandHomePath(cwd),
+        ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+      },
+      context,
+    );
+    return HttpServerResponse.jsonUnsafe(outcome, { status: 200 });
+  }),
+);
+
+/**
+ * Сабмит значения секрета из web-клиента. Авторизация — responseToken из
+ * bridge-события (его знает только клиент, получивший событие по
+ * аутентифицированному WS). Значение здесь записывается в env-файл и дальше
+ * никуда не передаётся.
+ */
+export const secretsResultRouteLayer = HttpRouter.add(
+  "POST",
+  SECRET_RESULT_PATH,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
+    if (typeof body !== "object" || body === null) {
+      return HttpServerResponse.text("Invalid result payload.", { status: 400 });
+    }
+    const input = body as Record<string, unknown>;
+    if (typeof input.requestId !== "string" || typeof input.responseToken !== "string") {
+      return HttpServerResponse.text("Invalid result payload.", { status: 400 });
+    }
+    const decline = input.decline === true;
+    const value = decline
+      ? undefined
+      : typeof input.value === "string"
+        ? input.value.trim()
+        : undefined;
+    if (!decline && (value === undefined || value.length === 0)) {
+      return HttpServerResponse.text("Invalid result payload.", { status: 400 });
+    }
+    if (value !== undefined && value.length > SECRET_VALUE_MAX_LENGTH) {
+      return HttpServerResponse.text("Secret value is too long.", { status: 400 });
+    }
+
+    const browserBridge = yield* BrowserBridge;
+    const credentials = { requestId: input.requestId, responseToken: input.responseToken };
+    const pending = yield* browserBridge.peekSecretRequest(credentials);
+    if (!pending) {
+      return HttpServerResponse.jsonUnsafe({ ok: false }, { status: 404 });
+    }
+
+    if (decline || value === undefined) {
+      yield* browserBridge.completeSecretRequest({
+        ...credentials,
+        outcome: {
+          ok: false,
+          name: pending.name,
+          error: "The user declined to provide this secret.",
+        },
+      });
+      return HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 });
+    }
+
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const envPath = path.join(expandHomePath(pending.cwd), pending.targetFile);
+    const current = yield* fs.readFileString(envPath).pipe(Effect.catch(() => Effect.succeed("")));
+    const contents = upsertEnvContent(current, pending.name, value);
+
+    const workspaceFileSystem = yield* WorkspaceFileSystem;
+    const written = yield* workspaceFileSystem
+      .writeFile({
+        cwd: pending.cwd,
+        relativePath: pending.targetFile,
+        contents,
+      })
+      .pipe(
+        Effect.as(true),
+        Effect.catch(() => Effect.succeed(false)),
+      );
+    if (!written) {
+      // Запрос остаётся висеть — пользователь может попробовать ещё раз.
+      return HttpServerResponse.jsonUnsafe(
+        { ok: false, error: `Failed to write ${pending.targetFile}.` },
+        { status: 500 },
+      );
+    }
+
+    yield* browserBridge.completeSecretRequest({
+      ...credentials,
+      outcome: { ok: true, name: pending.name, file: pending.targetFile },
+    });
+    return HttpServerResponse.jsonUnsafe(
+      { ok: true, name: pending.name, file: pending.targetFile },
+      { status: 200 },
+    );
   }),
 );
 
