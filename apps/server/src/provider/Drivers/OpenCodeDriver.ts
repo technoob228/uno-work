@@ -19,6 +19,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGeneration.ts";
 import { ServerConfig } from "../../config.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
+import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
 import { writeBrowserInstructionsFile } from "../browserInstructions.ts";
 import { ProviderDriverError } from "../Errors.ts";
@@ -48,6 +49,7 @@ export type OpenCodeDriverEnv =
   | Path.Path
   | ProviderEventLoggers
   | BrowserBridge
+  | UnoAgentAccess
   | ServerConfig;
 
 const withInstanceIdentity =
@@ -85,9 +87,11 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         baseUrl: browserBridge.baseUrl,
         extraSections: [buildPluginInstructions(serverConfig.pluginsDir)],
       });
-      const processEnv: NodeJS.ProcessEnv = browserBridge.applyEnvironment(
-        mergeProviderInstanceEnvironment(environment),
-      );
+      const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
+      const processEnv: NodeJS.ProcessEnv = {
+        ...unoAgentEnv,
+        ...browserBridge.applyEnvironment(mergeProviderInstanceEnvironment(environment)),
+      };
       // Инструкции про браузер задаём через OPENCODE_CONFIG_CONTENT.instructions
       // (путь к файлу). opencode мержит этот источник с пользовательским
       // конфигом, дописывая наш файл к их собственным инструкциям.

@@ -18,6 +18,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeClaudeTextGeneration } from "../../textGeneration/ClaudeTextGeneration.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
+import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
 import { buildBrowserInstructions } from "../browserInstructions.ts";
 import { ServerConfig } from "../../config.ts";
@@ -49,6 +50,7 @@ export type ClaudeDriverEnv =
   | Path.Path
   | ProviderEventLoggers
   | BrowserBridge
+  | UnoAgentAccess
   | ServerConfig;
 
 const withInstanceIdentity =
@@ -82,9 +84,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const eventLoggers = yield* ProviderEventLoggers;
       const browserBridge = yield* BrowserBridge;
       const serverConfig = yield* ServerConfig;
-      const processEnv = browserBridge.applyEnvironment(
-        mergeProviderInstanceEnvironment(environment),
-      );
+      const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
+      const processEnv = {
+        ...unoAgentEnv,
+        ...browserBridge.applyEnvironment(mergeProviderInstanceEnvironment(environment)),
+      };
       const harnessInstructionBlocks = [
         buildBrowserInstructions(browserBridge.baseUrl),
         buildPluginInstructions(serverConfig.pluginsDir),

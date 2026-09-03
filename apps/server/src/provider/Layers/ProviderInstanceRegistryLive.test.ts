@@ -36,6 +36,7 @@ import {
 import { Effect, Layer } from "effect";
 
 import { BrowserBridgeTest } from "../../browserBridge.ts";
+import { UnoAgentAccessTest } from "../../unoAgentAccess.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ClaudeDriver } from "../Drivers/ClaudeDriver.ts";
@@ -92,6 +93,7 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
   }).pipe(
     Layer.provideMerge(NodeServices.layer),
     Layer.provideMerge(BrowserBridgeTest),
+    Layer.provideMerge(UnoAgentAccessTest),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
   );
 
@@ -229,6 +231,7 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
   }).pipe(
     Layer.provideMerge(infraLayer),
     Layer.provideMerge(BrowserBridgeTest),
+    Layer.provideMerge(UnoAgentAccessTest),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
     Layer.provideMerge(ServerSettingsService.layerTest()),
   );

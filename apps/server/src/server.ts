@@ -17,6 +17,7 @@ import {
   browserApiCorsLayer,
 } from "./http.ts";
 import { BrowserBridgeLive } from "./browserBridge.ts";
+import { UnoAgentAccessLive } from "./unoAgentAccess.ts";
 import { HealthCheck } from "./health.ts";
 import { SelfWatchdogLive } from "./selfWatchdog.ts";
 import { ServerBrowserLive } from "./serverBrowser.ts";
@@ -359,6 +360,14 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provideMerge(OpenLive),
   Layer.provideMerge(ServerLifecycleEventsLive),
   Layer.provideMerge(BrowserBridgeLive),
+  // Uno-идентичность агентских сессий: scoped agent-токен бокса в env
+  // харнесов. Зависимости даём тем же экземплярам Live-слоёв (memoized).
+  Layer.provideMerge(
+    UnoAgentAccessLive.pipe(
+      Layer.provide(ServerSettingsLive),
+      Layer.provide(ServerSecretStoreLive),
+    ),
+  ),
   Layer.provideMerge(ServerBrowserLive),
   Layer.provide(NetService.layer),
 );

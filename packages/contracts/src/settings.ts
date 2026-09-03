@@ -475,8 +475,20 @@ export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
 export const UNO_GATEWAY_BASE_URL = "https://api.getuno.xyz/v1";
 
+/**
+ * Уровень доступа агентских сессий к аккаунту Uno. Демон чеканит на боксе
+ * scoped-токен этого уровня и кладёт его в env харнесов; "off" выключает
+ * выдачу целиком. "purchase" — явное согласие владельца на заказ платных
+ * продуктов агентом (по умолчанию его нет даже в "manage").
+ */
+export const UnoAgentAccessLevel = Schema.Literals(["off", "read", "manage", "purchase"]);
+export type UnoAgentAccessLevel = typeof UnoAgentAccessLevel.Type;
+
 export const UnoAccountSettings = Schema.Struct({
   apiKey: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  agentAccess: UnoAgentAccessLevel.pipe(
+    Schema.withDecodingDefault(Effect.succeed("read" as const satisfies UnoAgentAccessLevel)),
+  ),
 });
 export type UnoAccountSettings = typeof UnoAccountSettings.Type;
 
@@ -614,6 +626,7 @@ export const ServerSettingsPatch = Schema.Struct({
   uno: Schema.optionalKey(
     Schema.Struct({
       apiKey: Schema.optionalKey(Schema.String),
+      agentAccess: Schema.optionalKey(UnoAgentAccessLevel),
     }),
   ),
   providers: Schema.optionalKey(

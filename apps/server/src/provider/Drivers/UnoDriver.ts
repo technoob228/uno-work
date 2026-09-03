@@ -40,6 +40,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGeneration.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
+import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
 import { writeBrowserInstructionsFile } from "../browserInstructions.ts";
 import { ServerConfig } from "../../config.ts";
@@ -79,6 +80,7 @@ export type UnoDriverEnv =
   | Path.Path
   | ProviderEventLoggers
   | BrowserBridge
+  | UnoAgentAccess
   | ServerConfig
   | ServerSettingsService;
 
@@ -713,10 +715,12 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         baseUrl: browserBridge.baseUrl,
         extraSections: [buildPluginInstructions(serverConfig.pluginsDir)],
       });
+      const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
       const baseProcessEnv = browserBridge.applyEnvironment(
         mergeProviderInstanceEnvironment(environment),
       );
       const processEnv: NodeJS.ProcessEnv = {
+        ...unoAgentEnv,
         ...baseProcessEnv,
         OPENCODE_CONFIG_CONTENT: buildUnoConfigContent(unoApiKey, unoCatalog, instructionsFilePath),
         ...(unoApiKey.length > 0 ? { UNO_API_KEY: unoApiKey } : {}),

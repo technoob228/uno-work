@@ -18,6 +18,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { ServerConfig } from "../../config.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
+import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { makeCursorTextGeneration } from "../../textGeneration/CursorTextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCursorAdapter } from "../Layers/CursorAdapter.ts";
@@ -45,6 +46,7 @@ export type CursorDriverEnv =
   | Path.Path
   | ProviderEventLoggers
   | BrowserBridge
+  | UnoAgentAccess
   | ServerConfig;
 
 const withInstanceIdentity =
@@ -78,9 +80,11 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const path = yield* Path.Path;
       const eventLoggers = yield* ProviderEventLoggers;
       const browserBridge = yield* BrowserBridge;
-      const processEnv = browserBridge.applyEnvironment(
-        mergeProviderInstanceEnvironment(environment),
-      );
+      const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
+      const processEnv = {
+        ...unoAgentEnv,
+        ...browserBridge.applyEnvironment(mergeProviderInstanceEnvironment(environment)),
+      };
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,

@@ -21,6 +21,7 @@ const UNO_TEXT_GEN_MODEL =
 
 export function UnoLlmStep() {
   const apiKey = useSettings((settings) => settings.uno?.apiKey ?? "");
+  const agentAccess = useSettings((settings) => settings.uno?.agentAccess ?? "read");
   const { updateSettings } = useUpdateSettings();
   const serverReady = useServerConfigReady();
   const [draft, setDraft] = useState("");
@@ -37,7 +38,7 @@ export function UnoLlmStep() {
     setError(null);
     try {
       await updateSettings({
-        uno: { apiKey: trimmed },
+        uno: { apiKey: trimmed, agentAccess },
         textGenerationModelSelection: {
           instanceId: UNO_INSTANCE_ID,
           model: UNO_TEXT_GEN_MODEL,
@@ -62,7 +63,7 @@ export function UnoLlmStep() {
     setPending(true);
     setError(null);
     try {
-      await updateSettings({ uno: { apiKey: "" } });
+      await updateSettings({ uno: { apiKey: "", agentAccess } });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Update failed.";
       toastManager.add({

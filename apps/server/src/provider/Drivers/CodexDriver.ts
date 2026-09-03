@@ -28,6 +28,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
 import { ServerConfig } from "../../config.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
+import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
 import { buildBrowserInstructions } from "../browserInstructions.ts";
 import { ProviderDriverError } from "../Errors.ts";
@@ -58,6 +59,7 @@ export type CodexDriverEnv =
   | Path.Path
   | ProviderEventLoggers
   | BrowserBridge
+  | UnoAgentAccess
   | ServerConfig;
 
 /**
@@ -96,9 +98,11 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const eventLoggers = yield* ProviderEventLoggers;
       const browserBridge = yield* BrowserBridge;
       const serverConfig = yield* ServerConfig;
-      const processEnv = browserBridge.applyEnvironment(
-        mergeProviderInstanceEnvironment(environment),
-      );
+      const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
+      const processEnv = {
+        ...unoAgentEnv,
+        ...browserBridge.applyEnvironment(mergeProviderInstanceEnvironment(environment)),
+      };
       const harnessInstructionBlocks = [
         buildBrowserInstructions(browserBridge.baseUrl),
         buildPluginInstructions(serverConfig.pluginsDir),

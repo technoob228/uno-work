@@ -20,6 +20,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
+import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import type { TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { buildHermesSpawnEnvironment } from "../acp/HermesAcpSupport.ts";
@@ -47,6 +48,7 @@ export type HermesDriverEnv =
   | Path.Path
   | ProviderEventLoggers
   | BrowserBridge
+  | UnoAgentAccess
   | ServerConfig
   | ServerSettingsService;
 
@@ -108,7 +110,9 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
         unoApiKey,
         hermesHome: path.join(serverConfig.stateDir, `hermes-home-${instanceId}`),
       });
+      const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
       const processEnv = {
+        ...unoAgentEnv,
         ...browserBridge.applyEnvironment(mergeProviderInstanceEnvironment(environment)),
         ...hermesEnvironment,
       };
