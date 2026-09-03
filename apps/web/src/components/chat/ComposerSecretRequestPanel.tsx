@@ -69,9 +69,18 @@ const SecretRequestCard = memo(function SecretRequestCard({
       });
       removeSecretRequest(event.requestId);
     } catch (cause) {
-      // 404 = the request was already answered elsewhere (other tab, timeout).
       if (isEnvironmentHttpError(cause) && cause.status === 404) {
-        removeSecretRequest(event.requestId);
+        // The server no longer waits on this request (timeout, supersede, or
+        // another tab answered). A decline can vanish silently, but a typed-in
+        // value must not: tell the user instead of discarding their input.
+        if (decline) {
+          removeSecretRequest(event.requestId);
+          return;
+        }
+        setError(
+          "This request has expired — nothing was saved. Ask the agent to request the secret again.",
+        );
+        setIsSubmitting(false);
         return;
       }
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -104,6 +113,9 @@ const SecretRequestCard = memo(function SecretRequestCard({
         className="mt-3 flex items-center gap-2"
         onSubmit={(formEvent) => {
           formEvent.preventDefault();
+          // The panel lives inside the composer's <form>; without this the
+          // submit bubbles up and also fires the chat send handler.
+          formEvent.stopPropagation();
           void submit(false);
         }}
       >

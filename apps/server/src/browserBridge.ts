@@ -1,6 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 
 import type {
+  BridgeSecretRequestEvent,
   BrowserAutomationCommandInput,
   BrowserAutomationCommandResult,
   BrowserBridgeRequestContext,
@@ -162,6 +163,8 @@ export interface PendingSecretRequestMeta {
 interface PendingSecretRequest extends PendingSecretRequestMeta {
   readonly responseToken: string;
   readonly deferred: Deferred.Deferred<SecretRequestOutcome>;
+  /** Опубликованное событие целиком — для реплея новым подписчикам стрима. */
+  readonly event: BridgeSecretRequestEvent;
 }
 
 export function secretRequestTimeoutMs(timeoutMs: number | undefined): number {
@@ -415,19 +418,35 @@ export const makeBrowserBridge = (input: {
         }),
       publishSecretRequest: (input, context?) =>
         Effect.gen(function* () {
+          // Повторный запрос того же секрета вытесняет висящий: иначе у
+          // пользователя две плашки на одно имя, и значение, введённое в
+          // старую, уходит агенту, который его уже не ждёт.
+          const stale = [...pendingSecretRequests.entries()].find(
+            ([, pending]) => pending.name === input.name && pending.cwd === input.cwd,
+          );
+          if (stale) {
+            const [staleRequestId, stalePending] = stale;
+            pendingSecretRequests.delete(staleRequestId);
+            yield* Deferred.succeed(stalePending.deferred, {
+              ok: false,
+              name: stalePending.name,
+              error: "Superseded by a newer request for the same secret.",
+            });
+            const staleSequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
+            yield* PubSub.publish(pubsub, {
+              version: 1,
+              type: "secretSettled",
+              sequence: staleSequence,
+              requestId: staleRequestId,
+            } satisfies BrowserBridgeStreamEvent);
+          }
+
           const requestId = randomBytes(12).toString("hex");
           const responseToken = randomBytes(24).toString("hex");
           const deferred = yield* Deferred.make<SecretRequestOutcome>();
-          pendingSecretRequests.set(requestId, {
-            responseToken,
-            deferred,
-            name: input.name,
-            targetFile: input.targetFile,
-            cwd: input.cwd,
-          });
 
           const sequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
-          yield* PubSub.publish(pubsub, {
+          const event = {
             version: 1,
             type: "secretRequest",
             sequence,
@@ -438,7 +457,16 @@ export const makeBrowserBridge = (input: {
             targetFile: input.targetFile,
             cwd: input.cwd,
             ...(context ? { context } : {}),
-          } satisfies BrowserBridgeStreamEvent);
+          } satisfies BridgeSecretRequestEvent;
+          pendingSecretRequests.set(requestId, {
+            responseToken,
+            deferred,
+            name: input.name,
+            targetFile: input.targetFile,
+            cwd: input.cwd,
+            event,
+          });
+          yield* PubSub.publish(pubsub, event);
 
           const timeoutMs = secretRequestTimeoutMs(input.timeoutMs);
           const maybeOutcome = yield* Deferred.await(deferred).pipe(
@@ -491,7 +519,16 @@ export const makeBrowserBridge = (input: {
           Effect.gen(function* () {
             const subscription = yield* PubSub.subscribe(pubsub);
             yield* Ref.update(subscriberCountRef, (count) => count + 1);
-            return Stream.fromSubscription(subscription).pipe(
+            // Реплей висящих запросов секретов: клиент мог перезагрузиться или
+            // переподключиться после публикации — без реплея плашка теряется,
+            // а агент ждёт до таймаута. Снимок берётся после подписки: дубль
+            // клиент дедуплицирует по requestId, а settled-событие, успевшее
+            // между подпиской и снимком, придёт следом и снимет плашку.
+            const pendingReplay = [...pendingSecretRequests.values()].map(
+              (pending) => pending.event as BrowserBridgeStreamEvent,
+            );
+            return Stream.fromIterable(pendingReplay).pipe(
+              Stream.concat(Stream.fromSubscription(subscription)),
               Stream.ensuring(Ref.update(subscriberCountRef, (count) => count - 1)),
             );
           }),

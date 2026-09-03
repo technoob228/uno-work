@@ -222,3 +222,85 @@ it("normalizes bridge request contexts", () => {
   assert.isUndefined(normalizeBridgeRequestContext({ threadId: "  ", cwd: "" }));
   assert.isUndefined(normalizeBridgeRequestContext({ cwd: "x".repeat(5000) }));
 });
+
+it.effect("replays pending secret requests to new stream subscribers", () =>
+  Effect.gen(function* () {
+    const browserBridge = yield* BrowserBridge;
+    const requestFiber = yield* browserBridge
+      .publishSecretRequest({
+        name: "API_KEY",
+        targetFile: ".env",
+        cwd: "/tmp/project",
+        timeoutMs: 5_000,
+      })
+      .pipe(Effect.forkScoped);
+    // Дать publishSecretRequest зарегистрировать pending до подписки.
+    yield* Effect.yieldNow;
+
+    const replayed = yield* browserBridge.stream.pipe(
+      Stream.runHead,
+      Effect.map((option) => Option.getOrThrow(option)),
+    );
+    assert.equal(replayed.type, "secretRequest");
+    if (replayed.type !== "secretRequest") {
+      throw new Error("Expected replayed secretRequest event.");
+    }
+    assert.equal(replayed.name, "API_KEY");
+
+    const completed = yield* browserBridge.completeSecretRequest({
+      requestId: replayed.requestId,
+      responseToken: replayed.responseToken,
+      outcome: { ok: true, name: "API_KEY", file: ".env" },
+    });
+    assert.isTrue(completed);
+    const outcome = yield* Fiber.join(requestFiber);
+    assert.deepEqual(outcome, { ok: true, name: "API_KEY", file: ".env" });
+  }).pipe(Effect.provide(BrowserBridgeTest)),
+);
+
+it.effect("supersedes a pending secret request for the same name and cwd", () =>
+  Effect.gen(function* () {
+    const browserBridge = yield* BrowserBridge;
+    const firstFiber = yield* browserBridge
+      .publishSecretRequest({
+        name: "API_KEY",
+        targetFile: ".env",
+        cwd: "/tmp/project",
+        timeoutMs: 5_000,
+      })
+      .pipe(Effect.forkScoped);
+    yield* Effect.yieldNow;
+
+    const secondFiber = yield* browserBridge
+      .publishSecretRequest({
+        name: "API_KEY",
+        targetFile: ".env",
+        cwd: "/tmp/project",
+        timeoutMs: 5_000,
+      })
+      .pipe(Effect.forkScoped);
+    yield* Effect.yieldNow;
+
+    const firstOutcome = yield* Fiber.join(firstFiber);
+    assert.isFalse(firstOutcome.ok);
+    assert.include(firstOutcome.error ?? "", "Superseded");
+
+    // Реплей нового подписчика содержит ровно один живой запрос — второй.
+    const replayed = yield* browserBridge.stream.pipe(
+      Stream.runHead,
+      Effect.map((option) => Option.getOrThrow(option)),
+    );
+    assert.equal(replayed.type, "secretRequest");
+    if (replayed.type !== "secretRequest") {
+      throw new Error("Expected replayed secretRequest event.");
+    }
+    const completed = yield* browserBridge.completeSecretRequest({
+      requestId: replayed.requestId,
+      responseToken: replayed.responseToken,
+      outcome: { ok: true, name: "API_KEY", file: ".env" },
+    });
+    assert.isTrue(completed);
+    const secondOutcome = yield* Fiber.join(secondFiber);
+    assert.deepEqual(secondOutcome, { ok: true, name: "API_KEY", file: ".env" });
+  }).pipe(Effect.provide(BrowserBridgeTest)),
+);
