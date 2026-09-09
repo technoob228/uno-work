@@ -98,9 +98,10 @@ describe("collectVisibleTabs", () => {
   });
 
   it("keeps global and project tabs visible after switching to another chat", () => {
-    const ids = collectVisibleTabs(states, { projectKey: "proj-a", threadId: "thread-2" }).files.map(
-      (file) => file.id,
-    );
+    const ids = collectVisibleTabs(states, {
+      projectKey: "proj-a",
+      threadId: "thread-2",
+    }).files.map((file) => file.id);
     expect(ids).toEqual(["g1", "p1", "c2"]);
   });
 

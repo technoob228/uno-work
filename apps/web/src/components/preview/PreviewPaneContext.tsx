@@ -151,11 +151,7 @@ interface PreviewPaneState {
    * харнессов): вкладка попадает в бакет своего уровня, текущий вид не
    * трогается.
    */
-  openFileForTarget: (
-    target: PreviewTabTarget,
-    scope: PreviewTabScope,
-    file: PreviewFile,
-  ) => void;
+  openFileForTarget: (target: PreviewTabTarget, scope: PreviewTabScope, file: PreviewFile) => void;
   /** Открыть URL в браузерной вкладке (без аргумента — пустая «новая вкладка»). */
   openUrl: (url?: string) => void;
   /** То же для конкретного треда/проекта и уровня — bridge-события харнессов. */

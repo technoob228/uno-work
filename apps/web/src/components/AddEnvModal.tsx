@@ -754,12 +754,7 @@ const UnoBoxRow = memo(function UnoBoxRow({
           {specs ? <p className="truncate text-xs text-muted-foreground">{specs}</p> : null}
         </div>
         <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={disabled}
-            onClick={() => onConnect(box)}
-          >
+          <Button size="xs" variant="outline" disabled={disabled} onClick={() => onConnect(box)}>
             {connecting ? <RefreshCwIcon className="size-3 animate-spin" /> : null}
             {connecting ? "Connecting..." : "Connect"}
           </Button>
@@ -793,8 +788,7 @@ function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => vo
           description: `${record.label} is now in your environment switcher.`,
         });
       } catch (caught) {
-        const message =
-          caught instanceof Error ? caught.message : "Failed to connect this box.";
+        const message = caught instanceof Error ? caught.message : "Failed to connect this box.";
         setError(message);
         toastManager.add(
           stackedThreadToast({

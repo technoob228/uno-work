@@ -62,8 +62,6 @@ export function clearBrowserTabAutomationHandler(
 }
 
 /** null — вкладки с таким id в этом клиенте нет (например, её закрыли). */
-export function findBrowserTabAutomationHandler(
-  tabId: string,
-): BrowserAutomationHandler | null {
+export function findBrowserTabAutomationHandler(tabId: string): BrowserAutomationHandler | null {
   return handlersByTabId.get(tabId) ?? null;
 }

@@ -34,7 +34,10 @@ export const fillCredentialInBrowser = (
     const credentials = yield* vault.list;
     const metadata = credentials.find((candidate) => candidate.id === payload.id);
     if (!metadata) {
-      return { filled: false, error: "Сохранённый логин не найден." } satisfies CredentialFillResult;
+      return {
+        filled: false,
+        error: "Сохранённый логин не найден.",
+      } satisfies CredentialFillResult;
     }
     const password = yield* vault.reveal(payload.id);
     if (password === null) {

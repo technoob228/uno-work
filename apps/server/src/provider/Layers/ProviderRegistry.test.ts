@@ -755,7 +755,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
             Layer.provideMerge(OpenCodeRuntimeLive),
             Layer.provideMerge(BrowserBridgeTest),
-    Layer.provideMerge(UnoAgentAccessTest),
+            Layer.provideMerge(UnoAgentAccessTest),
             // NO spawner mock — provide real NodeServices inline because
             // `live` does not inherit the outer `it.layer(...)` services.
             // The missing-binary ENOENT is
@@ -842,7 +842,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
             Layer.provideMerge(OpenCodeRuntimeLive),
             Layer.provideMerge(BrowserBridgeTest),
-    Layer.provideMerge(UnoAgentAccessTest),
+            Layer.provideMerge(UnoAgentAccessTest),
             // `it.live` does not inherit layers from the outer `it.layer`
             // wrapper, so provide `NodeServices.layer` inline. This is the
             // same real `ChildProcessSpawner` + `FileSystem` + `Path`
@@ -948,7 +948,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
             Layer.provideMerge(OpenCodeRuntimeLive),
             Layer.provideMerge(BrowserBridgeTest),
-    Layer.provideMerge(UnoAgentAccessTest),
+            Layer.provideMerge(UnoAgentAccessTest),
             Layer.provideMerge(NodeServices.layer),
           );
           const runtimeServices = yield* Layer.build(providerRegistryLayer).pipe(
@@ -1001,7 +1001,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
             Layer.provideMerge(OpenCodeRuntimeLive),
             Layer.provideMerge(BrowserBridgeTest),
-    Layer.provideMerge(UnoAgentAccessTest),
+            Layer.provideMerge(UnoAgentAccessTest),
             Layer.provideMerge(NodeFileSystem.layer),
             Layer.provideMerge(NodePath.layer),
             Layer.provideMerge(

@@ -140,7 +140,11 @@ export function BrowserSettingsPanel() {
           title="Логины живут в разделе Credentials"
           description="Один список на всё приложение: браузерная версия и десктоп читают его из демона, кнопка с ключом в адресной строке подставляет пароль на совпадающем домене."
           control={
-            <Button size="xs" variant="outline" onClick={() => void navigate({ to: "/settings/vault" })}>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => void navigate({ to: "/settings/vault" })}
+            >
               Открыть Credentials
             </Button>
           }
@@ -150,7 +154,12 @@ export function BrowserSettingsPanel() {
             title={`Перенести ${legacyCredentials.length} ${legacyCredentials.length === 1 ? "логин" : "логина"} из старого локального хранилища`}
             description="Раньше пароли десктопа лежали отдельно от общего хранилища и были видны только на этом Mac. Перенос копирует их в Credentials и убирает из старого файла."
             control={
-              <Button size="xs" variant="outline" disabled={migrating} onClick={() => void migrateLegacy()}>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={migrating}
+                onClick={() => void migrateLegacy()}
+              >
                 {migrating ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
                 Перенести
               </Button>

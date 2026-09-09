@@ -1080,9 +1080,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         [WS_METHODS.vaultUpsert]: (input) =>
           observeRpcEffect(
             WS_METHODS.vaultUpsert,
-            credentialsVault
-              .upsert(input)
-              .pipe(Effect.tap(() => pushVaultToAccountInBackground)),
+            credentialsVault.upsert(input).pipe(Effect.tap(() => pushVaultToAccountInBackground)),
             { "rpc.aggregate": "vault" },
           ),
         [WS_METHODS.vaultDelete]: ({ id }) =>

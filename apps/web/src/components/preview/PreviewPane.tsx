@@ -1202,15 +1202,17 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
             { projectKey: context.currentProjectKey, threadId: context.currentChatThreadId },
             "chat",
             {
-            id: absolute,
-            name,
-            kind: detectFileKind(name),
-            content: "",
-            path: absolute,
-            ...(context.currentChatEnvironmentId
-              ? { environmentId: context.currentChatEnvironmentId }
-              : {}),
-            ...(context.currentChatProjectCwd ? { projectCwd: context.currentChatProjectCwd } : {}),
+              id: absolute,
+              name,
+              kind: detectFileKind(name),
+              content: "",
+              path: absolute,
+              ...(context.currentChatEnvironmentId
+                ? { environmentId: context.currentChatEnvironmentId }
+                : {}),
+              ...(context.currentChatProjectCwd
+                ? { projectCwd: context.currentChatProjectCwd }
+                : {}),
             },
           );
         },
@@ -1784,67 +1786,68 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
             const ScopeIcon = SCOPE_ICON[scope];
             // Границу групп рисуем один раз на переходе уровня: видно, где
             // заканчиваются «постоянные» вкладки и начинаются вкладки чата.
-            const previousScope = index > 0 ? (tabScopeById[files[index - 1]!.id] ?? "chat") : scope;
+            const previousScope =
+              index > 0 ? (tabScopeById[files[index - 1]!.id] ?? "chat") : scope;
             const startsGroup = index > 0 && previousScope !== scope;
             return (
               <Fragment key={file.id}>
                 {startsGroup ? (
                   <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-border" />
                 ) : null}
-              <button
-                type="button"
-                data-preview-tab={file.id}
-                onClick={() => setActiveFile(file.id)}
-                onDoubleClick={() => {
-                  if (dualView) toggleSourceView(file.id);
-                }}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  void showTabScopeMenu({
-                    file,
-                    scope,
-                    position: { x: event.clientX, y: event.clientY },
-                    setTabScope,
-                    closeFile,
-                  });
-                }}
-                className={cn(
-                  "group inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs",
-                  isActive
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-accent/50",
-                )}
-                title={`${KIND_LABEL[file.kind]} — ${file.name}\nУровень: ${SCOPE_LABEL[scope]} (правый клик — сменить)${dualView ? "\nДвойной клик: код ↔ превью" : ""}`}
-              >
-                <Icon className="size-3.5 shrink-0" />
-                {ScopeIcon ? (
-                  <ScopeIcon
-                    className={cn(
-                      "size-3 shrink-0",
-                      scope === "global" ? "text-primary" : "opacity-70",
-                    )}
-                  />
-                ) : null}
-                <span className="max-w-[8rem] truncate">{file.name}</span>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  className="rounded p-0.5 opacity-60 hover:bg-accent hover:opacity-100"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    closeFile(file.id);
+                <button
+                  type="button"
+                  data-preview-tab={file.id}
+                  onClick={() => setActiveFile(file.id)}
+                  onDoubleClick={() => {
+                    if (dualView) toggleSourceView(file.id);
                   }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    void showTabScopeMenu({
+                      file,
+                      scope,
+                      position: { x: event.clientX, y: event.clientY },
+                      setTabScope,
+                      closeFile,
+                    });
+                  }}
+                  className={cn(
+                    "group inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs",
+                    isActive
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted-foreground hover:bg-accent/50",
+                  )}
+                  title={`${KIND_LABEL[file.kind]} — ${file.name}\nУровень: ${SCOPE_LABEL[scope]} (правый клик — сменить)${dualView ? "\nДвойной клик: код ↔ превью" : ""}`}
+                >
+                  <Icon className="size-3.5 shrink-0" />
+                  {ScopeIcon ? (
+                    <ScopeIcon
+                      className={cn(
+                        "size-3 shrink-0",
+                        scope === "global" ? "text-primary" : "opacity-70",
+                      )}
+                    />
+                  ) : null}
+                  <span className="max-w-[8rem] truncate">{file.name}</span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="rounded p-0.5 opacity-60 hover:bg-accent hover:opacity-100"
+                    onClick={(e) => {
                       e.stopPropagation();
                       closeFile(file.id);
-                    }
-                  }}
-                >
-                  <XIcon className="size-3" />
-                </span>
-              </button>
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        closeFile(file.id);
+                      }
+                    }}
+                  >
+                    <XIcon className="size-3" />
+                  </span>
+                </button>
               </Fragment>
             );
           })}

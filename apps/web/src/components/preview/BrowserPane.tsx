@@ -489,8 +489,7 @@ function BrowserView({
         if (!result.filled) {
           toastManager.add({
             title: "Не удалось заполнить логин",
-            description:
-              result.error ?? "Откройте форму входа на странице и попробуйте ещё раз.",
+            description: result.error ?? "Откройте форму входа на странице и попробуйте ещё раз.",
             type: "warning",
           });
         }
