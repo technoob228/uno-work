@@ -13,8 +13,9 @@ export function WebWelcomeStep() {
         A real machine, in your browser
       </h1>
       <p className="max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-        No install. This tab is connected to a Linux machine that is yours — with a terminal, a
-        filesystem, git, and an AI agent that works on the files stored there.
+        This tab is the screen. Behind it is a Linux machine with a terminal, a filesystem, git, and
+        an AI agent that works on the files stored there — in the Uno cloud, with nothing to
+        install, or on your own computer if you prefer to keep everything local. You choose next.
       </p>
       <p className="text-xs text-muted-foreground/70">
         Takes about a minute · You can skip any step

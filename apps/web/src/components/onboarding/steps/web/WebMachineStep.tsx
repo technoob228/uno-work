@@ -2,13 +2,11 @@ import { FolderTree, HardDrive, RefreshCw, TerminalSquare } from "lucide-react";
 
 import { useServerConfig } from "~/rpc/serverState";
 import { FeatureBullet, StepEyebrow, StepLead, StepTitle, TwoColumn } from "../stepShared";
+import { describeConnectedMachine } from "./connectedMachine";
 
 export function WebMachineStep() {
-  const serverConfig = useServerConfig();
-  const platform = serverConfig?.environment.platform;
-  const label = serverConfig?.environment.label ?? "your machine";
-  const workingDirectory = serverConfig?.cwd ?? null;
-  const platformLabel = platform ? `${platform.os}/${platform.arch}` : "connecting…";
+  const { label, platformLabel, serverVersion, workingDirectory } =
+    describeConnectedMachine(useServerConfig());
 
   return (
     <TwoColumn>
@@ -55,10 +53,10 @@ export function WebMachineStep() {
               </dd>
             </div>
           ) : null}
-          {serverConfig?.environment.serverVersion ? (
+          {serverVersion ? (
             <div className="flex items-baseline justify-between gap-4">
               <dt className="text-muted-foreground">Version</dt>
-              <dd className="font-mono text-xs">{serverConfig.environment.serverVersion}</dd>
+              <dd className="font-mono text-xs">{serverVersion}</dd>
             </div>
           ) : null}
         </dl>

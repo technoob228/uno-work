@@ -39,6 +39,12 @@ export interface ServerDerivedPaths {
   readonly serverRuntimeStatePath: string;
   readonly secretsDir: string;
   readonly pluginsDir: string;
+  /**
+   * Scratch space for short-lived daemon files (checkpoint indexes, ...).
+   * Lives next to the state on the real disk instead of the OS temp dir: on a
+   * box `/tmp` is a 1 GB tmpfs and a large project fills it up.
+   */
+  readonly tempDir: string;
 }
 
 /**
@@ -102,6 +108,10 @@ export const deriveServerPaths = Effect.fn(function* (
     serverRuntimeStatePath: join(stateDir, "server-runtime.json"),
     secretsDir: join(stateDir, "secrets"),
     pluginsDir: join(stateDir, "plugins"),
+    // Deliberately `<baseDir>/tmp`, not under `userdata`: the systemd unit
+    // points TMPDIR at the same directory, so the daemon and its subprocesses
+    // share one scratch location.
+    tempDir: join(baseDir, "tmp"),
   };
 });
 
@@ -124,6 +134,7 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
       fs.makeDirectory(path.dirname(derivedPaths.anonymousIdPath), { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.serverRuntimeStatePath), { recursive: true }),
       fs.makeDirectory(derivedPaths.pluginsDir, { recursive: true }),
+      fs.makeDirectory(derivedPaths.tempDir, { recursive: true }),
     ],
     { concurrency: "unbounded" },
   );
