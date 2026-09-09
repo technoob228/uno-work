@@ -75,7 +75,6 @@ const clientSettings: ClientSettings = {
   },
   sidebarProjectSortOrder: "manual",
   sidebarThreadSortOrder: "created_at",
-  sidebarEnvironmentScope: "active",
   timestampFormat: "24-hour",
 };
 

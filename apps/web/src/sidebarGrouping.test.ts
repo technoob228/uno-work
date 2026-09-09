@@ -73,6 +73,7 @@ function makeThread(input: {
     session: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     archivedAt: null,
+    pinnedAt: null,
     updatedAt: input.updatedAt,
     latestTurn: null,
     branch: null,

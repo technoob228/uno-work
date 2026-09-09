@@ -81,11 +81,9 @@ import {
   selectProjectByRef,
   selectProjectsAcrossEnvironments,
   selectProjectsForEnvironment,
-  selectProjectsAcrossEnvironments,
   selectSidebarThreadsAcrossEnvironments,
-  selectSidebarThreadsForProjectRefs,
   selectSidebarThreadsForEnvironment,
-  selectSidebarThreadsAcrossEnvironments,
+  selectSidebarThreadsForProjectRefs,
   selectThreadByRef,
   useStore,
 } from "../store";
