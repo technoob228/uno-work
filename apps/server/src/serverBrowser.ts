@@ -9,6 +9,7 @@ import type {
 import {
   buildClickSelectorScript,
   buildClickTextScript,
+  buildFillLoginScript,
   buildTypeScript,
 } from "@t3tools/shared/browserAutomationScripts";
 import {
@@ -176,6 +177,20 @@ async function runCommand(page: Page, input: BrowserAutomationCommandInput): Pro
     case "evaluate":
       if (!input.script) throw new ServerBrowserCommandError({ message: "Missing script." });
       return page.evaluate(input.script);
+    case "fillCredential": {
+      // Значения приходят от сервера (vault.fill), не от агента — см.
+      // credentialsFill.ts. В логи и в результат пароль не попадает.
+      if (input.username === undefined || input.password === undefined) {
+        throw new ServerBrowserCommandError({ message: "fillCredential requires credentials." });
+      }
+      const filled = await page.evaluate(buildFillLoginScript(input.username, input.password));
+      if (filled !== true) {
+        throw new ServerBrowserCommandError({
+          message: "Поля логина на странице не найдены.",
+        });
+      }
+      return { filled: true };
+    }
   }
 }
 

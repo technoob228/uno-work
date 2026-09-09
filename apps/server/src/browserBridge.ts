@@ -6,6 +6,7 @@ import type {
   BrowserAutomationCommandResult,
   BrowserBridgeRequestContext,
   BrowserBridgeStreamEvent,
+  PreviewTabScope,
 } from "@t3tools/contracts";
 import { Context, Deferred, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from "effect";
 
@@ -61,6 +62,16 @@ export function isAllowedBridgeUrl(rawUrl: unknown): rawUrl is string {
   } catch {
     return false;
   }
+}
+
+/**
+ * Уровень вкладки из тела запроса агента. Мусор и незнакомые значения молча
+ * деградируют в undefined — клиент подставит уровень по умолчанию (чат).
+ */
+export function normalizeTabScope(rawScope: unknown): PreviewTabScope | undefined {
+  return rawScope === "chat" || rawScope === "project" || rawScope === "global"
+    ? rawScope
+    : undefined;
 }
 
 const MAX_FILE_PATH_LENGTH = 4096;
@@ -220,10 +231,12 @@ export interface BrowserBridgeShape {
   readonly publishOpenUrl: (
     url: string,
     context?: BrowserBridgeRequestContext,
+    scope?: PreviewTabScope,
   ) => Effect.Effect<BrowserBridgeStreamEvent>;
   readonly publishOpenFile: (
     path: string,
     context?: BrowserBridgeRequestContext,
+    scope?: PreviewTabScope,
   ) => Effect.Effect<BrowserBridgeStreamEvent>;
   readonly publishCommand: (
     input: BrowserAutomationCommandInput,
@@ -340,7 +353,7 @@ export const makeBrowserBridge = (input: {
       },
       scopedEnvironment,
       authorize,
-      publishOpenUrl: (url, context?) =>
+      publishOpenUrl: (url, context?, scope?) =>
         Ref.updateAndGet(sequenceRef, (sequence) => sequence + 1).pipe(
           Effect.map(
             (sequence) =>
@@ -349,12 +362,13 @@ export const makeBrowserBridge = (input: {
                 type: "openUrl",
                 sequence,
                 url,
+                ...(scope ? { scope } : {}),
                 ...(context ? { context } : {}),
               }) satisfies BrowserBridgeStreamEvent,
           ),
           Effect.tap((event) => PubSub.publish(pubsub, event)),
         ),
-      publishOpenFile: (path, context?) =>
+      publishOpenFile: (path, context?, scope?) =>
         Ref.updateAndGet(sequenceRef, (sequence) => sequence + 1).pipe(
           Effect.map(
             (sequence) =>
@@ -363,6 +377,7 @@ export const makeBrowserBridge = (input: {
                 type: "openFile",
                 sequence,
                 path,
+                ...(scope ? { scope } : {}),
                 ...(context ? { context } : {}),
               }) satisfies BrowserBridgeStreamEvent,
           ),

@@ -165,6 +165,8 @@ export interface WsRpcClient {
     readonly upsert: RpcUnaryMethod<typeof WS_METHODS.vaultUpsert>;
     readonly delete: RpcUnaryMethod<typeof WS_METHODS.vaultDelete>;
     readonly import: RpcUnaryMethod<typeof WS_METHODS.vaultImport>;
+    readonly fill: RpcUnaryMethod<typeof WS_METHODS.vaultFill>;
+    readonly sync: RpcUnaryMethod<typeof WS_METHODS.vaultSync>;
   };
   /**
    * Workspace registry. Every mutating call answers with the full state, so a
@@ -388,6 +390,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       upsert: (input) => transport.request((client) => client[WS_METHODS.vaultUpsert](input)),
       delete: (input) => transport.request((client) => client[WS_METHODS.vaultDelete](input)),
       import: (input) => transport.request((client) => client[WS_METHODS.vaultImport](input)),
+      fill: (input) => transport.request((client) => client[WS_METHODS.vaultFill](input)),
+      sync: (input) => transport.request((client) => client[WS_METHODS.vaultSync](input)),
     },
     workspace: {
       getState: () => transport.request((client) => client[WS_METHODS.workspaceGetState]({})),

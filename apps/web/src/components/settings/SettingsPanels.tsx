@@ -2,10 +2,7 @@ import { ArchiveIcon, ArchiveX } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo, useState } from "react";
-import {
-  type DesktopUpdateChannel,
-  type ScopedThreadRef,
-} from "@t3tools/contracts";
+import { type DesktopUpdateChannel, type ScopedThreadRef } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { DEFAULT_UNIFIED_SETTINGS, UNO_GATEWAY_BASE_URL } from "@t3tools/contracts/settings";
 import { Equal } from "effect";

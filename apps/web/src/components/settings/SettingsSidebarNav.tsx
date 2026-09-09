@@ -75,8 +75,8 @@ const ENVIRONMENT_NAV_ITEMS: ReadonlyArray<{
  * Vault (credentials) and Extensions (plugins) operate on the active
  * WS-connected box rather than a path-named environment, so they are not part
  * of the scope split above. They ride along in the app-scope nav as direct
- * links; Credentials is web-only, matching the desktop shell where it has no
- * meaning.
+ * links. Credentials видны в обеих оболочках: хранилище держит демон, поэтому
+ * один и тот же логин доступен и в браузерной версии, и в десктопе.
  */
 type FlatNavItem = {
   label: string;
@@ -86,16 +86,7 @@ type FlatNavItem = {
   flag?: FeatureFlagKey;
 };
 const FLAT_APP_NAV_ITEMS: ReadonlyArray<FlatNavItem> = [
-  ...(isWebApp
-    ? [
-        {
-          label: "Credentials",
-          to: "/settings/vault",
-          icon: KeyRoundIcon,
-          flag: "vault",
-        } as FlatNavItem,
-      ]
-    : []),
+  { label: "Credentials", to: "/settings/vault", icon: KeyRoundIcon, flag: "vault" },
   { label: "Workspace", to: "/settings/workspace", icon: LayersIcon, flag: "workspace" },
   { label: "Extensions", to: "/settings/extensions", icon: PuzzleIcon, flag: "plugins" },
 ];

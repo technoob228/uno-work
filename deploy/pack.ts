@@ -23,7 +23,9 @@ const outDir = resolve(repoRoot, outIndex === -1 ? "dist-tarball" : process.argv
 
 for (const asset of ["dist/bin.mjs", "dist/client/index.html"]) {
   if (!existsSync(join(serverDir, asset))) {
-    throw new Error(`Missing build asset: ${asset}. Run \`bun run build\` in apps/web then apps/server.`);
+    throw new Error(
+      `Missing build asset: ${asset}. Run \`bun run build\` in apps/web then apps/server.`,
+    );
   }
 }
 

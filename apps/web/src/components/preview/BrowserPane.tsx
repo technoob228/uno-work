@@ -14,10 +14,16 @@ import {
   MonitorSmartphoneIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { BrowserAutomationCommandInput, BrowserCredentialRecord } from "@t3tools/contracts";
+import type {
+  BrowserAutomationCommandInput,
+  BrowserCredentialRecord,
+  CredentialMetadata,
+} from "@t3tools/contracts";
 import {
   buildClickSelectorScript,
   buildClickTextScript,
+  buildFillLoginScript,
+  buildLoginCaptureScript,
   buildTypeScript,
 } from "@t3tools/shared/browserAutomationScripts";
 import {
@@ -34,18 +40,25 @@ import {
   runExtensionBrowserCommand,
 } from "../../browserExtensionBridge";
 import { cn } from "../../lib/utils";
-import { readLocalApi } from "../../localApi";
+import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { useSettings } from "../../hooks/useSettings";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import {
   clearBrowserAutomationHandler,
+  clearBrowserTabAutomationHandler,
   setBrowserAutomationHandler,
+  setBrowserTabAutomationHandler,
 } from "./BrowserAutomationRegistry";
-import { buildAutofillScript } from "./browserAutofill";
 import { CompanionExtensionPanel } from "./CompanionExtensionPanel";
 import { browserPartitionForScope, browserUrlOrigin, normalizeBrowserUrl } from "./browserUrl";
-import { isBrowserTab, usePreviewPane, type PreviewFile } from "./PreviewPaneContext";
+import {
+  isBrowserTab,
+  NO_PROJECT_KEY,
+  usePreviewPane,
+  type PreviewFile,
+} from "./PreviewPaneContext";
+import { projectScopeKey, scopeOfKey, visibleScopeKeys } from "./previewTabScopes";
 
 /**
  * Подмножество методов Electron `<webview>`, которое использует тулбар.
@@ -82,6 +95,10 @@ interface WebviewTitleEvent extends Event {
   title: string;
 }
 
+interface WebviewConsoleEvent extends Event {
+  message: string;
+}
+
 interface WebviewFailLoadEvent extends Event {
   errorCode: number;
   errorDescription: string;
@@ -89,7 +106,8 @@ interface WebviewFailLoadEvent extends Event {
   isMainFrame: boolean;
 }
 
-const BROWSER_CREDENTIALS_QUERY_KEY = ["browserCredentials"] as const;
+const BROWSER_CREDENTIALS_QUERY_KEY = ["vaultCredentials"] as const;
+const LEGACY_CREDENTIALS_QUERY_KEY = ["legacyDesktopCredentials"] as const;
 const BROWSER_RECENTS_STORAGE_KEY = "uno_browser_recent_urls";
 const MAX_BROWSER_RECENTS = 8;
 const DEFAULT_ZOOM_FACTOR = 1;
@@ -160,14 +178,20 @@ async function capturePanelScreenshot(view: ElectronWebviewElement): Promise<Scr
   );
 }
 
-export function useBrowserCredentials() {
+/**
+ * Сохранённые логины из хранилища демона (`vault.*`) — единый источник и для
+ * браузерной версии, и для десктопа: хранилище держит демон, а не оболочка,
+ * поэтому один раз введённый логин виден в обоих режимах. Пароли сюда не
+ * приходят: в списке только метаданные.
+ */
+export function useVaultCredentials() {
   return useQuery({
     queryKey: BROWSER_CREDENTIALS_QUERY_KEY,
-    queryFn: async (): Promise<readonly BrowserCredentialRecord[]> => {
-      if (!window.desktopBridge) return [];
-      return window.desktopBridge.listBrowserCredentials();
+    queryFn: async (): Promise<readonly CredentialMetadata[]> => {
+      const api = readLocalApi();
+      if (!api) return [];
+      return api.vault.list();
     },
-    enabled: isElectron,
     staleTime: 10_000,
   });
 }
@@ -180,16 +204,30 @@ export function useInvalidateBrowserCredentials() {
   );
 }
 
-function matchCredentialsForOrigin(input: {
-  credentials: readonly BrowserCredentialRecord[] | undefined;
+/**
+ * Логины из старого локального хранилища десктопа (Electron safeStorage). Живёт
+ * только ради переноса в общий vault — новые записи туда больше не пишутся.
+ */
+export function useLegacyDesktopCredentials() {
+  return useQuery({
+    queryKey: LEGACY_CREDENTIALS_QUERY_KEY,
+    queryFn: async (): Promise<readonly BrowserCredentialRecord[]> => {
+      if (!window.desktopBridge) return [];
+      return window.desktopBridge.listBrowserCredentials();
+    },
+    enabled: isElectron,
+    staleTime: 10_000,
+  });
+}
+
+/** Совпадение по origin: у креда хранится URL, сравниваем нормализованные origin. */
+export function matchCredentialsForOrigin(input: {
+  credentials: readonly CredentialMetadata[] | undefined;
   origin: string | null;
-  projectKey: string;
-}): readonly BrowserCredentialRecord[] {
+}): readonly CredentialMetadata[] {
   if (!input.credentials || !input.origin) return [];
   return input.credentials.filter(
-    (credential) =>
-      credential.origin === input.origin &&
-      (credential.scope === "account" || credential.projectKey === input.projectKey),
+    (credential) => browserUrlOrigin(credential.url) === input.origin,
   );
 }
 
@@ -200,24 +238,32 @@ function matchCredentialsForOrigin(input: {
  * харнесса из другого проекта исполняются в их webview, а не в текущем.
  */
 export function BrowserViews({ activeId }: { activeId: string | null }) {
-  const { statesByProjectKey, currentProjectKey } = usePreviewPane();
+  const { statesByScopeKey, currentProjectKey, currentChatThreadId, activeFileId } =
+    usePreviewPane();
+  const visibleKeys = new Set(
+    visibleScopeKeys({ projectKey: currentProjectKey, threadId: currentChatThreadId }),
+  );
   const views: ReactNode[] = [];
-  for (const [projectKey, bucket] of Object.entries(statesByProjectKey)) {
+  for (const [scopeKey, bucket] of Object.entries(statesByScopeKey)) {
     const tabs = bucket.files.filter(isBrowserTab);
     if (tabs.length === 0) continue;
-    // Таргет автоматизации проекта: его активная браузерная вкладка, иначе
-    // последняя открытая — команды работают, даже когда активен файл-превью.
+    // Таргет автоматизации бакета: активная браузерная вкладка (активная
+    // вкладка хранится в проектном бакете вида), иначе последняя открытая —
+    // команды работают, даже когда активен файл-превью.
     const automationTabId =
-      bucket.activeFileId && tabs.some((tab) => tab.id === bucket.activeFileId)
-        ? bucket.activeFileId
+      activeFileId && tabs.some((tab) => tab.id === activeFileId)
+        ? activeFileId
         : tabs[tabs.length - 1]!.id;
     for (const tab of tabs) {
       views.push(
         <BrowserView
-          key={tab.id}
+          // Один и тот же файл может быть открыт в бакетах разных тредов —
+          // ключ обязан включать бакет, иначе React увидит дубль.
+          key={`${scopeKey}::${tab.id}`}
           tab={tab}
-          projectKey={projectKey}
-          visible={projectKey === currentProjectKey && tab.id === activeId}
+          scopeKey={scopeKey}
+          projectKey={browserTabProjectKey(tab, scopeKey)}
+          visible={visibleKeys.has(scopeKey) && tab.id === activeId}
           automationActive={tab.id === automationTabId}
         />,
       );
@@ -227,18 +273,32 @@ export function BrowserViews({ activeId }: { activeId: string | null }) {
   return <>{views}</>;
 }
 
+/**
+ * Проект вкладки — для партиции cookies и подбора сохранённых кредов. У вкладок,
+ * восстановленных из localStorage, поля нет: тогда берём проект из бакета, а у
+ * глобальных вкладок проекта нет вовсе (аккаунтная партиция).
+ */
+function browserTabProjectKey(tab: PreviewFile, scopeKey: string): string {
+  if (tab.projectKey) return tab.projectKey;
+  return scopeOfKey(scopeKey) === "project"
+    ? scopeKey.slice(projectScopeKey("").length)
+    : NO_PROJECT_KEY;
+}
+
 function BrowserView({
   tab,
+  scopeKey,
   projectKey,
   visible,
   automationActive,
 }: {
   tab: PreviewFile;
+  scopeKey: string;
   projectKey: string;
   visible: boolean;
   automationActive: boolean;
 }) {
-  const { updateBrowserTab } = usePreviewPane();
+  const { updateBrowserTab, currentChatThreadId, currentChatProjectCwd } = usePreviewPane();
   const browserProfileScope = useSettings((settings) => settings.browserProfileScope);
   const [webviewNode, setWebviewNode] = useState<ElectronWebviewElement | null>(null);
   const webviewRef = useRef<ElectronWebviewElement | null>(null);
@@ -255,6 +315,9 @@ function BrowserView({
       projectKey,
     }),
   );
+  // Nonce канала перехвата логина: страница отдаёт пару логин/пароль через
+  // console.log с этим префиксом, и только наш слушатель его узнаёт.
+  const [captureNonce] = useState<string>(() => `uno-login-capture:${crypto.randomUUID()}:`);
   const [addressValue, setAddressValue] = useState<string>(tab.url ?? "");
   const [addressFocused, setAddressFocused] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -265,18 +328,20 @@ function BrowserView({
   const [deviceToolbarOpen, setDeviceToolbarOpen] = useState(false);
   const [viewportSize, setViewportSize] = useState<{ width: number; height: number } | null>(null);
   const [recentUrls, setRecentUrls] = useState<readonly string[]>(() => readBrowserRecents());
-  const credentialsQuery = useBrowserCredentials();
+  const credentialsQuery = useVaultCredentials();
+  const invalidateCredentials = useInvalidateBrowserCredentials();
+  // Перехваченный логин, который ещё не сохранён: плашка «Сохранить?» над страницей.
+  const [pendingLogin, setPendingLogin] = useState<{
+    origin: string;
+    username: string;
+    password: string;
+  } | null>(null);
 
   const currentUrl = tab.url ?? "";
   const origin = browserUrlOrigin(currentUrl);
   const matchedCredentials = useMemo(
-    () =>
-      matchCredentialsForOrigin({
-        credentials: credentialsQuery.data,
-        origin,
-        projectKey,
-      }),
-    [credentialsQuery.data, origin, projectKey],
+    () => matchCredentialsForOrigin({ credentials: credentialsQuery.data, origin }),
+    [credentialsQuery.data, origin],
   );
 
   // Адресная строка следует за навигацией, пока пользователь её не редактирует.
@@ -300,7 +365,7 @@ function BrowserView({
       const url = normalizeBrowserUrl(rawInput);
       if (!url) return;
       setLoadError(null);
-      updateBrowserTab(projectKey, tab.id, { url });
+      updateBrowserTab(scopeKey, tab.id, { url });
       // Веб-режим: webview нет, страницу открывает companion-расширение во
       // вкладке пользователя. Если расширения нет — панель ниже ведёт по
       // установке, адрес при этом сохранён в tab.url.
@@ -317,7 +382,7 @@ function BrowserView({
         setMountSrc(url);
       }
     },
-    [projectKey, tab.id, updateBrowserTab],
+    [scopeKey, tab.id, updateBrowserTab],
   );
 
   const attachWebview = useCallback((node: HTMLWebViewElement | null) => {
@@ -338,6 +403,33 @@ function BrowserView({
     const onDomReady = () => {
       readyRef.current = true;
       syncNavState();
+      // Перехват логина: скрипт идемпотентен, ставим на каждую загрузку.
+      void view.executeJavaScript(buildLoginCaptureScript(captureNonce), false).catch(() => {});
+    };
+    const onConsoleMessage = (event: Event) => {
+      const message = (event as WebviewConsoleEvent).message;
+      if (typeof message !== "string" || !message.startsWith(captureNonce)) return;
+      // Останавливаем всплытие в devtools-консоль хоста: пароль не должен
+      // оказаться ни в одном логе.
+      event.preventDefault?.();
+      event.stopImmediatePropagation?.();
+      const pageOrigin = browserUrlOrigin(view.getURL?.() || tab.url);
+      if (!pageOrigin) return;
+      try {
+        const parsed = JSON.parse(message.slice(captureNonce.length)) as {
+          username?: unknown;
+          password?: unknown;
+        };
+        if (typeof parsed.username !== "string" || typeof parsed.password !== "string") return;
+        if (parsed.username.length === 0 || parsed.password.length === 0) return;
+        setPendingLogin({
+          origin: pageOrigin,
+          username: parsed.username,
+          password: parsed.password,
+        });
+      } catch {
+        // Не наш формат — игнорируем.
+      }
     };
     const onStartLoading = () => setLoading(true);
     const onStopLoading = () => setLoading(false);
@@ -345,12 +437,12 @@ function BrowserView({
       const navigateEvent = event as WebviewNavigateEvent;
       if (navigateEvent.isMainFrame === false) return;
       setLoadError(null);
-      updateBrowserTab(projectKey, tab.id, { url: navigateEvent.url });
+      updateBrowserTab(scopeKey, tab.id, { url: navigateEvent.url });
       syncNavState();
     };
     const onTitleUpdated = (event: Event) => {
       const titleEvent = event as WebviewTitleEvent;
-      updateBrowserTab(projectKey, tab.id, { name: titleEvent.title });
+      updateBrowserTab(scopeKey, tab.id, { name: titleEvent.title });
     };
     const onFailLoad = (event: Event) => {
       const failEvent = event as WebviewFailLoadEvent;
@@ -360,6 +452,7 @@ function BrowserView({
     };
 
     view.addEventListener("dom-ready", onDomReady);
+    view.addEventListener("console-message", onConsoleMessage);
     view.addEventListener("did-start-loading", onStartLoading);
     view.addEventListener("did-stop-loading", onStopLoading);
     view.addEventListener("did-navigate", onNavigate);
@@ -368,6 +461,7 @@ function BrowserView({
     view.addEventListener("did-fail-load", onFailLoad);
     return () => {
       view.removeEventListener("dom-ready", onDomReady);
+      view.removeEventListener("console-message", onConsoleMessage);
       view.removeEventListener("did-start-loading", onStartLoading);
       view.removeEventListener("did-stop-loading", onStopLoading);
       view.removeEventListener("did-navigate", onNavigate);
@@ -375,31 +469,81 @@ function BrowserView({
       view.removeEventListener("page-title-updated", onTitleUpdated);
       view.removeEventListener("did-fail-load", onFailLoad);
     };
-  }, [webviewNode, projectKey, tab.id, updateBrowserTab]);
+  }, [webviewNode, scopeKey, tab.id, tab.url, captureNonce, updateBrowserTab]);
 
-  const autofillCredential = useCallback(async (credential: BrowserCredentialRecord) => {
-    const view = webviewRef.current;
-    if (!view || !window.desktopBridge) return;
-    const password = await window.desktopBridge.revealBrowserCredentialPassword(credential.id);
-    if (password === null) {
+  /**
+   * Заполнение просит СЕРВЕР: пароль лежит в хранилище демона, и клиент его не
+   * получает — он присылает только id креда и свою вкладку. Так один и тот же
+   * логин работает и в десктопе, и в браузерной версии, и в headless-браузере
+   * бокса, а секрет не проходит через RPC-ответ и чат.
+   */
+  const autofillCredential = useCallback(
+    async (credential: CredentialMetadata) => {
+      try {
+        const result = await ensureLocalApi().vault.fill({
+          id: credential.id,
+          tabId: tab.id,
+          ...(currentChatThreadId ? { threadId: currentChatThreadId } : {}),
+          ...(currentChatProjectCwd ? { cwd: currentChatProjectCwd } : {}),
+        });
+        if (!result.filled) {
+          toastManager.add({
+            title: "Не удалось заполнить логин",
+            description:
+              result.error ?? "Откройте форму входа на странице и попробуйте ещё раз.",
+            type: "warning",
+          });
+        }
+      } catch (error) {
+        toastManager.add({
+          title: "Хранилище логинов недоступно",
+          description: error instanceof Error ? error.message : String(error),
+          type: "error",
+        });
+      }
+    },
+    [currentChatProjectCwd, currentChatThreadId, tab.id],
+  );
+
+  const savePendingLogin = useCallback(async () => {
+    if (!pendingLogin) return;
+    const host = (() => {
+      try {
+        return new URL(pendingLogin.origin).hostname.replace(/^www\./, "");
+      } catch {
+        return pendingLogin.origin;
+      }
+    })();
+    const existing = (credentialsQuery.data ?? []).find(
+      (candidate) =>
+        browserUrlOrigin(candidate.url) === pendingLogin.origin &&
+        candidate.username === pendingLogin.username,
+    );
+    try {
+      await ensureLocalApi().vault.upsert({
+        ...(existing ? { id: existing.id } : {}),
+        input: {
+          label: host,
+          url: pendingLogin.origin,
+          username: pendingLogin.username,
+          password: pendingLogin.password,
+        },
+      });
+      setPendingLogin(null);
+      await invalidateCredentials();
       toastManager.add({
-        title: "Не удалось расшифровать пароль",
-        description: "Проверьте сохранённые креды в настройках браузера.",
+        type: "success",
+        title: existing ? `Пароль для ${host} обновлён` : `Логин для ${host} сохранён`,
+        description: "Дальше заполняется кнопкой с ключом в адресной строке.",
+      });
+    } catch (error) {
+      toastManager.add({
         type: "error",
-      });
-      return;
-    }
-    const filled = await view
-      .executeJavaScript(buildAutofillScript(credential.username, password), true)
-      .catch(() => false);
-    if (!filled) {
-      toastManager.add({
-        title: "Поля логина не найдены",
-        description: "Откройте форму входа на странице и попробуйте ещё раз.",
-        type: "warning",
+        title: "Не удалось сохранить логин",
+        description: error instanceof Error ? error.message : String(error),
       });
     }
-  }, []);
+  }, [credentialsQuery.data, invalidateCredentials, pendingLogin]);
 
   const handleAutofillClick = useCallback(
     async (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -558,6 +702,19 @@ function BrowserView({
         case "evaluate":
           if (!input.script) throw new Error("Missing script.");
           return view.executeJavaScript(input.script, true);
+        case "fillCredential": {
+          // Значения подставил сервер по явному действию пользователя
+          // (`vault.fill`) — агент такую команду отправить не может.
+          if (input.username === undefined || input.password === undefined) {
+            throw new Error("fillCredential requires credentials.");
+          }
+          const filled = await view.executeJavaScript(
+            buildFillLoginScript(input.username, input.password),
+            true,
+          );
+          if (filled !== true) throw new Error("Поля логина на странице не найдены.");
+          return { filled: true };
+        }
       }
     },
     [currentUrl, loading, navigate, tab.name],
@@ -565,11 +722,21 @@ function BrowserView({
 
   useEffect(() => {
     if (!automationActive) return;
-    setBrowserAutomationHandler(projectKey, handleAutomationCommand);
+    setBrowserAutomationHandler(scopeKey, handleAutomationCommand);
     return () => {
-      clearBrowserAutomationHandler(projectKey, handleAutomationCommand);
+      clearBrowserAutomationHandler(scopeKey, handleAutomationCommand);
     };
-  }, [automationActive, handleAutomationCommand, projectKey]);
+  }, [automationActive, handleAutomationCommand, scopeKey]);
+
+  // Адресация по вкладке: автозаполнение кредов должно попасть именно в ту
+  // вкладку, на которой пользователь нажал кнопку, даже если целью автоматизации
+  // сейчас выбрана другая.
+  useEffect(() => {
+    setBrowserTabAutomationHandler(tab.id, handleAutomationCommand);
+    return () => {
+      clearBrowserTabAutomationHandler(tab.id, handleAutomationCommand);
+    };
+  }, [handleAutomationCommand, tab.id]);
 
   return (
     <div
@@ -721,34 +888,35 @@ function BrowserView({
           >
             <MoreVerticalIcon className="size-3.5" />
           </button>
-          {isElectron ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    onClick={handleAutofillClick}
-                    disabled={matchedCredentials.length === 0}
-                    aria-label={
-                      matchedCredentials.length > 0
-                        ? "Заполнить сохранённые креды"
-                        : "Нет сохранённых кредов для текущего сайта"
-                    }
-                    className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
-                  >
-                    <KeyRoundIcon className="size-3.5" />
-                  </button>
-                }
-              />
-              <TooltipPopup side="bottom">
-                {matchedCredentials.length > 0
-                  ? "Заполнить логин и пароль"
-                  : origin
-                    ? `Нет сохранённых кредов для ${origin}`
-                    : "Откройте сайт, чтобы подобрать сохранённые креды"}
-              </TooltipPopup>
-            </Tooltip>
-          ) : null}
+          {/* Кнопка есть в обеих оболочках: пароль подставляет сервер, поэтому
+              заполнение работает и в браузерной версии (через companion), и в
+              десктопе, и в headless-браузере бокса. */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={handleAutofillClick}
+                  disabled={matchedCredentials.length === 0}
+                  aria-label={
+                    matchedCredentials.length > 0
+                      ? "Заполнить сохранённый логин"
+                      : "Нет сохранённых логинов для текущего сайта"
+                  }
+                  className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+                >
+                  <KeyRoundIcon className="size-3.5" />
+                </button>
+              }
+            />
+            <TooltipPopup side="bottom">
+              {matchedCredentials.length > 0
+                ? "Заполнить логин и пароль"
+                : origin
+                  ? `Нет сохранённых логинов для ${origin}`
+                  : "Откройте сайт, чтобы подобрать сохранённый логин"}
+            </TooltipPopup>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger
               render={
@@ -768,6 +936,29 @@ function BrowserView({
         </TooltipProvider>
       </div>
       <div className="relative flex min-h-0 flex-1 flex-col">
+        {pendingLogin ? (
+          <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border bg-primary/10 px-3 text-xs">
+            <KeyRoundIcon className="size-3.5 shrink-0 text-primary" />
+            <span className="min-w-0 flex-1 truncate">
+              Сохранить логин <span className="font-medium">{pendingLogin.username}</span> для{" "}
+              {pendingLogin.origin}?
+            </span>
+            <button
+              type="button"
+              onClick={() => void savePendingLogin()}
+              className="shrink-0 rounded bg-primary px-2 py-1 text-primary-foreground hover:opacity-90"
+            >
+              Сохранить
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingLogin(null)}
+              className="shrink-0 rounded px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              Не сейчас
+            </button>
+          </div>
+        ) : null}
         {deviceToolbarOpen ? (
           <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border bg-card px-2 text-[11px] text-muted-foreground">
             <MonitorSmartphoneIcon className="size-3.5" />

@@ -1,9 +1,17 @@
-import { KeyRoundIcon, PencilIcon, PlusIcon, Trash2Icon, UploadIcon } from "lucide-react";
+import {
+  KeyRoundIcon,
+  PencilIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  Trash2Icon,
+  UploadIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CredentialImportItem, CredentialId, CredentialMetadata } from "@t3tools/contracts";
 
 import { ensureLocalApi } from "../../localApi";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
+import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { FeatureDisabledPanel } from "./FeatureDisabledPanel";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 import { Button } from "../ui/button";
@@ -112,6 +120,10 @@ function parseImportText(text: string): readonly CredentialImportItem[] {
 
 export function VaultSettings() {
   const vaultEnabled = useFeatureFlag("vault");
+  const unoApiKey = useSettings((settings) => settings.uno?.apiKey ?? "");
+  const agentAccess = useSettings((settings) => settings.uno?.agentAccess ?? "read");
+  const credentialsSync = useSettings((settings) => settings.uno?.credentialsSync ?? false);
+  const { updateSettings } = useUpdateSettings();
   const [credentials, setCredentials] = useState<readonly CredentialMetadata[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -124,6 +136,7 @@ export function VaultSettings() {
   const [deleteTarget, setDeleteTarget] = useState<CredentialMetadata | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  const [syncing, setSyncing] = useState<"push" | "pull" | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
   const [isImporting, setIsImporting] = useState(false);
@@ -253,12 +266,109 @@ export function VaultSettings() {
 
   const canSave = form.url.trim().length > 0 && form.username.trim().length > 0;
 
+  const runSync = useCallback(
+    async (direction: "push" | "pull") => {
+      setSyncing(direction);
+      try {
+        const result = await ensureLocalApi().vault.sync({ direction });
+        if (!result.ok) {
+          toastManager.add({
+            type: "error",
+            title:
+              direction === "push"
+                ? "Не удалось отправить в аккаунт Uno"
+                : "Не удалось забрать из аккаунта Uno",
+            description: result.error ?? "Неизвестная причина.",
+          });
+          return;
+        }
+        if (direction === "pull") await refresh();
+        toastManager.add({
+          type: "success",
+          title:
+            direction === "push"
+              ? `Отправлено в аккаунт Uno: ${result.count ?? 0}`
+              : `Забрано из аккаунта Uno: ${result.count ?? 0}`,
+          description:
+            direction === "push"
+              ? "Другие машины получат их при включённой синхронизации."
+              : "Локальное хранилище заменено состоянием из аккаунта.",
+        });
+      } finally {
+        setSyncing(null);
+      }
+    },
+    [refresh],
+  );
+
   if (!vaultEnabled) {
     return <FeatureDisabledPanel feature="Credentials" />;
   }
 
   return (
     <SettingsPageContainer>
+      <SettingsSection
+        title="Одно хранилище на все машины"
+        icon={<RefreshCwIcon className="size-3.5" />}
+      >
+        <div className={ROW_CLASSNAME}>
+          <div className={ROW_INNER_CLASSNAME}>
+            <div className="min-w-0 flex-1 space-y-1">
+              <h3 className="text-sm font-medium text-foreground">
+                Синхронизация через аккаунт Uno
+              </h3>
+              <p className="text-xs text-muted-foreground/70">
+                Логины лежат на той машине, где работает демон: у браузерной версии — на боксе, у
+                десктопа — локально. Включите синхронизацию, чтобы хранить их в аккаунте Uno и
+                видеть один и тот же список везде. Обмен идёт набором целиком: «Отправить» заменяет
+                состояние в аккаунте, «Забрать» — локальное. Новая машина с пустым хранилищем
+                подтягивает логины сама при старте.
+              </p>
+              {!unoApiKey ? (
+                <p className="text-xs text-amber-500">
+                  Нужен ключ аккаунта Uno — Settings → Uno account.
+                </p>
+              ) : null}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={credentialsSync}
+                onClick={() =>
+                  void updateSettings({
+                    uno: { apiKey: unoApiKey, agentAccess, credentialsSync: !credentialsSync },
+                  })
+                }
+                className={
+                  credentialsSync
+                    ? "rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground"
+                    : "rounded-md border border-input px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
+                }
+              >
+                {credentialsSync ? "Включена" : "Выключена"}
+              </button>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={!credentialsSync || syncing !== null}
+                onClick={() => void runSync("push")}
+              >
+                {syncing === "push" ? "…" : "Отправить"}
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={!credentialsSync || syncing !== null}
+                onClick={() => void runSync("pull")}
+              >
+                {syncing === "pull" ? "…" : "Забрать"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </SettingsSection>
+
       <SettingsSection
         title="Credentials"
         icon={<KeyRoundIcon className="size-3.5" />}
@@ -391,7 +501,9 @@ export function VaultSettings() {
             </label>
           </DialogPanel>
           <DialogFooter variant="bare">
-            <DialogClose render={<Button variant="outline" disabled={isSaving} />}>Cancel</DialogClose>
+            <DialogClose render={<Button variant="outline" disabled={isSaving} />}>
+              Cancel
+            </DialogClose>
             <Button disabled={!canSave || isSaving} onClick={() => void handleSave()}>
               {isSaving ? "Saving…" : editingId ? "Save changes" : "Add credential"}
             </Button>
@@ -421,7 +533,10 @@ export function VaultSettings() {
             <DialogClose render={<Button variant="outline" disabled={isImporting} />}>
               Cancel
             </DialogClose>
-            <Button disabled={isImporting || importText.trim().length === 0} onClick={() => void handleImport()}>
+            <Button
+              disabled={isImporting || importText.trim().length === 0}
+              onClick={() => void handleImport()}
+            >
               {isImporting ? "Importing…" : "Import"}
             </Button>
           </DialogFooter>

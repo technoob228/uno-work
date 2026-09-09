@@ -43,6 +43,22 @@ export interface MaterializedCredential extends CredentialMetadata {
   readonly password: string;
 }
 
+/**
+ * Слепок хранилища целиком, включая пароли — формат обмена с аккаунтом Uno
+ * (`credentialsAccountSync`). Без id: они локальные, при переносе на другую
+ * машину выдаются заново.
+ */
+export interface CredentialsBundle {
+  readonly version: 1;
+  readonly credentials: ReadonlyArray<{
+    readonly label: string;
+    readonly url: string;
+    readonly username: string;
+    readonly password: string;
+    readonly notes?: string;
+  }>;
+}
+
 export interface CredentialsVaultShape {
   /** Metadata for every stored credential (no passwords). */
   readonly list: Effect.Effect<ReadonlyArray<CredentialMetadata>, CredentialsVaultError>;
@@ -64,6 +80,16 @@ export interface CredentialsVaultShape {
     ReadonlyArray<MaterializedCredential>,
     CredentialsVaultError
   >;
+  /** Слепок хранилища для синка с аккаунтом Uno (с паролями). */
+  readonly exportBundle: Effect.Effect<CredentialsBundle, CredentialsVaultError>;
+  /**
+   * Заменить хранилище слепком из аккаунта целиком: прежние записи и их секреты
+   * удаляются. Только для синка — построчного merge здесь нет намеренно (см.
+   * `credentialsAccountSync`).
+   */
+  readonly replaceAll: (
+    bundle: CredentialsBundle,
+  ) => Effect.Effect<{ readonly imported: number }, CredentialsVaultError>;
 }
 
 export class CredentialsVaultService extends Context.Service<
@@ -84,8 +110,7 @@ const makeCredentialsVault = Effect.gen(function* () {
   const secretStore = yield* ServerSecretStore;
   const writeSemaphore = yield* Semaphore.make(1);
 
-  const toError = (detail: string, cause?: unknown) =>
-    new CredentialsVaultError({ detail, cause });
+  const toError = (detail: string, cause?: unknown) => new CredentialsVaultError({ detail, cause });
 
   const loadFromDisk = Effect.gen(function* () {
     const exists = yield* fs
@@ -198,16 +223,18 @@ const makeCredentialsVault = Effect.gen(function* () {
           const id = CredentialId.make(crypto.randomUUID());
           yield* setPassword(id, item.password);
           const label =
-            item.label && item.label.trim().length > 0
-              ? item.label
-              : item.url || item.username;
+            item.label && item.label.trim().length > 0 ? item.label : item.url || item.username;
           added.push(
-            buildMetadata(id, {
-              label,
-              url: item.url,
-              username: item.username,
-              notes: item.notes,
-            }, now),
+            buildMetadata(
+              id,
+              {
+                label,
+                url: item.url,
+                username: item.username,
+                notes: item.notes,
+              },
+              now,
+            ),
           );
         }
         if (added.length === 0) {
@@ -221,12 +248,61 @@ const makeCredentialsVault = Effect.gen(function* () {
     );
 
   const reveal: CredentialsVaultShape["reveal"] = (id) =>
-    secretStore
-      .get(credentialSecretName(id))
-      .pipe(
-        Effect.map((bytes) => (bytes ? textDecoder.decode(bytes) : null)),
-        Effect.mapError((cause) => toError("failed to read credential password", cause)),
-      );
+    secretStore.get(credentialSecretName(id)).pipe(
+      Effect.map((bytes) => (bytes ? textDecoder.decode(bytes) : null)),
+      Effect.mapError((cause) => toError("failed to read credential password", cause)),
+    );
+
+  const exportBundle = Effect.gen(function* () {
+    const list = yield* Ref.get(credentialsRef);
+    const credentials: Array<CredentialsBundle["credentials"][number]> = [];
+    for (const metadata of list) {
+      const password = yield* reveal(metadata.id);
+      credentials.push({
+        label: metadata.label,
+        url: metadata.url,
+        username: metadata.username,
+        password: password ?? "",
+        ...(metadata.notes !== undefined ? { notes: metadata.notes } : {}),
+      });
+    }
+    return { version: 1, credentials } satisfies CredentialsBundle;
+  });
+
+  const replaceAll: CredentialsVaultShape["replaceAll"] = (bundle) =>
+    writeSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const previous = yield* Ref.get(credentialsRef);
+        const now = Date.now();
+        const next: CredentialMetadata[] = [];
+        for (const item of bundle.credentials) {
+          const id = CredentialId.make(crypto.randomUUID());
+          yield* setPassword(id, item.password);
+          next.push(
+            buildMetadata(
+              id,
+              {
+                label: item.label.length > 0 ? item.label : item.url,
+                url: item.url,
+                username: item.username,
+                notes: item.notes,
+              },
+              now,
+            ),
+          );
+        }
+        yield* persist(next);
+        yield* Ref.set(credentialsRef, next);
+        // Старые секреты чистим после успешной записи нового списка: упавший
+        // persist не должен оставить хранилище без паролей.
+        for (const stale of previous) {
+          yield* secretStore
+            .remove(credentialSecretName(stale.id))
+            .pipe(Effect.catch(() => Effect.void));
+        }
+        return { imported: next.length };
+      }),
+    );
 
   const materializeAll = Effect.gen(function* () {
     const list = yield* Ref.get(credentialsRef);
@@ -245,6 +321,8 @@ const makeCredentialsVault = Effect.gen(function* () {
     importItems,
     reveal,
     materializeAll,
+    exportBundle,
+    replaceAll,
   } satisfies CredentialsVaultShape;
 });
 

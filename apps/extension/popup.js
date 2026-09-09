@@ -3,7 +3,11 @@ const statusElement = document.getElementById("status");
 function send(message) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(message, (response) => {
-      resolve(chrome.runtime.lastError ? { ok: false, error: chrome.runtime.lastError.message } : response);
+      resolve(
+        chrome.runtime.lastError
+          ? { ok: false, error: chrome.runtime.lastError.message }
+          : response,
+      );
     });
   });
 }

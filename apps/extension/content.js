@@ -31,21 +31,18 @@ window.addEventListener("message", (event) => {
     return;
   }
 
-  chrome.runtime.sendMessage(
-    { type: message.type, input: message.input },
-    (response) => {
-      const error = chrome.runtime.lastError;
-      window.postMessage(
-        {
-          source: EXTENSION_SOURCE,
-          type: "result",
-          requestId: message.requestId,
-          response: error ? { ok: false, error: error.message } : response,
-        },
-        window.location.origin,
-      );
-    },
-  );
+  chrome.runtime.sendMessage({ type: message.type, input: message.input }, (response) => {
+    const error = chrome.runtime.lastError;
+    window.postMessage(
+      {
+        source: EXTENSION_SOURCE,
+        type: "result",
+        requestId: message.requestId,
+        response: error ? { ok: false, error: error.message } : response,
+      },
+      window.location.origin,
+    );
+  });
 });
 
 announce();

@@ -85,6 +85,46 @@ export type CredentialDeletePayload = typeof CredentialDeletePayload.Type;
 export const CredentialListResult = Schema.Array(CredentialMetadata);
 export type CredentialListResult = typeof CredentialListResult.Type;
 
+/**
+ * Автозаполнение сохранённого логина в открытой вкладке встроенного браузера.
+ * Пароль читает и подставляет СЕРВЕР: клиент присылает только id креда и
+ * вкладку-адресата, поэтому секрет не проходит через RPC-ответ.
+ */
+export const CredentialFillPayload = Schema.Struct({
+  id: CredentialId,
+  /** id вкладки предпросмотра, в которую заполнять. */
+  tabId: Schema.String,
+  /** Тред и рабочий каталог — чтобы команда ушла исполнителю нужного чата. */
+  threadId: Schema.optional(Schema.String),
+  cwd: Schema.optional(Schema.String),
+});
+export type CredentialFillPayload = typeof CredentialFillPayload.Type;
+
+/** Результат автозаполнения: заполнено ли и почему нет. */
+export const CredentialFillResult = Schema.Struct({
+  filled: Schema.Boolean,
+  error: Schema.optional(Schema.String),
+});
+export type CredentialFillResult = typeof CredentialFillResult.Type;
+
+/**
+ * Синхронизация хранилища через аккаунт Uno. `push` заменяет аккаунтный слепок
+ * локальным хранилищем, `pull` — локальное хранилище аккаунтным (целиком, без
+ * построчного слияния).
+ */
+export const CredentialSyncPayload = Schema.Struct({
+  direction: Schema.Literals(["push", "pull"]),
+});
+export type CredentialSyncPayload = typeof CredentialSyncPayload.Type;
+
+export const CredentialSyncResult = Schema.Struct({
+  ok: Schema.Boolean,
+  /** Сколько логинов в хранилище после операции. */
+  count: Schema.optional(Schema.Number),
+  error: Schema.optional(Schema.String),
+});
+export type CredentialSyncResult = typeof CredentialSyncResult.Type;
+
 export class CredentialsVaultError extends Schema.TaggedErrorClass<CredentialsVaultError>()(
   "CredentialsVaultError",
   {

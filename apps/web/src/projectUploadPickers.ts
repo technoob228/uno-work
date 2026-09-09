@@ -26,7 +26,10 @@ export function uploadFilesFromFileList(fileList: FileList): ProjectUploadFile[]
   }));
 }
 
-function pickWithInput(setup: (input: HTMLInputElement) => void, onPicked: (files: FileList) => void): void {
+function pickWithInput(
+  setup: (input: HTMLInputElement) => void,
+  onPicked: (files: FileList) => void,
+): void {
   const input = document.createElement("input");
   input.type = "file";
   setup(input);

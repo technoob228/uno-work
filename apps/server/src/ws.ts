@@ -51,6 +51,12 @@ import { PluginRegistry } from "./plugins/PluginRegistry.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { BrowserBridge } from "./browserBridge.ts";
+import { fillCredentialInBrowser } from "./credentialsFill.ts";
+import {
+  pullVaultFromAccount,
+  pushVaultToAccount,
+  pushVaultToAccountInBackground,
+} from "./credentialsAccountSync.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
 import { CredentialsVaultService } from "./credentialsVault.ts";
@@ -1069,16 +1075,38 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.vaultList, credentialsVault.list, {
             "rpc.aggregate": "vault",
           }),
+        // Каждая мутация хранилища тянет за собой фоновый push в аккаунт Uno
+        // (если синк включён): иначе правка осталась бы только на этой машине.
         [WS_METHODS.vaultUpsert]: (input) =>
-          observeRpcEffect(WS_METHODS.vaultUpsert, credentialsVault.upsert(input), {
-            "rpc.aggregate": "vault",
-          }),
+          observeRpcEffect(
+            WS_METHODS.vaultUpsert,
+            credentialsVault
+              .upsert(input)
+              .pipe(Effect.tap(() => pushVaultToAccountInBackground)),
+            { "rpc.aggregate": "vault" },
+          ),
         [WS_METHODS.vaultDelete]: ({ id }) =>
-          observeRpcEffect(WS_METHODS.vaultDelete, credentialsVault.remove(id), {
-            "rpc.aggregate": "vault",
-          }),
+          observeRpcEffect(
+            WS_METHODS.vaultDelete,
+            credentialsVault.remove(id).pipe(Effect.tap(() => pushVaultToAccountInBackground)),
+            { "rpc.aggregate": "vault" },
+          ),
         [WS_METHODS.vaultImport]: ({ items }) =>
-          observeRpcEffect(WS_METHODS.vaultImport, credentialsVault.importItems(items), {
+          observeRpcEffect(
+            WS_METHODS.vaultImport,
+            credentialsVault
+              .importItems(items)
+              .pipe(Effect.tap(() => pushVaultToAccountInBackground)),
+            { "rpc.aggregate": "vault" },
+          ),
+        [WS_METHODS.vaultSync]: ({ direction }) =>
+          observeRpcEffect(
+            WS_METHODS.vaultSync,
+            direction === "push" ? pushVaultToAccount : pullVaultFromAccount,
+            { "rpc.aggregate": "vault" },
+          ),
+        [WS_METHODS.vaultFill]: (input) =>
+          observeRpcEffect(WS_METHODS.vaultFill, fillCredentialInBrowser(input), {
             "rpc.aggregate": "vault",
           }),
         [WS_METHODS.workspaceGetState]: (_input) =>

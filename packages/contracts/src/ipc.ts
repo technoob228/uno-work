@@ -99,6 +99,10 @@ import { EditorId } from "./editor.ts";
 import type { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import type { ClientSettings, ServerSettings, ServerSettingsPatch } from "./settings.ts";
 import type {
+  CredentialFillPayload,
+  CredentialFillResult,
+  CredentialSyncPayload,
+  CredentialSyncResult,
   CredentialImportItem,
   CredentialImportResult,
   CredentialInput,
@@ -477,9 +481,11 @@ export interface LocalApi {
     transcribeAudio: (input: UnoTranscribeAudioInput) => Promise<UnoTranscribeAudioResult>;
   };
   /**
-   * Credentials vault (web-only). Website logins managed from Settings instead
-   * of being pasted into chat. Passwords are stored server-side and never
-   * returned by `list` — entries carry metadata only.
+   * Credentials vault. Website logins managed from Settings instead of being
+   * pasted into chat — доступен в обеих оболочках (браузер и десктоп), потому
+   * что хранилище держит демон, а не оболочка. Passwords are stored server-side
+   * and never returned by `list` — entries carry metadata only; `fill` просит
+   * сервер подставить пароль в открытую вкладку, тоже не возвращая его.
    */
   vault: {
     list: () => Promise<readonly CredentialMetadata[]>;
@@ -491,6 +497,9 @@ export interface LocalApi {
     import: (payload: {
       readonly items: readonly CredentialImportItem[];
     }) => Promise<CredentialImportResult>;
+    fill: (payload: CredentialFillPayload) => Promise<CredentialFillResult>;
+    /** Обмен хранилищем с аккаунтом Uno: целиком в одну или другую сторону. */
+    sync: (payload: CredentialSyncPayload) => Promise<CredentialSyncResult>;
   };
 }
 

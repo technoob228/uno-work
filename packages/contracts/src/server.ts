@@ -303,6 +303,14 @@ export const BrowserBridgeRequestContext = Schema.Struct({
 export type BrowserBridgeRequestContext = typeof BrowserBridgeRequestContext.Type;
 
 /**
+ * Уровень вкладки правой панели: `chat` — только в треде-источнике (по
+ * умолчанию), `project` — во всех чатах проекта, `global` — всегда и везде.
+ * Клиент кладёт вкладку в бакет соответствующего уровня.
+ */
+export const PreviewTabScope = Schema.Literals(["chat", "project", "global"]);
+export type PreviewTabScope = typeof PreviewTabScope.Type;
+
+/**
  * Events pushed to clients when a harness (or any local process holding the
  * bridge token) asks the app to open a URL in the built-in browser pane.
  */
@@ -311,6 +319,7 @@ export const BrowserBridgeOpenUrlEvent = Schema.Struct({
   type: Schema.Literal("openUrl"),
   sequence: NonNegativeInt,
   url: Schema.String,
+  scope: Schema.optional(PreviewTabScope),
   context: Schema.optional(BrowserBridgeRequestContext),
 });
 export type BrowserBridgeOpenUrlEvent = typeof BrowserBridgeOpenUrlEvent.Type;
@@ -325,6 +334,7 @@ export const BrowserBridgeOpenFileEvent = Schema.Struct({
   type: Schema.Literal("openFile"),
   sequence: NonNegativeInt,
   path: Schema.String,
+  scope: Schema.optional(PreviewTabScope),
   context: Schema.optional(BrowserBridgeRequestContext),
 });
 export type BrowserBridgeOpenFileEvent = typeof BrowserBridgeOpenFileEvent.Type;
@@ -342,6 +352,10 @@ export const BrowserAutomationCommandName = Schema.Literals([
   "back",
   "forward",
   "evaluate",
+  // Автозаполнение логина из хранилища кредов. НЕ доступна харнессам: команда
+  // не входит в allowlist bridge-эндпоинта, её публикует только сервер по
+  // явному действию пользователя (`vault.fill`), уже подставив значения.
+  "fillCredential",
 ]);
 export type BrowserAutomationCommandName = typeof BrowserAutomationCommandName.Type;
 
@@ -355,6 +369,19 @@ export const BrowserAutomationCommandInput = Schema.Struct({
   script: Schema.optional(Schema.String),
   x: Schema.optional(Schema.Number),
   y: Schema.optional(Schema.Number),
+  /**
+   * Конкретная вкладка-адресат (`fillCredential`): пользователь нажал «заполнить»
+   * на видимой вкладке, и подставить значения надо именно в неё, а не в ту, что
+   * выбрал бы роутинг по уровню.
+   */
+  tabId: Schema.optional(Schema.String),
+  /** Логин для `fillCredential` — подставляет сервер, не агент. */
+  username: Schema.optional(Schema.String),
+  /**
+   * Пароль для `fillCredential`. Единственное место, где секрет из хранилища
+   * доходит до исполнителя; в переписку и в контекст модели не попадает.
+   */
+  password: Schema.optional(Schema.String),
   // Полностраничный скриншот. Поддержан серверным headless-исполнителем;
   // клиентский webview снимает только видимую область и игнорирует флаг.
   fullPage: Schema.optional(Schema.Boolean),

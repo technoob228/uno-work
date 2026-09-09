@@ -28,6 +28,7 @@ import {
   isAllowedBridgeFilePath,
   isAllowedBridgeUrl,
   normalizeBridgeRequestContext,
+  normalizeTabScope,
 } from "./browserBridge.ts";
 import { expandHomePath } from "./pathExpansion.ts";
 import {
@@ -253,6 +254,11 @@ export const browserBridgeOpenRouteLayer = HttpRouter.add(
     const rawUrl = body && typeof body === "object" ? (body as { url?: unknown }).url : undefined;
     const rawFile =
       body && typeof body === "object" ? (body as { file?: unknown }).file : undefined;
+    // Уровень вкладки: чат треда-источника по умолчанию, project/global — когда
+    // агент явно просит вкладку, живущую дольше треда.
+    const tabScope = normalizeTabScope(
+      body && typeof body === "object" ? (body as { scope?: unknown }).scope : undefined,
+    );
 
     if (rawFile !== undefined) {
       if (rawUrl !== undefined) {
@@ -283,6 +289,7 @@ export const browserBridgeOpenRouteLayer = HttpRouter.add(
       yield* browserBridgeService.publishOpenFile(
         filePath,
         resolveBridgeRequestContext(authorization, body),
+        tabScope,
       );
       return HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 });
     }
@@ -299,6 +306,7 @@ export const browserBridgeOpenRouteLayer = HttpRouter.add(
     const result = yield* executeBridgeOpenUrl(
       rawUrl,
       resolveBridgeRequestContext(authorization, body),
+      tabScope,
     );
     return HttpServerResponse.jsonUnsafe(
       result.ok ? { ok: true } : { ok: false, error: result.error },

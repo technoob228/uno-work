@@ -139,10 +139,10 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
         // literally named "~" next to the process. Clean both so a failing run
         // does not leave junk in the repo.
         yield* Effect.addFinalizer(() =>
-          Effect.forEach(
-            [path.join(home, projectName), path.join(process.cwd(), "~")],
-            (target) =>
-              fileSystem.remove(target, { recursive: true }).pipe(Effect.catchCause(() => Effect.void)),
+          Effect.forEach([path.join(home, projectName), path.join(process.cwd(), "~")], (target) =>
+            fileSystem
+              .remove(target, { recursive: true })
+              .pipe(Effect.catchCause(() => Effect.void)),
           ).pipe(Effect.asVoid),
         );
 

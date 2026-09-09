@@ -27,6 +27,9 @@ const SUPPORTED_COMMANDS = new Set([
   "type",
   "press",
   "screenshot",
+  // Автозаполнение сохранённого логина: значения приходят от демона Uno Work по
+  // явному действию пользователя (кнопка с ключом в панели), а не от агента.
+  "fillCredential",
 ]);
 
 async function readManagedTabIds() {
@@ -109,18 +112,24 @@ function pageClickText(text) {
     document.querySelectorAll("button, a, [role=button], input[type=submit], summary, label"),
   );
   const match =
-    candidates.find((element) => (element.innerText || element.value || "").trim().toLowerCase() === needle) ??
-    candidates.find((element) => (element.innerText || element.value || "").trim().toLowerCase().includes(needle));
+    candidates.find(
+      (element) => (element.innerText || element.value || "").trim().toLowerCase() === needle,
+    ) ??
+    candidates.find((element) =>
+      (element.innerText || element.value || "").trim().toLowerCase().includes(needle),
+    );
   if (!match) return { clicked: false, reason: "not-found" };
   match.scrollIntoView({ block: "center" });
   match.click();
-  return { clicked: true, tagName: match.tagName, text: (match.innerText || match.value || "").slice(0, 120) };
+  return {
+    clicked: true,
+    tagName: match.tagName,
+    text: (match.innerText || match.value || "").slice(0, 120),
+  };
 }
 
 function pageType(selector, text) {
-  const element = selector
-    ? document.querySelector(selector)
-    : (document.activeElement ?? null);
+  const element = selector ? document.querySelector(selector) : (document.activeElement ?? null);
   if (!element) return { typed: false, reason: "not-found" };
   element.focus();
   const prototype =
@@ -140,6 +149,45 @@ function pageType(selector, text) {
     return { typed: true };
   }
   return { typed: false, reason: "not-editable" };
+}
+
+/**
+ * Автозаполнение формы логина. Значения передаются как аргументы инъекции — это
+ * фиксированная функция, а не произвольный скрипт (`evaluate` расширение не
+ * поддерживает намеренно).
+ */
+function pageFillLogin(username, password) {
+  function setValue(element, value) {
+    if (!element) return;
+    const prototype =
+      element instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+    if (setter) setter.call(element, value);
+    else element.value = value;
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  const passwordInput = document.querySelector('input[type="password"]');
+  let usernameInput =
+    document.querySelector('input[autocomplete="username"]') ||
+    document.querySelector('input[type="email"]') ||
+    document.querySelector('input[name*="user" i], input[name*="login" i], input[name*="email" i]');
+  if (!usernameInput && passwordInput) {
+    const inputs = Array.prototype.slice.call(document.querySelectorAll("input"));
+    const passwordIndex = inputs.indexOf(passwordInput);
+    for (let i = passwordIndex - 1; i >= 0; i--) {
+      const candidate = inputs[i];
+      if (candidate.type === "text" || candidate.type === "email" || candidate.type === "tel") {
+        usernameInput = candidate;
+        break;
+      }
+    }
+  }
+  if (usernameInput) setValue(usernameInput, username);
+  if (passwordInput) setValue(passwordInput, password);
+  return { filled: Boolean(usernameInput || passwordInput) };
 }
 
 function pagePress(key) {
@@ -191,7 +239,8 @@ async function runCommand(input) {
   if (!tab) {
     return {
       ok: false,
-      error: "No shared tab. Open one from the agent, or share the current tab from the extension popup.",
+      error:
+        "No shared tab. Open one from the agent, or share the current tab from the extension popup.",
     };
   }
 
@@ -232,19 +281,25 @@ async function runCommand(input) {
     case "click": {
       if (!input.selector) return { ok: false, error: "Missing selector." };
       const result = await executeInTab(tab.id, pageClickSelector, [input.selector]);
-      return result?.clicked ? { ok: true, data: result } : { ok: false, error: "Element not found." };
+      return result?.clicked
+        ? { ok: true, data: result }
+        : { ok: false, error: "Element not found." };
     }
 
     case "clickText": {
       if (!input.text) return { ok: false, error: "Missing text." };
       const result = await executeInTab(tab.id, pageClickText, [input.text]);
-      return result?.clicked ? { ok: true, data: result } : { ok: false, error: "Element not found." };
+      return result?.clicked
+        ? { ok: true, data: result }
+        : { ok: false, error: "Element not found." };
     }
 
     case "type": {
       if (typeof input.text !== "string") return { ok: false, error: "Missing text." };
       const result = await executeInTab(tab.id, pageType, [input.selector ?? null, input.text]);
-      return result?.typed ? { ok: true, data: result } : { ok: false, error: "No editable target." };
+      return result?.typed
+        ? { ok: true, data: result }
+        : { ok: false, error: "No editable target." };
     }
 
     case "press": {
@@ -256,6 +311,16 @@ async function runCommand(input) {
     case "screenshot": {
       const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
       return { ok: true, data: { dataUrl } };
+    }
+
+    case "fillCredential": {
+      if (typeof input.username !== "string" || typeof input.password !== "string") {
+        return { ok: false, error: "fillCredential requires credentials." };
+      }
+      const result = await executeInTab(tab.id, pageFillLogin, [input.username, input.password]);
+      return result?.filled
+        ? { ok: true, data: result }
+        : { ok: false, error: "Поля логина на странице не найдены." };
     }
 
     default:

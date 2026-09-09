@@ -17,17 +17,20 @@ Uno Work is a coding and automation workspace that runs on your own machine — 
 When you ask the assistant to do something on the web, it can act directly in your browser instead of a separate headless one. That means it works inside sessions you are already signed into: no passwords to share, no accounts to re-authenticate, no copies of your cookies anywhere.
 
 **What it can do**
+
 - open a page and report its URL, title and load state
 - navigate, reload, go back and forward
 - click elements, type text, press keys
 - capture a screenshot of the visible area on request
 
 **What it cannot do**
+
 - act in tabs you have not shared — it only touches tabs it opened itself and tabs you explicitly share from the popup
 - run arbitrary or remotely supplied code — the command set is fixed and every in-page action ships with the extension
 - collect data — there is no analytics, no telemetry and no server of its own. Results go only to the Uno Work application you are signed into.
 
 **How to use it**
+
 1. Install the extension.
 2. Open Uno Work in this browser — it detects the extension automatically.
 3. Ask the assistant to do something on the web. To use a page you already have open, click "Share the current tab" in the extension popup.

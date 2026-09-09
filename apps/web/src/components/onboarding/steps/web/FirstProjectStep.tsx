@@ -289,9 +289,9 @@ export function FirstProjectStep({ onProjectReady }: FirstProjectStepProps) {
               </Button>
               <p className="text-xs text-muted-foreground">
                 Copied to <span className="font-mono">{baseDirectory}</span>. Dependency folders,
-                git metadata and files over{" "}
-                {Math.round(UPLOAD_MAX_FILE_BYTES / (1024 * 1024))} MB are skipped — clone or{" "}
-                <span className="font-mono">git pull</span> from the terminal for anything larger.
+                git metadata and files over {Math.round(UPLOAD_MAX_FILE_BYTES / (1024 * 1024))} MB
+                are skipped — clone or <span className="font-mono">git pull</span> from the terminal
+                for anything larger.
               </p>
             </div>
           ) : null}

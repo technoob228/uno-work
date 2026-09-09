@@ -1,8 +1,32 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 
 import { browserTabNameForUrl } from "./browserUrl";
 import { forgetScrollPosition } from "./previewScrollMemory";
+import {
+  collectPersistableTabs,
+  readPersistedTabs,
+  restoreTabs,
+  writePersistedTabs,
+} from "./previewTabPersistence";
+import {
+  GLOBAL_SCOPE_KEY,
+  projectScopeKey,
+  scopeKeyForTarget,
+  scopeOfKey,
+  viewScopeKey,
+  visibleScopeKeys,
+  type PreviewTabScope,
+  type PreviewTabTarget,
+} from "./previewTabScopes";
 
 // Монотонный счётчик id браузерных вкладок: вкладки с одинаковым URL можно
 // открыть повторно после закрытия, поэтому id не выводится из URL.
@@ -31,6 +55,12 @@ export interface PreviewFile {
   blobUrl?: string;
   path?: string;
   projectCwd?: string;
+  /**
+   * Логический проект, из которого вкладку открыли. Уровень вкладки живёт в
+   * бакете, а проект нужен отдельно: браузерная вкладка чата/глобального уровня
+   * всё равно должна брать cookies-партицию и сохранённые креды своего проекта.
+   */
+  projectKey?: string;
   environmentId?: EnvironmentId;
   /** Текущий URL для вкладок `kind === "browser"`. Пустая строка = новая вкладка. */
   url?: string;
@@ -73,7 +103,12 @@ export interface BrowserContext {
   startPath: string | null;
 }
 
-export interface ProjectPreviewState {
+/**
+ * Бакет вкладок одного уровня (`previewTabScopes`). Вкладки лежат в бакете
+ * своего уровня; состояние вида (открыта ли панель, активная вкладка, режим
+ * фокуса) держит проектный бакет — см. `viewScopeKey`.
+ */
+export interface PreviewBucketState {
   open: boolean;
   previewLayoutMode: "sidebar" | "focus";
   files: ReadonlyArray<PreviewFile>;
@@ -88,6 +123,7 @@ export interface ProjectPreviewState {
 interface PreviewPaneState {
   open: boolean;
   previewLayoutMode: "sidebar" | "focus";
+  /** Видимые сейчас вкладки: global → project → chat, в этом порядке. */
   files: ReadonlyArray<PreviewFile>;
   activeFileId: string | null;
   browserOpen: boolean;
@@ -100,30 +136,35 @@ interface PreviewPaneState {
   /** Проект активного чата — вкладки панелей адресуют оркестрацию по нему. */
   currentChatProjectId: ProjectId | null;
   currentChatEnvironmentId: EnvironmentId | null;
+  /** Тред активного чата: по нему адресуется бакет уровня `chat`. */
+  currentChatThreadId: string | null;
+  /** Уровень каждой видимой вкладки — для значка в ряду вкладок и меню. */
+  tabScopeById: Readonly<Record<string, PreviewTabScope>>;
   setOpen: (open: boolean) => void;
   toggleOpen: () => void;
   setPreviewLayoutMode: (mode: "sidebar" | "focus") => void;
   togglePreviewLayoutMode: () => void;
+  /** Открыть файл на уровне по умолчанию (чат текущего треда). */
   openFile: (file: PreviewFile) => void;
   /**
-   * Открыть файл во вкладке конкретного проекта (bridge-события харнессов):
-   * вкладка попадает в бакет своего проекта, текущий вид не трогается.
+   * Открыть файл во вкладке конкретного треда/проекта (bridge-события
+   * харнессов): вкладка попадает в бакет своего уровня, текущий вид не
+   * трогается.
    */
-  openFileInProject: (projectKey: string, file: PreviewFile) => void;
+  openFileForTarget: (
+    target: PreviewTabTarget,
+    scope: PreviewTabScope,
+    file: PreviewFile,
+  ) => void;
   /** Открыть URL в браузерной вкладке (без аргумента — пустая «новая вкладка»). */
   openUrl: (url?: string) => void;
-  /**
-   * Открыть URL во вкладке конкретного проекта (bridge-события харнессов):
-   * вкладка попадает в бакет своего проекта, текущий вид не трогается.
-   */
-  openUrlInProject: (projectKey: string, url?: string) => void;
-  updateBrowserTab: (
-    projectKey: string,
-    id: string,
-    patch: { url?: string; name?: string },
-  ) => void;
+  /** То же для конкретного треда/проекта и уровня — bridge-события харнессов. */
+  openUrlForTarget: (target: PreviewTabTarget, scope: PreviewTabScope, url?: string) => void;
+  updateBrowserTab: (scopeKey: string, id: string, patch: { url?: string; name?: string }) => void;
+  /** Перенести вкладку на другой уровень (чат / проект / везде). */
+  setTabScope: (id: string, scope: PreviewTabScope) => void;
   /** Все бакеты предпросмотра — для постоянно смонтированных webview. */
-  statesByProjectKey: Readonly<Record<string, ProjectPreviewState>>;
+  statesByScopeKey: Readonly<Record<string, PreviewBucketState>>;
   closeFile: (id: string) => void;
   setActiveFile: (id: string) => void;
   openBrowser: (context: BrowserContext) => void;
@@ -136,6 +177,7 @@ interface PreviewPaneState {
     projectCwd: string | null;
     projectId: ProjectId | null;
     environmentId: EnvironmentId | null;
+    threadId: string | null;
   }) => void;
 }
 
@@ -143,7 +185,7 @@ export const EMPTY_BROWSER_CONTEXT: BrowserContext = { environmentId: null, star
 
 export const NO_PROJECT_KEY = "__no_project__";
 
-export const DEFAULT_PROJECT_PREVIEW_STATE: ProjectPreviewState = {
+export const DEFAULT_PREVIEW_BUCKET_STATE: PreviewBucketState = {
   open: false,
   previewLayoutMode: "sidebar",
   files: [],
@@ -154,7 +196,7 @@ export const DEFAULT_PROJECT_PREVIEW_STATE: ProjectPreviewState = {
   sourceViewFileIds: [],
 };
 
-/** Форматы, у которых есть и rendered-превью, и осмысленный исходник. */
+/** Формат, у которых есть и rendered-превью, и осмысленный исходник. */
 export const DUAL_VIEW_KINDS: ReadonlySet<PreviewFileKind> = new Set<PreviewFileKind>([
   "md",
   "html",
@@ -167,125 +209,207 @@ export function toggleSourceViewIds(ids: ReadonlyArray<string>, id: string): Rea
   return ids.includes(id) ? ids.filter((existing) => existing !== id) : [...ids, id];
 }
 
-export function getProjectPreviewState(
-  states: Readonly<Record<string, ProjectPreviewState>>,
+export function getPreviewBucketState(
+  states: Readonly<Record<string, PreviewBucketState>>,
   key: string,
-): ProjectPreviewState {
-  return states[key] ?? DEFAULT_PROJECT_PREVIEW_STATE;
+): PreviewBucketState {
+  return states[key] ?? DEFAULT_PREVIEW_BUCKET_STATE;
 }
 
-export function applyProjectPreviewPatch(
-  states: Readonly<Record<string, ProjectPreviewState>>,
+export function applyPreviewBucketPatch(
+  states: Readonly<Record<string, PreviewBucketState>>,
   key: string,
-  patch: Partial<ProjectPreviewState>,
-): Record<string, ProjectPreviewState> {
-  const current = getProjectPreviewState(states, key);
+  patch: Partial<PreviewBucketState>,
+): Record<string, PreviewBucketState> {
+  const current = getPreviewBucketState(states, key);
   return {
     ...states,
     [key]: { ...current, ...patch },
   };
 }
 
+/**
+ * Бакет, в котором лежит вкладка. `preferredKeys` (обычно — видимые сейчас
+ * бакеты) просматриваются первыми: один и тот же файл может быть открыт в
+ * бакетах двух разных чатов, и закрывать/переносить надо ту копию, которую
+ * пользователь видит, а не чужую. null — такой вкладки нет нигде.
+ */
+export function findTabScopeKey(
+  states: Readonly<Record<string, PreviewBucketState>>,
+  id: string,
+  preferredKeys: ReadonlyArray<string> = [],
+): string | null {
+  for (const scopeKey of preferredKeys) {
+    if (states[scopeKey]?.files.some((file) => file.id === id)) return scopeKey;
+  }
+  for (const [scopeKey, bucket] of Object.entries(states)) {
+    if (bucket.files.some((file) => file.id === id)) return scopeKey;
+  }
+  return null;
+}
+
+/** Видимые вкладки в порядке отображения плюс карта «вкладка → уровень». */
+export function collectVisibleTabs(
+  states: Readonly<Record<string, PreviewBucketState>>,
+  target: PreviewTabTarget,
+): {
+  readonly files: ReadonlyArray<PreviewFile>;
+  readonly tabScopeById: Readonly<Record<string, PreviewTabScope>>;
+} {
+  const files: PreviewFile[] = [];
+  const tabScopeById: Record<string, PreviewTabScope> = {};
+  for (const scopeKey of visibleScopeKeys(target)) {
+    const bucket = states[scopeKey];
+    if (!bucket) continue;
+    const scope = scopeOfKey(scopeKey);
+    for (const file of bucket.files) {
+      files.push(file);
+      tabScopeById[file.id] = scope;
+    }
+  }
+  return { files, tabScopeById };
+}
+
 const Ctx = createContext<PreviewPaneState | null>(null);
 
+function initialStates(): Record<string, PreviewBucketState> {
+  const restored = restoreTabs(readPersistedTabs());
+  const states: Record<string, PreviewBucketState> = {};
+  for (const [scopeKey, files] of Object.entries(restored)) {
+    if (files.length === 0) continue;
+    states[scopeKey] = { ...DEFAULT_PREVIEW_BUCKET_STATE, files };
+    // Счётчик id стартует с нуля в каждой сессии, а восстановленные вкладки
+    // несут id прошлой — без сдвига новая вкладка получила бы id уже живущей.
+    for (const file of files) {
+      const suffix = Number.parseInt(file.id.replace("browser-", ""), 10);
+      if (Number.isFinite(suffix) && suffix > browserTabCounter) browserTabCounter = suffix;
+    }
+  }
+  return states;
+}
+
 export function PreviewPaneProvider({ children }: { children: ReactNode }) {
-  const [statesByProjectKey, setStatesByProjectKey] = useState<Record<string, ProjectPreviewState>>(
-    {},
-  );
+  const [statesByScopeKey, setStatesByScopeKey] =
+    useState<Record<string, PreviewBucketState>>(initialStates);
   const [currentProjectKey, setCurrentProjectKey] = useState<string>(NO_PROJECT_KEY);
   const [currentChatProjectCwd, setCurrentChatProjectCwd] = useState<string | null>(null);
   const [currentChatProjectId, setCurrentChatProjectId] = useState<ProjectId | null>(null);
   const [currentChatEnvironmentId, setCurrentChatEnvironmentId] = useState<EnvironmentId | null>(
     null,
   );
+  const [currentChatThreadId, setCurrentChatThreadId] = useState<string | null>(null);
 
-  const updateProjectState = useCallback(
-    (projectKey: string, updater: (prev: ProjectPreviewState) => ProjectPreviewState) => {
-      setStatesByProjectKey((prev) => {
-        const current = getProjectPreviewState(prev, projectKey);
+  const currentTarget = useMemo<PreviewTabTarget>(
+    () => ({ projectKey: currentProjectKey, threadId: currentChatThreadId }),
+    [currentProjectKey, currentChatThreadId],
+  );
+
+  // Долгоживущие вкладки (global/project) переживают перезагрузку клиента.
+  useEffect(() => {
+    writePersistedTabs(collectPersistableTabs(statesByScopeKey));
+  }, [statesByScopeKey]);
+
+  const updateBucket = useCallback(
+    (scopeKey: string, updater: (prev: PreviewBucketState) => PreviewBucketState) => {
+      setStatesByScopeKey((prev) => {
+        const current = getPreviewBucketState(prev, scopeKey);
         const next = updater(current);
         if (next === current) return prev;
-        return { ...prev, [projectKey]: next };
+        return { ...prev, [scopeKey]: next };
       });
     },
     [],
   );
 
-  const updateCurrentState = useCallback(
-    (updater: (prev: ProjectPreviewState) => ProjectPreviewState) => {
-      updateProjectState(currentProjectKey, updater);
+  /**
+   * Состояние вида живёт в проектном бакете: переключение тредов внутри проекта
+   * не должно закрывать панель и терять раскладку.
+   */
+  const updateViewState = useCallback(
+    (updater: (prev: PreviewBucketState) => PreviewBucketState) => {
+      updateBucket(viewScopeKey(currentTarget), updater);
     },
-    [currentProjectKey, updateProjectState],
+    [currentTarget, updateBucket],
   );
 
   const setOpen = useCallback(
     (open: boolean) => {
-      updateCurrentState((current) => (current.open === open ? current : { ...current, open }));
+      updateViewState((current) => (current.open === open ? current : { ...current, open }));
     },
-    [updateCurrentState],
+    [updateViewState],
   );
 
   const toggleOpen = useCallback(() => {
-    updateCurrentState((current) => ({ ...current, open: !current.open }));
-  }, [updateCurrentState]);
+    updateViewState((current) => ({ ...current, open: !current.open }));
+  }, [updateViewState]);
 
   const setPreviewLayoutMode = useCallback(
     (previewLayoutMode: "sidebar" | "focus") => {
-      updateCurrentState((current) =>
+      updateViewState((current) =>
         current.previewLayoutMode === previewLayoutMode
           ? current
           : { ...current, previewLayoutMode },
       );
     },
-    [updateCurrentState],
+    [updateViewState],
   );
 
   const togglePreviewLayoutMode = useCallback(() => {
-    updateCurrentState((current) => ({
+    updateViewState((current) => ({
       ...current,
       previewLayoutMode: current.previewLayoutMode === "focus" ? "sidebar" : "focus",
       open: true,
     }));
-  }, [updateCurrentState]);
+  }, [updateViewState]);
+
+  /**
+   * Кладёт вкладку в бакет своего уровня и делает её активной в виде проекта.
+   * Уже открытая вкладка (тот же id — на любом видимом уровне) не дублируется.
+   */
+  const openFileForTarget = useCallback(
+    (target: PreviewTabTarget, scope: PreviewTabScope, file: PreviewFile) => {
+      const bucketKey = scopeKeyForTarget(target, scope);
+      setStatesByScopeKey((prev) => {
+        const existingScopeKey = visibleScopeKeys(target).find((scopeKey) =>
+          (prev[scopeKey]?.files ?? []).some((candidate) => candidate.id === file.id),
+        );
+        const next = { ...prev };
+        if (!existingScopeKey) {
+          const bucket = getPreviewBucketState(prev, bucketKey);
+          next[bucketKey] = { ...bucket, files: [...bucket.files, file] };
+        }
+        const viewKey = viewScopeKey(target);
+        const view = getPreviewBucketState(next, viewKey);
+        next[viewKey] = { ...view, activeFileId: file.id, open: true };
+        return next;
+      });
+    },
+    [],
+  );
 
   const openFile = useCallback(
     (file: PreviewFile) => {
-      updateCurrentState((current) => ({
-        ...current,
-        files: current.files.some((f) => f.id === file.id)
-          ? current.files
-          : [...current.files, file],
-        activeFileId: file.id,
-        open: true,
-      }));
+      openFileForTarget(currentTarget, "chat", file);
     },
-    [updateCurrentState],
+    [currentTarget, openFileForTarget],
   );
 
-  const openFileInProject = useCallback(
-    (projectKey: string, file: PreviewFile) => {
-      updateProjectState(projectKey, (current) => ({
-        ...current,
-        files: current.files.some((f) => f.id === file.id)
-          ? current.files
-          : [...current.files, file],
-        activeFileId: file.id,
-        open: true,
-      }));
-    },
-    [updateProjectState],
-  );
-
-  const openUrlInProject = useCallback(
-    (projectKey: string, url?: string) => {
+  const openUrlForTarget = useCallback(
+    (target: PreviewTabTarget, scope: PreviewTabScope, url?: string) => {
       const trimmed = url?.trim() ?? "";
-      updateProjectState(projectKey, (current) => {
-        // Уже открытая вкладка с тем же URL — просто фокусируем её.
-        const existing = trimmed
-          ? current.files.find((f) => isBrowserTab(f) && f.url === trimmed)
-          : undefined;
-        if (existing) {
-          return { ...current, activeFileId: existing.id, open: true };
+      const bucketKey = scopeKeyForTarget(target, scope);
+      setStatesByScopeKey((prev) => {
+        // Уже открытая вкладка с тем же URL на любом видимом уровне — фокус на неё.
+        if (trimmed) {
+          for (const scopeKey of visibleScopeKeys(target)) {
+            const existing = (prev[scopeKey]?.files ?? []).find(
+              (file) => isBrowserTab(file) && file.url === trimmed,
+            );
+            if (!existing) continue;
+            const viewKey = viewScopeKey(target);
+            const view = getPreviewBucketState(prev, viewKey);
+            return { ...prev, [viewKey]: { ...view, activeFileId: existing.id, open: true } };
+          }
         }
         const id = `browser-${++browserTabCounter}`;
         const tab: PreviewFile = {
@@ -294,28 +418,30 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
           kind: "browser",
           content: "",
           url: trimmed,
+          projectKey: target.projectKey,
         };
-        return {
-          ...current,
-          files: [...current.files, tab],
-          activeFileId: id,
-          open: true,
-        };
+        const next = { ...prev };
+        const bucket = getPreviewBucketState(prev, bucketKey);
+        next[bucketKey] = { ...bucket, files: [...bucket.files, tab] };
+        const viewKey = viewScopeKey(target);
+        const view = getPreviewBucketState(next, viewKey);
+        next[viewKey] = { ...view, activeFileId: id, open: true };
+        return next;
       });
     },
-    [updateProjectState],
+    [],
   );
 
   const openUrl = useCallback(
     (url?: string) => {
-      openUrlInProject(currentProjectKey, url);
+      openUrlForTarget(currentTarget, "chat", url);
     },
-    [currentProjectKey, openUrlInProject],
+    [currentTarget, openUrlForTarget],
   );
 
   const updateBrowserTab = useCallback(
-    (projectKey: string, id: string, patch: { url?: string; name?: string }) => {
-      updateProjectState(projectKey, (current) => {
+    (scopeKey: string, id: string, patch: { url?: string; name?: string }) => {
+      updateBucket(scopeKey, (current) => {
         const idx = current.files.findIndex((f) => f.id === id && isBrowserTab(f));
         if (idx === -1) return current;
         const existing = current.files[idx]!;
@@ -331,99 +457,142 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
         };
       });
     },
-    [updateProjectState],
+    [updateBucket],
+  );
+
+  /**
+   * Перенос вкладки между уровнями: id сохраняется, поэтому у браузерной вкладки
+   * не перезагружается страница (webview монтируется по id вкладки).
+   */
+  const setTabScope = useCallback(
+    (id: string, scope: PreviewTabScope) => {
+      setStatesByScopeKey((prev) => {
+        const fromKey = findTabScopeKey(prev, id, visibleScopeKeys(currentTarget));
+        if (!fromKey) return prev;
+        const toKey = scopeKeyForTarget(currentTarget, scope);
+        if (fromKey === toKey) return prev;
+        const from = getPreviewBucketState(prev, fromKey);
+        const tab = from.files.find((file) => file.id === id);
+        if (!tab) return prev;
+        const next = { ...prev };
+        next[fromKey] = { ...from, files: from.files.filter((file) => file.id !== id) };
+        const to = getPreviewBucketState(next, toKey);
+        next[toKey] = { ...to, files: [...to.files, tab] };
+        const viewKey = viewScopeKey(currentTarget);
+        const view = getPreviewBucketState(next, viewKey);
+        next[viewKey] = { ...view, activeFileId: id, open: true };
+        return next;
+      });
+    },
+    [currentTarget],
   );
 
   const closeFile = useCallback(
     (id: string) => {
-      updateCurrentState((current) => {
-        const closed = current.files.find((f) => f.id === id);
-        if (!closed) return current;
+      setStatesByScopeKey((prev) => {
+        const scopeKey = findTabScopeKey(prev, id, visibleScopeKeys(currentTarget));
+        if (!scopeKey) return prev;
+        const bucket = getPreviewBucketState(prev, scopeKey);
+        const closed = bucket.files.find((f) => f.id === id);
+        if (!closed) return prev;
         if (closed.blobUrl) URL.revokeObjectURL(closed.blobUrl);
-        const nextFiles = current.files.filter((f) => f.id !== id);
-        const nextActiveId =
-          current.activeFileId === id ? (nextFiles[0]?.id ?? null) : current.activeFileId;
-        const nextEditingId = current.editingFileId === id ? null : current.editingFileId;
-        return {
-          ...current,
-          files: nextFiles,
-          activeFileId: nextActiveId,
-          editingFileId: nextEditingId,
-          sourceViewFileIds: current.sourceViewFileIds.filter((existing) => existing !== id),
+        const next = {
+          ...prev,
+          [scopeKey]: { ...bucket, files: bucket.files.filter((f) => f.id !== id) },
         };
+        // Активная вкладка и режимы живут в проектном бакете, а закрытая могла
+        // лежать в чужом — чистим оба.
+        const viewKey = viewScopeKey(currentTarget);
+        const view = getPreviewBucketState(next, viewKey);
+        const remaining = collectVisibleTabs(next, currentTarget).files;
+        next[viewKey] = {
+          ...view,
+          activeFileId: view.activeFileId === id ? (remaining[0]?.id ?? null) : view.activeFileId,
+          editingFileId: view.editingFileId === id ? null : view.editingFileId,
+          sourceViewFileIds: view.sourceViewFileIds.filter((existing) => existing !== id),
+        };
+        return next;
       });
       forgetScrollPosition(id);
     },
-    [updateCurrentState],
+    [currentTarget],
   );
 
   const toggleSourceView = useCallback(
     (id: string) => {
-      updateCurrentState((current) => ({
+      updateViewState((current) => ({
         ...current,
         sourceViewFileIds: toggleSourceViewIds(current.sourceViewFileIds, id),
       }));
     },
-    [updateCurrentState],
+    [updateViewState],
   );
 
   const startEditing = useCallback(
     (id: string) => {
-      updateCurrentState((current) =>
+      updateViewState((current) =>
         current.editingFileId === id ? current : { ...current, editingFileId: id },
       );
     },
-    [updateCurrentState],
+    [updateViewState],
   );
 
   const cancelEditing = useCallback(() => {
-    updateCurrentState((current) =>
+    updateViewState((current) =>
       current.editingFileId === null ? current : { ...current, editingFileId: null },
     );
-  }, [updateCurrentState]);
+  }, [updateViewState]);
 
   const applyEditedContent = useCallback(
     (id: string, content: string) => {
-      updateCurrentState((current) => {
-        const idx = current.files.findIndex((f) => f.id === id);
-        if (idx === -1) return current;
-        const updated = { ...current.files[idx]!, content };
-        const nextFiles = [
-          ...current.files.slice(0, idx),
-          updated,
-          ...current.files.slice(idx + 1),
-        ];
-        return { ...current, files: nextFiles, editingFileId: null };
+      setStatesByScopeKey((prev) => {
+        const scopeKey = findTabScopeKey(prev, id, visibleScopeKeys(currentTarget));
+        if (!scopeKey) return prev;
+        const bucket = getPreviewBucketState(prev, scopeKey);
+        const idx = bucket.files.findIndex((f) => f.id === id);
+        if (idx === -1) return prev;
+        const updated = { ...bucket.files[idx]!, content };
+        const next = {
+          ...prev,
+          [scopeKey]: {
+            ...bucket,
+            files: [...bucket.files.slice(0, idx), updated, ...bucket.files.slice(idx + 1)],
+          },
+        };
+        const viewKey = viewScopeKey(currentTarget);
+        const view = getPreviewBucketState(next, viewKey);
+        next[viewKey] = { ...view, editingFileId: null };
+        return next;
       });
     },
-    [updateCurrentState],
+    [currentTarget],
   );
 
   const setActiveFile = useCallback(
     (id: string) => {
-      updateCurrentState((current) =>
+      updateViewState((current) =>
         current.activeFileId === id ? current : { ...current, activeFileId: id },
       );
     },
-    [updateCurrentState],
+    [updateViewState],
   );
 
   const openBrowser = useCallback(
     (context: BrowserContext) => {
-      updateCurrentState((current) => ({
+      updateViewState((current) => ({
         ...current,
         browserOpen: true,
         browserContext: context,
       }));
     },
-    [updateCurrentState],
+    [updateViewState],
   );
 
   const closeBrowser = useCallback(() => {
-    updateCurrentState((current) =>
+    updateViewState((current) =>
       current.browserOpen ? { ...current, browserOpen: false } : current,
     );
-  }, [updateCurrentState]);
+  }, [updateViewState]);
 
   const setCurrentChatContext = useCallback(
     (context: {
@@ -431,42 +600,51 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       projectCwd: string | null;
       projectId: ProjectId | null;
       environmentId: EnvironmentId | null;
+      threadId: string | null;
     }) => {
       setCurrentProjectKey(context.projectKey ?? NO_PROJECT_KEY);
       setCurrentChatProjectCwd(context.projectCwd);
       setCurrentChatProjectId(context.projectId);
       setCurrentChatEnvironmentId(context.environmentId);
+      setCurrentChatThreadId(context.threadId);
     },
     [],
   );
 
-  const currentState = getProjectPreviewState(statesByProjectKey, currentProjectKey);
+  const viewState = getPreviewBucketState(statesByScopeKey, viewScopeKey(currentTarget));
+  const { files, tabScopeById } = useMemo(
+    () => collectVisibleTabs(statesByScopeKey, currentTarget),
+    [statesByScopeKey, currentTarget],
+  );
 
   const value = useMemo<PreviewPaneState>(
     () => ({
-      open: currentState.open,
-      previewLayoutMode: currentState.previewLayoutMode,
-      files: currentState.files,
-      activeFileId: currentState.activeFileId,
-      browserOpen: currentState.browserOpen,
-      browserContext: currentState.browserContext,
-      editingFileId: currentState.editingFileId,
-      sourceViewFileIds: currentState.sourceViewFileIds,
+      open: viewState.open,
+      previewLayoutMode: viewState.previewLayoutMode,
+      files,
+      activeFileId: viewState.activeFileId,
+      browserOpen: viewState.browserOpen,
+      browserContext: viewState.browserContext,
+      editingFileId: viewState.editingFileId,
+      sourceViewFileIds: viewState.sourceViewFileIds,
       toggleSourceView,
       currentProjectKey,
       currentChatProjectCwd,
       currentChatProjectId,
       currentChatEnvironmentId,
+      currentChatThreadId,
+      tabScopeById,
       setOpen,
       toggleOpen,
       setPreviewLayoutMode,
       togglePreviewLayoutMode,
       openFile,
-      openFileInProject,
+      openFileForTarget,
       openUrl,
-      openUrlInProject,
+      openUrlForTarget,
       updateBrowserTab,
-      statesByProjectKey,
+      setTabScope,
+      statesByScopeKey,
       closeFile,
       setActiveFile,
       openBrowser,
@@ -477,22 +655,26 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       setCurrentChatContext,
     }),
     [
-      currentState,
+      viewState,
+      files,
+      tabScopeById,
       currentProjectKey,
       currentChatProjectCwd,
       currentChatProjectId,
       currentChatEnvironmentId,
+      currentChatThreadId,
       toggleSourceView,
       setOpen,
       toggleOpen,
       setPreviewLayoutMode,
       togglePreviewLayoutMode,
       openFile,
-      openFileInProject,
+      openFileForTarget,
       openUrl,
-      openUrlInProject,
+      openUrlForTarget,
       updateBrowserTab,
-      statesByProjectKey,
+      setTabScope,
+      statesByScopeKey,
       closeFile,
       setActiveFile,
       openBrowser,
@@ -512,6 +694,9 @@ export function usePreviewPane(): PreviewPaneState {
   if (!ctx) throw new Error("usePreviewPane must be used within PreviewPaneProvider");
   return ctx;
 }
+
+export { GLOBAL_SCOPE_KEY, projectScopeKey };
+export type { PreviewTabScope, PreviewTabTarget };
 
 const TEXT_EXTS = new Set([
   "txt",

@@ -191,6 +191,10 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
         rpcClient
           ? rpcClient.vault.import(payload)
           : Promise.reject(unavailableLocalBackendError()),
+      fill: (payload) =>
+        rpcClient ? rpcClient.vault.fill(payload) : Promise.reject(unavailableLocalBackendError()),
+      sync: (payload) =>
+        rpcClient ? rpcClient.vault.sync(payload) : Promise.reject(unavailableLocalBackendError()),
     },
   };
 }

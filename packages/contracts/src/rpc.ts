@@ -111,6 +111,10 @@ import {
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   CredentialDeletePayload,
+  CredentialFillPayload,
+  CredentialFillResult,
+  CredentialSyncPayload,
+  CredentialSyncResult,
   CredentialImportPayload,
   CredentialImportResult,
   CredentialListResult,
@@ -202,11 +206,13 @@ export const WS_METHODS = {
   pluginsSendToThread: "plugins.sendToThread",
   pluginsResolvePanelThread: "plugins.resolvePanelThread",
 
-  // Credentials vault methods (web-only Settings panel)
+  // Credentials vault methods (Settings panel, both shells)
   vaultList: "vault.list",
   vaultUpsert: "vault.upsert",
   vaultDelete: "vault.delete",
   vaultImport: "vault.import",
+  vaultFill: "vault.fill",
+  vaultSync: "vault.sync",
 
   // Uno account / billing methods
   unoCreateLlmTopUpAction: "uno.createLlmTopUpAction",
@@ -319,6 +325,18 @@ export const WsVaultDeleteRpc = Rpc.make(WS_METHODS.vaultDelete, {
 export const WsVaultImportRpc = Rpc.make(WS_METHODS.vaultImport, {
   payload: CredentialImportPayload,
   success: CredentialImportResult,
+  error: CredentialsVaultError,
+});
+
+export const WsVaultFillRpc = Rpc.make(WS_METHODS.vaultFill, {
+  payload: CredentialFillPayload,
+  success: CredentialFillResult,
+  error: CredentialsVaultError,
+});
+
+export const WsVaultSyncRpc = Rpc.make(WS_METHODS.vaultSync, {
+  payload: CredentialSyncPayload,
+  success: CredentialSyncResult,
   error: CredentialsVaultError,
 });
 
@@ -995,6 +1013,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsVaultUpsertRpc,
   WsVaultDeleteRpc,
   WsVaultImportRpc,
+  WsVaultFillRpc,
+  WsVaultSyncRpc,
   WsWorkspaceGetStateRpc,
   WsWorkspaceRenameRpc,
   WsWorkspaceSyncMachinesRpc,

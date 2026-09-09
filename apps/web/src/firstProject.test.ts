@@ -67,10 +67,7 @@ describe("planUpload", () => {
       { relativePath: "src/index.ts", size: 100 },
       { relativePath: "README.md", size: 20 },
     ]);
-    expect(plan.accepted.map((entry) => entry.relativePath)).toEqual([
-      "src/index.ts",
-      "README.md",
-    ]);
+    expect(plan.accepted.map((entry) => entry.relativePath)).toEqual(["src/index.ts", "README.md"]);
     expect(plan.totalBytes).toBe(120);
     expect(plan.skipped).toEqual([]);
   });
@@ -141,7 +138,10 @@ describe("pickFirstProjectModelSelection", () => {
   it("falls back when nothing is ready or nothing has models", () => {
     expect(pickFirstProjectModelSelection([], fallback)).toEqual(fallback);
     expect(
-      pickFirstProjectModelSelection([{ instanceId: "uno", status: "ready", models: [] }], fallback),
+      pickFirstProjectModelSelection(
+        [{ instanceId: "uno", status: "ready", models: [] }],
+        fallback,
+      ),
     ).toEqual(fallback);
   });
 });

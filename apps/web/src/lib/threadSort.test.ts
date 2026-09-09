@@ -7,11 +7,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import type { Thread } from "../types";
-import {
-  getLatestThreadForProject,
-  sortThreads,
-  sortThreadsPinnedFirst,
-} from "./threadSort";
+import { getLatestThreadForProject, sortThreads, sortThreadsPinnedFirst } from "./threadSort";
 
 const LOCAL_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const PROJECT_ID = ProjectId.make("project-1");
@@ -79,11 +75,7 @@ describe("sortThreadsPinnedFirst", () => {
       ],
       "created_at",
     );
-    expect(sorted.map((thread) => thread.id)).toEqual([
-      "pinned-late",
-      "pinned-early",
-      "unpinned",
-    ]);
+    expect(sorted.map((thread) => thread.id)).toEqual(["pinned-late", "pinned-early", "unpinned"]);
   });
 });
 

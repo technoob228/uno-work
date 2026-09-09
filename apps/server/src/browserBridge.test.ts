@@ -6,6 +6,7 @@ import {
   BrowserBridge,
   BrowserBridgeTest,
   isAllowedBridgeCommand,
+  normalizeTabScope,
   isAllowedBridgeFilePath,
   makeBrowserBridge,
   normalizeBridgeRequestContext,
@@ -211,6 +212,24 @@ it("validates the fullPage screenshot flag", () => {
   assert.isTrue(isAllowedBridgeCommand({ command: "screenshot", fullPage: true }));
   assert.isTrue(isAllowedBridgeCommand({ command: "screenshot" }));
   assert.isFalse(isAllowedBridgeCommand({ command: "screenshot", fullPage: "yes" }));
+});
+
+it("keeps fillCredential out of reach for harnesses", () => {
+  // Пароль в команду подставляет только сервер (vault.fill). Если команда
+  // попадёт в allowlist bridge-эндпоинта, агент сможет и заполнять чужие формы,
+  // и подсматривать значения через свой же запрос.
+  assert.isFalse(
+    isAllowedBridgeCommand({ command: "fillCredential", username: "u", password: "p" }),
+  );
+});
+
+it("accepts the tab scope only for known levels", () => {
+  assert.strictEqual(normalizeTabScope("chat"), "chat");
+  assert.strictEqual(normalizeTabScope("project"), "project");
+  assert.strictEqual(normalizeTabScope("global"), "global");
+  assert.isUndefined(normalizeTabScope("everywhere"));
+  assert.isUndefined(normalizeTabScope(undefined));
+  assert.isUndefined(normalizeTabScope(42));
 });
 
 it("normalizes bridge request contexts", () => {

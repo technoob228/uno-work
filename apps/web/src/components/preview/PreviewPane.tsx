@@ -18,12 +18,13 @@ import {
   Minimize2Icon,
   PanelLeftOpenIcon,
   PencilIcon,
+  PinIcon,
   PlusIcon,
   PuzzleIcon,
   TableIcon,
   XIcon,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -55,6 +56,12 @@ import {
   type PreviewFileKind,
   usePreviewPane,
 } from "./PreviewPaneContext";
+import {
+  PREVIEW_TAB_SCOPES,
+  SCOPE_LABEL,
+  SCOPE_MENU_LABEL,
+  type PreviewTabScope,
+} from "./previewTabScopes";
 import { createPanelBridge, shellEventToPanelEvent } from "./panelBridge";
 import {
   PluginPanelChat,
@@ -99,6 +106,17 @@ const KIND_LABEL: Record<PreviewFileKind, string> = {
   browser: "Браузер",
   "plugin-panel": "Панель плагина",
   unknown: "File",
+};
+
+/**
+ * Значок уровня вкладки. У вкладок чата значка нет: это уровень по умолчанию, и
+ * иконка на каждой вкладке была бы шумом — подсвечиваем только то, что живёт
+ * дольше треда.
+ */
+const SCOPE_ICON: Record<PreviewTabScope, typeof FileIcon | null> = {
+  chat: null,
+  project: FolderIcon,
+  global: PinIcon,
 };
 
 const KIND_EDITABLE: ReadonlySet<PreviewFileKind> = new Set<PreviewFileKind>([
@@ -1127,8 +1145,9 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
     currentChatProjectCwd,
     currentChatProjectId,
     currentChatEnvironmentId,
-    openFileInProject,
-    openUrlInProject,
+    currentChatThreadId,
+    openFileForTarget,
+    openUrlForTarget,
   } = usePreviewPane();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const panels = usePluginPanels();
@@ -1149,18 +1168,20 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
     currentChatProjectCwd,
     currentChatProjectId,
     currentChatEnvironmentId,
+    currentChatThreadId,
     primaryEnvironmentId,
-    openFileInProject,
-    openUrlInProject,
+    openFileForTarget,
+    openUrlForTarget,
   });
   contextRef.current = {
     currentProjectKey,
     currentChatProjectCwd,
     currentChatProjectId,
     currentChatEnvironmentId,
+    currentChatThreadId,
     primaryEnvironmentId,
-    openFileInProject,
-    openUrlInProject,
+    openFileForTarget,
+    openUrlForTarget,
   };
 
   useEffect(() => {
@@ -1177,7 +1198,10 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
           const context = contextRef.current;
           const absolute = resolvePanelFilePath(path, context.currentChatProjectCwd);
           const name = absolute.split(/[\\/]/).pop() ?? absolute;
-          context.openFileInProject(context.currentProjectKey, {
+          context.openFileForTarget(
+            { projectKey: context.currentProjectKey, threadId: context.currentChatThreadId },
+            "chat",
+            {
             id: absolute,
             name,
             kind: detectFileKind(name),
@@ -1187,11 +1211,16 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
               ? { environmentId: context.currentChatEnvironmentId }
               : {}),
             ...(context.currentChatProjectCwd ? { projectCwd: context.currentChatProjectCwd } : {}),
-          });
+            },
+          );
         },
         openUrl: ({ url: target }) => {
           const context = contextRef.current;
-          context.openUrlInProject(context.currentProjectKey, target);
+          context.openUrlForTarget(
+            { projectKey: context.currentProjectKey, threadId: context.currentChatThreadId },
+            "chat",
+            target,
+          );
         },
         sendToThread: async ({ text, threadTag }) => {
           const context = contextRef.current;
@@ -1534,6 +1563,35 @@ function PathBar({
   );
 }
 
+/**
+ * Контекстное меню вкладки: перенос между уровнями (чат / проект / везде) и
+ * закрытие. Уровень определяет, в каких чатах вкладка вообще видна.
+ */
+async function showTabScopeMenu(input: {
+  file: PreviewFile;
+  scope: PreviewTabScope;
+  position: { x: number; y: number };
+  setTabScope: (id: string, scope: PreviewTabScope) => void;
+  closeFile: (id: string) => void;
+}): Promise<void> {
+  const items = [
+    ...PREVIEW_TAB_SCOPES.filter((scope) => scope !== input.scope).map((scope) => ({
+      id: `scope:${scope}`,
+      label: SCOPE_MENU_LABEL[scope],
+    })),
+    { id: "close", label: "Закрыть вкладку" },
+  ];
+  const choice = await readLocalApi()?.contextMenu.show(items, input.position);
+  if (!choice) return;
+  if (choice === "close") {
+    input.closeFile(input.file.id);
+    return;
+  }
+  if (choice.startsWith("scope:")) {
+    input.setTabScope(input.file.id, choice.slice("scope:".length) as PreviewTabScope);
+  }
+}
+
 export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
   const {
     open,
@@ -1550,6 +1608,8 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
     currentChatProjectCwd,
     currentChatEnvironmentId,
     toggleSourceView,
+    tabScopeById,
+    setTabScope,
   } = usePreviewPane();
   const tabStripRef = useRef<HTMLDivElement | null>(null);
   // Live-список панелей: агент может создать плагин прямо сейчас, и он должен
@@ -1716,18 +1776,37 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
             isFocusMode && !sidebarVisible && "pl-0 fullscreen:pl-2",
           )}
         >
-          {files.map((file) => {
+          {files.map((file, index) => {
             const Icon = KIND_ICON[file.kind];
             const isActive = file.id === active?.id;
             const dualView = DUAL_VIEW_KINDS.has(file.kind);
+            const scope = tabScopeById[file.id] ?? "chat";
+            const ScopeIcon = SCOPE_ICON[scope];
+            // Границу групп рисуем один раз на переходе уровня: видно, где
+            // заканчиваются «постоянные» вкладки и начинаются вкладки чата.
+            const previousScope = index > 0 ? (tabScopeById[files[index - 1]!.id] ?? "chat") : scope;
+            const startsGroup = index > 0 && previousScope !== scope;
             return (
+              <Fragment key={file.id}>
+                {startsGroup ? (
+                  <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-border" />
+                ) : null}
               <button
-                key={file.id}
                 type="button"
                 data-preview-tab={file.id}
                 onClick={() => setActiveFile(file.id)}
                 onDoubleClick={() => {
                   if (dualView) toggleSourceView(file.id);
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  void showTabScopeMenu({
+                    file,
+                    scope,
+                    position: { x: event.clientX, y: event.clientY },
+                    setTabScope,
+                    closeFile,
+                  });
                 }}
                 className={cn(
                   "group inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs",
@@ -1735,9 +1814,17 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
                     ? "bg-accent text-accent-foreground"
                     : "text-muted-foreground hover:bg-accent/50",
                 )}
-                title={`${KIND_LABEL[file.kind]} — ${file.name}${dualView ? "\nДвойной клик: код ↔ превью" : ""}`}
+                title={`${KIND_LABEL[file.kind]} — ${file.name}\nУровень: ${SCOPE_LABEL[scope]} (правый клик — сменить)${dualView ? "\nДвойной клик: код ↔ превью" : ""}`}
               >
                 <Icon className="size-3.5 shrink-0" />
+                {ScopeIcon ? (
+                  <ScopeIcon
+                    className={cn(
+                      "size-3 shrink-0",
+                      scope === "global" ? "text-primary" : "opacity-70",
+                    )}
+                  />
+                ) : null}
                 <span className="max-w-[8rem] truncate">{file.name}</span>
                 <span
                   role="button"
@@ -1758,6 +1845,7 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
                   <XIcon className="size-3" />
                 </span>
               </button>
+              </Fragment>
             );
           })}
           <button
@@ -1767,9 +1855,7 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
               const choice = await readLocalApi()?.contextMenu.show(
                 [
                   { id: "file", label: "Открыть файл…" },
-                  ...(browserCompanionEnabled
-                    ? [{ id: "page", label: "Открыть страницу" }]
-                    : []),
+                  ...(browserCompanionEnabled ? [{ id: "page", label: "Открыть страницу" }] : []),
                   ...(pluginsEnabled && panels.length > 0
                     ? [
                         {

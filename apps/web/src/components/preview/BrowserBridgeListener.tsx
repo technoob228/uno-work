@@ -8,9 +8,13 @@ import {
 } from "../../environments/runtime";
 import { useSettings } from "../../hooks/useSettings";
 import { useStore } from "../../store";
-import { runBrowserAutomationCommandForProject } from "./BrowserAutomationRegistry";
+import {
+  findBrowserTabAutomationHandler,
+  runBrowserAutomationCommand,
+} from "./BrowserAutomationRegistry";
 import { resolveBridgeEventProjectKey } from "./browserBridgeRouting";
 import { detectFileKind, usePreviewPane } from "./PreviewPaneContext";
+import { automationScopeKeys, type PreviewTabScope } from "./previewTabScopes";
 import { addSecretRequest, removeSecretRequest } from "../../secretRequestStore";
 import {
   detectBrowserExtension,
@@ -55,7 +59,8 @@ async function postCommandResult(
  *    webview превращается в новую браузерную вкладку.
  */
 export function BrowserBridgeListener() {
-  const { openUrl, openUrlInProject, openFileInProject, currentProjectKey } = usePreviewPane();
+  const { openUrl, openUrlForTarget, openFileForTarget, currentProjectKey, currentChatThreadId } =
+    usePreviewPane();
   const browserAutomationLevel = useSettings((settings) => settings.browserAutomationLevel);
   const groupingSettings = useSettings((settings) => ({
     sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
@@ -66,14 +71,16 @@ export function BrowserBridgeListener() {
   // каждом переключении проекта или правке настроек.
   const currentProjectKeyRef = useRef(currentProjectKey);
   currentProjectKeyRef.current = currentProjectKey;
+  const currentThreadIdRef = useRef(currentChatThreadId);
+  currentThreadIdRef.current = currentChatThreadId;
   const groupingSettingsRef = useRef(groupingSettings);
   groupingSettingsRef.current = groupingSettings;
   const automationLevelRef = useRef(browserAutomationLevel);
   automationLevelRef.current = browserAutomationLevel;
-  const openUrlInProjectRef = useRef(openUrlInProject);
-  openUrlInProjectRef.current = openUrlInProject;
-  const openFileInProjectRef = useRef(openFileInProject);
-  openFileInProjectRef.current = openFileInProject;
+  const openUrlForTargetRef = useRef(openUrlForTarget);
+  openUrlForTargetRef.current = openUrlForTarget;
+  const openFileForTargetRef = useRef(openFileForTarget);
+  openFileForTargetRef.current = openFileForTarget;
 
   // Ask the companion extension to announce itself early, so the first bridge
   // command does not pay for the handshake.
@@ -110,6 +117,15 @@ export function BrowserBridgeListener() {
             state: useStore.getState(),
             groupingSettings: groupingSettingsRef.current,
           }) ?? currentProjectKeyRef.current;
+        // Вкладка принадлежит треду-источнику, а не тому чату, что на экране:
+        // так вкладки, открытые агентом в одном чате, не засоряют другие.
+        // Тред неизвестен (легаси-токен) — деградируем до текущего.
+        const target = {
+          projectKey,
+          threadId: event.context?.threadId ?? currentThreadIdRef.current,
+        };
+        const scope: PreviewTabScope =
+          event.type === "openUrl" || event.type === "openFile" ? (event.scope ?? "chat") : "chat";
 
         if (event.type === "openUrl") {
           if (isWebApp) {
@@ -118,7 +134,7 @@ export function BrowserBridgeListener() {
             );
             return;
           }
-          openUrlInProjectRef.current(projectKey, event.url);
+          openUrlForTargetRef.current(target, scope, event.url);
           return;
         }
         if (event.type === "openFile") {
@@ -126,13 +142,14 @@ export function BrowserBridgeListener() {
           // для Electron и браузерного режима: контент подтянется лениво через
           // filesystem.readFile окружения-источника.
           const name = event.path.split(/[\\/]/).findLast(Boolean) ?? event.path;
-          openFileInProjectRef.current(projectKey, {
+          openFileForTargetRef.current(target, scope, {
             id: event.path,
             name,
             kind: detectFileKind(name),
             content: "",
             path: event.path,
             environmentId: connection.environmentId,
+            projectKey,
           });
           return;
         }
@@ -144,6 +161,18 @@ export function BrowserBridgeListener() {
             }
             if (automationLevel === "safe" && event.input.command === "evaluate") {
               throw new Error("Browser automation safe mode blocks evaluate.");
+            }
+            // Автозаполнение логина адресовано конкретной вкладке (её id знает
+            // только клиент, открывший вкладку). Если такой вкладки здесь нет —
+            // команда не для нас: в вебе её исполнит companion в своей вкладке.
+            if (event.input.command === "fillCredential" && event.input.tabId && !isWebApp) {
+              const handler = findBrowserTabAutomationHandler(event.input.tabId);
+              if (!handler) {
+                throw new Error("Вкладка для автозаполнения больше не открыта.");
+              }
+              const data = await handler(event.input);
+              await postCommandResult(event, { ok: true, data });
+              return;
             }
             // The hosted build has no Electron webview: commands run in the
             // user's own tabs through the companion extension.
@@ -157,11 +186,14 @@ export function BrowserBridgeListener() {
             }
             if (event.input.command === "openUrl") {
               if (!event.input.url) throw new Error("Missing url.");
-              openUrlInProjectRef.current(projectKey, event.input.url);
+              openUrlForTargetRef.current(target, scope, event.input.url);
               await postCommandResult(event, { ok: true, data: { url: event.input.url } });
               return;
             }
-            const data = await runBrowserAutomationCommandForProject(projectKey, event.input);
+            const data = await runBrowserAutomationCommand(
+              automationScopeKeys(target),
+              event.input,
+            );
             await postCommandResult(event, { ok: true, data });
           } catch (error) {
             await postCommandResult(event, {

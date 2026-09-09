@@ -106,7 +106,9 @@ export function WebHarnessesStep() {
           onClick={() => setShowAdditional((value) => !value)}
           className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
         >
-          <ChevronDown className={cn("size-4 transition-transform", showAdditional && "rotate-180")} />
+          <ChevronDown
+            className={cn("size-4 transition-transform", showAdditional && "rotate-180")}
+          />
           Want Claude Code, Codex or Cursor too?
         </button>
 

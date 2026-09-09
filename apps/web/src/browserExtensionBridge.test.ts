@@ -17,9 +17,7 @@ interface PostedMessage {
 }
 
 /** Minimal stand-in for the content script running on the page. */
-function installFakeExtension(options: {
-  respond: (message: PostedMessage) => unknown | null;
-}) {
+function installFakeExtension(options: { respond: (message: PostedMessage) => unknown | null }) {
   const listeners = new Set<(event: MessageEvent) => void>();
   const posted: PostedMessage[] = [];
 

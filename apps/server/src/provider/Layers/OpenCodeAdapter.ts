@@ -414,7 +414,9 @@ function stripFinalAnswerClosingMarker(value: string): string {
   // A lone "<" at the end may be the start of anything; only trim once the
   // partial tag is unambiguous.
   const trimmed =
-    partialLength >= 2 ? withoutClosing.slice(0, withoutClosing.length - partialLength) : withoutClosing;
+    partialLength >= 2
+      ? withoutClosing.slice(0, withoutClosing.length - partialLength)
+      : withoutClosing;
   return trimmed.replace(/\s+$/u, "");
 }
 
@@ -422,9 +424,7 @@ export function visibleUnoAssistantTextFromRaw(rawText: string): string {
   const markerIndex = rawText.toLowerCase().indexOf(UNO_FINAL_ANSWER_MARKER);
   if (markerIndex >= 0) {
     return stripFinalAnswerClosingMarker(
-      rawText
-        .slice(markerIndex + UNO_FINAL_ANSWER_MARKER.length)
-        .replace(/^[\s:：\-–—]+/u, ""),
+      rawText.slice(markerIndex + UNO_FINAL_ANSWER_MARKER.length).replace(/^[\s:：\-–—]+/u, ""),
     );
   }
 
@@ -1633,45 +1633,43 @@ export function makeOpenCodeAdapter(
 
       // Fibers forked into `context.sessionScope` are interrupted
       // automatically when the scope closes — no bookkeeping required.
-      const subscribeOperation =
-        eventSource === "global" ? "global.event" : "event.subscribe";
+      const subscribeOperation = eventSource === "global" ? "global.event" : "event.subscribe";
       const subscribedEvents: Effect.Effect<
         Stream.Stream<OpenCodeSubscribedEvent, OpenCodeRuntimeError>,
         OpenCodeRuntimeError
-      > =
-        eventSource === "global"
-          ? runOpenCodeSdk(subscribeOperation, () =>
-              context.client.global.event({ signal: eventsAbortController.signal }),
-            ).pipe(
-              Effect.map((subscription) =>
-                Stream.fromAsyncIterable(
-                  subscription.stream,
-                  (cause) =>
-                    new OpenCodeRuntimeError({
-                      operation: subscribeOperation,
-                      detail: openCodeRuntimeErrorDetail(cause),
-                      cause,
-                    }),
-                ).pipe(Stream.map((envelope) => envelope.payload as OpenCodeSubscribedEvent)),
+      > = eventSource === "global"
+        ? runOpenCodeSdk(subscribeOperation, () =>
+            context.client.global.event({ signal: eventsAbortController.signal }),
+          ).pipe(
+            Effect.map((subscription) =>
+              Stream.fromAsyncIterable(
+                subscription.stream,
+                (cause) =>
+                  new OpenCodeRuntimeError({
+                    operation: subscribeOperation,
+                    detail: openCodeRuntimeErrorDetail(cause),
+                    cause,
+                  }),
+              ).pipe(Stream.map((envelope) => envelope.payload as OpenCodeSubscribedEvent)),
+            ),
+          )
+        : runOpenCodeSdk(subscribeOperation, () =>
+            context.client.event.subscribe(undefined, {
+              signal: eventsAbortController.signal,
+            }),
+          ).pipe(
+            Effect.map((subscription) =>
+              Stream.fromAsyncIterable(
+                subscription.stream,
+                (cause) =>
+                  new OpenCodeRuntimeError({
+                    operation: subscribeOperation,
+                    detail: openCodeRuntimeErrorDetail(cause),
+                    cause,
+                  }),
               ),
-            )
-          : runOpenCodeSdk(subscribeOperation, () =>
-              context.client.event.subscribe(undefined, {
-                signal: eventsAbortController.signal,
-              }),
-            ).pipe(
-              Effect.map((subscription) =>
-                Stream.fromAsyncIterable(
-                  subscription.stream,
-                  (cause) =>
-                    new OpenCodeRuntimeError({
-                      operation: subscribeOperation,
-                      detail: openCodeRuntimeErrorDetail(cause),
-                      cause,
-                    }),
-                ),
-              ),
-            );
+            ),
+          );
       yield* Effect.flatMap(subscribedEvents, (events) =>
         events.pipe(Stream.runForEach((event) => handleSubscribedEvent(context, event))),
       ).pipe(

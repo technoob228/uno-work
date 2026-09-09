@@ -24,6 +24,7 @@ import {
 } from "effect";
 
 import { ServerConfig } from "./config.ts";
+import { hydrateVaultFromAccountOnStartup } from "./credentialsAccountSync.ts";
 import { Keybindings } from "./keybindings.ts";
 import { Open } from "./open.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
@@ -442,6 +443,15 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
     );
 
     yield* runStartupPhase("provider-sessions.reconcile", reconcileProviderSessions);
+
+    // Логины из аккаунта Uno: новый бокс/новая машина подхватывает сохранённые
+    // входы сама, не дожидаясь, пока пользователь введёт их заново. Работает
+    // только при включённом синке и ПУСТОМ локальном хранилище — см.
+    // credentialsAccountSync. Форк: сеть до control plane не должна задерживать
+    // старт демона.
+    yield* Effect.forkScoped(
+      runStartupPhase("credentials.hydrate", hydrateVaultFromAccountOnStartup),
+    );
 
     const welcomeBase = yield* resolveWelcomeBase;
     const environment = yield* serverEnvironment.getDescriptor;

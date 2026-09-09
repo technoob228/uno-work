@@ -489,6 +489,13 @@ export const UnoAccountSettings = Schema.Struct({
   agentAccess: UnoAgentAccessLevel.pipe(
     Schema.withDecodingDefault(Effect.succeed("read" as const satisfies UnoAgentAccessLevel)),
   ),
+  /**
+   * Хранить сохранённые логины (Credentials) в аккаунте Uno, чтобы они были
+   * одни и те же на всех машинах пользователя — на боксе с браузерной версией
+   * и на десктопе. Выключено по умолчанию: пароли покидают машину только по
+   * явному согласию. Требует `apiKey`.
+   */
+  credentialsSync: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 export type UnoAccountSettings = typeof UnoAccountSettings.Type;
 
@@ -627,6 +634,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       apiKey: Schema.optionalKey(Schema.String),
       agentAccess: Schema.optionalKey(UnoAgentAccessLevel),
+      credentialsSync: Schema.optionalKey(Schema.Boolean),
     }),
   ),
   providers: Schema.optionalKey(

@@ -95,8 +95,9 @@ export function CompanionExtensionPanel({
           </p>
           <p className="mx-auto max-w-sm text-xs">
             Агент открывает страницы во вкладках этого браузера — в ваших живых сессиях. Он видит
-            только вкладки, которые открыл сам{sharedTabs !== null ? ` (сейчас: ${sharedTabs})` : ""}
-            , или те, что вы расшарили через значок расширения.
+            только вкладки, которые открыл сам
+            {sharedTabs !== null ? ` (сейчас: ${sharedTabs})` : ""}, или те, что вы расшарили через
+            значок расширения.
           </p>
         </div>
         {url ? (
@@ -133,10 +134,7 @@ export function CompanionExtensionPanel({
         <li>Вернитесь сюда и обновите страницу.</li>
       </ol>
       <div className="flex flex-wrap items-center justify-center gap-2">
-        <Button
-          size="sm"
-          render={<a href={COMPANION_EXTENSION_DOWNLOAD_URL} download />}
-        >
+        <Button size="sm" render={<a href={COMPANION_EXTENSION_DOWNLOAD_URL} download />}>
           <DownloadIcon className="size-3.5" />
           Скачать расширение
         </Button>

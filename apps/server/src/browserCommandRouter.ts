@@ -3,6 +3,7 @@ import type {
   BrowserAutomationCommandResult,
   BrowserBridgeRequestContext,
   BrowserExecutor,
+  PreviewTabScope,
   ServerBrowserSettings,
 } from "@t3tools/contracts";
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
@@ -181,6 +182,7 @@ const captureOnServerBrowser = (
 export const executeBridgeOpenUrl = (
   url: string,
   context: BrowserBridgeRequestContext | undefined,
+  scope?: PreviewTabScope,
 ): Effect.Effect<
   BrowserAutomationCommandResult,
   never,
@@ -196,7 +198,7 @@ export const executeBridgeOpenUrl = (
     });
 
     if (target === "client") {
-      yield* browserBridge.publishOpenUrl(url, context);
+      yield* browserBridge.publishOpenUrl(url, context, scope);
       return { ok: true, commandId: "open" };
     }
     if (browserSettings.serverAutomationLevel === "off") {

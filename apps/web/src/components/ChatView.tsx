@@ -1721,12 +1721,16 @@ export default function ChatView(props: ChatViewProps) {
       projectCwd: activeProject?.cwd ?? null,
       projectId: activeProject?.id ?? null,
       environmentId,
+      // Тред нужен правой панели, чтобы держать вкладки этого чата отдельно от
+      // вкладок соседних чатов того же проекта.
+      threadId: activeThread?.id ?? null,
     });
   }, [
     isEmbedded,
     previewProjectKey,
     activeProject?.cwd,
     activeProject?.id,
+    activeThread?.id,
     environmentId,
     setCurrentChatContext,
   ]);

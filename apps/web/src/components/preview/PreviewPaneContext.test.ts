@@ -1,60 +1,60 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  applyProjectPreviewPatch,
-  DEFAULT_PROJECT_PREVIEW_STATE,
+  applyPreviewBucketPatch,
+  DEFAULT_PREVIEW_BUCKET_STATE,
   detectFileKind,
   DUAL_VIEW_KINDS,
-  getProjectPreviewState,
+  getPreviewBucketState,
   NO_PROJECT_KEY,
   toggleSourceViewIds,
   type PreviewFile,
-  type ProjectPreviewState,
+  type PreviewBucketState,
 } from "./PreviewPaneContext";
 
 const fileA: PreviewFile = { id: "a", name: "a.md", kind: "md", content: "# A" };
 const fileB: PreviewFile = { id: "b", name: "b.md", kind: "md", content: "# B" };
 const fileC: PreviewFile = { id: "c", name: "c.md", kind: "md", content: "# C" };
 
-describe("getProjectPreviewState", () => {
+describe("getPreviewBucketState", () => {
   it("returns the default state for an unknown project key", () => {
-    const result = getProjectPreviewState({}, "project-x");
-    expect(result).toBe(DEFAULT_PROJECT_PREVIEW_STATE);
+    const result = getPreviewBucketState({}, "project-x");
+    expect(result).toBe(DEFAULT_PREVIEW_BUCKET_STATE);
     expect(result.open).toBe(false);
     expect(result.files).toEqual([]);
   });
 
   it("returns the stored state when present", () => {
-    const stored: ProjectPreviewState = {
-      ...DEFAULT_PROJECT_PREVIEW_STATE,
+    const stored: PreviewBucketState = {
+      ...DEFAULT_PREVIEW_BUCKET_STATE,
       open: true,
       files: [fileA],
       activeFileId: "a",
     };
-    const result = getProjectPreviewState({ "project-a": stored }, "project-a");
+    const result = getPreviewBucketState({ "project-a": stored }, "project-a");
     expect(result).toBe(stored);
   });
 
   it("treats NO_PROJECT_KEY as a regular bucket", () => {
-    const stored: ProjectPreviewState = {
-      ...DEFAULT_PROJECT_PREVIEW_STATE,
+    const stored: PreviewBucketState = {
+      ...DEFAULT_PREVIEW_BUCKET_STATE,
       open: true,
       files: [fileA],
       activeFileId: "a",
     };
-    expect(getProjectPreviewState({ [NO_PROJECT_KEY]: stored }, NO_PROJECT_KEY)).toBe(stored);
+    expect(getPreviewBucketState({ [NO_PROJECT_KEY]: stored }, NO_PROJECT_KEY)).toBe(stored);
   });
 });
 
-describe("applyProjectPreviewPatch", () => {
+describe("applyPreviewBucketPatch", () => {
   it("creates a new entry when the project key is unknown", () => {
-    const next = applyProjectPreviewPatch({}, "project-a", {
+    const next = applyPreviewBucketPatch({}, "project-a", {
       open: true,
       files: [fileA],
       activeFileId: "a",
     });
     expect(next["project-a"]).toEqual({
-      ...DEFAULT_PROJECT_PREVIEW_STATE,
+      ...DEFAULT_PREVIEW_BUCKET_STATE,
       open: true,
       files: [fileA],
       activeFileId: "a",
@@ -62,42 +62,42 @@ describe("applyProjectPreviewPatch", () => {
   });
 
   it("merges into the existing entry without touching other projects", () => {
-    const initial: Record<string, ProjectPreviewState> = {
+    const initial: Record<string, PreviewBucketState> = {
       "project-a": {
-        ...DEFAULT_PROJECT_PREVIEW_STATE,
+        ...DEFAULT_PREVIEW_BUCKET_STATE,
         open: true,
         files: [fileA],
         activeFileId: "a",
       },
       "project-b": {
-        ...DEFAULT_PROJECT_PREVIEW_STATE,
+        ...DEFAULT_PREVIEW_BUCKET_STATE,
         open: true,
         files: [fileB],
         activeFileId: "b",
       },
     };
-    const next = applyProjectPreviewPatch(initial, "project-a", { activeFileId: null });
+    const next = applyPreviewBucketPatch(initial, "project-a", { activeFileId: null });
     expect(next["project-a"]?.activeFileId).toBeNull();
     expect(next["project-a"]?.files).toEqual([fileA]);
     expect(next["project-b"]).toBe(initial["project-b"]);
   });
 
   it("isolates per-project switching: A keeps state when B is touched", () => {
-    let states: Record<string, ProjectPreviewState> = {};
+    let states: Record<string, PreviewBucketState> = {};
 
-    states = applyProjectPreviewPatch(states, "A", {
+    states = applyPreviewBucketPatch(states, "A", {
       open: true,
       files: [fileA, fileB],
       activeFileId: "b",
     });
-    states = applyProjectPreviewPatch(states, "B", {
+    states = applyPreviewBucketPatch(states, "B", {
       open: true,
       files: [fileC],
       activeFileId: "c",
     });
 
-    const stateA = getProjectPreviewState(states, "A");
-    const stateB = getProjectPreviewState(states, "B");
+    const stateA = getPreviewBucketState(states, "A");
+    const stateB = getPreviewBucketState(states, "B");
     expect(stateA.files).toEqual([fileA, fileB]);
     expect(stateA.activeFileId).toBe("b");
     expect(stateB.files).toEqual([fileC]);
@@ -105,13 +105,13 @@ describe("applyProjectPreviewPatch", () => {
   });
 
   it("returns a fresh default for projects that have never been touched", () => {
-    const states = applyProjectPreviewPatch({}, "A", {
+    const states = applyPreviewBucketPatch({}, "A", {
       open: true,
       files: [fileA],
       activeFileId: "a",
     });
-    const stateB = getProjectPreviewState(states, "B");
-    expect(stateB).toBe(DEFAULT_PROJECT_PREVIEW_STATE);
+    const stateB = getPreviewBucketState(states, "B");
+    expect(stateB).toBe(DEFAULT_PREVIEW_BUCKET_STATE);
     expect(stateB.open).toBe(false);
     expect(stateB.files).toEqual([]);
   });
