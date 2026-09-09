@@ -53,6 +53,7 @@ import Migration0037 from "./Migrations/037_ProjectionProjectRepositoryIdentity.
 
 import Migration0038 from "./Migrations/038_Workspace.ts";
 import Migration0039 from "./Migrations/039_ProjectionThreadsPinned.ts";
+import Migration0040 from "./Migrations/040_ProjectionProjectRepositoryIdentityReapply.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -104,6 +105,7 @@ export const migrationEntries = [
   [37, "ProjectionProjectRepositoryIdentity", Migration0037],
   [38, "Workspace", Migration0038],
   [39, "ProjectionThreadsPinned", Migration0039],
+  [40, "ProjectionProjectRepositoryIdentityReapply", Migration0040],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
