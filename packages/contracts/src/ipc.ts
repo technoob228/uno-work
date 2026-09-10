@@ -69,6 +69,7 @@ import type {
 import type { AdvertisedEndpoint } from "./remoteAccess.ts";
 import type {
   UnoBoxConnection,
+  UnoBoxCreateJobStatus,
   UnoCloudState,
   WorkspaceInstructions,
   WorkspaceState,
@@ -76,6 +77,9 @@ import type {
 import type {
   UnoCloudBoxPowerInput,
   UnoCloudConnectBoxInput,
+  UnoCloudCreateBoxInput,
+  UnoCloudCreateBoxResult,
+  UnoCloudCreateBoxStatusInput,
   UnoCloudGetStateInput,
   WorkspaceAcquireClaimInput,
   WorkspaceAcquireClaimResult,
@@ -623,5 +627,7 @@ export interface EnvironmentApi {
     getState: (input?: UnoCloudGetStateInput) => Promise<UnoCloudState>;
     boxPower: (input: UnoCloudBoxPowerInput) => Promise<UnoCloudState>;
     connectBox: (input: UnoCloudConnectBoxInput) => Promise<UnoBoxConnection>;
+    createBox: (input: UnoCloudCreateBoxInput) => Promise<UnoCloudCreateBoxResult>;
+    createBoxStatus: (input: UnoCloudCreateBoxStatusInput) => Promise<UnoBoxCreateJobStatus>;
   };
 }

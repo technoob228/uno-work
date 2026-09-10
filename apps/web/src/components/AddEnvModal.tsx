@@ -25,6 +25,8 @@ import {
   unoCloudStateQueryOptions,
 } from "../lib/workspaceReactQuery";
 import { getPairingTokenFromUrl } from "../pairingUrl";
+import type { CreateUnoBoxResult } from "../unoBoxCreation";
+import { CreateUnoBoxSection } from "./CreateUnoBoxSection";
 import type { SavedEnvironmentRecord } from "../environments/runtime";
 import {
   addSavedEnvironment,
@@ -754,12 +756,7 @@ const UnoBoxRow = memo(function UnoBoxRow({
           {specs ? <p className="truncate text-xs text-muted-foreground">{specs}</p> : null}
         </div>
         <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={disabled}
-            onClick={() => onConnect(box)}
-          >
+          <Button size="xs" variant="outline" disabled={disabled} onClick={() => onConnect(box)}>
             {connecting ? <RefreshCwIcon className="size-3 animate-spin" /> : null}
             {connecting ? "Connecting..." : "Connect"}
           </Button>
@@ -775,6 +772,19 @@ function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => vo
   const connectBox = useMutation(unoCloudConnectBoxMutationOptions(environmentId));
   const [connectingBoxId, setConnectingBoxId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [creatingOpen, setCreatingOpen] = useState(false);
+
+  const handleCreated = useCallback(
+    ({ record }: CreateUnoBoxResult) => {
+      onClose();
+      toastManager.add({
+        type: "success",
+        title: "Box created",
+        description: `${record.label} is ready and now in your environment switcher.`,
+      });
+    },
+    [onClose],
+  );
 
   const handleConnect = useCallback(
     async (box: UnoBox) => {
@@ -793,8 +803,7 @@ function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => vo
           description: `${record.label} is now in your environment switcher.`,
         });
       } catch (caught) {
-        const message =
-          caught instanceof Error ? caught.message : "Failed to connect this box.";
+        const message = caught instanceof Error ? caught.message : "Failed to connect this box.";
         setError(message);
         toastManager.add(
           stackedThreadToast({
@@ -862,6 +871,42 @@ function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => vo
           </div>
         )}
       </ScrollArea>
+
+      {cloud?.connected ? (
+        <div className="border-t border-border px-6 py-4">
+          {creatingOpen ? (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-medium text-foreground text-sm">Create a new box</h3>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => setCreatingOpen(false)}
+                  disabled={isConnecting}
+                >
+                  Cancel
+                </Button>
+              </div>
+              <CreateUnoBoxSection
+                environmentId={environmentId}
+                onCreated={handleCreated}
+                disabled={isConnecting}
+              />
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              disabled={isConnecting}
+              onClick={() => setCreatingOpen(true)}
+            >
+              <PlusIcon className="size-3.5" />
+              Create a new box
+            </Button>
+          )}
+        </div>
+      ) : null}
 
       <div className="flex justify-between gap-2 border-t border-border bg-muted/40 px-6 py-4">
         <Button variant="ghost" size="sm" onClick={onBack} disabled={isConnecting}>

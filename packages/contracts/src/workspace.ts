@@ -343,6 +343,61 @@ export const UnoBoxConnection = Schema.Struct({
 });
 export type UnoBoxConnection = typeof UnoBoxConnection.Type;
 
+/* ------------------------------------------------------------------ *
+ * Uno cloud: creating a box ("Move this project to a box")
+ * ------------------------------------------------------------------ */
+
+/**
+ * Golden image with the Uno Work daemon and harnesses preinstalled (port 80
+ * serves the daemon). Launching from it is what makes a fresh box pairable
+ * without any manual install step. Overridable per account via
+ * `settings.uno.goldenImageId`.
+ */
+export const UNO_WORK_GOLDEN_IMAGE_ID = 46;
+
+/** Sensible defaults for a first work box: enough for a harness plus a repository clone. */
+export const UNO_BOX_DEFAULT_RAM_MB = 2048;
+export const UNO_BOX_DEFAULT_VCPU = 1;
+export const UNO_BOX_DEFAULT_DISK_GB = 10;
+
+/**
+ * Lifecycle of a background "create box" job in the daemon:
+ *
+ * creating → starting → waiting_daemon → ready
+ *                                      ↘ failed (any step)
+ *
+ * `creating` = the launch call is in flight; `starting` = the box exists but
+ * is not `running` yet; `waiting_daemon` = running, but the daemon inside has
+ * not answered a pairing request yet.
+ */
+export const UnoBoxCreateJobState = Schema.Literals([
+  "creating",
+  "starting",
+  "waiting_daemon",
+  "ready",
+  "failed",
+]);
+export type UnoBoxCreateJobState = typeof UnoBoxCreateJobState.Type;
+
+export const UnoBoxCreateJobStatus = Schema.Struct({
+  jobId: Schema.String,
+  state: UnoBoxCreateJobState,
+  /** Known as soon as the control plane has answered the launch call. */
+  boxId: Schema.optional(Schema.NullOr(Schema.Number)),
+  box: Schema.optional(Schema.NullOr(UnoBox)),
+  /** Present only in `ready`. */
+  connection: Schema.optional(Schema.NullOr(UnoBoxConnection)),
+  /** Human-readable detail — the failure reason, or a progress hint. */
+  message: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * Set when the golden image was unavailable and a plain box was created
+   * instead: the box exists (and is billed) but has no daemon, so the flow
+   * stops in `failed` rather than pretending it can be paired.
+   */
+  daemonInstallRequired: Schema.optional(Schema.Boolean),
+});
+export type UnoBoxCreateJobStatus = typeof UnoBoxCreateJobStatus.Type;
+
 export function parseUnoBoxSshTarget(command: string | null): UnoBoxSshTarget | null {
   if (!command) return null;
   const trimmed = command.trim();
