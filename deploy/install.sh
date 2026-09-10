@@ -186,8 +186,12 @@ if ! grep -q '^Storage=persistent' /etc/systemd/journald.conf 2>/dev/null; then
 fi
 
 log "Installing the systemd unit"
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "${script_dir}/uno-work.service" ]; then
+# `curl … | bash` leaves BASH_SOURCE unset, and `set -u` turns that into a fatal
+# error right here — the unit never lands and the old daemon keeps running while
+# the script still reports success. Default to empty and fall back to the copy
+# that ships inside the bundle.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+if [ -n "${script_dir}" ] && [ -f "${script_dir}/uno-work.service" ]; then
   cp "${script_dir}/uno-work.service" /etc/systemd/system/uno-work.service
 else
   cp "${INSTALL_DIR}/app/deploy/uno-work.service" /etc/systemd/system/uno-work.service 2>/dev/null \
@@ -195,7 +199,10 @@ else
 fi
 
 systemctl daemon-reload
-systemctl enable --now uno-work >/dev/null
+# `enable --now` only starts a stopped unit; an upgrade leaves the old process
+# running on the old bundle. Restart unconditionally so the new code takes over.
+systemctl enable uno-work >/dev/null
+systemctl restart uno-work
 
 # 30 секунд хватало на быстрой машине, но на слабом боксе демон успевает
 # только прогнать миграции: первый запуск после установки видели ~60 с.
