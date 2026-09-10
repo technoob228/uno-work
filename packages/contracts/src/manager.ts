@@ -226,6 +226,35 @@ export const parseSlackChatKey = (
   };
 };
 
+/**
+ * Health of a connector's link to its provider, as the daemon last observed
+ * it. Persisted, so it survives a restart and the UI can show "auth expired
+ * since Tuesday" instead of a blank.
+ *
+ * - `connected`: the last poll succeeded.
+ * - `reconnecting`: network-level failures; the poller backs off and retries.
+ * - `auth_expired`: the provider rejected the token (Telegram 401/403).
+ * - `delivery_failed`: an outbound message was rejected after retries.
+ * - `provider_unavailable`: the provider answered but with a server-side
+ *   error (5xx, rate limit, conflicting poller).
+ */
+export const ManagerConnectorHealthStatus = Schema.Literals([
+  "connected",
+  "reconnecting",
+  "auth_expired",
+  "delivery_failed",
+  "provider_unavailable",
+]);
+export type ManagerConnectorHealthStatus = typeof ManagerConnectorHealthStatus.Type;
+
+export const ManagerConnectorHealth = Schema.Struct({
+  status: ManagerConnectorHealthStatus,
+  lastOkAt: Schema.NullOr(Schema.String),
+  lastError: Schema.NullOr(Schema.String),
+  lastErrorAt: Schema.NullOr(Schema.String),
+});
+export type ManagerConnectorHealth = typeof ManagerConnectorHealth.Type;
+
 /** Telegram connector as exposed to clients: token is never echoed back. */
 export const ManagerTelegramConnectorStatus = Schema.Struct({
   configured: Schema.Boolean,
@@ -233,6 +262,8 @@ export const ManagerTelegramConnectorStatus = Schema.Struct({
   allowedChatIds: Schema.Array(TrimmedNonEmptyString),
   botUsername: Schema.NullOr(TrimmedNonEmptyString),
   lastError: Schema.NullOr(Schema.String),
+  /** Null until the poller has observed the connector at least once. */
+  health: Schema.NullOr(ManagerConnectorHealth),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   /** Current addressing rules, echoed back so the settings UI can render them. */
   addressing: ManagerConnectorAddressingConfig,

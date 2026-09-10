@@ -9,6 +9,7 @@ import {
   ManagerSlackConnectorConfig,
   ManagerTelegramConnectorConfig,
   type ManagerAssistantSummary,
+  type ManagerConnectorHealth,
   type ManagerTelegramConnectorStatus,
   ProjectId,
 } from "@t3tools/contracts";
@@ -130,12 +131,14 @@ function slugifyAssistantName(name: string): string {
 const emptyTelegramStatus = (input: {
   readonly botUsername: string | null;
   readonly lastError: string | null;
+  readonly health: ManagerConnectorHealth | null;
 }): ManagerTelegramConnectorStatus => ({
   configured: false,
   enabled: false,
   allowedChatIds: [],
   botUsername: input.botUsername,
   lastError: input.lastError,
+  health: input.health,
   defaultModelSelection: null,
   addressing: DEFAULT_CONNECTOR_ADDRESSING,
 });
@@ -425,6 +428,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
             allowedChatIds: decoded.value.allowedChatIds,
             botUsername: runtime.botUsername,
             lastError: runtime.lastError,
+            health: runtime.health,
             defaultModelSelection: decoded.value.defaultModelSelection ?? null,
             addressing: decoded.value.addressing ?? DEFAULT_CONNECTOR_ADDRESSING,
           };
