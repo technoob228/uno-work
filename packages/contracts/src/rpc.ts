@@ -6,6 +6,7 @@ import { EnvironmentId } from "./baseSchemas.ts";
 import {
   CrossEnvironmentWriteMode,
   UnoBoxConnection,
+  UnoBoxCreateJobStatus,
   UnoCloudState,
   WorkspaceCapability,
   WorkspaceClaim,
@@ -263,6 +264,8 @@ export const WS_METHODS = {
   unoCloudGetState: "uno.cloud.getState",
   unoCloudBoxPower: "uno.cloud.boxPower",
   unoCloudConnectBox: "uno.cloud.connectBox",
+  unoCloudCreateBox: "uno.cloud.createBox",
+  unoCloudCreateBoxStatus: "uno.cloud.createBoxStatus",
 
   // Provider setup: install a harness CLI / sign it in on this machine
   providerInstallStart: "provider.install.start",
@@ -1055,6 +1058,43 @@ export const WsProviderAuthSubmitCodeRpc = Rpc.make(WS_METHODS.providerAuthSubmi
   error: ProviderSetupRpcError,
 });
 
+/**
+ * Creating a box is billable, so the RPC returns immediately with a job id and
+ * the client polls `createBoxStatus`. One RPC call = at most one launch call to
+ * the control plane; the daemon never retries the launch on its own.
+ */
+export const UnoCloudCreateBoxInput = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  ramMb: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
+  vcpu: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
+  diskGb: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
+  /** Only `work` exists today: a box launched from the Uno Work golden image. */
+  purpose: Schema.optional(Schema.Literals(["work"])),
+});
+export type UnoCloudCreateBoxInput = typeof UnoCloudCreateBoxInput.Type;
+
+export const UnoCloudCreateBoxResult = Schema.Struct({
+  jobId: Schema.String,
+});
+export type UnoCloudCreateBoxResult = typeof UnoCloudCreateBoxResult.Type;
+
+export const UnoCloudCreateBoxStatusInput = Schema.Struct({
+  jobId: Schema.String,
+});
+export type UnoCloudCreateBoxStatusInput = typeof UnoCloudCreateBoxStatusInput.Type;
+
+export const WsUnoCloudCreateBoxRpc = Rpc.make(WS_METHODS.unoCloudCreateBox, {
+  payload: UnoCloudCreateBoxInput,
+  success: UnoCloudCreateBoxResult,
+  error: UnoCloudRpcError,
+});
+
+export const WsUnoCloudCreateBoxStatusRpc = Rpc.make(WS_METHODS.unoCloudCreateBoxStatus, {
+  payload: UnoCloudCreateBoxStatusInput,
+  success: UnoBoxCreateJobStatus,
+  error: UnoCloudRpcError,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -1086,6 +1126,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoCloudGetStateRpc,
   WsUnoCloudBoxPowerRpc,
   WsUnoCloudConnectBoxRpc,
+  WsUnoCloudCreateBoxRpc,
+  WsUnoCloudCreateBoxStatusRpc,
   WsProviderInstallStartRpc,
   WsProviderInstallStatusRpc,
   WsProviderAuthStartRpc,

@@ -1206,6 +1206,24 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
             { "rpc.aggregate": "uno-cloud" },
           ),
+        // Creating a box is billable: the RPC starts one background job and
+        // answers with its id; the client polls `createBoxStatus`.
+        [WS_METHODS.unoCloudCreateBox]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoCloudCreateBox,
+            unoCloud
+              .createBox(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-cloud" },
+          ),
+        [WS_METHODS.unoCloudCreateBoxStatus]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoCloudCreateBoxStatus,
+            unoCloud
+              .createBoxStatus(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-cloud" },
+          ),
         [WS_METHODS.serverListPlugins]: (_input) =>
           observeRpcEffect(WS_METHODS.serverListPlugins, pluginRegistry.getSnapshot, {
             "rpc.aggregate": "server",

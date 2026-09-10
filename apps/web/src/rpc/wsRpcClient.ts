@@ -202,6 +202,8 @@ export interface WsRpcClient {
     ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.unoCloudGetState>>;
     readonly boxPower: RpcUnaryMethod<typeof WS_METHODS.unoCloudBoxPower>;
     readonly connectBox: RpcUnaryMethod<typeof WS_METHODS.unoCloudConnectBox>;
+    readonly createBox: RpcUnaryMethod<typeof WS_METHODS.unoCloudCreateBox>;
+    readonly createBoxStatus: RpcUnaryMethod<typeof WS_METHODS.unoCloudCreateBoxStatus>;
   };
 }
 
@@ -449,6 +451,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.unoCloudBoxPower](input)),
       connectBox: (input) =>
         transport.request((client) => client[WS_METHODS.unoCloudConnectBox](input)),
+      createBox: (input) =>
+        transport.request((client) => client[WS_METHODS.unoCloudCreateBox](input)),
+      createBoxStatus: (input) =>
+        transport.request((client) => client[WS_METHODS.unoCloudCreateBoxStatus](input)),
     },
   };
 }

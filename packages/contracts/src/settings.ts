@@ -567,6 +567,12 @@ export const UnoAccountSettings = Schema.Struct({
    * явному согласию. Требует `apiKey`.
    */
   credentialsSync: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /**
+   * Control-plane image id to launch new work boxes from. `null` means the
+   * built-in default (`UNO_WORK_GOLDEN_IMAGE_ID` in `workspace.ts`); set it
+   * when an account has its own golden image.
+   */
+  goldenImageId: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 });
 export type UnoAccountSettings = typeof UnoAccountSettings.Type;
 
@@ -706,6 +712,7 @@ export const ServerSettingsPatch = Schema.Struct({
       apiKey: Schema.optionalKey(Schema.String),
       agentAccess: Schema.optionalKey(UnoAgentAccessLevel),
       credentialsSync: Schema.optionalKey(Schema.Boolean),
+      goldenImageId: Schema.optionalKey(Schema.NullOr(Schema.Number)),
     }),
   ),
   providers: Schema.optionalKey(

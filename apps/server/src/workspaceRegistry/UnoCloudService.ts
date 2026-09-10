@@ -6,25 +6,43 @@
  * machine the app can *make* reachable — it exposes a ready-to-run SSH command
  * and can be woken — which is not true of an arbitrary host the user typed in.
  *
+ * The service can also *create* a box (`createBox`): that is a billable
+ * background job, tracked in memory and polled by the client via
+ * `createBoxStatus`. The job itself lives in `UnoBoxProvision.ts`.
+ *
  * The API key is the account credential from server settings. There is no
  * separate login: a workspace is "linked" exactly when the daemon has a key.
  */
-import {
-  UNO_CONTROL_PLANE_BASE_URL,
-  type UnoBox,
-  type UnoBoxConnection,
-  type UnoCloudState,
+import type {
+  UnoBoxConnection,
+  UnoBoxCreateJobStatus,
+  UnoCloudCreateBoxInput,
+  UnoCloudCreateBoxResult,
+  UnoCloudState,
 } from "@t3tools/contracts";
-import { Context, Data, Effect, Layer, Ref } from "effect";
+import { Context, Data, Effect, Layer } from "effect";
 
 import { ServerSettingsService } from "../serverSettings.ts";
+import {
+  isTerminalUnoBoxCreateJobState,
+  runUnoBoxProvisionJob,
+  type UnoBoxProvisionClient,
+} from "./UnoBoxProvision.ts";
+import {
+  asNullableString,
+  asNumber,
+  asString,
+  fetchControlPlaneJson,
+  parseUnoBoxConnection,
+  parseUnoBoxList,
+} from "./unoCloudParse.ts";
 
 /**
  * A control-plane request that did not return a usable payload. Tagged so the
  * `catch` in `fetchJson` does not merge into the untyped global `Error`
  * channel; `message` carries the status/detail the panel surfaces.
  */
-class UnoCloudFetchError extends Data.TaggedError("UnoCloudFetchError")<{
+export class UnoCloudFetchError extends Data.TaggedError("UnoCloudFetchError")<{
   readonly message: string;
 }> {}
 
@@ -34,7 +52,10 @@ class UnoCloudFetchError extends Data.TaggedError("UnoCloudFetchError")<{
  */
 const CACHE_TTL_MS = 20_000;
 
-const API_BASE_URL = UNO_CONTROL_PLANE_BASE_URL;
+/** Finished create jobs are kept this long so a client that reconnects can still read the outcome. */
+const FINISHED_JOB_RETENTION_MS = 60 * 60 * 1000;
+
+const NOT_LINKED_MESSAGE = "Connect your Uno account first.";
 
 export interface UnoCloudServiceShape {
   readonly getState: (input?: {
@@ -52,44 +73,23 @@ export interface UnoCloudServiceShape {
   readonly connectBox: (input: {
     readonly boxId: number;
   }) => Effect.Effect<UnoBoxConnection, UnoCloudFetchError>;
+  /**
+   * Start a background "create a work box" job. Returns immediately; the
+   * launch call happens once inside the job. A second call with the same name
+   * while the first is still running returns the running job instead of
+   * launching again — a double click must not buy two boxes.
+   */
+  readonly createBox: (
+    input: UnoCloudCreateBoxInput,
+  ) => Effect.Effect<UnoCloudCreateBoxResult, UnoCloudFetchError>;
+  readonly createBoxStatus: (input: {
+    readonly jobId: string;
+  }) => Effect.Effect<UnoBoxCreateJobStatus, UnoCloudFetchError>;
 }
 
 export class UnoCloudService extends Context.Service<UnoCloudService, UnoCloudServiceShape>()(
   "t3/workspace/UnoCloudService",
 ) {}
-
-function asNumber(value: unknown, fallback = 0): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function asString(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function asNullableString(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function toBox(raw: unknown): UnoBox | null {
-  if (typeof raw !== "object" || raw === null) return null;
-  const record = raw as Record<string, unknown>;
-  const id = asNumber(record["id"], -1);
-  if (id < 0) return null;
-  return {
-    id,
-    name: asString(record["name"]) || `box-${id}`,
-    status: asString(record["status"]) || "unknown",
-    os: asString(record["os"]),
-    ramMb: asNumber(record["ram_mb"]),
-    vcpu: asNumber(record["vcpu"]),
-    diskGb: asNumber(record["disk_gb"]),
-    ssh: asNullableString(record["ssh"]),
-    publicIp: asNullableString(record["public_ip"]),
-    internalIp: asNullableString(record["internal_ip"]),
-    createdAt: asNullableString(record["created_at"]),
-    sleepDeadlineAt: asNullableString(record["sleep_deadline_at"]),
-  };
-}
 
 const disconnectedState = (error: string | null): UnoCloudState => ({
   connected: false,
@@ -99,42 +99,60 @@ const disconnectedState = (error: string | null): UnoCloudState => ({
   error,
 });
 
+interface CreateJobRecord {
+  readonly name: string;
+  status: UnoBoxCreateJobStatus;
+  finishedAt: number | null;
+}
+
+function makeProvisionClient(apiKey: string): UnoBoxProvisionClient {
+  return {
+    listImages: () => fetchControlPlaneJson(apiKey, "/api/v1/images"),
+    launchImage: (imageId, body) =>
+      fetchControlPlaneJson(apiKey, `/api/v1/images/${imageId}/launch`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    createPlainBox: (body) =>
+      fetchControlPlaneJson(apiKey, "/api/v1/boxes", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    getBox: (boxId) => fetchControlPlaneJson(apiKey, `/api/v1/boxes/${boxId}`),
+    createWorkSession: (boxId) =>
+      fetchControlPlaneJson(apiKey, `/api/v1/boxes/${boxId}/work/session`, {
+        method: "POST",
+        body: "{}",
+      }),
+  };
+}
+
 const makeUnoCloudService = Effect.gen(function* () {
   const settings = yield* ServerSettingsService;
-  const cache = yield* Ref.make<{ readonly at: number; readonly state: UnoCloudState } | null>(
-    null,
-  );
+  // A plain closure variable rather than a `Ref`: the provisioning job (which
+  // runs outside any fiber) also needs to drop the cache when a box appears.
+  let cache: { readonly at: number; readonly state: UnoCloudState } | null = null;
+  const createJobs = new Map<string, CreateJobRecord>();
 
   const fetchJson = (path: string, apiKey: string, init?: RequestInit) =>
     Effect.tryPromise({
-      try: async () => {
-        const response = await fetch(`${API_BASE_URL}${path}`, {
-          ...init,
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-            ...init?.headers,
-          },
-        });
-        if (!response.ok) {
-          const detail = await response.text().catch(() => "");
-          throw new Error(
-            detail.trim().length > 0
-              ? `${response.status}: ${detail.slice(0, 200)}`
-              : `HTTP ${response.status}`,
-          );
-        }
-        return (await response.json()) as unknown;
-      },
+      try: () => fetchControlPlaneJson(apiKey, path, init),
       catch: (cause) =>
         new UnoCloudFetchError({
           message: cause instanceof Error ? cause.message : String(cause),
         }),
     });
 
-  const load = Effect.gen(function* () {
+  const readApiKey = Effect.gen(function* () {
     const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
-    const apiKey = current?.uno.apiKey.trim() ?? "";
+    return {
+      apiKey: current?.uno.apiKey.trim() ?? "",
+      goldenImageId: current?.uno.goldenImageId ?? null,
+    };
+  });
+
+  const load = Effect.gen(function* () {
+    const { apiKey } = yield* readApiKey;
     if (apiKey.length === 0) return disconnectedState(null);
 
     // Account and boxes are fetched independently: a boxes call that fails
@@ -146,12 +164,6 @@ const makeUnoCloudService = Effect.gen(function* () {
     }
     const accountRecord = accountResult.success as Record<string, unknown>;
     const boxesResult = yield* Effect.result(fetchJson("/api/v1/boxes", apiKey));
-    const boxes =
-      boxesResult._tag === "Success" &&
-      typeof boxesResult.success === "object" &&
-      boxesResult.success
-        ? ((boxesResult.success as Record<string, unknown>)["boxes"] ?? [])
-        : [];
 
     return {
       connected: true,
@@ -163,9 +175,7 @@ const makeUnoCloudService = Effect.gen(function* () {
         llmBalance: asNumber(accountRecord["llm_balance"]),
         role: asString(accountRecord["role"]) || "user",
       },
-      boxes: Array.isArray(boxes)
-        ? boxes.map(toBox).filter((box): box is UnoBox => box !== null)
-        : [],
+      boxes: boxesResult._tag === "Success" ? parseUnoBoxList(boxesResult.success) : [],
       fetchedAt: new Date().toISOString(),
       error: boxesResult._tag === "Failure" ? boxesResult.failure.message : null,
     } satisfies UnoCloudState;
@@ -173,19 +183,18 @@ const makeUnoCloudService = Effect.gen(function* () {
 
   const getState: UnoCloudServiceShape["getState"] = (input) =>
     Effect.gen(function* () {
-      const cached = yield* Ref.get(cache);
+      const cached = cache;
       const fresh = cached !== null && Date.now() - cached.at < CACHE_TTL_MS;
       if (fresh && input?.refresh !== true) return cached.state;
       const state = yield* load;
-      yield* Ref.set(cache, { at: Date.now(), state });
+      cache = { at: Date.now(), state };
       return state;
     });
 
   const boxPower: UnoCloudServiceShape["boxPower"] = (input) =>
     Effect.gen(function* () {
-      const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
-      const apiKey = current?.uno.apiKey.trim() ?? "";
-      if (apiKey.length === 0) return disconnectedState("Connect your Uno account first.");
+      const { apiKey } = yield* readApiKey;
+      if (apiKey.length === 0) return disconnectedState(NOT_LINKED_MESSAGE);
       const result = yield* Effect.result(
         fetchJson(`/api/v1/boxes/${input.boxId}/${input.action}`, apiKey, { method: "POST" }),
       );
@@ -195,40 +204,128 @@ const makeUnoCloudService = Effect.gen(function* () {
       const state = yield* load;
       const withError: UnoCloudState =
         result._tag === "Failure" ? { ...state, error: result.failure.message } : state;
-      yield* Ref.set(cache, { at: Date.now(), state: withError });
+      cache = { at: Date.now(), state: withError };
       return withError;
     });
 
   const connectBox: UnoCloudServiceShape["connectBox"] = (input) =>
     Effect.gen(function* () {
-      const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
-      const apiKey = current?.uno.apiKey.trim() ?? "";
+      const { apiKey } = yield* readApiKey;
       if (apiKey.length === 0) {
-        return yield* new UnoCloudFetchError({ message: "Connect your Uno account first." });
+        return yield* new UnoCloudFetchError({ message: NOT_LINKED_MESSAGE });
       }
       const raw = yield* fetchJson(`/api/v1/boxes/${input.boxId}/work/session`, apiKey, {
         method: "POST",
         body: "{}",
       });
-      const record = (typeof raw === "object" && raw !== null ? raw : {}) as Record<
-        string,
-        unknown
-      >;
-      const url = asString(record["url"]);
-      if (url.length === 0) {
+      const connection = parseUnoBoxConnection(raw, input.boxId);
+      if (!connection) {
         return yield* new UnoCloudFetchError({
           message: "The control plane did not return a pairing link for this box.",
         });
       }
-      return {
-        boxId: input.boxId,
-        url,
-        hostname: asString(record["hostname"]),
-        expiresAt: asNullableString(record["expires_at"]),
-      } satisfies UnoBoxConnection;
+      return connection;
     });
 
-  return { getState, boxPower, connectBox } satisfies UnoCloudServiceShape;
+  const pruneFinishedJobs = () => {
+    const cutoff = Date.now() - FINISHED_JOB_RETENTION_MS;
+    for (const [jobId, record] of createJobs) {
+      if (record.finishedAt !== null && record.finishedAt < cutoff) createJobs.delete(jobId);
+    }
+  };
+
+  const findActiveJobByName = (name: string): string | null => {
+    for (const [jobId, record] of createJobs) {
+      if (record.name === name && !isTerminalUnoBoxCreateJobState(record.status.state)) {
+        return jobId;
+      }
+    }
+    return null;
+  };
+
+  const createBox: UnoCloudServiceShape["createBox"] = (input) =>
+    Effect.gen(function* () {
+      const { apiKey, goldenImageId } = yield* readApiKey;
+      if (apiKey.length === 0) {
+        return yield* new UnoCloudFetchError({ message: NOT_LINKED_MESSAGE });
+      }
+      const name = input.name.trim();
+      if (name.length === 0) {
+        return yield* new UnoCloudFetchError({ message: "Give the box a name." });
+      }
+
+      pruneFinishedJobs();
+      const activeJobId = findActiveJobByName(name);
+      if (activeJobId !== null) return { jobId: activeJobId };
+
+      const jobId = crypto.randomUUID();
+      const record: CreateJobRecord = {
+        name,
+        status: { jobId, state: "creating" },
+        finishedAt: null,
+      };
+      createJobs.set(jobId, record);
+
+      // Fire-and-forget on the event loop rather than an Effect fiber: the job
+      // must outlive the RPC that started it, and it never throws (every
+      // failure is folded into a `failed` status).
+      void runUnoBoxProvisionJob(
+        {
+          jobId,
+          name,
+          ramMb: input.ramMb,
+          vcpu: input.vcpu,
+          diskGb: input.diskGb,
+          goldenImageId,
+        },
+        {
+          client: makeProvisionClient(apiKey),
+          sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+          now: () => Date.now(),
+          onStatus: (status) => {
+            const boxAppeared = status.boxId != null && record.status.boxId == null;
+            record.status = status;
+            if (isTerminalUnoBoxCreateJobState(status.state)) {
+              record.finishedAt = Date.now();
+            }
+            // A new box (or one that just became pairable) should show up on
+            // the next box-list read instead of after the cache TTL.
+            if (boxAppeared || status.state === "ready") {
+              cache = null;
+            }
+          },
+        },
+      ).catch((cause: unknown) => {
+        record.status = {
+          jobId,
+          state: "failed",
+          message: cause instanceof Error ? cause.message : String(cause),
+        };
+        record.finishedAt = Date.now();
+      });
+
+      return { jobId };
+    });
+
+  const createBoxStatus: UnoCloudServiceShape["createBoxStatus"] = (input) =>
+    Effect.gen(function* () {
+      const record = createJobs.get(input.jobId);
+      if (!record) {
+        return yield* new UnoCloudFetchError({
+          message:
+            "This box creation job is no longer known to the daemon (it may have restarted). Check the box list.",
+        });
+      }
+      return record.status;
+    });
+
+  return {
+    getState,
+    boxPower,
+    connectBox,
+    createBox,
+    createBoxStatus,
+  } satisfies UnoCloudServiceShape;
 });
 
 export const UnoCloudServiceLive = Layer.effect(UnoCloudService, makeUnoCloudService);

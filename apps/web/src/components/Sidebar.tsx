@@ -21,6 +21,7 @@ import {
   ThreadStatusLabel,
 } from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
+import { MoveProjectToBoxDialog } from "./MoveProjectToBoxDialog";
 import { autoAnimate } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -1162,6 +1163,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const [projectGroupingSelection, setProjectGroupingSelection] = useState<
     SidebarProjectGroupingMode | "inherit"
   >("inherit");
+  const [moveToBoxTarget, setMoveToBoxTarget] = useState<SidebarProjectGroupMember | null>(null);
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const confirmArchiveButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -1527,7 +1529,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
         const actionHandlers = new Map<string, () => Promise<void> | void>();
         const makeLeaf = (
-          action: "rename" | "grouping" | "copy-path" | "delete",
+          action: "rename" | "grouping" | "copy-path" | "move-to-box" | "delete",
           member: SidebarProjectGroupMember,
           options?: {
             destructive?: boolean;
@@ -1546,6 +1548,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               case "copy-path":
                 copyPathToClipboard(member.cwd, { path: member.cwd });
                 return;
+              case "move-to-box":
+                setMoveToBoxTarget(member);
+                return;
               case "delete":
                 return handleRemoveProject(member);
             }
@@ -1560,7 +1565,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         };
 
         const buildTargetedItem = (
-          action: "rename" | "grouping" | "copy-path" | "delete",
+          action: "rename" | "grouping" | "copy-path" | "move-to-box" | "delete",
           label: string,
           options?: {
             destructive?: boolean;
@@ -1595,6 +1600,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             buildTargetedItem("rename", "Rename project"),
             buildTargetedItem("grouping", "Project grouping…"),
             buildTargetedItem("copy-path", "Copy Project Path"),
+            buildTargetedItem("move-to-box", "Move to a box…"),
             buildTargetedItem("delete", "Remove project", {
               destructive: true,
             }),
@@ -2231,6 +2237,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         openPrLink={openPrLink}
         expandThreadListForProject={expandThreadListForProject}
         collapseThreadListForProject={collapseThreadListForProject}
+      />
+
+      <MoveProjectToBoxDialog
+        project={moveToBoxTarget}
+        open={moveToBoxTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setMoveToBoxTarget(null);
+        }}
       />
 
       <Dialog

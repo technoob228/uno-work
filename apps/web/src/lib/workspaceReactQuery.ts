@@ -30,6 +30,11 @@ import type {
 import { mutationOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
 
 import { ensureEnvironmentApi } from "../environmentApi";
+import {
+  createUnoBoxAndConnect,
+  type CreateUnoBoxInput,
+  type CreateUnoBoxResult,
+} from "../unoBoxCreation";
 
 const WORKSPACE_STALE_TIME_MS = 5_000;
 /**
@@ -326,6 +331,30 @@ export function unoCloudConnectBoxMutationOptions(environmentId: EnvironmentId |
     mutationFn: async (payload: UnoCloudConnectBoxInput): Promise<UnoBoxConnection> => {
       if (environmentId === null) throw new Error("No environment connection.");
       return ensureEnvironmentApi(environmentId).unoCloud.connectBox(payload);
+    },
+  });
+}
+
+/**
+ * Creates a box and waits for it to become pairable, then registers it as a
+ * saved environment. Creating a box is billable: the mutation key is shared so
+ * React Query's `isPending` can disable every "create" button while one is
+ * running, and the server dedupes same-name jobs behind that.
+ */
+export function unoCloudCreateBoxMutationOptions(
+  environmentId: EnvironmentId | null,
+  queryClient: QueryClient,
+) {
+  return mutationOptions({
+    mutationKey: ["workspace", "mutation", "create-box", environmentId] as const,
+    mutationFn: async (payload: CreateUnoBoxInput): Promise<CreateUnoBoxResult> => {
+      if (environmentId === null) throw new Error("No environment connection.");
+      return createUnoBoxAndConnect(environmentId, payload);
+    },
+    onSettled: async () => {
+      // The daemon drops its own cache when the box appears; this makes the
+      // modal's box list follow suit without waiting for the 30s poll.
+      await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.unoCloud(environmentId) });
     },
   });
 }
