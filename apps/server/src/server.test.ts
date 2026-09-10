@@ -1270,10 +1270,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         );
 
         assert.equal(response.status, 204);
-        assert.equal(
-          response.headers.get("access-control-allow-origin"),
-          "http://127.0.0.1:3773",
-        );
+        assert.equal(response.headers.get("access-control-allow-origin"), "http://127.0.0.1:3773");
         assert.deepEqual(splitHeaderTokens(response.headers.get("access-control-allow-methods")), [
           "GET",
           "OPTIONS",

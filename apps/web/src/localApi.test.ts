@@ -125,10 +125,19 @@ const rpcClientMock = {
     setInstructions: vi.fn(),
     applyInstructions: vi.fn(),
   },
+  providerSetup: {
+    installStart: vi.fn(),
+    installStatus: vi.fn(),
+    authStart: vi.fn(),
+    authStatus: vi.fn(),
+    authSubmitCode: vi.fn(),
+  },
   unoCloud: {
     getState: vi.fn(),
     boxPower: vi.fn(),
     connectBox: vi.fn(),
+    createBox: vi.fn(),
+    createBoxStatus: vi.fn(),
   },
 };
 
