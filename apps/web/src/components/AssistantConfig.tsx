@@ -26,6 +26,8 @@ import type {
   AssistantEditableFileName,
   EnvironmentId,
   ManagerAssistantSummary,
+  ManagerConnectorHealth,
+  ManagerConnectorHealthStatus,
   ManagerScope,
   ProjectId,
 } from "@t3tools/contracts";
@@ -74,6 +76,63 @@ function Toggle({
         }`}
       />
     </button>
+  );
+}
+
+const CONNECTOR_HEALTH_CHIP: Record<
+  ManagerConnectorHealthStatus,
+  { readonly label: string; readonly variant: "success" | "warning" | "error" }
+> = {
+  connected: { label: "Connected", variant: "success" },
+  reconnecting: { label: "Reconnecting", variant: "warning" },
+  auth_expired: { label: "Auth expired", variant: "error" },
+  delivery_failed: { label: "Delivery failed", variant: "error" },
+  provider_unavailable: { label: "Provider unavailable", variant: "warning" },
+};
+
+const formatClock = (iso: string): string => {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+};
+
+/**
+ * Persisted connector health (see `ManagerConnectorHealth`): a chip for the
+ * state, when the link was last known good, and the last error while the
+ * state is not `connected`. `fallbackError` is the poller's in-memory error
+ * for problems that are not provider health (invalid config, storage).
+ */
+function ConnectorHealthStatus({
+  health,
+  fallbackError,
+}: {
+  health: ManagerConnectorHealth | null;
+  fallbackError: string | null;
+}) {
+  if (health === null) {
+    return fallbackError ? (
+      <span className="text-destructive-foreground">{fallbackError}</span>
+    ) : (
+      <span>Not polled yet.</span>
+    );
+  }
+  const chip = CONNECTOR_HEALTH_CHIP[health.status];
+  const showError = health.status !== "connected" && health.lastError !== null;
+  return (
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <Badge variant={chip.variant} size="sm">
+        {chip.label}
+      </Badge>
+      {health.lastOkAt !== null ? <span>last ok {formatClock(health.lastOkAt)}</span> : null}
+      {showError ? (
+        <span className="text-destructive-foreground">
+          {health.lastError}
+          {health.lastErrorAt !== null ? ` (${formatClock(health.lastErrorAt)})` : ""}
+        </span>
+      ) : null}
+      {!showError && fallbackError !== null ? (
+        <span className="text-destructive-foreground">{fallbackError}</span>
+      ) : null}
+    </span>
   );
 }
 
@@ -569,8 +628,16 @@ export function AssistantConfig({
                   telegram?.configured
                     ? `Bot ${telegram.botUsername ? `@${telegram.botUsername}` : "configured"} · ${
                         telegram.enabled ? "enabled" : "disabled"
-                      }${telegram.lastError ? ` · error: ${telegram.lastError}` : ""}`
+                      }`
                     : "This assistant's own bot: paste a token from @BotFather and list allowed chat ids."
+                }
+                status={
+                  telegram?.configured && telegram.enabled ? (
+                    <ConnectorHealthStatus
+                      health={telegram.health}
+                      fallbackError={telegram.lastError}
+                    />
+                  ) : undefined
                 }
                 control={
                   <Toggle

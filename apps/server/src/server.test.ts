@@ -622,7 +622,8 @@ const buildAppUnderTest = (options?: {
             get: () => Effect.succeed(Option.none()),
           }),
           Layer.mock(ManagerTelegramService)({
-            getRuntimeStatus: () => Effect.succeed({ botUsername: null, lastError: null }),
+            getRuntimeStatus: () =>
+              Effect.succeed({ botUsername: null, lastError: null, health: null }),
           }),
           Layer.mock(ManagerAssistantService)({
             listAssistants: () => Effect.succeed([]),

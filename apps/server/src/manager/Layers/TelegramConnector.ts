@@ -18,6 +18,14 @@
  *
  * Config lives in `manager_assistant_connectors` and is re-read between poll
  * cycles, so saving settings takes effect without a restart.
+ *
+ * Delivery is durable: every update is written to `manager_connector_inbox`
+ * before it is handled, and the `getUpdates` offset is persisted in
+ * `manager_connector_state` only after the update is terminal there
+ * (see `connectorInbox.ts`). A restart resumes from the persisted offset and
+ * replays unhandled rows. Health (connected / reconnecting / auth_expired /
+ * delivery_failed / provider_unavailable) is derived in `connectorHealth.ts`
+ * and persisted alongside, so the settings UI can show it.
  */
 import {
   CommandId,
@@ -29,10 +37,12 @@ import {
   ThreadId,
   UNO_GATEWAY_BASE_URL,
   type ChatImageAttachment,
+  type ManagerConnectorHealth,
+  type ManagerConnectorHealthStatus,
   type ModelSelection,
   type OrchestrationThread,
 } from "@t3tools/contracts";
-import { Context, Data, Duration, Effect, Layer, Option, Ref, Schema } from "effect";
+import { Context, Data, Duration, Effect, Layer, Option, Ref, Schema, type Scope } from "effect";
 import * as crypto from "node:crypto";
 import * as fsPromises from "node:fs/promises";
 import * as nodePath from "node:path";
@@ -50,11 +60,33 @@ import {
   type AddressingReason,
 } from "../addressing.ts";
 import { classifyWake } from "../wakeClassifier.ts";
+import {
+  attemptWithBackoff,
+  classifyTelegramApiError,
+  INITIAL_CONNECTOR_HEALTH,
+  isBackingOff,
+  isRetriableTelegramApiError,
+  onDeliveryOutcome,
+  onPollFailure,
+  onPollSuccess,
+  SEND_RETRY_DELAYS_MS,
+  type ConnectorFailure,
+  type ConnectorHealthRuntime,
+  type HealthTransition,
+} from "../connectorHealth.ts";
+import {
+  processInboxEvents,
+  recoverPendingEvents,
+  type ConnectorInboxHandler,
+} from "../connectorInbox.ts";
 import { ServerConfig } from "../../config.ts";
 import { telegramCommandOrigin } from "../../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
+import {
+  ManagerConnectorRepository,
+  type ManagerConnectorKey,
+} from "../../persistence/Services/ManagerConnectors.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import {
   ProjectionTurnRepository,
@@ -80,6 +112,8 @@ import { renderTelegramHtml } from "../telegramMarkdown.ts";
 export interface ManagerTelegramRuntimeStatus {
   readonly botUsername: string | null;
   readonly lastError: string | null;
+  /** Persisted health; null until the poller has observed the connector. */
+  readonly health: ManagerConnectorHealth | null;
 }
 
 export interface ManagerTelegramServiceShape {
@@ -104,6 +138,13 @@ export class ManagerTelegramService extends Context.Service<
 
 const POLL_TIMEOUT_SECONDS = 10;
 const IDLE_RECHECK = Duration.seconds(5);
+// Persist `last_ok_at` on a healthy connector at most this often: the fact
+// that it is still fine does not need a write per 10-second long poll.
+const OK_PERSIST_INTERVAL = Duration.minutes(1);
+// Terminal inbox rows older than this are pruned; the dedupe window only has
+// to outlive Telegram's own retention of unconfirmed updates (24h).
+const INBOX_RETENTION = Duration.days(7);
+const INBOX_PRUNE_INTERVAL = Duration.hours(1);
 const REPLY_POLL_INTERVAL = Duration.seconds(2);
 const REPLY_TIMEOUT = Duration.minutes(10);
 const TYPING_ACTION_INTERVAL = Duration.seconds(4);
@@ -223,16 +264,45 @@ export const resolveTurnReply = (input: TurnReplyInputs): ResolvedTurnReply | nu
   };
 };
 
-interface TelegramUpdate {
+export interface TelegramUpdate {
   readonly update_id: number;
   readonly message?: TelegramIncomingMessage;
 }
 
+/** Shape check for an inbox payload replayed after a restart. */
+export const decodeStoredTelegramUpdate = (payload: unknown): TelegramUpdate | null =>
+  typeof payload === "object" &&
+  payload !== null &&
+  typeof (payload as { update_id?: unknown }).update_id === "number"
+    ? (payload as TelegramUpdate)
+    : null;
+
+/** Telegram's resume cursor: one past the last update we settled. */
+export const telegramOffsetAfter = (update: TelegramUpdate): number => update.update_id + 1;
+
 interface BotRuntime {
+  /**
+   * Bot token this runtime was built for. A different token in the config
+   * means the owner swapped bots: the runtime (and the persisted offset) are
+   * rebuilt for it. Null until the connector is first seen in this process.
+   */
+  botToken: string | null;
+  /** In-memory mirror of the persisted `getUpdates` offset. */
   offset: number;
   botUsername: string | null;
   lastError: string | null;
+  health: ConnectorHealthRuntime;
+  lastOkPersistedAtMs: number;
 }
+
+const INITIAL_BOT_RUNTIME: BotRuntime = {
+  botToken: null,
+  offset: 0,
+  botUsername: null,
+  lastError: null,
+  health: INITIAL_CONNECTOR_HEALTH,
+  lastOkPersistedAtMs: 0,
+};
 
 function telegramApi(botToken: string, method: string): string {
   return `https://api.telegram.org/bot${botToken}/${method}`;
@@ -243,15 +313,31 @@ class TelegramConnectorError extends Data.TaggedError("TelegramConnectorError")<
   readonly message: string;
 }> {}
 
+/** Telegram answered `{ ok: false }`; `errorCode` decides retry/health handling. */
+class TelegramApiRejection extends Data.TaggedError("TelegramApiRejection")<{
+  readonly errorCode: number | undefined;
+  readonly description: string;
+}> {}
+
+interface TelegramApiResponse {
+  readonly ok?: boolean;
+  readonly result?: unknown;
+  readonly description?: string;
+  readonly error_code?: number;
+}
+
 const fetchJson = (url: string, init?: RequestInit) =>
   Effect.tryPromise({
     try: async () => {
       const response = await fetch(url, init);
-      return (await response.json()) as { ok?: boolean; result?: unknown; description?: string };
+      return (await response.json()) as TelegramApiResponse;
     },
     catch: (cause) =>
       new TelegramConnectorError({ message: `Telegram request failed: ${String(cause)}` }),
   });
+
+const credentialFingerprint = (botToken: string): string =>
+  crypto.createHash("sha256").update(botToken).digest("hex").slice(0, 16);
 
 const makeTelegramConnector = Effect.gen(function* () {
   const connectorRepository = yield* ManagerConnectorRepository;
@@ -270,17 +356,122 @@ const makeTelegramConnector = Effect.gen(function* () {
   const updateRuntime = (projectId: ProjectId, patch: Partial<BotRuntime>) =>
     Ref.update(runtimesRef, (runtimes) => {
       const next = new Map(runtimes);
-      const current = next.get(projectId) ?? { offset: 0, botUsername: null, lastError: null };
+      const current = next.get(projectId) ?? INITIAL_BOT_RUNTIME;
       next.set(projectId, { ...current, ...patch });
       return next;
     });
 
   const getRuntime = (projectId: ProjectId) =>
     Ref.get(runtimesRef).pipe(
-      Effect.map(
-        (runtimes) => runtimes.get(projectId) ?? { offset: 0, botUsername: null, lastError: null },
-      ),
+      Effect.map((runtimes) => runtimes.get(projectId) ?? INITIAL_BOT_RUNTIME),
     );
+
+  const connectorKey = (projectId: ProjectId): ManagerConnectorKey => ({
+    projectId,
+    kind: "telegram",
+  });
+
+  // Apply a health transition: in-memory runtime, persisted state row, and a
+  // warning line — the latter only when the transition says one is due
+  // (status change, or a minute since the last one for this connector).
+  const applyHealthTransition = (input: {
+    readonly projectId: ProjectId;
+    readonly transition: HealthTransition;
+    readonly error: string | null;
+    readonly context: string;
+  }) =>
+    Effect.gen(function* () {
+      const { projectId, transition } = input;
+      const nowMs = Date.now();
+      const runtime = yield* getRuntime(projectId);
+      const healthy = transition.status === "connected";
+      const persist =
+        !healthy ||
+        transition.statusChanged ||
+        nowMs - runtime.lastOkPersistedAtMs >= Duration.toMillis(OK_PERSIST_INTERVAL);
+      yield* updateRuntime(projectId, {
+        health: transition.runtime,
+        lastError: healthy ? null : input.error,
+        ...(persist && healthy ? { lastOkPersistedAtMs: nowMs } : {}),
+      });
+      if (persist) {
+        yield* connectorRepository
+          .recordHealth({
+            ...connectorKey(projectId),
+            status: transition.status,
+            error: healthy ? null : input.error,
+            at: new Date(nowMs).toISOString(),
+          })
+          .pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("telegram connector health persist failed").pipe(
+                Effect.annotateLogs({ projectId, cause }),
+              ),
+            ),
+          );
+      }
+      if (transition.shouldWarn) {
+        yield* Effect.logWarning(`telegram connector ${transition.status}`).pipe(
+          Effect.annotateLogs({ projectId, context: input.context, error: input.error }),
+        );
+      } else if (transition.statusChanged && healthy) {
+        yield* Effect.logInfo("telegram connector connected").pipe(
+          Effect.annotateLogs({ projectId }),
+        );
+      }
+    });
+
+  const recordPollFailure = (projectId: ProjectId, failure: ConnectorFailure, context: string) =>
+    Effect.gen(function* () {
+      if (failure.kind === "delivery") {
+        return;
+      }
+      const runtime = yield* getRuntime(projectId);
+      yield* applyHealthTransition({
+        projectId,
+        transition: onPollFailure(runtime.health, failure.kind, Date.now()),
+        error: failure.message,
+        context,
+      });
+    });
+
+  const recordPollSuccess = (projectId: ProjectId) =>
+    Effect.gen(function* () {
+      const runtime = yield* getRuntime(projectId);
+      yield* applyHealthTransition({
+        projectId,
+        transition: onPollSuccess(runtime.health, Date.now()),
+        error: null,
+        context: "poll",
+      });
+    });
+
+  const recordDelivery = (projectId: ProjectId, delivered: boolean, error: string | null) =>
+    Effect.gen(function* () {
+      const runtime = yield* getRuntime(projectId);
+      const transition = onDeliveryOutcome(runtime.health, delivered, Date.now());
+      if (transition === null) {
+        return;
+      }
+      yield* applyHealthTransition({ projectId, transition, error, context: "send" });
+    });
+
+  const healthFromState = (
+    state: Option.Option<{
+      readonly status: ManagerConnectorHealthStatus | null;
+      readonly lastOkAt: string | null;
+      readonly lastError: string | null;
+      readonly lastErrorAt: string | null;
+    }>,
+  ): ManagerConnectorHealth | null =>
+    Option.isSome(state) && state.value.status !== null
+      ? {
+          status: state.value.status,
+          lastOkAt: state.value.lastOkAt,
+          lastError: state.value.lastError,
+          lastErrorAt: state.value.lastErrorAt,
+        }
+      : null;
 
   // Last time the bot replied to a chat, keyed `${projectId}:${chatId}`. Feeds
   // the addressing "hot window": for a few seconds after a reply, follow-ups
@@ -456,28 +647,54 @@ const makeTelegramConnector = Effect.gen(function* () {
       return transcript === null ? null : { fileId: target.fileId, transcript };
     });
 
-  // Send a message and surface Telegram-side rejections into the log instead
-  // of silently dropping them.
-  const sendTelegramText = (botToken: string, chatId: string, text: string) =>
-    fetchJson(telegramApi(botToken, "sendMessage"), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: renderTelegramHtml(text),
-        parse_mode: "HTML",
-      }),
-    }).pipe(
-      Effect.tap((response) =>
-        response.ok === true
-          ? Effect.void
-          : Effect.logWarning("telegram sendMessage rejected").pipe(
-              Effect.annotateLogs({
-                chatId,
-                description: response.description ?? "unknown error",
-              }),
-            ),
+  // Send a message with bounded retries (network errors, 429, 5xx), then
+  // record the outcome as connector health: a rejection after the last
+  // attempt puts the connector into `delivery_failed` until a later send
+  // succeeds. Never fails — callers get `{ ok: false }` and move on.
+  const sendTelegramText = (
+    projectId: ProjectId,
+    botToken: string,
+    chatId: string,
+    text: string,
+  ): Effect.Effect<{ readonly ok: boolean; readonly description?: string }> =>
+    attemptWithBackoff(
+      fetchJson(telegramApi(botToken, "sendMessage"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: renderTelegramHtml(text),
+          parse_mode: "HTML",
+        }),
+      }).pipe(
+        Effect.flatMap((response) =>
+          response.ok === true
+            ? Effect.succeed(response)
+            : Effect.fail(
+                new TelegramApiRejection({
+                  errorCode: response.error_code,
+                  description: response.description ?? "unknown error",
+                }),
+              ),
+        ),
       ),
+      {
+        retriable: (error) =>
+          error._tag === "TelegramConnectorError" || isRetriableTelegramApiError(error.errorCode),
+        delaysMs: SEND_RETRY_DELAYS_MS,
+      },
+    ).pipe(
+      Effect.tap(() => recordDelivery(projectId, true, null)),
+      Effect.map(() => ({ ok: true as const })),
+      Effect.catch((error) => {
+        const description =
+          error._tag === "TelegramApiRejection" ? error.description : error.message;
+        return Effect.logWarning("telegram sendMessage failed after retries").pipe(
+          Effect.annotateLogs({ projectId, chatId, description }),
+          Effect.andThen(recordDelivery(projectId, false, description)),
+          Effect.as({ ok: false as const, description }),
+        );
+      }),
     );
 
   // «Печатает…» живёт в Telegram ~5 секунд; ошибки индикатора не должны
@@ -676,7 +893,12 @@ const makeTelegramConnector = Effect.gen(function* () {
   // sendPhoto (with a sendDocument fallback: Telegram rejects photos over its
   // dimension limits), everything else via sendDocument. Failures are reported
   // into the chat so the user isn't left waiting for a file that never comes.
-  const sendTelegramFile = (botToken: string, chatId: string, filePath: string) =>
+  const sendTelegramFile = (
+    projectId: ProjectId,
+    botToken: string,
+    chatId: string,
+    filePath: string,
+  ) =>
     Effect.gen(function* () {
       const failure = yield* Effect.tryPromise({
         try: async () => {
@@ -717,11 +939,17 @@ const makeTelegramConnector = Effect.gen(function* () {
         yield* Effect.logWarning("telegram file upload failed").pipe(
           Effect.annotateLogs({ chatId, filePath, description: failure }),
         );
-        yield* sendTelegramText(botToken, chatId, `Could not send ${filePath}: ${failure}`);
+        yield* sendTelegramText(
+          projectId,
+          botToken,
+          chatId,
+          `Could not send ${filePath}: ${failure}`,
+        );
       }
     });
 
   const sendReplyWhenTurnCompletes = (input: {
+    readonly projectId: ProjectId;
     readonly botToken: string;
     readonly chatId: string;
     readonly threadId: ThreadId;
@@ -753,17 +981,18 @@ const makeTelegramConnector = Effect.gen(function* () {
         });
         if (reply === null) continue;
         if (reply.text.trim().length > 0) {
-          yield* sendTelegramText(input.botToken, input.chatId, reply.text);
+          yield* sendTelegramText(input.projectId, input.botToken, input.chatId, reply.text);
         } else if (reply.files.length === 0) {
-          yield* sendTelegramText(input.botToken, input.chatId, "Done.");
+          yield* sendTelegramText(input.projectId, input.botToken, input.chatId, "Done.");
         }
         for (const file of reply.files) {
-          yield* sendTelegramFile(input.botToken, input.chatId, file);
+          yield* sendTelegramFile(input.projectId, input.botToken, input.chatId, file);
         }
         yield* markHotWindow(input.hotKey);
         return;
       }
       yield* sendTelegramText(
+        input.projectId,
         input.botToken,
         input.chatId,
         "The assistant is still working on it; check the app for progress.",
@@ -912,6 +1141,7 @@ const makeTelegramConnector = Effect.gen(function* () {
       );
       yield* Effect.forkScoped(
         sendReplyWhenTurnCompletes({
+          projectId,
           botToken: config.botToken,
           chatId,
           threadId,
@@ -921,48 +1151,137 @@ const makeTelegramConnector = Effect.gen(function* () {
       );
     });
 
+  // Return type inferred: `handleUpdate` carries its own error union, and
+  // pinning it here would only duplicate it.
+  const inboxHandler = (projectId: ProjectId, config: ManagerTelegramConnectorConfig) => ({
+    key: connectorKey(projectId),
+    handle: (update: TelegramUpdate) => handleUpdate(projectId, config, update),
+    offsetAfter: telegramOffsetAfter,
+  });
+
+  const syncOffsetFromState = (projectId: ProjectId) =>
+    connectorRepository
+      .getState(connectorKey(projectId))
+      .pipe(
+        Effect.flatMap((state) =>
+          Option.isSome(state)
+            ? updateRuntime(projectId, { offset: state.value.offset })
+            : Effect.void,
+        ),
+      );
+
+  // First sighting of a connector in this process (or a swapped bot token):
+  // bind the persisted state to the token, load the resume offset, and
+  // replay whatever the previous run received but never settled.
+  const initializeRuntime = (projectId: ProjectId, config: ManagerTelegramConnectorConfig) =>
+    Effect.gen(function* () {
+      const key = connectorKey(projectId);
+      const fingerprint = credentialFingerprint(config.botToken);
+      const existing = yield* connectorRepository.getState(key);
+      const sameCredential =
+        Option.isSome(existing) && existing.value.credentialFingerprint === fingerprint;
+      if (!sameCredential) {
+        yield* connectorRepository.resetState({
+          ...key,
+          credentialFingerprint: fingerprint,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      yield* updateRuntime(projectId, {
+        ...INITIAL_BOT_RUNTIME,
+        botToken: config.botToken,
+        offset: sameCredential ? existing.value.offset : 0,
+        health: {
+          ...INITIAL_CONNECTOR_HEALTH,
+          status: sameCredential ? existing.value.status : null,
+        },
+      });
+      const recovered = yield* recoverPendingEvents(inboxHandler(projectId, config), {
+        decode: decodeStoredTelegramUpdate,
+      });
+      if (recovered.handled + recovered.failed + recovered.exhausted > 0) {
+        yield* Effect.logInfo("telegram inbox recovered after restart").pipe(
+          Effect.annotateLogs({ projectId, ...recovered }),
+        );
+        yield* syncOffsetFromState(projectId);
+      }
+    });
+
   const pollConnector = (projectId: ProjectId, config: ManagerTelegramConnectorConfig) =>
     Effect.gen(function* () {
-      const runtime = yield* getRuntime(projectId);
-      if (runtime.botUsername === null) {
-        const me = yield* fetchJson(telegramApi(config.botToken, "getMe"));
-        if (me.ok === true) {
-          const username = (me.result as { username?: string } | undefined)?.username ?? null;
-          yield* updateRuntime(projectId, { botUsername: username });
-        } else {
-          yield* updateRuntime(projectId, {
-            lastError: me.description ?? "getMe failed — check the bot token.",
-          });
-          return;
-        }
+      let runtime = yield* getRuntime(projectId);
+      if (runtime.botToken !== config.botToken) {
+        yield* initializeRuntime(projectId, config);
+        runtime = yield* getRuntime(projectId);
       }
-
-      const offset = (yield* getRuntime(projectId)).offset;
-      const response = yield* fetchJson(
-        telegramApi(config.botToken, "getUpdates") +
-          `?timeout=${POLL_TIMEOUT_SECONDS}&offset=${offset}&allowed_updates=%5B%22message%22%5D`,
-      );
-      if (response.ok !== true) {
-        yield* updateRuntime(projectId, {
-          lastError: response.description ?? "getUpdates failed.",
-        });
+      if (isBackingOff(runtime.health, Date.now())) {
         return;
       }
-      yield* updateRuntime(projectId, { lastError: null });
+
+      if (runtime.botUsername === null) {
+        const me = yield* fetchJson(telegramApi(config.botToken, "getMe"));
+        if (me.ok !== true) {
+          yield* recordPollFailure(
+            projectId,
+            classifyTelegramApiError({
+              errorCode: me.error_code,
+              description: me.description ?? "getMe failed — check the bot token.",
+            }),
+            "getMe",
+          );
+          return;
+        }
+        const username = (me.result as { username?: string } | undefined)?.username ?? null;
+        yield* updateRuntime(projectId, { botUsername: username });
+      }
+
+      const response = yield* fetchJson(
+        telegramApi(config.botToken, "getUpdates") +
+          `?timeout=${POLL_TIMEOUT_SECONDS}&offset=${runtime.offset}&allowed_updates=%5B%22message%22%5D`,
+      );
+      if (response.ok !== true) {
+        yield* recordPollFailure(
+          projectId,
+          classifyTelegramApiError({
+            errorCode: response.error_code,
+            description: response.description ?? "getUpdates failed.",
+          }),
+          "getUpdates",
+        );
+        return;
+      }
+      yield* recordPollSuccess(projectId);
+
       const updates = (response.result ?? []) as ReadonlyArray<TelegramUpdate>;
-      for (const update of updates) {
-        yield* updateRuntime(projectId, { offset: update.update_id + 1 });
-        yield* handleUpdate(projectId, config, update).pipe(
-          Effect.catch((cause) =>
-            Effect.logWarning("telegram update handling failed").pipe(
-              Effect.annotateLogs({ projectId, cause }),
-            ),
-          ),
+      if (updates.length === 0) {
+        return;
+      }
+      const outcomes = yield* processInboxEvents(
+        inboxHandler(projectId, config),
+        updates.map((update) => ({ providerEventId: String(update.update_id), payload: update })),
+      );
+      // Every update is terminal in the inbox now (the repository persisted
+      // the cursor per event); mirror the batch end in memory.
+      yield* updateRuntime(projectId, {
+        offset: updates.reduce(
+          (max, update) => Math.max(max, telegramOffsetAfter(update)),
+          runtime.offset,
+        ),
+      });
+      const failed = outcomes.filter((outcome) => outcome === "failed").length;
+      if (failed > 0) {
+        yield* Effect.logWarning("telegram update handling failed").pipe(
+          Effect.annotateLogs({ projectId, failed, total: updates.length }),
         );
       }
     }).pipe(
+      Effect.catchTag("TelegramConnectorError", (error) =>
+        recordPollFailure(projectId, { kind: "network", message: error.message }, "poll"),
+      ),
       Effect.catch((cause) =>
         Effect.gen(function* () {
+          // Not the provider's fault (SQLite, decode): keep the health status
+          // as it was, but make the error visible.
           yield* updateRuntime(projectId, {
             lastError: cause instanceof Error ? cause.message : "Telegram polling failed.",
           });
@@ -972,6 +1291,25 @@ const makeTelegramConnector = Effect.gen(function* () {
         }),
       ),
     );
+
+  const lastPrunedAtRef = yield* Ref.make(0);
+  const pruneInboxIfDue = Effect.gen(function* () {
+    const nowMs = Date.now();
+    const lastPrunedAt = yield* Ref.get(lastPrunedAtRef);
+    if (nowMs - lastPrunedAt < Duration.toMillis(INBOX_PRUNE_INTERVAL)) {
+      return;
+    }
+    yield* Ref.set(lastPrunedAtRef, nowMs);
+    yield* connectorRepository
+      .pruneInbox({
+        before: new Date(nowMs - Duration.toMillis(INBOX_RETENTION)).toISOString(),
+      })
+      .pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("telegram inbox prune failed").pipe(Effect.annotateLogs({ cause })),
+        ),
+      );
+  });
 
   const pollCycle = Effect.gen(function* () {
     const records = yield* connectorRepository
@@ -987,6 +1325,7 @@ const makeTelegramConnector = Effect.gen(function* () {
       yield* Effect.sleep(IDLE_RECHECK);
       return;
     }
+    yield* pruneInboxIfDue;
     // Poll all enabled bots concurrently; each long-polls up to 10s.
     yield* Effect.forEach(enabled, ({ projectId, config }) => pollConnector(projectId, config), {
       concurrency: 4,
@@ -1022,25 +1361,30 @@ const makeTelegramConnector = Effect.gen(function* () {
         return false;
       }
       return yield* sendTelegramText(
+        input.projectId,
         decoded.value.botToken,
         input.chatId,
         input.text.slice(0, TELEGRAM_MESSAGE_LIMIT),
-      ).pipe(
-        Effect.map((resp) => resp.ok === true),
-        Effect.catch(() => Effect.succeed(false)),
-      );
+      ).pipe(Effect.map((resp) => resp.ok));
     });
 
   yield* Effect.forkScoped(Effect.forever(pollCycle));
 
+  const getRuntimeStatus: ManagerTelegramServiceShape["getRuntimeStatus"] = (projectId) =>
+    Effect.gen(function* () {
+      const runtime = yield* getRuntime(projectId);
+      const state = yield* connectorRepository
+        .getState(connectorKey(projectId))
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      return {
+        botUsername: runtime.botUsername,
+        lastError: runtime.lastError,
+        health: healthFromState(state),
+      };
+    });
+
   return {
-    getRuntimeStatus: (projectId) =>
-      getRuntime(projectId).pipe(
-        Effect.map((runtime) => ({
-          botUsername: runtime.botUsername,
-          lastError: runtime.lastError,
-        })),
-      ),
+    getRuntimeStatus,
     sendText,
   } satisfies ManagerTelegramServiceShape;
 });
