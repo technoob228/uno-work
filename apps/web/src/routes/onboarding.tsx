@@ -2,11 +2,7 @@ import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
 import { OnboardingShell } from "~/components/onboarding/OnboardingShell";
-import {
-  DESKTOP_ONBOARDING_STEP_IDS,
-  WEB_ONBOARDING_STEP_IDS,
-  useOnboardingState,
-} from "~/components/onboarding/useOnboardingState";
+import { useOnboardingState } from "~/components/onboarding/useOnboardingState";
 import { DevModeStep } from "~/components/onboarding/steps/DevModeStep";
 import { HarnessesStep } from "~/components/onboarding/steps/HarnessesStep";
 import { PermissionsStep } from "~/components/onboarding/steps/PermissionsStep";
@@ -18,6 +14,7 @@ import { FirstProjectStep } from "~/components/onboarding/steps/web/FirstProject
 import { WebHarnessesStep } from "~/components/onboarding/steps/web/WebHarnessesStep";
 import { WebMachineStep } from "~/components/onboarding/steps/web/WebMachineStep";
 import { WebWelcomeStep } from "~/components/onboarding/steps/web/WebWelcomeStep";
+import { WebWhereStep } from "~/components/onboarding/steps/web/WebWhereStep";
 import { useCommandPaletteStore } from "~/commandPaletteStore";
 import { ensureClientSettingsHydrated, useUpdateSettings } from "~/hooks/useSettings";
 import { isWebApp } from "~/webMode";
@@ -33,8 +30,7 @@ export const Route = createFileRoute("/onboarding")({
 });
 
 function OnboardingRouteView() {
-  const stepIds = isWebApp ? WEB_ONBOARDING_STEP_IDS : DESKTOP_ONBOARDING_STEP_IDS;
-  const state = useOnboardingState(stepIds);
+  const state = useOnboardingState(isWebApp ? "web" : "desktop");
   const { updateSettings } = useUpdateSettings();
   const navigate = useNavigate();
   const openAddProjectRef = useRef(false);
@@ -88,6 +84,8 @@ function OnboardingRouteView() {
       progressPercent={state.progressPercent}
       isFirst={state.isFirst}
       isLast={state.isLast}
+      // The "where" step is a real decision: no default, so Continue waits for it.
+      canContinue={state.stepId !== "web-where" || state.workLocation !== null}
       {...continueLabelProps}
       onBack={state.back}
       onContinue={handleContinue}
@@ -101,6 +99,9 @@ function OnboardingRouteView() {
       {state.stepId === "unollm" && <UnoLlmStep />}
       {state.stepId === "rules" && <RulesStep />}
       {state.stepId === "web-welcome" && <WebWelcomeStep />}
+      {state.stepId === "web-where" && (
+        <WebWhereStep workLocation={state.workLocation} onSelect={state.setWorkLocation} />
+      )}
       {state.stepId === "web-machine" && <WebMachineStep />}
       {state.stepId === "web-harness" && <WebHarnessesStep />}
       {state.stepId === "web-first-project" && (

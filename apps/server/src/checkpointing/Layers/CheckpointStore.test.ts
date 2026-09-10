@@ -6,7 +6,7 @@ import { Effect, FileSystem, Layer, PlatformError, Scope } from "effect";
 import { describe, expect } from "vitest";
 
 import { checkpointRefForThreadTurn } from "../Utils.ts";
-import { CheckpointStoreLive } from "./CheckpointStore.ts";
+import { CHECKPOINT_TEMP_SUBDIR, CheckpointStoreLive } from "./CheckpointStore.ts";
 import { CheckpointStore } from "../Services/CheckpointStore.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
@@ -90,6 +90,31 @@ function buildLargeText(lineCount = 5_000): string {
 }
 
 it.layer(TestLayer)("CheckpointStoreLive", (it) => {
+  describe("captureCheckpoint", () => {
+    it.effect("uses scratch space under the daemon temp dir and cleans it up", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const config = yield* ServerConfig;
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const checkpointStore = yield* CheckpointStore;
+        const checkpointRef = checkpointRefForThreadTurn(
+          ThreadId.make("thread-checkpoint-store-tempdir"),
+          0,
+        );
+
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef });
+
+        const checkpointTempRoot = path.join(config.tempDir, CHECKPOINT_TEMP_SUBDIR);
+        expect(checkpointTempRoot.startsWith(config.baseDir)).toBe(true);
+        expect(yield* fileSystem.exists(checkpointTempRoot)).toBe(true);
+        // The per-capture directory (and its git index) must not survive the capture.
+        expect(yield* fileSystem.readDirectory(checkpointTempRoot)).toEqual([]);
+        expect(yield* checkpointStore.hasCheckpointRef({ cwd: tmp, checkpointRef })).toBe(true);
+      }),
+    );
+  });
+
   describe("diffCheckpoints", () => {
     it.effect("returns full oversized checkpoint diffs without truncation", () =>
       Effect.gen(function* () {

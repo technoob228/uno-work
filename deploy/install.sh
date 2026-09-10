@@ -79,6 +79,9 @@ chmod 0755 "${INSTALL_DIR}/bin/uno-work"
 ln -sf "${INSTALL_DIR}/bin/uno-work" /usr/local/bin/uno-work
 
 install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${STATE_DIR}" "${WORKSPACE_DIR}"
+# Scratch dir the unit points TMPDIR at (see uno-work.service): /tmp on a box is
+# a 1 GB tmpfs and checkpoints of a large project overflow it.
+install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${STATE_DIR}/tmp"
 install -d -m 0755 "${CONFIG_DIR}"
 
 if [ ! -f "${CONFIG_DIR}/uno-work.env" ]; then

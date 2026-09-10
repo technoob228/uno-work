@@ -13,6 +13,12 @@ EnvironmentFile=/etc/uno-work/uno-work.env
 # Stdout уходит в journald: стартовый owner pairing-токен там не место.
 # Токены чеканятся по требованию (`uno-work auth pairing create`).
 Environment=T3CODE_STARTUP_PAIRING_OUTPUT=0
+# /tmp on a box is a 1 GB tmpfs (and PrivateTmp below makes it per-service).
+# Checkpoint git indexes and harness scratch files for a large project filled
+# it up ("Out of diskspace"), so every TMPDIR consumer — the daemon and the
+# harnesses it spawns — writes to the state disk instead. install.sh creates
+# the directory owned by the service user.
+Environment=TMPDIR=/var/lib/uno-work/tmp
 ExecStart=/opt/uno-work/bin/uno-work serve \
   --mode web \
   --host ${UNO_WORK_HOST} \

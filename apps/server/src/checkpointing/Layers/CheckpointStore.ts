@@ -15,16 +15,41 @@ import { Effect, Layer, FileSystem, Path } from "effect";
 
 import { CheckpointInvariantError } from "../Errors.ts";
 import { VcsProcessExitError } from "@t3tools/contracts";
+import { ServerConfig } from "../../config.ts";
 import { VcsDriverRegistry } from "../../vcs/VcsDriverRegistry.ts";
 import { CheckpointStore, type CheckpointStoreShape } from "../Services/CheckpointStore.ts";
 import { CheckpointRef } from "@t3tools/contracts";
 
 const CHECKPOINT_DIFF_MAX_OUTPUT_BYTES = 10_000_000;
 
+/** Subdirectory of the daemon temp dir that holds per-capture scratch dirs. */
+export const CHECKPOINT_TEMP_SUBDIR = "checkpoints";
+
 const makeCheckpointStore = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const config = yield* ServerConfig;
   const vcsRegistry = yield* VcsDriverRegistry;
+
+  // Captures build a throwaway git index for the whole project, which can be
+  // large. Keep it on the state disk next to the daemon data; only if that
+  // directory cannot be used (unwritable, missing mount, ...) fall back to the
+  // OS temp dir so checkpoints keep working. Whichever root is chosen, the
+  // per-capture directory is removed after the capture (see acquireUseRelease).
+  const checkpointTempRoot = path.join(config.tempDir, CHECKPOINT_TEMP_SUBDIR);
+  const makeCheckpointTempDirectory = fs
+    .makeDirectory(checkpointTempRoot, { recursive: true })
+    .pipe(
+      Effect.andThen(
+        fs.makeTempDirectory({ directory: checkpointTempRoot, prefix: "checkpoint-" }),
+      ),
+      Effect.catch((error) =>
+        Effect.logWarning("checkpoint temp dir unavailable, falling back to OS temp dir", {
+          checkpointTempRoot,
+          error: error.message,
+        }).pipe(Effect.andThen(fs.makeTempDirectory({ prefix: "t3-fs-checkpoint-" }))),
+      ),
+    );
   const vcs = {
     execute: (input: {
       readonly operation: string;
@@ -107,7 +132,7 @@ const makeCheckpointStore = Effect.gen(function* () {
     const operation = "CheckpointStore.captureCheckpoint";
 
     yield* Effect.acquireUseRelease(
-      fs.makeTempDirectory({ prefix: "t3-fs-checkpoint-" }),
+      makeCheckpointTempDirectory,
       Effect.fn("captureCheckpoint.withTempDirectory")(function* (tempDir) {
         const tempIndexPath = path.join(tempDir, `index-${randomUUID()}`);
         const commitEnv: NodeJS.ProcessEnv = {
