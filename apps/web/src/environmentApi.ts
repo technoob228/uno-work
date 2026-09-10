@@ -75,6 +75,13 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       setInstructions: rpcClient.workspace.setInstructions,
       applyInstructions: rpcClient.workspace.applyInstructions,
     },
+    providerSetup: {
+      installStart: rpcClient.providerSetup.installStart,
+      installStatus: rpcClient.providerSetup.installStatus,
+      authStart: rpcClient.providerSetup.authStart,
+      authStatus: rpcClient.providerSetup.authStatus,
+      authSubmitCode: rpcClient.providerSetup.authSubmitCode,
+    },
     unoCloud: {
       getState: (input) => rpcClient.unoCloud.getState(input),
       boxPower: rpcClient.unoCloud.boxPower,

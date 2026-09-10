@@ -38,6 +38,8 @@ import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { ProviderSetupAction } from "../harness/ProviderSetupAction";
+import { useHarnessSetup } from "../harness/useHarnessSetup";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
@@ -83,6 +85,7 @@ export function EnvironmentProvidersPanel({
   const providers = useEnvironmentProviders(environmentId);
   const { updateSettings, canMutate, mutationBlockedReason } =
     useUpdateEnvironmentSettings(environmentId);
+  const harnessSetup = useHarnessSetup(environmentId);
   const clientSettings = useSettings();
   const { updateSettings: updateClientSettings } = useUpdateSettings();
 
@@ -372,6 +375,17 @@ export function EnvironmentProvidersPanel({
               }
               onUpdate={(next) => updateProviderInstance(row, next)}
               onDelete={row.isDefault ? undefined : () => deleteProviderInstance(row.instanceId)}
+              setupAction={
+                row.isDefault ? (
+                  <ProviderSetupAction
+                    driver={row.driver}
+                    provider={liveProvider}
+                    providersLoaded={providers.length > 0}
+                    setup={harnessSetup}
+                    enabled={canMutate}
+                  />
+                ) : null
+              }
               headerAction={
                 row.isDefault && row.isDirty ? (
                   <SettingResetButton

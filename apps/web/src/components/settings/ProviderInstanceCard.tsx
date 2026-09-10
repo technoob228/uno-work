@@ -399,6 +399,12 @@ interface ProviderInstanceCardProps {
    * omit it.
    */
   readonly headerAction?: ReactNode | undefined;
+  /**
+   * Optional call-to-action rendered next to the enable switch — used by the
+   * providers panel to offer "Install" / "Sign in" for harnesses that are
+   * missing or signed out on that machine.
+   */
+  readonly setupAction?: ReactNode | undefined;
   readonly hiddenModels: ReadonlyArray<string>;
   readonly favoriteModels: ReadonlyArray<string>;
   readonly modelOrder: ReadonlyArray<string>;
@@ -441,6 +447,7 @@ export function ProviderInstanceCard({
   onUpdate,
   onDelete,
   headerAction,
+  setupAction,
   hiddenModels,
   favoriteModels,
   modelOrder,
@@ -628,6 +635,7 @@ export function ProviderInstanceCard({
             </p>
           </div>
           <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+            {setupAction}
             <Button
               size="sm"
               variant="ghost"

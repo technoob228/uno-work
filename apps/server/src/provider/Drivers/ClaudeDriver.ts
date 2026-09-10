@@ -131,9 +131,21 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       });
       const capabilitiesCacheKey = yield* makeClaudeCapabilitiesCacheKey(effectiveConfig);
 
+      // A probe that could not verify auth (typically: not signed in yet) is
+      // not worth caching for the full TTL — the user may sign in from the
+      // UI moments later and the explicit refresh that follows must see it.
+      const resolveCapabilities = () =>
+        Cache.get(capabilitiesProbeCache, capabilitiesCacheKey).pipe(
+          Effect.tap((capabilities) =>
+            capabilities === undefined
+              ? Cache.invalidate(capabilitiesProbeCache, capabilitiesCacheKey)
+              : Effect.void,
+          ),
+        );
+
       const checkProvider = checkClaudeProviderStatus(
         effectiveConfig,
-        () => Cache.get(capabilitiesProbeCache, capabilitiesCacheKey),
+        resolveCapabilities,
         processEnv,
       ).pipe(
         Effect.map(stampIdentity),

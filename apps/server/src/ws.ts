@@ -66,6 +66,7 @@ import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths.ts";
 import { WorkspaceService } from "./workspaceRegistry/WorkspaceService.ts";
 import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
+import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
 import {
   GENERATED_INSTRUCTIONS_RELATIVE_PATH,
   WORKSPACE_INSTRUCTIONS_SCOPE,
@@ -207,6 +208,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const sessions = yield* SessionCredentialService;
       const workspaceRegistry = yield* WorkspaceService;
       const unoCloud = yield* UnoCloudService;
+      const harnessSetup = yield* HarnessSetup;
       const serverCommandId = (tag: string) =>
         CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
 
@@ -1080,9 +1082,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         [WS_METHODS.vaultUpsert]: (input) =>
           observeRpcEffect(
             WS_METHODS.vaultUpsert,
-            credentialsVault
-              .upsert(input)
-              .pipe(Effect.tap(() => pushVaultToAccountInBackground)),
+            credentialsVault.upsert(input).pipe(Effect.tap(() => pushVaultToAccountInBackground)),
             { "rpc.aggregate": "vault" },
           ),
         [WS_METHODS.vaultDelete]: ({ id }) =>
@@ -1600,6 +1600,26 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             }),
             { "rpc.aggregate": "auth" },
           ),
+        [WS_METHODS.providerInstallStart]: (input) =>
+          observeRpcEffect(WS_METHODS.providerInstallStart, harnessSetup.installStart(input), {
+            "rpc.aggregate": "provider-setup",
+          }),
+        [WS_METHODS.providerInstallStatus]: (input) =>
+          observeRpcEffect(WS_METHODS.providerInstallStatus, harnessSetup.installStatus(input), {
+            "rpc.aggregate": "provider-setup",
+          }),
+        [WS_METHODS.providerAuthStart]: (input) =>
+          observeRpcEffect(WS_METHODS.providerAuthStart, harnessSetup.authStart(input), {
+            "rpc.aggregate": "provider-setup",
+          }),
+        [WS_METHODS.providerAuthStatus]: (input) =>
+          observeRpcEffect(WS_METHODS.providerAuthStatus, harnessSetup.authStatus(input), {
+            "rpc.aggregate": "provider-setup",
+          }),
+        [WS_METHODS.providerAuthSubmitCode]: (input) =>
+          observeRpcEffect(WS_METHODS.providerAuthSubmitCode, harnessSetup.authSubmitCode(input), {
+            "rpc.aggregate": "provider-setup",
+          }),
         [WS_METHODS.subscribeBrowserBridge]: (_input) =>
           observeRpcStreamEffect(
             WS_METHODS.subscribeBrowserBridge,
