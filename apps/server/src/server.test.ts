@@ -1259,7 +1259,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           fetch(wsTokenUrl, {
             method: "OPTIONS",
             headers: {
-              origin: "http://192.168.86.35:3773",
+              origin: "http://127.0.0.1:3773",
               "access-control-request-method": "POST",
               "access-control-request-headers": "authorization",
             },
@@ -1267,7 +1267,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         );
 
         assert.equal(response.status, 204);
-        assert.equal(response.headers.get("access-control-allow-origin"), "*");
+        assert.equal(
+          response.headers.get("access-control-allow-origin"),
+          "http://127.0.0.1:3773",
+        );
         assert.deepEqual(splitHeaderTokens(response.headers.get("access-control-allow-methods")), [
           "GET",
           "OPTIONS",
@@ -1291,7 +1294,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         fetch(wsTokenUrl, {
           method: "POST",
           headers: {
-            origin: "http://192.168.86.35:3773",
+            origin: "http://127.0.0.1:3773",
           },
         }),
       );
@@ -1300,7 +1303,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       };
 
       assert.equal(response.status, 401);
-      assert.equal(response.headers.get("access-control-allow-origin"), "*");
+      assert.equal(response.headers.get("access-control-allow-origin"), "http://127.0.0.1:3773");
       assert.equal(body.error, "Authentication required.");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -1893,7 +1896,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
 
       assert.equal(response.status, 204);
-      assert.equal(response.headers["access-control-allow-origin"], "*");
+      assert.equal(response.headers["access-control-allow-origin"], "http://localhost:5733");
       assert.deepEqual(localTraceRecords, [
         {
           type: "otlp-span",
@@ -1958,7 +1961,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       assert.equal(response.status, 204);
-      assert.equal(response.headers.get("access-control-allow-origin"), "*");
+      assert.equal(response.headers.get("access-control-allow-origin"), "http://localhost:5733");
       assert.deepEqual(splitHeaderTokens(response.headers.get("access-control-allow-methods")), [
         "GET",
         "OPTIONS",

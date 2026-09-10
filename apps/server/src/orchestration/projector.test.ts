@@ -90,6 +90,7 @@ describe("orchestration projector", () => {
         updatedAt: now,
         archivedAt: null,
         deletedAt: null,
+        pinnedAt: null,
         messages: [],
         proposedPlans: [],
         activities: [],
