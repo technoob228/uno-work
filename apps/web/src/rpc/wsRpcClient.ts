@@ -189,6 +189,13 @@ export interface WsRpcClient {
     readonly setInstructions: RpcUnaryMethod<typeof WS_METHODS.workspaceSetInstructions>;
     readonly applyInstructions: RpcUnaryMethod<typeof WS_METHODS.workspaceApplyInstructions>;
   };
+  readonly providerSetup: {
+    readonly installStart: RpcUnaryMethod<typeof WS_METHODS.providerInstallStart>;
+    readonly installStatus: RpcUnaryMethod<typeof WS_METHODS.providerInstallStatus>;
+    readonly authStart: RpcUnaryMethod<typeof WS_METHODS.providerAuthStart>;
+    readonly authStatus: RpcUnaryMethod<typeof WS_METHODS.providerAuthStatus>;
+    readonly authSubmitCode: RpcUnaryMethod<typeof WS_METHODS.providerAuthSubmitCode>;
+  };
   readonly unoCloud: {
     readonly getState: (
       input?: RpcInput<typeof WS_METHODS.unoCloudGetState>,
@@ -422,6 +429,18 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.workspaceSetInstructions](input)),
       applyInstructions: (input) =>
         transport.request((client) => client[WS_METHODS.workspaceApplyInstructions](input)),
+    },
+    providerSetup: {
+      installStart: (input) =>
+        transport.request((client) => client[WS_METHODS.providerInstallStart](input)),
+      installStatus: (input) =>
+        transport.request((client) => client[WS_METHODS.providerInstallStatus](input)),
+      authStart: (input) =>
+        transport.request((client) => client[WS_METHODS.providerAuthStart](input)),
+      authStatus: (input) =>
+        transport.request((client) => client[WS_METHODS.providerAuthStatus](input)),
+      authSubmitCode: (input) =>
+        transport.request((client) => client[WS_METHODS.providerAuthSubmitCode](input)),
     },
     unoCloud: {
       getState: (input) =>

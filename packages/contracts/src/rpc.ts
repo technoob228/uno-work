@@ -81,6 +81,18 @@ import {
 } from "./plugins.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
+  ProviderAuthJobStatus,
+  ProviderAuthStartInput,
+  ProviderAuthStartResult,
+  ProviderAuthStatusInput,
+  ProviderAuthSubmitCodeInput,
+  ProviderInstallJobStatus,
+  ProviderInstallStartInput,
+  ProviderInstallStartResult,
+  ProviderInstallStatusInput,
+  ProviderSetupRpcError,
+} from "./providerSetup.ts";
+import {
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
@@ -251,6 +263,13 @@ export const WS_METHODS = {
   unoCloudGetState: "uno.cloud.getState",
   unoCloudBoxPower: "uno.cloud.boxPower",
   unoCloudConnectBox: "uno.cloud.connectBox",
+
+  // Provider setup: install a harness CLI / sign it in on this machine
+  providerInstallStart: "provider.install.start",
+  providerInstallStatus: "provider.install.status",
+  providerAuthStart: "provider.auth.start",
+  providerAuthStatus: "provider.auth.status",
+  providerAuthSubmitCode: "provider.auth.submitCode",
 
   // Streaming subscriptions
   subscribeFileChanges: "subscribeFileChanges",
@@ -1002,6 +1021,40 @@ export const WsUnoCloudConnectBoxRpc = Rpc.make(WS_METHODS.unoCloudConnectBox, {
   error: UnoCloudRpcError,
 });
 
+/* ------------------------------------------------------------------ *
+ * Provider setup (install + sign in)
+ * ------------------------------------------------------------------ */
+
+export const WsProviderInstallStartRpc = Rpc.make(WS_METHODS.providerInstallStart, {
+  payload: ProviderInstallStartInput,
+  success: ProviderInstallStartResult,
+  error: ProviderSetupRpcError,
+});
+
+export const WsProviderInstallStatusRpc = Rpc.make(WS_METHODS.providerInstallStatus, {
+  payload: ProviderInstallStatusInput,
+  success: ProviderInstallJobStatus,
+  error: ProviderSetupRpcError,
+});
+
+export const WsProviderAuthStartRpc = Rpc.make(WS_METHODS.providerAuthStart, {
+  payload: ProviderAuthStartInput,
+  success: ProviderAuthStartResult,
+  error: ProviderSetupRpcError,
+});
+
+export const WsProviderAuthStatusRpc = Rpc.make(WS_METHODS.providerAuthStatus, {
+  payload: ProviderAuthStatusInput,
+  success: ProviderAuthJobStatus,
+  error: ProviderSetupRpcError,
+});
+
+export const WsProviderAuthSubmitCodeRpc = Rpc.make(WS_METHODS.providerAuthSubmitCode, {
+  payload: ProviderAuthSubmitCodeInput,
+  success: ProviderAuthJobStatus,
+  error: ProviderSetupRpcError,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -1033,6 +1086,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoCloudGetStateRpc,
   WsUnoCloudBoxPowerRpc,
   WsUnoCloudConnectBoxRpc,
+  WsProviderInstallStartRpc,
+  WsProviderInstallStatusRpc,
+  WsProviderAuthStartRpc,
+  WsProviderAuthStatusRpc,
+  WsProviderAuthSubmitCodeRpc,
   WsServerListPluginsRpc,
   WsServerSetPluginEnabledRpc,
   WsPluginsSendToThreadRpc,

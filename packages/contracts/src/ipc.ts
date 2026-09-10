@@ -34,6 +34,17 @@ import type {
 } from "./project.ts";
 import type { ProviderInstanceId } from "./providerInstance.ts";
 import type {
+  ProviderAuthJobStatus,
+  ProviderAuthStartInput,
+  ProviderAuthStartResult,
+  ProviderAuthStatusInput,
+  ProviderAuthSubmitCodeInput,
+  ProviderInstallJobStatus,
+  ProviderInstallStartInput,
+  ProviderInstallStartResult,
+  ProviderInstallStatusInput,
+} from "./providerSetup.ts";
+import type {
   BrowserBridgeStreamEvent,
   ServerConfig,
   ServerProviderUpdatedPayload,
@@ -623,5 +634,13 @@ export interface EnvironmentApi {
     getState: (input?: UnoCloudGetStateInput) => Promise<UnoCloudState>;
     boxPower: (input: UnoCloudBoxPowerInput) => Promise<UnoCloudState>;
     connectBox: (input: UnoCloudConnectBoxInput) => Promise<UnoBoxConnection>;
+  };
+  /** Install a harness CLI or sign it in on this environment's machine. */
+  providerSetup: {
+    installStart: (input: ProviderInstallStartInput) => Promise<ProviderInstallStartResult>;
+    installStatus: (input: ProviderInstallStatusInput) => Promise<ProviderInstallJobStatus>;
+    authStart: (input: ProviderAuthStartInput) => Promise<ProviderAuthStartResult>;
+    authStatus: (input: ProviderAuthStatusInput) => Promise<ProviderAuthJobStatus>;
+    authSubmitCode: (input: ProviderAuthSubmitCodeInput) => Promise<ProviderAuthJobStatus>;
   };
 }

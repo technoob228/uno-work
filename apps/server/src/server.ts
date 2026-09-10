@@ -32,6 +32,7 @@ import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/Provi
 import { WorkspaceRegistryRepositoryLive } from "./persistence/Layers/WorkspaceRegistry.ts";
 import { WorkspaceServiceLive } from "./workspaceRegistry/WorkspaceService.ts";
 import { UnoCloudServiceLive } from "./workspaceRegistry/UnoCloudService.ts";
+import { HarnessSetupLive } from "./provider/setup/HarnessSetupService.ts";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
 import { ProviderEventLoggersLive } from "./provider/Layers/ProviderEventLoggers.ts";
 import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
@@ -322,6 +323,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       HealthCheck.layer,
       PluginRegistryLive,
       WorkspaceRegistryLayerLive,
+      // Install / sign-in jobs for harness CLIs; reads settings and re-probes
+      // through the provider registry, both provided further down this pipe.
+      HarnessSetupLive,
     ),
   ),
   Layer.provideMerge(PersistenceLayerLive),
