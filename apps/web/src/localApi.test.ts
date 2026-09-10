@@ -106,6 +106,30 @@ const rpcClientMock = {
   browser: {
     subscribeBridge: vi.fn(() => () => undefined),
   },
+  // `createEnvironmentApi` reads every method off these two aggregates while it
+  // builds the facade, so they have to exist even in tests that never call them.
+  workspace: {
+    getState: vi.fn(),
+    rename: vi.fn(),
+    syncMachines: vi.fn(),
+    updateMachine: vi.fn(),
+    removeMachine: vi.fn(),
+    setPolicy: vi.fn(),
+    upsertGrant: vi.fn(),
+    removeGrant: vi.fn(),
+    acquireClaim: vi.fn(),
+    releaseClaim: vi.fn(),
+    createRequest: vi.fn(),
+    decideRequest: vi.fn(),
+    getInstructions: vi.fn(),
+    setInstructions: vi.fn(),
+    applyInstructions: vi.fn(),
+  },
+  unoCloud: {
+    getState: vi.fn(),
+    boxPower: vi.fn(),
+    connectBox: vi.fn(),
+  },
 };
 
 vi.mock("./environments/runtime", () => ({
