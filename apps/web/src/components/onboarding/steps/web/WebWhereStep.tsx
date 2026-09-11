@@ -15,6 +15,8 @@ import { addSavedEnvironment } from "~/environments/runtime";
 import { useServerConfig } from "~/rpc/serverState";
 import { useStore } from "~/store";
 import { cn } from "~/lib/utils";
+import { plainExplanation } from "../../../../plainLanguage";
+import { Explain } from "../../../Explain";
 import { Button } from "../../../ui/button";
 import { Input } from "../../../ui/input";
 import { toastManager } from "../../../ui/toast";
@@ -144,7 +146,7 @@ function ConnectOwnMachine() {
       toastManager.add({
         type: "success",
         title: "Machine connected",
-        description: `${record.label} is now your active environment.`,
+        description: `${record.label} is now your active machine.`,
       });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not connect to that machine.");
@@ -158,17 +160,18 @@ function ConnectOwnMachine() {
       <div>
         <h3 className="flex items-center gap-2 text-sm font-semibold">
           <Link2 className="size-4 text-primary" />
-          Connect a machine you run the daemon on
+          Connect your own machine
         </h3>
         <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
           Any Debian/Ubuntu machine you can SSH into — a home server, a spare laptop, your own VPS.
-          Install the daemon there, mint a pairing link, paste it below.
+          Install the Uno Work background service (the daemon) there, create a pairing link, paste
+          it below.
         </p>
       </div>
 
       <ol className="flex flex-col gap-3 text-xs">
         <li className="flex flex-col gap-1.5">
-          <span className="font-semibold">1. Install the daemon (on that machine)</span>
+          <span className="font-semibold">1. Install the background service (on that machine)</span>
           <CommandLine command={DAEMON_INSTALL_COMMAND} label="install command" />
         </li>
         <li className="flex flex-col gap-1.5">
@@ -228,10 +231,16 @@ export function WebWhereStep({ workLocation, onSelect }: WebWhereStepProps) {
   return (
     <div className="flex flex-1 flex-col">
       <StepEyebrow>Where to work</StepEyebrow>
-      <StepTitle>Where do you want to work?</StepTitle>
+      <StepTitle>
+        <span className="inline-flex items-center gap-3">
+          Where do you want to work?
+          <Explain term="machine" technical className="size-6 [&_svg]:size-5" />
+        </span>
+      </StepTitle>
       <StepLead>
-        The browser is always the screen. Pick where your files live and where the agents run — you
-        can add the other one later from the environment switcher.
+        The browser is always the screen. Pick the machine —{" "}
+        {plainExplanation("machine").replace(/\.$/u, "").toLowerCase()} — and you can add the other
+        one later from the machine list in the sidebar.
       </StepLead>
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2">
@@ -257,7 +266,7 @@ export function WebWhereStep({ workLocation, onSelect }: WebWhereStepProps) {
         <ChoiceCard
           icon={<Laptop className="size-5" />}
           title="On my own computer"
-          description="The browser stays the screen, but files and agents live on a machine you own. Use the desktop app, or connect any machine you run the daemon on."
+          description="The browser stays the screen, but files and agents live on a machine you own. Use the desktop app, or connect any machine with the Uno Work background service on it."
           selected={workLocation === "local"}
           onSelect={() => onSelect("local")}
         />
@@ -272,8 +281,8 @@ export function WebWhereStep({ workLocation, onSelect }: WebWhereStepProps) {
                 Use the desktop app
               </h3>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                Uno Work for desktop is this same app with the daemon built in. Files, terminals and
-                agents stay on your computer; sign in with the same account.
+                Uno Work for desktop is this same app with the background service built in. Files,
+                terminals and agents stay on your computer; sign in with the same account.
               </p>
             </div>
             <Button

@@ -49,9 +49,9 @@ const KIND_ICON: Record<EnvironmentOption["kind"], typeof MonitorIcon> = {
 };
 
 const GROUP_LABELS: Record<EnvironmentOption["kind"], string> = {
-  local: "Local",
-  uno: "Uno VPS",
-  custom: "Custom",
+  local: "This computer",
+  uno: "Uno boxes",
+  custom: "Other machines",
 };
 
 const STATUS_DOT_CLASS: Record<EnvironmentConnectionState, string> = {
@@ -80,7 +80,7 @@ function formatSavedEnvironmentMeta(input: {
       return alias;
     }
     const fallback = input.httpBaseUrl.trim();
-    return fallback.length > 0 ? fallback : "Saved environment";
+    return fallback.length > 0 ? fallback : "Saved machine";
   }
 }
 
@@ -223,7 +223,7 @@ export function SidebarEnvSwitcher() {
               <button
                 type="button"
                 className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-left transition-colors hover:bg-accent"
-                aria-label="Switch environment"
+                aria-label="Switch machine"
               >
                 <span
                   aria-hidden="true"
@@ -235,10 +235,10 @@ export function SidebarEnvSwitcher() {
                 <CurrentIcon className="size-3.5 shrink-0 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-xs font-medium text-foreground">
-                    {current?.name ?? "No environment"}
+                    {current?.name ?? "No machine"}
                   </div>
                   <div className="truncate text-[10px] text-muted-foreground">
-                    {current?.meta ?? "Connect an environment"}
+                    {current?.meta ?? "Connect a machine"}
                   </div>
                 </div>
                 <ChevronsUpDownIcon className="size-3 shrink-0 text-muted-foreground" />
@@ -284,7 +284,7 @@ export function SidebarEnvSwitcher() {
             ))}
             {groups.length === 0 ? (
               <div className="px-2 py-2 text-xs text-muted-foreground">
-                No environments connected
+                No machines connected yet
               </div>
             ) : null}
             <div className="my-1 h-px bg-border" />
@@ -294,7 +294,7 @@ export function SidebarEnvSwitcher() {
               className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-primary transition-colors hover:bg-primary/8"
             >
               <PlusIcon className="size-3.5" />
-              <span>Add new environment</span>
+              <span>Add a machine</span>
             </button>
           </MenuPopup>
         </Menu>
@@ -303,8 +303,8 @@ export function SidebarEnvSwitcher() {
             type="button"
             className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
             disabled={isReconnectingCurrent}
-            title="Reconnect environment"
-            aria-label="Reconnect environment"
+            title="Reconnect machine"
+            aria-label="Reconnect machine"
             onClick={() => void reconnectCurrentEnvironment()}
           >
             <RefreshCwIcon className={cn("size-3.5", isReconnectingCurrent && "animate-spin")} />

@@ -18,11 +18,14 @@ export function useRelativeTimeTick(intervalMs = 1_000) {
 export function SettingsSection({
   title,
   icon,
+  titleAddon,
   headerAction,
   children,
 }: {
   title: string;
   icon?: ReactNode;
+  /** Rendered right after the title — typically an `<Explain />` for the section's concept. */
+  titleAddon?: ReactNode;
   headerAction?: ReactNode;
   children: ReactNode;
 }) {
@@ -33,6 +36,7 @@ export function SettingsSection({
           <span className="inline-block h-px w-3 bg-border" aria-hidden />
           {icon}
           {title}
+          {titleAddon}
         </h2>
         <div className="flex h-5 min-w-5 items-center justify-end">{headerAction}</div>
       </div>

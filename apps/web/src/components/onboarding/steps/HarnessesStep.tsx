@@ -5,6 +5,8 @@ import { ProviderDriverKind } from "@t3tools/contracts";
 
 import { useServerProviders } from "~/rpc/serverState";
 import { useDesktopUnoCodeInstallState } from "~/lib/desktopUnoCodeReactQuery";
+import { plainExplanation } from "../../../plainLanguage";
+import { Explain } from "../../Explain";
 import { Gemini, GithubCopilotIcon } from "../../Icons";
 import { Button } from "../../ui/button";
 import { toastManager } from "../../ui/toast";
@@ -45,11 +47,17 @@ export function HarnessesStep() {
   return (
     <div>
       <StepEyebrow>Bring your AI</StepEyebrow>
-      <StepTitle>Use the AI subscriptions you already have.</StepTitle>
+      <StepTitle>
+        <span className="inline-flex items-center gap-3">
+          Pick your agents
+          <Explain term="agent" technical className="size-6 [&_svg]:size-5" />
+        </span>
+      </StepTitle>
       <StepLead>
-        Uno Work auto-detects harnesses already installed and signed in on this computer. Anything
-        missing you can install right here — no terminal — and sign in with your own account or an
-        API key.
+        An agent is {plainExplanation("agent").replace(/\.$/u, "").toLowerCase()} — Claude, Codex,
+        Uno and others. Uno Work finds the ones already installed and signed in on this computer.
+        Anything missing you can install right here, no terminal, and sign in with your own account
+        or an API key.
       </StepLead>
 
       <div className="mt-6 max-w-2xl">
@@ -113,7 +121,7 @@ export function HarnessesStep() {
         </p>
       ) : null}
       <p className="mt-4 text-xs text-muted-foreground">
-        Switch between harnesses any time from the chat header — no lock-in.
+        Switch between agents any time from the model picker in a chat — no lock-in.
       </p>
     </div>
   );

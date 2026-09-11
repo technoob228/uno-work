@@ -65,7 +65,7 @@ const ENVIRONMENT_NAV_ITEMS: ReadonlyArray<{
   icon: ComponentType<{ className?: string }>;
 }> = [
   { label: "General", section: "general", icon: Settings2Icon },
-  { label: "Providers", section: "providers", icon: PlugIcon },
+  { label: "Agents", section: "providers", icon: PlugIcon },
   { label: "Assistants", section: "assistants", icon: BotIcon },
   { label: "Source Control", section: "source-control", icon: GitBranchIcon },
   { label: "Archive", section: "archived", icon: ArchiveIcon },
@@ -87,7 +87,9 @@ type FlatNavItem = {
 };
 const FLAT_APP_NAV_ITEMS: ReadonlyArray<FlatNavItem> = [
   { label: "Credentials", to: "/settings/vault", icon: KeyRoundIcon, flag: "vault" },
-  { label: "Workspace", to: "/settings/workspace", icon: LayersIcon, flag: "workspace" },
+  // The machines list is always on; the `workspace` flag now only gates the
+  // "Advanced sharing" fold inside the page.
+  { label: "My machines", to: "/settings/workspace", icon: LayersIcon },
   { label: "Extensions", to: "/settings/extensions", icon: PuzzleIcon, flag: "plugins" },
 ];
 
@@ -119,7 +121,7 @@ type WebNavItem =
 const WEB_NAV_ITEMS: ReadonlyArray<WebNavItem> = [
   { label: "General", icon: Settings2Icon, scope: "app", section: "general" },
   { label: "Account", icon: CircleUserIcon, scope: "environment", section: "general" },
-  { label: "Providers", icon: PlugIcon, scope: "environment", section: "providers" },
+  { label: "Agents", icon: PlugIcon, scope: "environment", section: "providers" },
   { label: "Assistants", icon: BotIcon, scope: "environment", section: "assistants" },
   { label: "Connections", icon: Link2Icon, scope: "app", section: "connections" },
   {

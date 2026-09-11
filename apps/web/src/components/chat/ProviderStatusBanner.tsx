@@ -25,9 +25,9 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
   const providerLabel = status.displayName?.trim() || formatProviderDriverKindLabel(status.driver);
   const defaultMessage =
     status.status === "error"
-      ? `${providerLabel} provider is unavailable.`
-      : `${providerLabel} provider has limited availability.`;
-  const title = `${providerLabel} provider status`;
+      ? `The ${providerLabel} agent is unavailable.`
+      : `The ${providerLabel} agent has limited availability.`;
+  const title = `${providerLabel} agent status`;
 
   return (
     <div className="pt-3 mx-auto max-w-3xl">

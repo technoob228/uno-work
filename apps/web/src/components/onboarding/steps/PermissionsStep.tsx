@@ -1,5 +1,8 @@
 import { Eye, Hand, Settings2 } from "lucide-react";
 
+import { permissionModeLabel } from "../../../plainLanguage";
+import { Explain } from "../../Explain";
+
 import {
   FeatureBullet,
   StepEyebrow,
@@ -14,7 +17,12 @@ export function PermissionsStep() {
     <TwoColumn>
       <div>
         <StepEyebrow>You're in control</StepEyebrow>
-        <StepTitle>You decide what the agent can do.</StepTitle>
+        <StepTitle>
+          <span className="inline-flex items-center gap-3">
+            You decide what the agent can do.
+            <Explain term="permissions" technical className="size-6 [&_svg]:size-5" />
+          </span>
+        </StepTitle>
         <StepLead>
           Every action the agent takes on your machine — reading files, editing them, running
           commands, accessing the internet — is something you can allow, deny, or be asked about.
@@ -28,8 +36,9 @@ export function PermissionsStep() {
             the task.
           </FeatureBullet>
           <FeatureBullet icon={<Settings2 className="size-3.5" />}>
-            <b>Tighten or loosen anytime</b> — ask the agent to configure the permission setup the
-            way you want in the given harness.
+            <b>Tighten or loosen anytime</b> — pick “{permissionModeLabel("approval-required")}”, “
+            {permissionModeLabel("auto-accept-edits")}” or “{permissionModeLabel("full-access")}” in
+            any chat, or ask the agent to set up finer rules.
           </FeatureBullet>
         </ul>
       </div>

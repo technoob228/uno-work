@@ -14,7 +14,7 @@ const RULES = [
   {
     n: 3,
     title: "Start with a project map",
-    body: "Ask the agent to scan the folder and write a short project description (e.g. AGENTS.md). Future sessions will be faster.",
+    body: "Ask the agent to scan the folder and write a short Instructions note (AGENTS.md) — it reads that note before every task, so future chats start faster.",
   },
   {
     n: 4,
@@ -23,13 +23,13 @@ const RULES = [
   },
   {
     n: 5,
-    title: "One task = one thread",
-    body: "Don't mix unrelated tasks in one chat. Start a new thread for a new goal — the agent stays focused.",
+    title: "One task = one chat",
+    body: "Don't mix unrelated tasks in one chat. Start a new chat for a new goal — the agent stays focused.",
   },
   {
     n: 6,
     title: "The agent uses your AI quota",
-    body: "Every message costs tokens against your harness or Uno LLM subscription. Bigger context = bigger cost.",
+    body: "Every message costs tokens against your agent's subscription or your Uno LLM balance. Bigger context = bigger cost.",
   },
 ];
 

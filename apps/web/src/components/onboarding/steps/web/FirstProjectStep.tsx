@@ -23,6 +23,8 @@ import { getPrimaryEnvironmentConnection } from "~/environments/runtime";
 import { useSettings } from "~/hooks/useSettings";
 import { useServerConfig, useServerProviders } from "~/rpc/serverState";
 import { newCommandId, newProjectId, cn } from "~/lib/utils";
+import { plainExplanation } from "../../../../plainLanguage";
+import { Explain } from "../../../Explain";
 import { Button } from "../../../ui/button";
 import { Input } from "../../../ui/input";
 import { StepEyebrow, StepLead, StepTitle } from "../stepShared";
@@ -176,7 +178,7 @@ export function FirstProjectStep({ onProjectReady }: FirstProjectStepProps) {
           </p>
         ) : null}
         <p className="text-sm text-muted-foreground">
-          Continue to open it and start your first thread.
+          Continue to open it and start your first chat.
         </p>
       </div>
     );
@@ -185,11 +187,16 @@ export function FirstProjectStep({ onProjectReady }: FirstProjectStepProps) {
   return (
     <div className="flex flex-1 flex-col">
       <StepEyebrow>First project</StepEyebrow>
-      <StepTitle>Put something on the machine</StepTitle>
+      <StepTitle>
+        <span className="inline-flex items-center gap-3">
+          Put something on the machine
+          <Explain term="project" className="size-6 [&_svg]:size-5" />
+        </span>
+      </StepTitle>
       <StepLead>
-        The agent works on files that live on {serverConfig?.environment.label ?? "your machine"}.
-        Bring an existing repository, upload a folder from this computer, or start with a small
-        guided project.
+        A project is {plainExplanation("project").replace(/\.$/u, "").toLowerCase()}, and it lives
+        on {serverConfig?.environment.label ?? "your machine"}. Bring an existing repository, upload
+        a folder from this computer, or start with a small guided project.
       </StepLead>
 
       {mode === null ? (

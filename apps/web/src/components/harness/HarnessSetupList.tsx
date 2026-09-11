@@ -12,6 +12,7 @@ import type { EnvironmentId, ProviderAuthDriver, ProviderDriverKind } from "@t3t
 import type { ServerProvider } from "@t3tools/contracts";
 
 import { cn } from "~/lib/utils";
+import { plainExplanation } from "../../plainLanguage";
 import { getDriverOption } from "../settings/providerDriverMeta";
 import { HarnessSignInDialog } from "./HarnessSignInDialog";
 import { SetupLogDetails } from "./SetupLogDetails";
@@ -126,8 +127,45 @@ export function HarnessSetupList({
   const [signInDriver, setSignInDriver] = useState<ProviderAuthDriver | null>(null);
   const providersLoaded = providers.length > 0;
 
+  // "No agents yet" only once the list has actually loaded: before that the
+  // rows say "Checking…" and a banner would contradict them.
+  const statusByDriver = HARNESS_ROW_DRIVERS.map((driver) => ({
+    driver,
+    status: resolveHarnessStatus({
+      provider: providers.find((candidate) => candidate.driver === driver),
+      providersLoaded,
+    }),
+  }));
+  const noAgentReady = providersLoaded && statusByDriver.every((row) => row.status !== "ready");
+  const firstInstallable = statusByDriver.find(
+    (row) =>
+      resolveHarnessAction({ driver: row.driver, status: row.status }) === "install" &&
+      !isJobActive(setup.installJobs[row.driver]),
+  );
+  const firstInstallableLabel = firstInstallable
+    ? (getDriverOption(firstInstallable.driver)?.label ?? String(firstInstallable.driver))
+    : null;
+
   return (
     <div className="grid gap-2">
+      {noAgentReady ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-border bg-muted/20 px-3 py-2.5">
+          <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">No agents set up yet.</span> An agent is{" "}
+            {plainExplanation("agent").replace(/\.$/u, "").toLowerCase()} — install one below and
+            sign in.
+          </div>
+          {firstInstallable && firstInstallableLabel ? (
+            <button
+              type="button"
+              onClick={() => void setup.startInstall(firstInstallable.driver)}
+              className="rounded-md bg-primary px-2.5 py-1 text-[11px] font-semibold text-primary-foreground hover:bg-primary/90"
+            >
+              Install {firstInstallableLabel}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {HARNESS_ROW_DRIVERS.map((driver) => {
         const option = getDriverOption(driver);
         const provider = providers.find((candidate) => candidate.driver === driver);

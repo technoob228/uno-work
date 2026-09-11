@@ -204,7 +204,7 @@ export const ChatHeader = memo(function ChatHeader({
             />
             <TooltipPopup side="bottom">
               {!terminalAvailable
-                ? "Terminal is unavailable until this thread has an active project."
+                ? "Terminal is unavailable until this chat has an active project."
                 : terminalToggleShortcutLabel
                   ? `Toggle terminal drawer (${terminalToggleShortcutLabel})`
                   : "Toggle terminal drawer"}

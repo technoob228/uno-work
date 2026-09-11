@@ -52,9 +52,9 @@ export const FEATURE_FLAGS = [
   },
   {
     key: "workspace",
-    label: "Workspaces",
+    label: "Advanced sharing between machines",
     description:
-      "The workspaces registry — machines, boxes and rules a person works across, read from the control plane. Turn off to hide the Workspace settings and its nav entry.",
+      "The shared machine list — grants, claims, requests and instruction layers that let one machine act on another. Turn off to hide the “Advanced sharing” section under Settings → My machines. The machines list itself stays.",
     default: true,
   },
   {
