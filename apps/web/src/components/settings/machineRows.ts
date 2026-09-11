@@ -49,6 +49,8 @@ export interface MachineRow {
 
 export interface MachineRowSources {
   readonly primaryEnvironmentId: EnvironmentId;
+  /** Label of the daemon serving this UI, for when it is in no other source yet. */
+  readonly primaryLabel?: string | undefined;
   readonly registryMachines: ReadonlyArray<WorkspaceMachine>;
   readonly savedEnvironments: ReadonlyArray<{
     readonly environmentId: EnvironmentId;
@@ -246,6 +248,33 @@ export function buildMachineRows(sources: MachineRowSources): ReadonlyArray<Mach
         environmentId: registryId,
         label: box.name,
         monogram: deriveMachineMonogram(box.name),
+        colorSlot: 0,
+        isMonogramOverridden: false,
+      },
+    });
+  }
+
+  // A fresh daemon is in no registry and no saved list, yet it is the one
+  // machine the person certainly has. Never let the list say "no machines"
+  // while the UI is literally being served by one.
+  if (!seenEnvironmentIds.has(sources.primaryEnvironmentId)) {
+    const label = sources.primaryLabel?.trim() || "This computer";
+    rows.push({
+      key: sources.primaryEnvironmentId,
+      environmentId: sources.primaryEnvironmentId,
+      label,
+      kind: "local",
+      status: "online",
+      detail: "The machine this app is running on",
+      projects: projectsFor(sources.primaryEnvironmentId),
+      box: null,
+      inRegistry: false,
+      isSavedConnection: false,
+      isPrimary: true,
+      identity: {
+        environmentId: sources.primaryEnvironmentId,
+        label,
+        monogram: deriveMachineMonogram(label),
         colorSlot: 0,
         isMonogramOverridden: false,
       },

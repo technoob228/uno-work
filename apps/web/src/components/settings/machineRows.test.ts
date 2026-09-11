@@ -6,6 +6,9 @@ import { boxStatus, buildMachineRows, formatRelativeTime, registryIdForBox } fro
 const NOW = Date.parse("2026-09-11T12:00:00.000Z");
 const primary = "env-local" as EnvironmentId;
 
+/** Rows other than the daemon serving the UI, which is always listed first. */
+const others = (rows: ReturnType<typeof buildMachineRows>) => rows.filter((row) => !row.isPrimary);
+
 function machine(
   overrides: Omit<Partial<WorkspaceMachine>, "environmentId"> & { environmentId: string },
 ): WorkspaceMachine {
@@ -101,8 +104,8 @@ describe("buildMachineRows", () => {
       projectNamesByEnvironmentId: new Map(),
       now: NOW,
     });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
+    expect(others(rows)).toHaveLength(1);
+    expect(others(rows)[0]).toMatchObject({
       kind: "uno_box",
       status: "sleeping",
       box: sleeping,
@@ -124,8 +127,8 @@ describe("buildMachineRows", () => {
       projectNamesByEnvironmentId: new Map([["env-devbox", ["site", "api"]]]),
       now: NOW,
     });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
+    expect(others(rows)).toHaveLength(1);
+    expect(others(rows)[0]).toMatchObject({
       environmentId: "env-devbox",
       kind: "uno_box",
       status: "online",
@@ -146,7 +149,7 @@ describe("buildMachineRows", () => {
       projectNamesByEnvironmentId: new Map(),
       now: NOW,
     });
-    expect(rows[0]).toMatchObject({
+    expect(others(rows)[0]).toMatchObject({
       environmentId: null,
       key: "box:9",
       kind: "uno_box",
@@ -154,7 +157,7 @@ describe("buildMachineRows", () => {
       inRegistry: false,
       isSavedConnection: false,
     });
-    expect(rows[0]?.identity.environmentId).toBe("uno-box-9");
+    expect(others(rows)[0]?.identity.environmentId).toBe("uno-box-9");
   });
 
   it("describes a connection in progress instead of calling it offline silently", () => {
@@ -169,7 +172,48 @@ describe("buildMachineRows", () => {
       projectNamesByEnvironmentId: new Map(),
       now: NOW,
     });
-    expect(rows[0]).toMatchObject({ status: "offline", detail: "Reconnecting…", kind: "ssh" });
+    expect(others(rows)[0]).toMatchObject({
+      status: "offline",
+      detail: "Reconnecting…",
+      kind: "ssh",
+    });
+  });
+});
+
+describe("buildMachineRows — primary machine", () => {
+  it("always lists the daemon serving the UI, even before anything is registered", () => {
+    const rows = buildMachineRows({
+      primaryEnvironmentId: "env-primary" as EnvironmentId,
+      primaryLabel: "Mikhail's laptop",
+      registryMachines: [],
+      savedEnvironments: [],
+      connectionStateById: {},
+      boxes: [],
+      projectNamesByEnvironmentId: new Map([["env-primary", ["site"]]]),
+      now: Date.now(),
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      environmentId: "env-primary",
+      label: "Mikhail's laptop",
+      kind: "local",
+      status: "online",
+      isPrimary: true,
+      projects: ["site"],
+    });
+  });
+
+  it("falls back to a generic label when the server config is not hydrated yet", () => {
+    const rows = buildMachineRows({
+      primaryEnvironmentId: "env-primary" as EnvironmentId,
+      registryMachines: [],
+      savedEnvironments: [],
+      connectionStateById: {},
+      boxes: [],
+      projectNamesByEnvironmentId: new Map(),
+      now: Date.now(),
+    });
+    expect(rows[0]?.label).toBe("This computer");
   });
 });
 

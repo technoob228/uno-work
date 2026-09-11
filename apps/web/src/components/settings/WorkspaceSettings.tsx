@@ -38,6 +38,7 @@ import {
 import { useShallow } from "zustand/react/shallow";
 
 import { usePrimaryEnvironmentId } from "../../environments/primary";
+import { useServerConfig } from "../../rpc/serverState";
 import {
   removeSavedEnvironment,
   useSavedEnvironmentRegistryStore,
@@ -160,6 +161,7 @@ export function WorkspaceSettings() {
   // The primary daemon is the registry client: the panel describes one
   // workspace regardless of which machine's chat is on screen.
   const registryEnvironmentId = usePrimaryEnvironmentId();
+  const primaryLabel = useServerConfig()?.environment.label;
   const savedEnvironments = useSavedEnvironmentRegistryStore((state) => state.byId);
   const runtimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
   const now = useRelativeTimeTick(30_000);
@@ -244,6 +246,7 @@ export function WorkspaceSettings() {
       registryEnvironmentId
         ? buildMachineRows({
             primaryEnvironmentId: registryEnvironmentId,
+            primaryLabel,
             registryMachines: state?.machines ?? [],
             savedEnvironments: connectionCandidates,
             connectionStateById,
@@ -257,6 +260,7 @@ export function WorkspaceSettings() {
       connectionCandidates,
       connectionStateById,
       now,
+      primaryLabel,
       projectNamesByEnvironmentId,
       registryEnvironmentId,
       state,
