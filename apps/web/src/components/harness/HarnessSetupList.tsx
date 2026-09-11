@@ -115,6 +115,10 @@ export interface HarnessSetupListProps {
   readonly comingSoon?: ReadonlyArray<{ readonly label: string; readonly icon?: ReactNode }>;
 }
 
+function lowerFirst(text: string): string {
+  return text.length > 0 ? text[0]!.toLowerCase() + text.slice(1) : text;
+}
+
 export function HarnessSetupList({
   providers,
   environmentId,
@@ -152,8 +156,8 @@ export function HarnessSetupList({
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-border bg-muted/20 px-3 py-2.5">
           <div className="min-w-0 flex-1 text-xs text-muted-foreground">
             <span className="font-medium text-foreground">No agents set up yet.</span> An agent is{" "}
-            {plainExplanation("agent").replace(/\.$/u, "").toLowerCase()} — install one below and
-            sign in.
+            {lowerFirst(plainExplanation("agent").replace(/\.$/u, ""))} — install one below and sign
+            in.
           </div>
           {firstInstallable && firstInstallableLabel ? (
             <button

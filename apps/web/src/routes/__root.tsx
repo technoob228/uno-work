@@ -124,8 +124,20 @@ function RootRouteView() {
     };
   }, [pathname]);
 
+  // Pairing and onboarding render without the app shell, but they still need
+  // a live connection to the primary machine: onboarding shows the machine's
+  // label, probes and installs agents, and validates the Uno key over RPC.
+  // Without these bootstraps every step sat on "connecting…" forever.
   if (pathname === "/pair" || pathname === "/onboarding") {
-    return <Outlet />;
+    return (
+      <ToastProvider>
+        <AnchoredToastProvider>
+          {primaryEnvironmentAuthenticated ? <ServerStateBootstrap /> : null}
+          <EnvironmentConnectionManagerBootstrap />
+          <Outlet />
+        </AnchoredToastProvider>
+      </ToastProvider>
+    );
   }
 
   if (authGateState.status !== "authenticated" && authGateState.status !== "hosted-static") {

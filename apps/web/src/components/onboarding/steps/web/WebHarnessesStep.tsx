@@ -4,6 +4,10 @@ import { Explain } from "../../../Explain";
 import { HarnessSetupList } from "../../../harness/HarnessSetupList";
 import { StepEyebrow, StepLead, StepTitle } from "../stepShared";
 
+function lowerFirst(text: string): string {
+  return text.length > 0 ? text[0]!.toLowerCase() + text.slice(1) : text;
+}
+
 export function WebHarnessesStep() {
   const providers = useServerProviders();
 
@@ -17,7 +21,7 @@ export function WebHarnessesStep() {
         </span>
       </StepTitle>
       <StepLead>
-        An agent is {plainExplanation("agent").replace(/\.$/u, "").toLowerCase()}. Uno, OpenCode and
+        An agent is {lowerFirst(plainExplanation("agent").replace(/\.$/u, ""))}. Uno, OpenCode and
         Hermes come with your machine, already signed in through the Uno gateway. Claude Code, Codex
         and Cursor run on your own subscriptions — install them here with one click, then sign in.
       </StepLead>
