@@ -7,139 +7,24 @@
  * currently selected in the sidebar and says which that is. Every row links
  * on with that environment in the path, so the settings page it opens can
  * never drift to another machine.
+ *
+ * The proposal cards and their polling live in `helper/ProposalsList` and are
+ * shared with the Advanced section of the Telegram settings page.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { BotIcon, PlusIcon, RefreshCwIcon, Settings2Icon } from "lucide-react";
-import type {
-  EnvironmentId,
-  ManagerActionProposal,
-  ManagerAssistantSummary,
-  ManagerProposalId,
-} from "@t3tools/contracts";
+import type { EnvironmentId, ManagerAssistantSummary } from "@t3tools/contracts";
 
 import { EnvironmentScopeBanner } from "../environments/scope/EnvironmentScopeBanner";
 import { useEnvironmentScope } from "../environments/scope/scopes";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { useStore } from "../store";
-import {
-  createAssistant,
-  listAssistants,
-  listManagerProposals,
-  resolveManagerProposal,
-} from "../lib/managerApi";
+import { createAssistant, listAssistants } from "../lib/managerApi";
+import { ProposalsList, useManagerProposals } from "./helper/ProposalsList";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { SidebarInset, SidebarTrigger } from "./ui/sidebar";
-
-const REFRESH_INTERVAL_MS = 10_000;
-
-function describeAction(proposal: ManagerActionProposal): {
-  title: string;
-  detail: string | null;
-} {
-  const action = proposal.action;
-  switch (action.kind) {
-    case "create-thread":
-      return {
-        title: `Create thread “${action.title}”`,
-        detail: action.prompt,
-      };
-    case "send-turn":
-      return {
-        title: `Send a turn to thread ${action.threadId.slice(0, 8)}…`,
-        detail: action.prompt,
-      };
-    case "interrupt-turn":
-      return {
-        title: `Interrupt the active turn of thread ${action.threadId.slice(0, 8)}…`,
-        detail: null,
-      };
-    case "respond-to-request":
-      return {
-        title: `Answer approval request (${action.decision}) in thread ${action.threadId.slice(0, 8)}…`,
-        detail: null,
-      };
-  }
-}
-
-function formatClock(iso: string): string {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime())
-    ? iso
-    : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function minutesUntil(iso: string): number {
-  return Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 60_000));
-}
-
-const STATUS_BADGE: Record<
-  ManagerActionProposal["status"],
-  "warning" | "success" | "error" | "outline"
-> = {
-  pending: "warning",
-  approved: "success",
-  denied: "error",
-  expired: "outline",
-};
-
-function ProposalCard({
-  proposal,
-  busy,
-  onResolve,
-}: {
-  proposal: ManagerActionProposal;
-  busy: boolean;
-  onResolve: (proposalId: ManagerProposalId, decision: "approved" | "denied") => void;
-}) {
-  const { title, detail } = describeAction(proposal);
-  const isPending = proposal.status === "pending";
-  return (
-    <div className="rounded-2xl border border-border/60 bg-card/40 px-4 py-3.5">
-      <div className="flex items-center gap-2">
-        <span className="truncate text-sm font-medium text-foreground">{title}</span>
-        <Badge variant={STATUS_BADGE[proposal.status]} className="shrink-0">
-          {proposal.status}
-        </Badge>
-        <span className="ml-auto shrink-0 text-[11px] text-muted-foreground/70">
-          {isPending
-            ? `expires in ${minutesUntil(proposal.expiresAt)} min`
-            : (proposal.resolvedBy ?? "")}
-        </span>
-      </div>
-      {detail ? (
-        <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-muted-foreground">
-          {detail}
-        </p>
-      ) : null}
-      <div className="mt-2.5 flex items-center gap-2">
-        <span className="text-[11px] text-muted-foreground/60">
-          filed {formatClock(proposal.requestedAt)}
-        </span>
-        {isPending ? (
-          <div className="ml-auto flex gap-2">
-            <Button
-              size="xs"
-              variant="outline"
-              disabled={busy}
-              onClick={() => onResolve(proposal.proposalId, "denied")}
-            >
-              Deny
-            </Button>
-            <Button
-              size="xs"
-              disabled={busy}
-              onClick={() => onResolve(proposal.proposalId, "approved")}
-            >
-              Approve
-            </Button>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
 
 export function ManagerPanel() {
   const navigate = useNavigate();
@@ -151,27 +36,33 @@ export function ManagerPanel() {
   const environmentId = activeEnvironmentId ?? primaryEnvironmentId;
   const scope = useEnvironmentScope(environmentId);
   const canMutate = scope?.availability.canMutate ?? false;
-  const [proposals, setProposals] = useState<ReadonlyArray<ManagerActionProposal> | null>(null);
   const [assistants, setAssistants] = useState<ReadonlyArray<ManagerAssistantSummary>>([]);
   const [newAssistantName, setNewAssistantName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [busyProposalId, setBusyProposalId] = useState<ManagerProposalId | null>(null);
 
-  const refresh = useCallback(async () => {
+  const proposals = useManagerProposals({ environmentId, canMutate, onError: setError });
+
+  const refreshAssistants = useCallback(async () => {
     if (environmentId === null) return;
     try {
-      const [proposalsResult, assistantsResult] = await Promise.all([
-        listManagerProposals({ environmentId }),
-        listAssistants({ environmentId }),
-      ]);
-      setProposals(proposalsResult.proposals);
-      setAssistants(assistantsResult.assistants);
+      const result = await listAssistants({ environmentId });
+      setAssistants(result.assistants);
       setError(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Failed to load assistant proposals.");
+      setError(cause instanceof Error ? cause.message : "Failed to load assistants.");
     }
   }, [environmentId]);
+
+  const refreshProposals = proposals.refresh;
+  const refresh = useCallback(() => {
+    void refreshAssistants();
+    void refreshProposals();
+  }, [refreshAssistants, refreshProposals]);
+
+  useEffect(() => {
+    void refreshAssistants();
+  }, [refreshAssistants]);
 
   const handleCreateAssistant = useCallback(() => {
     if (environmentId === null || !canMutate) return;
@@ -191,37 +82,6 @@ export function ManagerPanel() {
       .finally(() => setCreating(false));
   }, [canMutate, environmentId, newAssistantName, navigate]);
 
-  useEffect(() => {
-    void refresh();
-    const timer = setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [refresh]);
-
-  const handleResolve = useCallback(
-    (proposalId: ManagerProposalId, decision: "approved" | "denied") => {
-      if (environmentId === null || !canMutate) return;
-      setBusyProposalId(proposalId);
-      void resolveManagerProposal({ environmentId, proposalId, decision })
-        .catch((cause: unknown) => {
-          setError(cause instanceof Error ? cause.message : "Failed to resolve proposal.");
-        })
-        .finally(() => {
-          setBusyProposalId(null);
-          void refresh();
-        });
-    },
-    [canMutate, environmentId, refresh],
-  );
-
-  const pending = useMemo(
-    () => (proposals ?? []).filter((proposal) => proposal.status === "pending"),
-    [proposals],
-  );
-  const resolved = useMemo(
-    () => (proposals ?? []).filter((proposal) => proposal.status !== "pending").slice(0, 12),
-    [proposals],
-  );
-
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
@@ -230,9 +90,11 @@ export function ManagerPanel() {
             <SidebarTrigger className="size-7 shrink-0 md:hidden" />
             <BotIcon className="size-4 text-muted-foreground" />
             <span className="text-sm font-medium text-foreground">Assistant</span>
-            {pending.length > 0 ? <Badge variant="warning">{pending.length} pending</Badge> : null}
+            {proposals.pending.length > 0 ? (
+              <Badge variant="warning">{proposals.pending.length} pending</Badge>
+            ) : null}
             <div className="ml-auto flex items-center gap-1">
-              <Button size="xs" variant="ghost" onClick={() => void refresh()} aria-label="Refresh">
+              <Button size="xs" variant="ghost" onClick={refresh} aria-label="Refresh">
                 <RefreshCwIcon className="size-3.5" />
               </Button>
             </div>
@@ -313,43 +175,14 @@ export function ManagerPanel() {
               </div>
             </section>
 
-            <section className="space-y-2.5">
-              <h2 className="px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
-                Pending approvals
-              </h2>
-              {pending.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-border/70 px-4 py-6 text-center text-xs text-muted-foreground">
-                  {proposals === null
-                    ? "Loading…"
-                    : "No pending proposals. The assistant files a proposal here (and in Telegram) whenever it wants to create a thread, send a turn, or answer a permission request."}
-                </div>
-              ) : (
-                pending.map((proposal) => (
-                  <ProposalCard
-                    key={proposal.proposalId}
-                    proposal={proposal}
-                    busy={busyProposalId === proposal.proposalId}
-                    onResolve={handleResolve}
-                  />
-                ))
-              )}
-            </section>
-
-            {resolved.length > 0 ? (
-              <section className="space-y-2.5">
-                <h2 className="px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
-                  Recent
-                </h2>
-                {resolved.map((proposal) => (
-                  <ProposalCard
-                    key={proposal.proposalId}
-                    proposal={proposal}
-                    busy={false}
-                    onResolve={handleResolve}
-                  />
-                ))}
-              </section>
-            ) : null}
+            <ProposalsList
+              proposals={proposals.proposals}
+              pending={proposals.pending}
+              resolved={proposals.resolved}
+              busyProposalId={proposals.busyProposalId}
+              onResolve={proposals.resolve}
+              emptyText="No pending proposals. The assistant files a proposal here (and in Telegram) whenever it wants to create a thread, send a turn, or answer a permission request."
+            />
           </div>
         </div>
       </div>

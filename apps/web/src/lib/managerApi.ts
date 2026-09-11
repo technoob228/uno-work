@@ -26,7 +26,9 @@ import type {
   ManagerTelegramConnectorStatus,
   ManagerTokenId,
   ProjectId,
+  ThreadId,
 } from "@t3tools/contracts";
+import { ASSISTANT_PROJECT_ID } from "@t3tools/contracts";
 
 import { environmentFetchJson } from "~/environments/http/target";
 
@@ -282,15 +284,69 @@ export function setAssistantDefaultModel(
   });
 }
 
+/**
+ * The Helper is the one assistant an account talks to from Telegram. It is
+ * bootstrapped by the daemon on startup, so this normally just finds it; when
+ * an environment has none (fresh state directory, deleted project) it is
+ * created silently with defaults — the owner never sees "create assistant".
+ */
+export async function ensureHelper(input: EnvironmentScoped): Promise<{
+  readonly helper: ManagerAssistantSummary;
+  readonly assistants: ReadonlyArray<ManagerAssistantSummary>;
+}> {
+  const { assistants } = await listAssistants(input);
+  const existing =
+    assistants.find((assistant) => assistant.projectId === ASSISTANT_PROJECT_ID) ?? assistants[0];
+  if (existing !== undefined) return { helper: existing, assistants };
+  const created = await createAssistant({ environmentId: input.environmentId, name: "Helper" });
+  const helper = await getAssistant({
+    environmentId: input.environmentId,
+    projectId: created.projectId,
+  });
+  return { helper, assistants: [helper] };
+}
+
+interface SnapshotShells {
+  readonly projects: ReadonlyArray<{ readonly id: ProjectId; readonly title: string }>;
+  readonly threads: ReadonlyArray<{
+    readonly id: ThreadId;
+    readonly projectId: ProjectId;
+    readonly title: string;
+    readonly archivedAt: string | null;
+    readonly updatedAt: string;
+  }>;
+}
+
+const fetchSnapshotShells = (input: EnvironmentScoped): Promise<SnapshotShells> =>
+  environmentFetchJson<SnapshotShells>({
+    environmentId: input.environmentId,
+    pathname: "/api/orchestration/snapshot",
+  });
+
 /** Compact project list for the access picker (owner snapshot route). */
 export async function listProjectsForAccessPicker(
   input: EnvironmentScoped,
 ): Promise<ReadonlyArray<{ id: ProjectId; title: string }>> {
-  const snapshot = await environmentFetchJson<{
-    projects: ReadonlyArray<{ id: ProjectId; title: string }>;
-  }>({
-    environmentId: input.environmentId,
-    pathname: "/api/orchestration/snapshot",
-  });
+  const snapshot = await fetchSnapshotShells(input);
   return snapshot.projects.map((project) => ({ id: project.id, title: project.title }));
+}
+
+export interface BindingPickerThread {
+  readonly id: ThreadId;
+  readonly projectId: ProjectId;
+  readonly title: string;
+}
+
+/**
+ * Live (non-archived) threads of every project, newest first, for the
+ * "a specific chat" binding picker. One snapshot read serves all rows.
+ */
+export async function listThreadsForBindingPicker(
+  input: EnvironmentScoped,
+): Promise<ReadonlyArray<BindingPickerThread>> {
+  const snapshot = await fetchSnapshotShells(input);
+  return snapshot.threads
+    .filter((thread) => thread.archivedAt === null)
+    .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .map((thread) => ({ id: thread.id, projectId: thread.projectId, title: thread.title }));
 }
