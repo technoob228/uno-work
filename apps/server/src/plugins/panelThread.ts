@@ -42,12 +42,11 @@ import { Effect, Option } from "effect";
 import * as crypto from "node:crypto";
 
 import type { OrchestrationEngineShape } from "../orchestration/Services/OrchestrationEngine.ts";
+import { inheritProjectThreadModes } from "../orchestration/projectThreadModes.ts";
 import type { ProjectionSnapshotQueryShape } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import type { PluginRegistryShape } from "./PluginRegistry.ts";
 
 export const DEFAULT_PANEL_THREAD_TAG = "panel";
-/** Самый узкий режим — дефолт, когда наследовать не от чего. */
-const FALLBACK_RUNTIME_MODE: RuntimeMode = "approval-required";
 const PANEL_RUN_TRIGGER = "panel sendToThread";
 const PANEL_CHAT_RUN_TRIGGER = "panel chat";
 const MAX_TEXT_CHARS = 32_000;
@@ -201,7 +200,7 @@ function resolveOrCreatePanelThread(
       });
     }
 
-    const inherited = yield* inheritThreadModes(deps, input.projectId);
+    const inherited = yield* inheritProjectThreadModes(deps.projections, input.projectId);
     const threadId = ThreadId.make(crypto.randomUUID());
     yield* context.dispatch({
       type: "thread.create",
@@ -372,36 +371,4 @@ export function makePanelThreadResolver(deps: PanelThreadSenderDeps) {
         threadTag: context.threadTag,
       } satisfies PluginResolvePanelThreadResult;
     });
-}
-
-/**
- * У проекта нет собственного `runtimeMode` — режим живёт на треде. Поэтому
- * «унаследованный от проекта» = режим первого активного треда проекта; если
- * тредов нет, берём самый узкий режим, а не глобальный дефолт приложения.
- */
-function inheritThreadModes(
-  deps: PanelThreadSenderDeps,
-  projectId: ProjectId,
-): Effect.Effect<
-  { readonly runtimeMode: RuntimeMode; readonly interactionMode: ProviderInteractionMode },
-  never
-> {
-  return Effect.gen(function* () {
-    const firstThreadId = yield* deps.projections
-      .getFirstActiveThreadIdByProjectId(projectId)
-      .pipe(Effect.orElseSucceed(() => Option.none<ThreadId>()));
-    if (Option.isNone(firstThreadId)) {
-      return { runtimeMode: FALLBACK_RUNTIME_MODE, interactionMode: "default" as const };
-    }
-    const shell = yield* deps.projections
-      .getThreadShellById(firstThreadId.value)
-      .pipe(Effect.orElseSucceed(() => Option.none()));
-    if (Option.isNone(shell)) {
-      return { runtimeMode: FALLBACK_RUNTIME_MODE, interactionMode: "default" as const };
-    }
-    return {
-      runtimeMode: shell.value.runtimeMode,
-      interactionMode: shell.value.interactionMode,
-    };
-  });
 }

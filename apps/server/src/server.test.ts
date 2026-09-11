@@ -126,7 +126,9 @@ import { ManagerToolService } from "./manager/Services/ManagerToolService.ts";
 import { ManagerAuthError, ManagerTokenAuthService } from "./manager/Services/ManagerTokenAuth.ts";
 import { ManagerTelegramService } from "./manager/Layers/TelegramConnector.ts";
 import { ManagerAssistantService } from "./manager/Services/AssistantService.ts";
+import { ConnectorNotifyService } from "./manager/Services/ConnectorNotify.ts";
 import { ManagerCapabilityTokenRepository } from "./persistence/Services/ManagerCapabilityTokens.ts";
+import { ManagerConnectorBindingRepository } from "./persistence/Services/ManagerConnectorBindings.ts";
 import { ManagerConnectorRepository } from "./persistence/Services/ManagerConnectors.ts";
 
 const defaultProjectId = ProjectId.make("project-default");
@@ -621,6 +623,12 @@ const buildAppUnderTest = (options?: {
           }),
           Layer.mock(ManagerConnectorRepository)({
             get: () => Effect.succeed(Option.none()),
+          }),
+          Layer.mock(ManagerConnectorBindingRepository)({
+            listByConnectorProject: () => Effect.succeed([]),
+          }),
+          Layer.mock(ConnectorNotifyService)({
+            notify: () => Effect.succeed({ delivered: 0, chats: [] }),
           }),
           Layer.mock(ManagerTelegramService)({
             getRuntimeStatus: () =>

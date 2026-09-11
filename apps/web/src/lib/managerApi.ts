@@ -15,6 +15,9 @@ import type {
   ManagerActionProposal,
   ManagerAssistantSummary,
   ManagerCapabilityTokenDescriptor,
+  ManagerConnectorBindingKind,
+  ManagerConnectorBindingTarget,
+  ManagerConnectorBindingView,
   ManagerCreateTokenInput,
   ManagerCreateTokenResult,
   ManagerProposalDecision,
@@ -209,6 +212,50 @@ export function writeAssistantFile(
   return environmentFetchJson({
     environmentId,
     pathname: "/api/manager/assistant/file",
+    method: "POST",
+    body,
+  });
+}
+
+/** Chat → target bindings of the chats carried by this assistant's connectors. */
+export function listConnectorBindings(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<{ bindings: ReadonlyArray<ManagerConnectorBindingView> }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/connector-bindings",
+    searchParams: { projectId: input.projectId },
+  });
+}
+
+export function upsertConnectorBinding(
+  input: EnvironmentScoped & {
+    readonly kind: ManagerConnectorBindingKind;
+    readonly chatId: string;
+    readonly connectorProjectId: string;
+    readonly target: ManagerConnectorBindingTarget;
+    readonly notifyOnComplete?: boolean;
+  },
+): Promise<{ binding: ManagerConnectorBindingView | null }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/connector-bindings",
+    method: "POST",
+    body,
+  });
+}
+
+export function removeConnectorBinding(
+  input: EnvironmentScoped & {
+    readonly kind: ManagerConnectorBindingKind;
+    readonly chatId: string;
+  },
+): Promise<{ removed: boolean }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/connector-bindings/remove",
     method: "POST",
     body,
   });
