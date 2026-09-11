@@ -42,7 +42,6 @@ import {
   upsertConnectorBinding,
   type BindingPickerThread,
 } from "../../lib/managerApi";
-import { EnvironmentScopeBanner } from "../../environments/scope/EnvironmentScopeBanner";
 import { useEnvironmentScope } from "../../environments/scope/scopes";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "../settings/settingsLayout";
 import { Button } from "../ui/button";
@@ -417,7 +416,6 @@ export function TelegramPage({ environmentId }: { readonly environmentId: Enviro
 
   return (
     <SettingsPageContainer>
-      <EnvironmentScopeBanner scope={scope} environmentId={environmentId} />
       {error ? (
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
           {error}
