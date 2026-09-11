@@ -980,10 +980,12 @@ describe("GeneralSettingsPanel observability", () => {
       </AppAtomRegistryProvider>,
     );
 
-    await page.getByRole("button", { name: "Add environment", exact: true }).click();
-    const addEnvironmentDialog = page.getByRole("dialog", { name: "Add Environment" });
+    await page.getByRole("button", { name: "Add machine", exact: true }).click();
+    const addEnvironmentDialog = page.getByRole("dialog", { name: "Connect a machine" });
     await expect
-      .element(addEnvironmentDialog.getByRole("heading", { name: "Add Environment", exact: true }))
+      .element(
+        addEnvironmentDialog.getByRole("heading", { name: "Connect a machine", exact: true }),
+      )
       .toBeInTheDocument();
     await addEnvironmentDialog.getByRole("button", { name: /^SSH\b/ }).click();
     await vi.waitFor(() => {
@@ -997,7 +999,7 @@ describe("GeneralSettingsPanel observability", () => {
     await addEnvironmentDialog.getByLabelText("Username").fill("julius");
     await addEnvironmentDialog.getByLabelText("Port").fill("2222");
     await addEnvironmentDialog
-      .getByRole("button", { name: "Add environment", exact: true })
+      .getByRole("button", { name: "Add machine", exact: true })
       .first()
       .click();
 

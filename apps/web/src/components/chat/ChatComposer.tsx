@@ -84,7 +84,9 @@ import {
 } from "./composerProviderState";
 import { ContextWindowMeter } from "./ContextWindowMeter";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
+import { PERMISSION_MODES, PERMISSION_MODE_ORDER, plainLabel } from "../../plainLanguage";
 import { basenameOfPath } from "../../vscode-icons";
+import { Explain } from "../Explain";
 import { cn, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
 import { Button } from "../ui/button";
@@ -216,28 +218,40 @@ function InteractionModeIcon(props: { className?: string }) {
   return <BotIcon className={props.className} />;
 }
 
+// Labels and one-line consequences come from the plain-language vocabulary so
+// the composer, the compact menu and the settings pages all say the same thing.
 const runtimeModeConfig: Record<
   RuntimeMode,
   { label: string; description: string; icon: LucideIcon }
 > = {
   "approval-required": {
-    label: "Supervised",
-    description: "Ask before commands and file changes.",
+    label: PERMISSION_MODES["approval-required"].label,
+    description: PERMISSION_MODES["approval-required"].consequence,
     icon: LockIcon,
   },
   "auto-accept-edits": {
-    label: "Auto-accept edits",
-    description: "Auto-approve edits, ask before other actions.",
+    label: PERMISSION_MODES["auto-accept-edits"].label,
+    description: PERMISSION_MODES["auto-accept-edits"].consequence,
     icon: PenLineIcon,
   },
   "full-access": {
-    label: "Full access",
-    description: "Allow commands and edits without prompts.",
+    label: PERMISSION_MODES["full-access"].label,
+    description: PERMISSION_MODES["full-access"].consequence,
     icon: LockOpenIcon,
   },
 };
 
-const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[];
+const runtimeModeOptions = PERMISSION_MODE_ORDER;
+
+/** Header row inside the permissions dropdown: names the concept and explains it in place. */
+function PermissionsPopupHeader() {
+  return (
+    <div className="flex items-center gap-1.5 px-2 pt-1.5 pb-1 text-muted-foreground text-xs">
+      {plainLabel("permissions")}
+      <Explain term="permissions" technical />
+    </div>
+  );
+}
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const COMPOSER_FLOATING_LAYER_SELECTOR = [
@@ -332,13 +346,14 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             variant="ghost"
             size="sm"
             className="font-medium"
-            aria-label="Runtime mode"
+            aria-label="Permissions"
             title={runtimeModeOption.description}
           >
             <RuntimeModeIcon className="size-4" />
             <SelectValue>{runtimeModeOption.label}</SelectValue>
           </SelectTrigger>
           <SelectPopup alignItemWithTrigger={false}>
+            <PermissionsPopupHeader />
             {runtimeModeOptions.map((mode) => {
               const option = runtimeModeConfig[mode];
               const OptionIcon = option.icon;
@@ -416,7 +431,9 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
     <>
       {props.activeContextWindow ? <ContextWindowMeter usage={props.activeContextWindow} /> : null}
       {props.isPreparingWorktree ? (
-        <span className="text-muted-foreground/70 text-xs">Preparing worktree...</span>
+        <span className="text-muted-foreground/70 text-xs">
+          Preparing a separate copy of the project...
+        </span>
       ) : null}
       <ComposerPrimaryActions
         compact={props.compact}
@@ -1012,21 +1029,21 @@ export const ChatComposer = memo(
             type: "slash-command",
             command: "model",
             label: "/model",
-            description: "Switch response model for this thread",
+            description: "Switch the model for this chat",
           },
           {
             id: "slash:plan",
             type: "slash-command",
             command: "plan",
             label: "/plan",
-            description: "Switch this thread into plan mode",
+            description: "Switch this chat into plan mode",
           },
           {
             id: "slash:default",
             type: "slash-command",
             command: "default",
             label: "/default",
-            description: "Switch this thread back to normal build mode",
+            description: "Switch this chat back to normal build mode",
           },
         ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
         const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? []).map(
@@ -1036,7 +1053,7 @@ export const ChatComposer = memo(
             provider: selectedProvider,
             command,
             label: `/${command.name}`,
-            description: command.description ?? command.input?.hint ?? "Run provider command",
+            description: command.description ?? command.input?.hint ?? "Run agent command",
           }),
         );
         const query = composerTrigger.query.trim().toLowerCase();
@@ -1059,7 +1076,7 @@ export const ChatComposer = memo(
           description:
             skill.shortDescription ??
             skill.description ??
-            (skill.scope ? `${skill.scope} skill` : "Run provider skill"),
+            (skill.scope ? `${skill.scope} skill` : "Run agent skill"),
         }));
       }
       return [];
@@ -1134,7 +1151,7 @@ export const ChatComposer = memo(
         workspaceEntriesQuery.isFetching);
     const composerMenuEmptyState = useMemo(() => {
       if (composerTriggerKind === "skill") {
-        return "No skills found. Try / to browse provider commands.";
+        return "No skills found. Try / to browse agent commands.";
       }
       return composerTriggerKind === "path"
         ? "No matching files or folders."
@@ -2112,7 +2129,7 @@ export const ChatComposer = memo(
         toastManager.add({
           type: "warning",
           title: "Image support is unknown for this model.",
-          description: "The image will be sent, but the provider may ignore it.",
+          description: "The image will be sent, but the agent may ignore it.",
         });
       }
       if (pendingUserInputs.length > 0) {
@@ -2622,13 +2639,14 @@ export const ChatComposer = memo(
                   variant="ghost"
                   size="sm"
                   className="h-9 shrink-0 rounded-full px-3 text-muted-foreground hover:text-foreground"
-                  aria-label="Runtime mode"
+                  aria-label="Permissions"
                   title={runtimeModeOption.description}
                 >
                   <RuntimeModeIcon className="size-4" />
                   <SelectValue>{runtimeModeOption.label}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup alignItemWithTrigger={false}>
+                  <PermissionsPopupHeader />
                   {runtimeModeOptions.map((mode) => {
                     const option = runtimeModeConfig[mode];
                     const OptionIcon = option.icon;
@@ -2926,7 +2944,7 @@ export const ChatComposer = memo(
                 >
                   {hasKnownUnsupportedImageAttachments
                     ? "Selected model cannot read attached images. Choose an Images/Vision model or remove the images before sending."
-                    : "Image support for this model is unknown. The image will be sent, but the provider may ignore it."}
+                    : "Image support for this model is unknown. The image will be sent, but the agent may ignore it."}
                 </div>
               ) : null}
 

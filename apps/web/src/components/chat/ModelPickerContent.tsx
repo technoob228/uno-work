@@ -51,6 +51,7 @@ import {
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { TooltipProvider } from "../ui/tooltip";
+import { Explain } from "../Explain";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
 import {
@@ -939,40 +940,44 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           >
             {/* Search bar */}
             <div className="border-b px-3 py-2">
-              <ComboboxInput
-                ref={searchInputRef}
-                className="[&_input]:font-sans rounded-md"
-                inputClassName="border-0 shadow-none ring-0 focus-visible:ring-0"
-                placeholder="Search models..."
-                showTrigger={false}
-                startAddon={<SearchIcon className="size-4 shrink-0 text-muted-foreground/50" />}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    e.preventDefault();
+              <div className="flex items-center gap-1">
+                <ComboboxInput
+                  ref={searchInputRef}
+                  className="[&_input]:font-sans min-w-0 flex-1 rounded-md"
+                  inputClassName="border-0 shadow-none ring-0 focus-visible:ring-0"
+                  placeholder="Search models..."
+                  showTrigger={false}
+                  startAddon={<SearchIcon className="size-4 shrink-0 text-muted-foreground/50" />}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      props.onRequestClose?.();
+                      return;
+                    }
+                    if (e.key === "Enter" && highlightedModelKeyRef.current) {
+                      (
+                        e as typeof e & { preventBaseUIHandler?: () => void }
+                      ).preventBaseUIHandler?.();
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const { instanceId, slug } = splitInstanceModelKey(
+                        highlightedModelKeyRef.current,
+                      );
+                      handleModelSelect(slug, instanceId);
+                      return;
+                    }
                     e.stopPropagation();
-                    props.onRequestClose?.();
-                    return;
-                  }
-                  if (e.key === "Enter" && highlightedModelKeyRef.current) {
-                    (
-                      e as typeof e & { preventBaseUIHandler?: () => void }
-                    ).preventBaseUIHandler?.();
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const { instanceId, slug } = splitInstanceModelKey(
-                      highlightedModelKeyRef.current,
-                    );
-                    handleModelSelect(slug, instanceId);
-                    return;
-                  }
-                  e.stopPropagation();
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-                onTouchStart={(e) => e.stopPropagation()}
-                size="sm"
-              />
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  size="sm"
+                />
+                {/* "Model" explained in place: the picker is the first screen where the word appears. */}
+                <Explain term="model" className="mr-0.5" />
+              </div>
               {showUnoFilters ? (
                 <div className="mt-2 grid grid-cols-2 gap-1.5 text-[10px] sm:grid-cols-4">
                   <Select

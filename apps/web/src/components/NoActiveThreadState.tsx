@@ -1,4 +1,4 @@
-import { scopeThreadRef } from "@t3tools/client-runtime";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import { isAssistantProjectId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -6,9 +6,10 @@ import {
   FolderIcon,
   FolderPlusIcon,
   MessageSquareIcon,
+  MessageSquarePlusIcon,
   RefreshCwIcon,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { Button } from "./ui/button";
@@ -30,8 +31,10 @@ import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
+import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useReconnectEnvironment } from "../hooks/useReconnectEnvironment";
 import { sortThreads } from "../lib/threadSort";
+import { plainExplanation } from "../plainLanguage";
 import {
   selectProjectsForEnvironment,
   selectSidebarThreadsForEnvironment,
@@ -41,6 +44,12 @@ import { buildThreadRouteParams } from "../threadRoutes";
 import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
 import { formatElapsedAgoLabel } from "../timestampFormat";
+import { Explain } from "./Explain";
+
+/** "A folder the agent works in." → "a folder the agent works in" for mid-sentence use. */
+function asClause(sentence: string): string {
+  return sentence.replace(/\.$/u, "").replace(/^./u, (first) => first.toLowerCase());
+}
 
 export function NoActiveThreadState() {
   const navigate = useNavigate();
@@ -64,17 +73,19 @@ export function NoActiveThreadState() {
     (connectionState === "disconnected" || connectionState === "error");
   const isAutomaticallyReconnecting =
     connectionState === "connecting" || connectionState === "reconnecting";
-  const envName = runtime?.descriptor?.label ?? registryRecord?.label ?? "this environment";
+  const envName = runtime?.descriptor?.label ?? registryRecord?.label ?? "this machine";
   const cachedChatStatus = runtime?.lastSynchronizedAt
     ? `Cached chats were last synchronized ${formatElapsedAgoLabel(runtime.lastSynchronizedAt)}.`
     : "No fresh chat snapshot has been received yet.";
 
   const { reconnect, reconnectingId } = useReconnectEnvironment();
   const isReconnecting = selectedEnvId != null && reconnectingId === selectedEnvId;
+  const { handleNewThread } = useNewThreadHandler();
+  const [isStartingChat, setIsStartingChat] = useState(false);
 
   // The assistant's home project is created automatically and lives in its own
   // sidebar section — counting it here would tell a user with an empty machine
-  // to "pick a thread" instead of offering to add their first project.
+  // to "pick a chat" instead of offering to add their first project.
   const projectsInEnv = useStore(
     useShallow((store) =>
       selectProjectsForEnvironment(store, selectedEnvId).filter(
@@ -124,6 +135,21 @@ export function NoActiveThreadState() {
     });
   };
 
+  // "New chat" with no chats yet: open a composer in the only project, or in
+  // the first one — the user can move to another project from the sidebar.
+  const startFirstChat = async () => {
+    const project = singleProject ?? projectsInEnv[0];
+    if (!project || isStartingChat) return;
+    setIsStartingChat(true);
+    try {
+      await handleNewThread(scopeProjectRef(project.environmentId, project.id));
+    } catch {
+      // The handler already surfaces failures through the composer's own error path.
+    } finally {
+      setIsStartingChat(false);
+    }
+  };
+
   const renderThreadItem = (thread: SidebarThreadSummary) => (
     <MenuItem key={thread.id} onClick={() => openThread(thread)}>
       <MessageSquareIcon className="size-3.5 text-muted-foreground" />
@@ -147,13 +173,13 @@ export function NoActiveThreadState() {
         >
           {isElectron ? (
             <span className="text-xs text-muted-foreground/50 wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]">
-              No active thread
+              No chat open
             </span>
           ) : (
             <div className="flex items-center gap-2">
               <SidebarTrigger className="size-7 shrink-0 md:hidden" />
               <span className="text-sm font-medium text-foreground md:text-muted-foreground/60">
-                No active thread
+                No chat open
               </span>
             </div>
           )}
@@ -166,14 +192,14 @@ export function NoActiveThreadState() {
                 <EmptyHeader className="max-w-none">
                   <EmptyTitle className="text-foreground text-xl">
                     {isAutomaticallyReconnecting
-                      ? "Synchronizing environment"
-                      : "Environment disconnected"}
+                      ? "Reconnecting to machine"
+                      : "Machine disconnected"}
                   </EmptyTitle>
                   <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
                     <span className="font-medium text-foreground">&ldquo;{envName}&rdquo;</span>{" "}
                     {isAutomaticallyReconnecting
-                      ? "is reconnecting and verifying its current chat state."
-                      : "must reconnect before its threads can be trusted."}{" "}
+                      ? "is reconnecting and checking its current chats."
+                      : "must reconnect before its chats can be trusted."}{" "}
                     {cachedChatStatus}
                   </EmptyDescription>
                 </EmptyHeader>
@@ -191,7 +217,7 @@ export function NoActiveThreadState() {
                         )}
                       />
                       {isReconnecting || isAutomaticallyReconnecting
-                        ? "Synchronizing..."
+                        ? "Reconnecting..."
                         : "Reconnect"}
                     </Button>
                   </EmptyContent>
@@ -200,13 +226,14 @@ export function NoActiveThreadState() {
             ) : projectsInEnv.length === 0 ? (
               <>
                 <EmptyHeader className="max-w-none">
-                  <EmptyTitle className="text-foreground text-xl">
-                    No projects in this environment
+                  <EmptyTitle className="inline-flex items-center gap-2 text-foreground text-xl">
+                    No projects yet
+                    <Explain term="project" />
                   </EmptyTitle>
                   <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-                    Add a project folder to{" "}
+                    A project is {asClause(plainExplanation("project"))}. Add one on{" "}
                     <span className="font-medium text-foreground">&ldquo;{envName}&rdquo;</span> to
-                    start a thread.
+                    start your first chat.
                   </EmptyDescription>
                 </EmptyHeader>
                 <EmptyContent className="mt-6">
@@ -216,26 +243,46 @@ export function NoActiveThreadState() {
                   </Button>
                 </EmptyContent>
               </>
+            ) : !hasActiveThreads ? (
+              <>
+                <EmptyHeader className="max-w-none">
+                  <EmptyTitle className="inline-flex items-center gap-2 text-foreground text-xl">
+                    No chats yet
+                    <Explain term="chat" technical />
+                  </EmptyTitle>
+                  <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
+                    A chat is {asClause(plainExplanation("chat"))}. Start one in{" "}
+                    <span className="font-medium text-foreground">
+                      {singleProject ? singleProject.name : (projectsInEnv[0]?.name ?? "a project")}
+                    </span>{" "}
+                    and tell the agent what you need.
+                  </EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent className="mt-6">
+                  <Button onClick={() => void startFirstChat()} size="sm" disabled={isStartingChat}>
+                    <MessageSquarePlusIcon className="size-4" />
+                    New chat
+                  </Button>
+                </EmptyContent>
+              </>
             ) : (
               <>
                 <EmptyHeader className="max-w-none">
                   <EmptyTitle className="text-foreground text-xl">
-                    Pick a thread to continue
+                    Pick a chat to continue
                   </EmptyTitle>
                   <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-                    Select an active thread to get started.
+                    Open one of your chats, or start a new one from the sidebar.
                   </EmptyDescription>
                 </EmptyHeader>
                 <EmptyContent className="mt-6">
-                  {!hasActiveThreads ? (
-                    <div className="text-sm text-muted-foreground">No active threads.</div>
-                  ) : singleProject ? (
+                  {singleProject ? (
                     <Menu>
                       <MenuTrigger
                         render={
                           <Button size="sm">
                             <MessageSquareIcon className="size-4" />
-                            Pick thread
+                            Pick a chat
                             <ChevronDownIcon className="size-3.5 opacity-70" />
                           </Button>
                         }
@@ -253,7 +300,7 @@ export function NoActiveThreadState() {
                         render={
                           <Button size="sm">
                             <MessageSquareIcon className="size-4" />
-                            Pick thread
+                            Pick a chat
                             <ChevronDownIcon className="size-3.5 opacity-70" />
                           </Button>
                         }

@@ -319,8 +319,8 @@ describe("CompactComposerControlsMenu", () => {
       expect(text).not.toContain("Mode");
       expect(text).not.toContain("Chat");
       expect(text).not.toContain("Plan");
-      expect(text).toContain("Access");
-      expect(text).toContain("Supervised");
+      expect(text).toContain("Permissions");
+      expect(text).toContain("Ask before changes");
       expect(text).toContain("Full access");
     });
 

@@ -1517,8 +1517,8 @@ async function waitForNewThreadShortcutLabel(): Promise<void> {
   await expect.element(newThreadButton).toBeInTheDocument();
   await newThreadButton.hover();
   const shortcutLabel = isMacPlatform(navigator.platform)
-    ? "New thread (⇧⌘O)"
-    : "New thread (Ctrl+Shift+O)";
+    ? "New chat (⇧⌘O)"
+    : "New chat (Ctrl+Shift+O)";
   await expect.element(page.getByText(shortcutLabel)).toBeInTheDocument();
 }
 
@@ -1849,7 +1849,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      await expect.element(page.getByText("No threads yet")).toBeInTheDocument();
+      await expect.element(page.getByText("No chats yet")).toBeInTheDocument();
     } finally {
       await mounted.cleanup();
     }
@@ -3554,14 +3554,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
       const runtimeModeSelect = await waitForButtonByText("Full access");
       runtimeModeSelect.click();
 
-      expect((await waitForSelectItemContainingText("Supervised")).textContent).toContain(
-        "Ask before commands and file changes",
+      expect((await waitForSelectItemContainingText("Ask before changes")).textContent).toContain(
+        "asks you before editing files or running commands",
       );
 
-      const autoAcceptItem = await waitForSelectItemContainingText("Auto-accept edits");
-      expect(autoAcceptItem.textContent).toContain("Auto-approve edits");
+      const autoAcceptItem = await waitForSelectItemContainingText("Edit files freely");
+      expect(autoAcceptItem.textContent).toContain("edits files on its own");
       expect((await waitForSelectItemContainingText("Full access")).textContent).toContain(
-        "Allow commands and edits without prompts",
+        "runs commands without asking",
       );
     } finally {
       await mounted.cleanup();
@@ -4414,9 +4414,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await expect.element(palette).toBeInTheDocument();
       await expect
-        .element(palette.getByText("New thread in Project", { exact: true }))
+        .element(palette.getByText("New chat in Project", { exact: true }))
         .toBeInTheDocument();
-      await palette.getByText("New thread in Project", { exact: true }).click();
+      await palette.getByText("New chat in Project", { exact: true }).click();
 
       await waitForURL(
         mounted.router,
@@ -4468,7 +4468,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await page.getByPlaceholder("Search commands, projects, and threads...").fill("settings");
       await expect.element(palette.getByText("Open settings", { exact: true })).toBeInTheDocument();
       await expect
-        .element(palette.getByText("New thread in Project", { exact: true }))
+        .element(palette.getByText("New chat in Project", { exact: true }))
         .not.toBeInTheDocument();
     } finally {
       await mounted.cleanup();

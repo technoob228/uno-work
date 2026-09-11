@@ -34,6 +34,7 @@ import {
   useSavedEnvironmentRegistryStore,
 } from "../environments/runtime";
 import { AnimatedHeight } from "./AnimatedHeight";
+import { Explain } from "./Explain";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Dialog, DialogBackdrop, DialogPortal, DialogViewport } from "./ui/dialog";
@@ -41,12 +42,17 @@ import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
+type Step = "choice" | "uno" | "custom";
+
 interface AddEnvModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * Skip the "where should the agent run?" choice and open straight on one
+   * flow — "Add a box" or "Connect my computer" from the machines panel.
+   */
+  initialStep?: Step | undefined;
 }
-
-type Step = "choice" | "uno" | "custom";
 type SavedBackendMode = "remote" | "ssh";
 
 const ITEM_ROW_CLASSNAME = "border-t border-border/60 px-4 py-4 first:border-t-0 sm:px-5";
@@ -176,11 +182,18 @@ function formatDesktopSshConnectionError(error: unknown): string {
   return withoutTaggedErrorPrefix.trim() || fallback;
 }
 
-export function AddEnvModal({ open, onOpenChange }: AddEnvModalProps) {
-  const [step, setStep] = useState<Step>("choice");
+export function AddEnvModal({ open, onOpenChange, initialStep }: AddEnvModalProps) {
+  const startStep = initialStep ?? "choice";
+  const [step, setStep] = useState<Step>(startStep);
+
+  // A caller may reopen the same modal on a different flow; re-read the
+  // requested step every time it opens rather than only on first mount.
+  useEffect(() => {
+    if (open) setStep(startStep);
+  }, [open, startStep]);
 
   const handleOpenChange = (next: boolean) => {
-    if (!next) setStep("choice");
+    if (!next) setStep(startStep);
     onOpenChange(next);
   };
 
@@ -224,11 +237,12 @@ function ChoiceStep({ onClose, setStep }: { onClose: () => void; setStep: (step:
             <PlusIcon className="size-4" />
           </div>
           <div>
-            <DialogPrimitive.Title className="font-heading font-semibold text-lg leading-none">
-              Add a new environment
+            <DialogPrimitive.Title className="flex items-center gap-2 font-heading font-semibold text-lg leading-none">
+              Add a machine
+              <Explain term="machine" technical />
             </DialogPrimitive.Title>
             <DialogPrimitive.Description className="mt-1 text-muted-foreground text-sm">
-              Where should the agent run?
+              Where should the agent run? A machine is where your files and agents actually run.
             </DialogPrimitive.Description>
           </div>
         </div>
@@ -242,9 +256,10 @@ function ChoiceStep({ onClose, setStep }: { onClose: () => void; setStep: (step:
           <div className="grid size-9 place-items-center rounded-lg bg-primary/12 text-primary">
             <CloudIcon className="size-4" />
           </div>
-          <div className="font-medium text-sm">Uno VPS</div>
+          <div className="font-medium text-sm">Uno box</div>
           <div className="text-muted-foreground text-xs leading-relaxed">
-            Spin up a managed server in ~30s. Pre-installed harnesses, billed by Uno.
+            A ready-made machine in the Uno cloud, up in about 30 seconds. Agents pre-installed,
+            billed by Uno.
           </div>
           <Badge variant="outline" className="mt-auto self-start text-[10px]">
             Recommended
@@ -258,9 +273,10 @@ function ChoiceStep({ onClose, setStep }: { onClose: () => void; setStep: (step:
           <div className="grid size-9 place-items-center rounded-lg bg-muted text-muted-foreground">
             <GlobeIcon className="size-4" />
           </div>
-          <div className="font-medium text-sm">Remote link / SSH</div>
+          <div className="font-medium text-sm">My computer or another machine</div>
           <div className="text-muted-foreground text-xs leading-relaxed">
-            Pair an existing {APP_BASE_NAME} backend or connect through an SSH-managed tunnel.
+            Connect {APP_BASE_NAME} running on your own computer, or any machine you can reach over
+            SSH.
           </div>
           <Badge variant="outline" className="mt-auto self-start text-[10px] text-muted-foreground">
             Bring your own
@@ -364,7 +380,7 @@ function CustomEnvironmentStep({ onBack, onClose }: { onBack: () => void; onClos
         onClose();
         toastManager.add({
           type: "success",
-          title: "Environment connected",
+          title: "Machine connected",
           description: `${record.label} is ready over an SSH-managed tunnel.`,
         });
       } catch (error) {
@@ -458,8 +474,8 @@ function CustomEnvironmentStep({ onBack, onClose }: { onBack: () => void; onClos
         toastManager.add({
           type: "success",
           title: savedDesktopSshEnvironmentsByAlias[target.alias]
-            ? "Environment reconnected"
-            : "Environment connected",
+            ? "Machine reconnected"
+            : "Machine connected",
           description: `${record.label} is ready over an SSH-managed tunnel.`,
         });
       } catch (error) {
@@ -576,7 +592,7 @@ function CustomEnvironmentStep({ onBack, onClose }: { onBack: () => void; onClos
         onClick={() => void handleAddSavedBackend()}
       >
         <PlusIcon className="size-3.5" />
-        {isAddingSavedBackend ? "Adding..." : "Add environment"}
+        {isAddingSavedBackend ? "Adding..." : "Add machine"}
       </Button>
     </div>
   );
@@ -631,7 +647,7 @@ function CustomEnvironmentStep({ onBack, onClose }: { onBack: () => void; onClos
           onClick={() => void handleAddSavedBackend()}
         >
           <PlusIcon className="size-3.5" />
-          {isAddingSavedBackend ? "Adding..." : "Add environment"}
+          {isAddingSavedBackend ? "Adding..." : "Add machine"}
         </Button>
       </div>
       <div className="overflow-hidden rounded-lg border border-border/60">
@@ -680,11 +696,13 @@ function CustomEnvironmentStep({ onBack, onClose }: { onBack: () => void; onClos
   return (
     <>
       <div className="flex flex-col gap-1 border-b border-border p-6">
-        <DialogPrimitive.Title className="font-heading font-semibold text-lg leading-none">
-          Add Environment
+        <DialogPrimitive.Title className="flex items-center gap-2 font-heading font-semibold text-lg leading-none">
+          Connect a machine
+          <Explain term="machine" technical />
         </DialogPrimitive.Title>
         <DialogPrimitive.Description className="mt-1 text-muted-foreground text-sm">
-          Pair another environment to this client.
+          Link a machine you already run to this app — your own computer with {APP_BASE_NAME} on it,
+          or any machine you can reach over SSH.
         </DialogPrimitive.Description>
       </div>
       <ScrollArea className="min-h-0">
@@ -692,8 +710,8 @@ function CustomEnvironmentStep({ onBack, onClose }: { onBack: () => void; onClos
           <div className="grid gap-3 sm:grid-cols-2">
             {renderConnectionModeCard({
               mode: "remote",
-              title: "Remote link",
-              description: "Use a pairing link or host and pairing code from another backend.",
+              title: "Pairing link",
+              description: `Paste the pairing link (or host and code) that ${APP_BASE_NAME} shows on the other machine.`,
               icon: <ChevronsLeftRightEllipsisIcon className="size-4" />,
             })}
             {renderConnectionModeCard({
@@ -780,7 +798,7 @@ function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => vo
       toastManager.add({
         type: "success",
         title: "Box created",
-        description: `${record.label} is ready and now in your environment switcher.`,
+        description: `${record.label} is ready and now in your machine list.`,
       });
     },
     [onClose],
@@ -800,7 +818,7 @@ function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => vo
         toastManager.add({
           type: "success",
           title: "Machine connected",
-          description: `${record.label} is now in your environment switcher.`,
+          description: `${record.label} is now in your machine list.`,
         });
       } catch (caught) {
         const message = caught instanceof Error ? caught.message : "Failed to connect this box.";
@@ -851,7 +869,7 @@ function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => vo
           </div>
         ) : cloud && !cloud.connected ? (
           <div className="px-6 py-10 text-center text-muted-foreground text-sm">
-            Connect your Uno account first — add your API key in Settings → Workspace.
+            Connect your Uno account first — add your API key in Settings → General.
           </div>
         ) : boxes.length === 0 ? (
           <div className="px-6 py-10 text-center text-muted-foreground text-sm">
@@ -940,7 +958,7 @@ const DesktopSshHostRow = memo(function DesktopSshHostRow({
 }: DesktopSshHostRowProps) {
   const address = formatDesktopSshTarget(target);
   const showAddress = address !== target.alias;
-  const buttonLabel = connectingHostAlias === target.alias ? "Adding..." : "Add environment";
+  const buttonLabel = connectingHostAlias === target.alias ? "Adding..." : "Add machine";
 
   return (
     <div className="border-t border-border/60 px-4 py-3 first:border-t-0 sm:px-5">

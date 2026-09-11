@@ -197,14 +197,14 @@ export function AddProviderInstanceDialog({
       await updateSettings({ providerInstances: nextMap });
       toastManager.add({
         type: "success",
-        title: "Provider instance added",
+        title: "Agent setup added",
         description: `${driverOption.label} instance '${instanceId}' was added.`,
       });
       onOpenChange(false);
     } catch (error) {
       toastManager.add({
         type: "error",
-        title: "Could not add provider instance",
+        title: "Could not add agent setup",
         description: error instanceof Error ? error.message : "Update failed.",
       });
     }
@@ -226,7 +226,7 @@ export function AddProviderInstanceDialog({
       <DialogPopup className="max-w-xl overflow-hidden">
         <div className="flex min-h-0 flex-col overflow-hidden border-foreground/10 bg-background shadow-2xl">
           <DialogHeader className="border-b border-border/70 bg-background">
-            <DialogTitle>Add provider instance</DialogTitle>
+            <DialogTitle>Add agent setup (provider instance)</DialogTitle>
             <DialogDescription>
               Configure an additional provider instance — for example, a second Codex install
               pointed at a different workspace.
@@ -362,7 +362,7 @@ export function AddProviderInstanceDialog({
                     type="color"
                     value={normalizeProviderAccentColor(accentColor) ?? PROVIDER_ACCENT_SWATCHES[0]}
                     onChange={(event) => setAccentColor(event.target.value)}
-                    aria-label="Provider instance accent color"
+                    aria-label="Agent setup accent color"
                     className="h-8 w-10 cursor-pointer rounded-xl border border-input bg-background p-0.5"
                   />
                   <div className="flex flex-wrap gap-1.5">

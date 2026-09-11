@@ -102,6 +102,7 @@ import { useModelPickerOpen } from "../modelPickerOpenState";
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { useGitStatus } from "../lib/gitStatusState";
 import { readLocalApi } from "../localApi";
+import { plainExplanation } from "../plainLanguage";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
@@ -904,7 +905,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             data-thread-selection-safe
             className="flex h-6 w-full translate-x-0 items-center px-2 text-left text-[10px] text-muted-foreground/60"
           >
-            <span>No threads yet</span>
+            <span>No chats yet</span>
           </div>
         </SidebarMenuSubItem>
       ) : null}
@@ -1056,7 +1057,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     onCopy: (ctx) => {
       toastManager.add({
         type: "success",
-        title: "Thread ID copied",
+        title: "Chat ID copied",
         description: ctx.threadId,
       });
     },
@@ -1064,7 +1065,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Failed to copy thread ID",
+          title: "Failed to copy chat ID",
           description: error instanceof Error ? error.message : "An error occurred.",
         }),
       );
@@ -1421,7 +1422,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           stackedThreadToast({
             type: "warning",
             title: "Project is not empty",
-            description: "Delete all threads in this project before removing it.",
+            description: "Delete all chats in this project before removing it.",
             actionVariant: "destructive",
             actionProps: {
               children: "Delete anyway",
@@ -1442,9 +1443,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                           `Remove project "${member.name}" and delete its ${latestProjectThreads.length} thread${
                             latestProjectThreads.length === 1 ? "" : "s"
                           }?`,
-                          `Path: ${member.cwd}`,
+                          `Folder: ${member.cwd}`,
                           ...(member.environmentLabel
-                            ? [`Environment: ${member.environmentLabel}`]
+                            ? [`Machine: ${member.environmentLabel}`]
                             : []),
                           "This permanently clears conversation history for those threads.",
                           "This removes only this project entry.",
@@ -1452,9 +1453,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                         ].join("\n")
                       : [
                           `Remove project "${member.name}"?`,
-                          `Path: ${member.cwd}`,
+                          `Folder: ${member.cwd}`,
                           ...(member.environmentLabel
-                            ? [`Environment: ${member.environmentLabel}`]
+                            ? [`Machine: ${member.environmentLabel}`]
                             : []),
                           "This removes only this project entry.",
                         ].join("\n"),
@@ -1489,8 +1490,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
       const message = [
         `Remove project "${member.name}"?`,
-        `Path: ${member.cwd}`,
-        ...(member.environmentLabel ? [`Environment: ${member.environmentLabel}`] : []),
+        `Folder: ${member.cwd}`,
+        ...(member.environmentLabel ? [`Machine: ${member.environmentLabel}`] : []),
         "This removes only this project entry.",
       ].join("\n");
       const confirmed = await api.dialogs.confirm(message);
@@ -1723,8 +1724,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (appSettingsConfirmThreadDelete) {
         const confirmed = await api.dialogs.confirm(
           [
-            `Delete ${count} thread${count === 1 ? "" : "s"}?`,
-            "This permanently clears conversation history for these threads.",
+            `Delete ${count} chat${count === 1 ? "" : "s"}?`,
+            "This permanently clears the conversation history of these chats.",
           ].join("\n"),
         );
         if (!confirmed) return;
@@ -1850,7 +1851,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Failed to archive thread",
+            title: "Failed to archive chat",
             description: error instanceof Error ? error.message : "An error occurred.",
           }),
         );
@@ -1879,7 +1880,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (trimmed.length === 0) {
         toastManager.add({
           type: "warning",
-          title: "Thread title cannot be empty",
+          title: "Chat title cannot be empty",
         });
         finishRename();
         return;
@@ -1904,7 +1905,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Failed to rename thread",
+            title: "Failed to rename chat",
             description: error instanceof Error ? error.message : "An error occurred.",
           }),
         );
@@ -2014,7 +2015,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: pinned ? "Failed to pin thread" : "Failed to unpin thread",
+          title: pinned ? "Failed to pin chat" : "Failed to unpin chat",
           description: error instanceof Error ? error.message : "An error occurred.",
         }),
       );
@@ -2035,11 +2036,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const isPinned = thread.pinnedAt != null;
       const clicked = await api.contextMenu.show(
         [
-          { id: "rename", label: "Rename thread" },
-          { id: "pin", label: isPinned ? "Unpin thread" : "Pin thread" },
+          { id: "rename", label: "Rename chat" },
+          { id: "pin", label: isPinned ? "Unpin chat" : "Pin chat" },
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
-          { id: "copy-thread-id", label: "Copy Thread ID" },
+          { id: "copy-thread-id", label: "Copy chat ID" },
           { id: "delete", label: "Delete", destructive: true },
         ],
         position,
@@ -2067,7 +2068,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             stackedThreadToast({
               type: "error",
               title: "Path unavailable",
-              description: "This thread does not have a workspace path to copy.",
+              description: "This chat does not have a project folder to copy.",
             }),
           );
           return;
@@ -2083,8 +2084,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (appSettingsConfirmThreadDelete) {
         const confirmed = await api.dialogs.confirm(
           [
-            `Delete thread "${thread.title}"?`,
-            "This permanently clears conversation history for this thread.",
+            `Delete chat "${thread.title}"?`,
+            "This permanently clears the conversation history of this chat.",
           ].join("\n"),
         );
         if (!confirmed) {
@@ -2187,7 +2188,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               <div className="pointer-events-none absolute top-1 right-1.5 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
                 <button
                   type="button"
-                  aria-label={`Create new thread in ${project.displayName}`}
+                  aria-label={`Start a new chat in ${project.displayName}`}
                   data-testid="new-thread-button"
                   className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                   onClick={handleCreateThreadClick}
@@ -2198,7 +2199,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             }
           />
           <TooltipPopup side="top">
-            {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
+            {newThreadShortcutLabel ? `New chat (${newThreadShortcutLabel})` : "New chat"}
           </TooltipPopup>
         </Tooltip>
       </div>
@@ -2643,7 +2644,7 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
         <TooltipTrigger
           render={
             <Link
-              aria-label="Go to threads"
+              aria-label="Go to chats"
               className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
               to="/"
             >
@@ -3073,7 +3074,10 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
               <FolderPlusIcon className="size-4" />
             </div>
             <div className="text-xs text-muted-foreground/80">
-              {environmentScope === "all" ? "No projects yet" : "No projects in this environment"}
+              {environmentScope === "all" ? "No projects yet" : "No projects on this machine yet"}
+            </div>
+            <div className="text-[11px] leading-relaxed text-muted-foreground/60">
+              A project is {plainExplanation("project").replace(/\.$/u, "").toLowerCase()}.
             </div>
             <Button size="sm" variant="outline" onClick={openAddProject}>
               <FolderPlusIcon className="size-3.5" />

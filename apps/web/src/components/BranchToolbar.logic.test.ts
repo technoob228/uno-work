@@ -143,28 +143,28 @@ describe("resolveEffectiveEnvMode", () => {
 
 describe("resolveEnvModeLabel", () => {
   it("uses explicit workspace labels", () => {
-    expect(resolveEnvModeLabel("local")).toBe("Current checkout");
-    expect(resolveEnvModeLabel("worktree")).toBe("New worktree");
+    expect(resolveEnvModeLabel("local")).toBe("Project folder");
+    expect(resolveEnvModeLabel("worktree")).toBe("New separate copy");
   });
 });
 
 describe("resolveCurrentWorkspaceLabel", () => {
   it("describes the main repo checkout when no worktree path is active", () => {
-    expect(resolveCurrentWorkspaceLabel(null)).toBe("Current checkout");
+    expect(resolveCurrentWorkspaceLabel(null)).toBe("Project folder");
   });
 
-  it("describes the active checkout as a worktree when one is attached", () => {
-    expect(resolveCurrentWorkspaceLabel("/repo/.t3/worktrees/feature-a")).toBe("Current worktree");
+  it("describes the active checkout as a separate copy when a worktree is attached", () => {
+    expect(resolveCurrentWorkspaceLabel("/repo/.t3/worktrees/feature-a")).toBe("This copy");
   });
 });
 
 describe("resolveLockedWorkspaceLabel", () => {
   it("uses a shorter label for the main repo checkout", () => {
-    expect(resolveLockedWorkspaceLabel(null)).toBe("Local checkout");
+    expect(resolveLockedWorkspaceLabel(null)).toBe("Project folder");
   });
 
   it("uses a shorter label for an attached worktree", () => {
-    expect(resolveLockedWorkspaceLabel("/repo/.t3/worktrees/feature-a")).toBe("Worktree");
+    expect(resolveLockedWorkspaceLabel("/repo/.t3/worktrees/feature-a")).toBe("Separate copy");
   });
 });
 

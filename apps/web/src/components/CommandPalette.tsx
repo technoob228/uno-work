@@ -809,7 +809,7 @@ function OpenCommandPaletteDialog() {
           stackedThreadToast({
             type: "error",
             title: "Upload failed",
-            description: "Environment is not connected.",
+            description: "Machine is not connected.",
           }),
         );
         return;
@@ -1049,7 +1049,7 @@ function OpenCommandPaletteDialog() {
         stackedThreadToast({
           type: "error",
           title: "Unable to browse projects",
-          description: "No environment is available.",
+          description: "No machine is available.",
         }),
       );
       return;
@@ -1082,10 +1082,10 @@ function OpenCommandPaletteDialog() {
       actionItems.push({
         kind: "action",
         value: "action:new-thread",
-        searchTerms: ["new thread", "chat", "create", "draft"],
+        searchTerms: ["new chat", "new thread", "chat", "create", "draft"],
         title: (
           <>
-            New thread in <span className="font-semibold">{activeProjectTitle}</span>
+            New chat in <span className="font-semibold">{activeProjectTitle}</span>
           </>
         ),
         icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
@@ -1106,8 +1106,8 @@ function OpenCommandPaletteDialog() {
     actionItems.push({
       kind: "submenu",
       value: "action:new-thread-in",
-      searchTerms: ["new thread", "project", "pick", "choose", "select"],
-      title: "New thread in...",
+      searchTerms: ["new chat", "new thread", "project", "pick", "choose", "select"],
+      title: "New chat in...",
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
       groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
@@ -1116,8 +1116,8 @@ function OpenCommandPaletteDialog() {
     actionItems.push({
       kind: "action",
       value: "action:new-thread-needs-project",
-      searchTerms: ["new thread", "chat", "create", "draft", "start"],
-      title: "New thread (add a project first)",
+      searchTerms: ["new chat", "new thread", "chat", "create", "draft", "start"],
+      title: "New chat (add a project first)",
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "chat.new",
       run: async () => {
@@ -1312,7 +1312,7 @@ function OpenCommandPaletteDialog() {
         stackedThreadToast({
           type: "error",
           title: "Unable to clone project",
-          description: "Environment API is not available.",
+          description: "Machine API is not available.",
         }),
       );
       return;

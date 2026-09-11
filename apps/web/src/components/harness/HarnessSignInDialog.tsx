@@ -46,8 +46,7 @@ export interface HarnessSignInDialogProps {
 }
 
 const API_KEY_HINT: Readonly<Record<ProviderAuthDriver, string>> = {
-  claudeAgent:
-    "Stored as ANTHROPIC_API_KEY in this harness's environment, in plain text on that machine's disk.",
+  claudeAgent: "Stored as ANTHROPIC_API_KEY for this agent, in plain text on that machine's disk.",
   codex:
     "Handed to `codex login --with-api-key`; Codex stores it in its own config on that machine.",
 };
@@ -101,7 +100,7 @@ export function HarnessSignInDialog({
           {succeeded ? (
             <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 px-3 py-2.5 text-sm">
               <CheckCircle2 className="size-4 text-success" />
-              <span>Signed in. The harness is ready to use.</span>
+              <span>Signed in. The agent is ready to use.</span>
             </div>
           ) : job?.method === "oauth" && (active || failed) ? (
             <div className="flex flex-col gap-3">

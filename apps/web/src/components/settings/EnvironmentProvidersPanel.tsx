@@ -40,6 +40,7 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProviderSetupAction } from "../harness/ProviderSetupAction";
 import { useHarnessSetup } from "../harness/useHarnessSetup";
+import { Explain } from "../Explain";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
@@ -218,7 +219,7 @@ export function EnvironmentProvidersPanel({
         driver: row.driver,
         isDefault: row.isDefault,
       }),
-      "Could not save provider",
+      "Could not save agent settings",
     );
   };
 
@@ -226,7 +227,7 @@ export function EnvironmentProvidersPanel({
     if (!serverSettings) return;
     save(
       { providerInstances: withoutProviderInstanceKey(serverSettings.providerInstances, id) },
-      "Could not delete provider instance",
+      "Could not remove agent setup",
     );
     // Preferences and favourites are device-local, so they are cleaned up
     // through client settings rather than sent to the daemon.
@@ -259,7 +260,7 @@ export function EnvironmentProvidersPanel({
           defaultInstanceIdForDriver(driverKind),
         ),
       },
-      "Could not reset provider",
+      "Could not reset agent settings",
     );
   };
 
@@ -305,7 +306,8 @@ export function EnvironmentProvidersPanel({
       ) : null}
 
       <SettingsSection
-        title="Providers"
+        title="Agents"
+        titleAddon={<Explain term="agent" technical />}
         headerAction={
           <div className="flex items-center gap-1.5">
             <ProviderLastChecked lastCheckedAt={lastCheckedAt} />
@@ -318,13 +320,13 @@ export function EnvironmentProvidersPanel({
                     className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
                     disabled={!canMutate}
                     onClick={() => setIsAddInstanceDialogOpen(true)}
-                    aria-label="Add provider instance"
+                    aria-label="Add agent setup"
                   >
                     <PlusIcon className="size-3" />
                   </Button>
                 }
               />
-              <TooltipPopup side="top">Add provider instance</TooltipPopup>
+              <TooltipPopup side="top">Add agent setup (provider instance)</TooltipPopup>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger
@@ -335,7 +337,7 @@ export function EnvironmentProvidersPanel({
                     className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
                     disabled={isRefreshing || !canMutate}
                     onClick={refresh}
-                    aria-label="Refresh provider status"
+                    aria-label="Refresh agent status"
                   >
                     {isRefreshing ? (
                       <LoaderIcon className="size-3 animate-spin" />
@@ -345,7 +347,7 @@ export function EnvironmentProvidersPanel({
                   </Button>
                 }
               />
-              <TooltipPopup side="top">Refresh provider status</TooltipPopup>
+              <TooltipPopup side="top">Refresh agent status</TooltipPopup>
             </Tooltip>
           </div>
         }
@@ -389,7 +391,7 @@ export function EnvironmentProvidersPanel({
               headerAction={
                 row.isDefault && row.isDirty ? (
                   <SettingResetButton
-                    label={`${driverOption?.label ?? String(row.driver)} provider settings`}
+                    label={`${driverOption?.label ?? String(row.driver)} agent settings`}
                     onClick={() => resetDefaultInstance(row.driver)}
                   />
                 ) : null

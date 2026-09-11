@@ -359,7 +359,7 @@ function UnoCodeInstallSection() {
   let control: React.ReactNode = null;
 
   if (status === "installed" && state?.status === "installed") {
-    description = "Coding harness ready.";
+    description = "The Uno agent is ready.";
     statusNode = (
       <>
         <span className="font-mono tabular-nums">v{state.version}</span>
@@ -372,7 +372,7 @@ function UnoCodeInstallSection() {
     const percent =
       typeof state.percent === "number" ? Math.max(0, Math.min(100, state.percent)) : null;
     const phaseLabel = UNO_CODE_PHASE_LABEL[state.phase] ?? "Installing…";
-    description = "Setting up the coding harness in the background.";
+    description = "Setting up the Uno agent in the background.";
     statusNode = (
       <span>
         {phaseLabel}
@@ -466,7 +466,7 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Assistant output"]
         : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
-        ? ["New thread mode"]
+        ? ["New chat mode"]
         : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
         ? ["Add project base directory"]
@@ -715,7 +715,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           title="Archive confirmation"
-          description="Require a second click on the inline archive action before a thread is archived."
+          description="Require a second click on the inline archive action before a chat is archived."
           resetAction={
             settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive ? (
               <SettingResetButton
@@ -734,14 +734,14 @@ export function GeneralSettingsPanel() {
               onCheckedChange={(checked) =>
                 updateSettings({ confirmThreadArchive: Boolean(checked) })
               }
-              aria-label="Confirm thread archiving"
+              aria-label="Confirm chat archiving"
             />
           }
         />
 
         <SettingsRow
           title="Delete confirmation"
-          description="Ask before deleting a thread and its chat history."
+          description="Ask before deleting a chat and its history."
           resetAction={
             settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete ? (
               <SettingResetButton
@@ -760,7 +760,7 @@ export function GeneralSettingsPanel() {
               onCheckedChange={(checked) =>
                 updateSettings({ confirmThreadDelete: Boolean(checked) })
               }
-              aria-label="Confirm thread deletion"
+              aria-label="Confirm chat deletion"
             />
           }
         />
@@ -819,7 +819,7 @@ export function ArchivedThreadsPanel() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to unarchive thread",
+              title: "Failed to unarchive chat",
               description: error instanceof Error ? error.message : "An error occurred.",
             }),
           );
@@ -837,14 +837,14 @@ export function ArchivedThreadsPanel() {
   return (
     <SettingsPageContainer>
       {archivedGroups.length === 0 ? (
-        <SettingsSection title="Archived threads">
+        <SettingsSection title="Archived chats">
           <Empty className="min-h-88">
             <EmptyMedia variant="icon">
               <ArchiveIcon />
             </EmptyMedia>
             <EmptyHeader>
-              <EmptyTitle>No archived threads</EmptyTitle>
-              <EmptyDescription>Archived threads will appear here.</EmptyDescription>
+              <EmptyTitle>No archived chats</EmptyTitle>
+              <EmptyDescription>Archived chats will appear here.</EmptyDescription>
             </EmptyHeader>
           </Empty>
         </SettingsSection>
@@ -889,7 +889,7 @@ export function ArchivedThreadsPanel() {
                         toastManager.add(
                           stackedThreadToast({
                             type: "error",
-                            title: "Failed to unarchive thread",
+                            title: "Failed to unarchive chat",
                             description:
                               error instanceof Error ? error.message : "An error occurred.",
                           }),

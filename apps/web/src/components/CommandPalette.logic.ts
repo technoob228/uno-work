@@ -146,7 +146,7 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
       descriptionParts.push(`#${thread.branch}`);
     }
     if (thread.id === input.activeThreadId) {
-      descriptionParts.push("Current thread");
+      descriptionParts.push("Current chat");
     }
 
     const leadingContent = input.renderLeadingContent?.(thread);
@@ -353,9 +353,9 @@ export function buildRootGroups(input: {
 export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {
   switch (mode) {
     case "root":
-      return "Search commands, projects, and threads...";
+      return "Search commands, projects, and chats...";
     case "root-browse":
-      return "Enter project path (e.g. ~/projects/my-app)";
+      return "Enter the project folder (e.g. ~/projects/my-app)";
     case "submenu":
       return "Search...";
     case "submenu-browse":

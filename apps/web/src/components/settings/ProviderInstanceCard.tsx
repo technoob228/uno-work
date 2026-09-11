@@ -607,7 +607,7 @@ export function ProviderInstanceCard({
                           variant="ghost"
                           className="size-5 rounded-sm p-0 text-muted-foreground hover:text-destructive"
                           onClick={onDelete}
-                          aria-label={`Delete provider instance ${instanceId}`}
+                          aria-label={`Remove agent setup ${instanceId}`}
                         >
                           <Trash2Icon className="size-3" />
                         </Button>

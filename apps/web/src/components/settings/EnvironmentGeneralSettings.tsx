@@ -36,6 +36,8 @@ import { useServerAvailableEditors } from "~/rpc/serverState";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { Button } from "../ui/button";
+import { CHAT_WORKSPACE_MODE_EXPLANATIONS, CHAT_WORKSPACE_MODE_LABELS } from "../../plainLanguage";
+import { Explain } from "../Explain";
 import { DraftInput } from "../ui/draft-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
@@ -164,7 +166,7 @@ export function EnvironmentGeneralSettings({
 
         <SettingsRow
           title="API key"
-          description="Used by Uno Code on this environment to call the Uno LLM Gateway. Stored in plain text on that machine's disk."
+          description="Used by Uno Code on this machine to call the Uno LLM Gateway. Stored in plain text on that machine's disk."
           resetAction={
             unoApiKey.length > 0 ? (
               <SettingResetButton
@@ -219,8 +221,8 @@ export function EnvironmentGeneralSettings({
           title="Web search"
           description={
             unoApiKey.length > 0
-              ? "Enabled — Uno harness exposes a `web_search` tool (Brave-powered). Each query is billed against your Uno LLM balance."
-              : "Add an API key above to let the Uno harness search the web through Uno's billed proxy."
+              ? "Enabled — the Uno agent gets a `web_search` tool (Brave-powered). Each query is billed against your Uno LLM balance."
+              : "Add an API key above to let the Uno agent search the web through Uno's billed proxy."
           }
           control={
             <span
@@ -271,16 +273,21 @@ export function EnvironmentGeneralSettings({
         />
 
         <SettingsRow
-          title="New threads"
-          description="Pick the default workspace mode for newly created draft threads on this environment."
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              New chats
+              <Explain term="chat" technical />
+            </span>
+          }
+          description="Where a new chat works by default on this machine: straight in the project folder, or in a separate copy (a git worktree) so other chats are not disturbed."
           resetAction={
             settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode ? (
               <SettingResetButton
-                label="new threads"
+                label="new chats"
                 onClick={() =>
                   save(
                     { defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode },
-                    "Could not save the thread default",
+                    "Could not save the chat default",
                   )
                 }
               />
@@ -291,21 +298,29 @@ export function EnvironmentGeneralSettings({
               value={settings.defaultThreadEnvMode}
               onValueChange={(value) => {
                 if (value === "local" || value === "worktree") {
-                  save({ defaultThreadEnvMode: value }, "Could not save the thread default");
+                  save({ defaultThreadEnvMode: value }, "Could not save the chat default");
                 }
               }}
             >
-              <SelectTrigger className="w-full sm:w-44" aria-label="Default thread mode">
+              <SelectTrigger className="w-full sm:w-52" aria-label="Where new chats work">
                 <SelectValue>
-                  {settings.defaultThreadEnvMode === "worktree" ? "New worktree" : "Local"}
+                  {CHAT_WORKSPACE_MODE_LABELS[settings.defaultThreadEnvMode]}
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="local">
-                  Local
+                <SelectItem
+                  hideIndicator
+                  value="local"
+                  title={CHAT_WORKSPACE_MODE_EXPLANATIONS.local}
+                >
+                  {CHAT_WORKSPACE_MODE_LABELS.local}
                 </SelectItem>
-                <SelectItem hideIndicator value="worktree">
-                  New worktree
+                <SelectItem
+                  hideIndicator
+                  value="worktree"
+                  title={CHAT_WORKSPACE_MODE_EXPLANATIONS.worktree}
+                >
+                  {CHAT_WORKSPACE_MODE_LABELS.worktree}
                 </SelectItem>
               </SelectPopup>
             </Select>
@@ -345,7 +360,7 @@ export function EnvironmentGeneralSettings({
 
         <SettingsRow
           title="Text generation model"
-          description="Model this environment uses for generated commit messages, PR titles, and similar Git text."
+          description="Model this machine uses for generated commit messages, PR titles, and similar Git text."
           resetAction={
             isTextGenerationDirty ? (
               <SettingResetButton
@@ -421,10 +436,10 @@ export function EnvironmentGeneralSettings({
         />
       </SettingsSection>
 
-      <SettingsSection title="Files on this environment">
+      <SettingsSection title="Files on this machine">
         <SettingsRow
           title="Keybindings"
-          description="The persisted `keybindings.json` this daemon reads."
+          description="The persisted `keybindings.json` this machine reads."
           status={
             <>
               <span className="block break-all font-mono text-[11px] text-foreground">

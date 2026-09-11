@@ -74,7 +74,7 @@ export function SettingsScopeSwitcher({ pathname }: { readonly pathname: string 
       : (activeEnvironmentScope?.label ??
         // A URL naming an environment this device no longer has is a real
         // state, not something to silently replace with the active one.
-        "Unknown environment");
+        "Unknown machine");
 
   const TriggerIcon =
     location.kind === "app"
@@ -104,7 +104,7 @@ export function SettingsScopeSwitcher({ pathname }: { readonly pathname: string 
           </MenuItem>
         </MenuGroup>
         <MenuGroup>
-          <MenuGroupLabel>Execution environments</MenuGroupLabel>
+          <MenuGroupLabel>Machines</MenuGroupLabel>
           {scopes.map((scope) => {
             const isActive = scope.environmentId === location.environmentId;
             const PlacementIcon = scope.placement === "remote" ? ServerIcon : LaptopIcon;

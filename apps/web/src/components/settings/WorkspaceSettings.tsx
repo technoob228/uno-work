@@ -1,28 +1,48 @@
 /**
- * Workspace panel — the registry made visible: which machines are in this
- * workspace, which Uno account backs it, what is claimed right now, and the
- * rules under which one machine may act on another.
+ * "My machines" — the plain list of every computer and box this app can send
+ * work to, with the two things a person actually does here: add a box, or
+ * connect their own computer.
  *
- * Degradation is loud on purpose. A registry that cannot be reached looks
- * exactly like a healthy one unless the panel says otherwise, and silent
- * staleness is the failure we have already been bitten by with tunnels.
+ * Underneath sits the workspace registry: which machines are adopted, which
+ * Uno account backs it, what is claimed right now, and the rules under which
+ * one machine may act on another. That is real and stays — but it is folded
+ * into "Advanced sharing" at the bottom, because a first-time user opening
+ * this page should see machines, not grants.
+ *
+ * Degradation is still loud. A registry that cannot be reached looks exactly
+ * like a healthy one unless the panel says otherwise, and silent staleness is
+ * the failure we have already been bitten by with tunnels.
  */
 import {
-  deriveMachineMonogram,
+  isAssistantProjectId,
   parseUnoBoxSshTarget,
-  type EnvironmentId,
   type UnoBox,
   type WorkspaceCapability,
-  type WorkspaceMachine,
   type WorkspacePolicy,
   type WorkspaceState,
 } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
-import { CloudIcon, MonitorIcon, RefreshCwIcon, ServerIcon, TrashIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  CloudIcon,
+  LaptopIcon,
+  MonitorIcon,
+  MoonIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  ServerIcon,
+  SunIcon,
+  TrashIcon,
+} from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 
 import { usePrimaryEnvironmentId } from "../../environments/primary";
-import { useSavedEnvironmentRegistryStore } from "../../environments/runtime";
+import {
+  removeSavedEnvironment,
+  useSavedEnvironmentRegistryStore,
+  useSavedEnvironmentRuntimeStore,
+} from "../../environments/runtime";
 import {
   unoCloudBoxPowerMutationOptions,
   unoCloudStateQueryOptions,
@@ -39,12 +59,28 @@ import {
   workspaceUpsertGrantMutationOptions,
 } from "../../lib/workspaceReactQuery";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
-import { FeatureDisabledPanel } from "./FeatureDisabledPanel";
+import { readLocalApi } from "../../localApi";
+import { MACHINE_KIND_LABELS, MACHINE_STATUS_LABELS, plainExplanation } from "../../plainLanguage";
+import { selectProjectsAcrossEnvironments, useStore } from "../../store";
+import { AddEnvModal } from "../AddEnvModal";
+import { Explain } from "../Explain";
 import { MachineChip } from "../MachineChip";
 import { Button } from "../ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Switch } from "../ui/switch";
 import { Input } from "../ui/input";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSection,
+  useRelativeTimeTick,
+} from "./settingsLayout";
+import {
+  buildMachineRows,
+  formatRelativeTime,
+  registryIdForBox,
+  type MachineRow,
+} from "./machineRows";
 import { WorkspaceInstructionsSection } from "./WorkspaceInstructions";
 
 const MACHINE_COLOR_CHOICES = [
@@ -71,32 +107,11 @@ const WRITE_MODE_CHOICES: ReadonlyArray<{
   { value: "allow", label: "Straight through" },
 ];
 
-function formatRelative(iso: string | null): string {
-  if (!iso) return "never";
-  const then = new Date(iso).getTime();
-  if (!Number.isFinite(then)) return "unknown";
-  const seconds = Math.round((Date.now() - then) / 1000);
-  if (seconds < 60) return `${Math.max(seconds, 0)}s ago`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
-  if (seconds < 86_400) return `${Math.round(seconds / 3600)}h ago`;
-  return `${Math.round(seconds / 86_400)}d ago`;
-}
-
-/**
- * A machine is stale rather than offline when we have simply not heard from it
- * recently. The panel says which, because "old data" and "gone" call for
- * different reactions.
- */
-function machinePresence(machine: WorkspaceMachine): "live" | "stale" | "unknown" {
-  if (!machine.lastSeenAt) return "unknown";
-  const age = Date.now() - new Date(machine.lastSeenAt).getTime();
-  if (!Number.isFinite(age)) return "unknown";
-  return age < 2 * 60_000 ? "live" : "stale";
-}
-
-function presenceLabel(presence: "live" | "stale" | "unknown"): string {
-  return presence === "live" ? "live" : presence === "stale" ? "stale" : "not seen yet";
-}
+const MACHINE_KIND_ICON = {
+  local: LaptopIcon,
+  ssh: ServerIcon,
+  uno_box: CloudIcon,
+} as const;
 
 function StatusPill({
   tone,
@@ -118,13 +133,36 @@ function StatusPill({
   );
 }
 
+function MachineStatusPill({ status }: { readonly status: MachineRow["status"] }) {
+  const tone =
+    status === "online"
+      ? "ok"
+      : status === "sleeping"
+        ? "warn"
+        : status === "offline"
+          ? "bad"
+          : "muted";
+  return <StatusPill tone={tone}>{MACHINE_STATUS_LABELS[status]}</StatusPill>;
+}
+
+function formatProjects(projects: ReadonlyArray<string>): string {
+  if (projects.length === 0) return "No projects yet";
+  const shown = projects.slice(0, 3).join(", ");
+  const more = projects.length - 3;
+  return more > 0 ? `Projects: ${shown} +${more}` : `Projects: ${shown}`;
+}
+
 export function WorkspaceSettings() {
-  const workspaceEnabled = useFeatureFlag("workspace");
+  // The advanced registry (grants, claims, requests, instruction layers) is
+  // still behind the Labs flag. The machines list itself is always on.
+  const advancedEnabled = useFeatureFlag("workspace");
   const queryClient = useQueryClient();
   // The primary daemon is the registry client: the panel describes one
   // workspace regardless of which machine's chat is on screen.
   const registryEnvironmentId = usePrimaryEnvironmentId();
   const savedEnvironments = useSavedEnvironmentRegistryStore((state) => state.byId);
+  const runtimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
+  const now = useRelativeTimeTick(30_000);
 
   const stateQuery = useQuery(workspaceStateQueryOptions(registryEnvironmentId));
   const cloudQuery = useQuery(unoCloudStateQueryOptions(registryEnvironmentId));
@@ -161,10 +199,24 @@ export function WorkspaceSettings() {
   const state = stateQuery.data;
   const cloud = cloudQuery.data;
 
-  const knownMachineIds = useMemo(
-    () => new Set((state?.machines ?? []).map((machine) => machine.environmentId)),
-    [state],
-  );
+  const [addModal, setAddModal] = useState<{
+    readonly open: boolean;
+    readonly step: "uno" | "custom";
+  }>({ open: false, step: "uno" });
+  const [removingKey, setRemovingKey] = useState<string | null>(null);
+
+  const allProjects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
+  const projectNamesByEnvironmentId = useMemo(() => {
+    const next = new Map<string, string[]>();
+    for (const project of allProjects) {
+      // The assistant's home project is plumbing, not something the user put there.
+      if (isAssistantProjectId(project.id)) continue;
+      const existing = next.get(project.environmentId);
+      if (existing) existing.push(project.name);
+      else next.set(project.environmentId, [project.name]);
+    }
+    return next;
+  }, [allProjects]);
 
   const connectionCandidates = useMemo(
     () =>
@@ -176,13 +228,48 @@ export function WorkspaceSettings() {
     [savedEnvironments],
   );
 
+  const connectionStateById = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(runtimeById).map(([environmentId, runtime]) => [
+          environmentId,
+          runtime.connectionState,
+        ]),
+      ),
+    [runtimeById],
+  );
+
+  const rows = useMemo(
+    () =>
+      registryEnvironmentId
+        ? buildMachineRows({
+            primaryEnvironmentId: registryEnvironmentId,
+            registryMachines: state?.machines ?? [],
+            savedEnvironments: connectionCandidates,
+            connectionStateById,
+            boxes: cloud?.connected ? cloud.boxes : [],
+            projectNamesByEnvironmentId,
+            now,
+          })
+        : [],
+    [
+      cloud,
+      connectionCandidates,
+      connectionStateById,
+      now,
+      projectNamesByEnvironmentId,
+      registryEnvironmentId,
+      state,
+    ],
+  );
+
   const handleSyncConnections = useCallback(() => {
     if (!registryEnvironmentId) return;
     syncMachines.mutate({
       machines: [
         {
           environmentId: registryEnvironmentId,
-          label: "This machine",
+          label: "This computer",
           kind: "local" as const,
           lastSeenAt: new Date().toISOString(),
         },
@@ -207,7 +294,7 @@ export function WorkspaceSettings() {
       syncMachines.mutate({
         machines: [
           {
-            environmentId: `uno-box-${box.id}` as EnvironmentId,
+            environmentId: registryIdForBox(box.id),
             label: box.name,
             kind: "uno_box" as const,
             unoBoxId: box.id,
@@ -222,456 +309,633 @@ export function WorkspaceSettings() {
     [registryEnvironmentId, syncMachines],
   );
 
-  if (!workspaceEnabled) {
-    return <FeatureDisabledPanel feature="Workspaces" />;
-  }
+  const handleRemove = useCallback(
+    async (row: MachineRow) => {
+      if (row.isPrimary || !row.environmentId) return;
+      const message = [
+        `Remove ${row.label} from your machines?`,
+        "Nothing on the machine is deleted. You can connect it again later.",
+      ].join("\n");
+      const api = readLocalApi();
+      const confirmed = api ? await api.dialogs.confirm(message) : window.confirm(message);
+      if (!confirmed) return;
+      setRemovingKey(row.key);
+      try {
+        if (row.inRegistry) {
+          await removeMachine.mutateAsync({ environmentId: row.environmentId });
+        }
+        if (row.isSavedConnection) {
+          await removeSavedEnvironment(row.environmentId);
+        }
+      } finally {
+        setRemovingKey(null);
+      }
+    },
+    [removeMachine],
+  );
+
+  const openAddBox = () => setAddModal({ open: true, step: "uno" });
+  const openConnectComputer = () => setAddModal({ open: true, step: "custom" });
+
+  const addModalElement = (
+    <AddEnvModal
+      open={addModal.open}
+      initialStep={addModal.step}
+      onOpenChange={(open) => setAddModal((current) => ({ ...current, open }))}
+    />
+  );
 
   if (!registryEnvironmentId) {
     return (
       <SettingsPageContainer>
-        <SettingsSection title="Workspace">
-          <p className="px-1 text-sm text-muted-foreground">
-            No daemon connection yet — the workspace registry lives on a daemon, so there is nothing
-            to show until one is connected.
-          </p>
+        <SettingsSection title="My machines" titleAddon={<Explain term="myMachines" technical />}>
+          <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
+            <p className="text-sm text-foreground">No machine connected yet.</p>
+            <p className="max-w-sm text-xs text-muted-foreground">
+              A machine is {plainExplanation("machine").replace(/\.$/u, "").toLowerCase()}. Connect
+              one and it appears here.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button size="sm" onClick={openAddBox}>
+                <CloudIcon className="size-3.5" />
+                Add a box
+              </Button>
+              <Button size="sm" variant="outline" onClick={openConnectComputer}>
+                <LaptopIcon className="size-3.5" />
+                Connect my computer
+              </Button>
+            </div>
+          </div>
         </SettingsSection>
+        {addModalElement}
       </SettingsPageContainer>
     );
   }
 
-  const unreachableMachines = (state?.machines ?? []).filter(
-    (machine) => machinePresence(machine) !== "live",
-  ).length;
+  const pendingCount = state?.pendingRequests.length ?? 0;
+  const unreachableMachines = rows.filter((row) => row.status !== "online").length;
 
   return (
     <SettingsPageContainer>
-      <SettingsSection title="Workspace">
-        <SettingsRow
-          title="Name"
-          description="Shown in the sidebar switcher. Every machine in the workspace reads the same one."
-          control={
-            <Input
-              aria-label="Workspace name"
-              className="w-full sm:w-64"
-              // Uncontrolled with a key, so a rename from another client
-              // replaces the field instead of fighting the text being typed.
-              key={state?.identity.name ?? "workspace"}
-              defaultValue={state?.identity.name ?? ""}
-              placeholder="UNO"
-              onBlur={(event) => {
-                const next = event.currentTarget.value.trim();
-                if (next.length === 0 || next === state?.identity.name) return;
-                renameWorkspace.mutate({ name: next });
-              }}
+      <SettingsSection
+        title="My machines"
+        titleAddon={<Explain term="myMachines" technical />}
+        headerAction={
+          <Button
+            size="xs"
+            variant="ghost"
+            className="text-muted-foreground"
+            onClick={() => {
+              void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all });
+              void cloudQuery.refetch();
+            }}
+            disabled={stateQuery.isFetching || cloudQuery.isFetching}
+          >
+            <RefreshCwIcon
+              className={`size-3.5 ${stateQuery.isFetching || cloudQuery.isFetching ? "animate-spin" : ""}`}
             />
-          }
-        />
-
+            Refresh
+          </Button>
+        }
+      >
         <SettingsRow
-          title={state?.identity.name ?? "Workspace"}
-          description={
-            stateQuery.isError
-              ? "The registry could not be read. Everything below is unavailable, not empty."
-              : `Revision ${state?.identity.epoch ?? 0} · updated ${formatRelative(state?.identity.updatedAt ?? null)}`
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              Where your agents run
+              <Explain term="machine" />
+            </span>
           }
+          description="Your own computer, an Uno box, or any other machine you connect. Each one keeps its own projects and agents."
           control={
-            <div className="flex items-center gap-2">
-              {stateQuery.isError ? (
-                <StatusPill tone="bad">registry unreachable</StatusPill>
-              ) : unreachableMachines > 0 ? (
-                <StatusPill tone="warn">
-                  degraded: {unreachableMachines} of {state?.machines.length ?? 0} not live
-                </StatusPill>
-              ) : (
-                <StatusPill tone="ok">healthy</StatusPill>
-              )}
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={() => {
-                  void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all });
-                }}
-              >
-                <RefreshCwIcon className="size-3.5" />
-                Refresh
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" onClick={openAddBox}>
+                <CloudIcon className="size-3.5" />
+                Add a box
+              </Button>
+              <Button size="sm" variant="outline" onClick={openConnectComputer}>
+                <LaptopIcon className="size-3.5" />
+                Connect my computer
               </Button>
             </div>
           }
         />
 
-        <SettingsRow
-          title="Uno account"
-          description={
-            cloud?.connected
-              ? `${cloud.account?.username ?? "account"}${cloud.account?.email ? ` · ${cloud.account.email}` : ""} · balance $${(cloud.account?.balance ?? 0).toFixed(2)} · LLM $${(cloud.account?.llmBalance ?? 0).toFixed(2)}`
-              : cloudQuery.isPending
-                ? "Asking the control plane who this account is…"
-                : "Not linked. Add an Uno API key in Settings → General to see this account's boxes here."
-          }
-          control={
-            cloud?.error ? (
-              <StatusPill tone="warn">{cloud.error.slice(0, 40)}</StatusPill>
-            ) : cloud?.connected ? (
-              <StatusPill tone="ok">linked</StatusPill>
-            ) : cloudQuery.isPending ? (
-              // An unanswered first request is not evidence of an unlinked
-              // account, and saying "not linked" here sends the user off to
-              // paste a key they already have.
-              <StatusPill tone="muted">checking…</StatusPill>
-            ) : (
-              <StatusPill tone="muted">not linked</StatusPill>
-            )
-          }
-        />
-      </SettingsSection>
+        {stateQuery.isError ? (
+          <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+            <StatusPill tone="bad">machine list unreachable</StatusPill>
+            <span className="ml-2 text-xs text-muted-foreground">
+              The list could not be read from this computer. What you see below may be incomplete,
+              not empty.
+            </span>
+          </div>
+        ) : null}
 
-      <SettingsSection title="Machines">
-        <SettingsRow
-          title="Machines in this workspace"
-          description="Connections this client knows about can be adopted into the registry, so every machine reads the same rules."
-          control={
-            <Button
-              size="xs"
-              variant="outline"
-              disabled={syncMachines.isPending}
-              onClick={handleSyncConnections}
-            >
-              Adopt connections
-            </Button>
-          }
-        />
-
-        <div className="flex flex-col gap-2 px-1 pb-2">
-          {(state?.machines ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No machines yet. “Adopt connections” registers this daemon and every saved connection.
-            </p>
+        <div className="flex flex-col gap-2 border-t border-border/60 px-4 py-3 sm:px-5">
+          {rows.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 py-6 text-center">
+              <p className="text-sm text-foreground">No machines yet.</p>
+              <p className="max-w-sm text-xs text-muted-foreground">
+                A machine is {plainExplanation("machine").replace(/\.$/u, "").toLowerCase()}. Add a
+                box to get one in about a minute.
+              </p>
+              <Button size="sm" onClick={openAddBox}>
+                <CloudIcon className="size-3.5" />
+                Add a box
+              </Button>
+            </div>
           ) : null}
-          {(state?.machines ?? []).map((machine) => {
-            const presence = machinePresence(machine);
+          {rows.map((row) => {
+            const KindIcon = MACHINE_KIND_ICON[row.kind];
+            const canWake = row.box !== null;
+            const isRunning = row.status === "online";
             return (
               <div
-                key={machine.environmentId}
+                key={row.key}
                 className="flex flex-wrap items-center gap-3 rounded-lg border border-border px-3 py-2"
               >
-                <MachineChip
-                  identity={{
-                    environmentId: machine.environmentId,
-                    label: machine.label,
-                    monogram: machine.monogram,
-                    colorSlot: machine.colorSlot,
-                    isMonogramOverridden: true,
-                  }}
-                  size="lg"
-                  detail={presenceLabel(presence)}
-                />
+                <MachineChip identity={row.identity} size="lg" detail={row.detail} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium">{machine.label}</span>
-                    {machine.kind === "uno_box" ? (
-                      <CloudIcon className="size-3.5 text-muted-foreground" />
-                    ) : machine.kind === "local" ? (
-                      <MonitorIcon className="size-3.5 text-muted-foreground" />
-                    ) : (
-                      <ServerIcon className="size-3.5 text-muted-foreground" />
-                    )}
+                    <span className="truncate text-sm font-medium">{row.label}</span>
+                    <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <KindIcon className="size-3.5" />
+                      {MACHINE_KIND_LABELS[row.kind]}
+                    </span>
                   </div>
                   <p className="truncate text-xs text-muted-foreground">
-                    {machine.environmentId} · seen {formatRelative(machine.lastSeenAt)}
+                    {row.detail} · {formatProjects(row.projects)}
                   </p>
                 </div>
 
+                <MachineStatusPill status={row.status} />
+
+                {canWake && row.box ? (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={boxPower.isPending}
+                    onClick={() =>
+                      boxPower.mutate({
+                        boxId: row.box!.id,
+                        action: isRunning ? "sleep" : "wake",
+                      })
+                    }
+                  >
+                    {isRunning ? (
+                      <MoonIcon className="size-3.5" />
+                    ) : (
+                      <SunIcon className="size-3.5" />
+                    )}
+                    {isRunning ? "Sleep" : "Wake"}
+                  </Button>
+                ) : null}
+
+                {!row.environmentId && row.box ? (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={syncMachines.isPending}
+                    onClick={() => handleAddBox(row.box!)}
+                  >
+                    <PlusIcon className="size-3.5" />
+                    Add to my machines
+                  </Button>
+                ) : null}
+
+                {row.isPrimary || !row.environmentId ? null : (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    aria-label={`Remove ${row.label}`}
+                    title="Remove from my machines"
+                    disabled={removingKey === row.key}
+                    onClick={() => void handleRemove(row)}
+                  >
+                    <TrashIcon className="size-3.5" />
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </SettingsSection>
+
+      {advancedEnabled ? (
+        <AdvancedSharingSection
+          pendingCount={pendingCount}
+          unreachableMachines={unreachableMachines}
+          machineCount={rows.length}
+        >
+          <SettingsSection title="Shared list">
+            <SettingsRow
+              title="Name"
+              description="Shown in the sidebar switcher. Every machine in the list reads the same one."
+              control={
                 <Input
-                  aria-label={`Monogram for ${machine.label}`}
-                  className="w-16"
-                  defaultValue={machine.monogram}
-                  maxLength={2}
+                  aria-label="Machine list name"
+                  className="w-full sm:w-64"
+                  // Uncontrolled with a key, so a rename from another client
+                  // replaces the field instead of fighting the text being typed.
+                  key={state?.identity.name ?? "workspace"}
+                  defaultValue={state?.identity.name ?? ""}
+                  placeholder="UNO"
                   onBlur={(event) => {
                     const next = event.currentTarget.value.trim();
-                    if (next.length === 0 || next === machine.monogram) return;
-                    updateMachine.mutate({
+                    if (next.length === 0 || next === state?.identity.name) return;
+                    renameWorkspace.mutate({ name: next });
+                  }}
+                />
+              }
+            />
+
+            <SettingsRow
+              title={state?.identity.name ?? "Shared list"}
+              description={
+                stateQuery.isError
+                  ? "The list could not be read. Everything below is unavailable, not empty."
+                  : `Revision ${state?.identity.epoch ?? 0} · updated ${formatRelativeTime(state?.identity.updatedAt ?? null, now)}`
+              }
+              control={
+                stateQuery.isError ? (
+                  <StatusPill tone="bad">unreachable</StatusPill>
+                ) : unreachableMachines > 0 ? (
+                  <StatusPill tone="warn">
+                    {unreachableMachines} of {rows.length} not online
+                  </StatusPill>
+                ) : (
+                  <StatusPill tone="ok">healthy</StatusPill>
+                )
+              }
+            />
+
+            <SettingsRow
+              title="Uno account"
+              description={
+                cloud?.connected
+                  ? `${cloud.account?.username ?? "account"}${cloud.account?.email ? ` · ${cloud.account.email}` : ""} · balance $${(cloud.account?.balance ?? 0).toFixed(2)} · LLM $${(cloud.account?.llmBalance ?? 0).toFixed(2)}`
+                  : cloudQuery.isPending
+                    ? "Asking Uno who this account is…"
+                    : "Not linked. Add an Uno API key in Settings → General to see this account's boxes here."
+              }
+              control={
+                cloud?.error ? (
+                  <StatusPill tone="warn">{cloud.error.slice(0, 40)}</StatusPill>
+                ) : cloud?.connected ? (
+                  <StatusPill tone="ok">linked</StatusPill>
+                ) : cloudQuery.isPending ? (
+                  // An unanswered first request is not evidence of an unlinked
+                  // account, and saying "not linked" here sends the user off to
+                  // paste a key they already have.
+                  <StatusPill tone="muted">checking…</StatusPill>
+                ) : (
+                  <StatusPill tone="muted">not linked</StatusPill>
+                )
+              }
+            />
+
+            <SettingsRow
+              title="Share this computer's connections"
+              description="Machines this computer knows about can be added to the shared list, so every machine reads the same rules."
+              control={
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={syncMachines.isPending}
+                  onClick={handleSyncConnections}
+                >
+                  Add my connections
+                </Button>
+              }
+            />
+
+            <div className="flex flex-col gap-2 px-4 pb-3 sm:px-5">
+              {(state?.machines ?? []).map((machine) => (
+                <div
+                  key={machine.environmentId}
+                  className="flex flex-wrap items-center gap-3 rounded-lg border border-border px-3 py-2"
+                >
+                  <MachineChip
+                    identity={{
                       environmentId: machine.environmentId,
-                      monogram: next,
-                    });
-                  }}
-                />
+                      label: machine.label,
+                      monogram: machine.monogram,
+                      colorSlot: machine.colorSlot,
+                      isMonogramOverridden: true,
+                    }}
+                    size="lg"
+                    withoutTooltip
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium">{machine.label}</span>
+                      {machine.kind === "uno_box" ? (
+                        <CloudIcon className="size-3.5 text-muted-foreground" />
+                      ) : machine.kind === "local" ? (
+                        <MonitorIcon className="size-3.5 text-muted-foreground" />
+                      ) : (
+                        <ServerIcon className="size-3.5 text-muted-foreground" />
+                      )}
+                    </div>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {machine.environmentId} · seen {formatRelativeTime(machine.lastSeenAt, now)}
+                    </p>
+                  </div>
 
-                <div className="flex items-center gap-1">
-                  {MACHINE_COLOR_CHOICES.map((choice) => {
-                    const taken = (state?.machines ?? []).some(
-                      (other) =>
-                        other.environmentId !== machine.environmentId &&
-                        other.colorSlot === choice.slot &&
-                        choice.slot !== 0,
-                    );
-                    return (
-                      <button
-                        key={choice.slot}
-                        type="button"
-                        // Colliding hues are flagged, never blocked: the user
-                        // decides whether two machines they can tell apart by
-                        // name need different colours.
-                        title={
-                          taken ? `${choice.label} — already used by another machine` : choice.label
-                        }
-                        aria-label={choice.label}
-                        aria-pressed={machine.colorSlot === choice.slot}
-                        className={`size-5 rounded-md border ${
-                          machine.colorSlot === choice.slot
-                            ? "border-foreground"
-                            : "border-transparent"
-                        } ${
-                          choice.slot === 0
-                            ? "bg-muted"
-                            : choice.slot === 1
-                              ? "bg-machine-1/40"
-                              : choice.slot === 2
-                                ? "bg-machine-2/40"
-                                : "bg-machine-3/40"
-                        } ${taken ? "opacity-60 ring-1 ring-amber-500/60" : ""}`}
-                        onClick={() =>
-                          updateMachine.mutate({
-                            environmentId: machine.environmentId,
-                            colorSlot: choice.slot,
-                          })
-                        }
-                      />
-                    );
-                  })}
+                  <Input
+                    aria-label={`Monogram for ${machine.label}`}
+                    className="w-16"
+                    defaultValue={machine.monogram}
+                    maxLength={2}
+                    onBlur={(event) => {
+                      const next = event.currentTarget.value.trim();
+                      if (next.length === 0 || next === machine.monogram) return;
+                      updateMachine.mutate({
+                        environmentId: machine.environmentId,
+                        monogram: next,
+                      });
+                    }}
+                  />
+
+                  <div className="flex items-center gap-1">
+                    {MACHINE_COLOR_CHOICES.map((choice) => {
+                      const taken = (state?.machines ?? []).some(
+                        (other) =>
+                          other.environmentId !== machine.environmentId &&
+                          other.colorSlot === choice.slot &&
+                          choice.slot !== 0,
+                      );
+                      return (
+                        <button
+                          key={choice.slot}
+                          type="button"
+                          // Colliding hues are flagged, never blocked: the user
+                          // decides whether two machines they can tell apart by
+                          // name need different colours.
+                          title={
+                            taken
+                              ? `${choice.label} — already used by another machine`
+                              : choice.label
+                          }
+                          aria-label={choice.label}
+                          aria-pressed={machine.colorSlot === choice.slot}
+                          className={`size-5 rounded-md border ${
+                            machine.colorSlot === choice.slot
+                              ? "border-foreground"
+                              : "border-transparent"
+                          } ${
+                            choice.slot === 0
+                              ? "bg-muted"
+                              : choice.slot === 1
+                                ? "bg-machine-1/40"
+                                : choice.slot === 2
+                                  ? "bg-machine-2/40"
+                                  : "bg-machine-3/40"
+                          } ${taken ? "opacity-60 ring-1 ring-amber-500/60" : ""}`}
+                          onClick={() =>
+                            updateMachine.mutate({
+                              environmentId: machine.environmentId,
+                              colorSlot: choice.slot,
+                            })
+                          }
+                        />
+                      );
+                    })}
+                  </div>
                 </div>
-
-                <StatusPill
-                  tone={presence === "live" ? "ok" : presence === "stale" ? "warn" : "muted"}
-                >
-                  {presenceLabel(presence)}
-                </StatusPill>
-
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  aria-label={`Remove ${machine.label}`}
-                  onClick={() => removeMachine.mutate({ environmentId: machine.environmentId })}
-                >
-                  <TrashIcon className="size-3.5" />
-                </Button>
-              </div>
-            );
-          })}
-        </div>
-      </SettingsSection>
-
-      <SettingsSection title="Uno boxes">
-        <SettingsRow
-          title="Boxes on this account"
-          description="A box is a machine this app can wake. Adopting one adds it to the registry; connecting it is done from Settings → Connections with the SSH endpoint shown here."
-          control={
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => void cloudQuery.refetch()}
-              disabled={cloudQuery.isFetching}
-            >
-              <RefreshCwIcon className="size-3.5" />
-              Refresh
-            </Button>
-          }
-        />
-        <div className="flex flex-col gap-2 px-1 pb-2">
-          {!cloud?.connected ? (
-            <p className="text-sm text-muted-foreground">
-              {cloudQuery.isPending ? "Loading boxes…" : "Link an Uno account to list boxes."}
-            </p>
-          ) : cloud.boxes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">This account has no boxes yet.</p>
-          ) : null}
-          {(cloud?.boxes ?? []).map((box) => {
-            const sshTarget = parseUnoBoxSshTarget(box.ssh);
-            const adopted = knownMachineIds.has(`uno-box-${box.id}` as EnvironmentId);
-            return (
-              <div
-                key={box.id}
-                className="flex flex-wrap items-center gap-3 rounded-lg border border-border px-3 py-2"
-              >
-                <MachineChip
-                  identity={{
-                    environmentId: `uno-box-${box.id}` as EnvironmentId,
-                    label: box.name,
-                    monogram: deriveMachineMonogram(box.name),
-                    colorSlot: 0,
-                    isMonogramOverridden: false,
-                  }}
-                  size="lg"
-                  withoutTooltip
-                />
-                <div className="min-w-0 flex-1">
-                  <span className="truncate text-sm font-medium">{box.name}</span>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {box.vcpu} vCPU · {box.ramMb} MB · {box.diskGb} GB
-                    {sshTarget
-                      ? ` · ssh ${sshTarget.user}@${sshTarget.host}:${sshTarget.port}`
-                      : " · no SSH endpoint yet"}
-                  </p>
-                </div>
-                <StatusPill
-                  tone={box.status === "running" ? "ok" : box.status === "error" ? "bad" : "muted"}
-                >
-                  {box.status}
-                </StatusPill>
-                <Button
-                  size="xs"
-                  variant="outline"
-                  disabled={boxPower.isPending}
-                  onClick={() =>
-                    boxPower.mutate({
-                      boxId: box.id,
-                      action: box.status === "running" ? "sleep" : "wake",
-                    })
-                  }
-                >
-                  {box.status === "running" ? "Sleep" : "Wake"}
-                </Button>
-                <Button
-                  size="xs"
-                  variant={adopted ? "ghost" : "outline"}
-                  disabled={adopted || syncMachines.isPending}
-                  onClick={() => handleAddBox(box)}
-                >
-                  {adopted ? "In workspace" : "Adopt"}
-                </Button>
-              </div>
-            );
-          })}
-        </div>
-      </SettingsSection>
-
-      <SettingsSection title="Claims and budget">
-        <SettingsRow
-          title="Cross-environment budget"
-          description="Budgets are per workspace, not per token: a loop is made of individually authorised calls."
-          control={
-            <div className="flex items-center gap-2 text-sm">
-              <StatusPill tone="muted">
-                {state?.usage.crossEnvironmentTurnsLastHour ?? 0} /{" "}
-                {state?.policy.crossEnvironmentTurnsPerHour ?? 0} per hour
-              </StatusPill>
-              <StatusPill tone="muted">
-                {state?.usage.concurrentCrossEnvironment ?? 0} /{" "}
-                {state?.policy.maxConcurrentCrossEnvironment ?? 0} at once
-              </StatusPill>
+              ))}
             </div>
-          }
-        />
-        <div className="flex flex-col gap-2 px-1 pb-2">
-          {(state?.claims ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nothing is claimed right now.</p>
-          ) : null}
-          {(state?.claims ?? []).map((claim) => (
-            <div
-              key={claim.claimId}
-              className="flex flex-wrap items-center gap-3 rounded-lg border border-border px-3 py-2"
-            >
-              <div className="min-w-0 flex-1">
-                <span className="truncate text-sm font-medium">{claim.claimKey}</span>
-                <p className="truncate text-xs text-muted-foreground">
-                  held by {claim.holderEnvironmentId} · expires {formatRelative(claim.expiresAt)}
-                  {claim.reason ? ` · ${claim.reason}` : ""}
+          </SettingsSection>
+
+          <SettingsSection title="Uno boxes">
+            <SettingsRow
+              title="Boxes on this account"
+              description="A box is a machine this app can wake. Adding one puts it in the shared list; connecting it is done from Settings → Connections with the SSH endpoint shown here."
+            />
+            <div className="flex flex-col gap-2 px-4 pb-3 sm:px-5">
+              {!cloud?.connected ? (
+                <p className="text-sm text-muted-foreground">
+                  {cloudQuery.isPending ? "Loading boxes…" : "Link an Uno account to list boxes."}
                 </p>
-              </div>
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={() =>
-                  releaseClaim.mutate({ claimKey: claim.claimKey, holderEnvironmentId: null })
-                }
-              >
-                Take back
-              </Button>
-            </div>
-          ))}
-        </div>
-      </SettingsSection>
-
-      <SettingsSection title="Requests from other machines">
-        <SettingsRow
-          title="Pending"
-          description="Each one is approved separately. A standing permission is a grant, not a button on this dialog — the moment you are deciding a single request is the worst moment to widen a permission permanently."
-          control={
-            <StatusPill tone={(state?.pendingRequests ?? []).length > 0 ? "warn" : "muted"}>
-              {(state?.pendingRequests ?? []).length} waiting
-            </StatusPill>
-          }
-        />
-        <div className="flex flex-col gap-2 px-1 pb-2">
-          {(state?.pendingRequests ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nothing is waiting for a decision.</p>
-          ) : null}
-          {(state?.pendingRequests ?? []).map((request) => (
-            <div
-              key={request.requestId}
-              className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2"
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-medium">
-                  {request.fromEnvironmentId} wants to{" "}
-                  {request.kind === "post_message"
-                    ? "post a message"
-                    : request.kind === "create_thread"
-                      ? "create a chat"
-                      : "read a transcript"}
-                </span>
-                <StatusPill tone="muted">
-                  {request.hops} of {state?.policy.maxForwardHops ?? 0} forwards
-                </StatusPill>
-                <StatusPill tone="muted">expires {formatRelative(request.expiresAt)}</StatusPill>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {request.repositoryKey}
-                {request.threadId ? ` · ${request.threadId}` : ""}
-                {request.reason ? ` · “${request.reason}”` : ""}
-              </p>
-              {request.payloadPreview.trim().length > 0 ? (
-                <pre className="max-h-24 overflow-auto whitespace-pre-wrap rounded-md bg-muted/60 px-2 py-1 text-xs text-muted-foreground">
-                  {request.payloadPreview}
-                </pre>
+              ) : cloud.boxes.length === 0 ? (
+                <p className="text-sm text-muted-foreground">This account has no boxes yet.</p>
               ) : null}
-              <div className="flex items-center gap-2">
-                <Button
-                  size="xs"
-                  disabled={decideRequest.isPending}
-                  onClick={() =>
-                    decideRequest.mutate({ requestId: request.requestId, decision: "approve" })
-                  }
-                >
-                  Allow once
-                </Button>
-                <Button
-                  size="xs"
-                  variant="outline"
-                  disabled={decideRequest.isPending}
-                  onClick={() =>
-                    decideRequest.mutate({ requestId: request.requestId, decision: "reject" })
-                  }
-                >
-                  Refuse
-                </Button>
-              </div>
+              {(cloud?.boxes ?? []).map((box) => {
+                const sshTarget = parseUnoBoxSshTarget(box.ssh);
+                return (
+                  <div
+                    key={box.id}
+                    className="flex flex-wrap items-center gap-3 rounded-lg border border-border px-3 py-2"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <span className="truncate text-sm font-medium">{box.name}</span>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {box.vcpu} vCPU · {box.ramMb} MB · {box.diskGb} GB
+                        {sshTarget
+                          ? ` · ssh ${sshTarget.user}@${sshTarget.host}:${sshTarget.port}`
+                          : " · no SSH endpoint yet"}
+                      </p>
+                    </div>
+                    <StatusPill
+                      tone={
+                        box.status === "running" ? "ok" : box.status === "error" ? "bad" : "muted"
+                      }
+                    >
+                      {box.status}
+                    </StatusPill>
+                  </div>
+                );
+              })}
             </div>
-          ))}
-        </div>
-      </SettingsSection>
+          </SettingsSection>
 
-      <WorkspaceRulesSection
-        state={state ?? null}
-        onSetPolicy={(policy) => setPolicy.mutate({ policy })}
-        onRemoveGrant={(grantId) => removeGrant.mutate({ grantId })}
-        onAddGrant={(input) => upsertGrant.mutate(input)}
-      />
+          <SettingsSection title="Claims and budget">
+            <SettingsRow
+              title="Cross-machine budget"
+              description="Budgets are per list, not per token: a loop is made of individually authorised calls."
+              control={
+                <div className="flex items-center gap-2 text-sm">
+                  <StatusPill tone="muted">
+                    {state?.usage.crossEnvironmentTurnsLastHour ?? 0} /{" "}
+                    {state?.policy.crossEnvironmentTurnsPerHour ?? 0} per hour
+                  </StatusPill>
+                  <StatusPill tone="muted">
+                    {state?.usage.concurrentCrossEnvironment ?? 0} /{" "}
+                    {state?.policy.maxConcurrentCrossEnvironment ?? 0} at once
+                  </StatusPill>
+                </div>
+              }
+            />
+            <div className="flex flex-col gap-2 px-4 pb-3 sm:px-5">
+              {(state?.claims ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nothing is claimed right now.</p>
+              ) : null}
+              {(state?.claims ?? []).map((claim) => (
+                <div
+                  key={claim.claimId}
+                  className="flex flex-wrap items-center gap-3 rounded-lg border border-border px-3 py-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <span className="truncate text-sm font-medium">{claim.claimKey}</span>
+                    <p className="truncate text-xs text-muted-foreground">
+                      held by {claim.holderEnvironmentId} · expires{" "}
+                      {formatRelativeTime(claim.expiresAt, now)}
+                      {claim.reason ? ` · ${claim.reason}` : ""}
+                    </p>
+                  </div>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() =>
+                      releaseClaim.mutate({ claimKey: claim.claimKey, holderEnvironmentId: null })
+                    }
+                  >
+                    Take back
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </SettingsSection>
 
-      <WorkspaceInstructionsSection
-        registryEnvironmentId={registryEnvironmentId}
-        state={state ?? null}
-      />
+          <SettingsSection title="Requests from other machines">
+            <SettingsRow
+              title="Pending"
+              description="Each one is approved separately. A standing permission is a grant, not a button on this dialog — the moment you are deciding a single request is the worst moment to widen a permission permanently."
+              control={
+                <StatusPill tone={pendingCount > 0 ? "warn" : "muted"}>
+                  {pendingCount} waiting
+                </StatusPill>
+              }
+            />
+            <div className="flex flex-col gap-2 px-4 pb-3 sm:px-5">
+              {pendingCount === 0 ? (
+                <p className="text-sm text-muted-foreground">Nothing is waiting for a decision.</p>
+              ) : null}
+              {(state?.pendingRequests ?? []).map((request) => (
+                <div
+                  key={request.requestId}
+                  className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium">
+                      {request.fromEnvironmentId} wants to{" "}
+                      {request.kind === "post_message"
+                        ? "post a message"
+                        : request.kind === "create_thread"
+                          ? "create a chat"
+                          : "read a transcript"}
+                    </span>
+                    <StatusPill tone="muted">
+                      {request.hops} of {state?.policy.maxForwardHops ?? 0} forwards
+                    </StatusPill>
+                    <StatusPill tone="muted">
+                      expires {formatRelativeTime(request.expiresAt, now)}
+                    </StatusPill>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {request.repositoryKey}
+                    {request.threadId ? ` · ${request.threadId}` : ""}
+                    {request.reason ? ` · “${request.reason}”` : ""}
+                  </p>
+                  {request.payloadPreview.trim().length > 0 ? (
+                    <pre className="max-h-24 overflow-auto whitespace-pre-wrap rounded-md bg-muted/60 px-2 py-1 text-xs text-muted-foreground">
+                      {request.payloadPreview}
+                    </pre>
+                  ) : null}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="xs"
+                      disabled={decideRequest.isPending}
+                      onClick={() =>
+                        decideRequest.mutate({ requestId: request.requestId, decision: "approve" })
+                      }
+                    >
+                      Allow once
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={decideRequest.isPending}
+                      onClick={() =>
+                        decideRequest.mutate({ requestId: request.requestId, decision: "reject" })
+                      }
+                    >
+                      Refuse
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </SettingsSection>
+
+          <WorkspaceRulesSection
+            state={state ?? null}
+            onSetPolicy={(policy) => setPolicy.mutate({ policy })}
+            onRemoveGrant={(grantId) => removeGrant.mutate({ grantId })}
+            onAddGrant={(input) => upsertGrant.mutate(input)}
+          />
+
+          <WorkspaceInstructionsSection
+            registryEnvironmentId={registryEnvironmentId}
+            state={state ?? null}
+          />
+        </AdvancedSharingSection>
+      ) : null}
+
+      {addModalElement}
     </SettingsPageContainer>
+  );
+}
+
+/**
+ * Everything a first-time user does not need: the shared registry, grants,
+ * claims, requests and instruction layers. Collapsed by default; a pending
+ * request is surfaced on the trigger so it is never hidden by the fold.
+ */
+function AdvancedSharingSection({
+  pendingCount,
+  unreachableMachines,
+  machineCount,
+  children,
+}: {
+  readonly pendingCount: number;
+  readonly unreachableMachines: number;
+  readonly machineCount: number;
+  readonly children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(pendingCount > 0);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="flex flex-col gap-8">
+      <CollapsibleTrigger
+        className="group flex w-full items-center justify-between gap-3 rounded-2xl border border-dashed border-border px-4 py-3 text-left transition-colors hover:bg-muted/40 sm:px-5"
+        aria-label={open ? "Hide advanced sharing" : "Show advanced sharing"}
+      >
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
+            Advanced sharing
+            {pendingCount > 0 ? (
+              <StatusPill tone="warn">
+                {pendingCount} request{pendingCount === 1 ? "" : "s"} waiting
+              </StatusPill>
+            ) : null}
+            {unreachableMachines > 0 && machineCount > 0 ? (
+              <StatusPill tone="muted">
+                {unreachableMachines} of {machineCount} not online
+              </StatusPill>
+            ) : null}
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground/80">
+            Lets your machines work together: one machine can ask another to run a task, read a
+            chat, or post a message. You decide which machines may do that, whether each request
+            needs your approval, and what written instructions every agent gets on every machine.
+            Most people never need to open this.
+          </p>
+        </div>
+        <ChevronDownIcon
+          className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </CollapsibleTrigger>
+      <CollapsiblePanel className="flex flex-col gap-8">{children}</CollapsiblePanel>
+    </Collapsible>
   );
 }
 
@@ -758,7 +1022,7 @@ function WorkspaceRulesSection({
             />
             <span className="text-xs text-muted-foreground">forwards</span>
             <Input
-              aria-label="Cross-environment turns per hour"
+              aria-label="Cross-machine steps per hour"
               className="w-24"
               type="number"
               min={0}
@@ -769,12 +1033,12 @@ function WorkspaceRulesSection({
                 onSetPolicy({ ...policy, crossEnvironmentTurnsPerHour: Math.max(next, 0) });
               }}
             />
-            <span className="text-xs text-muted-foreground">turns / hour</span>
+            <span className="text-xs text-muted-foreground">steps / hour</span>
           </div>
         }
       />
 
-      <div className="flex flex-col gap-2 px-1 pb-2">
+      <div className="flex flex-col gap-2 px-4 pb-3 sm:px-5">
         {(state?.grants ?? []).map((grant) => (
           <div
             key={grant.grantId}
@@ -786,7 +1050,7 @@ function WorkspaceRulesSection({
               </span>
               <p className="truncate text-xs text-muted-foreground">
                 {grant.repositoryKey === "*" ? "all repositories" : grant.repositoryKey} ·{" "}
-                {grant.transport === "registry" ? "through the registry" : "direct"} ·{" "}
+                {grant.transport === "registry" ? "through the shared list" : "direct"} ·{" "}
                 {grant.capabilities.map((capability) => CAPABILITY_LABELS[capability]).join(", ") ||
                   "no capabilities"}
                 {grant.requiresClaim ? " · needs the claim" : ""}

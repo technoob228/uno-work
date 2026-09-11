@@ -42,16 +42,18 @@ export function resolveEnvironmentOptionLabel(input: {
   return runtimeLabel ?? savedLabel ?? input.environmentId;
 }
 
+// A git worktree is "a separate copy of the project" to the user; the word
+// "worktree" itself only appears where the technical name helps (first mention).
 export function resolveEnvModeLabel(mode: EnvMode): string {
-  return mode === "worktree" ? "New worktree" : "Current checkout";
+  return mode === "worktree" ? "New separate copy" : "Project folder";
 }
 
 export function resolveCurrentWorkspaceLabel(activeWorktreePath: string | null): string {
-  return activeWorktreePath ? "Current worktree" : resolveEnvModeLabel("local");
+  return activeWorktreePath ? "This copy" : resolveEnvModeLabel("local");
 }
 
 export function resolveLockedWorkspaceLabel(activeWorktreePath: string | null): string {
-  return activeWorktreePath ? "Worktree" : "Local checkout";
+  return activeWorktreePath ? "Separate copy" : "Project folder";
 }
 
 export function resolveEffectiveEnvMode(input: {

@@ -587,7 +587,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
           kind === "hosted-link"
             ? "Open it in the browser on the device you want to connect."
             : kind === "link"
-              ? "Open it in the client you want to pair to this environment."
+              ? "Open it in the app you want to connect to this machine."
               : "Paste it into another client to finish pairing.",
       });
     },
@@ -1379,7 +1379,7 @@ const DesktopSshHostRow = memo(function DesktopSshHostRow({
 }: DesktopSshHostRowProps) {
   const address = formatDesktopSshTarget(target);
   const showAddress = address !== target.alias;
-  const buttonLabel = connectingHostAlias === target.alias ? "Adding…" : "Add environment";
+  const buttonLabel = connectingHostAlias === target.alias ? "Adding…" : "Add machine";
 
   return (
     <div className="border-t border-border/60 px-4 py-3 first:border-t-0 sm:px-5">
@@ -1742,7 +1742,7 @@ export function ConnectionsSettings() {
         setAddBackendDialogOpen(false);
         toastManager.add({
           type: "success",
-          title: "Environment connected",
+          title: "Machine connected",
           description: `${record.label} is ready over an SSH-managed tunnel.`,
         });
       } catch (error) {
@@ -1901,8 +1901,8 @@ export function ConnectionsSettings() {
         toastManager.add({
           type: "success",
           title: savedDesktopSshEnvironmentsByAlias[target.alias]
-            ? "Environment reconnected"
-            : "Environment connected",
+            ? "Machine reconnected"
+            : "Machine connected",
           description: `${record.label} is ready over an SSH-managed tunnel.`,
         });
       } catch (error) {
@@ -2213,7 +2213,7 @@ export function ConnectionsSettings() {
         onClick={() => void handleAddSavedBackend()}
       >
         <PlusIcon className="size-3.5" />
-        {isAddingSavedBackend ? "Adding…" : "Add environment"}
+        {isAddingSavedBackend ? "Adding…" : "Add machine"}
       </Button>
     </div>
   );
@@ -2267,7 +2267,7 @@ export function ConnectionsSettings() {
           onClick={() => void handleAddSavedBackend()}
         >
           <PlusIcon className="size-3.5" />
-          {isAddingSavedBackend ? "Adding…" : "Add environment"}
+          {isAddingSavedBackend ? "Adding…" : "Add machine"}
         </Button>
       </div>
       <div className="overflow-hidden rounded-lg border border-border/60">
@@ -2515,8 +2515,8 @@ export function ConnectionsSettings() {
                 </AlertDialogTitle>
                 <AlertDialogDescription>
                   {pendingDesktopServerExposureMode === "network-accessible"
-                    ? `${APP_BASE_NAME} will restart to expose this environment over the network.`
-                    : `${APP_BASE_NAME} will restart and limit this environment back to this machine.`}
+                    ? `${APP_BASE_NAME} will restart to make this machine reachable over the network.`
+                    : `${APP_BASE_NAME} will restart and limit access back to this computer only.`}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -2679,14 +2679,17 @@ export function ConnectionsSettings() {
               render={
                 <Button size="xs" variant="outline">
                   <PlusIcon className="size-3" />
-                  Add environment
+                  Add machine
                 </Button>
               }
             />
             <DialogPopup className="max-h-[80dvh] sm:max-w-3xl">
               <DialogHeader>
-                <DialogTitle>Add Environment</DialogTitle>
-                <DialogDescription>Pair another environment to this client.</DialogDescription>
+                <DialogTitle>Connect a machine</DialogTitle>
+                <DialogDescription>
+                  Link a machine (environment) you already run to this app. A machine is where your
+                  files and agents actually run.
+                </DialogDescription>
               </DialogHeader>
               <DialogPanel>
                 <div className="space-y-4">

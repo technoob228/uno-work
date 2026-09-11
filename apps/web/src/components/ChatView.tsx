@@ -984,14 +984,14 @@ export default function ChatView(props: ChatViewProps) {
         await reconnectSavedEnvironment(environmentId);
         toastManager.add({
           type: "success",
-          title: "Environment reconnected",
+          title: "Machine reconnected",
           description: `${label} is ready.`,
         });
       } catch (error) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Could not reconnect environment",
+            title: "Could not reconnect machine",
             description: error instanceof Error ? error.message : "Failed to reconnect.",
           }),
         );
@@ -2668,18 +2668,18 @@ export default function ChatView(props: ChatViewProps) {
       if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
         setThreadError(
           activeThread.id,
-          `Reconnect ${activeEnvironmentUnavailableLabel} before reverting checkpoints.`,
+          `Reconnect ${activeEnvironmentUnavailableLabel} before going back to a snapshot.`,
         );
         return;
       }
       if (phase === "running" || isSendBusy || isConnecting) {
-        setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
+        setThreadError(activeThread.id, "Stop the current step before going back to a snapshot.");
         return;
       }
       const confirmed = await localApi.dialogs.confirm(
         [
-          `Revert this thread to checkpoint ${turnCount}?`,
-          "This will discard newer messages and turn diffs in this thread.",
+          `Go back to snapshot ${turnCount}?`,
+          "This will discard the newer messages and their changes in this chat.",
           "This action cannot be undone.",
         ].join("\n"),
       );
@@ -2700,7 +2700,7 @@ export default function ChatView(props: ChatViewProps) {
       } catch (err) {
         setThreadError(
           activeThread.id,
-          err instanceof Error ? err.message : "Failed to revert thread state.",
+          err instanceof Error ? err.message : "Failed to go back to that snapshot.",
         );
       }
       setIsRevertingCheckpoint(false);
@@ -2831,7 +2831,10 @@ export default function ChatView(props: ChatViewProps) {
     const shouldCreateWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath;
     if (shouldCreateWorktree && !activeThreadBranch) {
-      setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
+      setThreadError(
+        threadIdForSend,
+        "Select a base branch before sending in “separate copy” mode.",
+      );
       return;
     }
 
@@ -2955,7 +2958,7 @@ export default function ChatView(props: ChatViewProps) {
         } else if (composerTerminalContextsSnapshot.length > 0) {
           titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
         } else {
-          titleSeed = "New thread";
+          titleSeed = "New chat";
         }
       }
       const title = truncate(titleSeed);
@@ -3509,11 +3512,9 @@ export default function ChatView(props: ChatViewProps) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Could not start implementation thread",
+            title: "Could not start the implementation chat",
             description:
-              err instanceof Error
-                ? err.message
-                : "An error occurred while creating the new thread.",
+              err instanceof Error ? err.message : "An error occurred while creating the new chat.",
           }),
         );
       })
@@ -3912,7 +3913,7 @@ export default function ChatView(props: ChatViewProps) {
                     data-focus-chat-preview-panel="peek"
                   >
                     <MessageSquareTextIcon className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="shrink-0 text-muted-foreground text-xs">Latest turn</span>
+                    <span className="shrink-0 text-muted-foreground text-xs">Latest step</span>
                     <span className="min-w-0 flex-1 truncate text-foreground/80">
                       {formatFocusPreviewMessageText(latestFocusPreviewMessage)}
                     </span>

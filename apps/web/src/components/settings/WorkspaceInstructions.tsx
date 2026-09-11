@@ -21,6 +21,7 @@ import {
   workspaceInstructionsQueryOptions,
   workspaceSetInstructionsMutationOptions,
 } from "../../lib/workspaceReactQuery";
+import { Explain } from "../Explain";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
@@ -71,10 +72,10 @@ export function WorkspaceInstructionsSection({
   }, [targetEnvironmentId]);
 
   return (
-    <SettingsSection title="Agent instructions">
+    <SettingsSection title="Instructions" titleAddon={<Explain term="instructions" technical />}>
       <SettingsRow
         title="Layer them per machine"
-        description="Repository text comes from git and is read-only here. The workspace layer applies everywhere; the machine layer overrides it."
+        description="Instructions are a note the agent reads before every task. The project's own note (AGENTS.md) comes from the project folder and is read-only here. The all-machines layer applies everywhere; the machine layer overrides it."
         control={
           <div className="flex flex-wrap items-center gap-2">
             <select
@@ -93,9 +94,9 @@ export function WorkspaceInstructionsSection({
               ) : null}
             </select>
             <Input
-              aria-label="Project path"
+              aria-label="Project folder"
               className="w-64"
-              placeholder="/path/to/checkout (for the repository layer)"
+              placeholder="/path/to/project folder (for the project layer)"
               value={projectPath}
               onChange={(event) => setProjectPath(event.target.value)}
             />
@@ -106,7 +107,7 @@ export function WorkspaceInstructionsSection({
       <div className="flex flex-col gap-3 px-1 pb-2">
         <div className="rounded-lg border border-border">
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
-            <span className="text-sm font-medium">1 · Repository</span>
+            <span className="text-sm font-medium">1 · Project</span>
             <span className="text-xs text-muted-foreground">
               {repositoryLayer?.source ?? "no project selected"} · read-only
             </span>
@@ -114,13 +115,13 @@ export function WorkspaceInstructionsSection({
           <pre className="max-h-40 overflow-auto whitespace-pre-wrap px-3 py-2 text-xs text-muted-foreground">
             {repositoryLayer?.text?.trim().length
               ? repositoryLayer.text
-              : "Nothing yet — point at a checkout with an AGENTS.md."}
+              : "Nothing yet — pick a project folder that has an Instructions file."}
           </pre>
         </div>
 
         <div className="rounded-lg border border-border">
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
-            <span className="text-sm font-medium">2 · Workspace</span>
+            <span className="text-sm font-medium">2 · All machines</span>
             <Button
               size="xs"
               variant="outline"
@@ -137,7 +138,7 @@ export function WorkspaceInstructionsSection({
             </Button>
           </div>
           <Textarea
-            aria-label="Workspace instructions"
+            aria-label="Instructions for all machines"
             className="min-h-24 rounded-none border-0 text-xs"
             value={workspaceDraft ?? workspaceLayer?.text ?? ""}
             onChange={(event) => setWorkspaceDraft(event.target.value)}
@@ -149,7 +150,7 @@ export function WorkspaceInstructionsSection({
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
             <span className="text-sm font-medium">3 · This machine</span>
             <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">overrides the workspace</span>
+              <span className="text-xs text-muted-foreground">overrides the all-machines note</span>
               <Button
                 size="xs"
                 variant="outline"
@@ -187,8 +188,8 @@ export function WorkspaceInstructionsSection({
                   onSuccess: (result) =>
                     setApplyResult(
                       result.pointerWritten
-                        ? `Wrote ${result.generatedPath} and refreshed the pointer in AGENTS.md.`
-                        : `Wrote ${result.generatedPath}. AGENTS.md left alone — its marker block is gone, and we do not put it back.`,
+                        ? `Wrote ${result.generatedPath} and refreshed the pointer in the project's Instructions file.`
+                        : `Wrote ${result.generatedPath}. The project's Instructions file was left alone — its marker block is gone, and we do not put it back.`,
                     ),
                   onError: (error) =>
                     setApplyResult(error instanceof Error ? error.message : String(error)),
@@ -202,7 +203,7 @@ export function WorkspaceInstructionsSection({
             <span className="text-xs text-muted-foreground">{applyResult}</span>
           ) : (
             <span className="text-xs text-muted-foreground">
-              Generates .t3code/UNO_WORKSPACE.md in the checkout above.
+              Generates .t3code/UNO_WORKSPACE.md in the project folder above.
             </span>
           )}
         </div>
