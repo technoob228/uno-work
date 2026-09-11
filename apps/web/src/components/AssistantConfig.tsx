@@ -26,6 +26,7 @@ import type {
   AssistantEditableFileName,
   EnvironmentId,
   ManagerAssistantSummary,
+  ManagerConnectorBindingView,
   ManagerConnectorHealth,
   ManagerConnectorHealthStatus,
   ManagerScope,
@@ -35,12 +36,15 @@ import { isAssistantProjectId } from "@t3tools/contracts";
 
 import {
   getAssistant,
+  listConnectorBindings,
   listProjectsForAccessPicker,
   readAssistantFile,
+  removeConnectorBinding,
   saveAssistantTelegram,
   saveAssistantSlack,
   setAssistantDefaultModel,
   updateAssistantAccess,
+  upsertConnectorBinding,
   writeAssistantFile,
 } from "../lib/managerApi";
 import { EnvironmentScopeBanner } from "../environments/scope/EnvironmentScopeBanner";
@@ -204,6 +208,8 @@ export function AssistantConfig({
   const environmentLabel = scope?.label ?? "this environment";
   const [assistant, setAssistant] = useState<ManagerAssistantSummary | null>(null);
   const [projects, setProjects] = useState<ReadonlyArray<{ id: ProjectId; title: string }>>([]);
+  // Chat → target bindings of this assistant's connectors (ADR 2026-09-11).
+  const [bindings, setBindings] = useState<ReadonlyArray<ManagerConnectorBindingView>>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -241,12 +247,14 @@ export function AssistantConfig({
 
   const refresh = useCallback(async () => {
     try {
-      const [nextAssistant, nextProjects] = await Promise.all([
+      const [nextAssistant, nextProjects, nextBindings] = await Promise.all([
         getAssistant({ environmentId, projectId }),
         listProjectsForAccessPicker({ environmentId }),
+        listConnectorBindings({ environmentId, projectId }),
       ]);
       setAssistant(nextAssistant);
       setProjects(nextProjects.filter((project) => !isAssistantProjectId(project.id)));
+      setBindings(nextBindings.bindings);
       if (nextAssistant.token !== null) {
         setAllowAll(nextAssistant.token.projectAllowlist === "all");
         setSelectedProjects(
@@ -450,6 +458,39 @@ export function AssistantConfig({
     slackHotWindowSec,
     refresh,
   ]);
+
+  const handleBindingNotifyToggle = useCallback(
+    (binding: ManagerConnectorBindingView, notifyOnComplete: boolean) => {
+      if (!canMutate) return;
+      setNotice(null);
+      void upsertConnectorBinding({
+        environmentId,
+        kind: binding.kind,
+        chatId: binding.chatId,
+        connectorProjectId: binding.connectorProjectId,
+        target: binding.target,
+        notifyOnComplete,
+      })
+        .then(() => refresh())
+        .catch((cause: unknown) =>
+          setError(cause instanceof Error ? cause.message : "Failed to update the binding."),
+        );
+    },
+    [canMutate, environmentId, refresh],
+  );
+
+  const handleBindingRemove = useCallback(
+    (binding: ManagerConnectorBindingView) => {
+      if (!canMutate) return;
+      setNotice(null);
+      void removeConnectorBinding({ environmentId, kind: binding.kind, chatId: binding.chatId })
+        .then(() => refresh())
+        .catch((cause: unknown) =>
+          setError(cause instanceof Error ? cause.message : "Failed to remove the binding."),
+        );
+    },
+    [canMutate, environmentId, refresh],
+  );
 
   const toggleProject = useCallback((id: string) => {
     setSelectedProjects((current) => {
@@ -747,6 +788,58 @@ export function AssistantConfig({
                   />
                 }
               />
+            </SettingsSection>
+
+            <SettingsSection title="Chat bindings" icon={<SendIcon className="size-3.5" />}>
+              <SettingsRow
+                title="Where each chat's messages go"
+                description="A chat without a binding talks to this assistant. From the chat itself: /use <project>, /thread <thread>, /assistant, /where. Errors and approval requests of the bound target are pushed to the chat; completed turns only when the toggle is on."
+              />
+              {bindings.length === 0 ? (
+                <SettingsRow
+                  title="No bindings"
+                  description="Every allowed chat is bound to the assistant (default)."
+                />
+              ) : (
+                bindings.map((binding) => (
+                  <SettingsRow
+                    key={`${binding.kind}:${binding.chatId}`}
+                    title={
+                      <span className="flex items-center gap-2">
+                        <span>
+                          {binding.kind === "telegram" ? "Telegram" : "Slack"} chat {binding.chatId}
+                        </span>
+                        <Badge variant="outline">{binding.target.kind}</Badge>
+                      </span>
+                    }
+                    description={
+                      binding.targetLabel === null
+                        ? `Target no longer exists (${binding.target.kind === "thread" ? binding.target.threadId : binding.target.projectId}).`
+                        : `${binding.targetLabel} · ${binding.target.kind === "thread" ? binding.target.threadId : binding.target.projectId}`
+                    }
+                    control={
+                      <span className="flex items-center gap-3">
+                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          Notify on complete
+                          <Toggle
+                            checked={binding.notifyOnComplete}
+                            onChange={(next) => handleBindingNotifyToggle(binding, next)}
+                            label={`Notify ${binding.chatId} on completed turns`}
+                          />
+                        </span>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          disabled={!canMutate}
+                          onClick={() => handleBindingRemove(binding)}
+                        >
+                          Remove
+                        </Button>
+                      </span>
+                    }
+                  />
+                ))
+              )}
             </SettingsSection>
 
             <SettingsSection

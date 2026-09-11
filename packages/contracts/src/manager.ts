@@ -291,6 +291,111 @@ export const ManagerAssistantOverview = Schema.Struct({
 });
 export type ManagerAssistantOverview = typeof ManagerAssistantOverview.Type;
 
+// ===============================
+// Connector bindings (chat → target)
+// ===============================
+
+/**
+ * A chat connector is a transport, not a conversation partner (ADR
+ * 2026-09-11). Each chat of a connector is bound to a target that receives
+ * its messages and whose events it may be notified about:
+ *
+ * - `assistant`: the assistant project that owns the bot (the default when
+ *   no binding row exists — today's behaviour);
+ * - `project`: a regular project; the chat gets one thread there, created
+ *   on the project's default model, never forced into full access;
+ * - `thread`: one specific existing thread.
+ */
+export const ManagerConnectorBindingKind = Schema.Literals(["telegram", "slack"]);
+export type ManagerConnectorBindingKind = typeof ManagerConnectorBindingKind.Type;
+
+export const ManagerConnectorBindingTargetKind = Schema.Literals([
+  "assistant",
+  "project",
+  "thread",
+]);
+export type ManagerConnectorBindingTargetKind = typeof ManagerConnectorBindingTargetKind.Type;
+
+export const ManagerConnectorBindingTarget = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("assistant"), projectId: ProjectId }),
+  Schema.Struct({ kind: Schema.Literal("project"), projectId: ProjectId }),
+  Schema.Struct({ kind: Schema.Literal("thread"), threadId: ThreadId }),
+]);
+export type ManagerConnectorBindingTarget = typeof ManagerConnectorBindingTarget.Type;
+
+export const ManagerConnectorBinding = Schema.Struct({
+  kind: ManagerConnectorBindingKind,
+  /** Telegram chat id / Slack chat key — the connector's own chat identifier. */
+  chatId: TrimmedNonEmptyString,
+  /** Assistant project whose connector (bot) carries this chat. */
+  connectorProjectId: ProjectId,
+  target: ManagerConnectorBindingTarget,
+  /** Also push "turn completed" for the target (errors and approvals are always pushed). */
+  notifyOnComplete: Schema.Boolean,
+  updatedAt: IsoDateTime,
+});
+export type ManagerConnectorBinding = typeof ManagerConnectorBinding.Type;
+
+/** Binding as listed for the settings UI: the target resolved to a human label. */
+export const ManagerConnectorBindingView = Schema.Struct({
+  ...ManagerConnectorBinding.fields,
+  /** Project / thread title of the target; null when the target no longer exists. */
+  targetLabel: Schema.NullOr(Schema.String),
+});
+export type ManagerConnectorBindingView = typeof ManagerConnectorBindingView.Type;
+
+export const ManagerConnectorBindingsListResult = Schema.Struct({
+  bindings: Schema.Array(ManagerConnectorBindingView),
+});
+export type ManagerConnectorBindingsListResult = typeof ManagerConnectorBindingsListResult.Type;
+
+export const ManagerConnectorBindingUpsertInput = Schema.Struct({
+  kind: ManagerConnectorBindingKind,
+  chatId: TrimmedNonEmptyString,
+  connectorProjectId: ProjectId,
+  target: ManagerConnectorBindingTarget,
+  notifyOnComplete: Schema.optional(Schema.Boolean),
+});
+export type ManagerConnectorBindingUpsertInput = typeof ManagerConnectorBindingUpsertInput.Type;
+
+export const ManagerConnectorBindingRemoveInput = Schema.Struct({
+  kind: ManagerConnectorBindingKind,
+  chatId: TrimmedNonEmptyString,
+});
+export type ManagerConnectorBindingRemoveInput = typeof ManagerConnectorBindingRemoveInput.Type;
+
+/**
+ * `POST /api/channels/notify` — outbound message from a thread's harness (or
+ * any software holding the bridge token) to the chat(s) bound to that
+ * thread / project. `threadId` defaults to the thread the bridge token is
+ * scoped to.
+ */
+export const ChannelNotifyKind = Schema.Literals(["info", "warning", "error"]);
+export type ChannelNotifyKind = typeof ChannelNotifyKind.Type;
+
+export const CHANNEL_NOTIFY_PATH = "/api/channels/notify";
+export const CHANNEL_NOTIFY_MAX_TEXT_CHARS = 4_000;
+
+export const ChannelNotifyInput = Schema.Struct({
+  text: TrimmedNonEmptyString,
+  threadId: Schema.optional(ThreadId),
+  projectId: Schema.optional(ProjectId),
+  kind: Schema.optional(ChannelNotifyKind),
+});
+export type ChannelNotifyInput = typeof ChannelNotifyInput.Type;
+
+export const ChannelNotifyResult = Schema.Struct({
+  delivered: NonNegativeInt,
+  chats: Schema.Array(
+    Schema.Struct({
+      kind: ManagerConnectorBindingKind,
+      chatId: TrimmedNonEmptyString,
+      delivered: Schema.Boolean,
+    }),
+  ),
+});
+export type ChannelNotifyResult = typeof ChannelNotifyResult.Type;
+
 /** Defaults applied to a Slack connector that has no row yet. */
 export const DEFAULT_SLACK_CONNECTOR_STATUS: ManagerSlackConnectorStatus = {
   configured: false,

@@ -6,11 +6,21 @@
  *   never with user sessions. This is the ONLY route a manager token opens.
  * - `/api/manager/proposals*`, `/api/manager/tokens*` — owner-session-only
  *   management: list/resolve proposals, issue/list/revoke tokens.
+ * - `/api/manager/connector-bindings*` — owner-session-only: which chat of
+ *   an assistant's connector talks to which target (ADR 2026-09-11).
+ * - `POST /api/channels/notify` — outbound message to the chats bound to a
+ *   thread / project. Authenticated with the browser-bridge token every
+ *   harness process holds (a thread-scoped token implies the thread).
  */
 import {
   AssistantEditableFileName,
   assistantTokenLabel,
+  CHANNEL_NOTIFY_PATH,
+  ChannelNotifyInput,
+  isAssistantProjectId,
   ManagerAssistantAccessInput,
+  ManagerConnectorBindingRemoveInput,
+  ManagerConnectorBindingUpsertInput,
   ManagerCreateAssistantInput,
   ManagerCreateTokenInput,
   ManagerOwnerResolveProposalInput,
@@ -21,14 +31,22 @@ import {
   ManagerTokenId,
   ModelSelection,
   ProjectId,
+  ThreadId,
+  type ManagerConnectorBinding,
+  type ManagerConnectorBindingView,
 } from "@t3tools/contracts";
 import { Effect, Option, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { ServerAuth, AuthError } from "../auth/Services/ServerAuth.ts";
+import { BrowserBridge } from "../browserBridge.ts";
+import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerCapabilityTokenRepository } from "../persistence/Services/ManagerCapabilityTokens.ts";
+import { ManagerConnectorBindingRepository } from "../persistence/Services/ManagerConnectorBindings.ts";
 import { ManagerConnectorRepository } from "../persistence/Services/ManagerConnectors.ts";
+import { bindingTargetLabel } from "./connectorBindings.ts";
 import { ManagerAssistantService } from "./Services/AssistantService.ts";
+import { ConnectorNotifyService } from "./Services/ConnectorNotify.ts";
 import { handleManagerMcpMessage } from "./mcp.ts";
 import { ManagerApprovalService } from "./Services/ManagerApprovalService.ts";
 import { ManagerTokenAuthService } from "./Services/ManagerTokenAuth.ts";
@@ -527,4 +545,144 @@ export const managerTokensRevokeRouteLayer = HttpRouter.add(
       Effect.catch(respondServerError("tokens:revoke")),
     );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+// ---------------------------------------------------------------------------
+// Connector bindings (chat → target)
+// ---------------------------------------------------------------------------
+
+// Resolve target titles for the settings table in one snapshot read.
+const withBindingLabels = (bindings: ReadonlyArray<ManagerConnectorBinding>) =>
+  Effect.gen(function* () {
+    const projections = yield* ProjectionSnapshotQuery;
+    const snapshot = yield* projections.getShellSnapshot();
+    const labels = {
+      projectTitleById: new Map(snapshot.projects.map((project) => [project.id, project.title])),
+      threadTitleById: new Map(snapshot.threads.map((thread) => [thread.id, thread.title])),
+    };
+    return bindings.map(
+      (binding): ManagerConnectorBindingView => ({
+        ...binding,
+        targetLabel: bindingTargetLabel(binding.target, labels),
+      }),
+    );
+  });
+
+export const managerConnectorBindingsListRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/connector-bindings",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const bindingRepository = yield* ManagerConnectorBindingRepository;
+    const projectId = yield* assistantProjectIdFromQuery;
+    return yield* bindingRepository.listByConnectorProject(projectId).pipe(
+      Effect.flatMap(withBindingLabels),
+      Effect.map((bindings) => HttpServerResponse.jsonUnsafe({ bindings }, { status: 200 })),
+      Effect.catch(respondServerError("connector-bindings:list")),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const managerConnectorBindingsUpsertRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/connector-bindings",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const bindingRepository = yield* ManagerConnectorBindingRepository;
+    const projections = yield* ProjectionSnapshotQuery;
+    const input = yield* HttpServerRequest.schemaBodyJson(ManagerConnectorBindingUpsertInput).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid binding payload.", status: 400 })),
+    );
+    if (!isAssistantProjectId(input.connectorProjectId)) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: "connectorProjectId must be an assistant project." },
+        { status: 400 },
+      );
+    }
+    return yield* Effect.gen(function* () {
+      // The target must exist: a binding to nothing would only produce
+      // "no longer exists" replies in the chat.
+      const targetExists =
+        input.target.kind === "thread"
+          ? Option.isSome(yield* projections.getThreadShellById(input.target.threadId))
+          : Option.isSome(yield* projections.getProjectShellById(input.target.projectId));
+      if (!targetExists) {
+        return HttpServerResponse.jsonUnsafe(
+          { error: "Binding target not found." },
+          { status: 404 },
+        );
+      }
+      const existing = yield* bindingRepository.get({ kind: input.kind, chatId: input.chatId });
+      yield* bindingRepository.upsert({
+        kind: input.kind,
+        chatId: input.chatId,
+        connectorProjectId: input.connectorProjectId,
+        target: input.target,
+        notifyOnComplete:
+          input.notifyOnComplete ??
+          (Option.isSome(existing) ? existing.value.notifyOnComplete : false),
+        updatedAt: new Date().toISOString(),
+      });
+      const saved = yield* bindingRepository.get({ kind: input.kind, chatId: input.chatId });
+      const labelled = yield* withBindingLabels(Option.isSome(saved) ? [saved.value] : []);
+      return HttpServerResponse.jsonUnsafe({ binding: labelled[0] ?? null }, { status: 200 });
+    }).pipe(Effect.catch(respondServerError("connector-bindings:upsert")));
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const managerConnectorBindingsRemoveRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/connector-bindings/remove",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const bindingRepository = yield* ManagerConnectorBindingRepository;
+    const input = yield* HttpServerRequest.schemaBodyJson(ManagerConnectorBindingRemoveInput).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid remove payload.", status: 400 })),
+    );
+    return yield* bindingRepository.remove(input).pipe(
+      Effect.map((removed) => HttpServerResponse.jsonUnsafe({ removed }, { status: 200 })),
+      Effect.catch(respondServerError("connector-bindings:remove")),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+// ---------------------------------------------------------------------------
+// Outbound: software / harness → bound chat(s)
+// ---------------------------------------------------------------------------
+
+export const channelsNotifyRouteLayer = HttpRouter.add(
+  "POST",
+  CHANNEL_NOTIFY_PATH,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const browserBridge = yield* BrowserBridge;
+    const authorization = browserBridge.authorize(request.headers["authorization"]);
+    if (!authorization) {
+      return HttpServerResponse.jsonUnsafe({ error: "Unauthorized" }, { status: 401 });
+    }
+    const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
+    const decoded = Schema.decodeUnknownExit(ChannelNotifyInput)(body);
+    if (decoded._tag !== "Success") {
+      return HttpServerResponse.jsonUnsafe(
+        {
+          error:
+            'Invalid payload: expected {"text": string, "threadId"?: string, "projectId"?: string, "kind"?: "info"|"warning"|"error"}.',
+        },
+        { status: 400 },
+      );
+    }
+    const input = decoded.value;
+    // A thread-scoped token names its thread; an explicit threadId wins.
+    const scopedThreadId = authorization.context?.threadId;
+    const threadId =
+      input.threadId ?? (scopedThreadId !== undefined ? ThreadId.make(scopedThreadId) : undefined);
+    const notifyService = yield* ConnectorNotifyService;
+    const result = yield* notifyService.notify({
+      text: input.text,
+      ...(threadId !== undefined ? { threadId } : {}),
+      ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+      ...(input.kind !== undefined ? { kind: input.kind } : {}),
+    });
+    return HttpServerResponse.jsonUnsafe(result, { status: 200 });
+  }),
 );

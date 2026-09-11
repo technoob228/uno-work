@@ -55,6 +55,7 @@ import Migration0038 from "./Migrations/038_Workspace.ts";
 import Migration0039 from "./Migrations/039_ProjectionThreadsPinned.ts";
 import Migration0040 from "./Migrations/040_ProjectionProjectRepositoryIdentityReapply.ts";
 import Migration0041 from "./Migrations/041_ManagerConnectorInbox.ts";
+import Migration0042 from "./Migrations/042_ManagerConnectorBindings.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -108,6 +109,7 @@ export const migrationEntries = [
   [39, "ProjectionThreadsPinned", Migration0039],
   [40, "ProjectionProjectRepositoryIdentityReapply", Migration0040],
   [41, "ManagerConnectorInbox", Migration0041],
+  [42, "ManagerConnectorBindings", Migration0042],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

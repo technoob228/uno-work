@@ -10,11 +10,18 @@
  * dies mid-turn), the last assistant message goes back to the chat; files the
  * assistant marked with `[[send-file: /abs/path]]` are uploaded alongside it.
  *
- * Thread lifecycle per chat: one thread per (project, chatId), reused while it
- * stays alive AND still matches the connector's configured harness/model.
- * Changing the default selection (or archiving the thread) makes the next
- * message start a fresh thread on the new selection, seeded with a compact
- * transcript of the previous one.
+ * Where a chat's messages go is a binding (`manager_connector_bindings`,
+ * ADR 2026-09-11): the assistant that owns the bot (default), a regular
+ * project, or one specific thread — switched from the chat itself with
+ * `/use`, `/thread`, `/assistant` (see `connectorCommands.ts`). Routing per
+ * target is decided in `connectorBindings.ts#decideThreadRouting`.
+ *
+ * Thread lifecycle per chat (assistant / project targets): one thread per
+ * (target project, chatId), reused while it stays alive AND still matches
+ * the selection it should run on (the connector's harness for the assistant,
+ * the project's default model otherwise). Changing that selection (or
+ * archiving the thread) makes the next message start a fresh thread, seeded
+ * with a compact transcript of the previous one.
  *
  * Config lives in `manager_assistant_connectors` and is re-read between poll
  * cycles, so saving settings takes effect without a restart.
@@ -37,9 +44,9 @@ import {
   ThreadId,
   UNO_GATEWAY_BASE_URL,
   type ChatImageAttachment,
+  type ManagerConnectorBindingTarget,
   type ManagerConnectorHealth,
   type ManagerConnectorHealthStatus,
-  type ModelSelection,
   type OrchestrationThread,
 } from "@t3tools/contracts";
 import { Context, Data, Duration, Effect, Layer, Option, Ref, Schema, type Scope } from "effect";
@@ -81,12 +88,22 @@ import {
 } from "../connectorInbox.ts";
 import { ServerConfig } from "../../config.ts";
 import { telegramCommandOrigin } from "../../orchestration/commandOrigin.ts";
+import { inheritProjectThreadModes } from "../../orchestration/projectThreadModes.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ManagerConnectorBindingRepository } from "../../persistence/Services/ManagerConnectorBindings.ts";
 import {
   ManagerConnectorRepository,
   type ManagerConnectorKey,
 } from "../../persistence/Services/ManagerConnectors.ts";
+import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
+import {
+  decideThreadRouting,
+  effectiveBindingTarget,
+  type RoutingThreadShell,
+} from "../connectorBindings.ts";
+import { executeConnectorCommand } from "../connectorCommandHandler.ts";
+import { parseConnectorCommand } from "../connectorCommands.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import {
   ProjectionTurnRepository,
@@ -313,6 +330,15 @@ class TelegramConnectorError extends Data.TaggedError("TelegramConnectorError")<
   readonly message: string;
 }> {}
 
+/**
+ * The chat's binding cannot be served (bound thread gone / archived, project
+ * without a model). Reported to the chat as plain text; the update counts as
+ * handled — retrying would not change the answer.
+ */
+class TelegramRoutingError extends Data.TaggedError("TelegramRoutingError")<{
+  readonly message: string;
+}> {}
+
 /** Telegram answered `{ ok: false }`; `errorCode` decides retry/health handling. */
 class TelegramApiRejection extends Data.TaggedError("TelegramApiRejection")<{
   readonly errorCode: number | undefined;
@@ -341,6 +367,8 @@ const credentialFingerprint = (botToken: string): string =>
 
 const makeTelegramConnector = Effect.gen(function* () {
   const connectorRepository = yield* ManagerConnectorRepository;
+  const bindingRepository = yield* ManagerConnectorBindingRepository;
+  const pendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
@@ -348,7 +376,8 @@ const makeTelegramConnector = Effect.gen(function* () {
   const serverSettingsService = yield* ServerSettingsService;
 
   // Non-image incoming files land here; the harness reads them by absolute
-  // path (Telegram threads always run in full-access mode).
+  // path (assistant threads run in full access; a project / thread target
+  // may ask for approval to read them, which the chat resolves with /approve).
   const telegramFilesDir = nodePath.join(serverConfig.stateDir, "telegram-files");
 
   const runtimesRef = yield* Ref.make<ReadonlyMap<ProjectId, BotRuntime>>(new Map());
@@ -490,9 +519,6 @@ const makeTelegramConnector = Effect.gen(function* () {
           }),
         );
 
-  const sameHarnessAndModel = (a: ModelSelection, b: ModelSelection): boolean =>
-    a.instanceId === b.instanceId && a.model === b.model;
-
   // Compact transcript of the old thread, carried into the replacement thread
   // as a preamble on its first turn so the new harness knows what came before.
   const buildHandoffContext = (thread: OrchestrationThread): string | null => {
@@ -529,81 +555,117 @@ const makeTelegramConnector = Effect.gen(function* () {
     return lines.length === 0 ? null : lines.join("\n");
   };
 
+  const routingShell = (shell: Option.Option<RoutingThreadShell>): RoutingThreadShell | null =>
+    Option.isSome(shell) ? shell.value : null;
+
+  // Resolve the thread an addressed message lands in, per the chat's binding
+  // target (see `decideThreadRouting`). Creates the per-chat thread when the
+  // target is a project / the assistant and none is live on the right
+  // selection; never creates anything for a `thread` target.
   const ensureThreadForChat = (input: {
-    readonly projectId: ProjectId;
+    readonly target: ManagerConnectorBindingTarget;
     readonly chatId: string;
     readonly chatLabel: string;
     readonly config: ManagerTelegramConnectorConfig;
   }) =>
     Effect.gen(function* () {
-      const project = yield* projectionSnapshotQuery.getProjectShellById(input.projectId);
-      // The connector-level choice wins: Telegram must never spawn a harness
-      // the owner didn't pick for it.
-      const modelSelection =
-        input.config.defaultModelSelection ??
-        (Option.isSome(project) ? project.value.defaultModelSelection : null);
-
-      const existing = yield* connectorRepository.getThreadForChat({
-        projectId: input.projectId,
-        kind: "telegram",
-        chatId: input.chatId,
+      const { target } = input;
+      const routing = yield* Effect.gen(function* () {
+        if (target.kind === "thread") {
+          const targetThread = yield* projectionSnapshotQuery.getThreadShellById(target.threadId);
+          return decideThreadRouting({
+            target,
+            mappedThread: null,
+            targetThread: routingShell(targetThread),
+            connectorModelSelection: null,
+            projectModelSelection: null,
+            inheritedModes: null,
+          });
+        }
+        const project = yield* projectionSnapshotQuery.getProjectShellById(target.projectId);
+        if (Option.isNone(project)) {
+          return yield* new TelegramRoutingError({
+            message: `This chat is bound to project ${target.projectId}, which no longer exists. Use /use <project> or /assistant.`,
+          });
+        }
+        const existing = yield* connectorRepository.getThreadForChat({
+          projectId: target.projectId,
+          kind: "telegram",
+          chatId: input.chatId,
+        });
+        const mappedThread = Option.isSome(existing)
+          ? routingShell(yield* projectionSnapshotQuery.getThreadShellById(existing.value))
+          : null;
+        const inheritedModes =
+          target.kind === "project"
+            ? yield* inheritProjectThreadModes(projectionSnapshotQuery, target.projectId)
+            : null;
+        return decideThreadRouting({
+          target,
+          mappedThread,
+          targetThread: null,
+          // The connector-level choice wins for the assistant only: Telegram
+          // must never spawn a harness the owner didn't pick for it — while a
+          // project target runs on what the project itself is configured for.
+          connectorModelSelection: input.config.defaultModelSelection ?? null,
+          projectModelSelection: project.value.defaultModelSelection,
+          inheritedModes,
+        });
       });
-      let previousThreadId: ThreadId | null = null;
-      if (Option.isSome(existing)) {
-        const shell = yield* projectionSnapshotQuery.getThreadShellById(existing.value);
-        if (Option.isSome(shell) && shell.value.archivedAt === null) {
-          // Reuse the live thread unless the owner has since pointed the
-          // connector at a different harness/model — then start a fresh
-          // thread on the new selection instead of silently ignoring it.
-          if (
-            modelSelection === null ||
-            sameHarnessAndModel(shell.value.modelSelection, modelSelection)
-          ) {
-            return { threadId: existing.value, handoffContext: null };
+
+      switch (routing.kind) {
+        case "reject":
+          return yield* new TelegramRoutingError({ message: routing.message });
+        case "reuse":
+          return {
+            threadId: routing.threadId,
+            handoffContext: null,
+            runtimeMode: routing.runtimeMode,
+            interactionMode: routing.interactionMode,
+          };
+        case "create": {
+          let handoffContext: string | null = null;
+          if (routing.previousThreadId !== null) {
+            const previousDetail = yield* projectionSnapshotQuery
+              .getThreadDetailById(routing.previousThreadId)
+              .pipe(Effect.orElseSucceed(() => Option.none<OrchestrationThread>()));
+            if (Option.isSome(previousDetail)) {
+              handoffContext = buildHandoffContext(previousDetail.value);
+            }
           }
+          const threadId = ThreadId.make(crypto.randomUUID());
+          const createdAt = new Date().toISOString();
+          yield* orchestrationEngine.dispatch(
+            {
+              type: "thread.create",
+              commandId: CommandId.make(`telegram:${crypto.randomUUID()}`),
+              threadId,
+              projectId: routing.projectId,
+              title: `Telegram: ${input.chatLabel}`,
+              modelSelection: routing.modelSelection,
+              runtimeMode: routing.runtimeMode,
+              interactionMode: routing.interactionMode,
+              branch: null,
+              worktreePath: null,
+              createdAt,
+            },
+            { origin: telegramCommandOrigin(input.chatId) },
+          );
+          yield* connectorRepository.setThreadForChat({
+            projectId: routing.projectId,
+            kind: "telegram",
+            chatId: input.chatId,
+            threadId,
+            createdAt,
+          });
+          return {
+            threadId,
+            handoffContext,
+            runtimeMode: routing.runtimeMode,
+            interactionMode: routing.interactionMode,
+          };
         }
-        previousThreadId = existing.value;
       }
-      if (modelSelection === null) {
-        return yield* Effect.fail(new Error("Assistant project has no model configured."));
-      }
-
-      let handoffContext: string | null = null;
-      if (previousThreadId !== null) {
-        const previousDetail = yield* projectionSnapshotQuery
-          .getThreadDetailById(previousThreadId)
-          .pipe(Effect.orElseSucceed(() => Option.none<OrchestrationThread>()));
-        if (Option.isSome(previousDetail)) {
-          handoffContext = buildHandoffContext(previousDetail.value);
-        }
-      }
-
-      const threadId = ThreadId.make(crypto.randomUUID());
-      const createdAt = new Date().toISOString();
-      yield* orchestrationEngine.dispatch(
-        {
-          type: "thread.create",
-          commandId: CommandId.make(`telegram:${crypto.randomUUID()}`),
-          threadId,
-          projectId: input.projectId,
-          title: `Telegram: ${input.chatLabel}`,
-          modelSelection,
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          branch: null,
-          worktreePath: null,
-          createdAt,
-        },
-        { origin: telegramCommandOrigin(input.chatId) },
-      );
-      yield* connectorRepository.setThreadForChat({
-        projectId: input.projectId,
-        kind: "telegram",
-        chatId: input.chatId,
-        threadId,
-        createdAt,
-      });
-      return { threadId, handoffContext };
     });
 
   // Transcribe the first transcribable audio of a message BEFORE the addressing
@@ -1030,13 +1092,38 @@ const makeTelegramConnector = Effect.gen(function* () {
         return;
       }
 
+      const botUsername = (yield* getRuntime(projectId)).botUsername;
+
+      // --- Chat commands (`/use`, `/where`, `/approve`, …) come before the
+      // addressing gate: they steer the transport itself and never reach a
+      // harness. Anything else is message text for the bound target.
+      const command = parseConnectorCommand(text, botUsername);
+      if (command !== null) {
+        const reply = yield* executeConnectorCommand(
+          {
+            bindings: bindingRepository,
+            projections: projectionSnapshotQuery,
+            pendingApprovals: pendingApprovalRepository,
+            engine: orchestrationEngine,
+          },
+          {
+            kind: "telegram",
+            chatId,
+            connectorProjectId: projectId,
+            origin: telegramCommandOrigin(chatId),
+          },
+          command,
+        );
+        yield* sendTelegramText(projectId, config.botToken, chatId, reply);
+        return;
+      }
+
       // --- Addressing gate. Decide whether the bot should react BEFORE
       // creating a thread: a private chat always passes; a group needs an
       // @mention / reply / a (fuzzy) name / an active hot window, or — only if
       // the owner opted in — the smart classifier. Non-addressed group chatter
       // never spawns a thread or a harness session.
       const addressing = config.addressing ?? DEFAULT_ADDRESSING_CONFIG;
-      const botUsername = (yield* getRuntime(projectId)).botUsername;
       const hotKey = hotWindowKey(projectId, chatId);
       const withinHotWindow = yield* isWithinHotWindow(hotKey, addressing.hotWindowSec);
 
@@ -1094,12 +1181,20 @@ const makeTelegramConnector = Effect.gen(function* () {
       }
 
       const chatLabel = message.chat?.title ?? message.chat?.username ?? chatId;
-      const { threadId, handoffContext } = yield* ensureThreadForChat({
-        projectId,
-        chatId,
-        chatLabel,
-        config,
-      });
+      // Where this chat's messages go: its binding, or the assistant that
+      // owns the bot when it has none.
+      const binding = yield* bindingRepository
+        .get({ kind: "telegram", chatId })
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      const target = effectiveBindingTarget(Option.getOrNull(binding), projectId);
+      const { threadId, handoffContext, runtimeMode, interactionMode } = yield* ensureThreadForChat(
+        {
+          target,
+          chatId,
+          chatLabel,
+          config,
+        },
+      );
       const ingested =
         media.length > 0
           ? yield* ingestIncomingMedia({
@@ -1133,8 +1228,10 @@ const makeTelegramConnector = Effect.gen(function* () {
             text: messageText,
             attachments: ingested.attachments,
           },
-          runtimeMode: "full-access",
-          interactionMode: "default",
+          // Inherited from the routing decision: the assistant's fixed mode,
+          // or whatever the bound project / thread runs in. Never widened here.
+          runtimeMode,
+          interactionMode,
           createdAt: requestedAtIso,
         },
         { origin: telegramCommandOrigin(chatId) },
@@ -1149,7 +1246,19 @@ const makeTelegramConnector = Effect.gen(function* () {
           hotKey,
         }),
       );
-    });
+    }).pipe(
+      // A binding that cannot be served is an answer for the chat, not a
+      // failed delivery: the update is handled, the user is told what to do.
+      Effect.catchTag("TelegramRoutingError", (error) =>
+        Effect.gen(function* () {
+          const chatId = String(update.message?.chat?.id ?? "");
+          if (chatId.length === 0) {
+            return;
+          }
+          yield* sendTelegramText(projectId, config.botToken, chatId, error.message);
+        }),
+      ),
+    );
 
   // Return type inferred: `handleUpdate` carries its own error union, and
   // pinning it here would only duplicate it.
