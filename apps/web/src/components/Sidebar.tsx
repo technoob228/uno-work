@@ -2885,14 +2885,14 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
               onClick={() => void navigate({ to: "/assistant" })}
             >
               <BotIcon className="size-3" />
-              Assistants
+              Helper
             </button>
             <Tooltip>
               <TooltipTrigger
                 render={
                   <button
                     type="button"
-                    aria-label="New assistant"
+                    aria-label="New helper"
                     data-testid="sidebar-assistant-create-trigger"
                     className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
                     onClick={() => void navigate({ to: "/assistant" })}

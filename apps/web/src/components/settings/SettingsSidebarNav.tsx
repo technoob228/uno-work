@@ -66,7 +66,7 @@ const ENVIRONMENT_NAV_ITEMS: ReadonlyArray<{
 }> = [
   { label: "General", section: "general", icon: Settings2Icon },
   { label: "Agents", section: "providers", icon: PlugIcon },
-  { label: "Assistants", section: "assistants", icon: BotIcon },
+  { label: "Telegram", section: "assistants", icon: BotIcon },
   { label: "Source Control", section: "source-control", icon: GitBranchIcon },
   { label: "Archive", section: "archived", icon: ArchiveIcon },
 ];
@@ -122,7 +122,7 @@ const WEB_NAV_ITEMS: ReadonlyArray<WebNavItem> = [
   { label: "General", icon: Settings2Icon, scope: "app", section: "general" },
   { label: "Account", icon: CircleUserIcon, scope: "environment", section: "general" },
   { label: "Agents", icon: PlugIcon, scope: "environment", section: "providers" },
-  { label: "Assistants", icon: BotIcon, scope: "environment", section: "assistants" },
+  { label: "Telegram", icon: BotIcon, scope: "environment", section: "assistants" },
   { label: "Connections", icon: Link2Icon, scope: "app", section: "connections" },
   {
     label: "Source Control",
