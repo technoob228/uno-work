@@ -44,6 +44,7 @@ import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts
 import { executeBridgeCommand, executeBridgeOpenUrl } from "./browserCommandRouter.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
+import { isAllowedCorsOrigin, isLoopbackHostname } from "./corsOrigins.ts";
 import { HealthCheck } from "./health.ts";
 import { decodeOtlpTraceRecords } from "./observability/TraceRecord.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
@@ -55,62 +56,63 @@ import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
-const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 
-// Cross-origin к демону легитимно ходят два клиента: Electron-renderer
-// (origin http://127.0.0.1:<порт>) при подключении к remote environment по
-// bearer-токену, и браузерный Uno Work на app.uno4.work, который подключает
-// боксы аккаунта напрямую (descriptor → auth bootstrap → WS). Всё остальное —
-// same-origin. Пустой allowedOrigins в effect означает `*`, и до этой проверки
-// ЛЮБОЙ сайт мог дёргать /api/auth/* и читать ответы. Дополнительные origins
-// (свой хостинг SPA) — через T3CODE_ALLOWED_ORIGINS, список через запятую.
-const UNO_WEB_APP_ORIGINS = new Set(["https://app.uno4.work"]);
+// Which origins may talk to the daemon cross-origin lives in corsOrigins.ts
+// (the link-request route needs the same answer). Re-exported for callers
+// that historically imported it from here.
+export { isLoopbackHostname };
 
-function isAllowedCorsOrigin(origin: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(origin);
-  } catch {
-    return false;
-  }
-  if (isLoopbackHostname(parsed.hostname)) {
-    return true;
-  }
-  if (UNO_WEB_APP_ORIGINS.has(parsed.origin)) {
-    return true;
-  }
-  const extra = process.env.T3CODE_ALLOWED_ORIGINS;
-  if (!extra) {
-    return false;
-  }
-  return extra
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0)
-    .includes(parsed.origin);
-}
+const PRIVATE_NETWORK_REQUEST_HEADER = "access-control-request-private-network";
+const PRIVATE_NETWORK_ALLOW_HEADER = "access-control-allow-private-network";
+
+const browserApiCors = HttpMiddleware.cors({
+  allowedOrigins: isAllowedCorsOrigin,
+  allowedMethods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["authorization", "b3", "traceparent", "content-type"],
+  maxAge: 600,
+});
+
+// Chrome's Private Network Access: a public page (https://app.uno4.work)
+// reaching a loopback server (the desktop daemon) gets a preflight carrying
+// `Access-Control-Request-Private-Network: true`, and the browser drops the
+// request unless the 204 answers `Access-Control-Allow-Private-Network: true`.
+// Only allowed origins get it — the cors middleware already left the
+// allow-origin header off for everyone else, and we mirror that gate.
+// Typed by hand: effect's `HttpMiddleware` interface answers `Effect<_, any, any>`,
+// and that `any` would leak through the global layer into every consumer.
+const browserApiCorsWithPrivateNetwork = <E, R>(
+  httpApp: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
+): Effect.Effect<
+  HttpServerResponse.HttpServerResponse,
+  E,
+  R | HttpServerRequest.HttpServerRequest
+> =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const response = yield* browserApiCors(httpApp) as Effect.Effect<
+      HttpServerResponse.HttpServerResponse,
+      E,
+      R | HttpServerRequest.HttpServerRequest
+    >;
+    const origin = request.headers["origin"];
+    if (
+      request.method === "OPTIONS" &&
+      request.headers[PRIVATE_NETWORK_REQUEST_HEADER] === "true" &&
+      typeof origin === "string" &&
+      isAllowedCorsOrigin(origin)
+    ) {
+      return HttpServerResponse.setHeader(response, PRIVATE_NETWORK_ALLOW_HEADER, "true");
+    }
+    return response;
+  });
 
 // `global: true` — иначе middleware вешается только на сматченные маршруты, и
 // preflight OPTIONS (маршрута под него нет) падает в 404 БЕЗ cors-заголовков:
 // браузер режет весь кросс-origin запрос. Глобальный вариант оборачивает роутер
 // целиком, а cors-middleware сам отвечает 204 на OPTIONS до роутинга.
-export const browserApiCorsLayer = HttpRouter.middleware(
-  HttpMiddleware.cors({
-    allowedOrigins: isAllowedCorsOrigin,
-    allowedMethods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["authorization", "b3", "traceparent", "content-type"],
-    maxAge: 600,
-  }),
-  { global: true },
-);
-
-export function isLoopbackHostname(hostname: string): boolean {
-  const normalizedHostname = hostname
-    .trim()
-    .toLowerCase()
-    .replace(/^\[(.*)\]$/, "$1");
-  return LOOPBACK_HOSTNAMES.has(normalizedHostname);
-}
+export const browserApiCorsLayer = HttpRouter.middleware(browserApiCorsWithPrivateNetwork, {
+  global: true,
+});
 
 export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
   const redirectUrl = new URL(devUrl.toString());

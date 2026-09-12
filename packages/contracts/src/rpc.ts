@@ -20,7 +20,7 @@ import {
   WorkspaceTransport,
 } from "./workspace.ts";
 import { OpenError, OpenInEditorInput } from "./editor.ts";
-import { AuthAccessStreamEvent } from "./auth.ts";
+import { AuthAccessStreamEvent, AuthLinkRequestStreamEvent } from "./auth.ts";
 import {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
@@ -281,6 +281,7 @@ export const WS_METHODS = {
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
+  subscribeAuthLinkRequests: "subscribeAuthLinkRequests",
   subscribeBrowserBridge: "subscribeBrowserBridge",
   subscribePlugins: "subscribePlugins",
 } as const;
@@ -712,6 +713,13 @@ export const WsSubscribeBrowserBridgeRpc = Rpc.make(WS_METHODS.subscribeBrowserB
 export const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess, {
   payload: Schema.Struct({}),
   success: AuthAccessStreamEvent,
+  stream: true,
+});
+
+/** Pending "use this computer" approvals, for the desktop prompt. Owner sessions only. */
+export const WsSubscribeAuthLinkRequestsRpc = Rpc.make(WS_METHODS.subscribeAuthLinkRequests, {
+  payload: Schema.Struct({}),
+  success: AuthLinkRequestStreamEvent,
   stream: true,
 });
 
@@ -1178,6 +1186,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,
+  WsSubscribeAuthLinkRequestsRpc,
   WsSubscribeBrowserBridgeRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,

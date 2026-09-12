@@ -15,7 +15,9 @@ import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { PreviewPaneProvider } from "../components/preview/PreviewPaneContext";
+import { LinkRequestPromptDialog } from "../components/desktop/LinkRequestPromptDialog";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
+import { isElectron } from "../env";
 import {
   SlowRpcAckToastCoordinator,
   WebSocketConnectionCoordinator,
@@ -163,6 +165,7 @@ function RootRouteView() {
         {primaryEnvironmentAuthenticated ? <ServerStateBootstrap /> : null}
         <EnvironmentConnectionManagerBootstrap />
         <SshPasswordPromptDialog />
+        {isElectron && primaryEnvironmentAuthenticated ? <LinkRequestPromptDialog /> : null}
         <HostedStaticEnvironmentBootstrap />
         {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
         {primaryEnvironmentAuthenticated ? <WebSocketConnectionCoordinator /> : null}

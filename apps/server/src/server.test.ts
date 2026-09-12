@@ -25,7 +25,7 @@ import {
   WsRpcGroup,
   EditorId,
 } from "@t3tools/contracts";
-import { assert, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
 import {
   Deferred,
@@ -854,6 +854,7 @@ const bootstrapBearerSession = (credential = defaultDesktopBootstrapToken) =>
       readonly sessionMethod: string;
       readonly expiresAt: string;
       readonly sessionToken?: string;
+      readonly role?: string;
       readonly error?: string;
     };
     return {
@@ -1293,6 +1294,55 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect(
+    "answers private-network preflights from the hosted web app with the PNA allow header",
+    () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
+
+        const linkRequestUrl = yield* getHttpServerUrl("/api/auth/link-request");
+        const allowed = yield* Effect.promise(() =>
+          fetch(linkRequestUrl, {
+            method: "OPTIONS",
+            headers: {
+              origin: "https://app.uno4.work",
+              "access-control-request-method": "POST",
+              "access-control-request-headers": "content-type",
+              "access-control-request-private-network": "true",
+            },
+          }),
+        );
+        assert.equal(allowed.status, 204);
+        assert.equal(allowed.headers.get("access-control-allow-origin"), "https://app.uno4.work");
+        assert.equal(allowed.headers.get("access-control-allow-private-network"), "true");
+
+        const plainPreflight = yield* Effect.promise(() =>
+          fetch(linkRequestUrl, {
+            method: "OPTIONS",
+            headers: {
+              origin: "https://app.uno4.work",
+              "access-control-request-method": "POST",
+            },
+          }),
+        );
+        assert.equal(plainPreflight.status, 204);
+        assert.isNull(plainPreflight.headers.get("access-control-allow-private-network"));
+
+        const foreign = yield* Effect.promise(() =>
+          fetch(linkRequestUrl, {
+            method: "OPTIONS",
+            headers: {
+              origin: "https://evil.example",
+              "access-control-request-method": "POST",
+              "access-control-request-private-network": "true",
+            },
+          }),
+        );
+        assert.isNull(foreign.headers.get("access-control-allow-origin"));
+        assert.isNull(foreign.headers.get("access-control-allow-private-network"));
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("includes CORS headers on remote websocket-token auth failures", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
@@ -1351,6 +1401,191 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.status, 401);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
+
+  describe("link requests (use this computer)", () => {
+    const WEB_APP_ORIGIN = "https://app.uno4.work";
+
+    const createLinkRequest = (origin: string | null = WEB_APP_ORIGIN, label = "Chrome") =>
+      Effect.gen(function* () {
+        const url = yield* getHttpServerUrl("/api/auth/link-request");
+        const response = yield* Effect.promise(() =>
+          fetch(url, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              ...(origin ? { origin } : {}),
+            },
+            body: JSON.stringify({ origin: origin ?? "", label }),
+          }),
+        );
+        const body = (yield* Effect.promise(() => response.json())) as {
+          readonly requestId?: string;
+          readonly expiresAt?: string;
+          readonly error?: string;
+        };
+        return { response, body };
+      });
+
+    const pollLinkRequest = (requestId: string, origin: string | null = WEB_APP_ORIGIN) =>
+      Effect.gen(function* () {
+        const url = yield* getHttpServerUrl(`/api/auth/link-request/${requestId}`);
+        const response = yield* Effect.promise(() =>
+          fetch(url, { headers: origin ? { origin } : {} }),
+        );
+        const body = (yield* Effect.promise(() => response.json())) as {
+          readonly requestId?: string;
+          readonly status?: string;
+          readonly pairing?: { readonly credential: string; readonly expiresAt: string };
+          readonly error?: string;
+        };
+        return { response, body };
+      });
+
+    const decideLinkRequest = (
+      requestId: string,
+      decision: "allow" | "deny",
+      cookie: string | null,
+    ) =>
+      Effect.gen(function* () {
+        const url = yield* getHttpServerUrl("/api/auth/link-request/decide");
+        const response = yield* Effect.promise(() =>
+          fetch(url, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              ...(cookie ? { cookie } : {}),
+            },
+            body: JSON.stringify({ requestId, decision }),
+          }),
+        );
+        const body = (yield* Effect.promise(() => response.json())) as {
+          readonly status?: string;
+          readonly error?: string;
+        };
+        return { response, body };
+      });
+
+    it.effect("approves a request into a one-time owner pairing credential", () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
+
+        const created = yield* createLinkRequest();
+        assert.equal(created.response.status, 200);
+        assert.equal(created.response.headers.get("access-control-allow-origin"), WEB_APP_ORIGIN);
+        const requestId = created.body.requestId ?? "";
+        assert.isTrue(requestId.length > 0);
+        assert.equal(typeof created.body.expiresAt, "string");
+
+        const pending = yield* pollLinkRequest(requestId);
+        assert.equal(pending.response.status, 200);
+        assert.equal(pending.body.status, "pending");
+        assert.isUndefined(pending.body.pairing);
+
+        const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+        const decided = yield* decideLinkRequest(requestId, "allow", ownerCookie);
+        assert.equal(decided.response.status, 200);
+        assert.equal(decided.body.status, "approved");
+
+        const approved = yield* pollLinkRequest(requestId);
+        assert.equal(approved.body.status, "approved");
+        assert.equal(approved.response.headers.get("cache-control"), "no-store");
+        const credential = approved.body.pairing?.credential ?? "";
+        assert.isTrue(credential.length > 0);
+
+        // The credential is handed out once and only once.
+        const again = yield* pollLinkRequest(requestId);
+        assert.equal(again.body.status, "consumed");
+        assert.isUndefined(again.body.pairing);
+
+        // It is an ordinary pairing token: bootstrap works once, then is spent.
+        const bootstrap = yield* bootstrapBearerSession(credential);
+        assert.equal(bootstrap.response.status, 200);
+        assert.equal(bootstrap.body.role, "owner");
+        const replay = yield* bootstrapBearerSession(credential);
+        assert.equal(replay.response.status, 401);
+
+        // Nothing more can be decided about it.
+        const late = yield* decideLinkRequest(requestId, "deny", ownerCookie);
+        assert.equal(late.response.status, 409);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    );
+
+    it.effect("denies a request and never mints a credential", () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
+        const created = yield* createLinkRequest();
+        const requestId = created.body.requestId ?? "";
+
+        const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+        const decided = yield* decideLinkRequest(requestId, "deny", ownerCookie);
+        assert.equal(decided.response.status, 200);
+        assert.equal(decided.body.status, "denied");
+
+        const denied = yield* pollLinkRequest(requestId);
+        assert.equal(denied.body.status, "denied");
+        assert.isUndefined(denied.body.pairing);
+
+        const listResponse = yield* HttpClient.get("/api/auth/pairing-links", {
+          headers: { cookie: ownerCookie },
+        });
+        const listed = (yield* listResponse.json) as ReadonlyArray<{ readonly subject: string }>;
+        assert.isFalse(listed.some((entry) => entry.subject === "link-request"));
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    );
+
+    it.effect("only accepts requests and polls from origins the CORS layer trusts", () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
+
+        const foreign = yield* createLinkRequest("https://evil.example");
+        assert.equal(foreign.response.status, 400);
+        assert.isNull(foreign.response.headers.get("access-control-allow-origin"));
+
+        const missing = yield* createLinkRequest(null);
+        assert.equal(missing.response.status, 400);
+
+        const created = yield* createLinkRequest();
+        const requestId = created.body.requestId ?? "";
+        const foreignPoll = yield* pollLinkRequest(requestId, "https://evil.example");
+        assert.equal(foreignPoll.response.status, 400);
+
+        const unknown = yield* pollLinkRequest("does-not-exist");
+        assert.equal(unknown.response.status, 404);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    );
+
+    it.effect("only owner sessions may decide", () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest({ config: { host: "0.0.0.0" } });
+        const created = yield* createLinkRequest();
+        const requestId = created.body.requestId ?? "";
+
+        const anonymous = yield* decideLinkRequest(requestId, "allow", null);
+        assert.equal(anonymous.response.status, 401);
+
+        const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+        const clientTokenResponse = yield* HttpClient.post("/api/auth/pairing-token", {
+          headers: { cookie: ownerCookie },
+        });
+        const clientToken = (yield* clientTokenResponse.json) as { readonly credential: string };
+        const clientCookie = yield* getAuthenticatedSessionCookieHeader(clientToken.credential);
+        const client = yield* decideLinkRequest(requestId, "allow", clientCookie);
+        assert.equal(client.response.status, 403);
+
+        const stillPending = yield* pollLinkRequest(requestId);
+        assert.equal(stillPending.body.status, "pending");
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    );
+
+    it.effect("is unavailable on a daemon without a desktop shell", () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest({ config: { mode: "web" } });
+        const created = yield* createLinkRequest();
+        assert.equal(created.response.status, 404);
+        assert.equal(created.body.error, "This machine has no desktop app to approve the request.");
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    );
+  });
 
   it.effect("lists and revokes pairing links for owner sessions", () =>
     Effect.gen(function* () {

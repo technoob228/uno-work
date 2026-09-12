@@ -2,6 +2,11 @@ import {
   type AuthBearerBootstrapResult,
   AuthBootstrapInput,
   AuthCreatePairingCredentialInput,
+  type AuthLinkRequestCreateResult,
+  AuthLinkRequestCreateInput,
+  AuthLinkRequestDecideInput,
+  type AuthLinkRequestDecideResult,
+  type AuthLinkRequestPollResult,
   AuthRevokeClientSessionInput,
   AuthRevokePairingLinkInput,
   type AuthWebSocketTokenResult,
@@ -9,6 +14,8 @@ import {
 import { DateTime, Effect, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
+import { isAllowedCorsOrigin } from "../corsOrigins.ts";
+import { LinkRequestError, LinkRequestService } from "./Services/LinkRequestService.ts";
 import { AuthError, ServerAuth } from "./Services/ServerAuth.ts";
 import { SessionCredentialService } from "./Services/SessionCredentialService.ts";
 import { deriveAuthClientMetadata } from "./utils.ts";
@@ -245,6 +252,141 @@ export const authClientsRevokeRouteLayer = HttpRouter.add(
     const revoked = yield* serverAuth.revokeClientSession(session.sessionId, payload.sessionId);
     return HttpServerResponse.jsonUnsafe({ revoked }, { status: 200 });
   }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+);
+
+/* ------------------------------------------------------------------ *
+ * Link requests ("Use this computer")
+ *
+ * Unauthenticated by design on the browser side: the tab has no session on
+ * this daemon yet — that is the whole point. What gates it instead:
+ * - the `Origin` header must be one the CORS layer already trusts (so a random
+ *   site cannot even ask), and it — not the body — is what the prompt shows;
+ * - a human must press Allow in the desktop app (owner session) before any
+ *   credential exists;
+ * - the credential is a normal one-time pairing token with a 2-minute fuse,
+ *   handed out once to whoever knows the random request id.
+ * ------------------------------------------------------------------ */
+
+const LINK_REQUEST_LABEL_MAX_LENGTH = 120;
+
+const respondToLinkRequestError = (error: LinkRequestError) =>
+  Effect.gen(function* () {
+    if (error.status >= 500) {
+      yield* Effect.logError("link request route failed", {
+        message: error.message,
+        cause: error.cause,
+      });
+    }
+    return HttpServerResponse.jsonUnsafe({ error: error.message }, { status: error.status });
+  });
+
+const readAllowedRequestOrigin = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const origin = request.headers["origin"];
+  if (typeof origin !== "string" || origin.trim().length === 0) {
+    return yield* new LinkRequestError({
+      message: "Link requests must come from a browser origin.",
+      status: 400,
+    });
+  }
+  if (!isAllowedCorsOrigin(origin)) {
+    return yield* new LinkRequestError({
+      message: "This origin may not ask to use this computer.",
+      status: 400,
+    });
+  }
+  return new URL(origin).origin;
+});
+
+export const authLinkRequestCreateRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/auth/link-request",
+  Effect.gen(function* () {
+    const linkRequests = yield* LinkRequestService;
+    const origin = yield* readAllowedRequestOrigin;
+    const payload = yield* HttpServerRequest.schemaBodyJson(AuthLinkRequestCreateInput).pipe(
+      Effect.mapError(
+        (cause) =>
+          new LinkRequestError({
+            message: "Invalid link request payload.",
+            status: 400,
+            cause,
+          }),
+      ),
+    );
+    const pending = yield* linkRequests.create({
+      origin,
+      label: payload.label.slice(0, LINK_REQUEST_LABEL_MAX_LENGTH),
+    });
+    return HttpServerResponse.jsonUnsafe(
+      {
+        requestId: pending.requestId,
+        expiresAt: pending.expiresAt,
+      } satisfies AuthLinkRequestCreateResult,
+      { status: 200 },
+    );
+  }).pipe(Effect.catchTag("LinkRequestError", (error) => respondToLinkRequestError(error))),
+);
+
+export const authLinkRequestPollRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/auth/link-request/:requestId",
+  Effect.gen(function* () {
+    const linkRequests = yield* LinkRequestService;
+    yield* readAllowedRequestOrigin;
+    const params = yield* HttpRouter.params;
+    const requestId = params["requestId"]?.trim() ?? "";
+    if (requestId.length === 0) {
+      return yield* new LinkRequestError({ message: "Unknown link request.", status: 404 });
+    }
+    const view = yield* linkRequests.poll(requestId);
+    return HttpServerResponse.jsonUnsafe(
+      {
+        requestId: view.id,
+        status: view.status,
+        expiresAt: DateTime.makeUnsafe(view.expiresAtMs),
+        ...(view.pairing
+          ? {
+              pairing: {
+                id: view.pairing.id,
+                credential: view.pairing.credential,
+                ...(view.pairing.label ? { label: view.pairing.label } : {}),
+                expiresAt: DateTime.makeUnsafe(view.pairing.expiresAtMs),
+              },
+            }
+          : {}),
+      } satisfies AuthLinkRequestPollResult,
+      // The approved poll carries a live credential: never let a cache keep it.
+      { status: 200, headers: { "cache-control": "no-store" } },
+    );
+  }).pipe(Effect.catchTag("LinkRequestError", (error) => respondToLinkRequestError(error))),
+);
+
+export const authLinkRequestDecideRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/auth/link-request/decide",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const linkRequests = yield* LinkRequestService;
+    const payload = yield* HttpServerRequest.schemaBodyJson(AuthLinkRequestDecideInput).pipe(
+      Effect.mapError(
+        (cause) =>
+          new LinkRequestError({
+            message: "Invalid link request decision payload.",
+            status: 400,
+            cause,
+          }),
+      ),
+    );
+    const status = yield* linkRequests.decide(payload.requestId, payload.decision);
+    return HttpServerResponse.jsonUnsafe(
+      { requestId: payload.requestId, status } satisfies AuthLinkRequestDecideResult,
+      { status: 200 },
+    );
+  }).pipe(
+    Effect.catchTag("AuthError", (error) => respondToAuthError(error)),
+    Effect.catchTag("LinkRequestError", (error) => respondToLinkRequestError(error)),
+  ),
 );
 
 export const authClientsRevokeOthersRouteLayer = HttpRouter.add(

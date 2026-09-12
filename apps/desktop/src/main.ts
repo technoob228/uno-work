@@ -132,6 +132,7 @@ const CONFIRM_CHANNEL = "desktop:confirm";
 const SET_THEME_CHANNEL = "desktop:set-theme";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
+const FOCUS_WINDOW_CHANNEL = "desktop:focus-window";
 const MENU_ACTION_CHANNEL = "desktop:menu-action";
 const WINDOW_FULLSCREEN_STATE_CHANNEL = "desktop:window-fullscreen-state";
 const WINDOW_FULLSCREEN_GET_STATE_CHANNEL = "desktop:window-fullscreen-get-state";
@@ -2252,6 +2253,17 @@ function registerIpcHandlers(): void {
       return true;
     } catch {
       return false;
+    }
+  });
+
+  // The renderer asks for this when the daemon needs a human decision (a
+  // browser asking to use this computer): the person is looking at that
+  // browser, so the prompt must come to them, not wait behind it.
+  ipcMain.removeHandler(FOCUS_WINDOW_CHANNEL);
+  ipcMain.handle(FOCUS_WINDOW_CHANNEL, async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    if (window) {
+      revealWindow(window);
     }
   });
 

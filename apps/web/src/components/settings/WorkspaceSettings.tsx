@@ -60,6 +60,12 @@ import {
   workspaceUpsertGrantMutationOptions,
 } from "../../lib/workspaceReactQuery";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
+import {
+  localDaemonEnvironmentLabel,
+  useLocalDaemonDiscovery,
+  useUseThisComputer,
+} from "../../hooks/useLocalDaemon";
+import { useSwitchEnvironment } from "../../hooks/useSwitchEnvironment";
 import { readLocalApi } from "../../localApi";
 import { MACHINE_KIND_LABELS, MACHINE_STATUS_LABELS, plainExplanation } from "../../plainLanguage";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
@@ -206,6 +212,20 @@ export function WorkspaceSettings() {
     readonly step: "uno" | "custom";
   }>({ open: false, step: "uno" });
   const [removingKey, setRemovingKey] = useState<string | null>(null);
+
+  // Which machine the chats on screen belong to; the switch button is hidden
+  // on that row. Falls back to the primary daemon before anything is chosen.
+  const activeEnvironmentId = useStore((store) => store.activeEnvironmentId);
+  const currentEnvironmentId = activeEnvironmentId ?? registryEnvironmentId;
+  const switchEnvironment = useSwitchEnvironment();
+
+  // Browser build only: a Uno Work desktop running on this very computer.
+  // Probed once per session when this page opens, and again on Refresh.
+  const localDaemonDiscovery = useLocalDaemonDiscovery();
+  const useThisComputer = useUseThisComputer();
+  const localDaemon = localDaemonDiscovery.daemon;
+  const unlinkedLocalDaemon =
+    localDaemon && !savedEnvironments[localDaemon.environmentId] ? localDaemon : null;
 
   const allProjects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
   const projectNamesByEnvironmentId = useMemo(() => {
@@ -392,11 +412,14 @@ export function WorkspaceSettings() {
             onClick={() => {
               void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all });
               void cloudQuery.refetch();
+              void localDaemonDiscovery.refresh();
             }}
-            disabled={stateQuery.isFetching || cloudQuery.isFetching}
+            disabled={
+              stateQuery.isFetching || cloudQuery.isFetching || localDaemonDiscovery.isProbing
+            }
           >
             <RefreshCwIcon
-              className={`size-3.5 ${stateQuery.isFetching || cloudQuery.isFetching ? "animate-spin" : ""}`}
+              className={`size-3.5 ${stateQuery.isFetching || cloudQuery.isFetching || localDaemonDiscovery.isProbing ? "animate-spin" : ""}`}
             />
             Refresh
           </Button>
@@ -435,7 +458,44 @@ export function WorkspaceSettings() {
         ) : null}
 
         <div className="flex flex-col gap-2 border-t border-border/60 px-4 py-3 sm:px-5">
-          {rows.length === 0 ? (
+          {unlinkedLocalDaemon ? (
+            <div
+              className="flex flex-wrap items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2"
+              data-testid="use-this-computer-row"
+            >
+              <LaptopIcon className="size-5 shrink-0 text-primary" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-sm font-medium">This computer</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    {MACHINE_KIND_LABELS.local}
+                  </span>
+                </div>
+                <p className="truncate text-xs text-muted-foreground">
+                  Uno Work is running here ({unlinkedLocalDaemon.label}). Use it and this browser
+                  can run projects and agents on this computer — after you press Allow in the app.
+                </p>
+              </div>
+              {useThisComputer.isBusy ? (
+                <>
+                  <span className="text-xs text-muted-foreground">
+                    {useThisComputer.phase.kind === "waiting-for-approval"
+                      ? "Waiting for Allow in Uno Work on this computer…"
+                      : "Connecting…"}
+                  </span>
+                  <Button size="xs" variant="ghost" onClick={useThisComputer.cancel}>
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <Button size="xs" onClick={() => void useThisComputer.run(unlinkedLocalDaemon)}>
+                  <LaptopIcon className="size-3.5" />
+                  Use this computer
+                </Button>
+              )}
+            </div>
+          ) : null}
+          {rows.length === 0 && !unlinkedLocalDaemon ? (
             <div className="flex flex-col items-center gap-3 py-6 text-center">
               <p className="text-sm text-foreground">No machines yet.</p>
               <p className="max-w-sm text-xs text-muted-foreground">
@@ -472,6 +532,24 @@ export function WorkspaceSettings() {
                 </div>
 
                 <MachineStatusPill status={row.status} />
+
+                {row.environmentId &&
+                row.environmentId !== currentEnvironmentId &&
+                (row.isPrimary || row.isSavedConnection) ? (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => switchEnvironment(row.environmentId!)}
+                    title={
+                      localDaemon && row.environmentId === localDaemon.environmentId
+                        ? localDaemonEnvironmentLabel(localDaemon)
+                        : `Show ${row.label}'s projects and chats`
+                    }
+                  >
+                    <MonitorIcon className="size-3.5" />
+                    Switch to this machine
+                  </Button>
+                ) : null}
 
                 {canWake && row.box ? (
                   <Button

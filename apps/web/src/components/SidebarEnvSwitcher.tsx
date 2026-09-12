@@ -3,12 +3,12 @@ import {
   ChevronsUpDownIcon,
   CloudIcon,
   GlobeIcon,
+  LaptopIcon,
   MonitorIcon,
   PlusIcon,
   RefreshCwIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
 import type { EnvironmentId, EnvironmentConnectionState } from "@t3tools/contracts";
 
 import { AddEnvModal } from "./AddEnvModal";
@@ -18,13 +18,11 @@ import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
+import { useLocalDaemonDiscovery, useUseThisComputer } from "../hooks/useLocalDaemon";
 import { useReconnectEnvironment } from "../hooks/useReconnectEnvironment";
-import { useSettings } from "../hooks/useSettings";
-import { selectSidebarThreadsForEnvironment, useStore } from "../store";
-import { buildThreadRouteParams } from "../threadRoutes";
+import { useSwitchEnvironment } from "../hooks/useSwitchEnvironment";
+import { useStore } from "../store";
 import { formatElapsedAgoLabel } from "../timestampFormat";
-import { useUiStateStore } from "../uiStateStore";
-import { pickThreadForEnvironmentSwitch } from "./Sidebar.logic";
 import { Menu, MenuPopup, MenuTrigger } from "./ui/menu";
 
 interface EnvironmentOption {
@@ -108,15 +106,19 @@ function formatSavedEnvironmentStatusMeta(input: {
 }
 
 export function SidebarEnvSwitcher() {
-  const navigate = useNavigate();
   const [addEnvOpen, setAddEnvOpen] = useState(false);
   const { reconnect, reconnectingId } = useReconnectEnvironment();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
-  const setActiveEnvironmentId = useStore((state) => state.setActiveEnvironmentId);
-  const sidebarThreadSortOrder = useSettings((settings) => settings.sidebarThreadSortOrder);
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((state) => state.byId);
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
+  const switchEnvironment = useSwitchEnvironment();
+  // Browser build only: a Uno Work desktop on this very computer that is not
+  // yet one of the saved machines gets a one-click "Use this computer".
+  const { daemon: localDaemon } = useLocalDaemonDiscovery();
+  const useThisComputer = useUseThisComputer();
+  const unlinkedLocalDaemon =
+    localDaemon && !savedEnvironmentRegistry[localDaemon.environmentId] ? localDaemon : null;
 
   const environments = useMemo<EnvironmentOption[]>(() => {
     const primaryDescriptor = readPrimaryEnvironmentDescriptor();
@@ -190,24 +192,6 @@ export function SidebarEnvSwitcher() {
     currentSavedEnvironment != null &&
     (current?.connectionState === "disconnected" || current?.connectionState === "error");
   const isReconnectingCurrent = current != null && reconnectingId === current.id;
-
-  const switchEnvironment = (environmentId: EnvironmentId) => {
-    setActiveEnvironmentId(environmentId);
-    const threads = selectSidebarThreadsForEnvironment(useStore.getState(), environmentId);
-    const lastVisitedById = useUiStateStore.getState().threadLastVisitedAtById;
-    const target = pickThreadForEnvironmentSwitch(threads, lastVisitedById, sidebarThreadSortOrder);
-    if (target) {
-      void navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams({
-          environmentId,
-          threadId: target.id,
-        }),
-      });
-      return;
-    }
-    void navigate({ to: "/" });
-  };
 
   const reconnectCurrentEnvironment = () => {
     if (!currentSavedEnvironment || !current) return;
@@ -288,6 +272,28 @@ export function SidebarEnvSwitcher() {
               </div>
             ) : null}
             <div className="my-1 h-px bg-border" />
+            {unlinkedLocalDaemon ? (
+              <button
+                type="button"
+                disabled={useThisComputer.isBusy}
+                onClick={() => void useThisComputer.run(unlinkedLocalDaemon)}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-primary transition-colors hover:bg-primary/8 disabled:cursor-wait disabled:opacity-60"
+              >
+                <LaptopIcon className="size-3.5" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium">
+                    {useThisComputer.phase.kind === "waiting-for-approval"
+                      ? "Waiting for Allow on this computer…"
+                      : useThisComputer.phase.kind === "linking"
+                        ? "Connecting this computer…"
+                        : "Use this computer"}
+                  </div>
+                  <div className="truncate text-[10px] text-muted-foreground">
+                    {unlinkedLocalDaemon.label} · Uno Work is running here
+                  </div>
+                </div>
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => setAddEnvOpen(true)}
