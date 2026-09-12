@@ -1,6 +1,7 @@
 import { Cause, Duration, Effect, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
 import {
   type AuthAccessStreamEvent,
+  type AuthLinkRequestStreamEvent,
   AuthSessionId,
   CommandId,
   type EnvironmentId as EnvironmentIdType,
@@ -81,6 +82,7 @@ import { ProjectSetupScriptRunner } from "./project/Services/ProjectSetupScriptR
 import { RepositoryIdentityResolver } from "./project/Services/RepositoryIdentityResolver.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
+import { LinkRequestService } from "./auth/Services/LinkRequestService.ts";
 import * as SourceControlDiscoveryLayer from "./sourceControl/SourceControlDiscovery.ts";
 import { SourceControlRepositoryService } from "./sourceControl/SourceControlRepositoryService.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
@@ -99,6 +101,7 @@ import {
 import {
   SessionCredentialService,
   type SessionCredentialChange,
+  type SessionRole,
 } from "./auth/Services/SessionCredentialService.ts";
 import { respondToAuthError } from "./auth/http.ts";
 import {
@@ -176,9 +179,10 @@ function toAuthAccessStreamEvent(
   }
 }
 
-const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
+const makeWsRpcLayer = (currentSessionId: AuthSessionId, currentSessionRole: SessionRole) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
+      const linkRequests = yield* LinkRequestService;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
       const orchestrationEngine = yield* OrchestrationEngineService;
       const checkpointDiffQuery = yield* CheckpointDiffQuery;
@@ -1618,6 +1622,30 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             }),
             { "rpc.aggregate": "auth" },
           ),
+        [WS_METHODS.subscribeAuthLinkRequests]: (_input) =>
+          observeRpcStreamEffect(
+            WS_METHODS.subscribeAuthLinkRequests,
+            Effect.gen(function* () {
+              // Only the owner (the desktop renderer) may see who is asking
+              // to use this computer; a paired client gets an empty, silent
+              // stream rather than an error the RPC schema cannot express.
+              if (currentSessionRole !== "owner") {
+                return Stream.make({
+                  type: "snapshot" as const,
+                  payload: { pending: [] },
+                } satisfies AuthLinkRequestStreamEvent);
+              }
+              const pending = yield* linkRequests.listPending();
+              return Stream.concat(
+                Stream.make({
+                  type: "snapshot" as const,
+                  payload: { pending },
+                } satisfies AuthLinkRequestStreamEvent),
+                linkRequests.streamChanges,
+              );
+            }),
+            { "rpc.aggregate": "auth" },
+          ),
         [WS_METHODS.providerInstallStart]: (input) =>
           observeRpcEffect(WS_METHODS.providerInstallStart, harnessSetup.installStart(input), {
             "rpc.aggregate": "provider-setup",
@@ -1675,7 +1703,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           },
         }).pipe(
           Effect.provide(
-            makeWsRpcLayer(session.sessionId).pipe(
+            makeWsRpcLayer(session.sessionId, session.role).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(
                 SourceControlDiscoveryLayer.layer.pipe(

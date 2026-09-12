@@ -381,6 +381,12 @@ export interface DesktopBridge {
     position?: { x: number; y: number },
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
+  /**
+   * Bring the desktop window to the front. Used when the daemon needs a human
+   * decision (a browser asking to use this computer) and the window is hidden
+   * behind that browser.
+   */
+  focusWindow: () => Promise<void>;
   onMenuAction: (listener: (action: string) => void) => () => void;
   getWindowFullscreenState: () => boolean;
   onWindowFullscreenChange: (listener: (isFullscreen: boolean) => void) => () => void;

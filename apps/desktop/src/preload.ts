@@ -6,6 +6,7 @@ const CONFIRM_CHANNEL = "desktop:confirm";
 const SET_THEME_CHANNEL = "desktop:set-theme";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
+const FOCUS_WINDOW_CHANNEL = "desktop:focus-window";
 const MENU_ACTION_CHANNEL = "desktop:menu-action";
 const WINDOW_FULLSCREEN_STATE_CHANNEL = "desktop:window-fullscreen-state";
 const WINDOW_FULLSCREEN_GET_STATE_CHANNEL = "desktop:window-fullscreen-get-state";
@@ -140,6 +141,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   setTheme: (theme) => ipcRenderer.invoke(SET_THEME_CHANNEL, theme),
   showContextMenu: (items, position) => ipcRenderer.invoke(CONTEXT_MENU_CHANNEL, items, position),
   openExternal: (url: string) => ipcRenderer.invoke(OPEN_EXTERNAL_CHANNEL, url),
+  focusWindow: () => ipcRenderer.invoke(FOCUS_WINDOW_CHANNEL),
   onMenuAction: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, action: unknown) => {
       if (typeof action !== "string") return;

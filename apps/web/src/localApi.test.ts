@@ -263,6 +263,7 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
     setTheme: async () => undefined,
     showContextMenu: async () => null,
     openExternal: async () => true,
+    focusWindow: async () => undefined,
     onMenuAction: () => () => undefined,
     getWindowFullscreenState: () => false,
     onWindowFullscreenChange: () => () => undefined,

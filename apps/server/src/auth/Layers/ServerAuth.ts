@@ -25,6 +25,7 @@ import {
   SessionCredentialService,
 } from "../Services/SessionCredentialService.ts";
 import { AuthControlPlaneLive, AuthCoreLive } from "./AuthControlPlane.ts";
+import { LinkRequestServiceLive } from "./LinkRequestService.ts";
 
 type BootstrapExchangeResult = {
   readonly response: AuthBootstrapResult;
@@ -388,7 +389,12 @@ export const makeServerAuth = Effect.gen(function* () {
   } satisfies ServerAuthShape;
 });
 
-export const ServerAuthLive = Layer.effect(ServerAuth, makeServerAuth).pipe(
+// Link requests ride along with ServerAuth: they mint through the same
+// control plane, and every place that provides auth (server, tests) gets them.
+export const ServerAuthLive = Layer.mergeAll(
+  Layer.effect(ServerAuth, makeServerAuth),
+  LinkRequestServiceLive,
+).pipe(
   Layer.provideMerge(AuthControlPlaneLive),
   Layer.provideMerge(AuthCoreLive),
   Layer.provideMerge(ServerAuthPolicyLive),

@@ -149,6 +149,10 @@ export interface WsRpcClient {
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
     readonly subscribeAuthAccess: RpcStreamMethod<typeof WS_METHODS.subscribeAuthAccess>;
+    /** Pending "use this computer" approvals; empty for non-owner sessions. */
+    readonly subscribeAuthLinkRequests: RpcStreamMethod<
+      typeof WS_METHODS.subscribeAuthLinkRequests
+    >;
   };
   readonly orchestration: {
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
@@ -361,6 +365,15 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
           ...options,
           tag: WS_METHODS.subscribeAuthAccess,
         }),
+      subscribeAuthLinkRequests: (listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.subscribeAuthLinkRequests]({}),
+          listener,
+          {
+            ...options,
+            tag: WS_METHODS.subscribeAuthLinkRequests,
+          },
+        ),
     },
     orchestration: {
       dispatchCommand: (input) =>

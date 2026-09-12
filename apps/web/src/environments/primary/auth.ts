@@ -3,6 +3,9 @@ import type {
   AuthBootstrapResult,
   AuthClientMetadata,
   AuthCreatePairingCredentialInput,
+  AuthLinkRequestDecideInput,
+  AuthLinkRequestDecideResult,
+  AuthLinkRequestDecision,
   AuthPairingCredentialResult,
   AuthRevokeClientSessionInput,
   AuthRevokePairingLinkInput,
@@ -374,6 +377,34 @@ export async function revokeOtherServerClientSessions(): Promise<number> {
 
   const result = (await response.json()) as { revokedCount?: number };
   return result.revokedCount ?? 0;
+}
+
+/**
+ * The desktop's answer to "app.uno4.work wants to use this computer". Owner
+ * session only; on "allow" the daemon mints the one-time pairing credential
+ * the browser is polling for.
+ */
+export async function decideServerLinkRequest(
+  requestId: string,
+  decision: AuthLinkRequestDecision,
+): Promise<AuthLinkRequestDecideResult> {
+  const payload: AuthLinkRequestDecideInput = { requestId, decision };
+  const response = await fetch(resolvePrimaryEnvironmentHttpUrl("/api/auth/link-request/decide"), {
+    body: JSON.stringify(payload),
+    credentials: "include",
+    headers: {
+      "content-type": "application/json",
+    },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(response, `Failed to answer link request (${response.status}).`),
+    );
+  }
+
+  return (await response.json()) as AuthLinkRequestDecideResult;
 }
 
 export async function resolveInitialServerAuthGateState(): Promise<ServerAuthGateState> {

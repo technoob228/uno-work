@@ -264,3 +264,106 @@ export const AuthSessionState = Schema.Struct({
   expiresAt: Schema.optionalKey(Schema.DateTimeUtc),
 });
 export type AuthSessionState = typeof AuthSessionState.Type;
+
+/* ------------------------------------------------------------------ *
+ * Link requests ("Use this computer")
+ *
+ * A browser tab on an allowed origin (the hosted Uno Work app) asks the
+ * local desktop daemon for access. The daemon parks the request, the desktop
+ * app shows "<origin> wants to use this computer — Allow / Deny", and on
+ * Allow the daemon mints an ordinary one-time pairing credential bound to the
+ * request. The browser polls the request until it is approved, then runs the
+ * normal bootstrap with that credential. The auth model is not widened: an
+ * approval is exactly a pairing token the human never has to copy.
+ * ------------------------------------------------------------------ */
+
+export const AuthLinkRequestId = TrimmedNonEmptyString;
+export type AuthLinkRequestId = typeof AuthLinkRequestId.Type;
+
+export const AuthLinkRequestCreateInput = Schema.Struct({
+  /** Origin the browser claims; the daemon trusts the `Origin` header, not this. */
+  origin: TrimmedNonEmptyString,
+  /** What the approval prompt and the paired-client list call the browser. */
+  label: TrimmedNonEmptyString,
+});
+export type AuthLinkRequestCreateInput = typeof AuthLinkRequestCreateInput.Type;
+
+export const AuthLinkRequestCreateResult = Schema.Struct({
+  requestId: AuthLinkRequestId,
+  expiresAt: Schema.DateTimeUtc,
+});
+export type AuthLinkRequestCreateResult = typeof AuthLinkRequestCreateResult.Type;
+
+export const AuthLinkRequestStatus = Schema.Literals([
+  "pending",
+  "approved",
+  "denied",
+  "expired",
+  /** Approved and the credential was already handed out once. */
+  "consumed",
+]);
+export type AuthLinkRequestStatus = typeof AuthLinkRequestStatus.Type;
+
+export const AuthLinkRequestPollResult = Schema.Struct({
+  requestId: AuthLinkRequestId,
+  status: AuthLinkRequestStatus,
+  expiresAt: Schema.DateTimeUtc,
+  /** Present exactly once, on the first poll after approval. */
+  pairing: Schema.optionalKey(AuthPairingCredentialResult),
+});
+export type AuthLinkRequestPollResult = typeof AuthLinkRequestPollResult.Type;
+
+export const AuthLinkRequestDecision = Schema.Literals(["allow", "deny"]);
+export type AuthLinkRequestDecision = typeof AuthLinkRequestDecision.Type;
+
+export const AuthLinkRequestDecideInput = Schema.Struct({
+  requestId: AuthLinkRequestId,
+  decision: AuthLinkRequestDecision,
+});
+export type AuthLinkRequestDecideInput = typeof AuthLinkRequestDecideInput.Type;
+
+export const AuthLinkRequestDecideResult = Schema.Struct({
+  requestId: AuthLinkRequestId,
+  status: AuthLinkRequestStatus,
+});
+export type AuthLinkRequestDecideResult = typeof AuthLinkRequestDecideResult.Type;
+
+/** What the desktop prompt shows: who is asking, since when, until when. */
+export const AuthLinkRequestPending = Schema.Struct({
+  requestId: AuthLinkRequestId,
+  origin: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  createdAt: Schema.DateTimeUtc,
+  expiresAt: Schema.DateTimeUtc,
+});
+export type AuthLinkRequestPending = typeof AuthLinkRequestPending.Type;
+
+export const AuthLinkRequestStreamSnapshotEvent = Schema.Struct({
+  type: Schema.Literal("snapshot"),
+  payload: Schema.Struct({
+    pending: Schema.Array(AuthLinkRequestPending),
+  }),
+});
+export type AuthLinkRequestStreamSnapshotEvent = typeof AuthLinkRequestStreamSnapshotEvent.Type;
+
+export const AuthLinkRequestStreamRequestedEvent = Schema.Struct({
+  type: Schema.Literal("requested"),
+  payload: AuthLinkRequestPending,
+});
+export type AuthLinkRequestStreamRequestedEvent = typeof AuthLinkRequestStreamRequestedEvent.Type;
+
+export const AuthLinkRequestStreamResolvedEvent = Schema.Struct({
+  type: Schema.Literal("resolved"),
+  payload: Schema.Struct({
+    requestId: AuthLinkRequestId,
+    status: AuthLinkRequestStatus,
+  }),
+});
+export type AuthLinkRequestStreamResolvedEvent = typeof AuthLinkRequestStreamResolvedEvent.Type;
+
+export const AuthLinkRequestStreamEvent = Schema.Union([
+  AuthLinkRequestStreamSnapshotEvent,
+  AuthLinkRequestStreamRequestedEvent,
+  AuthLinkRequestStreamResolvedEvent,
+]);
+export type AuthLinkRequestStreamEvent = typeof AuthLinkRequestStreamEvent.Type;
