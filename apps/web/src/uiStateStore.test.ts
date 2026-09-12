@@ -9,6 +9,7 @@ import {
   PERSISTED_STATE_KEY,
   type PersistedUiState,
   persistState,
+  rememberSettingsScope,
   reorderProjects,
   setDefaultAdvertisedEndpointKey,
   setProjectExpanded,
@@ -25,9 +26,40 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
+    settingsScopeMemory: { machineEnvironmentId: null, lastKind: "app" },
+    settingsScopeNotice: null,
     ...overrides,
   };
 }
+
+describe("rememberSettingsScope", () => {
+  it("keeps the last machine while the user is on an app-scoped page", () => {
+    const onMachine = rememberSettingsScope(makeUiState(), {
+      kind: "environment",
+      environmentId: "env-box",
+    });
+    expect(onMachine.settingsScopeMemory).toEqual({
+      machineEnvironmentId: "env-box",
+      lastKind: "environment",
+    });
+
+    const backToApp = rememberSettingsScope(onMachine, { kind: "app", environmentId: null });
+    expect(backToApp.settingsScopeMemory).toEqual({
+      machineEnvironmentId: "env-box",
+      lastKind: "app",
+    });
+  });
+
+  it("returns the same state when nothing changes", () => {
+    const state = rememberSettingsScope(makeUiState(), {
+      kind: "environment",
+      environmentId: "env-box",
+    });
+    expect(rememberSettingsScope(state, { kind: "environment", environmentId: "env-box" })).toBe(
+      state,
+    );
+  });
+});
 
 describe("uiStateStore pure functions", () => {
   it("markThreadVisited stores the provided server timestamp", () => {

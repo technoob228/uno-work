@@ -2,8 +2,40 @@ import { Undo2Icon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 
 import { cn } from "../../lib/utils";
+import { plainLabel } from "../../plainLanguage";
+import { Explain } from "../Explain";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { useSettingsScopeBadge } from "./useSettingsScope";
+
+/**
+ * Where a section's settings live: everywhere this app runs, or on one named
+ * machine. Reads the scope the Settings layout provides, so every section
+ * header inside Settings carries it and nothing outside Settings does.
+ */
+function SettingsScopeBadge() {
+  const info = useSettingsScopeBadge();
+  if (!info) return null;
+  const term = info.kind === "app" ? "settingsScopeApp" : "settingsScopeMachine";
+  const text =
+    info.kind === "app"
+      ? `${plainLabel("settingsScopeApp")} (this app)`
+      : `${plainLabel("settingsScopeMachine")}: ${info.machineLabel}`;
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1 normal-case tracking-normal">
+      <Badge
+        variant="outline"
+        size="sm"
+        className="max-w-56 truncate font-medium text-muted-foreground"
+        title={text}
+      >
+        {text}
+      </Badge>
+      <Explain term={term} />
+    </span>
+  );
+}
 
 /** Re-render every `intervalMs`; return a stable timestamp snapshot for render-time relative labels. */
 export function useRelativeTimeTick(intervalMs = 1_000) {
@@ -38,7 +70,10 @@ export function SettingsSection({
           {title}
           {titleAddon}
         </h2>
-        <div className="flex h-5 min-w-5 items-center justify-end">{headerAction}</div>
+        <div className="flex h-5 min-w-5 items-center justify-end gap-2">
+          <SettingsScopeBadge />
+          {headerAction}
+        </div>
       </div>
       <div className="relative overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-sm/4 not-dark:bg-clip-padding before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:shadow-none dark:before:shadow-[0_-1px_--theme(--color-white/6%)]">
         {children}

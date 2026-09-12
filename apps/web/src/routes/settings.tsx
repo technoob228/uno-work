@@ -11,9 +11,18 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { SettingsScopeSwitcher } from "../components/settings/SettingsScopeSwitcher";
+import { settingsLandingPath } from "../components/settings/settingsScopeRoutes";
+import {
+  SettingsScopeBadgeContext,
+  settingsScopeBadgeInfo,
+  useSettingsScopeModel,
+} from "../components/settings/useSettingsScope";
 import { Button } from "../components/ui/button";
 import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
 import { isElectron } from "../env";
+import { readPrimaryEnvironmentDescriptor } from "../environments/primary";
+import { useSavedEnvironmentRegistryStore } from "../environments/runtime";
+import { useUiStateStore } from "../uiStateStore";
 
 function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
@@ -31,11 +40,37 @@ function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
   );
 }
 
+/**
+ * The one-line hint queued by a scope switch that could not keep the section.
+ * Shown only on the page the switch landed on; moving anywhere else clears it.
+ */
+function ScopeSwitchNotice({ pathname }: { readonly pathname: string }) {
+  const notice = useUiStateStore((state) => state.settingsScopeNotice);
+  const setNotice = useUiStateStore((state) => state.setSettingsScopeNotice);
+  const isForThisPage = notice !== null && notice.pathname === pathname;
+
+  useEffect(() => {
+    if (notice !== null && !isForThisPage) setNotice(null);
+  }, [isForThisPage, notice, setNotice]);
+
+  if (!isForThisPage) return null;
+  return (
+    <p
+      role="status"
+      className="border-b border-border bg-muted/40 px-5 py-1.5 text-xs text-muted-foreground"
+    >
+      {notice.message}
+    </p>
+  );
+}
+
 function SettingsContentLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   const [restoreSignal, setRestoreSignal] = useState(0);
+  const scopeModel = useSettingsScopeModel(location.pathname);
+  const badgeInfo = settingsScopeBadgeInfo(scopeModel);
   // Restoring defaults only ever resets this device's own preferences, so it
   // is offered on the app scope's general page and nowhere else — a button
   // that could mean "reset a daemon" depending on the page would be worse
@@ -70,11 +105,15 @@ function SettingsContentLayout() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         {!isElectron && (
           <header className="border-b border-border px-3 py-2 sm:px-5">
-            <div className="flex min-h-7 items-center gap-2 sm:min-h-6">
+            <div className="flex min-h-7 flex-wrap items-center gap-2 sm:min-h-6">
               <SidebarTrigger className="size-7 shrink-0 md:hidden" />
               <span className="text-sm font-medium text-foreground">Settings</span>
-              {/* Browser build is single-environment: no device-vs-environment
-                  scope toggle. The desktop header below keeps it. */}
+              {/* The browser build serves one machine, so the control mostly
+                  reads "This app | <that box>" — still the one place that
+                  says which of the two a page belongs to. */}
+              <div className="ms-1 min-w-0">
+                <SettingsScopeSwitcher model={scopeModel} />
+              </div>
               {showRestoreDefaults ? (
                 <div className="ms-auto flex items-center gap-2">
                   <RestoreDefaultsButton onRestored={handleRestored} />
@@ -89,20 +128,24 @@ function SettingsContentLayout() {
             <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
               Settings
             </span>
-            <div className="no-drag ms-3">
-              <SettingsScopeSwitcher pathname={location.pathname} />
+            <div className="no-drag ms-3 min-w-0">
+              <SettingsScopeSwitcher model={scopeModel} />
             </div>
             {showRestoreDefaults ? (
-              <div className="ms-auto flex items-center gap-2">
+              <div className="no-drag ms-auto flex items-center gap-2">
                 <RestoreDefaultsButton onRestored={handleRestored} />
               </div>
             ) : null}
           </div>
         )}
 
-        <div key={restoreSignal} className="min-h-0 flex flex-1 flex-col">
-          <Outlet />
-        </div>
+        <ScopeSwitchNotice pathname={location.pathname} />
+
+        <SettingsScopeBadgeContext.Provider value={badgeInfo}>
+          <div key={restoreSignal} className="min-h-0 flex flex-1 flex-col">
+            <Outlet />
+          </div>
+        </SettingsScopeBadgeContext.Provider>
       </div>
     </SidebarInset>
   );
@@ -122,7 +165,19 @@ export const Route = createFileRoute("/settings")({
     }
 
     if (location.pathname === "/settings") {
-      throw redirect({ to: "/settings/app/general", replace: true });
+      // Come back to the machine the user was configuring last, as long as
+      // the app still knows it; otherwise the app's own general page.
+      const primaryId = readPrimaryEnvironmentDescriptor()?.environmentId ?? null;
+      const savedIds = Object.values(useSavedEnvironmentRegistryStore.getState().byId).map(
+        (record) => record.environmentId,
+      );
+      throw redirect({
+        to: settingsLandingPath({
+          memory: useUiStateStore.getState().settingsScopeMemory,
+          knownEnvironmentIds: primaryId ? [primaryId, ...savedIds] : savedIds,
+        }),
+        replace: true,
+      });
     }
   },
   component: SettingsRouteLayout,

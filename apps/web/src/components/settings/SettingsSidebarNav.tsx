@@ -1,198 +1,56 @@
-import { useCallback, useMemo, type ComponentType } from "react";
-import {
-  ArchiveIcon,
-  ArrowLeftIcon,
-  BotIcon,
-  CircleUserIcon,
-  FlaskConicalIcon,
-  GitBranchIcon,
-  GlobeIcon,
-  KeyRoundIcon,
-  LayersIcon,
-  Link2Icon,
-  PlugIcon,
-  PuzzleIcon,
-  Settings2Icon,
-} from "lucide-react";
+import { useCallback, useMemo } from "react";
+import { ArrowLeftIcon, ChevronDownIcon } from "lucide-react";
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
 
 import { isWebApp } from "../../webMode";
-import { usePrimaryEnvironmentId } from "~/environments/primary";
 import { type FeatureFlagKey, resolveFeatureFlag } from "../../featureFlags";
 import { useFeatureFlagOverrides } from "../../hooks/useFeatureFlags";
+import { cn } from "../../lib/utils";
 
-import {
-  appSettingsPath,
-  environmentSettingsPath,
-  parseSettingsScopeLocation,
-  type AppSettingsSection,
-  type EnvironmentSettingsSection,
-} from "./settingsScopeRoutes";
-
+import { Menu, MenuGroup, MenuGroupLabel, MenuPopup, MenuTrigger } from "../ui/menu";
 import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
+  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarSeparator,
   useSidebar,
 } from "../ui/sidebar";
+import { MachineMenuItems, MachineStatusDot } from "./SettingsScopeSwitcher";
+import { buildSettingsNavGroups, type SettingsNavGroup } from "./settingsNavGroups";
+import { useSettingsScopeModel, type SettingsScopeModel } from "./useSettingsScope";
 
 /**
- * The nav lists the sections of whichever scope the URL names: this device's
- * own settings, or one environment's. A section from the other scope is never
- * shown, so there is no way to click from "my theme" straight into a daemon's
- * providers without noticing the machine changed.
+ * The nav shows two groups at once: the entries that belong to this app
+ * wherever it runs, and the entries that belong to one machine — headed by
+ * that machine's name, so it is obvious which pages change when the machine
+ * at the top of Settings changes. Routes and section ids are unchanged.
  */
-const APP_NAV_ITEMS: ReadonlyArray<{
-  label: string;
-  section: AppSettingsSection;
-  icon: ComponentType<{ className?: string }>;
-  /** When set, the entry is hidden unless this feature flag is enabled. */
-  flag?: FeatureFlagKey;
-}> = [
-  { label: "General", section: "general", icon: Settings2Icon },
-  { label: "Connections", section: "connections", icon: Link2Icon },
-  { label: "Browser", section: "browser", icon: GlobeIcon, flag: "browserCompanion" },
-  { label: "Labs", section: "labs", icon: FlaskConicalIcon },
-];
-
-const ENVIRONMENT_NAV_ITEMS: ReadonlyArray<{
-  label: string;
-  section: EnvironmentSettingsSection;
-  icon: ComponentType<{ className?: string }>;
-}> = [
-  { label: "General", section: "general", icon: Settings2Icon },
-  { label: "Agents", section: "providers", icon: PlugIcon },
-  { label: "Telegram", section: "assistants", icon: BotIcon },
-  { label: "Source Control", section: "source-control", icon: GitBranchIcon },
-  { label: "Archive", section: "archived", icon: ArchiveIcon },
-];
-
-/**
- * Vault (credentials) and Extensions (plugins) operate on the active
- * WS-connected box rather than a path-named environment, so they are not part
- * of the scope split above. They ride along in the app-scope nav as direct
- * links. Credentials видны в обеих оболочках: хранилище держит демон, поэтому
- * один и тот же логин доступен и в браузерной версии, и в десктопе.
- */
-type FlatNavItem = {
-  label: string;
-  to: string;
-  icon: ComponentType<{ className?: string }>;
-  /** When set, the entry is hidden unless this feature flag is enabled. */
-  flag?: FeatureFlagKey;
-};
-const FLAT_APP_NAV_ITEMS: ReadonlyArray<FlatNavItem> = [
-  { label: "Credentials", to: "/settings/vault", icon: KeyRoundIcon, flag: "vault" },
-  // The machines list is always on; the `workspace` flag now only gates the
-  // "Advanced sharing" fold inside the page.
-  { label: "My machines", to: "/settings/workspace", icon: LayersIcon },
-  { label: "Extensions", to: "/settings/extensions", icon: PuzzleIcon, flag: "plugins" },
-];
-
-/**
- * The browser build talks to exactly one execution environment — the box
- * daemon that serves the page — so the desktop device-vs-environment split is
- * meaningless here. Instead of a scope toggle, web mode shows one flat list
- * that folds the app-scope pages together with that single environment's own
- * pages (its providers, its Uno account, its assistants). Every environment
- * entry resolves to the primary environment id, so provider/gateway/model
- * settings read and write the one daemon that actually runs the harness.
- */
-type WebNavItem =
-  | {
-      readonly label: string;
-      readonly icon: ComponentType<{ className?: string }>;
-      readonly scope: "app";
-      readonly section: AppSettingsSection;
-      readonly flag?: FeatureFlagKey;
-    }
-  | {
-      readonly label: string;
-      readonly icon: ComponentType<{ className?: string }>;
-      readonly scope: "environment";
-      readonly section: EnvironmentSettingsSection;
-      readonly flag?: FeatureFlagKey;
-    };
-
-const WEB_NAV_ITEMS: ReadonlyArray<WebNavItem> = [
-  { label: "General", icon: Settings2Icon, scope: "app", section: "general" },
-  { label: "Account", icon: CircleUserIcon, scope: "environment", section: "general" },
-  { label: "Agents", icon: PlugIcon, scope: "environment", section: "providers" },
-  { label: "Telegram", icon: BotIcon, scope: "environment", section: "assistants" },
-  { label: "Connections", icon: Link2Icon, scope: "app", section: "connections" },
-  {
-    label: "Source Control",
-    icon: GitBranchIcon,
-    scope: "environment",
-    section: "source-control",
-  },
-  { label: "Browser", icon: GlobeIcon, scope: "app", section: "browser", flag: "browserCompanion" },
-  { label: "Archive", icon: ArchiveIcon, scope: "environment", section: "archived" },
-  { label: "Labs", icon: FlaskConicalIcon, scope: "app", section: "labs" },
-];
-
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   const { isMobile, setOpenMobile } = useSidebar();
-  const location = useMemo(() => parseSettingsScopeLocation(pathname), [pathname]);
   const flagOverrides = useFeatureFlagOverrides();
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const items = useMemo(() => {
-    const isVisible = (flag: FeatureFlagKey | undefined) =>
+  const model = useSettingsScopeModel(pathname);
+  const { location, selectedMachine, unknownMachine } = model;
+
+  const groups = useMemo(() => {
+    const isFlagEnabled = (flag: FeatureFlagKey | undefined) =>
       flag === undefined || resolveFeatureFlag(flagOverrides, flag);
+    // A URL naming a machine this device no longer has still gets its group,
+    // so the nav matches the page rather than pretending the page is not open.
+    const machine =
+      unknownMachine && location.environmentId
+        ? { environmentId: location.environmentId, label: "Unknown machine" }
+        : selectedMachine
+          ? { environmentId: selectedMachine.environmentId, label: selectedMachine.label }
+          : null;
+    return buildSettingsNavGroups({ isWebApp, isFlagEnabled, machine });
+  }, [flagOverrides, location.environmentId, selectedMachine, unknownMachine]);
 
-    // Browser build: one flat list, no scope split. Environment pages point at
-    // the single primary environment so the box's providers and Uno gateway
-    // key are reachable and resolve to the daemon that runs the harness.
-    if (isWebApp) {
-      const flatItems = FLAT_APP_NAV_ITEMS.filter((item) => isVisible(item.flag)).map((item) => ({
-        label: item.label,
-        icon: item.icon,
-        to: item.to,
-      }));
-      return [
-        ...WEB_NAV_ITEMS.filter((item) => isVisible(item.flag))
-          // Environment pages need the primary id; before it has bootstrapped
-          // we simply omit them rather than build a broken path.
-          .filter((item) => item.scope === "app" || primaryEnvironmentId !== null)
-          .map((item) => ({
-            label: item.label,
-            icon: item.icon,
-            to:
-              item.scope === "app"
-                ? appSettingsPath(item.section)
-                : environmentSettingsPath(primaryEnvironmentId!, item.section),
-          })),
-        ...flatItems,
-      ];
-    }
-
-    const environmentId = location.environmentId;
-    if (location.kind === "environment" && environmentId) {
-      return ENVIRONMENT_NAV_ITEMS.map((item) => ({
-        label: item.label,
-        icon: item.icon,
-        to: environmentSettingsPath(environmentId, item.section),
-      }));
-    }
-    return [
-      ...APP_NAV_ITEMS.filter((item) => isVisible(item.flag)).map((item) => ({
-        label: item.label,
-        icon: item.icon,
-        to: appSettingsPath(item.section),
-      })),
-      ...FLAT_APP_NAV_ITEMS.filter((item) => isVisible(item.flag)).map((item) => ({
-        label: item.label,
-        icon: item.icon,
-        to: item.to,
-      })),
-    ];
-  }, [flagOverrides, location.environmentId, location.kind, primaryEnvironmentId]);
   const handleSectionClick = useCallback(
     (to: string) => {
       if (isMobile) {
@@ -216,37 +74,40 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   return (
     <>
       <SidebarContent className="overflow-x-hidden">
-        <SidebarGroup className="px-2 py-3">
-          <SidebarMenu>
-            {items.map((item) => {
-              const Icon = item.icon;
-              const isActive = pathname === item.to;
-              return (
-                <SidebarMenuItem key={item.to}>
-                  <SidebarMenuButton
-                    size="sm"
-                    isActive={isActive}
-                    className={
-                      isActive
-                        ? "gap-2.5 px-2.5 py-2 text-left text-[13px] font-medium text-foreground"
-                        : "gap-2.5 px-2.5 py-2 text-left text-[13px] text-muted-foreground/70 hover:text-foreground/80"
-                    }
-                    onClick={() => handleSectionClick(item.to)}
-                  >
-                    <Icon
+        {groups.map((group) => (
+          <SidebarGroup key={group.kind} className="px-2 py-2 first:pt-3">
+            <NavGroupHeading group={group} model={model} />
+            <SidebarMenu>
+              {group.entries.map((item) => {
+                const Icon = item.icon;
+                const isActive = pathname === item.to;
+                return (
+                  <SidebarMenuItem key={item.to}>
+                    <SidebarMenuButton
+                      size="sm"
+                      isActive={isActive}
                       className={
                         isActive
-                          ? "size-4 shrink-0 text-foreground"
-                          : "size-4 shrink-0 text-muted-foreground/60"
+                          ? "gap-2.5 px-2.5 py-2 text-left text-[13px] font-medium text-foreground"
+                          : "gap-2.5 px-2.5 py-2 text-left text-[13px] text-muted-foreground/70 hover:text-foreground/80"
                       }
-                    />
-                    <span className="truncate">{item.label}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              );
-            })}
-          </SidebarMenu>
-        </SidebarGroup>
+                      onClick={() => handleSectionClick(item.to)}
+                    >
+                      <Icon
+                        className={
+                          isActive
+                            ? "size-4 shrink-0 text-foreground"
+                            : "size-4 shrink-0 text-muted-foreground/60"
+                        }
+                      />
+                      <span className="truncate">{item.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
 
       <SidebarSeparator />
@@ -265,5 +126,71 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         </SidebarMenu>
       </SidebarFooter>
     </>
+  );
+}
+
+const GROUP_HEADING_CLASS =
+  "h-6 px-2.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/60";
+
+/**
+ * The machine group's heading doubles as a picker when there is more than one
+ * machine, so the selector at the top of Settings is reflected right where
+ * the per-machine entries live.
+ */
+function NavGroupHeading({
+  group,
+  model,
+}: {
+  readonly group: SettingsNavGroup;
+  readonly model: SettingsScopeModel;
+}) {
+  if (group.kind === "app") {
+    return <SidebarGroupLabel className={GROUP_HEADING_CLASS}>{group.heading}</SidebarGroupLabel>;
+  }
+
+  const machine =
+    model.machines.find((candidate) => candidate.environmentId === group.environmentId) ?? null;
+  const heading = (
+    <>
+      <span className="truncate">{group.heading}</span>
+      {machine ? <MachineStatusDot status={machine.status} className="ms-1.5" /> : null}
+    </>
+  );
+
+  if (model.machines.length <= 1) {
+    return (
+      <SidebarGroupLabel className={cn(GROUP_HEADING_CLASS, "gap-0")}>{heading}</SidebarGroupLabel>
+    );
+  }
+
+  return (
+    <Menu>
+      <MenuTrigger
+        render={
+          <SidebarGroupLabel
+            render={<button type="button" aria-label="Choose which machine to configure" />}
+            className={cn(
+              GROUP_HEADING_CLASS,
+              "w-full cursor-pointer gap-0 hover:text-foreground/80 focus-visible:ring-2",
+            )}
+          />
+        }
+      >
+        {heading}
+        <ChevronDownIcon className="ms-auto size-3.5 shrink-0" />
+      </MenuTrigger>
+      <MenuPopup align="start" className="min-w-64">
+        <MenuGroup>
+          <MenuGroupLabel>Configure which machine?</MenuGroupLabel>
+          <MachineMenuItems
+            machines={model.machines}
+            activeEnvironmentId={group.environmentId}
+            onPick={(picked) =>
+              model.switchTo({ kind: "environment", environmentId: picked.environmentId })
+            }
+          />
+        </MenuGroup>
+      </MenuPopup>
+    </Menu>
   );
 }

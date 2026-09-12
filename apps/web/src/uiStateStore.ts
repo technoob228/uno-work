@@ -37,7 +37,27 @@ export interface UiEndpointState {
   defaultAdvertisedEndpointKey: string | null;
 }
 
-export interface UiState extends UiProjectState, UiThreadState, UiEndpointState {}
+/**
+ * Which machine the Settings screen was last configuring. Session-only (never
+ * persisted): the point is that closing and reopening Settings lands on the
+ * same machine, not that a stale id survives a restart.
+ */
+export interface UiSettingsScopeState {
+  settingsScopeMemory: {
+    /** Last machine the user configured. Sticky across app-scoped pages. */
+    readonly machineEnvironmentId: string | null;
+    /** Whether the last Settings page visited belonged to a machine. */
+    readonly lastKind: "app" | "environment";
+  };
+  /**
+   * One-line hint queued for the page at `pathname` — shown after a scope
+   * switch that could not keep the section. Ignored once the user moves on.
+   */
+  settingsScopeNotice: { readonly pathname: string; readonly message: string } | null;
+}
+
+export interface UiState
+  extends UiProjectState, UiThreadState, UiEndpointState, UiSettingsScopeState {}
 
 export interface SyncProjectInput {
   /** Physical project key (env + cwd). Used for manual sort order. */
@@ -58,6 +78,8 @@ const initialState: UiState = {
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
+  settingsScopeMemory: { machineEnvironmentId: null, lastKind: "app" },
+  settingsScopeNotice: null,
 };
 
 const persistedCollapsedProjectCwds = new Set<string>();
@@ -636,6 +658,31 @@ interface UiStateStore extends UiState {
     draggedProjectIds: readonly string[],
     targetProjectIds: readonly string[],
   ) => void;
+  /** Record which scope a Settings page belongs to, so Settings reopens there. */
+  rememberSettingsScope: (scope: {
+    readonly kind: "app" | "environment";
+    readonly environmentId: string | null;
+  }) => void;
+  setSettingsScopeNotice: (notice: UiSettingsScopeState["settingsScopeNotice"]) => void;
+}
+
+export function rememberSettingsScope(
+  state: UiState,
+  scope: { readonly kind: "app" | "environment"; readonly environmentId: string | null },
+): UiState {
+  const machineEnvironmentId =
+    scope.kind === "environment" && scope.environmentId !== null
+      ? scope.environmentId
+      : state.settingsScopeMemory.machineEnvironmentId;
+  const lastKind =
+    scope.kind === "environment" && scope.environmentId !== null ? "environment" : "app";
+  if (
+    state.settingsScopeMemory.machineEnvironmentId === machineEnvironmentId &&
+    state.settingsScopeMemory.lastKind === lastKind
+  ) {
+    return state;
+  }
+  return { ...state, settingsScopeMemory: { machineEnvironmentId, lastKind } };
 }
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
@@ -656,6 +703,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setProjectExpanded(state, projectId, expanded)),
   reorderProjects: (draggedProjectIds, targetProjectIds) =>
     set((state) => reorderProjects(state, draggedProjectIds, targetProjectIds)),
+  rememberSettingsScope: (scope) => set((state) => rememberSettingsScope(state, scope)),
+  setSettingsScopeNotice: (notice) => set({ settingsScopeNotice: notice }),
 }));
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));

@@ -30,7 +30,9 @@ export type PlainTerm =
   | "projectFolder"
   | "snapshot"
   | "myMachines"
-  | "agentSetup";
+  | "agentSetup"
+  | "settingsScopeApp"
+  | "settingsScopeMachine";
 
 export interface PlainTermEntry {
   /** What the UI calls the concept. */
@@ -116,6 +118,20 @@ export const PLAIN_TERMS: Readonly<Record<PlainTerm, PlainTermEntry>> = {
     plural: "Agent setups",
     explanation: "One agent with its own settings, keys and models.",
     technical: "provider instance",
+  },
+  settingsScopeApp: {
+    label: "Everywhere",
+    plural: "Everywhere",
+    explanation:
+      "Stored in this copy of Uno Work. It applies no matter which machine you are working on.",
+    technical: "app scope",
+  },
+  settingsScopeMachine: {
+    label: "On this machine",
+    plural: "On this machine",
+    explanation:
+      "Stored on that one machine. Pick another machine at the top of Settings to change it there.",
+    technical: "environment scope",
   },
 };
 
