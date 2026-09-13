@@ -59,9 +59,9 @@ export const FEATURE_FLAGS = [
   },
   {
     key: "sidebarInbox",
-    label: "Inbox sidebar",
+    label: "All machines in one sidebar (experimental)",
     description:
-      "Switch the sidebar to an inbox that unions every machine/workspace into one list, with a workspace switcher in the footer. Off keeps the sidebar scoped to the active machine.",
+      "Lists chats from every machine in a single sidebar with a machine switcher at the bottom. This is our old workspace experiment, not an inbox. Off keeps the normal sidebar for the machine you are on.",
     default: false,
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
