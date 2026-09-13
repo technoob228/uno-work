@@ -26,7 +26,19 @@ export interface PersistedUiState {
 export interface UiProjectState {
   projectExpandedById: Record<string, boolean>;
   projectOrder: string[];
+  /**
+   * Sidebar inbox shelves the user opened, keyed by logical project key.
+   * Session-only (never persisted): shelves start collapsed on every launch,
+   * like upstream's default. Read by the project list and by the keyboard
+   * jump ordering, so it lives here rather than in component state.
+   */
+  sidebarShelfExpandedByProjectKey: Record<
+    string,
+    { readonly snoozed?: boolean; readonly settled?: boolean }
+  >;
 }
+
+export type SidebarShelfKind = "snoozed" | "settled";
 
 export interface UiThreadState {
   threadLastVisitedAtById: Record<string, string>;
@@ -75,6 +87,7 @@ export interface SyncThreadInput {
 const initialState: UiState = {
   projectExpandedById: {},
   projectOrder: [],
+  sidebarShelfExpandedByProjectKey: {},
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
@@ -644,7 +657,27 @@ export function reorderProjects(
   };
 }
 
+export function setSidebarShelfExpanded(
+  state: UiState,
+  projectKey: string,
+  shelf: SidebarShelfKind,
+  expanded: boolean,
+): UiState {
+  const current = state.sidebarShelfExpandedByProjectKey[projectKey];
+  if ((current?.[shelf] ?? false) === expanded) {
+    return state;
+  }
+  return {
+    ...state,
+    sidebarShelfExpandedByProjectKey: {
+      ...state.sidebarShelfExpandedByProjectKey,
+      [projectKey]: { ...current, [shelf]: expanded },
+    },
+  };
+}
+
 interface UiStateStore extends UiState {
+  setSidebarShelfExpanded: (projectKey: string, shelf: SidebarShelfKind, expanded: boolean) => void;
   syncProjects: (projects: readonly SyncProjectInput[]) => void;
   syncThreads: (threads: readonly SyncThreadInput[]) => void;
   markThreadVisited: (threadId: string, visitedAt?: string) => void;
@@ -698,6 +731,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setThreadChangedFilesExpanded(state, threadId, turnId, expanded)),
   setDefaultAdvertisedEndpointKey: (key) =>
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
+  setSidebarShelfExpanded: (projectKey, shelf, expanded) =>
+    set((state) => setSidebarShelfExpanded(state, projectKey, shelf, expanded)),
   toggleProject: (projectId) => set((state) => toggleProject(state, projectId)),
   setProjectExpanded: (projectId, expanded) =>
     set((state) => setProjectExpanded(state, projectId, expanded)),

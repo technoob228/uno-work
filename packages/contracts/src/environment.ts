@@ -21,6 +21,10 @@ export type ExecutionEnvironmentPlatform = typeof ExecutionEnvironmentPlatform.T
 
 export const ExecutionEnvironmentCapabilities = Schema.Struct({
   repositoryIdentity: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** Server understands thread.snooze / thread.unsnooze. Absent on pre-snooze
+      servers, so clients treat missing as unsupported and hide the Snooze
+      actions. Same key as upstream T3 Code. */
+  threadSnooze: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

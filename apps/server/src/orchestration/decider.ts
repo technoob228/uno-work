@@ -2,6 +2,7 @@ import type {
   OrchestrationCommand,
   OrchestrationEvent,
   OrchestrationReadModel,
+  OrchestrationThread,
 } from "@t3tools/contracts";
 import { Effect } from "effect";
 
@@ -12,6 +13,7 @@ import {
   requireProjectAbsent,
   requireThread,
   requireThreadAbsent,
+  requireThreadNotArchived,
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
 
@@ -48,6 +50,84 @@ function withEventBase(
 }
 
 type PlannedOrchestrationEvent = Omit<OrchestrationEvent, "sequence">;
+
+/** A user message no turn has picked up within this window is a failed start
+    (or stale data), not pending work. Mirrors upstream's grace window. */
+const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000;
+
+/** Approval / user-input requests the agent is still blocked on. Ported from
+    upstream T3 Code's decider (without its stale-failure pruning). */
+function hasOpenRequests(thread: Pick<OrchestrationThread, "activities">): boolean {
+  const open = new Set<string>();
+  for (const activity of thread.activities) {
+    const payload =
+      typeof activity.payload === "object" && activity.payload !== null
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+    const requestId = typeof payload?.requestId === "string" ? payload.requestId : null;
+    if (requestId === null) continue;
+    if (activity.kind === "approval.requested" || activity.kind === "user-input.requested") {
+      open.add(requestId);
+    } else if (activity.kind === "approval.resolved" || activity.kind === "user-input.resolved") {
+      open.delete(requestId);
+    }
+  }
+  return open.size > 0;
+}
+
+/** A user message strictly newer than every timestamp on the latest turn and
+    still inside the adoption grace window: work the user just asked for that
+    no session has picked up yet. */
+function hasQueuedTurnStart(
+  thread: Pick<OrchestrationThread, "messages" | "latestTurn" | "session">,
+  now: string,
+): boolean {
+  if (thread.session?.status === "error") return false;
+  let messageAt = Number.NEGATIVE_INFINITY;
+  for (const message of thread.messages) {
+    if (message.role !== "user") continue;
+    const parsed = Date.parse(message.createdAt);
+    if (!Number.isNaN(parsed) && parsed > messageAt) messageAt = parsed;
+  }
+  if (!Number.isFinite(messageAt)) return false;
+  const nowMs = Date.parse(now);
+  if (Number.isNaN(nowMs) || Math.abs(nowMs - messageAt) > QUEUED_TURN_START_GRACE_MS) {
+    return false;
+  }
+  const turn = thread.latestTurn;
+  if (turn === null) return true;
+  return [turn.requestedAt, turn.startedAt, turn.completedAt].every(
+    (candidate) => candidate == null || Date.parse(candidate) < messageAt,
+  );
+}
+
+/** Activity that outranks a snooze: the decider clears the snooze in the same
+    batch so the thread is back in the inbox on every client. */
+function activityRaisesHand(kind: string): boolean {
+  return kind === "approval.requested" || kind === "user-input.requested";
+}
+
+function unsnoozedByActivityEvent(input: {
+  readonly thread: Pick<OrchestrationThread, "id" | "snoozedUntil">;
+  readonly commandId: OrchestrationCommand["commandId"];
+  readonly occurredAt: string;
+}): PlannedOrchestrationEvent | null {
+  if (input.thread.snoozedUntil == null) return null;
+  return {
+    ...withEventBase({
+      aggregateKind: "thread",
+      aggregateId: input.thread.id,
+      occurredAt: input.occurredAt,
+      commandId: input.commandId,
+    }),
+    type: "thread.unsnoozed",
+    payload: {
+      threadId: input.thread.id,
+      reason: "activity",
+      updatedAt: input.occurredAt,
+    },
+  };
+}
 
 type DecideOrchestrationCommandResult =
   | PlannedOrchestrationEvent
@@ -337,6 +417,85 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.snooze": {
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const occurredAt = nowIso();
+      // A wake time in the past would be snoozed and woken at once. The
+      // negated comparison also rejects unparseable wake times (NaN).
+      if (!(Date.parse(command.snoozedUntil) > Date.parse(occurredAt))) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' snooze wake time ${command.snoozedUntil} is not in the future.`,
+        });
+      }
+      // Blocked-on-you work must not be snoozed away. A running session IS
+      // snoozable: snooze only affects visibility, never the agent.
+      if (hasOpenRequests(thread)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has a pending approval or input request and cannot be snoozed.`,
+        });
+      }
+      if (hasQueuedTurnStart(thread, occurredAt)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has a queued turn start and cannot be snoozed.`,
+        });
+      }
+      // Re-snoozing to the SAME wake time is a duplicate (double click, raced
+      // clients): keep the original timestamps so the projection is a no-op.
+      const existingSnoozedAt =
+        thread.snoozedUntil === command.snoozedUntil && thread.snoozedAt != null
+          ? thread.snoozedAt
+          : null;
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.snoozed",
+        payload: {
+          threadId: command.threadId,
+          snoozedUntil: command.snoozedUntil,
+          snoozedAt: existingSnoozedAt ?? occurredAt,
+          updatedAt: existingSnoozedAt !== null ? thread.updatedAt : occurredAt,
+        },
+      };
+    }
+
+    case "thread.unsnooze": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      // Idempotent: waking a thread that is not snoozed is a no-op success.
+      if (thread.snoozedUntil == null) {
+        return [];
+      }
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.unsnoozed",
+        payload: {
+          threadId: command.threadId,
+          reason: command.reason,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
     case "thread.runtime-mode.set": {
       yield* requireThread({
         readModel,
@@ -455,7 +614,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
         },
       };
-      return [userMessageEvent, turnStartRequestedEvent];
+      // Sending a message to a snoozed thread is the user re-engaging: the
+      // snooze is spent.
+      const wakeEvent = unsnoozedByActivityEvent({
+        thread: targetThread,
+        commandId: command.commandId,
+        occurredAt: command.createdAt,
+      });
+      return wakeEvent === null
+        ? [userMessageEvent, turnStartRequestedEvent]
+        : [wakeEvent, userMessageEvent, turnStartRequestedEvent];
     }
 
     case "thread.turn.interrupt": {
@@ -749,7 +917,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.activity.append": {
-      yield* requireThread({
+      const activityThread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
@@ -762,7 +930,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ? ((command.activity.payload as { requestId: string })
               .requestId as OrchestrationEvent["metadata"]["requestId"])
           : undefined;
-      return {
+      const activityEvent: PlannedOrchestrationEvent = {
         ...withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -776,6 +944,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           activity: command.activity,
         },
       };
+      // The agent asking for approval / input outranks the user's snooze.
+      const wakeEvent = activityRaisesHand(command.activity.kind)
+        ? unsnoozedByActivityEvent({
+            thread: activityThread,
+            commandId: command.commandId,
+            occurredAt: command.createdAt,
+          })
+        : null;
+      return wakeEvent === null ? activityEvent : [wakeEvent, activityEvent];
     }
 
     default: {

@@ -58,11 +58,18 @@ export const FEATURE_FLAGS = [
     default: true,
   },
   {
-    key: "sidebarInbox",
+    key: "allMachinesSidebar",
     label: "All machines in one sidebar (experimental)",
     description:
       "Lists chats from every machine in a single sidebar with a machine switcher at the bottom. This is our old workspace experiment, not an inbox. Off keeps the normal sidebar for the machine you are on.",
     default: false,
+  },
+  {
+    key: "inboxSections",
+    label: "Inbox sections in the sidebar",
+    description:
+      "Sorts each project's chats into Pinned, Active, Snoozed and Done, and lets you snooze a chat until later. Off keeps one flat list per project.",
+    default: true,
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
 
@@ -73,12 +80,50 @@ const FLAG_DEFAULTS: Readonly<Record<FeatureFlagKey, boolean>> = Object.fromEntr
 ) as Record<FeatureFlagKey, boolean>;
 
 /**
- * Resolve a flag against the sparse stored overrides. Falls back to the
- * registry default when the user has made no explicit choice.
+ * Keys a flag was stored under before a rename. The persisted map is an open
+ * record in localStorage, so a rename cannot rewrite old devices up front:
+ * reads fall back to the legacy key and the next write moves the value.
+ */
+const LEGACY_FEATURE_FLAG_KEYS: Readonly<Partial<Record<FeatureFlagKey, string>>> = {
+  // Was misleadingly called "sidebarInbox"; it never was an inbox.
+  allMachinesSidebar: "sidebarInbox",
+};
+
+/**
+ * Resolve a flag against the sparse stored overrides. Falls back to a legacy
+ * key (see LEGACY_FEATURE_FLAG_KEYS), then to the registry default when the
+ * user has made no explicit choice.
  */
 export function resolveFeatureFlag(
   stored: Readonly<Record<string, boolean>> | undefined,
   key: FeatureFlagKey,
 ): boolean {
-  return stored?.[key] ?? FLAG_DEFAULTS[key];
+  const legacyKey = LEGACY_FEATURE_FLAG_KEYS[key];
+  return (
+    stored?.[key] ??
+    (legacyKey !== undefined ? stored?.[legacyKey] : undefined) ??
+    FLAG_DEFAULTS[key]
+  );
+}
+
+/** Stored overrides with legacy keys moved to their current names. Current
+    keys win over legacy ones; the legacy entry is dropped either way. */
+export function migrateFeatureFlagOverrides(
+  stored: Readonly<Record<string, boolean>> | undefined,
+): Record<string, boolean> {
+  const next: Record<string, boolean> = { ...stored };
+  for (const [key, legacyKey] of Object.entries(LEGACY_FEATURE_FLAG_KEYS)) {
+    if (legacyKey === undefined || !(legacyKey in next)) continue;
+    if (next[key] === undefined) next[key] = next[legacyKey]!;
+    delete next[legacyKey];
+  }
+  return next;
+}
+
+/** The stored override for a flag, looking through legacy keys. */
+export function readStoredFeatureFlag(
+  stored: Readonly<Record<string, boolean>> | undefined,
+  key: FeatureFlagKey,
+): boolean | undefined {
+  return migrateFeatureFlagOverrides(stored)[key];
 }

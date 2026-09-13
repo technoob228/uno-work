@@ -1,4 +1,5 @@
 import {
+  AlarmClockIcon,
   ArchiveIcon,
   ArrowUpDownIcon,
   BotIcon,
@@ -146,6 +147,7 @@ import {
   Menu,
   MenuCheckboxItem,
   MenuGroup,
+  MenuItem,
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
@@ -190,7 +192,25 @@ import {
   useThreadJumpHintVisibility,
   ThreadStatusPill,
 } from "./Sidebar.logic";
-import { sortThreadsPinnedFirst } from "../lib/threadSort";
+import { useMinuteClock } from "../hooks/useMinuteClock";
+import {
+  readEnvironmentSupportsThreadSnooze,
+  useEnvironmentSupportsThreadSnooze,
+} from "../environments/threadSnoozeSupport";
+import {
+  resolveSidebarProjectThreadList,
+  type SidebarInboxListItem,
+  type SidebarSection,
+} from "./Sidebar.sections";
+import {
+  canSnoozeThread,
+  formatSnoozePickerValue,
+  isThreadSnoozed,
+  parseSnoozePickerValue,
+  resolveSnoozePresets,
+  snoozeWakeDescription,
+  snoozeWakeLabel,
+} from "./Sidebar.snooze";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { CommandDialogTrigger } from "./ui/command";
@@ -215,6 +235,10 @@ import {
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 const THREAD_PREVIEW_LIMIT = 6;
+
+function sidebarThreadKey(thread: Pick<SidebarThreadSummary, "environmentId" | "id">): string {
+  return scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+}
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
   created_at: "Created at",
@@ -310,8 +334,103 @@ function buildThreadJumpLabelMap(input: {
   return mapping.size > 0 ? mapping : EMPTY_THREAD_JUMP_LABELS;
 }
 
-interface SidebarThreadRowProps {
+interface SidebarSnoozeActions {
+  snoozeThread: (threadRef: ScopedThreadRef, snoozedUntil: string) => Promise<void>;
+  unsnoozeThread: (threadRef: ScopedThreadRef) => Promise<void>;
+  openSnoozePicker: (threadRef: ScopedThreadRef) => void;
+}
+
+/**
+ * Clock button on a hovered row: snooze presets, "Pick time…", or Unsnooze
+ * for a chat that is already snoozed. Rendered only when inbox sections are
+ * on and the chat's machine understands snooze.
+ */
+const SidebarThreadSnoozeMenu = memo(function SidebarThreadSnoozeMenu(
+  props: SidebarSnoozeActions & {
+    thread: SidebarThreadSummary;
+    isSnoozed: boolean;
+    now: string;
+    className: string;
+  },
+) {
+  const { thread, isSnoozed, now, className, snoozeThread, unsnoozeThread, openSnoozePicker } =
+    props;
+  const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+  const [open, setOpen] = useState(false);
+  // Presets are computed when the menu opens so "This evening" and the
+  // shown wake times are fresh, not frozen at first render.
+  const presets = useMemo(() => (open ? resolveSnoozePresets(new Date()) : []), [open]);
+  const snoozable = canSnoozeThread(thread, now);
+  const stopRowActivation = useCallback((event: React.SyntheticEvent) => {
+    // Menu popups are portaled, but React events still bubble to the row.
+    event.stopPropagation();
+  }, []);
+  const label = isSnoozed ? "Unsnooze" : "Snooze";
+  return (
+    <div className={className}>
+      <Menu open={open} onOpenChange={setOpen}>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <MenuTrigger
+                data-thread-selection-safe
+                data-testid={`thread-snooze-${thread.id}`}
+                aria-label={`${label} ${thread.title}`}
+                disabled={!isSnoozed && !snoozable}
+                className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default disabled:opacity-40"
+                onClick={stopRowActivation}
+                onPointerDown={stopRowActivation}
+              />
+            }
+          >
+            <AlarmClockIcon className="size-3.5" />
+          </TooltipTrigger>
+          <TooltipPopup side="top">
+            {!isSnoozed && !snoozable ? "Answer the agent before snoozing" : label}
+          </TooltipPopup>
+        </Tooltip>
+        <MenuPopup
+          align="end"
+          side="bottom"
+          className="min-w-40"
+          onClick={stopRowActivation}
+          onPointerDown={stopRowActivation}
+        >
+          {isSnoozed && thread.snoozedUntil != null ? (
+            <>
+              <div className="px-2 py-1 text-xs text-muted-foreground">
+                Snoozed until {snoozeWakeDescription(thread.snoozedUntil, new Date(now))}
+              </div>
+              <MenuItem onClick={() => void unsnoozeThread(threadRef)}>Unsnooze</MenuItem>
+            </>
+          ) : (
+            <>
+              <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                Snooze until
+              </div>
+              {presets.map((preset) => (
+                <MenuItem
+                  key={preset.id}
+                  onClick={() => void snoozeThread(threadRef, preset.snoozedUntil)}
+                >
+                  {preset.label}
+                </MenuItem>
+              ))}
+              <MenuSeparator />
+              <MenuItem onClick={() => openSnoozePicker(threadRef)}>Pick time…</MenuItem>
+            </>
+          )}
+        </MenuPopup>
+      </Menu>
+    </div>
+  );
+});
+
+interface SidebarThreadRowProps extends SidebarSnoozeActions {
   thread: SidebarThreadSummary;
+  /** Inbox section the row renders in; null when inbox sections are off. */
+  section: SidebarSection | null;
+  now: string;
   projectCwd: string | null;
   orderedProjectThreadKeys: readonly string[];
   isActive: boolean;
@@ -371,9 +490,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     attemptArchiveThread,
     openPrLink,
     thread,
+    section,
+    now,
+    snoozeThread,
+    unsnoozeThread,
+    openSnoozePicker,
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
+  const environmentSupportsSnooze = useEnvironmentSupportsThreadSnooze(thread.environmentId);
+  const showSnoozeMenu = section !== null && environmentSupportsSnooze;
+  const isSnoozedRow = section === "snoozed";
+  const isSettledRow = section === "settled";
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const hasSelection = useThreadSelectionStore((state) => state.selectedThreadKeys.size > 0);
@@ -449,9 +577,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
   const threadMetaClassName = isConfirmingArchive
     ? "pointer-events-none opacity-0"
-    : !isThreadRunning
-      ? "pointer-events-none transition-opacity duration-150 max-sm:pr-6 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0"
+    : !isThreadRunning || showSnoozeMenu
+      ? `pointer-events-none transition-opacity duration-150 ${
+          showSnoozeMenu && !isThreadRunning ? "max-sm:pr-12" : "max-sm:pr-6"
+        } group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0`
       : "pointer-events-none";
+  const hoverActionClassName =
+    "pointer-events-none absolute top-1/2 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100";
   const clearConfirmingArchive = useCallback(() => {
     setConfirmingArchiveThreadKey((current) => (current === threadKey ? null : current));
   }, [setConfirmingArchiveThreadKey, threadKey]);
@@ -616,10 +748,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         size="sm"
         isActive={isActive}
         data-testid={`thread-row-${thread.id}`}
+        data-sidebar-section={section ?? undefined}
         className={`${resolveThreadRowClassName({
           isActive,
           isSelected,
-        })} relative isolate`}
+        })} relative isolate${
+          // Settled chats recede: quieter until hovered or opened.
+          isSettledRow && !isHighlighted
+            ? " opacity-65 transition-opacity hover:opacity-100 focus-visible:opacity-100"
+            : ""
+        }`}
         onClick={handleRowClick}
         onKeyDown={handleRowKeyDown}
         onContextMenu={handleRowContextMenu}
@@ -693,6 +831,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               isRemoteThread ? "max-sm:min-w-24" : "max-sm:min-w-20"
             }`}
           >
+            {showSnoozeMenu && !isConfirmingArchive ? (
+              <SidebarThreadSnoozeMenu
+                thread={thread}
+                isSnoozed={isSnoozedRow}
+                now={now}
+                className={`${hoverActionClassName} ${isThreadRunning ? "right-1" : "right-6"}`}
+                snoozeThread={snoozeThread}
+                unsnoozeThread={unsnoozeThread}
+                openSnoozePicker={openSnoozePicker}
+              />
+            ) : null}
             {isConfirmingArchive ? (
               <button
                 ref={handleConfirmArchiveRef}
@@ -786,6 +935,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   >
                     {jumpLabel}
                   </span>
+                ) : isSnoozedRow && thread.snoozedUntil != null ? (
+                  <span
+                    aria-label={`Snoozed until ${snoozeWakeDescription(thread.snoozedUntil, new Date(now))}`}
+                    className={`inline-flex items-center gap-0.5 text-[10px] ${
+                      isHighlighted
+                        ? "text-foreground/72 dark:text-foreground/82"
+                        : "text-muted-foreground/50"
+                    }`}
+                  >
+                    <AlarmClockIcon className="size-2.5" />
+                    until {snoozeWakeLabel(thread.snoozedUntil, now)}
+                  </span>
                 ) : (
                   <span
                     className={`text-[10px] ${
@@ -814,7 +975,13 @@ interface SidebarProjectThreadListProps {
   hasOverflowingThreads: boolean;
   hiddenThreadStatus: ThreadStatusPill | null;
   orderedProjectThreadKeys: readonly string[];
-  renderedThreads: readonly SidebarThreadSummary[];
+  renderedItems: readonly SidebarInboxListItem<SidebarThreadSummary>[];
+  inboxSections: boolean;
+  now: string;
+  snoozeThread: SidebarSnoozeActions["snoozeThread"];
+  unsnoozeThread: SidebarSnoozeActions["unsnoozeThread"];
+  openSnoozePicker: SidebarSnoozeActions["openSnoozePicker"];
+  toggleSnoozedShelf: () => void;
   showEmptyThreadState: boolean;
   shouldShowThreadPanel: boolean;
   isThreadListExpanded: boolean;
@@ -864,7 +1031,13 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     hasOverflowingThreads,
     hiddenThreadStatus,
     orderedProjectThreadKeys,
-    renderedThreads,
+    renderedItems,
+    inboxSections,
+    now,
+    snoozeThread,
+    unsnoozeThread,
+    openSnoozePicker,
+    toggleSnoozedShelf,
     showEmptyThreadState,
     shouldShowThreadPanel,
     isThreadListExpanded,
@@ -912,12 +1085,76 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         </SidebarMenuSubItem>
       ) : null}
       {shouldShowThreadPanel &&
-        renderedThreads.map((thread) => {
-          const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+        renderedItems.map((item) => {
+          if (item.kind === "snoozed-header") {
+            return (
+              <SidebarMenuSubItem
+                key="snoozed-header"
+                className="w-full"
+                data-thread-selection-safe
+              >
+                <button
+                  type="button"
+                  data-thread-selection-safe
+                  aria-expanded={item.expanded}
+                  className="flex h-6 w-full cursor-pointer items-center gap-1 rounded-md px-2 text-left text-[10px] text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground/80"
+                  onClick={toggleSnoozedShelf}
+                >
+                  <ChevronRightIcon
+                    className={`size-3 shrink-0 transition-transform duration-150 ${
+                      item.expanded ? "rotate-90" : ""
+                    }`}
+                  />
+                  <span>Snoozed · {item.count}</span>
+                </button>
+              </SidebarMenuSubItem>
+            );
+          }
+          if (item.kind === "settled-header") {
+            return (
+              <SidebarMenuSubItem
+                key="settled-header"
+                className="w-full"
+                data-thread-selection-safe
+              >
+                <div
+                  data-thread-selection-safe
+                  className="flex h-6 w-full items-center px-2 text-[10px] text-muted-foreground/50"
+                >
+                  <span>Done · {item.count}</span>
+                </div>
+              </SidebarMenuSubItem>
+            );
+          }
+          if (item.kind === "settled-toggle") {
+            return (
+              <SidebarMenuSubItem key="settled-toggle" className="w-full">
+                <SidebarMenuSubButton
+                  render={item.expanded ? showLessButtonRender : showMoreButtonRender}
+                  data-thread-selection-safe
+                  size="sm"
+                  className="h-6 w-full translate-x-0 justify-start px-2 text-left text-[10px] text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground/80"
+                  onClick={() => {
+                    if (item.expanded) collapseThreadListForProject(projectKey);
+                    else expandThreadListForProject(projectKey);
+                  }}
+                >
+                  <span>{item.expanded ? "Show less" : `Show ${item.hiddenCount} more`}</span>
+                </SidebarMenuSubButton>
+              </SidebarMenuSubItem>
+            );
+          }
+          const thread = item.thread;
+          const threadKey = sidebarThreadKey(thread);
           return (
             <SidebarThreadRow
               key={threadKey}
               thread={thread}
+              section={inboxSections ? item.section : null}
+              now={now}
+              snoozeThread={snoozeThread}
+              unsnoozeThread={unsnoozeThread}
+              openSnoozePicker={openSnoozePicker}
               projectCwd={projectCwd}
               orderedProjectThreadKeys={orderedProjectThreadKeys}
               isActive={activeRouteThreadKey === threadKey}
@@ -1197,57 +1434,18 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     return counts;
   }, [memberProjectByScopedKey, project.memberProjects, projectThreads]);
 
-  const { projectStatus, visibleProjectThreads, orderedProjectThreadKeys } = useMemo(() => {
-    const lastVisitedAtByThreadKey = new Map(
-      projectThreads.map((thread, index) => [
-        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-        threadLastVisitedAts[index] ?? null,
-      ]),
-    );
-    const resolveProjectThreadStatus = (thread: SidebarThreadSummary) => {
-      const lastVisitedAt = lastVisitedAtByThreadKey.get(
-        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-      );
-      return resolveThreadStatusPill({
-        thread: {
-          ...thread,
-          ...(lastVisitedAt !== null && lastVisitedAt !== undefined ? { lastVisitedAt } : {}),
-        },
-      });
-    };
-    const visibleProjectThreads = sortThreadsPinnedFirst(
-      projectThreads.filter((thread) => thread.archivedAt === null),
-      threadSortOrder,
-    );
-    const projectStatus = resolveProjectStatusIndicator(
-      visibleProjectThreads.map((thread) => resolveProjectThreadStatus(thread)),
-    );
-    return {
-      orderedProjectThreadKeys: visibleProjectThreads.map((thread) =>
-        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-      ),
-      projectStatus,
-      visibleProjectThreads,
-    };
-  }, [projectThreads, threadLastVisitedAts, threadSortOrder]);
-
-  const pinnedCollapsedThread = useMemo(() => {
-    const activeThreadKey = activeRouteThreadKey ?? undefined;
-    if (!activeThreadKey || projectExpanded) {
-      return null;
-    }
-    return (
-      visibleProjectThreads.find(
-        (thread) =>
-          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === activeThreadKey,
-      ) ?? null
-    );
-  }, [activeRouteThreadKey, projectExpanded, visibleProjectThreads]);
-
+  const inboxSections = useFeatureFlag("inboxSections");
+  const sidebarNow = useMinuteClock();
+  const isSnoozedShelfExpanded = useUiStateStore(
+    (state) => state.sidebarShelfExpandedByProjectKey[project.projectKey]?.snoozed ?? false,
+  );
+  const setSidebarShelfExpanded = useUiStateStore((state) => state.setSidebarShelfExpanded);
   const {
+    projectStatus,
+    orderedProjectThreadKeys,
     hasOverflowingThreads,
     hiddenThreadStatus,
-    renderedThreads,
+    renderedItems,
     showEmptyThreadState,
     shouldShowThreadPanel,
   } = useMemo(() => {
@@ -1268,41 +1466,41 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         },
       });
     };
-    const hasOverflowingThreads = visibleProjectThreads.length > THREAD_PREVIEW_LIMIT;
-    const previewThreads =
-      isThreadListExpanded || !hasOverflowingThreads
-        ? visibleProjectThreads
-        : visibleProjectThreads.slice(0, THREAD_PREVIEW_LIMIT);
-    const visibleThreadKeys = new Set(
-      [...previewThreads, ...(pinnedCollapsedThread ? [pinnedCollapsedThread] : [])].map((thread) =>
-        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-      ),
-    );
-    const renderedThreads = pinnedCollapsedThread
-      ? [pinnedCollapsedThread]
-      : visibleProjectThreads.filter((thread) =>
-          visibleThreadKeys.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
-        );
-    const hiddenThreads = visibleProjectThreads.filter(
-      (thread) =>
-        !visibleThreadKeys.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
-    );
+    const threadList = resolveSidebarProjectThreadList({
+      threads: projectThreads.filter((thread) => thread.archivedAt === null),
+      inboxSections,
+      now: sidebarNow,
+      sortOrder: threadSortOrder,
+      projectExpanded,
+      activeThreadKey: activeRouteThreadKey,
+      isThreadListExpanded,
+      snoozedExpanded: isSnoozedShelfExpanded,
+      previewLimit: THREAD_PREVIEW_LIMIT,
+      threadKey: sidebarThreadKey,
+    });
     return {
-      hasOverflowingThreads,
-      hiddenThreadStatus: resolveProjectStatusIndicator(
-        hiddenThreads.map((thread) => resolveProjectThreadStatus(thread)),
+      orderedProjectThreadKeys: threadList.orderedThreads.map(sidebarThreadKey),
+      projectStatus: resolveProjectStatusIndicator(
+        threadList.orderedThreads.map((thread) => resolveProjectThreadStatus(thread)),
       ),
-      renderedThreads,
-      showEmptyThreadState: projectExpanded && visibleProjectThreads.length === 0,
-      shouldShowThreadPanel: projectExpanded || pinnedCollapsedThread !== null,
+      hasOverflowingThreads: threadList.hasOverflowingThreads,
+      hiddenThreadStatus: resolveProjectStatusIndicator(
+        threadList.hiddenThreads.map((thread) => resolveProjectThreadStatus(thread)),
+      ),
+      renderedItems: threadList.items,
+      showEmptyThreadState: projectExpanded && threadList.orderedThreads.length === 0,
+      shouldShowThreadPanel: threadList.shouldShowThreadPanel,
     };
   }, [
+    activeRouteThreadKey,
+    inboxSections,
+    isSnoozedShelfExpanded,
     isThreadListExpanded,
-    pinnedCollapsedThread,
     projectExpanded,
     projectThreads,
+    sidebarNow,
     threadLastVisitedAts,
-    visibleProjectThreads,
+    threadSortOrder,
   ]);
 
   const handleProjectButtonClick = useCallback(
@@ -2025,6 +2223,78 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     }
   }, []);
 
+  const snoozeThread = useCallback(async (threadRef: ScopedThreadRef, snoozedUntil: string) => {
+    const api = readEnvironmentApi(threadRef.environmentId);
+    if (!api) return;
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.snooze",
+        commandId: newCommandId(),
+        threadId: threadRef.threadId,
+        snoozedUntil,
+      });
+      toastManager.add({
+        type: "success",
+        title: `Snoozed until ${snoozeWakeDescription(snoozedUntil, new Date())}`,
+        description: "It comes back on its own, or sooner if the agent needs you.",
+      });
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Failed to snooze chat",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    }
+  }, []);
+
+  const unsnoozeThread = useCallback(async (threadRef: ScopedThreadRef) => {
+    const api = readEnvironmentApi(threadRef.environmentId);
+    if (!api) return;
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.unsnooze",
+        commandId: newCommandId(),
+        threadId: threadRef.threadId,
+        reason: "user",
+      });
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Failed to unsnooze chat",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    }
+  }, []);
+
+  const [snoozePickerTarget, setSnoozePickerTarget] = useState<ScopedThreadRef | null>(null);
+  const [snoozePickerValue, setSnoozePickerValue] = useState("");
+  const openSnoozePicker = useCallback((threadRef: ScopedThreadRef) => {
+    const defaultWake = new Date(Date.now() + 2 * 60 * 60 * 1_000);
+    defaultWake.setMinutes(0, 0, 0);
+    setSnoozePickerValue(formatSnoozePickerValue(defaultWake));
+    setSnoozePickerTarget(threadRef);
+  }, []);
+  const closeSnoozePicker = useCallback(() => {
+    setSnoozePickerTarget(null);
+  }, []);
+  const snoozePickerWake = useMemo(
+    () => parseSnoozePickerValue(snoozePickerValue, new Date()),
+    [snoozePickerValue],
+  );
+  const submitSnoozePicker = useCallback(() => {
+    if (!snoozePickerTarget || snoozePickerWake === null) return;
+    void snoozeThread(snoozePickerTarget, snoozePickerWake);
+    setSnoozePickerTarget(null);
+  }, [snoozePickerTarget, snoozePickerWake, snoozeThread]);
+
+  const toggleSnoozedShelf = useCallback(() => {
+    setSidebarShelfExpanded(project.projectKey, "snoozed", !isSnoozedShelfExpanded);
+  }, [isSnoozedShelfExpanded, project.projectKey, setSidebarShelfExpanded]);
+
   const handleThreadContextMenu = useCallback(
     async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
       const api = readLocalApi();
@@ -2037,10 +2307,40 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       );
       const threadWorkspacePath = thread.worktreePath ?? threadProject?.cwd ?? project.cwd ?? null;
       const isPinned = thread.pinnedAt != null;
+      const nowDate = new Date();
+      const nowIso = nowDate.toISOString();
+      const snoozeAvailable =
+        inboxSections && readEnvironmentSupportsThreadSnooze(thread.environmentId);
+      const isSnoozed = snoozeAvailable && isThreadSnoozed(thread, nowIso);
+      const snoozePresets = resolveSnoozePresets(nowDate);
+      const snoozeMenuItems: ContextMenuItem[] = !snoozeAvailable
+        ? []
+        : isSnoozed && thread.snoozedUntil != null
+          ? [
+              {
+                id: "unsnooze",
+                label: `Unsnooze (until ${snoozeWakeDescription(thread.snoozedUntil, nowDate)})`,
+              },
+            ]
+          : [
+              {
+                id: "snooze",
+                label: "Snooze",
+                disabled: !canSnoozeThread(thread, nowIso),
+                children: [
+                  ...snoozePresets.map((preset) => ({
+                    id: `snooze:${preset.id}`,
+                    label: preset.label,
+                  })),
+                  { id: "snooze:pick", label: "Pick time…" },
+                ],
+              },
+            ];
       const clicked = await api.contextMenu.show(
         [
           { id: "rename", label: "Rename chat" },
           { id: "pin", label: isPinned ? "Unpin chat" : "Pin chat" },
+          ...snoozeMenuItems,
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy chat ID" },
@@ -2059,6 +2359,22 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
       if (clicked === "pin") {
         await setThreadPinned(threadRef, !isPinned);
+        return;
+      }
+
+      if (clicked === "unsnooze") {
+        await unsnoozeThread(threadRef);
+        return;
+      }
+      if (clicked === "snooze:pick") {
+        openSnoozePicker(threadRef);
+        return;
+      }
+      if (typeof clicked === "string" && clicked.startsWith("snooze:")) {
+        const preset = snoozePresets.find((entry) => `snooze:${entry.id}` === clicked);
+        if (preset) {
+          await snoozeThread(threadRef, preset.snoozedUntil);
+        }
         return;
       }
 
@@ -2107,10 +2423,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
+      inboxSections,
       markThreadUnread,
       memberProjectByScopedKey,
+      openSnoozePicker,
       project.cwd,
       setThreadPinned,
+      snoozeThread,
+      unsnoozeThread,
     ],
   );
 
@@ -2218,7 +2538,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         hasOverflowingThreads={hasOverflowingThreads}
         hiddenThreadStatus={hiddenThreadStatus}
         orderedProjectThreadKeys={orderedProjectThreadKeys}
-        renderedThreads={renderedThreads}
+        renderedItems={renderedItems}
+        inboxSections={inboxSections}
+        now={sidebarNow}
+        snoozeThread={snoozeThread}
+        unsnoozeThread={unsnoozeThread}
+        openSnoozePicker={openSnoozePicker}
+        toggleSnoozedShelf={toggleSnoozedShelf}
         showEmptyThreadState={showEmptyThreadState}
         shouldShowThreadPanel={shouldShowThreadPanel}
         isThreadListExpanded={isThreadListExpanded}
@@ -2263,6 +2589,51 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           if (!open) setContinueThreadTarget(null);
         }}
       />
+
+      <Dialog
+        open={snoozePickerTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeSnoozePicker();
+          }
+        }}
+      >
+        <DialogPopup className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Snooze until…</DialogTitle>
+            <DialogDescription>
+              The chat moves to Snoozed and comes back at this time, or sooner if the agent needs
+              you.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-2">
+            <Input
+              type="datetime-local"
+              aria-label="Wake up time"
+              value={snoozePickerValue}
+              min={formatSnoozePickerValue(new Date())}
+              onChange={(event) => setSnoozePickerValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  submitSnoozePicker();
+                }
+              }}
+            />
+            {snoozePickerValue !== "" && snoozePickerWake === null ? (
+              <p className="text-xs text-destructive">Pick a time in the future.</p>
+            ) : null}
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeSnoozePicker}>
+              Cancel
+            </Button>
+            <Button disabled={snoozePickerWake === null} onClick={submitSnoozePicker}>
+              Snooze
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
 
       <Dialog
         open={projectRenameTarget !== null}
@@ -2697,7 +3068,7 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
 
 const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
-  const sidebarInbox = useFeatureFlag("sidebarInbox");
+  const allMachinesSidebar = useFeatureFlag("allMachinesSidebar");
   const { isMobile, setOpenMobile } = useSidebar();
   const handleSettingsClick = useCallback(() => {
     if (isMobile) {
@@ -2709,7 +3080,7 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
     <SidebarFooter className="gap-2 p-2">
       <SidebarUpdatePill />
-      {sidebarInbox ? <SidebarWorkspaceSwitcher /> : <SidebarEnvSwitcher />}
+      {allMachinesSidebar ? <SidebarWorkspaceSwitcher /> : <SidebarEnvSwitcher />}
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton
@@ -3110,13 +3481,13 @@ export default function Sidebar() {
   const activeEnvironmentId = useStore((store) => store.activeEnvironmentId);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const selectedEnvironmentId = activeEnvironmentId ?? primaryEnvironmentId;
-  // Inbox mode (Labs flag `sidebarInbox`) unions every environment into one
+  // All-machines mode (Labs flag `allMachinesSidebar`) unions every environment into one
   // list instead of scoping to the active machine. Gated so that with the flag
   // off — or on but with scope still "active" — the sidebar is byte-for-byte
   // today's behaviour.
-  const sidebarInbox = useFeatureFlag("sidebarInbox");
+  const allMachinesSidebar = useFeatureFlag("allMachinesSidebar");
   const sidebarEnvironmentScopeSetting = useSettings((s) => s.sidebarEnvironmentScope);
-  const sidebarEnvironmentScope: SidebarEnvironmentScope = sidebarInbox
+  const sidebarEnvironmentScope: SidebarEnvironmentScope = allMachinesSidebar
     ? sidebarEnvironmentScopeSetting
     : "active";
   const sidebarGroupBy = useSettings((s) => s.sidebarGroupBy);
@@ -3154,6 +3525,11 @@ export default function Sidebar() {
     ),
   );
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
+  const sidebarShelfExpandedByProjectKey = useUiStateStore(
+    (store) => store.sidebarShelfExpandedByProjectKey,
+  );
+  const inboxSections = useFeatureFlag("inboxSections");
+  const sidebarNow = useMinuteClock();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);
   const navigate = useNavigate();
@@ -3514,42 +3890,30 @@ export default function Sidebar() {
   const visibleSidebarThreadKeys = useMemo(
     () =>
       sortedProjects.flatMap((project) => {
-        const projectThreads = sortThreadsPinnedFirst(
-          (threadsByProjectKey.get(project.projectKey) ?? []).filter(
+        const { renderedThreads } = resolveSidebarProjectThreadList({
+          threads: (threadsByProjectKey.get(project.projectKey) ?? []).filter(
             (thread) => thread.archivedAt === null,
           ),
-          sidebarThreadSortOrder,
-        );
-        const projectExpanded = projectExpandedById[project.projectKey] ?? true;
-        const activeThreadKey = routeThreadKey ?? undefined;
-        const pinnedCollapsedThread =
-          !projectExpanded && activeThreadKey
-            ? (projectThreads.find(
-                (thread) =>
-                  scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) ===
-                  activeThreadKey,
-              ) ?? null)
-            : null;
-        const shouldShowThreadPanel = projectExpanded || pinnedCollapsedThread !== null;
-        if (!shouldShowThreadPanel) {
-          return [];
-        }
-        const isThreadListExpanded = expandedThreadListsByProject.has(project.projectKey);
-        const hasOverflowingThreads = projectThreads.length > THREAD_PREVIEW_LIMIT;
-        const previewThreads =
-          isThreadListExpanded || !hasOverflowingThreads
-            ? projectThreads
-            : projectThreads.slice(0, THREAD_PREVIEW_LIMIT);
-        const renderedThreads = pinnedCollapsedThread ? [pinnedCollapsedThread] : previewThreads;
-        return renderedThreads.map((thread) =>
-          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-        );
+          inboxSections,
+          now: sidebarNow,
+          sortOrder: sidebarThreadSortOrder,
+          projectExpanded: projectExpandedById[project.projectKey] ?? true,
+          activeThreadKey: routeThreadKey,
+          isThreadListExpanded: expandedThreadListsByProject.has(project.projectKey),
+          snoozedExpanded: sidebarShelfExpandedByProjectKey[project.projectKey]?.snoozed ?? false,
+          previewLimit: THREAD_PREVIEW_LIMIT,
+          threadKey: sidebarThreadKey,
+        });
+        return renderedThreads.map(sidebarThreadKey);
       }),
     [
       sidebarThreadSortOrder,
       expandedThreadListsByProject,
+      inboxSections,
       projectExpandedById,
       routeThreadKey,
+      sidebarNow,
+      sidebarShelfExpandedByProjectKey,
       sortedProjects,
       threadsByProjectKey,
     ],

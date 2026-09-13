@@ -84,6 +84,7 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
     serverVersion: packageJson.version,
     capabilities: {
       repositoryIdentity: true,
+      threadSnooze: true,
     },
   } satisfies Omit<ExecutionEnvironmentDescriptor, "machineKind" | "unoBoxId">;
   const hostname = OS.hostname();

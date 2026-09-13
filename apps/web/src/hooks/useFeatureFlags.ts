@@ -7,7 +7,11 @@
  */
 import { useCallback } from "react";
 
-import { type FeatureFlagKey, resolveFeatureFlag } from "../featureFlags";
+import {
+  type FeatureFlagKey,
+  migrateFeatureFlagOverrides,
+  resolveFeatureFlag,
+} from "../featureFlags";
 import { useSettings, useUpdateSettings } from "./useSettings";
 
 /** Read a single flag's effective value (stored override, else default). */
@@ -35,10 +39,15 @@ export function useSetFeatureFlag(): (key: FeatureFlagKey, value: boolean) => vo
       // scope leaves the sidebar exactly as before, which reads as "the toggle
       // does nothing" — so the flag carries the scope with it both ways.
       const scope =
-        key === "sidebarInbox"
+        key === "allMachinesSidebar"
           ? { sidebarEnvironmentScope: value ? ("all" as const) : ("active" as const) }
           : {};
-      void updateSettings({ featureFlags: { ...overrides, [key]: value }, ...scope });
+      // Every write also moves renamed keys (e.g. sidebarInbox) to their
+      // current names, so the legacy entry does not linger.
+      void updateSettings({
+        featureFlags: { ...migrateFeatureFlagOverrides(overrides), [key]: value },
+        ...scope,
+      });
     },
     [overrides, updateSettings],
   );

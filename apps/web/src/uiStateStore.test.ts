@@ -13,6 +13,7 @@ import {
   reorderProjects,
   setDefaultAdvertisedEndpointKey,
   setProjectExpanded,
+  setSidebarShelfExpanded,
   setThreadChangedFilesExpanded,
   syncProjects,
   syncThreads,
@@ -23,6 +24,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
     projectExpandedById: {},
     projectOrder: [],
+    sidebarShelfExpandedByProjectKey: {},
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
@@ -638,5 +640,27 @@ describe("uiStateStore persistence round-trip", () => {
     ]);
 
     expect(rehydrated.projectExpandedById[nextLogicalKey]).toBe(false);
+  });
+});
+
+describe("setSidebarShelfExpanded", () => {
+  it("opens and closes one shelf per project without touching the other", () => {
+    const opened = setSidebarShelfExpanded(makeUiState(), "project-a", "snoozed", true);
+    expect(opened.sidebarShelfExpandedByProjectKey).toEqual({ "project-a": { snoozed: true } });
+    const both = setSidebarShelfExpanded(opened, "project-a", "settled", true);
+    expect(both.sidebarShelfExpandedByProjectKey["project-a"]).toEqual({
+      snoozed: true,
+      settled: true,
+    });
+    const closed = setSidebarShelfExpanded(both, "project-a", "snoozed", false);
+    expect(closed.sidebarShelfExpandedByProjectKey["project-a"]).toEqual({
+      snoozed: false,
+      settled: true,
+    });
+  });
+
+  it("returns the same state when nothing changes", () => {
+    const state = makeUiState();
+    expect(setSidebarShelfExpanded(state, "project-a", "snoozed", false)).toBe(state);
   });
 });

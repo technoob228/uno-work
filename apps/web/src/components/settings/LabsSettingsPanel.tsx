@@ -1,4 +1,9 @@
-import { FEATURE_FLAGS, resolveFeatureFlag, type FeatureFlagKey } from "../../featureFlags";
+import {
+  FEATURE_FLAGS,
+  readStoredFeatureFlag,
+  resolveFeatureFlag,
+  type FeatureFlagKey,
+} from "../../featureFlags";
 import { useFeatureFlagOverrides, useSetFeatureFlag } from "../../hooks/useFeatureFlags";
 import { Switch } from "../ui/switch";
 import {
@@ -24,7 +29,8 @@ export function LabsSettingsPanel() {
         {FEATURE_FLAGS.map((flag) => {
           const key = flag.key as FeatureFlagKey;
           const value = resolveFeatureFlag(overrides, key);
-          const isOverridden = overrides[key] !== undefined && overrides[key] !== flag.default;
+          const stored = readStoredFeatureFlag(overrides, key);
+          const isOverridden = stored !== undefined && stored !== flag.default;
           return (
             <SettingsRow
               key={flag.key}

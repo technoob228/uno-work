@@ -174,6 +174,9 @@ export interface SidebarThreadSummary {
   hasPendingApprovals: boolean;
   hasPendingUserInput: boolean;
   hasActionableProposedPlan: boolean;
+  /** Snooze wake time; absent/null when not snoozed or on pre-snooze servers. */
+  snoozedUntil?: string | null | undefined;
+  snoozedAt?: string | null | undefined;
 }
 
 export interface ThreadSession {

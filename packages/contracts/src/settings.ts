@@ -42,7 +42,7 @@ export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode =
  * grouping so the same repo checked out locally and on a server reads as one
  * project rather than two unrelated ones.
  *
- * Only consulted when the `sidebarInbox` Labs flag is on — with the flag off
+ * Only consulted when the `allMachinesSidebar` Labs flag is on — with the flag off
  * the sidebar always behaves as `active`.
  */
 export const SidebarEnvironmentScope = Schema.Literals(["active", "all"]);

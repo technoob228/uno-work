@@ -125,6 +125,48 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       });
     }),
   );
+
+  it.effect("round-trips thread snooze columns (migration 043)", () =>
+    Effect.gen(function* () {
+      const threads = yield* ProjectionThreadRepository;
+      const threadId = ThreadId.make("thread-snoozed");
+      const row = {
+        threadId,
+        projectId: ProjectId.make("project-snoozed"),
+        title: "Snoozed thread",
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        branch: null,
+        worktreePath: null,
+        latestTurnId: null,
+        createdAt: "2026-09-13T00:00:00.000Z",
+        updatedAt: "2026-09-13T00:00:00.000Z",
+        archivedAt: null,
+        pinnedAt: null,
+        latestUserMessageAt: null,
+        pendingApprovalCount: 0,
+        pendingUserInputCount: 0,
+        hasActionableProposedPlan: 0,
+        deletedAt: null,
+      };
+
+      // Rows written without the snooze fields persist as NULL.
+      yield* threads.upsert(row);
+      const unsnoozed = Option.getOrNull(yield* threads.getById({ threadId }));
+      assert.strictEqual(unsnoozed?.snoozedUntil, null);
+      assert.strictEqual(unsnoozed?.snoozedAt, null);
+
+      yield* threads.upsert({
+        ...row,
+        snoozedUntil: "2026-09-14T09:00:00.000Z",
+        snoozedAt: "2026-09-13T12:00:00.000Z",
+      });
+      const snoozed = Option.getOrNull(yield* threads.getById({ threadId }));
+      assert.strictEqual(snoozed?.snoozedUntil, "2026-09-14T09:00:00.000Z");
+      assert.strictEqual(snoozed?.snoozedAt, "2026-09-13T12:00:00.000Z");
+    }),
+  );
   const makeIdentity = (canonicalKey: string, rootPath: string) => ({
     canonicalKey,
     locator: {
