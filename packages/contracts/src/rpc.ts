@@ -57,6 +57,15 @@ import {
   VcsStatusResult,
   VcsStatusStreamEvent,
 } from "./git.ts";
+import {
+  ThreadContinueCompleteInput,
+  ThreadContinueCompleteResult,
+  ThreadContinueError,
+  ThreadContinuePrepareInput,
+  ThreadContinuePrepareResult,
+  ThreadContinueReceiveInput,
+  ThreadContinueReceiveResult,
+} from "./threadContinue.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
 import {
   ClientOrchestrationCommand,
@@ -198,6 +207,11 @@ export const WS_METHODS = {
   gitRunStackedAction: "git.runStackedAction",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
+
+  // Continue a chat on another machine (source: prepare/complete, target: receive)
+  threadContinuePrepare: "thread.continue.prepare",
+  threadContinueReceive: "thread.continue.receive",
+  threadContinueComplete: "thread.continue.complete",
 
   // Terminal methods
   terminalOpen: "terminal.open",
@@ -570,6 +584,24 @@ export const WsGitPreparePullRequestThreadRpc = Rpc.make(WS_METHODS.gitPreparePu
   payload: GitPreparePullRequestThreadInput,
   success: GitPreparePullRequestThreadResult,
   error: GitManagerServiceError,
+});
+
+export const WsThreadContinuePrepareRpc = Rpc.make(WS_METHODS.threadContinuePrepare, {
+  payload: ThreadContinuePrepareInput,
+  success: ThreadContinuePrepareResult,
+  error: ThreadContinueError,
+});
+
+export const WsThreadContinueReceiveRpc = Rpc.make(WS_METHODS.threadContinueReceive, {
+  payload: ThreadContinueReceiveInput,
+  success: ThreadContinueReceiveResult,
+  error: ThreadContinueError,
+});
+
+export const WsThreadContinueCompleteRpc = Rpc.make(WS_METHODS.threadContinueComplete, {
+  payload: ThreadContinueCompleteInput,
+  success: ThreadContinueCompleteResult,
+  error: ThreadContinueError,
 });
 
 export const WsVcsListRefsRpc = Rpc.make(WS_METHODS.vcsListRefs, {
@@ -1170,6 +1202,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitRunStackedActionRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
+  WsThreadContinuePrepareRpc,
+  WsThreadContinueReceiveRpc,
+  WsThreadContinueCompleteRpc,
   WsVcsListRefsRpc,
   WsVcsCreateWorktreeRpc,
   WsVcsRemoveWorktreeRpc,

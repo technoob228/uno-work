@@ -78,6 +78,15 @@ import {
 import { VcsStatusBroadcaster } from "./vcs/VcsStatusBroadcaster.ts";
 import { VcsProvisioningService } from "./vcs/VcsProvisioningService.ts";
 import { GitWorkflowService } from "./git/GitWorkflowService.ts";
+import { ContinueTransport } from "./git/continueTransport.ts";
+import {
+  makeThreadContinueComplete,
+  makeThreadContinuePrepare,
+  makeThreadContinueReceive,
+} from "./orchestration/continueOnMachine.ts";
+import { expandHomePath } from "./pathExpansion.ts";
+import * as fsPromises from "node:fs/promises";
+import * as nodePath from "node:path";
 import { ProjectSetupScriptRunner } from "./project/Services/ProjectSetupScriptRunner.ts";
 import { RepositoryIdentityResolver } from "./project/Services/RepositoryIdentityResolver.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
@@ -223,6 +232,43 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId, currentSessionRole: Ses
       };
       const sendPluginPanelToThread = makePanelThreadSender(panelThreadDeps);
       const resolvePluginPanelThread = makePanelThreadResolver(panelThreadDeps);
+
+      const continueTransport = yield* ContinueTransport;
+      const continueOnMachineDeps = {
+        transport: continueTransport,
+        projections: projectionSnapshotQuery,
+        engine: orchestrationEngine,
+        getProviders: providerRegistry.getProviders,
+        getMachineLabel: serverEnvironment.getDescriptor.pipe(
+          Effect.map((descriptor) => descriptor.label),
+        ),
+        readEnvFile: (projectRoot: string) =>
+          workspaceFileSystem.readFile({ path: nodePath.join(projectRoot, ".env") }).pipe(
+            Effect.map((file) =>
+              file.encoding === "utf8"
+                ? file.content
+                : Buffer.from(file.content, "base64").toString("utf8"),
+            ),
+            Effect.catch(() => Effect.succeed(null)),
+          ),
+        writeEnvFile: (projectRoot: string, text: string) =>
+          workspaceFileSystem
+            .writeFile({ cwd: projectRoot, relativePath: ".env", contents: text, encoding: "utf8" })
+            .pipe(Effect.asVoid),
+        cloneRepository: (input: {
+          readonly remoteUrl: string;
+          readonly destinationPath: string;
+        }) => sourceControlRepositories.cloneRepository(input),
+        directoryExists: (path: string) =>
+          Effect.tryPromise(() => fsPromises.stat(path)).pipe(
+            Effect.map((stats) => stats.isDirectory()),
+            Effect.catch(() => Effect.succeed(false)),
+          ),
+        expandPath: expandHomePath,
+      };
+      const threadContinuePrepare = makeThreadContinuePrepare(continueOnMachineDeps);
+      const threadContinueReceive = makeThreadContinueReceive(continueOnMachineDeps);
+      const threadContinueComplete = makeThreadContinueComplete(continueOnMachineDeps);
 
       const loadAuthAccessSnapshot = () =>
         Effect.all({
@@ -1453,6 +1499,22 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId, currentSessionRole: Ses
               .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
             { "rpc.aggregate": "git" },
           ),
+        [WS_METHODS.threadContinuePrepare]: (input) =>
+          observeRpcEffect(WS_METHODS.threadContinuePrepare, threadContinuePrepare(input), {
+            "rpc.aggregate": "thread-continue",
+          }),
+        [WS_METHODS.threadContinueReceive]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.threadContinueReceive,
+            threadContinueReceive(input).pipe(
+              Effect.tap((result) => refreshGitStatus(result.projectPath)),
+            ),
+            { "rpc.aggregate": "thread-continue" },
+          ),
+        [WS_METHODS.threadContinueComplete]: (input) =>
+          observeRpcEffect(WS_METHODS.threadContinueComplete, threadContinueComplete(input), {
+            "rpc.aggregate": "thread-continue",
+          }),
         [WS_METHODS.vcsListRefs]: (input) =>
           observeRpcEffect(WS_METHODS.vcsListRefs, gitWorkflow.listRefs(input), {
             "rpc.aggregate": "vcs",

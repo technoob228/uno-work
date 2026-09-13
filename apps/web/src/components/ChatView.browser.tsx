@@ -212,6 +212,7 @@ function createMockEnvironmentApi(input: {
       watchFile: (() => () => {}) as EnvironmentApi["filesystem"]["watchFile"],
     },
     sourceControl: {} as EnvironmentApi["sourceControl"],
+    threadContinue: {} as EnvironmentApi["threadContinue"],
     vcs: {} as EnvironmentApi["vcs"],
     git: {} as EnvironmentApi["git"],
     orchestration: {

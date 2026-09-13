@@ -794,6 +794,22 @@ const ThreadActivityAppendCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/**
+ * Append a user message to a thread WITHOUT starting a turn. Used by
+ * "Continue on <machine>" to seed the new thread with the carried-over
+ * history: the seed is folded into the prompt of the first real turn
+ * (see `resolvePendingHandoffSeed`), so the harness sees it, but nothing
+ * runs until the person types the next message.
+ */
+const ThreadMessageUserAppendCommand = Schema.Struct({
+  type: Schema.Literal("thread.message.user.append"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messageId: MessageId,
+  text: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 const ThreadRevertCompleteCommand = Schema.Struct({
   type: Schema.Literal("thread.revert.complete"),
   commandId: CommandId,
@@ -809,6 +825,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
+  ThreadMessageUserAppendCommand,
   ThreadRevertCompleteCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;

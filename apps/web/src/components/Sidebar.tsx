@@ -22,6 +22,8 @@ import {
 } from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { MoveProjectToBoxDialog } from "./MoveProjectToBoxDialog";
+import { ContinueOnMachineDialog } from "./ContinueOnMachineDialog";
+import { CONTINUE_ON_MACHINE_COPY } from "../continueOnMachineCopy";
 import { autoAnimate } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -1165,6 +1167,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     SidebarProjectGroupingMode | "inherit"
   >("inherit");
   const [moveToBoxTarget, setMoveToBoxTarget] = useState<SidebarProjectGroupMember | null>(null);
+  const [continueThreadTarget, setContinueThreadTarget] = useState<ScopedThreadRef | null>(null);
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const confirmArchiveButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -2041,6 +2044,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy chat ID" },
+          { id: "continue-on-machine", label: CONTINUE_ON_MACHINE_COPY.action },
           { id: "delete", label: "Delete", destructive: true },
         ],
         position,
@@ -2078,6 +2082,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       }
       if (clicked === "copy-thread-id") {
         copyThreadIdToClipboard(thread.id, { threadId: thread.id });
+        return;
+      }
+      if (clicked === "continue-on-machine") {
+        setContinueThreadTarget(threadRef);
         return;
       }
       if (clicked !== "delete") return;
@@ -2245,6 +2253,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         open={moveToBoxTarget !== null}
         onOpenChange={(open) => {
           if (!open) setMoveToBoxTarget(null);
+        }}
+      />
+
+      <ContinueOnMachineDialog
+        threadRef={continueThreadTarget}
+        open={continueThreadTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setContinueThreadTarget(null);
         }}
       />
 

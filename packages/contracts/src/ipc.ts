@@ -151,6 +151,14 @@ import type {
   VideoDigest,
 } from "./video.ts";
 import type { UnoTranscribeAudioInput, UnoTranscribeAudioResult } from "./transcription.ts";
+import type {
+  ThreadContinueCompleteInput,
+  ThreadContinueCompleteResult,
+  ThreadContinuePrepareInput,
+  ThreadContinuePrepareResult,
+  ThreadContinueReceiveInput,
+  ThreadContinueReceiveResult,
+} from "./threadContinue.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -591,6 +599,15 @@ export interface EnvironmentApi {
     preparePullRequestThread: (
       input: GitPreparePullRequestThreadInput,
     ) => Promise<GitPreparePullRequestThreadResult>;
+  };
+  /**
+   * "Continue on <machine>": `prepare` and `complete` are called on the
+   * daemon the chat lives on, `receive` on the daemon it moves to.
+   */
+  threadContinue: {
+    prepare: (input: ThreadContinuePrepareInput) => Promise<ThreadContinuePrepareResult>;
+    receive: (input: ThreadContinueReceiveInput) => Promise<ThreadContinueReceiveResult>;
+    complete: (input: ThreadContinueCompleteInput) => Promise<ThreadContinueCompleteResult>;
   };
   orchestration: {
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
