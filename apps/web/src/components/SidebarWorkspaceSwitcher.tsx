@@ -13,17 +13,15 @@
 import {
   CheckIcon,
   ChevronsUpDownIcon,
-  CloudIcon,
   LayersIcon,
-  MonitorIcon,
   PlusIcon,
   RefreshCwIcon,
-  ServerIcon,
   SettingsIcon,
+  StarIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import type { EnvironmentId, WorkspaceMachineKind } from "@t3tools/contracts";
+import type { EnvironmentId } from "@t3tools/contracts";
 
 import { AddEnvModal } from "./AddEnvModal";
 import { cn } from "../lib/utils";
@@ -32,6 +30,8 @@ import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
+import { useDefaultEnvironment } from "../hooks/useDefaultEnvironment";
+import { useMachineRows } from "../hooks/useMachineRows";
 import { useReconnectEnvironment } from "../hooks/useReconnectEnvironment";
 import { useSettings, useUpdateSettings } from "../hooks/useSettings";
 import {
@@ -39,18 +39,15 @@ import {
   useWorkspaces,
   type WorkspaceSummary,
 } from "../lib/useWorkspaces";
+import { deriveMachineKind, type MachineKind } from "../machineKind";
+import { MACHINE_KIND_LABELS } from "../plainLanguage";
 import { selectSidebarThreadsForEnvironment, useStore } from "../store";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
 import { pickThreadForEnvironmentSwitch } from "./Sidebar.logic";
 import { MachineChip } from "./MachineChip";
+import { MACHINE_KIND_ICON } from "./machineKindIcons";
 import { Menu, MenuPopup, MenuTrigger } from "./ui/menu";
-
-const MACHINE_KIND_ICON: Record<WorkspaceMachineKind, typeof MonitorIcon> = {
-  local: MonitorIcon,
-  ssh: ServerIcon,
-  uno_box: CloudIcon,
-};
 
 export function SidebarWorkspaceSwitcher() {
   const navigate = useNavigate();
@@ -64,6 +61,17 @@ export function SidebarWorkspaceSwitcher() {
   const { updateSettings } = useUpdateSettings();
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((state) => state.byId);
   const runtimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
+  const machineRows = useMachineRows();
+  const { explicitDefaultId, setDefaultEnvironment } = useDefaultEnvironment();
+  // Kind per machine from the shared fold, so a box is a box here as well as
+  // in My machines; a registry-only machine falls back to the registry's word.
+  const kindById = useMemo(() => {
+    const map = new Map<string, MachineKind>();
+    for (const row of machineRows) {
+      if (row.environmentId) map.set(row.environmentId, row.kind);
+    }
+    return map;
+  }, [machineRows]);
 
   useEnsureOwnMachineRegistered();
   const { workspaces, isLoading } = useWorkspaces();
@@ -217,47 +225,94 @@ export function SidebarWorkspaceSwitcher() {
                   Machines
                 </div>
                 {currentWorkspace.machines.map((entry) => {
-                  const Icon = MACHINE_KIND_ICON[entry.machine.kind];
+                  const kind =
+                    kindById.get(entry.machine.environmentId) ??
+                    deriveMachineKind({ registryKind: entry.machine.kind });
+                  const Icon = MACHINE_KIND_ICON[kind];
                   const isCurrent =
                     environmentScope === "active" &&
                     entry.machine.environmentId === currentEnvironmentId;
+                  const isDefault = explicitDefaultId === entry.machine.environmentId;
                   return (
-                    <button
+                    <div
                       key={entry.machine.environmentId}
-                      type="button"
-                      disabled={!entry.connected}
-                      onClick={() => openMachine(entry.machine.environmentId)}
-                      title={
-                        entry.connected
-                          ? entry.machine.label
-                          : `${entry.machine.label} — listed, but not connected from here`
-                      }
                       className={cn(
-                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent",
+                        "group/machine flex items-center gap-1 rounded-md pr-1 transition-colors hover:bg-accent",
                         isCurrent && "bg-accent/60",
-                        !entry.connected && "cursor-not-allowed opacity-55 hover:bg-transparent",
+                        !entry.connected && "opacity-55 hover:bg-transparent",
                       )}
                     >
-                      <MachineChip
-                        identity={{
-                          environmentId: entry.machine.environmentId,
-                          label: entry.machine.label,
-                          monogram: entry.machine.monogram,
-                          colorSlot: entry.machine.colorSlot,
-                          isMonogramOverridden: true,
-                        }}
-                        size="sm"
-                        withoutTooltip
-                      />
-                      <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium">{entry.machine.label}</div>
-                        <div className="truncate text-[10px] text-muted-foreground">
-                          {entry.connected ? "connected" : "not connected"}
+                      <button
+                        type="button"
+                        disabled={!entry.connected}
+                        onClick={() => openMachine(entry.machine.environmentId)}
+                        title={
+                          entry.connected
+                            ? entry.machine.label
+                            : `${entry.machine.label} — listed, but not connected from here`
+                        }
+                        className={cn(
+                          "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs",
+                          !entry.connected && "cursor-not-allowed",
+                        )}
+                      >
+                        <MachineChip
+                          identity={{
+                            environmentId: entry.machine.environmentId,
+                            label: entry.machine.label,
+                            monogram: entry.machine.monogram,
+                            colorSlot: entry.machine.colorSlot,
+                            isMonogramOverridden: true,
+                          }}
+                          size="sm"
+                          withoutTooltip
+                        />
+                        <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="truncate font-medium">{entry.machine.label}</span>
+                            {isDefault ? (
+                              <span className="shrink-0 text-[10px] font-normal text-primary">
+                                Default
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="truncate text-[10px] text-muted-foreground">
+                            {MACHINE_KIND_LABELS[kind]} ·{" "}
+                            {entry.connected ? "connected" : "not connected"}
+                          </div>
                         </div>
-                      </div>
-                      {isCurrent ? <CheckIcon className="size-3.5 shrink-0 text-primary" /> : null}
-                    </button>
+                        {isCurrent ? (
+                          <CheckIcon className="size-3.5 shrink-0 text-primary" />
+                        ) : null}
+                      </button>
+                      {entry.connected ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDefaultEnvironment(isDefault ? null : entry.machine.environmentId)
+                          }
+                          aria-pressed={isDefault}
+                          aria-label={
+                            isDefault
+                              ? `Stop using ${entry.machine.label} as the default machine`
+                              : `Make ${entry.machine.label} the default machine`
+                          }
+                          title={isDefault ? "Default machine" : "Make this the default machine"}
+                          className={cn(
+                            "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-opacity hover:text-foreground",
+                            isDefault
+                              ? "text-primary opacity-100"
+                              : "opacity-0 focus-visible:opacity-100 group-hover/machine:opacity-100",
+                          )}
+                        >
+                          <StarIcon
+                            className={cn("size-3.5", isDefault && "fill-current")}
+                            aria-hidden="true"
+                          />
+                        </button>
+                      ) : null}
+                    </div>
                   );
                 })}
               </>

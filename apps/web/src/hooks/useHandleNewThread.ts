@@ -15,6 +15,7 @@ import { selectProjectsAcrossEnvironments, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
+import { useDefaultEnvironment } from "./useDefaultEnvironment";
 import { useSettings } from "./useSettings";
 
 function useNewThreadState() {
@@ -168,6 +169,7 @@ export function useHandleNewThread() {
       : null,
   );
   const projects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
+  const { defaultEnvironmentId } = useDefaultEnvironment();
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
       items: projects,
@@ -177,11 +179,18 @@ export function useHandleNewThread() {
   }, [projectOrder, projects]);
   const handleNewThread = useNewThreadState();
 
+  // With no project open, a new chat starts on the default machine when it
+  // has any project; otherwise on the first project in sidebar order.
+  const defaultProject =
+    (defaultEnvironmentId
+      ? orderedProjects.find((project) => project.environmentId === defaultEnvironmentId)
+      : undefined) ?? orderedProjects[0];
+
   return {
     activeDraftThread,
     activeThread,
-    defaultProjectRef: orderedProjects[0]
-      ? scopeProjectRef(orderedProjects[0].environmentId, orderedProjects[0].id)
+    defaultProjectRef: defaultProject
+      ? scopeProjectRef(defaultProject.environmentId, defaultProject.id)
       : null,
     handleNewThread,
     routeThreadRef,

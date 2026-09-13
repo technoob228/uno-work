@@ -1,56 +1,42 @@
 import {
   CheckIcon,
   ChevronsUpDownIcon,
-  CloudIcon,
-  GlobeIcon,
   LaptopIcon,
-  MonitorIcon,
   PlusIcon,
   RefreshCwIcon,
+  StarIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { EnvironmentId, EnvironmentConnectionState } from "@t3tools/contracts";
 
 import { AddEnvModal } from "./AddEnvModal";
 import { cn } from "../lib/utils";
-import { readPrimaryEnvironmentDescriptor, usePrimaryEnvironmentId } from "../environments/primary";
+import { usePrimaryEnvironmentDescriptor } from "../environments/primary";
 import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
+import { useDefaultEnvironment } from "../hooks/useDefaultEnvironment";
 import { useLocalDaemonDiscovery, useUseThisComputer } from "../hooks/useLocalDaemon";
+import { useMachineRows } from "../hooks/useMachineRows";
 import { useReconnectEnvironment } from "../hooks/useReconnectEnvironment";
 import { useSwitchEnvironment } from "../hooks/useSwitchEnvironment";
+import { deriveMachineKind, type MachineKind } from "../machineKind";
+import { MACHINE_KIND_LABELS } from "../plainLanguage";
 import { useStore } from "../store";
 import { formatElapsedAgoLabel } from "../timestampFormat";
+import { MACHINE_KIND_ICON } from "./machineKindIcons";
+import { groupSwitcherMachines, type SwitcherMachine } from "./SidebarEnvSwitcher.logic";
 import { Menu, MenuPopup, MenuTrigger } from "./ui/menu";
 
-interface EnvironmentOption {
-  id: EnvironmentId;
-  name: string;
-  meta: string;
-  kind: "local" | "uno" | "custom";
-  connectionState: EnvironmentConnectionState;
-}
-
 const FALLBACK_ENV = {
-  name: "This device",
+  name: "This machine",
   meta: "Starting...",
-  kind: "local",
+  kind: "server",
   connectionState: "connecting",
-} as const satisfies Omit<EnvironmentOption, "id">;
-
-const KIND_ICON: Record<EnvironmentOption["kind"], typeof MonitorIcon> = {
-  local: MonitorIcon,
-  uno: CloudIcon,
-  custom: GlobeIcon,
-};
-
-const GROUP_LABELS: Record<EnvironmentOption["kind"], string> = {
-  local: "This computer",
-  uno: "Uno boxes",
-  custom: "Other machines",
-};
+  isPrimary: true,
+  isDefault: false,
+} as const satisfies Omit<SwitcherMachine, "id">;
 
 const STATUS_DOT_CLASS: Record<EnvironmentConnectionState, string> = {
   connected: "bg-emerald-500",
@@ -108,11 +94,14 @@ function formatSavedEnvironmentStatusMeta(input: {
 export function SidebarEnvSwitcher() {
   const [addEnvOpen, setAddEnvOpen] = useState(false);
   const { reconnect, reconnectingId } = useReconnectEnvironment();
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const primaryDescriptor = usePrimaryEnvironmentDescriptor();
+  const primaryEnvironmentId = primaryDescriptor?.environmentId ?? null;
   const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((state) => state.byId);
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
   const switchEnvironment = useSwitchEnvironment();
+  const machineRows = useMachineRows();
+  const { explicitDefaultId, setDefaultEnvironment } = useDefaultEnvironment();
   // Browser build only: a Uno Work desktop on this very computer that is not
   // yet one of the saved machines gets a one-click "Use this computer".
   const { daemon: localDaemon } = useLocalDaemonDiscovery();
@@ -120,9 +109,15 @@ export function SidebarEnvSwitcher() {
   const unlinkedLocalDaemon =
     localDaemon && !savedEnvironmentRegistry[localDaemon.environmentId] ? localDaemon : null;
 
-  const environments = useMemo<EnvironmentOption[]>(() => {
-    const primaryDescriptor = readPrimaryEnvironmentDescriptor();
-    const primary = primaryDescriptor
+  const environments = useMemo<SwitcherMachine[]>(() => {
+    // Kinds come from the shared fold (daemon descriptor, account boxes,
+    // registry, platform) so the switcher agrees with My machines.
+    const kindById = new Map<string, MachineKind>();
+    for (const row of machineRows) {
+      if (row.environmentId) kindById.set(row.environmentId, row.kind);
+    }
+
+    const primary: SwitcherMachine[] = primaryDescriptor
       ? [
           {
             id: primaryDescriptor.environmentId,
@@ -131,16 +126,19 @@ export function SidebarEnvSwitcher() {
               primaryDescriptor.platform.os,
               primaryDescriptor.platform.arch,
             ),
-            kind: "local" as const,
-            connectionState: "connected" as const,
+            kind:
+              kindById.get(primaryDescriptor.environmentId) ??
+              deriveMachineKind({ descriptor: primaryDescriptor }),
+            connectionState: "connected",
+            isPrimary: true,
+            isDefault: explicitDefaultId === primaryDescriptor.environmentId,
           },
         ]
       : [];
 
     const saved = Object.values(savedEnvironmentRegistry)
       .filter((record) => record.environmentId !== primaryDescriptor?.environmentId)
-      .toSorted((left, right) => left.label.localeCompare(right.label))
-      .map((record) => {
+      .map((record): SwitcherMachine => {
         const runtime = savedEnvironmentRuntimeById[record.environmentId];
         const descriptor = runtime?.descriptor;
         const details = descriptor
@@ -162,13 +160,21 @@ export function SidebarEnvSwitcher() {
             lastSynchronizedAt: runtime?.lastSynchronizedAt ?? null,
             details,
           }),
-          kind: "custom" as const,
+          kind: kindById.get(record.environmentId) ?? deriveMachineKind({ descriptor }),
           connectionState,
+          isPrimary: false,
+          isDefault: explicitDefaultId === record.environmentId,
         };
       });
 
     return [...primary, ...saved];
-  }, [savedEnvironmentRegistry, savedEnvironmentRuntimeById]);
+  }, [
+    explicitDefaultId,
+    machineRows,
+    primaryDescriptor,
+    savedEnvironmentRegistry,
+    savedEnvironmentRuntimeById,
+  ]);
 
   const currentId = activeEnvironmentId ?? primaryEnvironmentId ?? environments[0]?.id ?? null;
   const current =
@@ -179,14 +185,9 @@ export function SidebarEnvSwitcher() {
           ...FALLBACK_ENV,
         }
       : null);
-  const groups = (Object.keys(GROUP_LABELS) as EnvironmentOption["kind"][])
-    .map((kind) => ({
-      kind,
-      items: environments.filter((environment) => environment.kind === kind),
-    }))
-    .filter((g) => g.items.length > 0);
+  const groups = useMemo(() => groupSwitcherMachines(environments), [environments]);
 
-  const CurrentIcon = current ? KIND_ICON[current.kind] : MonitorIcon;
+  const CurrentIcon = MACHINE_KIND_ICON[current?.kind ?? "server"];
   const currentSavedEnvironment = current ? savedEnvironmentRegistry[current.id] : null;
   const canReconnectCurrent =
     currentSavedEnvironment != null &&
@@ -196,6 +197,10 @@ export function SidebarEnvSwitcher() {
   const reconnectCurrentEnvironment = () => {
     if (!currentSavedEnvironment || !current) return;
     void reconnect(current.id);
+  };
+
+  const toggleDefault = (environmentId: EnvironmentId) => {
+    setDefaultEnvironment(explicitDefaultId === environmentId ? null : environmentId);
   };
 
   return (
@@ -222,46 +227,92 @@ export function SidebarEnvSwitcher() {
                     {current?.name ?? "No machine"}
                   </div>
                   <div className="truncate text-[10px] text-muted-foreground">
-                    {current?.meta ?? "Connect a machine"}
+                    {current
+                      ? `${MACHINE_KIND_LABELS[current.kind]} · ${current.meta}`
+                      : "Connect a machine"}
                   </div>
                 </div>
                 <ChevronsUpDownIcon className="size-3 shrink-0 text-muted-foreground" />
               </button>
             }
           />
-          <MenuPopup align="start" side="top" sideOffset={6} className="min-w-[15rem] p-1">
+          <MenuPopup align="start" side="top" sideOffset={6} className="min-w-[16rem] p-1">
             {groups.map((group) => (
               <div key={group.kind} className="flex flex-col">
                 <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-                  {GROUP_LABELS[group.kind]}
+                  {group.label}
                 </div>
                 {group.items.map((env) => {
-                  const Icon = KIND_ICON[env.kind];
+                  const Icon = MACHINE_KIND_ICON[env.kind];
                   const isActive = env.id === currentId;
                   return (
-                    <button
+                    <div
                       key={env.id}
-                      type="button"
-                      onClick={() => switchEnvironment(env.id)}
                       className={cn(
-                        "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent",
+                        "group/machine flex items-center gap-1 rounded-md pr-1 transition-colors hover:bg-accent",
                         isActive && "bg-accent/60",
                       )}
                     >
-                      <span
-                        aria-hidden="true"
+                      <button
+                        type="button"
+                        onClick={() => switchEnvironment(env.id)}
+                        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            "size-2 shrink-0 rounded-full",
+                            STATUS_DOT_CLASS[env.connectionState],
+                          )}
+                        />
+                        <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="truncate font-medium">{env.name}</span>
+                            {env.isDefault ? (
+                              <span className="shrink-0 text-[10px] font-normal text-primary">
+                                Default
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="truncate text-[10px] text-muted-foreground">
+                            {env.meta}
+                          </div>
+                        </div>
+                        {isActive ? (
+                          <CheckIcon className="size-3.5 shrink-0 text-primary" />
+                        ) : env.isPrimary ? (
+                          <span
+                            className="shrink-0 text-[10px] text-muted-foreground"
+                            title="The machine serving this page"
+                          >
+                            current
+                          </span>
+                        ) : null}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleDefault(env.id)}
+                        aria-pressed={env.isDefault}
+                        aria-label={
+                          env.isDefault
+                            ? `Stop using ${env.name} as the default machine`
+                            : `Make ${env.name} the default machine`
+                        }
+                        title={env.isDefault ? "Default machine" : "Make this the default machine"}
                         className={cn(
-                          "size-2 shrink-0 rounded-full",
-                          STATUS_DOT_CLASS[env.connectionState],
+                          "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-opacity hover:text-foreground",
+                          env.isDefault
+                            ? "text-primary opacity-100"
+                            : "opacity-0 focus-visible:opacity-100 group-hover/machine:opacity-100",
                         )}
-                      />
-                      <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium">{env.name}</div>
-                        <div className="truncate text-[10px] text-muted-foreground">{env.meta}</div>
-                      </div>
-                      {isActive ? <CheckIcon className="size-3.5 shrink-0 text-primary" /> : null}
-                    </button>
+                      >
+                        <StarIcon
+                          className={cn("size-3.5", env.isDefault && "fill-current")}
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </div>
                   );
                 })}
               </div>

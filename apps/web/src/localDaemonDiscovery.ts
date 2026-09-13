@@ -30,6 +30,8 @@ export interface LocalDaemonDescriptor {
   readonly label: string;
   readonly platform: ExecutionEnvironmentDescriptor["platform"];
   readonly serverVersion: string;
+  /** What the daemon says it is; older daemons leave it out (a computer here). */
+  readonly machineKind?: ExecutionEnvironmentDescriptor["machineKind"];
   /** `http://127.0.0.1:<port>/` — what a saved environment stores. */
   readonly httpBaseUrl: string;
 }
@@ -79,6 +81,7 @@ export function parseLocalDaemonDescriptor(
   ) {
     return null;
   }
+  const machineKind = body["machineKind"];
   return {
     environmentId: environmentId as LocalDaemonDescriptor["environmentId"],
     label: label.trim(),
@@ -87,6 +90,9 @@ export function parseLocalDaemonDescriptor(
       arch: platform["arch"],
     } as LocalDaemonDescriptor["platform"],
     serverVersion: serverVersion.trim(),
+    ...(machineKind === "uno_box" || machineKind === "computer" || machineKind === "server"
+      ? { machineKind }
+      : {}),
     httpBaseUrl,
   };
 }

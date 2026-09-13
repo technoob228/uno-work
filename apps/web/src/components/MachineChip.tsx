@@ -1,6 +1,9 @@
 import { cva, type VariantProps } from "class-variance-authority";
 
+import type { MachineKind } from "@t3tools/contracts";
+
 import { cn } from "~/lib/utils";
+import { MACHINE_KIND_LABELS } from "~/plainLanguage";
 import type { MachineIdentity } from "../machineIdentity";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
@@ -48,6 +51,8 @@ interface MachineChipProps {
    * to know whether the data is old or the machine is gone.
    */
   readonly detail?: string | null | undefined;
+  /** What the machine is; named in the tooltip ("hk-box · Uno box") when known. */
+  readonly kind?: MachineKind | null | undefined;
   /** Set when the chip sits inside a control that already has a tooltip. */
   readonly withoutTooltip?: boolean | undefined;
 }
@@ -61,6 +66,7 @@ export function MachineChip({
   size = "default",
   className,
   detail,
+  kind,
   withoutTooltip,
 }: MachineChipProps) {
   const chip = (
@@ -85,7 +91,12 @@ export function MachineChip({
     <Tooltip>
       <TooltipTrigger render={<span className="inline-flex" />}>{chip}</TooltipTrigger>
       <TooltipPopup side="top">
-        {detail != null && detail.length > 0 ? `${identity.label} — ${detail}` : identity.label}
+        {[
+          kind ? `${identity.label} · ${MACHINE_KIND_LABELS[kind]}` : identity.label,
+          detail != null && detail.length > 0 ? detail : null,
+        ]
+          .filter((part) => part !== null)
+          .join(" — ")}
       </TooltipPopup>
     </Tooltip>
   );

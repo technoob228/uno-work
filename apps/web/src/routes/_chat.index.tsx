@@ -12,6 +12,7 @@ import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
 import { useSavedEnvironmentRegistryStore } from "../environments/runtime";
 import { APP_BASE_NAME, APP_DISPLAY_NAME } from "~/branding";
 import { resolveDefaultLandingTarget } from "../defaultLanding";
+import { useDefaultEnvironment } from "../hooks/useDefaultEnvironment";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { getProjectOrderKey } from "../logicalProject";
 import {
@@ -31,6 +32,7 @@ function useDefaultLandingRedirect(enabled: boolean) {
   const navigate = useNavigate();
   const { handleNewThread } = useNewThreadHandler();
   const activeEnvironmentId = useStore((store) => store.activeEnvironmentId);
+  const { defaultEnvironmentId } = useDefaultEnvironment();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useStore(useShallow((store) => selectSidebarThreadsAcrossEnvironments(store)));
   const projects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
@@ -50,9 +52,10 @@ function useDefaultLandingRedirect(enabled: boolean) {
             orderKey: getProjectOrderKey(project),
           })),
         activeEnvironmentId,
+        defaultEnvironmentId,
         projectOrder,
       }),
-    [activeEnvironmentId, projectOrder, projects, threads],
+    [activeEnvironmentId, defaultEnvironmentId, projectOrder, projects, threads],
   );
 
   useEffect(() => {

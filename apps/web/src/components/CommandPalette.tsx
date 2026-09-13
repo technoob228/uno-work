@@ -42,6 +42,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { readEnvironmentApi } from "../environmentApi";
 import { readPrimaryEnvironmentDescriptor, usePrimaryEnvironmentId } from "../environments/primary";
+import { useDefaultEnvironment } from "../hooks/useDefaultEnvironment";
 import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
@@ -160,6 +161,8 @@ interface AddProjectEnvironmentOption {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly isPrimary: boolean;
+  /** The user's default machine — offered first. */
+  readonly isDefault: boolean;
 }
 
 type AddProjectRemoteProviderKind = Extract<
@@ -432,6 +435,7 @@ function OpenCommandPaletteDialog() {
   const primaryEnvironmentLabel = readPrimaryEnvironmentDescriptor()?.label ?? null;
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((state) => state.byId);
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
+  const { defaultEnvironmentId } = useDefaultEnvironment();
   const {
     openBrowser: openEnvironmentFileBrowser,
     currentChatEnvironmentId,
@@ -452,6 +456,7 @@ function OpenCommandPaletteDialog() {
           runtimeLabel: primaryEnvironmentLabel,
         }),
         isPrimary: true,
+        isDefault: primaryEnvironmentId === defaultEnvironmentId,
       });
     }
 
@@ -470,10 +475,16 @@ function OpenCommandPaletteDialog() {
           savedLabel: record.label,
         }),
         isPrimary: false,
+        isDefault: record.environmentId === defaultEnvironmentId,
       });
     }
 
+    // The default machine first (it is preselected), then the daemon serving
+    // the page, then the rest by name.
     options.sort((left, right) => {
+      if (left.isDefault !== right.isDefault) {
+        return left.isDefault ? -1 : 1;
+      }
       if (left.isPrimary !== right.isPrimary) {
         return left.isPrimary ? -1 : 1;
       }
@@ -482,6 +493,7 @@ function OpenCommandPaletteDialog() {
 
     return options;
   }, [
+    defaultEnvironmentId,
     primaryEnvironmentId,
     primaryEnvironmentLabel,
     savedEnvironmentRegistry,

@@ -108,11 +108,16 @@ describe("PERMISSION_MODES", () => {
 
 describe("machine and chat-mode vocabularies", () => {
   it("names every machine kind and status", () => {
+    // Labels follow what the machine is, never its role: the daemon serving
+    // the page is not "This computer" when it is a box.
     expect(MACHINE_KIND_LABELS).toEqual({
-      local: "This computer",
       uno_box: "Uno box",
-      ssh: "Other machine",
+      computer: "Your computer",
+      server: "Other machine",
     });
+    for (const label of Object.values(MACHINE_KIND_LABELS)) {
+      expect(label).not.toMatch(/this computer/iu);
+    }
     expect(Object.keys(MACHINE_STATUS_LABELS).toSorted()).toEqual([
       "offline",
       "online",

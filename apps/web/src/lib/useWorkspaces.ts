@@ -17,11 +17,12 @@ import type { EnvironmentId, WorkspaceMachine, WorkspaceState } from "@t3tools/c
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef } from "react";
 
-import { usePrimaryEnvironmentId } from "../environments/primary";
+import { usePrimaryEnvironmentDescriptor, usePrimaryEnvironmentId } from "../environments/primary";
 import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
+import { deriveMachineKind, registryKindForMachineKind } from "../machineKind";
 import {
   workspaceStateQueryOptions,
   workspaceSyncMachinesMutationOptions,
@@ -64,7 +65,8 @@ export interface WorkspaceDirectory {
  */
 export function useEnsureOwnMachineRegistered(): void {
   const queryClient = useQueryClient();
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const primaryDescriptor = usePrimaryEnvironmentDescriptor();
+  const primaryEnvironmentId = primaryDescriptor?.environmentId ?? null;
   const savedLabel = useSavedEnvironmentRegistryStore((state) =>
     primaryEnvironmentId ? state.byId[primaryEnvironmentId]?.label : undefined,
   );
@@ -83,18 +85,24 @@ export function useEnsureOwnMachineRegistered(): void {
     if (attemptedForWorkspaceId.current === state.identity.workspaceId) return;
     if (state.machines.some((machine) => machine.environmentId === primaryEnvironmentId)) return;
     attemptedForWorkspaceId.current = state.identity.workspaceId;
+    // Register under what the daemon says it is: a box registers as a box,
+    // not as "local" just because it is the one doing the registering.
+    const kind = registryKindForMachineKind(deriveMachineKind({ descriptor: primaryDescriptor }));
     mutate({
       machines: [
         {
           environmentId: primaryEnvironmentId,
-          label: savedLabel?.trim() || "This machine",
-          kind: "local",
+          label: savedLabel?.trim() || primaryDescriptor?.label || "This machine",
+          kind,
+          ...(kind === "uno_box" && primaryDescriptor?.unoBoxId != null
+            ? { unoBoxId: primaryDescriptor.unoBoxId }
+            : {}),
           lastSeenAt: new Date().toISOString(),
         },
       ],
       registryEnvironmentId: primaryEnvironmentId,
     });
-  }, [mutate, primaryEnvironmentId, savedLabel, state]);
+  }, [mutate, primaryDescriptor, primaryEnvironmentId, savedLabel, state]);
 }
 
 export function useWorkspaces(): WorkspaceDirectory {

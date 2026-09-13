@@ -3,7 +3,7 @@ import {
   ChevronLeftIcon,
   ChevronsLeftRightEllipsisIcon,
   CloudIcon,
-  GlobeIcon,
+  LaptopIcon,
   PlusIcon,
   RefreshCwIcon,
   TerminalIcon,
@@ -271,9 +271,9 @@ function ChoiceStep({ onClose, setStep }: { onClose: () => void; setStep: (step:
           className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-primary/4"
         >
           <div className="grid size-9 place-items-center rounded-lg bg-muted text-muted-foreground">
-            <GlobeIcon className="size-4" />
+            <LaptopIcon className="size-4" />
           </div>
-          <div className="font-medium text-sm">My computer or another machine</div>
+          <div className="font-medium text-sm">Your computer or another machine</div>
           <div className="text-muted-foreground text-xs leading-relaxed">
             Connect {APP_BASE_NAME} running on your own computer, or any machine you can reach over
             SSH.

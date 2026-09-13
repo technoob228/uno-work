@@ -31,19 +31,22 @@ import {
   MoonIcon,
   PlusIcon,
   RefreshCwIcon,
-  ServerIcon,
+  StarIcon,
   SunIcon,
   TrashIcon,
+  XIcon,
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 
-import { usePrimaryEnvironmentId } from "../../environments/primary";
-import { useServerConfig } from "../../rpc/serverState";
+import { usePrimaryEnvironmentDescriptor } from "../../environments/primary";
 import {
   removeSavedEnvironment,
   useSavedEnvironmentRegistryStore,
-  useSavedEnvironmentRuntimeStore,
 } from "../../environments/runtime";
+import { useDefaultEnvironment } from "../../hooks/useDefaultEnvironment";
+import { useMachineRows } from "../../hooks/useMachineRows";
+import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
+import { deriveMachineKind, registryKindForMachineKind } from "../../machineKind";
 import {
   unoCloudBoxPowerMutationOptions,
   unoCloudStateQueryOptions,
@@ -72,8 +75,10 @@ import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import { AddEnvModal } from "../AddEnvModal";
 import { Explain } from "../Explain";
 import { MachineChip } from "../MachineChip";
+import { MACHINE_KIND_ICON } from "../machineKindIcons";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Switch } from "../ui/switch";
 import { Input } from "../ui/input";
 import {
@@ -82,12 +87,7 @@ import {
   SettingsSection,
   useRelativeTimeTick,
 } from "./settingsLayout";
-import {
-  buildMachineRows,
-  formatRelativeTime,
-  registryIdForBox,
-  type MachineRow,
-} from "./machineRows";
+import { formatRelativeTime, registryIdForBox, type MachineRow } from "./machineRows";
 import { WorkspaceInstructionsSection } from "./WorkspaceInstructions";
 
 const MACHINE_COLOR_CHOICES = [
@@ -113,12 +113,6 @@ const WRITE_MODE_CHOICES: ReadonlyArray<{
   { value: "request", label: "By request" },
   { value: "allow", label: "Straight through" },
 ];
-
-const MACHINE_KIND_ICON = {
-  local: LaptopIcon,
-  ssh: ServerIcon,
-  uno_box: CloudIcon,
-} as const;
 
 function StatusPill({
   tone,
@@ -166,11 +160,20 @@ export function WorkspaceSettings() {
   const queryClient = useQueryClient();
   // The primary daemon is the registry client: the panel describes one
   // workspace regardless of which machine's chat is on screen.
-  const registryEnvironmentId = usePrimaryEnvironmentId();
-  const primaryLabel = useServerConfig()?.environment.label;
+  const primaryDescriptor = usePrimaryEnvironmentDescriptor();
+  const registryEnvironmentId = primaryDescriptor?.environmentId ?? null;
   const savedEnvironments = useSavedEnvironmentRegistryStore((state) => state.byId);
-  const runtimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
   const now = useRelativeTimeTick(30_000);
+  const {
+    explicitDefaultId,
+    candidates: defaultCandidates,
+    shouldOfferChoice,
+    setDefaultEnvironment,
+  } = useDefaultEnvironment();
+  const defaultPromptDismissed = useSettings(
+    (settings) => settings.defaultEnvironmentPromptDismissed,
+  );
+  const { updateSettings } = useUpdateSettings();
 
   const stateQuery = useQuery(workspaceStateQueryOptions(registryEnvironmentId));
   const cloudQuery = useQuery(unoCloudStateQueryOptions(registryEnvironmentId));
@@ -250,51 +253,26 @@ export function WorkspaceSettings() {
     [savedEnvironments],
   );
 
-  const connectionStateById = useMemo(
-    () =>
-      Object.fromEntries(
-        Object.entries(runtimeById).map(([environmentId, runtime]) => [
-          environmentId,
-          runtime.connectionState,
-        ]),
-      ),
-    [runtimeById],
-  );
-
-  const rows = useMemo(
-    () =>
-      registryEnvironmentId
-        ? buildMachineRows({
-            primaryEnvironmentId: registryEnvironmentId,
-            primaryLabel,
-            registryMachines: state?.machines ?? [],
-            savedEnvironments: connectionCandidates,
-            connectionStateById,
-            boxes: cloud?.connected ? cloud.boxes : [],
-            projectNamesByEnvironmentId,
-            now,
-          })
-        : [],
-    [
-      cloud,
-      connectionCandidates,
-      connectionStateById,
-      now,
-      primaryLabel,
-      projectNamesByEnvironmentId,
-      registryEnvironmentId,
-      state,
-    ],
-  );
+  // The same fold the sidebar switcher and Settings "Applies to" read, so a
+  // machine is the same kind everywhere; this page adds project names.
+  const rows = useMachineRows({ projectNamesByEnvironmentId, now });
 
   const handleSyncConnections = useCallback(() => {
     if (!registryEnvironmentId) return;
+    // The daemon registers as what it says it is (a box as a box), never as
+    // "local" merely because it is the one doing the registering.
+    const primaryKind = registryKindForMachineKind(
+      deriveMachineKind({ descriptor: primaryDescriptor }),
+    );
     syncMachines.mutate({
       machines: [
         {
           environmentId: registryEnvironmentId,
-          label: "This computer",
-          kind: "local" as const,
+          label: primaryDescriptor?.label ?? "This machine",
+          kind: primaryKind,
+          ...(primaryKind === "uno_box" && primaryDescriptor?.unoBoxId != null
+            ? { unoBoxId: primaryDescriptor.unoBoxId }
+            : {}),
           lastSeenAt: new Date().toISOString(),
         },
         ...connectionCandidates
@@ -308,7 +286,7 @@ export function WorkspaceSettings() {
       ],
       registryEnvironmentId,
     });
-  }, [connectionCandidates, registryEnvironmentId, syncMachines]);
+  }, [connectionCandidates, primaryDescriptor, registryEnvironmentId, syncMachines]);
 
   const handleAddBox = useCallback(
     (box: UnoBox) => {
@@ -458,6 +436,57 @@ export function WorkspaceSettings() {
         ) : null}
 
         <div className="flex flex-col gap-2 border-t border-border/60 px-4 py-3 sm:px-5">
+          {shouldOfferChoice && !defaultPromptDismissed ? (
+            <div
+              className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2"
+              data-testid="choose-default-machine-banner"
+              role="status"
+            >
+              <StarIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium">Choose your default machine</div>
+                <p className="text-xs text-muted-foreground">
+                  The app opens on it and offers it first for new projects and chats. Until you pick
+                  one, it uses an online computer of yours, or the machine serving this page.
+                </p>
+              </div>
+              <Menu>
+                <MenuTrigger render={<Button size="xs" />}>
+                  <StarIcon className="size-3.5" />
+                  Pick
+                </MenuTrigger>
+                <MenuPopup align="end" className="min-w-56">
+                  {defaultCandidates.map((candidate) => {
+                    const KindIcon = MACHINE_KIND_ICON[candidate.kind];
+                    return (
+                      <MenuItem
+                        key={candidate.environmentId}
+                        onClick={() => setDefaultEnvironment(candidate.environmentId)}
+                      >
+                        <KindIcon className="size-4 text-muted-foreground" />
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className="truncate">{candidate.label}</span>
+                          <span className="truncate text-[11px] text-muted-foreground">
+                            {MACHINE_KIND_LABELS[candidate.kind]}
+                            {candidate.online ? "" : " · offline"}
+                          </span>
+                        </span>
+                      </MenuItem>
+                    );
+                  })}
+                </MenuPopup>
+              </Menu>
+              <Button
+                size="xs"
+                variant="ghost"
+                aria-label="Dismiss"
+                title="Not now"
+                onClick={() => updateSettings({ defaultEnvironmentPromptDismissed: true })}
+              >
+                <XIcon className="size-3.5" />
+              </Button>
+            </div>
+          ) : null}
           {unlinkedLocalDaemon ? (
             <div
               className="flex flex-wrap items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2"
@@ -468,7 +497,7 @@ export function WorkspaceSettings() {
                 <div className="flex items-center gap-2">
                   <span className="truncate text-sm font-medium">This computer</span>
                   <span className="text-[11px] text-muted-foreground">
-                    {MACHINE_KIND_LABELS.local}
+                    {MACHINE_KIND_LABELS.computer}
                   </span>
                 </div>
                 <p className="truncate text-xs text-muted-foreground">
@@ -517,7 +546,12 @@ export function WorkspaceSettings() {
                 key={row.key}
                 className="flex flex-wrap items-center gap-3 rounded-lg border border-border px-3 py-2"
               >
-                <MachineChip identity={row.identity} size="lg" detail={row.detail} />
+                <MachineChip
+                  identity={row.identity}
+                  size="lg"
+                  detail={row.detail}
+                  kind={row.kind}
+                />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate text-sm font-medium">{row.label}</span>
@@ -525,6 +559,12 @@ export function WorkspaceSettings() {
                       <KindIcon className="size-3.5" />
                       {MACHINE_KIND_LABELS[row.kind]}
                     </span>
+                    {row.isDefault ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-primary">
+                        <StarIcon className="size-3 fill-current" aria-hidden="true" />
+                        Default
+                      </span>
+                    ) : null}
                   </div>
                   <p className="truncate text-xs text-muted-foreground">
                     {row.detail} · {formatProjects(row.projects)}
@@ -532,6 +572,29 @@ export function WorkspaceSettings() {
                 </div>
 
                 <MachineStatusPill status={row.status} />
+
+                {row.environmentId && (row.isPrimary || row.isSavedConnection) ? (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    aria-pressed={row.isDefault}
+                    aria-label={
+                      row.isDefault
+                        ? `Stop using ${row.label} as the default machine`
+                        : `Make ${row.label} the default machine`
+                    }
+                    title={row.isDefault ? "Default machine" : "Make this the default machine"}
+                    className={row.isDefault ? "text-primary" : "text-muted-foreground"}
+                    onClick={() =>
+                      setDefaultEnvironment(
+                        explicitDefaultId === row.environmentId ? null : row.environmentId!,
+                      )
+                    }
+                  >
+                    <StarIcon className={`size-3.5 ${row.isDefault ? "fill-current" : ""}`} />
+                    {row.isDefault ? "Default" : "Set as default"}
+                  </Button>
+                ) : null}
 
                 {row.environmentId &&
                 row.environmentId !== currentEnvironmentId &&
@@ -710,13 +773,11 @@ export function WorkspaceSettings() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate text-sm font-medium">{machine.label}</span>
-                      {machine.kind === "uno_box" ? (
-                        <CloudIcon className="size-3.5 text-muted-foreground" />
-                      ) : machine.kind === "local" ? (
-                        <MonitorIcon className="size-3.5 text-muted-foreground" />
-                      ) : (
-                        <ServerIcon className="size-3.5 text-muted-foreground" />
-                      )}
+                      {(() => {
+                        const RegistryKindIcon =
+                          MACHINE_KIND_ICON[deriveMachineKind({ registryKind: machine.kind })];
+                        return <RegistryKindIcon className="size-3.5 text-muted-foreground" />;
+                      })()}
                     </div>
                     <p className="truncate text-xs text-muted-foreground">
                       {machine.environmentId} · seen {formatRelativeTime(machine.lastSeenAt, now)}

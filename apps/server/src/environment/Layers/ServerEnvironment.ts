@@ -1,9 +1,12 @@
 import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import { Effect, FileSystem, Layer, Path, Random } from "effect";
+import * as OS from "node:os";
 
 import { ServerConfig } from "../../config.ts";
+import { UnoBoxIdentity } from "../../unoBoxIdentity.ts";
 import { ServerEnvironment, type ServerEnvironmentShape } from "../Services/ServerEnvironment.ts";
 import packageJson from "../../../package.json" with { type: "json" };
+import { resolveMachineKind } from "../machineKind.ts";
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
 
 function platformOs(): ExecutionEnvironmentDescriptor["platform"]["os"] {
@@ -34,6 +37,7 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig;
+  const unoBoxIdentity = yield* UnoBoxIdentity;
 
   const readPersistedEnvironmentId = Effect.gen(function* () {
     const exists = yield* fileSystem
@@ -70,7 +74,7 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
     cwdBaseName,
   });
 
-  const descriptor: ExecutionEnvironmentDescriptor = {
+  const base = {
     environmentId,
     label,
     platform: {
@@ -81,11 +85,27 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
     capabilities: {
       repositoryIdentity: true,
     },
-  };
+  } satisfies Omit<ExecutionEnvironmentDescriptor, "machineKind" | "unoBoxId">;
+  const hostname = OS.hostname();
+
+  // Built per call: the box id can arrive after startup (control-plane probe),
+  // and the descriptor must say "Uno box" from that moment on.
+  const getDescriptor = Effect.map(
+    unoBoxIdentity.current,
+    (unoBoxId): ExecutionEnvironmentDescriptor => ({
+      ...base,
+      ...resolveMachineKind({
+        mode: serverConfig.mode,
+        platform: process.platform,
+        hostname,
+        unoBoxId,
+      }),
+    }),
+  );
 
   return {
     getEnvironmentId: Effect.succeed(environmentId),
-    getDescriptor: Effect.succeed(descriptor),
+    getDescriptor,
   } satisfies ServerEnvironmentShape;
 });
 

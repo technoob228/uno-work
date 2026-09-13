@@ -54,6 +54,8 @@ const clientSettings: ClientSettings = {
   browserProfileScope: "account",
   confirmThreadArchive: true,
   confirmThreadDelete: false,
+  defaultEnvironmentId: null,
+  defaultEnvironmentPromptDismissed: false,
   diffIgnoreWhitespace: true,
   diffWordWrap: true,
   featureFlags: {},

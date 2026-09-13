@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
-import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
+import { EnvironmentId, TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
 import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
@@ -151,6 +151,16 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  // The machine the app opens on and offers first (new project, new chat,
+  // sidebar switcher). `null` means "not chosen": the app then prefers an
+  // online computer of the user's, then the daemon serving the page.
+  defaultEnvironmentId: Schema.NullOr(EnvironmentId).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  // The one-time "Choose your default machine" hint in My machines was closed.
+  defaultEnvironmentPromptDismissed: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
   diffIgnoreWhitespace: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffWordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // Labs / feature-flag overrides. A sparse map from flag key to the user's
@@ -739,6 +749,8 @@ export const ClientSettingsPatch = Schema.Struct({
   browserProfileScope: Schema.optionalKey(BrowserProfileScope),
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
+  defaultEnvironmentId: Schema.optionalKey(Schema.NullOr(EnvironmentId)),
+  defaultEnvironmentPromptDismissed: Schema.optionalKey(Schema.Boolean),
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
   diffWordWrap: Schema.optionalKey(Schema.Boolean),
   featureFlags: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),

@@ -34,6 +34,7 @@ import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReac
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
+import { UnoBoxIdentity } from "./unoBoxIdentity.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { PluginRegistry } from "./plugins/PluginRegistry.ts";
@@ -403,6 +404,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
   const lifecycleEvents = yield* ServerLifecycleEvents;
   const serverSettings = yield* ServerSettingsService;
   const serverEnvironment = yield* ServerEnvironment;
+  const unoBoxIdentity = yield* UnoBoxIdentity;
 
   const commandGate = yield* makeCommandGate;
   const httpListening = yield* Deferred.make<void>();
@@ -476,6 +478,9 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
     yield* Effect.forkScoped(
       runStartupPhase("credentials.hydrate", hydrateVaultFromAccountOnStartup),
     );
+    // Off the request path: the descriptor answers with local signals at once
+    // and upgrades to "Uno box" when the control plane confirms the box id.
+    yield* Effect.forkScoped(runStartupPhase("machine-kind.probe", unoBoxIdentity.probe));
 
     const welcomeBase = yield* resolveWelcomeBase;
     const environment = yield* serverEnvironment.getDescriptor;

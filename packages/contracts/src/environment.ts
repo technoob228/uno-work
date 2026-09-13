@@ -24,12 +24,28 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 
+/**
+ * What kind of machine a daemon runs on, as the daemon itself reports it.
+ *
+ * `uno_box` is a managed Uno box, `computer` is a person's own laptop or
+ * desktop (the Uno Work desktop app, or a macOS/Windows host), `server` is
+ * anything else reachable over the network. Labels, icons and grouping in the
+ * UI come from this, never from whether the daemon happens to be the one that
+ * served the page.
+ */
+export const MachineKind = Schema.Literals(["uno_box", "computer", "server"]);
+export type MachineKind = typeof MachineKind.Type;
+
 export const ExecutionEnvironmentDescriptor = Schema.Struct({
   environmentId: EnvironmentId,
   label: TrimmedNonEmptyString,
   platform: ExecutionEnvironmentPlatform,
   serverVersion: TrimmedNonEmptyString,
   capabilities: ExecutionEnvironmentCapabilities,
+  /** Optional so daemons older than this field keep working. */
+  machineKind: Schema.optionalKey(MachineKind),
+  /** The box id in the Uno control plane when `machineKind` is `uno_box` and known. */
+  unoBoxId: Schema.optionalKey(Schema.Number),
 });
 export type ExecutionEnvironmentDescriptor = typeof ExecutionEnvironmentDescriptor.Type;
 

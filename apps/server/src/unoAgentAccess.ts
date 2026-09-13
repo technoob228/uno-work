@@ -9,9 +9,10 @@
  *   UNO_API_URL       — control plane (console.uno4.dev);
  *   UNO_BOX_ID        — номер бокса, на котором живёт агент.
  *
- * Свой бокс демон находит сам: по совпадению internal_ip бокса с локальными
- * интерфейсами, с фолбэком на уникальное совпадение hostname ↔ имя бокса.
- * Не Uno-бокс (ноут, BYO-VM без ключа) — переменные просто не появляются.
+ * Свой бокс демон находит сам (см. `unoBoxIdentity.ts`): по совпадению
+ * internal_ip бокса с локальными интерфейсами, с фолбэком на уникальное
+ * совпадение hostname ↔ имя бокса. Не Uno-бокс (ноут, BYO-VM без ключа) —
+ * переменные просто не появляются.
  *
  * Токен хранится в ServerSecretStore (0600, вне settings.json); в настройках
  * живёт только уровень доступа. Смена уровня или ключа аккаунта приводит к
@@ -19,12 +20,18 @@
  */
 import { UNO_CONTROL_PLANE_BASE_URL, type UnoAgentAccessLevel } from "@t3tools/contracts";
 import { Context, Effect, Layer, Ref } from "effect";
-import os from "node:os";
 
 import { ServerSecretStore } from "./auth/Services/ServerSecretStore.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
+import {
+  UNO_AGENT_TOKEN_SECRET_KEY,
+  discoverOwnBoxId,
+  fetchControlPlaneJson,
+  parseStoredAgentToken,
+  type StoredAgentToken,
+} from "./unoBoxIdentity.ts";
 
-const SECRET_STORE_KEY = "uno-agent-token";
+const SECRET_STORE_KEY = UNO_AGENT_TOKEN_SECRET_KEY;
 /** Не дёргать control plane чаще, чем раз в минуту, даже при серии create(). */
 const CACHE_TTL_MS = 60_000;
 /** Перечеканивать заранее, чтобы токен не истёк посреди длинной сессии. */
@@ -43,15 +50,6 @@ export class UnoAgentAccess extends Context.Service<UnoAgentAccess, UnoAgentAcce
   "t3/UnoAgentAccess",
 ) {}
 
-interface StoredAgentToken {
-  readonly token: string;
-  readonly access: string;
-  readonly boxId: number;
-  readonly expiresAt: string | null;
-  /** Хвост ключа аккаунта, которым чеканили: смена ключа = перечеканка. */
-  readonly mintedBy: string;
-}
-
 interface CacheEntry {
   readonly at: number;
   readonly env: Record<string, string>;
@@ -59,78 +57,6 @@ interface CacheEntry {
 
 function accountKeyFingerprint(apiKey: string): string {
   return apiKey.length <= 4 ? apiKey : apiKey.slice(-4);
-}
-
-function localIPv4Addresses(): Set<string> {
-  const found = new Set<string>();
-  for (const addrs of Object.values(os.networkInterfaces())) {
-    for (const addr of addrs ?? []) {
-      if (addr.family === "IPv4" && !addr.internal) found.add(addr.address);
-    }
-  }
-  return found;
-}
-
-async function fetchControlPlaneJson(
-  path: string,
-  apiKey: string,
-  init?: RequestInit,
-): Promise<unknown> {
-  const response = await fetch(`${UNO_CONTROL_PLANE_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
-  });
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(
-      detail.trim().length > 0
-        ? `${response.status}: ${detail.slice(0, 200)}`
-        : `HTTP ${response.status}`,
-    );
-  }
-  return (await response.json()) as unknown;
-}
-
-/**
- * Опознание собственного бокса. internal_ip уникален на бокс; имя — нет,
- * поэтому по имени принимаем только однозначное совпадение.
- */
-async function discoverOwnBoxId(apiKey: string): Promise<number | null> {
-  const raw = await fetchControlPlaneJson("/api/v1/boxes", apiKey);
-  const boxes =
-    typeof raw === "object" && raw !== null
-      ? ((raw as Record<string, unknown>)["boxes"] as ReadonlyArray<Record<string, unknown>>)
-      : [];
-  if (!Array.isArray(boxes)) return null;
-
-  const localAddresses = localIPv4Addresses();
-  const byIp = boxes.filter(
-    (box) => typeof box["internal_ip"] === "string" && localAddresses.has(box["internal_ip"]),
-  );
-  if (byIp.length === 1 && typeof byIp[0]?.["id"] === "number") {
-    return byIp[0]["id"];
-  }
-
-  const hostname = os.hostname();
-  const byName = boxes.filter((box) => box["name"] === hostname || box["hostname"] === hostname);
-  if (byName.length === 1 && typeof byName[0]?.["id"] === "number") {
-    return byName[0]["id"];
-  }
-  return null;
-}
-
-function parseStored(bytes: Uint8Array | null): StoredAgentToken | null {
-  if (bytes === null || bytes.length === 0) return null;
-  try {
-    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as StoredAgentToken;
-    return typeof parsed.token === "string" && parsed.token.length > 0 ? parsed : null;
-  } catch {
-    return null;
-  }
 }
 
 function storedStillValid(
@@ -167,7 +93,7 @@ const makeUnoAgentAccess = Effect.gen(function* () {
     const storedBytes = yield* secretStore
       .get(SECRET_STORE_KEY)
       .pipe(Effect.orElseSucceed(() => null));
-    const stored = parseStored(storedBytes);
+    const stored = parseStoredAgentToken(storedBytes);
     if (stored !== null && storedStillValid(stored, access, keyFingerprint)) {
       return environmentFor(stored);
     }

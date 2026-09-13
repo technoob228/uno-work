@@ -18,6 +18,7 @@ import {
 } from "./http.ts";
 import { BrowserBridgeLive } from "./browserBridge.ts";
 import { UnoAgentAccessLive } from "./unoAgentAccess.ts";
+import { UnoBoxIdentityLive } from "./unoBoxIdentity.ts";
 import { HealthCheck } from "./health.ts";
 import { SelfWatchdogLive } from "./selfWatchdog.ts";
 import { ServerBrowserLive } from "./serverBrowser.ts";
@@ -361,7 +362,19 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLive),
   Layer.provideMerge(RepositoryIdentityResolverLive),
-  Layer.provideMerge(ServerEnvironmentLive),
+  // The descriptor reports the machine kind, which on a box comes from the
+  // box identity. Its dependencies are the same memoized Live layers the
+  // runtime builds further down this pipe.
+  Layer.provideMerge(
+    ServerEnvironmentLive.pipe(
+      Layer.provideMerge(
+        UnoBoxIdentityLive.pipe(
+          Layer.provide(ServerSettingsLive),
+          Layer.provide(ServerSecretStoreLive),
+        ),
+      ),
+    ),
+  ),
   Layer.provideMerge(AuthLayerLive),
 );
 

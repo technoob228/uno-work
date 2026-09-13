@@ -4,11 +4,15 @@ import { expect, it } from "@effect/vitest";
 import { Effect, Exit, FileSystem, Layer, PlatformError } from "effect";
 
 import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "../../config.ts";
+import { UnoBoxIdentity, UnoBoxIdentityNone } from "../../unoBoxIdentity.ts";
 import { ServerEnvironment } from "../Services/ServerEnvironment.ts";
 import { ServerEnvironmentLive } from "./ServerEnvironment.ts";
 
 const makeServerEnvironmentLayer = (baseDir: string) =>
-  ServerEnvironmentLive.pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)));
+  ServerEnvironmentLive.pipe(
+    Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)),
+    Layer.provide(UnoBoxIdentityNone),
+  );
 
 const makeServerConfig = Effect.fn(function* (baseDir: string) {
   const derivedPaths = yield* deriveServerPaths(baseDir, undefined);
@@ -61,6 +65,36 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
 
       expect(first.environmentId).toBe(second.environmentId);
       expect(second.capabilities.repositoryIdentity).toBe(true);
+      // Off a box, the kind follows the host: a computer here (macOS/Windows)
+      // or a server (Linux CI). Never undefined — new daemons always report it.
+      expect(["computer", "server"]).toContain(second.machineKind);
+      expect(second.unoBoxId).toBeUndefined();
+    }),
+  );
+
+  it.effect("reports the Uno box once the identity service knows the box id", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-environment-box-test-",
+      });
+      const boxIdentity = Layer.succeed(UnoBoxIdentity, {
+        current: Effect.succeed(395),
+        probe: Effect.void,
+      });
+      const descriptor = yield* Effect.gen(function* () {
+        const serverEnvironment = yield* ServerEnvironment;
+        return yield* serverEnvironment.getDescriptor;
+      }).pipe(
+        Effect.provide(
+          ServerEnvironmentLive.pipe(
+            Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)),
+            Layer.provide(boxIdentity),
+          ),
+        ),
+      );
+      expect(descriptor.machineKind).toBe("uno_box");
+      expect(descriptor.unoBoxId).toBe(395);
     }),
   );
 
@@ -112,6 +146,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
             Layer.provide(
               Layer.merge(Layer.succeed(ServerConfig, serverConfig), failingFileSystemLayer),
             ),
+            Layer.provide(UnoBoxIdentityNone),
           ),
         ),
         Effect.exit,

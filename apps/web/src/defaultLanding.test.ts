@@ -117,4 +117,63 @@ describe("resolveDefaultLandingTarget", () => {
   it("reports empty when there is no project either", () => {
     expect(resolveDefaultLandingTarget({ threads: [], projects: [] })).toEqual({ kind: "empty" });
   });
+
+  describe("default machine", () => {
+    it("lands on the default machine's most recent thread on a fresh open", () => {
+      const target = resolveDefaultLandingTarget({
+        threads: [
+          thread("box-recent", {
+            environmentId: ENV_A,
+            latestUserMessageAt: "2026-08-09T10:00:00.000Z",
+          }),
+          thread("laptop-older", {
+            environmentId: ENV_B,
+            latestUserMessageAt: "2026-08-02T10:00:00.000Z",
+          }),
+        ],
+        projects: [],
+        activeEnvironmentId: null,
+        defaultEnvironmentId: ENV_B,
+      });
+
+      expect(target).toMatchObject({ kind: "thread", threadId: "laptop-older" });
+    });
+
+    it("keeps the machine the user already switched to over the default", () => {
+      const target = resolveDefaultLandingTarget({
+        threads: [
+          thread("box", { environmentId: ENV_A }),
+          thread("laptop", { environmentId: ENV_B }),
+        ],
+        projects: [],
+        activeEnvironmentId: ENV_A,
+        defaultEnvironmentId: ENV_B,
+      });
+
+      expect(target).toMatchObject({ kind: "thread", threadId: "box" });
+    });
+
+    it("opens a composer on the default machine's project when there is nothing to resume", () => {
+      const target = resolveDefaultLandingTarget({
+        threads: [],
+        projects: [
+          { id: "box-project" as ProjectId, environmentId: ENV_A },
+          { id: "laptop-project" as ProjectId, environmentId: ENV_B },
+        ],
+        defaultEnvironmentId: ENV_B,
+      });
+
+      expect(target).toEqual({ kind: "draft", environmentId: ENV_B, projectId: "laptop-project" });
+    });
+
+    it("still resumes elsewhere when the default machine has nothing", () => {
+      const target = resolveDefaultLandingTarget({
+        threads: [thread("box", { environmentId: ENV_A })],
+        projects: [],
+        defaultEnvironmentId: ENV_B,
+      });
+
+      expect(target).toMatchObject({ kind: "thread", threadId: "box" });
+    });
+  });
 });

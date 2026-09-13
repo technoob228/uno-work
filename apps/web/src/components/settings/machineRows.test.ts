@@ -54,7 +54,69 @@ describe("buildMachineRows", () => {
       now: NOW,
     });
     expect(rows.map((row) => row.label)).toEqual(["This machine", "Zed"]);
-    expect(rows[0]).toMatchObject({ isPrimary: true, status: "online", kind: "local" });
+    expect(rows[0]).toMatchObject({ isPrimary: true, status: "online", kind: "computer" });
+    expect(rows[1]?.kind).toBe("server");
+  });
+
+  it("takes the kind from what each daemon reports, not from its role", () => {
+    const rows = buildMachineRows({
+      primaryEnvironmentId: primary,
+      descriptorById: {
+        [primary]: { machineKind: "uno_box", unoBoxId: 395 },
+        "env-laptop": { machineKind: "computer" },
+      },
+      registryMachines: [
+        // The registry still says "local" for the daemon that registered
+        // itself — the descriptor wins.
+        machine({ environmentId: primary, label: "unowork-golden-build", kind: "local" }),
+        machine({ environmentId: "env-laptop", label: "MacBook", kind: "ssh" }),
+      ],
+      savedEnvironments: [],
+      connectionStateById: {},
+      boxes: [],
+      projectNamesByEnvironmentId: new Map(),
+      now: NOW,
+    });
+    const byLabel = new Map(rows.map((row) => [row.label, row]));
+    expect(byLabel.get("unowork-golden-build")?.kind).toBe("uno_box");
+    expect(byLabel.get("MacBook")?.kind).toBe("computer");
+  });
+
+  it("matches the box by the id the daemon reports before any name match", () => {
+    const mine = box({ id: 395, name: "renamed-in-console" });
+    const rows = buildMachineRows({
+      primaryEnvironmentId: primary,
+      primaryLabel: "unowork-golden-build",
+      descriptorById: { [primary]: { machineKind: "uno_box", unoBoxId: 395 } },
+      registryMachines: [],
+      savedEnvironments: [],
+      connectionStateById: {},
+      boxes: [mine],
+      projectNamesByEnvironmentId: new Map(),
+      now: NOW,
+    });
+    // One row, not "this machine" plus a separate unconnected box.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ isPrimary: true, kind: "uno_box", box: mine });
+  });
+
+  it("lists the chosen default machine first and flags it", () => {
+    const rows = buildMachineRows({
+      primaryEnvironmentId: primary,
+      defaultEnvironmentId: "env-b" as EnvironmentId,
+      registryMachines: [
+        machine({ environmentId: primary, label: "Box", kind: "local" }),
+        machine({ environmentId: "env-b", label: "Laptop", kind: "ssh" }),
+        machine({ environmentId: "env-c", label: "Alpha", kind: "ssh" }),
+      ],
+      savedEnvironments: [],
+      connectionStateById: {},
+      boxes: [],
+      projectNamesByEnvironmentId: new Map(),
+      now: NOW,
+    });
+    expect(rows.map((row) => row.label)).toEqual(["Laptop", "Box", "Alpha"]);
+    expect(rows.map((row) => row.isDefault)).toEqual([true, false, false]);
   });
 
   it("reads status from the live connection before registry presence", () => {
@@ -175,7 +237,8 @@ describe("buildMachineRows", () => {
     expect(others(rows)[0]).toMatchObject({
       status: "offline",
       detail: "Reconnecting…",
-      kind: "ssh",
+      // Never answered, so nothing says what it is: "Other machine".
+      kind: "server",
     });
   });
 });
@@ -185,6 +248,9 @@ describe("buildMachineRows — primary machine", () => {
     const rows = buildMachineRows({
       primaryEnvironmentId: "env-primary" as EnvironmentId,
       primaryLabel: "Mikhail's laptop",
+      descriptorById: {
+        "env-primary": { platform: { os: "darwin", arch: "arm64" } },
+      },
       registryMachines: [],
       savedEnvironments: [],
       connectionStateById: {},
@@ -196,7 +262,8 @@ describe("buildMachineRows — primary machine", () => {
     expect(rows[0]).toMatchObject({
       environmentId: "env-primary",
       label: "Mikhail's laptop",
-      kind: "local",
+      // An older daemon that does not report its kind: macOS means a computer.
+      kind: "computer",
       status: "online",
       isPrimary: true,
       projects: ["site"],
@@ -213,7 +280,8 @@ describe("buildMachineRows — primary machine", () => {
       projectNamesByEnvironmentId: new Map(),
       now: Date.now(),
     });
-    expect(rows[0]?.label).toBe("This computer");
+    // Not "This computer": the daemon serving the page may well be a box.
+    expect(rows[0]?.label).toBe("This machine");
   });
 });
 

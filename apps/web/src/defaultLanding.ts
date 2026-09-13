@@ -59,20 +59,46 @@ export interface ResolveDefaultLandingInput {
   readonly projects: ReadonlyArray<LandingProjectCandidate>;
   /** Environment the sidebar currently points at, when known. */
   readonly activeEnvironmentId?: EnvironmentId | null;
+  /**
+   * The user's default machine (see `defaultEnvironment.ts`). Preferred when
+   * nothing is active yet — on a fresh open — but never over a machine the
+   * user has already switched to in this session.
+   */
+  readonly defaultEnvironmentId?: EnvironmentId | null;
   /** Project ids in the user's preferred sidebar order. */
   readonly projectOrder?: ReadonlyArray<string>;
+}
+
+/** Machines to look in first, strongest preference first. */
+function preferredEnvironmentIds(input: ResolveDefaultLandingInput): ReadonlyArray<EnvironmentId> {
+  const ids: EnvironmentId[] = [];
+  if (input.activeEnvironmentId) ids.push(input.activeEnvironmentId);
+  if (input.defaultEnvironmentId && !ids.includes(input.defaultEnvironmentId)) {
+    ids.push(input.defaultEnvironmentId);
+  }
+  return ids;
+}
+
+/** The first preferred environment that has any of `items`, else all of them. */
+function narrowToPreferredEnvironment<T extends { readonly environmentId: EnvironmentId }>(
+  items: ReadonlyArray<T>,
+  preferred: ReadonlyArray<EnvironmentId>,
+): ReadonlyArray<T> {
+  for (const environmentId of preferred) {
+    const inEnvironment = items.filter((item) => item.environmentId === environmentId);
+    if (inEnvironment.length > 0) return inEnvironment;
+  }
+  return items;
 }
 
 export function resolveDefaultLandingTarget(
   input: ResolveDefaultLandingInput,
 ): DefaultLandingTarget {
   const resumable = input.threads.filter((thread) => thread.archivedAt === null);
+  const preferred = preferredEnvironmentIds(input);
 
   if (resumable.length > 0) {
-    const preferred = input.activeEnvironmentId
-      ? resumable.filter((thread) => thread.environmentId === input.activeEnvironmentId)
-      : [];
-    const pool = preferred.length > 0 ? preferred : resumable;
+    const pool = narrowToPreferredEnvironment(resumable, preferred);
 
     let best = pool[0]!;
     for (const thread of pool.slice(1)) {
@@ -94,10 +120,7 @@ export function resolveDefaultLandingTarget(
 function pickLandingProject(
   input: ResolveDefaultLandingInput,
 ): LandingProjectCandidate | undefined {
-  const inActiveEnvironment = input.activeEnvironmentId
-    ? input.projects.filter((project) => project.environmentId === input.activeEnvironmentId)
-    : [];
-  const pool = inActiveEnvironment.length > 0 ? inActiveEnvironment : input.projects;
+  const pool = narrowToPreferredEnvironment(input.projects, preferredEnvironmentIds(input));
   if (pool.length === 0) return undefined;
 
   for (const preferredKey of input.projectOrder ?? []) {

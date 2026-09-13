@@ -13,23 +13,17 @@
  *
  * @module components/settings/useSettingsScope
  */
-import type { EnvironmentId, WorkspaceMachineKind } from "@t3tools/contracts";
-import { useQuery } from "@tanstack/react-query";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { createContext, useCallback, useContext, useEffect, useMemo } from "react";
 
 import { usePrimaryEnvironmentId } from "~/environments/primary";
-import {
-  useSavedEnvironmentRegistryStore,
-  useSavedEnvironmentRuntimeStore,
-} from "~/environments/runtime";
 import { useEnvironmentScopes } from "~/environments/scope/scopes";
-import { unoCloudStateQueryOptions, workspaceStateQueryOptions } from "~/lib/workspaceReactQuery";
+import { useMachineRows } from "~/hooks/useMachineRows";
+import { deriveMachineKind, type MachineKind } from "~/machineKind";
 import { MACHINE_KIND_LABELS, MACHINE_STATUS_LABELS, type MachineStatus } from "~/plainLanguage";
-import { useServerConfig } from "~/rpc/serverState";
 import { useUiStateStore } from "~/uiStateStore";
 
-import { buildMachineRows } from "./machineRows";
 import {
   SETTINGS_SCOPE_SWITCH_HINT,
   parseSettingsScopeLocation,
@@ -42,15 +36,13 @@ import {
 export interface SettingsMachineOption {
   readonly environmentId: EnvironmentId;
   readonly label: string;
-  readonly kind: WorkspaceMachineKind;
-  /** "This computer" / "Uno box" / "Other machine". */
+  readonly kind: MachineKind;
+  /** "Uno box" / "Your computer" / "Other machine". */
   readonly kindLabel: string;
   readonly status: MachineStatus;
   readonly statusLabel: string;
   readonly isPrimary: boolean;
 }
-
-const NO_PROJECTS: ReadonlyMap<string, ReadonlyArray<string>> = new Map();
 
 /**
  * Every machine whose settings this app can open, primary first. Kind and
@@ -59,42 +51,19 @@ const NO_PROJECTS: ReadonlyMap<string, ReadonlyArray<string>> = new Map();
 export function useSettingsMachineOptions(): ReadonlyArray<SettingsMachineOption> {
   const scopes = useEnvironmentScopes();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const primaryLabel = useServerConfig()?.environment.label;
-  const savedEnvironments = useSavedEnvironmentRegistryStore((state) => state.byId);
-  const runtimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
-  const registry = useQuery(workspaceStateQueryOptions(primaryEnvironmentId)).data;
-  const cloud = useQuery(unoCloudStateQueryOptions(primaryEnvironmentId)).data;
+  const rows = useMachineRows();
 
   return useMemo(() => {
-    const rowsById = new Map<string, { kind: WorkspaceMachineKind; status: MachineStatus }>();
-    if (primaryEnvironmentId) {
-      const rows = buildMachineRows({
-        primaryEnvironmentId,
-        primaryLabel,
-        registryMachines: registry?.machines ?? [],
-        savedEnvironments: Object.values(savedEnvironments).map((record) => ({
-          environmentId: record.environmentId,
-          label: record.label,
-          lastConnectedAt: record.lastConnectedAt,
-        })),
-        connectionStateById: Object.fromEntries(
-          Object.entries(runtimeById).map(([id, runtime]) => [id, runtime.connectionState]),
-        ),
-        boxes: cloud?.connected ? cloud.boxes : [],
-        projectNamesByEnvironmentId: NO_PROJECTS,
-        now: Date.now(),
-      });
-      for (const row of rows) {
-        if (row.environmentId) {
-          rowsById.set(row.environmentId, { kind: row.kind, status: row.status });
-        }
+    const rowsById = new Map<string, { kind: MachineKind; status: MachineStatus }>();
+    for (const row of rows) {
+      if (row.environmentId) {
+        rowsById.set(row.environmentId, { kind: row.kind, status: row.status });
       }
     }
 
     return scopes.map((scope): SettingsMachineOption => {
       const row = rowsById.get(scope.environmentId);
-      const kind: WorkspaceMachineKind =
-        row?.kind ?? (scope.placement === "local" ? "local" : "ssh");
+      const kind: MachineKind = row?.kind ?? deriveMachineKind({});
       // A live connection is the one fact Settings must not get wrong: writes
       // go through it. Anything else shows the registry's word (sleeping box,
       // offline), falling back to offline.
@@ -114,7 +83,7 @@ export function useSettingsMachineOptions(): ReadonlyArray<SettingsMachineOption
         isPrimary: scope.environmentId === primaryEnvironmentId,
       };
     });
-  }, [cloud, primaryEnvironmentId, primaryLabel, registry, runtimeById, savedEnvironments, scopes]);
+  }, [primaryEnvironmentId, rows, scopes]);
 }
 
 export interface SettingsScopeModel {

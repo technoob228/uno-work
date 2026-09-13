@@ -16,7 +16,7 @@
  *
  * @module plainLanguage
  */
-import type { RuntimeMode, WorkspaceMachineKind } from "@t3tools/contracts";
+import type { MachineKind, RuntimeMode } from "@t3tools/contracts";
 
 export type PlainTerm =
   | "machine"
@@ -196,11 +196,21 @@ export function permissionModeConsequence(mode: RuntimeMode): string {
   return PERMISSION_MODES[mode].consequence;
 }
 
-/** What kind of machine a row is, in the user's words. */
-export const MACHINE_KIND_LABELS: Readonly<Record<WorkspaceMachineKind, string>> = {
-  local: "This computer",
+/**
+ * What kind of machine a row is, in the user's words. Keyed by the kind the
+ * daemon reports (see `machineKind.ts`), never by whether it served the page.
+ */
+export const MACHINE_KIND_LABELS: Readonly<Record<MachineKind, string>> = {
   uno_box: "Uno box",
-  ssh: "Other machine",
+  computer: "Your computer",
+  server: "Other machine",
+};
+
+/** Group headings when machines are listed by kind. */
+export const MACHINE_KIND_GROUP_LABELS: Readonly<Record<MachineKind, string>> = {
+  uno_box: "Uno boxes",
+  computer: "Your computers",
+  server: "Other machines",
 };
 
 export type MachineStatus = "online" | "offline" | "sleeping" | "unknown";
