@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { describeBrowserForLink, requestLocalDaemonLink } from "./localDaemonLink";
+import {
+  describeBrowserForLink,
+  requestLocalDaemonLink,
+  OUTDATED_DAEMON_MESSAGE,
+} from "./localDaemonLink";
 
 const daemon = { httpBaseUrl: "http://127.0.0.1:3773/" };
 
@@ -102,6 +106,21 @@ describe("requestLocalDaemonLink", () => {
 
     await expect(outcome).resolves.toEqual({ status: "timeout" });
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("explains an outdated daemon instead of quoting a 404 on the link request", async () => {
+    // Pre-0.0.52 desktops answer a bare 404 with an empty body.
+    const oldDaemonFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("", { status: 404 }));
+    const outcome = await requestLocalDaemonLink({
+      daemon,
+      origin: "https://app.uno4.work",
+      label: "Chrome",
+      fetch: oldDaemonFetch,
+      pollIntervalMs: 1_000,
+    });
+    expect(outcome).toEqual({ status: "unavailable", message: OUTDATED_DAEMON_MESSAGE });
   });
 
   it("treats an expired or forgotten request as no answer", async () => {

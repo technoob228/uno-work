@@ -19,6 +19,14 @@ import type {
 
 import type { LocalDaemonDescriptor } from "./localDaemonDiscovery";
 
+/**
+ * A daemon that answers 404 to the link request predates the feature (desktop
+ * builds before 0.0.52) or is not the desktop at all; either way the fix is
+ * on that computer, so say so instead of quoting a status code.
+ */
+export const OUTDATED_DAEMON_MESSAGE =
+  "Uno Work on this computer is too old to accept links from the browser. Update it to version 0.0.52 or newer, then try again.";
+
 export const LOCAL_DAEMON_LINK_POLL_INTERVAL_MS = 1_000;
 /** Matches the daemon's request TTL, plus a little for the last poll. */
 export const LOCAL_DAEMON_LINK_TIMEOUT_MS = 2 * 60_000 + 5_000;
@@ -132,7 +140,15 @@ export async function requestLocalDaemonLink(
   if (!created.ok) {
     return {
       status: "unavailable",
-      message: await readErrorMessage(created, `Uno Work refused the request (${created.status}).`),
+      // A daemon that knows the endpoint explains itself in the body (e.g. a
+      // headless box has nobody to press Allow); an old daemon answers a bare
+      // 404 with no body, and the only fix is updating it.
+      message: await readErrorMessage(
+        created,
+        created.status === 404
+          ? OUTDATED_DAEMON_MESSAGE
+          : `Uno Work refused the request (${created.status}).`,
+      ),
     };
   }
   const { requestId, expiresAt } = (await created.json()) as AuthLinkRequestCreateResult;
