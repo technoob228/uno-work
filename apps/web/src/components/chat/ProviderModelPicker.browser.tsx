@@ -20,6 +20,16 @@ import {
 } from "@t3tools/contracts/settings";
 import { __resetLocalApiForTests } from "../../localApi";
 
+// Install / sign-in RPCs the picker's setup panes call on the primary daemon.
+// Hoisted so individual tests can script the job lifecycle.
+const providerSetupRpc = vi.hoisted(() => ({
+  installStart: vi.fn(),
+  installStatus: vi.fn(),
+  authStart: vi.fn(),
+  authStatus: vi.fn(),
+  authSubmitCode: vi.fn(),
+}));
+
 // Mock the environments/runtime module to provide a mock primary environment connection
 vi.mock("../../environments/runtime", () => {
   const primaryConnection = {
@@ -40,6 +50,7 @@ vi.mock("../../environments/runtime", () => {
         getConfig: vi.fn(),
         updateSettings: vi.fn(),
       },
+      providerSetup: providerSetupRpc,
     },
     ensureBootstrapped: async () => undefined,
     reconnect: async () => undefined,
@@ -262,30 +273,31 @@ async function mountPicker(props: {
   document.body.append(host);
   const onInstanceModelChange = vi.fn();
   const providers = props.providers ?? TEST_PROVIDERS;
-  const instanceEntries = sortProviderInstanceEntries(deriveProviderInstanceEntries(providers));
   const activeInstanceId = props.activeInstanceId ?? CODEX_INSTANCE_ID;
-  const modelOptionsByInstance = getCustomModelOptionsByInstance(
-    props.settings ?? DEFAULT_UNIFIED_SETTINGS,
-    providers,
-    activeInstanceId,
-    props.model,
-  );
-  const screen = await render(
+  const renderPicker = (currentProviders: ReadonlyArray<ServerProvider>) => (
     <ProviderModelPicker
       activeInstanceId={activeInstanceId}
       model={props.model}
       lockedProvider={props.lockedProvider}
       lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
-      instanceEntries={instanceEntries}
-      modelOptionsByInstance={modelOptionsByInstance}
+      instanceEntries={sortProviderInstanceEntries(deriveProviderInstanceEntries(currentProviders))}
+      modelOptionsByInstance={getCustomModelOptionsByInstance(
+        props.settings ?? DEFAULT_UNIFIED_SETTINGS,
+        currentProviders,
+        activeInstanceId,
+        props.model,
+      )}
       triggerVariant={props.triggerVariant}
       onInstanceModelChange={onInstanceModelChange}
-    />,
-    { container: host },
+    />
   );
+  const screen = await render(renderPicker(providers), { container: host });
 
   return {
     onInstanceModelChange,
+    /** Simulate the daemon re-probing providers (what a finished install triggers). */
+    updateProviders: (nextProviders: ReadonlyArray<ServerProvider>) =>
+      screen.rerender(renderPicker(nextProviders)),
     // Back-compat alias used by callers that still assert on the old callback
     // name. Delegates to the instance-aware mock so existing expectations work.
     get onProviderModelChange() {
@@ -314,6 +326,34 @@ function getVisibleModelNames() {
     .filter((text) => text.length > 0);
 }
 
+/** TEST_PROVIDERS with Claude in the given setup state. */
+function withClaudeState(overrides: Partial<ServerProvider>): ServerProvider[] {
+  return TEST_PROVIDERS.map((provider) =>
+    provider.instanceId === CLAUDE_INSTANCE_ID ? { ...provider, ...overrides } : provider,
+  );
+}
+
+const CLAUDE_NOT_INSTALLED = withClaudeState({
+  installed: false,
+  version: null,
+  status: "error",
+  auth: { status: "unknown" },
+  models: [],
+});
+
+const CLAUDE_NEEDS_SIGN_IN = withClaudeState({
+  status: "error",
+  auth: { status: "unauthenticated" },
+});
+
+function getSidebarButton(instanceId: string): HTMLButtonElement {
+  const button = document.querySelector<HTMLButtonElement>(
+    `button[data-model-picker-provider="${instanceId}"]`,
+  );
+  expect(button).not.toBeNull();
+  return button!;
+}
+
 function getSidebarProviderOrder() {
   return Array.from(document.querySelectorAll<HTMLElement>("[data-model-picker-provider]")).map(
     (element) => element.dataset.modelPickerProvider ?? "",
@@ -325,6 +365,9 @@ describe("ProviderModelPicker", () => {
     // Reset test environment before each test
     resetModelPickerFilterStoreForTests();
     await __resetLocalApiForTests();
+    for (const rpc of Object.values(providerSetupRpc)) {
+      rpc.mockReset();
+    }
   });
 
   afterEach(async () => {
@@ -1289,6 +1332,241 @@ describe("ProviderModelPicker", () => {
         // Disabled provider should not have its models shown
         expect(text).not.toContain("Claude Opus 4.6");
       });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps a not-installed agent clickable and shows its install pane", async () => {
+    const mounted = await mountPicker({
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      providers: CLAUDE_NOT_INSTALLED,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        const claude = getSidebarButton("claudeAgent");
+        expect(claude.disabled).toBe(false);
+        expect(claude.dataset.modelPickerProviderState).toBe("Not installed");
+        expect(claude.getAttribute("aria-label")).toBe("Claude, not installed");
+      });
+
+      await userEvent.click(getSidebarButton("claudeAgent"));
+
+      await vi.waitFor(() => {
+        const pane = document.querySelector<HTMLElement>('[data-model-picker-pane="install"]');
+        expect(pane).not.toBeNull();
+        expect(pane?.textContent).toContain("Install Claude on this computer");
+        expect(pane?.textContent).toContain("no terminal");
+        expect(document.body.textContent).not.toContain("No models found");
+      });
+      await expect
+        .element(page.getByRole("button", { name: "Install", exact: true }))
+        .toBeVisible();
+      // Search still works from the pane: the input keeps focus.
+      expect(document.activeElement).toBe(
+        document.querySelector<HTMLInputElement>('input[placeholder="Search models..."]'),
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("runs the install in the pane and switches to the model list once the agent is ready", async () => {
+    providerSetupRpc.installStart.mockResolvedValue({ jobId: "job-1" });
+    providerSetupRpc.installStatus.mockResolvedValue({
+      jobId: "job-1",
+      driver: "claudeAgent",
+      state: "running",
+      log: "npm warn deprecated\nadded 12 packages",
+      command: "npm install -g @anthropic-ai/claude-code",
+    });
+
+    const mounted = await mountPicker({
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      providers: CLAUDE_NOT_INSTALLED,
+    });
+
+    try {
+      await page.getByRole("button").click();
+      await userEvent.click(getSidebarButton("claudeAgent"));
+      await page.getByRole("button", { name: "Install", exact: true }).click();
+
+      // The first status poll lands a second after the job starts.
+      await vi.waitFor(
+        () => {
+          expect(providerSetupRpc.installStart).toHaveBeenCalledWith({ driver: "claudeAgent" });
+          const pane = document.querySelector<HTMLElement>('[data-model-picker-pane="install"]');
+          expect(pane?.textContent).toContain("Installing…");
+          // Last log line, not the whole log.
+          expect(pane?.textContent).toContain("added 12 packages");
+          expect(getSidebarButton("claudeAgent").dataset.modelPickerProviderState).toBe(
+            "Installing…",
+          );
+        },
+        { timeout: 5_000 },
+      );
+      await expect.element(page.getByRole("button", { name: "Show log" })).toBeVisible();
+
+      providerSetupRpc.installStatus.mockResolvedValue({
+        jobId: "job-1",
+        driver: "claudeAgent",
+        state: "succeeded",
+        log: "added 12 packages",
+        command: "npm install -g @anthropic-ai/claude-code",
+      });
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("Installed. Loading models…");
+        },
+        { timeout: 5_000 },
+      );
+
+      // The daemon re-probes providers; Claude now reports installed + signed in.
+      await mounted.updateProviders(TEST_PROVIDERS);
+
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-model-picker-pane="install"]')).toBeNull();
+        expect(getVisibleModelNames()).toEqual([
+          "Claude Opus 4.6",
+          "Claude Sonnet 4.6",
+          "Claude Haiku 4.5",
+        ]);
+        expect(getSidebarButton("claudeAgent").dataset.modelPickerProviderState).toBeUndefined();
+      });
+      // Focus returns to the search box so the new list is keyboard-ready.
+      const searchInput = document.querySelector<HTMLInputElement>(
+        'input[placeholder="Search models..."]',
+      );
+      await vi.waitFor(() => {
+        expect(document.activeElement).toBe(searchInput);
+      });
+      await userEvent.keyboard("{ArrowDown}");
+      await vi.waitFor(() => {
+        const highlighted = document.querySelector<HTMLElement>(
+          '[data-slot="combobox-item"][data-highlighted]',
+        );
+        expect(highlighted?.textContent).toContain("Claude Opus 4.6");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows the error with Retry and the log when the install fails", async () => {
+    providerSetupRpc.installStart.mockResolvedValue({ jobId: "job-2" });
+    providerSetupRpc.installStatus.mockResolvedValue({
+      jobId: "job-2",
+      driver: "claudeAgent",
+      state: "failed",
+      log: "npm ERR! EACCES",
+      command: "npm install -g @anthropic-ai/claude-code",
+      error: "npm exited with code 1.",
+    });
+
+    const mounted = await mountPicker({
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      providers: CLAUDE_NOT_INSTALLED,
+    });
+
+    try {
+      await page.getByRole("button").click();
+      await userEvent.click(getSidebarButton("claudeAgent"));
+      await page.getByRole("button", { name: "Install", exact: true }).click();
+
+      await vi.waitFor(
+        () => {
+          const pane = document.querySelector<HTMLElement>('[data-model-picker-pane="install"]');
+          expect(pane?.textContent).toContain("npm exited with code 1.");
+        },
+        { timeout: 5_000 },
+      );
+      await expect.element(page.getByRole("button", { name: "Retry" })).toBeVisible();
+      await page.getByRole("button", { name: "Show log" }).click();
+      await vi.waitFor(() => {
+        expect(document.body.textContent).toContain("npm ERR! EACCES");
+      });
+
+      await page.getByRole("button", { name: "Retry" }).click();
+      await vi.waitFor(() => {
+        expect(providerSetupRpc.installStart).toHaveBeenCalledTimes(2);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows the sign-in pane inline for an installed agent without an account", async () => {
+    const mounted = await mountPicker({
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      providers: CLAUDE_NEEDS_SIGN_IN,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        const claude = getSidebarButton("claudeAgent");
+        expect(claude.disabled).toBe(false);
+        expect(claude.dataset.modelPickerProviderState).toBe("Sign in needed");
+      });
+      await userEvent.click(getSidebarButton("claudeAgent"));
+
+      await vi.waitFor(() => {
+        const pane = document.querySelector<HTMLElement>('[data-model-picker-pane="signin"]');
+        expect(pane).not.toBeNull();
+        expect(pane?.textContent).toContain("Use your own Claude account, or paste an API key.");
+        expect(pane?.textContent).toContain("Use an API key");
+        expect(getModelPickerListText()).not.toContain("Claude Opus 4.6");
+      });
+      await expect
+        .element(page.getByRole("button", { name: "Sign in with account" }))
+        .toBeVisible();
+      // No dialog: the controls live in the picker itself.
+      expect(document.body.textContent).not.toContain("Sign in to Claude");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("finds a not-installed agent by name in search and opens its install pane with the keyboard", async () => {
+    const mounted = await mountPicker({
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      providers: CLAUDE_NOT_INSTALLED,
+    });
+
+    try {
+      await page.getByRole("button").click();
+      await page.getByPlaceholder("Search models...").fill("claude");
+
+      await vi.waitFor(() => {
+        const row = document.querySelector<HTMLElement>(
+          '[data-model-picker-setup-row="claudeAgent"]',
+        );
+        expect(row).not.toBeNull();
+        expect(row?.textContent).toContain("Claude");
+        expect(row?.textContent).toContain("Not installed");
+        expect(document.body.textContent).not.toContain("No models found");
+      });
+
+      await userEvent.keyboard("{ArrowDown}");
+      await userEvent.keyboard("{Enter}");
+
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-model-picker-pane="install"]')).not.toBeNull();
+        expect(
+          document.querySelector<HTMLInputElement>('input[placeholder="Search models..."]')?.value,
+        ).toBe("");
+        expect(getSidebarProviderOrder()).toContain("claudeAgent");
+      });
+      expect(mounted.onInstanceModelChange).not.toHaveBeenCalled();
     } finally {
       await mounted.cleanup();
     }

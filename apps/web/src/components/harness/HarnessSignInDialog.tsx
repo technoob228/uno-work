@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 
 import type { ProviderAuthDriver } from "@t3tools/contracts";
 
+import { cn } from "~/lib/utils";
 import { openInstallDocs } from "../onboarding/harnessInstallLinks";
 import { Button } from "../ui/button";
 import {
@@ -30,9 +31,7 @@ import { SetupLogDetails } from "./SetupLogDetails";
 import type { AuthJobView } from "./useHarnessSetup";
 import { isJobActive } from "./harnessSetupState";
 
-export interface HarnessSignInDialogProps {
-  readonly open: boolean;
-  readonly onOpenChange: (open: boolean) => void;
+export interface HarnessSignInPanelProps {
   readonly driver: ProviderAuthDriver;
   readonly label: string;
   readonly job: AuthJobView | undefined;
@@ -41,8 +40,13 @@ export interface HarnessSignInDialogProps {
     readonly apiKey?: string;
   }) => void;
   readonly onSubmitCode: (code: string) => void;
-  /** Forget the finished job so the dialog reopens in its initial state. */
+  /** Forget the finished job so the panel starts over. */
   readonly onReset: () => void;
+}
+
+export interface HarnessSignInDialogProps extends HarnessSignInPanelProps {
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
 }
 
 const API_KEY_HINT: Readonly<Record<ProviderAuthDriver, string>> = {
@@ -51,26 +55,28 @@ const API_KEY_HINT: Readonly<Record<ProviderAuthDriver, string>> = {
     "Handed to `codex login --with-api-key`; Codex stores it in its own config on that machine.",
 };
 
-export function HarnessSignInDialog({
-  open,
-  onOpenChange,
+/** One-line lead for the sign-in surface, shared by the dialog and the picker pane. */
+export function describeSignInState(label: string, job: AuthJobView | undefined): string {
+  return job?.state === "succeeded"
+    ? `${label} is signed in on this machine.`
+    : `Use your own ${label} account, or paste an API key.`;
+}
+
+/**
+ * The sign-in controls without any dialog chrome, so the model picker can
+ * show them inline. `key` the component on the driver to reset its inputs.
+ */
+export function HarnessSignInPanel({
   driver,
-  label,
   job,
   onStart,
   onSubmitCode,
   onReset,
-}: HarnessSignInDialogProps) {
+  className,
+}: Omit<HarnessSignInPanelProps, "label"> & { readonly className?: string }) {
   const [apiKey, setApiKey] = useState("");
   const [code, setCode] = useState("");
   const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (open) return;
-    setApiKey("");
-    setCode("");
-    setCopied(false);
-  }, [open]);
 
   const active = isJobActive(job);
   const succeeded = job?.state === "succeeded";
@@ -85,153 +91,179 @@ export function HarnessSignInDialog({
   };
 
   return (
+    <div className={cn("flex flex-col gap-4", className)}>
+      {succeeded ? (
+        <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 px-3 py-2.5 text-sm">
+          <CheckCircle2 className="size-4 text-success" />
+          <span>Signed in. The agent is ready to use.</span>
+        </div>
+      ) : job?.method === "oauth" && (active || failed) ? (
+        <div className="flex flex-col gap-3">
+          {job.verificationUrl ? (
+            <button
+              type="button"
+              onClick={() => openInstallDocs(job.verificationUrl!)}
+              className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-left text-sm font-medium text-primary hover:bg-primary/10"
+            >
+              <ExternalLink className="size-4 shrink-0" />
+              <span className="min-w-0 break-all">{job.verificationUrl}</span>
+            </button>
+          ) : null}
+
+          {job.userCode ? (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">
+                Enter this one-time code on that page
+              </span>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-base tracking-widest">
+                  {job.userCode}
+                </code>
+                <Button size="sm" variant="outline" onClick={copyCode}>
+                  <Copy className="mr-1 size-3" />
+                  {copied ? "Copied" : "Copy"}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {job.needsCodeInput ? (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium" htmlFor={`harness-code-${driver}`}>
+                Paste the code from the browser
+              </label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id={`harness-code-${driver}`}
+                  value={code}
+                  onChange={(event) => setCode(event.target.value)}
+                  placeholder="Authorization code"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <Button
+                  size="sm"
+                  disabled={code.trim().length === 0}
+                  onClick={() => onSubmitCode(code.trim())}
+                >
+                  Submit
+                </Button>
+              </div>
+            </div>
+          ) : active ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" />
+              {job.verificationUrl
+                ? "Waiting for you to finish in the browser…"
+                : "Starting the sign-in…"}
+            </div>
+          ) : null}
+        </div>
+      ) : active ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          Connecting…
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium" htmlFor={`harness-key-${driver}`}>
+              Use an API key
+            </label>
+            <div className="flex items-center gap-2">
+              <Input
+                id={`harness-key-${driver}`}
+                type="password"
+                value={apiKey}
+                onChange={(event) => setApiKey(event.target.value)}
+                placeholder="sk-…"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <Button
+                size="sm"
+                disabled={apiKey.trim().length === 0}
+                onClick={() => onStart({ method: "apiKey", apiKey: apiKey.trim() })}
+              >
+                Connect
+              </Button>
+            </div>
+            <span className="text-[11px] text-muted-foreground">{API_KEY_HINT[driver]}</span>
+          </div>
+
+          <div className="flex flex-col gap-1.5 border-t border-border/60 pt-3">
+            <span className="text-xs font-medium">Or sign in with your account</span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="self-start"
+              onClick={() => onStart({ method: "oauth" })}
+            >
+              Sign in with account
+            </Button>
+            <span className="text-[11px] text-muted-foreground">
+              Opens a one-time link you finish in your browser. Uses your existing subscription.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {failed ? (
+        <div className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2.5">
+          <div className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-300">
+            <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+            <span className="min-w-0 break-words">
+              {job?.error ?? "The sign-in did not complete."}
+            </span>
+          </div>
+          <SetupLogDetails log={job?.log ?? ""} />
+          <Button size="sm" variant="outline" className="self-start" onClick={onReset}>
+            Try again
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function HarnessSignInDialog({
+  open,
+  onOpenChange,
+  driver,
+  label,
+  job,
+  onStart,
+  onSubmitCode,
+  onReset,
+}: HarnessSignInDialogProps) {
+  // Remount the panel when the dialog closes so its inputs start empty next time.
+  const [panelKey, setPanelKey] = useState(0);
+  useEffect(() => {
+    if (open) return;
+    setPanelKey((value) => value + 1);
+  }, [open]);
+
+  const succeeded = job?.state === "succeeded";
+
+  return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup className="max-w-md">
         <DialogHeader>
           <DialogTitle>Sign in to {label}</DialogTitle>
-          <DialogDescription>
-            {succeeded
-              ? `${label} is signed in on this machine.`
-              : `Use your own ${label} account, or paste an API key.`}
-          </DialogDescription>
+          <DialogDescription>{describeSignInState(label, job)}</DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4 px-4 pb-2 sm:px-6">
-          {succeeded ? (
-            <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 px-3 py-2.5 text-sm">
-              <CheckCircle2 className="size-4 text-success" />
-              <span>Signed in. The agent is ready to use.</span>
-            </div>
-          ) : job?.method === "oauth" && (active || failed) ? (
-            <div className="flex flex-col gap-3">
-              {job.verificationUrl ? (
-                <button
-                  type="button"
-                  onClick={() => openInstallDocs(job.verificationUrl!)}
-                  className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-left text-sm font-medium text-primary hover:bg-primary/10"
-                >
-                  <ExternalLink className="size-4 shrink-0" />
-                  <span className="min-w-0 break-all">{job.verificationUrl}</span>
-                </button>
-              ) : null}
-
-              {job.userCode ? (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-muted-foreground">
-                    Enter this one-time code on that page
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <code className="flex-1 rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-base tracking-widest">
-                      {job.userCode}
-                    </code>
-                    <Button size="sm" variant="outline" onClick={copyCode}>
-                      <Copy className="mr-1 size-3" />
-                      {copied ? "Copied" : "Copy"}
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-
-              {job.needsCodeInput ? (
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium" htmlFor={`harness-code-${driver}`}>
-                    Paste the code from the browser
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      id={`harness-code-${driver}`}
-                      value={code}
-                      onChange={(event) => setCode(event.target.value)}
-                      placeholder="Authorization code"
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                    <Button
-                      size="sm"
-                      disabled={code.trim().length === 0}
-                      onClick={() => onSubmitCode(code.trim())}
-                    >
-                      Submit
-                    </Button>
-                  </div>
-                </div>
-              ) : active ? (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="size-3.5 animate-spin" />
-                  {job.verificationUrl
-                    ? "Waiting for you to finish in the browser…"
-                    : "Starting the sign-in…"}
-                </div>
-              ) : null}
-            </div>
-          ) : active ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Connecting…
-            </div>
-          ) : (
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-medium" htmlFor={`harness-key-${driver}`}>
-                  Use an API key
-                </label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id={`harness-key-${driver}`}
-                    type="password"
-                    value={apiKey}
-                    onChange={(event) => setApiKey(event.target.value)}
-                    placeholder="sk-…"
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                  <Button
-                    size="sm"
-                    disabled={apiKey.trim().length === 0}
-                    onClick={() => onStart({ method: "apiKey", apiKey: apiKey.trim() })}
-                  >
-                    Connect
-                  </Button>
-                </div>
-                <span className="text-[11px] text-muted-foreground">{API_KEY_HINT[driver]}</span>
-              </div>
-
-              <div className="flex flex-col gap-1.5 border-t border-border/60 pt-3">
-                <span className="text-xs font-medium">Or sign in with your account</span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="self-start"
-                  onClick={() => onStart({ method: "oauth" })}
-                >
-                  Sign in with account
-                </Button>
-                <span className="text-[11px] text-muted-foreground">
-                  Opens a one-time link you finish in your browser. Uses your existing subscription.
-                </span>
-              </div>
-            </div>
-          )}
-
-          {failed ? (
-            <div className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2.5">
-              <div className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-300">
-                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-                <span className="min-w-0 break-words">
-                  {job?.error ?? "The sign-in did not complete."}
-                </span>
-              </div>
-              <SetupLogDetails log={job?.log ?? ""} />
-            </div>
-          ) : null}
-        </div>
+        <HarnessSignInPanel
+          key={panelKey}
+          driver={driver}
+          job={job}
+          onStart={onStart}
+          onSubmitCode={onSubmitCode}
+          onReset={onReset}
+          className="px-4 pb-2 sm:px-6"
+        />
 
         <DialogFooter>
-          {failed ? (
-            <Button size="sm" variant="outline" onClick={onReset}>
-              Try again
-            </Button>
-          ) : null}
           <Button size="sm" variant="ghost" onClick={() => onOpenChange(false)}>
             {succeeded ? "Done" : "Close"}
           </Button>
