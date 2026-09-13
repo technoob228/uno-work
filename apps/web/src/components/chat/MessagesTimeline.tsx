@@ -12,6 +12,8 @@ import {
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
+import { describeHandoffSeed, isHandoffSeed } from "../../continueOnMachine";
+import { CONTINUE_ON_MACHINE_COPY } from "../../continueOnMachineCopy";
 import {
   type ChatImageAttachment,
   type ChatVideoDigestAttachment,
@@ -22,12 +24,15 @@ import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
   FileVideoIcon,
   GlobeIcon,
   HammerIcon,
   type LucideIcon,
+  MonitorSmartphoneIcon,
   SquarePenIcon,
   TerminalIcon,
   Undo2Icon,
@@ -381,12 +386,16 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                     ))}
                   </div>
                 )}
-                {(displayedUserMessage.visibleText.trim().length > 0 ||
-                  terminalContexts.length > 0) && (
-                  <UserMessageBody
-                    text={displayedUserMessage.visibleText}
-                    terminalContexts={terminalContexts}
-                  />
+                {isHandoffSeed(displayedUserMessage.visibleText) ? (
+                  <HandoffSeedBody text={displayedUserMessage.visibleText} />
+                ) : (
+                  (displayedUserMessage.visibleText.trim().length > 0 ||
+                    terminalContexts.length > 0) && (
+                    <UserMessageBody
+                      text={displayedUserMessage.visibleText}
+                      terminalContexts={terminalContexts}
+                    />
+                  )
                 )}
                 <div className="mt-1.5 flex items-center justify-end gap-2">
                   <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
@@ -720,6 +729,53 @@ const UserMessageTerminalContextInlineLabel = memo(
     return <TerminalContextInlineChip label={props.context.header} tooltipText={tooltipText} />;
   },
 );
+
+/**
+ * A user message that opens with a handoff preamble (the seed of a chat
+ * continued from another machine, or a Telegram handoff). The carried
+ * history can be thousands of characters, so it renders as a compact card
+ * collapsed by default; anything after the preamble (the person's own
+ * message, a model note) stays visible.
+ */
+const HandoffSeedBody = memo(function HandoffSeedBody(props: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const summary = describeHandoffSeed(props.text);
+  const ToggleIcon = expanded ? ChevronDownIcon : ChevronRightIcon;
+  return (
+    <div className="flex flex-col gap-2" data-testid="handoff-seed">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        <span className="flex items-center gap-1.5 font-medium text-foreground">
+          <MonitorSmartphoneIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          {CONTINUE_ON_MACHINE_COPY.seedCardTitle(summary.sourceMachineLabel)}
+        </span>
+        <span className="text-muted-foreground">
+          · {CONTINUE_ON_MACHINE_COPY.seedCardCount(summary.earlierMessages)}
+        </span>
+        <button
+          type="button"
+          className="flex items-center gap-1 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+        >
+          <ToggleIcon className="size-3 shrink-0" />
+          {expanded
+            ? CONTINUE_ON_MACHINE_COPY.seedHideHistory
+            : CONTINUE_ON_MACHINE_COPY.seedShowHistory}
+        </button>
+      </div>
+      {expanded ? (
+        <div className="max-h-96 overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-lg bg-background/60 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+          {props.text}
+        </div>
+      ) : null}
+      {!expanded && summary.tail.length > 0 ? (
+        <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
+          {summary.tail}
+        </div>
+      ) : null}
+    </div>
+  );
+});
 
 const UserMessageBody = memo(function UserMessageBody(props: {
   text: string;

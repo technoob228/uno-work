@@ -6,7 +6,13 @@
  * `runContinueOnMachine`; the step order, retry checkpointing and target
  * project resolution live in `continueOnMachine.ts`.
  */
-import type { EnvironmentId, ProjectId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProjectId,
+  ScopedThreadRef,
+  ThreadContinueInspectResult,
+  ThreadId,
+} from "@t3tools/contracts";
 import { scopeProjectRef } from "@t3tools/client-runtime";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { useNavigate } from "@tanstack/react-router";
@@ -16,19 +22,24 @@ import {
   CircleIcon,
   RefreshCwIcon,
   ServerIcon,
+  TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   CONTINUE_ON_MACHINE_STEPS,
+  canStartContinue,
   ContinueOnMachineFailure,
+  describeContinueTarget,
+  inspectContinueTarget,
   resolveContinueTargetProject,
   runContinueOnMachine,
   waitUntil,
   type ContinueOnMachineDeps,
   type ContinueOnMachineProgress,
   type ContinueOnMachineStep,
+  type ContinueTargetProject,
 } from "../continueOnMachine";
 import { CONTINUE_ON_MACHINE_COPY, STEP_LABEL_WITH_MACHINE } from "../continueOnMachineCopy";
 import { createEnvironmentApi, ensureEnvironmentApi } from "../environmentApi";
@@ -79,6 +90,29 @@ interface RunState {
 
 const IDLE_RUN: RunState = { step: null, failedStep: null, error: null, progress: {} };
 
+/** The read-only look at the target project, keyed by the machine it was taken on. */
+type InspectionState =
+  | { readonly status: "idle" }
+  | { readonly status: "loading"; readonly environmentId: EnvironmentId }
+  | {
+      readonly status: "done";
+      readonly environmentId: EnvironmentId;
+      readonly target: ContinueTargetProject;
+      readonly result: ThreadContinueInspectResult;
+    }
+  | { readonly status: "error"; readonly environmentId: EnvironmentId; readonly error: string };
+
+const IDLE_INSPECTION: InspectionState = { status: "idle" };
+
+function describeError(caught: unknown): string {
+  if (caught instanceof Error && caught.message.trim().length > 0) return caught.message;
+  if (typeof caught === "object" && caught !== null && "message" in caught) {
+    const message = (caught as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim().length > 0) return message;
+  }
+  return "Something went wrong.";
+}
+
 export function ContinueOnMachineDialog({
   threadRef,
   open,
@@ -99,6 +133,9 @@ export function ContinueOnMachineDialog({
   const [targetEnvironmentId, setTargetEnvironmentId] = useState<EnvironmentId | null>(null);
   const [copyEnv, setCopyEnv] = useState(true);
   const [archiveSource, setArchiveSource] = useState(false);
+  const [replaceConfirmed, setReplaceConfirmed] = useState(false);
+  const [inspection, setInspection] = useState<InspectionState>(IDLE_INSPECTION);
+  const [inspectionAttempt, setInspectionAttempt] = useState(0);
   const [run, setRun] = useState<RunState>(IDLE_RUN);
   const [pending, setPending] = useState(false);
 
@@ -126,9 +163,79 @@ export function ContinueOnMachineDialog({
     setTargetEnvironmentId(null);
     setCopyEnv(true);
     setArchiveSource(false);
+    setReplaceConfirmed(false);
+    setInspection(IDLE_INSPECTION);
     setRun(IDLE_RUN);
     setPending(false);
   }, []);
+
+  /** Where the chat lands on `targetId`: a project there with the same remote, else a fresh clone. */
+  const resolveTargetProjectFor = useCallback(
+    (targetId: EnvironmentId): ContinueTargetProject | null => {
+      if (!project) return null;
+      const targetBaseDirectory =
+        savedRuntime[targetId]?.serverConfig?.settings?.addProjectBaseDirectory?.trim() ||
+        "~/projects";
+      return resolveContinueTargetProject({
+        sourceProject: project,
+        targetEnvironmentId: targetId,
+        projects: selectProjectsAcrossEnvironments(useStore.getState()),
+        targetBaseDirectory,
+      });
+    },
+    [project, savedRuntime],
+  );
+
+  const ensureTargetConnected = useCallback(
+    async (targetId: EnvironmentId) => {
+      await ensureEnvironmentConnectionBootstrapped(targetId);
+      if (savedRuntime[targetId]?.connectionState !== "connected") {
+        await reconnectSavedEnvironment(targetId).catch(() => undefined);
+      }
+      // Throws with a useful message when the connection never came up.
+      createEnvironmentApi(requireEnvironmentConnection(targetId).client);
+    },
+    [savedRuntime],
+  );
+
+  // Look at the target project as soon as a machine is picked, so the person
+  // knows before pressing the button whether files there would be replaced.
+  useEffect(() => {
+    if (!open || targetEnvironmentId === null) return;
+    const targetId = targetEnvironmentId;
+    const target = resolveTargetProjectFor(targetId);
+    if (!target) return;
+    let cancelled = false;
+    setInspection({ status: "loading", environmentId: targetId });
+    setReplaceConfirmed(false);
+    void inspectContinueTarget(
+      {
+        ensureTargetConnected: () => ensureTargetConnected(targetId),
+        inspect: (input) => ensureEnvironmentApi(targetId).threadContinue.inspect(input),
+      },
+      target,
+    ).then(
+      (result) => {
+        if (cancelled) return;
+        setInspection({ status: "done", environmentId: targetId, target, result });
+      },
+      (caught: unknown) => {
+        if (cancelled) return;
+        setInspection({ status: "error", environmentId: targetId, error: describeError(caught) });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+    // `resolveTargetProjectFor`/`ensureTargetConnected` change with the store; re-inspecting
+    // on every store tick would flicker, so only a new pick or an explicit retry re-runs it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, targetEnvironmentId, inspectionAttempt]);
+
+  const targetState =
+    inspection.status === "done" && inspection.environmentId === targetEnvironmentId
+      ? describeContinueTarget(inspection.result, inspection.target)
+      : null;
 
   const handleOpenChange = useCallback(
     (next: boolean) => {
@@ -159,31 +266,24 @@ export function ContinueOnMachineDialog({
       if (!thread || !project || !threadRef || pending) return;
       const target = targets.find((candidate) => candidate.environmentId === targetId);
       if (!target) return;
+      // The run uses the project the inspection looked at, so the warning the
+      // person confirmed is about the same folder that gets written.
+      const targetProject =
+        inspection.status === "done" && inspection.environmentId === targetId
+          ? inspection.target
+          : resolveTargetProjectFor(targetId);
+      if (!targetProject) return;
       setPending(true);
       setRun({ step: null, failedStep: null, error: null, progress });
 
-      const targetBaseDirectory =
-        savedRuntime[targetId]?.serverConfig?.settings?.addProjectBaseDirectory?.trim() ||
-        "~/projects";
-      const targetProject = resolveContinueTargetProject({
-        sourceProject: project,
-        targetEnvironmentId: targetId,
-        projects: selectProjectsAcrossEnvironments(useStore.getState()),
-        targetBaseDirectory,
-      });
-
       const deps: ContinueOnMachineDeps = {
-        ensureTargetConnected: async () => {
-          await ensureEnvironmentConnectionBootstrapped(targetId);
-          if (savedRuntime[targetId]?.connectionState !== "connected") {
-            await reconnectSavedEnvironment(targetId).catch(() => undefined);
-          }
-          // Throws with a useful message when the connection never came up.
-          createEnvironmentApi(requireEnvironmentConnection(targetId).client);
-        },
+        ensureTargetConnected: () => ensureTargetConnected(targetId),
+        inspect: (input) => ensureEnvironmentApi(targetId).threadContinue.inspect(input),
         prepare: (input) =>
           ensureEnvironmentApi(threadRef.environmentId).threadContinue.prepare(input),
         receive: (input) => ensureEnvironmentApi(targetId).threadContinue.receive(input),
+        cleanup: (input) =>
+          ensureEnvironmentApi(threadRef.environmentId).threadContinue.cleanup(input),
         complete: (input) =>
           ensureEnvironmentApi(threadRef.environmentId).threadContinue.complete(input),
         openThread: (input) => openThreadOnTarget(targetId, input),
@@ -207,7 +307,10 @@ export function ContinueOnMachineDialog({
         toastManager.add({
           type: "success",
           title: CONTINUE_ON_MACHINE_COPY.successTitle(target.label),
-          description: CONTINUE_ON_MACHINE_COPY.successDescription(result.received),
+          description: CONTINUE_ON_MACHINE_COPY.successDescription({
+            ...result.received,
+            transferBranchRemoved: result.cleanedUp.removed,
+          }),
         });
       } catch (caught) {
         const failure =
@@ -234,16 +337,29 @@ export function ContinueOnMachineDialog({
     [
       archiveSource,
       copyEnv,
+      ensureTargetConnected,
       handleOpenChange,
+      inspection,
       openThreadOnTarget,
       pending,
       project,
-      savedRuntime,
+      resolveTargetProjectFor,
       targets,
       thread,
       threadRef,
     ],
   );
+
+  const inspectionForTarget =
+    inspection.status !== "idle" && inspection.environmentId === targetEnvironmentId
+      ? inspection
+      : null;
+  const canSubmit =
+    !pending &&
+    targetEnvironmentId !== null &&
+    !!thread &&
+    !!project &&
+    canStartContinue({ targetState, replaceConfirmed });
 
   const showSteps = run.step !== null || run.failedStep !== null;
   const stepIndex = (step: ContinueOnMachineStep) => CONTINUE_ON_MACHINE_STEPS.indexOf(step);
@@ -301,6 +417,7 @@ export function ContinueOnMachineDialog({
                             aria-pressed={selected}
                             onClick={() => {
                               setTargetEnvironmentId(target.environmentId);
+                              setReplaceConfirmed(false);
                               setRun(IDLE_RUN);
                             }}
                             className={cn(
@@ -329,6 +446,17 @@ export function ContinueOnMachineDialog({
                       })}
                     </div>
                   )}
+                  {selectedTarget && inspectionForTarget ? (
+                    <TargetProjectNotice
+                      machineLabel={selectedTarget.label}
+                      inspection={inspectionForTarget}
+                      targetState={targetState}
+                      replaceConfirmed={replaceConfirmed}
+                      disabled={pending}
+                      onReplaceConfirmedChange={setReplaceConfirmed}
+                      onRetry={() => setInspectionAttempt((attempt) => attempt + 1)}
+                    />
+                  ) : null}
                 </div>
 
                 <div className="flex flex-col gap-2">
@@ -403,7 +531,7 @@ export function ContinueOnMachineDialog({
               </Button>
               <Button
                 size="sm"
-                disabled={pending || targetEnvironmentId === null || !thread || !project}
+                disabled={!canSubmit}
                 onClick={() => {
                   if (targetEnvironmentId) void runContinue(targetEnvironmentId, run.progress);
                 }}
@@ -424,5 +552,83 @@ export function ContinueOnMachineDialog({
         </DialogViewport>
       </DialogPortal>
     </Dialog>
+  );
+}
+
+/**
+ * What the receive would do to the project on the chosen machine. Local
+ * changes there get a red line and a required "Replace them" checkbox; the
+ * primary button stays disabled until it is ticked.
+ */
+function TargetProjectNotice(props: {
+  readonly machineLabel: string;
+  readonly inspection: Exclude<InspectionState, { status: "idle" }>;
+  readonly targetState: ReturnType<typeof describeContinueTarget> | null;
+  readonly replaceConfirmed: boolean;
+  readonly disabled: boolean;
+  readonly onReplaceConfirmedChange: (confirmed: boolean) => void;
+  readonly onRetry: () => void;
+}) {
+  const { inspection, machineLabel, targetState } = props;
+  if (inspection.status === "loading") {
+    return (
+      <p className="flex items-center gap-2 text-muted-foreground text-xs">
+        <RefreshCwIcon className="size-3 shrink-0 animate-spin" />
+        {CONTINUE_ON_MACHINE_COPY.inspecting(machineLabel)}
+      </p>
+    );
+  }
+  if (inspection.status === "error" || targetState === null) {
+    return (
+      <p className="flex items-center gap-2 text-destructive text-xs">
+        <span className="min-w-0">
+          {CONTINUE_ON_MACHINE_COPY.inspectFailed(machineLabel)}
+          {inspection.status === "error" ? `: ${inspection.error}` : null}
+        </span>
+        <button
+          type="button"
+          className="shrink-0 underline underline-offset-2"
+          disabled={props.disabled}
+          onClick={props.onRetry}
+        >
+          {CONTINUE_ON_MACHINE_COPY.inspectRetry}
+        </button>
+      </p>
+    );
+  }
+  const text = CONTINUE_ON_MACHINE_COPY.targetState(targetState, machineLabel);
+  if (targetState.kind === "changes") {
+    return (
+      <div
+        className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-destructive/8 px-3 py-2"
+        data-testid="continue-target-changes"
+      >
+        <p className="flex items-start gap-2 text-destructive text-xs">
+          <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
+          <span>{text}</span>
+        </p>
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="continue-replace-files"
+            checked={props.replaceConfirmed}
+            disabled={props.disabled}
+            onCheckedChange={(checked) => props.onReplaceConfirmedChange(checked === true)}
+          />
+          <Label htmlFor="continue-replace-files" className="text-sm text-foreground">
+            {CONTINUE_ON_MACHINE_COPY.replaceThem}
+          </Label>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <p
+      className={cn(
+        "text-xs",
+        targetState.kind === "not-git" ? "text-destructive" : "text-muted-foreground",
+      )}
+    >
+      {text}
+    </p>
   );
 }

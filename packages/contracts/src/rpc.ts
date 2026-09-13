@@ -58,9 +58,13 @@ import {
   VcsStatusStreamEvent,
 } from "./git.ts";
 import {
+  ThreadContinueCleanupInput,
+  ThreadContinueCleanupResult,
   ThreadContinueCompleteInput,
   ThreadContinueCompleteResult,
   ThreadContinueError,
+  ThreadContinueInspectInput,
+  ThreadContinueInspectResult,
   ThreadContinuePrepareInput,
   ThreadContinuePrepareResult,
   ThreadContinueReceiveInput,
@@ -209,8 +213,10 @@ export const WS_METHODS = {
   gitPreparePullRequestThread: "git.preparePullRequestThread",
 
   // Continue a chat on another machine (source: prepare/complete, target: receive)
+  threadContinueInspect: "thread.continue.inspect",
   threadContinuePrepare: "thread.continue.prepare",
   threadContinueReceive: "thread.continue.receive",
+  threadContinueCleanup: "thread.continue.cleanup",
   threadContinueComplete: "thread.continue.complete",
 
   // Terminal methods
@@ -586,6 +592,12 @@ export const WsGitPreparePullRequestThreadRpc = Rpc.make(WS_METHODS.gitPreparePu
   error: GitManagerServiceError,
 });
 
+export const WsThreadContinueInspectRpc = Rpc.make(WS_METHODS.threadContinueInspect, {
+  payload: ThreadContinueInspectInput,
+  success: ThreadContinueInspectResult,
+  error: ThreadContinueError,
+});
+
 export const WsThreadContinuePrepareRpc = Rpc.make(WS_METHODS.threadContinuePrepare, {
   payload: ThreadContinuePrepareInput,
   success: ThreadContinuePrepareResult,
@@ -595,6 +607,12 @@ export const WsThreadContinuePrepareRpc = Rpc.make(WS_METHODS.threadContinuePrep
 export const WsThreadContinueReceiveRpc = Rpc.make(WS_METHODS.threadContinueReceive, {
   payload: ThreadContinueReceiveInput,
   success: ThreadContinueReceiveResult,
+  error: ThreadContinueError,
+});
+
+export const WsThreadContinueCleanupRpc = Rpc.make(WS_METHODS.threadContinueCleanup, {
+  payload: ThreadContinueCleanupInput,
+  success: ThreadContinueCleanupResult,
   error: ThreadContinueError,
 });
 
@@ -1202,8 +1220,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitRunStackedActionRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
+  WsThreadContinueInspectRpc,
   WsThreadContinuePrepareRpc,
   WsThreadContinueReceiveRpc,
+  WsThreadContinueCleanupRpc,
   WsThreadContinueCompleteRpc,
   WsVcsListRefsRpc,
   WsVcsCreateWorktreeRpc,

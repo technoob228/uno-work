@@ -152,8 +152,12 @@ import type {
 } from "./video.ts";
 import type { UnoTranscribeAudioInput, UnoTranscribeAudioResult } from "./transcription.ts";
 import type {
+  ThreadContinueCleanupInput,
+  ThreadContinueCleanupResult,
   ThreadContinueCompleteInput,
   ThreadContinueCompleteResult,
+  ThreadContinueInspectInput,
+  ThreadContinueInspectResult,
   ThreadContinuePrepareInput,
   ThreadContinuePrepareResult,
   ThreadContinueReceiveInput,
@@ -601,12 +605,15 @@ export interface EnvironmentApi {
     ) => Promise<GitPreparePullRequestThreadResult>;
   };
   /**
-   * "Continue on <machine>": `prepare` and `complete` are called on the
-   * daemon the chat lives on, `receive` on the daemon it moves to.
+   * "Continue on <machine>": `prepare`, `cleanup` and `complete` are called
+   * on the daemon the chat lives on, `inspect` and `receive` on the daemon it
+   * moves to.
    */
   threadContinue: {
+    inspect: (input: ThreadContinueInspectInput) => Promise<ThreadContinueInspectResult>;
     prepare: (input: ThreadContinuePrepareInput) => Promise<ThreadContinuePrepareResult>;
     receive: (input: ThreadContinueReceiveInput) => Promise<ThreadContinueReceiveResult>;
+    cleanup: (input: ThreadContinueCleanupInput) => Promise<ThreadContinueCleanupResult>;
     complete: (input: ThreadContinueCompleteInput) => Promise<ThreadContinueCompleteResult>;
   };
   orchestration: {

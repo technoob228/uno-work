@@ -91,6 +91,10 @@
     "./pluginPatterns": {
       "types": "./src/pluginPatterns.ts",
       "import": "./src/pluginPatterns.ts"
+    },
+    "./handoff": {
+      "types": "./src/handoff.ts",
+      "import": "./src/handoff.ts"
     }
   },
   "scripts": {

@@ -41,8 +41,15 @@ export interface ContinueHead {
   readonly branch: string | null;
 }
 
+export interface ContinueStatus extends ContinueHead {
+  /** Entries in `git status` (tracked changes plus untracked files, not ignored). */
+  readonly changedFiles: number;
+}
+
 export interface ContinueTransportShape {
   readonly isGitRepository: (cwd: string) => Effect.Effect<boolean, VcsError>;
+  /** HEAD plus a count of the uncommitted work a restore would overwrite. Read-only. */
+  readonly readStatus: (cwd: string) => Effect.Effect<ContinueStatus, VcsError>;
   /** Fetch URL of the named remote, or of `origin` / the first remote when no name is given. */
   readonly resolveRemote: (
     cwd: string,
@@ -56,10 +63,17 @@ export interface ContinueTransportShape {
     readonly parents: ReadonlyArray<string>;
     readonly message: string;
   }) => Effect.Effect<string, CheckpointStoreError>;
+  /** Force-pushes `localRef` to `remoteBranch`; an existing branch of that name is updated in place. */
   readonly pushRef: (input: {
     readonly cwd: string;
     readonly remoteName: string;
     readonly localRef: string;
+    readonly remoteBranch: string;
+  }) => Effect.Effect<void, VcsError>;
+  /** Deletes `remoteBranch` on the remote (`git push <remote> --delete`). */
+  readonly deleteRemoteBranch: (input: {
+    readonly cwd: string;
+    readonly remoteName: string;
     readonly remoteBranch: string;
   }) => Effect.Effect<void, VcsError>;
   /** Fetch `remoteBranch` from `remoteUrl` into `localRef`; returns the commit oid it points at. */
@@ -162,6 +176,21 @@ const make = Effect.gen(function* () {
     };
   });
 
+  const readStatus: ContinueTransportShape["readStatus"] = Effect.fn("readStatus")(function* (cwd) {
+    const head = yield* readHead(cwd);
+    // `--untracked-files=all` lists files inside new folders one by one so
+    // the count matches what the person would see replaced.
+    const result = yield* git({
+      operation: "ContinueTransport.readStatus",
+      cwd,
+      args: ["status", "--porcelain", "--untracked-files=all"],
+    });
+    const changedFiles = result.stdout
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0).length;
+    return { ...head, changedFiles };
+  });
+
   const captureSnapshot: ContinueTransportShape["captureSnapshot"] = Effect.fn("captureSnapshot")(
     function* (input) {
       yield* checkpointStore.captureCheckpoint({
@@ -189,6 +218,20 @@ const make = Effect.gen(function* () {
         "--no-verify",
         input.remoteName,
         `${input.localRef}:refs/heads/${input.remoteBranch}`,
+      ],
+      timeoutMs: NETWORK_TIMEOUT_MS,
+    }).pipe(Effect.asVoid);
+
+  const deleteRemoteBranch: ContinueTransportShape["deleteRemoteBranch"] = (input) =>
+    git({
+      operation: "ContinueTransport.deleteRemoteBranch",
+      cwd: input.cwd,
+      args: [
+        "push",
+        "--no-verify",
+        input.remoteName,
+        "--delete",
+        `refs/heads/${input.remoteBranch}`,
       ],
       timeoutMs: NETWORK_TIMEOUT_MS,
     }).pipe(Effect.asVoid);
@@ -228,10 +271,12 @@ const make = Effect.gen(function* () {
 
   return {
     isGitRepository,
+    readStatus,
     resolveRemote,
     readHead,
     captureSnapshot,
     pushRef,
+    deleteRemoteBranch,
     fetchBranch,
     restoreTree,
     deleteRef,
