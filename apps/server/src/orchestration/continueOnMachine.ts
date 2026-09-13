@@ -1,9 +1,10 @@
 /**
- * "Continue on <machine>" — the three RPC handlers.
+ * "Continue on <machine>" — the RPC handlers.
  *
  * `prepare` runs on the daemon the chat lives on, `receive` on the daemon it
- * moves to, `complete` on the source again. The web client sequences them;
- * see `packages/contracts/src/threadContinue.ts` for the protocol.
+ * moves to, `cleanup` and `complete` on the source again; `inspect` is the
+ * read-only look at the target before anything runs. The web client
+ * sequences them; see `packages/contracts/src/threadContinue.ts`.
  *
  * Dependencies are passed explicitly (same pattern as `plugins/panelThread.ts`)
  * so the handlers are testable with a fake transport and fake projections,
@@ -17,13 +18,18 @@ import {
   MessageId,
   type ModelSelection,
   type OrchestrationProjectShell,
+  type OrchestrationThread,
   ProjectId,
   type ServerProvider,
   THREAD_CONTINUE_BRANCH_PREFIX,
   ThreadContinueError,
   type ThreadContinueErrorReason,
+  type ThreadContinueCleanupInput,
+  type ThreadContinueCleanupResult,
   type ThreadContinueCompleteInput,
   type ThreadContinueCompleteResult,
+  type ThreadContinueInspectInput,
+  type ThreadContinueInspectResult,
   type ThreadContinuePrepareInput,
   type ThreadContinuePrepareResult,
   type ThreadContinueReceiveInput,
@@ -172,28 +178,96 @@ export function resolveTargetModelSelection(input: {
   return { selection: fallback, fallbackApplied: input.requested !== undefined };
 }
 
+/**
+ * Read-only look at where the chat would land on this machine, so the dialog
+ * can say up front whether `receive` would overwrite uncommitted work.
+ */
+export function makeThreadContinueInspect(deps: ContinueOnMachineDeps) {
+  return (
+    input: ThreadContinueInspectInput,
+  ): Effect.Effect<ThreadContinueInspectResult, ThreadContinueError> =>
+    Effect.gen(function* () {
+      // Same expansion and trailing-slash handling as `receive`, so the
+      // folder inspected is the folder written to.
+      const projectPath = normalizePath(deps.expandPath(input.projectPath));
+      const snapshot = yield* deps.projections
+        .getShellSnapshot()
+        .pipe(mapFailure("project_not_found", "Could not list the projects on this machine"));
+      const registered = findProjectByPath(snapshot.projects, projectPath) !== undefined;
+      const absent: ThreadContinueInspectResult = {
+        projectPath,
+        exists: false,
+        isGitRepository: false,
+        registered,
+        hasLocalChanges: false,
+        changedFiles: 0,
+        branch: null,
+      };
+
+      const exists = yield* deps.directoryExists(projectPath);
+      if (!exists) {
+        return absent;
+      }
+      const isGit = yield* deps.transport
+        .isGitRepository(projectPath)
+        .pipe(mapFailure("not_git", "Could not inspect the project folder"));
+      if (!isGit) {
+        return { ...absent, exists: true };
+      }
+      const status = yield* deps.transport
+        .readStatus(projectPath)
+        .pipe(mapFailure("not_git", "Could not read the project's git status"));
+      return {
+        projectPath,
+        exists: true,
+        isGitRepository: true,
+        registered,
+        hasLocalChanges: status.changedFiles > 0,
+        changedFiles: status.changedFiles,
+        branch: status.branch,
+      } satisfies ThreadContinueInspectResult;
+    });
+}
+
+/** The folder a thread's files live in on this machine, with the errors `prepare`/`cleanup` share. */
+function resolveSourceCwd(
+  deps: ContinueOnMachineDeps,
+  threadId: ThreadId,
+): Effect.Effect<
+  {
+    readonly thread: OrchestrationThread;
+    readonly project: OrchestrationProjectShell;
+    readonly cwd: string;
+  },
+  ThreadContinueError
+> {
+  return Effect.gen(function* () {
+    const thread = yield* deps.projections
+      .getThreadDetailById(threadId)
+      .pipe(mapFailure("thread_not_found", "Could not read the chat"));
+    if (Option.isNone(thread)) {
+      return yield* fail("thread_not_found", "This chat no longer exists on this machine.");
+    }
+    const project = yield* deps.projections
+      .getProjectShellById(thread.value.projectId)
+      .pipe(mapFailure("project_not_found", "Could not read the project"));
+    if (Option.isNone(project)) {
+      return yield* fail("project_not_found", "The project of this chat no longer exists.");
+    }
+    const cwd = resolveThreadWorkspaceCwd({ thread: thread.value, projects: [project.value] });
+    if (!cwd) {
+      return yield* fail("project_not_found", "This chat has no project folder to carry over.");
+    }
+    return { thread: thread.value, project: project.value, cwd };
+  });
+}
+
 export function makeThreadContinuePrepare(deps: ContinueOnMachineDeps) {
   return (
     input: ThreadContinuePrepareInput,
   ): Effect.Effect<ThreadContinuePrepareResult, ThreadContinueError> =>
     Effect.gen(function* () {
-      const thread = yield* deps.projections
-        .getThreadDetailById(input.threadId)
-        .pipe(mapFailure("thread_not_found", "Could not read the chat"));
-      if (Option.isNone(thread)) {
-        return yield* fail("thread_not_found", "This chat no longer exists on this machine.");
-      }
-      const project = yield* deps.projections
-        .getProjectShellById(thread.value.projectId)
-        .pipe(mapFailure("project_not_found", "Could not read the project"));
-      if (Option.isNone(project)) {
-        return yield* fail("project_not_found", "The project of this chat no longer exists.");
-      }
-
-      const cwd = resolveThreadWorkspaceCwd({ thread: thread.value, projects: [project.value] });
-      if (!cwd) {
-        return yield* fail("project_not_found", "This chat has no project folder to carry over.");
-      }
+      const { thread, project, cwd } = yield* resolveSourceCwd(deps, input.threadId);
       const isGit = yield* deps.transport
         .isGitRepository(cwd)
         .pipe(mapFailure("not_git", "Could not inspect the project folder"));
@@ -213,17 +287,20 @@ export function makeThreadContinuePrepare(deps: ContinueOnMachineDeps) {
       const head = yield* deps.transport
         .readHead(cwd)
         .pipe(mapFailure("capture_failed", "Could not read the current commit"));
-      const localRef = continueLocalRefForThread(thread.value.id);
+      const localRef = continueLocalRefForThread(thread.id);
       const commit = yield* deps.transport
         .captureSnapshot({
           cwd,
           ref: localRef,
           parents: head.commit ? [head.commit] : [],
-          message: `uno continue: ${thread.value.title}`,
+          message: `uno continue: ${thread.title}`,
         })
         .pipe(mapFailure("capture_failed", "Could not save the working tree"));
 
-      const branch = continueBranchForThread(thread.value.id);
+      // A branch of the same name may already sit on the remote (an earlier
+      // attempt for this chat, or a retry): the push is a force-update, so it
+      // is reused rather than refused.
+      const branch = continueBranchForThread(thread.id);
       yield* deps.transport
         .pushRef({ cwd, remoteName: remote.name, localRef, remoteBranch: branch })
         .pipe(mapFailure("push_failed", `Could not push to ${remote.name}`));
@@ -232,15 +309,15 @@ export function makeThreadContinuePrepare(deps: ContinueOnMachineDeps) {
 
       const sourceMachineLabel = yield* deps.getMachineLabel;
       const seedText = buildContinueSeed({
-        thread: thread.value,
+        thread: thread,
         sourceMachineLabel,
         sourceBranch: head.branch,
       });
       const envText =
-        input.includeEnv === false ? null : yield* deps.readEnvFile(project.value.workspaceRoot);
+        input.includeEnv === false ? null : yield* deps.readEnvFile(project.workspaceRoot);
 
       yield* Effect.logInfo("thread.continue.prepare", {
-        threadId: thread.value.id,
+        threadId: thread.id,
         remote: remote.name,
         branch,
         commit,
@@ -249,7 +326,7 @@ export function makeThreadContinuePrepare(deps: ContinueOnMachineDeps) {
       });
 
       return {
-        sourceThreadId: thread.value.id,
+        sourceThreadId: thread.id,
         sourceMachineLabel,
         remoteUrl: remote.url,
         remoteName: remote.name,
@@ -257,10 +334,10 @@ export function makeThreadContinuePrepare(deps: ContinueOnMachineDeps) {
         commit,
         baseCommit: head.commit,
         sourceBranch: head.branch,
-        title: thread.value.title,
-        modelSelection: thread.value.modelSelection,
-        runtimeMode: thread.value.runtimeMode,
-        interactionMode: thread.value.interactionMode,
+        title: thread.title,
+        modelSelection: thread.modelSelection,
+        runtimeMode: thread.runtimeMode,
+        interactionMode: thread.interactionMode,
         seedText,
         envText,
       } satisfies ThreadContinuePrepareResult;
@@ -503,6 +580,51 @@ export function makeThreadContinueReceive(deps: ContinueOnMachineDeps) {
         modelFallbackApplied: model.fallbackApplied,
         envWritten,
       } satisfies ThreadContinueReceiveResult;
+    });
+}
+
+/**
+ * Deletes the transport branch on the remote once the target has fetched it.
+ * Best-effort by design: a failure here must never undo a handoff that
+ * already succeeded, so it is logged and reported as `removed: false`.
+ * Missing chat or project still fail, since there is nothing to clean.
+ */
+export function makeThreadContinueCleanup(deps: ContinueOnMachineDeps) {
+  return (
+    input: ThreadContinueCleanupInput,
+  ): Effect.Effect<ThreadContinueCleanupResult, ThreadContinueError> =>
+    Effect.gen(function* () {
+      const source = yield* resolveSourceCwd(deps, input.threadId);
+      const branch = continueBranchForThread(source.thread.id);
+      const logSkip = (detail: string) =>
+        Effect.logWarning("thread.continue.cleanup: transport branch not removed", {
+          threadId: source.thread.id,
+          branch,
+          detail,
+        }).pipe(Effect.as({ branch, removed: false } satisfies ThreadContinueCleanupResult));
+
+      const remote = yield* deps.transport
+        .resolveRemote(source.cwd, input.remote ?? null)
+        .pipe(Effect.catch((cause) => Effect.succeed({ error: errorDetail(cause) })));
+      if (remote === null) {
+        return yield* logSkip("no remote");
+      }
+      if ("error" in remote) {
+        return yield* logSkip(remote.error);
+      }
+      return yield* deps.transport
+        .deleteRemoteBranch({ cwd: source.cwd, remoteName: remote.name, remoteBranch: branch })
+        .pipe(
+          Effect.andThen(
+            Effect.logInfo("thread.continue.cleanup", {
+              threadId: source.thread.id,
+              remote: remote.name,
+              branch,
+            }),
+          ),
+          Effect.as({ branch, removed: true } satisfies ThreadContinueCleanupResult),
+          Effect.catch((cause) => logSkip(errorDetail(cause))),
+        );
     });
 }
 

@@ -80,7 +80,9 @@ import { VcsProvisioningService } from "./vcs/VcsProvisioningService.ts";
 import { GitWorkflowService } from "./git/GitWorkflowService.ts";
 import { ContinueTransport } from "./git/continueTransport.ts";
 import {
+  makeThreadContinueCleanup,
   makeThreadContinueComplete,
+  makeThreadContinueInspect,
   makeThreadContinuePrepare,
   makeThreadContinueReceive,
 } from "./orchestration/continueOnMachine.ts";
@@ -266,8 +268,10 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId, currentSessionRole: Ses
           ),
         expandPath: expandHomePath,
       };
+      const threadContinueInspect = makeThreadContinueInspect(continueOnMachineDeps);
       const threadContinuePrepare = makeThreadContinuePrepare(continueOnMachineDeps);
       const threadContinueReceive = makeThreadContinueReceive(continueOnMachineDeps);
+      const threadContinueCleanup = makeThreadContinueCleanup(continueOnMachineDeps);
       const threadContinueComplete = makeThreadContinueComplete(continueOnMachineDeps);
 
       const loadAuthAccessSnapshot = () =>
@@ -1499,8 +1503,16 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId, currentSessionRole: Ses
               .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
             { "rpc.aggregate": "git" },
           ),
+        [WS_METHODS.threadContinueInspect]: (input) =>
+          observeRpcEffect(WS_METHODS.threadContinueInspect, threadContinueInspect(input), {
+            "rpc.aggregate": "thread-continue",
+          }),
         [WS_METHODS.threadContinuePrepare]: (input) =>
           observeRpcEffect(WS_METHODS.threadContinuePrepare, threadContinuePrepare(input), {
+            "rpc.aggregate": "thread-continue",
+          }),
+        [WS_METHODS.threadContinueCleanup]: (input) =>
+          observeRpcEffect(WS_METHODS.threadContinueCleanup, threadContinueCleanup(input), {
             "rpc.aggregate": "thread-continue",
           }),
         [WS_METHODS.threadContinueReceive]: (input) =>

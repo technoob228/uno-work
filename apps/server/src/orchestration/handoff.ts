@@ -16,26 +16,22 @@
  * handoff can be handed off again without nesting preambles.
  */
 import type { OrchestrationMessage } from "@t3tools/contracts";
+import {
+  CONTINUE_SEED_PREFIX,
+  HANDOFF_PREAMBLE_END,
+  HANDOFF_PREAMBLE_START,
+  HANDOFF_PREAMBLE_STARTS,
+  LEGACY_TELEGRAM_HANDOFF_PREAMBLE_START,
+} from "@t3tools/shared/handoff";
 
-export const HANDOFF_PREAMBLE_START =
-  "[Context: this conversation continues an earlier thread. Recent history, oldest first:]";
-export const HANDOFF_PREAMBLE_END = "[End of context. Reply to the message below.]";
-
-/**
- * Marker the Telegram connector used before the preamble became shared. Kept
- * so preambles already persisted in old threads are still recognised and
- * stripped.
- */
-export const LEGACY_TELEGRAM_HANDOFF_PREAMBLE_START =
-  "[Context: this Telegram chat previously ran in another thread (the harness/model was switched). Recent history, oldest first:]";
-
-const HANDOFF_PREAMBLE_STARTS: ReadonlyArray<string> = [
+// The marker strings live in `@t3tools/shared/handoff` so the web app can
+// recognise a seed without duplicating them; re-exported for existing callers.
+export {
+  CONTINUE_SEED_PREFIX,
+  HANDOFF_PREAMBLE_END,
   HANDOFF_PREAMBLE_START,
   LEGACY_TELEGRAM_HANDOFF_PREAMBLE_START,
-];
-
-/** First line of a "Continue on <machine>" seed; `isContinueSeedText` keys off it. */
-export const CONTINUE_SEED_PREFIX = "[Continued from ";
+};
 
 export interface HandoffContextOptions {
   /** How many of the most recent user/assistant messages to carry. */

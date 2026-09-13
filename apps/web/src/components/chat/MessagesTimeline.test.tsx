@@ -1,4 +1,9 @@
 import { EnvironmentId, MessageId } from "@t3tools/contracts";
+import {
+  CONTINUE_SEED_PREFIX,
+  HANDOFF_PREAMBLE_END,
+  HANDOFF_PREAMBLE_START,
+} from "@t3tools/shared/handoff";
 import { createRef, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -139,6 +144,44 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("lucide-terminal");
     expect(markup).toContain("yoo what&#x27;s ");
   }, 20_000);
+
+  it("collapses a handoff seed into a compact card with the history hidden", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const seedText = [
+      `${CONTINUE_SEED_PREFIX}Misha's Mac] This chat continues "Fix login" from Misha's Mac. Pick up where the conversation left off.`,
+      "",
+      HANDOFF_PREAMBLE_START,
+      "User: please fix login",
+      "Assistant: done, see auth.ts",
+      HANDOFF_PREAMBLE_END,
+    ].join("\n");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "message",
+            createdAt: "2026-09-12T10:00:00.000Z",
+            message: {
+              id: MessageId.make("message-seed"),
+              role: "user",
+              text: seedText,
+              createdAt: "2026-09-12T10:00:00.000Z",
+              streaming: false,
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain('data-testid="handoff-seed"');
+    expect(markup).toContain("Continued from Misha&#x27;s Mac");
+    expect(markup).toContain("2 earlier messages");
+    expect(markup).toContain("Show history");
+    expect(markup).not.toContain("please fix login");
+    expect(markup).not.toContain("done, see auth.ts");
+  });
 
   it("renders context compaction entries in the normal work log", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");

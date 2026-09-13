@@ -21,7 +21,9 @@ import type { ContinueTransportShape } from "../git/continueTransport.ts";
 import {
   continueBranchForThread,
   type ContinueOnMachineDeps,
+  makeThreadContinueCleanup,
   makeThreadContinueComplete,
+  makeThreadContinueInspect,
   makeThreadContinuePrepare,
   makeThreadContinueReceive,
   NO_REMOTE_MESSAGE,
@@ -186,11 +188,13 @@ function makeFixture(options?: {
 
   const baseTransport: ContinueTransportShape = {
     isGitRepository: () => Effect.succeed(true),
+    readStatus: () => Effect.succeed({ commit: "headsha", branch: "feat/login", changedFiles: 0 }),
     resolveRemote: (_cwd, name) =>
       Effect.succeed({ name: name ?? "origin", url: "git@github.com:uno/uno.git" }),
     readHead: () => Effect.succeed({ commit: "headsha", branch: "feat/login" }),
     captureSnapshot: () => Effect.succeed("wipsha"),
     pushRef: () => Effect.void,
+    deleteRemoteBranch: () => Effect.void,
     fetchBranch: () => Effect.succeed("wipsha"),
     restoreTree: () => Effect.succeed(true),
     deleteRef: () => Effect.void,
@@ -375,6 +379,34 @@ describe("thread.continue.prepare", () => {
         makeThreadContinuePrepare(missing.deps)({ threadId: THREAD_ID }),
       );
       assert.equal(missingError.reason, "thread_not_found");
+    }),
+  );
+
+  it.effect("reuses the transport branch of the same name on a second run instead of failing", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({
+        transport: {
+          captureSnapshot: (() => {
+            let calls = 0;
+            return () => Effect.succeed(`wipsha-${++calls}`);
+          })(),
+        },
+      });
+      const prepare = makeThreadContinuePrepare(fixture.deps);
+
+      const first = yield* prepare({ threadId: THREAD_ID });
+      const second = yield* prepare({ threadId: THREAD_ID });
+
+      assert.equal(first.branch, second.branch);
+      assert.notEqual(first.commit, second.commit);
+      const pushes = fixture.transportCalls.filter((call) => call.op === "pushRef");
+      assert.equal(pushes.length, 2);
+      for (const push of pushes) {
+        assert.equal(
+          (push.input as { remoteBranch: string }).remoteBranch,
+          "uno/continue/thread-1",
+        );
+      }
     }),
   );
 
@@ -632,6 +664,136 @@ describe("thread.continue.receive", () => {
       );
       assert.equal(result.envWritten, false);
       assert.deepEqual(skipped.writtenEnv, []);
+    }),
+  );
+});
+
+describe("thread.continue.inspect", () => {
+  it.effect("reports a missing folder as a clone target", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({ projects: [] });
+      const result = yield* makeThreadContinueInspect(fixture.deps)({
+        projectPath: "~/projects/uno",
+      });
+      assert.deepEqual(result, {
+        projectPath: "/home/unowork/projects/uno",
+        exists: false,
+        isGitRepository: false,
+        registered: false,
+        hasLocalChanges: false,
+        changedFiles: 0,
+        branch: null,
+      });
+      assert.isFalse(fixture.transportCalls.some((call) => call.op === "readStatus"));
+    }),
+  );
+
+  it.effect("flags a folder that exists but is not a repository, without reading status", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({
+        projects: [],
+        existingDirectories: new Set(["/home/unowork/projects/uno"]),
+        transport: { isGitRepository: () => Effect.succeed(false) },
+      });
+      const result = yield* makeThreadContinueInspect(fixture.deps)({
+        projectPath: "~/projects/uno",
+      });
+      assert.equal(result.exists, true);
+      assert.equal(result.isGitRepository, false);
+      assert.equal(result.hasLocalChanges, false);
+      assert.isFalse(fixture.transportCalls.some((call) => call.op === "readStatus"));
+    }),
+  );
+
+  it.effect("reports a clean registered checkout with its branch", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({
+        existingDirectories: new Set(["/Users/dev/uno"]),
+        transport: {
+          readStatus: () => Effect.succeed({ commit: "headsha", branch: "main", changedFiles: 0 }),
+        },
+      });
+      const result = yield* makeThreadContinueInspect(fixture.deps)({
+        projectPath: "/Users/dev/uno/",
+      });
+      // The trailing slash is dropped, like `receive` does, so the folder
+      // inspected is the folder written to.
+      assert.deepEqual(result, {
+        projectPath: "/Users/dev/uno",
+        exists: true,
+        isGitRepository: true,
+        registered: true,
+        hasLocalChanges: false,
+        changedFiles: 0,
+        branch: "main",
+      });
+      assert.equal(transportInput<string>(fixture, "readStatus"), "/Users/dev/uno");
+    }),
+  );
+
+  it.effect("counts the local changes a receive would replace", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({
+        existingDirectories: new Set(["/Users/dev/uno"]),
+        transport: {
+          readStatus: () => Effect.succeed({ commit: "headsha", branch: null, changedFiles: 4 }),
+        },
+      });
+      const result = yield* makeThreadContinueInspect(fixture.deps)({
+        projectPath: "/Users/dev/uno",
+      });
+      assert.equal(result.hasLocalChanges, true);
+      assert.equal(result.changedFiles, 4);
+      assert.equal(result.branch, null);
+      // Read-only: nothing is dispatched or written.
+      assert.equal(fixture.dispatched.length, 0);
+      assert.deepEqual(fixture.writtenEnv, []);
+    }),
+  );
+});
+
+describe("thread.continue.cleanup", () => {
+  it.effect("deletes the transport branch on the remote the snapshot was pushed to", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture();
+      const result = yield* makeThreadContinueCleanup(fixture.deps)({
+        threadId: THREAD_ID,
+        remote: "uno",
+      });
+      assert.deepEqual(result, { branch: "uno/continue/thread-1", removed: true });
+      assert.deepEqual(transportInput(fixture, "deleteRemoteBranch"), {
+        cwd: "/Users/dev/uno",
+        remoteName: "uno",
+        remoteBranch: "uno/continue/thread-1",
+      });
+      assert.equal(fixture.dispatched.length, 0);
+    }),
+  );
+
+  it.effect("reports a failed delete instead of throwing", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({
+        transport: {
+          deleteRemoteBranch: () => Effect.fail(new Error("remote: branch is protected")) as never,
+        },
+      });
+      const result = yield* makeThreadContinueCleanup(fixture.deps)({ threadId: THREAD_ID });
+      assert.deepEqual(result, { branch: "uno/continue/thread-1", removed: false });
+
+      const noRemote = makeFixture({ transport: { resolveRemote: () => Effect.succeed(null) } });
+      const skipped = yield* makeThreadContinueCleanup(noRemote.deps)({ threadId: THREAD_ID });
+      assert.equal(skipped.removed, false);
+      assert.isFalse(noRemote.transportCalls.some((call) => call.op === "deleteRemoteBranch"));
+    }),
+  );
+
+  it.effect("fails when the chat is gone, since there is nothing to clean", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({ thread: Option.none() });
+      const error = yield* expectFailure(
+        makeThreadContinueCleanup(fixture.deps)({ threadId: THREAD_ID }),
+      );
+      assert.equal(error.reason, "thread_not_found");
     }),
   );
 });

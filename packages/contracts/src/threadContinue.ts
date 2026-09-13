@@ -2,8 +2,12 @@
  * "Continue on <machine>" — carry one chat (files + history + secrets) from
  * the daemon it lives on to another daemon.
  *
- * Three RPCs, two daemons:
+ * Three RPCs on the main path, two daemons, plus two small helpers:
  *
+ * - `thread.continue.inspect` runs on the TARGET before anything happens. It
+ *   is read-only: does the project folder exist there, is it a git checkout,
+ *   which branch is it on and does it carry uncommitted work that `receive`
+ *   would overwrite. The dialog uses it to warn before replacing files.
  * - `thread.continue.prepare` runs on the SOURCE. It snapshots the thread's
  *   workspace into a WIP commit on a transport branch, pushes it to the
  *   project's git remote and returns everything the target needs (branch,
@@ -13,6 +17,9 @@
  *   exists there (cloning it if needed), fetches the transport branch, puts
  *   its tree into the working tree without touching the target's branch, and
  *   creates the new thread with the seed as its first user message.
+ * - `thread.continue.cleanup` runs on the SOURCE after a successful receive
+ *   and deletes the transport branch on the remote. Best-effort: a failure is
+ *   reported in the result, never thrown, so it cannot block the handoff.
  * - `thread.continue.complete` runs on the SOURCE again to mark the old
  *   thread ("Continued on <machine>") and optionally archive it.
  *
@@ -53,6 +60,34 @@ export class ThreadContinueError extends Schema.TaggedErrorClass<ThreadContinueE
     cause: Schema.optional(Schema.Defect),
   },
 ) {}
+
+export const ThreadContinueInspectInput = Schema.Struct({
+  /**
+   * Folder the chat would land in on this machine: the workspace root of a
+   * registered project, or the destination a fresh clone would go to. `~` is
+   * expanded here.
+   */
+  projectPath: TrimmedNonEmptyString,
+});
+export type ThreadContinueInspectInput = typeof ThreadContinueInspectInput.Type;
+
+export const ThreadContinueInspectResult = Schema.Struct({
+  /** `projectPath` with `~` expanded, as the receiver would use it. */
+  projectPath: TrimmedNonEmptyString,
+  /** The folder exists on this machine. */
+  exists: Schema.Boolean,
+  /** The folder is a git checkout; `receive` refuses a folder that exists but is not one. */
+  isGitRepository: Schema.Boolean,
+  /** A project is registered at this path on this machine. */
+  registered: Schema.Boolean,
+  /** Uncommitted or untracked work that `receive` would replace. */
+  hasLocalChanges: Schema.Boolean,
+  /** Number of changed entries in `git status` (tracked changes plus untracked files). */
+  changedFiles: Schema.Number,
+  /** Branch the checkout is on; null when detached, unborn or not a repository. */
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ThreadContinueInspectResult = typeof ThreadContinueInspectResult.Type;
 
 export const ThreadContinuePrepareInput = Schema.Struct({
   threadId: ThreadId,
@@ -134,6 +169,20 @@ export const ThreadContinueReceiveResult = Schema.Struct({
   envWritten: Schema.Boolean,
 });
 export type ThreadContinueReceiveResult = typeof ThreadContinueReceiveResult.Type;
+
+export const ThreadContinueCleanupInput = Schema.Struct({
+  threadId: ThreadId,
+  /** Remote the transport branch was pushed to (`remoteName` of the prepare result). */
+  remote: Schema.optional(TrimmedNonEmptyString),
+});
+export type ThreadContinueCleanupInput = typeof ThreadContinueCleanupInput.Type;
+
+export const ThreadContinueCleanupResult = Schema.Struct({
+  branch: TrimmedNonEmptyString,
+  /** False when the branch could not be deleted; the reason is in the server log. */
+  removed: Schema.Boolean,
+});
+export type ThreadContinueCleanupResult = typeof ThreadContinueCleanupResult.Type;
 
 export const ThreadContinueCompleteInput = Schema.Struct({
   threadId: ThreadId,

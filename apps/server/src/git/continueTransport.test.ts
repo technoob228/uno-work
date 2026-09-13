@@ -128,6 +128,18 @@ it.layer(TestLayer)("ContinueTransportLive", (it) => {
 
           expect(yield* transport.isGitRepository(source)).toBe(true);
           expect(yield* transport.isGitRepository(root)).toBe(false);
+          // Status counts what a restore on another machine would replace:
+          // the edit, the new file and the deletion; the ignored file is not listed.
+          expect(yield* transport.readStatus(source)).toEqual({
+            commit: sourceHeadBefore,
+            branch: "main",
+            changedFiles: 3,
+          });
+          expect(yield* transport.readStatus(target)).toEqual({
+            commit: sourceHeadBefore,
+            branch: "main",
+            changedFiles: 0,
+          });
           const resolvedRemote = yield* transport.resolveRemote(source, null);
           expect(resolvedRemote?.name).toBe("origin");
           expect(resolvedRemote?.url).toBe(remote);
@@ -194,6 +206,66 @@ it.layer(TestLayer)("ContinueTransportLive", (it) => {
               .toSorted(),
           ).toEqual(["D gone.txt", "M edit.txt", "?? src/"].toSorted());
         }),
+    );
+
+    it.effect("force-updates an existing transport branch and can delete it afterwards", () =>
+      Effect.gen(function* () {
+        const transport = yield* ContinueTransport;
+        const root = yield* makeTmpDir();
+        const remote = path.join(root, "remote.git");
+        const source = path.join(root, "source");
+        yield* git(root, ["init", "--bare", "--initial-branch=main", remote]);
+        yield* git(root, ["clone", "--quiet", remote, source]);
+        yield* configureUser(source);
+        yield* write(path.join(source, "a.txt"), "1\n");
+        yield* git(source, ["add", "."]);
+        yield* git(source, ["commit", "-q", "-m", "initial"]);
+        yield* git(source, ["push", "-q", "-u", "origin", "HEAD:main"]);
+        const head = yield* git(source, ["rev-parse", "HEAD"]);
+        const localRef = continueLocalRefForThread("thread-twice");
+        const branch = "uno/continue/thread-twice";
+
+        yield* write(path.join(source, "a.txt"), "2\n");
+        const first = yield* transport.captureSnapshot({
+          cwd: source,
+          ref: localRef,
+          parents: [head],
+          message: "first",
+        });
+        yield* transport.pushRef({
+          cwd: source,
+          remoteName: "origin",
+          localRef,
+          remoteBranch: branch,
+        });
+        expect(yield* git(remote, ["rev-parse", `refs/heads/${branch}`])).toBe(first);
+
+        // A second run for the same chat: the branch already exists on the
+        // remote and its new commit is not a descendant of the old one.
+        yield* write(path.join(source, "a.txt"), "3\n");
+        const second = yield* transport.captureSnapshot({
+          cwd: source,
+          ref: localRef,
+          parents: [head],
+          message: "second",
+        });
+        expect(second).not.toBe(first);
+        yield* transport.pushRef({
+          cwd: source,
+          remoteName: "origin",
+          localRef,
+          remoteBranch: branch,
+        });
+        expect(yield* git(remote, ["rev-parse", `refs/heads/${branch}`])).toBe(second);
+
+        yield* transport.deleteRemoteBranch({
+          cwd: source,
+          remoteName: "origin",
+          remoteBranch: branch,
+        });
+        expect(yield* git(remote, ["branch", "--list", branch])).toBe("");
+        expect(yield* git(remote, ["rev-parse", "refs/heads/main"])).toBe(head);
+      }),
     );
 
     it.effect("reports no remote for a repository without one", () =>
