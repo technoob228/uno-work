@@ -1,4 +1,5 @@
 import {
+  type EnvironmentId,
   type ProviderInstanceId,
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
@@ -9,8 +10,17 @@ import { memo, useMemo, useState, useCallback, useEffect, useLayoutEffect, useRe
 import { SearchIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import { modelCannotRunCodingAgent, modelMatchesCapabilityFilter } from "./modelCapabilities";
-import { ModelPickerSidebar } from "./ModelPickerSidebar";
+import { ModelPickerSidebar, type ModelPickerSidebarPaneState } from "./ModelPickerSidebar";
 import { isModelPickerNewModel } from "./modelPickerModelHighlights";
+import {
+  parseProviderSetupKey,
+  providerPaneBadgeLabel,
+  providerSetupKey,
+  resolveProviderPaneKind,
+} from "./modelPickerProviderPane";
+import { ProviderSetupListRow } from "./ProviderSetupListRow";
+import { ProviderSetupPane } from "./ProviderSetupPane";
+import type { HarnessSetupApi } from "../harness/useHarnessSetup";
 import {
   createModelPickerSearchIndex,
   getModelPickerSearchTokens,
@@ -250,6 +260,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
   terminalOpen: boolean;
   allowImageGenerationModels?: boolean;
+  /**
+   * Install / sign-in jobs for providers that are not ready. Owned by the
+   * picker trigger (which outlives this popup) so an install keeps being
+   * tracked while the popup is closed.
+   */
+  setup: HarnessSetupApi;
+  /** Machine the install / sign-in runs on. `null` means the primary machine. */
+  environmentId: EnvironmentId | null;
   onRequestClose?: () => void;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
 }) {
@@ -258,6 +276,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     modelOptionsByInstance,
     instanceEntries,
     onInstanceModelChange,
+    setup,
   } = props;
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -306,6 +325,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     },
     [focusSearchInput],
   );
+  // A search result can point at a provider that has no models yet; picking
+  // it opens that provider's Install / Sign in pane instead of a model.
+  const handleSelectSetupRow = useCallback(
+    (instanceId: ProviderInstanceId) => {
+      setSearchQuery("");
+      handleSelectInstance(instanceId);
+    },
+    [handleSelectInstance],
+  );
 
   useLayoutEffect(() => {
     focusSearchInput();
@@ -349,15 +377,62 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     [props.lockedContinuationGroupKey, props.lockedProvider],
   );
 
+  // What each rail item shows in the content pane: models, an install
+  // panel, a sign-in panel, or nothing. Kept apart from the badges below so
+  // install-job polling (once a second) does not rebuild the model index.
+  const paneKindByInstanceId = useMemo(
+    () =>
+      new Map(
+        instanceEntries.map((entry) => [entry.instanceId, resolveProviderPaneKind(entry)] as const),
+      ),
+    [instanceEntries],
+  );
+  const paneStateByInstanceId = useMemo(() => {
+    const out = new Map<ProviderInstanceId, ModelPickerSidebarPaneState>();
+    for (const entry of instanceEntries) {
+      const kind = paneKindByInstanceId.get(entry.instanceId) ?? "blocked";
+      out.set(entry.instanceId, {
+        kind,
+        badge: providerPaneBadgeLabel({ kind, installJob: setup.installJobs[entry.driverKind] }),
+      });
+    }
+    return out;
+  }, [instanceEntries, paneKindByInstanceId, setup.installJobs]);
   const readyInstanceSet = useMemo(() => {
     const ready = new Set<ProviderInstanceId>();
-    for (const entry of instanceEntries) {
-      if (entry.status === "ready") {
-        ready.add(entry.instanceId);
+    for (const [instanceId, kind] of paneKindByInstanceId) {
+      if (kind === "models") {
+        ready.add(instanceId);
       }
     }
     return ready;
-  }, [instanceEntries]);
+  }, [paneKindByInstanceId]);
+  // Providers the search can surface as "set this up" rows. Locked mode
+  // never offers them: the turn already has a working provider.
+  const setupEntries = useMemo(
+    () =>
+      props.lockedProvider !== null
+        ? []
+        : instanceEntries.filter((entry) => {
+            const kind = paneKindByInstanceId.get(entry.instanceId);
+            return kind === "install" || kind === "signin";
+          }),
+    [instanceEntries, paneKindByInstanceId, props.lockedProvider],
+  );
+  const setupSearchIndexByInstanceId = useMemo(
+    () =>
+      new Map(
+        setupEntries.map((entry) => [
+          entry.instanceId,
+          createModelPickerSearchIndex({
+            name: entry.displayName,
+            driverKind: entry.driverKind,
+            providerDisplayName: entry.displayName,
+          }),
+        ]),
+      ),
+    [setupEntries],
+  );
 
   // Flatten models into a searchable array. One pass over the
   // instance-keyed map; each model carries its instance id + driver kind
@@ -420,6 +495,30 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   );
   const selectedInstanceEntry =
     selectedInstanceId === "favorites" ? null : (entryByInstanceId.get(selectedInstanceId) ?? null);
+  const selectedPaneKind = selectedInstanceEntry
+    ? (paneKindByInstanceId.get(selectedInstanceEntry.instanceId) ?? null)
+    : null;
+  // Install / Sign in replaces the model list for the selected rail item.
+  // Searching always shows results instead, so the pane never hides a hit.
+  const setupPaneKind =
+    !isSearching && (selectedPaneKind === "install" || selectedPaneKind === "signin")
+      ? selectedPaneKind
+      : null;
+  // When the selected provider becomes ready (install or sign-in finished),
+  // hand focus back to the search box so the freshly listed models can be
+  // picked with the keyboard right away.
+  const previousSelectedPaneKindRef = useRef(selectedPaneKind);
+  useEffect(() => {
+    const previous = previousSelectedPaneKindRef.current;
+    previousSelectedPaneKindRef.current = selectedPaneKind;
+    if (
+      (previous === "install" || previous === "signin") &&
+      selectedPaneKind === "models" &&
+      !isSearching
+    ) {
+      window.requestAnimationFrame(() => focusSearchInput());
+    }
+  }, [focusSearchInput, isSearching, selectedPaneKind]);
   const showUnoFilters =
     selectedInstanceEntry?.driverKind === "uno" ||
     (isSearching && flatModels.some((model) => model.driverKind === "uno"));
@@ -600,6 +699,25 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     unoSortMode,
   ]);
 
+  // Not-ready providers matching the search, appended after the model hits.
+  const filteredSetupKeys = useMemo((): string[] => {
+    if (searchTokens.length === 0) return [];
+    return setupEntries
+      .map((entry) => {
+        const searchIndex = setupSearchIndexByInstanceId.get(entry.instanceId);
+        const score = searchIndex
+          ? scoreModelPickerSearchIndex(searchIndex, searchTokens, { isFavorite: false })
+          : null;
+        return { entry, score };
+      })
+      .filter(
+        (ranked): ranked is { entry: ProviderInstanceEntry; score: number } =>
+          ranked.score !== null,
+      )
+      .toSorted((a, b) => a.score - b.score)
+      .map((ranked) => providerSetupKey(ranked.entry.instanceId));
+  }, [searchTokens, setupEntries, setupSearchIndexByInstanceId]);
+
   const handleModelSelect = useCallback(
     (modelSlug: string, instanceId: ProviderInstanceId) => {
       const options = modelOptionsByInstance.get(instanceId);
@@ -707,12 +825,18 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     [modelJumpCommandByKey],
   );
   const allModelKeys = useMemo(
-    (): string[] => flatModels.map((model) => `${model.instanceId}:${model.slug}`),
-    [flatModels],
+    (): string[] => [
+      ...flatModels.map((model) => `${model.instanceId}:${model.slug}`),
+      ...setupEntries.map((entry) => providerSetupKey(entry.instanceId)),
+    ],
+    [flatModels, setupEntries],
   );
   const filteredModelKeys = useMemo(
-    (): string[] => filteredModels.map((model) => `${model.instanceId}:${model.slug}`),
-    [filteredModels],
+    (): string[] => [
+      ...filteredModels.map((model) => `${model.instanceId}:${model.slug}`),
+      ...filteredSetupKeys,
+    ],
+    [filteredModels, filteredSetupKeys],
   );
   const filteredModelByKey = useMemo(
     (): ReadonlyMap<string, ModelPickerItem> =>
@@ -834,6 +958,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   const renderModelRow = useCallback(
     (modelKey: string, index: number) => {
+      const setupInstanceId = parseProviderSetupKey(modelKey);
+      if (setupInstanceId !== null) {
+        const entry = entryByInstanceId.get(setupInstanceId);
+        const badge = paneStateByInstanceId.get(setupInstanceId)?.badge;
+        if (!entry || !badge) {
+          return null;
+        }
+        return <ProviderSetupListRow key={modelKey} index={index} entry={entry} badge={badge} />;
+      }
       const model = filteredModelByKey.get(modelKey);
       if (!model) {
         return null;
@@ -865,10 +998,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       );
     },
     [
+      entryByInstanceId,
       favoritesSet,
       filteredModelByKey,
       isLocked,
       modelJumpLabelByKey,
+      paneStateByInstanceId,
       props.allowImageGenerationModels,
       showLockedInstanceSidebar,
       toggleFavorite,
@@ -898,6 +1033,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             onSelectInstance={handleSelectInstance}
             instanceEntries={sidebarInstanceEntries}
             showFavorites={!isLocked}
+            paneStateByInstanceId={paneStateByInstanceId}
           />
         )}
 
@@ -926,6 +1062,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           }}
           onValueChange={(modelKey) => {
             if (typeof modelKey !== "string") {
+              return;
+            }
+            const setupInstanceId = parseProviderSetupKey(modelKey);
+            if (setupInstanceId !== null) {
+              handleSelectSetupRow(setupInstanceId);
               return;
             }
             const { instanceId, slug } = splitInstanceModelKey(modelKey);
@@ -963,6 +1104,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                       ).preventBaseUIHandler?.();
                       e.preventDefault();
                       e.stopPropagation();
+                      const setupInstanceId = parseProviderSetupKey(highlightedModelKeyRef.current);
+                      if (setupInstanceId !== null) {
+                        handleSelectSetupRow(setupInstanceId);
+                        return;
+                      }
                       const { instanceId, slug } = splitInstanceModelKey(
                         highlightedModelKeyRef.current,
                       );
@@ -1155,10 +1301,21 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               ) : null}
             </div>
 
-            {/* Model list */}
+            {/* Install / Sign in pane, or the model list */}
+            {setupPaneKind !== null && selectedInstanceEntry ? (
+              <ProviderSetupPane
+                entry={selectedInstanceEntry}
+                kind={setupPaneKind}
+                setup={setup}
+                environmentId={props.environmentId}
+              />
+            ) : null}
             <div
               ref={listRegionRef}
-              className="relative min-h-0 flex-1 before:pointer-events-none before:absolute before:inset-0 before:bg-muted/40"
+              className={cn(
+                "relative min-h-0 flex-1 before:pointer-events-none before:absolute before:inset-0 before:bg-muted/40",
+                setupPaneKind !== null && "hidden",
+              )}
             >
               {shouldVirtualizeModelList ? (
                 <ComboboxListVirtualized className="model-picker-list size-full divide-y px-2 py-1">
@@ -1178,9 +1335,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 </ComboboxList>
               )}
             </div>
-            <ComboboxEmpty className="not-empty:py-6 empty:h-0 text-xs font-normal leading-snug">
-              No models found
-            </ComboboxEmpty>
+            {setupPaneKind === null ? (
+              <ComboboxEmpty className="not-empty:py-6 empty:h-0 text-xs font-normal leading-snug">
+                No models found
+              </ComboboxEmpty>
+            ) : null}
           </div>
         </Combobox>
       </div>

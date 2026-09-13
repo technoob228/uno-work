@@ -23,8 +23,7 @@ import {
   type ProviderInstallJobStatus,
 } from "@t3tools/contracts";
 
-import { readEnvironmentConnection } from "~/environments/runtime";
-import { getPrimaryEnvironmentConnection } from "~/environments/runtime/service";
+import { getPrimaryEnvironmentConnection, readEnvironmentConnection } from "~/environments/runtime";
 import { isPrimaryEnvironmentId } from "~/environments/http/target";
 import { refreshEnvironmentProviders } from "~/environments/settings/serverSettings";
 import { usePrimaryEnvironmentId } from "~/environments/primary/context";
@@ -101,7 +100,6 @@ export function useHarnessSetup(explicitEnvironmentId?: EnvironmentId | null): H
 
   const startInstall = useCallback(
     async (driver: ProviderDriverKind) => {
-      const client = resolveClient(environmentId);
       setInstallJobs((current) => ({
         ...current,
         [driver]: {
@@ -113,6 +111,9 @@ export function useHarnessSetup(explicitEnvironmentId?: EnvironmentId | null): H
         },
       }));
       try {
+        // Inside the try so a machine we cannot reach reads as a failed job
+        // with its reason, not as an unhandled rejection.
+        const client = resolveClient(environmentId);
         const { jobId } = await client.providerSetup.installStart({ driver });
         installIds.current.set(driver, jobId);
       } catch (error) {
@@ -135,7 +136,6 @@ export function useHarnessSetup(explicitEnvironmentId?: EnvironmentId | null): H
 
   const startAuth = useCallback<HarnessSetupApi["startAuth"]>(
     async ({ driver, method, apiKey }) => {
-      const client = resolveClient(environmentId);
       setAuthJobs((current) => ({
         ...current,
         [driver]: {
@@ -148,6 +148,7 @@ export function useHarnessSetup(explicitEnvironmentId?: EnvironmentId | null): H
         },
       }));
       try {
+        const client = resolveClient(environmentId);
         const { jobId } = await client.providerSetup.authStart({
           driver,
           method,

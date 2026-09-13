@@ -1,7 +1,8 @@
 import { type ProviderInstanceId } from "@t3tools/contracts";
 import { memo, useMemo } from "react";
-import { SparklesIcon, StarIcon } from "lucide-react";
+import { DownloadIcon, KeyRoundIcon, Loader2Icon, SparklesIcon, StarIcon } from "lucide-react";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
+import type { ProviderPaneBadge, ProviderPaneKind } from "./modelPickerProviderPane";
 import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
@@ -35,6 +36,20 @@ const SELECTED_INDICATOR_CLASS =
 const BADGE_BASE_CLASS =
   "pointer-events-none absolute -right-0.5 top-0.5 z-10 flex size-3.5 items-center justify-center rounded-full bg-transparent shadow-sm ";
 const NEW_BADGE_CLASS = `${BADGE_BASE_CLASS} text-amber-600  dark:text-amber-300 `;
+const STATE_BADGE_CLASS = `${BADGE_BASE_CLASS} bg-background text-amber-600 dark:text-amber-300`;
+
+/** Per-instance pane state the rail renders as a badge and uses to decide clickability. */
+export interface ModelPickerSidebarPaneState {
+  readonly kind: ProviderPaneKind;
+  readonly badge: ProviderPaneBadge | null;
+}
+
+function StateBadgeIcon({ badge }: { badge: ProviderPaneBadge }) {
+  if (badge === "Installing…") return <Loader2Icon className="size-2.5 animate-spin" />;
+  if (badge === "Sign in needed") return <KeyRoundIcon className="size-2.5" />;
+  if (badge === "Not installed") return <DownloadIcon className="size-2.5" />;
+  return null;
+}
 
 /** Opens toward the rail so the list stays readable (not over the model names). */
 const PICKER_TOOLTIP_SIDE = "left" as const;
@@ -59,6 +74,12 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
    * instances are never flagged — the user just made them).
    */
   newBadgeInstanceIds?: ReadonlySet<ProviderInstanceId>;
+  /**
+   * Pane state per instance. Providers whose pane is `install` / `signin`
+   * stay clickable (the content pane shows what to do); `blocked` ones are
+   * greyed out. When omitted, only `ready` instances are clickable.
+   */
+  paneStateByInstanceId?: ReadonlyMap<ProviderInstanceId, ModelPickerSidebarPaneState>;
 }) {
   const handleSelect = (instanceId: ProviderInstanceId | "favorites") => {
     props.onSelectInstance(instanceId);
@@ -118,7 +139,14 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
 
         {/* Instance buttons (one per configured instance — built-in + custom) */}
         {props.instanceEntries.map((entry) => {
-          const isDisabled = !entry.isAvailable || entry.status !== "ready";
+          const paneState = props.paneStateByInstanceId?.get(entry.instanceId);
+          const isDisabled = paneState
+            ? paneState.kind === "blocked"
+            : !entry.isAvailable || entry.status !== "ready";
+          const stateBadge =
+            paneState && paneState.kind !== "models" && paneState.kind !== "blocked"
+              ? paneState.badge
+              : null;
           const isSelected = props.selectedInstanceId === entry.instanceId;
           const showNewBadge = props.newBadgeInstanceIds?.has(entry.instanceId) ?? false;
           const showInstanceBadge =
@@ -126,9 +154,11 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
 
           const tooltip = isDisabled
             ? describeUnavailableInstance(entry)
-            : showNewBadge
-              ? `${entry.displayName} — New`
-              : entry.displayName;
+            : stateBadge
+              ? `${entry.displayName} — ${stateBadge}`
+              : showNewBadge
+                ? `${entry.displayName} — New`
+                : entry.displayName;
 
           const button = (
             <button
@@ -145,10 +175,13 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
               aria-label={
                 isDisabled
                   ? tooltip
-                  : showNewBadge
-                    ? `${entry.displayName}, new`
-                    : entry.displayName
+                  : stateBadge
+                    ? `${entry.displayName}, ${stateBadge.toLocaleLowerCase()}`
+                    : showNewBadge
+                      ? `${entry.displayName}, new`
+                      : entry.displayName
               }
+              data-model-picker-provider-state={stateBadge ?? undefined}
             >
               <ProviderInstanceIcon
                 driverKind={entry.driverKind}
@@ -158,7 +191,11 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 className="size-6"
                 iconClassName="size-5"
               />
-              {showNewBadge ? (
+              {stateBadge ? (
+                <span className={STATE_BADGE_CLASS} aria-hidden>
+                  <StateBadgeIcon badge={stateBadge} />
+                </span>
+              ) : showNewBadge ? (
                 <span className={NEW_BADGE_CLASS} aria-hidden>
                   <SparklesIcon className="size-2" />
                 </span>

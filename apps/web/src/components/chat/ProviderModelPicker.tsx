@@ -1,4 +1,5 @@
 import {
+  type EnvironmentId,
   type ProviderInstanceId,
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
@@ -19,6 +20,7 @@ import {
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+import { useHarnessSetup } from "../harness/useHarnessSetup";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -31,6 +33,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   lockedContinuationGroupKey?: string | null;
   /** Instance entries rendered in the sidebar + used to resolve display name. */
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
+  /**
+   * Machine whose providers these are. Installing or signing in to an agent
+   * from the picker runs on this machine; omit for the primary machine.
+   */
+  environmentId?: EnvironmentId | null;
   keybindings?: ResolvedKeybindingsConfig;
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
   activeProviderIconClassName?: string;
@@ -46,6 +53,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 }) {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
+  const environmentId = props.environmentId ?? null;
+  // Lives on the trigger, not the popup, so an install started in the picker
+  // keeps being polled while the popup is closed.
+  const setup = useHarnessSetup(environmentId);
 
   // Resolve the active instance entry by exact routing key. The composer
   // resolves fallbacks before rendering this component; if the selected
@@ -184,6 +195,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           modelOptionsByInstance={props.modelOptionsByInstance}
           terminalOpen={props.terminalOpen ?? false}
           allowImageGenerationModels={props.allowImageGenerationModels === true}
+          setup={setup}
+          environmentId={environmentId}
           onRequestClose={() => setIsMenuOpen(false)}
           onInstanceModelChange={handleInstanceModelChange}
         />
