@@ -6,7 +6,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import { memo } from "react";
+import { memo, useState } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
 import {
@@ -14,6 +14,7 @@ import {
   DiffIcon,
   FolderIcon,
   GlobeIcon,
+  MonitorSmartphoneIcon,
   PanelRightIcon,
   TerminalSquareIcon,
 } from "lucide-react";
@@ -27,6 +28,8 @@ import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { usePreviewPane } from "../preview/PreviewPaneContext";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { toggleDevMode, useDevMode } from "../../devMode";
+import { CONTINUE_ON_MACHINE_COPY } from "../../continueOnMachineCopy";
+import { ContinueOnMachineDialog } from "../ContinueOnMachineDialog";
 
 const HEADER_ICON_BUTTON_CLASS =
   "inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-md border border-input px-[calc(--spacing(1)-1px)] text-muted-foreground shadow-xs/5 hover:bg-accent hover:text-foreground sm:h-6 sm:min-w-6";
@@ -111,6 +114,9 @@ export const ChatHeader = memo(function ChatHeader({
     activeThreadEnvironmentId,
     primaryEnvironmentId,
   });
+  const [continueDialogOpen, setContinueDialogOpen] = useState(false);
+  // A draft has nothing to carry yet: no files were touched, no history exists.
+  const canContinueOnMachine = Boolean(activeProjectName) && !draftId;
 
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
@@ -273,6 +279,30 @@ export const ChatHeader = memo(function ChatHeader({
             />
             <TooltipPopup side="bottom">Открыть браузер</TooltipPopup>
           </Tooltip>
+        )}
+        {canContinueOnMachine && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={() => setContinueDialogOpen(true)}
+                  aria-label={CONTINUE_ON_MACHINE_COPY.action}
+                  className={HEADER_ICON_BUTTON_CLASS}
+                >
+                  <MonitorSmartphoneIcon className="size-3" />
+                </button>
+              }
+            />
+            <TooltipPopup side="bottom">{CONTINUE_ON_MACHINE_COPY.action}</TooltipPopup>
+          </Tooltip>
+        )}
+        {canContinueOnMachine && (
+          <ContinueOnMachineDialog
+            threadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}
+            open={continueDialogOpen}
+            onOpenChange={setContinueDialogOpen}
+          />
         )}
         {previewFiles.length > 0 && (
           <Tooltip>

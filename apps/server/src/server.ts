@@ -40,6 +40,7 @@ import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReap
 import { OpenCodeRuntimeLive } from "./provider/opencodeRuntime.ts";
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery.ts";
 import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore.ts";
+import { ContinueTransportLive } from "./git/continueTransport.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
@@ -250,9 +251,21 @@ const VcsLayerLive = Layer.empty.pipe(
   Layer.provideMerge(VcsStatusBroadcaster.layer.pipe(Layer.provide(GitWorkflowLayerLive))),
 );
 
+const CheckpointStoreLayerLive = CheckpointStoreLive.pipe(
+  Layer.provide(VcsDriverRegistryLayerLive),
+);
+
 const CheckpointingLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CheckpointDiffQueryLive),
-  Layer.provideMerge(CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
+  // "Continue on <machine>" snapshots and restores working trees through the
+  // checkpoint store, so its transport lives next to it.
+  Layer.provideMerge(
+    ContinueTransportLive.pipe(
+      Layer.provide(CheckpointStoreLayerLive),
+      Layer.provide(VcsDriverRegistryLayerLive),
+    ),
+  ),
+  Layer.provideMerge(CheckpointStoreLayerLive),
 );
 
 const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));

@@ -178,11 +178,12 @@ const makeCheckpointStore = Effect.gen(function* () {
           });
         }
 
-        const message = `t3 checkpoint ref=${input.checkpointRef}`;
+        const message = input.message ?? `t3 checkpoint ref=${input.checkpointRef}`;
+        const parentArgs = (input.parents ?? []).flatMap((parent) => ["-p", parent]);
         const commitTreeResult = yield* vcs.execute({
           operation,
           cwd: input.cwd,
-          args: ["commit-tree", treeOid, "-m", message],
+          args: ["commit-tree", treeOid, ...parentArgs, "-m", message],
           env: commitEnv,
         });
         const commitOid = commitTreeResult.stdout.trim();

@@ -84,6 +84,11 @@ const rpcClientMock = {
     resolvePullRequest: vi.fn(),
     preparePullRequestThread: vi.fn(),
   },
+  threadContinue: {
+    prepare: vi.fn(),
+    receive: vi.fn(),
+    complete: vi.fn(),
+  },
   server: {
     getConfig: vi.fn(),
     refreshProviders: vi.fn(),

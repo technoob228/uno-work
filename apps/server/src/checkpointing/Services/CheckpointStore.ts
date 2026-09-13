@@ -19,6 +19,14 @@ import { CheckpointRef } from "@t3tools/contracts";
 export interface CaptureCheckpointInput {
   readonly cwd: string;
   readonly checkpointRef: CheckpointRef;
+  /**
+   * Parent commits of the snapshot. Checkpoints are parentless root commits;
+   * "Continue on <machine>" passes the workspace HEAD so the transport commit
+   * carries history and pushes as a delta.
+   */
+  readonly parents?: ReadonlyArray<string>;
+  /** Commit message; defaults to the checkpoint marker message. */
+  readonly message?: string;
 }
 
 export interface RestoreCheckpointInput {

@@ -19,6 +19,7 @@ import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } 
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
+import { applyHandoffSeed, resolvePendingHandoffSeed } from "../handoff.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import { classifyOrchestrationErrorDetail as classifyProviderErrorDetail } from "../../provider/unoBilling.ts";
@@ -825,9 +826,16 @@ const make = Effect.gen(function* () {
         ),
       );
 
+    // A thread seeded by "Continue on <machine>" carries the old chat as a
+    // user message that never ran. Fold it into the first real prompt so the
+    // harness sees it; after that its own session history has the context.
+    const pendingHandoffSeed = resolvePendingHandoffSeed({
+      messages: thread.messages,
+      currentMessageId: message.id,
+    });
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
-      messageText: message.text,
+      messageText: applyHandoffSeed(pendingHandoffSeed, message.text),
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }

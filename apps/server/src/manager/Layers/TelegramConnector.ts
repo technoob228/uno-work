@@ -88,6 +88,12 @@ import {
 } from "../connectorInbox.ts";
 import { ServerConfig } from "../../config.ts";
 import { telegramCommandOrigin } from "../../orchestration/commandOrigin.ts";
+import {
+  buildHandoffContext as buildSharedHandoffContext,
+  stripHandoffPreamble,
+  TELEGRAM_HANDOFF_OPTIONS,
+  wrapHandoffPreamble,
+} from "../../orchestration/handoff.ts";
 import { inheritProjectThreadModes } from "../../orchestration/projectThreadModes.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -171,32 +177,14 @@ const TYPING_ACTION_INTERVAL = Duration.seconds(4);
 // сообщения, прежде чем сдаться и отправить "Turn finished with state".
 const TERMINAL_REPLY_GRACE = Duration.seconds(45);
 const TELEGRAM_MESSAGE_LIMIT = 4000;
-// When the chat is re-pointed at a new thread (harness switch, archived
-// thread), this many recent messages of the old thread are carried over as a
-// context preamble on the first turn.
-const HANDOFF_MESSAGE_COUNT = 12;
-const HANDOFF_MESSAGE_CHARS = 600;
 // Session statuses that mean the harness runtime is gone and the turn will
 // never reach a terminal state on its own.
 const DEAD_SESSION_STATUSES: ReadonlySet<string> = new Set(["stopped", "error"]);
 
-// Markers wrapping the handoff preamble on the first message of a replacement
-// thread. `stripHandoffPreamble` relies on them so that re-pointing the chat
-// again does not nest preambles inside preambles.
-const HANDOFF_PREAMBLE_START =
-  "[Context: this Telegram chat previously ran in another thread (the harness/model was switched). Recent history, oldest first:]";
-const HANDOFF_PREAMBLE_END = "[End of context. Reply to the message below.]";
-
-export const stripHandoffPreamble = (text: string): string => {
-  if (!text.startsWith(HANDOFF_PREAMBLE_START)) {
-    return text;
-  }
-  const endIndex = text.indexOf(HANDOFF_PREAMBLE_END);
-  if (endIndex === -1) {
-    return text;
-  }
-  return text.slice(endIndex + HANDOFF_PREAMBLE_END.length).replace(/^\s+/, "");
-};
+// The handoff preamble (carrying recent history of the old thread into the
+// replacement thread) is shared with "Continue on <machine>"; see
+// `orchestration/handoff.ts`. Re-exported for the connector tests.
+export { stripHandoffPreamble };
 
 export interface TurnReplyInputs {
   readonly turns: ReadonlyArray<
@@ -521,39 +509,12 @@ const makeTelegramConnector = Effect.gen(function* () {
 
   // Compact transcript of the old thread, carried into the replacement thread
   // as a preamble on its first turn so the new harness knows what came before.
-  const buildHandoffContext = (thread: OrchestrationThread): string | null => {
-    const recent = thread.messages
-      .filter(
-        (message) =>
-          (message.role === "user" || message.role === "assistant") &&
-          !message.streaming &&
-          message.text.trim().length > 0,
-      )
-      .slice(-HANDOFF_MESSAGE_COUNT);
-    if (recent.length === 0) {
-      return null;
-    }
-    const lines = recent.flatMap((message) => {
-      const role = message.role === "assistant" ? "Assistant" : "User";
-      // If the old thread itself started from a handoff, its first user
-      // message carries a preamble of the thread before it. Strip it, or
-      // rapid harness switches nest preambles inside preambles. The standing
-      // send-file hint is connector plumbing, not conversation — drop it too.
-      const withoutPreamble = stripHandoffPreamble(message.text).replace(
-        TELEGRAM_SEND_FILE_HINT,
-        "",
-      );
-      if (withoutPreamble.trim().length === 0) {
-        return [];
-      }
-      const text =
-        withoutPreamble.length > HANDOFF_MESSAGE_CHARS
-          ? `${withoutPreamble.slice(0, HANDOFF_MESSAGE_CHARS)}…`
-          : withoutPreamble;
-      return [`${role}: ${text}`];
+  // The standing send-file hint is connector plumbing, not conversation — drop it.
+  const buildHandoffContext = (thread: OrchestrationThread): string | null =>
+    buildSharedHandoffContext(thread, {
+      ...TELEGRAM_HANDOFF_OPTIONS,
+      sanitize: (text) => text.replace(TELEGRAM_SEND_FILE_HINT, ""),
     });
-    return lines.length === 0 ? null : lines.join("\n");
-  };
 
   const routingShell = (shell: Option.Option<RoutingThreadShell>): RoutingThreadShell | null =>
     Option.isSome(shell) ? shell.value : null;
@@ -1213,9 +1174,7 @@ const makeTelegramConnector = Effect.gen(function* () {
       }
       const body = [...bodyParts, TELEGRAM_SEND_FILE_HINT].join("\n\n");
       const messageText =
-        handoffContext === null
-          ? body
-          : [HANDOFF_PREAMBLE_START, handoffContext, HANDOFF_PREAMBLE_END, "", body].join("\n");
+        handoffContext === null ? body : [wrapHandoffPreamble(handoffContext), "", body].join("\n");
       const requestedAtIso = new Date().toISOString();
       yield* orchestrationEngine.dispatch(
         {

@@ -115,6 +115,44 @@ it.layer(TestLayer)("CheckpointStoreLive", (it) => {
     );
   });
 
+  describe("captureCheckpoint with parents", () => {
+    it.effect("writes the snapshot as a child of the given commit with a custom message", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const checkpointStore = yield* CheckpointStore;
+        const head = yield* git(tmp, ["rev-parse", "HEAD"]);
+        const checkpointRef = checkpointRefForThreadTurn(
+          ThreadId.make("thread-checkpoint-store-parents"),
+          0,
+        );
+        yield* writeTextFile(path.join(tmp, "new.txt"), "new\n");
+
+        yield* checkpointStore.captureCheckpoint({
+          cwd: tmp,
+          checkpointRef,
+          parents: [head],
+          message: "uno continue: parents",
+        });
+
+        expect(yield* git(tmp, ["rev-parse", `${checkpointRef}^`])).toBe(head);
+        expect(yield* git(tmp, ["log", "-1", "--format=%s", checkpointRef])).toBe(
+          "uno continue: parents",
+        );
+        // Plain checkpoints stay parentless root commits.
+        const plainRef = checkpointRefForThreadTurn(
+          ThreadId.make("thread-checkpoint-store-parents"),
+          1,
+        );
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: plainRef });
+        expect(yield* git(tmp, ["rev-list", "--count", plainRef])).toBe("1");
+        // HEAD and the index are untouched either way.
+        expect(yield* git(tmp, ["rev-parse", "HEAD"])).toBe(head);
+        expect(yield* git(tmp, ["diff", "--cached", "--name-only"])).toBe("");
+      }),
+    );
+  });
+
   describe("diffCheckpoints", () => {
     it.effect("returns full oversized checkpoint diffs without truncation", () =>
       Effect.gen(function* () {

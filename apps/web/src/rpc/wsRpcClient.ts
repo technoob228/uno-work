@@ -113,6 +113,12 @@ export interface WsRpcClient {
       typeof WS_METHODS.gitPreparePullRequestThread
     >;
   };
+  /** "Continue on <machine>": prepare/complete on the source daemon, receive on the target. */
+  readonly threadContinue: {
+    readonly prepare: RpcUnaryMethod<typeof WS_METHODS.threadContinuePrepare>;
+    readonly receive: RpcUnaryMethod<typeof WS_METHODS.threadContinueReceive>;
+    readonly complete: RpcUnaryMethod<typeof WS_METHODS.threadContinueComplete>;
+  };
   readonly server: {
     readonly getConfig: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetConfig>;
     /**
@@ -308,6 +314,14 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.gitResolvePullRequest](input)),
       preparePullRequestThread: (input) =>
         transport.request((client) => client[WS_METHODS.gitPreparePullRequestThread](input)),
+    },
+    threadContinue: {
+      prepare: (input) =>
+        transport.request((client) => client[WS_METHODS.threadContinuePrepare](input)),
+      receive: (input) =>
+        transport.request((client) => client[WS_METHODS.threadContinueReceive](input)),
+      complete: (input) =>
+        transport.request((client) => client[WS_METHODS.threadContinueComplete](input)),
     },
     server: {
       getConfig: () => transport.request((client) => client[WS_METHODS.serverGetConfig]({})),
