@@ -244,11 +244,23 @@ export type OrchestrationProject = typeof OrchestrationProject.Type;
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
 
+/**
+ * Who drives a thread right now. A thread another thread's agent spawned
+ * starts as "agent" (the spawning agent may send turns into it); a human
+ * message or the handoff button flips it to "human", which locks the agent
+ * out until the human hands it back. Absent on the wire means "human".
+ */
+export const ThreadController = Schema.Literals(["human", "agent"]);
+export type ThreadController = typeof ThreadController.Type;
+
 export const OrchestrationMessage = Schema.Struct({
   id: MessageId,
   role: OrchestrationMessageRole,
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  // Set on a user-role message another thread's agent sent (via the bridge);
+  // absent/null means a human wrote it.
+  sentByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
   createdAt: IsoDateTime,
@@ -397,6 +409,12 @@ export const OrchestrationThread = Schema.Struct({
   // so payloads from pre-snooze servers still decode.
   snoozedUntil: Schema.optional(Schema.NullOr(IsoDateTime)),
   snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // The thread whose agent created this one (bridge `POST /api/threads`);
+  // null for threads a human (or the manager) created. Immutable.
+  spawnedByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  // See ThreadController. Absent means "human".
+  controller: Schema.optional(ThreadController),
+  controlChangedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -449,6 +467,10 @@ export const OrchestrationThreadShell = Schema.Struct({
   // See OrchestrationThread.snoozedUntil.
   snoozedUntil: Schema.optional(Schema.NullOr(IsoDateTime)),
   snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // See OrchestrationThread.spawnedByThreadId / controller.
+  spawnedByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  controller: Schema.optional(ThreadController),
+  controlChangedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
@@ -550,6 +572,9 @@ const ThreadCreateCommand = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  // Only honored with an `agent` origin whose threadId matches; the decider
+  // rejects a mismatch so a client cannot fake agent parentage.
+  spawnedByThreadId: Schema.optional(ThreadId),
   createdAt: IsoDateTime,
 });
 
@@ -601,6 +626,16 @@ const ThreadUnsnoozeCommand = Schema.Struct({
   // decider emits thread.unsnoozed(reason: "activity") directly) and timer
   // wakes need no event at all.
   reason: Schema.Literal("user"),
+});
+
+// Handoff between the human and the spawning agent. A human may set either
+// value; an agent (origin kind "agent") may only release control to "human".
+const ThreadControlSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.control.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  controller: ThreadController,
+  createdAt: IsoDateTime,
 });
 
 const ThreadRuntimeModeSetCommand = Schema.Struct({
@@ -736,6 +771,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
+  ThreadControlSetCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
@@ -759,6 +795,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
+  ThreadControlSetCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
@@ -880,6 +917,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.meta-updated",
   "thread.snoozed",
   "thread.unsnoozed",
+  "thread.control-changed",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.message-sent",
@@ -938,6 +976,9 @@ export const ThreadCreatedPayload = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  // Present only for agent-spawned threads; such threads start with
+  // controller "agent".
+  spawnedByThreadId: Schema.optional(ThreadId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -984,6 +1025,16 @@ export const ThreadUnsnoozedPayload = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 
+export const ThreadControlChangedPayload = Schema.Struct({
+  threadId: ThreadId,
+  controller: ThreadController,
+  // "handoff": an explicit thread.control.set. "human-message": a human wrote
+  // into an agent-driven thread and the decider took control for them.
+  reason: Schema.Literals(["handoff", "human-message"]),
+  changedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
 export const ThreadRuntimeModeSetPayload = Schema.Struct({
   threadId: ThreadId,
   runtimeMode: RuntimeMode,
@@ -1004,6 +1055,8 @@ export const ThreadMessageSentPayload = Schema.Struct({
   role: OrchestrationMessageRole,
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  // See OrchestrationMessage.sentByThreadId.
+  sentByThreadId: Schema.optional(ThreadId),
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
   createdAt: IsoDateTime,
@@ -1140,6 +1193,18 @@ export const OrchestrationConnectorCommandOrigin = Schema.Struct({
 });
 export type OrchestrationConnectorCommandOrigin = typeof OrchestrationConnectorCommandOrigin.Type;
 
+/**
+ * A command one thread's agent dispatched through the bridge
+ * (`/api/threads*`): spawning a thread, sending into it, releasing control.
+ * `threadId` is the calling (parent) thread, resolved from its scoped bridge
+ * token — never taken from the request body.
+ */
+export const OrchestrationAgentCommandOrigin = Schema.Struct({
+  kind: Schema.Literal("agent"),
+  threadId: ThreadId,
+});
+export type OrchestrationAgentCommandOrigin = typeof OrchestrationAgentCommandOrigin.Type;
+
 /** A command dispatched by the assistant bootstrapper on the daemon's behalf. */
 export const OrchestrationAssistantCommandOrigin = Schema.Struct({
   kind: Schema.Literal("assistant"),
@@ -1162,6 +1227,7 @@ export const OrchestrationCommandOrigin = Schema.Union([
   OrchestrationPeerCommandOrigin,
   OrchestrationConnectorCommandOrigin,
   OrchestrationAssistantCommandOrigin,
+  OrchestrationAgentCommandOrigin,
   OrchestrationSystemCommandOrigin,
 ]);
 export type OrchestrationCommandOrigin = typeof OrchestrationCommandOrigin.Type;
@@ -1238,6 +1304,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.unsnoozed"),
     payload: ThreadUnsnoozedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.control-changed"),
+    payload: ThreadControlChangedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

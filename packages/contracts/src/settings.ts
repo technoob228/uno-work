@@ -588,6 +588,11 @@ export type UnoAccountSettings = typeof UnoAccountSettings.Type;
 
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Where a chat's agent may spawn threads through the bridge
+  // (`POST /api/threads`): only its own project, or any project.
+  agentThreadsScope: Schema.Literals(["own-project", "any-project"]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("own-project" as const)),
+  ),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("local" as const satisfies ThreadEnvMode)),
   ),
@@ -702,6 +707,7 @@ const OpenCodeSettingsPatch = Schema.Struct({
 export const ServerSettingsPatch = Schema.Struct({
   // Server settings
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
+  agentThreadsScope: Schema.optionalKey(Schema.Literals(["own-project", "any-project"])),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   addProjectBaseDirectory: Schema.optionalKey(Schema.String),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
