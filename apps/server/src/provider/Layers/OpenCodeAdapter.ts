@@ -109,6 +109,16 @@ interface OpenCodeSessionContext {
 export interface OpenCodeAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
+  /**
+   * Per-session env overlay from the thread context (threadId + cwd): the
+   * browser bridge hands out a thread-scoped token, which `/api/threads*`
+   * requires to know the calling thread. Applies only to servers we spawn per
+   * session; an external `serverUrl` keeps its own environment.
+   */
+  readonly bridgeEnvironment?: (context: {
+    readonly threadId?: string;
+    readonly cwd?: string;
+  }) => Record<string, string>;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
   /**
@@ -1726,10 +1736,16 @@ export function makeOpenCodeAdapter(
               // The runtime binds the server's lifetime to the Scope.Scope
               // we provide below — closing `sessionScope` kills the child
               // process automatically. No manual `server.close()` needed.
+              const bridgeOverlay =
+                options?.bridgeEnvironment?.({ threadId: input.threadId, cwd: directory }) ?? {};
+              const sessionEnvironment =
+                options?.environment || Object.keys(bridgeOverlay).length > 0
+                  ? { ...(options?.environment ?? process.env), ...bridgeOverlay }
+                  : undefined;
               const server = yield* openCodeRuntime.connectToOpenCodeServer({
                 binaryPath,
                 serverUrl,
-                ...(options?.environment ? { environment: options.environment } : {}),
+                ...(sessionEnvironment ? { environment: sessionEnvironment } : {}),
               });
               const client = openCodeRuntime.createOpenCodeSdkClient({
                 baseUrl: server.url,
