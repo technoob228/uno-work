@@ -1306,4 +1306,74 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       }).pipe(Effect.provide(customAdapterLayer));
     },
   );
+
+  it.effect("sends Uno Work instructions only with the first prompt of a fresh session", () => {
+    const instructionsAdapterLayer = Layer.effect(
+      CursorAdapter,
+      Effect.gen(function* () {
+        const cursorConfig = Schema.decodeSync(CursorSettings)({});
+        const resolveSettings = yield* makeResolveCursorSettings;
+        return yield* makeCursorAdapter(cursorConfig, {
+          resolveSettings,
+          harnessInstructions: "UNO-TEST-INSTRUCTIONS",
+        });
+      }),
+    ).pipe(
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(
+        ServerConfig.layerTest(process.cwd(), {
+          prefix: "t3code-cursor-adapter-instructions-",
+        }),
+      ),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    return Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const serverSettings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-harness-instructions");
+      const tempDir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "cursor-acp-")));
+      const requestLogPath = path.join(tempDir, "requests.ndjson");
+      const argvLogPath = path.join(tempDir, "argv.txt");
+      yield* Effect.promise(() => writeFile(requestLogPath, "", "utf8"));
+      const wrapperPath = yield* Effect.promise(() =>
+        makeProbeWrapper(requestLogPath, argvLogPath),
+      );
+      yield* serverSettings.updateSettings({
+        providers: { cursor: { binaryPath: wrapperPath } },
+      });
+      const modelSelection = createModelSelection(ProviderInstanceId.make("cursor"), "default");
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection,
+      });
+      for (const input of ["first turn", "second turn"]) {
+        yield* adapter.sendTurn({
+          threadId,
+          input,
+          attachments: [],
+          modelSelection,
+          interactionMode: "default",
+        });
+      }
+      yield* adapter.stopSession(threadId);
+
+      const prompts = (yield* Effect.promise(() => readJsonLines(requestLogPath)))
+        .filter((entry) => entry.method === "session/prompt")
+        .map((entry) =>
+          ((entry.params as Record<string, unknown>).prompt as Array<{ text?: string }>).map(
+            (part) => part.text ?? "",
+          ),
+        );
+      assert.equal(prompts.length, 2);
+      assert.equal(prompts[0]?.length, 2);
+      assert.include(prompts[0]?.[0], "UNO-TEST-INSTRUCTIONS");
+      assert.equal(prompts[0]?.[1], "first turn");
+      assert.deepStrictEqual(prompts[1], ["second turn"]);
+    }).pipe(Effect.provide(instructionsAdapterLayer));
+  });
 });

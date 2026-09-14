@@ -18,6 +18,8 @@ import { Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { ServerConfig } from "../../config.ts";
+import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
+import { buildBrowserInstructions } from "../browserInstructions.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
@@ -111,10 +113,20 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
         hermesHome: path.join(serverConfig.stateDir, `hermes-home-${instanceId}`),
       });
       const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
+      const harnessInstructions = [
+        buildBrowserInstructions(browserBridge.baseUrl),
+        buildPluginInstructions(serverConfig.pluginsDir),
+      ]
+        .filter((block): block is string => block !== undefined && block.length > 0)
+        .join("\n\n");
       const processEnv = {
         ...unoAgentEnv,
         ...browserBridge.applyEnvironment(mergeProviderInstanceEnvironment(environment)),
         ...hermesEnvironment,
+        // Hermes' embedder slot: appended to the stable system prompt (env wins
+        // over config `agent.environment_hint`). No other system-prompt hook
+        // exists in `hermes acp`.
+        ...(harnessInstructions.length > 0 ? { HERMES_ENVIRONMENT_HINT: harnessInstructions } : {}),
       };
 
       const continuationIdentity = defaultProviderContinuationIdentity({

@@ -94,6 +94,13 @@ export interface CursorAdapterLiveOptions {
     readonly threadId?: string;
     readonly cwd?: string;
   }) => Record<string, string>;
+  /**
+   * Uno Work instructions (browser bridge, plugins, thread API). cursor-agent
+   * has no system-prompt hook, so they ride as a leading text block on the
+   * first prompt of a fresh ACP session; a resumed session already has them
+   * in its history.
+   */
+  readonly harnessInstructions?: string;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
   /**
@@ -136,6 +143,8 @@ interface CursorSessionContext {
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
   stopped: boolean;
+  /** Instructions still owed to this ACP session (see harnessInstructions). */
+  pendingHarnessInstructions: string | undefined;
 }
 
 function settlePendingApprovalsAsCancelled(
@@ -729,6 +738,10 @@ export function makeCursorAdapter(
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
             stopped: false,
+            pendingHarnessInstructions:
+              resumeSessionId !== undefined && started.sessionId === resumeSessionId
+                ? undefined
+                : options?.harnessInstructions,
           };
 
           const nf = yield* Stream.runDrain(
@@ -935,9 +948,18 @@ export function makeCursorAdapter(
           });
         }
 
+        const pendingInstructions = ctx.pendingHarnessInstructions;
         const result = yield* ctx.acp
           .prompt({
-            prompt: promptParts,
+            prompt: pendingInstructions
+              ? [
+                  {
+                    type: "text",
+                    text: `<uno-work-instructions>\n${pendingInstructions}\n</uno-work-instructions>`,
+                  },
+                  ...promptParts,
+                ]
+              : promptParts,
           })
           .pipe(
             Effect.mapError((error) =>
@@ -945,6 +967,7 @@ export function makeCursorAdapter(
             ),
           );
 
+        ctx.pendingHarnessInstructions = undefined;
         ctx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });
         ctx.session = {
           ...ctx.session,

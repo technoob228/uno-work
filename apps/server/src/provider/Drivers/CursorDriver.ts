@@ -17,6 +17,8 @@ import { Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { ServerConfig } from "../../config.ts";
+import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
+import { buildBrowserInstructions } from "../browserInstructions.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { makeCursorTextGeneration } from "../../textGeneration/CursorTextGeneration.ts";
@@ -80,7 +82,14 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const path = yield* Path.Path;
       const eventLoggers = yield* ProviderEventLoggers;
       const browserBridge = yield* BrowserBridge;
+      const serverConfig = yield* ServerConfig;
       const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
+      const harnessInstructions = [
+        buildBrowserInstructions(browserBridge.baseUrl),
+        buildPluginInstructions(serverConfig.pluginsDir),
+      ]
+        .filter((block): block is string => block !== undefined && block.length > 0)
+        .join("\n\n");
       const processEnv = {
         ...unoAgentEnv,
         ...browserBridge.applyEnvironment(mergeProviderInstanceEnvironment(environment)),
@@ -100,6 +109,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const adapter = yield* makeCursorAdapter(effectiveConfig, {
         environment: processEnv,
         bridgeEnvironment: (context) => browserBridge.scopedEnvironment(context),
+        ...(harnessInstructions.length > 0 ? { harnessInstructions } : {}),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
       });
