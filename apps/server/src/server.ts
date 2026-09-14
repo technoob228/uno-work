@@ -102,6 +102,13 @@ import {
   persistServerRuntimeState,
 } from "./serverRuntimeState.ts";
 import {
+  agentThreadsCreateRouteLayer,
+  agentThreadsGetRouteLayer,
+  agentThreadsListRouteLayer,
+  agentThreadsReleaseRouteLayer,
+  agentThreadsSendMessageRouteLayer,
+} from "./agentThreads/http.ts";
+import {
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
 } from "./orchestration/http.ts";
@@ -427,6 +434,11 @@ export const makeRoutesLayer = Layer.mergeAll(
   authPairingCredentialRouteLayer,
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
+  agentThreadsCreateRouteLayer,
+  agentThreadsGetRouteLayer,
+  agentThreadsListRouteLayer,
+  agentThreadsReleaseRouteLayer,
+  agentThreadsSendMessageRouteLayer,
   attachmentsRouteLayer,
   browserBridgeCommandRouteLayer,
   browserBridgeCommandResultRouteLayer,

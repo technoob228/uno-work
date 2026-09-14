@@ -64,9 +64,10 @@ function isUsableForDefault(provider: ServerProvider): boolean {
 /**
  * The driver's canonical default when the instance actually offers it,
  * otherwise its first advertised model. `null` means the instance reports no
- * models at all and cannot serve as a default.
+ * models at all and cannot serve as a default. Also used by the agent-threads
+ * bridge when an agent names a provider without a model.
  */
-function resolveModel(provider: ServerProvider): string | null {
+export function resolveModel(provider: ServerProvider): string | null {
   const preferred = DEFAULT_MODEL_BY_PROVIDER[provider.driver];
   if (preferred !== undefined && provider.models.some((model) => model.slug === preferred)) {
     return preferred;
