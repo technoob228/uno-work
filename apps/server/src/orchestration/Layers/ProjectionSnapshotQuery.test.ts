@@ -309,12 +309,16 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           pinnedAt: null,
           snoozedUntil: null,
           snoozedAt: null,
+          spawnedByThreadId: null,
+          controller: "human",
+          controlChangedAt: null,
           deletedAt: null,
           messages: [
             {
               id: asMessageId("message-1"),
               role: "assistant",
               text: "hello from projection",
+              sentByThreadId: null,
               turnId: asTurnId("turn-1"),
               streaming: false,
               createdAt: "2026-02-24T00:00:04.000Z",
@@ -422,6 +426,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           pinnedAt: null,
           snoozedUntil: null,
           snoozedAt: null,
+          spawnedByThreadId: null,
+          controller: "human",
+          controlChangedAt: null,
           session: {
             threadId: ThreadId.make("thread-1"),
             status: "running",

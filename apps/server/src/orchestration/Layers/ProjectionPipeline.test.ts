@@ -2278,4 +2278,96 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
       ]);
     }),
   );
+
+  it.effect("projects agent-spawned threads, agent messages and control changes", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const sql = yield* SqlClient.SqlClient;
+      const createdAt = new Date().toISOString();
+      const projectId = ProjectId.make("project-agent-spawn");
+      const parentId = ThreadId.make("thread-agent-spawn-parent");
+      const childId = ThreadId.make("thread-agent-spawn-child");
+      const agentOrigin = { kind: "agent" as const, threadId: parentId };
+      const threadCreate = (threadId: ThreadId) => ({
+        type: "thread.create" as const,
+        commandId: CommandId.make(`cmd-agent-spawn-create-${threadId}`),
+        threadId,
+        projectId,
+        title: `Thread ${threadId}`,
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      });
+      const turnStart = (id: string) => ({
+        type: "thread.turn.start" as const,
+        commandId: CommandId.make(`cmd-agent-spawn-${id}`),
+        threadId: childId,
+        message: {
+          messageId: MessageId.make(`msg-agent-spawn-${id}`),
+          role: "user" as const,
+          text: id,
+          attachments: [],
+        },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        createdAt: new Date().toISOString(),
+      });
+
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-agent-spawn-project"),
+        projectId,
+        title: "Agent spawn",
+        workspaceRoot: "/tmp/project-agent-spawn",
+        defaultModelSelection: null,
+        createdAt,
+      });
+      yield* engine.dispatch(threadCreate(parentId));
+      yield* engine.dispatch(
+        { ...threadCreate(childId), spawnedByThreadId: parentId },
+        { origin: agentOrigin },
+      );
+      yield* engine.dispatch(turnStart("from-agent"), { origin: agentOrigin });
+
+      const readThread = sql<{
+        readonly spawnedByThreadId: string | null;
+        readonly controller: string | null;
+        readonly controlChangedAt: string | null;
+      }>`
+        SELECT
+          spawned_by_thread_id AS "spawnedByThreadId",
+          controller,
+          control_changed_at AS "controlChangedAt"
+        FROM projection_threads
+        WHERE thread_id = ${childId}
+      `;
+      const spawned = yield* readThread;
+      assert.deepEqual(spawned, [
+        { spawnedByThreadId: parentId, controller: "agent", controlChangedAt: null },
+      ]);
+
+      // A human writing from the UI (no origin) takes control.
+      yield* engine.dispatch(turnStart("from-human"));
+      const taken = yield* readThread;
+      assert.strictEqual(taken[0]?.controller, "human");
+      assert.isString(taken[0]?.controlChangedAt);
+
+      const messageRows = yield* sql<{
+        readonly text: string;
+        readonly sentByThreadId: string | null;
+      }>`
+        SELECT text, sent_by_thread_id AS "sentByThreadId"
+        FROM projection_thread_messages
+        WHERE thread_id = ${childId}
+        ORDER BY created_at ASC, message_id ASC
+      `;
+      assert.deepEqual(messageRows, [
+        { text: "from-agent", sentByThreadId: parentId },
+        { text: "from-human", sentByThreadId: null },
+      ]);
+    }),
+  );
 });

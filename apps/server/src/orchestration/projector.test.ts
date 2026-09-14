@@ -93,6 +93,9 @@ describe("orchestration projector", () => {
         pinnedAt: null,
         snoozedUntil: null,
         snoozedAt: null,
+        spawnedByThreadId: null,
+        controller: "human",
+        controlChangedAt: null,
         messages: [],
         proposedPlans: [],
         activities: [],
@@ -100,6 +103,71 @@ describe("orchestration projector", () => {
         session: null,
       },
     ]);
+  });
+
+  it("starts agent-spawned threads under agent control and applies thread.control-changed", async () => {
+    const now = "2026-09-14T10:00:00.000Z";
+    const later = "2026-09-14T10:05:00.000Z";
+    const created = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-child",
+          occurredAt: now,
+          commandId: "cmd-thread-create-child",
+          payload: {
+            threadId: "thread-child",
+            projectId: "project-1",
+            title: "child",
+            modelSelection: {
+              provider: ProviderDriverKind.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            spawnedByThreadId: "thread-parent",
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+    expect(created.threads[0]).toMatchObject({
+      spawnedByThreadId: "thread-parent",
+      controller: "agent",
+      controlChangedAt: null,
+    });
+
+    const handedOff = await Effect.runPromise(
+      projectEvent(
+        created,
+        makeEvent({
+          sequence: 2,
+          type: "thread.control-changed",
+          aggregateKind: "thread",
+          aggregateId: "thread-child",
+          occurredAt: later,
+          commandId: "cmd-control-set",
+          payload: {
+            threadId: "thread-child",
+            controller: "human",
+            reason: "handoff",
+            changedAt: later,
+            updatedAt: later,
+          },
+        }),
+      ),
+    );
+    expect(handedOff.threads[0]).toMatchObject({
+      spawnedByThreadId: "thread-parent",
+      controller: "human",
+      controlChangedAt: later,
+      updatedAt: later,
+    });
   });
 
   it("fails when event payload cannot be decoded by runtime schema", async () => {

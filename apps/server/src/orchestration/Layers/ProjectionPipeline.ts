@@ -578,6 +578,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             pinnedAt: null,
             snoozedUntil: null,
             snoozedAt: null,
+            spawnedByThreadId: event.payload.spawnedByThreadId ?? null,
+            controller: event.payload.spawnedByThreadId !== undefined ? "agent" : "human",
+            controlChangedAt: null,
             latestUserMessageAt: null,
             pendingApprovalCount: 0,
             pendingUserInputCount: 0,
@@ -666,6 +669,22 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...existingRow.value,
             snoozedUntil: null,
             snoozedAt: null,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.control-changed": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            controller: event.payload.controller,
+            controlChangedAt: event.payload.changedAt,
             updatedAt: event.payload.updatedAt,
           });
           return;
@@ -845,6 +864,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             role: event.payload.role,
             text: nextText,
             ...(nextAttachments !== undefined ? { attachments: [...nextAttachments] } : {}),
+            // Streaming/complete updates never carry it; keep the original.
+            sentByThreadId: event.payload.sentByThreadId ?? previousMessage?.sentByThreadId ?? null,
             isStreaming: event.payload.streaming,
             createdAt: previousMessage?.createdAt ?? event.payload.createdAt,
             updatedAt: event.payload.updatedAt,

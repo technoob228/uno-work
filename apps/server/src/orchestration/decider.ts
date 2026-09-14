@@ -1,5 +1,6 @@
 import type {
   OrchestrationCommand,
+  OrchestrationCommandOrigin,
   OrchestrationEvent,
   OrchestrationReadModel,
   OrchestrationThread,
@@ -129,6 +130,40 @@ function unsnoozedByActivityEvent(input: {
   };
 }
 
+/** A human writing into a thread the spawning agent drives takes control in
+    the same batch, so the agent sees `human_in_control` on its next send.
+    Only human-originated sends count: the UI (no origin) and connectors
+    (Telegram/Slack relay a human). Manager/assistant/plugin/peer/system
+    sends leave control alone. */
+function isHumanOrigin(origin: OrchestrationCommandOrigin | undefined): boolean {
+  return origin === undefined || origin.kind === "connector";
+}
+
+function controlChangedEvent(input: {
+  readonly threadId: OrchestrationThread["id"];
+  readonly controller: NonNullable<OrchestrationThread["controller"]>;
+  readonly reason: "handoff" | "human-message";
+  readonly commandId: OrchestrationCommand["commandId"];
+  readonly occurredAt: string;
+}): PlannedOrchestrationEvent {
+  return {
+    ...withEventBase({
+      aggregateKind: "thread",
+      aggregateId: input.threadId,
+      occurredAt: input.occurredAt,
+      commandId: input.commandId,
+    }),
+    type: "thread.control-changed",
+    payload: {
+      threadId: input.threadId,
+      controller: input.controller,
+      reason: input.reason,
+      changedAt: input.occurredAt,
+      updatedAt: input.occurredAt,
+    },
+  };
+}
+
 type DecideOrchestrationCommandResult =
   | PlannedOrchestrationEvent
   | ReadonlyArray<PlannedOrchestrationEvent>;
@@ -136,9 +171,11 @@ type DecideOrchestrationCommandResult =
 const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
   commands,
   readModel,
+  origin,
 }: {
   readonly commands: ReadonlyArray<OrchestrationCommand>;
   readonly readModel: OrchestrationReadModel;
+  readonly origin?: OrchestrationCommandOrigin | undefined;
 }): Effect.fn.Return<ReadonlyArray<PlannedOrchestrationEvent>, OrchestrationCommandInvariantError> {
   let nextReadModel = readModel;
   let nextSequence = readModel.snapshotSequence;
@@ -148,6 +185,7 @@ const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
     const decided = yield* decideOrchestrationCommand({
       command: nextCommand,
       readModel: nextReadModel,
+      origin,
     });
     const nextEvents = Array.isArray(decided) ? decided : [decided];
     for (const nextEvent of nextEvents) {
@@ -166,9 +204,12 @@ const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
 export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
   command,
   readModel,
+  origin,
 }: {
   readonly command: OrchestrationCommand;
   readonly readModel: OrchestrationReadModel;
+  /** Who dispatched the command (engine envelope). Absent = a human in the UI. */
+  readonly origin?: OrchestrationCommandOrigin | undefined;
 }): Effect.fn.Return<DecideOrchestrationCommandResult, OrchestrationCommandInvariantError> {
   switch (command.type) {
     case "project.create": {
@@ -244,6 +285,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (activeThreads.length > 0) {
         return yield* decideCommandSequence({
           readModel,
+          origin,
           commands: [
             ...activeThreads.map(
               (thread): Extract<OrchestrationCommand, { type: "thread.delete" }> => ({
@@ -288,6 +330,24 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      const spawnedByThreadId = command.spawnedByThreadId;
+      if (spawnedByThreadId !== undefined) {
+        // Agent parentage is proven by the dispatch origin (the bridge resolves
+        // it from the caller's scoped token), never by the command body alone.
+        if (origin?.kind !== "agent" || origin.threadId !== spawnedByThreadId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `spawn_origin_mismatch: Thread '${command.threadId}' claims parent '${spawnedByThreadId}' but was not dispatched by that thread's agent.`,
+          });
+        }
+        const parent = readModel.threads.find((thread) => thread.id === spawnedByThreadId);
+        if (parent === undefined || parent.deletedAt !== null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `parent_thread_not_found: Parent thread '${spawnedByThreadId}' does not exist.`,
+          });
+        }
+      }
       return {
         ...withEventBase({
           aggregateKind: "thread",
@@ -305,6 +365,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           interactionMode: command.interactionMode,
           branch: command.branch,
           worktreePath: command.worktreePath,
+          ...(spawnedByThreadId !== undefined ? { spawnedByThreadId } : {}),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -496,6 +557,45 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.control.set": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (thread.spawnedByThreadId == null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `not_agent_thread: Thread '${command.threadId}' was not spawned by an agent; there is no one to hand control to.`,
+        });
+      }
+      if (origin?.kind === "agent") {
+        if (origin.threadId !== thread.spawnedByThreadId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `not_your_thread: Thread '${command.threadId}' was not spawned by thread '${origin.threadId}'.`,
+          });
+        }
+        if (command.controller !== "human") {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `agent_cannot_take_control: An agent may only release thread '${command.threadId}' to the human.`,
+          });
+        }
+      }
+      // Idempotent: handing control to whoever already holds it is a no-op.
+      if ((thread.controller ?? "human") === command.controller) {
+        return [];
+      }
+      return controlChangedEvent({
+        threadId: command.threadId,
+        controller: command.controller,
+        reason: "handoff",
+        commandId: command.commandId,
+        occurredAt: nowIso(),
+      });
+    }
+
     case "thread.runtime-mode.set": {
       yield* requireThread({
         readModel,
@@ -572,6 +672,23 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Proposed plan '${sourceProposedPlan?.planId}' belongs to thread '${sourceThread.id}' in a different project.`,
         });
       }
+      const targetController = targetThread.controller ?? "human";
+      if (origin?.kind === "agent") {
+        // An agent may only drive threads it spawned, and only while the
+        // human has not taken over. The bridge maps these prefixes to 403/409.
+        if (targetThread.spawnedByThreadId !== origin.threadId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `not_your_thread: Thread '${command.threadId}' was not spawned by thread '${origin.threadId}'.`,
+          });
+        }
+        if (targetController !== "agent") {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `human_in_control: A human has taken control of thread '${command.threadId}'.`,
+          });
+        }
+      }
       const userMessageEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...withEventBase({
           aggregateKind: "thread",
@@ -586,6 +703,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           role: "user",
           text: command.message.text,
           attachments: command.message.attachments,
+          ...(origin?.kind === "agent" ? { sentByThreadId: origin.threadId } : {}),
           turnId: null,
           streaming: false,
           createdAt: command.createdAt,
@@ -621,9 +739,24 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         commandId: command.commandId,
         occurredAt: command.createdAt,
       });
-      return wakeEvent === null
-        ? [userMessageEvent, turnStartRequestedEvent]
-        : [wakeEvent, userMessageEvent, turnStartRequestedEvent];
+      // A human writing into an agent-driven thread takes control first, so
+      // the message lands in a human-controlled thread.
+      const takeControlEvent =
+        targetController === "agent" && isHumanOrigin(origin)
+          ? controlChangedEvent({
+              threadId: command.threadId,
+              controller: "human",
+              reason: "human-message",
+              commandId: command.commandId,
+              occurredAt: command.createdAt,
+            })
+          : null;
+      return [
+        ...(wakeEvent === null ? [] : [wakeEvent]),
+        ...(takeControlEvent === null ? [] : [takeControlEvent]),
+        userMessageEvent,
+        turnStartRequestedEvent,
+      ];
     }
 
     case "thread.turn.interrupt": {

@@ -15,6 +15,7 @@ import {
   ProjectMetaUpdatedPayload,
   ThreadActivityAppendedPayload,
   ThreadArchivedPayload,
+  ThreadControlChangedPayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
@@ -268,6 +269,9 @@ export function projectEvent(
             pinnedAt: null,
             snoozedUntil: null,
             snoozedAt: null,
+            spawnedByThreadId: payload.spawnedByThreadId ?? null,
+            controller: payload.spawnedByThreadId !== undefined ? "agent" : "human",
+            controlChangedAt: null,
             deletedAt: null,
             messages: [],
             activities: [],
@@ -360,6 +364,18 @@ export function projectEvent(
         })),
       );
 
+    case "thread.control-changed":
+      return decodeForEvent(ThreadControlChangedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            controller: payload.controller,
+            controlChangedAt: payload.changedAt,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
     case "thread.runtime-mode-set":
       return decodeForEvent(ThreadRuntimeModeSetPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
@@ -407,6 +423,9 @@ export function projectEvent(
             role: payload.role,
             text: payload.text,
             ...(payload.attachments !== undefined ? { attachments: payload.attachments } : {}),
+            ...(payload.sentByThreadId !== undefined
+              ? { sentByThreadId: payload.sentByThreadId }
+              : {}),
             turnId: payload.turnId,
             streaming: payload.streaming,
             createdAt: payload.createdAt,

@@ -27,6 +27,9 @@ export const ProjectionThreadMessage = Schema.Struct({
   role: OrchestrationMessageRole,
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  // Migration 044: the thread whose agent sent this user message. Optional so
+  // existing row literals compile; absent is written as NULL.
+  sentByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   isStreaming: Schema.Boolean,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

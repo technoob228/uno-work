@@ -1,4 +1,4 @@
-import { ProjectId, ThreadId, ProviderInstanceId } from "@t3tools/contracts";
+import { MessageId, ProjectId, ThreadId, ProviderInstanceId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -6,13 +6,16 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "./Sqlite.ts";
 import { ProjectionProjectRepositoryLive } from "./ProjectionProjects.ts";
 import { ProjectionThreadRepositoryLive } from "./ProjectionThreads.ts";
+import { ProjectionThreadMessageRepositoryLive } from "./ProjectionThreadMessages.ts";
 import { ProjectionProjectRepository } from "../Services/ProjectionProjects.ts";
 import { ProjectionThreadRepository } from "../Services/ProjectionThreads.ts";
+import { ProjectionThreadMessageRepository } from "../Services/ProjectionThreadMessages.ts";
 
 const projectionRepositoriesLayer = it.layer(
   Layer.mergeAll(
     ProjectionProjectRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     ProjectionThreadRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+    ProjectionThreadMessageRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     SqlitePersistenceMemory,
   ),
 );
@@ -165,6 +168,73 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       const snoozed = Option.getOrNull(yield* threads.getById({ threadId }));
       assert.strictEqual(snoozed?.snoozedUntil, "2026-09-14T09:00:00.000Z");
       assert.strictEqual(snoozed?.snoozedAt, "2026-09-13T12:00:00.000Z");
+    }),
+  );
+
+  it.effect("round-trips agent-spawned thread and message columns (migration 044)", () =>
+    Effect.gen(function* () {
+      const threads = yield* ProjectionThreadRepository;
+      const messages = yield* ProjectionThreadMessageRepository;
+      const threadId = ThreadId.make("thread-agent-child");
+      const parentThreadId = ThreadId.make("thread-agent-parent");
+      const row = {
+        threadId,
+        projectId: ProjectId.make("project-agent"),
+        title: "Agent child thread",
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        branch: null,
+        worktreePath: null,
+        latestTurnId: null,
+        createdAt: "2026-09-14T00:00:00.000Z",
+        updatedAt: "2026-09-14T00:00:00.000Z",
+        archivedAt: null,
+        pinnedAt: null,
+        latestUserMessageAt: null,
+        pendingApprovalCount: 0,
+        pendingUserInputCount: 0,
+        hasActionableProposedPlan: 0,
+        deletedAt: null,
+      };
+
+      // Rows written without the new fields persist as NULL.
+      yield* threads.upsert(row);
+      const plain = Option.getOrNull(yield* threads.getById({ threadId }));
+      assert.strictEqual(plain?.spawnedByThreadId, null);
+      assert.strictEqual(plain?.controller, null);
+      assert.strictEqual(plain?.controlChangedAt, null);
+
+      yield* threads.upsert({
+        ...row,
+        spawnedByThreadId: parentThreadId,
+        controller: "agent",
+        controlChangedAt: "2026-09-14T01:00:00.000Z",
+      });
+      const spawned = Option.getOrNull(yield* threads.getById({ threadId }));
+      assert.strictEqual(spawned?.spawnedByThreadId, parentThreadId);
+      assert.strictEqual(spawned?.controller, "agent");
+      assert.strictEqual(spawned?.controlChangedAt, "2026-09-14T01:00:00.000Z");
+
+      const message = {
+        messageId: MessageId.make("message-agent-sent"),
+        threadId,
+        turnId: null,
+        role: "user" as const,
+        text: "from the parent agent",
+        isStreaming: false,
+        createdAt: "2026-09-14T00:00:01.000Z",
+        updatedAt: "2026-09-14T00:00:01.000Z",
+      };
+      yield* messages.upsert(message);
+      const humanMessage = Option.getOrNull(
+        yield* messages.getByMessageId({ messageId: message.messageId }),
+      );
+      assert.strictEqual(humanMessage?.sentByThreadId, null);
+
+      yield* messages.upsert({ ...message, sentByThreadId: parentThreadId });
+      const listed = yield* messages.listByThreadId({ threadId });
+      assert.strictEqual(listed[0]?.sentByThreadId, parentThreadId);
     }),
   );
   const makeIdentity = (canonicalKey: string, rootPath: string) => ({

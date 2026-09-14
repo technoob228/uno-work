@@ -147,6 +147,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         const eventBase = yield* decideOrchestrationCommand({
           command: envelope.command,
           readModel: commandReadModel,
+          origin: envelope.origin,
         });
         const decidedEventBases = Array.isArray(eventBase) ? eventBase : [eventBase];
         // Stamp non-user provenance (manager tool layer) into every produced
