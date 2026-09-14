@@ -167,6 +167,7 @@ import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { UnoBillingTopUpBanner } from "./chat/UnoBillingTopUpBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { ThreadControlBar } from "./chat/ThreadControlBar";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
@@ -3943,6 +3944,14 @@ export default function ChatView(props: ChatViewProps) {
               }
             >
               <div className={cn("relative isolate", isPreviewFocusMode && "pointer-events-auto")}>
+                {isServerThread && activeThread?.spawnedByThreadId ? (
+                  <ThreadControlBar
+                    environmentId={activeThread.environmentId}
+                    threadId={activeThread.id}
+                    spawnedByThreadId={activeThread.spawnedByThreadId}
+                    controller={activeThread.controller}
+                  />
+                ) : null}
                 <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                 <div className="relative z-10">
                   <ChatComposer

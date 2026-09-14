@@ -17,6 +17,7 @@ import type {
   CheckpointRef,
   ProviderInteractionMode,
   RuntimeMode,
+  ThreadController,
 } from "@t3tools/contracts";
 
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
@@ -63,6 +64,8 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   text: string;
   attachments?: ChatAttachment[];
+  /** Set on a user-role message another thread's agent sent; absent = a human wrote it. */
+  sentByThreadId?: ThreadId | null | undefined;
   turnId?: TurnId | null;
   createdAt: string;
   completedAt?: string | undefined;
@@ -131,6 +134,11 @@ export interface Thread {
   worktreePath: string | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
+  /** Thread whose agent created this one; absent/null for human-created threads. */
+  spawnedByThreadId?: ThreadId | null | undefined;
+  /** Who drives the thread; absent means "human". */
+  controller?: ThreadController | undefined;
+  controlChangedAt?: string | null | undefined;
 }
 
 export interface ThreadShell {
@@ -149,6 +157,11 @@ export interface ThreadShell {
   updatedAt?: string | undefined;
   branch: string | null;
   worktreePath: string | null;
+  /** Thread whose agent created this one; absent/null for human-created threads. */
+  spawnedByThreadId?: ThreadId | null | undefined;
+  /** Who drives the thread; absent means "human". */
+  controller?: ThreadController | undefined;
+  controlChangedAt?: string | null | undefined;
 }
 
 export interface ThreadTurnState {
@@ -177,6 +190,11 @@ export interface SidebarThreadSummary {
   /** Snooze wake time; absent/null when not snoozed or on pre-snooze servers. */
   snoozedUntil?: string | null | undefined;
   snoozedAt?: string | null | undefined;
+  /** Thread whose agent created this one; absent/null for human-created threads. */
+  spawnedByThreadId?: ThreadId | null | undefined;
+  /** Who drives the thread; absent means "human". */
+  controller?: ThreadController | undefined;
+  controlChangedAt?: string | null | undefined;
 }
 
 export interface ThreadSession {

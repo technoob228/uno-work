@@ -197,6 +197,9 @@ import {
   readEnvironmentSupportsThreadSnooze,
   useEnvironmentSupportsThreadSnooze,
 } from "../environments/threadSnoozeSupport";
+import { useEnvironmentSupportsAgentThreads } from "../environments/agentThreadsSupport";
+import { useThreadTitle } from "../hooks/useThreadTitle";
+import { describeSpawnedThreadOrigin } from "../agentThreads.logic";
 import {
   resolveSidebarProjectThreadList,
   type SidebarInboxListItem,
@@ -423,6 +426,40 @@ const SidebarThreadSnoozeMenu = memo(function SidebarThreadSnoozeMenu(
         </MenuPopup>
       </Menu>
     </div>
+  );
+});
+
+/**
+ * Bot mark on a row another chat's agent created, naming that chat. Hidden
+ * when the row's machine does not advertise `agentThreads`.
+ */
+const SidebarSpawnedThreadBadge = memo(function SidebarSpawnedThreadBadge(props: {
+  environmentId: EnvironmentId;
+  threadId: ThreadId;
+  spawnedByThreadId: ThreadId;
+}) {
+  const supported = useEnvironmentSupportsAgentThreads(props.environmentId);
+  const parentTitle = useThreadTitle(props.environmentId, props.spawnedByThreadId);
+  if (!supported) return null;
+  const label = describeSpawnedThreadOrigin(parentTitle);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            role="img"
+            aria-label={label}
+            data-testid={`thread-spawned-badge-${props.threadId}`}
+            className="inline-flex shrink-0 items-center justify-center text-muted-foreground/70"
+          >
+            <BotIcon className="size-3" />
+          </span>
+        }
+      />
+      <TooltipPopup side="top" className="max-w-80 whitespace-normal leading-tight">
+        {label}
+      </TooltipPopup>
+    </Tooltip>
   );
 });
 
@@ -787,6 +824,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               className="size-3 shrink-0 -rotate-45 text-muted-foreground/70"
             />
           )}
+          {thread.spawnedByThreadId ? (
+            <SidebarSpawnedThreadBadge
+              environmentId={thread.environmentId}
+              threadId={thread.id}
+              spawnedByThreadId={thread.spawnedByThreadId}
+            />
+          ) : null}
           {renamingThreadKey === threadKey ? (
             <input
               ref={handleRenameInputRef}

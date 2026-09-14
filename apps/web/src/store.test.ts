@@ -154,6 +154,10 @@ function makeState(thread: Thread): AppState {
         updatedAt: thread.updatedAt,
         branch: thread.branch,
         worktreePath: thread.worktreePath,
+        ...(thread.spawnedByThreadId !== undefined
+          ? { spawnedByThreadId: thread.spawnedByThreadId }
+          : {}),
+        ...(thread.controller !== undefined ? { controller: thread.controller } : {}),
       },
     },
     threadSessionById: {
@@ -1207,5 +1211,82 @@ describe("incremental orchestration updates", () => {
       state: "running",
     });
     expect(threadsOf(next)[0]?.latestTurn?.sourceProposedPlan).toBeUndefined();
+  });
+});
+
+describe("agent-spawned threads", () => {
+  it("marks a thread created with spawnedByThreadId as agent-driven", () => {
+    const parent = makeThread();
+    const childId = ThreadId.make("thread-child");
+    const next = applyOrchestrationEvent(
+      makeState(parent),
+      makeEvent("thread.created", {
+        threadId: childId,
+        projectId: parent.projectId,
+        title: "Child",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: DEFAULT_MODEL,
+        },
+        runtimeMode: DEFAULT_RUNTIME_MODE,
+        interactionMode: DEFAULT_INTERACTION_MODE,
+        branch: null,
+        worktreePath: null,
+        spawnedByThreadId: parent.id,
+        createdAt: "2026-02-27T00:00:01.000Z",
+        updatedAt: "2026-02-27T00:00:01.000Z",
+      }),
+      localEnvironmentId,
+    );
+
+    const child = selectThreadByRef(next, scopeThreadRef(localEnvironmentId, childId));
+    expect(child?.spawnedByThreadId).toBe(parent.id);
+    expect(child?.controller).toBe("agent");
+    const parentAfter = selectThreadByRef(next, scopeThreadRef(localEnvironmentId, parent.id));
+    expect(parentAfter?.spawnedByThreadId ?? null).toBeNull();
+    expect(parentAfter?.controller ?? "human").toBe("human");
+  });
+
+  it("applies thread.control-changed and keeps sentByThreadId on messages", () => {
+    const thread = makeThread({
+      spawnedByThreadId: ThreadId.make("thread-parent"),
+      controller: "agent",
+    });
+    const afterMessage = applyOrchestrationEvent(
+      makeState(thread),
+      makeEvent("thread.message-sent", {
+        threadId: thread.id,
+        messageId: MessageId.make("message-agent"),
+        role: "user",
+        text: "do the thing",
+        sentByThreadId: ThreadId.make("thread-parent"),
+        turnId: null,
+        streaming: false,
+        createdAt: "2026-02-27T00:00:01.000Z",
+        updatedAt: "2026-02-27T00:00:01.000Z",
+      }),
+      localEnvironmentId,
+    );
+    const next = applyOrchestrationEvent(
+      afterMessage,
+      makeEvent(
+        "thread.control-changed",
+        {
+          threadId: thread.id,
+          controller: "human",
+          reason: "handoff",
+          changedAt: "2026-02-27T00:00:02.000Z",
+          updatedAt: "2026-02-27T00:00:02.000Z",
+        },
+        { sequence: 2 },
+      ),
+      localEnvironmentId,
+    );
+
+    const updated = selectThreadByRef(next, scopeThreadRef(localEnvironmentId, thread.id));
+    expect(updated?.controller).toBe("human");
+    expect(updated?.controlChangedAt).toBe("2026-02-27T00:00:02.000Z");
+    expect(updated?.spawnedByThreadId).toBe(ThreadId.make("thread-parent"));
+    expect(updated?.messages[0]?.sentByThreadId).toBe(ThreadId.make("thread-parent"));
   });
 });

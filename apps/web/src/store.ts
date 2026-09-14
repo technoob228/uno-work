@@ -200,6 +200,7 @@ function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage)
     streaming: message.streaming,
     ...(message.streaming ? {} : { completedAt: message.updatedAt }),
     ...(attachments && attachments.length > 0 ? { attachments } : {}),
+    ...(message.sentByThreadId ? { sentByThreadId: message.sentByThreadId } : {}),
   };
 }
 
@@ -272,6 +273,9 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     worktreePath: thread.worktreePath,
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
+    spawnedByThreadId: thread.spawnedByThreadId ?? null,
+    controller: thread.controller ?? "human",
+    controlChangedAt: thread.controlChangedAt ?? null,
   };
 }
 
@@ -300,6 +304,9 @@ function mapThreadShell(
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    spawnedByThreadId: thread.spawnedByThreadId ?? null,
+    controller: thread.controller ?? "human",
+    controlChangedAt: thread.controlChangedAt ?? null,
   };
   const session = thread.session ? mapSession(thread.session) : null;
   const turnState: ThreadTurnState = {
@@ -326,6 +333,9 @@ function mapThreadShell(
     hasActionableProposedPlan: thread.hasActionableProposedPlan,
     snoozedUntil: thread.snoozedUntil ?? null,
     snoozedAt: thread.snoozedAt ?? null,
+    spawnedByThreadId: thread.spawnedByThreadId ?? null,
+    controller: thread.controller ?? "human",
+    controlChangedAt: thread.controlChangedAt ?? null,
   };
   return {
     shell,
@@ -352,6 +362,9 @@ function toThreadShell(thread: Thread): ThreadShell {
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    spawnedByThreadId: thread.spawnedByThreadId ?? null,
+    controller: thread.controller ?? "human",
+    controlChangedAt: thread.controlChangedAt ?? null,
   };
 }
 
@@ -431,7 +444,10 @@ function sidebarThreadSummariesEqual(
     left.hasPendingUserInput === right.hasPendingUserInput &&
     left.hasActionableProposedPlan === right.hasActionableProposedPlan &&
     (left.snoozedUntil ?? null) === (right.snoozedUntil ?? null) &&
-    (left.snoozedAt ?? null) === (right.snoozedAt ?? null)
+    (left.snoozedAt ?? null) === (right.snoozedAt ?? null) &&
+    (left.spawnedByThreadId ?? null) === (right.spawnedByThreadId ?? null) &&
+    (left.controller ?? "human") === (right.controller ?? "human") &&
+    (left.controlChangedAt ?? null) === (right.controlChangedAt ?? null)
   );
 }
 
@@ -452,7 +468,10 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.pinnedAt === right.pinnedAt &&
     left.updatedAt === right.updatedAt &&
     left.branch === right.branch &&
-    left.worktreePath === right.worktreePath
+    left.worktreePath === right.worktreePath &&
+    (left.spawnedByThreadId ?? null) === (right.spawnedByThreadId ?? null) &&
+    (left.controller ?? "human") === (right.controller ?? "human") &&
+    (left.controlChangedAt ?? null) === (right.controlChangedAt ?? null)
   );
 }
 
@@ -1299,6 +1318,13 @@ function applyEnvironmentOrchestrationEvent(
           activities: [],
           checkpoints: [],
           session: null,
+          ...(event.payload.spawnedByThreadId !== undefined
+            ? {
+                spawnedByThreadId: event.payload.spawnedByThreadId,
+                controller: "agent" as const,
+                controlChangedAt: event.payload.createdAt,
+              }
+            : {}),
         },
         environmentId,
       );
@@ -1333,6 +1359,14 @@ function applyEnvironmentOrchestrationEvent(
         ...(event.payload.worktreePath !== undefined
           ? { worktreePath: event.payload.worktreePath }
           : {}),
+        updatedAt: event.payload.updatedAt,
+      }));
+
+    case "thread.control-changed":
+      return updateThreadState(state, event.payload.threadId, (thread) => ({
+        ...thread,
+        controller: event.payload.controller,
+        controlChangedAt: event.payload.changedAt,
         updatedAt: event.payload.updatedAt,
       }));
 
@@ -1413,6 +1447,9 @@ function applyEnvironmentOrchestrationEvent(
           ...(event.payload.attachments !== undefined
             ? { attachments: event.payload.attachments }
             : {}),
+          ...(event.payload.sentByThreadId !== undefined
+            ? { sentByThreadId: event.payload.sentByThreadId }
+            : {}),
           turnId: event.payload.turnId,
           streaming: event.payload.streaming,
           createdAt: event.payload.createdAt,
@@ -1442,6 +1479,7 @@ function applyEnvironmentOrchestrationEvent(
                     ...(message.attachments !== undefined
                       ? { attachments: message.attachments }
                       : {}),
+                    ...(message.sentByThreadId ? { sentByThreadId: message.sentByThreadId } : {}),
                   },
             )
           : [...thread.messages, message];

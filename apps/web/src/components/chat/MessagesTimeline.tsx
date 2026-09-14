@@ -1,4 +1,4 @@
-import { type EnvironmentId, type MessageId, type TurnId } from "@t3tools/contracts";
+import { type EnvironmentId, type MessageId, type ThreadId, type TurnId } from "@t3tools/contracts";
 import {
   createContext,
   memo,
@@ -62,6 +62,8 @@ import {
 } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
+import { describeAgentSentMessage } from "~/agentThreads.logic";
+import { useThreadTitle } from "~/hooks/useThreadTitle";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
 
@@ -299,6 +301,22 @@ function formatVideoDuration(durationMs: number): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+/** "From the agent in “<thread>”" above a user message another chat's agent sent. */
+const AgentSentMessageLabel = memo(function AgentSentMessageLabel({
+  sentByThreadId,
+}: {
+  sentByThreadId: ThreadId;
+}) {
+  const ctx = use(TimelineRowCtx);
+  const senderTitle = useThreadTitle(ctx.activeThreadEnvironmentId, sentByThreadId);
+  return (
+    <div className="mb-1.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+      <BotIcon aria-hidden="true" className="size-3 shrink-0 text-info" />
+      <span className="truncate">{describeAgentSentMessage(senderTitle)}</span>
+    </div>
+  );
+});
+
 function TimelineRowContent({ row }: { row: TimelineRow }) {
   const ctx = use(TimelineRowCtx);
 
@@ -329,9 +347,20 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
           const terminalContexts = displayedUserMessage.contexts;
           const canRevertAgentWork = typeof row.revertTurnCount === "number";
+          const sentByThreadId = row.message.sentByThreadId ?? null;
           return (
             <div className="flex justify-end">
-              <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
+              <div
+                className={cn(
+                  "group relative max-w-[80%] rounded-2xl rounded-br-sm border px-4 py-3",
+                  // Sent by another chat's agent: same side, but visibly not the human's own bubble.
+                  sentByThreadId
+                    ? "border-dashed border-info/30 bg-info/4"
+                    : "border-border bg-secondary",
+                )}
+                data-sent-by-agent={sentByThreadId ? "true" : undefined}
+              >
+                {sentByThreadId && <AgentSentMessageLabel sentByThreadId={sentByThreadId} />}
                 {userImages.length > 0 && (
                   <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                     {userImages.map((image) => (

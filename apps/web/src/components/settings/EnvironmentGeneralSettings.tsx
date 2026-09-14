@@ -26,6 +26,7 @@ import {
   useUpdateEnvironmentSettings,
 } from "~/environments/settings/serverSettings";
 import { isPrimaryEnvironmentId } from "~/environments/http/target";
+import { useEnvironmentSupportsAgentThreads } from "~/environments/agentThreadsSupport";
 import { useSettings } from "~/hooks/useSettings";
 import { resolveAndPersistPreferredEditor } from "~/editorPreferences";
 import { ensureLocalApi } from "~/localApi";
@@ -77,6 +78,7 @@ export function EnvironmentGeneralSettings({
   const [isOpening, setIsOpening] = useState(false);
 
   const isLocalDaemon = isPrimaryEnvironmentId(environmentId);
+  const supportsAgentThreads = useEnvironmentSupportsAgentThreads(environmentId);
   const settings = serverSettings ?? DEFAULT_UNIFIED_SETTINGS;
   const unoApiKey = settings.uno?.apiKey ?? "";
   const observability = config?.observability ?? null;
@@ -326,6 +328,38 @@ export function EnvironmentGeneralSettings({
             </Select>
           }
         />
+
+        {supportsAgentThreads ? (
+          <SettingsRow
+            title="Chats can create chats in other projects"
+            description="An agent in a chat can start new chats and hand work to them. Off: only in its own project. On: in any project on this machine."
+            resetAction={
+              settings.agentThreadsScope !== DEFAULT_UNIFIED_SETTINGS.agentThreadsScope ? (
+                <SettingResetButton
+                  label="cross-project chats"
+                  onClick={() =>
+                    save(
+                      { agentThreadsScope: DEFAULT_UNIFIED_SETTINGS.agentThreadsScope },
+                      "Could not save cross-project chats",
+                    )
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.agentThreadsScope === "any-project"}
+                onCheckedChange={(checked) =>
+                  save(
+                    { agentThreadsScope: checked ? "any-project" : "own-project" },
+                    "Could not save cross-project chats",
+                  )
+                }
+                aria-label="Let chats create chats in other projects"
+              />
+            }
+          />
+        ) : null}
 
         <SettingsRow
           title="Add project starts in"
