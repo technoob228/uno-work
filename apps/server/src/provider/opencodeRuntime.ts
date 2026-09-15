@@ -30,6 +30,7 @@ import {
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { isWindowsCommandNotFound } from "../processRunner.ts";
+import { withBunScratchDir } from "./bunScratchDir.ts";
 import { collectStreamAsString } from "./providerSnapshot.ts";
 import { NetService } from "@t3tools/shared/Net";
 
@@ -278,10 +279,12 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
 
   const runOpenCodeCommand: OpenCodeRuntimeShape["runOpenCodeCommand"] = (input) =>
     Effect.gen(function* () {
+      // Released after the child's own finalizer (scopes close in reverse).
+      const env = yield* withBunScratchDir(input.environment ?? process.env);
       const child = yield* spawner.spawn(
         ChildProcess.make(input.binaryPath, [...input.args], {
           shell: process.platform === "win32",
-          env: input.environment ?? process.env,
+          env,
         }),
       );
       const [stdout, stderr, code] = yield* Effect.all(
@@ -334,7 +337,11 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
       const timeoutMs = input.timeoutMs ?? DEFAULT_OPENCODE_SERVER_TIMEOUT_MS;
       const args = ["serve", `--hostname=${hostname}`, `--port=${port}`];
 
-      const baseEnv = input.environment ?? process.env;
+      // Registered before the child's kill finalizer, so it runs after the
+      // server is gone: the extracted native library is removed with it.
+      const baseEnv = yield* withBunScratchDir(input.environment ?? process.env).pipe(
+        Effect.provideService(Scope.Scope, runtimeScope),
+      );
       const child = yield* spawner
         .spawn(
           ChildProcess.make(input.binaryPath, args, {
