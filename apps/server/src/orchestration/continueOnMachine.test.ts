@@ -10,31 +10,37 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
+  THREAD_CONTINUE_CHUNK_BYTES,
+  THREAD_CONTINUE_LEGACY_CLIENT_MESSAGE,
+  THREAD_CONTINUE_MAX_BUNDLE_BYTES,
   ThreadContinueError,
+  type ThreadContinueLandInput,
   ThreadId,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Option } from "effect";
 import { describe } from "vitest";
 
+import type { ContinueTransferStoreShape } from "../git/continueTransferStore.ts";
 import type { ContinueTransportShape } from "../git/continueTransport.ts";
 import {
-  continueBranchForThread,
+  continueBranchName,
   type ContinueOnMachineDeps,
-  makeThreadContinueCleanup,
   makeThreadContinueComplete,
   makeThreadContinueInspect,
-  makeThreadContinuePrepare,
-  makeThreadContinueReceive,
-  NO_REMOTE_MESSAGE,
+  makeThreadContinueLand,
+  makeThreadContinueLegacyRefusal,
+  makeThreadContinueSnapshot,
   resolveTargetModelSelection,
-  threadIdFromContinueBranch,
 } from "./continueOnMachine.ts";
 import { CONTINUE_SEED_PREFIX, HANDOFF_PREAMBLE_START } from "./handoff.ts";
 
 const PROJECT_ID = ProjectId.make("project-1");
 const THREAD_ID = ThreadId.make("thread-1");
 const NOW = "2026-09-12T10:00:00.000Z";
+const TRANSFER_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const TRANSFER_REF = `refs/t3/continue/${TRANSFER_ID}`;
+const WORKTREES = "/home/unowork/.t3/worktrees";
 
 const provider = (input: {
   readonly instanceId: string;
@@ -147,8 +153,8 @@ const threadShell = (overrides: Partial<OrchestrationThreadShell> = {}): Orchest
     ...overrides,
   }) as unknown as OrchestrationThreadShell;
 
-interface TransportCall {
-  readonly op: keyof ContinueTransportShape;
+interface Call {
+  readonly op: string;
   readonly input: unknown;
 }
 
@@ -158,10 +164,15 @@ interface Fixture {
     readonly command: OrchestrationCommand;
     readonly origin: OrchestrationCommandOrigin | undefined;
   }>;
-  readonly transportCalls: TransportCall[];
-  readonly writtenEnv: Array<{ readonly root: string; readonly text: string }>;
+  readonly transportCalls: Call[];
+  readonly transferCalls: Call[];
+  readonly envReads: string[];
+  readonly writtenEnv: Array<{ readonly folder: string; readonly text: string }>;
   readonly clones: Array<{ readonly remoteUrl: string; readonly destinationPath: string }>;
+  readonly madeDirectories: string[];
 }
+
+const DIGEST = { sizeBytes: 5 * 1024 * 1024, sha256: "abc123" };
 
 function makeFixture(options?: {
   readonly thread?: Option.Option<OrchestrationThread>;
@@ -169,46 +180,66 @@ function makeFixture(options?: {
   readonly projects?: ReadonlyArray<OrchestrationProjectShell>;
   readonly providers?: ReadonlyArray<ServerProvider>;
   readonly transport?: Partial<ContinueTransportShape>;
-  readonly envText?: string | null;
+  readonly transfers?: Partial<ContinueTransferStoreShape>;
+  readonly envFiles?: Readonly<Record<string, string>>;
   readonly existingDirectories?: ReadonlySet<string>;
   readonly writeEnvFails?: boolean;
 }): Fixture {
   const dispatched: Fixture["dispatched"] = [];
-  const transportCalls: TransportCall[] = [];
+  const transportCalls: Call[] = [];
+  const transferCalls: Call[] = [];
+  const envReads: string[] = [];
   const writtenEnv: Fixture["writtenEnv"] = [];
   const clones: Fixture["clones"] = [];
+  const madeDirectories: string[] = [];
   const projects = [...(options?.projects ?? [projectShell()])];
 
-  const record =
-    <K extends keyof ContinueTransportShape>(op: K, impl: ContinueTransportShape[K]) =>
-    (...args: Parameters<ContinueTransportShape[K]>) => {
-      transportCalls.push({ op, input: args.length === 1 ? args[0] : args });
-      return (impl as (...inner: unknown[]) => ReturnType<ContinueTransportShape[K]>)(...args);
-    };
+  const recordAll = <T extends object>(calls: Call[], impl: T): T =>
+    Object.fromEntries(
+      Object.entries(impl).map(([op, value]) => [
+        op,
+        typeof value === "function"
+          ? (...args: unknown[]) => {
+              calls.push({ op, input: args.length === 1 ? args[0] : args });
+              return (value as (...inner: unknown[]) => unknown)(...args);
+            }
+          : Effect.suspend(() => {
+              calls.push({ op, input: undefined });
+              return value as Effect.Effect<unknown>;
+            }),
+      ]),
+    ) as T;
 
   const baseTransport: ContinueTransportShape = {
     isGitRepository: () => Effect.succeed(true),
     readStatus: () => Effect.succeed({ commit: "headsha", branch: "feat/login", changedFiles: 0 }),
-    resolveRemote: (_cwd, name) =>
-      Effect.succeed({ name: name ?? "origin", url: "git@github.com:uno/uno.git" }),
+    resolveRemote: () => Effect.succeed({ name: "origin", url: "git@github.com:uno/uno.git" }),
     readHead: () => Effect.succeed({ commit: "headsha", branch: "feat/login" }),
     captureSnapshot: () => Effect.succeed("wipsha"),
-    pushRef: () => Effect.void,
-    deleteRemoteBranch: () => Effect.void,
-    fetchBranch: () => Effect.succeed("wipsha"),
+    createBundle: () => Effect.void,
+    verifyBundle: () => Effect.succeed({ ok: true, detail: "" }),
+    fetchRemotes: () => Effect.void,
+    fetchBundle: () => Effect.succeed("wipsha"),
+    initRepository: () => Effect.void,
+    branchExists: () => Effect.succeed(false),
+    addWorktree: () => Effect.void,
     restoreTree: () => Effect.succeed(true),
     deleteRef: () => Effect.void,
   };
-  const merged: ContinueTransportShape = { ...baseTransport, ...options?.transport };
-  const transport = Object.fromEntries(
-    (Object.keys(merged) as Array<keyof ContinueTransportShape>).map((op) => [
-      op,
-      record(op, merged[op]),
-    ]),
-  ) as unknown as ContinueTransportShape;
+  const baseTransfers: ContinueTransferStoreShape = {
+    prepareOutgoing: (id) => Effect.succeed(`/scratch/outgoing/${id}.bundle`),
+    digest: () => Effect.succeed(DIGEST),
+    incomingPath: (id) => Effect.succeed(`/scratch/incoming/${id}.bundle`),
+    readChunk: () => Effect.succeed(""),
+    writeChunk: () => Effect.succeed(0),
+    discard: () => Effect.succeed(true),
+    sweep: Effect.void,
+  };
 
   const deps: ContinueOnMachineDeps = {
-    transport,
+    transport: recordAll(transportCalls, { ...baseTransport, ...options?.transport }),
+    transfers: recordAll(transferCalls, { ...baseTransfers, ...options?.transfers }),
+    worktreesDir: WORKTREES,
     projections: {
       getThreadDetailById: () => Effect.succeed(options?.thread ?? Option.some(threadDetail())),
       getThreadShellById: () => Effect.succeed(options?.threadShell ?? Option.some(threadShell())),
@@ -236,13 +267,16 @@ function makeFixture(options?: {
     },
     getProviders: Effect.succeed(options?.providers ?? [codex, claude]),
     getMachineLabel: Effect.succeed("Misha's Mac"),
-    readEnvFile: () =>
-      Effect.succeed(options?.envText === undefined ? "TOKEN=1\n" : options.envText),
-    writeEnvFile: (root, text) =>
+    readEnvFile: (folder) =>
+      Effect.sync(() => {
+        envReads.push(folder);
+        return options?.envFiles?.[folder] ?? null;
+      }),
+    writeEnvFile: (folder, text) =>
       options?.writeEnvFails
         ? Effect.fail(new Error("disk full"))
         : Effect.sync(() => {
-            writtenEnv.push({ root, text });
+            writtenEnv.push({ folder, text });
           }),
     cloneRepository: (input) =>
       Effect.sync(() => {
@@ -250,95 +284,133 @@ function makeFixture(options?: {
         return { cwd: input.destinationPath };
       }),
     directoryExists: (path) => Effect.succeed(options?.existingDirectories?.has(path) ?? false),
+    makeDirectory: (path) =>
+      Effect.sync(() => {
+        madeDirectories.push(path);
+      }),
     expandPath: (path) => path.replace(/^~/, "/home/unowork"),
     now: () => NOW,
+    newTransferId: () => TRANSFER_ID,
   };
 
-  return { deps, dispatched, transportCalls, writtenEnv, clones };
+  return {
+    deps,
+    dispatched,
+    transportCalls,
+    transferCalls,
+    envReads,
+    writtenEnv,
+    clones,
+    madeDirectories,
+  };
 }
 
 const expectFailure = <A>(effect: Effect.Effect<A, ThreadContinueError>) => Effect.flip(effect);
 
-function transportInput<T>(fixture: Fixture, op: keyof ContinueTransportShape): T {
-  const call = fixture.transportCalls.find((candidate) => candidate.op === op);
+function callInput<T>(calls: ReadonlyArray<Call>, op: string): T {
+  const call = calls.find((candidate) => candidate.op === op);
   if (!call) {
-    assert.fail(`expected a ${op} transport call`);
+    assert.fail(`expected a ${op} call`);
   }
   return call.input as T;
 }
 
-describe("transport branch naming", () => {
-  it("maps a thread id to uno/continue/<threadId> and back", () => {
-    assert.equal(continueBranchForThread("abc-123"), "uno/continue/abc-123");
-    assert.equal(threadIdFromContinueBranch("uno/continue/abc-123"), "abc-123");
-    assert.equal(threadIdFromContinueBranch("uno/continue/"), null);
-    assert.equal(threadIdFromContinueBranch("main"), null);
+const ops = (calls: ReadonlyArray<Call>) => calls.map((call) => call.op);
+
+describe("continue branch naming", () => {
+  it("uses a short, git-safe id and numbers repeats", () => {
+    assert.equal(continueBranchName("thread-1"), "uno/continue/thread-1");
+    assert.equal(
+      continueBranchName("7F3A9C1E-0000-4000-8000-000000000000", 3),
+      "uno/continue/7f3a9c1e-000-3",
+    );
+    assert.equal(continueBranchName("../weird id!!"), "uno/continue/weird-id");
+    assert.equal(continueBranchName("///"), "uno/continue/chat");
   });
 });
 
-describe("thread.continue.prepare", () => {
+describe("thread.continue.snapshot", () => {
   it.effect(
-    "snapshots the working tree on top of HEAD, pushes the transport branch and builds the seed",
+    "snapshots onto HEAD, bundles it without pushing, drops the hidden ref and returns the digest",
     () =>
       Effect.gen(function* () {
         const fixture = makeFixture();
-        const prepare = makeThreadContinuePrepare(fixture.deps);
+        const result = yield* makeThreadContinueSnapshot(fixture.deps)({ threadId: THREAD_ID });
 
-        const result = yield* prepare({ threadId: THREAD_ID });
-
-        assert.equal(result.branch, "uno/continue/thread-1");
-        assert.equal(result.commit, "wipsha");
-        assert.equal(result.baseCommit, "headsha");
-        assert.equal(result.sourceBranch, "feat/login");
-        assert.equal(result.remoteName, "origin");
-        assert.equal(result.remoteUrl, "git@github.com:uno/uno.git");
-        assert.equal(result.sourceMachineLabel, "Misha's Mac");
-        assert.equal(result.title, "Fix login");
-        assert.deepEqual(result.modelSelection, CLAUDE_SELECTION);
-        assert.equal(result.runtimeMode, "auto-accept-edits");
-        assert.equal(result.interactionMode, "plan");
-        assert.equal(result.envText, "TOKEN=1\n");
-        assert.isTrue(result.seedText.startsWith(`${CONTINUE_SEED_PREFIX}Misha's Mac]`));
-        assert.include(result.seedText, HANDOFF_PREAMBLE_START);
-        assert.include(result.seedText, "User: please fix login\nAssistant: done, see auth.ts");
-
-        const capture = fixture.transportCalls.find((call) => call.op === "captureSnapshot");
-        assert.deepEqual(capture?.input, {
+        assert.deepEqual(callInput(fixture.transportCalls, "captureSnapshot"), {
           cwd: "/Users/dev/uno",
-          ref: CheckpointRef.make("refs/t3/continue/thread-1"),
+          ref: CheckpointRef.make(TRANSFER_REF),
           parents: ["headsha"],
           message: "uno continue: Fix login",
         });
-        const push = fixture.transportCalls.find((call) => call.op === "pushRef");
-        assert.deepEqual(push?.input, {
+        assert.deepEqual(callInput(fixture.transportCalls, "createBundle"), {
           cwd: "/Users/dev/uno",
-          remoteName: "origin",
-          localRef: "refs/t3/continue/thread-1",
-          remoteBranch: "uno/continue/thread-1",
+          ref: CheckpointRef.make(TRANSFER_REF),
+          bundlePath: `/scratch/outgoing/${TRANSFER_ID}.bundle`,
         });
-        // The local ref is dropped once the remote holds the snapshot.
-        assert.isTrue(fixture.transportCalls.some((call) => call.op === "deleteRef"));
-        // Nothing is dispatched on the source until `complete`.
+        const transportOps = ops(fixture.transportCalls);
+        assert.isAbove(transportOps.indexOf("deleteRef"), transportOps.indexOf("createBundle"));
+        assert.deepEqual(ops(fixture.transferCalls).slice(0, 3), [
+          "sweep",
+          "prepareOutgoing",
+          "digest",
+        ]);
+
+        assert.equal(result.transferId, TRANSFER_ID);
+        assert.equal(result.sizeBytes, DIGEST.sizeBytes);
+        assert.equal(result.sha256, DIGEST.sha256);
+        assert.equal(result.chunkBytes, THREAD_CONTINUE_CHUNK_BYTES);
+        assert.equal(result.chunkCount, 3);
+        assert.equal(result.commit, "wipsha");
+        assert.equal(result.baseCommit, "headsha");
+        assert.equal(result.sourceBranch, "feat/login");
+        assert.equal(result.remoteUrl, "git@github.com:uno/uno.git");
+        assert.equal(result.sourceMachineLabel, "Misha's Mac");
+        assert.deepEqual(result.modelSelection, CLAUDE_SELECTION);
+        assert.isTrue(result.seedText.startsWith(`${CONTINUE_SEED_PREFIX}Misha's Mac]`));
+        assert.include(result.seedText, HANDOFF_PREAMBLE_START);
+        assert.include(result.seedText, "User: please fix login");
         assert.equal(fixture.dispatched.length, 0);
       }),
   );
 
-  it.effect(
-    "snapshots the thread's worktree rather than the project root, and honours the remote override",
-    () =>
-      Effect.gen(function* () {
-        const fixture = makeFixture({
-          thread: Option.some(threadDetail({ worktreePath: "/Users/dev/uno-wt" })),
-        });
-        const prepare = makeThreadContinuePrepare(fixture.deps);
+  it.effect("leaves .env behind unless asked, then reads it from the worktree first", () =>
+    Effect.gen(function* () {
+      const worktreeThread = Option.some(
+        threadDetail({ worktreePath: "/Users/dev/.t3/worktrees/uno/feat" } as never),
+      );
+      const withoutEnv = makeFixture({
+        thread: worktreeThread,
+        envFiles: { "/Users/dev/uno": "ROOT=1\n" },
+      });
+      const skipped = yield* makeThreadContinueSnapshot(withoutEnv.deps)({ threadId: THREAD_ID });
+      assert.equal(skipped.envText, null);
+      assert.deepEqual(withoutEnv.envReads, []);
 
-        const result = yield* prepare({ threadId: THREAD_ID, remote: "uno", includeEnv: false });
+      const fromWorktree = makeFixture({
+        thread: worktreeThread,
+        envFiles: {
+          "/Users/dev/.t3/worktrees/uno/feat": "WT=1\n",
+          "/Users/dev/uno": "ROOT=1\n",
+        },
+      });
+      const worktreeEnv = yield* makeThreadContinueSnapshot(fromWorktree.deps)({
+        threadId: THREAD_ID,
+        includeEnv: true,
+      });
+      assert.equal(worktreeEnv.envText, "WT=1\n");
 
-        assert.equal(result.remoteName, "uno");
-        assert.equal(result.envText, null);
-        const capture = transportInput<{ cwd: string }>(fixture, "captureSnapshot");
-        assert.equal(capture.cwd, "/Users/dev/uno-wt");
-      }),
+      const fallback = makeFixture({
+        thread: worktreeThread,
+        envFiles: { "/Users/dev/uno": "ROOT=1\n" },
+      });
+      const rootEnv = yield* makeThreadContinueSnapshot(fallback.deps)({
+        threadId: THREAD_ID,
+        includeEnv: true,
+      });
+      assert.equal(rootEnv.envText, "ROOT=1\n");
+      assert.deepEqual(fallback.envReads, ["/Users/dev/.t3/worktrees/uno/feat", "/Users/dev/uno"]);
+    }),
   );
 
   it.effect("makes a parentless snapshot in an unborn repository", () =>
@@ -346,135 +418,124 @@ describe("thread.continue.prepare", () => {
       const fixture = makeFixture({
         transport: { readHead: () => Effect.succeed({ commit: null, branch: null }) },
       });
-      const result = yield* makeThreadContinuePrepare(fixture.deps)({ threadId: THREAD_ID });
+      const result = yield* makeThreadContinueSnapshot(fixture.deps)({ threadId: THREAD_ID });
+      assert.deepEqual(
+        callInput<{ parents: ReadonlyArray<string> }>(fixture.transportCalls, "captureSnapshot")
+          .parents,
+        [],
+      );
       assert.equal(result.baseCommit, null);
-      assert.equal(result.sourceBranch, null);
-      const capture = transportInput<{ parents: string[] }>(fixture, "captureSnapshot");
-      assert.deepEqual(capture.parents, []);
     }),
   );
 
-  it.effect("fails early without a remote, before touching the tree", () =>
+  it.effect("works without a remote: the target gets the whole history instead", () =>
     Effect.gen(function* () {
       const fixture = makeFixture({ transport: { resolveRemote: () => Effect.succeed(null) } });
-      const error = yield* expectFailure(
-        makeThreadContinuePrepare(fixture.deps)({ threadId: THREAD_ID }),
-      );
-      assert.equal(error.reason, "no_remote");
-      assert.equal(error.message, NO_REMOTE_MESSAGE);
-      assert.isFalse(fixture.transportCalls.some((call) => call.op === "captureSnapshot"));
+      const result = yield* makeThreadContinueSnapshot(fixture.deps)({ threadId: THREAD_ID });
+      assert.equal(result.remoteUrl, null);
     }),
   );
 
-  it.effect("fails for non-git projects and missing threads", () =>
+  it.effect("refuses a snapshot above the size limit and deletes the bundle", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({
+        transfers: {
+          digest: () =>
+            Effect.succeed({ sizeBytes: THREAD_CONTINUE_MAX_BUNDLE_BYTES + 1, sha256: "x" }),
+        },
+      });
+      const error = yield* expectFailure(
+        makeThreadContinueSnapshot(fixture.deps)({ threadId: THREAD_ID }),
+      );
+      assert.equal(error.reason, "too_large");
+      assert.include(ops(fixture.transferCalls), "discard");
+    }),
+  );
+
+  it.effect("fails for non-git projects and missing threads, before touching the tree", () =>
     Effect.gen(function* () {
       const notGit = makeFixture({ transport: { isGitRepository: () => Effect.succeed(false) } });
       const notGitError = yield* expectFailure(
-        makeThreadContinuePrepare(notGit.deps)({ threadId: THREAD_ID }),
+        makeThreadContinueSnapshot(notGit.deps)({ threadId: THREAD_ID }),
       );
       assert.equal(notGitError.reason, "not_git");
+      assert.isFalse(ops(notGit.transportCalls).includes("captureSnapshot"));
 
       const missing = makeFixture({ thread: Option.none() });
       const missingError = yield* expectFailure(
-        makeThreadContinuePrepare(missing.deps)({ threadId: THREAD_ID }),
+        makeThreadContinueSnapshot(missing.deps)({ threadId: THREAD_ID }),
       );
       assert.equal(missingError.reason, "thread_not_found");
     }),
   );
 
-  it.effect("reuses the transport branch of the same name on a second run instead of failing", () =>
+  it.effect("still drops the hidden ref when bundling fails", () =>
     Effect.gen(function* () {
       const fixture = makeFixture({
-        transport: {
-          captureSnapshot: (() => {
-            let calls = 0;
-            return () => Effect.succeed(`wipsha-${++calls}`);
-          })(),
-        },
-      });
-      const prepare = makeThreadContinuePrepare(fixture.deps);
-
-      const first = yield* prepare({ threadId: THREAD_ID });
-      const second = yield* prepare({ threadId: THREAD_ID });
-
-      assert.equal(first.branch, second.branch);
-      assert.notEqual(first.commit, second.commit);
-      const pushes = fixture.transportCalls.filter((call) => call.op === "pushRef");
-      assert.equal(pushes.length, 2);
-      for (const push of pushes) {
-        assert.equal(
-          (push.input as { remoteBranch: string }).remoteBranch,
-          "uno/continue/thread-1",
-        );
-      }
-    }),
-  );
-
-  it.effect("reports a push failure with the remote name", () =>
-    Effect.gen(function* () {
-      const fixture = makeFixture({
-        transport: {
-          pushRef: () => Effect.fail(new Error("Permission denied (publickey)")) as never,
-        },
+        transport: { createBundle: () => Effect.fail(new Error("disk full")) as never },
       });
       const error = yield* expectFailure(
-        makeThreadContinuePrepare(fixture.deps)({ threadId: THREAD_ID }),
+        makeThreadContinueSnapshot(fixture.deps)({ threadId: THREAD_ID }),
       );
-      assert.equal(error.reason, "push_failed");
-      assert.include(error.message, "origin");
-      assert.include(error.message, "Permission denied");
+      assert.equal(error.reason, "capture_failed");
+      assert.include(ops(fixture.transportCalls), "deleteRef");
     }),
   );
 });
 
-const receiveInput = (
-  overrides: Partial<Parameters<ReturnType<typeof makeThreadContinueReceive>>[0]> = {},
-) => ({
-  project: { kind: "existing" as const, projectPath: "/Users/dev/uno/" },
-  remoteUrl: "git@github.com:uno/uno.git",
-  branch: "uno/continue/thread-1",
+const landInput = (overrides: Partial<ThreadContinueLandInput> = {}): ThreadContinueLandInput => ({
+  transferId: TRANSFER_ID,
+  sizeBytes: DIGEST.sizeBytes,
+  sha256: DIGEST.sha256,
   commit: "wipsha",
+  baseCommit: "headsha",
+  project: { kind: "existing", projectPath: "/Users/dev/uno" },
   title: "Fix login",
   modelSelection: CLAUDE_SELECTION,
-  runtimeMode: "auto-accept-edits" as const,
-  interactionMode: "plan" as const,
-  seedText: `${CONTINUE_SEED_PREFIX}Misha's Mac] seed`,
-  envText: "TOKEN=1\n",
+  runtimeMode: "auto-accept-edits",
+  interactionMode: "plan",
+  seedText: "[Continued from Misha's Mac] seed",
+  envText: null,
   sourceMachineLabel: "Misha's Mac",
   sourceThreadId: THREAD_ID,
   ...overrides,
 });
 
-describe("thread.continue.receive", () => {
+describe("thread.continue.land", () => {
   it.effect(
-    "fetches into a hidden ref, restores the tree, writes .env and creates the seeded thread",
+    "verifies the bytes, opens a new worktree on uno/continue/<id> at the base commit and creates the thread there",
     () =>
       Effect.gen(function* () {
         const fixture = makeFixture();
-        const receive = makeThreadContinueReceive(fixture.deps);
+        const result = yield* makeThreadContinueLand(fixture.deps)(
+          landInput({ envText: "TOKEN=1\n" }),
+        );
 
-        const result = yield* receive(receiveInput());
-
-        assert.equal(result.projectId, PROJECT_ID);
-        assert.equal(result.projectPath, "/Users/dev/uno");
-        assert.equal(result.projectCreated, false);
-        assert.equal(result.envWritten, true);
-        assert.equal(result.modelFallbackApplied, false);
-        assert.deepEqual(result.modelSelection, CLAUDE_SELECTION);
-
-        const fetch = fixture.transportCalls.find((call) => call.op === "fetchBranch");
-        assert.deepEqual(fetch?.input, {
+        const worktreePath = `${WORKTREES}/uno/uno-continue-thread-1`;
+        assert.deepEqual(callInput(fixture.transportCalls, "verifyBundle"), {
           cwd: "/Users/dev/uno",
-          remoteUrl: "git@github.com:uno/uno.git",
-          remoteBranch: "uno/continue/thread-1",
-          localRef: "refs/t3/continue/thread-1",
+          bundlePath: `/scratch/incoming/${TRANSFER_ID}.bundle`,
         });
-        const restore = fixture.transportCalls.find((call) => call.op === "restoreTree");
-        assert.deepEqual(restore?.input, {
+        assert.deepEqual(callInput(fixture.transportCalls, "fetchBundle"), {
           cwd: "/Users/dev/uno",
-          ref: "refs/t3/continue/thread-1",
+          bundlePath: `/scratch/incoming/${TRANSFER_ID}.bundle`,
+          ref: CheckpointRef.make(TRANSFER_REF),
         });
-        assert.deepEqual(fixture.writtenEnv, [{ root: "/Users/dev/uno", text: "TOKEN=1\n" }]);
+        assert.deepEqual(callInput(fixture.transportCalls, "addWorktree"), {
+          cwd: "/Users/dev/uno",
+          branch: "uno/continue/thread-1",
+          path: worktreePath,
+          startPoint: "headsha",
+        });
+        // The files go into the new worktree, never into the project checkout.
+        assert.deepEqual(callInput(fixture.transportCalls, "restoreTree"), {
+          cwd: worktreePath,
+          ref: CheckpointRef.make(TRANSFER_REF),
+        });
+        assert.isFalse(ops(fixture.transportCalls).includes("fetchRemotes"));
+        assert.deepEqual(fixture.writtenEnv, [{ folder: worktreePath, text: "TOKEN=1\n" }]);
+        assert.include(ops(fixture.transferCalls), "discard");
+        assert.deepEqual(fixture.clones, []);
 
         assert.deepEqual(
           fixture.dispatched.map((entry) => entry.command.type),
@@ -483,26 +544,11 @@ describe("thread.continue.receive", () => {
         const create = fixture.dispatched[0]?.command;
         assert.equal(create?.type, "thread.create");
         if (create?.type === "thread.create") {
-          assert.equal(create.threadId, result.threadId);
-          assert.equal(create.title, "Fix login");
-          assert.equal(create.runtimeMode, "auto-accept-edits");
-          assert.equal(create.interactionMode, "plan");
-          assert.equal(create.branch, null);
-          assert.equal(create.worktreePath, null);
+          assert.equal(create.projectId, PROJECT_ID);
+          assert.equal(create.branch, "uno/continue/thread-1");
+          assert.equal(create.worktreePath, worktreePath);
+          assert.deepEqual(create.modelSelection, CLAUDE_SELECTION);
         }
-        const seed = fixture.dispatched[1]?.command;
-        if (seed?.type === "thread.message.user.append") {
-          assert.equal(seed.text, `${CONTINUE_SEED_PREFIX}Misha's Mac] seed`);
-        }
-        const activity = fixture.dispatched[2]?.command;
-        if (activity?.type === "thread.activity.append") {
-          assert.equal(activity.activity.kind, "thread.continued.from");
-          assert.equal(activity.activity.summary, "Continued from Misha's Mac");
-        }
-        // No turn is started: the person types the next message.
-        assert.isFalse(
-          fixture.dispatched.some((entry) => entry.command.type === "thread.turn.start"),
-        );
         for (const entry of fixture.dispatched) {
           assert.deepEqual(entry.origin, {
             kind: "system",
@@ -510,7 +556,106 @@ describe("thread.continue.receive", () => {
             reason: "continued from Misha's Mac",
           });
         }
+        assert.deepEqual(result, {
+          projectId: PROJECT_ID,
+          threadId: result.threadId,
+          projectPath: "/Users/dev/uno",
+          worktreePath,
+          branch: "uno/continue/thread-1",
+          projectCreated: false,
+          modelSelection: CLAUDE_SELECTION,
+          modelFallbackApplied: false,
+          envWritten: true,
+        });
       }),
+  );
+
+  it.effect("refuses bytes that do not match the source's size or hash, before any git work", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({
+        transfers: { digest: () => Effect.succeed({ sizeBytes: 10, sha256: "other" }) },
+      });
+      const error = yield* expectFailure(makeThreadContinueLand(fixture.deps)(landInput()));
+      assert.equal(error.reason, "transfer_incomplete");
+      assert.deepEqual(fixture.transportCalls, []);
+      assert.equal(fixture.dispatched.length, 0);
+    }),
+  );
+
+  it.effect("fetches from its own remotes when the base commit is missing, then continues", () =>
+    Effect.gen(function* () {
+      let verifications = 0;
+      const fixture = makeFixture({
+        transport: {
+          verifyBundle: () =>
+            Effect.sync(() => {
+              verifications += 1;
+              return verifications === 1
+                ? { ok: false, detail: "Repository lacks these prerequisite commits" }
+                : { ok: true, detail: "" };
+            }),
+        },
+      });
+      yield* makeThreadContinueLand(fixture.deps)(landInput());
+      assert.deepEqual(ops(fixture.transportCalls).slice(0, 4), [
+        "isGitRepository",
+        "verifyBundle",
+        "fetchRemotes",
+        "verifyBundle",
+      ]);
+      assert.include(ops(fixture.transportCalls), "addWorktree");
+    }),
+  );
+
+  it.effect("fails with base_missing when the base cannot be fetched either", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({
+        transport: {
+          verifyBundle: () => Effect.succeed({ ok: false, detail: "lacks prerequisite" }),
+          fetchRemotes: () => Effect.fail(new Error("could not read from remote")) as never,
+        },
+      });
+      const error = yield* expectFailure(makeThreadContinueLand(fixture.deps)(landInput()));
+      assert.equal(error.reason, "base_missing");
+      assert.include(error.message, "headsha".slice(0, 7));
+      assert.isFalse(ops(fixture.transportCalls).includes("addWorktree"));
+      assert.equal(fixture.dispatched.length, 0);
+    }),
+  );
+
+  it.effect("refuses a bundle whose snapshot is not the reported commit", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({ transport: { fetchBundle: () => Effect.succeed("othersha") } });
+      const error = yield* expectFailure(makeThreadContinueLand(fixture.deps)(landInput()));
+      assert.equal(error.reason, "commit_mismatch");
+      assert.isFalse(ops(fixture.transportCalls).includes("addWorktree"));
+    }),
+  );
+
+  it.effect("numbers the branch when an earlier continue already used the name", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({
+        transport: {
+          branchExists: ({ branch }) => Effect.succeed(branch === "uno/continue/thread-1"),
+        },
+        existingDirectories: new Set([`${WORKTREES}/uno/uno-continue-thread-1-2`]),
+      });
+      const result = yield* makeThreadContinueLand(fixture.deps)(landInput());
+      assert.equal(result.branch, "uno/continue/thread-1-3");
+      assert.equal(result.worktreePath, `${WORKTREES}/uno/uno-continue-thread-1-3`);
+    }),
+  );
+
+  it.effect("starts the branch at the snapshot when the source repository was unborn", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture();
+      yield* makeThreadContinueLand(fixture.deps)(landInput({ baseCommit: null }));
+      assert.equal(
+        callInput<{ startPoint: string }>(fixture.transportCalls, "addWorktree").startPoint,
+        "wipsha",
+      );
+      assert.isFalse(ops(fixture.transportCalls).includes("restoreTree"));
+    }),
   );
 
   it.effect("resolves an existing project by path, expanding ~ and ignoring trailing slashes", () =>
@@ -518,19 +663,18 @@ describe("thread.continue.receive", () => {
       const fixture = makeFixture({
         projects: [projectShell({ workspaceRoot: "/home/unowork/projects/uno" })],
       });
-      const result = yield* makeThreadContinueReceive(fixture.deps)(
-        receiveInput({ project: { kind: "existing", projectPath: "~/projects/uno/" } }),
+      const result = yield* makeThreadContinueLand(fixture.deps)(
+        landInput({ project: { kind: "existing", projectPath: "~/projects/uno/" } }),
       );
       assert.equal(result.projectPath, "/home/unowork/projects/uno");
-      assert.equal(result.projectCreated, false);
     }),
   );
 
   it.effect("clones and registers the project when asked to create it", () =>
     Effect.gen(function* () {
       const fixture = makeFixture({ projects: [] });
-      const result = yield* makeThreadContinueReceive(fixture.deps)(
-        receiveInput({
+      const result = yield* makeThreadContinueLand(fixture.deps)(
+        landInput({
           project: {
             kind: "create",
             remoteUrl: "git@github.com:uno/uno.git",
@@ -539,18 +683,36 @@ describe("thread.continue.receive", () => {
           },
         }),
       );
-      assert.equal(result.projectCreated, true);
-      assert.equal(result.projectPath, "/home/unowork/projects/uno");
       assert.deepEqual(fixture.clones, [
         { remoteUrl: "git@github.com:uno/uno.git", destinationPath: "/home/unowork/projects/uno" },
       ]);
       assert.equal(fixture.dispatched[0]?.command.type, "project.create");
-      const create = fixture.dispatched[0]?.command;
-      if (create?.type === "project.create") {
-        assert.equal(create.projectId, result.projectId);
-        assert.equal(create.workspaceRoot, "/home/unowork/projects/uno");
-        assert.equal(create.createWorkspaceRootIfMissing, true);
-      }
+      assert.equal(result.projectCreated, true);
+      assert.equal(result.projectPath, "/home/unowork/projects/uno");
+      assert.equal(result.worktreePath, `${WORKTREES}/uno/uno-continue-thread-1`);
+    }),
+  );
+
+  it.effect("starts an empty repository when the project has no remote", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({ projects: [] });
+      const result = yield* makeThreadContinueLand(fixture.deps)(
+        landInput({
+          project: {
+            kind: "create",
+            remoteUrl: null,
+            destinationPath: "~/projects/uno",
+            title: "uno",
+          },
+        }),
+      );
+      assert.deepEqual(fixture.clones, []);
+      assert.deepEqual(fixture.madeDirectories, ["/home/unowork/projects/uno"]);
+      assert.equal(
+        callInput(fixture.transportCalls, "initRepository"),
+        "/home/unowork/projects/uno",
+      );
+      assert.equal(result.projectCreated, true);
     }),
   );
 
@@ -560,8 +722,8 @@ describe("thread.continue.receive", () => {
         projects: [],
         existingDirectories: new Set(["/home/unowork/projects/uno"]),
       });
-      const result = yield* makeThreadContinueReceive(fixture.deps)(
-        receiveInput({
+      const result = yield* makeThreadContinueLand(fixture.deps)(
+        landInput({
           project: {
             kind: "create",
             remoteUrl: "git@github.com:uno/uno.git",
@@ -570,12 +732,12 @@ describe("thread.continue.receive", () => {
           },
         }),
       );
-      assert.equal(result.projectCreated, true);
       assert.deepEqual(fixture.clones, []);
+      assert.equal(result.projectCreated, true);
     }),
   );
 
-  it.effect("refuses to clone over a folder that is not a repository", () =>
+  it.effect("refuses to use a folder that is not a repository", () =>
     Effect.gen(function* () {
       const fixture = makeFixture({
         projects: [],
@@ -583,8 +745,8 @@ describe("thread.continue.receive", () => {
         transport: { isGitRepository: () => Effect.succeed(false) },
       });
       const error = yield* expectFailure(
-        makeThreadContinueReceive(fixture.deps)(
-          receiveInput({
+        makeThreadContinueLand(fixture.deps)(
+          landInput({
             project: {
               kind: "create",
               remoteUrl: "git@github.com:uno/uno.git",
@@ -601,69 +763,59 @@ describe("thread.continue.receive", () => {
 
   it.effect("fails when no project is registered at the given path", () =>
     Effect.gen(function* () {
-      const fixture = makeFixture();
-      const error = yield* expectFailure(
-        makeThreadContinueReceive(fixture.deps)(
-          receiveInput({ project: { kind: "existing", projectPath: "/elsewhere" } }),
-        ),
-      );
+      const fixture = makeFixture({ projects: [] });
+      const error = yield* expectFailure(makeThreadContinueLand(fixture.deps)(landInput()));
       assert.equal(error.reason, "project_not_found");
-      assert.isFalse(fixture.transportCalls.some((call) => call.op === "fetchBranch"));
-    }),
-  );
-
-  it.effect("refuses a transport branch that no longer points at the pushed commit", () =>
-    Effect.gen(function* () {
-      const fixture = makeFixture({ transport: { fetchBranch: () => Effect.succeed("othersha") } });
-      const error = yield* expectFailure(makeThreadContinueReceive(fixture.deps)(receiveInput()));
-      assert.equal(error.reason, "commit_mismatch");
-      assert.isFalse(fixture.transportCalls.some((call) => call.op === "restoreTree"));
-      assert.equal(fixture.dispatched.length, 0);
     }),
   );
 
   it.effect("falls back to a model this machine can run and says so in the seed", () =>
     Effect.gen(function* () {
-      const fixture = makeFixture({
-        providers: [
-          codex,
-          provider({ instanceId: "claudeAgent", driver: "claude", installed: false }),
-        ],
-        projects: [projectShell({ defaultModelSelection: CODEX_SELECTION })],
-      });
-      const result = yield* makeThreadContinueReceive(fixture.deps)(receiveInput());
+      const fixture = makeFixture({ providers: [codex] });
+      const result = yield* makeThreadContinueLand(fixture.deps)(landInput());
       assert.equal(result.modelFallbackApplied, true);
       assert.deepEqual(result.modelSelection, CODEX_SELECTION);
       const seed = fixture.dispatched[1]?.command;
       if (seed?.type === "thread.message.user.append") {
-        assert.include(seed.text, "claudeAgent / claude-sonnet-4-6");
-        assert.include(seed.text, `codex / ${DEFAULT_MODEL}`);
+        assert.include(seed.text, "is not installed here");
       }
     }),
   );
 
-  it.effect("fails with no_model when nothing on the machine can run a chat", () =>
+  it.effect("fails with no_model before creating a branch or worktree", () =>
     Effect.gen(function* () {
       const fixture = makeFixture({ providers: [] });
-      const error = yield* expectFailure(makeThreadContinueReceive(fixture.deps)(receiveInput()));
+      const error = yield* expectFailure(makeThreadContinueLand(fixture.deps)(landInput()));
       assert.equal(error.reason, "no_model");
-      assert.equal(fixture.dispatched.length, 0);
+      assert.isFalse(ops(fixture.transportCalls).includes("fetchBundle"));
+      assert.isFalse(ops(fixture.transportCalls).includes("addWorktree"));
     }),
   );
 
   it.effect("keeps going when .env cannot be written, and skips it when not sent", () =>
     Effect.gen(function* () {
       const failing = makeFixture({ writeEnvFails: true });
-      const failed = yield* makeThreadContinueReceive(failing.deps)(receiveInput());
-      assert.equal(failed.envWritten, false);
-      assert.equal(failing.dispatched.length, 3);
-
-      const skipped = makeFixture();
-      const result = yield* makeThreadContinueReceive(skipped.deps)(
-        receiveInput({ envText: null }),
+      const result = yield* makeThreadContinueLand(failing.deps)(
+        landInput({ envText: "TOKEN=1\n" }),
       );
       assert.equal(result.envWritten, false);
+
+      const skipped = makeFixture();
+      const skippedResult = yield* makeThreadContinueLand(skipped.deps)(landInput());
+      assert.equal(skippedResult.envWritten, false);
       assert.deepEqual(skipped.writtenEnv, []);
+    }),
+  );
+});
+
+describe("legacy 0.0.53–0.0.56 RPCs", () => {
+  it.effect("answer with an update request and never touch git", () =>
+    Effect.gen(function* () {
+      const error = yield* expectFailure(
+        makeThreadContinueLegacyRefusal("thread.continue.prepare")({ threadId: THREAD_ID }),
+      );
+      assert.equal(error.reason, "invalid_request");
+      assert.equal(error.message, THREAD_CONTINUE_LEGACY_CLIENT_MESSAGE);
     }),
   );
 });
@@ -684,7 +836,7 @@ describe("thread.continue.inspect", () => {
         changedFiles: 0,
         branch: null,
       });
-      assert.isFalse(fixture.transportCalls.some((call) => call.op === "readStatus"));
+      assert.isFalse(ops(fixture.transportCalls).includes("readStatus"));
     }),
   );
 
@@ -701,7 +853,7 @@ describe("thread.continue.inspect", () => {
       assert.equal(result.exists, true);
       assert.equal(result.isGitRepository, false);
       assert.equal(result.hasLocalChanges, false);
-      assert.isFalse(fixture.transportCalls.some((call) => call.op === "readStatus"));
+      assert.isFalse(ops(fixture.transportCalls).includes("readStatus"));
     }),
   );
 
@@ -716,8 +868,8 @@ describe("thread.continue.inspect", () => {
       const result = yield* makeThreadContinueInspect(fixture.deps)({
         projectPath: "/Users/dev/uno/",
       });
-      // The trailing slash is dropped, like `receive` does, so the folder
-      // inspected is the folder written to.
+      // The trailing slash is dropped, like `land` does, so the folder
+      // inspected is the folder used.
       assert.deepEqual(result, {
         projectPath: "/Users/dev/uno",
         exists: true,
@@ -727,11 +879,11 @@ describe("thread.continue.inspect", () => {
         changedFiles: 0,
         branch: "main",
       });
-      assert.equal(transportInput<string>(fixture, "readStatus"), "/Users/dev/uno");
+      assert.equal(callInput<string>(fixture.transportCalls, "readStatus"), "/Users/dev/uno");
     }),
   );
 
-  it.effect("counts the local changes a receive would replace", () =>
+  it.effect("counts local changes in the checkout, for information only", () =>
     Effect.gen(function* () {
       const fixture = makeFixture({
         existingDirectories: new Set(["/Users/dev/uno"]),
@@ -748,52 +900,6 @@ describe("thread.continue.inspect", () => {
       // Read-only: nothing is dispatched or written.
       assert.equal(fixture.dispatched.length, 0);
       assert.deepEqual(fixture.writtenEnv, []);
-    }),
-  );
-});
-
-describe("thread.continue.cleanup", () => {
-  it.effect("deletes the transport branch on the remote the snapshot was pushed to", () =>
-    Effect.gen(function* () {
-      const fixture = makeFixture();
-      const result = yield* makeThreadContinueCleanup(fixture.deps)({
-        threadId: THREAD_ID,
-        remote: "uno",
-      });
-      assert.deepEqual(result, { branch: "uno/continue/thread-1", removed: true });
-      assert.deepEqual(transportInput(fixture, "deleteRemoteBranch"), {
-        cwd: "/Users/dev/uno",
-        remoteName: "uno",
-        remoteBranch: "uno/continue/thread-1",
-      });
-      assert.equal(fixture.dispatched.length, 0);
-    }),
-  );
-
-  it.effect("reports a failed delete instead of throwing", () =>
-    Effect.gen(function* () {
-      const fixture = makeFixture({
-        transport: {
-          deleteRemoteBranch: () => Effect.fail(new Error("remote: branch is protected")) as never,
-        },
-      });
-      const result = yield* makeThreadContinueCleanup(fixture.deps)({ threadId: THREAD_ID });
-      assert.deepEqual(result, { branch: "uno/continue/thread-1", removed: false });
-
-      const noRemote = makeFixture({ transport: { resolveRemote: () => Effect.succeed(null) } });
-      const skipped = yield* makeThreadContinueCleanup(noRemote.deps)({ threadId: THREAD_ID });
-      assert.equal(skipped.removed, false);
-      assert.isFalse(noRemote.transportCalls.some((call) => call.op === "deleteRemoteBranch"));
-    }),
-  );
-
-  it.effect("fails when the chat is gone, since there is nothing to clean", () =>
-    Effect.gen(function* () {
-      const fixture = makeFixture({ thread: Option.none() });
-      const error = yield* expectFailure(
-        makeThreadContinueCleanup(fixture.deps)({ threadId: THREAD_ID }),
-      );
-      assert.equal(error.reason, "thread_not_found");
     }),
   );
 });

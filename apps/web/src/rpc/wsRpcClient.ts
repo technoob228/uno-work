@@ -116,9 +116,11 @@ export interface WsRpcClient {
   /** "Continue on <machine>": prepare/complete on the source daemon, receive on the target. */
   readonly threadContinue: {
     readonly inspect: RpcUnaryMethod<typeof WS_METHODS.threadContinueInspect>;
-    readonly prepare: RpcUnaryMethod<typeof WS_METHODS.threadContinuePrepare>;
-    readonly receive: RpcUnaryMethod<typeof WS_METHODS.threadContinueReceive>;
-    readonly cleanup: RpcUnaryMethod<typeof WS_METHODS.threadContinueCleanup>;
+    readonly snapshot: RpcUnaryMethod<typeof WS_METHODS.threadContinueSnapshot>;
+    readonly readChunk: RpcUnaryMethod<typeof WS_METHODS.threadContinueReadChunk>;
+    readonly writeChunk: RpcUnaryMethod<typeof WS_METHODS.threadContinueWriteChunk>;
+    readonly land: RpcUnaryMethod<typeof WS_METHODS.threadContinueLand>;
+    readonly discard: RpcUnaryMethod<typeof WS_METHODS.threadContinueDiscard>;
     readonly complete: RpcUnaryMethod<typeof WS_METHODS.threadContinueComplete>;
   };
   readonly server: {
@@ -320,12 +322,15 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
     threadContinue: {
       inspect: (input) =>
         transport.request((client) => client[WS_METHODS.threadContinueInspect](input)),
-      prepare: (input) =>
-        transport.request((client) => client[WS_METHODS.threadContinuePrepare](input)),
-      receive: (input) =>
-        transport.request((client) => client[WS_METHODS.threadContinueReceive](input)),
-      cleanup: (input) =>
-        transport.request((client) => client[WS_METHODS.threadContinueCleanup](input)),
+      snapshot: (input) =>
+        transport.request((client) => client[WS_METHODS.threadContinueSnapshot](input)),
+      readChunk: (input) =>
+        transport.request((client) => client[WS_METHODS.threadContinueReadChunk](input)),
+      writeChunk: (input) =>
+        transport.request((client) => client[WS_METHODS.threadContinueWriteChunk](input)),
+      land: (input) => transport.request((client) => client[WS_METHODS.threadContinueLand](input)),
+      discard: (input) =>
+        transport.request((client) => client[WS_METHODS.threadContinueDiscard](input)),
       complete: (input) =>
         transport.request((client) => client[WS_METHODS.threadContinueComplete](input)),
     },
