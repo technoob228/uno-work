@@ -35,7 +35,7 @@ die() { printf '\033[1;31m[prepare-image]\033[0m %s\n' "$*" >&2; exit 1; }
 # 1. Убедиться, что образ снимается с рабочего софта, а не со сломанного.
 log "Проверяю, что демон и харнесы живые"
 systemctl is-active --quiet uno-work || die "uno-work service is not running"
-curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null || die "health probe failed"
+curl -fsS --max-time 10 "http://127.0.0.1:${PORT}/api/health" >/dev/null || die "health probe failed"
 
 for harness in uno-code opencode hermes; do
   if sudo -u "${SERVICE_USER}" env HOME="/home/${SERVICE_USER}" bash -lc "command -v ${harness}" >/dev/null 2>&1; then

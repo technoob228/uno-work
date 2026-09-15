@@ -208,7 +208,10 @@ systemctl restart uno-work
 # только прогнать миграции: первый запуск после установки видели ~60 с.
 log "Waiting for the daemon"
 for _ in $(seq 1 120); do
-  if curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
+  # --max-time: while the daemon boots it can accept the connection without
+  # answering, and a bare curl then hangs forever instead of retrying (seen on
+  # the golden build box during the 0.0.57 upgrade).
+  if curl -fsS --max-time 5 "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
     log "Daemon is up on ${HOST}:${PORT}"
     log "Pair a browser:  uno-work auth pairing create --base-dir ${STATE_DIR} --ttl 10m --role owner --json"
     exit 0
