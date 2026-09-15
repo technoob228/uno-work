@@ -22,8 +22,10 @@ import {
   ThreadMetaUpdatedPayload,
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
+  ThreadSettledPayload,
   ThreadSnoozedPayload,
   ThreadUnarchivedPayload,
+  ThreadUnsettledPayload,
   ThreadUnsnoozedPayload,
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
@@ -269,6 +271,8 @@ export function projectEvent(
             pinnedAt: null,
             snoozedUntil: null,
             snoozedAt: null,
+            settledOverride: null,
+            settledAt: null,
             spawnedByThreadId: payload.spawnedByThreadId ?? null,
             controller: payload.spawnedByThreadId !== undefined ? "agent" : "human",
             controlChangedAt: null,
@@ -359,6 +363,30 @@ export function projectEvent(
           threads: updateThread(nextBase.threads, payload.threadId, {
             snoozedUntil: null,
             snoozedAt: null,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.settled":
+      return decodeForEvent(ThreadSettledPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            settledOverride: "settled",
+            settledAt: payload.settledAt,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.unsettled":
+      return decodeForEvent(ThreadUnsettledPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            settledOverride: payload.reason === "user" ? "active" : null,
+            settledAt: null,
             updatedAt: payload.updatedAt,
           }),
         })),

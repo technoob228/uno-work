@@ -10,6 +10,8 @@ import {
   ThreadDeletedPayload as ContractsThreadDeletedPayloadSchema,
   ThreadUnarchivedPayload as ContractsThreadUnarchivedPayloadSchema,
   ThreadSnoozedPayload as ContractsThreadSnoozedPayloadSchema,
+  ThreadSettledPayload as ContractsThreadSettledPayloadSchema,
+  ThreadUnsettledPayload as ContractsThreadUnsettledPayloadSchema,
   ThreadUnsnoozedPayload as ContractsThreadUnsnoozedPayloadSchema,
   ThreadControlChangedPayload as ContractsThreadControlChangedPayloadSchema,
   ThreadMessageSentPayload as ContractsThreadMessageSentPayloadSchema,
@@ -39,6 +41,8 @@ export const ThreadDeletedPayload = ContractsThreadDeletedPayloadSchema;
 export const ThreadUnarchivedPayload = ContractsThreadUnarchivedPayloadSchema;
 export const ThreadSnoozedPayload = ContractsThreadSnoozedPayloadSchema;
 export const ThreadUnsnoozedPayload = ContractsThreadUnsnoozedPayloadSchema;
+export const ThreadSettledPayload = ContractsThreadSettledPayloadSchema;
+export const ThreadUnsettledPayload = ContractsThreadUnsettledPayloadSchema;
 export const ThreadControlChangedPayload = ContractsThreadControlChangedPayloadSchema;
 
 export const MessageSentPayloadSchema = ContractsThreadMessageSentPayloadSchema;

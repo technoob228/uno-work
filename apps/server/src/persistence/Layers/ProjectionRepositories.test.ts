@@ -171,6 +171,48 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
     }),
   );
 
+  it.effect("round-trips thread settle columns (migration 045)", () =>
+    Effect.gen(function* () {
+      const threads = yield* ProjectionThreadRepository;
+      const threadId = ThreadId.make("thread-settled");
+      const row = {
+        threadId,
+        projectId: ProjectId.make("project-settled"),
+        title: "Settled thread",
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        branch: null,
+        worktreePath: null,
+        latestTurnId: null,
+        createdAt: "2026-09-14T00:00:00.000Z",
+        updatedAt: "2026-09-14T00:00:00.000Z",
+        archivedAt: null,
+        pinnedAt: null,
+        latestUserMessageAt: null,
+        pendingApprovalCount: 0,
+        pendingUserInputCount: 0,
+        hasActionableProposedPlan: 0,
+        deletedAt: null,
+      };
+
+      // Rows written without the settle fields persist as NULL.
+      yield* threads.upsert(row);
+      const neutral = Option.getOrNull(yield* threads.getById({ threadId }));
+      assert.strictEqual(neutral?.settledOverride, null);
+      assert.strictEqual(neutral?.settledAt, null);
+
+      yield* threads.upsert({
+        ...row,
+        settledOverride: "settled",
+        settledAt: "2026-09-14T12:00:00.000Z",
+      });
+      const settled = Option.getOrNull(yield* threads.getById({ threadId }));
+      assert.strictEqual(settled?.settledOverride, "settled");
+      assert.strictEqual(settled?.settledAt, "2026-09-14T12:00:00.000Z");
+    }),
+  );
+
   it.effect("round-trips agent-spawned thread and message columns (migration 044)", () =>
     Effect.gen(function* () {
       const threads = yield* ProjectionThreadRepository;

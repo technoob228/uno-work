@@ -130,6 +130,31 @@ function unsnoozedByActivityEvent(input: {
   };
 }
 
+/** Real activity resets ANY settle override (upstream T3 Code rule): it wakes
+    an explicitly settled thread and clears a keep-active override back to
+    neutral, so the thread can auto-settle again once this work goes stale. */
+function unsettledByActivityEvent(input: {
+  readonly thread: Pick<OrchestrationThread, "id" | "settledOverride">;
+  readonly commandId: OrchestrationCommand["commandId"];
+  readonly occurredAt: string;
+}): PlannedOrchestrationEvent | null {
+  if (input.thread.settledOverride == null) return null;
+  return {
+    ...withEventBase({
+      aggregateKind: "thread",
+      aggregateId: input.thread.id,
+      occurredAt: input.occurredAt,
+      commandId: input.commandId,
+    }),
+    type: "thread.unsettled",
+    payload: {
+      threadId: input.thread.id,
+      reason: "activity",
+      updatedAt: input.occurredAt,
+    },
+  };
+}
+
 /** A human writing into a thread the spawning agent drives takes control in
     the same batch, so the agent sees `human_in_control` on its next send.
     Only human-originated sends count: the UI (no origin) and connectors
@@ -557,6 +582,115 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.settle": {
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      // A thread whose session is coming alive or working is not done.
+      if (thread.session?.status === "starting" || thread.session?.status === "running") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' is working and cannot be settled.`,
+        });
+      }
+      // Blocked-on-you work must be answered, not parked.
+      if (hasOpenRequests(thread)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has a pending approval or input request and cannot be settled.`,
+        });
+      }
+      const occurredAt = nowIso();
+      // Settling inside the adoption window would hide just-requested work.
+      if (hasQueuedTurnStart(thread, occurredAt)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has a queued turn start and cannot be settled.`,
+        });
+      }
+      // Settling an already-settled thread re-emits with the original
+      // settledAt/updatedAt: double clicks and bulk settles stay silent no-ops.
+      const alreadySettled = thread.settledOverride === "settled" && thread.settledAt != null;
+      const settledEvent: PlannedOrchestrationEvent = {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.settled",
+        payload: {
+          threadId: command.threadId,
+          settledAt: alreadySettled && thread.settledAt != null ? thread.settledAt : occurredAt,
+          updatedAt: alreadySettled ? thread.updatedAt : occurredAt,
+        },
+      };
+      // Settling is "I'm done with this": clear the pin and the snooze so the
+      // row lands in the settled tail instead of staying pinned or shelved.
+      const companionEvents: PlannedOrchestrationEvent[] = [];
+      if (thread.pinnedAt != null) {
+        companionEvents.push({
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt,
+            commandId: command.commandId,
+          }),
+          type: "thread.meta-updated",
+          payload: {
+            threadId: command.threadId,
+            pinnedAt: null,
+            updatedAt: occurredAt,
+          },
+        });
+      }
+      if (thread.snoozedUntil != null) {
+        companionEvents.push({
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt,
+            commandId: command.commandId,
+          }),
+          type: "thread.unsnoozed",
+          payload: {
+            threadId: command.threadId,
+            reason: "user",
+            updatedAt: occurredAt,
+          },
+        });
+      }
+      return companionEvents.length > 0 ? [settledEvent, ...companionEvents] : settledEvent;
+    }
+
+    case "thread.unsettle": {
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      // Idempotent by re-emission: a duplicate keeps the existing updatedAt so
+      // it does not churn ordering.
+      const alreadyActive = thread.settledOverride === "active";
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.unsettled",
+        payload: {
+          threadId: command.threadId,
+          reason: command.reason,
+          updatedAt: alreadyActive ? thread.updatedAt : occurredAt,
+        },
+      };
+    }
+
     case "thread.control.set": {
       const thread = yield* requireThread({
         readModel,
@@ -751,7 +885,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               occurredAt: command.createdAt,
             })
           : null;
+      // A new turn is real activity: it resets any settle override.
+      const unsettleEvent = unsettledByActivityEvent({
+        thread: targetThread,
+        commandId: command.commandId,
+        occurredAt: command.createdAt,
+      });
       return [
+        ...(unsettleEvent === null ? [] : [unsettleEvent]),
         ...(wakeEvent === null ? [] : [wakeEvent]),
         ...(takeControlEvent === null ? [] : [takeControlEvent]),
         userMessageEvent,
@@ -877,12 +1018,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.session.set": {
-      yield* requireThread({
+      const sessionThread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
-      return {
+      const sessionSetEvent: PlannedOrchestrationEvent = {
         ...withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -896,6 +1037,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           session: command.session,
         },
       };
+      // Only a session coming alive is activity worth waking a settled thread
+      // for; ready/stopped/error writes arrive after the fact and must not
+      // fight an explicit settle.
+      const isSessionActivity =
+        command.session.status === "starting" || command.session.status === "running";
+      const unsettleEvent = isSessionActivity
+        ? unsettledByActivityEvent({
+            thread: sessionThread,
+            commandId: command.commandId,
+            occurredAt: command.createdAt,
+          })
+        : null;
+      return unsettleEvent === null ? sessionSetEvent : [unsettleEvent, sessionSetEvent];
     }
 
     case "thread.message.assistant.delta": {
@@ -1085,7 +1239,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             occurredAt: command.createdAt,
           })
         : null;
-      return wakeEvent === null ? activityEvent : [wakeEvent, activityEvent];
+      // Blocked-on-you work must never stay hidden in the settled tail.
+      const unsettleEvent = activityRaisesHand(command.activity.kind)
+        ? unsettledByActivityEvent({
+            thread: activityThread,
+            commandId: command.commandId,
+            occurredAt: command.createdAt,
+          })
+        : null;
+      if (unsettleEvent === null && wakeEvent === null) return activityEvent;
+      return [
+        ...(unsettleEvent === null ? [] : [unsettleEvent]),
+        ...(wakeEvent === null ? [] : [wakeEvent]),
+        activityEvent,
+      ];
     }
 
     default: {

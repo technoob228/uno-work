@@ -409,6 +409,14 @@ export const OrchestrationThread = Schema.Struct({
   // so payloads from pre-snooze servers still decode.
   snoozedUntil: Schema.optional(Schema.NullOr(IsoDateTime)),
   snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // Manual settle lifecycle, wire-compatible with upstream T3 Code:
+  // "settled" = the user parked the thread (thread.settle), "active" = the
+  // user pulled it back out (thread.unsettle) so it does not auto-settle
+  // again until real activity resets the override to null. Automatic
+  // settling after idle days is computed on the client in this fork.
+  // Optional so payloads from pre-settle servers still decode.
+  settledOverride: Schema.optional(Schema.NullOr(Schema.Literals(["settled", "active"]))),
+  settledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // The thread whose agent created this one (bridge `POST /api/threads`);
   // null for threads a human (or the manager) created. Immutable.
   spawnedByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
@@ -467,6 +475,9 @@ export const OrchestrationThreadShell = Schema.Struct({
   // See OrchestrationThread.snoozedUntil.
   snoozedUntil: Schema.optional(Schema.NullOr(IsoDateTime)),
   snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // See OrchestrationThread.settledOverride.
+  settledOverride: Schema.optional(Schema.NullOr(Schema.Literals(["settled", "active"]))),
+  settledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // See OrchestrationThread.spawnedByThreadId / controller.
   spawnedByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   controller: Schema.optional(ThreadController),
@@ -628,6 +639,22 @@ const ThreadUnsnoozeCommand = Schema.Struct({
   reason: Schema.Literal("user"),
 });
 
+// Wire-compatible with upstream T3 Code's thread.settle / thread.unsettle.
+const ThreadSettleCommand = Schema.Struct({
+  type: Schema.Literal("thread.settle"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
+const ThreadUnsettleCommand = Schema.Struct({
+  type: Schema.Literal("thread.unsettle"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  // Commands only carry "user": activity un-settles are decided server-side
+  // (the decider emits thread.unsettled(reason: "activity") directly).
+  reason: Schema.Literal("user"),
+});
+
 // Handoff between the human and the spawning agent. A human may set either
 // value; an agent (origin kind "agent") may only release control to "human".
 const ThreadControlSetCommand = Schema.Struct({
@@ -771,6 +798,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
+  ThreadSettleCommand,
+  ThreadUnsettleCommand,
   ThreadControlSetCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
@@ -795,6 +824,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
+  ThreadSettleCommand,
+  ThreadUnsettleCommand,
   ThreadControlSetCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
@@ -917,6 +948,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.meta-updated",
   "thread.snoozed",
   "thread.unsnoozed",
+  "thread.settled",
+  "thread.unsettled",
   "thread.control-changed",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
@@ -1021,6 +1054,21 @@ export const ThreadUnsnoozedPayload = Schema.Struct({
   // "user": the Unsnooze action. "activity": the thread raised its hand (a
   // new turn was requested, or the agent asked for approval / input) and the
   // decider cleared the snooze.
+  reason: Schema.Literals(["user", "activity"]),
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadSettledPayload = Schema.Struct({
+  threadId: ThreadId,
+  settledAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadUnsettledPayload = Schema.Struct({
+  threadId: ThreadId,
+  // "user": the Un-settle action (override becomes "active"). "activity":
+  // real work arrived (new turn, session coming alive, approval / input
+  // request) and the decider reset the override to neutral.
   reason: Schema.Literals(["user", "activity"]),
   updatedAt: IsoDateTime,
 });
@@ -1304,6 +1352,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.unsnoozed"),
     payload: ThreadUnsnoozedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.settled"),
+    payload: ThreadSettledPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.unsettled"),
+    payload: ThreadUnsettledPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

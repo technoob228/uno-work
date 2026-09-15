@@ -25,6 +25,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       servers, so clients treat missing as unsupported and hide the Snooze
       actions. Same key as upstream T3 Code. */
   threadSnooze: Schema.optionalKey(Schema.Boolean),
+  /** Server understands thread.settle / thread.unsettle and projects
+      settledOverride. Same key as upstream T3 Code. */
+  threadSettlement: Schema.optionalKey(Schema.Boolean),
   /** Server tracks agent-spawned threads (spawnedByThreadId, controller,
       thread.control.set). Clients hide the control badge/handoff when absent. */
   agentThreads: Schema.optionalKey(Schema.Boolean),

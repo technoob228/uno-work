@@ -85,6 +85,7 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
     capabilities: {
       repositoryIdentity: true,
       threadSnooze: true,
+      threadSettlement: true,
       agentThreads: true,
     },
   } satisfies Omit<ExecutionEnvironmentDescriptor, "machineKind" | "unoBoxId">;
