@@ -322,7 +322,7 @@ describe("continue branch naming", () => {
     assert.equal(continueBranchName("thread-1"), "uno/continue/thread-1");
     assert.equal(
       continueBranchName("7F3A9C1E-0000-4000-8000-000000000000", 3),
-      "uno/continue/7f3a9c1e-000-3",
+      "uno/continue/7f3a9c1e-3",
     );
     assert.equal(continueBranchName("../weird id!!"), "uno/continue/weird-id");
     assert.equal(continueBranchName("///"), "uno/continue/chat");

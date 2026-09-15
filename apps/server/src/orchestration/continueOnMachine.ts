@@ -106,7 +106,8 @@ function branchTail(id: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^[-.]+|[-.]+$/g, "")
-    .slice(0, 12)
+    // Thread ids are UUIDs: the first group is enough to tell copies apart.
+    .slice(0, 8)
     .replace(/[-.]+$/g, "");
   return cleaned.length > 0 ? cleaned : "chat";
 }
