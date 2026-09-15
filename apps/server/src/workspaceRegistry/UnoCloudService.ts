@@ -107,7 +107,7 @@ interface CreateJobRecord {
 
 function makeProvisionClient(apiKey: string): UnoBoxProvisionClient {
   return {
-    listImages: () => fetchControlPlaneJson(apiKey, "/api/v1/images"),
+    getWorkImage: () => fetchControlPlaneJson(apiKey, "/api/v1/work/image"),
     launchImage: (imageId, body) =>
       fetchControlPlaneJson(apiKey, `/api/v1/images/${imageId}/launch`, {
         method: "POST",

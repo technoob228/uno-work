@@ -73,31 +73,40 @@ export function parseUnoBoxConnection(raw: unknown, boxId: number): UnoBoxConnec
   };
 }
 
-export interface UnoImage {
+export interface UnoWorkImage {
   readonly id: number;
-  readonly name: string;
   readonly state: string;
-  readonly kind: string;
 }
 
-/** `GET /api/v1/images` answers `{ images: [{ id, name, state, kind }] }`. */
-export function parseUnoImages(raw: unknown): ReadonlyArray<UnoImage> {
-  const list = Array.isArray(raw) ? raw : (asRecord(raw)?.["images"] ?? []);
-  if (!Array.isArray(list)) return [];
-  const images: UnoImage[] = [];
-  for (const entry of list) {
-    const record = asRecord(entry);
-    if (!record) continue;
-    const id = asNumber(record["id"], -1);
-    if (id < 0) continue;
-    images.push({
-      id,
-      name: asString(record["name"]),
-      state: asString(record["state"]),
-      kind: asString(record["kind"]),
-    });
+/**
+ * `GET /api/v1/work/image` answers `{ image_id, name, state, ... }` — the image
+ * the control plane launches Uno Work machines from (`BOX_WORK_IMAGE_ID`).
+ * Null for anything else, including the plain-text 404 of a control plane that
+ * does not have the route yet.
+ */
+export function parseUnoWorkImage(raw: unknown): UnoWorkImage | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const id = asNumber(record["image_id"], -1);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  return { id, state: asString(record["state"]) };
+}
+
+/** HTTP status of a failed control-plane call, or null when it never got an answer. */
+export function controlPlaneErrorStatus(cause: unknown): number | null {
+  if (cause instanceof ControlPlaneHttpError) return cause.status;
+  const message = cause instanceof Error ? cause.message : String(cause);
+  const match = /^(?:HTTP )?(\d{3})\b/.exec(message);
+  return match ? Number(match[1]) : null;
+}
+
+export class ControlPlaneHttpError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ControlPlaneHttpError";
+    this.status = status;
   }
-  return images;
 }
 
 /**
@@ -120,7 +129,8 @@ export async function fetchControlPlaneJson(
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(
+    throw new ControlPlaneHttpError(
+      response.status,
       detail.trim().length > 0
         ? `${response.status}: ${detail.slice(0, 200)}`
         : `HTTP ${response.status}`,

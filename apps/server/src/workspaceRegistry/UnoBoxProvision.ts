@@ -21,7 +21,12 @@ import {
   type UnoBoxCreateJobStatus,
 } from "@t3tools/contracts";
 
-import { parseUnoBox, parseUnoBoxConnection, parseUnoImages } from "./unoCloudParse.ts";
+import {
+  controlPlaneErrorStatus,
+  parseUnoBox,
+  parseUnoBoxConnection,
+  parseUnoWorkImage,
+} from "./unoCloudParse.ts";
 
 export interface UnoBoxLaunchBody {
   readonly name: string;
@@ -41,7 +46,8 @@ export interface UnoBoxPlainCreateBody extends UnoBoxLaunchBody {
  * user-presentable (see `fetchControlPlaneJson`).
  */
 export interface UnoBoxProvisionClient {
-  readonly listImages: () => Promise<unknown>;
+  /** `GET /api/v1/work/image` — the control plane's current Uno Work image. */
+  readonly getWorkImage: () => Promise<unknown>;
   readonly launchImage: (imageId: number, body: UnoBoxLaunchBody) => Promise<unknown>;
   readonly createPlainBox: (body: UnoBoxPlainCreateBody) => Promise<unknown>;
   readonly getBox: (boxId: number) => Promise<unknown>;
@@ -81,7 +87,11 @@ export interface UnoBoxProvisionInput {
   readonly ramMb?: number | undefined;
   readonly vcpu?: number | undefined;
   readonly diskGb?: number | undefined;
-  /** Image to launch from; defaults to the Uno Work golden image. */
+  /**
+   * Image to launch from (`settings.uno.goldenImageId`). When unset, the
+   * control plane's current Uno Work image is used, falling back to the id
+   * built into this release.
+   */
   readonly goldenImageId?: number | null | undefined;
 }
 
@@ -110,25 +120,34 @@ function toLaunchBody(input: UnoBoxProvisionInput): UnoBoxLaunchBody {
   };
 }
 
-type ImageLookup =
-  | { readonly kind: "present" }
-  | { readonly kind: "missing" }
-  | { readonly kind: "dead"; readonly state: string }
-  | { readonly kind: "unknown"; readonly error: string };
+type ImageChoice =
+  | { readonly kind: "launch"; readonly imageId: number }
+  | { readonly kind: "dead"; readonly imageId: number; readonly state: string };
 
-async function lookupImage(client: UnoBoxProvisionClient, imageId: number): Promise<ImageLookup> {
-  let raw: unknown;
+/**
+ * Which image to launch. The golden image belongs to a service account, so it
+ * never shows up in the user's own `GET /api/v1/images` — looking it up there
+ * made every account except the owner fall back to a plain box without the
+ * daemon. The control plane lets any account launch its Uno Work image, and
+ * `GET /api/v1/work/image` names it; older control planes without that route
+ * get the id built into this release.
+ */
+async function chooseImage(
+  client: UnoBoxProvisionClient,
+  override: number | null | undefined,
+): Promise<ImageChoice> {
+  if (override != null) return { kind: "launch", imageId: override };
+  let workImage: ReturnType<typeof parseUnoWorkImage> = null;
   try {
-    raw = await client.listImages();
-  } catch (cause) {
-    return { kind: "unknown", error: errorMessage(cause) };
+    workImage = parseUnoWorkImage(await client.getWorkImage());
+  } catch {
+    workImage = null;
   }
-  const image = parseUnoImages(raw).find((candidate) => candidate.id === imageId);
-  if (!image) return { kind: "missing" };
-  if (IMAGE_DEAD_STATES.has(image.state.toLowerCase())) {
-    return { kind: "dead", state: image.state };
+  if (!workImage) return { kind: "launch", imageId: UNO_WORK_GOLDEN_IMAGE_ID };
+  if (IMAGE_DEAD_STATES.has(workImage.state.toLowerCase())) {
+    return { kind: "dead", imageId: workImage.id, state: workImage.state };
   }
-  return { kind: "present" };
+  return { kind: "launch", imageId: workImage.id };
 }
 
 /**
@@ -142,7 +161,6 @@ export async function runUnoBoxProvisionJob(
 ): Promise<UnoBoxCreateJobStatus> {
   const timing: UnoBoxProvisionTiming = { ...DEFAULT_UNO_BOX_PROVISION_TIMING, ...deps.timing };
   const { client } = deps;
-  const imageId = input.goldenImageId ?? UNO_WORK_GOLDEN_IMAGE_ID;
 
   let current: UnoBoxCreateJobStatus = { jobId: input.jobId, state: "creating" };
   const emit = (next: Omit<UnoBoxCreateJobStatus, "jobId">): UnoBoxCreateJobStatus => {
@@ -157,31 +175,41 @@ export async function runUnoBoxProvisionJob(
 
   emit({ state: "creating", message: "Launching a box from the Uno Work image…" });
 
-  // --- 1. Decide what to create. The image check is read-only; when it cannot
-  // be answered we still attempt the golden launch (that call fails cleanly
-  // if the image is really gone, and nothing gets billed).
-  const lookup = await lookupImage(client, imageId);
-  if (lookup.kind === "dead") {
+  // --- 1. Decide what to create. Read-only; nothing is billed here.
+  const choice = await chooseImage(client, input.goldenImageId);
+  const imageId = choice.imageId;
+  if (choice.kind === "dead") {
     return fail(
-      `The Uno Work image #${imageId} is not usable right now (state: ${lookup.state}). Nothing was created.`,
+      `The Uno Work image #${imageId} is not usable right now (state: ${choice.state}). Nothing was created.`,
     );
   }
-  const useGoldenImage = lookup.kind !== "missing";
 
-  // --- 2. Exactly one create call.
+  // --- 2. One launch call. A 404 means the image does not exist for this
+  // account and nothing was created, so a plain box is the only other create
+  // call a job can make.
   let box: UnoBox | null = null;
+  let useGoldenImage = true;
+  const body = toLaunchBody(input);
   try {
-    const body = toLaunchBody(input);
-    const raw = useGoldenImage
-      ? await client.launchImage(imageId, body)
-      : await client.createPlainBox({
+    box = parseUnoBox(await client.launchImage(imageId, body));
+  } catch (cause) {
+    if (controlPlaneErrorStatus(cause) !== 404) {
+      return fail(`Could not create the box: ${errorMessage(cause)}`);
+    }
+    useGoldenImage = false;
+  }
+  if (!useGoldenImage) {
+    try {
+      box = parseUnoBox(
+        await client.createPlainBox({
           ...body,
           template: PLAIN_BOX_TEMPLATE,
           network_profile: PLAIN_BOX_NETWORK_PROFILE,
-        });
-    box = parseUnoBox(raw);
-  } catch (cause) {
-    return fail(`Could not create the box: ${errorMessage(cause)}`);
+        }),
+      );
+    } catch (cause) {
+      return fail(`Could not create the box: ${errorMessage(cause)}`);
+    }
   }
   if (!box) {
     return fail(

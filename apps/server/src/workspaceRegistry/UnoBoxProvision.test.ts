@@ -38,9 +38,10 @@ function makeHarness(clientOverrides: Partial<UnoBoxProvisionClient> = {}) {
   let clock = 0;
   const statuses: UnoBoxCreateJobStatus[] = [];
   const client: UnoBoxProvisionClient = {
-    listImages: vi.fn(async () => ({
-      images: [{ id: UNO_WORK_GOLDEN_IMAGE_ID, name: "uno-work-golden-v4", state: "ready" }],
-    })),
+    // A control plane without GET /api/v1/work/image answers a plain-text 404.
+    getWorkImage: vi.fn(async () => {
+      throw new Error("404: 404 page not found");
+    }),
     launchImage: vi.fn(async () => rawBox()),
     createPlainBox: vi.fn(async () => rawBox({ id: 777 })),
     getBox: vi.fn(async () => rawBox({ status: "running" })),
@@ -105,9 +106,7 @@ describe("runUnoBoxProvisionJob", () => {
   });
 
   it("honours explicit size and image overrides", async () => {
-    const harness = makeHarness({
-      listImages: vi.fn(async () => ({ images: [{ id: 99, name: "custom", state: "ready" }] })),
-    });
+    const harness = makeHarness();
     await runUnoBoxProvisionJob(
       { ...INPUT, ramMb: 4096, vcpu: 2, diskGb: 20, goldenImageId: 99 },
       harness.deps,
@@ -119,6 +118,26 @@ describe("runUnoBoxProvisionJob", () => {
       vcpu: 2,
       disk_gb: 20,
     });
+    // An explicit override is not second-guessed by the control plane's choice.
+    expect(harness.client.getWorkImage).not.toHaveBeenCalled();
+  });
+
+  it("launches the golden image it does not own, from the id the control plane names", async () => {
+    // The owner-only image list is never consulted: that lookup is what sent
+    // every account except the image owner to a plain box without the daemon.
+    const harness = makeHarness({
+      getWorkImage: vi.fn(async () => ({
+        image_id: 126,
+        name: "uno-work-golden-v9",
+        state: "ready",
+      })),
+    });
+    const result = await runUnoBoxProvisionJob(INPUT, harness.deps);
+
+    expect(result.state).toBe("ready");
+    expect(harness.client.launchImage).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(harness.client.launchImage).mock.calls[0]?.[0]).toBe(126);
+    expect(harness.client.createPlainBox).not.toHaveBeenCalled();
   });
 
   it("retries the pairing link while the daemon boots and never re-launches", async () => {
@@ -206,14 +225,16 @@ describe("runUnoBoxProvisionJob", () => {
     expect(harness.client.createPlainBox).not.toHaveBeenCalled();
   });
 
-  it("falls back to a plain box when the golden image is missing and stops with daemonInstallRequired", async () => {
+  it("falls back to a plain box only when the launch says the image does not exist", async () => {
     const harness = makeHarness({
-      listImages: vi.fn(async () => ({ images: [{ id: 1, name: "other", state: "ready" }] })),
+      launchImage: vi.fn(async () => {
+        throw new Error('404: {"error":"NOT_FOUND"}');
+      }),
       getBox: vi.fn(async () => rawBox({ id: 777, status: "running" })),
     });
     const result = await runUnoBoxProvisionJob(INPUT, harness.deps);
 
-    expect(harness.client.launchImage).not.toHaveBeenCalled();
+    expect(harness.client.launchImage).toHaveBeenCalledTimes(1);
     expect(harness.client.createPlainBox).toHaveBeenCalledTimes(1);
     expect(harness.client.createPlainBox).toHaveBeenCalledWith({
       name: "my-app",
@@ -230,24 +251,22 @@ describe("runUnoBoxProvisionJob", () => {
     expect(harness.client.createWorkSession).not.toHaveBeenCalled();
   });
 
-  it("still tries the golden launch when the image list cannot be read", async () => {
+  it("uses the built-in image id when the control plane cannot name one", async () => {
     const harness = makeHarness({
-      listImages: vi.fn(async () => {
-        throw new Error("503: unavailable");
+      getWorkImage: vi.fn(async () => {
+        throw new Error("fetch failed");
       }),
     });
     const result = await runUnoBoxProvisionJob(INPUT, harness.deps);
 
     expect(result.state).toBe("ready");
-    expect(harness.client.launchImage).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(harness.client.launchImage).mock.calls[0]?.[0]).toBe(UNO_WORK_GOLDEN_IMAGE_ID);
     expect(harness.client.createPlainBox).not.toHaveBeenCalled();
   });
 
   it("refuses to create anything when the golden image is in a dead state", async () => {
     const harness = makeHarness({
-      listImages: vi.fn(async () => ({
-        images: [{ id: UNO_WORK_GOLDEN_IMAGE_ID, name: "golden", state: "error" }],
-      })),
+      getWorkImage: vi.fn(async () => ({ image_id: 126, name: "golden", state: "error" })),
     });
     const result = await runUnoBoxProvisionJob(INPUT, harness.deps);
 

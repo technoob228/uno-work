@@ -4,7 +4,9 @@ import {
   parseUnoBox,
   parseUnoBoxConnection,
   parseUnoBoxList,
-  parseUnoImages,
+  controlPlaneErrorStatus,
+  ControlPlaneHttpError,
+  parseUnoWorkImage,
 } from "./unoCloudParse.ts";
 
 describe("parseUnoBox", () => {
@@ -97,25 +99,26 @@ describe("parseUnoBoxConnection", () => {
   });
 });
 
-describe("parseUnoImages", () => {
-  it("reads the { images } envelope", () => {
+describe("parseUnoWorkImage", () => {
+  it("reads the work image payload", () => {
     expect(
-      parseUnoImages({
-        images: [
-          { id: 46, name: "uno-work-golden-v4", state: "ready", kind: "golden" },
-          { id: "bad" },
-          { id: 47 },
-        ],
-      }),
-    ).toEqual([
-      { id: 46, name: "uno-work-golden-v4", state: "ready", kind: "golden" },
-      { id: 47, name: "", state: "", kind: "" },
-    ]);
+      parseUnoWorkImage({ image_id: 126, name: "uno-work-golden-v9", state: "ready" }),
+    ).toEqual({ id: 126, state: "ready" });
   });
 
-  it("tolerates missing or malformed payloads", () => {
-    expect(parseUnoImages(null)).toEqual([]);
-    expect(parseUnoImages({ images: null })).toEqual([]);
-    expect(parseUnoImages([{ id: 1 }])).toHaveLength(1);
+  it("returns null for anything that is not a work image", () => {
+    expect(parseUnoWorkImage(null)).toBeNull();
+    expect(parseUnoWorkImage("404 page not found")).toBeNull();
+    expect(parseUnoWorkImage({ id: 126 })).toBeNull();
+    expect(parseUnoWorkImage({ image_id: 0 })).toBeNull();
+  });
+});
+
+describe("controlPlaneErrorStatus", () => {
+  it("reads the status from typed and message-only errors", () => {
+    expect(controlPlaneErrorStatus(new ControlPlaneHttpError(404, "HTTP 404"))).toBe(404);
+    expect(controlPlaneErrorStatus(new Error("404: NOT_FOUND"))).toBe(404);
+    expect(controlPlaneErrorStatus(new Error("HTTP 409"))).toBe(409);
+    expect(controlPlaneErrorStatus(new Error("fetch failed"))).toBeNull();
   });
 });
