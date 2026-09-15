@@ -185,6 +185,76 @@ if ! grep -q '^Storage=persistent' /etc/systemd/journald.conf 2>/dev/null; then
   systemctl restart systemd-journald || true
 fi
 
+# --- Scratch-dir sweep ------------------------------------------------------
+# Harnesses built with `bun build --compile` (OpenCode, Uno Code) write their
+# embedded native library into the temp dir on every start and never remove it:
+# ~4.7 MB per provider probe, ~1.4 GB a day on a box. Daemons from 0.0.58 give
+# each harness its own BUN_TMPDIR and remove it, but older daemons, crashes and
+# other tools still leave files behind. Hourly, remove files older than a day
+# that no process has open or mapped.
+log "Installing the scratch-dir sweep"
+cat > /usr/local/sbin/uno-work-tmp-sweep <<'SCRIPT'
+#!/bin/sh
+set -eu
+DIR="${1:-${UNO_WORK_STATE_DIR:-/var/lib/uno-work}/tmp}"
+[ -d "${DIR}" ] || exit 0
+DIR="$(cd "${DIR}" && pwd -P)"
+busy="$(mktemp)"
+candidates="$(mktemp)"
+trap 'rm -f "${busy}" "${candidates}"' EXIT
+# Everything under DIR that a process holds: open descriptors and mappings
+# (a loaded .so stays mapped after its descriptor is closed).
+for p in /proc/[0-9]*; do
+  awk -v d="${DIR}/" 'index($6, d) == 1 { print $6 }' "${p}/maps" 2>/dev/null || true
+  for fd in "${p}"/fd/*; do
+    t="$(readlink "${fd}" 2>/dev/null)" || continue
+    case "${t}" in "${DIR}"/*) printf '%s\n' "${t}" ;; esac
+  done
+done | sed 's/ (deleted)$//' | sort -u > "${busy}"
+removed=0
+kept=0
+find "${DIR}" -mindepth 1 -type f -mmin +1440 -amin +1440 2>/dev/null > "${candidates}" || true
+while IFS= read -r f; do
+  if grep -Fxq -- "${f}" "${busy}"; then
+    kept=$((kept + 1))
+  else
+    rm -f -- "${f}" && removed=$((removed + 1))
+  fi
+done < "${candidates}"
+# Per-harness BUN_TMPDIR dirs a crashed daemon did not get to remove.
+find "${DIR}" -mindepth 1 -maxdepth 1 -type d -name 'uno-bun-*' -empty -mmin +60 -delete 2>/dev/null || true
+echo "uno-work-tmp-sweep: removed ${removed}, kept ${kept} in use"
+SCRIPT
+chmod 0755 /usr/local/sbin/uno-work-tmp-sweep
+
+cat > /etc/systemd/system/uno-work-tmp-sweep.service <<'UNIT'
+[Unit]
+Description=Remove stale Uno Work scratch files nobody holds open
+Documentation=https://uno4.dev/docs/work
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/uno-work-tmp-sweep
+Nice=19
+IOSchedulingClass=idle
+UNIT
+
+cat > /etc/systemd/system/uno-work-tmp-sweep.timer <<'UNIT'
+[Unit]
+Description=Hourly sweep of stale Uno Work scratch files
+Documentation=https://uno4.dev/docs/work
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now uno-work-tmp-sweep.timer >/dev/null 2>&1 || log "  could not enable the sweep timer"
+
 log "Installing the systemd unit"
 # `curl … | bash` leaves BASH_SOURCE unset, and `set -u` turns that into a fatal
 # error right here — the unit never lands and the old daemon keeps running while
