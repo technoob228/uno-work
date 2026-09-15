@@ -1,7 +1,7 @@
 import { useEffect, type ReactNode } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
-import ThreadSidebar from "./Sidebar";
+import ThreadSidebar from "./LegacySidebar";
 import { BrowserBridgeListener } from "./preview/BrowserBridgeListener";
 import { FileBrowser } from "./preview/FileBrowser";
 import { PreviewPane } from "./preview/PreviewPane";
