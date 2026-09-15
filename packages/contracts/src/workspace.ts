@@ -353,7 +353,7 @@ export type UnoBoxConnection = typeof UnoBoxConnection.Type;
  * without any manual install step. Overridable per account via
  * `settings.uno.goldenImageId`.
  */
-export const UNO_WORK_GOLDEN_IMAGE_ID = 132;
+export const UNO_WORK_GOLDEN_IMAGE_ID = 133;
 
 /** Sensible defaults for a first work box: enough for a harness plus a repository clone. */
 export const UNO_BOX_DEFAULT_RAM_MB = 2048;
