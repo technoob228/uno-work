@@ -19,6 +19,7 @@ import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } 
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
+import { agentMessageEnvelope } from "../../agentThreads/logic.ts";
 import { applyHandoffSeed, resolvePendingHandoffSeed } from "../handoff.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
@@ -833,9 +834,22 @@ const make = Effect.gen(function* () {
       messages: thread.messages,
       currentMessageId: message.id,
     });
+    // A message another thread's agent sent reaches the harness with a line
+    // saying who it is from and how to answer (plan 22); the stored message
+    // and the UI keep the clean text.
+    const senderThreadId = message.sentByThreadId ?? null;
+    const promptText =
+      senderThreadId === null
+        ? message.text
+        : agentMessageEnvelope({
+            sender: (yield* resolveThread(senderThreadId)) ?? null,
+            senderThreadId,
+            recipientSpawnedByThreadId: thread.spawnedByThreadId,
+            text: message.text,
+          });
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
-      messageText: applyHandoffSeed(pendingHandoffSeed, message.text),
+      messageText: applyHandoffSeed(pendingHandoffSeed, promptText),
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }

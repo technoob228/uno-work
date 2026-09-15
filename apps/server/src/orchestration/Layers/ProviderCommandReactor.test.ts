@@ -445,6 +445,63 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.runtimeMode).toBe("approval-required");
   });
 
+  it("tells the harness which agent sent a message and how to answer it", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-thread-create-sender"),
+        threadId: ThreadId.make("thread-sender"),
+        projectId: asProjectId("project-1"),
+        title: "Reviewer",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-4-6",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch(
+        {
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-turn-start-peer"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("user-message-peer"),
+            role: "user",
+            text: "check the migration",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        },
+        { origin: { kind: "agent", threadId: ThreadId.make("thread-sender") } },
+      ),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    const input = (harness.sendTurn.mock.calls[0]?.[0] as { input?: string }).input ?? "";
+    expect(input).toContain("«Reviewer» (threadId thread-sender, claudeAgent)");
+    expect(input).toContain("/api/threads/thread-sender/messages");
+    expect(input.endsWith("\n\ncheck the migration")).toBe(true);
+
+    // The stored message stays clean for the UI.
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.messages.at(-1)).toMatchObject({
+      text: "check the migration",
+      sentByThreadId: "thread-sender",
+    });
+  });
+
   it("generates a thread title on the first turn", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

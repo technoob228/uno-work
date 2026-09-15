@@ -8,6 +8,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  agentMessageEnvelope,
   checkMessageText,
   clampInteger,
   defaultTitleFromText,
@@ -15,7 +16,9 @@ import {
   isCwdInsideOwnProject,
   lastAssistantText,
   messageAuthor,
+  parseListScope,
   resolveProviderModelSelection,
+  threadRelation,
 } from "./logic.ts";
 
 const CALLER = "thread-parent" as ThreadId;
@@ -231,5 +234,65 @@ describe("small helpers", () => {
       ]),
     ).toBe("y".repeat(500));
     expect(lastAssistantText([{ role: "user", text: "hi" }])).toBeNull();
+  });
+});
+
+describe("agentMessageEnvelope", () => {
+  const sender = {
+    id: "thread-boss" as ThreadId,
+    title: "Boss",
+    modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+  } as Parameters<typeof agentMessageEnvelope>[0]["sender"];
+
+  it("tells a peer how to write back", () => {
+    const text = agentMessageEnvelope({
+      sender,
+      senderThreadId: "thread-boss" as ThreadId,
+      recipientSpawnedByThreadId: null,
+      text: "review this",
+    });
+    expect(text).toContain("«Boss» (threadId thread-boss, codex)");
+    expect(text).toContain("POST $UNO_WORK_BRIDGE_URL/api/threads/thread-boss/messages");
+    expect(text.endsWith("\n\nreview this")).toBe(true);
+  });
+
+  it("tells a child its parent reads the answer in place", () => {
+    const text = agentMessageEnvelope({
+      sender,
+      senderThreadId: "thread-boss" as ThreadId,
+      recipientSpawnedByThreadId: "thread-boss" as ThreadId,
+      text: "next",
+    });
+    expect(text).toContain("просто ответь здесь");
+    expect(text).not.toContain("/messages");
+  });
+
+  it("survives a deleted sender", () => {
+    const text = agentMessageEnvelope({
+      sender: null,
+      senderThreadId: "thread-gone" as ThreadId,
+      recipientSpawnedByThreadId: undefined,
+      text: "hi",
+    });
+    expect(text).toContain("«без названия» (threadId thread-gone)");
+  });
+});
+
+describe("threadRelation / parseListScope", () => {
+  it("classifies threads relative to the caller", () => {
+    const caller = { id: "c" as ThreadId, spawnedByThreadId: "p" as ThreadId };
+    expect(threadRelation(caller, { id: "c" as ThreadId })).toBe("self");
+    expect(threadRelation(caller, { id: "p" as ThreadId })).toBe("parent");
+    expect(threadRelation(caller, { id: "k" as ThreadId, spawnedByThreadId: "c" as ThreadId })).toBe(
+      "child",
+    );
+    expect(threadRelation(caller, { id: "x" as ThreadId, spawnedByThreadId: null })).toBe("peer");
+  });
+
+  it("defaults to children and rejects unknown scopes", () => {
+    expect(parseListScope(null)).toBe("children");
+    expect(parseListScope(" project ")).toBe("project");
+    expect(parseListScope("all")).toBe("all");
+    expect(parseListScope("everyone")).toBeNull();
   });
 });
