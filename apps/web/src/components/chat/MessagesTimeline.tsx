@@ -62,6 +62,7 @@ import {
 } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
+import { useNavigate } from "@tanstack/react-router";
 import { describeAgentSentMessage } from "~/agentThreads.logic";
 import { useThreadTitle } from "~/hooks/useThreadTitle";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
@@ -309,10 +310,28 @@ const AgentSentMessageLabel = memo(function AgentSentMessageLabel({
 }) {
   const ctx = use(TimelineRowCtx);
   const senderTitle = useThreadTitle(ctx.activeThreadEnvironmentId, sentByThreadId);
+  const navigate = useNavigate();
+  const label = describeAgentSentMessage(senderTitle);
   return (
     <div className="mb-1.5 flex items-center gap-1 text-[11px] text-muted-foreground">
       <BotIcon aria-hidden="true" className="size-3 shrink-0 text-info" />
-      <span className="truncate">{describeAgentSentMessage(senderTitle)}</span>
+      {senderTitle ? (
+        <button
+          type="button"
+          title="Open the chat this message came from"
+          onClick={() =>
+            void navigate({
+              to: "/$environmentId/$threadId",
+              params: { environmentId: ctx.activeThreadEnvironmentId, threadId: sentByThreadId },
+            })
+          }
+          className="cursor-pointer truncate rounded-sm underline-offset-2 outline-hidden hover:text-foreground hover:underline focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          {label}
+        </button>
+      ) : (
+        <span className="truncate">{label}</span>
+      )}
     </div>
   );
 });
