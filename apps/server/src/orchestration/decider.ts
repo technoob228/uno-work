@@ -808,15 +808,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       const targetController = targetThread.controller ?? "human";
       if (origin?.kind === "agent") {
-        // An agent may only drive threads it spawned, and only while the
-        // human has not taken over. The bridge maps these prefixes to 403/409.
-        if (targetThread.spawnedByThreadId !== origin.threadId) {
+        // Any agent may message any other thread (plan 22) — its own child or a
+        // peer. What it may not do is write into an agent thread a human took
+        // over. Project scope and "waiting for the human" are the bridge's
+        // checks (they need settings); the bridge maps these prefixes to 4xx.
+        if (command.threadId === origin.threadId) {
           return yield* new OrchestrationCommandInvariantError({
             commandType: command.type,
-            detail: `not_your_thread: Thread '${command.threadId}' was not spawned by thread '${origin.threadId}'.`,
+            detail: `cannot_message_self: Thread '${command.threadId}' cannot message itself.`,
           });
         }
-        if (targetController !== "agent") {
+        if (targetThread.spawnedByThreadId != null && targetController !== "agent") {
           return yield* new OrchestrationCommandInvariantError({
             commandType: command.type,
             detail: `human_in_control: A human has taken control of thread '${command.threadId}'.`,

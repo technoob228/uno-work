@@ -2,9 +2,10 @@
  * HTTP surface of the agent-threads bridge (see `service.ts` for the rules):
  *
  * - `POST /api/threads`                   — spawn a thread and start its first turn;
- * - `GET  /api/threads`                   — the caller's child threads;
+ * - `GET  /api/threads`                   — `?scope=children|project|all`, default the caller's children;
  * - `GET  /api/threads/:threadId`         — status + last messages, `?limit`, `?waitMs` long-poll;
- * - `POST /api/threads/:threadId/messages` — send a turn (409 when a human took over);
+ * - `POST /api/threads/:threadId/messages` — send a turn to a child or a peer (409 when a human
+ *   took over / is asked, or the peer is busy; `waitMs` waits for it);
  * - `POST /api/threads/:threadId/release` — hand control to the human.
  *
  * Authenticated with the thread-scoped browser-bridge token every harness
@@ -73,8 +74,10 @@ export const agentThreadsListRouteLayer = HttpRouter.add(
   "GET",
   AGENT_THREADS_PATH,
   Effect.gen(function* () {
-    const { handlers, authorization } = yield* makeRequestContext;
-    return respond(yield* handlers.listThreads(authorization));
+    const { request, handlers, authorization } = yield* makeRequestContext;
+    return respond(
+      yield* handlers.listThreads(authorization, { scope: searchParam(request, "scope") }),
+    );
   }),
 );
 

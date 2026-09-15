@@ -220,21 +220,38 @@ describe("decider agent-spawned threads: thread.turn.start", () => {
     expect(child.messages.at(-1)?.sentByThreadId).toBe(PARENT_ID);
   });
 
-  it("rejects an agent sending into a thread it did not spawn", async () => {
-    const readModel = await seedChild();
-    await expect(decide(readModel, turnStart(CHILD_ID), agentOrigin(OTHER_ID))).rejects.toThrow(
-      "not_your_thread:",
-    );
-    // A human-created thread has no parent at all.
-    await expect(decide(readModel, turnStart(OTHER_ID), agentOrigin(PARENT_ID))).rejects.toThrow(
-      "not_your_thread:",
-    );
+  it("lets any agent message a peer thread without touching control", async () => {
+    // A non-parent agent into someone else's agent-driven child.
+    const peer = await decideAndApply(await seedChild(), turnStart(CHILD_ID), agentOrigin(OTHER_ID));
+    expect(peer.events.map((event) => event.type)).toEqual([
+      "thread.message-sent",
+      "thread.turn-start-requested",
+    ]);
+    expect(peer.events[0]?.payload).toMatchObject({ sentByThreadId: OTHER_ID });
+    expect(threadOf(peer.readModel, CHILD_ID).controller).toBe("agent");
+
+    // A child answering its parent, a human-created thread.
+    const reply = await decideAndApply(peer.readModel, turnStart(PARENT_ID), agentOrigin(CHILD_ID));
+    expect(reply.events[0]?.payload).toMatchObject({ sentByThreadId: CHILD_ID });
+    expect(threadOf(reply.readModel, PARENT_ID)).toMatchObject({
+      controller: "human",
+      controlChangedAt: null,
+    });
   });
 
-  it("rejects the parent agent once a human holds control", async () => {
+  it("rejects an agent messaging its own thread", async () => {
+    await expect(
+      decide(await seedChild(), turnStart(PARENT_ID), agentOrigin(PARENT_ID)),
+    ).rejects.toThrow("cannot_message_self:");
+  });
+
+  it("rejects every agent once a human holds control of an agent thread", async () => {
     const handedOff = await decideAndApply(await seedChild(), controlSet(CHILD_ID, "human"));
     await expect(
       decide(handedOff.readModel, turnStart(CHILD_ID), agentOrigin(PARENT_ID)),
+    ).rejects.toThrow("human_in_control:");
+    await expect(
+      decide(handedOff.readModel, turnStart(CHILD_ID), agentOrigin(OTHER_ID)),
     ).rejects.toThrow("human_in_control:");
   });
 

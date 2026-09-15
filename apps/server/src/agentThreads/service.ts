@@ -11,9 +11,11 @@
  * - every command is dispatched with origin `{ kind: "agent", threadId }`, so
  *   the decider enforces parentage/controller and the event store records who
  *   did it;
- * - read/write access is limited to threads whose `spawnedByThreadId` is the
- *   caller (anything else is 404, not 403 — no probing of foreign threads);
- * - a thread in another project only with `agentThreadsScope: "any-project"`.
+ * - read/write reaches any live thread of the caller's project, other projects
+ *   only with `agentThreadsScope: "any-project"` (anything else is 404, not
+ *   403 — no probing of foreign threads); release stays parent-only;
+ * - an agent never writes into a thread that waits for the human or that the
+ *   human took over (plan 22).
  */
 import {
   CommandId,
@@ -41,18 +43,24 @@ import {
   AGENT_THREAD_MAX_TITLE_CHARS,
   AGENT_THREAD_MAX_WAIT_MS,
   AGENT_THREAD_MESSAGE_TEXT_CHARS,
+  type AgentThreadListScope,
+  bodyWaitMs,
   checkMessageText,
   clampInteger,
   defaultTitleFromText,
   deriveAgentThreadStatus,
+  HUMAN_ACTIVE_MESSAGE,
   HUMAN_IN_CONTROL_MESSAGE,
   isCwdInsideOwnProject,
   lastAssistantText,
   messageAuthor,
   normalizeWorkspacePath,
   optionalString,
+  parseListScope,
   resolveProviderModelSelection,
+  TARGET_BUSY_MESSAGE,
   threadController,
+  threadRelation,
 } from "./logic.ts";
 
 export type AgentThreadsScope = "own-project" | "any-project";
@@ -97,7 +105,7 @@ const commandId = (tag: string) => CommandId.make(`agent:${tag}:${crypto.randomU
 const THREAD_NOT_FOUND_BODY = {
   ok: false,
   error: "thread_not_found",
-  message: "Тред не найден среди твоих.",
+  message: "Тред не найден среди доступных тебе.",
 } as const;
 
 /**
@@ -118,6 +126,11 @@ export function replyForDispatchError(error: OrchestrationDispatchError): AgentT
       return {
         status: 409,
         body: { ok: false, error: "human_in_control", message: HUMAN_IN_CONTROL_MESSAGE },
+      };
+    case "cannot_message_self":
+      return {
+        status: 400,
+        body: { ok: false, error: "cannot_message_self", message: "Нельзя написать самому себе." },
       };
     case "not_your_thread":
     case "not_agent_thread":
@@ -242,6 +255,24 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
       const shell = yield* deps.projections.getThreadShellById(ThreadId.make(trimmed));
       if (Option.isNone(shell) || (shell.value.spawnedByThreadId ?? null) !== caller.id) {
         return yield* Effect.fail(new Reply({ status: 404, body: THREAD_NOT_FOUND_BODY }));
+      }
+      return shell.value;
+    });
+
+  /**
+   * Any live thread the caller may talk to: its own project, or any project
+   * when the user allowed it. Archived and out-of-scope threads are 404.
+   */
+  const loadReachable = (caller: OrchestrationThreadShell, rawThreadId: string | undefined) =>
+    Effect.gen(function* () {
+      const trimmed = rawThreadId?.trim() ?? "";
+      const notFound = Effect.fail(new Reply({ status: 404, body: THREAD_NOT_FOUND_BODY }));
+      if (trimmed.length === 0) return yield* notFound;
+      const shell = yield* deps.projections.getThreadShellById(ThreadId.make(trimmed));
+      if (Option.isNone(shell) || shell.value.archivedAt !== null) return yield* notFound;
+      if (shell.value.projectId !== caller.projectId) {
+        const scope = yield* deps.getAgentThreadsScope;
+        if (scope !== "any-project") return yield* notFound;
       }
       return shell.value;
     });
@@ -412,21 +443,41 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
       }),
     );
 
-  const listThreads = (authorization: BridgeAuthorization | null) =>
+  const listThreads = (
+    authorization: BridgeAuthorization | null,
+    input: { readonly scope: string | null } = { scope: null },
+  ) =>
     run("list", authorization, (caller) =>
       Effect.gen(function* () {
+        const scope: AgentThreadListScope | null = parseListScope(input.scope);
+        if (scope === null) {
+          return yield* fail(
+            400,
+            "invalid_scope",
+            '"scope" — "children" (по умолчанию), "project" или "all".',
+          );
+        }
+        if (scope === "all") yield* requireAnyProjectScope;
         const snapshot = yield* deps.projections.getShellSnapshot();
-        const children = snapshot.threads
-          .filter((thread) => (thread.spawnedByThreadId ?? null) === caller.id)
+        const selected = snapshot.threads
+          .filter((thread) =>
+            scope === "children"
+              ? (thread.spawnedByThreadId ?? null) === caller.id
+              : thread.archivedAt === null &&
+                (scope === "all" || thread.projectId === caller.projectId),
+          )
           .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
         const threads = yield* Effect.forEach(
-          children,
+          selected,
           (child) =>
             deps.projections.getThreadDetailById(child.id).pipe(
               Effect.map((detail) => ({
                 id: child.id,
                 title: child.title,
                 projectId: child.projectId,
+                provider: child.modelSelection.instanceId,
+                relation: threadRelation(caller, child),
+                spawnedByThreadId: child.spawnedByThreadId ?? null,
                 status: deriveAgentThreadStatus(child),
                 controller: threadController(child),
                 updatedAt: child.updatedAt,
@@ -451,7 +502,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
   ) =>
     run("get", authorization, (caller) =>
       Effect.gen(function* () {
-        let shell = yield* loadChild(caller, input.threadId);
+        let shell = yield* loadReachable(caller, input.threadId);
         const limit = clampInteger(input.limit, {
           fallback: AGENT_THREAD_DEFAULT_MESSAGE_LIMIT,
           min: 1,
@@ -465,7 +516,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         const deadline = nowMs() + waitMs;
         while (deriveAgentThreadStatus(shell) === "running" && nowMs() < deadline) {
           yield* sleep(Math.max(1, Math.min(pollIntervalMs, deadline - nowMs())));
-          shell = yield* loadChild(caller, shell.id);
+          shell = yield* loadReachable(caller, shell.id);
         }
 
         const detail = yield* deps.projections.getThreadDetailById(shell.id);
@@ -476,6 +527,8 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
             id: shell.id,
             title: shell.title,
             projectId: shell.projectId,
+            provider: shell.modelSelection.instanceId,
+            relation: threadRelation(caller, shell),
             status: deriveAgentThreadStatus(shell),
             controller: threadController(shell),
             controlChangedAt: shell.controlChangedAt ?? null,
@@ -485,6 +538,11 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
               const view: Record<string, unknown> = {
                 role: message.role,
                 author: messageAuthor(message, caller.id),
+                ...(message.role === "user" &&
+                message.sentByThreadId != null &&
+                message.sentByThreadId !== caller.id
+                  ? { fromThreadId: message.sentByThreadId }
+                  : {}),
                 text: message.text.slice(0, AGENT_THREAD_MESSAGE_TEXT_CHARS),
                 createdAt: message.createdAt,
               };
@@ -496,42 +554,79 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
       }),
     );
 
+  /**
+   * Why an agent may not write into `target` right now; null when it may.
+   * A parent keeps driving its own child mid-turn as in plan 21; everyone
+   * else waits for the recipient to be idle.
+   */
+  const deliveryBlock = (caller: OrchestrationThreadShell, target: OrchestrationThreadShell) => {
+    if (target.spawnedByThreadId != null && threadController(target) !== "agent") {
+      return { status: 409, error: "human_in_control", message: HUMAN_IN_CONTROL_MESSAGE };
+    }
+    if (threadRelation(caller, target) === "child") return null;
+    const status = deriveAgentThreadStatus(target);
+    if (status === "waiting") {
+      return { status: 409, error: "human_active", message: HUMAN_ACTIVE_MESSAGE };
+    }
+    if (status === "running") {
+      return { status: 409, error: "target_busy", message: TARGET_BUSY_MESSAGE };
+    }
+    return null;
+  };
+
   const sendMessage = (
     authorization: BridgeAuthorization | null,
     input: { readonly threadId: string | undefined; readonly body: unknown },
   ) =>
     run("send", authorization, (caller) =>
       Effect.gen(function* () {
-        const child = yield* loadChild(caller, input.threadId);
+        let target = yield* loadReachable(caller, input.threadId);
+        if (target.id === caller.id) {
+          return yield* fail(400, "cannot_message_self", "Нельзя написать самому себе.");
+        }
         const body = asBody(input.body);
         const text = checkMessageText(body?.text);
         if (!text.ok) return yield* fail(400, "invalid_payload", text.message);
-        if (threadController(child) !== "agent") {
-          return yield* fail(409, "human_in_control", HUMAN_IN_CONTROL_MESSAGE);
+
+        // Only a running turn is worth waiting for: a human takeover or a
+        // pending approval does not clear on its own within a request.
+        const waitMs = bodyWaitMs(body?.waitMs);
+        const startedMs = nowMs();
+        const deadline = startedMs + waitMs;
+        let block = deliveryBlock(caller, target);
+        while (block?.error === "target_busy" && nowMs() < deadline) {
+          yield* sleep(Math.max(1, Math.min(pollIntervalMs, deadline - nowMs())));
+          target = yield* loadReachable(caller, target.id);
+          block = deliveryBlock(caller, target);
         }
+        if (block !== null) return yield* fail(block.status, block.error, block.message);
+
         yield* dispatch(
           {
             type: "thread.turn.start",
             commandId: commandId("turn"),
-            threadId: child.id,
+            threadId: target.id,
             message: {
               messageId: MessageId.make(crypto.randomUUID()),
               role: "user",
               text: text.value,
               attachments: [],
             },
-            runtimeMode: child.runtimeMode,
-            interactionMode: child.interactionMode,
+            runtimeMode: target.runtimeMode,
+            interactionMode: target.interactionMode,
             createdAt: new Date(nowMs()).toISOString(),
           },
           caller.id,
         );
+        const relation = threadRelation(caller, target);
         yield* Effect.logInfo("agent threads: message sent", {
           callerThreadId: caller.id,
-          threadId: child.id,
+          threadId: target.id,
+          relation,
+          waitedMs: nowMs() - startedMs,
           textPreview: text.value.slice(0, 80),
         });
-        return ok({});
+        return ok({ threadId: target.id, relation });
       }),
     );
 

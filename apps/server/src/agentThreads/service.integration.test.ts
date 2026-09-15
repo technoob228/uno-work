@@ -182,13 +182,59 @@ describe("agent threads bridge (real engine)", () => {
     expect(Option.isSome(finalShell) && finalShell.value.controller).toBe("human");
   });
 
-  it("threads a human created are invisible to the agent", async () => {
+  it("agents message peers and parents; busy peers and self are refused", async () => {
     const system = await createSystem();
-    const other = await system.run(
-      system.handlers.getThread(auth, { threadId: CALLER, limit: null, waitMs: null }),
+    const { run, handlers } = system;
+
+    const created = await run(handlers.createThread(auth, { text: "Do the subtask" }));
+    const childId = ThreadId.make(body(created).threadId);
+    const childAuth: BridgeAuthorization = { context: { threadId: childId } };
+
+    // The child answers its parent — a human-created thread — through the bridge.
+    const toParent = await run(
+      handlers.sendMessage(childAuth, { threadId: CALLER, body: { text: "Done: 3 files" } }),
     );
-    expect(other.status).toBe(404);
-    const released = await system.run(system.handlers.releaseThread(auth, { threadId: CALLER }));
+    expect(toParent).toEqual({
+      status: 200,
+      body: { ok: true, threadId: CALLER, relation: "parent" },
+    });
+    const parent = await run(system.projections.getThreadShellById(CALLER));
+    expect(Option.isSome(parent) && parent.value.controller).toBe("human");
+
+    // The parent has not reacted yet (no harness here): a second message is busy.
+    const busy = await run(
+      handlers.sendMessage(childAuth, { threadId: CALLER, body: { text: "and one more" } }),
+    );
+    expect(busy.status).toBe(409);
+    expect(body(busy).error).toBe("target_busy");
+
+    const listed = await run(handlers.listThreads(childAuth, { scope: "project" }));
+    expect(
+      Object.fromEntries(
+        (body(listed).threads as Array<{ id: string; relation: string }>).map((thread) => [
+          thread.id,
+          thread.relation,
+        ]),
+      ),
+    ).toEqual({ [CALLER]: "parent", [childId]: "self" });
+
+    const parentView = await run(
+      handlers.getThread(childAuth, { threadId: CALLER, limit: null, waitMs: null }),
+    );
+    expect(body(parentView).messages).toMatchObject([
+      { role: "user", author: "you", text: "Done: 3 files" },
+    ]);
+    const fromChild = await run(
+      handlers.getThread(auth, { threadId: CALLER, limit: null, waitMs: null }),
+    );
+    expect(body(fromChild).messages).toMatchObject([{ author: "agent", fromThreadId: childId }]);
+
+    const self = await run(
+      handlers.sendMessage(auth, { threadId: CALLER, body: { text: "me" } }),
+    );
+    expect(self.status).toBe(400);
+    // Release stays parent-only.
+    const released = await run(handlers.releaseThread(childAuth, { threadId: CALLER }));
     expect(released.status).toBe(404);
   });
 });

@@ -31,12 +31,43 @@ export const AGENT_THREAD_DEFAULT_MESSAGE_LIMIT = 20;
 export const AGENT_THREAD_MAX_MESSAGE_LIMIT = 100;
 export const AGENT_THREAD_MAX_WAIT_MS = 600_000;
 
+/** Long-poll cap of `POST /api/threads/:id/messages` waiting for a busy recipient. */
+export const AGENT_THREAD_MAX_SEND_WAIT_MS = 600_000;
+
 export const HUMAN_IN_CONTROL_MESSAGE =
   "Человек взял управление этим тредом. Не пиши в него, пока он не передаст управление обратно; читать можно.";
 
 export type AgentThreadStatus = "idle" | "running" | "waiting" | "error";
 
-export type AgentMessageAuthor = "you" | "human" | "assistant" | "system" | "user";
+export type AgentMessageAuthor = "you" | "human" | "agent" | "assistant" | "system";
+
+export const HUMAN_ACTIVE_MESSAGE =
+  "Этот чат ждёт ответа или подтверждения от человека. Не пиши в него, пока человек не ответит; читать можно.";
+
+export const TARGET_BUSY_MESSAGE =
+  'У получателя сейчас идёт ход. Повтори позже или передай "waitMs" (до 600000), чтобы сервер дождался и доставил сам.';
+
+/** How the listed/read thread relates to the calling thread. */
+export type AgentThreadRelation = "self" | "child" | "parent" | "peer";
+
+/** `GET /api/threads?scope=` — children (default), the caller's project, or every project. */
+export type AgentThreadListScope = "children" | "project" | "all";
+
+export function parseListScope(raw: string | null | undefined): AgentThreadListScope | null {
+  if (raw === null || raw === undefined || raw.trim().length === 0) return "children";
+  const value = raw.trim();
+  return value === "children" || value === "project" || value === "all" ? value : null;
+}
+
+export function threadRelation(
+  caller: Pick<OrchestrationThreadShell, "id" | "spawnedByThreadId">,
+  target: Pick<OrchestrationThreadShell, "id" | "spawnedByThreadId">,
+): AgentThreadRelation {
+  if (target.id === caller.id) return "self";
+  if ((target.spawnedByThreadId ?? null) === caller.id) return "child";
+  if ((caller.spawnedByThreadId ?? null) === target.id) return "parent";
+  return "peer";
+}
 
 /** Result of a text-field check: the trimmed value or a user-facing error. */
 export type TextCheck =
@@ -136,7 +167,7 @@ export function messageAuthor(
   if (message.role === "user") {
     const sentBy = message.sentByThreadId ?? null;
     if (sentBy === null) return "human";
-    return sentBy === callerThreadId ? "you" : "user";
+    return sentBy === callerThreadId ? "you" : "agent";
   }
   return message.role;
 }
@@ -151,6 +182,36 @@ export function lastAssistantText(
     }
   }
   return null;
+}
+
+/** `waitMs` from a JSON body: a number or a numeric string, clamped. */
+export function bodyWaitMs(raw: unknown): number {
+  const text = typeof raw === "number" ? String(raw) : typeof raw === "string" ? raw : null;
+  return clampInteger(text, { fallback: 0, min: 0, max: AGENT_THREAD_MAX_SEND_WAIT_MS });
+}
+
+/**
+ * The line the recipient's harness sees in front of a message another
+ * thread's agent sent (the stored message stays clean; the UI labels it).
+ * A parent reads its child's answers itself, so a child just answers in
+ * place; everyone else is told how to write back.
+ */
+export function agentMessageEnvelope(input: {
+  readonly sender: Pick<OrchestrationThreadShell, "id" | "title" | "modelSelection"> | null;
+  readonly senderThreadId: ThreadId;
+  readonly recipientSpawnedByThreadId: ThreadId | null | undefined;
+  readonly text: string;
+}): string {
+  const title = input.sender?.title ?? "без названия";
+  const provider = input.sender?.modelSelection.instanceId;
+  const who = `агента чата «${title}» (threadId ${input.senderThreadId}${
+    provider ? `, ${provider}` : ""
+  })`;
+  const header =
+    (input.recipientSpawnedByThreadId ?? null) === input.senderThreadId
+      ? `[Uno Work: сообщение от ${who} — это чат, который создал тебя. Он сам читает ответы в этом чате: просто ответь здесь.]`
+      : `[Uno Work: сообщение от ${who}. Он не видит этот чат автоматически. Чтобы ответить, отправь POST $UNO_WORK_BRIDGE_URL/api/threads/${input.senderThreadId}/messages с {"text": "..."} (Authorization: Bearer $UNO_WORK_BRIDGE_TOKEN). Если ответ не нужен или добавить нечего — не отвечай.]`;
+  return `${header}\n\n${input.text}`;
 }
 
 export function normalizeWorkspacePath(path: string): string {

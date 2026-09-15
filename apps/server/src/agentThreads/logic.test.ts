@@ -128,7 +128,7 @@ describe("messageAuthor", () => {
     expect(messageAuthor({ role: "user" }, CALLER)).toBe("human");
     expect(messageAuthor({ role: "user", sentByThreadId: null }, CALLER)).toBe("human");
     expect(messageAuthor({ role: "user", sentByThreadId: "other" as ThreadId }, CALLER)).toBe(
-      "user",
+      "agent",
     );
     expect(messageAuthor({ role: "assistant" }, CALLER)).toBe("assistant");
     expect(messageAuthor({ role: "system" }, CALLER)).toBe("system");

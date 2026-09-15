@@ -19,7 +19,7 @@ import { describe } from "vitest";
 import type { BridgeAuthorization } from "../browserBridge.ts";
 import { OrchestrationCommandInvariantError } from "../orchestration/Errors.ts";
 import type { OrchestrationDispatchError } from "../orchestration/Errors.ts";
-import { HUMAN_IN_CONTROL_MESSAGE } from "./logic.ts";
+import { HUMAN_ACTIVE_MESSAGE, HUMAN_IN_CONTROL_MESSAGE, TARGET_BUSY_MESSAGE } from "./logic.ts";
 import { type AgentThreadsScope, makeAgentThreadsHandlers } from "./service.ts";
 
 const OWN_PROJECT = "project-own" as ProjectId;
@@ -368,31 +368,35 @@ describe("agent threads bridge: reading children", () => {
     }),
   );
 
-  it.effect("404 for a thread that is not the caller's child", () =>
+  it.effect("404 for missing, archived and out-of-scope threads; release stays parent-only", () =>
     Effect.gen(function* () {
-      const { handlers, dispatched } = makeFixture();
+      const threads = [
+        threadShell(CALLER),
+        threadShell(CHILD, { spawnedByThreadId: CALLER, controller: "agent" }),
+        threadShell(FOREIGN, { spawnedByThreadId: "someone-else" as ThreadId, controller: "agent" }),
+        threadShell("thread-archived" as ThreadId, { archivedAt: T0 }),
+        threadShell("thread-elsewhere" as ThreadId, { projectId: OTHER_PROJECT }),
+      ];
+      const { handlers, dispatched } = makeFixture({ threads });
       const params = { limit: null, waitMs: null };
-      assert.strictEqual(
-        (yield* handlers.getThread(scoped(), { threadId: FOREIGN, ...params })).status,
-        404,
-      );
-      assert.strictEqual(
-        (yield* handlers.getThread(scoped(), { threadId: CALLER, ...params })).status,
-        404,
-      );
-      assert.strictEqual(
-        (yield* handlers.getThread(scoped(), { threadId: "missing", ...params })).status,
-        404,
-      );
-      assert.strictEqual(
-        (yield* handlers.sendMessage(scoped(), { threadId: FOREIGN, body: { text: "hi" } })).status,
-        404,
-      );
-      assert.strictEqual(
-        (yield* handlers.releaseThread(scoped(), { threadId: FOREIGN })).status,
-        404,
-      );
+      for (const threadId of ["missing", "thread-archived", "thread-elsewhere"]) {
+        assert.strictEqual((yield* handlers.getThread(scoped(), { threadId, ...params })).status, 404);
+        assert.strictEqual(
+          (yield* handlers.sendMessage(scoped(), { threadId, body: { text: "hi" } })).status,
+          404,
+        );
+      }
+      assert.strictEqual((yield* handlers.releaseThread(scoped(), { threadId: FOREIGN })).status, 404);
       assert.strictEqual(dispatched.length, 0);
+
+      // "any-project" opens other projects.
+      const wide = makeFixture({ threads, scope: "any-project" });
+      const elsewhere = yield* wide.handlers.getThread(scoped(), {
+        threadId: "thread-elsewhere",
+        ...params,
+      });
+      assert.strictEqual(elsewhere.status, 200);
+      assert.strictEqual(body(elsewhere).relation, "peer");
     }),
   );
 
@@ -493,7 +497,10 @@ describe("agent threads bridge: driving children", () => {
         threadId: CHILD,
         body: { text: "next" },
       });
-      assert.deepStrictEqual(reply, { status: 200, body: { ok: true } });
+      assert.deepStrictEqual(reply, {
+        status: 200,
+        body: { ok: true, threadId: CHILD, relation: "child" },
+      });
       assert.strictEqual(dispatched.length, 1);
       assert.deepStrictEqual(dispatched[0]?.origin, { kind: "agent", threadId: CALLER });
       const turn = dispatched[0]?.command as Extract<
@@ -593,6 +600,185 @@ describe("agent threads bridge: driving children", () => {
       assert.strictEqual(command.threadId, CHILD);
       assert.strictEqual(command.controller, "human");
       assert.deepStrictEqual(dispatched[0]?.origin, { kind: "agent", threadId: CALLER });
+    }),
+  );
+});
+
+describe("agent threads bridge: peers (plan 22)", () => {
+  it.effect("lists the project with relations; scope=all needs any-project", () =>
+    Effect.gen(function* () {
+      const threads = [
+        threadShell(CALLER, { spawnedByThreadId: "thread-boss" as ThreadId, controller: "agent" }),
+        threadShell("thread-boss" as ThreadId, { updatedAt: "2026-09-14T10:05:00.000Z" }),
+        threadShell(CHILD, { spawnedByThreadId: CALLER, controller: "agent" }),
+        threadShell(FOREIGN, { modelSelection: { instanceId: "codex", model: "gpt-5.4" } as any }),
+        threadShell("thread-archived" as ThreadId, { archivedAt: T0 }),
+        threadShell("thread-elsewhere" as ThreadId, { projectId: OTHER_PROJECT }),
+      ];
+      const { handlers } = makeFixture({ threads });
+      const reply = yield* handlers.listThreads(scoped(), { scope: "project" });
+      assert.strictEqual(reply.status, 200);
+      const rows = body(reply).threads as Array<Record<string, unknown>>;
+      assert.deepStrictEqual(
+        Object.fromEntries(rows.map((row) => [row.id, row.relation])),
+        { "thread-boss": "parent", [CALLER]: "self", [CHILD]: "child", [FOREIGN]: "peer" },
+      );
+      assert.strictEqual(rows[0]?.id, "thread-boss");
+      assert.strictEqual(rows.find((row) => row.id === FOREIGN)?.provider, "codex");
+
+      const all = yield* handlers.listThreads(scoped(), { scope: "all" });
+      assert.strictEqual(all.status, 403);
+      assert.strictEqual(body(all).error, "project_not_allowed");
+      const bad = yield* handlers.listThreads(scoped(), { scope: "everyone" });
+      assert.strictEqual(bad.status, 400);
+
+      const wide = makeFixture({ threads, scope: "any-project" });
+      const wideAll = yield* wide.handlers.listThreads(scoped(), { scope: "all" });
+      assert.strictEqual((body(wideAll).threads as Array<unknown>).length, 5);
+    }),
+  );
+
+  it.effect("a child writes to its parent and any agent to a human-created chat", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = makeFixture({
+        threads: [
+          threadShell(CALLER, { spawnedByThreadId: "thread-boss" as ThreadId, controller: "agent" }),
+          threadShell("thread-boss" as ThreadId),
+          threadShell(FOREIGN),
+        ],
+      });
+      const toParent = yield* handlers.sendMessage(scoped(), {
+        threadId: "thread-boss",
+        body: { text: "готово" },
+      });
+      assert.deepStrictEqual(toParent, {
+        status: 200,
+        body: { ok: true, threadId: "thread-boss", relation: "parent" },
+      });
+      const toPeer = yield* handlers.sendMessage(scoped(), {
+        threadId: FOREIGN,
+        body: { text: "глянь PR" },
+      });
+      assert.strictEqual(body(toPeer).relation, "peer");
+      assert.deepStrictEqual(
+        dispatched.map((entry) => [entry.command.type, (entry.command as any).threadId, entry.origin]),
+        [
+          ["thread.turn.start", "thread-boss", { kind: "agent", threadId: CALLER }],
+          ["thread.turn.start", FOREIGN, { kind: "agent", threadId: CALLER }],
+        ],
+      );
+
+      const self = yield* handlers.sendMessage(scoped(), { threadId: CALLER, body: { text: "x" } });
+      assert.strictEqual(self.status, 400);
+      assert.strictEqual(body(self).error, "cannot_message_self");
+    }),
+  );
+
+  it.effect("refuses threads that wait for the human or that a human took over", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = makeFixture({
+        threads: [
+          threadShell(CALLER),
+          threadShell("thread-asking" as ThreadId, { hasPendingApprovals: true }),
+          threadShell(FOREIGN, { spawnedByThreadId: "someone-else" as ThreadId, controller: "human" }),
+        ],
+      });
+      const asking = yield* handlers.sendMessage(scoped(), {
+        threadId: "thread-asking",
+        body: { text: "x", waitMs: 60_000 },
+      });
+      assert.deepStrictEqual(asking, {
+        status: 409,
+        body: { ok: false, error: "human_active", message: HUMAN_ACTIVE_MESSAGE },
+      });
+      const takenOver = yield* handlers.sendMessage(scoped(), {
+        threadId: FOREIGN,
+        body: { text: "x" },
+      });
+      assert.strictEqual(takenOver.status, 409);
+      assert.strictEqual(body(takenOver).error, "human_in_control");
+      assert.strictEqual(dispatched.length, 0);
+    }),
+  );
+
+  it.effect("a busy peer is 409 target_busy, or delivered after waitMs sees it idle", () =>
+    Effect.gen(function* () {
+      const running = { status: "running", updatedAt: T0 } as OrchestrationThreadShell["session"];
+      const busy = makeFixture({
+        threads: [threadShell(CALLER), threadShell(FOREIGN, { session: running })],
+      });
+      const now = yield* busy.handlers.sendMessage(scoped(), {
+        threadId: FOREIGN,
+        body: { text: "x" },
+      });
+      assert.deepStrictEqual(now, {
+        status: 409,
+        body: { ok: false, error: "target_busy", message: TARGET_BUSY_MESSAGE },
+      });
+      assert.strictEqual(busy.dispatched.length, 0);
+
+      let sleeps = 0;
+      const waiting = makeFixture({
+        threads: [threadShell(CALLER), threadShell(FOREIGN, { session: running })],
+        onSleep: (threads) => {
+          sleeps += 1;
+          if (sleeps === 2) {
+            threads.set(
+              FOREIGN,
+              threadShell(FOREIGN, {
+                session: { status: "ready", updatedAt: T0 } as OrchestrationThreadShell["session"],
+              }),
+            );
+          }
+        },
+      });
+      const delivered = yield* waiting.handlers.sendMessage(scoped(), {
+        threadId: FOREIGN,
+        body: { text: "x", waitMs: "60000" },
+      });
+      assert.strictEqual(delivered.status, 200);
+      assert.strictEqual(sleeps, 2);
+      assert.strictEqual(waiting.dispatched.length, 1);
+
+      // A parent still drives its own running child without waiting (plan 21).
+      const parent = makeFixture({
+        threads: [
+          threadShell(CALLER),
+          threadShell(CHILD, { spawnedByThreadId: CALLER, controller: "agent", session: running }),
+        ],
+      });
+      const steer = yield* parent.handlers.sendMessage(scoped(), {
+        threadId: CHILD,
+        body: { text: "x" },
+      });
+      assert.strictEqual(steer.status, 200);
+    }),
+  );
+
+  it.effect("labels messages from other agents with their thread", () =>
+    Effect.gen(function* () {
+      const { handlers } = makeFixture({
+        threads: [threadShell(CALLER), threadShell(FOREIGN)],
+        messages: [
+          message({ role: "user", text: "from me", sentByThreadId: CALLER }),
+          message({ role: "user", text: "from a peer", sentByThreadId: "thread-x" as ThreadId }),
+        ],
+      });
+      const reply = yield* handlers.getThread(scoped(), {
+        threadId: FOREIGN,
+        limit: null,
+        waitMs: null,
+      });
+      assert.deepStrictEqual(
+        (body(reply).messages as Array<Record<string, unknown>>).map((m) => [
+          m.author,
+          m.fromThreadId,
+        ]),
+        [
+          ["you", undefined],
+          ["agent", "thread-x"],
+        ],
+      );
     }),
   );
 });
