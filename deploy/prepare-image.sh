@@ -55,8 +55,9 @@ rm -rf \
   "${STATE_DIR}/userdata" \
   "${STATE_DIR}/caches" \
   "${STATE_DIR}/worktrees" \
-  "${STATE_DIR}"/*.log
-install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${STATE_DIR}"
+  "${STATE_DIR}"/*.log \
+  "${STATE_DIR}/tmp"
+install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${STATE_DIR}" "${STATE_DIR}/tmp"
 
 # Ключ Gateway в образ не кладём: он персональный, пишется при провижне.
 rm -f "${STATE_DIR}/settings.json"
@@ -74,6 +75,11 @@ rm -rf /home/"${SERVICE_USER}"/.bash_history /root/.bash_history
 rm -rf /home/"${SERVICE_USER}"/projects/* 2>/dev/null || true
 rm -rf /var/lib/apt/lists/* /var/log/journal/* 2>/dev/null || true
 apt-get clean >/dev/null 2>&1 || true
+# TMPDIR демона живёт на диске состояния (см. uno-work.service), и там копятся
+# распакованные .so от bun-бинарей харнесов — по 4.7 МБ на запуск uno-code, без
+# уборки. В golden v9 первой съёмкой уехало 3.9 ГБ такого мусора, и min_disk
+# образа вырос с 8 до 11 ГБ. npm-кэш root — от `npm install` установщика.
+rm -rf /root/.npm/_cacache 2>/dev/null || true
 
 # 5. Вернуть host keys на первой загрузке клона.
 #
