@@ -1,6 +1,7 @@
 /**
- * "Continue on <machine>…" — carries the current chat (files, history,
- * optionally `.env`) to another connected machine and opens it there.
+ * "Continue on <machine>…" — carries the current chat (files, history, and
+ * `.env` only when ticked) to another connected machine and opens it there in
+ * a new worktree. The files travel through this client, never through GitHub.
  *
  * The dialog only wires environment APIs and the store into
  * `runContinueOnMachine`; the step order, retry checkpointing and target
@@ -8,6 +9,7 @@
  */
 import type {
   EnvironmentId,
+  ExecutionEnvironmentDescriptor,
   ProjectId,
   ScopedThreadRef,
   ThreadContinueInspectResult,
@@ -31,7 +33,9 @@ import {
   CONTINUE_ON_MACHINE_STEPS,
   canStartContinue,
   ContinueOnMachineFailure,
+  ContinueUpdateRequiredError,
   describeContinueTarget,
+  findMachineNeedingUpdate,
   inspectContinueTarget,
   resolveContinueTargetProject,
   runContinueOnMachine,
@@ -43,6 +47,10 @@ import {
 } from "../continueOnMachine";
 import { CONTINUE_ON_MACHINE_COPY, STEP_LABEL_WITH_MACHINE } from "../continueOnMachineCopy";
 import { createEnvironmentApi, ensureEnvironmentApi } from "../environmentApi";
+import {
+  readPrimaryEnvironmentDescriptor,
+  usePrimaryEnvironmentDescriptor,
+} from "../environments/primary";
 import {
   ensureEnvironmentConnectionBootstrapped,
   reconnectSavedEnvironment,
@@ -79,6 +87,10 @@ interface TargetOption {
   readonly label: string;
   readonly connected: boolean;
   readonly detail: string;
+  /** Known to run a version without the direct protocol (unknown until connected). */
+  readonly needsUpdate: boolean;
+  /** A project with the same remote is registered there. */
+  readonly hasProject: boolean;
 }
 
 interface RunState {
@@ -89,6 +101,15 @@ interface RunState {
 }
 
 const IDLE_RUN: RunState = { step: null, failedStep: null, error: null, progress: {} };
+
+/** The descriptor a machine advertised: the primary one from bootstrap, others from their runtime. */
+function readDescriptor(
+  environmentId: EnvironmentId,
+): ExecutionEnvironmentDescriptor | null | undefined {
+  const primary = readPrimaryEnvironmentDescriptor();
+  if (primary?.environmentId === environmentId) return primary;
+  return useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.descriptor;
+}
 
 /** The read-only look at the target project, keyed by the machine it was taken on. */
 type InspectionState =
@@ -121,6 +142,7 @@ export function ContinueOnMachineDialog({
   const navigate = useNavigate();
   const savedRegistry = useSavedEnvironmentRegistryStore((state) => state.byId);
   const savedRuntime = useSavedEnvironmentRuntimeStore((state) => state.byId);
+  const primaryDescriptor = usePrimaryEnvironmentDescriptor();
   // The sidebar summary is enough (title + project) and is loaded for every
   // thread, unlike the full detail which only the open chat has.
   const thread = useStore((state) => selectSidebarThreadSummaryByRef(state, threadRef));
@@ -131,43 +153,13 @@ export function ContinueOnMachineDialog({
   );
 
   const [targetEnvironmentId, setTargetEnvironmentId] = useState<EnvironmentId | null>(null);
-  const [copyEnv, setCopyEnv] = useState(true);
+  const [copyEnv, setCopyEnv] = useState(false);
   const [archiveSource, setArchiveSource] = useState(false);
-  const [replaceConfirmed, setReplaceConfirmed] = useState(false);
   const [inspection, setInspection] = useState<InspectionState>(IDLE_INSPECTION);
   const [inspectionAttempt, setInspectionAttempt] = useState(0);
   const [run, setRun] = useState<RunState>(IDLE_RUN);
   const [pending, setPending] = useState(false);
-
-  const targets = useMemo<ReadonlyArray<TargetOption>>(() => {
-    return Object.values(savedRegistry)
-      .filter((record) => record.environmentId !== threadRef?.environmentId)
-      .toSorted((left, right) => left.label.localeCompare(right.label))
-      .map((record) => {
-        const runtime = savedRuntime[record.environmentId];
-        const connected = runtime?.connectionState === "connected";
-        return {
-          environmentId: record.environmentId,
-          label: runtime?.descriptor?.label ?? record.label,
-          connected,
-          detail: connected
-            ? CONTINUE_ON_MACHINE_COPY.connected
-            : (runtime?.connectionState ?? "disconnected"),
-        };
-      });
-  }, [savedRegistry, savedRuntime, threadRef?.environmentId]);
-
-  const selectedTarget = targets.find((target) => target.environmentId === targetEnvironmentId);
-
-  const reset = useCallback(() => {
-    setTargetEnvironmentId(null);
-    setCopyEnv(true);
-    setArchiveSource(false);
-    setReplaceConfirmed(false);
-    setInspection(IDLE_INSPECTION);
-    setRun(IDLE_RUN);
-    setPending(false);
-  }, []);
+  const [sendProgress, setSendProgress] = useState<{ sent: number; total: number } | null>(null);
 
   /** Where the chat lands on `targetId`: a project there with the same remote, else a fresh clone. */
   const resolveTargetProjectFor = useCallback(
@@ -186,6 +178,81 @@ export function ContinueOnMachineDialog({
     [project, savedRuntime],
   );
 
+  const targets = useMemo<ReadonlyArray<TargetOption>>(() => {
+    return (
+      Object.values(savedRegistry)
+        .filter((record) => record.environmentId !== threadRef?.environmentId)
+        .map((record) => {
+          const runtime = savedRuntime[record.environmentId];
+          const connected = runtime?.connectionState === "connected";
+          // A connected machine has told us its version; a disconnected one is
+          // checked again once the run connects to it.
+          const needsUpdate =
+            connected &&
+            runtime?.descriptor != null &&
+            runtime.descriptor.capabilities.threadContinueDirect !== true;
+          const hasProject = resolveTargetProjectFor(record.environmentId)?.kind === "existing";
+          const status = connected
+            ? CONTINUE_ON_MACHINE_COPY.connected
+            : (runtime?.connectionState ?? "disconnected");
+          return {
+            environmentId: record.environmentId,
+            label: runtime?.descriptor?.label ?? record.label,
+            connected,
+            needsUpdate,
+            hasProject,
+            detail: needsUpdate
+              ? CONTINUE_ON_MACHINE_COPY.needsUpdate
+              : `${hasProject ? CONTINUE_ON_MACHINE_COPY.hasProject : CONTINUE_ON_MACHINE_COPY.willAddProject} · ${status}`,
+          };
+        })
+        // Machines that already have the project first.
+        .toSorted(
+          (left, right) =>
+            Number(right.hasProject) - Number(left.hasProject) ||
+            left.label.localeCompare(right.label),
+        )
+    );
+  }, [resolveTargetProjectFor, savedRegistry, savedRuntime, threadRef?.environmentId]);
+
+  const selectedTarget = targets.find((target) => target.environmentId === targetEnvironmentId);
+
+  const sourceLabel = useMemo(() => {
+    if (!threadRef) return "this machine";
+    if (primaryDescriptor?.environmentId === threadRef.environmentId) {
+      return primaryDescriptor.label;
+    }
+    const runtime = savedRuntime[threadRef.environmentId];
+    return (
+      runtime?.descriptor?.label ?? savedRegistry[threadRef.environmentId]?.label ?? "this machine"
+    );
+  }, [primaryDescriptor, savedRegistry, savedRuntime, threadRef]);
+
+  // Known blockers before the run: the chat's own machine (always connected)
+  // and a connected target that advertised an older version.
+  const machineNeedingUpdate = useMemo(() => {
+    if (!threadRef) return null;
+    const sourceDescriptor =
+      primaryDescriptor?.environmentId === threadRef.environmentId
+        ? primaryDescriptor
+        : savedRuntime[threadRef.environmentId]?.descriptor;
+    const sourceBlocked = findMachineNeedingUpdate([
+      { label: sourceLabel, descriptor: sourceDescriptor },
+    ]);
+    if (sourceBlocked) return sourceBlocked;
+    return selectedTarget?.needsUpdate ? selectedTarget.label : null;
+  }, [primaryDescriptor, savedRuntime, selectedTarget, sourceLabel, threadRef]);
+
+  const reset = useCallback(() => {
+    setTargetEnvironmentId(null);
+    setCopyEnv(false);
+    setArchiveSource(false);
+    setSendProgress(null);
+    setInspection(IDLE_INSPECTION);
+    setRun(IDLE_RUN);
+    setPending(false);
+  }, []);
+
   const ensureTargetConnected = useCallback(
     async (targetId: EnvironmentId) => {
       await ensureEnvironmentConnectionBootstrapped(targetId);
@@ -199,7 +266,7 @@ export function ContinueOnMachineDialog({
   );
 
   // Look at the target project as soon as a machine is picked, so the person
-  // knows before pressing the button whether files there would be replaced.
+  // knows before pressing the button whether the project is there already.
   useEffect(() => {
     if (!open || targetEnvironmentId === null) return;
     const targetId = targetEnvironmentId;
@@ -207,7 +274,6 @@ export function ContinueOnMachineDialog({
     if (!target) return;
     let cancelled = false;
     setInspection({ status: "loading", environmentId: targetId });
-    setReplaceConfirmed(false);
     void inspectContinueTarget(
       {
         ensureTargetConnected: () => ensureTargetConnected(targetId),
@@ -266,29 +332,41 @@ export function ContinueOnMachineDialog({
       if (!thread || !project || !threadRef || pending) return;
       const target = targets.find((candidate) => candidate.environmentId === targetId);
       if (!target) return;
-      // The run uses the project the inspection looked at, so the warning the
-      // person confirmed is about the same folder that gets written.
+      // The run uses the project the inspection looked at, so what the dialog
+      // said is about the same folder that gets used.
       const targetProject =
         inspection.status === "done" && inspection.environmentId === targetId
           ? inspection.target
           : resolveTargetProjectFor(targetId);
       if (!targetProject) return;
       setPending(true);
+      setSendProgress(null);
       setRun({ step: null, failedStep: null, error: null, progress });
 
       const deps: ContinueOnMachineDeps = {
         ensureTargetConnected: () => ensureTargetConnected(targetId),
+        assertMachinesSupported: () => {
+          const blocked = findMachineNeedingUpdate([
+            { label: sourceLabel, descriptor: readDescriptor(threadRef.environmentId) },
+            { label: target.label, descriptor: readDescriptor(targetId) },
+          ]);
+          if (blocked !== null) throw new ContinueUpdateRequiredError(blocked);
+        },
         inspect: (input) => ensureEnvironmentApi(targetId).threadContinue.inspect(input),
-        prepare: (input) =>
-          ensureEnvironmentApi(threadRef.environmentId).threadContinue.prepare(input),
-        receive: (input) => ensureEnvironmentApi(targetId).threadContinue.receive(input),
-        cleanup: (input) =>
-          ensureEnvironmentApi(threadRef.environmentId).threadContinue.cleanup(input),
+        snapshot: (input) =>
+          ensureEnvironmentApi(threadRef.environmentId).threadContinue.snapshot(input),
+        readChunk: (input) =>
+          ensureEnvironmentApi(threadRef.environmentId).threadContinue.readChunk(input),
+        writeChunk: (input) => ensureEnvironmentApi(targetId).threadContinue.writeChunk(input),
+        land: (input) => ensureEnvironmentApi(targetId).threadContinue.land(input),
+        discardSource: (input) =>
+          ensureEnvironmentApi(threadRef.environmentId).threadContinue.discard(input),
         complete: (input) =>
           ensureEnvironmentApi(threadRef.environmentId).threadContinue.complete(input),
         openThread: (input) => openThreadOnTarget(targetId, input),
         onStep: (step) =>
           setRun((current) => ({ ...current, step, failedStep: null, error: null })),
+        onSendProgress: (sent, total) => setSendProgress({ sent, total }),
       };
 
       try {
@@ -307,10 +385,7 @@ export function ContinueOnMachineDialog({
         toastManager.add({
           type: "success",
           title: CONTINUE_ON_MACHINE_COPY.successTitle(target.label),
-          description: CONTINUE_ON_MACHINE_COPY.successDescription({
-            ...result.received,
-            transferBranchRemoved: result.cleanedUp.removed,
-          }),
+          description: CONTINUE_ON_MACHINE_COPY.successDescription(result.landed),
         });
       } catch (caught) {
         const failure =
@@ -344,6 +419,7 @@ export function ContinueOnMachineDialog({
       pending,
       project,
       resolveTargetProjectFor,
+      sourceLabel,
       targets,
       thread,
       threadRef,
@@ -359,7 +435,7 @@ export function ContinueOnMachineDialog({
     targetEnvironmentId !== null &&
     !!thread &&
     !!project &&
-    canStartContinue({ targetState, replaceConfirmed });
+    canStartContinue({ targetState, machineNeedingUpdate });
 
   const showSteps = run.step !== null || run.failedStep !== null;
   const stepIndex = (step: ContinueOnMachineStep) => CONTINUE_ON_MACHINE_STEPS.indexOf(step);
@@ -417,7 +493,6 @@ export function ContinueOnMachineDialog({
                             aria-pressed={selected}
                             onClick={() => {
                               setTargetEnvironmentId(target.environmentId);
-                              setReplaceConfirmed(false);
                               setRun(IDLE_RUN);
                             }}
                             className={cn(
@@ -436,7 +511,11 @@ export function ContinueOnMachineDialog({
                             <span
                               className={cn(
                                 "shrink-0 text-[11px]",
-                                target.connected ? "text-emerald-600" : "text-muted-foreground",
+                                target.needsUpdate
+                                  ? "text-destructive"
+                                  : target.connected
+                                    ? "text-emerald-600"
+                                    : "text-muted-foreground",
                               )}
                             >
                               {target.detail}
@@ -446,30 +525,42 @@ export function ContinueOnMachineDialog({
                       })}
                     </div>
                   )}
-                  {selectedTarget && inspectionForTarget ? (
+                  {machineNeedingUpdate !== null ? (
+                    <p
+                      className="flex items-start gap-2 text-destructive text-xs"
+                      data-testid="continue-update-required"
+                    >
+                      <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
+                      <span>{CONTINUE_ON_MACHINE_COPY.updateRequired(machineNeedingUpdate)}</span>
+                    </p>
+                  ) : selectedTarget && inspectionForTarget ? (
                     <TargetProjectNotice
                       machineLabel={selectedTarget.label}
                       inspection={inspectionForTarget}
                       targetState={targetState}
-                      replaceConfirmed={replaceConfirmed}
                       disabled={pending}
-                      onReplaceConfirmedChange={setReplaceConfirmed}
                       onRetry={() => setInspectionAttempt((attempt) => attempt + 1)}
                     />
                   ) : null}
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-start gap-2">
                     <Checkbox
                       id="continue-copy-env"
+                      className="mt-0.5"
                       checked={copyEnv}
                       disabled={pending}
                       onCheckedChange={(checked) => setCopyEnv(checked === true)}
                     />
-                    <Label htmlFor="continue-copy-env" className="text-sm text-foreground">
-                      {CONTINUE_ON_MACHINE_COPY.copyEnv}
-                    </Label>
+                    <div className="flex flex-col gap-0.5">
+                      <Label htmlFor="continue-copy-env" className="text-sm text-foreground">
+                        {CONTINUE_ON_MACHINE_COPY.copyEnv}
+                      </Label>
+                      <span className="text-muted-foreground text-xs">
+                        {CONTINUE_ON_MACHINE_COPY.copyEnvHint}
+                      </span>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <Checkbox
@@ -512,6 +603,14 @@ export function ContinueOnMachineDialog({
                             <CircleIcon className="size-3 shrink-0 opacity-40" />
                           )}
                           {STEP_LABEL_WITH_MACHINE(step, selectedTarget?.label ?? "the machine")}
+                          {step === "sending" && (active || failed) && sendProgress ? (
+                            <span className="text-muted-foreground">
+                              {CONTINUE_ON_MACHINE_COPY.sendingProgress(
+                                sendProgress.sent,
+                                sendProgress.total,
+                              )}
+                            </span>
+                          ) : null}
                         </li>
                       );
                     })}
@@ -556,17 +655,14 @@ export function ContinueOnMachineDialog({
 }
 
 /**
- * What the receive would do to the project on the chosen machine. Local
- * changes there get a red line and a required "Replace them" checkbox; the
- * primary button stays disabled until it is ticked.
+ * Where the chat lands on the chosen machine: the project is there (the chat
+ * gets its own worktree beside it), will be added, or the folder is unusable.
  */
 function TargetProjectNotice(props: {
   readonly machineLabel: string;
   readonly inspection: Exclude<InspectionState, { status: "idle" }>;
   readonly targetState: ReturnType<typeof describeContinueTarget> | null;
-  readonly replaceConfirmed: boolean;
   readonly disabled: boolean;
-  readonly onReplaceConfirmedChange: (confirmed: boolean) => void;
   readonly onRetry: () => void;
 }) {
   const { inspection, machineLabel, targetState } = props;
@@ -597,30 +693,6 @@ function TargetProjectNotice(props: {
     );
   }
   const text = CONTINUE_ON_MACHINE_COPY.targetState(targetState, machineLabel);
-  if (targetState.kind === "changes") {
-    return (
-      <div
-        className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-destructive/8 px-3 py-2"
-        data-testid="continue-target-changes"
-      >
-        <p className="flex items-start gap-2 text-destructive text-xs">
-          <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
-          <span>{text}</span>
-        </p>
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="continue-replace-files"
-            checked={props.replaceConfirmed}
-            disabled={props.disabled}
-            onCheckedChange={(checked) => props.onReplaceConfirmedChange(checked === true)}
-          />
-          <Label htmlFor="continue-replace-files" className="text-sm text-foreground">
-            {CONTINUE_ON_MACHINE_COPY.replaceThem}
-          </Label>
-        </div>
-      </div>
-    );
-  }
   return (
     <p
       className={cn(

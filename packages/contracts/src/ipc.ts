@@ -152,16 +152,20 @@ import type {
 } from "./video.ts";
 import type { UnoTranscribeAudioInput, UnoTranscribeAudioResult } from "./transcription.ts";
 import type {
-  ThreadContinueCleanupInput,
-  ThreadContinueCleanupResult,
   ThreadContinueCompleteInput,
   ThreadContinueCompleteResult,
+  ThreadContinueDiscardInput,
+  ThreadContinueDiscardResult,
   ThreadContinueInspectInput,
   ThreadContinueInspectResult,
-  ThreadContinuePrepareInput,
-  ThreadContinuePrepareResult,
-  ThreadContinueReceiveInput,
-  ThreadContinueReceiveResult,
+  ThreadContinueLandInput,
+  ThreadContinueLandResult,
+  ThreadContinueReadChunkInput,
+  ThreadContinueReadChunkResult,
+  ThreadContinueSnapshotInput,
+  ThreadContinueSnapshotResult,
+  ThreadContinueWriteChunkInput,
+  ThreadContinueWriteChunkResult,
 } from "./threadContinue.ts";
 
 export interface ContextMenuItem<T extends string = string> {
@@ -605,15 +609,18 @@ export interface EnvironmentApi {
     ) => Promise<GitPreparePullRequestThreadResult>;
   };
   /**
-   * "Continue on <machine>": `prepare`, `cleanup` and `complete` are called
-   * on the daemon the chat lives on, `inspect` and `receive` on the daemon it
-   * moves to.
+   * "Continue on <machine>": `snapshot`, `readChunk` and `complete` are
+   * called on the daemon the chat lives on, `inspect`, `writeChunk` and
+   * `land` on the daemon it moves to, `discard` on either. The client carries
+   * the bundle between them; nothing goes through a git remote.
    */
   threadContinue: {
     inspect: (input: ThreadContinueInspectInput) => Promise<ThreadContinueInspectResult>;
-    prepare: (input: ThreadContinuePrepareInput) => Promise<ThreadContinuePrepareResult>;
-    receive: (input: ThreadContinueReceiveInput) => Promise<ThreadContinueReceiveResult>;
-    cleanup: (input: ThreadContinueCleanupInput) => Promise<ThreadContinueCleanupResult>;
+    snapshot: (input: ThreadContinueSnapshotInput) => Promise<ThreadContinueSnapshotResult>;
+    readChunk: (input: ThreadContinueReadChunkInput) => Promise<ThreadContinueReadChunkResult>;
+    writeChunk: (input: ThreadContinueWriteChunkInput) => Promise<ThreadContinueWriteChunkResult>;
+    land: (input: ThreadContinueLandInput) => Promise<ThreadContinueLandResult>;
+    discard: (input: ThreadContinueDiscardInput) => Promise<ThreadContinueDiscardResult>;
     complete: (input: ThreadContinueCompleteInput) => Promise<ThreadContinueCompleteResult>;
   };
   orchestration: {

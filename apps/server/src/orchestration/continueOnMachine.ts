@@ -1,15 +1,18 @@
 /**
  * "Continue on <machine>" — the RPC handlers.
  *
- * `prepare` runs on the daemon the chat lives on, `receive` on the daemon it
- * moves to, `cleanup` and `complete` on the source again; `inspect` is the
- * read-only look at the target before anything runs. The web client
- * sequences them; see `packages/contracts/src/threadContinue.ts`.
+ * `snapshot` and `readChunk` run on the daemon the chat lives on,
+ * `writeChunk` and `land` on the daemon it moves to, `complete` on the source
+ * again; `inspect` is the read-only look at the target and `discard` drops a
+ * bundle on either side. The web client carries the bytes and sequences the
+ * calls; see `packages/contracts/src/threadContinue.ts`. Nothing here pushes
+ * to a git remote.
  *
  * Dependencies are passed explicitly (same pattern as `plugins/panelThread.ts`)
  * so the handlers are testable with a fake transport and fake projections,
  * and `ws.ts` stays a thin wiring layer. The git side lives in
- * `git/continueTransport.ts`; the seed text in `handoff.ts`.
+ * `git/continueTransport.ts`, the bundle files in
+ * `git/continueTransferStore.ts`, the seed text in `handoff.ts`.
  */
 import {
   CommandId,
@@ -22,26 +25,35 @@ import {
   ProjectId,
   type ServerProvider,
   THREAD_CONTINUE_BRANCH_PREFIX,
+  THREAD_CONTINUE_CHUNK_BYTES,
+  THREAD_CONTINUE_LEGACY_CLIENT_MESSAGE,
+  THREAD_CONTINUE_MAX_BUNDLE_BYTES,
   ThreadContinueError,
   type ThreadContinueErrorReason,
-  type ThreadContinueCleanupInput,
-  type ThreadContinueCleanupResult,
   type ThreadContinueCompleteInput,
   type ThreadContinueCompleteResult,
+  type ThreadContinueDiscardInput,
+  type ThreadContinueDiscardResult,
   type ThreadContinueInspectInput,
   type ThreadContinueInspectResult,
-  type ThreadContinuePrepareInput,
-  type ThreadContinuePrepareResult,
-  type ThreadContinueReceiveInput,
-  type ThreadContinueReceiveResult,
+  type ThreadContinueLandInput,
+  type ThreadContinueLandResult,
+  type ThreadContinueReadChunkInput,
+  type ThreadContinueReadChunkResult,
+  type ThreadContinueSnapshotInput,
+  type ThreadContinueSnapshotResult,
+  type ThreadContinueWriteChunkInput,
+  type ThreadContinueWriteChunkResult,
   ThreadId,
 } from "@t3tools/contracts";
-import { Effect, Option, Schema } from "effect";
+import { type Cause, Effect, Option, Schema } from "effect";
 import * as crypto from "node:crypto";
+import * as nodePath from "node:path";
 
 import { resolveThreadWorkspaceCwd } from "../checkpointing/Utils.ts";
+import type { ContinueTransferStoreShape } from "../git/continueTransferStore.ts";
 import {
-  continueLocalRefForThread,
+  continueLocalRefForTransfer,
   type ContinueTransportShape,
 } from "../git/continueTransport.ts";
 import { selectAutoBootstrapModelSelection } from "../provider/autoBootstrapModelSelection.ts";
@@ -52,12 +64,14 @@ import type { ProjectionSnapshotQueryShape } from "./Services/ProjectionSnapshot
 
 export const CONTINUE_ORIGIN_COMPONENT = "thread-continue";
 
-/** Message the person sees when the project cannot travel because git has nowhere to push. */
-export const NO_REMOTE_MESSAGE =
-  "Add a git remote (GitHub or Uno Git) to continue on another machine.";
+/** How many `uno/continue/<id>-N` names `land` tries before giving up. */
+const MAX_BRANCH_ATTEMPTS = 50;
 
 export interface ContinueOnMachineDeps {
   readonly transport: ContinueTransportShape;
+  readonly transfers: ContinueTransferStoreShape;
+  /** Where new worktrees go on this machine (`<baseDir>/worktrees`). */
+  readonly worktreesDir: string;
   readonly projections: Pick<
     ProjectionSnapshotQueryShape,
     | "getThreadDetailById"
@@ -71,30 +85,37 @@ export interface ContinueOnMachineDeps {
   readonly getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>;
   /** Friendly label of this machine, as shown in the machine switcher. */
   readonly getMachineLabel: Effect.Effect<string>;
-  /** Root `.env` of a project as text; null when absent or unreadable. */
-  readonly readEnvFile: (projectRoot: string) => Effect.Effect<string | null>;
-  readonly writeEnvFile: (projectRoot: string, text: string) => Effect.Effect<void, Error>;
+  /** `.env` in a folder as text; null when absent or unreadable. */
+  readonly readEnvFile: (folder: string) => Effect.Effect<string | null>;
+  readonly writeEnvFile: (folder: string, text: string) => Effect.Effect<void, Error>;
   readonly cloneRepository: (input: {
     readonly remoteUrl: string;
     readonly destinationPath: string;
   }) => Effect.Effect<{ readonly cwd: string }, Error>;
   readonly directoryExists: (path: string) => Effect.Effect<boolean>;
+  readonly makeDirectory: (path: string) => Effect.Effect<void, Cause.UnknownError>;
   /** `~` expansion for paths the client typed or derived. */
   readonly expandPath: (path: string) => string;
   readonly now?: () => string;
+  readonly newTransferId?: () => string;
 }
 
-export function continueBranchForThread(threadId: string): string {
-  return `${THREAD_CONTINUE_BRANCH_PREFIX}${threadId}`;
+/** Git-safe tail for `uno/continue/<tail>` from a thread or transfer id. */
+function branchTail(id: string): string {
+  const cleaned = id
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "")
+    // Thread ids are UUIDs: the first group is enough to tell copies apart.
+    .slice(0, 8)
+    .replace(/[-.]+$/g, "");
+  return cleaned.length > 0 ? cleaned : "chat";
 }
 
-/** The thread id a transport branch was made for, or null when it is not one of ours. */
-export function threadIdFromContinueBranch(branch: string): string | null {
-  if (!branch.startsWith(THREAD_CONTINUE_BRANCH_PREFIX)) {
-    return null;
-  }
-  const tail = branch.slice(THREAD_CONTINUE_BRANCH_PREFIX.length);
-  return tail.length > 0 ? tail : null;
+/** Branch name for attempt `attempt` (1-based): `uno/continue/<id>`, then `-2`, `-3`, … */
+export function continueBranchName(id: string, attempt = 1): string {
+  const base = `${THREAD_CONTINUE_BRANCH_PREFIX}${branchTail(id)}`;
+  return attempt <= 1 ? base : `${base}-${attempt}`;
 }
 
 const commandId = (tag: string) =>
@@ -180,15 +201,15 @@ export function resolveTargetModelSelection(input: {
 
 /**
  * Read-only look at where the chat would land on this machine, so the dialog
- * can say up front whether `receive` would overwrite uncommitted work.
+ * can say up front whether the project is there or will be added.
  */
 export function makeThreadContinueInspect(deps: ContinueOnMachineDeps) {
   return (
     input: ThreadContinueInspectInput,
   ): Effect.Effect<ThreadContinueInspectResult, ThreadContinueError> =>
     Effect.gen(function* () {
-      // Same expansion and trailing-slash handling as `receive`, so the
-      // folder inspected is the folder written to.
+      // Same expansion and trailing-slash handling as `land`, so the folder
+      // inspected is the folder used.
       const projectPath = normalizePath(deps.expandPath(input.projectPath));
       const snapshot = yield* deps.projections
         .getShellSnapshot()
@@ -229,7 +250,7 @@ export function makeThreadContinueInspect(deps: ContinueOnMachineDeps) {
     });
 }
 
-/** The folder a thread's files live in on this machine, with the errors `prepare`/`cleanup` share. */
+/** The folder a thread's files live in on this machine. */
 function resolveSourceCwd(
   deps: ContinueOnMachineDeps,
   threadId: ThreadId,
@@ -262,10 +283,20 @@ function resolveSourceCwd(
   });
 }
 
-export function makeThreadContinuePrepare(deps: ContinueOnMachineDeps) {
+function megabytes(bytes: number): string {
+  return `${Math.max(1, Math.round(bytes / (1024 * 1024)))} MB`;
+}
+
+/**
+ * Source side: snapshot the thread's working tree into a bundle in the
+ * scratch folder. Only the commits no remote-tracking branch has travel, plus
+ * the snapshot itself; nothing is pushed anywhere.
+ */
+export function makeThreadContinueSnapshot(deps: ContinueOnMachineDeps) {
+  const newTransferId = deps.newTransferId ?? (() => crypto.randomUUID());
   return (
-    input: ThreadContinuePrepareInput,
-  ): Effect.Effect<ThreadContinuePrepareResult, ThreadContinueError> =>
+    input: ThreadContinueSnapshotInput,
+  ): Effect.Effect<ThreadContinueSnapshotResult, ThreadContinueError> =>
     Effect.gen(function* () {
       const { thread, project, cwd } = yield* resolveSourceCwd(deps, input.threadId);
       const isGit = yield* deps.transport
@@ -274,74 +305,116 @@ export function makeThreadContinuePrepare(deps: ContinueOnMachineDeps) {
       if (!isGit) {
         return yield* fail(
           "not_git",
-          "This project is not a git repository. Git is how files travel between machines, so run `git init` and add a remote first.",
+          "This project is not a git repository. Uno Work packs the files for the other machine with git, so run `git init` in the project first.",
         );
       }
-      const remote = yield* deps.transport
-        .resolveRemote(cwd, input.remote ?? null)
-        .pipe(mapFailure("no_remote", "Could not read the git remotes"));
-      if (remote === null) {
-        return yield* fail("no_remote", NO_REMOTE_MESSAGE);
-      }
+      yield* deps.transfers.sweep;
 
+      const transferId = newTransferId();
       const head = yield* deps.transport
         .readHead(cwd)
         .pipe(mapFailure("capture_failed", "Could not read the current commit"));
-      const localRef = continueLocalRefForThread(thread.id);
+      const ref = continueLocalRefForTransfer(transferId);
       const commit = yield* deps.transport
         .captureSnapshot({
           cwd,
-          ref: localRef,
+          ref,
           parents: head.commit ? [head.commit] : [],
           message: `uno continue: ${thread.title}`,
         })
         .pipe(mapFailure("capture_failed", "Could not save the working tree"));
 
-      // A branch of the same name may already sit on the remote (an earlier
-      // attempt for this chat, or a retry): the push is a force-update, so it
-      // is reused rather than refused.
-      const branch = continueBranchForThread(thread.id);
+      const bundlePath = yield* deps.transfers.prepareOutgoing(transferId);
+      // The hidden ref only exists to name the snapshot inside the bundle.
       yield* deps.transport
-        .pushRef({ cwd, remoteName: remote.name, localRef, remoteBranch: branch })
-        .pipe(mapFailure("push_failed", `Could not push to ${remote.name}`));
-      // The remote holds the snapshot now; the hidden local ref is only clutter.
-      yield* deps.transport.deleteRef({ cwd, ref: localRef }).pipe(Effect.ignore);
+        .createBundle({ cwd, ref, bundlePath })
+        .pipe(
+          mapFailure("capture_failed", "Could not pack the files"),
+          Effect.ensuring(deps.transport.deleteRef({ cwd, ref }).pipe(Effect.ignore)),
+        );
+      const digest = yield* deps.transfers
+        .digest("outgoing", transferId)
+        .pipe(Effect.tapError(() => deps.transfers.discard(transferId)));
+      if (digest.sizeBytes > THREAD_CONTINUE_MAX_BUNDLE_BYTES) {
+        yield* deps.transfers.discard(transferId);
+        return yield* fail(
+          "too_large",
+          `The files to carry over are ${megabytes(digest.sizeBytes)}; one transfer can carry up to ${megabytes(THREAD_CONTINUE_MAX_BUNDLE_BYTES)}. Commit and push large files, or add them to .gitignore, then try again.`,
+        );
+      }
 
+      // Only ever used by a target that has to clone the project; never pushed to.
+      const remote = yield* deps.transport
+        .resolveRemote(cwd)
+        .pipe(Effect.catch(() => Effect.succeed(null)));
       const sourceMachineLabel = yield* deps.getMachineLabel;
       const seedText = buildContinueSeed({
-        thread: thread,
+        thread,
         sourceMachineLabel,
         sourceBranch: head.branch,
       });
-      const envText =
-        input.includeEnv === false ? null : yield* deps.readEnvFile(project.workspaceRoot);
+      let envText: string | null = null;
+      if (input.includeEnv === true) {
+        envText = yield* deps.readEnvFile(cwd);
+        if (envText === null && normalizePath(cwd) !== normalizePath(project.workspaceRoot)) {
+          envText = yield* deps.readEnvFile(project.workspaceRoot);
+        }
+      }
 
-      yield* Effect.logInfo("thread.continue.prepare", {
+      yield* Effect.logInfo("thread.continue.snapshot", {
         threadId: thread.id,
-        remote: remote.name,
-        branch,
+        transferId,
         commit,
         baseCommit: head.commit,
+        sizeBytes: digest.sizeBytes,
         envIncluded: envText !== null,
       });
 
       return {
+        transferId,
         sourceThreadId: thread.id,
         sourceMachineLabel,
-        remoteUrl: remote.url,
-        remoteName: remote.name,
-        branch,
+        sizeBytes: digest.sizeBytes,
+        sha256: digest.sha256,
+        chunkBytes: THREAD_CONTINUE_CHUNK_BYTES,
+        chunkCount: Math.max(1, Math.ceil(digest.sizeBytes / THREAD_CONTINUE_CHUNK_BYTES)),
         commit,
         baseCommit: head.commit,
         sourceBranch: head.branch,
+        remoteUrl: remote?.url ?? null,
         title: thread.title,
         modelSelection: thread.modelSelection,
         runtimeMode: thread.runtimeMode,
         interactionMode: thread.interactionMode,
         seedText,
         envText,
-      } satisfies ThreadContinuePrepareResult;
+      } satisfies ThreadContinueSnapshotResult;
     });
+}
+
+export function makeThreadContinueReadChunk(deps: ContinueOnMachineDeps) {
+  return (
+    input: ThreadContinueReadChunkInput,
+  ): Effect.Effect<ThreadContinueReadChunkResult, ThreadContinueError> =>
+    deps.transfers
+      .readChunk({ transferId: input.transferId, index: input.index })
+      .pipe(Effect.map((data) => ({ data })));
+}
+
+export function makeThreadContinueWriteChunk(deps: ContinueOnMachineDeps) {
+  return (
+    input: ThreadContinueWriteChunkInput,
+  ): Effect.Effect<ThreadContinueWriteChunkResult, ThreadContinueError> =>
+    deps.transfers
+      .writeChunk({ transferId: input.transferId, offset: input.offset, data: input.data })
+      .pipe(Effect.map((receivedBytes) => ({ receivedBytes })));
+}
+
+export function makeThreadContinueDiscard(deps: ContinueOnMachineDeps) {
+  return (
+    input: ThreadContinueDiscardInput,
+  ): Effect.Effect<ThreadContinueDiscardResult, ThreadContinueError> =>
+    deps.transfers.discard(input.transferId).pipe(Effect.map((removed) => ({ removed })));
 }
 
 interface ResolvedTargetProject {
@@ -359,12 +432,13 @@ function findProjectByPath(
 
 /**
  * The project the continued thread lands in. `existing` must already be
- * registered; `create` clones (or adopts a folder that is already a clone)
+ * registered; `create` clones (or adopts a folder that is already a
+ * repository, or starts an empty repository when the project has no remote)
  * and registers it, like "Move to a box" does.
  */
 function resolveTargetProject(
   deps: ContinueOnMachineDeps,
-  input: ThreadContinueReceiveInput,
+  input: ThreadContinueLandInput,
   origin: ReturnType<typeof systemCommandOrigin>,
   createdAt: string,
 ): Effect.Effect<ResolvedTargetProject, ThreadContinueError> {
@@ -403,11 +477,24 @@ function resolveTargetProject(
           `${destination} already exists and is not a git repository. Remove it or pick another folder.`,
         );
       }
-    } else {
+    } else if (input.project.remoteUrl !== null) {
       const cloned = yield* deps
         .cloneRepository({ remoteUrl: input.project.remoteUrl, destinationPath: destination })
-        .pipe(mapFailure("clone_failed", "Could not clone the repository"));
+        .pipe(
+          mapFailure(
+            "clone_failed",
+            `Could not clone ${input.project.remoteUrl} here. Give this machine access to the repository or add the project to it first`,
+          ),
+        );
       cwd = cloned.cwd.trim().length > 0 ? cloned.cwd : destination;
+    } else {
+      // No remote anywhere: the bundle carries the whole history.
+      yield* deps
+        .makeDirectory(destination)
+        .pipe(mapFailure("clone_failed", `Could not create ${destination}`));
+      yield* deps.transport
+        .initRepository(destination)
+        .pipe(mapFailure("clone_failed", `Could not start a repository in ${destination}`));
     }
 
     const projectId = ProjectId.make(crypto.randomUUID());
@@ -435,57 +522,70 @@ function resolveTargetProject(
   });
 }
 
-export function makeThreadContinueReceive(deps: ContinueOnMachineDeps) {
+/** First `uno/continue/<id>[-N]` whose branch and worktree folder are both free. */
+function pickWorktree(
+  deps: ContinueOnMachineDeps,
+  input: { readonly cwd: string; readonly id: string },
+): Effect.Effect<{ readonly branch: string; readonly path: string }, ThreadContinueError> {
+  return Effect.gen(function* () {
+    const repoName = nodePath.basename(normalizePath(input.cwd)) || "project";
+    for (let attempt = 1; attempt <= MAX_BRANCH_ATTEMPTS; attempt += 1) {
+      const branch = continueBranchName(input.id, attempt);
+      const path = nodePath.join(deps.worktreesDir, repoName, branch.replace(/\//g, "-"));
+      const taken = yield* deps.transport
+        .branchExists({ cwd: input.cwd, branch })
+        .pipe(mapFailure("worktree_failed", "Could not list the branches"));
+      if (taken) continue;
+      if (yield* deps.directoryExists(path)) continue;
+      return { branch, path };
+    }
+    return yield* fail(
+      "worktree_failed",
+      `Too many continued copies of this chat on this machine. Delete old ${THREAD_CONTINUE_BRANCH_PREFIX}* branches and try again.`,
+    );
+  });
+}
+
+/**
+ * Target side: check the bundle that arrived, make sure the project exists,
+ * open a new worktree on a new branch with the source's files, and create the
+ * thread there. The person's own checkout of the project is not touched.
+ */
+export function makeThreadContinueLand(deps: ContinueOnMachineDeps) {
   const now = deps.now ?? (() => new Date().toISOString());
   return (
-    input: ThreadContinueReceiveInput,
-  ): Effect.Effect<ThreadContinueReceiveResult, ThreadContinueError> =>
+    input: ThreadContinueLandInput,
+  ): Effect.Effect<ThreadContinueLandResult, ThreadContinueError> =>
     Effect.gen(function* () {
       const createdAt = now();
       const origin = systemCommandOrigin(
         CONTINUE_ORIGIN_COMPONENT,
         `continued from ${input.sourceMachineLabel}`,
       );
+
+      // 1. The bytes are exactly what the source packed.
+      const digest = yield* deps.transfers.digest("incoming", input.transferId);
+      if (digest.sizeBytes !== input.sizeBytes || digest.sha256 !== input.sha256) {
+        return yield* fail(
+          "transfer_incomplete",
+          `The files did not arrive intact (${digest.sizeBytes} of ${input.sizeBytes} bytes). Try again.`,
+        );
+      }
+      const bundlePath = yield* deps.transfers.incomingPath(input.transferId);
+
+      // 2. The project, and a model that can run here, before any git write,
+      //    so a refusal leaves no stray branch behind.
       const target = yield* resolveTargetProject(deps, input, origin, createdAt);
       const cwd = target.project.workspaceRoot;
-
-      const refTail = threadIdFromContinueBranch(input.branch) ?? input.commit;
-      const localRef = continueLocalRefForThread(refTail);
-      const fetched = yield* deps.transport
-        .fetchBranch({
-          cwd,
-          remoteUrl: input.remoteUrl,
-          remoteBranch: input.branch,
-          localRef,
-        })
-        .pipe(mapFailure("fetch_failed", `Could not fetch ${input.branch}`));
-      if (fetched !== input.commit) {
+      const isGit = yield* deps.transport
+        .isGitRepository(cwd)
+        .pipe(mapFailure("not_git", "Could not inspect the project folder"));
+      if (!isGit) {
         return yield* fail(
-          "commit_mismatch",
-          `The transport branch on the remote points at ${fetched.slice(0, 7)}, not the snapshot that was just pushed (${input.commit.slice(0, 7)}). Try again from the source machine.`,
+          "not_git",
+          `The project at ${cwd} is not a git repository on this machine, so the files cannot be added to it.`,
         );
       }
-      const restored = yield* deps.transport
-        .restoreTree({ cwd, ref: localRef })
-        .pipe(mapFailure("restore_failed", "Could not write the files into the project"));
-      if (!restored) {
-        return yield* fail("restore_failed", "The fetched snapshot is unavailable locally.");
-      }
-      yield* deps.transport.deleteRef({ cwd, ref: localRef }).pipe(Effect.ignore);
-
-      let envWritten = false;
-      if (typeof input.envText === "string") {
-        envWritten = yield* deps.writeEnvFile(cwd, input.envText).pipe(
-          Effect.as(true),
-          Effect.catch((cause) =>
-            Effect.logWarning("thread.continue.receive: .env not written", {
-              cwd,
-              detail: errorDetail(cause),
-            }).pipe(Effect.as(false)),
-          ),
-        );
-      }
-
       const providers = yield* deps.getProviders;
       const model = resolveTargetModelSelection({
         requested: input.modelSelection,
@@ -498,6 +598,91 @@ export function makeThreadContinueReceive(deps: ContinueOnMachineDeps) {
           "No coding harness is installed and signed in on this machine yet. Set one up in Settings, then try again.",
         );
       }
+
+      // 3. The commits the changes build on. Fetching from this machine's own
+      //    remotes is fine (it only reads); nothing is ever pushed.
+      let check = yield* deps.transport
+        .verifyBundle({ cwd, bundlePath })
+        .pipe(mapFailure("fetch_failed", "Could not read the transferred files"));
+      if (!check.ok) {
+        yield* deps.transport.fetchRemotes(cwd).pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("thread.continue.land: fetch from remotes failed", {
+              cwd,
+              detail: errorDetail(cause),
+            }),
+          ),
+        );
+        check = yield* deps.transport
+          .verifyBundle({ cwd, bundlePath })
+          .pipe(mapFailure("fetch_failed", "Could not read the transferred files"));
+      }
+      if (!check.ok) {
+        const base = input.baseCommit ? ` (${input.baseCommit.slice(0, 7)})` : "";
+        yield* Effect.logWarning("thread.continue.land: bundle prerequisites missing", {
+          cwd,
+          detail: check.detail,
+        });
+        return yield* fail(
+          "base_missing",
+          `This machine does not have the commit the changes are based on${base} and could not fetch it from the project's remotes. Pull the latest commits into ${cwd} on this machine and try again.`,
+        );
+      }
+
+      const ref = continueLocalRefForTransfer(input.transferId);
+      const fetched = yield* deps.transport
+        .fetchBundle({ cwd, bundlePath, ref })
+        .pipe(mapFailure("fetch_failed", "Could not unpack the transferred files"));
+      if (fetched !== input.commit) {
+        yield* deps.transport.deleteRef({ cwd, ref }).pipe(Effect.ignore);
+        return yield* fail(
+          "commit_mismatch",
+          `The transferred snapshot is ${fetched.slice(0, 7)}, not ${input.commit.slice(0, 7)} as the source reported. Try again from the source machine.`,
+        );
+      }
+
+      // 4. A worktree of its own: new branch at the source's base commit, the
+      //    snapshot's files on top as uncommitted changes.
+      const worktree = yield* pickWorktree(deps, {
+        cwd,
+        id: input.sourceThreadId ?? input.transferId,
+      });
+      yield* deps.transport
+        .addWorktree({
+          cwd,
+          branch: worktree.branch,
+          path: worktree.path,
+          // An unborn source has no base: the branch starts at the snapshot.
+          startPoint: input.baseCommit ?? input.commit,
+        })
+        .pipe(
+          mapFailure("worktree_failed", "Could not create a worktree for the chat"),
+          Effect.tapError(() => deps.transport.deleteRef({ cwd, ref }).pipe(Effect.ignore)),
+        );
+      if (input.baseCommit !== null) {
+        const restored = yield* deps.transport
+          .restoreTree({ cwd: worktree.path, ref })
+          .pipe(mapFailure("restore_failed", "Could not write the files into the worktree"));
+        if (!restored) {
+          return yield* fail("restore_failed", "The transferred snapshot is unavailable locally.");
+        }
+      }
+      yield* deps.transport.deleteRef({ cwd, ref }).pipe(Effect.ignore);
+      yield* deps.transfers.discard(input.transferId);
+
+      let envWritten = false;
+      if (typeof input.envText === "string") {
+        envWritten = yield* deps.writeEnvFile(worktree.path, input.envText).pipe(
+          Effect.as(true),
+          Effect.catch((cause) =>
+            Effect.logWarning("thread.continue.land: .env not written", {
+              worktreePath: worktree.path,
+              detail: errorDetail(cause),
+            }).pipe(Effect.as(false)),
+          ),
+        );
+      }
+
       const seedText =
         model.fallbackApplied && input.modelSelection !== undefined
           ? [
@@ -526,8 +711,8 @@ export function makeThreadContinueReceive(deps: ContinueOnMachineDeps) {
         modelSelection: model.selection,
         runtimeMode: input.runtimeMode,
         interactionMode: input.interactionMode,
-        branch: null,
-        worktreePath: null,
+        branch: worktree.branch,
+        worktreePath: worktree.path,
         createdAt,
       });
       yield* dispatch({
@@ -550,8 +735,10 @@ export function makeThreadContinueReceive(deps: ContinueOnMachineDeps) {
           payload: {
             sourceMachineLabel: input.sourceMachineLabel,
             sourceThreadId: input.sourceThreadId ?? null,
-            branch: input.branch,
+            branch: worktree.branch,
+            worktreePath: worktree.path,
             commit: input.commit,
+            baseCommit: input.baseCommit,
             envWritten,
             modelFallbackApplied: model.fallbackApplied,
           },
@@ -561,11 +748,13 @@ export function makeThreadContinueReceive(deps: ContinueOnMachineDeps) {
         createdAt,
       });
 
-      yield* Effect.logInfo("thread.continue.receive", {
+      yield* Effect.logInfo("thread.continue.land", {
         threadId,
         projectId: target.project.id,
         projectCreated: target.created,
-        branch: input.branch,
+        transferId: input.transferId,
+        branch: worktree.branch,
+        worktreePath: worktree.path,
         commit: input.commit,
         envWritten,
         modelFallbackApplied: model.fallbackApplied,
@@ -575,57 +764,28 @@ export function makeThreadContinueReceive(deps: ContinueOnMachineDeps) {
         projectId: target.project.id,
         threadId,
         projectPath: cwd,
+        worktreePath: worktree.path,
+        branch: worktree.branch,
         projectCreated: target.created,
         modelSelection: model.selection,
         modelFallbackApplied: model.fallbackApplied,
         envWritten,
-      } satisfies ThreadContinueReceiveResult;
+      } satisfies ThreadContinueLandResult;
     });
 }
 
 /**
- * Deletes the transport branch on the remote once the target has fetched it.
- * Best-effort by design: a failure here must never undo a handoff that
- * already succeeded, so it is logged and reported as `removed: false`.
- * Missing chat or project still fail, since there is nothing to clean.
+ * Answer for the 0.0.53–0.0.56 RPCs (`prepare` / `receive` / `cleanup`),
+ * which pushed work in progress to `origin`. A current daemon never does
+ * that, so an old client gets a readable request to update instead.
  */
-export function makeThreadContinueCleanup(deps: ContinueOnMachineDeps) {
-  return (
-    input: ThreadContinueCleanupInput,
-  ): Effect.Effect<ThreadContinueCleanupResult, ThreadContinueError> =>
-    Effect.gen(function* () {
-      const source = yield* resolveSourceCwd(deps, input.threadId);
-      const branch = continueBranchForThread(source.thread.id);
-      const logSkip = (detail: string) =>
-        Effect.logWarning("thread.continue.cleanup: transport branch not removed", {
-          threadId: source.thread.id,
-          branch,
-          detail,
-        }).pipe(Effect.as({ branch, removed: false } satisfies ThreadContinueCleanupResult));
-
-      const remote = yield* deps.transport
-        .resolveRemote(source.cwd, input.remote ?? null)
-        .pipe(Effect.catch((cause) => Effect.succeed({ error: errorDetail(cause) })));
-      if (remote === null) {
-        return yield* logSkip("no remote");
-      }
-      if ("error" in remote) {
-        return yield* logSkip(remote.error);
-      }
-      return yield* deps.transport
-        .deleteRemoteBranch({ cwd: source.cwd, remoteName: remote.name, remoteBranch: branch })
-        .pipe(
-          Effect.andThen(
-            Effect.logInfo("thread.continue.cleanup", {
-              threadId: source.thread.id,
-              remote: remote.name,
-              branch,
-            }),
-          ),
-          Effect.as({ branch, removed: true } satisfies ThreadContinueCleanupResult),
-          Effect.catch((cause) => logSkip(errorDetail(cause))),
-        );
-    });
+export function makeThreadContinueLegacyRefusal(method: string) {
+  return (_input: unknown): Effect.Effect<never, ThreadContinueError> =>
+    Effect.logWarning("thread.continue: refused a request from an outdated client", {
+      method,
+    }).pipe(
+      Effect.andThen(Effect.fail(fail("invalid_request", THREAD_CONTINUE_LEGACY_CLIENT_MESSAGE))),
+    );
 }
 
 export function makeThreadContinueComplete(deps: ContinueOnMachineDeps) {

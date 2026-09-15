@@ -1,16 +1,21 @@
 /**
  * ContinueTransport - git plumbing for "Continue on <machine>".
  *
- * Git is the transport: the source daemon snapshots the working tree into a
- * WIP commit (parented on HEAD, built with the checkpoint machinery so the
- * user's index and HEAD are never touched), pushes it to a transport branch
- * `uno/continue/<threadId>` on the project remote, and the target daemon
- * fetches that branch and restores its tree into its own working tree
- * without moving its HEAD — so the target keeps its branch and ends up with
- * the same uncommitted changes the source had.
+ * Nothing here talks to a remote in the write direction. The source daemon
+ * snapshots the working tree into a WIP commit (parented on HEAD, built with
+ * the checkpoint machinery so the user's index and HEAD are never touched)
+ * and packs it into a git bundle file. The bundle excludes everything the
+ * source already sees on a remote-tracking branch, so it stays small and the
+ * target can fill any gap with a plain fetch from its own remotes.
  *
- * Everything here is stateless and per-call; a future continuous mirror can
- * call the same operations on a schedule.
+ * On the target the bundle is verified and fetched into a hidden ref, a new
+ * worktree is created on a fresh branch at the source's base commit, and the
+ * snapshot tree is restored into that worktree — the chat continues with the
+ * same uncommitted changes, while the checkout the person already had there
+ * stays exactly as it was.
+ *
+ * Everything here is stateless and per-call. Moving the bundle bytes between
+ * machines is `continueTransferStore.ts` plus the client.
  *
  * @module ContinueTransport
  */
@@ -22,14 +27,15 @@ import { CheckpointStore } from "../checkpointing/Services/CheckpointStore.ts";
 import type { CheckpointStoreError } from "../checkpointing/Errors.ts";
 import { VcsDriverRegistry } from "../vcs/VcsDriverRegistry.ts";
 
-/** Hidden local ref that holds a transport commit on either side. */
+/** Hidden local ref that holds a snapshot commit on either side. */
 export const CONTINUE_REFS_PREFIX = "refs/t3/continue";
 
-export function continueLocalRefForThread(threadId: string): CheckpointRef {
-  return CheckpointRef.make(`${CONTINUE_REFS_PREFIX}/${threadId}`);
+export function continueLocalRefForTransfer(transferId: string): CheckpointRef {
+  return CheckpointRef.make(`${CONTINUE_REFS_PREFIX}/${transferId}`);
 }
 
 const NETWORK_TIMEOUT_MS = 10 * 60_000;
+const BUNDLE_TIMEOUT_MS = 10 * 60_000;
 
 export interface ContinueRemote {
   readonly name: string;
@@ -46,15 +52,19 @@ export interface ContinueStatus extends ContinueHead {
   readonly changedFiles: number;
 }
 
+export interface ContinueBundleCheck {
+  /** The repository has every commit the bundle is based on. */
+  readonly ok: boolean;
+  /** Git's explanation when it does not (missing prerequisite commits, corrupt file). */
+  readonly detail: string;
+}
+
 export interface ContinueTransportShape {
   readonly isGitRepository: (cwd: string) => Effect.Effect<boolean, VcsError>;
-  /** HEAD plus a count of the uncommitted work a restore would overwrite. Read-only. */
+  /** HEAD plus a count of uncommitted work. Read-only. */
   readonly readStatus: (cwd: string) => Effect.Effect<ContinueStatus, VcsError>;
-  /** Fetch URL of the named remote, or of `origin` / the first remote when no name is given. */
-  readonly resolveRemote: (
-    cwd: string,
-    remoteName?: string | null,
-  ) => Effect.Effect<ContinueRemote | null, VcsError>;
+  /** Fetch URL of `origin`, else of the first remote. Only ever used to clone or fetch. */
+  readonly resolveRemote: (cwd: string) => Effect.Effect<ContinueRemote | null, VcsError>;
   readonly readHead: (cwd: string) => Effect.Effect<ContinueHead, VcsError>;
   /** Snapshot the working tree (tracked + untracked, not ignored) into a commit at `ref`; returns the commit oid. */
   readonly captureSnapshot: (input: {
@@ -63,26 +73,42 @@ export interface ContinueTransportShape {
     readonly parents: ReadonlyArray<string>;
     readonly message: string;
   }) => Effect.Effect<string, CheckpointStoreError>;
-  /** Force-pushes `localRef` to `remoteBranch`; an existing branch of that name is updated in place. */
-  readonly pushRef: (input: {
+  /**
+   * Writes a bundle with `ref` and every commit behind it that no
+   * remote-tracking branch already has (`--not --remotes`). A repository
+   * without remotes gets its whole history.
+   */
+  readonly createBundle: (input: {
     readonly cwd: string;
-    readonly remoteName: string;
-    readonly localRef: string;
-    readonly remoteBranch: string;
+    readonly ref: CheckpointRef;
+    readonly bundlePath: string;
   }) => Effect.Effect<void, VcsError>;
-  /** Deletes `remoteBranch` on the remote (`git push <remote> --delete`). */
-  readonly deleteRemoteBranch: (input: {
+  /** `git bundle verify`: whether this repository has the commits the bundle builds on. */
+  readonly verifyBundle: (input: {
     readonly cwd: string;
-    readonly remoteName: string;
-    readonly remoteBranch: string;
-  }) => Effect.Effect<void, VcsError>;
-  /** Fetch `remoteBranch` from `remoteUrl` into `localRef`; returns the commit oid it points at. */
-  readonly fetchBranch: (input: {
+    readonly bundlePath: string;
+  }) => Effect.Effect<ContinueBundleCheck, VcsError>;
+  /** `git fetch --all`: pulls in commits the bundle may build on. Reads only. */
+  readonly fetchRemotes: (cwd: string) => Effect.Effect<void, VcsError>;
+  /** Fetch `ref` out of the bundle into the same local ref; returns the commit oid. */
+  readonly fetchBundle: (input: {
     readonly cwd: string;
-    readonly remoteUrl: string;
-    readonly remoteBranch: string;
-    readonly localRef: string;
+    readonly bundlePath: string;
+    readonly ref: CheckpointRef;
   }) => Effect.Effect<string, VcsError>;
+  /** `git init` in an existing, empty folder. */
+  readonly initRepository: (cwd: string) => Effect.Effect<void, VcsError>;
+  readonly branchExists: (input: {
+    readonly cwd: string;
+    readonly branch: string;
+  }) => Effect.Effect<boolean, VcsError>;
+  /** `git worktree add -b <branch> <path> <startPoint>`. */
+  readonly addWorktree: (input: {
+    readonly cwd: string;
+    readonly branch: string;
+    readonly path: string;
+    readonly startPoint: string;
+  }) => Effect.Effect<void, VcsError>;
   /** Put the tree of `ref` into the working tree; HEAD and the current branch stay as they are. */
   readonly restoreTree: (input: {
     readonly cwd: string;
@@ -102,16 +128,15 @@ const make = Effect.gen(function* () {
   const vcsRegistry = yield* VcsDriverRegistry;
   const checkpointStore = yield* CheckpointStore;
 
+  // The git driver directly, without repository detection: `initRepository`
+  // and freshly created worktrees must not hit a cached "not a repository".
   const git = (input: {
     readonly operation: string;
     readonly cwd: string;
     readonly args: ReadonlyArray<string>;
     readonly allowNonZeroExit?: boolean;
     readonly timeoutMs?: number;
-  }) =>
-    vcsRegistry
-      .resolve({ cwd: input.cwd, requestedKind: "git" })
-      .pipe(Effect.flatMap((handle) => handle.driver.execute(input)));
+  }) => vcsRegistry.get("git").pipe(Effect.flatMap((driver) => driver.execute(input)));
 
   const gitStdout = (operation: string, cwd: string, args: ReadonlyArray<string>) =>
     git({ operation, cwd, args, allowNonZeroExit: true }).pipe(
@@ -128,19 +153,13 @@ const make = Effect.gen(function* () {
     );
 
   const resolveRemote: ContinueTransportShape["resolveRemote"] = Effect.fn("resolveRemote")(
-    function* (cwd, remoteName) {
-      const requested = remoteName?.trim() ?? "";
-      const candidates: string[] = [];
-      if (requested.length > 0) {
-        candidates.push(requested);
-      } else {
-        candidates.push("origin");
-        const listed = yield* gitStdout("ContinueTransport.listRemotes", cwd, ["remote"]);
-        for (const name of (listed ?? "").split(/\r?\n/)) {
-          const trimmed = name.trim();
-          if (trimmed.length > 0 && trimmed !== "origin") {
-            candidates.push(trimmed);
-          }
+    function* (cwd) {
+      const candidates: string[] = ["origin"];
+      const listed = yield* gitStdout("ContinueTransport.listRemotes", cwd, ["remote"]);
+      for (const name of (listed ?? "").split(/\r?\n/)) {
+        const trimmed = name.trim();
+        if (trimmed.length > 0 && trimmed !== "origin") {
+          candidates.push(trimmed);
         }
       }
       for (const name of candidates) {
@@ -178,8 +197,7 @@ const make = Effect.gen(function* () {
 
   const readStatus: ContinueTransportShape["readStatus"] = Effect.fn("readStatus")(function* (cwd) {
     const head = yield* readHead(cwd);
-    // `--untracked-files=all` lists files inside new folders one by one so
-    // the count matches what the person would see replaced.
+    // `--untracked-files=all` lists files inside new folders one by one.
     const result = yield* git({
       operation: "ContinueTransport.readStatus",
       cwd,
@@ -208,56 +226,73 @@ const make = Effect.gen(function* () {
     },
   );
 
-  const pushRef: ContinueTransportShape["pushRef"] = (input) =>
+  const createBundle: ContinueTransportShape["createBundle"] = (input) =>
     git({
-      operation: "ContinueTransport.pushRef",
+      operation: "ContinueTransport.createBundle",
       cwd: input.cwd,
-      args: [
-        "push",
-        "--force",
-        "--no-verify",
-        input.remoteName,
-        `${input.localRef}:refs/heads/${input.remoteBranch}`,
-      ],
+      args: ["bundle", "create", input.bundlePath, input.ref, "--not", "--remotes"],
+      timeoutMs: BUNDLE_TIMEOUT_MS,
+    }).pipe(Effect.asVoid);
+
+  const verifyBundle: ContinueTransportShape["verifyBundle"] = (input) =>
+    git({
+      operation: "ContinueTransport.verifyBundle",
+      cwd: input.cwd,
+      args: ["bundle", "verify", input.bundlePath],
+      allowNonZeroExit: true,
+      timeoutMs: BUNDLE_TIMEOUT_MS,
+    }).pipe(
+      Effect.map((result) => ({
+        ok: result.exitCode === 0,
+        detail: (result.stderr.trim() || result.stdout.trim()).slice(0, 2_000),
+      })),
+    );
+
+  const fetchRemotes: ContinueTransportShape["fetchRemotes"] = (cwd) =>
+    git({
+      operation: "ContinueTransport.fetchRemotes",
+      cwd,
+      args: ["fetch", "--all", "--no-tags", "--quiet"],
       timeoutMs: NETWORK_TIMEOUT_MS,
     }).pipe(Effect.asVoid);
 
-  const deleteRemoteBranch: ContinueTransportShape["deleteRemoteBranch"] = (input) =>
-    git({
-      operation: "ContinueTransport.deleteRemoteBranch",
-      cwd: input.cwd,
-      args: [
-        "push",
-        "--no-verify",
-        input.remoteName,
-        "--delete",
-        `refs/heads/${input.remoteBranch}`,
-      ],
-      timeoutMs: NETWORK_TIMEOUT_MS,
-    }).pipe(Effect.asVoid);
-
-  const fetchBranch: ContinueTransportShape["fetchBranch"] = Effect.fn("fetchBranch")(
+  const fetchBundle: ContinueTransportShape["fetchBundle"] = Effect.fn("fetchBundle")(
     function* (input) {
       yield* git({
-        operation: "ContinueTransport.fetchBranch",
+        operation: "ContinueTransport.fetchBundle",
         cwd: input.cwd,
-        args: [
-          "fetch",
-          "--no-tags",
-          "--force",
-          input.remoteUrl,
-          `+refs/heads/${input.remoteBranch}:${input.localRef}`,
-        ],
-        timeoutMs: NETWORK_TIMEOUT_MS,
+        args: ["fetch", "--no-tags", "--quiet", input.bundlePath, `+${input.ref}:${input.ref}`],
+        timeoutMs: BUNDLE_TIMEOUT_MS,
       });
       const result = yield* git({
-        operation: "ContinueTransport.fetchBranch.resolve",
+        operation: "ContinueTransport.fetchBundle.resolve",
         cwd: input.cwd,
-        args: ["rev-parse", "--verify", `${input.localRef}^{commit}`],
+        args: ["rev-parse", "--verify", `${input.ref}^{commit}`],
       });
       return result.stdout.trim();
     },
   );
+
+  const initRepository: ContinueTransportShape["initRepository"] = (cwd) =>
+    git({ operation: "ContinueTransport.initRepository", cwd, args: ["init", "--quiet"] }).pipe(
+      Effect.asVoid,
+    );
+
+  const branchExists: ContinueTransportShape["branchExists"] = (input) =>
+    git({
+      operation: "ContinueTransport.branchExists",
+      cwd: input.cwd,
+      args: ["show-ref", "--verify", "--quiet", `refs/heads/${input.branch}`],
+      allowNonZeroExit: true,
+    }).pipe(Effect.map((result) => result.exitCode === 0));
+
+  const addWorktree: ContinueTransportShape["addWorktree"] = (input) =>
+    git({
+      operation: "ContinueTransport.addWorktree",
+      cwd: input.cwd,
+      args: ["worktree", "add", "--quiet", "-b", input.branch, input.path, input.startPoint],
+      timeoutMs: BUNDLE_TIMEOUT_MS,
+    }).pipe(Effect.asVoid);
 
   const restoreTree: ContinueTransportShape["restoreTree"] = (input) =>
     checkpointStore.restoreCheckpoint({
@@ -275,9 +310,13 @@ const make = Effect.gen(function* () {
     resolveRemote,
     readHead,
     captureSnapshot,
-    pushRef,
-    deleteRemoteBranch,
-    fetchBranch,
+    createBundle,
+    verifyBundle,
+    fetchRemotes,
+    fetchBundle,
+    initRepository,
+    branchExists,
+    addWorktree,
     restoreTree,
     deleteRef,
   } satisfies ContinueTransportShape;

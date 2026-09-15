@@ -48,9 +48,11 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
     },
     threadContinue: {
       inspect: rpcClient.threadContinue.inspect,
-      prepare: rpcClient.threadContinue.prepare,
-      receive: rpcClient.threadContinue.receive,
-      cleanup: rpcClient.threadContinue.cleanup,
+      snapshot: rpcClient.threadContinue.snapshot,
+      readChunk: rpcClient.threadContinue.readChunk,
+      writeChunk: rpcClient.threadContinue.writeChunk,
+      land: rpcClient.threadContinue.land,
+      discard: rpcClient.threadContinue.discard,
       complete: rpcClient.threadContinue.complete,
     },
     orchestration: {

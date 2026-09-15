@@ -79,12 +79,16 @@ import { VcsStatusBroadcaster } from "./vcs/VcsStatusBroadcaster.ts";
 import { VcsProvisioningService } from "./vcs/VcsProvisioningService.ts";
 import { GitWorkflowService } from "./git/GitWorkflowService.ts";
 import { ContinueTransport } from "./git/continueTransport.ts";
+import { makeContinueTransferStore } from "./git/continueTransferStore.ts";
 import {
-  makeThreadContinueCleanup,
   makeThreadContinueComplete,
+  makeThreadContinueDiscard,
   makeThreadContinueInspect,
-  makeThreadContinuePrepare,
-  makeThreadContinueReceive,
+  makeThreadContinueLand,
+  makeThreadContinueLegacyRefusal,
+  makeThreadContinueReadChunk,
+  makeThreadContinueSnapshot,
+  makeThreadContinueWriteChunk,
 } from "./orchestration/continueOnMachine.ts";
 import { expandHomePath } from "./pathExpansion.ts";
 import * as fsPromises from "node:fs/promises";
@@ -238,14 +242,18 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId, currentSessionRole: Ses
       const continueTransport = yield* ContinueTransport;
       const continueOnMachineDeps = {
         transport: continueTransport,
+        transfers: makeContinueTransferStore({
+          rootDir: nodePath.join(config.tempDir, "continue"),
+        }),
+        worktreesDir: config.worktreesDir,
         projections: projectionSnapshotQuery,
         engine: orchestrationEngine,
         getProviders: providerRegistry.getProviders,
         getMachineLabel: serverEnvironment.getDescriptor.pipe(
           Effect.map((descriptor) => descriptor.label),
         ),
-        readEnvFile: (projectRoot: string) =>
-          workspaceFileSystem.readFile({ path: nodePath.join(projectRoot, ".env") }).pipe(
+        readEnvFile: (folder: string) =>
+          workspaceFileSystem.readFile({ path: nodePath.join(folder, ".env") }).pipe(
             Effect.map((file) =>
               file.encoding === "utf8"
                 ? file.content
@@ -253,9 +261,9 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId, currentSessionRole: Ses
             ),
             Effect.catch(() => Effect.succeed(null)),
           ),
-        writeEnvFile: (projectRoot: string, text: string) =>
+        writeEnvFile: (folder: string, text: string) =>
           workspaceFileSystem
-            .writeFile({ cwd: projectRoot, relativePath: ".env", contents: text, encoding: "utf8" })
+            .writeFile({ cwd: folder, relativePath: ".env", contents: text, encoding: "utf8" })
             .pipe(Effect.asVoid),
         cloneRepository: (input: {
           readonly remoteUrl: string;
@@ -266,12 +274,16 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId, currentSessionRole: Ses
             Effect.map((stats) => stats.isDirectory()),
             Effect.catch(() => Effect.succeed(false)),
           ),
+        makeDirectory: (path: string) =>
+          Effect.tryPromise(() => fsPromises.mkdir(path, { recursive: true })).pipe(Effect.asVoid),
         expandPath: expandHomePath,
       };
       const threadContinueInspect = makeThreadContinueInspect(continueOnMachineDeps);
-      const threadContinuePrepare = makeThreadContinuePrepare(continueOnMachineDeps);
-      const threadContinueReceive = makeThreadContinueReceive(continueOnMachineDeps);
-      const threadContinueCleanup = makeThreadContinueCleanup(continueOnMachineDeps);
+      const threadContinueSnapshot = makeThreadContinueSnapshot(continueOnMachineDeps);
+      const threadContinueReadChunk = makeThreadContinueReadChunk(continueOnMachineDeps);
+      const threadContinueWriteChunk = makeThreadContinueWriteChunk(continueOnMachineDeps);
+      const threadContinueLand = makeThreadContinueLand(continueOnMachineDeps);
+      const threadContinueDiscard = makeThreadContinueDiscard(continueOnMachineDeps);
       const threadContinueComplete = makeThreadContinueComplete(continueOnMachineDeps);
 
       const loadAuthAccessSnapshot = () =>
@@ -1507,20 +1519,46 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId, currentSessionRole: Ses
           observeRpcEffect(WS_METHODS.threadContinueInspect, threadContinueInspect(input), {
             "rpc.aggregate": "thread-continue",
           }),
+        [WS_METHODS.threadContinueSnapshot]: (input) =>
+          observeRpcEffect(WS_METHODS.threadContinueSnapshot, threadContinueSnapshot(input), {
+            "rpc.aggregate": "thread-continue",
+          }),
+        [WS_METHODS.threadContinueReadChunk]: (input) =>
+          observeRpcEffect(WS_METHODS.threadContinueReadChunk, threadContinueReadChunk(input), {
+            "rpc.aggregate": "thread-continue",
+          }),
+        [WS_METHODS.threadContinueWriteChunk]: (input) =>
+          observeRpcEffect(WS_METHODS.threadContinueWriteChunk, threadContinueWriteChunk(input), {
+            "rpc.aggregate": "thread-continue",
+          }),
+        [WS_METHODS.threadContinueLand]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.threadContinueLand,
+            threadContinueLand(input).pipe(
+              Effect.tap((result) => refreshGitStatus(result.worktreePath)),
+            ),
+            { "rpc.aggregate": "thread-continue" },
+          ),
+        [WS_METHODS.threadContinueDiscard]: (input) =>
+          observeRpcEffect(WS_METHODS.threadContinueDiscard, threadContinueDiscard(input), {
+            "rpc.aggregate": "thread-continue",
+          }),
         [WS_METHODS.threadContinuePrepare]: (input) =>
-          observeRpcEffect(WS_METHODS.threadContinuePrepare, threadContinuePrepare(input), {
-            "rpc.aggregate": "thread-continue",
-          }),
-        [WS_METHODS.threadContinueCleanup]: (input) =>
-          observeRpcEffect(WS_METHODS.threadContinueCleanup, threadContinueCleanup(input), {
-            "rpc.aggregate": "thread-continue",
-          }),
+          observeRpcEffect(
+            WS_METHODS.threadContinuePrepare,
+            makeThreadContinueLegacyRefusal(WS_METHODS.threadContinuePrepare)(input),
+            { "rpc.aggregate": "thread-continue" },
+          ),
         [WS_METHODS.threadContinueReceive]: (input) =>
           observeRpcEffect(
             WS_METHODS.threadContinueReceive,
-            threadContinueReceive(input).pipe(
-              Effect.tap((result) => refreshGitStatus(result.projectPath)),
-            ),
+            makeThreadContinueLegacyRefusal(WS_METHODS.threadContinueReceive)(input),
+            { "rpc.aggregate": "thread-continue" },
+          ),
+        [WS_METHODS.threadContinueCleanup]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.threadContinueCleanup,
+            makeThreadContinueLegacyRefusal(WS_METHODS.threadContinueCleanup)(input),
             { "rpc.aggregate": "thread-continue" },
           ),
         [WS_METHODS.threadContinueComplete]: (input) =>

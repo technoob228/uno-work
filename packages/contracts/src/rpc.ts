@@ -62,13 +62,23 @@ import {
   ThreadContinueCleanupResult,
   ThreadContinueCompleteInput,
   ThreadContinueCompleteResult,
+  ThreadContinueDiscardInput,
+  ThreadContinueDiscardResult,
   ThreadContinueError,
   ThreadContinueInspectInput,
   ThreadContinueInspectResult,
+  ThreadContinueLandInput,
+  ThreadContinueLandResult,
   ThreadContinuePrepareInput,
   ThreadContinuePrepareResult,
+  ThreadContinueReadChunkInput,
+  ThreadContinueReadChunkResult,
   ThreadContinueReceiveInput,
   ThreadContinueReceiveResult,
+  ThreadContinueSnapshotInput,
+  ThreadContinueSnapshotResult,
+  ThreadContinueWriteChunkInput,
+  ThreadContinueWriteChunkResult,
 } from "./threadContinue.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
 import {
@@ -212,12 +222,19 @@ export const WS_METHODS = {
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
 
-  // Continue a chat on another machine (source: prepare/complete, target: receive)
+  // Continue a chat on another machine, files sent through the client
+  // (source: snapshot/readChunk/complete, target: inspect/writeChunk/land)
   threadContinueInspect: "thread.continue.inspect",
+  threadContinueSnapshot: "thread.continue.snapshot",
+  threadContinueReadChunk: "thread.continue.readChunk",
+  threadContinueWriteChunk: "thread.continue.writeChunk",
+  threadContinueLand: "thread.continue.land",
+  threadContinueDiscard: "thread.continue.discard",
+  threadContinueComplete: "thread.continue.complete",
+  // 0.0.53–0.0.56 protocol (pushed through origin); answered with an update error
   threadContinuePrepare: "thread.continue.prepare",
   threadContinueReceive: "thread.continue.receive",
   threadContinueCleanup: "thread.continue.cleanup",
-  threadContinueComplete: "thread.continue.complete",
 
   // Terminal methods
   terminalOpen: "terminal.open",
@@ -598,18 +615,51 @@ export const WsThreadContinueInspectRpc = Rpc.make(WS_METHODS.threadContinueInsp
   error: ThreadContinueError,
 });
 
+export const WsThreadContinueSnapshotRpc = Rpc.make(WS_METHODS.threadContinueSnapshot, {
+  payload: ThreadContinueSnapshotInput,
+  success: ThreadContinueSnapshotResult,
+  error: ThreadContinueError,
+});
+
+export const WsThreadContinueReadChunkRpc = Rpc.make(WS_METHODS.threadContinueReadChunk, {
+  payload: ThreadContinueReadChunkInput,
+  success: ThreadContinueReadChunkResult,
+  error: ThreadContinueError,
+});
+
+export const WsThreadContinueWriteChunkRpc = Rpc.make(WS_METHODS.threadContinueWriteChunk, {
+  payload: ThreadContinueWriteChunkInput,
+  success: ThreadContinueWriteChunkResult,
+  error: ThreadContinueError,
+});
+
+export const WsThreadContinueLandRpc = Rpc.make(WS_METHODS.threadContinueLand, {
+  payload: ThreadContinueLandInput,
+  success: ThreadContinueLandResult,
+  error: ThreadContinueError,
+});
+
+export const WsThreadContinueDiscardRpc = Rpc.make(WS_METHODS.threadContinueDiscard, {
+  payload: ThreadContinueDiscardInput,
+  success: ThreadContinueDiscardResult,
+  error: ThreadContinueError,
+});
+
+/** @deprecated 0.0.53–0.0.56 protocol; answers with an update error. */
 export const WsThreadContinuePrepareRpc = Rpc.make(WS_METHODS.threadContinuePrepare, {
   payload: ThreadContinuePrepareInput,
   success: ThreadContinuePrepareResult,
   error: ThreadContinueError,
 });
 
+/** @deprecated 0.0.53–0.0.56 protocol; answers with an update error. */
 export const WsThreadContinueReceiveRpc = Rpc.make(WS_METHODS.threadContinueReceive, {
   payload: ThreadContinueReceiveInput,
   success: ThreadContinueReceiveResult,
   error: ThreadContinueError,
 });
 
+/** @deprecated 0.0.53–0.0.56 protocol; answers with an update error. */
 export const WsThreadContinueCleanupRpc = Rpc.make(WS_METHODS.threadContinueCleanup, {
   payload: ThreadContinueCleanupInput,
   success: ThreadContinueCleanupResult,
@@ -1221,6 +1271,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
   WsThreadContinueInspectRpc,
+  WsThreadContinueSnapshotRpc,
+  WsThreadContinueReadChunkRpc,
+  WsThreadContinueWriteChunkRpc,
+  WsThreadContinueLandRpc,
+  WsThreadContinueDiscardRpc,
   WsThreadContinuePrepareRpc,
   WsThreadContinueReceiveRpc,
   WsThreadContinueCleanupRpc,

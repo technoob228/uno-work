@@ -31,6 +31,11 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Server tracks agent-spawned threads (spawnedByThreadId, controller,
       thread.control.set). Clients hide the control badge/handoff when absent. */
   agentThreads: Schema.optionalKey(Schema.Boolean),
+  /** Server speaks the "Continue on <machine>" protocol that sends files
+      through the client (thread.continue.snapshot / land) instead of pushing
+      them to origin. Clients refuse to continue to or from a machine without
+      it and ask to update that machine. */
+  threadContinueDirect: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 
