@@ -119,6 +119,12 @@ function makeProvisionClient(apiKey: string): UnoBoxProvisionClient {
         body: JSON.stringify(body),
       }),
     getBox: (boxId) => fetchControlPlaneJson(apiKey, `/api/v1/boxes/${boxId}`),
+    listPorts: (boxId) => fetchControlPlaneJson(apiKey, `/api/v1/boxes/${boxId}/ports`),
+    openPort: (boxId, port) =>
+      fetchControlPlaneJson(apiKey, `/api/v1/boxes/${boxId}/ports`, {
+        method: "POST",
+        body: JSON.stringify({ port }),
+      }),
     createWorkSession: (boxId) =>
       fetchControlPlaneJson(apiKey, `/api/v1/boxes/${boxId}/work/session`, {
         method: "POST",

@@ -51,6 +51,10 @@ export interface UnoBoxProvisionClient {
   readonly launchImage: (imageId: number, body: UnoBoxLaunchBody) => Promise<unknown>;
   readonly createPlainBox: (body: UnoBoxPlainCreateBody) => Promise<unknown>;
   readonly getBox: (boxId: number) => Promise<unknown>;
+  /** `GET /api/v1/boxes/{id}/ports` */
+  readonly listPorts: (boxId: number) => Promise<unknown>;
+  /** `POST /api/v1/boxes/{id}/ports` — the control plane allows duplicates, so list first. */
+  readonly openPort: (boxId: number, port: number) => Promise<unknown>;
   readonly createWorkSession: (boxId: number) => Promise<unknown>;
 }
 
@@ -98,6 +102,17 @@ export interface UnoBoxProvisionInput {
 /** Plain-box fallback: what the console would create from its own "New box" form. */
 const PLAIN_BOX_TEMPLATE = "ubuntu-24.04";
 const PLAIN_BOX_NETWORK_PROFILE = "nat";
+
+/** The daemon listens here; the edge publishes `https://<box>.app.uno4.dev` only for an open port. */
+const UNO_WORK_DAEMON_PORT = 80;
+
+function hasInboundPort(raw: unknown, port: number): boolean {
+  const list = (raw as { ports?: unknown } | null)?.ports;
+  return (
+    Array.isArray(list) &&
+    list.some((entry) => (entry as { internal_port?: unknown } | null)?.internal_port === port)
+  );
+}
 
 const BOX_RUNNING_STATUSES: ReadonlySet<string> = new Set(["running"]);
 const BOX_DEAD_STATUSES: ReadonlySet<string> = new Set(["error", "failed", "deleted", "destroyed"]);
@@ -260,7 +275,28 @@ export async function runUnoBoxProvisionJob(
     );
   }
 
-  // --- 4. Mint the pairing link. The daemon inside the box boots after the VM
+  // --- 4. Publish the daemon port. A box from an image has no inbound ports,
+  // and without one the control plane has no hostname to put in the pairing
+  // link ("no published hostname yet"), so every attempt below would fail.
+  let hasDaemonPort = false;
+  try {
+    hasDaemonPort = hasInboundPort(await client.listPorts(boxId), UNO_WORK_DAEMON_PORT);
+  } catch {
+    hasDaemonPort = false;
+  }
+  if (!hasDaemonPort) {
+    try {
+      await client.openPort(boxId, UNO_WORK_DAEMON_PORT);
+    } catch (cause) {
+      return fail(
+        `Box #${boxId} is running but port ${UNO_WORK_DAEMON_PORT} could not be opened for Uno Work (${errorMessage(cause)}). ` +
+          "Open it from the box list, then use Connect.",
+        { boxId, box },
+      );
+    }
+  }
+
+  // --- 5. Mint the pairing link. The daemon inside the box boots after the VM
   // reports running, so the first attempts are expected to fail.
   emit({ state: "waiting_daemon", boxId, box, message: "Box is running, waiting for Uno Work…" });
   const pairingDeadline = deps.now() + timing.pairingTimeoutMs;

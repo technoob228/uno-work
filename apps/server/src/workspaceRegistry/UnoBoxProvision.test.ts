@@ -45,6 +45,8 @@ function makeHarness(clientOverrides: Partial<UnoBoxProvisionClient> = {}) {
     launchImage: vi.fn(async () => rawBox()),
     createPlainBox: vi.fn(async () => rawBox({ id: 777 })),
     getBox: vi.fn(async () => rawBox({ status: "running" })),
+    listPorts: vi.fn(async () => ({ ports: [{ id: 1, internal_port: 22 }] })),
+    openPort: vi.fn(async () => ({ id: 2, internal_port: 80 })),
     createWorkSession: vi.fn(async () => ({
       url: "https://box-501.uno4.dev/pair#token=abc",
       hostname: "box-501.uno4.dev",
@@ -138,6 +140,50 @@ describe("runUnoBoxProvisionJob", () => {
     expect(harness.client.launchImage).toHaveBeenCalledTimes(1);
     expect(vi.mocked(harness.client.launchImage).mock.calls[0]?.[0]).toBe(126);
     expect(harness.client.createPlainBox).not.toHaveBeenCalled();
+  });
+
+  it("opens the daemon port before asking for a pairing link", async () => {
+    const order: string[] = [];
+    const harness = makeHarness({
+      openPort: vi.fn(async () => {
+        order.push("openPort");
+        return { id: 2, internal_port: 80 };
+      }),
+      createWorkSession: vi.fn(async () => {
+        order.push("createWorkSession");
+        return { url: "https://box-501.uno4.dev/pair#token=abc", hostname: "h" };
+      }),
+    });
+    const result = await runUnoBoxProvisionJob(INPUT, harness.deps);
+
+    expect(result.state).toBe("ready");
+    expect(harness.client.openPort).toHaveBeenCalledWith(501, 80);
+    expect(order).toEqual(["openPort", "createWorkSession"]);
+  });
+
+  it("does not open a second port 80 when the box already has one", async () => {
+    const harness = makeHarness({
+      listPorts: vi.fn(async () => ({ ports: [{ id: 7, internal_port: 80 }] })),
+    });
+    const result = await runUnoBoxProvisionJob(INPUT, harness.deps);
+
+    expect(result.state).toBe("ready");
+    expect(harness.client.openPort).not.toHaveBeenCalled();
+  });
+
+  it("fails with the box kept when port 80 cannot be opened", async () => {
+    const harness = makeHarness({
+      openPort: vi.fn(async () => {
+        throw new Error("402: PORT_LIMIT");
+      }),
+    });
+    const result = await runUnoBoxProvisionJob(INPUT, harness.deps);
+
+    expect(result.state).toBe("failed");
+    expect(result.boxId).toBe(501);
+    expect(result.message).toContain("PORT_LIMIT");
+    expect(harness.client.createWorkSession).not.toHaveBeenCalled();
+    expect(harness.client.launchImage).toHaveBeenCalledTimes(1);
   });
 
   it("retries the pairing link while the daemon boots and never re-launches", async () => {
