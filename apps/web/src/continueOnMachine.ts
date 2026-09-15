@@ -1,32 +1,39 @@
 /**
  * "Continue on <machine>" — the environment-independent orchestration.
  *
- * The client drives two daemons: `prepare` on the machine the chat lives on
- * (snapshot + push), `receive` on the machine it moves to (fetch + restore +
- * new thread), `cleanup` on the source (drop the transport branch, best
- * effort), then `complete` back on the source (mark / archive), then it
- * opens the new chat. Before any of that, `inspect` on the target tells the
- * dialog whether the receive would overwrite local work there. Every
- * dependency is injected so the step machine can be tested without live
- * daemons; the dialog supplies real environment APIs.
+ * The client drives two daemons and carries the files between them itself:
+ * `snapshot` on the machine the chat lives on packs the working tree into a
+ * bundle, the client reads it chunk by chunk from there and writes the same
+ * chunks to the machine it moves to, `land` there opens a new worktree with
+ * the files and creates the chat, `complete` back on the source marks the old
+ * chat, then the new one opens. Nothing goes through GitHub or any other git
+ * remote. Before any of that, `inspect` on the target tells the dialog whether
+ * the project is already there.
  *
- * Progress is checkpointed so a retry resumes at the failed step instead of
- * pushing (or cloning) twice.
+ * Every dependency is injected so the step machine can be tested without live
+ * daemons; the dialog supplies real environment APIs. Progress is
+ * checkpointed so a retry resumes at the failed step (and at the first chunk
+ * that did not arrive) instead of starting over.
  */
 import type {
   EnvironmentId,
+  ExecutionEnvironmentDescriptor,
   ProjectId,
-  ThreadContinueCleanupInput,
-  ThreadContinueCleanupResult,
   ThreadContinueCompleteInput,
   ThreadContinueCompleteResult,
+  ThreadContinueDiscardInput,
+  ThreadContinueDiscardResult,
   ThreadContinueInspectInput,
   ThreadContinueInspectResult,
-  ThreadContinuePrepareInput,
-  ThreadContinuePrepareResult,
-  ThreadContinueReceiveInput,
-  ThreadContinueReceiveProject,
-  ThreadContinueReceiveResult,
+  ThreadContinueLandInput,
+  ThreadContinueLandProject,
+  ThreadContinueLandResult,
+  ThreadContinueReadChunkInput,
+  ThreadContinueReadChunkResult,
+  ThreadContinueSnapshotInput,
+  ThreadContinueSnapshotResult,
+  ThreadContinueWriteChunkInput,
+  ThreadContinueWriteChunkResult,
   ThreadId,
 } from "@t3tools/contracts";
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
@@ -42,41 +49,95 @@ import type { Project } from "./types";
 export type ContinueOnMachineStep =
   | "connecting"
   | "saving"
+  | "sending"
   | "preparing"
-  | "cleaning"
   | "marking"
   | "opening";
 
 export const CONTINUE_ON_MACHINE_STEPS: ReadonlyArray<ContinueOnMachineStep> = [
   "connecting",
   "saving",
+  "sending",
   "preparing",
-  "cleaning",
   "marking",
   "opening",
 ];
 
-/** Where the chat lands on the target; `remoteUrl` for `create` comes from the prepare result. */
+/** Where the chat lands on the target; `remoteUrl` for `create` comes from the snapshot. */
 export type ContinueTargetProject =
   | { readonly kind: "existing"; readonly projectPath: string; readonly title: string }
   | { readonly kind: "create"; readonly destinationPath: string; readonly title: string };
 
-/** The target-side path `inspect` and `receive` look at for a chosen project. */
+/** The target-side path `inspect` and `land` look at for a chosen project. */
 export function continueTargetProjectPath(target: ContinueTargetProject): string {
   return target.kind === "existing" ? target.projectPath : target.destinationPath;
+}
+
+/**
+ * Whether a daemon speaks the direct protocol. Daemons from 0.0.53–0.0.56
+ * pushed files through `origin`; the client never continues to or from them.
+ */
+export function descriptorSupportsDirectContinue(
+  descriptor: ExecutionEnvironmentDescriptor | null | undefined,
+): boolean {
+  return descriptor?.capabilities.threadContinueDirect === true;
+}
+
+/** Thrown before anything runs when either machine needs an update. */
+export class ContinueUpdateRequiredError extends Error {
+  readonly machineLabel: string;
+  constructor(machineLabel: string) {
+    super(
+      `Update Uno Work on ${machineLabel} first. This version sends the files directly between your machines, and ${machineLabel} still runs the older version that sent them through GitHub.`,
+    );
+    this.name = "ContinueUpdateRequiredError";
+    this.machineLabel = machineLabel;
+  }
+}
+
+/**
+ * The first machine that blocks the run, or null when both speak the direct
+ * protocol. A descriptor that is not known yet counts as blocking: the check
+ * runs again after connecting, when it is.
+ */
+export function findMachineNeedingUpdate(
+  machines: ReadonlyArray<{
+    readonly label: string;
+    readonly descriptor: ExecutionEnvironmentDescriptor | null | undefined;
+  }>,
+): string | null {
+  return (
+    machines.find((machine) => !descriptorSupportsDirectContinue(machine.descriptor))?.label ?? null
+  );
 }
 
 export interface ContinueOnMachineDeps {
   /** Makes sure the target environment has a live connection before any RPC. */
   readonly ensureTargetConnected: () => Promise<void>;
+  /**
+   * Throws `ContinueUpdateRequiredError` when the source or the target does
+   * not advertise `threadContinueDirect`. Runs after connecting, so the
+   * target's descriptor is fresh.
+   */
+  readonly assertMachinesSupported: () => void;
   /** `thread.continue.inspect` on the TARGET environment (read-only). */
   readonly inspect: (input: ThreadContinueInspectInput) => Promise<ThreadContinueInspectResult>;
-  /** `thread.continue.prepare` on the SOURCE environment. */
-  readonly prepare: (input: ThreadContinuePrepareInput) => Promise<ThreadContinuePrepareResult>;
-  /** `thread.continue.receive` on the TARGET environment. */
-  readonly receive: (input: ThreadContinueReceiveInput) => Promise<ThreadContinueReceiveResult>;
-  /** `thread.continue.cleanup` on the SOURCE environment; a failure never stops the run. */
-  readonly cleanup: (input: ThreadContinueCleanupInput) => Promise<ThreadContinueCleanupResult>;
+  /** `thread.continue.snapshot` on the SOURCE environment. */
+  readonly snapshot: (input: ThreadContinueSnapshotInput) => Promise<ThreadContinueSnapshotResult>;
+  /** `thread.continue.readChunk` on the SOURCE environment. */
+  readonly readChunk: (
+    input: ThreadContinueReadChunkInput,
+  ) => Promise<ThreadContinueReadChunkResult>;
+  /** `thread.continue.writeChunk` on the TARGET environment. */
+  readonly writeChunk: (
+    input: ThreadContinueWriteChunkInput,
+  ) => Promise<ThreadContinueWriteChunkResult>;
+  /** `thread.continue.land` on the TARGET environment. */
+  readonly land: (input: ThreadContinueLandInput) => Promise<ThreadContinueLandResult>;
+  /** `thread.continue.discard` on the SOURCE environment; a failure never stops the run. */
+  readonly discardSource: (
+    input: ThreadContinueDiscardInput,
+  ) => Promise<ThreadContinueDiscardResult>;
   /** `thread.continue.complete` on the SOURCE environment. */
   readonly complete: (input: ThreadContinueCompleteInput) => Promise<ThreadContinueCompleteResult>;
   /** Switch to the target environment and navigate to the new thread. */
@@ -85,29 +146,31 @@ export interface ContinueOnMachineDeps {
     readonly projectId: ProjectId;
   }) => Promise<void>;
   readonly onStep?: (step: ContinueOnMachineStep) => void;
+  /** Bytes that reached the target so far, out of `totalBytes`. */
+  readonly onSendProgress?: (sentBytes: number, totalBytes: number) => void;
 }
 
 export interface ContinueOnMachineInput {
   readonly sourceThreadId: ThreadId;
   readonly targetMachineLabel: string;
   readonly targetProject: ContinueTargetProject;
+  /** Send `.env` along. Off unless the person ticked the box. */
   readonly copyEnv: boolean;
   readonly archiveSource: boolean;
 }
 
 /** What has already succeeded; passed back in on retry so finished steps are skipped. */
 export interface ContinueOnMachineProgress {
-  readonly prepared?: ThreadContinuePrepareResult;
-  readonly received?: ThreadContinueReceiveResult;
-  /** Recorded once attempted, even when the branch stayed: cleanup is not retried. */
-  readonly cleanedUp?: ThreadContinueCleanupResult;
+  readonly snapshot?: ThreadContinueSnapshotResult;
+  /** Chunks that reached the target, in order. */
+  readonly sentChunks?: number;
+  readonly landed?: ThreadContinueLandResult;
   readonly completed?: ThreadContinueCompleteResult;
 }
 
 export interface ContinueOnMachineResult {
-  readonly prepared: ThreadContinuePrepareResult;
-  readonly received: ThreadContinueReceiveResult;
-  readonly cleanedUp: ThreadContinueCleanupResult;
+  readonly snapshot: ThreadContinueSnapshotResult;
+  readonly landed: ThreadContinueLandResult;
   readonly completed: ThreadContinueCompleteResult;
 }
 
@@ -138,10 +201,19 @@ function describeFailure(cause: unknown): string {
   return "Something went wrong.";
 }
 
-export function toReceiveProject(
+/** `reason` of a `ThreadContinueError` that crossed the RPC boundary, if any. */
+export function continueErrorReason(cause: unknown): string | null {
+  if (typeof cause === "object" && cause !== null && "reason" in cause) {
+    const reason = (cause as { reason?: unknown }).reason;
+    return typeof reason === "string" ? reason : null;
+  }
+  return null;
+}
+
+export function toLandProject(
   target: ContinueTargetProject,
-  remoteUrl: string,
-): ThreadContinueReceiveProject {
+  remoteUrl: string | null,
+): ThreadContinueLandProject {
   return target.kind === "existing"
     ? { kind: "existing", projectPath: target.projectPath }
     : { kind: "create", remoteUrl, destinationPath: target.destinationPath, title: target.title };
@@ -167,52 +239,99 @@ export async function runContinueOnMachine(
     }
   };
 
-  // Always re-checked: a retry may follow a dropped connection.
-  await step("connecting", () => deps.ensureTargetConnected());
+  // Always re-checked: a retry may follow a dropped connection or an update.
+  await step("connecting", async () => {
+    await deps.ensureTargetConnected();
+    deps.assertMachinesSupported();
+  });
 
-  const prepared =
-    current.prepared ??
+  const snapshot =
+    current.snapshot ??
     (await step("saving", () =>
-      deps.prepare({ threadId: input.sourceThreadId, includeEnv: input.copyEnv }),
+      deps.snapshot({ threadId: input.sourceThreadId, includeEnv: input.copyEnv }),
     ));
-  current = { ...current, prepared };
+  current = { ...current, snapshot };
 
-  const received =
-    current.received ??
+  if (!current.landed) {
+    await step("sending", async () => {
+      let sent = current.sentChunks ?? 0;
+      let restarted = false;
+      deps.onSendProgress?.(
+        Math.min(sent * snapshot.chunkBytes, snapshot.sizeBytes),
+        snapshot.sizeBytes,
+      );
+      while (sent < snapshot.chunkCount) {
+        try {
+          const chunk = await deps.readChunk({ transferId: snapshot.transferId, index: sent });
+          const { receivedBytes } = await deps.writeChunk({
+            transferId: snapshot.transferId,
+            offset: sent * snapshot.chunkBytes,
+            data: chunk.data,
+          });
+          sent += 1;
+          current = { ...current, sentChunks: sent };
+          deps.onSendProgress?.(receivedBytes, snapshot.sizeBytes);
+        } catch (cause) {
+          const reason = continueErrorReason(cause);
+          if (reason === "transfer_not_found") {
+            // The source no longer has the bundle (swept or restarted): a
+            // retry has to take a new snapshot.
+            const { snapshot: _stale, ...rest } = current;
+            current = { ...rest, sentChunks: 0 };
+            throw cause;
+          }
+          if (reason === "transfer_incomplete" && sent > 0 && !restarted) {
+            // The target lost what it had (e.g. restarted): send it all again, once.
+            restarted = true;
+            sent = 0;
+            current = { ...current, sentChunks: 0 };
+            continue;
+          }
+          throw cause;
+        }
+      }
+    });
+  }
+
+  const landed =
+    current.landed ??
     (await step("preparing", () =>
-      deps.receive({
-        project: toReceiveProject(input.targetProject, prepared.remoteUrl),
-        remoteUrl: prepared.remoteUrl,
-        branch: prepared.branch,
-        commit: prepared.commit,
-        title: prepared.title,
-        modelSelection: prepared.modelSelection,
-        runtimeMode: prepared.runtimeMode,
-        interactionMode: prepared.interactionMode,
-        seedText: prepared.seedText,
-        envText: input.copyEnv ? prepared.envText : null,
-        sourceMachineLabel: prepared.sourceMachineLabel,
-        sourceThreadId: prepared.sourceThreadId,
+      landOrForgetChunks({
+        transferId: snapshot.transferId,
+        sizeBytes: snapshot.sizeBytes,
+        sha256: snapshot.sha256,
+        commit: snapshot.commit,
+        baseCommit: snapshot.baseCommit,
+        project: toLandProject(input.targetProject, snapshot.remoteUrl),
+        title: snapshot.title,
+        modelSelection: snapshot.modelSelection,
+        runtimeMode: snapshot.runtimeMode,
+        interactionMode: snapshot.interactionMode,
+        seedText: snapshot.seedText,
+        envText: input.copyEnv ? snapshot.envText : null,
+        sourceMachineLabel: snapshot.sourceMachineLabel,
+        sourceThreadId: snapshot.sourceThreadId,
       }),
     ));
-  current = { ...current, received };
 
-  // The target has the files now; the transport branch is only clutter on the
-  // remote. Failing to remove it must not undo a handoff that worked, so the
-  // outcome is recorded and shown as a note rather than thrown.
-  const cleanedUp =
-    current.cleanedUp ??
-    (await step("cleaning", async () => {
-      try {
-        return await deps.cleanup({
-          threadId: input.sourceThreadId,
-          remote: prepared.remoteName,
-        });
-      } catch {
-        return { branch: prepared.branch, removed: false };
+  async function landOrForgetChunks(landInput: ThreadContinueLandInput) {
+    try {
+      return await deps.land(landInput);
+    } catch (cause) {
+      const reason = continueErrorReason(cause);
+      if (reason === "transfer_incomplete" || reason === "transfer_not_found") {
+        // What arrived is unusable; a retry sends the files again.
+        current = { ...current, sentChunks: 0 };
       }
-    }));
-  current = { ...current, cleanedUp };
+      throw cause;
+    }
+  }
+  if (!current.landed) {
+    // The target has its copy; the source's bundle is only clutter. The
+    // daemon also sweeps old bundles, so a failure here is ignored.
+    await deps.discardSource({ transferId: snapshot.transferId }).catch(() => undefined);
+  }
+  current = { ...current, landed };
 
   const completed =
     current.completed ??
@@ -220,17 +339,17 @@ export async function runContinueOnMachine(
       deps.complete({
         threadId: input.sourceThreadId,
         targetMachineLabel: input.targetMachineLabel,
-        targetThreadId: received.threadId,
+        targetThreadId: landed.threadId,
         archive: input.archiveSource,
       }),
     ));
   current = { ...current, completed };
 
   await step("opening", () =>
-    deps.openThread({ threadId: received.threadId, projectId: received.projectId }),
+    deps.openThread({ threadId: landed.threadId, projectId: landed.projectId }),
   );
 
-  return { prepared, received, cleanedUp, completed };
+  return { snapshot, landed, completed };
 }
 
 /**
@@ -248,14 +367,12 @@ export async function inspectContinueTarget(
 
 /** What the dialog says about the target project before the run starts. */
 export type ContinueTargetState =
-  /** Nothing at the path yet: the project will be cloned there. */
+  /** Nothing at the path yet: the project will be added there. */
   | { readonly kind: "missing"; readonly destinationPath: string }
-  /** The folder exists but is not a git checkout; `receive` would refuse it. */
+  /** The folder exists but is not a git checkout; `land` would refuse it. */
   | { readonly kind: "not-git"; readonly projectPath: string }
-  /** A clean checkout: files are updated, nothing of the target's own is lost. */
-  | { readonly kind: "clean"; readonly branch: string | null }
-  /** Uncommitted work on the target that the copy would replace. */
-  | { readonly kind: "changes"; readonly changedFiles: number; readonly branch: string | null };
+  /** The project is there; the chat opens in a new worktree beside it. */
+  | { readonly kind: "exists"; readonly projectPath: string };
 
 export function describeContinueTarget(
   inspection: ThreadContinueInspectResult,
@@ -267,27 +384,25 @@ export function describeContinueTarget(
   if (!inspection.isGitRepository) {
     return { kind: "not-git", projectPath: inspection.projectPath };
   }
-  if (inspection.hasLocalChanges) {
-    return { kind: "changes", changedFiles: inspection.changedFiles, branch: inspection.branch };
-  }
-  return { kind: "clean", branch: inspection.branch };
+  return { kind: "exists", projectPath: inspection.projectPath };
 }
 
 /**
  * Whether the primary button may be enabled: the target must have been
- * inspected, must be usable, and when it carries local changes the person
- * must have ticked "Replace them".
+ * inspected and be usable, and neither machine may need an update. Nothing
+ * on the target is overwritten, so there is nothing to confirm.
  */
 export function canStartContinue(input: {
   readonly targetState: ContinueTargetState | null;
-  readonly replaceConfirmed: boolean;
+  readonly machineNeedingUpdate: string | null;
 }): boolean {
+  if (input.machineNeedingUpdate !== null) {
+    return false;
+  }
   switch (input.targetState?.kind) {
     case "missing":
-    case "clean":
+    case "exists":
       return true;
-    case "changes":
-      return input.replaceConfirmed;
     case "not-git":
     case undefined:
       return false;
