@@ -109,16 +109,15 @@ const SecretRequestCard = memo(function SecretRequestCard({
         Saved into <code className="font-mono">{event.targetFile}</code> in the project — it never
         enters the chat.
       </p>
-      <form
-        className="mt-3 flex items-center gap-2"
-        onSubmit={(formEvent) => {
-          formEvent.preventDefault();
-          // The panel lives inside the composer's <form>; without this the
-          // submit bubbles up and also fires the chat send handler.
-          formEvent.stopPropagation();
-          void submit(false);
-        }}
-      >
+      {/*
+        Deliberately not a <form>: the panel renders inside the composer's
+        <form>, and Chromium does not propagate `submit` out of a nested form,
+        so React's delegated onSubmit never ran — Enter/Save did a native GET
+        submit that reloaded the whole app and dropped the pasted value.
+        Enter is handled on the input instead; preventDefault also stops the
+        implicit submission of the outer composer form.
+      */}
+      <div className="mt-3 flex items-center gap-2">
         <input
           type="password"
           autoComplete="new-password"
@@ -127,6 +126,12 @@ const SecretRequestCard = memo(function SecretRequestCard({
           value={value}
           disabled={isSubmitting}
           onChange={(changeEvent) => setValue(changeEvent.currentTarget.value)}
+          onKeyDown={(keyEvent) => {
+            if (keyEvent.key !== "Enter" || keyEvent.nativeEvent.isComposing) return;
+            keyEvent.preventDefault();
+            keyEvent.stopPropagation();
+            void submit(false);
+          }}
           placeholder={`Paste ${event.name} here`}
           className="h-9 min-w-0 flex-1 rounded-lg border border-border/60 bg-muted/20 px-3 font-mono text-sm outline-none placeholder:font-sans placeholder:text-muted-foreground/45 focus:border-blue-500/40"
         />
@@ -139,10 +144,15 @@ const SecretRequestCard = memo(function SecretRequestCard({
         >
           Decline
         </Button>
-        <Button type="submit" size="sm" disabled={isSubmitting || value.trim().length === 0}>
+        <Button
+          type="button"
+          size="sm"
+          disabled={isSubmitting || value.trim().length === 0}
+          onClick={() => void submit(false)}
+        >
           Save
         </Button>
-      </form>
+      </div>
       {error ? <p className="mt-2 text-xs text-red-400">{error}</p> : null}
     </div>
   );
