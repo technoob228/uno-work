@@ -333,6 +333,12 @@ function mapThreadShell(
     hasActionableProposedPlan: thread.hasActionableProposedPlan,
     snoozedUntil: thread.snoozedUntil ?? null,
     snoozedAt: thread.snoozedAt ?? null,
+    settledOverride: thread.settledOverride ?? null,
+    settledAt: thread.settledAt ?? null,
+    modelSelection: {
+      instanceId: shell.modelSelection.instanceId,
+      model: shell.modelSelection.model,
+    },
     spawnedByThreadId: thread.spawnedByThreadId ?? null,
     controller: thread.controller ?? "human",
     controlChangedAt: thread.controlChangedAt ?? null,
@@ -445,6 +451,10 @@ function sidebarThreadSummariesEqual(
     left.hasActionableProposedPlan === right.hasActionableProposedPlan &&
     (left.snoozedUntil ?? null) === (right.snoozedUntil ?? null) &&
     (left.snoozedAt ?? null) === (right.snoozedAt ?? null) &&
+    (left.settledOverride ?? null) === (right.settledOverride ?? null) &&
+    (left.settledAt ?? null) === (right.settledAt ?? null) &&
+    left.modelSelection?.instanceId === right.modelSelection?.instanceId &&
+    left.modelSelection?.model === right.modelSelection?.model &&
     (left.spawnedByThreadId ?? null) === (right.spawnedByThreadId ?? null) &&
     (left.controller ?? "human") === (right.controller ?? "human") &&
     (left.controlChangedAt ?? null) === (right.controlChangedAt ?? null)

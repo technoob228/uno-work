@@ -25,6 +25,19 @@ import {
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
 import {
+  compactSidebarTimeLabel,
+  filterSidebarProjectScopeItems,
+  formatWorkingDurationLabel,
+  isSidebarNestedLinkClick,
+  isTrailingDoubleClick,
+  reduceSidebarProjectScopeMenuState,
+  resolveSidebarThreadStatus,
+  resolveWorkingStartedAt,
+  searchSidebarThreads,
+  shouldCreateNewThreadInCurrentProject,
+  shouldRecedeSidebarThread,
+} from "./Sidebar.logic";
+import {
   EnvironmentId,
   OrchestrationLatestTurn,
   ProjectId,
@@ -1141,5 +1154,293 @@ describe("resolveSidebarThreadEnvironmentAvailability", () => {
     expect(
       resolveSidebarThreadEnvironmentAvailability({ ...base, connectionState: null }).status,
     ).toBe("offline");
+  });
+});
+
+// ── Chat-list sidebar cases, ported from upstream T3 Code's Sidebar.logic.test.ts ──
+
+describe("shouldRecedeSidebarThread", () => {
+  it("recedes an inactive working thread even when it is unread", () => {
+    expect(
+      shouldRecedeSidebarThread({
+        status: "working",
+        isUnread: true,
+        isActive: false,
+        isSelected: false,
+      }),
+    ).toBe(true);
+  });
+
+  it.each(["ready", "approval", "input"] as const)(
+    "keeps an unread %s thread prominent",
+    (status) => {
+      expect(
+        shouldRecedeSidebarThread({ status, isUnread: true, isActive: false, isSelected: false }),
+      ).toBe(false);
+    },
+  );
+
+  it("recedes a read ready thread", () => {
+    expect(
+      shouldRecedeSidebarThread({
+        status: "ready",
+        isUnread: false,
+        isActive: false,
+        isSelected: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps active and selected working threads prominent", () => {
+    const input = {
+      status: "working" as const,
+      isUnread: true,
+      isActive: false,
+      isSelected: false,
+    };
+    expect(shouldRecedeSidebarThread({ ...input, isActive: true })).toBe(false);
+    expect(shouldRecedeSidebarThread({ ...input, isSelected: true })).toBe(false);
+  });
+
+  it.each([false, true])("keeps input-required threads prominent with unread=%s", (isUnread) => {
+    expect(
+      shouldRecedeSidebarThread({ status: "input", isUnread, isActive: false, isSelected: false }),
+    ).toBe(false);
+  });
+});
+
+describe("isTrailingDoubleClick", () => {
+  it("treats single and synthetic clicks as a normal activation", () => {
+    expect(isTrailingDoubleClick(1)).toBe(false);
+    expect(isTrailingDoubleClick(0)).toBe(false);
+  });
+
+  it("ignores the second and later clicks of a multi-click", () => {
+    expect(isTrailingDoubleClick(2)).toBe(true);
+    expect(isTrailingDoubleClick(3)).toBe(true);
+  });
+});
+
+describe("isSidebarNestedLinkClick", () => {
+  const linkTarget = {
+    closest: (selector: string) => (selector === "a[href]" ? ({} as Element) : null),
+  } as unknown as EventTarget;
+
+  it("ignores row clicks that originated on a nested link", () => {
+    expect(isSidebarNestedLinkClick(linkTarget)).toBe(true);
+  });
+
+  it("walks up from a text node to the enclosing link", () => {
+    expect(isSidebarNestedLinkClick({ parentElement: linkTarget } as unknown as EventTarget)).toBe(
+      true,
+    );
+  });
+
+  it("leaves ordinary row clicks alone", () => {
+    expect(isSidebarNestedLinkClick({ closest: () => null } as unknown as EventTarget)).toBe(false);
+    expect(isSidebarNestedLinkClick(null)).toBe(false);
+  });
+});
+
+describe("shouldCreateNewThreadInCurrentProject", () => {
+  it("creates directly on shift+click in a multi-project setup", () => {
+    expect(shouldCreateNewThreadInCurrentProject(true, 2)).toBe(true);
+  });
+
+  it("opens the picker on a plain click in a multi-project setup", () => {
+    expect(shouldCreateNewThreadInCurrentProject(false, 2)).toBe(false);
+  });
+
+  it("creates directly on any click with a single project", () => {
+    expect(shouldCreateNewThreadInCurrentProject(false, 1)).toBe(true);
+    expect(shouldCreateNewThreadInCurrentProject(true, 1)).toBe(true);
+  });
+});
+
+describe("resolveSidebarThreadStatus", () => {
+  const session = {
+    provider: ProviderDriverKind.make("codex"),
+    status: "running" as const,
+    orchestrationStatus: "running" as const,
+    createdAt: "2026-03-09T10:00:00.000Z",
+    updatedAt: "2026-03-09T10:00:00.000Z",
+  };
+  const idle = { hasPendingApprovals: false, hasPendingUserInput: false };
+
+  it("prioritizes approval, then input, over a running session", () => {
+    expect(resolveSidebarThreadStatus({ ...idle, hasPendingApprovals: true, session })).toBe(
+      "approval",
+    );
+    expect(resolveSidebarThreadStatus({ ...idle, hasPendingUserInput: true, session })).toBe(
+      "input",
+    );
+    expect(
+      resolveSidebarThreadStatus({
+        hasPendingApprovals: true,
+        hasPendingUserInput: true,
+        session,
+      }),
+    ).toBe("approval");
+  });
+
+  it("reports working for running and starting sessions", () => {
+    expect(resolveSidebarThreadStatus({ ...idle, session })).toBe("working");
+    expect(
+      resolveSidebarThreadStatus({
+        ...idle,
+        session: { ...session, status: "connecting", orchestrationStatus: "starting" },
+      }),
+    ).toBe("working");
+  });
+
+  it("reports failed only while the session status is error", () => {
+    expect(
+      resolveSidebarThreadStatus({
+        ...idle,
+        session: { ...session, status: "error", orchestrationStatus: "error" },
+      }),
+    ).toBe("failed");
+    expect(
+      resolveSidebarThreadStatus({
+        ...idle,
+        session: { ...session, status: "ready", orchestrationStatus: "ready" },
+      }),
+    ).toBe("ready");
+  });
+
+  it("defaults to ready with no session", () => {
+    expect(resolveSidebarThreadStatus({ ...idle, session: null })).toBe("ready");
+  });
+});
+
+describe("searchSidebarThreads", () => {
+  const threads = [
+    { id: "thread-1", title: "Fix workspace search", project: "Alpha" },
+    { id: "thread-2", title: "Review providers", project: "Workspace" },
+    { id: "thread-3", title: "WORKTREE cleanup", project: "Beta" },
+  ];
+
+  it("matches thread titles case-insensitively and preserves their order", () => {
+    expect(searchSidebarThreads(threads, "work")).toEqual([threads[0], threads[2]]);
+  });
+
+  it("does not match project metadata", () => {
+    expect(searchSidebarThreads(threads, "workspace")).toEqual([threads[0]]);
+  });
+
+  it("returns no results for an empty query", () => {
+    expect(searchSidebarThreads(threads, "   ")).toEqual([]);
+  });
+});
+
+describe("filterSidebarProjectScopeItems", () => {
+  const items = [
+    { value: "all", label: "All projects" },
+    { value: "alpha", label: "Alpha workspace" },
+    { value: "beta", label: "Beta tools" },
+  ] as const;
+  const filter = (query: string) =>
+    filterSidebarProjectScopeItems({
+      items,
+      query,
+      matches: (item, candidate) =>
+        item.label.toLocaleLowerCase().includes(candidate.toLocaleLowerCase()),
+    });
+
+  it("shows the default row first while the query is empty", () => {
+    expect(filter("")).toEqual(items);
+    expect(filter("   ")).toEqual(items);
+  });
+
+  it("hides the default row while filtering", () => {
+    expect(filter("all")).toEqual([]);
+  });
+
+  it("returns matching projects in source order and supports no-match results", () => {
+    expect(filter("WORK")).toEqual([items[1]]);
+    expect(filter("missing")).toEqual([]);
+  });
+});
+
+describe("reduceSidebarProjectScopeMenuState", () => {
+  it("clears the query when the combobox closes", () => {
+    expect(
+      reduceSidebarProjectScopeMenuState(
+        { open: true, query: "alpha" },
+        { type: "open-changed", open: false },
+      ),
+    ).toEqual({ open: false, query: "" });
+  });
+
+  it("keeps the popup open while the query changes", () => {
+    expect(
+      reduceSidebarProjectScopeMenuState(
+        { open: true, query: "" },
+        { type: "query-changed", query: "beta" },
+      ),
+    ).toEqual({ open: true, query: "beta" });
+  });
+});
+
+describe("resolveWorkingStartedAt", () => {
+  const session = {
+    provider: ProviderDriverKind.make("codex"),
+    status: "running" as const,
+    orchestrationStatus: "running" as const,
+    createdAt: "2026-03-09T10:00:00.000Z",
+    updatedAt: "2026-03-09T10:02:00.000Z",
+  };
+  const runningTurn = (startedAt: string | null): OrchestrationLatestTurn => ({
+    ...makeLatestTurn(),
+    state: "running",
+    startedAt,
+    completedAt: null,
+  });
+
+  it("uses the running turn's start time, or the request time before adoption", () => {
+    expect(
+      resolveWorkingStartedAt({ latestTurn: runningTurn("2026-03-09T10:01:00.000Z"), session }),
+    ).toBe("2026-03-09T10:01:00.000Z");
+    expect(resolveWorkingStartedAt({ latestTurn: runningTurn(null), session })).toBe(
+      "2026-03-09T10:00:00.000Z",
+    );
+  });
+
+  it("falls back to the session transition when the latest turn already completed", () => {
+    expect(resolveWorkingStartedAt({ latestTurn: makeLatestTurn(), session })).toBe(
+      "2026-03-09T10:02:00.000Z",
+    );
+  });
+
+  it("skips a malformed startedAt instead of returning it", () => {
+    expect(resolveWorkingStartedAt({ latestTurn: runningTurn("not-a-date"), session })).toBe(
+      "2026-03-09T10:00:00.000Z",
+    );
+  });
+
+  it("returns null with neither a running turn nor a session", () => {
+    expect(resolveWorkingStartedAt({ latestTurn: null, session: null })).toBeNull();
+  });
+});
+
+describe("formatWorkingDurationLabel", () => {
+  it("formats seconds, minutes, and hours", () => {
+    expect(formatWorkingDurationLabel(0)).toBe("0s");
+    expect(formatWorkingDurationLabel(42_000)).toBe("42s");
+    expect(formatWorkingDurationLabel(5 * 60_000)).toBe("5m");
+    expect(formatWorkingDurationLabel(90 * 60_000)).toBe("1h 30m");
+  });
+
+  it("clamps negative and non-finite elapsed values to zero", () => {
+    expect(formatWorkingDurationLabel(-5_000)).toBe("0s");
+    expect(formatWorkingDurationLabel(Number.NaN)).toBe("0s");
+  });
+});
+
+describe("compactSidebarTimeLabel", () => {
+  it("drops the ago suffix and shortens just now", () => {
+    expect(compactSidebarTimeLabel("18h ago")).toBe("18h");
+    expect(compactSidebarTimeLabel("just now")).toBe("now");
+    expect(compactSidebarTimeLabel("Mar 3")).toBe("Mar 3");
   });
 });

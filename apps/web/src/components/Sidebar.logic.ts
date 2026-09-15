@@ -672,3 +672,167 @@ export function sortProjectsForSidebar<
     return left.name.localeCompare(right.name) || left.id.localeCompare(right.id);
   });
 }
+
+// ── Chat-list sidebar (ported from upstream T3 Code's Sidebar v2) ──────
+// Function names and behavior follow upstream's Sidebar.logic.ts so future
+// merges line up; adaptations are noted inline.
+
+// A double-click dispatches two `click` events before `dblclick`: the first has
+// `detail === 1`, the second `detail === 2`. The second click must not run the
+// row's single-click navigation, otherwise double-click-to-rename would also
+// navigate. `MouseEvent.detail` is 0 for synthetic/keyboard activations, which
+// still count as a normal single activation.
+export function isTrailingDoubleClick(detail: number): boolean {
+  return detail > 1;
+}
+
+function nodeClosest(node: object | null, selector: string): unknown {
+  if (node === null || !("closest" in node) || typeof node.closest !== "function") return null;
+  return node.closest(selector);
+}
+
+/** Clicks on a nested link keep the link's meaning. The row must not treat them as multi-select. */
+export function isSidebarNestedLinkClick(target: EventTarget | null): boolean {
+  if (target == null || typeof target !== "object") return false;
+  if (nodeClosest(target, "a[href]") !== null) return true;
+  const parent =
+    "parentElement" in target &&
+    target.parentElement !== null &&
+    typeof target.parentElement === "object"
+      ? target.parentElement
+      : null;
+  return nodeClosest(parent, "a[href]") !== null;
+}
+
+// Shift+click on the new chat button creates directly in the current
+// project, skipping the command palette's project picker. With a single
+// project there is nothing to pick, so a plain click already creates
+// immediately and the modifier changes nothing.
+export function shouldCreateNewThreadInCurrentProject(
+  shiftKey: boolean,
+  projectGroupCount: number,
+): boolean {
+  return shiftKey || projectGroupCount <= 1;
+}
+
+// Five visual states: color is reserved for "act now" (approval / input),
+// "in motion" (working) and "broken" (failed). Ready is the unlabeled resting
+// state. Upstream also has "monitoring" (background liveness), which this
+// fork's shells do not carry.
+export type SidebarThreadStatus = "approval" | "input" | "working" | "failed" | "ready";
+
+export function shouldRecedeSidebarThread(input: {
+  status: SidebarThreadStatus;
+  isUnread: boolean;
+  isActive: boolean;
+  isSelected: boolean;
+}): boolean {
+  if (input.isActive || input.isSelected || input.status === "input") return false;
+  if (input.status === "working") return true;
+  if (input.status === "ready" || input.status === "approval") {
+    return !input.isUnread;
+  }
+  return false;
+}
+
+export function resolveSidebarThreadStatus(
+  thread: Pick<SidebarThreadSummary, "hasPendingApprovals" | "hasPendingUserInput" | "session">,
+): SidebarThreadStatus {
+  if (thread.hasPendingApprovals) return "approval";
+  if (thread.hasPendingUserInput) return "input";
+  const session = thread.session;
+  // Fork sessions carry a client phase plus the orchestration status.
+  if (
+    session?.status === "running" ||
+    session?.status === "connecting" ||
+    session?.orchestrationStatus === "running" ||
+    session?.orchestrationStatus === "starting"
+  ) {
+    return "working";
+  }
+  if (session?.status === "error") return "failed";
+  return "ready";
+}
+
+/** First VALID timestamp wins: a present-yet-malformed string falls through too. */
+function firstValidTimestamp(
+  ...candidates: ReadonlyArray<string | null | undefined>
+): string | null {
+  for (const candidate of candidates) {
+    if (candidate == null) continue;
+    if (!Number.isNaN(Date.parse(candidate))) return candidate;
+  }
+  return null;
+}
+
+/** The timestamp a working thread's elapsed label counts from: the running
+    turn's start (request time until adoption), falling back to the session's
+    last transition when the turn projection lags behind. */
+export function resolveWorkingStartedAt(
+  thread: Pick<SidebarThreadSummary, "latestTurn" | "session">,
+): string | null {
+  const turn = thread.latestTurn;
+  if (turn && turn.completedAt === null) {
+    return firstValidTimestamp(turn.startedAt, turn.requestedAt, thread.session?.updatedAt);
+  }
+  return firstValidTimestamp(thread.session?.updatedAt);
+}
+
+export function formatWorkingDurationLabel(elapsedMs: number): string {
+  const seconds = Number.isFinite(elapsedMs) ? Math.max(0, Math.floor(elapsedMs / 1000)) : 0;
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+/**
+ * Search the already-ordered sidebar thread collection by title, keeping the
+ * input order so lifecycle ordering stays stable while the list narrows.
+ * Upstream also matches linked pull requests, which this fork's shells lack.
+ */
+export function searchSidebarThreads<T extends { readonly title: string }>(
+  threads: readonly T[],
+  query: string,
+): T[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (normalizedQuery.length === 0) return [];
+  return threads.filter((thread) => thread.title.toLowerCase().includes(normalizedQuery));
+}
+
+export function filterSidebarProjectScopeItems<TItem extends { readonly value: string }>(input: {
+  items: readonly TItem[];
+  query: string;
+  matches: (item: TItem, query: string) => boolean;
+}): readonly TItem[] {
+  const query = input.query.trim();
+  if (query.length === 0) return input.items;
+  return input.items.filter((item) => item.value !== "all" && input.matches(item, query));
+}
+
+export interface SidebarProjectScopeMenuState {
+  readonly open: boolean;
+  readonly query: string;
+}
+
+export type SidebarProjectScopeMenuAction =
+  | { readonly type: "query-changed"; readonly query: string }
+  | { readonly type: "open-changed"; readonly open: boolean };
+
+export function reduceSidebarProjectScopeMenuState(
+  state: SidebarProjectScopeMenuState,
+  action: SidebarProjectScopeMenuAction,
+): SidebarProjectScopeMenuState {
+  switch (action.type) {
+    case "query-changed":
+      return { ...state, query: action.query };
+    case "open-changed":
+      return { open: action.open, query: "" };
+  }
+}
+
+/** "3 minutes ago" → "3m", "just now" → "now": card and slim rows are narrow. */
+export function compactSidebarTimeLabel(label: string): string {
+  if (label === "just now") return "now";
+  return label.endsWith(" ago") ? label.slice(0, -4) : label;
+}

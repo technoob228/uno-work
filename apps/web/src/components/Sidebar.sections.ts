@@ -2,9 +2,11 @@
 // Snoozed (collapsed shelf) -> Settled (quiet, time-ordered, first few shown).
 //
 // Ported from upstream T3 Code's Sidebar.logic.ts section model, adapted:
-// - Settlement is derived on the client (upstream settles server-side with a
-//   settledOverride column). The rule is upstream's inactivity auto-settle
-//   (ThreadSettlementPolicy) with its default of 3 idle days.
+// - Automatic settlement is derived on the client: upstream's inactivity
+//   auto-settle (ThreadSettlementPolicy) with its default of 3 idle days.
+//   Manual settle is server-backed like upstream (settledOverride): "settled"
+//   always settles, "active" keeps the chat out of the auto rule until real
+//   activity resets the override.
 // - Pinned threads never settle: in our fork a pin means "keep this in view".
 // - A thread that needs the person (approval / question) is never hidden: it
 //   leaves the snoozed shelf and sorts to the top of Active (or stays in
@@ -33,6 +35,8 @@ export type SidebarSectionThread = Pick<
   | "pinnedAt"
   | "snoozedUntil"
   | "snoozedAt"
+  | "settledOverride"
+  | "settledAt"
   | "hasPendingApprovals"
   | "hasPendingUserInput"
   | "latestUserMessageAt"
@@ -47,6 +51,35 @@ function latestTimestampMs(values: ReadonlyArray<string | null | undefined>): nu
     if (parsed !== null && (latest === null || parsed > latest)) latest = parsed;
   }
   return latest;
+}
+
+/**
+ * The moment a settled thread wrapped up: the explicit settle time when there
+ * is one, otherwise its last activity. Settled rows sort by this and show it
+ * as their time label (upstream's resolveSettledThreadTimestamp).
+ */
+export function resolveSettledThreadTimestamp(thread: SidebarSectionThread): string | null {
+  if (thread.settledAt != null && toSortableTimestamp(thread.settledAt) !== null) {
+    return thread.settledAt;
+  }
+  let latest: string | null = null;
+  let latestMs = Number.NEGATIVE_INFINITY;
+  for (const candidate of [
+    thread.latestUserMessageAt,
+    thread.latestTurn?.requestedAt,
+    thread.latestTurn?.startedAt,
+    thread.latestTurn?.completedAt,
+  ]) {
+    const parsed = toSortableTimestamp(candidate ?? undefined);
+    if (candidate != null && parsed !== null && parsed > latestMs) {
+      latest = candidate;
+      latestMs = parsed;
+    }
+  }
+  if (latest !== null) return latest;
+  return thread.updatedAt != null && toSortableTimestamp(thread.updatedAt) !== null
+    ? thread.updatedAt
+    : null;
 }
 
 /** When the thread last did anything: a user message or a turn edge. */
@@ -86,7 +119,10 @@ export function resolveSidebarThreadSection(
   const pinned = thread.pinnedAt != null;
   if (threadNeedsUser(thread)) return pinned ? "pinned" : "active";
   if (isThreadSnoozed(thread, now)) return "snoozed";
+  // An explicit settle outranks the pin (the server clears the pin as well).
+  if (thread.settledOverride === "settled") return "settled";
   if (pinned) return "pinned";
+  if (thread.settledOverride === "active") return "active";
   if (isThreadSettled(thread, now)) return "settled";
   return "active";
 }
@@ -101,8 +137,8 @@ export interface SidebarThreadSections<T> {
 /**
  * Assign and order threads. Pinned: most recently pinned first (our existing
  * pin order). Active: threads that need the person first, then the user's
- * sidebar sort order. Snoozed: soonest wake first. Settled: most recent
- * activity first, regardless of sort order (history reads by when work ended).
+ * sidebar sort order. Snoozed: soonest wake first. Settled: most recently
+ * wrapped up first (settle time, else last activity), regardless of sort order.
  */
 export function partitionSidebarThreads<T extends SidebarSectionThread>(
   threads: readonly T[],
@@ -122,7 +158,9 @@ export function partitionSidebarThreads<T extends SidebarSectionThread>(
   const rest = activeSorted.filter((thread) => !threadNeedsUser(thread));
   const wakeMs = (thread: T) =>
     toSortableTimestamp(thread.snoozedUntil ?? undefined) ?? Number.POSITIVE_INFINITY;
-  const activityMs = (thread: T) => resolveThreadActivityMs(thread) ?? Number.NEGATIVE_INFINITY;
+  const settledMs = (thread: T) =>
+    toSortableTimestamp(resolveSettledThreadTimestamp(thread) ?? undefined) ??
+    Number.NEGATIVE_INFINITY;
   return {
     pinned: sortThreadsPinnedFirst(buckets.pinned, input.sortOrder),
     active: [...needsUser, ...rest],
@@ -130,7 +168,7 @@ export function partitionSidebarThreads<T extends SidebarSectionThread>(
       (left, right) => wakeMs(left) - wakeMs(right) || left.id.localeCompare(right.id),
     ),
     settled: buckets.settled.toSorted(
-      (left, right) => activityMs(right) - activityMs(left) || right.id.localeCompare(left.id),
+      (left, right) => settledMs(right) - settledMs(left) || right.id.localeCompare(left.id),
     ),
   };
 }

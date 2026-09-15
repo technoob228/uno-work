@@ -364,3 +364,38 @@ describe("resolveSidebarProjectThreadList", () => {
     expect(list.items).toEqual([]);
   });
 });
+
+describe("manual settle override", () => {
+  it("settles an explicitly settled thread even when it was active a minute ago", () => {
+    const thread = makeThread("parked", { settledOverride: "settled", settledAt: ago(60_000) });
+    expect(resolveSidebarThreadSection(thread, NOW)).toBe("settled");
+  });
+
+  it("keeps an un-settled thread out of the idle auto-settle", () => {
+    const thread = makeThread("pulled-back", { ...idle(10), settledOverride: "active" });
+    expect(resolveSidebarThreadSection(thread, NOW)).toBe("active");
+  });
+
+  it("never hides a thread that needs the person, even when settled", () => {
+    const thread = makeThread("asks", {
+      settledOverride: "settled",
+      settledAt: ago(HOUR_MS),
+      hasPendingApprovals: true,
+    });
+    expect(resolveSidebarThreadSection(thread, NOW)).toBe("active");
+  });
+
+  it("orders the settled tail by settle time before last activity", () => {
+    const settledRecently = makeThread("settled-recently", {
+      ...idle(20),
+      settledOverride: "settled",
+      settledAt: ago(HOUR_MS),
+    });
+    const autoSettled = makeThread("auto-settled", idle(4));
+    const { settled } = partitionSidebarThreads([autoSettled, settledRecently], {
+      now: NOW,
+      sortOrder: "updated_at",
+    });
+    expect(settled.map((thread) => thread.id)).toEqual(["settled-recently", "auto-settled"]);
+  });
+});
