@@ -60,7 +60,7 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime";
-import { Link, useLocation, useNavigate, useParams, useRouter } from "@tanstack/react-router";
+import { useLocation, useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import {
   type SidebarEnvironmentScope,
   type SidebarGroupBy,
@@ -78,7 +78,6 @@ import {
 } from "./MachineIdentityContext";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { isElectron } from "../env";
-import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform, newCommandId } from "../lib/utils";
 import {
@@ -160,7 +159,6 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
-  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -168,7 +166,6 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
   SidebarSeparator,
-  SidebarTrigger,
   useSidebar,
 } from "./ui/sidebar";
 import { useThreadSelectionStore } from "../threadSelectionStore";
@@ -215,6 +212,7 @@ import {
   snoozeWakeLabel,
 } from "./Sidebar.snooze";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
+import { SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { CommandDialogTrigger } from "./ui/command";
 import { readEnvironmentApi } from "../environmentApi";
@@ -3060,56 +3058,6 @@ function SortableProjectItem({
   );
 }
 
-const SidebarChromeHeader = memo(function SidebarChromeHeader({
-  isElectron,
-}: {
-  isElectron: boolean;
-}) {
-  const wordmark = (
-    <div className="flex min-w-0 flex-1 items-center gap-2">
-      <Tooltip>
-        <TooltipTrigger render={<SidebarTrigger className="size-7 shrink-0" />} />
-        <TooltipPopup side="bottom">Hide sidebar</TooltipPopup>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Link
-              aria-label="Go to chats"
-              className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
-              to="/"
-            >
-              <span
-                aria-hidden="true"
-                className="grid size-5 shrink-0 place-items-center rounded-md bg-primary font-bold text-[11px] text-primary-foreground"
-              >
-                U
-              </span>
-              <span className="min-w-0 truncate text-sm font-semibold tracking-tight text-foreground">
-                {APP_BASE_NAME}
-              </span>
-              <span className="shrink-0 rounded-full bg-primary/12 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-primary">
-                {APP_STAGE_LABEL}
-              </span>
-            </Link>
-          }
-        />
-        <TooltipPopup side="bottom" sideOffset={2}>
-          Version {APP_VERSION}
-        </TooltipPopup>
-      </Tooltip>
-    </div>
-  );
-
-  return isElectron ? (
-    <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 overflow-hidden px-4 py-0 pl-[78px] fullscreen:pl-4 wco:h-[env(titlebar-area-height)] wco:pl-[calc(env(titlebar-area-x)+1em)]">
-      {wordmark}
-    </SidebarHeader>
-  ) : (
-    <SidebarHeader className="gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">{wordmark}</SidebarHeader>
-  );
-});
-
 const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
   const allMachinesSidebar = useFeatureFlag("allMachinesSidebar");
@@ -3521,7 +3469,12 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
   );
 });
 
-export default function Sidebar() {
+/**
+ * The legacy project-grouped sidebar (Labs → "Sidebar (legacy)"). The default
+ * is the flat chat list in `Sidebar.tsx`, ported from upstream T3 Code's
+ * Sidebar v2; upstream keeps its old sidebar the same way.
+ */
+export default function LegacySidebar() {
   const activeEnvironmentId = useStore((store) => store.activeEnvironmentId);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const selectedEnvironmentId = activeEnvironmentId ?? primaryEnvironmentId;

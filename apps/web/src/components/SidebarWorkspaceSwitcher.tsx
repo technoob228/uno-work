@@ -49,7 +49,10 @@ import { MachineChip } from "./MachineChip";
 import { MACHINE_KIND_ICON } from "./machineKindIcons";
 import { Menu, MenuPopup, MenuTrigger } from "./ui/menu";
 
-export function SidebarWorkspaceSwitcher() {
+/** See SidebarEnvSwitcher for the `card` / `compact` variants. */
+export function SidebarWorkspaceSwitcher({
+  variant = "card",
+}: { variant?: "card" | "compact" } = {}) {
   const navigate = useNavigate();
   const [addEnvOpen, setAddEnvOpen] = useState(false);
   const { reconnect, reconnectingId } = useReconnectEnvironment();
@@ -160,16 +163,30 @@ export function SidebarWorkspaceSwitcher() {
             render={
               <button
                 type="button"
-                className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-left transition-colors hover:bg-accent"
+                className={cn(
+                  "flex min-w-0 flex-1 items-center gap-2 rounded-md text-left transition-colors",
+                  variant === "compact"
+                    ? "h-8 px-2 text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+                    : "border border-border bg-background px-2 py-1.5 hover:bg-accent",
+                )}
                 aria-label="Switch machine"
+                title={variant === "compact" ? `${triggerTitle} · ${triggerSubtitle}` : undefined}
               >
                 <LayersIcon className="size-3.5 shrink-0 text-primary" />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-xs font-medium text-foreground">{triggerTitle}</div>
-                  <div className="truncate text-[10px] text-muted-foreground">
-                    {triggerSubtitle}
+                {variant === "compact" ? (
+                  <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                    {triggerTitle}
+                  </span>
+                ) : (
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-xs font-medium text-foreground">
+                      {triggerTitle}
+                    </div>
+                    <div className="truncate text-[10px] text-muted-foreground">
+                      {triggerSubtitle}
+                    </div>
                   </div>
-                </div>
+                )}
                 {pendingCount > 0 ? (
                   <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
                     {pendingCount}
@@ -340,7 +357,12 @@ export function SidebarWorkspaceSwitcher() {
         {canReconnectCurrent ? (
           <button
             type="button"
-            className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+            className={cn(
+              "flex shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60",
+              variant === "compact"
+                ? "size-8 hover:bg-sidebar-row-hover"
+                : "size-9 border border-border bg-background hover:bg-accent",
+            )}
             disabled={isReconnectingCurrent}
             title="Reconnect machine"
             aria-label="Reconnect machine"

@@ -65,10 +65,17 @@ export const FEATURE_FLAGS = [
     default: false,
   },
   {
-    key: "inboxSections",
-    label: "Inbox sections in the sidebar",
+    key: "legacySidebar",
+    label: "Sidebar (legacy)",
     description:
-      "Sorts each project's chats into Pinned, Active, Snoozed and Done, and lets you snooze a chat until later. Off keeps one flat list per project.",
+      "Brings back the old sidebar that groups chats under their projects. Off shows the chat list: every chat in one list, newest first, with finished chats settling at the bottom.",
+    default: false,
+  },
+  {
+    key: "inboxSections",
+    label: "Inbox sections in the legacy sidebar",
+    description:
+      "Legacy sidebar only: sorts each project's chats into Pinned, Active, Snoozed and Done, and lets you snooze a chat until later. Off keeps one flat list per project.",
     default: true,
   },
 ] as const satisfies readonly FeatureFlagDefinition[];

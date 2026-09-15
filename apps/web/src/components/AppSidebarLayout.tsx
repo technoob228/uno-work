@@ -1,7 +1,9 @@
 import { useEffect, type ReactNode } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
-import ThreadSidebar from "./LegacySidebar";
+import LegacyThreadSidebar from "./LegacySidebar";
+import ThreadSidebar from "./Sidebar";
+import { useFeatureFlag } from "../hooks/useFeatureFlags";
 import { BrowserBridgeListener } from "./preview/BrowserBridgeListener";
 import { FileBrowser } from "./preview/FileBrowser";
 import { PreviewPane } from "./preview/PreviewPane";
@@ -16,6 +18,9 @@ const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
 const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  // Labs "Sidebar (legacy)": the old project-grouped sidebar. Off (default)
+  // is the flat chat list ported from upstream T3 Code's Sidebar v2.
+  const legacySidebar = useFeatureFlag("legacySidebar");
   // В настройках правая панель предпросмотра не имеет смысла — прячем её
   // (webview внутри остаются жить, состояние вкладок сохраняется).
   const inSettings = useLocation({
@@ -77,7 +82,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
             storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
           }}
         >
-          <ThreadSidebar />
+          {legacySidebar ? <LegacyThreadSidebar /> : <ThreadSidebar />}
           <SidebarRail />
         </Sidebar>
         {children}

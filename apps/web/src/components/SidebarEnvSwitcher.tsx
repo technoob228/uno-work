@@ -91,7 +91,12 @@ function formatSavedEnvironmentStatusMeta(input: {
   }
 }
 
-export function SidebarEnvSwitcher() {
+/**
+ * `card` is the two-line bordered block the legacy sidebar footer uses;
+ * `compact` is a one-line ghost trigger that sits in the chat-list sidebar's
+ * utility row next to the icon buttons.
+ */
+export function SidebarEnvSwitcher({ variant = "card" }: { variant?: "card" | "compact" } = {}) {
   const [addEnvOpen, setAddEnvOpen] = useState(false);
   const { reconnect, reconnectingId } = useReconnectEnvironment();
   const primaryDescriptor = usePrimaryEnvironmentDescriptor();
@@ -211,8 +216,18 @@ export function SidebarEnvSwitcher() {
             render={
               <button
                 type="button"
-                className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-left transition-colors hover:bg-accent"
+                className={cn(
+                  "flex min-w-0 flex-1 items-center gap-2 rounded-md text-left transition-colors",
+                  variant === "compact"
+                    ? "h-8 px-2 text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+                    : "border border-border bg-background px-2 py-1.5 hover:bg-accent",
+                )}
                 aria-label="Switch machine"
+                title={
+                  variant === "compact" && current
+                    ? `${current.name} · ${MACHINE_KIND_LABELS[current.kind]} · ${current.meta}`
+                    : undefined
+                }
               >
                 <span
                   aria-hidden="true"
@@ -222,16 +237,22 @@ export function SidebarEnvSwitcher() {
                   )}
                 />
                 <CurrentIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-xs font-medium text-foreground">
+                {variant === "compact" ? (
+                  <span className="min-w-0 flex-1 truncate text-xs font-medium">
                     {current?.name ?? "No machine"}
+                  </span>
+                ) : (
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-xs font-medium text-foreground">
+                      {current?.name ?? "No machine"}
+                    </div>
+                    <div className="truncate text-[10px] text-muted-foreground">
+                      {current
+                        ? `${MACHINE_KIND_LABELS[current.kind]} · ${current.meta}`
+                        : "Connect a machine"}
+                    </div>
                   </div>
-                  <div className="truncate text-[10px] text-muted-foreground">
-                    {current
-                      ? `${MACHINE_KIND_LABELS[current.kind]} · ${current.meta}`
-                      : "Connect a machine"}
-                  </div>
-                </div>
+                )}
                 <ChevronsUpDownIcon className="size-3 shrink-0 text-muted-foreground" />
               </button>
             }
@@ -358,7 +379,12 @@ export function SidebarEnvSwitcher() {
         {canReconnectCurrent ? (
           <button
             type="button"
-            className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+            className={cn(
+              "flex shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60",
+              variant === "compact"
+                ? "size-8 hover:bg-sidebar-row-hover"
+                : "size-9 border border-border bg-background hover:bg-accent",
+            )}
             disabled={isReconnectingCurrent}
             title="Reconnect machine"
             aria-label="Reconnect machine"

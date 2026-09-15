@@ -1083,6 +1083,22 @@ function OpenCommandPaletteDialog() {
     openAddProjectFlow();
   }, [clearOpenIntent, openAddProjectFlow, openIntent]);
 
+  // The chat-list sidebar's New chat button opens straight into the project
+  // picker (upstream T3 Code's "new-thread-in" palette intent).
+  useLayoutEffect(() => {
+    if (openIntent?.kind !== "new-thread-in") {
+      return;
+    }
+    clearOpenIntent();
+    pushPaletteView({
+      addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
+      groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
+    });
+    // pushPaletteView is a plain function re-created per render; the intent
+    // request is what should trigger this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clearOpenIntent, openIntent, projectThreadItems]);
+
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (projects.length > 0) {

@@ -1,7 +1,8 @@
 import { create } from "zustand";
 
 interface CommandPaletteOpenIntent {
-  kind: "add-project";
+  /** add-project: the add-project flow. new-thread-in: the "New chat in..." project picker. */
+  kind: "add-project" | "new-thread-in";
   requestId: number;
 }
 
@@ -11,6 +12,7 @@ interface CommandPaletteStore {
   setOpen: (open: boolean) => void;
   toggleOpen: () => void;
   openAddProject: () => void;
+  openNewThreadIn: () => void;
   clearOpenIntent: () => void;
 }
 
@@ -25,6 +27,14 @@ export const useCommandPaletteStore = create<CommandPaletteStore>((set) => ({
       open: true,
       openIntent: {
         kind: "add-project",
+        requestId: (state.openIntent?.requestId ?? 0) + 1,
+      },
+    })),
+  openNewThreadIn: () =>
+    set((state) => ({
+      open: true,
+      openIntent: {
+        kind: "new-thread-in",
         requestId: (state.openIntent?.requestId ?? 0) + 1,
       },
     })),
