@@ -116,6 +116,50 @@ export function isFilesystemBrowseQuery(
   );
 }
 
+/**
+ * The add-project browser opens pre-filled with a directory (`~/` or the
+ * configured base directory), and clearing the input leaves the flow. So
+ * people type or paste a full path straight after the prefill, producing
+ * `~//tmp/x` or `~/~/x`. The server expands those shell-style into
+ * `$HOME/tmp/x` and a literal `$HOME/~/x`. Treat a fresh root the way file
+ * choosers do: an empty segment (`//`) restarts at `/`, a `~` segment
+ * restarts at home, and a Windows drive segment restarts at that drive.
+ */
+export function collapseRestartedBrowsePath(value: string): string {
+  const leadingWhitespace = value.match(/^\s*/)?.[0] ?? "";
+  const path = value.slice(leadingWhitespace.length);
+  if (isUncPath(path)) {
+    return value;
+  }
+
+  let restartIndex = -1;
+  for (let index = 1; index < path.length; index += 1) {
+    const previous = path[index - 1];
+    if (previous !== "/" && previous !== "\\") {
+      continue;
+    }
+    const rest = path.slice(index);
+    if (
+      (previous === "/" && rest.startsWith("/")) ||
+      /^~([/\\]|$)/.test(rest) ||
+      isWindowsDrivePath(rest)
+    ) {
+      restartIndex = index;
+    }
+  }
+
+  if (restartIndex < 0) {
+    return value;
+  }
+  // A lone trailing `~` is still being typed; keep the input stable until the
+  // separator arrives so the palette does not flip out of browse mode.
+  const restarted = path.slice(restartIndex);
+  if (restarted === "~") {
+    return value;
+  }
+  return `${leadingWhitespace}${restarted}`;
+}
+
 export function isUnsupportedWindowsProjectPath(value: string, platform: string): boolean {
   return isWindowsAbsolutePath(value) && !isWindowsPlatform(platform);
 }
@@ -125,7 +169,7 @@ export function normalizeProjectPathForDispatch(value: string): string {
 }
 
 export function resolveProjectPathForDispatch(value: string, cwd?: string | null): string {
-  const trimmedValue = value.trim();
+  const trimmedValue = collapseRestartedBrowsePath(value.trim());
   if (!isExplicitRelativePath(trimmedValue) || !cwd) {
     return normalizeProjectPathForDispatch(trimmedValue);
   }

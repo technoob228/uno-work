@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   appendBrowsePathSegment,
   canNavigateUp,
+  collapseRestartedBrowsePath,
   getBrowseDirectoryPath,
   findProjectByPath,
   getBrowseLeafPathSegment,
@@ -80,6 +81,40 @@ describe("projectPaths", () => {
     expect(resolveProjectPathForDispatch("./docs", "/home/user\\project")).toBe(
       "/home/user\\project/docs",
     );
+  });
+
+  it("restarts a path typed after the prefilled browse directory", () => {
+    // Absolute path pasted after "~/" stays absolute instead of landing in $HOME.
+    expect(collapseRestartedBrowsePath("~//tmp/x")).toBe("/tmp/x");
+    expect(collapseRestartedBrowsePath("~/projects//tmp/x/")).toBe("/tmp/x/");
+    // "~/x" typed after "~/" means home, not a literal "~" folder inside home.
+    expect(collapseRestartedBrowsePath("~/~/x")).toBe("~/x");
+    expect(collapseRestartedBrowsePath("/Users/me/projects/~/")).toBe("~/");
+    expect(collapseRestartedBrowsePath("~/C:\\Work")).toBe("C:\\Work");
+    // A trailing "~" is still being typed.
+    expect(collapseRestartedBrowsePath("~/~")).toBe("~/~");
+  });
+
+  it("leaves ordinary browse paths untouched", () => {
+    for (const value of [
+      "~/",
+      "~/x",
+      "/tmp/x",
+      "/",
+      "./docs",
+      "~/a~b/",
+      "C:\\Work\\",
+      "\\\\srv\\share",
+    ]) {
+      expect(collapseRestartedBrowsePath(value)).toBe(value);
+    }
+  });
+
+  it("dispatches absolute and home paths typed after the prefill as intended", () => {
+    expect(resolveProjectPathForDispatch("~//tmp/x")).toBe("/tmp/x");
+    expect(resolveProjectPathForDispatch("~/~/x/")).toBe("~/x");
+    expect(resolveProjectPathForDispatch("/tmp/x")).toBe("/tmp/x");
+    expect(resolveProjectPathForDispatch("~/x")).toBe("~/x");
   });
 
   it("navigates browse paths with matching separators", () => {

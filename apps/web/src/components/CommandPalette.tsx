@@ -61,6 +61,7 @@ import {
 import {
   appendBrowsePathSegment,
   canNavigateUp,
+  collapseRestartedBrowsePath,
   ensureBrowseDirectoryPath,
   findProjectByPath,
   getBrowseDirectoryPath,
@@ -771,7 +772,11 @@ function OpenCommandPaletteDialog() {
     setQuery("");
   }
 
-  function handleQueryChange(nextQuery: string): void {
+  function handleQueryChange(rawQuery: string): void {
+    const nextQuery =
+      !isRemoteProjectRepositoryStep && isFilesystemBrowseQuery(rawQuery, browseEnvironmentPlatform)
+        ? collapseRestartedBrowsePath(rawQuery)
+        : rawQuery;
     setHighlightedItemValue(null);
     setQuery(nextQuery);
     if (nextQuery === "" && currentView?.initialQuery) {
