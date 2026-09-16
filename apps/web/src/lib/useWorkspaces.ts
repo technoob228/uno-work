@@ -41,7 +41,6 @@ export interface WorkspaceSummary {
   /** The daemon whose registry answered — where mutations are sent. */
   readonly registryEnvironmentId: EnvironmentId;
   readonly machines: readonly WorkspaceMachineEntry[];
-  readonly pendingRequestCount: number;
   /** Machines in the registry this client cannot currently reach. */
   readonly unreachableCount: number;
   readonly state: WorkspaceState;
@@ -166,7 +165,6 @@ export function useWorkspaces(): WorkspaceDirectory {
         epoch: state.identity.epoch,
         registryEnvironmentId: environmentId,
         machines,
-        pendingRequestCount: state.pendingRequests.length,
         unreachableCount: machines.filter((entry) => !entry.connected).length,
         state,
       });

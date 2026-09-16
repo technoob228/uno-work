@@ -192,13 +192,6 @@ export interface WsRpcClient {
     readonly syncMachines: RpcUnaryMethod<typeof WS_METHODS.workspaceSyncMachines>;
     readonly updateMachine: RpcUnaryMethod<typeof WS_METHODS.workspaceUpdateMachine>;
     readonly removeMachine: RpcUnaryMethod<typeof WS_METHODS.workspaceRemoveMachine>;
-    readonly setPolicy: RpcUnaryMethod<typeof WS_METHODS.workspaceSetPolicy>;
-    readonly upsertGrant: RpcUnaryMethod<typeof WS_METHODS.workspaceUpsertGrant>;
-    readonly removeGrant: RpcUnaryMethod<typeof WS_METHODS.workspaceRemoveGrant>;
-    readonly acquireClaim: RpcUnaryMethod<typeof WS_METHODS.workspaceAcquireClaim>;
-    readonly releaseClaim: RpcUnaryMethod<typeof WS_METHODS.workspaceReleaseClaim>;
-    readonly createRequest: RpcUnaryMethod<typeof WS_METHODS.workspaceCreateRequest>;
-    readonly decideRequest: RpcUnaryMethod<typeof WS_METHODS.workspaceDecideRequest>;
     readonly getInstructions: RpcUnaryMethod<typeof WS_METHODS.workspaceGetInstructions>;
     readonly setInstructions: RpcUnaryMethod<typeof WS_METHODS.workspaceSetInstructions>;
     readonly applyInstructions: RpcUnaryMethod<typeof WS_METHODS.workspaceApplyInstructions>;
@@ -449,20 +442,6 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.workspaceUpdateMachine](input)),
       removeMachine: (input) =>
         transport.request((client) => client[WS_METHODS.workspaceRemoveMachine](input)),
-      setPolicy: (input) =>
-        transport.request((client) => client[WS_METHODS.workspaceSetPolicy](input)),
-      upsertGrant: (input) =>
-        transport.request((client) => client[WS_METHODS.workspaceUpsertGrant](input)),
-      removeGrant: (input) =>
-        transport.request((client) => client[WS_METHODS.workspaceRemoveGrant](input)),
-      acquireClaim: (input) =>
-        transport.request((client) => client[WS_METHODS.workspaceAcquireClaim](input)),
-      releaseClaim: (input) =>
-        transport.request((client) => client[WS_METHODS.workspaceReleaseClaim](input)),
-      createRequest: (input) =>
-        transport.request((client) => client[WS_METHODS.workspaceCreateRequest](input)),
-      decideRequest: (input) =>
-        transport.request((client) => client[WS_METHODS.workspaceDecideRequest](input)),
       getInstructions: (input) =>
         transport.request((client) => client[WS_METHODS.workspaceGetInstructions](input)),
       setInstructions: (input) =>

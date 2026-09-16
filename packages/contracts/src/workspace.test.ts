@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 
+import { WS_METHODS, WsRpcGroup } from "./rpc.ts";
 import { deriveMachineMonogram, parseUnoBoxSshTarget } from "./workspace.ts";
 
 describe("uno box ssh target", () => {
@@ -45,5 +46,39 @@ describe("machine monogram", () => {
 
   it("falls back for an empty label", () => {
     assert.equal(deriveMachineMonogram("   "), "··");
+  });
+});
+
+describe("legacy registry commands (migration 038)", () => {
+  // Grants, claims, peer requests and the cross-machine policy were writable
+  // by any connected client without a role check. They are gone: nothing
+  // enforced them, and they were a ready-made escalation point once roles
+  // arrive. This test is the lock on the door.
+  const REMOVED = [
+    "workspace.setPolicy",
+    "workspace.upsertGrant",
+    "workspace.removeGrant",
+    "workspace.acquireClaim",
+    "workspace.releaseClaim",
+    "workspace.createRequest",
+    "workspace.decideRequest",
+  ] as const;
+
+  it("does not name them in WS_METHODS", () => {
+    const methods = new Set<string>(Object.values(WS_METHODS));
+    for (const removed of REMOVED) {
+      assert.isFalse(methods.has(removed), `${removed} is still routable`);
+    }
+  });
+
+  it("does not serve them in the websocket RPC group", () => {
+    const served = new Set<string>(WsRpcGroup.requests.keys());
+    for (const removed of REMOVED) {
+      assert.isFalse(served.has(removed), `${removed} is still in the RPC group`);
+    }
+    // The machine list and instruction layers stay — the app uses them.
+    assert.isTrue(served.has(WS_METHODS.workspaceGetState));
+    assert.isTrue(served.has(WS_METHODS.workspaceSyncMachines));
+    assert.isTrue(served.has(WS_METHODS.workspaceSetInstructions));
   });
 });

@@ -1201,42 +1201,6 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId, currentSessionRole: Ses
             workspaceRegistry.removeMachine(input),
             { "rpc.aggregate": "workspace" },
           ),
-        [WS_METHODS.workspaceSetPolicy]: (input) =>
-          observeRpcEffect(WS_METHODS.workspaceSetPolicy, workspaceRegistry.setPolicy(input), {
-            "rpc.aggregate": "workspace",
-          }),
-        [WS_METHODS.workspaceUpsertGrant]: (input) =>
-          observeRpcEffect(WS_METHODS.workspaceUpsertGrant, workspaceRegistry.upsertGrant(input), {
-            "rpc.aggregate": "workspace",
-          }),
-        [WS_METHODS.workspaceRemoveGrant]: (input) =>
-          observeRpcEffect(WS_METHODS.workspaceRemoveGrant, workspaceRegistry.removeGrant(input), {
-            "rpc.aggregate": "workspace",
-          }),
-        [WS_METHODS.workspaceAcquireClaim]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.workspaceAcquireClaim,
-            workspaceRegistry.acquireClaim(input),
-            { "rpc.aggregate": "workspace" },
-          ),
-        [WS_METHODS.workspaceReleaseClaim]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.workspaceReleaseClaim,
-            workspaceRegistry.releaseClaim(input),
-            { "rpc.aggregate": "workspace" },
-          ),
-        [WS_METHODS.workspaceCreateRequest]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.workspaceCreateRequest,
-            workspaceRegistry.createRequest(input),
-            { "rpc.aggregate": "workspace" },
-          ),
-        [WS_METHODS.workspaceDecideRequest]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.workspaceDecideRequest,
-            workspaceRegistry.decideRequest(input),
-            { "rpc.aggregate": "workspace" },
-          ),
         [WS_METHODS.workspaceGetInstructions]: (input) =>
           observeRpcEffect(WS_METHODS.workspaceGetInstructions, getWorkspaceInstructions(input), {
             "rpc.aggregate": "workspace",

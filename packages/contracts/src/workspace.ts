@@ -2,21 +2,16 @@
  * Workspace — the set of machines one person (or one Uno account) works across.
  *
  * The sidebar already unions several environments into one list; this module
- * gives that union a durable identity, a registry of the machines in it, and
- * the rules under which one machine is allowed to touch another.
+ * gives that union a durable identity and a registry of the machines in it.
  *
- * Three things are deliberately *not* modelled here:
+ * Grants, claims, peer requests and the cross-machine policy used to live here
+ * too. They were removed: nothing enforced them, and the RPCs that wrote them
+ * were open to any connected client. Who may touch which directory on which
+ * machine will be decided in the Uno account, not in this local registry.
  *
- * - **Consensus.** Exactly one machine holds the registry (`registryEnvironmentId`).
- *   Everyone else reads it over the same RPC the UI uses. A workspace whose
- *   registry is unreachable degrades loudly rather than forking into two
- *   divergent truths.
- * - **Transitive trust.** A grant names one source, one target and one
- *   repository. Nothing composes grants, so no chain of individually
- *   reasonable permissions adds up to an unintended one.
- * - **Identity of *people*.** A machine is the principal. Uno account linkage
- *   (below) is how two machines agree they belong to the same workspace, not a
- *   per-user permission system.
+ * Still deliberately *not* modelled here: identity of *people*. A machine is
+ * the principal; Uno account linkage (below) is how two machines agree they
+ * belong to the same workspace.
  */
 import { Schema } from "effect";
 
@@ -66,137 +61,6 @@ export const WorkspaceMachine = Schema.Struct({
 });
 export type WorkspaceMachine = typeof WorkspaceMachine.Type;
 
-/**
- * Default answer to "may another machine write here".
- *
- * `request` is the shipped default: a peer may ask, and a human approves each
- * time. `allow` is the standing version of that approval and lives only in an
- * explicit grant — the approval dialog itself never offers "always", because
- * the moment someone is deciding a single request is the worst moment to widen
- * a permission permanently.
- */
-export const CrossEnvironmentWriteMode = Schema.Literals(["deny", "request", "allow"]);
-export type CrossEnvironmentWriteMode = typeof CrossEnvironmentWriteMode.Type;
-
-export const WorkspaceCapability = Schema.Literals([
-  "view_status",
-  "view_threads",
-  "read_transcript",
-  "create_threads",
-  "write",
-]);
-export type WorkspaceCapability = typeof WorkspaceCapability.Type;
-
-/**
- * How a peer reaches this machine. Shown in the UI on purpose: a laptop behind
- * NAT can only be reached through the registry, and hiding that turns a
- * structural fact into "it is broken".
- */
-export const WorkspaceTransport = Schema.Literals(["direct", "registry"]);
-export type WorkspaceTransport = typeof WorkspaceTransport.Type;
-
-/** `*` means "any" in `fromEnvironmentId`, `toEnvironmentId` and `repositoryKey`. */
-export const WORKSPACE_GRANT_WILDCARD = "*";
-
-export const WorkspaceGrant = Schema.Struct({
-  grantId: Schema.String,
-  fromEnvironmentId: Schema.String,
-  toEnvironmentId: Schema.String,
-  repositoryKey: Schema.String,
-  capabilities: Schema.Array(WorkspaceCapability),
-  transport: WorkspaceTransport,
-  /**
-   * `deny` wins over every other row regardless of specificity, so a single
-   * "never touch this" cannot be re-enabled by adding a narrower allow.
-   */
-  mode: CrossEnvironmentWriteMode,
-  /** Whether the capability additionally requires holding the claim on the target. */
-  requiresClaim: Schema.Boolean,
-  createdAt: Schema.String,
-});
-export type WorkspaceGrant = typeof WorkspaceGrant.Type;
-
-export const WorkspacePolicy = Schema.Struct({
-  crossEnvironmentWrite: CrossEnvironmentWriteMode,
-  /** Guard against "HK pushes CM, CM pushes HK" running all night. */
-  maxForwardHops: Schema.Number,
-  dropOwnEcho: Schema.Boolean,
-  crossEnvironmentTurnsPerHour: Schema.Number,
-  maxConcurrentCrossEnvironment: Schema.Number,
-  /** Master switch; off means every peer command is refused before policy runs. */
-  acceptPeerCommands: Schema.Boolean,
-});
-export type WorkspacePolicy = typeof WorkspacePolicy.Type;
-
-export const DEFAULT_WORKSPACE_POLICY: WorkspacePolicy = {
-  crossEnvironmentWrite: "request",
-  maxForwardHops: 3,
-  dropOwnEcho: true,
-  crossEnvironmentTurnsPerHour: 20,
-  maxConcurrentCrossEnvironment: 4,
-  acceptPeerCommands: true,
-};
-
-/**
- * A claim is an advisory lock on a unit of work, keyed by
- * `<repositoryKey>|<slug>` so two machines can hold different parts of the same
- * repository. Advisory because the holder is a person's agent, not a
- * transaction: we surface who holds what and let a human break the tie.
- */
-export const WorkspaceClaim = Schema.Struct({
-  claimId: Schema.String,
-  claimKey: Schema.String,
-  holderEnvironmentId: EnvironmentId,
-  reason: Schema.String,
-  acquiredAt: Schema.String,
-  expiresAt: Schema.String,
-});
-export type WorkspaceClaim = typeof WorkspaceClaim.Type;
-
-export const WorkspaceRequestKind = Schema.Literals([
-  "post_message",
-  "create_thread",
-  "read_transcript",
-]);
-export type WorkspaceRequestKind = typeof WorkspaceRequestKind.Type;
-
-export const WorkspaceRequestStatus = Schema.Literals([
-  "pending",
-  "approved",
-  "rejected",
-  "expired",
-]);
-export type WorkspaceRequestStatus = typeof WorkspaceRequestStatus.Type;
-
-export const WorkspaceRequest = Schema.Struct({
-  requestId: Schema.String,
-  kind: WorkspaceRequestKind,
-  fromEnvironmentId: EnvironmentId,
-  toEnvironmentId: EnvironmentId,
-  repositoryKey: Schema.String,
-  threadId: Schema.NullOr(Schema.String),
-  reason: Schema.String,
-  /**
-   * What would actually be delivered, already defanged. Shown behind "show me
-   * what arrives" so approving is not a blind act.
-   */
-  payloadPreview: Schema.String,
-  status: WorkspaceRequestStatus,
-  /** Single-use: a decision consumes it, so an approval cannot be replayed. */
-  nonce: Schema.String,
-  hops: Schema.Number,
-  createdAt: Schema.String,
-  expiresAt: Schema.String,
-  decidedAt: Schema.NullOr(Schema.String),
-});
-export type WorkspaceRequest = typeof WorkspaceRequest.Type;
-
-export const WorkspaceUsage = Schema.Struct({
-  crossEnvironmentTurnsLastHour: Schema.Number,
-  concurrentCrossEnvironment: Schema.Number,
-});
-export type WorkspaceUsage = typeof WorkspaceUsage.Type;
-
 export const WorkspaceIdentity = Schema.Struct({
   workspaceId: Schema.String,
   name: Schema.String,
@@ -216,11 +80,6 @@ export type WorkspaceIdentity = typeof WorkspaceIdentity.Type;
 export const WorkspaceState = Schema.Struct({
   identity: WorkspaceIdentity,
   machines: Schema.Array(WorkspaceMachine),
-  claims: Schema.Array(WorkspaceClaim),
-  grants: Schema.Array(WorkspaceGrant),
-  policy: WorkspacePolicy,
-  pendingRequests: Schema.Array(WorkspaceRequest),
-  usage: WorkspaceUsage,
 });
 export type WorkspaceState = typeof WorkspaceState.Type;
 

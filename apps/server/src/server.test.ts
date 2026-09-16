@@ -666,14 +666,7 @@ const buildAppUnderTest = (options?: {
           }),
           // The router tests never exercise the workspace RPCs; they only have
           // to satisfy the ws layer's requirements.
-          Layer.mock(WorkspaceService)({
-            evaluate: () => ({
-              outcome: "deny" as const,
-              reason: "Router tests do not evaluate workspace policy.",
-              grant: null,
-              requiresClaim: false,
-            }),
-          }),
+          Layer.mock(WorkspaceService)({}),
           Layer.mock(UnoCloudService)({}),
           Layer.mock(HarnessSetup)({}),
         ),

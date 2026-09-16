@@ -153,8 +153,6 @@ export function SidebarWorkspaceSwitcher({
       ? `all machines · ${machineCount} ${machineCount === 1 ? "machine" : "machines"}`
       : "No machines yet";
 
-  const pendingCount = currentWorkspace?.pendingRequestCount ?? 0;
-
   return (
     <>
       <div className="flex w-full items-stretch gap-1">
@@ -187,11 +185,6 @@ export function SidebarWorkspaceSwitcher({
                     </div>
                   </div>
                 )}
-                {pendingCount > 0 ? (
-                  <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
-                    {pendingCount}
-                  </span>
-                ) : null}
                 <ChevronsUpDownIcon className="size-3 shrink-0 text-muted-foreground" />
               </button>
             }

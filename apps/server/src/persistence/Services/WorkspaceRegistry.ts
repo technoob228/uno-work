@@ -1,7 +1,9 @@
 /**
  * WorkspaceRegistryRepository — durable state for the workspace a daemon
- * belongs to: its machines, grants, claims, pending requests and the
- * instruction layers agents read.
+ * belongs to: its machines and the instruction layers agents read.
+ *
+ * The grant / claim / request half of migration 038 is gone: nothing checked
+ * those rows, and the RPCs that wrote them were open to any connected client.
  *
  * Every mutation bumps `epoch`. Readers compare epochs to tell "my view is
  * stale" from "nothing has changed" — the panel says that out loud, because a
@@ -9,16 +11,7 @@
  *
  * @module WorkspaceRegistryRepository
  */
-import type {
-  WorkspaceClaim,
-  WorkspaceGrant,
-  WorkspaceIdentity,
-  WorkspaceMachine,
-  WorkspacePolicy,
-  WorkspaceRequest,
-  WorkspaceRequestStatus,
-  WorkspaceState,
-} from "@t3tools/contracts";
+import type { WorkspaceIdentity, WorkspaceMachine, WorkspaceState } from "@t3tools/contracts";
 import { Context, Option, Schema } from "effect";
 import type { Effect } from "effect";
 
@@ -39,24 +32,6 @@ export const UpdateWorkspaceIdentityInput = Schema.Struct({
 });
 export type UpdateWorkspaceIdentityInput = typeof UpdateWorkspaceIdentityInput.Type;
 
-export const ClaimAcquireInput = Schema.Struct({
-  claimKey: Schema.String,
-  holderEnvironmentId: Schema.String,
-  reason: Schema.String,
-  now: Schema.String,
-  expiresAt: Schema.String,
-});
-export type ClaimAcquireInput = typeof ClaimAcquireInput.Type;
-
-/**
- * `taken` carries the current holder so the caller can say who has it rather
- * than only that the attempt failed.
- */
-export type ClaimAcquireOutcome =
-  | { readonly kind: "acquired"; readonly claim: WorkspaceClaim }
-  | { readonly kind: "renewed"; readonly claim: WorkspaceClaim }
-  | { readonly kind: "taken"; readonly claim: WorkspaceClaim };
-
 export interface WorkspaceRegistryRepositoryShape {
   /** Creates the single identity row if missing; never overwrites an existing one. */
   readonly ensureWorkspace: (
@@ -69,7 +44,7 @@ export interface WorkspaceRegistryRepositoryShape {
   readonly updateIdentity: (
     input: UpdateWorkspaceIdentityInput,
   ) => Effect.Effect<void, ManagerRepositoryError>;
-  /** Full snapshot with expired claims and requests already filtered out. */
+  /** Full snapshot: identity and machines. */
   readonly getState: (input: {
     readonly now: string;
   }) => Effect.Effect<WorkspaceState, ManagerRepositoryError>;
@@ -85,50 +60,6 @@ export interface WorkspaceRegistryRepositoryShape {
     readonly environmentId: string;
     readonly lastSeenAt: string;
   }) => Effect.Effect<void, ManagerRepositoryError>;
-  readonly setPolicy: (input: {
-    readonly policy: WorkspacePolicy;
-    readonly now: string;
-  }) => Effect.Effect<void, ManagerRepositoryError>;
-  readonly upsertGrant: (input: {
-    readonly grant: WorkspaceGrant;
-    readonly now: string;
-  }) => Effect.Effect<void, ManagerRepositoryError>;
-  readonly removeGrant: (input: {
-    readonly grantId: string;
-    readonly now: string;
-  }) => Effect.Effect<void, ManagerRepositoryError>;
-  /** Atomic take-or-report: the unique index on `claim_key` is the arbiter. */
-  readonly acquireClaim: (
-    input: ClaimAcquireInput,
-  ) => Effect.Effect<ClaimAcquireOutcome, ManagerRepositoryError>;
-  /** Releases only if the caller is the holder; `force` skips that check. */
-  readonly releaseClaim: (input: {
-    readonly claimKey: string;
-    readonly holderEnvironmentId: string | null;
-    readonly now: string;
-  }) => Effect.Effect<boolean, ManagerRepositoryError>;
-  readonly createRequest: (input: {
-    readonly request: WorkspaceRequest;
-  }) => Effect.Effect<void, ManagerRepositoryError>;
-  readonly decideRequest: (input: {
-    readonly requestId: string;
-    readonly status: WorkspaceRequestStatus;
-    readonly decidedAt: string;
-  }) => Effect.Effect<Option.Option<WorkspaceRequest>, ManagerRepositoryError>;
-  readonly getRequest: (input: {
-    readonly requestId: string;
-  }) => Effect.Effect<Option.Option<WorkspaceRequest>, ManagerRepositoryError>;
-  readonly expireRequests: (input: {
-    readonly now: string;
-  }) => Effect.Effect<number, ManagerRepositoryError>;
-  readonly recordActivity: (input: {
-    readonly occurredAt: string;
-    readonly fromEnvironmentId: string;
-    readonly kind: string;
-  }) => Effect.Effect<void, ManagerRepositoryError>;
-  readonly countActivitySince: (input: {
-    readonly since: string;
-  }) => Effect.Effect<number, ManagerRepositoryError>;
   /** `environmentId` of `*` is the workspace-wide instruction layer. */
   readonly getInstructionText: (input: {
     readonly environmentId: string;

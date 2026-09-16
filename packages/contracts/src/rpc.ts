@@ -4,20 +4,13 @@ import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 import { EnvironmentId } from "./baseSchemas.ts";
 import {
-  CrossEnvironmentWriteMode,
   UnoBoxConnection,
   UnoBoxCreateJobStatus,
   UnoCloudState,
-  WorkspaceCapability,
-  WorkspaceClaim,
   WorkspaceInstructions,
   WorkspaceMachineKind,
   WorkspaceMachineScope,
-  WorkspacePolicy,
-  WorkspaceRequest,
-  WorkspaceRequestKind,
   WorkspaceState,
-  WorkspaceTransport,
 } from "./workspace.ts";
 import { OpenError, OpenInEditorInput } from "./editor.ts";
 import { AuthAccessStreamEvent, AuthLinkRequestStreamEvent } from "./auth.ts";
@@ -286,13 +279,6 @@ export const WS_METHODS = {
   workspaceSyncMachines: "workspace.syncMachines",
   workspaceUpdateMachine: "workspace.updateMachine",
   workspaceRemoveMachine: "workspace.removeMachine",
-  workspaceSetPolicy: "workspace.setPolicy",
-  workspaceUpsertGrant: "workspace.upsertGrant",
-  workspaceRemoveGrant: "workspace.removeGrant",
-  workspaceAcquireClaim: "workspace.acquireClaim",
-  workspaceReleaseClaim: "workspace.releaseClaim",
-  workspaceCreateRequest: "workspace.createRequest",
-  workspaceDecideRequest: "workspace.decideRequest",
   workspaceGetInstructions: "workspace.getInstructions",
   workspaceSetInstructions: "workspace.setInstructions",
   workspaceApplyInstructions: "workspace.applyInstructions",
@@ -894,80 +880,6 @@ export const WorkspaceRemoveMachineInput = Schema.Struct({
 });
 export type WorkspaceRemoveMachineInput = typeof WorkspaceRemoveMachineInput.Type;
 
-export const WorkspaceSetPolicyInput = Schema.Struct({
-  policy: WorkspacePolicy,
-});
-export type WorkspaceSetPolicyInput = typeof WorkspaceSetPolicyInput.Type;
-
-export const WorkspaceUpsertGrantInput = Schema.Struct({
-  /** Omitted for a new grant; present when editing an existing row. */
-  grantId: Schema.optional(Schema.String),
-  fromEnvironmentId: Schema.String,
-  toEnvironmentId: Schema.String,
-  repositoryKey: Schema.String,
-  capabilities: Schema.Array(WorkspaceCapability),
-  transport: WorkspaceTransport,
-  mode: CrossEnvironmentWriteMode,
-  requiresClaim: Schema.Boolean,
-});
-export type WorkspaceUpsertGrantInput = typeof WorkspaceUpsertGrantInput.Type;
-
-export const WorkspaceRemoveGrantInput = Schema.Struct({
-  grantId: Schema.String,
-});
-export type WorkspaceRemoveGrantInput = typeof WorkspaceRemoveGrantInput.Type;
-
-export const WorkspaceAcquireClaimInput = Schema.Struct({
-  claimKey: Schema.String,
-  holderEnvironmentId: EnvironmentId,
-  reason: Schema.String,
-  ttlSeconds: Schema.optional(Schema.Number),
-});
-export type WorkspaceAcquireClaimInput = typeof WorkspaceAcquireClaimInput.Type;
-
-export const WorkspaceAcquireClaimResult = Schema.Struct({
-  outcome: Schema.Literals(["acquired", "renewed", "taken"]),
-  claim: WorkspaceClaim,
-  state: WorkspaceState,
-});
-export type WorkspaceAcquireClaimResult = typeof WorkspaceAcquireClaimResult.Type;
-
-export const WorkspaceReleaseClaimInput = Schema.Struct({
-  claimKey: Schema.String,
-  /** Null releases regardless of holder — the "take it back" path, behind a confirm. */
-  holderEnvironmentId: Schema.NullOr(EnvironmentId),
-});
-export type WorkspaceReleaseClaimInput = typeof WorkspaceReleaseClaimInput.Type;
-
-export const WorkspaceCreateRequestInput = Schema.Struct({
-  kind: WorkspaceRequestKind,
-  fromEnvironmentId: EnvironmentId,
-  toEnvironmentId: EnvironmentId,
-  repositoryKey: Schema.String,
-  threadId: Schema.optional(Schema.NullOr(Schema.String)),
-  reason: Schema.String,
-  payloadPreview: Schema.String,
-  hops: Schema.optional(Schema.Number),
-});
-export type WorkspaceCreateRequestInput = typeof WorkspaceCreateRequestInput.Type;
-
-export const WorkspaceCreateRequestResult = Schema.Struct({
-  /**
-   * `auto_approved` when a grant already says `allow` — the caller still gets a
-   * request row, so the audit trail does not depend on which path was taken.
-   */
-  disposition: Schema.Literals(["pending", "auto_approved"]),
-  request: WorkspaceRequest,
-  state: WorkspaceState,
-});
-export type WorkspaceCreateRequestResult = typeof WorkspaceCreateRequestResult.Type;
-
-export const WorkspaceDecideRequestInput = Schema.Struct({
-  requestId: Schema.String,
-  decision: Schema.Literals(["approve", "reject"]),
-});
-export type WorkspaceDecideRequestInput = typeof WorkspaceDecideRequestInput.Type;
-
 export const WorkspaceGetInstructionsInput = Schema.Struct({
   environmentId: EnvironmentId,
   /** Optional project root, so the repository layer can be read from disk. */
@@ -1022,48 +934,6 @@ export const WsWorkspaceUpdateMachineRpc = Rpc.make(WS_METHODS.workspaceUpdateMa
 
 export const WsWorkspaceRemoveMachineRpc = Rpc.make(WS_METHODS.workspaceRemoveMachine, {
   payload: WorkspaceRemoveMachineInput,
-  success: WorkspaceState,
-  error: WorkspaceRpcError,
-});
-
-export const WsWorkspaceSetPolicyRpc = Rpc.make(WS_METHODS.workspaceSetPolicy, {
-  payload: WorkspaceSetPolicyInput,
-  success: WorkspaceState,
-  error: WorkspaceRpcError,
-});
-
-export const WsWorkspaceUpsertGrantRpc = Rpc.make(WS_METHODS.workspaceUpsertGrant, {
-  payload: WorkspaceUpsertGrantInput,
-  success: WorkspaceState,
-  error: WorkspaceRpcError,
-});
-
-export const WsWorkspaceRemoveGrantRpc = Rpc.make(WS_METHODS.workspaceRemoveGrant, {
-  payload: WorkspaceRemoveGrantInput,
-  success: WorkspaceState,
-  error: WorkspaceRpcError,
-});
-
-export const WsWorkspaceAcquireClaimRpc = Rpc.make(WS_METHODS.workspaceAcquireClaim, {
-  payload: WorkspaceAcquireClaimInput,
-  success: WorkspaceAcquireClaimResult,
-  error: WorkspaceRpcError,
-});
-
-export const WsWorkspaceReleaseClaimRpc = Rpc.make(WS_METHODS.workspaceReleaseClaim, {
-  payload: WorkspaceReleaseClaimInput,
-  success: WorkspaceState,
-  error: WorkspaceRpcError,
-});
-
-export const WsWorkspaceCreateRequestRpc = Rpc.make(WS_METHODS.workspaceCreateRequest, {
-  payload: WorkspaceCreateRequestInput,
-  success: WorkspaceCreateRequestResult,
-  error: WorkspaceRpcError,
-});
-
-export const WsWorkspaceDecideRequestRpc = Rpc.make(WS_METHODS.workspaceDecideRequest, {
-  payload: WorkspaceDecideRequestInput,
   success: WorkspaceState,
   error: WorkspaceRpcError,
 });
@@ -1221,13 +1091,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsWorkspaceSyncMachinesRpc,
   WsWorkspaceUpdateMachineRpc,
   WsWorkspaceRemoveMachineRpc,
-  WsWorkspaceSetPolicyRpc,
-  WsWorkspaceUpsertGrantRpc,
-  WsWorkspaceRemoveGrantRpc,
-  WsWorkspaceAcquireClaimRpc,
-  WsWorkspaceReleaseClaimRpc,
-  WsWorkspaceCreateRequestRpc,
-  WsWorkspaceDecideRequestRpc,
   WsWorkspaceGetInstructionsRpc,
   WsWorkspaceSetInstructionsRpc,
   WsWorkspaceApplyInstructionsRpc,

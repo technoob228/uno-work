@@ -13,14 +13,7 @@
  * like a healthy one unless the panel says otherwise, and silent staleness is
  * the failure we have already been bitten by with tunnels.
  */
-import {
-  isAssistantProjectId,
-  parseUnoBoxSshTarget,
-  type UnoBox,
-  type WorkspaceCapability,
-  type WorkspacePolicy,
-  type WorkspaceState,
-} from "@t3tools/contracts";
+import { isAssistantProjectId, parseUnoBoxSshTarget, type UnoBox } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import {
@@ -51,16 +44,11 @@ import {
   unoCloudBoxPowerMutationOptions,
   unoCloudStateQueryOptions,
   workspaceQueryKeys,
-  workspaceDecideRequestMutationOptions,
-  workspaceRemoveGrantMutationOptions,
   workspaceRenameMutationOptions,
   workspaceRemoveMachineMutationOptions,
-  workspaceReleaseClaimMutationOptions,
-  workspaceSetPolicyMutationOptions,
   workspaceStateQueryOptions,
   workspaceSyncMachinesMutationOptions,
   workspaceUpdateMachineMutationOptions,
-  workspaceUpsertGrantMutationOptions,
 } from "../../lib/workspaceReactQuery";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import {
@@ -79,7 +67,6 @@ import { MACHINE_KIND_ICON } from "../machineKindIcons";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
-import { Switch } from "../ui/switch";
 import { Input } from "../ui/input";
 import {
   SettingsPageContainer,
@@ -96,23 +83,6 @@ const MACHINE_COLOR_CHOICES = [
   { slot: 2, label: "Hue 2" },
   { slot: 3, label: "Hue 3" },
 ] as const;
-
-const CAPABILITY_LABELS: Record<WorkspaceCapability, string> = {
-  view_status: "see status",
-  view_threads: "see chats",
-  read_transcript: "read transcript",
-  create_threads: "create chats",
-  write: "write",
-};
-
-const WRITE_MODE_CHOICES: ReadonlyArray<{
-  readonly value: WorkspacePolicy["crossEnvironmentWrite"];
-  readonly label: string;
-}> = [
-  { value: "deny", label: "Never" },
-  { value: "request", label: "By request" },
-  { value: "allow", label: "Straight through" },
-];
 
 function StatusPill({
   tone,
@@ -187,22 +157,7 @@ export function WorkspaceSettings() {
   const removeMachine = useMutation(
     workspaceRemoveMachineMutationOptions(registryEnvironmentId, queryClient),
   );
-  const releaseClaim = useMutation(
-    workspaceReleaseClaimMutationOptions(registryEnvironmentId, queryClient),
-  );
-  const setPolicy = useMutation(
-    workspaceSetPolicyMutationOptions(registryEnvironmentId, queryClient),
-  );
-  const upsertGrant = useMutation(
-    workspaceUpsertGrantMutationOptions(registryEnvironmentId, queryClient),
-  );
-  const removeGrant = useMutation(
-    workspaceRemoveGrantMutationOptions(registryEnvironmentId, queryClient),
-  );
   const boxPower = useMutation(unoCloudBoxPowerMutationOptions(registryEnvironmentId, queryClient));
-  const decideRequest = useMutation(
-    workspaceDecideRequestMutationOptions(registryEnvironmentId, queryClient),
-  );
   const renameWorkspace = useMutation(
     workspaceRenameMutationOptions(registryEnvironmentId, queryClient),
   );
@@ -374,7 +329,6 @@ export function WorkspaceSettings() {
     );
   }
 
-  const pendingCount = state?.pendingRequests.length ?? 0;
   const unreachableMachines = rows.filter((row) => row.status !== "online").length;
 
   return (
@@ -667,7 +621,6 @@ export function WorkspaceSettings() {
 
       {advancedEnabled ? (
         <AdvancedSharingSection
-          pendingCount={pendingCount}
           unreachableMachines={unreachableMachines}
           machineCount={rows.length}
         >
@@ -891,132 +844,6 @@ export function WorkspaceSettings() {
             </div>
           </SettingsSection>
 
-          <SettingsSection title="Claims and budget">
-            <SettingsRow
-              title="Cross-machine budget"
-              description="Budgets are per list, not per token: a loop is made of individually authorised calls."
-              control={
-                <div className="flex items-center gap-2 text-sm">
-                  <StatusPill tone="muted">
-                    {state?.usage.crossEnvironmentTurnsLastHour ?? 0} /{" "}
-                    {state?.policy.crossEnvironmentTurnsPerHour ?? 0} per hour
-                  </StatusPill>
-                  <StatusPill tone="muted">
-                    {state?.usage.concurrentCrossEnvironment ?? 0} /{" "}
-                    {state?.policy.maxConcurrentCrossEnvironment ?? 0} at once
-                  </StatusPill>
-                </div>
-              }
-            />
-            <div className="flex flex-col gap-2 px-4 pb-3 sm:px-5">
-              {(state?.claims ?? []).length === 0 ? (
-                <p className="text-sm text-muted-foreground">Nothing is claimed right now.</p>
-              ) : null}
-              {(state?.claims ?? []).map((claim) => (
-                <div
-                  key={claim.claimId}
-                  className="flex flex-wrap items-center gap-3 rounded-lg border border-border px-3 py-2"
-                >
-                  <div className="min-w-0 flex-1">
-                    <span className="truncate text-sm font-medium">{claim.claimKey}</span>
-                    <p className="truncate text-xs text-muted-foreground">
-                      held by {claim.holderEnvironmentId} · expires{" "}
-                      {formatRelativeTime(claim.expiresAt, now)}
-                      {claim.reason ? ` · ${claim.reason}` : ""}
-                    </p>
-                  </div>
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    onClick={() =>
-                      releaseClaim.mutate({ claimKey: claim.claimKey, holderEnvironmentId: null })
-                    }
-                  >
-                    Take back
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </SettingsSection>
-
-          <SettingsSection title="Requests from other machines">
-            <SettingsRow
-              title="Pending"
-              description="Each one is approved separately. A standing permission is a grant, not a button on this dialog — the moment you are deciding a single request is the worst moment to widen a permission permanently."
-              control={
-                <StatusPill tone={pendingCount > 0 ? "warn" : "muted"}>
-                  {pendingCount} waiting
-                </StatusPill>
-              }
-            />
-            <div className="flex flex-col gap-2 px-4 pb-3 sm:px-5">
-              {pendingCount === 0 ? (
-                <p className="text-sm text-muted-foreground">Nothing is waiting for a decision.</p>
-              ) : null}
-              {(state?.pendingRequests ?? []).map((request) => (
-                <div
-                  key={request.requestId}
-                  className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2"
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-medium">
-                      {request.fromEnvironmentId} wants to{" "}
-                      {request.kind === "post_message"
-                        ? "post a message"
-                        : request.kind === "create_thread"
-                          ? "create a chat"
-                          : "read a transcript"}
-                    </span>
-                    <StatusPill tone="muted">
-                      {request.hops} of {state?.policy.maxForwardHops ?? 0} forwards
-                    </StatusPill>
-                    <StatusPill tone="muted">
-                      expires {formatRelativeTime(request.expiresAt, now)}
-                    </StatusPill>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {request.repositoryKey}
-                    {request.threadId ? ` · ${request.threadId}` : ""}
-                    {request.reason ? ` · “${request.reason}”` : ""}
-                  </p>
-                  {request.payloadPreview.trim().length > 0 ? (
-                    <pre className="max-h-24 overflow-auto whitespace-pre-wrap rounded-md bg-muted/60 px-2 py-1 text-xs text-muted-foreground">
-                      {request.payloadPreview}
-                    </pre>
-                  ) : null}
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="xs"
-                      disabled={decideRequest.isPending}
-                      onClick={() =>
-                        decideRequest.mutate({ requestId: request.requestId, decision: "approve" })
-                      }
-                    >
-                      Allow once
-                    </Button>
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      disabled={decideRequest.isPending}
-                      onClick={() =>
-                        decideRequest.mutate({ requestId: request.requestId, decision: "reject" })
-                      }
-                    >
-                      Refuse
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </SettingsSection>
-
-          <WorkspaceRulesSection
-            state={state ?? null}
-            onSetPolicy={(policy) => setPolicy.mutate({ policy })}
-            onRemoveGrant={(grantId) => removeGrant.mutate({ grantId })}
-            onAddGrant={(input) => upsertGrant.mutate(input)}
-          />
-
           <WorkspaceInstructionsSection
             registryEnvironmentId={registryEnvironmentId}
             state={state ?? null}
@@ -1030,22 +857,19 @@ export function WorkspaceSettings() {
 }
 
 /**
- * Everything a first-time user does not need: the shared registry, grants,
- * claims, requests and instruction layers. Collapsed by default; a pending
- * request is surfaced on the trigger so it is never hidden by the fold.
+ * Everything a first-time user does not need: the shared machine list, the
+ * Uno boxes on the account and the instruction layers. Collapsed by default.
  */
 function AdvancedSharingSection({
-  pendingCount,
   unreachableMachines,
   machineCount,
   children,
 }: {
-  readonly pendingCount: number;
   readonly unreachableMachines: number;
   readonly machineCount: number;
   readonly children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(pendingCount > 0);
+  const [open, setOpen] = useState(false);
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="flex flex-col gap-8">
       <CollapsibleTrigger
@@ -1055,11 +879,6 @@ function AdvancedSharingSection({
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
             Advanced sharing
-            {pendingCount > 0 ? (
-              <StatusPill tone="warn">
-                {pendingCount} request{pendingCount === 1 ? "" : "s"} waiting
-              </StatusPill>
-            ) : null}
             {unreachableMachines > 0 && machineCount > 0 ? (
               <StatusPill tone="muted">
                 {unreachableMachines} of {machineCount} not online
@@ -1067,10 +886,8 @@ function AdvancedSharingSection({
             ) : null}
           </div>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground/80">
-            Lets your machines work together: one machine can ask another to run a task, read a
-            chat, or post a message. You decide which machines may do that, whether each request
-            needs your approval, and what written instructions every agent gets on every machine.
-            Most people never need to open this.
+            The shared machine list, the Uno boxes on this account and the written instructions
+            every agent gets on every machine. Most people never need to open this.
           </p>
         </div>
         <ChevronDownIcon
@@ -1079,216 +896,5 @@ function AdvancedSharingSection({
       </CollapsibleTrigger>
       <CollapsiblePanel className="flex flex-col gap-8">{children}</CollapsiblePanel>
     </Collapsible>
-  );
-}
-
-function WorkspaceRulesSection({
-  state,
-  onSetPolicy,
-  onRemoveGrant,
-  onAddGrant,
-}: {
-  readonly state: WorkspaceState | null;
-  readonly onSetPolicy: (policy: WorkspacePolicy) => void;
-  readonly onRemoveGrant: (grantId: string) => void;
-  readonly onAddGrant: (input: {
-    readonly fromEnvironmentId: string;
-    readonly toEnvironmentId: string;
-    readonly repositoryKey: string;
-    readonly capabilities: readonly WorkspaceCapability[];
-    readonly transport: "direct" | "registry";
-    readonly mode: WorkspacePolicy["crossEnvironmentWrite"];
-    readonly requiresClaim: boolean;
-  }) => void;
-}) {
-  const policy = state?.policy;
-  const [draftFrom, setDraftFrom] = useState("*");
-  const [draftTo, setDraftTo] = useState("*");
-  const [draftRepository, setDraftRepository] = useState("*");
-  const [draftMode, setDraftMode] = useState<WorkspacePolicy["crossEnvironmentWrite"]>("request");
-  const [draftCapabilities, setDraftCapabilities] = useState<readonly WorkspaceCapability[]>([
-    "view_status",
-  ]);
-
-  if (!policy) return null;
-
-  return (
-    <SettingsSection title="Rules">
-      <SettingsRow
-        title="How another machine may write here"
-        description="The default is a request a human approves. A standing permission is a grant below — the approval dialog never offers “always”."
-        control={
-          <div className="flex items-center gap-1">
-            {WRITE_MODE_CHOICES.map((choice) => (
-              <Button
-                key={choice.value}
-                size="xs"
-                variant={policy.crossEnvironmentWrite === choice.value ? "default" : "outline"}
-                onClick={() => onSetPolicy({ ...policy, crossEnvironmentWrite: choice.value })}
-              >
-                {choice.label}
-              </Button>
-            ))}
-          </div>
-        }
-      />
-
-      <SettingsRow
-        title="Accept commands from other machines"
-        description="Master switch. Off refuses every peer command before any grant is consulted."
-        control={
-          <Switch
-            checked={policy.acceptPeerCommands}
-            onCheckedChange={(checked) =>
-              onSetPolicy({ ...policy, acceptPeerCommands: checked === true })
-            }
-          />
-        }
-      />
-
-      <SettingsRow
-        title="Chain limits"
-        description="Guards against “HK pushes CM, CM pushes HK” running all night."
-        control={
-          <div className="flex items-center gap-2">
-            <Input
-              aria-label="Maximum forwards"
-              className="w-20"
-              type="number"
-              min={0}
-              defaultValue={policy.maxForwardHops}
-              onBlur={(event) => {
-                const next = Number.parseInt(event.currentTarget.value, 10);
-                if (!Number.isFinite(next) || next === policy.maxForwardHops) return;
-                onSetPolicy({ ...policy, maxForwardHops: Math.max(next, 0) });
-              }}
-            />
-            <span className="text-xs text-muted-foreground">forwards</span>
-            <Input
-              aria-label="Cross-machine steps per hour"
-              className="w-24"
-              type="number"
-              min={0}
-              defaultValue={policy.crossEnvironmentTurnsPerHour}
-              onBlur={(event) => {
-                const next = Number.parseInt(event.currentTarget.value, 10);
-                if (!Number.isFinite(next) || next === policy.crossEnvironmentTurnsPerHour) return;
-                onSetPolicy({ ...policy, crossEnvironmentTurnsPerHour: Math.max(next, 0) });
-              }}
-            />
-            <span className="text-xs text-muted-foreground">steps / hour</span>
-          </div>
-        }
-      />
-
-      <div className="flex flex-col gap-2 px-4 pb-3 sm:px-5">
-        {(state?.grants ?? []).map((grant) => (
-          <div
-            key={grant.grantId}
-            className="flex flex-wrap items-center gap-3 rounded-lg border border-border px-3 py-2"
-          >
-            <div className="min-w-0 flex-1">
-              <span className="truncate text-sm font-medium">
-                {grant.fromEnvironmentId} → {grant.toEnvironmentId}
-              </span>
-              <p className="truncate text-xs text-muted-foreground">
-                {grant.repositoryKey === "*" ? "all repositories" : grant.repositoryKey} ·{" "}
-                {grant.transport === "registry" ? "through the shared list" : "direct"} ·{" "}
-                {grant.capabilities.map((capability) => CAPABILITY_LABELS[capability]).join(", ") ||
-                  "no capabilities"}
-                {grant.requiresClaim ? " · needs the claim" : ""}
-              </p>
-            </div>
-            <StatusPill
-              tone={grant.mode === "deny" ? "bad" : grant.mode === "allow" ? "ok" : "warn"}
-            >
-              {grant.mode === "deny"
-                ? "denied"
-                : grant.mode === "allow"
-                  ? "straight through"
-                  : "by request"}
-            </StatusPill>
-            <Button size="xs" variant="ghost" onClick={() => onRemoveGrant(grant.grantId)}>
-              <TrashIcon className="size-3.5" />
-            </Button>
-          </div>
-        ))}
-
-        <div className="flex flex-wrap items-end gap-2 rounded-lg border border-dashed border-border px-3 py-2">
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            From
-            <Input
-              className="w-40"
-              value={draftFrom}
-              onChange={(e) => setDraftFrom(e.target.value)}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            To
-            <Input className="w-40" value={draftTo} onChange={(e) => setDraftTo(e.target.value)} />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            Repository
-            <Input
-              className="w-40"
-              value={draftRepository}
-              onChange={(e) => setDraftRepository(e.target.value)}
-            />
-          </label>
-          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-            Capabilities
-            <div className="flex flex-wrap gap-1">
-              {(Object.keys(CAPABILITY_LABELS) as WorkspaceCapability[]).map((capability) => (
-                <Button
-                  key={capability}
-                  size="xs"
-                  variant={draftCapabilities.includes(capability) ? "default" : "outline"}
-                  onClick={() =>
-                    setDraftCapabilities((current) =>
-                      current.includes(capability)
-                        ? current.filter((entry) => entry !== capability)
-                        : [...current, capability],
-                    )
-                  }
-                >
-                  {CAPABILITY_LABELS[capability]}
-                </Button>
-              ))}
-            </div>
-          </div>
-          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-            Mode
-            <div className="flex gap-1">
-              {WRITE_MODE_CHOICES.map((choice) => (
-                <Button
-                  key={choice.value}
-                  size="xs"
-                  variant={draftMode === choice.value ? "default" : "outline"}
-                  onClick={() => setDraftMode(choice.value)}
-                >
-                  {choice.label}
-                </Button>
-              ))}
-            </div>
-          </div>
-          <Button
-            size="xs"
-            onClick={() =>
-              onAddGrant({
-                fromEnvironmentId: draftFrom.trim() || "*",
-                toEnvironmentId: draftTo.trim() || "*",
-                repositoryKey: draftRepository.trim() || "*",
-                capabilities: draftCapabilities,
-                transport: "direct",
-                mode: draftMode,
-                requiresClaim: draftMode !== "deny" && draftCapabilities.includes("write"),
-              })
-            }
-          >
-            Add grant
-          </Button>
-        </div>
-      </div>
-    </SettingsSection>
   );
 }

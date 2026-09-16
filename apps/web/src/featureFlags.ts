@@ -54,7 +54,7 @@ export const FEATURE_FLAGS = [
     key: "workspace",
     label: "Advanced sharing between machines",
     description:
-      "The shared machine list — grants, claims, requests and instruction layers that let one machine act on another. Turn off to hide the “Advanced sharing” section under Settings → My machines. The machines list itself stays.",
+      "The shared machine list, the Uno boxes on this account and the instruction layers agents read. Turn off to hide the “Advanced sharing” section under Settings → My machines. The machines list itself stays.",
     default: true,
   },
   {

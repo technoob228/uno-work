@@ -374,20 +374,29 @@ describe("agent threads bridge: reading children", () => {
       const threads = [
         threadShell(CALLER),
         threadShell(CHILD, { spawnedByThreadId: CALLER, controller: "agent" }),
-        threadShell(FOREIGN, { spawnedByThreadId: "someone-else" as ThreadId, controller: "agent" }),
+        threadShell(FOREIGN, {
+          spawnedByThreadId: "someone-else" as ThreadId,
+          controller: "agent",
+        }),
         threadShell("thread-archived" as ThreadId, { archivedAt: T0 }),
         threadShell("thread-elsewhere" as ThreadId, { projectId: OTHER_PROJECT }),
       ];
       const { handlers, dispatched } = makeFixture({ threads });
       const params = { limit: null, waitMs: null };
       for (const threadId of ["missing", "thread-archived", "thread-elsewhere"]) {
-        assert.strictEqual((yield* handlers.getThread(scoped(), { threadId, ...params })).status, 404);
+        assert.strictEqual(
+          (yield* handlers.getThread(scoped(), { threadId, ...params })).status,
+          404,
+        );
         assert.strictEqual(
           (yield* handlers.sendMessage(scoped(), { threadId, body: { text: "hi" } })).status,
           404,
         );
       }
-      assert.strictEqual((yield* handlers.releaseThread(scoped(), { threadId: FOREIGN })).status, 404);
+      assert.strictEqual(
+        (yield* handlers.releaseThread(scoped(), { threadId: FOREIGN })).status,
+        404,
+      );
       assert.strictEqual(dispatched.length, 0);
 
       // "any-project" opens other projects.
@@ -620,10 +629,12 @@ describe("agent threads bridge: peers (plan 22)", () => {
       const reply = yield* handlers.listThreads(scoped(), { scope: "project" });
       assert.strictEqual(reply.status, 200);
       const rows = body(reply).threads as Array<Record<string, unknown>>;
-      assert.deepStrictEqual(
-        Object.fromEntries(rows.map((row) => [row.id, row.relation])),
-        { "thread-boss": "parent", [CALLER]: "self", [CHILD]: "child", [FOREIGN]: "peer" },
-      );
+      assert.deepStrictEqual(Object.fromEntries(rows.map((row) => [row.id, row.relation])), {
+        "thread-boss": "parent",
+        [CALLER]: "self",
+        [CHILD]: "child",
+        [FOREIGN]: "peer",
+      });
       assert.strictEqual(rows[0]?.id, "thread-boss");
       assert.strictEqual(rows.find((row) => row.id === FOREIGN)?.provider, "codex");
 
@@ -643,7 +654,10 @@ describe("agent threads bridge: peers (plan 22)", () => {
     Effect.gen(function* () {
       const { handlers, dispatched } = makeFixture({
         threads: [
-          threadShell(CALLER, { spawnedByThreadId: "thread-boss" as ThreadId, controller: "agent" }),
+          threadShell(CALLER, {
+            spawnedByThreadId: "thread-boss" as ThreadId,
+            controller: "agent",
+          }),
           threadShell("thread-boss" as ThreadId),
           threadShell(FOREIGN),
         ],
@@ -662,7 +676,11 @@ describe("agent threads bridge: peers (plan 22)", () => {
       });
       assert.strictEqual(body(toPeer).relation, "peer");
       assert.deepStrictEqual(
-        dispatched.map((entry) => [entry.command.type, (entry.command as any).threadId, entry.origin]),
+        dispatched.map((entry) => [
+          entry.command.type,
+          (entry.command as any).threadId,
+          entry.origin,
+        ]),
         [
           ["thread.turn.start", "thread-boss", { kind: "agent", threadId: CALLER }],
           ["thread.turn.start", FOREIGN, { kind: "agent", threadId: CALLER }],
@@ -681,7 +699,10 @@ describe("agent threads bridge: peers (plan 22)", () => {
         threads: [
           threadShell(CALLER),
           threadShell("thread-asking" as ThreadId, { hasPendingApprovals: true }),
-          threadShell(FOREIGN, { spawnedByThreadId: "someone-else" as ThreadId, controller: "human" }),
+          threadShell(FOREIGN, {
+            spawnedByThreadId: "someone-else" as ThreadId,
+            controller: "human",
+          }),
         ],
       });
       const asking = yield* handlers.sendMessage(scoped(), {

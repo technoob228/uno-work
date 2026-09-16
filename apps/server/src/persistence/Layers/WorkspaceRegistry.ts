@@ -1,20 +1,10 @@
 import {
-  DEFAULT_WORKSPACE_POLICY,
   EnvironmentId,
-  type WorkspaceCapability,
-  type WorkspaceClaim,
-  type WorkspaceGrant,
   type WorkspaceIdentity,
   type WorkspaceMachine,
   type WorkspaceMachineKind,
   type WorkspaceMachineScope,
-  type WorkspacePolicy,
-  type WorkspaceRequest,
-  type WorkspaceRequestKind,
-  type WorkspaceRequestStatus,
   type WorkspaceState,
-  type WorkspaceTransport,
-  type CrossEnvironmentWriteMode,
 } from "@t3tools/contracts";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -22,7 +12,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { toPersistenceSqlError, type ManagerRepositoryError } from "../Errors.ts";
 import {
   WorkspaceRegistryRepository,
-  type ClaimAcquireOutcome,
   type WorkspaceRegistryRepositoryShape,
 } from "../Services/WorkspaceRegistry.ts";
 
@@ -32,10 +21,26 @@ interface IdentityRow {
   readonly epoch: number;
   readonly registryEnvironmentId: string | null;
   readonly unoAccountId: number | null;
-  readonly policyJson: string;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
+
+const IDENTITY_COLUMNS = `
+  workspace_id AS "workspaceId",
+  name AS "name",
+  epoch AS "epoch",
+  registry_environment_id AS "registryEnvironmentId",
+  uno_account_id AS "unoAccountId",
+  created_at AS "createdAt",
+  updated_at AS "updatedAt"
+`;
+
+/**
+ * `policy_json` is NOT NULL in migration 038 and nothing reads it any more —
+ * the cross-machine policy went away with the grants. New rows get an empty
+ * object until the release that drops the column.
+ */
+const LEGACY_EMPTY_POLICY_JSON = "{}";
 
 interface MachineRow {
   readonly environmentId: string;
@@ -48,44 +53,6 @@ interface MachineRow {
   readonly repositoriesJson: string;
   readonly addedAt: string;
   readonly lastSeenAt: string | null;
-}
-
-interface GrantRow {
-  readonly grantId: string;
-  readonly fromEnvironmentId: string;
-  readonly toEnvironmentId: string;
-  readonly repositoryKey: string;
-  readonly capabilitiesJson: string;
-  readonly transport: string;
-  readonly mode: string;
-  readonly requiresClaim: number;
-  readonly createdAt: string;
-}
-
-interface ClaimRow {
-  readonly claimId: string;
-  readonly claimKey: string;
-  readonly holderEnvironmentId: string;
-  readonly reason: string;
-  readonly acquiredAt: string;
-  readonly expiresAt: string;
-}
-
-interface RequestRow {
-  readonly requestId: string;
-  readonly kind: string;
-  readonly fromEnvironmentId: string;
-  readonly toEnvironmentId: string;
-  readonly repositoryKey: string;
-  readonly threadId: string | null;
-  readonly reason: string;
-  readonly payloadPreview: string;
-  readonly status: string;
-  readonly nonce: string;
-  readonly hops: number;
-  readonly createdAt: string;
-  readonly expiresAt: string;
-  readonly decidedAt: string | null;
 }
 
 /**
@@ -104,76 +71,12 @@ function parseJsonArray(raw: string): readonly string[] {
   }
 }
 
-function parsePolicy(raw: string): WorkspacePolicy {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) return DEFAULT_WORKSPACE_POLICY;
-    const candidate = parsed as Partial<WorkspacePolicy>;
-    return {
-      crossEnvironmentWrite: isWriteMode(candidate.crossEnvironmentWrite)
-        ? candidate.crossEnvironmentWrite
-        : DEFAULT_WORKSPACE_POLICY.crossEnvironmentWrite,
-      maxForwardHops:
-        typeof candidate.maxForwardHops === "number" && candidate.maxForwardHops >= 0
-          ? candidate.maxForwardHops
-          : DEFAULT_WORKSPACE_POLICY.maxForwardHops,
-      dropOwnEcho:
-        typeof candidate.dropOwnEcho === "boolean"
-          ? candidate.dropOwnEcho
-          : DEFAULT_WORKSPACE_POLICY.dropOwnEcho,
-      crossEnvironmentTurnsPerHour:
-        typeof candidate.crossEnvironmentTurnsPerHour === "number" &&
-        candidate.crossEnvironmentTurnsPerHour >= 0
-          ? candidate.crossEnvironmentTurnsPerHour
-          : DEFAULT_WORKSPACE_POLICY.crossEnvironmentTurnsPerHour,
-      maxConcurrentCrossEnvironment:
-        typeof candidate.maxConcurrentCrossEnvironment === "number" &&
-        candidate.maxConcurrentCrossEnvironment >= 0
-          ? candidate.maxConcurrentCrossEnvironment
-          : DEFAULT_WORKSPACE_POLICY.maxConcurrentCrossEnvironment,
-      acceptPeerCommands:
-        typeof candidate.acceptPeerCommands === "boolean"
-          ? candidate.acceptPeerCommands
-          : DEFAULT_WORKSPACE_POLICY.acceptPeerCommands,
-    };
-  } catch {
-    return DEFAULT_WORKSPACE_POLICY;
-  }
-}
-
-function isWriteMode(value: unknown): value is CrossEnvironmentWriteMode {
-  return value === "deny" || value === "request" || value === "allow";
-}
-
 function toMachineKind(value: string): WorkspaceMachineKind {
   return value === "local" || value === "ssh" || value === "uno_box" ? value : "ssh";
 }
 
 function toMachineScope(value: string): WorkspaceMachineScope {
   return value === "repositories" ? "repositories" : "full";
-}
-
-function toTransport(value: string): WorkspaceTransport {
-  return value === "registry" ? "registry" : "direct";
-}
-
-function toCapabilities(raw: string): readonly WorkspaceCapability[] {
-  const allowed = new Set<string>([
-    "view_status",
-    "view_threads",
-    "read_transcript",
-    "create_threads",
-    "write",
-  ]);
-  return parseJsonArray(raw).filter((entry): entry is WorkspaceCapability => allowed.has(entry));
-}
-
-function toRequestKind(value: string): WorkspaceRequestKind {
-  return value === "create_thread" || value === "read_transcript" ? value : "post_message";
-}
-
-function toRequestStatus(value: string): WorkspaceRequestStatus {
-  return value === "approved" || value === "rejected" || value === "expired" ? value : "pending";
 }
 
 function toIdentity(row: IdentityRow): WorkspaceIdentity {
@@ -203,61 +106,6 @@ function toMachine(row: MachineRow): WorkspaceMachine {
     lastSeenAt: row.lastSeenAt,
   };
 }
-
-function toGrant(row: GrantRow): WorkspaceGrant {
-  return {
-    grantId: row.grantId,
-    fromEnvironmentId: row.fromEnvironmentId,
-    toEnvironmentId: row.toEnvironmentId,
-    repositoryKey: row.repositoryKey,
-    capabilities: toCapabilities(row.capabilitiesJson),
-    transport: toTransport(row.transport),
-    mode: isWriteMode(row.mode) ? row.mode : "request",
-    requiresClaim: row.requiresClaim !== 0,
-    createdAt: row.createdAt,
-  };
-}
-
-function toClaim(row: ClaimRow): WorkspaceClaim {
-  return {
-    claimId: row.claimId,
-    claimKey: row.claimKey,
-    holderEnvironmentId: EnvironmentId.make(row.holderEnvironmentId),
-    reason: row.reason,
-    acquiredAt: row.acquiredAt,
-    expiresAt: row.expiresAt,
-  };
-}
-
-function toRequest(row: RequestRow): WorkspaceRequest {
-  return {
-    requestId: row.requestId,
-    kind: toRequestKind(row.kind),
-    fromEnvironmentId: EnvironmentId.make(row.fromEnvironmentId),
-    toEnvironmentId: EnvironmentId.make(row.toEnvironmentId),
-    repositoryKey: row.repositoryKey,
-    threadId: row.threadId,
-    reason: row.reason,
-    payloadPreview: row.payloadPreview,
-    status: toRequestStatus(row.status),
-    nonce: row.nonce,
-    hops: row.hops,
-    createdAt: row.createdAt,
-    expiresAt: row.expiresAt,
-    decidedAt: row.decidedAt,
-  };
-}
-
-const IDENTITY_COLUMNS = `
-  workspace_id AS "workspaceId",
-  name AS "name",
-  epoch AS "epoch",
-  registry_environment_id AS "registryEnvironmentId",
-  uno_account_id AS "unoAccountId",
-  policy_json AS "policyJson",
-  created_at AS "createdAt",
-  updated_at AS "updatedAt"
-`;
 
 const makeWorkspaceRegistryRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -298,7 +146,7 @@ const makeWorkspaceRegistryRepository = Effect.gen(function* () {
           uno_account_id, policy_json, created_at, updated_at
         ) VALUES (
           1, ${input.workspaceId}, ${input.name}, 0, NULL,
-          NULL, ${JSON.stringify(DEFAULT_WORKSPACE_POLICY)}, ${input.now}, ${input.now}
+          NULL, ${LEGACY_EMPTY_POLICY_JSON}, ${input.now}, ${input.now}
         )
         ON CONFLICT(id) DO NOTHING
       `;
@@ -369,16 +217,6 @@ const makeWorkspaceRegistryRepository = Effect.gen(function* () {
   const removeMachine: WorkspaceRegistryRepositoryShape["removeMachine"] = (input) =>
     Effect.gen(function* () {
       yield* sql`DELETE FROM workspace_machines WHERE environment_id = ${input.environmentId}`;
-      // Grants and claims that named the machine go with it; leaving them would
-      // silently re-authorise a future machine that reuses the id.
-      yield* sql`
-        DELETE FROM workspace_grants
-        WHERE from_environment_id = ${input.environmentId}
-           OR to_environment_id = ${input.environmentId}
-      `;
-      yield* sql`
-        DELETE FROM workspace_claims WHERE holder_environment_id = ${input.environmentId}
-      `;
       yield* bumpEpoch(input.now);
     }).pipe(Effect.mapError(fail("removeMachine")));
 
@@ -388,235 +226,6 @@ const makeWorkspaceRegistryRepository = Effect.gen(function* () {
       SET last_seen_at = ${input.lastSeenAt}
       WHERE environment_id = ${input.environmentId}
     `.pipe(Effect.asVoid, Effect.mapError(fail("touchMachine")));
-
-  const setPolicy: WorkspaceRegistryRepositoryShape["setPolicy"] = (input) =>
-    Effect.gen(function* () {
-      yield* sql`
-        UPDATE workspace_identity SET policy_json = ${JSON.stringify(input.policy)} WHERE id = 1
-      `;
-      yield* bumpEpoch(input.now);
-    }).pipe(Effect.mapError(fail("setPolicy")));
-
-  const upsertGrant: WorkspaceRegistryRepositoryShape["upsertGrant"] = (input) =>
-    Effect.gen(function* () {
-      const grant = input.grant;
-      yield* sql`
-        INSERT INTO workspace_grants (
-          grant_id, from_environment_id, to_environment_id, repository_key,
-          capabilities_json, transport, mode, requires_claim, created_at
-        ) VALUES (
-          ${grant.grantId}, ${grant.fromEnvironmentId}, ${grant.toEnvironmentId},
-          ${grant.repositoryKey}, ${JSON.stringify(grant.capabilities)}, ${grant.transport},
-          ${grant.mode}, ${grant.requiresClaim ? 1 : 0}, ${grant.createdAt}
-        )
-        ON CONFLICT(grant_id) DO UPDATE SET
-          from_environment_id = excluded.from_environment_id,
-          to_environment_id = excluded.to_environment_id,
-          repository_key = excluded.repository_key,
-          capabilities_json = excluded.capabilities_json,
-          transport = excluded.transport,
-          mode = excluded.mode,
-          requires_claim = excluded.requires_claim
-      `;
-      yield* bumpEpoch(input.now);
-    }).pipe(Effect.mapError(fail("upsertGrant")));
-
-  const removeGrant: WorkspaceRegistryRepositoryShape["removeGrant"] = (input) =>
-    Effect.gen(function* () {
-      yield* sql`DELETE FROM workspace_grants WHERE grant_id = ${input.grantId}`;
-      yield* bumpEpoch(input.now);
-    }).pipe(Effect.mapError(fail("removeGrant")));
-
-  const acquireClaim: WorkspaceRegistryRepositoryShape["acquireClaim"] = (input) =>
-    Effect.gen(function* () {
-      // Expired rows are cleared first so a crashed holder does not park a key
-      // forever: the TTL is the recovery mechanism, not an admin action.
-      yield* sql`DELETE FROM workspace_claims WHERE expires_at <= ${input.now}`;
-      const existingRows = yield* sql<ClaimRow>`
-        SELECT
-          claim_id AS "claimId",
-          claim_key AS "claimKey",
-          holder_environment_id AS "holderEnvironmentId",
-          reason AS "reason",
-          acquired_at AS "acquiredAt",
-          expires_at AS "expiresAt"
-        FROM workspace_claims
-        WHERE claim_key = ${input.claimKey}
-      `;
-      const existing = existingRows[0];
-      if (existing && existing.holderEnvironmentId !== input.holderEnvironmentId) {
-        return { kind: "taken", claim: toClaim(existing) } satisfies ClaimAcquireOutcome;
-      }
-      if (existing) {
-        yield* sql`
-          UPDATE workspace_claims
-          SET expires_at = ${input.expiresAt}, reason = ${input.reason}
-          WHERE claim_key = ${input.claimKey}
-        `;
-        yield* bumpEpoch(input.now);
-        return {
-          kind: "renewed",
-          claim: {
-            ...toClaim(existing),
-            reason: input.reason,
-            expiresAt: input.expiresAt,
-          },
-        } satisfies ClaimAcquireOutcome;
-      }
-      const claimId = `claim_${input.claimKey}_${input.now}`;
-      yield* sql`
-        INSERT INTO workspace_claims (
-          claim_id, claim_key, holder_environment_id, reason, acquired_at, expires_at
-        ) VALUES (
-          ${claimId}, ${input.claimKey}, ${input.holderEnvironmentId},
-          ${input.reason}, ${input.now}, ${input.expiresAt}
-        )
-      `;
-      yield* bumpEpoch(input.now);
-      return {
-        kind: "acquired",
-        claim: {
-          claimId,
-          claimKey: input.claimKey,
-          holderEnvironmentId: EnvironmentId.make(input.holderEnvironmentId),
-          reason: input.reason,
-          acquiredAt: input.now,
-          expiresAt: input.expiresAt,
-        },
-      } satisfies ClaimAcquireOutcome;
-    }).pipe(Effect.mapError(fail("acquireClaim")));
-
-  const releaseClaim: WorkspaceRegistryRepositoryShape["releaseClaim"] = (input) =>
-    Effect.gen(function* () {
-      const before = yield* sql<{ readonly total: number }>`
-        SELECT COUNT(*) AS "total" FROM workspace_claims WHERE claim_key = ${input.claimKey}
-      `;
-      if ((before[0]?.total ?? 0) === 0) return false;
-      if (input.holderEnvironmentId === null) {
-        yield* sql`DELETE FROM workspace_claims WHERE claim_key = ${input.claimKey}`;
-      } else {
-        yield* sql`
-          DELETE FROM workspace_claims
-          WHERE claim_key = ${input.claimKey}
-            AND holder_environment_id = ${input.holderEnvironmentId}
-        `;
-      }
-      const after = yield* sql<{ readonly total: number }>`
-        SELECT COUNT(*) AS "total" FROM workspace_claims WHERE claim_key = ${input.claimKey}
-      `;
-      const removed = (after[0]?.total ?? 0) === 0;
-      if (removed) yield* bumpEpoch(input.now);
-      return removed;
-    }).pipe(Effect.mapError(fail("releaseClaim")));
-
-  const createRequest: WorkspaceRegistryRepositoryShape["createRequest"] = (input) =>
-    Effect.gen(function* () {
-      const request = input.request;
-      yield* sql`
-        INSERT INTO workspace_requests (
-          request_id, kind, from_environment_id, to_environment_id, repository_key,
-          thread_id, reason, payload_preview, status, nonce, hops,
-          created_at, expires_at, decided_at
-        ) VALUES (
-          ${request.requestId}, ${request.kind}, ${request.fromEnvironmentId},
-          ${request.toEnvironmentId}, ${request.repositoryKey}, ${request.threadId},
-          ${request.reason}, ${request.payloadPreview}, ${request.status}, ${request.nonce},
-          ${request.hops}, ${request.createdAt}, ${request.expiresAt}, ${request.decidedAt}
-        )
-      `;
-      yield* bumpEpoch(request.createdAt);
-    }).pipe(Effect.mapError(fail("createRequest")));
-
-  const requestColumns = `
-    request_id AS "requestId",
-    kind AS "kind",
-    from_environment_id AS "fromEnvironmentId",
-    to_environment_id AS "toEnvironmentId",
-    repository_key AS "repositoryKey",
-    thread_id AS "threadId",
-    reason AS "reason",
-    payload_preview AS "payloadPreview",
-    status AS "status",
-    nonce AS "nonce",
-    hops AS "hops",
-    created_at AS "createdAt",
-    expires_at AS "expiresAt",
-    decided_at AS "decidedAt"
-  `;
-
-  const getRequest: WorkspaceRegistryRepositoryShape["getRequest"] = (input) =>
-    sql
-      .unsafe<RequestRow>(`SELECT ${requestColumns} FROM workspace_requests WHERE request_id = ?`, [
-        input.requestId,
-      ])
-      .pipe(
-        Effect.map((rows) => {
-          const row = rows[0];
-          return row ? Option.some(toRequest(row)) : Option.none();
-        }),
-        Effect.mapError(fail("getRequest")),
-      );
-
-  const decideRequest: WorkspaceRegistryRepositoryShape["decideRequest"] = (input) =>
-    Effect.gen(function* () {
-      // "Did this call decide it" is answered by the row's status *before* the
-      // update, not by comparing timestamps afterwards: two decisions landing
-      // in the same millisecond produce identical `decided_at`, and the second
-      // one would then read as successful — a replayed approval flipping an
-      // already-rejected request is exactly the case this guards.
-      const beforeRows = yield* sql<{ readonly status: string }>`
-        SELECT status AS "status" FROM workspace_requests WHERE request_id = ${input.requestId}
-      `;
-      const before = beforeRows[0];
-      if (!before || before.status !== "pending") return Option.none();
-
-      yield* sql`
-        UPDATE workspace_requests
-        SET status = ${input.status}, decided_at = ${input.decidedAt}
-        WHERE request_id = ${input.requestId} AND status = 'pending'
-      `;
-      yield* bumpEpoch(input.decidedAt);
-      const rows = yield* sql.unsafe<RequestRow>(
-        `SELECT ${requestColumns} FROM workspace_requests WHERE request_id = ?`,
-        [input.requestId],
-      );
-      const row = rows[0];
-      if (!row) return Option.none();
-      const decided = toRequest(row);
-      return decided.status === input.status ? Option.some(decided) : Option.none();
-    }).pipe(Effect.mapError(fail("decideRequest")));
-
-  const expireRequests: WorkspaceRegistryRepositoryShape["expireRequests"] = (input) =>
-    Effect.gen(function* () {
-      const stale = yield* sql<{ readonly total: number }>`
-        SELECT COUNT(*) AS "total"
-        FROM workspace_requests
-        WHERE status = 'pending' AND expires_at <= ${input.now}
-      `;
-      const total = stale[0]?.total ?? 0;
-      if (total === 0) return 0;
-      yield* sql`
-        UPDATE workspace_requests
-        SET status = 'expired', decided_at = ${input.now}
-        WHERE status = 'pending' AND expires_at <= ${input.now}
-      `;
-      yield* bumpEpoch(input.now);
-      return total;
-    }).pipe(Effect.mapError(fail("expireRequests")));
-
-  const recordActivity: WorkspaceRegistryRepositoryShape["recordActivity"] = (input) =>
-    sql`
-      INSERT INTO workspace_activity (occurred_at, from_environment_id, kind)
-      VALUES (${input.occurredAt}, ${input.fromEnvironmentId}, ${input.kind})
-    `.pipe(Effect.asVoid, Effect.mapError(fail("recordActivity")));
-
-  const countActivitySince: WorkspaceRegistryRepositoryShape["countActivitySince"] = (input) =>
-    sql<{ readonly total: number }>`
-      SELECT COUNT(*) AS "total" FROM workspace_activity WHERE occurred_at >= ${input.since}
-    `.pipe(
-      Effect.map((rows) => rows[0]?.total ?? 0),
-      Effect.mapError(fail("countActivitySince")),
-    );
 
   const getInstructionText: WorkspaceRegistryRepositoryShape["getInstructionText"] = (input) =>
     sql<{ readonly text: string }>`
@@ -653,8 +262,6 @@ const makeWorkspaceRegistryRepository = Effect.gen(function* () {
             createdAt: input.now,
             updatedAt: input.now,
           };
-      const policy = identityRow ? parsePolicy(identityRow.policyJson) : DEFAULT_WORKSPACE_POLICY;
-
       const machineRows = yield* sql<MachineRow>`
         SELECT
           environment_id AS "environmentId",
@@ -671,58 +278,9 @@ const makeWorkspaceRegistryRepository = Effect.gen(function* () {
         ORDER BY added_at ASC
       `;
 
-      const claimRows = yield* sql<ClaimRow>`
-        SELECT
-          claim_id AS "claimId",
-          claim_key AS "claimKey",
-          holder_environment_id AS "holderEnvironmentId",
-          reason AS "reason",
-          acquired_at AS "acquiredAt",
-          expires_at AS "expiresAt"
-        FROM workspace_claims
-        WHERE expires_at > ${input.now}
-        ORDER BY acquired_at ASC
-      `;
-
-      const grantRows = yield* sql<GrantRow>`
-        SELECT
-          grant_id AS "grantId",
-          from_environment_id AS "fromEnvironmentId",
-          to_environment_id AS "toEnvironmentId",
-          repository_key AS "repositoryKey",
-          capabilities_json AS "capabilitiesJson",
-          transport AS "transport",
-          mode AS "mode",
-          requires_claim AS "requiresClaim",
-          created_at AS "createdAt"
-        FROM workspace_grants
-        ORDER BY created_at ASC
-      `;
-
-      const requestRows = yield* sql.unsafe<RequestRow>(
-        `SELECT ${requestColumns} FROM workspace_requests
-         WHERE status = 'pending' AND expires_at > ? ORDER BY created_at ASC`,
-        [input.now],
-      );
-
-      const hourAgo = new Date(new Date(input.now).getTime() - 60 * 60 * 1000).toISOString();
-      const activityRows = yield* sql<{ readonly total: number }>`
-        SELECT COUNT(*) AS "total" FROM workspace_activity WHERE occurred_at >= ${hourAgo}
-      `;
-
       return {
         identity,
         machines: machineRows.map(toMachine),
-        claims: claimRows.map(toClaim),
-        grants: grantRows.map(toGrant),
-        policy,
-        pendingRequests: requestRows.map(toRequest),
-        usage: {
-          crossEnvironmentTurnsLastHour: activityRows[0]?.total ?? 0,
-          // Active claims are the honest proxy for "work in flight from
-          // elsewhere": a peer holds one for the duration of what it is doing.
-          concurrentCrossEnvironment: claimRows.length,
-        },
       } satisfies WorkspaceState;
     }).pipe(Effect.mapError(fail("getState")));
 
@@ -734,17 +292,6 @@ const makeWorkspaceRegistryRepository = Effect.gen(function* () {
     upsertMachine,
     removeMachine,
     touchMachine,
-    setPolicy,
-    upsertGrant,
-    removeGrant,
-    acquireClaim,
-    releaseClaim,
-    createRequest,
-    decideRequest,
-    getRequest,
-    expireRequests,
-    recordActivity,
-    countActivitySince,
     getInstructionText,
     setInstructionText,
   } satisfies WorkspaceRegistryRepositoryShape;

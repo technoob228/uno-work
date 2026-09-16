@@ -14,6 +14,13 @@
  * `epoch` is bumped by every mutation. It is the difference between "your view
  * is stale" and "nothing has changed", which the panel has to state out loud —
  * on silent staleness we have been burned before with tunnels.
+ *
+ * **Frozen.** `workspace_grants`, `workspace_claims`, `workspace_requests`,
+ * `workspace_activity` and `workspace_identity.policy_json` are no longer read
+ * or written: the commands that filled them ran without any permission check
+ * and nothing ever enforced the rows. The tables stay so an older daemon can
+ * still open the database; a later migration drops them. Do not add new
+ * readers — cross-machine permissions will come from the Uno account.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";

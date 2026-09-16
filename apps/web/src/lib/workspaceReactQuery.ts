@@ -12,20 +12,13 @@ import type {
   UnoBoxConnection,
   UnoCloudBoxPowerInput,
   UnoCloudConnectBoxInput,
-  WorkspaceAcquireClaimInput,
   WorkspaceApplyInstructionsInput,
-  WorkspaceCreateRequestInput,
-  WorkspaceDecideRequestInput,
   WorkspaceGetInstructionsInput,
-  WorkspaceReleaseClaimInput,
   WorkspaceRenameInput,
-  WorkspaceRemoveGrantInput,
   WorkspaceRemoveMachineInput,
   WorkspaceSetInstructionsInput,
-  WorkspaceSetPolicyInput,
   WorkspaceSyncMachinesInput,
   WorkspaceUpdateMachineInput,
-  WorkspaceUpsertGrantInput,
 } from "@t3tools/contracts";
 import { mutationOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
 
@@ -185,98 +178,6 @@ export function workspaceRemoveMachineMutationOptions(
     queryClient,
     key: "remove-machine",
     run: (api, payload) => api.workspace.removeMachine(payload),
-  });
-}
-
-export function workspaceSetPolicyMutationOptions(
-  environmentId: EnvironmentId | null,
-  queryClient: QueryClient,
-) {
-  return makeWorkspaceMutation<WorkspaceSetPolicyInput>({
-    environmentId,
-    queryClient,
-    key: "set-policy",
-    run: (api, payload) => api.workspace.setPolicy(payload),
-  });
-}
-
-export function workspaceUpsertGrantMutationOptions(
-  environmentId: EnvironmentId | null,
-  queryClient: QueryClient,
-) {
-  return makeWorkspaceMutation<WorkspaceUpsertGrantInput>({
-    environmentId,
-    queryClient,
-    key: "upsert-grant",
-    run: (api, payload) => api.workspace.upsertGrant(payload),
-  });
-}
-
-export function workspaceRemoveGrantMutationOptions(
-  environmentId: EnvironmentId | null,
-  queryClient: QueryClient,
-) {
-  return makeWorkspaceMutation<WorkspaceRemoveGrantInput>({
-    environmentId,
-    queryClient,
-    key: "remove-grant",
-    run: (api, payload) => api.workspace.removeGrant(payload),
-  });
-}
-
-export function workspaceReleaseClaimMutationOptions(
-  environmentId: EnvironmentId | null,
-  queryClient: QueryClient,
-) {
-  return makeWorkspaceMutation<WorkspaceReleaseClaimInput>({
-    environmentId,
-    queryClient,
-    key: "release-claim",
-    run: (api, payload) => api.workspace.releaseClaim(payload),
-  });
-}
-
-export function workspaceAcquireClaimMutationOptions(
-  environmentId: EnvironmentId | null,
-  queryClient: QueryClient,
-) {
-  return mutationOptions({
-    mutationKey: ["workspace", "mutation", "acquire-claim", environmentId] as const,
-    mutationFn: async (payload: WorkspaceAcquireClaimInput) => {
-      if (environmentId === null) throw new Error("No environment connection.");
-      return ensureEnvironmentApi(environmentId).workspace.acquireClaim(payload);
-    },
-    onSuccess: (result) => {
-      queryClient.setQueryData(workspaceQueryKeys.state(environmentId), result.state);
-    },
-  });
-}
-
-export function workspaceCreateRequestMutationOptions(
-  environmentId: EnvironmentId | null,
-  queryClient: QueryClient,
-) {
-  return mutationOptions({
-    mutationKey: ["workspace", "mutation", "create-request", environmentId] as const,
-    mutationFn: async (payload: WorkspaceCreateRequestInput) => {
-      if (environmentId === null) throw new Error("No environment connection.");
-      return ensureEnvironmentApi(environmentId).workspace.createRequest(payload);
-    },
-    onSuccess: (result) => {
-      queryClient.setQueryData(workspaceQueryKeys.state(environmentId), result.state);
-    },
-  });
-}
-
-export function workspaceDecideRequestMutationOptions(
-  environmentId: EnvironmentId | null,
-  queryClient: QueryClient,
-) {
-  return makeWorkspaceMutation<WorkspaceDecideRequestInput>({
-    environmentId,
-    queryClient,
-    key: "decide-request",
-    run: (api, payload) => api.workspace.decideRequest(payload),
   });
 }
 
