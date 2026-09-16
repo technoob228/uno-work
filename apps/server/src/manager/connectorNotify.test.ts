@@ -1,4 +1,4 @@
-import { describe, expect, it } from "@effect/vitest";
+import { assert, describe, expect, it } from "@effect/vitest";
 import {
   ApprovalRequestId,
   CommandId,
@@ -14,6 +14,7 @@ import {
 
 import type { ResolvedNotifyChat } from "./connectorBindings.ts";
 import {
+  resolveNotifyThreadId,
   admitNotification,
   formatNotificationText,
   INITIAL_NOTIFY_TRACKER_STATE,
@@ -297,5 +298,25 @@ describe("admitNotification", () => {
     expect([...later.sentAt.keys()].toSorted()).toEqual(["k", "other"]);
     const pruned = admitNotification(later.sentAt, "k2", 2_000 + NOTIFY_RATE_LIMIT_MS + 1);
     expect(pruned.sentAt.has("other")).toBe(false);
+  });
+});
+
+describe("channel notify: thread ownership", () => {
+  it("takes the thread from the bridge token when the body stays silent", () => {
+    assert.deepEqual(resolveNotifyThreadId("thread-a", undefined), {
+      ok: true,
+      threadId: "thread-a",
+    });
+  });
+
+  it("allows a body that repeats its own thread", () => {
+    assert.deepEqual(resolveNotifyThreadId("thread-a", "thread-a"), {
+      ok: true,
+      threadId: "thread-a",
+    });
+  });
+
+  it("refuses to notify on behalf of another chat", () => {
+    assert.deepEqual(resolveNotifyThreadId("thread-a", "thread-b"), { ok: false });
   });
 });

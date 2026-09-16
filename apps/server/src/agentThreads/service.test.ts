@@ -31,6 +31,7 @@ const T0 = "2026-09-14T10:00:00.000Z";
 
 const scoped = (threadId: string = CALLER): BridgeAuthorization => ({
   context: { threadId, cwd: "/p/own" },
+  kind: "thread",
 });
 
 const projectShell = (
@@ -199,10 +200,10 @@ describe("agent threads bridge: auth", () => {
       const { handlers, dispatched } = makeFixture();
       const noToken = yield* handlers.createThread(null, { text: "hi" });
       assert.strictEqual(noToken.status, 401);
-      const baseToken = yield* handlers.listThreads({ context: undefined });
+      const baseToken = yield* handlers.listThreads({ context: undefined, kind: "legacy" });
       assert.strictEqual(baseToken.status, 403);
       assert.strictEqual(body(baseToken).error, "thread_context_required");
-      const cwdOnly = yield* handlers.listThreads({ context: { cwd: "/p/own" } });
+      const cwdOnly = yield* handlers.listThreads({ context: { cwd: "/p/own" }, kind: "thread" });
       assert.strictEqual(cwdOnly.status, 403);
       const gone = yield* handlers.createThread(scoped("thread-deleted"), { text: "hi" });
       assert.strictEqual(gone.status, 403);

@@ -31,7 +31,7 @@ import {
 import { Data, Effect, Option } from "effect";
 import * as crypto from "node:crypto";
 
-import type { BridgeAuthorization } from "../browserBridge.ts";
+import { requireBridgeThread, type BridgeAuthorization } from "../browserBridge.ts";
 import type { OrchestrationDispatchError } from "../orchestration/Errors.ts";
 import type { ProjectionRepositoryError } from "../persistence/Errors.ts";
 import { inheritProjectThreadModes } from "../orchestration/projectThreadModes.ts";
@@ -167,21 +167,14 @@ export function replyForDispatchError(error: OrchestrationDispatchError): AgentT
 export function resolveCallerThreadId(
   authorization: BridgeAuthorization | null,
 ): { readonly ok: true; readonly threadId: ThreadId } | AgentThreadsReply {
-  if (authorization === null) {
-    return { status: 401, body: { ok: false, error: "unauthorized", message: "Unauthorized" } };
-  }
-  const threadId = authorization.context?.threadId;
-  if (threadId === undefined || threadId.length === 0) {
+  const resolved = requireBridgeThread(authorization);
+  if (!resolved.ok) {
     return {
-      status: 403,
-      body: {
-        ok: false,
-        error: "thread_context_required",
-        message: "Нужен bridge-токен сессии треда ($UNO_WORK_BRIDGE_TOKEN внутри чата).",
-      },
+      status: resolved.status,
+      body: { ok: false, error: resolved.error, message: resolved.message },
     };
   }
-  return { ok: true, threadId: ThreadId.make(threadId) };
+  return { ok: true, threadId: ThreadId.make(resolved.threadId) };
 }
 
 function asBody(body: unknown): Record<string, unknown> | null {

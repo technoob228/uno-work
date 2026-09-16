@@ -238,3 +238,18 @@ export const admitNotification = (
   next.set(key, nowMs);
   return { admit: true, sentAt: next };
 };
+
+/**
+ * Какому треду принадлежит `POST /api/channels/notify`.
+ *
+ * Тред называет bridge-токен сессии. Явный `threadId` в теле разрешён только
+ * как повтор своего же треда: раньше, с общим токеном машины, им можно было
+ * отправить уведомление от имени чужого чата.
+ */
+export const resolveNotifyThreadId = (
+  tokenThreadId: string,
+  requestedThreadId: string | undefined,
+): { readonly ok: true; readonly threadId: string } | { readonly ok: false } =>
+  requestedThreadId === undefined || requestedThreadId === tokenThreadId
+    ? { ok: true, threadId: tokenThreadId }
+    : { ok: false };

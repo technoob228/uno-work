@@ -19,6 +19,14 @@ import { ServerConfig } from "./config.ts";
  * (`UNO_WORK_BRIDGE_URL` + `UNO_WORK_BRIDGE_TOKEN`). Модель открывает страницу
  * пользователю обычным curl-запросом на `POST /api/browser/open`; сервер
  * пушит событие подписчикам (web-клиентам) через `subscribeBrowserBridge`.
+ *
+ * **Токен — всегда на тред.** Раньше в окружении каждого харнесса лежал общий
+ * токен машины, и любой процесс, запущенный агентом, мог действовать от имени
+ * «любого чата»: открыть вкладку, попросить секрет, написать в чужой тред,
+ * дёрнуть connector-нотификацию. Теперь токен выдаётся на пару «тред + cwd»
+ * при старте хода, а ручки моста требуют, чтобы тред был назван токеном.
+ * Базовый токен машины остаётся только как метка старых сессий: он не
+ * попадает в окружение и получает внятный 403 вместо тишины.
  */
 
 export const BROWSER_BRIDGE_URL_ENV = "UNO_WORK_BRIDGE_URL";
@@ -202,26 +210,81 @@ export function normalizeBridgeRequestContext(input: {
   return Object.keys(context).length > 0 ? context : undefined;
 }
 
-/** Результат проверки bridge-токена: контекст выдачи (undefined у базового). */
+/**
+ * Результат проверки bridge-токена.
+ *
+ * `kind: "thread"` — токен выдан сессии конкретного треда, контекст назван им
+ * самим. `kind: "legacy"` — базовый токен машины: так представляются сессии,
+ * поднятые до обновления. Ручки моста на него отвечают отказом с причиной.
+ */
+export type BridgeTokenKind = "thread" | "legacy";
+
 export interface BridgeAuthorization {
   readonly context: BrowserBridgeRequestContext | undefined;
+  readonly kind: BridgeTokenKind;
+}
+
+/** Отказ моста: код и текст, который агент прочитает в теле ответа. */
+export interface BridgeThreadRefusal {
+  readonly status: 401 | 403;
+  readonly error: string;
+  readonly message: string;
+}
+
+export type BridgeThreadResolution =
+  | { readonly ok: true; readonly threadId: string; readonly context: BrowserBridgeRequestContext }
+  | ({ readonly ok: false } & BridgeThreadRefusal);
+
+const UNAUTHORIZED_REFUSAL: BridgeThreadRefusal = {
+  status: 401,
+  error: "unauthorized",
+  message: "Unauthorized",
+};
+
+const THREAD_REQUIRED_REFUSAL: BridgeThreadRefusal = {
+  status: 403,
+  error: "thread_context_required",
+  message:
+    "Нужен bridge-токен сессии треда ($UNO_WORK_BRIDGE_TOKEN внутри чата). " +
+    "Общий токен машины больше не принимается: перезапусти агента в чате, " +
+    "чтобы сессия получила свой токен.",
+};
+
+/**
+ * Единая проверка для всех ручек моста: запрос действует от имени треда,
+ * названного его же токеном. Чужой тред своим токеном не назвать — контекст
+ * приходит из карты выдачи на сервере, а не из тела запроса.
+ */
+export function requireBridgeThread(
+  authorization: BridgeAuthorization | null,
+): BridgeThreadResolution {
+  if (authorization === null) return { ok: false, ...UNAUTHORIZED_REFUSAL };
+  const threadId = authorization.context?.threadId;
+  if (authorization.kind !== "thread" || threadId === undefined || threadId.length === 0) {
+    return { ok: false, ...THREAD_REQUIRED_REFUSAL };
+  }
+  return { ok: true, threadId, context: authorization.context! };
 }
 
 export interface BrowserBridgeShape {
   readonly token: string;
   /** undefined, когда слушающий порт неизвестен (bridge выключен). */
   readonly baseUrl: string | undefined;
-  /** Env-переменные для подпроцессов харнессов; пусто при выключенном bridge. */
-  readonly environmentVariables: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   /**
-   * Те же переменные в виде record для слияния в `NodeJS.ProcessEnv`.
-   * С контекстом токен скоупится на тред/проект: запросы с ним сервер
-   * атрибуцирует источнику, и клиент открывает вкладку в нужном проекте.
+   * Bridge-переменные для слияния в `NodeJS.ProcessEnv`. Токен появляется
+   * только вместе с тредом; без него остаётся один адрес, а уже лежавший в
+   * окружении токен вычищается — процесс инстанса не должен унести токен
+   * чужой сессии.
    */
   readonly applyEnvironment: (
     base: NodeJS.ProcessEnv,
     context?: BrowserBridgeRequestContext,
   ) => NodeJS.ProcessEnv;
+  /**
+   * Токен сессии треда: выдаётся при старте хода и живёт, пока жив сервер.
+   * `null` — контекст без треда, такому запросу мост откажет.
+   */
+  readonly issueThreadToken: (context: BrowserBridgeRequestContext | undefined) => string | null;
   /** Оверлей bridge-переменных со scoped-токеном для точек спавна харнессов. */
   readonly scopedEnvironment: (
     context: BrowserBridgeRequestContext | undefined,
@@ -304,21 +367,9 @@ export const makeBrowserBridge = (input: {
     // харнесса в рамках жизни сервера. Треды конечны — рост карт ограничен.
     const scopedTokenByContextKey = new Map<string, string>();
     const contextByScopedToken = new Map<string, BrowserBridgeRequestContext>();
-    const environmentVariables = baseUrl
-      ? [
-          { name: BROWSER_BRIDGE_URL_ENV, value: baseUrl },
-          { name: BROWSER_BRIDGE_TOKEN_ENV, value: token },
-        ]
-      : [];
-
-    const scopedEnvironment = (
-      context: BrowserBridgeRequestContext | undefined,
-    ): Record<string, string> => {
-      if (!baseUrl) return {};
+    const issueThreadToken = (context: BrowserBridgeRequestContext | undefined): string | null => {
       const normalized = context ? normalizeBridgeRequestContext(context) : undefined;
-      if (!normalized) {
-        return { [BROWSER_BRIDGE_URL_ENV]: baseUrl, [BROWSER_BRIDGE_TOKEN_ENV]: token };
-      }
+      if (!normalized?.threadId) return null;
       const key = bridgeContextKey(normalized);
       let scopedToken = scopedTokenByContextKey.get(key);
       if (!scopedToken) {
@@ -326,31 +377,48 @@ export const makeBrowserBridge = (input: {
         scopedTokenByContextKey.set(key, scopedToken);
         contextByScopedToken.set(scopedToken, normalized);
       }
+      return scopedToken;
+    };
+
+    const scopedEnvironment = (
+      context: BrowserBridgeRequestContext | undefined,
+    ): Record<string, string> => {
+      if (!baseUrl) return {};
+      const scopedToken = issueThreadToken(context);
+      // Без треда токена нет: адрес отдаём, чтобы запрос дошёл до сервера и
+      // агент прочитал причину отказа, а не упёрся в пустую переменную.
+      if (scopedToken === null) return { [BROWSER_BRIDGE_URL_ENV]: baseUrl };
       return { [BROWSER_BRIDGE_URL_ENV]: baseUrl, [BROWSER_BRIDGE_TOKEN_ENV]: scopedToken };
     };
 
     const authorize = (authorizationHeader: string | undefined): BridgeAuthorization | null => {
       const presented = authorizationHeader?.replace(/^Bearer\s+/i, "").trim() ?? "";
       if (presented.length === 0) return null;
+      const scopedContext = contextByScopedToken.get(presented);
+      if (scopedContext) return { context: scopedContext, kind: "thread" };
+      // Базовый токен машины больше не открывает ручки, но узнаётся: сессия,
+      // поднятая до обновления, получает внятный отказ вместо 401.
       if (
         presented.length === token.length &&
         timingSafeEqual(Buffer.from(presented, "utf8"), Buffer.from(token, "utf8"))
       ) {
-        return { context: undefined };
+        return { context: undefined, kind: "legacy" };
       }
-      const scopedContext = contextByScopedToken.get(presented);
-      return scopedContext ? { context: scopedContext } : null;
+      return null;
     };
 
     return {
       token,
       baseUrl,
-      environmentVariables,
       applyEnvironment: (base, context) => {
         const overlay = scopedEnvironment(context);
-        if (Object.keys(overlay).length === 0) return base;
-        return { ...base, ...overlay };
+        const next: NodeJS.ProcessEnv = { ...base, ...overlay };
+        if (overlay[BROWSER_BRIDGE_TOKEN_ENV] === undefined) {
+          delete next[BROWSER_BRIDGE_TOKEN_ENV];
+        }
+        return next;
       },
+      issueThreadToken,
       scopedEnvironment,
       authorize,
       publishOpenUrl: (url, context?, scope?) =>

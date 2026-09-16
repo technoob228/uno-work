@@ -415,10 +415,7 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   ),
   // Ключ шлюза для окружения харнессов — ключ аккаунта агенту не отдаём.
   Layer.provideMerge(
-    UnoGatewayKeyLive.pipe(
-      Layer.provide(ServerSettingsLive),
-      Layer.provide(ServerSecretStoreLive),
-    ),
+    UnoGatewayKeyLive.pipe(Layer.provide(ServerSettingsLive), Layer.provide(ServerSecretStoreLive)),
   ),
   Layer.provideMerge(ServerBrowserLive),
   Layer.provide(NetService.layer),

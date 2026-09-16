@@ -29,6 +29,7 @@ import {
   isAllowedBridgeUrl,
   normalizeBridgeRequestContext,
   normalizeTabScope,
+  requireBridgeThread,
 } from "./browserBridge.ts";
 import { expandHomePath } from "./pathExpansion.ts";
 import {
@@ -223,17 +224,24 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
 );
 
 /**
- * Контекст запроса к bridge: приоритет у контекста scoped-токена (его выдал
- * сервер, подделать нельзя), `cwd` из тела — fallback для харнессов с общим
- * per-instance токеном (OpenCode/Uno), где модель подставляет `$PWD` сама.
+ * Контекст запроса к bridge. Тред всегда берётся из токена — подделать его
+ * телом запроса нельзя. `cwd` из тела уточняет проект вкладки (модель
+ * подставляет `$PWD`), когда токен выдавался без рабочей папки.
  */
 function resolveBridgeRequestContext(
-  authorization: { readonly context: BrowserBridgeRequestContext | undefined },
+  context: BrowserBridgeRequestContext,
   body: unknown,
-): BrowserBridgeRequestContext | undefined {
-  if (authorization.context) return authorization.context;
+): BrowserBridgeRequestContext {
+  if (context.cwd !== undefined) return context;
   const rawCwd = body && typeof body === "object" ? (body as { cwd?: unknown }).cwd : undefined;
-  return typeof rawCwd === "string" ? normalizeBridgeRequestContext({ cwd: rawCwd }) : undefined;
+  const fromBody =
+    typeof rawCwd === "string" ? normalizeBridgeRequestContext({ cwd: rawCwd }) : undefined;
+  return fromBody?.cwd !== undefined ? { ...context, cwd: fromBody.cwd } : context;
+}
+
+/** 401/403 моста текстом — тем же способом, каким ручка отвечает на ошибки. */
+function bridgeRefusalText(refusal: { readonly status: number; readonly message: string }) {
+  return HttpServerResponse.text(refusal.message, { status: refusal.status });
 }
 
 /**
@@ -247,9 +255,9 @@ export const browserBridgeOpenRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const browserBridge = yield* BrowserBridge;
-    const authorization = browserBridge.authorize(request.headers["authorization"]);
-    if (!authorization) {
-      return HttpServerResponse.text("Unauthorized", { status: 401 });
+    const thread = requireBridgeThread(browserBridge.authorize(request.headers["authorization"]));
+    if (!thread.ok) {
+      return bridgeRefusalText(thread);
     }
 
     const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
@@ -290,7 +298,7 @@ export const browserBridgeOpenRouteLayer = HttpRouter.add(
       }
       yield* browserBridgeService.publishOpenFile(
         filePath,
-        resolveBridgeRequestContext(authorization, body),
+        resolveBridgeRequestContext(thread.context, body),
         tabScope,
       );
       return HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 });
@@ -307,7 +315,7 @@ export const browserBridgeOpenRouteLayer = HttpRouter.add(
 
     const result = yield* executeBridgeOpenUrl(
       rawUrl,
-      resolveBridgeRequestContext(authorization, body),
+      resolveBridgeRequestContext(thread.context, body),
       tabScope,
     );
     return HttpServerResponse.jsonUnsafe(
@@ -323,9 +331,9 @@ export const browserBridgeCommandRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const browserBridge = yield* BrowserBridge;
-    const authorization = browserBridge.authorize(request.headers["authorization"]);
-    if (!authorization) {
-      return HttpServerResponse.text("Unauthorized", { status: 401 });
+    const thread = requireBridgeThread(browserBridge.authorize(request.headers["authorization"]));
+    if (!thread.ok) {
+      return bridgeRefusalText(thread);
     }
 
     const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
@@ -339,7 +347,7 @@ export const browserBridgeCommandRouteLayer = HttpRouter.add(
 
     const result = yield* executeBridgeCommand(
       rawInput,
-      resolveBridgeRequestContext(authorization, body),
+      resolveBridgeRequestContext(thread.context, body),
     );
     return HttpServerResponse.jsonUnsafe(result, { status: result.ok ? 200 : 502 });
   }),
@@ -389,9 +397,9 @@ export const secretsRequestRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const browserBridge = yield* BrowserBridge;
-    const authorization = browserBridge.authorize(request.headers["authorization"]);
-    if (!authorization) {
-      return HttpServerResponse.text("Unauthorized", { status: 401 });
+    const thread = requireBridgeThread(browserBridge.authorize(request.headers["authorization"]));
+    if (!thread.ok) {
+      return bridgeRefusalText(thread);
     }
 
     const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
@@ -429,7 +437,7 @@ export const secretsRequestRouteLayer = HttpRouter.add(
       );
     }
 
-    const context = resolveBridgeRequestContext(authorization, body);
+    const context = resolveBridgeRequestContext(thread.context, body);
     const cwd = context?.cwd;
     if (!cwd) {
       return HttpServerResponse.jsonUnsafe(

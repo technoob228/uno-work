@@ -22,7 +22,7 @@ import { makeAgentThreadsHandlers } from "./service.ts";
 
 const PROJECT = ProjectId.make("project-integration");
 const CALLER = ThreadId.make("thread-caller");
-const auth: BridgeAuthorization = { context: { threadId: CALLER } };
+const auth: BridgeAuthorization = { kind: "thread", context: { threadId: CALLER } };
 
 let dispose: (() => Promise<void>) | undefined;
 afterEach(async () => {
@@ -188,7 +188,7 @@ describe("agent threads bridge (real engine)", () => {
 
     const created = await run(handlers.createThread(auth, { text: "Do the subtask" }));
     const childId = ThreadId.make(body(created).threadId);
-    const childAuth: BridgeAuthorization = { context: { threadId: childId } };
+    const childAuth: BridgeAuthorization = { kind: "thread", context: { threadId: childId } };
 
     // The child answers its parent — a human-created thread — through the bridge.
     const toParent = await run(
@@ -229,9 +229,7 @@ describe("agent threads bridge (real engine)", () => {
     );
     expect(body(fromChild).messages).toMatchObject([{ author: "agent", fromThreadId: childId }]);
 
-    const self = await run(
-      handlers.sendMessage(auth, { threadId: CALLER, body: { text: "me" } }),
-    );
+    const self = await run(handlers.sendMessage(auth, { threadId: CALLER, body: { text: "me" } }));
     expect(self.status).toBe(400);
     // Release stays parent-only.
     const released = await run(handlers.releaseThread(childAuth, { threadId: CALLER }));

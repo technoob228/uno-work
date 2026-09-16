@@ -54,8 +54,33 @@ import { vi } from "vitest";
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
+/**
+ * Мост как в BrowserBridgeTest, но экземпляр остаётся под рукой: ручкам моста
+ * теперь нужен токен сессии треда, и тест должен уметь его выпустить.
+ */
+let capturedBrowserBridge: BrowserBridgeShape | null = null;
+const BrowserBridgeCapture = Layer.effect(
+  BrowserBridge,
+  makeBrowserBridge({ token: "test-browser-bridge-token", baseUrl: undefined }).pipe(
+    Effect.tap((bridge) =>
+      Effect.sync(() => {
+        capturedBrowserBridge = bridge;
+      }),
+    ),
+  ),
+);
+
+/** Токен сессии треда для запросов к мосту в тестах. */
+const threadBridgeToken = (threadId = "thread-under-test"): string => {
+  const bridge = capturedBrowserBridge;
+  if (bridge === null) throw new Error("Browser bridge layer was not built yet.");
+  const token = bridge.issueThreadToken({ threadId, cwd: "/tmp/project" });
+  if (token === null) throw new Error("Expected a thread-scoped bridge token.");
+  return token;
+};
+
 import type { ServerConfigShape } from "./config.ts";
-import { BrowserBridgeTest } from "./browserBridge.ts";
+import { BrowserBridge, makeBrowserBridge, type BrowserBridgeShape } from "./browserBridge.ts";
 import { ServerBrowserTest } from "./serverBrowser.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { HealthCheck, HealthProbeError, type HealthCheckShape } from "./health.ts";
@@ -746,7 +771,7 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provideMerge(makeAuthTestLayer()),
-      Layer.provideMerge(BrowserBridgeTest),
+      Layer.provideMerge(BrowserBridgeCapture),
       Layer.provideMerge(ServerBrowserTest),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),
@@ -1081,9 +1106,18 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
       assert.equal(unauthorized.status, 401);
 
-      const invalid = yield* HttpClient.post("/api/browser/command", {
+      const baseToken = yield* HttpClient.post("/api/browser/command", {
         headers: {
           authorization: "Bearer test-browser-bridge-token",
+        },
+        body: HttpBody.text(JSON.stringify({ command: "state" }), "application/json"),
+      });
+      // The machine-wide token no longer speaks for a chat.
+      assert.equal(baseToken.status, 403);
+
+      const invalid = yield* HttpClient.post("/api/browser/command", {
+        headers: {
+          authorization: `Bearer ${threadBridgeToken()}`,
         },
         body: HttpBody.text(JSON.stringify({ command: "dance" }), "application/json"),
       });
@@ -1111,7 +1145,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       // исполнителю (в тестах — стаб ServerBrowserTest с ошибкой-маркером).
       const response = yield* HttpClient.post("/api/browser/command", {
         headers: {
-          authorization: "Bearer test-browser-bridge-token",
+          authorization: `Bearer ${threadBridgeToken()}`,
         },
         body: HttpBody.text(JSON.stringify({ command: "state" }), "application/json"),
       });

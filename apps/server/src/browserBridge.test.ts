@@ -10,6 +10,8 @@ import {
   isAllowedBridgeFilePath,
   makeBrowserBridge,
   normalizeBridgeRequestContext,
+  requireBridgeThread,
+  BROWSER_BRIDGE_URL_ENV,
 } from "./browserBridge.ts";
 
 it.effect("delivers browser command results to the pending publisher", () =>
@@ -118,10 +120,80 @@ it.effect("scopes bridge tokens to a thread context and resolves it back on auth
       scopedToken,
     );
 
-    assert.deepEqual(bridge.authorize(`Bearer ${scopedToken}`), { context });
-    assert.deepEqual(bridge.authorize("Bearer base-token"), { context: undefined });
+    assert.deepEqual(bridge.authorize(`Bearer ${scopedToken}`), { context, kind: "thread" });
+    // Базовый токен узнаётся, но тредом не представляется — ручки его отклонят.
+    assert.deepEqual(bridge.authorize("Bearer base-token"), {
+      context: undefined,
+      kind: "legacy",
+    });
     assert.isNull(bridge.authorize("Bearer unknown-token"));
     assert.isNull(bridge.authorize(undefined));
+  }),
+);
+
+it.effect("keeps the machine-wide token out of harness environments", () =>
+  Effect.gen(function* () {
+    const bridge = yield* makeBrowserBridge({
+      token: "base-token",
+      baseUrl: "http://127.0.0.1:4100",
+    });
+
+    // Инстанс без треда: адрес есть, токена нет.
+    const instanceEnvironment = bridge.scopedEnvironment(undefined);
+    assert.equal(instanceEnvironment[BROWSER_BRIDGE_URL_ENV], "http://127.0.0.1:4100");
+    assert.isUndefined(instanceEnvironment[BROWSER_BRIDGE_TOKEN_ENV]);
+    assert.isUndefined(
+      bridge.scopedEnvironment({ cwd: "/tmp/project-a" })[BROWSER_BRIDGE_TOKEN_ENV],
+    );
+
+    // Унаследованный токен вычищается, а не переживает спавн инстанса.
+    const merged = bridge.applyEnvironment(
+      { PATH: "/usr/bin", [BROWSER_BRIDGE_TOKEN_ENV]: "stale-token" },
+      undefined,
+    );
+    assert.isUndefined(merged[BROWSER_BRIDGE_TOKEN_ENV]);
+    assert.equal(merged["PATH"], "/usr/bin");
+
+    // Сессия треда токен получает.
+    const sessionEnvironment = bridge.applyEnvironment(
+      { PATH: "/usr/bin" },
+      { threadId: "thread-1", cwd: "/tmp/project-a" },
+    );
+    const sessionToken = sessionEnvironment[BROWSER_BRIDGE_TOKEN_ENV];
+    assert.isString(sessionToken);
+    assert.notEqual(sessionToken, "base-token");
+  }),
+);
+
+it.effect("refuses bridge calls that cannot name their thread", () =>
+  Effect.gen(function* () {
+    const bridge = yield* makeBrowserBridge({
+      token: "base-token",
+      baseUrl: "http://127.0.0.1:4100",
+    });
+    const scopedToken = bridge.issueThreadToken({ threadId: "thread-1", cwd: "/tmp/project-a" });
+    assert.isString(scopedToken);
+
+    const unknown = requireBridgeThread(bridge.authorize("Bearer nope"));
+    assert.isFalse(unknown.ok);
+    assert.equal(unknown.ok ? 0 : unknown.status, 401);
+
+    // Сессия, поднятая до обновления: отказ с причиной, а не тишина.
+    const legacy = requireBridgeThread(bridge.authorize("Bearer base-token"));
+    assert.isFalse(legacy.ok);
+    assert.equal(legacy.ok ? 0 : legacy.status, 403);
+    assert.equal(legacy.ok ? "" : legacy.error, "thread_context_required");
+    assert.include(legacy.ok ? "" : legacy.message, "перезапусти агента");
+
+    const thread = requireBridgeThread(bridge.authorize(`Bearer ${scopedToken}`));
+    assert.isTrue(thread.ok);
+    assert.equal(thread.ok ? thread.threadId : "", "thread-1");
+
+    // Токен одного треда никогда не представляется другим.
+    const otherToken = bridge.issueThreadToken({ threadId: "thread-2", cwd: "/tmp/project-a" });
+    const other = requireBridgeThread(bridge.authorize(`Bearer ${otherToken}`));
+    assert.equal(other.ok ? other.threadId : "", "thread-2");
+    assert.notEqual(scopedToken, otherToken);
   }),
 );
 

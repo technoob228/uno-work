@@ -39,12 +39,13 @@ import { Effect, Option, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { ServerAuth, AuthError } from "../auth/Services/ServerAuth.ts";
-import { BrowserBridge } from "../browserBridge.ts";
+import { BrowserBridge, requireBridgeThread } from "../browserBridge.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerCapabilityTokenRepository } from "../persistence/Services/ManagerCapabilityTokens.ts";
 import { ManagerConnectorBindingRepository } from "../persistence/Services/ManagerConnectorBindings.ts";
 import { ManagerConnectorRepository } from "../persistence/Services/ManagerConnectors.ts";
 import { bindingTargetLabel } from "./connectorBindings.ts";
+import { resolveNotifyThreadId } from "./connectorNotify.ts";
 import { ManagerAssistantService } from "./Services/AssistantService.ts";
 import { ConnectorNotifyService } from "./Services/ConnectorNotify.ts";
 import { handleManagerMcpMessage } from "./mcp.ts";
@@ -656,9 +657,12 @@ export const channelsNotifyRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const browserBridge = yield* BrowserBridge;
-    const authorization = browserBridge.authorize(request.headers["authorization"]);
-    if (!authorization) {
-      return HttpServerResponse.jsonUnsafe({ error: "Unauthorized" }, { status: 401 });
+    const thread = requireBridgeThread(browserBridge.authorize(request.headers["authorization"]));
+    if (!thread.ok) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: thread.error, message: thread.message },
+        { status: thread.status },
+      );
     }
     const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
     const decoded = Schema.decodeUnknownExit(ChannelNotifyInput)(body);
@@ -672,14 +676,25 @@ export const channelsNotifyRouteLayer = HttpRouter.add(
       );
     }
     const input = decoded.value;
-    // A thread-scoped token names its thread; an explicit threadId wins.
-    const scopedThreadId = authorization.context?.threadId;
-    const threadId =
-      input.threadId ?? (scopedThreadId !== undefined ? ThreadId.make(scopedThreadId) : undefined);
+    // The token names the thread. An explicit `threadId` may only repeat it:
+    // notifying from someone else's chat is exactly what a shared token used
+    // to allow.
+    const notifyThread = resolveNotifyThreadId(thread.threadId, input.threadId);
+    if (!notifyThread.ok) {
+      return HttpServerResponse.jsonUnsafe(
+        {
+          error: "thread_mismatch",
+          message:
+            'Уведомить можно только от имени своего чата: "threadId" не совпадает с тредом bridge-токена.',
+        },
+        { status: 403 },
+      );
+    }
+    const threadId = ThreadId.make(notifyThread.threadId);
     const notifyService = yield* ConnectorNotifyService;
     const result = yield* notifyService.notify({
       text: input.text,
-      ...(threadId !== undefined ? { threadId } : {}),
+      threadId,
       ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
       ...(input.kind !== undefined ? { kind: input.kind } : {}),
     });
