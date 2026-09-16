@@ -23,6 +23,7 @@ import { buildBrowserInstructions } from "../browserInstructions.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
+import { UnoGatewayKey } from "../../unoGatewayKey.ts";
 import type { TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { buildHermesSpawnEnvironment } from "../acp/HermesAcpSupport.ts";
@@ -51,6 +52,7 @@ export type HermesDriverEnv =
   | ProviderEventLoggers
   | BrowserBridge
   | UnoAgentAccess
+  | UnoGatewayKey
   | ServerConfig
   | ServerSettingsService;
 
@@ -106,7 +108,8 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
       const serverSettings = yield* serverSettingsService.getSettings.pipe(
         Effect.orElseSucceed(() => undefined),
       );
-      const unoApiKey = serverSettings?.uno.apiKey ?? "";
+      // Только ключ шлюза: ключ аккаунта в процесс харнесса не уходит.
+      const unoApiKey = yield* (yield* UnoGatewayKey).harnessKey();
 
       const hermesEnvironment = buildHermesSpawnEnvironment({
         unoApiKey,

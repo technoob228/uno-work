@@ -18,7 +18,11 @@
  * живёт только уровень доступа. Смена уровня или ключа аккаунта приводит к
  * перечеканке — control plane при этом отзывает предыдущий токен бокса.
  */
-import { UNO_CONTROL_PLANE_BASE_URL, type UnoAgentAccessLevel } from "@t3tools/contracts";
+import {
+  UNO_CONTROL_PLANE_BASE_URL,
+  clampUnoAgentAccessLevel,
+  type MintableUnoAgentAccessLevel,
+} from "@t3tools/contracts";
 import { Context, Effect, Layer, Ref } from "effect";
 
 import { ServerSecretStore } from "./auth/Services/ServerSecretStore.ts";
@@ -86,7 +90,12 @@ const makeUnoAgentAccess = Effect.gen(function* () {
   const resolve = Effect.gen(function* () {
     const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
     const apiKey = current?.uno.apiKey.trim() ?? "";
-    const access: UnoAgentAccessLevel = current?.uno.agentAccess ?? "read";
+    // Покупки агенту не выдаём: "purchase" из старых настроек понижается до
+    // "manage", и токен с `infra:purchase` перечеканивается при первом же
+    // обращении (control plane отзывает предыдущий токен бокса).
+    const access: MintableUnoAgentAccessLevel = clampUnoAgentAccessLevel(
+      current?.uno.agentAccess ?? "read",
+    );
     if (apiKey.length === 0 || access === "off") return {};
 
     const keyFingerprint = accountKeyFingerprint(apiKey);

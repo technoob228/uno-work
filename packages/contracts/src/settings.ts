@@ -559,11 +559,29 @@ export const UNO_GATEWAY_BASE_URL = "https://api.getuno.xyz/v1";
 /**
  * Уровень доступа агентских сессий к аккаунту Uno. Демон чеканит на боксе
  * scoped-токен этого уровня и кладёт его в env харнесов; "off" выключает
- * выдачу целиком. "purchase" — явное согласие владельца на заказ платных
- * продуктов агентом (по умолчанию его нет даже в "manage").
+ * выдачу целиком.
+ *
+ * "purchase" больше не чеканится: агентский ключ не должен уметь заказывать
+ * платные продукты — покупка остаётся явным действием человека в UI, которое
+ * идёт ключом аккаунта, а не ключом из окружения агента. Литерал оставлен,
+ * чтобы уже сохранённые настройки читались; уровень приводится к допустимому
+ * через {@link clampUnoAgentAccessLevel}.
  */
 export const UnoAgentAccessLevel = Schema.Literals(["off", "read", "manage", "purchase"]);
 export type UnoAgentAccessLevel = typeof UnoAgentAccessLevel.Type;
+
+/** Уровни, которые демон вправе чеканить для агентских сессий. */
+export const MINTABLE_UNO_AGENT_ACCESS_LEVELS = ["off", "read", "manage"] as const;
+export type MintableUnoAgentAccessLevel = (typeof MINTABLE_UNO_AGENT_ACCESS_LEVELS)[number];
+
+/**
+ * Приводит сохранённый уровень к тому, что можно выдать агенту. Легаси
+ * "purchase" понижается до "manage": scope `infra:purchase` в окружение
+ * агента не попадает никогда.
+ */
+export function clampUnoAgentAccessLevel(level: UnoAgentAccessLevel): MintableUnoAgentAccessLevel {
+  return level === "purchase" ? "manage" : level;
+}
 
 export const UnoAccountSettings = Schema.Struct({
   apiKey: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),

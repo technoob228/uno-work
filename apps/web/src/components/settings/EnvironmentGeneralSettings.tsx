@@ -13,6 +13,7 @@
 import {
   type EnvironmentId,
   ProviderDriverKind,
+  clampUnoAgentAccessLevel,
   type UnoAgentAccessLevel,
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
@@ -195,14 +196,14 @@ export function EnvironmentGeneralSettings({
           title="Agent access to Uno account"
           description={
             unoApiKey.length > 0
-              ? "On an Uno box, agent sessions get a scoped token (UNO_AGENT_API_KEY) minted for this box — never the account key. Read lists boxes and secrets; Manage adds writes; Purchase lets the agent order paid products."
+              ? "On an Uno box, agent sessions get a scoped token (UNO_AGENT_API_KEY) minted for this box — never the account key, and never a purchasing one. Read lists boxes and secrets; Manage adds writes. Ordering paid products stays a human action in the app."
               : "Add an API key above first. Then agent sessions on an Uno box receive a scoped account token automatically."
           }
           control={
             <select
               aria-label="Agent access to Uno account"
               className="h-7 rounded-md border border-border bg-background px-2 text-xs"
-              value={settings.uno?.agentAccess ?? "read"}
+              value={clampUnoAgentAccessLevel(settings.uno?.agentAccess ?? "read")}
               disabled={unoApiKey.length === 0}
               onChange={(event) =>
                 save(
@@ -214,7 +215,6 @@ export function EnvironmentGeneralSettings({
               <option value="off">Off</option>
               <option value="read">Read only</option>
               <option value="manage">Manage</option>
-              <option value="purchase">Manage + purchase</option>
             </select>
           }
         />

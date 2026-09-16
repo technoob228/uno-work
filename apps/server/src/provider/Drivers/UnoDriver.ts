@@ -41,6 +41,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGeneration.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
+import { UnoGatewayKey } from "../../unoGatewayKey.ts";
 import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
 import { writeBrowserInstructionsFile } from "../browserInstructions.ts";
 import { ServerConfig } from "../../config.ts";
@@ -81,6 +82,7 @@ export type UnoDriverEnv =
   | ProviderEventLoggers
   | BrowserBridge
   | UnoAgentAccess
+  | UnoGatewayKey
   | ServerConfig
   | ServerSettingsService;
 
@@ -707,7 +709,8 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
       const serverSettings = yield* serverSettingsService.getSettings.pipe(
         Effect.orElseSucceed(() => undefined),
       );
-      const unoApiKey = serverSettings?.uno.apiKey ?? "";
+      // Только ключ шлюза: ключ аккаунта в процесс харнесса не уходит.
+      const unoApiKey = yield* (yield* UnoGatewayKey).harnessKey();
       const unoCatalog = yield* Effect.promise(() => fetchUnoModelsCatalog(unoApiKey));
       const browserBridge = yield* BrowserBridge;
       const instructionsFilePath = writeBrowserInstructionsFile({

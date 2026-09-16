@@ -18,6 +18,7 @@ import {
 } from "./http.ts";
 import { BrowserBridgeLive } from "./browserBridge.ts";
 import { UnoAgentAccessLive } from "./unoAgentAccess.ts";
+import { UnoGatewayKeyLive } from "./unoGatewayKey.ts";
 import { UnoBoxIdentityLive } from "./unoBoxIdentity.ts";
 import { HealthCheck } from "./health.ts";
 import { SelfWatchdogLive } from "./selfWatchdog.ts";
@@ -408,6 +409,13 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   // харнесов. Зависимости даём тем же экземплярам Live-слоёв (memoized).
   Layer.provideMerge(
     UnoAgentAccessLive.pipe(
+      Layer.provide(ServerSettingsLive),
+      Layer.provide(ServerSecretStoreLive),
+    ),
+  ),
+  // Ключ шлюза для окружения харнессов — ключ аккаунта агенту не отдаём.
+  Layer.provideMerge(
+    UnoGatewayKeyLive.pipe(
       Layer.provide(ServerSettingsLive),
       Layer.provide(ServerSecretStoreLive),
     ),
