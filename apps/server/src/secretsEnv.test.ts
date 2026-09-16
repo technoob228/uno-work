@@ -4,6 +4,7 @@ import {
   formatEnvValue,
   isValidSecretName,
   isValidSecretTargetFile,
+  resolveSecretTargetDirectory,
   upsertEnvContent,
 } from "./secretsEnv.ts";
 
@@ -79,5 +80,49 @@ describe("upsertEnvContent", () => {
 
   it("quotes special values on the way in", () => {
     expect(upsertEnvContent("", "KEY", "a b")).toBe('KEY="a b"\n');
+  });
+});
+
+describe("secret target directory", () => {
+  const threadCwd = "/Users/dev/projects/api";
+
+  it("accepts the thread's own folder", () => {
+    expect(resolveSecretTargetDirectory({ threadCwd, requestedCwd: threadCwd })).toEqual({
+      ok: true,
+      cwd: threadCwd,
+    });
+  });
+
+  it("accepts a folder inside it", () => {
+    expect(
+      resolveSecretTargetDirectory({ threadCwd, requestedCwd: `${threadCwd}/services/worker` }),
+    ).toEqual({ ok: true, cwd: `${threadCwd}/services/worker` });
+  });
+
+  it("refuses a sibling project", () => {
+    // The agent picks `cwd` itself; without this check it could drop a .env
+    // into any project on the machine.
+    expect(
+      resolveSecretTargetDirectory({ threadCwd, requestedCwd: "/Users/dev/projects/billing" }).ok,
+    ).toBe(false);
+  });
+
+  it("refuses an escape through ..", () => {
+    expect(
+      resolveSecretTargetDirectory({ threadCwd, requestedCwd: `${threadCwd}/../billing` }).ok,
+    ).toBe(false);
+    expect(resolveSecretTargetDirectory({ threadCwd, requestedCwd: "/etc" }).ok).toBe(false);
+  });
+
+  it("does not mistake a name prefix for a subfolder", () => {
+    expect(
+      resolveSecretTargetDirectory({ threadCwd, requestedCwd: "/Users/dev/projects/api-old" }).ok,
+    ).toBe(false);
+  });
+
+  it("keeps the old behaviour when the thread has no folder", () => {
+    expect(
+      resolveSecretTargetDirectory({ threadCwd: undefined, requestedCwd: "/tmp/anywhere" }),
+    ).toEqual({ ok: true, cwd: "/tmp/anywhere" });
   });
 });

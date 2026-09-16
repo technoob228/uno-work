@@ -7,6 +7,10 @@
  * updated file content.
  */
 
+import { isAbsolute, relative, resolve } from "node:path";
+
+import { expandHomePath } from "./pathExpansion.ts";
+
 export const SECRET_REQUEST_PATH = "/api/secrets/request";
 export const SECRET_RESULT_PATH = "/api/secrets/result";
 
@@ -66,4 +70,30 @@ export const upsertEnvContent = (content: string, name: string, value: string): 
   }
   const next = nextLines.join("\n");
   return next.endsWith("\n") ? next : `${next}\n`;
+};
+
+/**
+ * Куда агенту можно писать секрет: только в рабочую папку своего треда.
+ *
+ * `cwd` приходит из тела запроса (модель подставляет `$PWD`), а `.env` пишет
+ * сервер — то есть без проверки агент мог назвать любую папку на машине и
+ * положить туда файл. Папка треда известна из bridge-токена, поэтому запрос
+ * сверяется с ней: сама папка или что-то внутри неё — можно, выход наружу
+ * (`..`, соседний проект, абсолютный путь мимо) — отказ.
+ *
+ * Токен без папки (тред без `cwd`) оставляет прежнее поведение: он всё равно
+ * привязан к треду, а запретить ему запись значило бы сломать сценарий вместо
+ * того, чтобы его сузить.
+ */
+export const resolveSecretTargetDirectory = (input: {
+  readonly threadCwd: string | undefined;
+  readonly requestedCwd: string;
+}): { readonly ok: true; readonly cwd: string } | { readonly ok: false; readonly cwd: string } => {
+  const requested = resolve(expandHomePath(input.requestedCwd));
+  const threadCwd = input.threadCwd?.trim();
+  if (!threadCwd) return { ok: true, cwd: requested };
+  const root = resolve(expandHomePath(threadCwd));
+  const step = relative(root, requested);
+  const inside = step === "" || (!step.startsWith("..") && !isAbsolute(step));
+  return inside ? { ok: true, cwd: requested } : { ok: false, cwd: requested };
 };

@@ -35,6 +35,7 @@ import { expandHomePath } from "./pathExpansion.ts";
 import {
   isValidSecretName,
   isValidSecretTargetFile,
+  resolveSecretTargetDirectory,
   SECRET_DESCRIPTION_MAX_LENGTH,
   SECRET_REQUEST_PATH,
   SECRET_RESULT_PATH,
@@ -457,12 +458,29 @@ export const secretsRequestRouteLayer = HttpRouter.add(
       );
     }
 
+    // Папку называет токен треда: `.env` пишет сервер, и без этой сверки агент
+    // мог положить файл в любой проект на машине.
+    const target = resolveSecretTargetDirectory({
+      threadCwd: thread.context.cwd,
+      requestedCwd: cwd,
+    });
+    if (!target.ok) {
+      return HttpServerResponse.jsonUnsafe(
+        {
+          ok: false,
+          error: "cwd_outside_thread",
+          message: `"cwd" вне рабочей папки этого чата (${thread.context.cwd}). Секрет можно просить только в неё.`,
+        },
+        { status: 403 },
+      );
+    }
+
     const outcome = yield* browserBridge.publishSecretRequest(
       {
         name: input.name,
         ...(input.description !== undefined ? { description: input.description } : {}),
         targetFile,
-        cwd: expandHomePath(cwd),
+        cwd: target.cwd,
         ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
       },
       context,
