@@ -122,6 +122,36 @@ it.effect("reuses the stored child key for the same account key", () =>
   }),
 );
 
+it.effect("re-mints when the stored child key was minted by a different account key", () =>
+  Effect.gen(function* () {
+    const calls: Call[] = [];
+    const restore = stubControlPlane(calls, { key: "unollm_fresh" });
+    // The stored child belongs to a rotated/previous account key — it is
+    // stale and must not be handed to harnesses.
+    const key = yield* harnessKeyWith(ACCOUNT_KEY, {
+      [UNO_GATEWAY_KEY_SECRET_KEY]: JSON.stringify({
+        secret: "unollm_stale",
+        mintedBy: "old0",
+      }),
+    }).pipe(Effect.ensuring(Effect.sync(restore)));
+
+    assert.strictEqual(key, "unollm_fresh");
+    assert.lengthOf(calls, 1);
+    assert.include(calls[0]!.url, "/api/v1/llm/keys");
+  }),
+);
+
+it.effect("hands over nothing when no key is configured at all", () =>
+  Effect.gen(function* () {
+    const calls: Call[] = [];
+    const restore = stubControlPlane(calls, { key: "unollm_unused" });
+    const key = yield* harnessKeyWith("").pipe(Effect.ensuring(Effect.sync(restore)));
+
+    assert.strictEqual(key, "");
+    assert.lengthOf(calls, 0);
+  }),
+);
+
 it.effect("hands over nothing when the child key cannot be minted", () =>
   Effect.gen(function* () {
     const calls: Call[] = [];

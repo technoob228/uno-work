@@ -50,6 +50,7 @@ import {
 import { Effect, Layer, Stream } from "effect";
 
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { accountKeyFingerprint } from "../../unoGatewayKey.ts";
 import { BUILT_IN_DRIVERS, type BuiltInDriversEnv } from "../builtInDrivers.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderInstanceRegistryMutator } from "../Services/ProviderInstanceRegistryMutator.ts";
@@ -67,6 +68,10 @@ import { ProviderInstanceRegistryMutableLayer } from "./ProviderInstanceRegistry
  * The returned map is the input the registry consumes; pure & exported
  * separately so the hydration logic can be exercised by unit tests
  * without layering.
+ *
+ * Uno envelopes additionally carry a fingerprint of `settings.uno.apiKey`
+ * (see {@link stampUnoGatewayKeyFingerprint}) so a key change reconciles
+ * into an instance rebuild.
  */
 export const deriveProviderInstanceConfigMap = (
   settings: ServerSettings,
@@ -98,7 +103,44 @@ export const deriveProviderInstanceConfigMap = (
     };
   }
 
+  const unoKeyFingerprint = accountKeyFingerprint(settings.uno.apiKey);
+  for (const [instanceId, entry] of Object.entries(merged)) {
+    merged[instanceId] = stampUnoGatewayKeyFingerprint(entry, unoKeyFingerprint);
+  }
+
   return merged as ProviderInstanceConfigMap;
+};
+
+const UNO_DRIVER_KIND = "uno";
+
+/**
+ * Make the Uno gateway key участником сравнения конфигов при reconcile.
+ *
+ * `UnoDriver.create` снимает каталог моделей шлюза и собирает env харнесса
+ * один раз — при создании инстанса. На Work-боксе `settings.uno.apiKey`
+ * дописывает консоль (fishcode `back/internal/box/work_llm_key.go`), обычно
+ * уже ПОСЛЕ старта демона: settings-watcher видит правку файла и запускает
+ * reconcile, но конверт uno-инстанса без этого штампа не меняется — инстанс
+ * не пересоздаётся, каталог остаётся пустым, провайдер вечно «не подключён».
+ *
+ * Штампуем отпечаток (хвост, не секрет) в конверт: смена ключа ⇒ конверт
+ * не равен прежнему ⇒ реестр пересоздаёт инстанс ⇒ каталог и env собираются
+ * с новым ключом. Драйверная схема (`OpenCodeSettings`) лишние ключи при
+ * декодировании игнорирует; карта живёт только в памяти и в settings.json
+ * не записывается.
+ */
+const stampUnoGatewayKeyFingerprint = (
+  entry: ProviderInstanceConfig,
+  fingerprint: string,
+): ProviderInstanceConfig => {
+  if (entry.driver !== UNO_DRIVER_KIND) {
+    return entry;
+  }
+  const config = entry.config !== null && typeof entry.config === "object" ? entry.config : {};
+  return {
+    ...entry,
+    config: { ...config, unoGatewayKeyFingerprint: fingerprint },
+  };
 };
 
 /**
