@@ -16,6 +16,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 
 import { isAllowedCorsOrigin } from "../corsOrigins.ts";
 import { LinkRequestError, LinkRequestService } from "./Services/LinkRequestService.ts";
+import { scopesForSessionRole } from "../compat/mobileScopes.ts";
 import { AuthError, ServerAuth } from "./Services/ServerAuth.ts";
 import { SessionCredentialService } from "./Services/SessionCredentialService.ts";
 import { deriveAuthClientMetadata } from "./utils.ts";
@@ -43,7 +44,12 @@ export const authSessionRouteLayer = HttpRouter.add(
     const request = yield* HttpServerRequest.HttpServerRequest;
     const serverAuth = yield* ServerAuth;
     const session = yield* serverAuth.getSessionState(request);
-    return HttpServerResponse.jsonUnsafe(session, { status: 200 });
+    // Mobile-compat: апстримный клиент читает из session `scopes` (у нас их
+    // нет — роль шире). Добавляем аддитивно, `role` остаётся для нашего веба.
+    const compatSession = session.authenticated
+      ? { ...session, scopes: scopesForSessionRole(session.role) }
+      : session;
+    return HttpServerResponse.jsonUnsafe(compatSession, { status: 200 });
   }),
 );
 

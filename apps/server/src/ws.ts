@@ -33,7 +33,9 @@ import {
 } from "@t3tools/contracts";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest } from "effect/unstable/http";
-import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
+import { RpcServer } from "effect/unstable/rpc";
+
+import { layerJsonMobileCompat } from "./compat/rpcSerializationMobileCompat.ts";
 
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery.ts";
 import { ServerConfig } from "./config.ts";
@@ -1097,6 +1099,17 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId, currentSessionRole: Ses
           observeRpcEffect(WS_METHODS.serverGetConfig, loadServerConfig, {
             "rpc.aggregate": "server",
           }),
+        // Mobile-compat: заглушки методов апстримного клиента. Смысл — не дать
+        // вызову свалиться в defect "Unknown request tag" (он в effect/rpc не
+        // привязан к requestId и рушит все in-flight запросы клиента).
+        [WS_METHODS.serverProbe]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverProbe, Effect.succeed({}), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverReportClientActivity]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverReportClientActivity, Effect.void, {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.serverRefreshProviders]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverRefreshProviders,
@@ -1780,7 +1793,9 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         }).pipe(
           Effect.provide(
             makeWsRpcLayer(session.sessionId, session.role).pipe(
-              Layer.provideMerge(RpcSerialization.layerJson),
+              // Mobile-compat: JSON-сериализация с коерсией числовых request id
+              // апстримного клиента (effect rc.115) к нашим строковым (beta.59).
+              Layer.provideMerge(layerJsonMobileCompat),
               Layer.provide(
                 SourceControlDiscoveryLayer.layer.pipe(
                   Layer.provide(

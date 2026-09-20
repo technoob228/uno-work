@@ -34,6 +34,10 @@ type BootstrapExchangeResult = {
 
 const AUTHORIZATION_PREFIX = "Bearer ";
 const WEBSOCKET_TOKEN_QUERY_PARAM = "wsToken";
+// Mobile-compat: апстримный T3-клиент (мобилка из сторов) передаёт тот же
+// одноразовый токен в query-параметре `wsTicket` (их /api/auth/websocket-ticket).
+// Принимаем оба имени; семантика идентична.
+const WEBSOCKET_TICKET_QUERY_PARAM = "wsTicket";
 
 export function toBootstrapExchangeAuthError(cause: BootstrapCredentialError): AuthError {
   if (cause.status === 500) {
@@ -346,7 +350,9 @@ export const makeServerAuth = Effect.gen(function* () {
     Effect.gen(function* () {
       const requestUrl = HttpServerRequest.toURL(request);
       if (Option.isSome(requestUrl)) {
-        const websocketToken = requestUrl.value.searchParams.get(WEBSOCKET_TOKEN_QUERY_PARAM);
+        const websocketToken =
+          requestUrl.value.searchParams.get(WEBSOCKET_TOKEN_QUERY_PARAM) ??
+          requestUrl.value.searchParams.get(WEBSOCKET_TICKET_QUERY_PARAM);
         if (websocketToken && websocketToken.trim().length > 0) {
           return yield* sessions.verifyWebSocketToken(websocketToken).pipe(
             Effect.map((session) => ({

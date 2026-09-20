@@ -307,6 +307,11 @@ export const WS_METHODS = {
   subscribeAuthLinkRequests: "subscribeAuthLinkRequests",
   subscribeBrowserBridge: "subscribeBrowserBridge",
   subscribePlugins: "subscribePlugins",
+
+  // Mobile-compat: методы, которые зовёт апстримный T3-клиент (мобилка).
+  // Имена должны буквально совпадать с upstream WS_METHODS.
+  serverProbe: "server.probe",
+  serverReportClientActivity: "server.reportClientActivity",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -319,6 +324,26 @@ export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   payload: Schema.Struct({}),
   success: ServerConfig,
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError]),
+});
+
+/**
+ * Mobile-compat: liveness-проба апстримного клиента. Пустой запрос/ответ —
+ * важен сам факт успешного round-trip. Payload намеренно Struct({}) — лишние
+ * поля апстримных версий игнорируются decode'ом.
+ */
+export const WsServerProbeRpc = Rpc.make(WS_METHODS.serverProbe, {
+  payload: Schema.Struct({}),
+  success: Schema.Struct({}),
+});
+
+/**
+ * Mobile-compat: телеметрия активности апстримного клиента. Мы её не храним —
+ * заглушка нужна, чтобы вызов не ронял WS-сессию defect-кадром
+ * "Unknown request tag" (он у effect/rpc не привязан к requestId и валит
+ * все in-flight запросы клиента разом).
+ */
+export const WsServerReportClientActivityRpc = Rpc.make(WS_METHODS.serverReportClientActivity, {
+  payload: Schema.Struct({}),
 });
 
 export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, {
@@ -1075,6 +1100,8 @@ export const WsUnoCloudCreateBoxStatusRpc = Rpc.make(WS_METHODS.unoCloudCreateBo
 
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
+  WsServerProbeRpc,
+  WsServerReportClientActivityRpc,
   WsServerRefreshProvidersRpc,
   WsServerUpsertKeybindingRpc,
   WsServerGetSettingsRpc,
