@@ -1266,7 +1266,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
         assert.equal(sessionResponse.status, 200);
         assert.equal(sessionBody.authenticated, true);
-        assert.equal(sessionBody.sessionMethod, "bearer-session-token");
+        // Mobile-compat: bearer-запросы получают апстримный алиас
+        // "bearer-access-token" (наши клиенты декодируют оба написания,
+        // cookie-путь по-прежнему отдаёт канонический литерал).
+        assert.equal(sessionBody.sessionMethod, "bearer-access-token");
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
