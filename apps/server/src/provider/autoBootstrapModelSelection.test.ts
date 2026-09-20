@@ -60,6 +60,72 @@ describe("selectAutoBootstrapModelSelection", () => {
     });
   });
 
+  it("prefers a linked built-in Uno gateway over every signed-in harness", () => {
+    const unoLinked = provider({
+      instanceId: "uno",
+      driver: "uno",
+      models: ["uno/anthropic/claude-opus-4.7", "uno/moonshotai/kimi-k2.7-code"],
+    });
+    const claudeAgentReady = provider({
+      instanceId: "claudeAgent",
+      driver: "claudeAgent",
+      models: ["claude-sonnet-4-6"],
+    });
+
+    expect(selectAutoBootstrapModelSelection([codexReady, claudeAgentReady, unoLinked])).toEqual({
+      instanceId: ProviderInstanceId.make("uno"),
+      // The canonical Uno default, not the first pinned headline model.
+      model: "uno/moonshotai/kimi-k2.7-code",
+    });
+  });
+
+  it("ranks a signed-in claudeAgent above opencode", () => {
+    const claudeAgentReady = provider({
+      instanceId: "claudeAgent",
+      driver: "claudeAgent",
+      models: ["claude-sonnet-4-6"],
+    });
+    const opencodeReady = provider({
+      instanceId: "opencode",
+      driver: "opencode",
+      models: ["opencode/zen-free"],
+    });
+
+    expect(selectAutoBootstrapModelSelection([opencodeReady, claudeAgentReady])).toEqual({
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "claude-sonnet-4-6",
+    });
+  });
+
+  it("falls back to free OpenCode when uno is unlinked and codex is signed out", () => {
+    const unoUnlinked = provider({
+      instanceId: "uno",
+      driver: "uno",
+      authStatus: "unknown",
+      status: "warning",
+    });
+    const codexLoggedOut = provider({
+      instanceId: "codex",
+      driver: "codex",
+      models: [DEFAULT_MODEL],
+      authStatus: "unauthenticated",
+    });
+    const opencodeReady = provider({
+      instanceId: "opencode",
+      driver: "opencode",
+      models: ["opencode/zen-free"],
+    });
+
+    expect(selectAutoBootstrapModelSelection([unoUnlinked, codexLoggedOut, opencodeReady])).toEqual(
+      {
+        instanceId: ProviderInstanceId.make("opencode"),
+        // The canonical opencode default is not in this instance's catalog, so
+        // the first advertised (free Zen) model wins.
+        model: "opencode/zen-free",
+      },
+    );
+  });
+
   it("skips a driver that is installed but not logged in", () => {
     const codexLoggedOut = provider({
       instanceId: "codex",
