@@ -12,19 +12,12 @@ export const DESKTOP_ONBOARDING_STEP_IDS = [
 ] as const;
 
 /**
- * Browser flow: after the welcome the user picks where to work (the Uno cloud
- * box or their own computer); the rest is about what this thing is and getting
- * the first project onto the machine.
+ * Browser flow: the tab is already connected to a provisioned machine, so
+ * there is nothing to install or choose. Three screens: this is your computer,
+ * it works while you're away, now ask it for something — the last one ends in
+ * a real chat rather than a settings page.
  */
-export const WEB_ONBOARDING_STEP_IDS = [
-  "web-welcome",
-  "web-where",
-  "what",
-  "web-machine",
-  "web-harness",
-  "unollm",
-  "web-first-project",
-] as const;
+export const WEB_ONBOARDING_STEP_IDS = ["web-computer", "web-away", "web-chat"] as const;
 
 /** Kept as the default export name for the desktop flow and its tests. */
 export const ONBOARDING_STEP_IDS = DESKTOP_ONBOARDING_STEP_IDS;
@@ -35,26 +28,8 @@ export type OnboardingStepId =
 
 export type OnboardingFlow = "desktop" | "web";
 
-/** Where the browser user chose to keep files and run agents. */
-export type OnboardingWorkLocation = "cloud" | "local";
-
-/**
- * Users who work on their own computer are never introduced to the cloud box,
- * so that step drops out once they pick "local". Every other step stays and
- * keeps targeting the primary environment.
- */
-export function resolveWebOnboardingStepIds(
-  workLocation: OnboardingWorkLocation | null,
-): ReadonlyArray<OnboardingStepId> {
-  if (workLocation !== "local") return WEB_ONBOARDING_STEP_IDS;
-  return WEB_ONBOARDING_STEP_IDS.filter((stepId) => stepId !== "web-machine");
-}
-
-export function resolveOnboardingStepIds(
-  flow: OnboardingFlow,
-  workLocation: OnboardingWorkLocation | null,
-): ReadonlyArray<OnboardingStepId> {
-  return flow === "web" ? resolveWebOnboardingStepIds(workLocation) : DESKTOP_ONBOARDING_STEP_IDS;
+export function resolveOnboardingStepIds(flow: OnboardingFlow): ReadonlyArray<OnboardingStepId> {
+  return flow === "web" ? WEB_ONBOARDING_STEP_IDS : DESKTOP_ONBOARDING_STEP_IDS;
 }
 
 export interface OnboardingState {
@@ -64,9 +39,6 @@ export interface OnboardingState {
   progressPercent: number;
   isFirst: boolean;
   isLast: boolean;
-  /** Browser flow only; `null` until the user picks on the "web-where" step. */
-  workLocation: OnboardingWorkLocation | null;
-  setWorkLocation: (workLocation: OnboardingWorkLocation) => void;
   next: () => void;
   back: () => void;
   goTo: (stepId: OnboardingStepId) => void;
@@ -74,8 +46,7 @@ export interface OnboardingState {
 
 export function useOnboardingState(flow: OnboardingFlow = "desktop"): OnboardingState {
   const [stepIndex, setStepIndex] = useState(0);
-  const [workLocation, setWorkLocation] = useState<OnboardingWorkLocation | null>(null);
-  const stepIds = useMemo(() => resolveOnboardingStepIds(flow, workLocation), [flow, workLocation]);
+  const stepIds = useMemo(() => resolveOnboardingStepIds(flow), [flow]);
 
   const next = useCallback(() => {
     setStepIndex((current) => Math.min(current + 1, stepIds.length - 1));
@@ -94,7 +65,6 @@ export function useOnboardingState(flow: OnboardingFlow = "desktop"): Onboarding
   );
 
   return useMemo(() => {
-    // The step list can shrink after a choice; never point past its end.
     const boundedIndex = Math.min(stepIndex, stepIds.length - 1);
     const stepId = stepIds[boundedIndex] ?? stepIds[0] ?? "welcome";
     const total = stepIds.length;
@@ -105,11 +75,9 @@ export function useOnboardingState(flow: OnboardingFlow = "desktop"): Onboarding
       progressPercent: ((boundedIndex + 1) / total) * 100,
       isFirst: boundedIndex === 0,
       isLast: boundedIndex === total - 1,
-      workLocation,
-      setWorkLocation,
       next,
       back,
       goTo,
     };
-  }, [stepIndex, stepIds, workLocation, next, back, goTo]);
+  }, [stepIndex, stepIds, next, back, goTo]);
 }

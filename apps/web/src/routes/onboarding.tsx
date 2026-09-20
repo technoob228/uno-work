@@ -1,7 +1,8 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import { OnboardingShell } from "~/components/onboarding/OnboardingShell";
+import { useFirstChatLaunch } from "~/components/onboarding/useFirstChatLaunch";
 import { useOnboardingState } from "~/components/onboarding/useOnboardingState";
 import { DevModeStep } from "~/components/onboarding/steps/DevModeStep";
 import { HarnessesStep } from "~/components/onboarding/steps/HarnessesStep";
@@ -10,11 +11,9 @@ import { RulesStep } from "~/components/onboarding/steps/RulesStep";
 import { UnoLlmStep } from "~/components/onboarding/steps/UnoLlmStep";
 import { WelcomeStep } from "~/components/onboarding/steps/WelcomeStep";
 import { WhatItDoesStep } from "~/components/onboarding/steps/WhatItDoesStep";
-import { FirstProjectStep } from "~/components/onboarding/steps/web/FirstProjectStep";
-import { WebHarnessesStep } from "~/components/onboarding/steps/web/WebHarnessesStep";
-import { WebMachineStep } from "~/components/onboarding/steps/web/WebMachineStep";
-import { WebWelcomeStep } from "~/components/onboarding/steps/web/WebWelcomeStep";
-import { WebWhereStep } from "~/components/onboarding/steps/web/WebWhereStep";
+import { ComputerAwayStep } from "~/components/onboarding/steps/web/ComputerAwayStep";
+import { ComputerChatStep } from "~/components/onboarding/steps/web/ComputerChatStep";
+import { ComputerHelloStep } from "~/components/onboarding/steps/web/ComputerHelloStep";
 import { useCommandPaletteStore } from "~/commandPaletteStore";
 import { ensureClientSettingsHydrated, useUpdateSettings } from "~/hooks/useSettings";
 import { isWebApp } from "~/webMode";
@@ -34,9 +33,14 @@ function OnboardingRouteView() {
   const { updateSettings } = useUpdateSettings();
   const navigate = useNavigate();
   const openAddProjectRef = useRef(false);
-  // In the browser flow the last step creates the project itself, so finishing
-  // must not reopen the desktop folder picker.
-  const [webProjectCreated, setWebProjectCreated] = useState(false);
+
+  const markCompleted = useCallback(() => {
+    void updateSettings({ onboardingCompleted: true });
+  }, [updateSettings]);
+
+  // In the browser flow the last step opens a real chat itself; completion is
+  // recorded just before that navigation so the root guard lets it through.
+  const firstChat = useFirstChatLaunch({ onBeforeNavigate: markCompleted });
 
   useEffect(() => {
     return () => {
@@ -48,7 +52,7 @@ function OnboardingRouteView() {
   }, []);
 
   const finish = (openProjectPicker: boolean) => {
-    void updateSettings({ onboardingCompleted: true });
+    markCompleted();
     openAddProjectRef.current = openProjectPicker;
     void navigate({ to: "/", replace: true });
   };
@@ -58,23 +62,20 @@ function OnboardingRouteView() {
       state.next();
       return;
     }
-    finish(!isWebApp);
+    if (isWebApp) {
+      // Same path as the suggestion chips, just without a pre-filled message.
+      void firstChat.launch(null);
+      return;
+    }
+    finish(true);
   };
 
   const handleSkip = () => {
-    void updateSettings({ onboardingCompleted: true });
+    markCompleted();
     void navigate({ to: "/", replace: true });
   };
 
-  const continueLabelProps = isWebApp
-    ? {
-        continueLabel: state.isLast
-          ? webProjectCreated
-            ? "Open project"
-            : "Skip for now"
-          : "Continue",
-      }
-    : {};
+  const continueLabelProps = isWebApp && state.isLast ? { continueLabel: "Open my computer" } : {};
 
   return (
     <OnboardingShell
@@ -84,8 +85,7 @@ function OnboardingRouteView() {
       progressPercent={state.progressPercent}
       isFirst={state.isFirst}
       isLast={state.isLast}
-      // The "where" step is a real decision: no default, so Continue waits for it.
-      canContinue={state.stepId !== "web-where" || state.workLocation !== null}
+      canContinue={!firstChat.pending}
       {...continueLabelProps}
       onBack={state.back}
       onContinue={handleContinue}
@@ -98,14 +98,14 @@ function OnboardingRouteView() {
       {state.stepId === "harness" && <HarnessesStep />}
       {state.stepId === "unollm" && <UnoLlmStep />}
       {state.stepId === "rules" && <RulesStep />}
-      {state.stepId === "web-welcome" && <WebWelcomeStep />}
-      {state.stepId === "web-where" && (
-        <WebWhereStep workLocation={state.workLocation} onSelect={state.setWorkLocation} />
-      )}
-      {state.stepId === "web-machine" && <WebMachineStep />}
-      {state.stepId === "web-harness" && <WebHarnessesStep />}
-      {state.stepId === "web-first-project" && (
-        <FirstProjectStep onProjectReady={() => setWebProjectCreated(true)} />
+      {state.stepId === "web-computer" && <ComputerHelloStep />}
+      {state.stepId === "web-away" && <ComputerAwayStep />}
+      {state.stepId === "web-chat" && (
+        <ComputerChatStep
+          pending={firstChat.pending}
+          error={firstChat.error}
+          onPick={(prompt) => void firstChat.launch(prompt)}
+        />
       )}
     </OnboardingShell>
   );

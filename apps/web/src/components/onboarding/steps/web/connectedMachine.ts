@@ -1,3 +1,5 @@
+import type { MachineKind } from "@t3tools/contracts";
+
 import type { useServerConfig } from "~/rpc/serverState";
 
 export interface ConnectedMachineSummary {
@@ -21,4 +23,22 @@ export function describeConnectedMachine(
     serverVersion: serverConfig?.environment.serverVersion ?? null,
     workingDirectory: serverConfig?.cwd ?? null,
   };
+}
+
+/**
+ * What kind of machine this is, in the user's words. `null` when the daemon
+ * predates the `machineKind` field — then the UI simply omits the row instead
+ * of guessing.
+ */
+export function machineKindLabel(machineKind: MachineKind | undefined): string | null {
+  switch (machineKind) {
+    case "uno_box":
+      return "Uno cloud box";
+    case "computer":
+      return "Personal computer";
+    case "server":
+      return "Server";
+    default:
+      return null;
+  }
 }
