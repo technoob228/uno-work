@@ -24,3 +24,26 @@ const OWNER_SCOPES = [
 export function scopesForSessionRole(role: string | undefined): ReadonlyArray<string> {
   return role === "owner" ? OWNER_SCOPES : STANDARD_CLIENT_SCOPES;
 }
+
+/**
+ * Апстрим переименовал session-метод `bearer-session-token` →
+ * `bearer-access-token`; их Schema.Literals отвергает наш литерал и валит
+ * decode всего AuthSessionState / ServerConfig на клиенте. Транслируем
+ * литерал в ответах для апстримных потребителей (bearer-запросы и
+ * wsTicket-коннекты). Наши клиенты после расширения союза в contracts
+ * переваривают оба написания.
+ */
+export function toUpstreamSessionMethod<M extends string>(
+  method: M,
+): M | "bearer-access-token" {
+  return method === "bearer-session-token" ? "bearer-access-token" : method;
+}
+
+export function translateAuthDescriptorForUpstream<
+  D extends { readonly sessionMethods: ReadonlyArray<string> },
+>(descriptor: D): D {
+  return {
+    ...descriptor,
+    sessionMethods: descriptor.sessionMethods.map(toUpstreamSessionMethod),
+  };
+}

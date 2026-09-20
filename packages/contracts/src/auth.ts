@@ -66,6 +66,10 @@ export type ServerAuthBootstrapMethod = typeof ServerAuthBootstrapMethod.Type;
 export const ServerAuthSessionMethod = Schema.Literals([
   "browser-session-cookie",
   "bearer-session-token",
+  // Mobile-compat: апстрим переименовал bearer-session-token →
+  // bearer-access-token (коммит a04c09a19). Для апстримных клиентов мы
+  // отдаём их литерал; союз расширен, чтобы наши encode/decode его принимали.
+  "bearer-access-token",
 ]);
 export type ServerAuthSessionMethod = typeof ServerAuthSessionMethod.Type;
 

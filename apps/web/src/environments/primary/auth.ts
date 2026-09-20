@@ -42,7 +42,9 @@ export interface ServerClientSessionRecord {
   readonly sessionId: AuthSessionId;
   readonly subject: string;
   readonly role: "owner" | "client";
-  readonly method: "browser-session-cookie" | "bearer-session-token";
+  // "bearer-access-token" — апстримный алиас bearer-session-token
+  // (mobile-compat), см. contracts ServerAuthSessionMethod.
+  readonly method: "browser-session-cookie" | "bearer-session-token" | "bearer-access-token";
   readonly client: AuthClientMetadata;
   readonly issuedAt: string;
   readonly expiresAt: string;

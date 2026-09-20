@@ -16,7 +16,11 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 
 import { isAllowedCorsOrigin } from "../corsOrigins.ts";
 import { LinkRequestError, LinkRequestService } from "./Services/LinkRequestService.ts";
-import { scopesForSessionRole } from "../compat/mobileScopes.ts";
+import {
+  scopesForSessionRole,
+  toUpstreamSessionMethod,
+  translateAuthDescriptorForUpstream,
+} from "../compat/mobileScopes.ts";
 import { AuthError, ServerAuth } from "./Services/ServerAuth.ts";
 import { SessionCredentialService } from "./Services/SessionCredentialService.ts";
 import { deriveAuthClientMetadata } from "./utils.ts";
@@ -46,8 +50,23 @@ export const authSessionRouteLayer = HttpRouter.add(
     const session = yield* serverAuth.getSessionState(request);
     // Mobile-compat: апстримный клиент читает из session `scopes` (у нас их
     // нет — роль шире). Добавляем аддитивно, `role` остаётся для нашего веба.
+    // Для bearer-запросов (мобилка всегда ходит с Authorization: Bearer, наш
+    // веб — с cookie) дополнительно транслируем литералы session-методов в
+    // апстримные, иначе их Schema.Literals валит decode целиком.
+    const isBearerRequest = request.headers["authorization"]?.startsWith("Bearer ") === true;
     const compatSession = session.authenticated
-      ? { ...session, scopes: scopesForSessionRole(session.role) }
+      ? {
+          ...session,
+          scopes: scopesForSessionRole(session.role),
+          ...(isBearerRequest
+            ? {
+                auth: translateAuthDescriptorForUpstream(session.auth),
+                ...(session.sessionMethod
+                  ? { sessionMethod: toUpstreamSessionMethod(session.sessionMethod) }
+                  : {}),
+              }
+            : {}),
+        }
       : session;
     return HttpServerResponse.jsonUnsafe(compatSession, { status: 200 });
   }),
