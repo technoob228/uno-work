@@ -47,6 +47,7 @@ import {
   FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION,
   selectAutoBootstrapModelSelection,
 } from "./provider/autoBootstrapModelSelection.ts";
+import { awaitUsableBootDefault } from "./provider/awaitUsableBootDefault.ts";
 import { ReminderScheduler } from "./reminders/Services/ReminderScheduler.ts";
 import {
   formatHeadlessServeOutput,
@@ -180,6 +181,7 @@ export const getAutoBootstrapDefaultModelSelection: Effect.Effect<
   ProviderRegistry
 > = Effect.gen(function* () {
   const providerRegistry = yield* ProviderRegistry;
+  yield* awaitUsableBootDefault();
   const providers = yield* providerRegistry.getProviders;
   return selectAutoBootstrapModelSelection(providers) ?? FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION;
 });

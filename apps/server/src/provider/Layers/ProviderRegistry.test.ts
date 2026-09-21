@@ -2,7 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodePath from "@effect/platform-node/NodePath";
 import { describe, it, assert, live } from "@effect/vitest";
-import { Effect, Exit, Layer, PubSub, Ref, Schema, Scope, Sink, Stream } from "effect";
+import { Effect, Exit, Layer, Option, PubSub, Ref, Schema, Scope, Sink, Stream } from "effect";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import {
   ClaudeSettings,
@@ -37,7 +37,7 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "../../serverSettings.ts";
 import type { ProviderInstance } from "../ProviderDriver.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
-import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
+import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
 
 const defaultClaudeSettings: ClaudeSettings = Schema.decodeSync(ClaudeSettings)({});
 const defaultCodexSettings: CodexSettings = Schema.decodeSync(CodexSettings)({});
@@ -50,6 +50,26 @@ process.env.T3CODE_CURSOR_ENABLED = "1";
 // ── Test helpers ────────────────────────────────────────────────────
 
 const encoder = new TextEncoder();
+
+/**
+ * Boot-time probes run in the background (the server must answer HTTP
+ * before slow harness binaries finish probing), so tests that assert on the
+ * boot probe wait for it to land. Real timers — use from `it.live` only.
+ */
+const awaitBootProbe = (
+  registry: ProviderRegistryShape,
+  instanceId: string,
+  landed: (provider: ServerProvider) => boolean,
+) =>
+  Effect.gen(function* () {
+    for (let attempts = 0; attempts < 60; attempts += 1) {
+      const providers = yield* registry.getProviders;
+      const provider = providers.find((candidate) => candidate.instanceId === instanceId);
+      if (provider !== undefined && landed(provider)) return providers;
+      yield* Effect.sleep("50 millis");
+    }
+    return yield* registry.getProviders;
+  });
 
 function selectDescriptor(
   id: string,
@@ -771,7 +791,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
 
           yield* Effect.gen(function* () {
             const registry = yield* ProviderRegistry;
-            const providers = yield* registry.getProviders;
+            const providers = yield* awaitBootProbe(
+              registry,
+              "codex_personal",
+              (provider) => provider.status === "error",
+            );
             const codexPersonal = providers.find(
               (provider) => provider.instanceId === "codex_personal",
             );
@@ -864,7 +888,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             // the two probe runs is `checkedAt` — each probe stamps a
             // fresh DateTime, so we capture it and assert it advances
             // after the settings mutation.
-            const initialProviders = yield* registry.getProviders;
+            const initialProviders = yield* awaitBootProbe(
+              registry,
+              "codex",
+              (provider) => provider.status === "error",
+            );
             const initialCodex = initialProviders.find(
               (provider) => provider.instanceId === "codex",
             );
@@ -913,6 +941,84 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             assert.strictEqual(reprobedCodex?.status, "error");
             assert.strictEqual(reprobedCodex?.installed, false);
           }).pipe(Effect.provide(runtimeServices));
+        }),
+      );
+
+      // Guards the first-visit "white screen" on fresh Uno Work boxes: the
+      // server layer (and so the HTTP handler) is built only after the
+      // registry. A harness whose probe hangs must not hold layer build;
+      // `awaitBootProbes` is the explicit signal for boot-time defaults.
+      live("does not hold layer build on a slow boot probe", () =>
+        Effect.gen(function* () {
+          const serverSettings = yield* makeMutableServerSettingsService(
+            Schema.decodeSync(ServerSettings)(
+              deepMerge(DEFAULT_SERVER_SETTINGS, {
+                providers: {
+                  codex: { enabled: true },
+                  claudeAgent: { enabled: false },
+                  cursor: { enabled: false },
+                  opencode: { enabled: false },
+                },
+              }),
+            ),
+          );
+          const scope = yield* Scope.make();
+          yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+          const hangingSpawner = Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() =>
+              Effect.succeed(
+                ChildProcessSpawner.makeHandle({
+                  pid: ChildProcessSpawner.ProcessId(1),
+                  exitCode: Effect.never,
+                  isRunning: Effect.succeed(true),
+                  kill: () => Effect.void,
+                  unref: Effect.succeed(Effect.void),
+                  stdin: Sink.drain,
+                  stdout: Stream.never,
+                  stderr: Stream.never,
+                  all: Stream.never,
+                  getInputFd: () => Sink.drain,
+                  getOutputFd: () => Stream.never,
+                }),
+              ),
+            ),
+          );
+          const providerRegistryLayer = ProviderRegistryLive.pipe(
+            Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+            Layer.provideMerge(Layer.succeed(ServerSettingsService, serverSettings)),
+            Layer.provideMerge(
+              ServerConfig.layerTest(process.cwd(), {
+                prefix: "t3-provider-registry-",
+              }),
+            ),
+            Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+            Layer.provideMerge(OpenCodeRuntimeLive),
+            Layer.provideMerge(BrowserBridgeTest),
+            Layer.provideMerge(UnoAgentAccessTest),
+            Layer.provideMerge(UnoGatewayKeyTest()),
+            Layer.provideMerge(hangingSpawner),
+            Layer.provideMerge(NodeFileSystem.layer),
+            Layer.provideMerge(NodePath.layer),
+          );
+          const built = yield* Layer.build(providerRegistryLayer).pipe(
+            Scope.provide(scope),
+            Effect.timeoutOption("3 seconds"),
+          );
+          assert.isTrue(Option.isSome(built), "layer build waited for a hanging probe");
+
+          yield* Effect.gen(function* () {
+            const registry = yield* ProviderRegistry;
+            // The registry still answers with the seeded snapshot…
+            const providers = yield* registry.getProviders;
+            assert.isTrue(providers.some((provider) => provider.instanceId === "codex"));
+            // …and boot-time defaults can tell the probe hasn't landed.
+            assert.notStrictEqual(registry.awaitBootProbes, undefined);
+            const landed = yield* registry.awaitBootProbes!.pipe(
+              Effect.timeoutOption("200 millis"),
+            );
+            assert.isTrue(Option.isNone(landed));
+          }).pipe(Effect.provide(Option.getOrThrow(built)));
         }),
       );
 

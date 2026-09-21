@@ -148,6 +148,7 @@ import { PluginRegistryLive } from "./plugins/PluginRegistry.ts";
 import { PluginRuntimeLive } from "./plugins/PluginRuntime.ts";
 import { ReminderSchedulerLive } from "./reminders/Layers/ReminderScheduler.ts";
 import { NetService } from "@t3tools/shared/Net";
+import { installStartupGate } from "./startupGate.ts";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 
 const PtyAdapterLive = Layer.unwrap(
@@ -178,10 +179,19 @@ const HttpServerLive = Layer.unwrap(
         Effect.promise(() => import("@effect/platform-node/NodeHttpServer")),
         Effect.promise(() => import("node:http")),
       ]);
-      return NodeHttpServer.layer(NodeHttp.createServer, {
-        host: config.host,
-        port: config.port,
-      });
+      // Шлюз отвечает «Starting your computer…», пока демон собирает сервисы:
+      // иначе запросы, пришедшие между listen() и serve(), висят без ответа.
+      return NodeHttpServer.layer(
+        () => {
+          const server = NodeHttp.createServer();
+          installStartupGate(server);
+          return server;
+        },
+        {
+          host: config.host,
+          port: config.port,
+        },
+      );
     }
   }),
 );

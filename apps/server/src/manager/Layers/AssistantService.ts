@@ -25,6 +25,7 @@ import { ProjectionSnapshotQuery } from "../../orchestration/Services/Projection
 import { ManagerCapabilityTokenRepository } from "../../persistence/Services/ManagerCapabilityTokens.ts";
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { awaitUsableBootDefault } from "../../provider/awaitUsableBootDefault.ts";
 import {
   FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION,
   isUnusableAutoBootstrapDefault,
@@ -637,9 +638,13 @@ export const ManagerAssistantServiceLive = Layer.effect(
   makeManagerAssistantService,
 );
 
-/** Startup: make sure the default assistant exists. */
+/**
+ * Startup: make sure the default assistant exists. Runs in the background so
+ * the daemon starts answering HTTP right away.
+ */
 export const AssistantBootstrapLive = Layer.effectDiscard(
   Effect.gen(function* () {
+    yield* awaitUsableBootDefault();
     const assistants = yield* ManagerAssistantService;
     yield* assistants.ensureAssistant({ projectId: ASSISTANT_PROJECT_ID, title: "Assistant" });
     yield* assistants.scanWorkspaceFolders();
@@ -656,5 +661,6 @@ export const AssistantBootstrapLive = Layer.effectDiscard(
     Effect.catch((cause) =>
       Effect.logWarning("assistant bootstrap failed").pipe(Effect.annotateLogs({ cause })),
     ),
+    Effect.forkScoped,
   ),
 );

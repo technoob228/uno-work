@@ -44,6 +44,15 @@ export interface ProviderRegistryShape {
    * change. The array contains the full current state.
    */
   readonly streamChanges: Stream.Stream<ReadonlyArray<ServerProvider>>;
+
+  /**
+   * Resolves once the boot-time probes of every instance present at start
+   * have finished (successfully or not). Boot probes run in the background so
+   * the HTTP server is not held by slow harness binaries; code that picks a
+   * default at boot waits on this instead. Optional: implementations without
+   * background probing (tests, mocks) omit it and callers don't wait.
+   */
+  readonly awaitBootProbes?: Effect.Effect<void>;
 }
 
 export class ProviderRegistry extends Context.Service<ProviderRegistry, ProviderRegistryShape>()(
