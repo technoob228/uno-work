@@ -33,7 +33,6 @@ import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
 import * as Socket from "effect/unstable/socket/Socket";
 import { randomUUID } from "node:crypto";
 
-const BASE = process.env.SHIM_BASE ?? "http://127.0.0.1:13791";
 // Принимаем либо голый credential (SHIM_PAIRING), либо готовую мобильную
 // ссылку из `auth pairing create --base-url … --qr` (SHIM_PAIR_URL) — её
 // разбираем так же, как мобилка: токен из hash первым, потом query.
@@ -50,6 +49,13 @@ const PAIRING =
     );
   })();
 if (!PAIRING) throw new Error("SHIM_PAIRING credential or SHIM_PAIR_URL pair link is required");
+
+// Хост — тоже из ссылки, как у мобилки (parsePairingUrl: origin без path):
+// ссылка из кнопки «Connect your phone» должна сама вести к нужному демону.
+const BASE =
+  process.env.SHIM_BASE ??
+  (process.env.SHIM_PAIR_URL ? new URL(process.env.SHIM_PAIR_URL).origin : "http://127.0.0.1:13791");
+console.log("[itest] pair target:", JSON.stringify({ base: BASE, code: `${PAIRING.slice(0, 4)}…` }));
 
 const log = (step: string, detail: unknown) =>
   console.log(`[itest] ${step}:`, typeof detail === "string" ? detail : JSON.stringify(detail));
@@ -94,10 +100,13 @@ log("oauth/token", {
 
 const auth = { authorization: `Bearer ${token.access_token}` };
 
-const session = decodeJson(AuthSessionState)(
-  await (await fetch(`${BASE}/api/auth/session`, { headers: auth })).json(),
-);
-log("session", { authenticated: session.authenticated, scopes: session.scopes });
+const sessionRaw = await (await fetch(`${BASE}/api/auth/session`, { headers: auth })).json();
+const session = decodeJson(AuthSessionState)(sessionRaw);
+log("session", {
+  authenticated: session.authenticated,
+  role: (sessionRaw as { role?: string }).role,
+  scopes: session.scopes,
+});
 
 const ticket = decodeJson(AuthWebSocketTicketResult)(
   await (
