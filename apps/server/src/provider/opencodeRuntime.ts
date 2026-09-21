@@ -35,7 +35,11 @@ import { collectStreamAsString } from "./providerSnapshot.ts";
 import { NetService } from "@t3tools/shared/Net";
 
 const OPENCODE_SERVER_READY_PREFIX = "opencode server listening";
-const DEFAULT_OPENCODE_SERVER_TIMEOUT_MS = 5_000;
+// A ceiling, not a delay: the wait ends as soon as the server says it is up.
+// 5 s was too tight for the first start on a fresh 1-vCPU Work box (cold
+// binary unpack): the first chat failed with "Timed out waiting for OpenCode
+// server start" and only the second message worked.
+const DEFAULT_OPENCODE_SERVER_TIMEOUT_MS = 30_000;
 const DEFAULT_HOSTNAME = "127.0.0.1";
 export interface OpenCodeServerProcess {
   readonly url: string;
