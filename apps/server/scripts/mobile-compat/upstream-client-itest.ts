@@ -1,3 +1,6 @@
+// @ts-nocheck — файл запускается из checkout'а АПСТРИМА (их contracts +
+// effect rc.115, см. README.md рядом); под нашим tsconfig имена экспортов
+// другие, поэтому наш typecheck этот файл не проверяет.
 /**
  * Интеграционный тест mobile-compat шима Uno Work.
  *
@@ -31,8 +34,22 @@ import * as Socket from "effect/unstable/socket/Socket";
 import { randomUUID } from "node:crypto";
 
 const BASE = process.env.SHIM_BASE ?? "http://127.0.0.1:13791";
-const PAIRING = process.env.SHIM_PAIRING;
-if (!PAIRING) throw new Error("SHIM_PAIRING pairing credential is required");
+// Принимаем либо голый credential (SHIM_PAIRING), либо готовую мобильную
+// ссылку из `auth pairing create --base-url … --qr` (SHIM_PAIR_URL) — её
+// разбираем так же, как мобилка: токен из hash первым, потом query.
+const PAIRING =
+  process.env.SHIM_PAIRING ??
+  (() => {
+    const pairUrl = process.env.SHIM_PAIR_URL;
+    if (!pairUrl) return undefined;
+    const parsed = new URL(pairUrl);
+    return (
+      new URLSearchParams(parsed.hash.slice(1)).get("token") ??
+      parsed.searchParams.get("token") ??
+      undefined
+    );
+  })();
+if (!PAIRING) throw new Error("SHIM_PAIRING credential or SHIM_PAIR_URL pair link is required");
 
 const log = (step: string, detail: unknown) =>
   console.log(`[itest] ${step}:`, typeof detail === "string" ? detail : JSON.stringify(detail));

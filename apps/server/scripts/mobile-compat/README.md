@@ -27,6 +27,21 @@ AT=$AT node apps/server/scripts/mobile-compat/ws-probe.mjs
 Ожидаемо: 0 defect-кадров, `requestId` в ответах — числа, snapshot-чанки
 у subscribeServerConfig и subscribeShell.
 
+## Пейринг живого телефона (стор-мобилка T3)
+
+```bash
+node apps/server/src/bin.ts auth pairing create \
+  --base-dir <base-dir> --role owner --label "mikhail-phone" \
+  --base-url https://<публичный-хост-демона> --qr
+```
+
+Печатает готовую ссылку `https://<host>/pair#token=<code>`, ASCII-QR для
+сканера мобилки и строку ручного ввода (host + code). Мобилка парсит ссылку
+локально (токен из hash первым, path отбрасывается — см. апстрим
+`apps/mobile/src/features/connection/pairing.ts:parsePairingUrl`), страница
+/pair нашей SPA при этом не открывается; QR-сканер принимает и сырую
+https-ссылку (`extractPairingUrlFromQrPayload` → `return trimmed`).
+
 ## Честный интеграционный тест апстримным клиентом (upstream-client-itest.ts)
 
 Использует АПСТРИМНЫЙ стек (их contracts + RpcClient + effect rc.115 — то,
@@ -38,6 +53,8 @@ cd /tmp/t3-upstream-main && pnpm install --ignore-scripts
 cp <этот-файл> /tmp/t3-upstream-main/packages/client-runtime/mobile-shim-itest.ts
 cd /tmp/t3-upstream-main/packages/client-runtime
 SHIM_PAIRING=<pairing-credential> node mobile-shim-itest.ts
+# либо готовой ссылкой из `auth pairing create --base-url … --qr`:
+SHIM_PAIR_URL='https://<host>/pair#token=<code>' node mobile-shim-itest.ts
 ```
 
 Проходит путь: descriptor → /oauth/token → session → websocket-ticket →
