@@ -113,7 +113,10 @@ const makeUnoGatewayKey = Effect.gen(function* () {
     if (stored !== null && stored.mintedBy === fingerprint) return stored.secret;
 
     const minted = yield* Effect.tryPromise(() =>
-      fetchControlPlaneJson("/api/v1/llm/keys", apiKey, {
+      // The console serves LLM keys at /llm/keys (fishcode handler.go), not
+      // under /api/v1 — the old path answered 404, the mint "failed" and a
+      // machine holding an account key never got its AI (seen on box 395).
+      fetchControlPlaneJson("/llm/keys", apiKey, {
         method: "POST",
         body: JSON.stringify({ label: keyLabel() }),
       }),

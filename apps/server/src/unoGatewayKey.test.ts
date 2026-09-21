@@ -90,7 +90,8 @@ it.effect("mints a gateway-only child key instead of handing over the account ke
     assert.strictEqual(key, "unollm_child");
     assert.notStrictEqual(key, ACCOUNT_KEY);
     assert.lengthOf(calls, 1);
-    assert.include(calls[0]!.url, "/api/v1/llm/keys");
+    assert.match(calls[0]!.url, /\/llm\/keys$/);
+    assert.notInclude(calls[0]!.url, "/api/v1/");
     assert.strictEqual(calls[0]!.authorization, `Bearer ${ACCOUNT_KEY}`);
   }),
 );
@@ -137,7 +138,8 @@ it.effect("re-mints when the stored child key was minted by a different account 
 
     assert.strictEqual(key, "unollm_fresh");
     assert.lengthOf(calls, 1);
-    assert.include(calls[0]!.url, "/api/v1/llm/keys");
+    assert.match(calls[0]!.url, /\/llm\/keys$/);
+    assert.notInclude(calls[0]!.url, "/api/v1/");
   }),
 );
 
