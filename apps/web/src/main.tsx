@@ -9,6 +9,7 @@ import "./index.css";
 import { isElectron } from "./env";
 import { getRouter } from "./router";
 import { APP_DISPLAY_NAME } from "./branding";
+import { handleUncaughtRenderError } from "./fatalRecovery";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
 import { syncDocumentFullscreenClass } from "./lib/windowFullscreen";
 
@@ -24,7 +25,10 @@ if (isElectron) {
 
 document.title = APP_DISPLAY_NAME;
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement, {
+  // Never leave a blank page when a render error escapes every boundary.
+  onUncaughtError: handleUncaughtRenderError,
+}).render(
   <React.StrictMode>
     <RouterProvider router={router} />
   </React.StrictMode>,

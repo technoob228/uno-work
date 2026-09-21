@@ -1,9 +1,9 @@
 import { type ServerLifecycleWelcomePayload } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime";
 import {
+  Navigate,
   Outlet,
   createRootRouteWithContext,
-  redirect,
   type ErrorComponentProps,
   useLocation,
   useNavigate,
@@ -93,17 +93,21 @@ export const Route = createRootRouteWithContext<{
       resolveInitialServerAuthGateState(),
     ]);
 
-    if (
+    // Not a `throw redirect(...)`: after pairing, the client navigates
+    // /pair → / with the root match reused, and a redirect thrown from the
+    // ROOT beforeLoad left a match TanStack Router renders by throwing its
+    // (already cleared) load promise — `throw undefined`, uncaught, and React
+    // unmounted the whole app. That was the blank first visit that a reload
+    // "fixed". RootRouteView navigates instead.
+    const needsOnboarding =
       authGateState.status === "authenticated" &&
       !getClientSettings().onboardingCompleted &&
       location.pathname !== "/onboarding" &&
-      location.pathname !== "/pair"
-    ) {
-      throw redirect({ to: "/onboarding", replace: true });
-    }
+      location.pathname !== "/pair";
 
     return {
       authGateState,
+      needsOnboarding,
     };
   },
   component: RootRouteView,
@@ -121,7 +125,9 @@ export const Route = createRootRouteWithContext<{
 
 function RootRouteView() {
   const pathname = useLocation({ select: (location) => location.pathname });
-  const { authGateState } = Route.useRouteContext();
+  const context = Route.useRouteContext();
+  const { authGateState } = context;
+  const needsOnboarding = "needsOnboarding" in context && context.needsOnboarding === true;
   const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
 
   useEffect(() => {
@@ -132,6 +138,10 @@ function RootRouteView() {
       window.cancelAnimationFrame(frame);
     };
   }, [pathname]);
+
+  if (needsOnboarding && pathname !== "/onboarding" && pathname !== "/pair") {
+    return <Navigate to="/onboarding" replace />;
+  }
 
   // Pairing and onboarding render without the app shell, but they still need
   // a live connection to the primary machine: onboarding shows the machine's
