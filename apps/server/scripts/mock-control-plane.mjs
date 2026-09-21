@@ -21,11 +21,31 @@
  *                — the screen must say "coming soon", not show errors.
  *   sleeping     the computer is asleep
  *   node-down    /metrics answers 502 {"ok":false,"error":"node unreachable"}
+ *   fleet        an account with several named boxes, for the machine flows of
+ *                Uno Work (Connect / Create a box / Wake / Sleep). Box 123 is
+ *                the computer serving Work; 201 "night-owl" is asleep; 202
+ *                "outreach-machine" runs something else. "Create a box" works:
+ *                the box boots in ~6 s, and its public address then hangs
+ *                (like a not-yet-routed edge) for MOCK_ADDRESS_DELAY_MS
+ *                (default 25 s). Each box that runs Uno Work gets a local
+ *                "edge" port that proxies HTTP + WebSocket to a real daemon;
+ *                asleep → 502 without CORS, exactly what prod's edge does.
+ *
+ *                Daemons for the boxes are real `t3 serve` processes you start
+ *                yourself; tell the mock where they are:
+ *                  MOCK_SLEEPING_DAEMON=/tmp/t3-c:13779   (box 201)
+ *                  MOCK_NEW_BOX_DAEMON=/tmp/t3-b:13778    (created boxes)
+ *                The mock mints pairing links on them with
+ *                `node src/bin.ts auth pairing create --base-dir … --json`.
  *
  * Power is stateful: POST /sleep|/wake|/stop|/start flips the status the next
  * GET returns. Installs take ~6 s and then show up as a git service with a URL.
  */
+import { execFile } from "node:child_process";
 import http from "node:http";
+import net from "node:net";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const PORT = Number(process.env.PORT || 8091);
 const SCENARIO = process.env.MOCK_SCENARIO || process.argv[2] || "happy";
@@ -39,6 +59,10 @@ let statusOverride = null;
 let startedAtOverride = null;
 
 function status() {
+  // In "fleet" the box list owns the power state of box 123 as well.
+  if (SCENARIO === "fleet" && typeof fleet !== "undefined" && fleet.has(BOX_ID)) {
+    return fleet.get(BOX_ID).status;
+  }
   if (statusOverride) return statusOverride;
   return SCENARIO === "sleeping" ? "sleeping" : "running";
 }
@@ -274,6 +298,275 @@ function notFound(res) {
 
 const NOT_DEPLOYED = /^\/api\/v1\/(boxes\/\d+\/(metrics|applogs|apps)|apps\/templates)$/;
 
+// ---------------------------------------------------------------- fleet ---
+
+const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+let ADDRESS_DELAY_MS = Number(process.env.MOCK_ADDRESS_DELAY_MS || 25_000);
+const BOOT_MS = Number(process.env.MOCK_BOOT_MS || 6_000);
+const WAKE_MS = Number(process.env.MOCK_WAKE_MS || 5_000);
+
+function parseDaemon(spec) {
+  if (!spec) return null;
+  const [home, port] = spec.split(":");
+  return { home, port: Number(port) };
+}
+
+const fleet = new Map();
+let nextBoxId = 300;
+let nextEdgePort = 18300;
+
+function fleetBox(id, name, status, daemon, edgePort) {
+  const b = {
+    id,
+    name,
+    status,
+    daemon,
+    edgePort,
+    ramMb: 2048,
+    vcpu: 1,
+    diskGb: 10,
+    createdAt: iso(minsAgo(60 * 24 * 3)),
+    addressReadyAt: 0,
+    edge: null,
+  };
+  fleet.set(id, b);
+  if (daemon && edgePort) startEdge(b);
+  return b;
+}
+
+function fleetJson(b) {
+  const hasEdge = b.daemon && b.edgePort;
+  return {
+    id: b.id,
+    name: b.name,
+    status: b.status,
+    os: "ubuntu-24.04",
+    ram_mb: b.ramMb,
+    vcpu: b.vcpu,
+    disk_gb: b.diskGb,
+    created_at: b.createdAt,
+    internal_ip: `10.77.0.${b.id % 250}`,
+    ssh_command: `ssh -p ${40000 + b.id} uno@203.0.113.42`,
+    ...(hasEdge
+      ? { hostname: `127.0.0.1:${b.edgePort}`, url: `http://127.0.0.1:${b.edgePort}` }
+      : {}),
+  };
+}
+
+function setStatusLater(b, status, ms) {
+  setTimeout(() => {
+    b.status = status;
+    console.log(`box #${b.id} ${b.name} → ${status}`);
+  }, ms);
+}
+
+/**
+ * The box's public address. Asleep/off → 502 text/plain with no CORS header
+ * (the browser sees "Failed to fetch"). Freshly booted → the request hangs
+ * until the address is "routed". Otherwise HTTP and WebSocket go to the daemon.
+ */
+function startEdge(b) {
+  const edge = http.createServer((req, res) => {
+    if (b.status !== "running") {
+      res.writeHead(502, { "Content-Type": "text/plain" });
+      return res.end("502 Bad Gateway\n");
+    }
+    if (Date.now() < b.addressReadyAt) {
+      console.log(`edge ${b.name}: not routed yet, hanging ${req.method} ${req.url}`);
+      return; // never answers, like prod before the route exists
+    }
+    const upstream = http.request(
+      {
+        host: "127.0.0.1",
+        port: b.daemon.port,
+        method: req.method,
+        path: req.url,
+        headers: { ...req.headers, host: `127.0.0.1:${b.daemon.port}` },
+      },
+      (up) => {
+        res.writeHead(up.statusCode || 502, up.headers);
+        up.pipe(res);
+      },
+    );
+    upstream.on("error", () => {
+      if (!res.headersSent) res.writeHead(502, { "Content-Type": "text/plain" });
+      res.end("502 Bad Gateway\n");
+    });
+    req.pipe(upstream);
+  });
+  edge.on("upgrade", (req, socket, head) => {
+    if (b.status !== "running" || Date.now() < b.addressReadyAt) return socket.destroy();
+    const up = net.connect(b.daemon.port, "127.0.0.1", () => {
+      const lines = [`${req.method} ${req.url} HTTP/1.1`];
+      for (let i = 0; i < req.rawHeaders.length; i += 2) {
+        const name = req.rawHeaders[i];
+        const value =
+          name.toLowerCase() === "host" ? `127.0.0.1:${b.daemon.port}` : req.rawHeaders[i + 1];
+        lines.push(`${name}: ${value}`);
+      }
+      up.write(lines.join("\r\n") + "\r\n\r\n");
+      if (head?.length) up.write(head);
+      up.pipe(socket);
+      socket.pipe(up);
+    });
+    up.on("error", () => socket.destroy());
+    socket.on("error", () => up.destroy());
+  });
+  edge.listen(b.edgePort, "127.0.0.1", () =>
+    console.log(
+      `edge for box #${b.id} ${b.name} on http://127.0.0.1:${b.edgePort} → :${b.daemon.port}`,
+    ),
+  );
+  b.edge = edge;
+}
+
+function mintPairing(b) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      process.execPath,
+      [
+        "src/bin.ts",
+        "auth",
+        "pairing",
+        "create",
+        "--base-dir",
+        b.daemon.home,
+        "--base-url",
+        `http://127.0.0.1:${b.edgePort}`,
+        "--role",
+        "owner",
+        "--label",
+        "mock-connect",
+        "--json",
+      ],
+      { cwd: SERVER_DIR, timeout: 30_000 },
+      (error, stdout) => {
+        if (error) return reject(error);
+        // --json prints one pretty-printed object after any log lines.
+        const start = stdout.search(/^\{/m);
+        try {
+          resolve(JSON.parse(stdout.slice(start)));
+        } catch (cause) {
+          reject(cause);
+        }
+      },
+    );
+  });
+}
+
+function initFleet() {
+  // With MOCK_PRIMARY_DAEMON the computer serving Work also has a public
+  // address (edge on :18123), so "which address goes into the phone QR" can
+  // be checked with the page opened from a different origin.
+  const primaryDaemon = parseDaemon(process.env.MOCK_PRIMARY_DAEMON);
+  fleetBox(BOX_ID, "my-computer", "running", primaryDaemon, primaryDaemon ? 18123 : null);
+  fleetBox(201, "night-owl", "sleeping", parseDaemon(process.env.MOCK_SLEEPING_DAEMON), 18201);
+  fleetBox(202, "outreach-machine", "running", null, null);
+  fleetBox(203, "old-experiment", "error", null, null);
+}
+
+async function handleFleet(req, res, url) {
+  const p = url.pathname;
+  // Test knob: POST /__mock/address-delay?ms=250000 — how long the next
+  // created box's address stays unrouted.
+  if (p === "/__mock/address-delay" && req.method === "POST") {
+    ADDRESS_DELAY_MS = Number(url.searchParams.get("ms") || ADDRESS_DELAY_MS);
+    return (send(res, 200, { addressDelayMs: ADDRESS_DELAY_MS }), true);
+  }
+  if (p === "/api/v1/boxes" && req.method === "GET") {
+    return (send(res, 200, { boxes: [...fleet.values()].map(fleetJson) }), true);
+  }
+  if (p === "/api/v1/work/image") {
+    return (send(res, 200, { image_id: 135, name: "uno-work v9.3", state: "ready" }), true);
+  }
+  const launch = p.match(/^\/api\/v1\/images\/(\d+)\/launch$/);
+  if (launch && req.method === "POST") {
+    const body = await readBody(req);
+    const id = nextBoxId++;
+    const b = fleetBox(
+      id,
+      body.name || `box-${id}`,
+      "provisioning",
+      parseDaemon(process.env.MOCK_NEW_BOX_DAEMON),
+      nextEdgePort++,
+    );
+    b.ramMb = body.ram_mb || 2048;
+    b.vcpu = body.vcpu || 1;
+    b.diskGb = body.disk_gb || 10;
+    setStatusLater(b, "running", BOOT_MS);
+    b.addressReadyAt = Date.now() + BOOT_MS + ADDRESS_DELAY_MS;
+    console.log(
+      `launched box #${id} ${b.name}; address routed in ${(BOOT_MS + ADDRESS_DELAY_MS) / 1000}s`,
+    );
+    return (send(res, 201, fleetJson(b)), true);
+  }
+  const m = p.match(/^\/api\/v1\/boxes\/(\d+)(\/.*)?$/);
+  if (!m) return false;
+  const b = fleet.get(Number(m[1]));
+  if (!b) return (send(res, 404, { error: "NOT_FOUND" }), true);
+  if (
+    b.id === BOX_ID &&
+    !["/sleep", "/wake", "/stop", "/start", "/work/session"].includes(m[2] || "")
+  ) {
+    return false; // metrics, apps, logs of "my-computer": the single-box mock below
+  }
+  const sub = m[2] || "";
+  if (sub === "") return (send(res, 200, fleetJson(b)), true);
+  if (sub === "/ports" && req.method === "GET") {
+    return (send(res, 200, { ports: b.edgePort ? [{ id: 1, internal_port: 80 }] : [] }), true);
+  }
+  if (sub === "/ports" && req.method === "POST")
+    return (send(res, 201, { id: 2, internal_port: 80 }), true);
+  if (req.method === "POST" && ["/sleep", "/stop"].includes(sub)) {
+    b.status = sub === "/sleep" ? "sleeping" : "stopped";
+    console.log(`box #${b.id} ${b.name} → ${b.status}`);
+    return (send(res, 200, { status: "ok", box_state: b.status }), true);
+  }
+  if (req.method === "POST" && ["/wake", "/start"].includes(sub)) {
+    if (b.status !== "running") {
+      b.status = "starting";
+      setStatusLater(b, "running", WAKE_MS);
+    }
+    return (send(res, 200, { status: "ok", box_state: b.status }), true);
+  }
+  if (sub === "/work/session" && req.method === "POST") {
+    if (b.status === "error") {
+      return (
+        send(res, 409, {
+          error: `NETWORK_NOT_READY: box ${b.id} hostname is not published yet — retry shortly`,
+        }),
+        true
+      );
+    }
+    if (!b.daemon) {
+      return (
+        send(res, 409, {
+          error: `uno work daemon is not installed on box ${b.id}: run curl -fsSL https://console.uno4.dev/cli/work/install.sh | sudo bash`,
+        }),
+        true
+      );
+    }
+    if (b.status !== "running")
+      return (send(res, 409, { error: `box ${b.id} is not running` }), true);
+    try {
+      const issued = await mintPairing(b);
+      return (
+        send(res, 200, {
+          url: issued.pairUrl,
+          hostname: `127.0.0.1:${b.edgePort}`,
+          expires_at: issued.expiresAt ?? null,
+        }),
+        true
+      );
+    } catch (cause) {
+      return (send(res, 500, { error: `pairing failed: ${cause?.message ?? cause}` }), true);
+    }
+  }
+  return false;
+}
+
+if (SCENARIO === "fleet") initFleet();
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const path = url.pathname;
@@ -283,6 +576,7 @@ const server = http.createServer(async (req, res) => {
     return send(res, 401, { error: "UNAUTHORIZED" });
   }
   if (SCENARIO === "not-deployed" && NOT_DEPLOYED.test(path)) return notFound(res);
+  if (SCENARIO === "fleet" && (await handleFleet(req, res, url))) return;
 
   if (path === "/auth/me") {
     return send(res, 200, {
