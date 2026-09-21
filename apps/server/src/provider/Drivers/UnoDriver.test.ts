@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { __unoDriverTest } from "./UnoDriver.ts";
+import { __unoDriverTest, fetchUnoModelsCatalogWithRetry } from "./UnoDriver.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -228,6 +228,47 @@ describe("UnoDriver catalog normalization", () => {
     const catalog = await __unoDriverTest.fetchUnoModelsCatalog("uno-key");
 
     expect(Object.keys(catalog)).toEqual(["uno/openai/gpt-5.5"]);
+  });
+
+  it("retries the catalog when the first attempts fail (fresh box, network not up yet)", async () => {
+    let calls = 0;
+    const failures: number[] = [];
+    const catalog = await fetchUnoModelsCatalogWithRetry("unollm_key", {
+      delaysMs: [0, 0, 0],
+      fetchCatalog: async () => {
+        calls += 1;
+        if (calls < 3) throw new Error("fetch failed");
+        return { "uno/openai/gpt-5.5": {} as never };
+      },
+      onAttemptFailed: (attempt) => failures.push(attempt),
+    });
+    expect(Object.keys(catalog)).toEqual(["uno/openai/gpt-5.5"]);
+    expect(failures).toEqual([1, 2]);
+  });
+
+  it("an empty answer is a failed attempt, and giving up returns an empty catalog", async () => {
+    let calls = 0;
+    const catalog = await fetchUnoModelsCatalogWithRetry("unollm_key", {
+      delaysMs: [0, 0],
+      fetchCatalog: async () => {
+        calls += 1;
+        return {};
+      },
+    });
+    expect(catalog).toEqual({});
+    expect(calls).toBe(2);
+  });
+
+  it("no key — no requests", async () => {
+    let calls = 0;
+    const catalog = await fetchUnoModelsCatalogWithRetry("", {
+      fetchCatalog: async () => {
+        calls += 1;
+        return {};
+      },
+    });
+    expect(catalog).toEqual({});
+    expect(calls).toBe(0);
   });
 
   it("sorts pinned models, then frontier, strong, and cheap tiers", () => {

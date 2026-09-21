@@ -420,8 +420,9 @@ async function fetchUnoRouteModels(input: {
 }): Promise<UnoCatalog> {
   const response = await fetch(`${input.url}/models`, {
     headers: { Authorization: `Bearer ${input.unoApiKey}` },
+    signal: AbortSignal.timeout(UNO_CATALOG_FETCH_TIMEOUT_MS),
   });
-  if (!response.ok) return {};
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const payload = (await response.json()) as unknown;
   const rows: ReadonlyArray<UnoGatewayModelResponse> = Array.isArray(payload)
     ? (payload as ReadonlyArray<UnoGatewayModelResponse>)
@@ -437,12 +438,51 @@ async function fetchUnoRouteModels(input: {
   return catalog;
 }
 
+/** One catalog request may not hang the provider's creation. */
+const UNO_CATALOG_FETCH_TIMEOUT_MS = 6_000;
+/**
+ * Pauses before each catalog attempt. On a fresh Work box the console writes
+ * the gateway key ~10 s after boot and the first outbound requests right then
+ * fail; one failed attempt used to leave the provider with an empty catalog
+ * for the machine's whole life ("No models found", first chat falls through to
+ * a logged-out Claude). ~40 s of retries, then give up loudly.
+ */
+export const UNO_CATALOG_RETRY_DELAYS_MS = [0, 3_000, 6_000, 12_000, 20_000] as const;
+
+/**
+ * The gateway catalog with bounded retries. The default route is the one that
+ * matters: it is retried until it answers; the russia route is best-effort.
+ */
+export async function fetchUnoModelsCatalogWithRetry(
+  unoApiKey: string,
+  options: {
+    readonly delaysMs?: ReadonlyArray<number>;
+    readonly fetchCatalog?: (key: string) => Promise<UnoCatalog>;
+    readonly onAttemptFailed?: (attempt: number, cause: unknown) => void;
+  } = {},
+): Promise<UnoCatalog> {
+  if (unoApiKey.length === 0) return {};
+  const delays = options.delaysMs ?? UNO_CATALOG_RETRY_DELAYS_MS;
+  const fetchCatalog = options.fetchCatalog ?? fetchUnoModelsCatalog;
+  for (let attempt = 0; attempt < delays.length; attempt++) {
+    const delay = delays[attempt] ?? 0;
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+    try {
+      const catalog = await fetchCatalog(unoApiKey);
+      if (Object.keys(catalog).length > 0) return catalog;
+      options.onAttemptFailed?.(attempt + 1, new Error("empty catalog"));
+    } catch (cause) {
+      options.onAttemptFailed?.(attempt + 1, cause);
+    }
+  }
+  return {};
+}
+
 async function fetchUnoModelsCatalog(unoApiKey: string): Promise<UnoCatalog> {
   if (unoApiKey.length === 0) return {};
   const [defaultCatalog, russiaCatalog] = await Promise.all([
-    fetchUnoRouteModels({ unoApiKey, route: "default", url: UNO_GATEWAY_BASE_URL }).catch(
-      () => ({}),
-    ),
+    // The default route failing is a failed attempt (retried by the caller).
+    fetchUnoRouteModels({ unoApiKey, route: "default", url: UNO_GATEWAY_BASE_URL }),
     fetchUnoRouteModels({ unoApiKey, route: "russia", url: UNO_RUSSIA_GATEWAY_BASE_URL }).catch(
       () => ({}),
     ),
@@ -711,7 +751,22 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
       );
       // Только ключ шлюза: ключ аккаунта в процесс харнесса не уходит.
       const unoApiKey = yield* (yield* UnoGatewayKey).harnessKey();
-      const unoCatalog = yield* Effect.promise(() => fetchUnoModelsCatalog(unoApiKey));
+      const catalogFailures: string[] = [];
+      const unoCatalog = yield* Effect.promise(() =>
+        fetchUnoModelsCatalogWithRetry(unoApiKey, {
+          onAttemptFailed: (attempt, cause) =>
+            catalogFailures.push(
+              `#${attempt}: ${cause instanceof Error ? cause.message : String(cause)}`,
+            ),
+        }),
+      );
+      if (catalogFailures.length > 0) {
+        const got = Object.keys(unoCatalog).length;
+        yield* (got > 0 ? Effect.logInfo : Effect.logWarning)("uno.catalog.fetch", {
+          models: got,
+          failedAttempts: catalogFailures,
+        });
+      }
       const browserBridge = yield* BrowserBridge;
       const instructionsFilePath = writeBrowserInstructionsFile({
         stateDir: serverConfig.stateDir,
