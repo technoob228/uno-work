@@ -8,8 +8,8 @@ import {
   RefreshCwIcon,
   TerminalIcon,
 } from "lucide-react";
-import { type ReactNode, memo, useCallback, useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { type ReactNode, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   DesktopDiscoveredSshHost,
   DesktopSshEnvironmentTarget,
@@ -17,13 +17,22 @@ import type {
 } from "@t3tools/contracts";
 
 import { APP_BASE_NAME } from "../branding";
-import { usePrimaryEnvironmentId } from "../environments/primary";
+import { usePrimaryEnvironmentDescriptor, usePrimaryEnvironmentId } from "../environments/primary";
 import { readHostedPairingRequest } from "../hostedPairing";
 import { cn } from "../lib/utils";
+import { unoCloudStateQueryOptions, workspaceQueryKeys } from "../lib/workspaceReactQuery";
+import { describeMachineError } from "../machineErrors";
 import {
-  unoCloudConnectBoxMutationOptions,
-  unoCloudStateQueryOptions,
-} from "../lib/workspaceReactQuery";
+  boxNeedsWake,
+  connectUnoBox,
+  describeUnoBoxConnectProgress,
+  isBoxDead,
+  isBoxRunning,
+  isUnoBoxStillStartingError,
+  UnoBoxConnectAbortedError,
+  type UnoBoxConnectProgress,
+} from "../unoBoxConnect";
+import { MachineErrorNotice } from "./machines/MachineErrorNotice";
 import { getPairingTokenFromUrl } from "../pairingUrl";
 import type { CreateUnoBoxResult } from "../unoBoxCreation";
 import { CreateUnoBoxSection } from "./CreateUnoBoxSection";
@@ -747,37 +756,84 @@ function formatBoxSpecs(box: UnoBox): string {
   return parts.join(" · ");
 }
 
+/** Box power state in a person's words. */
+function describeBoxStatus(status: string): string {
+  if (isBoxRunning(status)) return "On";
+  if (boxNeedsWake(status) === "wake") return "Asleep";
+  if (boxNeedsWake(status) === "start") return "Off";
+  if (isBoxDead(status)) return "Broken";
+  const lower = status.trim().toLowerCase();
+  if (lower === "provisioning" || lower === "creating" || lower === "starting") return "Starting";
+  return "Unknown";
+}
+
 interface UnoBoxRowProps {
   box: UnoBox;
-  connecting: boolean;
+  /** Progress of this row's connect, when it is the one connecting. */
+  progress: UnoBoxConnectProgress | null;
   disabled: boolean;
+  /** This app is running on it right now. */
+  isCurrent: boolean;
+  /** Already one of the saved machines. */
+  isConnected: boolean;
   onConnect: (box: UnoBox) => void;
 }
 
 const UnoBoxRow = memo(function UnoBoxRow({
   box,
-  connecting,
+  progress,
   disabled,
+  isCurrent,
+  isConnected,
   onConnect,
 }: UnoBoxRowProps) {
   const specs = formatBoxSpecs(box);
+  const dead = isBoxDead(box.status);
+  const asleep = boxNeedsWake(box.status) !== null;
+  const connecting = progress !== null;
   return (
-    <div className="border-t border-border/60 px-4 py-3 first:border-t-0 sm:px-5">
+    <div
+      className="border-t border-border/60 px-4 py-3 first:border-t-0 sm:px-5"
+      data-testid={`uno-box-row-${box.id}`}
+    >
       <div className={ITEM_ROW_INNER_CLASSNAME}>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h3 className="truncate text-sm font-medium text-foreground">{box.name}</h3>
-            <Badge variant="outline" className="shrink-0 text-[10px] text-muted-foreground">
-              {box.status}
+            <Badge
+              variant="outline"
+              className={cn(
+                "shrink-0 text-[10px]",
+                dead ? "border-destructive/40 text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {describeBoxStatus(box.status)}
             </Badge>
+            {isCurrent ? (
+              <span className="shrink-0 text-[10px] text-primary">You're using it now</span>
+            ) : isConnected ? (
+              <span className="shrink-0 text-[10px] text-muted-foreground">Connected</span>
+            ) : null}
           </div>
-          {specs ? <p className="truncate text-xs text-muted-foreground">{specs}</p> : null}
+          <p className="truncate text-xs text-muted-foreground">
+            {connecting
+              ? describeUnoBoxConnectProgress(progress)
+              : dead
+                ? "Uno reports this computer as broken. Delete it in the Uno console."
+                : specs}
+          </p>
         </div>
         <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-          <Button size="xs" variant="outline" disabled={disabled} onClick={() => onConnect(box)}>
-            {connecting ? <RefreshCwIcon className="size-3 animate-spin" /> : null}
-            {connecting ? "Connecting..." : "Connect"}
-          </Button>
+          {isCurrent || isConnected || dead ? null : (
+            <Button size="xs" variant="outline" disabled={disabled} onClick={() => onConnect(box)}>
+              {connecting ? <RefreshCwIcon className="size-3 animate-spin" /> : null}
+              {connecting
+                ? describeUnoBoxConnectProgress(progress)
+                : asleep
+                  ? "Wake up & connect"
+                  : "Connect"}
+            </Button>
+          )}
         </div>
       </div>
     </div>
@@ -786,19 +842,38 @@ const UnoBoxRow = memo(function UnoBoxRow({
 
 function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => void }) {
   const environmentId = usePrimaryEnvironmentId();
+  const primaryDescriptor = usePrimaryEnvironmentDescriptor();
+  const queryClient = useQueryClient();
   const cloudQuery = useQuery(unoCloudStateQueryOptions(environmentId));
-  const connectBox = useMutation(unoCloudConnectBoxMutationOptions(environmentId));
-  const [connectingBoxId, setConnectingBoxId] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const savedEnvironments = useSavedEnvironmentRegistryStore((state) => state.byId);
+  const [connecting, setConnecting] = useState<{
+    readonly boxId: number;
+    readonly progress: UnoBoxConnectProgress;
+  } | null>(null);
+  const [error, setError] = useState<{ readonly boxName: string; readonly error: unknown } | null>(
+    null,
+  );
+  const [stillStarting, setStillStarting] = useState<UnoBox | null>(null);
   const [creatingOpen, setCreatingOpen] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  const connectedBoxIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const record of Object.values(savedEnvironments)) {
+      if (record.unoBoxId !== undefined) ids.add(record.unoBoxId);
+    }
+    return ids;
+  }, [savedEnvironments]);
+  const currentBoxId = primaryDescriptor?.unoBoxId ?? null;
 
   const handleCreated = useCallback(
     ({ record }: CreateUnoBoxResult) => {
       onClose();
       toastManager.add({
         type: "success",
-        title: "Box created",
-        description: `${record.label} is ready and now in your machine list.`,
+        title: "Computer ready",
+        description: `${record.label} is connected and in your machine list.`,
       });
     },
     [onClose],
@@ -806,13 +881,23 @@ function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => vo
 
   const handleConnect = useCallback(
     async (box: UnoBox) => {
-      setConnectingBoxId(box.id);
+      if (environmentId === null) return;
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
       setError(null);
+      setStillStarting(null);
+      setConnecting({
+        boxId: box.id,
+        progress: { phase: "connecting", attempt: 0, lastProblem: null },
+      });
       try {
-        const connection = await connectBox.mutateAsync({ boxId: box.id });
-        const record = await addSavedEnvironment({
-          label: box.name,
-          pairingUrl: connection.url,
+        const record = await connectUnoBox(environmentId, box, {
+          signal: controller.signal,
+          onProgress: (progress) => setConnecting({ boxId: box.id, progress }),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: workspaceQueryKeys.unoCloud(environmentId),
         });
         onClose();
         toastManager.add({
@@ -821,25 +906,25 @@ function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => vo
           description: `${record.label} is now in your machine list.`,
         });
       } catch (caught) {
-        const message = caught instanceof Error ? caught.message : "Failed to connect this box.";
-        setError(message);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not connect box",
-            description: message,
-          }),
-        );
+        if (caught instanceof UnoBoxConnectAbortedError) return;
+        if (isUnoBoxStillStartingError(caught)) {
+          setStillStarting(box);
+        } else {
+          setError({ boxName: box.name, error: caught });
+        }
+        void queryClient.invalidateQueries({
+          queryKey: workspaceQueryKeys.unoCloud(environmentId),
+        });
       } finally {
-        setConnectingBoxId(null);
+        if (abortRef.current === controller) setConnecting(null);
       }
     },
-    [connectBox, onClose],
+    [environmentId, onClose, queryClient],
   );
 
   const cloud = cloudQuery.data;
   const boxes = cloud?.boxes ?? [];
-  const isConnecting = connectingBoxId !== null;
+  const isConnecting = connecting !== null;
 
   return (
     <>
@@ -848,17 +933,44 @@ function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => vo
           Connect an Uno box
         </DialogPrimitive.Title>
         <DialogPrimitive.Description className="mt-1 text-muted-foreground text-sm">
-          Pick a machine from your subscription — it links in one click, no pairing to paste.
+          Pick a computer from your Uno account — it links in one click. Asleep ones are woken up
+          first.
         </DialogPrimitive.Description>
       </div>
 
-      {error ? (
-        <div className="border-b border-destructive/30 bg-destructive/8 px-6 py-3 text-destructive text-xs">
-          {error}
-        </div>
-      ) : cloud && cloud.error && cloud.connected ? (
-        <div className="border-b border-amber-500/30 bg-amber-500/8 px-6 py-3 text-amber-700 text-xs dark:text-amber-400">
-          {cloud.error}
+      {error || stillStarting || (cloud && cloud.error && cloud.connected) ? (
+        <div className="border-b border-border px-6 py-3">
+          {stillStarting ? (
+            <MachineErrorNotice
+              tone="warning"
+              human={{
+                title: "Still starting, we'll keep trying",
+                message: `${stillStarting.name} is taking longer than usual to answer. Give it a minute and try again.`,
+                details: null,
+                transient: true,
+              }}
+              action={
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => void handleConnect(stillStarting)}
+                >
+                  <RefreshCwIcon className="size-3" />
+                  Try again
+                </Button>
+              }
+            />
+          ) : error ? (
+            <MachineErrorNotice error={error.error} />
+          ) : cloud?.error ? (
+            <MachineErrorNotice
+              tone="warning"
+              human={{
+                ...describeMachineError(cloud.error),
+                title: "Couldn't load all your computers",
+              }}
+            />
+          ) : null}
         </div>
       ) : null}
 
@@ -869,11 +981,11 @@ function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => vo
           </div>
         ) : cloud && !cloud.connected ? (
           <div className="px-6 py-10 text-center text-muted-foreground text-sm">
-            Connect your Uno account first — add your API key in Settings → General.
+            This app isn't linked to your Uno account yet. Link it in Settings → Machine → Account.
           </div>
         ) : boxes.length === 0 ? (
           <div className="px-6 py-10 text-center text-muted-foreground text-sm">
-            No boxes on this account yet.
+            No computers on this account yet — create one below.
           </div>
         ) : (
           <div className="py-1">
@@ -881,8 +993,10 @@ function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => vo
               <UnoBoxRow
                 key={box.id}
                 box={box}
-                connecting={connectingBoxId === box.id}
+                progress={connecting?.boxId === box.id ? connecting.progress : null}
                 disabled={isConnecting}
+                isCurrent={currentBoxId === box.id}
+                isConnected={connectedBoxIds.has(box.id)}
                 onConnect={handleConnect}
               />
             ))}
@@ -895,7 +1009,7 @@ function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => vo
           {creatingOpen ? (
             <div className="flex flex-col gap-3">
               <div className="flex items-center justify-between gap-2">
-                <h3 className="font-medium text-foreground text-sm">Create a new box</h3>
+                <h3 className="font-medium text-foreground text-sm">Create a new computer</h3>
                 <Button
                   variant="ghost"
                   size="xs"

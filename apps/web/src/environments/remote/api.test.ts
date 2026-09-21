@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   bootstrapRemoteBearerSession,
+  isRemoteEnvironmentUnreachableError,
   fetchRemoteEnvironmentDescriptor,
   fetchRemoteSessionState,
   issueRemoteWebSocketToken,
@@ -120,6 +121,7 @@ describe("remote environment api", () => {
       body: JSON.stringify({
         credential: "pairing-token",
       }),
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -205,6 +207,7 @@ describe("remote environment api", () => {
       {
         method: "GET",
         headers: {},
+        signal: expect.any(AbortSignal),
       },
     );
     expect(fetchMock).toHaveBeenNthCalledWith(2, "https://remote.example.com/api/auth/session", {
@@ -212,12 +215,14 @@ describe("remote environment api", () => {
       headers: {
         authorization: "Bearer bearer-token",
       },
+      signal: expect.any(AbortSignal),
     });
     expect(fetchMock).toHaveBeenNthCalledWith(3, "https://remote.example.com/api/auth/ws-token", {
       method: "POST",
       headers: {
         authorization: "Bearer bearer-token",
       },
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -245,4 +250,49 @@ describe("remote environment api", () => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+});
+
+describe("timeouts and retries (e2e 21.09: a fresh box left the request hanging forever)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("retries a read that could not reach the machine, then succeeds", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ environmentId: "env-1" }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const pending = fetchRemoteEnvironmentDescriptor({ httpBaseUrl: "https://box.example.com/" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(pending).resolves.toEqual({ environmentId: "env-1" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a pairing bootstrap (the one-time link may be spent)", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+    const caught = await bootstrapRemoteBearerSession({
+      httpBaseUrl: "https://box.example.com/",
+      credential: "t",
+    }).catch((error: unknown) => error);
+    expect(isRemoteEnvironmentUnreachableError(caught)).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns an aborted (timed out) request into an unreachable error", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValue(new DOMException("The operation timed out.", "TimeoutError"));
+    vi.stubGlobal("fetch", fetchMock);
+    const caught = await bootstrapRemoteBearerSession({
+      httpBaseUrl: "https://box.example.com/",
+      credential: "t",
+    }).catch((error: unknown) => error);
+    expect(isRemoteEnvironmentUnreachableError(caught)).toBe(true);
+    expect((caught as { timedOut: boolean }).timedOut).toBe(true);
+  });
 });

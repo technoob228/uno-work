@@ -32,6 +32,7 @@ import {
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useMachineLabels } from "../hooks/useMachineRows";
 import { useReconnectEnvironment } from "../hooks/useReconnectEnvironment";
 import { sortThreads } from "../lib/threadSort";
 import { plainExplanation } from "../plainLanguage";
@@ -73,13 +74,19 @@ export function NoActiveThreadState() {
     (connectionState === "disconnected" || connectionState === "error");
   const isAutomaticallyReconnecting =
     connectionState === "connecting" || connectionState === "reconnecting";
-  const envName = runtime?.descriptor?.label ?? registryRecord?.label ?? "this machine";
+  const machineLabels = useMachineLabels();
+  const envName =
+    (selectedEnvId ? machineLabels.get(selectedEnvId) : undefined) ??
+    runtime?.descriptor?.label ??
+    registryRecord?.label ??
+    "this machine";
   const cachedChatStatus = runtime?.lastSynchronizedAt
     ? `Cached chats were last synchronized ${formatElapsedAgoLabel(runtime.lastSynchronizedAt)}.`
     : "No fresh chat snapshot has been received yet.";
 
-  const { reconnect, reconnectingId } = useReconnectEnvironment();
+  const { reconnect, reconnectingId, wakingId } = useReconnectEnvironment();
   const isReconnecting = selectedEnvId != null && reconnectingId === selectedEnvId;
+  const isWaking = selectedEnvId != null && wakingId === selectedEnvId;
   const { handleNewThread } = useNewThreadHandler();
   const [isStartingChat, setIsStartingChat] = useState(false);
 
@@ -216,9 +223,11 @@ export function NoActiveThreadState() {
                           (isReconnecting || isAutomaticallyReconnecting) && "animate-spin",
                         )}
                       />
-                      {isReconnecting || isAutomaticallyReconnecting
-                        ? "Reconnecting..."
-                        : "Reconnect"}
+                      {isWaking
+                        ? "Waking up…"
+                        : isReconnecting || isAutomaticallyReconnecting
+                          ? "Reconnecting…"
+                          : "Reconnect"}
                     </Button>
                   </EmptyContent>
                 ) : null}

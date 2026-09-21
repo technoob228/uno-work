@@ -16,7 +16,13 @@ import {
 } from "@t3tools/contracts";
 
 import { ensureEnvironmentApi } from "./environmentApi";
-import { addSavedEnvironment, type SavedEnvironmentRecord } from "./environments/runtime";
+import type { SavedEnvironmentRecord } from "./environments/runtime";
+import { describeMachineError } from "./machineErrors";
+import {
+  UnoBoxStillStartingError,
+  connectUnoBox,
+  type UnoBoxConnectProgress,
+} from "./unoBoxConnect";
 
 export type UnoBoxSizePreset = "small" | "medium";
 
@@ -66,16 +72,51 @@ export function normalizeUnoBoxName(raw: string): string {
 export function describeUnoBoxCreateJobState(state: UnoBoxCreateJobState): string {
   switch (state) {
     case "creating":
-      return "Creating the box…";
+      return "Creating your computer…";
     case "starting":
-      return "Box created, waiting for it to boot…";
     case "waiting_daemon":
-      return "Box is running, waiting for Uno Work to answer…";
+      return "Starting…";
     case "ready":
-      return "Box is ready.";
+      return "Connecting…";
     case "failed":
-      return "Box creation failed.";
+      return "Creating the computer didn't work.";
   }
+}
+
+/**
+ * The three steps a person sees while a computer is made: create → start →
+ * connect. Derived from the job status (and, once the job hands over, from the
+ * browser's own connect attempts), never from the daemon's free-text message.
+ */
+export type UnoBoxCreateStage = "creating" | "starting" | "connecting" | "retrying";
+
+export const UNO_BOX_CREATE_STAGES: ReadonlyArray<{
+  readonly stage: Exclude<UnoBoxCreateStage, "retrying">;
+  readonly label: string;
+}> = [
+  { stage: "creating", label: "Creating your computer…" },
+  { stage: "starting", label: "Starting…" },
+  { stage: "connecting", label: "Connecting…" },
+];
+
+export function unoBoxCreateStageFromJob(status: UnoBoxCreateJobStatus): UnoBoxCreateStage {
+  switch (status.state) {
+    case "creating":
+      return "creating";
+    case "starting":
+      return "starting";
+    case "waiting_daemon":
+      // With a link in hand the daemon is up; what remains is its public address.
+      return status.connection ? "connecting" : "starting";
+    case "ready":
+    case "failed":
+      return "connecting";
+  }
+}
+
+export function unoBoxCreateStageFromConnect(progress: UnoBoxConnectProgress): UnoBoxCreateStage {
+  if (progress.phase === "waking") return "starting";
+  return progress.phase === "retrying" ? "retrying" : "connecting";
 }
 
 export function isTerminalUnoBoxCreateJobStatus(status: UnoBoxCreateJobStatus): boolean {
@@ -145,10 +186,15 @@ export async function waitForUnoBoxCreateJob(
   }
 }
 
+/** Browser-side connect budget after the daemon reported the address as not answering yet. */
+const ADDRESS_NOT_READY_CONNECT_BUDGET_MS = 30_000;
+
 export interface CreateUnoBoxInput {
   readonly name: string;
   readonly preset: UnoBoxSizePreset;
   readonly onStatus?: (status: UnoBoxCreateJobStatus) => void;
+  readonly onStage?: (stage: UnoBoxCreateStage) => void;
+  readonly signal?: AbortSignal;
 }
 
 export interface CreateUnoBoxResult {
@@ -160,6 +206,10 @@ export interface CreateUnoBoxResult {
  * The full "Create a new box" flow against the environment that holds the Uno
  * account (normally the primary one). One `createBox` call per invocation;
  * the caller is responsible for not invoking it twice for one click.
+ *
+ * Once the box exists, "could not connect yet" is never a failure: the flow
+ * throws `UnoBoxStillStartingError` (carrying the box id) so the UI can keep
+ * the machine and keep trying via `connectUnoBox`.
  */
 export async function createUnoBoxAndConnect(
   environmentId: EnvironmentId,
@@ -168,10 +218,11 @@ export async function createUnoBoxAndConnect(
   const api = ensureEnvironmentApi(environmentId);
   const name = normalizeUnoBoxName(input.name);
   if (name.length === 0) {
-    throw new Error("Give the box a name (letters, digits and dashes).");
+    throw new Error("Give the computer a name (letters, digits and dashes).");
   }
   const size = UNO_BOX_SIZE_PRESETS[input.preset];
 
+  input.onStage?.("creating");
   const { jobId } = await api.unoCloud.createBox({
     name,
     ramMb: size.ramMb,
@@ -183,16 +234,36 @@ export async function createUnoBoxAndConnect(
   const status = await waitForUnoBoxCreateJob(
     (id) => api.unoCloud.createBoxStatus({ jobId: id }),
     jobId,
-    input.onStatus ? { onStatus: input.onStatus } : {},
+    {
+      onStatus: (next) => {
+        input.onStatus?.(next);
+        input.onStage?.(unoBoxCreateStageFromJob(next));
+      },
+    },
   );
 
+  const boxId = status.boxId ?? status.box?.id ?? null;
   if (status.state !== "ready" || !status.connection) {
-    throw new Error(status.message ?? describeUnoBoxCreateJobState(status.state));
+    // A box that exists but is only slow is handed over for retries; a box
+    // that was never made (or is broken / has no daemon) is a real failure.
+    const cause = new Error(status.message ?? describeUnoBoxCreateJobState(status.state));
+    if (boxId !== null && !status.daemonInstallRequired && describeMachineError(cause).transient) {
+      throw new UnoBoxStillStartingError(boxId, cause);
+    }
+    throw cause;
   }
 
-  const record = await addSavedEnvironment({
-    label: status.box?.name ?? name,
-    pairingUrl: status.connection.url,
-  });
+  const record = await connectUnoBox(
+    environmentId,
+    { id: status.connection.boxId, name: status.box?.name ?? name, status: "running" },
+    {
+      initialConnection: status.connection,
+      // The daemon already waited for the address; when it did not answer,
+      // try briefly and then say "still starting" instead of spinning on.
+      ...(status.addressReady === false ? { budgetMs: ADDRESS_NOT_READY_CONNECT_BUDGET_MS } : {}),
+      onProgress: (progress) => input.onStage?.(unoBoxCreateStageFromConnect(progress)),
+      ...(input.signal ? { signal: input.signal } : {}),
+    },
+  );
   return { status, record };
 }
