@@ -13,6 +13,7 @@ import { RotatingFileSink } from "@t3tools/shared/logging";
 import { Effect, Exit, Logger, Scope, SynchronizedRef } from "effect";
 
 import { toSafeThreadAttachmentSegment } from "../../attachmentStore.ts";
+import { redactSecretsDeep } from "../../secretRedaction.ts";
 
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_FILES = 10;
@@ -252,7 +253,8 @@ export const makeEventNdjsonLogger = Effect.fn("makeEventNdjsonLogger")(function
 
   const write = Effect.fn("write")(function* (event: unknown, threadId: ThreadId | null) {
     const threadSegment = resolveThreadSegment(threadId);
-    const message = yield* toLogMessage(event);
+    // Сырые события харнесса — те же выводы инструментов: секреты в лог не пишем.
+    const message = yield* toLogMessage(redactSecretsDeep(event));
     if (!message) {
       return;
     }

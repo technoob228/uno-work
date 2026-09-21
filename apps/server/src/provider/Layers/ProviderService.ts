@@ -46,6 +46,7 @@ import {
 } from "../Services/ProviderSessionDirectory.ts";
 import { type EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { ProviderEventLoggers } from "./ProviderEventLoggers.ts";
+import { redactSecretsDeep } from "../../secretRedaction.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
 
 /**
@@ -201,8 +202,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const directory = yield* ProviderSessionDirectory;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
+  // Единая точка, через которую проходит всё, что отдают харнессы: вывод
+  // инструментов, текст ассистента, ошибки. Маскируем секреты здесь — до
+  // канонического лога, истории треда и UI (агент мог прочитать settings.json
+  // или env и вывести ключ в шаге).
   const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-    Effect.succeed(event).pipe(
+    Effect.sync(() => redactSecretsDeep(event)).pipe(
       Effect.tap((canonicalEvent) =>
         canonicalEventLogger
           ? canonicalEventLogger.write(canonicalEvent, canonicalEvent.threadId)

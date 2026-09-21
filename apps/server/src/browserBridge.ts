@@ -11,6 +11,7 @@ import type {
 import { Context, Deferred, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from "effect";
 
 import { ServerConfig } from "./config.ts";
+import { registerKnownSecret } from "./secretRedaction.ts";
 
 /**
  * Мост «харнесс → встроенный браузер».
@@ -374,6 +375,7 @@ export const makeBrowserBridge = (input: {
       let scopedToken = scopedTokenByContextKey.get(key);
       if (!scopedToken) {
         scopedToken = randomBytes(24).toString("hex");
+        registerKnownSecret(scopedToken);
         scopedTokenByContextKey.set(key, scopedToken);
         contextByScopedToken.set(scopedToken, normalized);
       }

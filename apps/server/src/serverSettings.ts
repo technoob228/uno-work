@@ -51,6 +51,7 @@ import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { ServerSecretStore } from "./auth/Services/ServerSecretStore.ts";
+import { registerKnownSecret } from "./secretRedaction.ts";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -92,6 +93,21 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
   if (settings.uno.boxToken === undefined) return { ...settings, providerInstances };
   const { boxToken: _boxToken, ...uno } = settings.uno;
   return { ...settings, providerInstances, uno };
+}
+
+/**
+ * Секреты из настроек, которые демон знает по значению: ключ Uno (в т.ч.
+ * аккаунтный старого формата без префикса), токен машины, чувствительные
+ * env провайдеров. Их вывод агентом в чат маскируется (secretRedaction.ts).
+ */
+export function rememberSettingsSecrets(settings: ServerSettings): void {
+  registerKnownSecret(settings.uno.apiKey);
+  registerKnownSecret(settings.uno.boxToken);
+  for (const instance of Object.values(settings.providerInstances)) {
+    for (const variable of instance.environment ?? []) {
+      if (variable.sensitive) registerKnownSecret(variable.value);
+    }
+  }
 }
 
 export interface ServerSettingsShape {
@@ -345,10 +361,12 @@ const makeServerSettings = Effect.gen(function* () {
           environment,
         } satisfies ProviderInstanceConfig;
       }
-      return {
+      const materialized = {
         ...settings,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
       };
+      rememberSettingsSecrets(materialized);
+      return materialized;
     });
 
   const persistProviderEnvironmentSecrets = (

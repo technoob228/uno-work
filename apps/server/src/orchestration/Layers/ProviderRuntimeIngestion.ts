@@ -36,6 +36,7 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { redactSecretsInText } from "../../secretRedaction.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
@@ -800,7 +801,7 @@ const make = Effect.gen(function* () {
 
           // Safety valve: flush full buffered text as an assistant delta to cap memory.
           yield* Cache.invalidate(bufferedAssistantTextByMessageId, messageId);
-          return nextText;
+          return redactSecretsInText(nextText);
         }),
       ),
     );
@@ -853,7 +854,9 @@ const make = Effect.gen(function* () {
     commandTag: string;
   }) =>
     Effect.gen(function* () {
-      const bufferedText = yield* takeBufferedAssistantText(input.messageId);
+      // Дельты замаскированы по отдельности; секрет, разрезанный между двумя
+      // дельтами, ловим на склеенном тексте.
+      const bufferedText = redactSecretsInText(yield* takeBufferedAssistantText(input.messageId));
       if (!hasRenderableAssistantText(bufferedText)) {
         return false;
       }
@@ -916,12 +919,14 @@ const make = Effect.gen(function* () {
   }) =>
     Effect.gen(function* () {
       const bufferedText = yield* takeBufferedAssistantText(input.messageId);
-      const text =
+      // Склеенный текст — последний шанс поймать секрет, разрезанный дельтами.
+      const text = redactSecretsInText(
         bufferedText.length > 0
           ? bufferedText
           : (input.fallbackText?.trim().length ?? 0) > 0
             ? input.fallbackText!
-            : "";
+            : "",
+      );
       const hasRenderableText = hasRenderableAssistantText(text);
 
       if (hasRenderableText) {

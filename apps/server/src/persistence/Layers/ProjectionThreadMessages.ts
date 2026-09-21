@@ -4,6 +4,7 @@ import { Effect, Layer, Option, Schema, Struct } from "effect";
 import { ChatAttachment } from "@t3tools/contracts";
 
 import { toPersistenceSqlError } from "../Errors.ts";
+import { redactSecretsInText } from "../../secretRedaction.ts";
 import {
   GetProjectionThreadMessageInput,
   ProjectionThreadMessageRepository,
@@ -63,7 +64,12 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           ${row.threadId},
           ${row.turnId},
           ${row.role},
-          ${row.text},
+          ${
+            // История треда: текст ассистента пишем уже замаскированным — в
+            // стриминговом режиме он склеивается из дельт, и секрет, разрезанный
+            // между ними, виден только здесь.
+            row.role === "assistant" ? redactSecretsInText(row.text) : row.text
+          },
           COALESCE(
             ${nextAttachmentsJson},
             (

@@ -1435,6 +1435,43 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
     }),
   );
 
+  it.effect("masks secrets the agent printed before events leave the provider bus", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const session = yield* provider.startSession(asThreadId("thread-secret"), {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId: asThreadId("thread-secret"),
+        runtimeMode: "full-access",
+      });
+
+      const receivedRef = yield* Ref.make<Array<ProviderRuntimeEvent>>([]);
+      const consumer = yield* Stream.take(provider.streamEvents, 1).pipe(
+        Stream.runForEach((event) => Ref.update(receivedRef, (current) => [...current, event])),
+        Effect.forkChild,
+      );
+      yield* sleep(50);
+
+      const boxToken = "uno_agt_Zk3q9XbLr0aQwErTyUiOp12";
+      fanout.codex.emit({
+        type: "tool.completed",
+        eventId: asEventId("evt-secret-1"),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: new Date().toISOString(),
+        threadId: session.threadId,
+        turnId: asTurnId("turn-1"),
+        toolKind: "command",
+        title: `cat settings.json -> {"boxToken":"${boxToken}"}`,
+      });
+
+      yield* Fiber.join(consumer);
+      const received = yield* Ref.get(receivedRef);
+      const serialized = JSON.stringify(received);
+      assert.equal(serialized.includes(boxToken), false);
+      assert.equal(serialized.includes("uno_agt_[redacted]"), true);
+    }),
+  );
+
   it.effect("fans out canonical runtime events in emission order", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService;
