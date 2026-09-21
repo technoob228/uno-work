@@ -16,7 +16,19 @@ import {
 } from "@t3tools/contracts";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { Cause, Deferred, Effect, Exit, Option, Queue, Random, Ref, Scope, Stream } from "effect";
+import {
+  Cause,
+  Deferred,
+  Effect,
+  Exit,
+  FileSystem,
+  Option,
+  Queue,
+  Random,
+  Ref,
+  Scope,
+  Stream,
+} from "effect";
 import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 
@@ -33,6 +45,7 @@ import {
 } from "../Errors.ts";
 import { classifyProviderErrorDetail, normalizeUnoBillingErrorMessage } from "../unoBilling.ts";
 import { type OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
+import { projectMcpConfigOverlay } from "../opencodeMcpConfig.ts";
 import {
   buildOpenCodePermissionRules,
   OpenCodeRuntime,
@@ -892,6 +905,7 @@ export function makeOpenCodeAdapter(
     const eventSource = options?.eventSource ?? "instance";
     const serverConfig = yield* ServerConfig;
     const openCodeRuntime = yield* OpenCodeRuntime;
+    const fileSystem = yield* FileSystem.FileSystem;
     const nativeEventLogger =
       options?.nativeEventLogger ??
       (options?.nativeEventLogPath !== undefined
@@ -1738,9 +1752,22 @@ export function makeOpenCodeAdapter(
               // process automatically. No manual `server.close()` needed.
               const bridgeOverlay =
                 options?.bridgeEnvironment?.({ threadId: input.threadId, cwd: directory }) ?? {};
+              // opencode не читает `.mcp.json` из cwd (формат Claude Code) —
+              // подмешиваем его серверы в OPENCODE_CONFIG_CONTENT. Так
+              // диспетчер-ассистент получает свой uno-manager. Внешний
+              // `serverUrl` живёт со своим env — ему не передаём.
+              const mcpOverlay = serverUrl?.trim()
+                ? {}
+                : yield* projectMcpConfigOverlay({
+                    cwd: directory,
+                    existingConfigContent:
+                      bridgeOverlay.OPENCODE_CONFIG_CONTENT ??
+                      (options?.environment ?? process.env).OPENCODE_CONFIG_CONTENT,
+                  }).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
+              const sessionOverlay = { ...bridgeOverlay, ...mcpOverlay };
               const sessionEnvironment =
-                options?.environment || Object.keys(bridgeOverlay).length > 0
-                  ? { ...(options?.environment ?? process.env), ...bridgeOverlay }
+                options?.environment || Object.keys(sessionOverlay).length > 0
+                  ? { ...(options?.environment ?? process.env), ...sessionOverlay }
                   : undefined;
               const server = yield* openCodeRuntime.connectToOpenCodeServer({
                 binaryPath,
