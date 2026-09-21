@@ -30,6 +30,23 @@ export interface UseMachineRowsOptions {
   readonly now?: number | undefined;
 }
 
+/**
+ * environmentId → the name to show for that machine (Uno box name when the
+ * machine is a box, otherwise its saved or daemon label). Surfaces that name a
+ * machine without listing them all — the switcher, the empty chat state, the
+ * sidebar chips — read this so a box is called the same everywhere.
+ */
+export function useMachineLabels(): ReadonlyMap<string, string> {
+  const rows = useMachineRows();
+  return useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const row of rows) {
+      if (row.environmentId) labels.set(row.environmentId, row.label);
+    }
+    return labels;
+  }, [rows]);
+}
+
 export function useMachineRows(options?: UseMachineRowsOptions): ReadonlyArray<MachineRow> {
   const primaryDescriptor = usePrimaryEnvironmentDescriptor();
   const primaryEnvironmentId = primaryDescriptor?.environmentId ?? null;
@@ -65,6 +82,7 @@ export function useMachineRows(options?: UseMachineRowsOptions): ReadonlyArray<M
         environmentId: record.environmentId,
         label: record.label,
         lastConnectedAt: record.lastConnectedAt,
+        unoBoxId: record.unoBoxId,
       })),
       connectionStateById,
       boxes: cloud?.connected ? cloud.boxes : [],

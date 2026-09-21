@@ -25,6 +25,7 @@ import type {
 } from "@t3tools/contracts";
 import { useMemo } from "react";
 
+import { useMachineLabels } from "../../hooks/useMachineRows";
 import { usePrimaryEnvironmentDescriptor } from "../primary";
 import { useSavedEnvironmentRegistryStore, useSavedEnvironmentRuntimeStore } from "../runtime";
 import { type EnvironmentAvailability, describeEnvironmentAvailability } from "./availability";
@@ -74,13 +75,15 @@ export function useEnvironmentScopes(): ReadonlyArray<EnvironmentScopeInfo> {
   const primaryDescriptor = usePrimaryEnvironmentDescriptor();
   const savedRegistry = useSavedEnvironmentRegistryStore((state) => state.byId);
   const savedRuntime = useSavedEnvironmentRuntimeStore((state) => state.byId);
+  // Box names from the Uno account win over the guest hostname a daemon reports.
+  const machineLabels = useMachineLabels();
 
   return useMemo(() => {
     const primary: ReadonlyArray<EnvironmentScopeInfo> = primaryDescriptor
       ? [
           {
             environmentId: primaryDescriptor.environmentId,
-            label: primaryDescriptor.label,
+            label: machineLabels.get(primaryDescriptor.environmentId) ?? primaryDescriptor.label,
             placement: "local",
             // The renderer is served by this daemon; if it were gone the app
             // would not be rendering this page at all.
@@ -102,7 +105,8 @@ export function useEnvironmentScopes(): ReadonlyArray<EnvironmentScopeInfo> {
         const sessionRole = runtime?.role ?? null;
         return {
           environmentId: record.environmentId,
-          label: runtime?.descriptor?.label ?? record.label,
+          label:
+            machineLabels.get(record.environmentId) ?? runtime?.descriptor?.label ?? record.label,
           placement: "remote",
           connectionState,
           sessionRole,
@@ -113,7 +117,7 @@ export function useEnvironmentScopes(): ReadonlyArray<EnvironmentScopeInfo> {
       });
 
     return [...primary, ...saved];
-  }, [primaryDescriptor, savedRegistry, savedRuntime]);
+  }, [machineLabels, primaryDescriptor, savedRegistry, savedRuntime]);
 }
 
 /**

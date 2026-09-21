@@ -304,4 +304,65 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime(new Date(NOW - 2 * 86_400_000).toISOString(), NOW)).toBe("2d ago");
     expect(formatRelativeTime("not a date", NOW)).toBe("unknown");
   });
+
+  describe("box names (e2e 21.09: every new box was 'uno-work-golden-v5-build')", () => {
+    const newBox = "env-new" as EnvironmentId;
+
+    it("names a box connected from the account by its Uno name, not the guest hostname", () => {
+      const rows = buildMachineRows({
+        primaryEnvironmentId: primary,
+        // An unlinked daemon on a box calls itself a server (e2e: "OTHER MACHINES").
+        descriptorById: { [newBox]: { label: "uno-work-golden-v5-build", machineKind: "server" } },
+        registryMachines: [],
+        savedEnvironments: [
+          {
+            environmentId: newBox,
+            label: "uno-work-golden-v5-build",
+            lastConnectedAt: null,
+            unoBoxId: 1790,
+          },
+        ],
+        connectionStateById: { [newBox]: "connected" },
+        boxes: [box({ id: 1790, name: "e2e-new-0921" })],
+        projectNamesByEnvironmentId: new Map(),
+        now: NOW,
+      });
+      const row = others(rows).find((candidate) => candidate.environmentId === newBox);
+      expect(row?.label).toBe("e2e-new-0921");
+      expect(row?.kind).toBe("uno_box");
+      // One row per box: the account box is claimed, not listed a second time.
+      expect(others(rows).filter((candidate) => candidate.box?.id === 1790)).toHaveLength(1);
+    });
+
+    it("names the primary box by its Uno name", () => {
+      const rows = buildMachineRows({
+        primaryEnvironmentId: primary,
+        primaryLabel: "unowork-golden-build",
+        descriptorById: { [primary]: { label: "unowork-golden-build", unoBoxId: 395 } },
+        registryMachines: [],
+        savedEnvironments: [],
+        connectionStateById: {},
+        boxes: [box({ id: 395, name: "my-computer" })],
+        projectNamesByEnvironmentId: new Map(),
+        now: NOW,
+      });
+      expect(rows[0]?.label).toBe("my-computer");
+    });
+
+    it("keeps a label the person typed", () => {
+      const rows = buildMachineRows({
+        primaryEnvironmentId: primary,
+        descriptorById: { [newBox]: { label: "some-host" } },
+        registryMachines: [],
+        savedEnvironments: [
+          { environmentId: newBox, label: "Work laptop", lastConnectedAt: null, unoBoxId: 5 },
+        ],
+        connectionStateById: {},
+        boxes: [box({ id: 5, name: "box-5" })],
+        projectNamesByEnvironmentId: new Map(),
+        now: NOW,
+      });
+      expect(others(rows)[0]?.label).toBe("Work laptop");
+    });
+  });
 });

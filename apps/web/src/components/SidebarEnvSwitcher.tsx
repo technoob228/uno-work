@@ -118,15 +118,20 @@ export function SidebarEnvSwitcher({ variant = "card" }: { variant?: "card" | "c
     // Kinds come from the shared fold (daemon descriptor, account boxes,
     // registry, platform) so the switcher agrees with My machines.
     const kindById = new Map<string, MachineKind>();
+    // Names from the same fold: a box shows its Uno name, never the guest hostname.
+    const labelById = new Map<string, string>();
     for (const row of machineRows) {
-      if (row.environmentId) kindById.set(row.environmentId, row.kind);
+      if (row.environmentId) {
+        kindById.set(row.environmentId, row.kind);
+        labelById.set(row.environmentId, row.label);
+      }
     }
 
     const primary: SwitcherMachine[] = primaryDescriptor
       ? [
           {
             id: primaryDescriptor.environmentId,
-            name: primaryDescriptor.label,
+            name: labelById.get(primaryDescriptor.environmentId) ?? primaryDescriptor.label,
             meta: formatPlatformMeta(
               primaryDescriptor.platform.os,
               primaryDescriptor.platform.arch,
@@ -159,7 +164,7 @@ export function SidebarEnvSwitcher({ variant = "card" }: { variant?: "card" | "c
         const connectionState = runtime?.connectionState ?? "disconnected";
         return {
           id: record.environmentId,
-          name: descriptor?.label ?? record.label,
+          name: labelById.get(record.environmentId) ?? descriptor?.label ?? record.label,
           meta: formatSavedEnvironmentStatusMeta({
             connectionState,
             lastSynchronizedAt: runtime?.lastSynchronizedAt ?? null,

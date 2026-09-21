@@ -11,6 +11,7 @@ import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../../environments/runtime";
+import { useMachineLabels } from "../../hooks/useMachineRows";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { resolveMachineIdentities } from "../../machineIdentity";
 
@@ -19,13 +20,14 @@ export function useSidebarEnvironmentLabelResolver(): (
 ) => string | null {
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((s) => s.byId);
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((s) => s.byId);
+  const machineLabels = useMachineLabels();
   return useCallback(
     (environmentId: EnvironmentId): string | null => {
       const runtime = savedEnvironmentRuntimeById[environmentId];
       const saved = savedEnvironmentRegistry[environmentId];
-      return runtime?.descriptor?.label ?? saved?.label ?? null;
+      return machineLabels.get(environmentId) ?? runtime?.descriptor?.label ?? saved?.label ?? null;
     },
-    [savedEnvironmentRegistry, savedEnvironmentRuntimeById],
+    [machineLabels, savedEnvironmentRegistry, savedEnvironmentRuntimeById],
   );
 }
 

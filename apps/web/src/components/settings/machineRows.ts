@@ -72,6 +72,8 @@ export interface MachineRowSources {
     readonly environmentId: EnvironmentId;
     readonly label: string;
     readonly lastConnectedAt: string | null;
+    /** Box id recorded when the connection was made from the Uno account. */
+    readonly unoBoxId?: number | undefined;
   }>;
   readonly connectionStateById: Readonly<Partial<Record<string, EnvironmentConnectionState>>>;
   readonly boxes: ReadonlyArray<UnoBox>;
@@ -80,6 +82,15 @@ export interface MachineRowSources {
 }
 
 const LIVE_WINDOW_MS = 2 * 60_000;
+
+/**
+ * Hostnames the Work image was built under. Every box launched from it boots
+ * with one of these until the image renames the guest on first boot, so they
+ * never identify a machine.
+ */
+export function isImageBuildHostname(label: string): boolean {
+  return /^uno-?work-golden(-v\d+)?-build$/i.test(label.trim());
+}
 
 export function registryIdForBox(boxId: number): EnvironmentId {
   return `uno-box-${boxId}` as EnvironmentId;
@@ -175,6 +186,27 @@ export function buildMachineRows(sources: MachineRowSources): ReadonlyArray<Mach
     return boxesByName.get(input.label.trim().toLowerCase()) ?? null;
   };
 
+  /**
+   * The name a person gave the box in Uno wins over what the daemon calls
+   * itself: a daemon's own label is the guest hostname, and every box made
+   * from the Work image boots with the image's build hostname
+   * ("uno-work-golden-v5-build"). A label the user typed (different from the
+   * daemon's) is kept.
+   */
+  const labelFor = (input: {
+    readonly label: string;
+    readonly box: UnoBox | null;
+    readonly descriptor: MachineKindDescriptorHint | null;
+  }): string => {
+    if (!input.box) return input.label;
+    const label = input.label.trim();
+    const daemonLabel = input.descriptor?.label?.trim() ?? null;
+    if (label.length === 0 || label === daemonLabel || isImageBuildHostname(label)) {
+      return input.box.name;
+    }
+    return input.label;
+  };
+
   const projectsFor = (environmentId: EnvironmentId | null): ReadonlyArray<string> =>
     environmentId ? (sources.projectNamesByEnvironmentId.get(environmentId) ?? []) : [];
 
@@ -203,13 +235,15 @@ export function buildMachineRows(sources: MachineRowSources): ReadonlyArray<Mach
           ? "The machine this app is running on"
           : `seen ${formatRelativeTime(machine.lastSeenAt, sources.now)}`);
 
+    const label = labelFor({ label: machine.label, box, descriptor });
     rows.push({
       key: machine.environmentId,
       environmentId: machine.environmentId,
-      label: machine.label,
+      label,
       kind: deriveMachineKind({
         descriptor,
         matchedBox: box !== null,
+        matchedBoxById: box !== null && machine.kind === "uno_box" && machine.unoBoxId === box.id,
         registryKind: machine.kind,
       }),
       status,
@@ -224,7 +258,7 @@ export function buildMachineRows(sources: MachineRowSources): ReadonlyArray<Mach
       isDefault: isDefault(machine.environmentId),
       identity: {
         environmentId: machine.environmentId,
-        label: machine.label,
+        label,
         monogram: machine.monogram,
         colorSlot: machine.colorSlot,
         isMonogramOverridden: true,
@@ -238,8 +272,14 @@ export function buildMachineRows(sources: MachineRowSources): ReadonlyArray<Mach
     const isPrimary = record.environmentId === sources.primaryEnvironmentId;
     const connection = sources.connectionStateById[record.environmentId];
     const descriptor = descriptorFor(record.environmentId);
-    const box = matchBox({ descriptor, registryBoxId: null, label: record.label });
+    const box = matchBox({
+      descriptor,
+      registryBoxId: record.unoBoxId ?? null,
+      label: record.label,
+    });
     if (box) claimedBoxIds.add(box.id);
+    const matchedBoxById = box !== null && record.unoBoxId === box.id;
+    const label = labelFor({ label: record.label, box, descriptor });
 
     const status: MachineStatus = isPrimary
       ? "online"
@@ -257,10 +297,10 @@ export function buildMachineRows(sources: MachineRowSources): ReadonlyArray<Mach
     rows.push({
       key: record.environmentId,
       environmentId: record.environmentId,
-      label: record.label,
+      label,
       // A saved connection that has never answered has no descriptor and no
       // platform, so it reads as "Other machine" until it connects.
-      kind: deriveMachineKind({ descriptor, matchedBox: box !== null }),
+      kind: deriveMachineKind({ descriptor, matchedBox: box !== null, matchedBoxById }),
       status,
       detail,
       projects: projectsFor(record.environmentId),
@@ -271,8 +311,8 @@ export function buildMachineRows(sources: MachineRowSources): ReadonlyArray<Mach
       isDefault: isDefault(record.environmentId),
       identity: {
         environmentId: record.environmentId,
-        label: record.label,
-        monogram: deriveMachineMonogram(record.label),
+        label,
+        monogram: deriveMachineMonogram(label),
         colorSlot: 0,
         isMonogramOverridden: false,
       },
@@ -283,10 +323,11 @@ export function buildMachineRows(sources: MachineRowSources): ReadonlyArray<Mach
   // machine the person certainly has. Never let the list say "no machines"
   // while the UI is literally being served by one.
   if (!seenEnvironmentIds.has(sources.primaryEnvironmentId)) {
-    const label = sources.primaryLabel?.trim() || "This machine";
+    const rawLabel = sources.primaryLabel?.trim() || "This machine";
     const descriptor = descriptorFor(sources.primaryEnvironmentId);
-    const box = matchBox({ descriptor, registryBoxId: null, label });
+    const box = matchBox({ descriptor, registryBoxId: null, label: rawLabel });
     if (box) claimedBoxIds.add(box.id);
+    const label = labelFor({ label: rawLabel, box, descriptor });
     rows.push({
       key: sources.primaryEnvironmentId,
       environmentId: sources.primaryEnvironmentId,

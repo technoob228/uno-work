@@ -31,10 +31,13 @@ export type { MachineKind };
 /** Group order wherever machines are listed by kind. */
 export const MACHINE_KIND_ORDER: ReadonlyArray<MachineKind> = ["uno_box", "computer", "server"];
 
-/** The descriptor fields the derivation reads; the rest is irrelevant. */
+/**
+ * The descriptor fields machine derivations read (kind, box id, and the
+ * daemon's own label — which machine rows replace with the box's Uno name).
+ */
 export type MachineKindDescriptorHint = Pick<
   Partial<ExecutionEnvironmentDescriptor>,
-  "machineKind" | "unoBoxId" | "platform"
+  "machineKind" | "unoBoxId" | "platform" | "label"
 >;
 
 export interface DeriveMachineKindInput {
@@ -42,6 +45,13 @@ export interface DeriveMachineKindInput {
   readonly descriptor?: MachineKindDescriptorHint | null | undefined;
   /** True when a box on the Uno account has been matched to this environment. */
   readonly matchedBox?: boolean | undefined;
+  /**
+   * The match is by box id (recorded when the machine was connected from the
+   * Uno account), not by name. That is stronger than what the daemon reports:
+   * a daemon on a box that is not linked to the account yet cannot know it is
+   * a box and calls itself a server.
+   */
+  readonly matchedBoxById?: boolean | undefined;
   /** The workspace registry's kind for this machine, when it is registered. */
   readonly registryKind?: WorkspaceMachineKind | null | undefined;
   /** Platform when known from somewhere other than the descriptor. */
@@ -78,6 +88,7 @@ export function registryKindForMachineKind(kind: MachineKind): WorkspaceMachineK
 }
 
 export function deriveMachineKind(input: DeriveMachineKindInput): MachineKind {
+  if (input.matchedBoxById === true) return "uno_box";
   const reported = input.descriptor?.machineKind;
   if (reported) return reported;
   if (input.matchedBox === true) return "uno_box";
