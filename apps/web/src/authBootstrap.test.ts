@@ -138,9 +138,10 @@ describe("resolveInitialServerAuthGateState", () => {
       },
     });
 
-    expect(fetchMock).toHaveBeenCalledWith("https://remote.example.com/api/auth/session", {
-      credentials: "include",
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://remote.example.com/api/auth/session",
+      expect.objectContaining({ credentials: "include", signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("uses the current origin as an auth proxy base for local dev environments", async () => {
@@ -170,9 +171,10 @@ describe("resolveInitialServerAuthGateState", () => {
       },
     });
 
-    expect(fetchMock).toHaveBeenCalledWith("http://localhost:5735/api/auth/session", {
-      credentials: "include",
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:5735/api/auth/session",
+      expect.objectContaining({ credentials: "include", signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("uses the vite proxy for desktop-managed loopback auth requests during local dev", async () => {
@@ -211,9 +213,10 @@ describe("resolveInitialServerAuthGateState", () => {
       },
     });
 
-    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:5733/api/auth/session", {
-      credentials: "include",
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:5733/api/auth/session",
+      expect.objectContaining({ credentials: "include", signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("returns a requires-auth state instead of throwing when no bootstrap credential exists", async () => {
@@ -278,6 +281,33 @@ describe("resolveInitialServerAuthGateState", () => {
       },
     });
     expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("retries an auth session request that timed out instead of waiting forever", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new DOMException("The operation timed out.", "TimeoutError"))
+      .mockResolvedValueOnce(
+        sessionResponse({
+          authenticated: false,
+          auth: {
+            policy: "loopback-browser",
+            bootstrapMethods: ["one-time-token"],
+            sessionMethods: ["browser-session-cookie"],
+            sessionCookieName: "t3_session",
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { resolveInitialServerAuthGateState } = await import("./environments/primary");
+
+    const gateStatePromise = resolveInitialServerAuthGateState();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(gateStatePromise).resolves.toMatchObject({ status: "requires-auth" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("takes a pairing token from the location hash and strips it immediately", async () => {

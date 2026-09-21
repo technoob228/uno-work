@@ -13,6 +13,7 @@ import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
 import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
+import { SplashScreen } from "../components/SplashScreen";
 import { CommandPalette } from "../components/CommandPalette";
 import { PreviewPaneProvider } from "../components/preview/PreviewPaneContext";
 import { LinkRequestPromptDialog } from "../components/desktop/LinkRequestPromptDialog";
@@ -106,6 +107,12 @@ export const Route = createRootRouteWithContext<{
     };
   },
   component: RootRouteView,
+  // While beforeLoad talks to the machine, keep showing the same splash as
+  // index.html's boot shell — React has already replaced it, and without a
+  // pending view the first visit rendered a blank page until it resolved.
+  pendingComponent: SplashScreen,
+  pendingMs: 0,
+  pendingMinMs: 0,
   errorComponent: RootRouteErrorView,
   head: () => ({
     meta: [{ name: "title", content: APP_DISPLAY_NAME }],

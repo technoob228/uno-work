@@ -99,6 +99,9 @@ export async function fetchSessionState(): Promise<AuthSessionState> {
   return retryTransientBootstrap(async () => {
     const response = await fetch(resolvePrimaryEnvironmentHttpUrl("/api/auth/session"), {
       credentials: "include",
+      // A request that never answers must not leave the first visit blank:
+      // time it out and let retryTransientBootstrap try again.
+      signal: AbortSignal.timeout(BOOTSTRAP_ATTEMPT_TIMEOUT_MS),
     });
     if (!response.ok) {
       throw new BootstrapHttpError({
@@ -193,6 +196,7 @@ async function waitForAuthenticatedSessionAfterBootstrap(): Promise<AuthSessionS
 const TRANSIENT_BOOTSTRAP_STATUS_CODES = new Set([502, 503, 504]);
 const BOOTSTRAP_RETRY_TIMEOUT_MS = 15_000;
 const BOOTSTRAP_RETRY_STEP_MS = 500;
+const BOOTSTRAP_ATTEMPT_TIMEOUT_MS = 10_000;
 
 export async function retryTransientBootstrap<T>(operation: () => Promise<T>): Promise<T> {
   const startedAt = Date.now();
@@ -228,7 +232,9 @@ function isTransientBootstrapError(error: unknown): boolean {
     return true;
   }
 
-  return error instanceof DOMException && error.name === "AbortError";
+  return (
+    error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")
+  );
 }
 
 async function bootstrapServerAuth(): Promise<ServerAuthGateState> {
