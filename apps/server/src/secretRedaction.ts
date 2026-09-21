@@ -99,34 +99,41 @@ export function redactSecretsInText(text: string): string {
   return next === text ? text : next;
 }
 
-function redactValue(value: unknown, depth: number, seen: WeakSet<object>): unknown {
+function redactValue(value: unknown, depth: number, memo: WeakMap<object, unknown>): unknown {
   if (typeof value === "string") return redactSecretsInText(value);
   if (value === null || typeof value !== "object" || depth >= MAX_DEPTH) return value;
-  if (seen.has(value)) return value;
-  seen.add(value);
+  // Один объект может встречаться в событии несколько раз (OpenCode кладёт
+  // state инструмента и в raw, и в payload.data) — каждое вхождение получает
+  // ту же замаскированную копию. Пока объект обходится (цикл), отдаём его как
+  // есть: строк, до которых не дошли, в цикле всё равно не будет.
+  if (memo.has(value)) return memo.get(value);
+  memo.set(value, value);
 
+  let result: unknown = value;
   if (Array.isArray(value)) {
     let changed = false;
     const next = value.map((entry) => {
-      const redacted = redactValue(entry, depth + 1, seen);
+      const redacted = redactValue(entry, depth + 1, memo);
       if (redacted !== entry) changed = true;
       return redacted;
     });
-    return changed ? next : value;
+    if (changed) result = next;
+  } else {
+    // Только простые объекты: Date, Uint8Array, Map и т.п. не трогаем.
+    const proto = Object.getPrototypeOf(value);
+    if (proto === Object.prototype || proto === null) {
+      let changed = false;
+      const next: Record<string, unknown> = {};
+      for (const [key, entry] of Object.entries(value)) {
+        const redacted = redactValue(entry, depth + 1, memo);
+        if (redacted !== entry) changed = true;
+        next[key] = redacted;
+      }
+      if (changed) result = next;
+    }
   }
-
-  // Только простые объекты: Date, Uint8Array, Map и т.п. не трогаем.
-  const proto = Object.getPrototypeOf(value);
-  if (proto !== Object.prototype && proto !== null) return value;
-
-  let changed = false;
-  const next: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    const redacted = redactValue(entry, depth + 1, seen);
-    if (redacted !== entry) changed = true;
-    next[key] = redacted;
-  }
-  return changed ? next : value;
+  memo.set(value, result);
+  return result;
 }
 
 /**
@@ -135,7 +142,7 @@ function redactValue(value: unknown, depth: number, seen: WeakSet<object>): unkn
  * стрима без находок это ноль аллокаций сверх обхода.
  */
 export function redactSecretsDeep<T>(value: T): T {
-  return redactValue(value, 0, new WeakSet()) as T;
+  return redactValue(value, 0, new WeakMap()) as T;
 }
 
 const UNO_SECRET_VALUE =

@@ -83,6 +83,15 @@ describe("redactSecretsDeep", () => {
     expect(event.payload.data.state.output).toContain(BOX_TOKEN); // вход не мутируем
   });
 
+  it("masks an object shared between raw and payload in both places", () => {
+    // OpenCode кладёт один и тот же state инструмента и в raw, и в payload.data.
+    const state = { output: `UNO_API_KEY=${GATEWAY_KEY}` };
+    const event = { raw: { part: { state } }, payload: { data: { state } } };
+    const out = redactSecretsDeep(event);
+    expect(JSON.stringify(out)).not.toContain(GATEWAY_KEY);
+    expect(out.payload.data.state).toBe(out.raw.part.state);
+  });
+
   it("returns the same object when nothing to mask", () => {
     const event = { type: "content.delta", payload: { delta: "hello" } };
     expect(redactSecretsDeep(event)).toBe(event);
