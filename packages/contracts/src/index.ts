@@ -23,6 +23,7 @@ export * from "./plugins.ts";
 export * from "./transcription.ts";
 export * from "./video.ts";
 export * from "./workspace.ts";
+export * from "./unoComputer.ts";
 export * from "./editor.ts";
 export * from "./project.ts";
 export * from "./filesystem.ts";

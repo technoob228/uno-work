@@ -126,6 +126,19 @@ import type {
 } from "./credentialsVault.ts";
 import type { UnoCreateLlmTopUpActionResult } from "./rpc.ts";
 import type {
+  UnoComputerActivity,
+  UnoComputerActivityInput,
+  UnoComputerApps,
+  UnoComputerInstallAppInput,
+  UnoComputerInstallAppResult,
+  UnoComputerInstallStatus,
+  UnoComputerInstallStatusInput,
+  UnoComputerMetrics,
+  UnoComputerPowerInput,
+  UnoComputerState,
+  UnoComputerTargetInput,
+} from "./unoComputer.ts";
+import type {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
   SourceControlDiscoveryResult,
@@ -677,6 +690,16 @@ export interface EnvironmentApi {
     connectBox: (input: UnoCloudConnectBoxInput) => Promise<UnoBoxConnection>;
     createBox: (input: UnoCloudCreateBoxInput) => Promise<UnoCloudCreateBoxResult>;
     createBoxStatus: (input: UnoCloudCreateBoxStatusInput) => Promise<UnoBoxCreateJobStatus>;
+  };
+  /** "This computer": the desktop view of the machine behind this environment. */
+  unoComputer: {
+    getState: (input?: UnoComputerTargetInput) => Promise<UnoComputerState>;
+    metrics: (input?: UnoComputerTargetInput) => Promise<UnoComputerMetrics>;
+    activity: (input?: UnoComputerActivityInput) => Promise<UnoComputerActivity>;
+    apps: (input?: UnoComputerTargetInput) => Promise<UnoComputerApps>;
+    installApp: (input: UnoComputerInstallAppInput) => Promise<UnoComputerInstallAppResult>;
+    installStatus: (input: UnoComputerInstallStatusInput) => Promise<UnoComputerInstallStatus>;
+    power: (input: UnoComputerPowerInput) => Promise<UnoComputerState>;
   };
   /** Install a harness CLI or sign it in on this environment's machine. */
   providerSetup: {

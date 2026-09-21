@@ -110,6 +110,21 @@ export class ControlPlaneHttpError extends Error {
 }
 
 /**
+ * Dev/test switch: point every control-plane call at a local stub instead of
+ * the production console (e.g. `UNO_WORK_DEV_CONTROL_PLANE_URL=http://127.0.0.1:8081`).
+ * The account key is sent to whatever this names, so it is read from the
+ * daemon's own environment only — never from settings a client can write.
+ */
+export const CONTROL_PLANE_URL_OVERRIDE_ENV = "UNO_WORK_DEV_CONTROL_PLANE_URL";
+
+export function controlPlaneBaseUrl(): string {
+  const override = process.env[CONTROL_PLANE_URL_OVERRIDE_ENV]?.trim();
+  return override && override.length > 0
+    ? override.replace(/\/+$/, "")
+    : UNO_CONTROL_PLANE_BASE_URL;
+}
+
+/**
  * One request to the control plane. Non-2xx answers become an `Error` whose
  * message carries the status and (trimmed) body, which is what both the panel
  * and the provisioning job surface to the user.
@@ -119,7 +134,7 @@ export async function fetchControlPlaneJson(
   path: string,
   init?: RequestInit,
 ): Promise<unknown> {
-  const response = await fetch(`${UNO_CONTROL_PLANE_BASE_URL}${path}`, {
+  const response = await fetch(`${controlPlaneBaseUrl()}${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${apiKey}`,

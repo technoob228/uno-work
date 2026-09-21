@@ -67,6 +67,7 @@ import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths.ts";
 import { WorkspaceService } from "./workspaceRegistry/WorkspaceService.ts";
 import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
+import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
 import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
 import {
   GENERATED_INSTRUCTIONS_RELATIVE_PATH,
@@ -227,6 +228,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId, currentSessionRole: Ses
       const sessions = yield* SessionCredentialService;
       const workspaceRegistry = yield* WorkspaceService;
       const unoCloud = yield* UnoCloudService;
+      const unoComputer = yield* UnoComputerService;
       const harnessSetup = yield* HarnessSetup;
       const serverCommandId = (tag: string) =>
         CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
@@ -1289,6 +1291,65 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId, currentSessionRole: Ses
               .createBoxStatus(input)
               .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
             { "rpc.aggregate": "uno-cloud" },
+          ),
+        // "This computer": reads answer with an availability instead of failing,
+        // so a control-plane route that is not deployed yet reads as "coming soon".
+        [WS_METHODS.unoComputerGetState]: (input) =>
+          observeRpcEffect(WS_METHODS.unoComputerGetState, unoComputer.getState(input), {
+            "rpc.aggregate": "uno-computer",
+          }),
+        [WS_METHODS.unoComputerMetrics]: (input) =>
+          observeRpcEffect(WS_METHODS.unoComputerMetrics, unoComputer.metrics(input), {
+            "rpc.aggregate": "uno-computer",
+          }),
+        [WS_METHODS.unoComputerActivity]: (input) =>
+          observeRpcEffect(WS_METHODS.unoComputerActivity, unoComputer.activity(input), {
+            "rpc.aggregate": "uno-computer",
+          }),
+        [WS_METHODS.unoComputerApps]: (input) =>
+          observeRpcEffect(WS_METHODS.unoComputerApps, unoComputer.apps(input), {
+            "rpc.aggregate": "uno-computer",
+          }),
+        [WS_METHODS.unoComputerInstallApp]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerInstallApp,
+            unoComputer
+              .installApp(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
+        [WS_METHODS.unoComputerInstallStatus]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerInstallStatus,
+            unoComputer
+              .installStatus(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
+        // Power reuses `uno.cloud.boxPower` (same key, same control-plane call)
+        // and answers with the refreshed computer.
+        [WS_METHODS.unoComputerPower]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerPower,
+            Effect.gen(function* () {
+              const boxId = yield* unoComputer.resolveBoxId(input);
+              if (boxId === null) {
+                return yield* new UnoCloudRpcError({
+                  message: "This machine isn't an Uno computer.",
+                });
+              }
+              const cloud = yield* unoCloud.boxPower({ boxId, action: input.action });
+              if (!cloud.connected) {
+                return yield* new UnoCloudRpcError({
+                  message: cloud.error ?? "Connect your Uno account first.",
+                });
+              }
+              if (cloud.error !== null) {
+                return yield* new UnoCloudRpcError({ message: cloud.error });
+              }
+              return yield* unoComputer.getState({ boxId });
+            }),
+            { "rpc.aggregate": "uno-computer" },
           ),
         [WS_METHODS.serverListPlugins]: (_input) =>
           observeRpcEffect(WS_METHODS.serverListPlugins, pluginRegistry.getSnapshot, {
