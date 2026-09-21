@@ -96,11 +96,24 @@ export type AuthSessionRole = typeof AuthSessionRole.Type;
  * the right UX without embedding server-specific auth logic or assuming a
  * single access method.
  */
+/**
+ * "Sign in with Uno": the daemon runs on an Uno box and knows which one, so a
+ * browser without a session is sent to the console (`<consoleUrl>/work/open`),
+ * which checks the box is the signed-in user's and comes back with a one-time
+ * pairing token. Only advertised to browsers that are not signed in yet.
+ */
+export const ServerAuthUnoSignIn = Schema.Struct({
+  consoleUrl: TrimmedNonEmptyString,
+  boxId: Schema.Number,
+});
+export type ServerAuthUnoSignIn = typeof ServerAuthUnoSignIn.Type;
+
 export const ServerAuthDescriptor = Schema.Struct({
   policy: ServerAuthPolicy,
   bootstrapMethods: Schema.Array(ServerAuthBootstrapMethod),
   sessionMethods: Schema.Array(ServerAuthSessionMethod),
   sessionCookieName: TrimmedNonEmptyString,
+  unoSignIn: Schema.optionalKey(ServerAuthUnoSignIn),
 });
 export type ServerAuthDescriptor = typeof ServerAuthDescriptor.Type;
 

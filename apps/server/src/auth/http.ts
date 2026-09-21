@@ -10,11 +10,14 @@ import {
   AuthRevokeClientSessionInput,
   AuthRevokePairingLinkInput,
   type AuthWebSocketTokenResult,
+  type ServerAuthDescriptor,
 } from "@t3tools/contracts";
 import { DateTime, Effect, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { isAllowedCorsOrigin } from "../corsOrigins.ts";
+import { UnoBoxIdentity } from "../unoBoxIdentity.ts";
+import { controlPlaneBaseUrl } from "../workspaceRegistry/unoCloudParse.ts";
 import { LinkRequestError, LinkRequestService } from "./Services/LinkRequestService.ts";
 import {
   scopesForSessionRole,
@@ -39,6 +42,24 @@ export const respondToAuthError = (error: AuthError) =>
       },
       { status: error.status ?? 500 },
     );
+  });
+
+/**
+ * A signed-out browser on an Uno box is offered "Sign in with Uno" instead of
+ * a pairing-token field: the box id is what the console needs to check
+ * ownership and mint the pairing token itself. `serviceOption` keeps the route
+ * usable where box identity is not wired (tests, desktop).
+ */
+export const withUnoSignIn = <S extends { readonly auth: ServerAuthDescriptor }>(session: S) =>
+  Effect.gen(function* () {
+    const identity = yield* Effect.serviceOption(UnoBoxIdentity);
+    if (identity._tag === "None") return session;
+    const boxId = yield* identity.value.current;
+    if (boxId === null) return session;
+    return {
+      ...session,
+      auth: { ...session.auth, unoSignIn: { consoleUrl: controlPlaneBaseUrl(), boxId } },
+    };
   });
 
 export const authSessionRouteLayer = HttpRouter.add(
@@ -67,7 +88,7 @@ export const authSessionRouteLayer = HttpRouter.add(
               }
             : {}),
         }
-      : session;
+      : yield* withUnoSignIn(session);
     return HttpServerResponse.jsonUnsafe(compatSession, { status: 200 });
   }),
 );

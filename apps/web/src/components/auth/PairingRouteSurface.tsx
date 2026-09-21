@@ -9,6 +9,15 @@ import {
   submitServerAuthCredential,
 } from "../../environments/primary";
 import { readHostedPairingRequest } from "../../hostedPairing";
+import {
+  buildUnoSignInUrl,
+  readReturnPathFromUrl,
+  recordAutoSignInAttempt,
+  sessionAttemptStore,
+  shouldAutoSignIn,
+  stripReturnPathFromUrl,
+  UNO_SIGN_IN_DELAY_MS,
+} from "../../unoSignIn";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 
@@ -43,9 +52,25 @@ export function PairingRouteSurface({
 }: {
   auth: AuthSessionState["auth"];
   initialErrorMessage?: string;
-  onAuthenticated: () => void;
+  /** Called with the validated path to land on (the console's `return`, else "/"). */
+  onAuthenticated: (returnPath: string) => void;
 }) {
   const autoPairTokenRef = useRef<string | null>(peekPairingTokenFromUrl());
+  const returnPathRef = useRef<string>(readReturnPathFromUrl(new URL(window.location.href)));
+  // "Sign in with Uno" replaces the token field on an Uno box, unless a token
+  // is already in the URL (the console's way back), an error needs showing, or
+  // the person asked for the manual field.
+  const unoSignIn = auth.unoSignIn;
+  const [manualPairing, setManualPairing] = useState(false);
+  const [autoSignIn] = useState(
+    () =>
+      unoSignIn !== undefined &&
+      autoPairTokenRef.current === null &&
+      !initialErrorMessage &&
+      shouldAutoSignIn(sessionAttemptStore(), Date.now()),
+  );
+  const showUnoSignIn =
+    unoSignIn !== undefined && !manualPairing && autoPairTokenRef.current === null;
   const [credential, setCredential] = useState(() => autoPairTokenRef.current ?? "");
   const [errorMessage, setErrorMessage] = useState(initialErrorMessage ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -69,7 +94,7 @@ export function PairingRouteSurface({
       }
 
       startTransition(() => {
-        onAuthenticated();
+        onAuthenticated(returnPathRef.current);
       });
     },
     [onAuthenticated],
@@ -93,6 +118,36 @@ export function PairingRouteSurface({
     stripPairingTokenFromUrl();
     void submitCredential(token);
   }, [submitCredential]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const next = stripReturnPathFromUrl(url);
+    if (next.toString() !== url.toString()) {
+      window.history.replaceState({}, document.title, next.toString());
+    }
+  }, []);
+
+  const goToUno = useCallback(() => {
+    if (!unoSignIn) return;
+    recordAutoSignInAttempt(sessionAttemptStore(), Date.now());
+    window.location.assign(buildUnoSignInUrl(unoSignIn, returnPathRef.current));
+  }, [unoSignIn]);
+
+  useEffect(() => {
+    if (!autoSignIn || manualPairing) return;
+    const timer = window.setTimeout(goToUno, UNO_SIGN_IN_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [autoSignIn, manualPairing, goToUno]);
+
+  if (showUnoSignIn) {
+    return (
+      <UnoSignInSurface
+        auto={autoSignIn}
+        onSignIn={goToUno}
+        onUsePairingCode={() => setManualPairing(true)}
+      />
+    );
+  }
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
@@ -156,6 +211,46 @@ export function PairingRouteSurface({
         <div className="mt-6 rounded-lg border border-border/70 bg-background/55 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
           {describeSupportedMethods(auth.bootstrapMethods)}
         </div>
+      </section>
+    </div>
+  );
+}
+
+function UnoSignInSurface({
+  auto,
+  onSignIn,
+  onUsePairingCode,
+}: {
+  /** Leaving on its own; otherwise the round trip just failed — ask for a click. */
+  auto: boolean;
+  onSignIn: () => void;
+  onUsePairingCode: () => void;
+}) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
+      <section className="flex w-full max-w-sm flex-col items-center gap-5 text-center">
+        <img src="/uno-mark.svg" alt="" className="size-12 rounded-xl" />
+        {auto ? (
+          <>
+            <div className="size-5 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" />
+            <p className="text-base font-medium">Signing you in with Uno…</p>
+          </>
+        ) : (
+          <>
+            <p className="text-base font-medium">This is your Uno computer</p>
+            <p className="text-sm text-muted-foreground">
+              Sign in with your Uno account to open it.
+            </p>
+            <Button onClick={onSignIn}>Sign in with Uno</Button>
+          </>
+        )}
+        <button
+          type="button"
+          onClick={onUsePairingCode}
+          className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+        >
+          Use a pairing code instead
+        </button>
       </section>
     </div>
   );

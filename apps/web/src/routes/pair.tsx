@@ -41,8 +41,14 @@ function PairRouteView() {
   return (
     <PairingRouteSurface
       auth={authGateState.auth}
-      onAuthenticated={() => {
-        void navigate({ to: "/", replace: true });
+      onAuthenticated={(returnPath) => {
+        if (returnPath === "/") {
+          void navigate({ to: "/", replace: true });
+          return;
+        }
+        // A deep path the console carried back (already validated as a
+        // same-origin path by safeReturnPath).
+        window.location.replace(returnPath);
       }}
       {...(authGateState.errorMessage ? { initialErrorMessage: authGateState.errorMessage } : {})}
     />
