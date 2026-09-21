@@ -8,7 +8,7 @@ import {
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { assert, it } from "@effect/vitest";
-import { Effect, FileSystem, Layer, Schema } from "effect";
+import { Effect, FileSystem, Layer, Ref, Schema, Stream } from "effect";
 import { ServerConfig } from "./config.ts";
 import { ServerSettingsLive, ServerSettingsService } from "./serverSettings.ts";
 
@@ -412,6 +412,33 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       assert.equal(next.providers.codex.binaryPath, "codex");
       assert.equal(next.providers.claudeAgent.binaryPath, "claude");
     }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("an edit made before the watcher started still reaches subscribers", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const serverConfig = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      // Read before start — what the provider registry does while the daemon boots.
+      const early = yield* serverSettings.getSettings;
+      assert.equal(early.uno.apiKey, "");
+      const seen = yield* Ref.make<string[]>([]);
+      yield* serverSettings.streamChanges.pipe(
+        Stream.runForEach((next) => Ref.update(seen, (all) => [...all, next.uno.apiKey])),
+        Effect.forkScoped,
+      );
+      yield* Effect.yieldNow;
+      // The console writes the gateway key before the watcher exists.
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        JSON.stringify({ uno: { apiKey: "unollm_late" } }),
+      );
+      yield* serverSettings.start;
+      for (let i = 0; i < 50 && !(yield* Ref.get(seen)).includes("unollm_late"); i++) {
+        yield* Effect.yieldNow;
+      }
+      assert.include(yield* Ref.get(seen), "unollm_late");
+    }).pipe(Effect.provide(makeServerSettingsLayer()), Effect.scoped),
   );
 
   it.effect("writes only non-default server settings to disk", () =>

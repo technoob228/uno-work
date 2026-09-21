@@ -509,9 +509,16 @@ const makeServerSettings = Effect.gen(function* () {
     }
 
     const startup = Effect.gen(function* () {
+      const before = yield* getSettingsFromCache.pipe(Effect.option);
       yield* startWatcher;
       yield* Cache.invalidate(settingsCache, cacheKey);
-      yield* getSettingsFromCache;
+      const after = yield* getSettingsFromCache;
+      // Whoever read settings before the watcher existed must hear about an
+      // edit made in between (the console writes the gateway key into a
+      // fresh Work box while the daemon is still starting).
+      if (before._tag === "Some" && JSON.stringify(before.value) !== JSON.stringify(after)) {
+        yield* emitChange(after);
+      }
     });
 
     const startupExit = yield* Effect.exit(startup);

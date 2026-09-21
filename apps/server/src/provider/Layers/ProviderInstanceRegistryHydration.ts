@@ -47,7 +47,7 @@ import {
   type ProviderInstanceConfigMap,
   ServerSettings,
 } from "@t3tools/contracts";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Stream, Duration } from "effect";
 
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { accountKeyFingerprint } from "../../unoGatewayKey.ts";
@@ -162,15 +162,28 @@ const SettingsWatcherLive: Layer.Layer<
   Effect.gen(function* () {
     const mutator = yield* ProviderInstanceRegistryMutator;
     const serverSettings = yield* ServerSettingsService;
-    yield* serverSettings.streamChanges.pipe(
-      Stream.runForEach((next) =>
-        mutator
-          .reconcile(deriveProviderInstanceConfigMap(next))
-          .pipe(
-            Effect.catchCause((cause) =>
-              Effect.logError("ProviderInstanceRegistry reconcile failed", cause),
-            ),
+    const reconcileWith = (next: ServerSettings) =>
+      mutator
+        .reconcile(deriveProviderInstanceConfigMap(next))
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError("ProviderInstanceRegistry reconcile failed", cause),
           ),
+        );
+    yield* serverSettings.streamChanges.pipe(Stream.runForEach(reconcileWith), Effect.forkScoped);
+    // Catch-up. The registry was built from settings read before this
+    // subscription existed, and change events are not replayed: a write in
+    // that window was lost until the next restart. On a fresh Work box that
+    // write is the console's gateway key, ~10 s after boot while the daemon is
+    // still starting — the Uno provider then stayed with no models ("No models
+    // found", first chat fell through to a logged-out Claude). Reconcile is
+    // idempotent, so re-applying the current settings once the subscription is
+    // live costs nothing when nothing was missed.
+    yield* Effect.sleep(Duration.seconds(1)).pipe(
+      Effect.andThen(serverSettings.getSettings),
+      Effect.flatMap(reconcileWith),
+      Effect.catchCause((cause) =>
+        Effect.logError("ProviderInstanceRegistry catch-up reconcile failed", cause),
       ),
       Effect.forkScoped,
     );
