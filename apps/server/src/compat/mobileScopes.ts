@@ -25,6 +25,9 @@ export function scopesForSessionRole(role: string | undefined): ReadonlyArray<st
   return role === "owner" ? OWNER_SCOPES : STANDARD_CLIENT_SCOPES;
 }
 
+/** Все имена скоупов, которые этот сервер вообще знает (= набор owner). */
+export const KNOWN_SCOPES: ReadonlySet<string> = new Set(OWNER_SCOPES);
+
 /**
  * Апстрим переименовал session-метод `bearer-session-token` →
  * `bearer-access-token`; их Schema.Literals отвергает наш литерал и валит

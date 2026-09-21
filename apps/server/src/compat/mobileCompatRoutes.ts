@@ -26,7 +26,7 @@ import { AuthError, ServerAuth } from "../auth/Services/ServerAuth.ts";
 import { deriveAuthClientMetadata } from "../auth/utils.ts";
 import { respondToAuthError } from "../auth/http.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { scopesForSessionRole } from "./mobileScopes.ts";
+import { KNOWN_SCOPES, scopesForSessionRole } from "./mobileScopes.ts";
 
 /** Литералы RFC 8693, которые шлёт апстримный клиент. */
 const TOKEN_EXCHANGE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange";
@@ -85,6 +85,22 @@ export const oauthTokenRouteLayer = HttpRouter.add(
       );
     }
 
+    // Валидация scope ДО обмена: subject_token одноразовый, и отвечать 400
+    // после consume значило бы сжечь credential впустую. Здесь режем только
+    // неизвестные имена; пересечение с ролью считаем после обмена (роль
+    // зашита в grant и известна только из результата).
+    const requestedScopeRaw = form.get("scope");
+    const requestedScopes =
+      requestedScopeRaw && requestedScopeRaw.trim().length > 0
+        ? [...new Set(requestedScopeRaw.trim().split(/\s+/))]
+        : undefined;
+    if (requestedScopes !== undefined) {
+      const unknown = requestedScopes.filter((scope) => !KNOWN_SCOPES.has(scope));
+      if (unknown.length > 0) {
+        return oauthError("invalid_scope", `Unknown scope(s): ${unknown.join(", ")}.`, 400);
+      }
+    }
+
     const serverAuth = yield* ServerAuth;
     const clientLabel = form.get("client_label");
     const result = yield* serverAuth.exchangeBootstrapCredentialForBearerSession(
@@ -100,17 +116,24 @@ export const oauthTokenRouteLayer = HttpRouter.add(
       Math.floor((DateTime.toEpochMillis(result.expiresAt) - Date.now()) / 1000),
     );
 
-    const requestedScope = form.get("scope");
+    // RFC 6749 §3.3 / RFC 8693 §2.2.1: сервер вправе выдать МЕНЬШЕ
+    // запрошенного и обязан указать фактический scope. Отражать запрос
+    // as-is нельзя: client-роль, попросившая admin-скоупы, поверила бы
+    // ответу и включила в UI функции, падающие 403. Выдаём пересечение
+    // «запрошено ∩ положено по роли»; пустое пересечение (просили только
+    // чужое) → полный набор роли: сессия уже создана (credential сожжён
+    // обменом), честный downgrade с фактическим scope в ответе.
+    const grantedScopes = scopesForSessionRole(result.role);
+    const granted = new Set(grantedScopes);
+    const intersection = requestedScopes?.filter((scope) => granted.has(scope)) ?? [];
+    const issuedScopes = intersection.length > 0 ? intersection : grantedScopes;
     return HttpServerResponse.jsonUnsafe(
       {
         access_token: result.sessionToken,
         issued_token_type: ACCESS_TOKEN_TYPE,
         token_type: "Bearer",
         expires_in: expiresInSeconds,
-        scope:
-          requestedScope && requestedScope.trim().length > 0
-            ? requestedScope.trim()
-            : scopesForSessionRole(result.role).join(" "),
+        scope: issuedScopes.join(" "),
       },
       { status: 200, headers: { "cache-control": "no-store", pragma: "no-cache" } },
     );
