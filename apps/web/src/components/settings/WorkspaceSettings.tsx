@@ -60,7 +60,28 @@ import { useSwitchEnvironment } from "../../hooks/useSwitchEnvironment";
 import { readLocalApi } from "../../localApi";
 import { MACHINE_KIND_LABELS, MACHINE_STATUS_LABELS, plainExplanation } from "../../plainLanguage";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
+import { readEnvironmentApi } from "../../environmentApi";
+import { describeMachineError } from "../../machineErrors";
+import {
+  connectUnoBox,
+  describeUnoBoxConnectProgress,
+  isBoxDead,
+  isUnoBoxStillStartingError,
+  type UnoBoxConnectProgress,
+} from "../../unoBoxConnect";
 import { AddEnvModal } from "../AddEnvModal";
+import { boxSleepConfirmCopy, type BoxSleepConfirmCopy } from "../machines/boxSleepCopy";
+import { MachineErrorNotice } from "../machines/MachineErrorNotice";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
+import { toastManager } from "../ui/toast";
 import { Explain } from "../Explain";
 import { MachineChip } from "../MachineChip";
 import { MACHINE_KIND_ICON } from "../machineKindIcons";
@@ -74,7 +95,7 @@ import {
   SettingsSection,
   useRelativeTimeTick,
 } from "./settingsLayout";
-import { formatRelativeTime, registryIdForBox, type MachineRow } from "./machineRows";
+import { formatRelativeTime, type MachineRow } from "./machineRows";
 import { WorkspaceInstructionsSection } from "./WorkspaceInstructions";
 
 const MACHINE_COLOR_CHOICES = [
@@ -114,6 +135,32 @@ function MachineStatusPill({ status }: { readonly status: MachineRow["status"] }
           ? "bad"
           : "muted";
   return <StatusPill tone={tone}>{MACHINE_STATUS_LABELS[status]}</StatusPill>;
+}
+
+function BoxSleepConfirmBody({
+  copy,
+  onConfirm,
+}: {
+  readonly copy: BoxSleepConfirmCopy;
+  readonly onConfirm: () => void;
+}) {
+  return (
+    <>
+      <AlertDialogHeader>
+        <AlertDialogTitle>{copy.title}</AlertDialogTitle>
+        <AlertDialogDescription>{copy.body}</AlertDialogDescription>
+        {copy.warning ? (
+          <p className="rounded-md bg-amber-500/10 px-3 py-2 text-amber-800 text-sm dark:text-amber-300">
+            {copy.warning}
+          </p>
+        ) : null}
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+        <Button onClick={onConfirm}>{copy.confirm}</Button>
+      </AlertDialogFooter>
+    </>
+  );
 }
 
 function formatProjects(projects: ReadonlyArray<string>): string {
@@ -170,6 +217,13 @@ export function WorkspaceSettings() {
     readonly step: "uno" | "custom";
   }>({ open: false, step: "uno" });
   const [removingKey, setRemovingKey] = useState<string | null>(null);
+  const [sleepTarget, setSleepTarget] = useState<MachineRow | null>(null);
+  const [boxConnect, setBoxConnect] = useState<{
+    readonly boxId: number;
+    readonly progress: UnoBoxConnectProgress | null;
+    readonly error: unknown;
+    readonly stillStarting: boolean;
+  } | null>(null);
 
   // Which machine the chats on screen belong to; the switch button is hidden
   // on that row. Falls back to the primary daemon before anything is chosen.
@@ -243,27 +297,59 @@ export function WorkspaceSettings() {
     });
   }, [connectionCandidates, primaryDescriptor, registryEnvironmentId, syncMachines]);
 
-  const handleAddBox = useCallback(
-    (box: UnoBox) => {
-      if (!registryEnvironmentId) return;
-      // A box joins the registry under its control-plane identity, so the row
-      // survives the box being re-paired later under a different SSH endpoint.
-      syncMachines.mutate({
-        machines: [
-          {
-            environmentId: registryIdForBox(box.id),
-            label: box.name,
-            kind: "uno_box" as const,
-            unoBoxId: box.id,
-            // Null, even for a running box: "the control plane says it is up"
-            // is not "this workspace has heard from it". Presence starts at
-            // "not seen yet" and only a real connection moves it.
-            lastSeenAt: null,
-          },
-        ],
-      });
+  // Wake/sleep answer before the box has changed state; follow it for a
+  // little while so the row reads "Online" without a manual Refresh.
+  // Each read bypasses the daemon's short cache (`refresh: true`).
+  const followPowerChange = useCallback(() => {
+    if (!registryEnvironmentId) return;
+    const refreshNow = async () => {
+      const api = readEnvironmentApi(registryEnvironmentId);
+      if (!api) return;
+      const next = await api.unoCloud.getState({ refresh: true }).catch(() => null);
+      if (next) queryClient.setQueryData(workspaceQueryKeys.unoCloud(registryEnvironmentId), next);
+    };
+    for (const delayMs of [2_000, 5_000, 9_000, 15_000, 25_000]) {
+      setTimeout(() => void refreshNow(), delayMs);
+    }
+  }, [queryClient, registryEnvironmentId]);
+
+  const handlePower = useCallback(
+    (row: MachineRow, action: "wake" | "sleep") => {
+      if (!row.box) return;
+      boxPower.mutate({ boxId: row.box.id, action }, { onSettled: followPowerChange });
     },
-    [registryEnvironmentId, syncMachines],
+    [boxPower, followPowerChange],
+  );
+
+  // A box on the account that nothing connected to yet: one click wakes it
+  // (when asleep), pairs it and makes it a machine everywhere in the app.
+  const handleConnectBox = useCallback(
+    async (box: UnoBox) => {
+      if (!registryEnvironmentId) return;
+      setBoxConnect({ boxId: box.id, progress: null, error: null, stillStarting: false });
+      try {
+        const record = await connectUnoBox(registryEnvironmentId, box, {
+          onProgress: (progress) =>
+            setBoxConnect({ boxId: box.id, progress, error: null, stillStarting: false }),
+        });
+        setBoxConnect(null);
+        void cloudQuery.refetch();
+        toastManager.add({
+          type: "success",
+          title: "Machine connected",
+          description: `${record.label} is now one of your machines.`,
+        });
+      } catch (caught) {
+        setBoxConnect({
+          boxId: box.id,
+          progress: null,
+          error: isUnoBoxStillStartingError(caught) ? null : caught,
+          stillStarting: isUnoBoxStillStartingError(caught),
+        });
+        void cloudQuery.refetch();
+      }
+    },
+    [cloudQuery, registryEnvironmentId],
   );
 
   const handleRemove = useCallback(
@@ -493,7 +579,9 @@ export function WorkspaceSettings() {
           ) : null}
           {rows.map((row) => {
             const KindIcon = MACHINE_KIND_ICON[row.kind];
-            const canWake = row.box !== null;
+            // A box Uno reports as broken can be neither woken nor connected.
+            const broken = row.box !== null && isBoxDead(row.box.status);
+            const canWake = row.box !== null && !broken;
             const isRunning = row.status === "online";
             return (
               <div
@@ -525,7 +613,11 @@ export function WorkspaceSettings() {
                   </p>
                 </div>
 
-                <MachineStatusPill status={row.status} />
+                {broken ? (
+                  <StatusPill tone="bad">Broken</StatusPill>
+                ) : (
+                  <MachineStatusPill status={row.status} />
+                )}
 
                 {row.environmentId && (row.isPrimary || row.isSavedConnection) ? (
                   <Button
@@ -573,12 +665,7 @@ export function WorkspaceSettings() {
                     size="xs"
                     variant="outline"
                     disabled={boxPower.isPending}
-                    onClick={() =>
-                      boxPower.mutate({
-                        boxId: row.box!.id,
-                        action: isRunning ? "sleep" : "wake",
-                      })
-                    }
+                    onClick={() => (isRunning ? setSleepTarget(row) : handlePower(row, "wake"))}
                   >
                     {isRunning ? (
                       <MoonIcon className="size-3.5" />
@@ -589,16 +676,61 @@ export function WorkspaceSettings() {
                   </Button>
                 ) : null}
 
-                {!row.environmentId && row.box ? (
+                {broken ? (
+                  <span className="text-[11px] text-muted-foreground">
+                    Delete it in the Uno console
+                  </span>
+                ) : null}
+
+                {!row.environmentId && row.box && !broken ? (
                   <Button
                     size="xs"
                     variant="outline"
-                    disabled={syncMachines.isPending}
-                    onClick={() => handleAddBox(row.box!)}
+                    data-testid={`connect-box-${row.box.id}`}
+                    disabled={boxConnect !== null && boxConnect.progress !== null}
+                    onClick={() => void handleConnectBox(row.box!)}
                   >
-                    <PlusIcon className="size-3.5" />
-                    Add to my machines
+                    {boxConnect?.boxId === row.box.id && boxConnect.progress ? (
+                      <>
+                        <RefreshCwIcon className="size-3.5 animate-spin" />
+                        {describeUnoBoxConnectProgress(boxConnect.progress)}
+                      </>
+                    ) : (
+                      <>
+                        <PlusIcon className="size-3.5" />
+                        Connect
+                      </>
+                    )}
                   </Button>
+                ) : null}
+
+                {row.box &&
+                boxConnect?.boxId === row.box.id &&
+                (boxConnect.error != null || boxConnect.stillStarting) ? (
+                  <MachineErrorNotice
+                    className="basis-full"
+                    tone={boxConnect.stillStarting ? "warning" : "error"}
+                    {...(boxConnect.stillStarting
+                      ? {
+                          human: {
+                            title: "Still starting, we'll keep trying",
+                            message: `${row.label} is taking longer than usual to answer.`,
+                            details: null,
+                            transient: true,
+                          },
+                        }
+                      : { error: boxConnect.error })}
+                    action={
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() => void handleConnectBox(row.box!)}
+                      >
+                        <RefreshCwIcon className="size-3" />
+                        Try again
+                      </Button>
+                    }
+                  />
                 ) : null}
 
                 {row.isPrimary || !row.environmentId ? null : (
@@ -618,6 +750,29 @@ export function WorkspaceSettings() {
           })}
         </div>
       </SettingsSection>
+
+      <AlertDialog
+        open={sleepTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setSleepTarget(null);
+        }}
+      >
+        <AlertDialogPopup data-testid="box-sleep-confirm">
+          {sleepTarget ? (
+            <BoxSleepConfirmBody
+              copy={boxSleepConfirmCopy({
+                label: sleepTarget.label,
+                isThisScreen: sleepTarget.isPrimary,
+                isConnectedHere: sleepTarget.isSavedConnection,
+              })}
+              onConfirm={() => {
+                handlePower(sleepTarget, "sleep");
+                setSleepTarget(null);
+              }}
+            />
+          ) : null}
+        </AlertDialogPopup>
+      </AlertDialog>
 
       {advancedEnabled ? (
         <AdvancedSharingSection
@@ -673,11 +828,11 @@ export function WorkspaceSettings() {
                   ? `${cloud.account?.username ?? "account"}${cloud.account?.email ? ` · ${cloud.account.email}` : ""} · balance $${(cloud.account?.balance ?? 0).toFixed(2)} · LLM $${(cloud.account?.llmBalance ?? 0).toFixed(2)}`
                   : cloudQuery.isPending
                     ? "Asking Uno who this account is…"
-                    : "Not linked. Add an Uno API key in Settings → General to see this account's boxes here."
+                    : "Not linked. Add your Uno API key in Settings → Machine → Account to see this account's computers here."
               }
               control={
                 cloud?.error ? (
-                  <StatusPill tone="warn">{cloud.error.slice(0, 40)}</StatusPill>
+                  <StatusPill tone="warn">{describeMachineError(cloud.error).title}</StatusPill>
                 ) : cloud?.connected ? (
                   <StatusPill tone="ok">linked</StatusPill>
                 ) : cloudQuery.isPending ? (
@@ -805,7 +960,7 @@ export function WorkspaceSettings() {
           <SettingsSection title="Uno boxes">
             <SettingsRow
               title="Boxes on this account"
-              description="A box is a machine this app can wake. Adding one puts it in the shared list; connecting it is done from Settings → Connections with the SSH endpoint shown here."
+              description="Computers on your Uno account. To use one here, press Connect next to it in My machines above — it is woken up if needed."
             />
             <div className="flex flex-col gap-2 px-4 pb-3 sm:px-5">
               {!cloud?.connected ? (
