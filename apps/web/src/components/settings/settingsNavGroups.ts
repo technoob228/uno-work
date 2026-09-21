@@ -25,6 +25,7 @@ import {
   PlugIcon,
   PuzzleIcon,
   Settings2Icon,
+  SmartphoneIcon,
 } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -55,6 +56,7 @@ interface EnvironmentNavItem {
 const APP_NAV_ITEMS: ReadonlyArray<AppNavItem> = [
   { label: "General", section: "general", icon: Settings2Icon },
   { label: "Connections", section: "connections", icon: Link2Icon },
+  { label: "Phone", section: "phone", icon: SmartphoneIcon },
   { label: "Browser", section: "browser", icon: GlobeIcon, flag: "browserCompanion" },
   { label: "Labs", section: "labs", icon: FlaskConicalIcon },
 ];

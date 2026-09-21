@@ -27,6 +27,7 @@ describe("buildSettingsNavGroups", () => {
     expect(app!.entries.map((entry) => entry.to)).toEqual([
       "/settings/app/general",
       "/settings/app/connections",
+      "/settings/app/phone",
       "/settings/app/browser",
       "/settings/app/labs",
       "/settings/vault",
@@ -63,6 +64,7 @@ describe("buildSettingsNavGroups", () => {
     expect(groups[0]!.entries.map((entry) => entry.label)).toEqual([
       "General",
       "Connections",
+      "Phone",
       "Labs",
       "My machines",
     ]);
