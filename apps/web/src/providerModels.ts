@@ -202,6 +202,33 @@ export function resolveDefaultThreadProvider(
   return resolveSelectableProvider(providers, machineDefault);
 }
 
+/**
+ * The model a brand-new project should start on when the machine picks for
+ * the user (browser onboarding's starter project). Same bar and order as
+ * {@link resolveDefaultThreadProvider}: the first *usable* harness wins, and
+ * its canonical default model is preferred over the first advertised one —
+ * Uno pins headline models first that the gateway may not currently serve.
+ * `null` when nothing is usable yet, so callers keep their own fallback.
+ */
+export function pickUsableDefaultModelSelection(
+  providers: ReadonlyArray<ServerProvider>,
+): { readonly instanceId: ProviderInstanceId; readonly model: string } | null {
+  const winner = providers
+    .filter(isUsableDefaultProvider)
+    .toSorted(
+      (a, b) => defaultThreadPreferenceRank(a.driver) - defaultThreadPreferenceRank(b.driver),
+    )[0];
+  if (!winner) return null;
+  const preferred = DEFAULT_MODEL_BY_PROVIDER[winner.driver];
+  const model =
+    (preferred !== undefined && winner.models.some((entry) => entry.slug === preferred)
+      ? preferred
+      : undefined) ??
+    winner.models.find((entry) => !entry.isCustom)?.slug ??
+    winner.models[0]?.slug;
+  return model ? { instanceId: winner.instanceId, model } : null;
+}
+
 function defaultThreadPreferenceRank(driver: ProviderDriverKind): number {
   const index = DEFAULT_THREAD_DRIVER_PREFERENCE.indexOf(driver);
   return index === -1 ? DEFAULT_THREAD_DRIVER_PREFERENCE.length : index;

@@ -9,6 +9,7 @@ import { getPrimaryEnvironmentConnection } from "~/environments/runtime";
 import { joinWorkspacePath, pickFirstProjectModelSelection } from "~/firstProject";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useSettings } from "~/hooks/useSettings";
+import { pickUsableDefaultModelSelection } from "~/providerModels";
 import { newCommandId, newProjectId } from "~/lib/utils";
 import { useServerProviders } from "~/rpc/serverState";
 import { selectProjectsAcrossEnvironments, useStore } from "~/store";
@@ -65,14 +66,20 @@ export function useFirstChatLaunch(options: {
           projectRef = scopeProjectRef(existingProject.environmentId, existingProject.id);
         } else {
           const api = createEnvironmentApi(connection.client);
-          const modelSelection = pickFirstProjectModelSelection(
-            providers.map((provider) => ({
-              instanceId: provider.instanceId,
-              status: provider.status,
-              models: provider.models.map((model) => ({ slug: model.slug })),
-            })),
-            { instanceId: "codex", model: DEFAULT_MODEL },
-          );
+          // Same bar as a new chat (builtin-ai-default): only a harness that is
+          // installed, signed in and serving models may own the starter
+          // project, and Uno starts on its canonical default rather than the
+          // pinned headline model. The looser picker is the last resort.
+          const modelSelection =
+            pickUsableDefaultModelSelection(providers) ??
+            pickFirstProjectModelSelection(
+              providers.map((provider) => ({
+                instanceId: provider.instanceId,
+                status: provider.status,
+                models: provider.models.map((model) => ({ slug: model.slug })),
+              })),
+              { instanceId: "codex", model: DEFAULT_MODEL },
+            );
           const baseDirectory =
             configuredBaseDirectory.length > 0 ? configuredBaseDirectory : DEFAULT_WORKSPACE_ROOT;
           const projectId = newProjectId();

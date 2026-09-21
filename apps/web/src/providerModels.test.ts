@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getDefaultServerModel,
   isUsableDefaultProvider,
+  pickUsableDefaultModelSelection,
   resolveDefaultThreadProvider,
   resolveSelectableProvider,
 } from "./providerModels";
@@ -209,5 +210,34 @@ describe("getDefaultServerModel", () => {
 
   it("keeps returning the canonical default when the snapshot has no models yet", () => {
     expect(getDefaultServerModel([unoNotLinked], ProviderDriverKind.make("uno"))).toBe(UNO_DEFAULT);
+  });
+});
+
+describe("pickUsableDefaultModelSelection", () => {
+  it("prefers signed-in Uno and its canonical default over the pinned headline model", () => {
+    const selection = pickUsableDefaultModelSelection([
+      provider({ provider: "codex", authStatus: "unauthenticated", models: ["gpt-5.4"] }),
+      provider({
+        provider: "uno",
+        models: ["uno/~anthropic/claude-sonnet-latest", "uno/moonshotai/kimi-k2.7-code"],
+      }),
+    ]);
+    expect(selection).toEqual({ instanceId: "uno", model: "uno/moonshotai/kimi-k2.7-code" });
+  });
+
+  it("skips a logged-out harness even when it is listed first", () => {
+    const selection = pickUsableDefaultModelSelection([
+      provider({ provider: "codex", authStatus: "unauthenticated", models: ["gpt-5.4"] }),
+      provider({ provider: "opencode", models: ["opencode/free", "openai/gpt-5"] }),
+    ]);
+    expect(selection).toEqual({ instanceId: "opencode", model: "openai/gpt-5" });
+  });
+
+  it("returns null when nothing is usable so the caller keeps its fallback", () => {
+    expect(
+      pickUsableDefaultModelSelection([
+        provider({ provider: "codex", authStatus: "unauthenticated", models: ["gpt-5.4"] }),
+      ]),
+    ).toBeNull();
   });
 });
