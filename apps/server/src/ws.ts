@@ -1323,6 +1323,12 @@ const makeWsRpcLayer = (
                   message: "This machine isn't an Uno computer.",
                 });
               }
+              // Своя машина — её же токеном (на Work-машине ключа аккаунта нет,
+              // а ключ ИИ консоль не принимает). Иначе — ключом аккаунта.
+              const viaBoxToken = yield* unoComputer
+                .powerOwnBox(boxId, input.action)
+                .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message })));
+              if (viaBoxToken) return yield* unoComputer.getState({ boxId });
               const cloud = yield* unoCloud.boxPower({ boxId, action: input.action });
               if (!cloud.connected) {
                 return yield* new UnoCloudRpcError({

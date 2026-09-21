@@ -28,7 +28,9 @@ import { Context, Effect, Layer } from "effect";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { UnoBoxIdentity } from "../unoBoxIdentity.ts";
 import { UnoCloudFetchError } from "./UnoCloudService.ts";
+import { fetchControlPlaneJson } from "./unoCloudParse.ts";
 import {
+  computerKeyFor,
   installComputerApp,
   readComputerActivity,
   readComputerApps,
@@ -55,6 +57,14 @@ export interface UnoComputerServiceShape {
   readonly installStatus: (
     input: UnoComputerInstallStatusInput,
   ) => Effect.Effect<UnoComputerInstallStatus, UnoCloudFetchError>;
+  /**
+   * Питание СВОЕЙ машины токеном машины. `false` — не наш случай (чужой бокс
+   * или токена нет): тогда питание идёт ключом аккаунта через `uno.cloud`.
+   */
+  readonly powerOwnBox: (
+    boxId: number,
+    action: string,
+  ) => Effect.Effect<boolean, UnoCloudFetchError>;
 }
 
 export class UnoComputerService extends Context.Service<
@@ -75,18 +85,25 @@ export const makeUnoComputerService = (
     const identity = yield* UnoBoxIdentity;
     const known: KnownInstall[] = [];
 
-    const readApiKey = settings.getSettings.pipe(
-      Effect.map((current) => current.uno.apiKey.trim()),
-      Effect.orElseSucceed(() => ""),
+    const readCredentials = settings.getSettings.pipe(
+      Effect.map((current) => ({
+        accountKey: current.uno.apiKey.trim(),
+        boxToken: current.uno.boxToken?.trim() ?? "",
+      })),
+      Effect.orElseSucceed(() => ({ accountKey: "", boxToken: "" })),
     );
 
     const resolveBoxId: UnoComputerServiceShape["resolveBoxId"] = (input) =>
       input?.boxId !== undefined ? Effect.succeed(input.boxId) : identity.current;
 
-    const context = Effect.gen(function* () {
-      const apiKey = yield* readApiKey;
-      return { apiKey, fetchJson: options.fetchJson };
-    });
+    /** Ключ под конкретный бокс: см. `computerKeyFor`. */
+    const context = (targetBoxId: number | null) =>
+      Effect.gen(function* () {
+        const creds = yield* readCredentials;
+        const ownBoxId = yield* identity.current;
+        const apiKey = computerKeyFor({ ...creds, ownBoxId }, targetBoxId);
+        return { apiKey, fetchJson: options.fetchJson };
+      });
 
     // The read helpers fold every control-plane failure into their result, so
     // a rejection here would be a programming error — a defect, not an answer.
@@ -94,8 +111,8 @@ export const makeUnoComputerService = (
 
     const getState: UnoComputerServiceShape["getState"] = (input) =>
       Effect.gen(function* () {
-        const ctx = yield* context;
         const ownBoxId = yield* identity.current;
+        const ctx = yield* context(input?.boxId ?? ownBoxId);
         return yield* run(() =>
           readComputerState({ ...ctx, ownBoxId, requestedBoxId: input?.boxId }),
         );
@@ -103,30 +120,30 @@ export const makeUnoComputerService = (
 
     const metrics: UnoComputerServiceShape["metrics"] = (input) =>
       Effect.gen(function* () {
-        const ctx = yield* context;
         const boxId = yield* resolveBoxId(input);
+        const ctx = yield* context(boxId);
         return yield* run(() => readComputerMetrics({ ...ctx, boxId }));
       });
 
     const activity: UnoComputerServiceShape["activity"] = (input) =>
       Effect.gen(function* () {
-        const ctx = yield* context;
         const boxId = yield* resolveBoxId(input);
+        const ctx = yield* context(boxId);
         const tail = input?.tail ?? DEFAULT_ACTIVITY_TAIL;
         return yield* run(() => readComputerActivity({ ...ctx, boxId, tail }));
       });
 
     const apps: UnoComputerServiceShape["apps"] = (input) =>
       Effect.gen(function* () {
-        const ctx = yield* context;
         const boxId = yield* resolveBoxId(input);
+        const ctx = yield* context(boxId);
         return yield* run(() => readComputerApps({ ...ctx, boxId, known: [...known] }));
       });
 
     const installApp: UnoComputerServiceShape["installApp"] = (input) =>
       Effect.gen(function* () {
-        const ctx = yield* context;
         const boxId = yield* resolveBoxId(input);
+        const ctx = yield* context(boxId);
         const result = yield* Effect.tryPromise({
           try: () =>
             installComputerApp({
@@ -152,9 +169,9 @@ export const makeUnoComputerService = (
 
     const installStatus: UnoComputerServiceShape["installStatus"] = (input) =>
       Effect.gen(function* () {
-        const ctx = yield* context;
         const record = known.find((k) => k.deploymentId === input.deploymentId);
         const boxId = record?.boxId ?? (yield* identity.current);
+        const ctx = yield* context(boxId);
         const status = yield* Effect.tryPromise({
           try: () =>
             readInstallStatus({
@@ -172,7 +189,22 @@ export const makeUnoComputerService = (
         return status;
       });
 
+    const powerOwnBox: UnoComputerServiceShape["powerOwnBox"] = (boxId, action) =>
+      Effect.gen(function* () {
+        const creds = yield* readCredentials;
+        const ownBoxId = yield* identity.current;
+        if (creds.boxToken.length === 0 || boxId !== ownBoxId) return false;
+        const fetchJson = options.fetchJson ?? fetchControlPlaneJson;
+        yield* Effect.tryPromise({
+          try: () =>
+            fetchJson(creds.boxToken, `/api/v1/boxes/${boxId}/${action}`, { method: "POST" }),
+          catch: toFetchError,
+        });
+        return true;
+      });
+
     return {
+      powerOwnBox,
       resolveBoxId,
       getState,
       metrics,

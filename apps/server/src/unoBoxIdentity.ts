@@ -36,6 +36,11 @@ export interface StoredAgentToken {
   readonly mintedBy: string;
 }
 
+/** `uno.boxId` из настроек; мусор и не-положительные — как «нет». */
+export function parseSettingsBoxId(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
 export function parseStoredAgentToken(bytes: Uint8Array | null): StoredAgentToken | null {
   if (bytes === null || bytes.length === 0) return null;
   try {
@@ -136,8 +141,20 @@ const makeUnoBoxIdentity = Effect.gen(function* () {
     null;
   const known = yield* Ref.make<number | null>(fromStoredToken);
 
+  // Номер, который консоль сама пишет в settings.json (`uno.boxId`, fishcode
+  // box/work_box_token.go) — самый надёжный сигнал: не нужен ни ключ аккаунта,
+  // ни совпадение hostname (клоны образа зовутся именем сборочной машины).
+  // Читается на каждый запрос: консоль может дописать его уже после старта.
+  const fromSettings = settings.getSettings.pipe(
+    Effect.map((current) => parseSettingsBoxId(current.uno.boxId)),
+    Effect.orElseSucceed(() => null),
+  );
+  const currentBoxId = Effect.gen(function* () {
+    return (yield* fromSettings) ?? (yield* Ref.get(known));
+  });
+
   const probe: UnoBoxIdentityShape["probe"] = Effect.gen(function* () {
-    if ((yield* Ref.get(known)) !== null) return;
+    if ((yield* currentBoxId) !== null) return;
     const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
     const apiKey = current?.uno.apiKey.trim() ?? "";
     if (apiKey.length === 0) return;
@@ -153,7 +170,7 @@ const makeUnoBoxIdentity = Effect.gen(function* () {
   });
 
   return {
-    current: Ref.get(known),
+    current: currentBoxId,
     probe,
   } satisfies UnoBoxIdentityShape;
 });

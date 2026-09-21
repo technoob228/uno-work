@@ -601,6 +601,18 @@ export const UnoAccountSettings = Schema.Struct({
    * when an account has its own golden image.
    */
   goldenImageId: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  /**
+   * Номер Uno-бокса, на котором живёт демон. Пишет консоль при входе в Work
+   * (fishcode `box/work_box_token.go`); вручную не задаётся.
+   */
+  boxId: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  /**
+   * Узкий токен `uno_agt_` на СВОЙ бокс (чтение, питание, порты — без
+   * удаления, покупок и аккаунта). Пишет консоль рядом с ключом ИИ; им ходит
+   * экран «This computer», когда в `apiKey` лежит ключ ИИ `unollm_`, который
+   * консоль не принимает. Клиенту не отдаётся (`redactServerSettingsForClient`).
+   */
+  boxToken: Schema.optionalKey(Schema.String),
 });
 export type UnoAccountSettings = typeof UnoAccountSettings.Type;
 

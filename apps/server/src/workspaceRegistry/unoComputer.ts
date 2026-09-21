@@ -65,6 +65,35 @@ export class UnoComputerActionError extends Error {
   }
 }
 
+/** Ключ ИИ шлюза (`unoGatewayKey.ts`). Консоль его не принимает — это не ключ аккаунта. */
+const GATEWAY_KEY_PREFIX = "unollm_";
+
+export interface UnoComputerCredentials {
+  /** `uno.apiKey`: ключ аккаунта на ноутбуке, ключ ИИ `unollm_` на Work-машине. */
+  readonly accountKey: string;
+  /** `uno.boxToken`: узкий токен на свой бокс, его пишет консоль. */
+  readonly boxToken: string;
+  /** Бокс, на котором живёт демон. */
+  readonly ownBoxId: number | null;
+}
+
+/**
+ * Каким ключом идти в control plane за экраном этого бокса.
+ *
+ * Свой бокс — токеном машины, если он есть: он узкий и именно для этого выдан.
+ * Иначе — ключом аккаунта, если в `uno.apiKey` лежит он, а не ключ ИИ: с
+ * `unollm_` консоль отвечает 401, и честнее сказать «не привязано», чем
+ * показать человеку «401». Пустая строка = идти не с чем.
+ */
+export function computerKeyFor(creds: UnoComputerCredentials, targetBoxId: number | null): string {
+  const boxToken = creds.boxToken.trim();
+  if (boxToken.length > 0 && targetBoxId !== null && targetBoxId === creds.ownBoxId) {
+    return boxToken;
+  }
+  const account = creds.accountKey.trim();
+  return account.length > 0 && !account.startsWith(GATEWAY_KEY_PREFIX) ? account : "";
+}
+
 function bind(ctx: UnoComputerClientContext): ControlPlaneFetch | null {
   const apiKey = ctx.apiKey.trim();
   if (apiKey.length === 0) return null;

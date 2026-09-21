@@ -88,7 +88,10 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
         : instance,
     ]),
   );
-  return { ...settings, providerInstances };
+  // Токен машины нужен только демону: в браузер его не отдаём.
+  if (settings.uno.boxToken === undefined) return { ...settings, providerInstances };
+  const { boxToken: _boxToken, ...uno } = settings.uno;
+  return { ...settings, providerInstances, uno };
 }
 
 export interface ServerSettingsShape {

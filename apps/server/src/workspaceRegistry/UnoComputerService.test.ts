@@ -8,18 +8,28 @@ import { UnoComputerService, makeUnoComputerService } from "./UnoComputerService
 
 function serviceLayer(input: {
   readonly apiKey: string;
+  readonly boxToken?: string;
   readonly ownBoxId: number | null;
   readonly routes: Record<string, () => unknown>;
   readonly calls?: string[];
+  readonly keys?: string[];
 }) {
-  const fetchJson = async (_apiKey: string, path: string) => {
+  const fetchJson = async (apiKey: string, path: string) => {
     input.calls?.push(path);
+    input.keys?.push(apiKey);
     const route = input.routes[path.split("?")[0] ?? path];
     if (!route) throw new ControlPlaneHttpError(404, "404: 404 page not found");
     return route();
   };
   return Layer.effect(UnoComputerService, makeUnoComputerService({ fetchJson })).pipe(
-    Layer.provide(ServerSettingsService.layerTest({ uno: { apiKey: input.apiKey } })),
+    Layer.provide(
+      ServerSettingsService.layerTest({
+        uno: {
+          apiKey: input.apiKey,
+          ...(input.boxToken !== undefined ? { boxToken: input.boxToken } : {}),
+        },
+      }),
+    ),
     Layer.provide(
       Layer.succeed(UnoBoxIdentity, {
         current: Effect.succeed(input.ownBoxId),
@@ -109,3 +119,77 @@ it.effect("fails an install with a readable message when there is no computer", 
     assert.match(error.message, /isn't an Uno computer/);
   }).pipe(Effect.provide(serviceLayer({ apiKey: "key", ownBoxId: null, routes: {} }))),
 );
+
+it.effect("a work machine reads its own computer with the box token, not the AI key", () => {
+  const keys: string[] = [];
+  return Effect.gen(function* () {
+    const computer = yield* UnoComputerService;
+    const state = yield* computer.getState();
+    assert.strictEqual(state.own, true);
+    assert.strictEqual(state.error, null);
+    assert.ok(keys.length > 0);
+    assert.ok(keys.every((key) => key === "uno_agt_box"));
+  }).pipe(
+    Effect.provide(
+      serviceLayer({
+        apiKey: "unollm_ai",
+        boxToken: "uno_agt_box",
+        ownBoxId: 1806,
+        routes: {
+          "/api/v1/boxes/1806": () => ({ id: 1806, name: "stage-work", status: "running" }),
+        },
+        keys,
+      }),
+    ),
+  );
+});
+
+it.effect("with only the AI key the screen says 'not linked' instead of a 401", () => {
+  const calls: string[] = [];
+  return Effect.gen(function* () {
+    const computer = yield* UnoComputerService;
+    const state = yield* computer.getState();
+    assert.strictEqual(state.linked, false);
+    assert.strictEqual(state.error, null);
+    assert.deepStrictEqual(calls, []);
+  }).pipe(Effect.provide(serviceLayer({ apiKey: "unollm_ai", ownBoxId: 1806, routes: {}, calls })));
+});
+
+it.effect("another box of the account never gets the box token", () => {
+  const keys: string[] = [];
+  return Effect.gen(function* () {
+    const computer = yield* UnoComputerService;
+    yield* computer.getState({ boxId: 7 });
+    assert.ok(keys.every((key) => key === "uno_usr_account"));
+  }).pipe(
+    Effect.provide(
+      serviceLayer({
+        apiKey: "uno_usr_account",
+        boxToken: "uno_agt_box",
+        ownBoxId: 1806,
+        routes: { "/api/v1/boxes/7": () => ({ id: 7, name: "other", status: "running" }) },
+        keys,
+      }),
+    ),
+  );
+});
+
+it.effect("powers its own box with the box token and leaves other boxes to the account key", () => {
+  const calls: string[] = [];
+  return Effect.gen(function* () {
+    const computer = yield* UnoComputerService;
+    assert.strictEqual(yield* computer.powerOwnBox(1806, "stop"), true);
+    assert.strictEqual(yield* computer.powerOwnBox(7, "stop"), false);
+    assert.deepStrictEqual(calls, ["/api/v1/boxes/1806/stop"]);
+  }).pipe(
+    Effect.provide(
+      serviceLayer({
+        apiKey: "unollm_ai",
+        boxToken: "uno_agt_box",
+        ownBoxId: 1806,
+        routes: { "/api/v1/boxes/1806/stop": () => ({ ok: true }) },
+        calls,
+      }),
+    ),
+  );
+});
