@@ -162,3 +162,28 @@ it.effect("hands over nothing when the child key cannot be minted", () =>
     assert.strictEqual(key, "");
   }),
 );
+
+// Work-box: the daemon starts without a key, the console writes unollm_ into
+// settings seconds later. The answer cached at startup must not outlive it —
+// otherwise the rebuilt uno provider fetched an empty catalog forever and the
+// first chat went to a logged-out Claude.
+it.effect("a key written after startup is picked up at once, not after the cache TTL", () =>
+  Effect.gen(function* () {
+    const gateway = yield* UnoGatewayKey;
+    const settings = yield* ServerSettingsService;
+    assert.strictEqual(yield* gateway.harnessKey(), "");
+    yield* settings.updateSettings({ uno: { apiKey: "unollm_written_later" } });
+    assert.strictEqual(yield* gateway.harnessKey(), "unollm_written_later");
+  }).pipe(
+    Effect.provide(
+      UnoGatewayKeyLive.pipe(
+        Layer.provideMerge(
+          Layer.mergeAll(
+            ServerSettingsService.layerTest({ uno: { apiKey: "" } }),
+            secretStoreLayer(),
+          ),
+        ),
+      ),
+    ),
+  ),
+);

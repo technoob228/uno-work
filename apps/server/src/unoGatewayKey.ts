@@ -72,6 +72,8 @@ export class UnoGatewayKey extends Context.Service<UnoGatewayKey, UnoGatewayKeyS
 interface CacheEntry {
   readonly at: number;
   readonly key: string;
+  /** Отпечаток uno.apiKey, для которого посчитан ответ: другой ключ = промах. */
+  readonly source: string;
 }
 
 /**
@@ -139,12 +141,21 @@ const makeUnoGatewayKey = Effect.gen(function* () {
     return secret;
   });
 
+  // Кэш привязан к ключу в настройках. На Work-боксе демон стартует без ключа,
+  // и через секунды консоль дописывает unollm_ в settings.json. Реестр
+  // провайдеров тут же пересоздаёт uno-инстанс, но раньше получал из кэша тот
+  // же пустой ответ, снятый при старте (TTL минута): каталог моделей оставался
+  // пустым навсегда, и первый чат уходил в незалогиненный Claude.
   const harnessKey: UnoGatewayKeyShape["harnessKey"] = () =>
     Effect.gen(function* () {
+      const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
+      const source = accountKeyFingerprint(current?.uno.apiKey ?? "");
       const cached = yield* Ref.get(cache);
-      if (cached !== null && Date.now() - cached.at < CACHE_TTL_MS) return cached.key;
+      if (cached !== null && cached.source === source && Date.now() - cached.at < CACHE_TTL_MS) {
+        return cached.key;
+      }
       const key = yield* resolve.pipe(Effect.orElseSucceed(() => ""));
-      yield* Ref.set(cache, { at: Date.now(), key });
+      yield* Ref.set(cache, { at: Date.now(), key, source });
       return key;
     });
 
