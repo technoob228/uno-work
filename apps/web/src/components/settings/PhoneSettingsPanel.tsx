@@ -30,6 +30,7 @@ import {
 } from "../../environments/primary/auth";
 import { readPrimaryEnvironmentTarget } from "../../environments/primary/target";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { isWorkProxyHost, useDirectMachineBaseUrl } from "../../hooks/useDirectMachineAddress";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import {
@@ -70,8 +71,13 @@ const LIST_REFRESH_MS = 15_000;
  * The address a phone should dial: the daemon's own HTTP origin. In the
  * browser build the daemon serves this page, so it equals the page origin;
  * in dev/desktop it is the daemon, not the Vite server in front of it.
+ *
+ * Behind app.uno4.work the page origin is the console's proxy, which turns
+ * away anything without the console cookie — the phone app included. There
+ * the box's own published address (`directBaseUrl`) is used instead.
  */
-function resolvePhoneBaseUrl(): string {
+function resolvePhoneBaseUrl(directBaseUrl: string | null): string {
+  if (directBaseUrl) return normalizePhoneHost(directBaseUrl);
   const target = readPrimaryEnvironmentTarget();
   return normalizePhoneHost(target?.target.httpBaseUrl ?? window.location.origin);
 }
@@ -133,7 +139,7 @@ export function PhoneSettingsPanel() {
       <SettingsSection title="Phone" icon={<SmartphoneIcon className="size-3" />}>
         <SettingsRow
           title="Connect your phone"
-          description="Keep chatting with your computer from anywhere. Scan a code with the free T3 Code app — no setup on the phone beyond that."
+          description="Keep chatting with your computer from anywhere. Scan a code with the free T3 Code app — no setup on the phone beyond that. (To use Work in the phone's browser instead, use Connections → Open on another device.)"
           control={
             <Button onClick={() => setDialogOpen(true)} data-testid="connect-phone">
               <SmartphoneIcon />
@@ -213,7 +219,8 @@ function ConnectPhoneDialog({
   onPhoneConnected: () => void;
 }) {
   const [state, setState] = useState<DialogState>({ kind: "loading" });
-  const [baseUrl, setBaseUrl] = useState<string>(() => resolvePhoneBaseUrl());
+  const directBaseUrl = useDirectMachineBaseUrl();
+  const [baseUrl, setBaseUrl] = useState<string>(() => resolvePhoneBaseUrl(directBaseUrl));
   const liveCodeRef = useRef<IssuedCode | null>(null);
   const knownSessionIdsRef = useRef<ReadonlySet<string>>(new Set());
   const nowMs = useRelativeTimeTick(1_000);
@@ -252,10 +259,15 @@ function ConnectPhoneDialog({
 
   useEffect(() => {
     if (!open) return;
-    setBaseUrl(resolvePhoneBaseUrl());
     void mint();
     return () => retireLiveCode();
   }, [open, mint, retireLiveCode]);
+
+  // The box's direct address can arrive after the dialog opened (the account
+  // state loads asynchronously); the QR follows it.
+  useEffect(() => {
+    if (open) setBaseUrl(resolvePhoneBaseUrl(directBaseUrl));
+  }, [open, directBaseUrl]);
 
   // Watch for the phone to arrive: a new phone session that did not exist
   // when this code was minted.
@@ -286,7 +298,9 @@ function ConnectPhoneDialog({
     };
   }, [readyCode, onPhoneConnected]);
 
-  const reach = classifyPhoneHostReach(baseUrl);
+  const reach: PhoneHostReach | "proxy" = isWorkProxyHost(baseUrl)
+    ? "proxy"
+    : classifyPhoneHostReach(baseUrl);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -341,8 +355,20 @@ function ConnectPhoneDialog({
   );
 }
 
-function ReachNotice({ reach }: { reach: PhoneHostReach }) {
+function ReachNotice({ reach }: { reach: PhoneHostReach | "proxy" }) {
   if (reach === "public") return null;
+  if (reach === "proxy") {
+    return (
+      <Alert variant="warning" data-testid="phone-reach-notice">
+        <TriangleAlertIcon />
+        <AlertDescription>
+          You opened Work through app.uno4.work, and the phone app can't sign in that way. Wait a
+          moment while we look up your computer's own address, or reopen this page after linking
+          your Uno account.
+        </AlertDescription>
+      </Alert>
+    );
+  }
   return (
     <Alert variant="warning" data-testid="phone-reach-notice">
       <TriangleAlertIcon />

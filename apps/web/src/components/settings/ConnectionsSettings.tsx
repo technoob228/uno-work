@@ -103,6 +103,14 @@ import {
 import { useUiStateStore } from "~/uiStateStore";
 import { resolveServerConfigVersionMismatch } from "~/versionSkew";
 import { useServerConfig } from "~/rpc/serverState";
+import { useDirectMachineBaseUrl } from "~/hooks/useDirectMachineAddress";
+import { useMachineLabels } from "~/hooks/useMachineRows";
+import { Link } from "@tanstack/react-router";
+import {
+  clientSessionPrimaryLabel,
+  describeWorkProxyGroup,
+  groupClientSessions,
+} from "./clientSessionGroups";
 
 const DEFAULT_TAILSCALE_SERVE_PORT = 443;
 
@@ -488,8 +496,13 @@ function resolveAdvertisedEndpointPairingUrl(
   return resolveDesktopPairingUrl(endpoint.httpBaseUrl, credential);
 }
 
-function resolveCurrentOriginPairingUrl(credential: string): string {
-  const url = new URL("/pair", window.location.href);
+/**
+ * The link another browser opens to pair. Normally this page's own origin; behind
+ * app.uno4.work (which sends anyone without the console cookie to the console
+ * login) it is the box's own published address instead.
+ */
+function resolveCurrentOriginPairingUrl(credential: string, directBaseUrl: string | null): string {
+  const url = new URL("/pair", directBaseUrl ?? window.location.href);
   return setPairingTokenOnUrl(url, credential).toString();
 }
 
@@ -528,9 +541,10 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
   );
   const [isRevealDialogOpen, setIsRevealDialogOpen] = useState(false);
 
+  const directBaseUrl = useDirectMachineBaseUrl();
   const currentOriginPairingUrl = useMemo(
-    () => resolveCurrentOriginPairingUrl(pairingLink.credential),
-    [pairingLink.credential],
+    () => resolveCurrentOriginPairingUrl(pairingLink.credential, directBaseUrl),
+    [directBaseUrl, pairingLink.credential],
   );
   const hostedPairingUrl = useMemo(
     () =>
@@ -562,9 +576,11 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
     endpointPairingUrl ??
     (endpointUrl != null && endpointUrl !== ""
       ? (hostedPairingUrl ?? resolveDesktopPairingUrl(endpointUrl, pairingLink.credential))
-      : isLoopbackHostname(window.location.hostname)
-        ? null
-        : currentOriginPairingUrl);
+      : // The box's own address works from anywhere, even when this page is
+        // open on a loopback or proxy origin.
+        directBaseUrl !== null || !isLoopbackHostname(window.location.hostname)
+        ? currentOriginPairingUrl
+        : null);
   const revealValue = shareablePairingUrl ?? pairingLink.credential;
   const isShareableHostedAppPairingUrl =
     shareablePairingUrl !== null && isHostedAppPairingUrl(shareablePairingUrl);
@@ -754,7 +770,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
                       size={88}
                       level="M"
                       marginSize={2}
-                      title="Pairing link — scan to open on another device"
+                      title="Scan to open Work in the browser on another device"
                     />
                   </PopoverPopup>
                 </>
@@ -912,10 +928,7 @@ const ConnectedClientListRow = memo(function ConnectedClientListRow({
     clientSession.client.browser ?? null,
     clientSession.client.ipAddress ?? null,
   ].filter((value): value is string => value !== null);
-  const primaryLabel =
-    clientSession.client.label ??
-    ([clientSession.client.os, clientSession.client.browser].filter(Boolean).join(" · ") ||
-      clientSession.subject);
+  const primaryLabel = clientSessionPrimaryLabel(clientSession);
 
   return (
     <div className={accessRowClassName(presentation)}>
@@ -949,6 +962,67 @@ const ConnectedClientListRow = memo(function ConnectedClientListRow({
               {revokingClientSessionId === clientSession.sessionId ? "Revoking…" : "Revoke"}
             </Button>
           ) : null}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * All app.uno4.work sign-ins as one row. "Sign out all" revokes them one by
+ * one through the same call as a single Revoke; the tab you are reading this
+ * in is never among them (see `groupClientSessions`).
+ */
+const WorkProxySessionsRow = memo(function WorkProxySessionsRow({
+  sessions,
+  presentation = "current",
+  onRevokeSession,
+}: {
+  sessions: ReadonlyArray<ServerClientSessionRecord>;
+  presentation?: AccessSectionPresentation;
+  onRevokeSession: (sessionId: ServerClientSessionRecord["sessionId"]) => void | Promise<void>;
+}) {
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const liveCount = sessions.filter((session) => session.connected).length;
+  const handleSignOutAll = useCallback(async () => {
+    setIsSigningOut(true);
+    try {
+      for (const session of sessions) {
+        await onRevokeSession(session.sessionId);
+      }
+    } finally {
+      setIsSigningOut(false);
+    }
+  }, [onRevokeSession, sessions]);
+
+  return (
+    <div className={accessRowClassName(presentation)} data-testid="work-proxy-sessions">
+      <div className={ITEM_ROW_INNER_CLASSNAME}>
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex min-h-5 items-center gap-1.5">
+            <ConnectionStatusDot
+              tooltipText={liveCount > 0 ? `${liveCount} open now` : "None open right now"}
+              dotClassName={liveCount > 0 ? "bg-success" : "bg-muted-foreground/30"}
+              pingClassName={null}
+            />
+            <h3 className="text-sm font-medium text-foreground">
+              {describeWorkProxyGroup(sessions.length)}
+            </h3>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Each time you open Work from the Uno console, a browser sign-in is added here.
+            {liveCount > 0 ? ` ${liveCount} open right now.` : ""}
+          </p>
+        </div>
+        <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+          <Button
+            size="xs"
+            variant="destructive-outline"
+            disabled={isSigningOut}
+            onClick={() => void handleSignOutAll()}
+          >
+            {isSigningOut ? "Signing out…" : "Sign out all"}
+          </Button>
         </div>
       </div>
     </div>
@@ -1015,16 +1089,20 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
           render={
             <Button size="xs" variant="default">
               <PlusIcon className="size-3" />
-              Create link
+              Open on another device
             </Button>
           }
         />
         <DialogPopup className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Create pairing link</DialogTitle>
+            <DialogTitle>Open Work on another device (browser)</DialogTitle>
             <DialogDescription>
-              Generate a one-time link that another device can use to pair with this backend as an
-              authorized client.
+              Makes a one-time link, with a QR code, that signs another browser — a laptop, a
+              tablet, your phone's browser — into this computer. For the T3 Code phone app, use{" "}
+              <Link to="/settings/app/phone" className="font-medium text-foreground underline">
+                Settings → Phone
+              </Link>{" "}
+              instead.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
@@ -1050,7 +1128,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
               Cancel
             </Button>
             <Button disabled={isCreatingPairingLink} onClick={() => void handleCreatePairingLink()}>
-              {isCreatingPairingLink ? "Creating…" : "Create link"}
+              {isCreatingPairingLink ? "Creating…" : "Make link"}
             </Button>
           </DialogFooter>
         </DialogPopup>
@@ -1086,6 +1164,7 @@ const PairingClientsList = memo(function PairingClientsList({
   onRevokePairingLink,
   onRevokeClientSession,
 }: PairingClientsListProps) {
+  const groupedSessions = useMemo(() => groupClientSessions(clientSessions), [clientSessions]);
   return (
     <>
       {pairingLinks.map((pairingLink) => (
@@ -1101,7 +1180,7 @@ const PairingClientsList = memo(function PairingClientsList({
         />
       ))}
 
-      {clientSessions.map((clientSession) => (
+      {groupedSessions.individual.map((clientSession) => (
         <ConnectedClientListRow
           key={clientSession.sessionId}
           clientSession={clientSession}
@@ -1110,6 +1189,14 @@ const PairingClientsList = memo(function PairingClientsList({
           onRevokeSession={onRevokeClientSession}
         />
       ))}
+
+      {groupedSessions.proxy.length > 0 ? (
+        <WorkProxySessionsRow
+          sessions={groupedSessions.proxy}
+          presentation={presentation}
+          onRevokeSession={onRevokeClientSession}
+        />
+      ) : null}
 
       {pairingLinks.length === 0 && clientSessions.length === 0 && !isLoading ? (
         <div className={accessRowClassName(presentation)}>
@@ -1275,6 +1362,7 @@ function SavedBackendListRow({
   const nowMs = useRelativeTimeTick(1_000);
   const record = useSavedEnvironmentRegistryStore((state) => state.byId[environmentId] ?? null);
   const runtime = useSavedEnvironmentRuntimeStore((state) => state.byId[environmentId] ?? null);
+  const machineLabel = useMachineLabels().get(environmentId) ?? null;
 
   if (!record) {
     return null;
@@ -1297,7 +1385,8 @@ function SavedBackendListRow({
           : "bg-muted-foreground/40";
   const roleLabel = runtime?.role ? (runtime.role === "owner" ? "Owner" : "Client") : null;
   const descriptorLabel = runtime?.descriptor?.label ?? null;
-  const displayLabel = descriptorLabel ?? record.label;
+  // A box's Uno name, not the guest hostname its daemon reports.
+  const displayLabel = machineLabel ?? descriptorLabel ?? record.label;
   const statusTooltip = getSavedBackendStatusTooltip(runtime, record, nowMs);
   const versionMismatch = resolveServerConfigVersionMismatch(runtime?.serverConfig);
   const metadataBits = [
