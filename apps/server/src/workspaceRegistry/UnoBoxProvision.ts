@@ -11,6 +11,15 @@
  *
  *   creating → starting → waiting_daemon → ready
  *                                        ↘ failed
+ *
+ * `ready` is only announced once the box's *public* address answers as an Uno
+ * Work daemon (`/.well-known/t3/environment`), not merely once the control
+ * plane minted a pairing link: the edge publishes the hostname a little after
+ * the daemon inside is up, and a browser sent to it too early hangs on a
+ * request that never answers. If the address stays silent past its budget the
+ * job still ends in `ready` (the box exists and is billed) with
+ * `addressReady: false`, so the client keeps retrying instead of reporting a
+ * failure for a machine that is merely slow.
  */
 import {
   UNO_BOX_DEFAULT_DISK_GB,
@@ -18,6 +27,7 @@ import {
   UNO_BOX_DEFAULT_VCPU,
   UNO_WORK_GOLDEN_IMAGE_ID,
   type UnoBox,
+  type UnoBoxConnection,
   type UnoBoxCreateJobStatus,
 } from "@t3tools/contracts";
 
@@ -56,6 +66,12 @@ export interface UnoBoxProvisionClient {
   /** `POST /api/v1/boxes/{id}/ports` — the control plane allows duplicates, so list first. */
   readonly openPort: (boxId: number, port: number) => Promise<unknown>;
   readonly createWorkSession: (boxId: number) => Promise<unknown>;
+  /**
+   * One read of `<baseUrl>/.well-known/t3/environment`, with its own short
+   * timeout. Resolves true only when the address answers as an Uno Work
+   * daemon; never rejects.
+   */
+  readonly probeDaemonAddress: (baseUrl: string) => Promise<boolean>;
 }
 
 export interface UnoBoxProvisionTiming {
@@ -67,6 +83,16 @@ export interface UnoBoxProvisionTiming {
   readonly pairingRetryIntervalMs: number;
   /** Give up waiting for the daemon after this long. */
   readonly pairingTimeoutMs: number;
+  /** How often to re-check the box's public address once the link exists. */
+  readonly addressProbeIntervalMs: number;
+  /** Total time the public address may take to answer before handing over anyway. */
+  readonly addressReadyBudgetMs: number;
+  /**
+   * The pairing link is short-lived (the control plane mints it for ~2 min).
+   * When waiting for the address took longer than this, mint a fresh one so the
+   * client does not receive a link that is about to expire.
+   */
+  readonly pairingRefreshAfterMs: number;
 }
 
 export const DEFAULT_UNO_BOX_PROVISION_TIMING: UnoBoxProvisionTiming = {
@@ -74,6 +100,9 @@ export const DEFAULT_UNO_BOX_PROVISION_TIMING: UnoBoxProvisionTiming = {
   statusPollTimeoutMs: 180_000,
   pairingRetryIntervalMs: 5_000,
   pairingTimeoutMs: 120_000,
+  addressProbeIntervalMs: 3_000,
+  addressReadyBudgetMs: 90_000,
+  pairingRefreshAfterMs: 45_000,
 };
 
 export interface UnoBoxProvisionDeps {
@@ -301,12 +330,11 @@ export async function runUnoBoxProvisionJob(
   emit({ state: "waiting_daemon", boxId, box, message: "Box is running, waiting for Uno Work…" });
   const pairingDeadline = deps.now() + timing.pairingTimeoutMs;
   let lastPairingError: string | null = null;
+  let connection: UnoBoxConnection | null = null;
   for (;;) {
     try {
-      const connection = parseUnoBoxConnection(await client.createWorkSession(boxId), boxId);
-      if (connection) {
-        return emit({ state: "ready", boxId, box, connection, message: null });
-      }
+      connection = parseUnoBoxConnection(await client.createWorkSession(boxId), boxId);
+      if (connection) break;
       lastPairingError = "the control plane did not return a pairing link";
     } catch (cause) {
       lastPairingError = errorMessage(cause);
@@ -320,5 +348,55 @@ export async function runUnoBoxProvisionJob(
       );
     }
     await deps.sleep(timing.pairingRetryIntervalMs);
+  }
+
+  // --- 6. Wait until the public address serves the daemon. The link alone
+  // proves the daemon runs *inside* the box; the browser needs the edge route.
+  emit({
+    state: "waiting_daemon",
+    boxId,
+    box,
+    connection,
+    message: "Connecting to your computer…",
+  });
+  const baseUrl = pairingBaseUrl(connection);
+  const mintedAt = deps.now();
+  const addressDeadline = mintedAt + timing.addressReadyBudgetMs;
+  let addressReady = baseUrl === null;
+  while (!addressReady) {
+    addressReady = await client.probeDaemonAddress(baseUrl!).catch(() => false);
+    if (addressReady || deps.now() >= addressDeadline) break;
+    await deps.sleep(timing.addressProbeIntervalMs);
+  }
+
+  // A link that waited long enough to be close to expiry is replaced. Failing
+  // to mint a new one is not fatal: the client re-mints on its own retries.
+  if (deps.now() - mintedAt >= timing.pairingRefreshAfterMs) {
+    try {
+      connection =
+        parseUnoBoxConnection(await client.createWorkSession(boxId), boxId) ?? connection;
+    } catch {
+      // keep the older link
+    }
+  }
+
+  return emit({
+    state: "ready",
+    boxId,
+    box,
+    connection,
+    addressReady,
+    message: addressReady
+      ? null
+      : "Your computer is created but still starting up. We'll keep trying to connect.",
+  });
+}
+
+/** Origin of the pairing link (`https://<box>/pair#token=…` → `https://<box>`), or null if unparsable. */
+export function pairingBaseUrl(connection: UnoBoxConnection): string | null {
+  try {
+    return new URL(connection.url).origin;
+  } catch {
+    return connection.hostname.length > 0 ? `https://${connection.hostname}` : null;
   }
 }

@@ -25,6 +25,8 @@ describe("parseUnoBox", () => {
         internal_ip: "10.0.0.5",
         created_at: "2026-09-09T10:00:00Z",
         sleep_deadline_at: null,
+        hostname: "my-app-u85.app.uno4.dev",
+        url: "https://my-app-u85.app.uno4.dev",
       }),
     ).toEqual({
       id: 12,
@@ -39,6 +41,10 @@ describe("parseUnoBox", () => {
       internalIp: "10.0.0.5",
       createdAt: "2026-09-09T10:00:00Z",
       sleepDeadlineAt: null,
+      // The published address: the phone QR and pairing links behind
+      // app.uno4.work need it to reach the daemon directly.
+      hostname: "my-app-u85.app.uno4.dev",
+      url: "https://my-app-u85.app.uno4.dev",
     });
   });
 

@@ -161,6 +161,13 @@ export const UnoBox = Schema.Struct({
   internalIp: Schema.NullOr(Schema.String),
   createdAt: Schema.NullOr(Schema.String),
   sleepDeadlineAt: Schema.NullOr(Schema.String),
+  /**
+   * Published name in the managed zone (`<box>.app.uno4.dev`), once the box has
+   * an inbound port. Optional so an older daemon's payload still decodes.
+   */
+  hostname: Schema.optional(Schema.NullOr(Schema.String)),
+  /** `https://<hostname>` when the box serves HTTP on port 80 (the Uno Work daemon does). */
+  url: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type UnoBox = typeof UnoBox.Type;
 
@@ -244,8 +251,19 @@ export const UnoBoxCreateJobStatus = Schema.Struct({
   /** Known as soon as the control plane has answered the launch call. */
   boxId: Schema.optional(Schema.NullOr(Schema.Number)),
   box: Schema.optional(Schema.NullOr(UnoBox)),
-  /** Present only in `ready`. */
+  /**
+   * The pairing link. Set once it has been minted — already during the last
+   * part of `waiting_daemon`, while the daemon checks that the box's public
+   * address answers — and always in `ready`.
+   */
   connection: Schema.optional(Schema.NullOr(UnoBoxConnection)),
+  /**
+   * In `ready`: whether the box's public address answered before the job
+   * handed over. `false` means the box exists and is billed, the link is
+   * minted, but the edge did not serve the daemon yet — the client should keep
+   * retrying rather than report a failure. Absent from older daemons.
+   */
+  addressReady: Schema.optional(Schema.Boolean),
   /** Human-readable detail — the failure reason, or a progress hint. */
   message: Schema.optional(Schema.NullOr(Schema.String)),
   /**

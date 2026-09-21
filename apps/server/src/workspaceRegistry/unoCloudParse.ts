@@ -42,6 +42,8 @@ export function parseUnoBox(raw: unknown): UnoBox | null {
     internalIp: asNullableString(record["internal_ip"]),
     createdAt: asNullableString(record["created_at"]),
     sleepDeadlineAt: asNullableString(record["sleep_deadline_at"]),
+    hostname: asNullableString(record["hostname"]),
+    url: asNullableString(record["url"]),
   };
 }
 

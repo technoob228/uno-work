@@ -130,7 +130,31 @@ function makeProvisionClient(apiKey: string): UnoBoxProvisionClient {
         method: "POST",
         body: "{}",
       }),
+    probeDaemonAddress: probeUnoWorkDaemonAddress,
   };
+}
+
+/** Per-request cap for the address probe: an edge that is not routing yet tends to hang, not refuse. */
+const ADDRESS_PROBE_TIMEOUT_MS = 8_000;
+
+/**
+ * True when `<baseUrl>/.well-known/t3/environment` answers with an environment
+ * descriptor — i.e. the box's public address reaches the Uno Work daemon. No
+ * credentials are sent: the descriptor is public, and the account key must
+ * never travel to a box hostname.
+ */
+export async function probeUnoWorkDaemonAddress(baseUrl: string): Promise<boolean> {
+  try {
+    const response = await fetch(new URL("/.well-known/t3/environment", baseUrl), {
+      signal: AbortSignal.timeout(ADDRESS_PROBE_TIMEOUT_MS),
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) return false;
+    const body = (await response.json()) as { environmentId?: unknown } | null;
+    return typeof body?.environmentId === "string" && body.environmentId.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 const makeUnoCloudService = Effect.gen(function* () {

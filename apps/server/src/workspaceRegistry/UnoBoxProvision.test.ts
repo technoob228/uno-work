@@ -13,6 +13,9 @@ const TIMING = {
   statusPollTimeoutMs: 100,
   pairingRetryIntervalMs: 10,
   pairingTimeoutMs: 100,
+  addressProbeIntervalMs: 10,
+  addressReadyBudgetMs: 90,
+  pairingRefreshAfterMs: 45,
 };
 
 function rawBox(overrides: Record<string, unknown> = {}) {
@@ -52,6 +55,7 @@ function makeHarness(clientOverrides: Partial<UnoBoxProvisionClient> = {}) {
       hostname: "box-501.uno4.dev",
       expires_at: "2026-09-09T10:05:00Z",
     })),
+    probeDaemonAddress: vi.fn(async () => true),
     ...clientOverrides,
   };
   const deps: UnoBoxProvisionDeps = {
@@ -87,10 +91,64 @@ describe("runUnoBoxProvisionJob", () => {
       "starting",
       "starting",
       "waiting_daemon",
+      "waiting_daemon",
       "ready",
     ]);
+    expect(result.addressReady).toBe(true);
+    // The public address was checked before "ready" was announced.
+    expect(harness.client.probeDaemonAddress).toHaveBeenCalledWith("https://box-501.uno4.dev");
     // The terminal status is the last thing the sink saw.
     expect(harness.statuses.at(-1)).toEqual(result);
+  });
+
+  it("holds ready until the public address answers", async () => {
+    let probes = 0;
+    const harness = makeHarness({
+      probeDaemonAddress: vi.fn(async () => {
+        probes += 1;
+        return probes >= 3;
+      }),
+    });
+    const result = await runUnoBoxProvisionJob(INPUT, harness.deps);
+
+    expect(result.state).toBe("ready");
+    expect(result.addressReady).toBe(true);
+    expect(harness.client.probeDaemonAddress).toHaveBeenCalledTimes(3);
+    // While waiting, the status already carries the link (the UI shows "Connecting…").
+    const connecting = harness.statuses.filter(
+      (status) => status.state === "waiting_daemon" && status.connection,
+    );
+    expect(connecting.length).toBeGreaterThan(0);
+  });
+
+  it("hands over a created box with addressReady=false instead of failing when the address stays silent", async () => {
+    const harness = makeHarness({ probeDaemonAddress: vi.fn(async () => false) });
+    const result = await runUnoBoxProvisionJob(INPUT, harness.deps);
+
+    // The box exists and is billed: never "failed" just because the edge is slow.
+    expect(result.state).toBe("ready");
+    expect(result.boxId).toBe(501);
+    expect(result.addressReady).toBe(false);
+    expect(result.message).toContain("keep trying");
+    expect(harness.client.launchImage).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-mints the pairing link after a long wait for the address", async () => {
+    let mints = 0;
+    const harness = makeHarness({
+      createWorkSession: vi.fn(async () => {
+        mints += 1;
+        return {
+          url: `https://box-501.uno4.dev/pair#token=t${mints}`,
+          hostname: "box-501.uno4.dev",
+        };
+      }),
+      probeDaemonAddress: vi.fn(async () => false),
+    });
+    const result = await runUnoBoxProvisionJob(INPUT, harness.deps);
+
+    expect(harness.client.createWorkSession).toHaveBeenCalledTimes(2);
+    expect(result.connection?.url).toContain("token=t2");
   });
 
   it("launches from the golden image exactly once with defaults filled in", async () => {
