@@ -203,8 +203,61 @@ Unit=uno-work-identity.service
 WantedBy=multi-user.target
 UNIT
 
+# 7. Имя машины = имя бокса, ДО старта демона.
+#
+# uno-box-agent проставляет hostname из MMDS только на resume. Work-образ
+# всегда стартует холодным, и все клоны оставались с именем сборочной машины
+# («uno-work-golden-v5-build»): в Uno Work две новые машины выглядели одной
+# строкой с чужим именем. Демон берёт метку машины из hostname при старте,
+# поэтому ставим его раньше демона и раньше uno-work-identity (новое имя = клон
+# → ротация ключа кук). MMDS недоступен — оставляем как есть, загрузку не держим.
+log "Ставлю юнит имени машины из MMDS (hostname клона = имя бокса)"
+cat > /usr/local/sbin/uno-work-hostname <<'SCRIPT'
+#!/bin/sh
+set -u
+url="http://169.254.169.254/uno/identity/hostname"
+name=""
+i=0
+while [ "${i}" -lt 15 ]; do
+  name="$(curl -fsS --max-time 2 "${url}" 2>/dev/null | tr -d '\r\n')" && [ -n "${name}" ] && break
+  i=$((i + 1))
+  sleep 1
+done
+# Только то, что годится в hostname: буквы, цифры, дефис и точка.
+case "${name}" in
+  "" | *[!A-Za-z0-9.-]*) exit 0 ;;
+esac
+[ "$(hostname)" = "${name}" ] && [ "$(cat /etc/hostname 2>/dev/null)" = "${name}" ] && exit 0
+printf '%s\n' "${name}" > /etc/hostname
+hostname "${name}"
+if grep -q '^127\.0\.1\.1' /etc/hosts; then
+  sed -i "s/^127\.0\.1\.1.*/127.0.1.1 ${name}/" /etc/hosts
+else
+  printf '127.0.1.1 %s\n' "${name}" >> /etc/hosts
+fi
+exit 0
+SCRIPT
+chmod 0755 /usr/local/sbin/uno-work-hostname
+
+cat > /etc/systemd/system/uno-work-hostname.service <<'UNIT'
+[Unit]
+Description=Name this machine after its Uno box (MMDS) before Uno Work starts
+Documentation=https://uno4.dev/docs/work
+After=network.target
+Before=uno-work-identity.service uno-work.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=30
+ExecStart=/usr/local/sbin/uno-work-hostname
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 systemctl daemon-reload >/dev/null 2>&1 || true
-systemctl enable ssh uno-work-sshkeys.service uno-work-identity.service uno-work-identity.path >/dev/null 2>&1 || true
+systemctl enable ssh uno-work-sshkeys.service uno-work-hostname.service uno-work-identity.service uno-work-identity.path >/dev/null 2>&1 || true
 
 # Штамп относится к машине-эталону; в образе его быть не должно, иначе первый
 # клон решит, что hostname совпадает, и ключ не ротирует.
