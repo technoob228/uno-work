@@ -304,6 +304,12 @@ export interface PersistedSavedEnvironmentRecord {
   createdAt: string;
   lastConnectedAt: string | null;
   desktopSsh?: DesktopSshEnvironmentTarget;
+  /**
+   * The Uno box behind this connection, when it was connected from the Uno
+   * account (Connect / Create a box). Lets the app show the box's own name and
+   * wake it, even when the daemon inside does not know which box it is.
+   */
+  unoBoxId?: number;
 }
 
 export type DesktopServerExposureMode = "local-only" | "network-accessible";

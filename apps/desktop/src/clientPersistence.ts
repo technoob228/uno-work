@@ -46,6 +46,11 @@ function writeJsonFile(filePath: string, value: unknown): void {
   FS.renameSync(tempPath, filePath);
 }
 
+/** Carries the optional box id over without a spread inside `map` callbacks. */
+function withUnoBoxId<T extends object>(record: T, unoBoxId: number | undefined): T {
+  return unoBoxId === undefined ? record : Object.assign(record, { unoBoxId });
+}
+
 function isPersistedSavedEnvironmentStorageRecord(
   value: unknown,
 ): value is PersistedSavedEnvironmentStorageRecord {
@@ -63,6 +68,7 @@ function isPersistedSavedEnvironmentStorageRecord(
         typeof value.desktopSsh.hostname === "string" &&
         (value.desktopSsh.username === null || typeof value.desktopSsh.username === "string") &&
         (value.desktopSsh.port === null || typeof value.desktopSsh.port === "number"))) &&
+    (value.unoBoxId === undefined || typeof value.unoBoxId === "number") &&
     (value.encryptedBearerToken === undefined || typeof value.encryptedBearerToken === "string")
   );
 }
@@ -90,6 +96,7 @@ function toPersistedSavedEnvironmentRecord(
     wsBaseUrl: record.wsBaseUrl,
     createdAt: record.createdAt,
     lastConnectedAt: record.lastConnectedAt,
+    ...(record.unoBoxId !== undefined ? { unoBoxId: record.unoBoxId } : {}),
   };
   return record.desktopSsh ? { ...nextRecord, desktopSsh: record.desktopSsh } : nextRecord;
 }
@@ -142,6 +149,7 @@ export function writeSavedEnvironmentRegistry(
             createdAt: record.createdAt,
             lastConnectedAt: record.lastConnectedAt,
             ...(record.desktopSsh ? { desktopSsh: record.desktopSsh } : {}),
+            ...(record.unoBoxId !== undefined ? { unoBoxId: record.unoBoxId } : {}),
             encryptedBearerToken,
           }
         : record;
@@ -206,6 +214,7 @@ export function writeSavedEnvironmentSecret(input: {
         lastConnectedAt: record.lastConnectedAt,
         encryptedBearerToken,
       };
+      withUnoBoxId(nextRecord, record.unoBoxId);
       return record.desktopSsh ? { ...nextRecord, desktopSsh: record.desktopSsh } : nextRecord;
     }),
   } satisfies SavedEnvironmentRegistryDocument);

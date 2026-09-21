@@ -27,6 +27,7 @@ const BrowserSavedEnvironmentRecordSchema = Schema.Struct({
       port: Schema.NullOr(Schema.Number),
     }),
   ),
+  unoBoxId: Schema.optionalKey(Schema.Number),
   bearerToken: Schema.optionalKey(Schema.String),
 });
 type BrowserSavedEnvironmentRecord = typeof BrowserSavedEnvironmentRecordSchema.Type;
@@ -37,6 +38,11 @@ const BrowserSavedEnvironmentRegistryDocumentSchema = Schema.Struct({
 });
 type BrowserSavedEnvironmentRegistryDocument =
   typeof BrowserSavedEnvironmentRegistryDocumentSchema.Type;
+
+/** Carries the optional box id over without a spread inside `map` callbacks. */
+function withUnoBoxId<T extends object>(record: T, unoBoxId: number | undefined): T {
+  return unoBoxId === undefined ? record : Object.assign(record, { unoBoxId });
+}
 
 function hasWindow(): boolean {
   return typeof window !== "undefined";
@@ -52,6 +58,7 @@ function toPersistedSavedEnvironmentRecord(
     wsBaseUrl: record.wsBaseUrl,
     createdAt: record.createdAt,
     lastConnectedAt: record.lastConnectedAt,
+    ...(record.unoBoxId !== undefined ? { unoBoxId: record.unoBoxId } : {}),
   };
   return record.desktopSsh ? { ...nextRecord, desktopSsh: record.desktopSsh } : nextRecord;
 }
@@ -145,6 +152,7 @@ export function writeBrowserSavedEnvironmentRegistry(
             createdAt: record.createdAt,
             lastConnectedAt: record.lastConnectedAt,
             ...(record.desktopSsh ? { desktopSsh: record.desktopSsh } : {}),
+            ...(record.unoBoxId !== undefined ? { unoBoxId: record.unoBoxId } : {}),
             bearerToken,
           }
         : toPersistedSavedEnvironmentRecord(record);
@@ -185,6 +193,7 @@ export function writeBrowserSavedEnvironmentSecret(
         lastConnectedAt: record.lastConnectedAt,
         bearerToken: secret,
       };
+      withUnoBoxId(nextRecord, record.unoBoxId);
       return record.desktopSsh ? { ...nextRecord, desktopSsh: record.desktopSsh } : nextRecord;
     }),
   });

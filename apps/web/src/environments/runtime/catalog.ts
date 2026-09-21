@@ -19,6 +19,8 @@ export interface SavedEnvironmentRecord {
   readonly createdAt: string;
   readonly lastConnectedAt: string | null;
   readonly desktopSsh?: PersistedSavedEnvironmentRecord["desktopSsh"];
+  /** The Uno box behind this connection, when known (see the persisted record). */
+  readonly unoBoxId?: number;
 }
 
 interface SavedEnvironmentRegistryState {
@@ -47,6 +49,7 @@ export function toPersistedSavedEnvironmentRecord(
     createdAt: record.createdAt,
     lastConnectedAt: record.lastConnectedAt,
     ...(record.desktopSsh ? { desktopSsh: record.desktopSsh } : {}),
+    ...(record.unoBoxId !== undefined ? { unoBoxId: record.unoBoxId } : {}),
   };
 }
 

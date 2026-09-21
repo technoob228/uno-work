@@ -1891,6 +1891,8 @@ export async function addSavedEnvironment(input: {
   readonly host?: string;
   readonly pairingCode?: string;
   readonly desktopSsh?: DesktopSshEnvironmentTarget;
+  /** The Uno box this connection reaches, when it came from the Uno account. */
+  readonly unoBoxId?: number;
 }): Promise<SavedEnvironmentRecord> {
   const resolvedTarget = resolveRemotePairingTarget({
     ...(input.pairingUrl !== undefined ? { pairingUrl: input.pairingUrl } : {}),
@@ -1917,6 +1919,7 @@ export async function addSavedEnvironment(input: {
         credential: resolvedTarget.credential,
       });
 
+  const unoBoxId = input.unoBoxId ?? existingRecord?.unoBoxId;
   const record: SavedEnvironmentRecord = {
     environmentId,
     label: input.label.trim() || existingRecord?.label || descriptor.label,
@@ -1927,6 +1930,7 @@ export async function addSavedEnvironment(input: {
     ...((input.desktopSsh ?? existingRecord?.desktopSsh)
       ? { desktopSsh: input.desktopSsh ?? existingRecord?.desktopSsh }
       : {}),
+    ...(unoBoxId !== undefined ? { unoBoxId } : {}),
   };
 
   await persistSavedEnvironmentRecord(record);
