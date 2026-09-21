@@ -1,3 +1,5 @@
+import { ArrowRight, Monitor } from "lucide-react";
+
 import { useServerConfig } from "~/rpc/serverState";
 import { cn } from "~/lib/utils";
 import { describeConnectedMachine, machineKindLabel } from "./connectedMachine";
@@ -19,7 +21,12 @@ function FactRow({ label, value, mono = true }: { label: string; value: string; 
  * daemon's own descriptor — nothing is invented, and rows the daemon does not
  * report are omitted rather than faked.
  */
-export function ComputerHelloStep() {
+export function ComputerHelloStep({
+  onOpenComputer,
+}: {
+  /** Leaves onboarding for the computer's own screen (monitor, apps, activity). */
+  onOpenComputer?: () => void;
+} = {}) {
   const serverConfig = useServerConfig();
   const machine = describeConnectedMachine(serverConfig);
   const kindLabel = machineKindLabel(serverConfig?.environment.machineKind);
@@ -68,6 +75,26 @@ export function ComputerHelloStep() {
             <FactRow label="Uno Work version" value={machine.serverVersion} />
           ) : null}
         </dl>
+        {isUnoBox && onOpenComputer ? (
+          <button
+            type="button"
+            onClick={onOpenComputer}
+            className="mt-5 flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left text-sm transition hover:border-primary/50 hover:bg-primary/5"
+          >
+            <span className="flex items-center gap-3">
+              <span className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Monitor className="size-4" />
+              </span>
+              <span>
+                <span className="block font-medium">Look inside this computer</span>
+                <span className="block text-xs text-muted-foreground">
+                  Its monitor, apps and what it&apos;s doing right now
+                </span>
+              </span>
+            </span>
+            <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
+          </button>
+        ) : null}
       </div>
     </div>
   );

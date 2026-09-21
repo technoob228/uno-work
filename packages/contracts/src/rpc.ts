@@ -13,6 +13,19 @@ import {
   WorkspaceState,
 } from "./workspace.ts";
 import { OpenError, OpenInEditorInput } from "./editor.ts";
+import {
+  UnoComputerActivity,
+  UnoComputerActivityInput,
+  UnoComputerApps,
+  UnoComputerInstallAppInput,
+  UnoComputerInstallAppResult,
+  UnoComputerInstallStatus,
+  UnoComputerInstallStatusInput,
+  UnoComputerMetrics,
+  UnoComputerPowerInput,
+  UnoComputerState,
+  UnoComputerTargetInput,
+} from "./unoComputer.ts";
 import { AuthAccessStreamEvent, AuthLinkRequestStreamEvent } from "./auth.ts";
 import {
   FilesystemBrowseInput,
@@ -289,6 +302,15 @@ export const WS_METHODS = {
   unoCloudConnectBox: "uno.cloud.connectBox",
   unoCloudCreateBox: "uno.cloud.createBox",
   unoCloudCreateBoxStatus: "uno.cloud.createBoxStatus",
+
+  // "This computer": the desktop view of the machine the daemon runs on
+  unoComputerGetState: "uno.computer.getState",
+  unoComputerMetrics: "uno.computer.metrics",
+  unoComputerActivity: "uno.computer.activity",
+  unoComputerApps: "uno.computer.apps",
+  unoComputerInstallApp: "uno.computer.installApp",
+  unoComputerInstallStatus: "uno.computer.installStatus",
+  unoComputerPower: "uno.computer.power",
 
   // Provider setup: install a harness CLI / sign it in on this machine
   providerInstallStart: "provider.install.start",
@@ -1098,6 +1120,56 @@ export const WsUnoCloudCreateBoxStatusRpc = Rpc.make(WS_METHODS.unoCloudCreateBo
   error: UnoCloudRpcError,
 });
 
+/* ------------------------------------------------------------------ *
+ * "This computer" (Uno Work desktop)
+ *
+ * Reads never fail on a missing control-plane route: they answer with an
+ * `availability` so the UI can say "coming soon". Install and power are
+ * actions, so they fail with `UnoCloudRpcError` carrying a readable message.
+ * ------------------------------------------------------------------ */
+
+export const WsUnoComputerGetStateRpc = Rpc.make(WS_METHODS.unoComputerGetState, {
+  payload: UnoComputerTargetInput,
+  success: UnoComputerState,
+  error: UnoCloudRpcError,
+});
+
+export const WsUnoComputerMetricsRpc = Rpc.make(WS_METHODS.unoComputerMetrics, {
+  payload: UnoComputerTargetInput,
+  success: UnoComputerMetrics,
+  error: UnoCloudRpcError,
+});
+
+export const WsUnoComputerActivityRpc = Rpc.make(WS_METHODS.unoComputerActivity, {
+  payload: UnoComputerActivityInput,
+  success: UnoComputerActivity,
+  error: UnoCloudRpcError,
+});
+
+export const WsUnoComputerAppsRpc = Rpc.make(WS_METHODS.unoComputerApps, {
+  payload: UnoComputerTargetInput,
+  success: UnoComputerApps,
+  error: UnoCloudRpcError,
+});
+
+export const WsUnoComputerInstallAppRpc = Rpc.make(WS_METHODS.unoComputerInstallApp, {
+  payload: UnoComputerInstallAppInput,
+  success: UnoComputerInstallAppResult,
+  error: UnoCloudRpcError,
+});
+
+export const WsUnoComputerInstallStatusRpc = Rpc.make(WS_METHODS.unoComputerInstallStatus, {
+  payload: UnoComputerInstallStatusInput,
+  success: UnoComputerInstallStatus,
+  error: UnoCloudRpcError,
+});
+
+export const WsUnoComputerPowerRpc = Rpc.make(WS_METHODS.unoComputerPower, {
+  payload: UnoComputerPowerInput,
+  success: UnoComputerState,
+  error: UnoCloudRpcError,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerProbeRpc,
@@ -1126,6 +1198,13 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoCloudConnectBoxRpc,
   WsUnoCloudCreateBoxRpc,
   WsUnoCloudCreateBoxStatusRpc,
+  WsUnoComputerGetStateRpc,
+  WsUnoComputerMetricsRpc,
+  WsUnoComputerActivityRpc,
+  WsUnoComputerAppsRpc,
+  WsUnoComputerInstallAppRpc,
+  WsUnoComputerInstallStatusRpc,
+  WsUnoComputerPowerRpc,
   WsProviderInstallStartRpc,
   WsProviderInstallStatusRpc,
   WsProviderAuthStartRpc,

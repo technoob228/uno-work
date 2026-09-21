@@ -21,11 +21,11 @@
  *
  * @module CredentialsAccountSync
  */
-import { UNO_CONTROL_PLANE_BASE_URL } from "@t3tools/contracts";
 import { Effect } from "effect";
 
 import { CredentialsVaultService, type CredentialsBundle } from "./credentialsVault.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
+import { controlPlaneBaseUrl } from "./workspaceRegistry/unoCloudParse.ts";
 
 /** Имя аккаунтного секрета со слепком хранилища. */
 export const ACCOUNT_SECRET_NAME = "unowork.credentials.v1";
@@ -46,7 +46,7 @@ async function controlPlaneJson(
   apiKey: string,
   init?: RequestInit,
 ): Promise<unknown> {
-  const response = await fetch(`${UNO_CONTROL_PLANE_BASE_URL}${path}`, {
+  const response = await fetch(`${controlPlaneBaseUrl()}${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${apiKey}`,

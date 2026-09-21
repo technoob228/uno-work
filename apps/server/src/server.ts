@@ -34,6 +34,7 @@ import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/Provi
 import { WorkspaceRegistryRepositoryLive } from "./persistence/Layers/WorkspaceRegistry.ts";
 import { WorkspaceServiceLive } from "./workspaceRegistry/WorkspaceService.ts";
 import { UnoCloudServiceLive } from "./workspaceRegistry/UnoCloudService.ts";
+import { UnoComputerServiceLive } from "./workspaceRegistry/UnoComputerService.ts";
 import { HarnessSetupLive } from "./provider/setup/HarnessSetupService.ts";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
 import { ProviderEventLoggersLive } from "./provider/Layers/ProviderEventLoggers.ts";
@@ -311,6 +312,9 @@ const WorkspaceLayerLive = Layer.mergeAll(
 const WorkspaceRegistryLayerLive = Layer.mergeAll(
   WorkspaceServiceLive.pipe(Layer.provideMerge(WorkspaceRegistryRepositoryLive)),
   UnoCloudServiceLive,
+  // "This computer" reads the same account key and this machine's box id
+  // (UnoBoxIdentity, provided further down the runtime pipe).
+  UnoComputerServiceLive,
 );
 
 const AuthLayerLive = ServerAuthLive.pipe(

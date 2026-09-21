@@ -13,13 +13,13 @@
  * network, so it runs as a startup probe (`probe`) rather than on the request
  * path; `current` simply reports the latest known answer.
  */
-import { UNO_CONTROL_PLANE_BASE_URL } from "@t3tools/contracts";
 import { Context, Duration, Effect, Layer, Ref } from "effect";
 import os from "node:os";
 
 import { ServerSecretStore } from "./auth/Services/ServerSecretStore.ts";
 import { parseUnoBoxIdFromEnvironment } from "./environment/machineKind.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
+import { controlPlaneBaseUrl } from "./workspaceRegistry/unoCloudParse.ts";
 
 /** Secret-store key of the box-scoped agent token minted by UnoAgentAccess. */
 export const UNO_AGENT_TOKEN_SECRET_KEY = "uno-agent-token";
@@ -61,7 +61,7 @@ export async function fetchControlPlaneJson(
   apiKey: string,
   init?: RequestInit,
 ): Promise<unknown> {
-  const response = await fetch(`${UNO_CONTROL_PLANE_BASE_URL}${path}`, {
+  const response = await fetch(`${controlPlaneBaseUrl()}${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${apiKey}`,

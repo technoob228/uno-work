@@ -98,7 +98,14 @@ function OnboardingRouteView() {
       {state.stepId === "harness" && <HarnessesStep />}
       {state.stepId === "unollm" && <UnoLlmStep />}
       {state.stepId === "rules" && <RulesStep />}
-      {state.stepId === "web-computer" && <ComputerHelloStep />}
+      {state.stepId === "web-computer" && (
+        <ComputerHelloStep
+          onOpenComputer={() => {
+            markCompleted();
+            void navigate({ to: "/computer", replace: true });
+          }}
+        />
+      )}
       {state.stepId === "web-away" && <ComputerAwayStep />}
       {state.stepId === "web-chat" && (
         <ComputerChatStep
