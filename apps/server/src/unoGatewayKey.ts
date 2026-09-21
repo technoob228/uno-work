@@ -74,8 +74,17 @@ interface CacheEntry {
   readonly key: string;
 }
 
-function accountKeyFingerprint(apiKey: string): string {
-  return apiKey.length <= 4 ? apiKey : apiKey.slice(-4);
+/**
+ * Короткий отпечаток ключа из настроек (хвост, не сам секрет). Помимо
+ * перечеканки дочернего ключа используется гидрацией реестра провайдеров:
+ * отпечаток вштамповывается в конверт uno-инстанса, чтобы появление или
+ * смена ключа (на Work-боксе консоль дописывает его в settings.json уже
+ * после старта демона) пересоздавала инстанс — иначе каталог моделей,
+ * снятый один раз при создании, навсегда остаётся пустым.
+ */
+export function accountKeyFingerprint(apiKey: string): string {
+  const trimmed = apiKey.trim();
+  return trimmed.length <= 4 ? trimmed : trimmed.slice(-4);
 }
 
 function keyLabel(): string {

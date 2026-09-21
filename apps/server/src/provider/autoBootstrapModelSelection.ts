@@ -11,7 +11,7 @@
  *
  * So the pick follows the machine: the first provider instance that is
  * actually installed, enabled, and authenticated wins, in a preference order
- * that keeps the historical `codex` choice when Codex is in fact usable.
+ * that puts the built-in Uno gateway first when it is connected.
  *
  * @module autoBootstrapModelSelection
  */
@@ -35,14 +35,21 @@ export const FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION: ModelSelection = {
 };
 
 /**
- * Driver preference, most preferred first. Codex stays at the top so a
- * logged-in Codex machine keeps the default it has always had; the rest are
- * ordered by how self-sufficient they are for unattended work.
+ * Driver preference, most preferred first. The built-in Uno gateway leads:
+ * when the box (or laptop) has a working Uno key, the out-of-the-box default
+ * must answer without any harness login — Codex and Claude stay one click
+ * away as "bring your own subscription" options. Providers that need a
+ * subscription login rank next; the rest are ordered by how self-sufficient
+ * they are for unattended work (OpenCode serves free Zen models without
+ * auth, so it is the safety net when nothing else is signed in).
+ *
+ * Note: the Claude driver kind is `claudeAgent` (a bare `"claude"` entry
+ * here would never match and silently unranked it).
  */
 const DRIVER_PREFERENCE: ReadonlyArray<string> = [
-  "codex",
-  "claude",
   "uno",
+  "codex",
+  "claudeAgent",
   "opencode",
   "hermes",
   "cursor",

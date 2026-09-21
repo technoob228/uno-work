@@ -125,7 +125,13 @@ import {
   projectScriptIdFromCommand,
 } from "~/projectScripts";
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
-import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
+import {
+  getDefaultServerModel,
+  getProviderModelCapabilities,
+  isUsableDefaultProvider,
+  resolveDefaultThreadProvider,
+  resolveSelectableProvider,
+} from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -1326,10 +1332,13 @@ export default function ChatView(props: ChatViewProps) {
     versionMismatchServerLabel,
   ]);
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
-  const unlockedSelectedProvider = resolveSelectableProvider(
-    providerStatuses,
-    selectedProviderByThreadId ?? threadProvider ?? ProviderDriverKind.make("codex"),
-  );
+  // An explicit picker selection is honored as before; a machine default
+  // (thread/project seed, historically hardcoded codex) only sticks when that
+  // harness can actually answer — a fresh Work box must land on the built-in
+  // Uno gateway (or free OpenCode Zen), never on a logged-out Codex.
+  const unlockedSelectedProvider = selectedProviderByThreadId
+    ? resolveSelectableProvider(providerStatuses, selectedProviderByThreadId)
+    : resolveDefaultThreadProvider(providerStatuses, threadProvider);
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
@@ -1755,6 +1764,25 @@ export default function ChatView(props: ChatViewProps) {
     const defaultInstanceId = defaultInstanceIdForDriver(selectedProvider);
     return providerStatuses.find((status) => status.instanceId === defaultInstanceId) ?? null;
   }, [activeProviderInstanceId, providerStatuses, selectedProvider]);
+  // Escape hatch for the status banner: when the active harness is unusable
+  // because it is not signed in (the fresh-Work-box "run codex login" dead
+  // end), offer a one-click switch to the built-in Uno gateway if it is live.
+  const unoProviderFallbackTarget = useMemo(() => {
+    if (!activeProviderStatus) return null;
+    if (activeProviderStatus.status === "ready" || activeProviderStatus.status === "disabled") {
+      return null;
+    }
+    if (activeProviderStatus.driver === "uno") return null;
+    if (activeProviderStatus.auth.status === "authenticated") return null;
+    const uno = providerStatuses.find(
+      (candidate) => candidate.driver === "uno" && isUsableDefaultProvider(candidate),
+    );
+    if (!uno) return null;
+    return {
+      instanceId: uno.instanceId,
+      model: getDefaultServerModel(providerStatuses, uno.driver),
+    };
+  }, [activeProviderStatus, providerStatuses]);
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
@@ -3772,7 +3800,26 @@ export default function ChatView(props: ChatViewProps) {
       {/* Error banner */}
       {!isPreviewFocusMode ? (
         <>
-          <ProviderStatusBanner status={activeProviderStatus} />
+          <ProviderStatusBanner
+            status={activeProviderStatus}
+            action={
+              unoProviderFallbackTarget && lockedProvider === null
+                ? {
+                    label: "Switch to built-in Uno AI",
+                    onClick: () =>
+                      onProviderModelSelect(
+                        unoProviderFallbackTarget.instanceId,
+                        unoProviderFallbackTarget.model,
+                      ),
+                  }
+                : null
+            }
+            hint={
+              unoProviderFallbackTarget && lockedProvider !== null
+                ? "Built-in Uno AI is available — start a new chat to use it."
+                : null
+            }
+          />
           <UnoBillingTopUpBanner
             active={activeThread.session?.lastErrorClass === "billing_error"}
             sessionUpdatedAt={activeThread.session?.updatedAt ?? null}
