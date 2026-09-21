@@ -111,8 +111,29 @@ function asNullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+/**
+ * What a person sees when the control plane fails. Never the raw body: behind
+ * Cloudflare a 502 arrives as a whole HTML error page, and that used to land
+ * on the screen verbatim ("502: <!DOCTYPE html>…").
+ */
+export function humanizeControlPlaneError(cause: unknown): string {
+  const status = controlPlaneErrorStatus(cause);
+  if (status !== null) {
+    if (status === 401 || status === 403) return "Uno refused this machine's key.";
+    if (status === 404) return "Uno doesn't know this computer — it may have been deleted.";
+    if (status === 429) return "Uno is busy. Try again in a moment.";
+    if (status >= 500) return "Uno isn't answering right now. It usually comes back in a minute.";
+    return `Uno answered with an error (HTTP ${status}).`;
+  }
+  const raw = cause instanceof Error ? cause.message : String(cause);
+  if (/fetch failed|ECONN|ENOTFOUND|EAI_AGAIN|timed? ?out|abort/i.test(raw)) {
+    return "Can't reach Uno right now. It will try again by itself.";
+  }
+  return /<[a-z!/]/i.test(raw) ? "Uno answered with an error." : raw.slice(0, 200);
+}
+
 function errorMessage(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
+  return humanizeControlPlaneError(cause);
 }
 
 /** A route the control plane does not serve (yet). */
@@ -133,10 +154,7 @@ export function classifyFailure(cause: unknown): {
       message: "The computer isn't answering right now. It usually comes back in a minute.",
     };
   }
-  if (status === 401 || status === 403) {
-    return { availability: "error", message: "Your Uno account key was refused." };
-  }
-  return { availability: "error", message: errorMessage(cause) };
+  return { availability: "error", message: humanizeControlPlaneError(cause) };
 }
 
 /* ------------------------------------------------------------------ *
@@ -572,7 +590,8 @@ export async function installComputerApp(
       body: JSON.stringify({ template_id: ctx.templateId, env: ctx.settings ?? {} }),
     });
   } catch (cause) {
-    const message = errorMessage(cause);
+    // Raw text to recognise the error code; errorMessage() for anything shown.
+    const message = cause instanceof Error ? cause.message : String(cause);
     if (message.includes("TEMPLATE_NOT_FOUND")) {
       throw new UnoComputerActionError("That app isn't in the catalog anymore.");
     }
@@ -580,9 +599,11 @@ export async function installComputerApp(
       throw new UnoComputerActionError("Installing apps is coming soon to this computer.");
     }
     if (controlPlaneErrorStatus(cause) === 400) {
-      throw new UnoComputerActionError(`The app didn't accept its settings: ${message}`);
+      throw new UnoComputerActionError(
+        `The app didn't accept its settings: ${/<[a-z!/]/i.test(message) ? "HTTP 400" : message.slice(0, 200)}`,
+      );
     }
-    throw new UnoComputerActionError(message);
+    throw new UnoComputerActionError(errorMessage(cause));
   }
   const deploymentId = asNullableNumber(asRecord(raw)?.["deployment_id"]);
   if (deploymentId === null) {

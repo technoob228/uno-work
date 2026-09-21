@@ -10,6 +10,7 @@ import {
   readComputerApps,
   readComputerMetrics,
   readComputerState,
+  humanizeControlPlaneError,
   readInstallStatus,
   type KnownInstall,
 } from "./unoComputer.ts";
@@ -477,4 +478,37 @@ describe("classifyFailure", () => {
     }
     expect(classifyFailure(new Error("fetch failed")).availability).toBe("error");
   });
+});
+
+describe("humanizeControlPlaneError", () => {
+  it("never shows a raw HTML error page", () => {
+    const html = new Error("502: <!DOCTYPE html><html><head><title>Bad gateway</title>");
+    expect(humanizeControlPlaneError(html)).toBe(
+      "Uno isn't answering right now. It usually comes back in a minute.",
+    );
+    expect(humanizeControlPlaneError(new Error("<html>oops</html>"))).toBe(
+      "Uno answered with an error.",
+    );
+  });
+  it("names refused keys and network trouble in plain words", () => {
+    expect(humanizeControlPlaneError(new Error("401: INVALID_TOKEN"))).toBe(
+      "Uno refused this machine's key.",
+    );
+    expect(humanizeControlPlaneError(new TypeError("fetch failed"))).toBe(
+      "Can't reach Uno right now. It will try again by itself.",
+    );
+  });
+});
+
+it("a 502 from the control plane reads as a pause, not as 'not an Uno computer'", async () => {
+  const state = await readComputerState({
+    apiKey: "uno_agt_box",
+    ownBoxId: 1806,
+    fetchJson: async () => {
+      throw new Error("502: <!DOCTYPE html><html>cloudflare</html>");
+    },
+  });
+  expect(state.box).toBe(null);
+  expect(state.candidates).toEqual([]);
+  expect(state.error).toBe("Uno isn't answering right now. It usually comes back in a minute.");
 });

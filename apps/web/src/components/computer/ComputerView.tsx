@@ -113,6 +113,10 @@ export function ComputerView() {
                 </Link>{" "}
                 to see it here.
               </Notice>
+            ) : box === null && computer.error && computer.candidates.length === 0 ? (
+              <Notice title="This screen can't reach your computer right now">
+                {computer.error}
+              </Notice>
             ) : box === null ? (
               <ComputerPicker
                 candidates={computer.candidates}
