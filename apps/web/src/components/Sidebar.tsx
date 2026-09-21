@@ -2071,6 +2071,8 @@ export default function Sidebar() {
           defaultProjectRef: newThreadContext.defaultProjectRef,
           defaultThreadEnvMode: envMode,
           handleNewThread: newThreadContext.handleNewThread,
+          activeEnvironmentId: newThreadContext.activeEnvironmentId,
+          createStarterProject: newThreadContext.createStarterProject,
           onMissingProject: openAddProject,
         });
         return;

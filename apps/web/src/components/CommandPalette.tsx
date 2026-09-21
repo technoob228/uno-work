@@ -417,8 +417,14 @@ function OpenCommandPaletteDialog() {
   const queryClient = useQueryClient();
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   const settings = useSettings();
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
-    useHandleNewThread();
+  const {
+    activeDraftThread,
+    activeThread,
+    activeEnvironmentId,
+    createStarterProject,
+    defaultProjectRef,
+    handleNewThread,
+  } = useHandleNewThread();
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
   const keybindings = useServerKeybindings();
@@ -1130,6 +1136,8 @@ function OpenCommandPaletteDialog() {
             defaultProjectRef,
             defaultThreadEnvMode: settings.defaultThreadEnvMode,
             handleNewThread,
+            activeEnvironmentId,
+            createStarterProject,
             onMissingProject: openAddProjectFlow,
           });
         },

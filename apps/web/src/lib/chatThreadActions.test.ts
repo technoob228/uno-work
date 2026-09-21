@@ -138,4 +138,62 @@ describe("chatThreadActions", () => {
     expect(handleNewThread).not.toHaveBeenCalled();
     expect(onMissingProject).toHaveBeenCalledTimes(1);
   });
+
+  describe("selected machine", () => {
+    const PRIMARY = EnvironmentId.make("primary");
+    const NEW_BOX = EnvironmentId.make("new-box");
+    const PRIMARY_PROJECT = scopeProjectRef(PRIMARY, ProjectId.make("boost-9"));
+
+    it("does not open a new chat on the primary machine when another machine is selected", async () => {
+      // e2e 21.09: switch to a freshly connected box → New chat → landed on boost-9.
+      const handleNewThread = vi.fn<ChatThreadActionContext["handleNewThread"]>(async () => {});
+      const starter = scopeProjectRef(NEW_BOX, ProjectId.make("home"));
+      const createStarterProject = vi.fn(async () => starter);
+
+      const didStart = await startNewThreadFromContext(
+        createContext({
+          defaultProjectRef: PRIMARY_PROJECT,
+          activeEnvironmentId: NEW_BOX,
+          createStarterProject,
+          handleNewThread,
+        }),
+      );
+
+      expect(didStart).toBe(true);
+      expect(createStarterProject).toHaveBeenCalledWith(NEW_BOX);
+      expect(handleNewThread).toHaveBeenCalledWith(starter, expect.anything());
+    });
+
+    it("ignores a thread still open from another machine", () => {
+      const projectRef = resolveThreadActionProjectRef(
+        createContext({
+          activeThread: {
+            environmentId: PRIMARY,
+            projectId: ProjectId.make("boost-9"),
+            branch: null,
+            worktreePath: null,
+          },
+          defaultProjectRef: scopeProjectRef(NEW_BOX, PROJECT_ID),
+          activeEnvironmentId: NEW_BOX,
+        }),
+      );
+      expect(projectRef).toEqual(scopeProjectRef(NEW_BOX, PROJECT_ID));
+    });
+
+    it("asks for a project instead of jumping machines when it cannot make one", async () => {
+      const onMissingProject = vi.fn();
+      const handleNewThread = vi.fn<ChatThreadActionContext["handleNewThread"]>(async () => {});
+      const didStart = await startNewThreadFromContext(
+        createContext({
+          defaultProjectRef: PRIMARY_PROJECT,
+          activeEnvironmentId: NEW_BOX,
+          onMissingProject,
+          handleNewThread,
+        }),
+      );
+      expect(didStart).toBe(false);
+      expect(onMissingProject).toHaveBeenCalled();
+      expect(handleNewThread).not.toHaveBeenCalled();
+    });
+  });
 });

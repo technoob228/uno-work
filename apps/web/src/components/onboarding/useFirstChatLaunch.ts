@@ -1,25 +1,17 @@
 import { useCallback, useState } from "react";
 
 import { scopeProjectRef } from "@t3tools/client-runtime";
-import { DEFAULT_MODEL, ProviderInstanceId, type ScopedProjectRef } from "@t3tools/contracts";
+import type { ScopedProjectRef } from "@t3tools/contracts";
 
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { createEnvironmentApi } from "~/environmentApi";
 import { getPrimaryEnvironmentConnection } from "~/environments/runtime";
-import { joinWorkspacePath, pickFirstProjectModelSelection } from "~/firstProject";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useSettings } from "~/hooks/useSettings";
-import { pickUsableDefaultModelSelection } from "~/providerModels";
-import { newCommandId, newProjectId } from "~/lib/utils";
 import { useServerProviders } from "~/rpc/serverState";
+import { createStarterProject } from "~/starterProject";
 import { selectProjectsAcrossEnvironments, useStore } from "~/store";
-import {
-  FIRST_CHAT_PROJECT_DIR,
-  FIRST_CHAT_PROJECT_TITLE,
-  pickFirstChatProject,
-} from "./firstChat";
-
-const DEFAULT_WORKSPACE_ROOT = "~/projects";
+import { pickFirstChatProject } from "./firstChat";
 
 export interface FirstChatLaunch {
   readonly pending: boolean;
@@ -65,38 +57,12 @@ export function useFirstChatLaunch(options: {
         if (existingProject) {
           projectRef = scopeProjectRef(existingProject.environmentId, existingProject.id);
         } else {
-          const api = createEnvironmentApi(connection.client);
-          // Same bar as a new chat (builtin-ai-default): only a harness that is
-          // installed, signed in and serving models may own the starter
-          // project, and Uno starts on its canonical default rather than the
-          // pinned headline model. The looser picker is the last resort.
-          const modelSelection =
-            pickUsableDefaultModelSelection(providers) ??
-            pickFirstProjectModelSelection(
-              providers.map((provider) => ({
-                instanceId: provider.instanceId,
-                status: provider.status,
-                models: provider.models.map((model) => ({ slug: model.slug })),
-              })),
-              { instanceId: "codex", model: DEFAULT_MODEL },
-            );
-          const baseDirectory =
-            configuredBaseDirectory.length > 0 ? configuredBaseDirectory : DEFAULT_WORKSPACE_ROOT;
-          const projectId = newProjectId();
-          await api.orchestration.dispatchCommand({
-            type: "project.create",
-            commandId: newCommandId(),
-            projectId,
-            title: FIRST_CHAT_PROJECT_TITLE,
-            workspaceRoot: joinWorkspacePath(baseDirectory, FIRST_CHAT_PROJECT_DIR),
-            createWorkspaceRootIfMissing: true,
-            defaultModelSelection: {
-              instanceId: ProviderInstanceId.make(modelSelection.instanceId),
-              model: modelSelection.model,
-            },
-            createdAt: new Date().toISOString(),
+          projectRef = await createStarterProject({
+            environmentId,
+            providers,
+            baseDirectory: configuredBaseDirectory,
+            api: createEnvironmentApi(connection.client),
           });
-          projectRef = scopeProjectRef(environmentId, projectId);
         }
 
         onBeforeNavigate();

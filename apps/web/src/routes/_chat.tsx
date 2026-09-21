@@ -18,8 +18,15 @@ import { useServerKeybindings } from "~/rpc/serverState";
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
   const selectedThreadKeysSize = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
-    useHandleNewThread();
+  const {
+    activeDraftThread,
+    activeThread,
+    activeEnvironmentId,
+    createStarterProject,
+    defaultProjectRef,
+    handleNewThread,
+    routeThreadRef,
+  } = useHandleNewThread();
   const keybindings = useServerKeybindings();
   const terminalOpen = useTerminalStateStore((state) =>
     routeThreadRef
@@ -59,6 +66,8 @@ function ChatRouteGlobalShortcuts() {
             defaultEnvMode: appSettings.defaultThreadEnvMode,
           }),
           handleNewThread,
+          activeEnvironmentId,
+          createStarterProject,
           onMissingProject: () => useCommandPaletteStore.getState().openAddProject(),
         });
         return;
@@ -75,6 +84,8 @@ function ChatRouteGlobalShortcuts() {
             defaultEnvMode: appSettings.defaultThreadEnvMode,
           }),
           handleNewThread,
+          activeEnvironmentId,
+          createStarterProject,
           onMissingProject: () => useCommandPaletteStore.getState().openAddProject(),
         });
       }
@@ -87,6 +98,8 @@ function ChatRouteGlobalShortcuts() {
   }, [
     activeDraftThread,
     activeThread,
+    activeEnvironmentId,
+    createStarterProject,
     clearSelection,
     handleNewThread,
     keybindings,

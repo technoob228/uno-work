@@ -1,5 +1,10 @@
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime";
-import { DEFAULT_RUNTIME_MODE, type ScopedProjectRef } from "@t3tools/contracts";
+import {
+  DEFAULT_RUNTIME_MODE,
+  isAssistantProjectId,
+  type EnvironmentId,
+  type ScopedProjectRef,
+} from "@t3tools/contracts";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -15,6 +20,9 @@ import { selectProjectsAcrossEnvironments, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
+import { usePrimaryEnvironmentId } from "../environments/primary";
+import { useEnvironmentProviders } from "../environments/settings/serverSettings";
+import { createStarterProject } from "../starterProject";
 import { useDefaultEnvironment } from "./useDefaultEnvironment";
 import { useSettings } from "./useSettings";
 
@@ -170,6 +178,14 @@ export function useHandleNewThread() {
   );
   const projects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
   const { defaultEnvironmentId } = useDefaultEnvironment();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const storeActiveEnvironmentId = useStore((store) => store.activeEnvironmentId);
+  // The machine selected in the switcher; the primary one until something else is.
+  const activeEnvironmentId = storeActiveEnvironmentId ?? primaryEnvironmentId ?? null;
+  const activeEnvironmentProviders = useEnvironmentProviders(activeEnvironmentId);
+  const addProjectBaseDirectory = useSettings(
+    (settings) => settings.addProjectBaseDirectory?.trim() ?? "",
+  );
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
       items: projects,
@@ -179,16 +195,34 @@ export function useHandleNewThread() {
   }, [projectOrder, projects]);
   const handleNewThread = useNewThreadState();
 
-  // With no project open, a new chat starts on the default machine when it
-  // has any project; otherwise on the first project in sidebar order.
+  // With no project open, a new chat starts on the selected machine: its first
+  // project in sidebar order. Only with no machine selected does the default
+  // machine (then the first project anywhere) decide. A selected machine with
+  // no project gets a starter project (`createStarterProject`) instead of the
+  // chat silently opening on another machine.
+  const realProjects = orderedProjects.filter((project) => !isAssistantProjectId(project.id));
   const defaultProject =
-    (defaultEnvironmentId
-      ? orderedProjects.find((project) => project.environmentId === defaultEnvironmentId)
-      : undefined) ?? orderedProjects[0];
+    activeEnvironmentId !== null
+      ? realProjects.find((project) => project.environmentId === activeEnvironmentId)
+      : ((defaultEnvironmentId
+          ? realProjects.find((project) => project.environmentId === defaultEnvironmentId)
+          : undefined) ?? realProjects[0]);
+
+  const createStarterProjectOnMachine = useCallback(
+    (environmentId: EnvironmentId) =>
+      createStarterProject({
+        environmentId,
+        providers: environmentId === activeEnvironmentId ? activeEnvironmentProviders : [],
+        baseDirectory: addProjectBaseDirectory,
+      }),
+    [activeEnvironmentId, activeEnvironmentProviders, addProjectBaseDirectory],
+  );
 
   return {
     activeDraftThread,
     activeThread,
+    activeEnvironmentId,
+    createStarterProject: createStarterProjectOnMachine,
     defaultProjectRef: defaultProject
       ? scopeProjectRef(defaultProject.environmentId, defaultProject.id)
       : null,
