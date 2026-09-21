@@ -23,6 +23,7 @@ import { Route as SettingsConnectionsRouteImport } from './routes/settings.conne
 import { Route as SettingsBrowserRouteImport } from './routes/settings.browser'
 import { Route as SettingsAssistantRouteImport } from './routes/settings.assistant'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
+import { Route as ChatComputerRouteImport } from './routes/_chat.computer'
 import { Route as ChatAssistantRouteImport } from './routes/_chat.assistant'
 import { Route as ChatAssistantIndexRouteImport } from './routes/_chat.assistant.index'
 import { Route as SettingsEnvironmentEnvironmentIdRouteImport } from './routes/settings.environment.$environmentId'
@@ -107,6 +108,11 @@ const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
   id: '/archived',
   path: '/archived',
   getParentRoute: () => SettingsRoute,
+} as any)
+const ChatComputerRoute = ChatComputerRouteImport.update({
+  id: '/computer',
+  path: '/computer',
+  getParentRoute: () => ChatRoute,
 } as any)
 const ChatAssistantRoute = ChatAssistantRouteImport.update({
   id: '/assistant',
@@ -198,6 +204,7 @@ export interface FileRoutesByFullPath {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/assistant': typeof ChatAssistantRouteWithChildren
+  '/computer': typeof ChatComputerRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/browser': typeof SettingsBrowserRoute
@@ -226,6 +233,7 @@ export interface FileRoutesByTo {
   '/onboarding': typeof OnboardingRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/computer': typeof ChatComputerRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/browser': typeof SettingsBrowserRoute
@@ -258,6 +266,7 @@ export interface FileRoutesById {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/_chat/assistant': typeof ChatAssistantRouteWithChildren
+  '/_chat/computer': typeof ChatComputerRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/browser': typeof SettingsBrowserRoute
@@ -291,6 +300,7 @@ export interface FileRouteTypes {
     | '/pair'
     | '/settings'
     | '/assistant'
+    | '/computer'
     | '/settings/archived'
     | '/settings/assistant'
     | '/settings/browser'
@@ -319,6 +329,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/pair'
     | '/settings'
+    | '/computer'
     | '/settings/archived'
     | '/settings/assistant'
     | '/settings/browser'
@@ -350,6 +361,7 @@ export interface FileRouteTypes {
     | '/pair'
     | '/settings'
     | '/_chat/assistant'
+    | '/_chat/computer'
     | '/settings/archived'
     | '/settings/assistant'
     | '/settings/browser'
@@ -483,6 +495,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsArchivedRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/_chat/computer': {
+      id: '/_chat/computer'
+      path: '/computer'
+      fullPath: '/computer'
+      preLoaderRoute: typeof ChatComputerRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/assistant': {
       id: '/_chat/assistant'
       path: '/assistant'
@@ -608,6 +627,7 @@ const ChatAssistantRouteWithChildren = ChatAssistantRoute._addFileChildren(
 
 interface ChatRouteChildren {
   ChatAssistantRoute: typeof ChatAssistantRouteWithChildren
+  ChatComputerRoute: typeof ChatComputerRoute
   ChatIndexRoute: typeof ChatIndexRoute
   ChatEnvironmentIdThreadIdRoute: typeof ChatEnvironmentIdThreadIdRoute
   ChatDraftDraftIdRoute: typeof ChatDraftDraftIdRoute
@@ -615,6 +635,7 @@ interface ChatRouteChildren {
 
 const ChatRouteChildren: ChatRouteChildren = {
   ChatAssistantRoute: ChatAssistantRouteWithChildren,
+  ChatComputerRoute: ChatComputerRoute,
   ChatIndexRoute: ChatIndexRoute,
   ChatEnvironmentIdThreadIdRoute: ChatEnvironmentIdThreadIdRoute,
   ChatDraftDraftIdRoute: ChatDraftDraftIdRoute,

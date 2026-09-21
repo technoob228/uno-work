@@ -146,6 +146,15 @@ const rpcClientMock = {
     createBox: vi.fn(),
     createBoxStatus: vi.fn(),
   },
+  unoComputer: {
+    getState: vi.fn(),
+    metrics: vi.fn(),
+    activity: vi.fn(),
+    apps: vi.fn(),
+    installApp: vi.fn(),
+    installStatus: vi.fn(),
+    power: vi.fn(),
+  },
 };
 
 vi.mock("./environments/runtime", () => ({

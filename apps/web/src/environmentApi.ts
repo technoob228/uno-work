@@ -98,6 +98,15 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       createBox: rpcClient.unoCloud.createBox,
       createBoxStatus: rpcClient.unoCloud.createBoxStatus,
     },
+    unoComputer: {
+      getState: (input) => rpcClient.unoComputer.getState(input),
+      metrics: (input) => rpcClient.unoComputer.metrics(input),
+      activity: (input) => rpcClient.unoComputer.activity(input),
+      apps: (input) => rpcClient.unoComputer.apps(input),
+      installApp: rpcClient.unoComputer.installApp,
+      installStatus: rpcClient.unoComputer.installStatus,
+      power: rpcClient.unoComputer.power,
+    },
   };
 }
 

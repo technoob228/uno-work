@@ -219,6 +219,23 @@ export interface WsRpcClient {
     readonly createBox: RpcUnaryMethod<typeof WS_METHODS.unoCloudCreateBox>;
     readonly createBoxStatus: RpcUnaryMethod<typeof WS_METHODS.unoCloudCreateBoxStatus>;
   };
+  readonly unoComputer: {
+    readonly getState: (
+      input?: RpcInput<typeof WS_METHODS.unoComputerGetState>,
+    ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.unoComputerGetState>>;
+    readonly metrics: (
+      input?: RpcInput<typeof WS_METHODS.unoComputerMetrics>,
+    ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.unoComputerMetrics>>;
+    readonly activity: (
+      input?: RpcInput<typeof WS_METHODS.unoComputerActivity>,
+    ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.unoComputerActivity>>;
+    readonly apps: (
+      input?: RpcInput<typeof WS_METHODS.unoComputerApps>,
+    ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.unoComputerApps>>;
+    readonly installApp: RpcUnaryMethod<typeof WS_METHODS.unoComputerInstallApp>;
+    readonly installStatus: RpcUnaryMethod<typeof WS_METHODS.unoComputerInstallStatus>;
+    readonly power: RpcUnaryMethod<typeof WS_METHODS.unoComputerPower>;
+  };
 }
 
 export function createWsRpcClient(transport: WsTransport): WsRpcClient {
@@ -493,6 +510,21 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.unoCloudCreateBox](input)),
       createBoxStatus: (input) =>
         transport.request((client) => client[WS_METHODS.unoCloudCreateBoxStatus](input)),
+    },
+    unoComputer: {
+      getState: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerGetState](input ?? {})),
+      metrics: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerMetrics](input ?? {})),
+      activity: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerActivity](input ?? {})),
+      apps: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerApps](input ?? {})),
+      installApp: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerInstallApp](input)),
+      installStatus: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerInstallStatus](input)),
+      power: (input) => transport.request((client) => client[WS_METHODS.unoComputerPower](input)),
     },
   };
 }
