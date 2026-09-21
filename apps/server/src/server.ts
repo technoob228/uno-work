@@ -114,6 +114,12 @@ import {
   orchestrationSnapshotRouteLayer,
 } from "./orchestration/http.ts";
 import {
+  authWebSocketTicketRouteLayer,
+  oauthTokenRouteLayer,
+  orchestrationShellRouteLayer,
+  orchestrationThreadDetailRouteLayer,
+} from "./compat/mobileCompatRoutes.ts";
+import {
   channelsNotifyRouteLayer,
   managerAssistantAccessRouteLayer,
   managerAssistantFileReadRouteLayer,
@@ -439,6 +445,11 @@ export const makeRoutesLayer = Layer.mergeAll(
   authPairingCredentialRouteLayer,
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
+  // Mobile-compat: поверхность апстримного T3-клиента (мобилка из сторов).
+  authWebSocketTicketRouteLayer,
+  oauthTokenRouteLayer,
+  orchestrationShellRouteLayer,
+  orchestrationThreadDetailRouteLayer,
   agentThreadsCreateRouteLayer,
   agentThreadsGetRouteLayer,
   agentThreadsListRouteLayer,

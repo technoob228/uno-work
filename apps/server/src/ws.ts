@@ -33,7 +33,10 @@ import {
 } from "@t3tools/contracts";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest } from "effect/unstable/http";
-import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
+import { RpcServer } from "effect/unstable/rpc";
+
+import { layerJsonMobileCompat } from "./compat/rpcSerializationMobileCompat.ts";
+import { translateAuthDescriptorForUpstream } from "./compat/mobileScopes.ts";
 
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery.ts";
 import { ServerConfig } from "./config.ts";
@@ -194,7 +197,13 @@ function toAuthAccessStreamEvent(
   }
 }
 
-const makeWsRpcLayer = (currentSessionId: AuthSessionId, currentSessionRole: SessionRole) =>
+const makeWsRpcLayer = (
+  currentSessionId: AuthSessionId,
+  currentSessionRole: SessionRole,
+  // Mobile-compat: коннект пришёл от апстримного клиента (query wsTicket) —
+  // в отдаваемых конфигах транслируем литералы session-методов в апстримные.
+  mobileCompat = false,
+) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
       const linkRequests = yield* LinkRequestService;
@@ -667,7 +676,8 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId, currentSessionRole: Ses
         const providers = yield* providerRegistry.getProviders;
         const settings = redactServerSettingsForClient(yield* serverSettings.getSettings);
         const environment = yield* serverEnvironment.getDescriptor;
-        const auth = yield* serverAuth.getDescriptor();
+        const rawAuth = yield* serverAuth.getDescriptor();
+        const auth = mobileCompat ? translateAuthDescriptorForUpstream(rawAuth) : rawAuth;
 
         return {
           environment,
@@ -1095,6 +1105,17 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId, currentSessionRole: Ses
           ),
         [WS_METHODS.serverGetConfig]: (_input) =>
           observeRpcEffect(WS_METHODS.serverGetConfig, loadServerConfig, {
+            "rpc.aggregate": "server",
+          }),
+        // Mobile-compat: заглушки методов апстримного клиента. Смысл — не дать
+        // вызову свалиться в defect "Unknown request tag" (он в effect/rpc не
+        // привязан к requestId и рушит все in-flight запросы клиента).
+        [WS_METHODS.serverProbe]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverProbe, Effect.succeed({}), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverReportClientActivity]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverReportClientActivity, Effect.void, {
             "rpc.aggregate": "server",
           }),
         [WS_METHODS.serverRefreshProviders]: (input) =>
@@ -1771,6 +1792,13 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         const serverAuth = yield* ServerAuth;
         const sessions = yield* SessionCredentialService;
         const session = yield* serverAuth.authenticateWebSocketUpgrade(request);
+        // Mobile-compat: апстримный клиент передаёт тикет как ?wsTicket=
+        // (наши клиенты — ?wsToken=). По этому признаку включаем трансляцию
+        // литералов в отдаваемых конфигах.
+        const mobileCompat = Option.match(HttpServerRequest.toURL(request), {
+          onNone: () => false,
+          onSome: (url) => url.searchParams.has("wsTicket"),
+        });
         const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(WsRpcGroup, {
           spanPrefix: "ws.rpc",
           spanAttributes: {
@@ -1779,8 +1807,10 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           },
         }).pipe(
           Effect.provide(
-            makeWsRpcLayer(session.sessionId, session.role).pipe(
-              Layer.provideMerge(RpcSerialization.layerJson),
+            makeWsRpcLayer(session.sessionId, session.role, mobileCompat).pipe(
+              // Mobile-compat: JSON-сериализация с коерсией числовых request id
+              // апстримного клиента (effect rc.115) к нашим строковым (beta.59).
+              Layer.provideMerge(layerJsonMobileCompat),
               Layer.provide(
                 SourceControlDiscoveryLayer.layer.pipe(
                   Layer.provide(

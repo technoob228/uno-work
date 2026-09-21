@@ -24,6 +24,19 @@ function toIsoString(value: DateTime.DateTime | DateTime.Utc): string {
   return DateTime.formatIso(DateTime.toUtc(value));
 }
 
+/**
+ * Готовая пейринг-ссылка в формате, который понимает и наш веб, и
+ * АПСТРИМНАЯ мобилка T3 из сторов: токен в hash (`/pair#token=…`).
+ * Мобилка парсит её локально (hash первым, path отбрасывается) — страница
+ * /pair в браузере не открывается, конфликтов с нашей SPA нет.
+ */
+export function buildMobilePairUrl(baseUrl: string, credential: string): string {
+  const url = new URL("/pair", baseUrl);
+  url.searchParams.delete("token");
+  url.hash = new URLSearchParams([["token", credential]]).toString();
+  return url.toString();
+}
+
 export function formatIssuedPairingCredential(
   credential: IssuedPairingLink,
   options?: {
@@ -33,12 +46,7 @@ export function formatIssuedPairingCredential(
 ): string {
   const pairUrl =
     options?.baseUrl != null && options.baseUrl.length > 0
-      ? (() => {
-          const url = new URL("/pair", options.baseUrl);
-          url.searchParams.delete("token");
-          url.hash = new URLSearchParams([["token", credential.credential]]).toString();
-          return url.toString();
-        })()
+      ? buildMobilePairUrl(options.baseUrl, credential.credential)
       : undefined;
 
   if (options?.json) {

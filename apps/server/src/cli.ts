@@ -42,10 +42,12 @@ import {
   type StartupPresentation,
 } from "./config.ts";
 import { readBootstrapEnvelope } from "./bootstrap.ts";
+import { renderTerminalQrCode } from "./startupAccess.ts";
 import { expandHomePath, resolveBaseDir } from "./os-jank.ts";
 import { runServer } from "./server.ts";
 import { AuthControlPlaneRuntimeLive } from "./auth/Layers/AuthControlPlane.ts";
 import {
+  buildMobilePairUrl,
   formatIssuedPairingCredential,
   formatIssuedSession,
   formatPairingCredentialList,
@@ -858,6 +860,13 @@ const pairingRoleFlag = Flag.choice("role", ["owner", "client"]).pipe(
   Flag.withDefault("client"),
 );
 
+const pairingQrFlag = Flag.boolean("qr").pipe(
+  Flag.withDescription(
+    "Print a terminal QR code of the pair URL for the T3 mobile app (requires --base-url).",
+  ),
+  Flag.withDefault(false),
+);
+
 const pairingCreateCommand = Command.make("create", {
   ...authLocationFlags,
   ttl: ttlFlag,
@@ -865,6 +874,7 @@ const pairingCreateCommand = Command.make("create", {
   baseUrl: baseUrlFlag,
   role: pairingRoleFlag,
   json: jsonFlag,
+  qr: pairingQrFlag,
 }).pipe(
   Command.withDescription("Issue a new client pairing token."),
   Command.withHandler((flags) =>
@@ -883,6 +893,27 @@ const pairingCreateCommand = Command.make("create", {
             ...(Option.isSome(flags.baseUrl) ? { baseUrl: flags.baseUrl.value } : {}),
           });
           yield* Console.log(output);
+          // Mobile-compat: готовый блок для пейринга стор-мобилки T3 —
+          // QR с pair-ссылкой (их сканер принимает https-ссылку как есть)
+          // и инструкция ручного ввода host + code.
+          if (flags.qr && !flags.json) {
+            if (Option.isSome(flags.baseUrl)) {
+              const pairUrl = buildMobilePairUrl(flags.baseUrl.value, issued.credential);
+              yield* Console.log(
+                [
+                  "Scan with the T3 mobile app (Add connection → Scan QR):",
+                  "",
+                  renderTerminalQrCode(pairUrl),
+                  "",
+                  `Or enter manually in the app: host ${flags.baseUrl.value}, code ${issued.credential}`,
+                ].join("\n"),
+              );
+            } else {
+              yield* Console.log(
+                "Note: --qr needs --base-url (public URL of this daemon) to build the pair link.",
+              );
+            }
+          }
         }),
       {
         quietLogs: flags.json,

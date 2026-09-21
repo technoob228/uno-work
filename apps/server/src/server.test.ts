@@ -1266,7 +1266,76 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
         assert.equal(sessionResponse.status, 200);
         assert.equal(sessionBody.authenticated, true);
-        assert.equal(sessionBody.sessionMethod, "bearer-session-token");
+        // Mobile-compat: bearer-запросы получают апстримный алиас
+        // "bearer-access-token" (наши клиенты декодируют оба написания,
+        // cookie-путь по-прежнему отдаёт канонический литерал).
+        assert.equal(sessionBody.sessionMethod, "bearer-access-token");
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "oauth token exchange caps issued scopes at the session role (mobile-compat)",
+    () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest({ config: { host: "0.0.0.0" } });
+
+        const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+        const mintClientCredential = Effect.gen(function* () {
+          const response = yield* HttpClient.post("/api/auth/pairing-token", {
+            headers: { cookie: ownerCookie },
+          });
+          const body = (yield* response.json) as { readonly credential: string };
+          return body.credential;
+        });
+        const tokenUrl = yield* getHttpServerUrl("/oauth/token");
+        const exchange = (subjectToken: string, scope?: string) =>
+          Effect.promise(() =>
+            fetch(tokenUrl, {
+              method: "POST",
+              headers: { "content-type": "application/x-www-form-urlencoded" },
+              body: new URLSearchParams({
+                grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+                subject_token: subjectToken,
+                ...(scope !== undefined ? { scope } : {}),
+              }),
+            }),
+          );
+
+        // Client-роль запрашивает owner-скоупы вперемешку с клиентскими:
+        // в ответе только клиентское пересечение, без access/relay:write.
+        const mixed = yield* exchange(
+          yield* mintClientCredential,
+          "access:write relay:write orchestration:read",
+        );
+        const mixedBody = (yield* Effect.promise(() => mixed.json())) as {
+          readonly scope: string;
+        };
+        assert.equal(mixed.status, 200);
+        assert.equal(mixedBody.scope, "orchestration:read");
+
+        // Только owner-скоупы: сессия уже создана обменом, отдаём честный
+        // downgrade — полный набор клиентской роли, без admin-скоупов.
+        const ownerOnly = yield* exchange(yield* mintClientCredential, "access:write relay:write");
+        const ownerOnlyBody = (yield* Effect.promise(() => ownerOnly.json())) as {
+          readonly scope: string;
+        };
+        assert.equal(ownerOnly.status, 200);
+        assert.equal(
+          ownerOnlyBody.scope,
+          "orchestration:read orchestration:operate terminal:operate review:write relay:read",
+        );
+
+        // Неизвестное имя скоупа режется ДО обмена (invalid_scope), и
+        // одноразовый credential при этом не сжигается.
+        const credential = yield* mintClientCredential;
+        const unknown = yield* exchange(credential, "galaxy:conquer");
+        const unknownBody = (yield* Effect.promise(() => unknown.json())) as {
+          readonly error: string;
+        };
+        assert.equal(unknown.status, 400);
+        assert.equal(unknownBody.error, "invalid_scope");
+        const retry = yield* exchange(credential);
+        assert.equal(retry.status, 200);
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

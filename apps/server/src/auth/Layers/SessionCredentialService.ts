@@ -195,6 +195,11 @@ export const makeSessionCredentialService = Effect.gen(function* () {
   const issue: SessionCredentialServiceShape["issue"] = (input) =>
     Effect.gen(function* () {
       const sessionId = AuthSessionId.make(crypto.randomUUID());
+      // Mobile-compat: "bearer-access-token" — апстримный алиас нашего
+      // "bearer-session-token" на проводе; в хранилище держим канонику.
+      const requestedMethod = input?.method ?? "browser-session-cookie";
+      const canonicalMethod =
+        requestedMethod === "bearer-access-token" ? "bearer-session-token" : requestedMethod;
       const issuedAt = yield* DateTime.now;
       const expiresAt = DateTime.add(issuedAt, {
         milliseconds: Duration.toMillis(input?.ttl ?? DEFAULT_SESSION_TTL),
@@ -205,7 +210,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
         sid: sessionId,
         sub: input?.subject ?? "browser",
         role: input?.role ?? "client",
-        method: input?.method ?? "browser-session-cookie",
+        method: canonicalMethod,
         iat: issuedAt.epochMilliseconds,
         exp: expiresAt.epochMilliseconds,
       };
