@@ -46,12 +46,7 @@ export function splitHostPort(raw: string): { host: string; port: number } | nul
 
 export function isLoopbackAddress(host: string): boolean {
   const h = host.toLowerCase();
-  return (
-    h === "localhost" ||
-    h === "::1" ||
-    h.startsWith("127.") ||
-    h.startsWith("::ffff:127.")
-  );
+  return h === "localhost" || h === "::1" || h.startsWith("127.") || h.startsWith("::ffff:127.");
 }
 
 /**
@@ -379,10 +374,13 @@ export function parseCgroupOwner(
   for (const line of content.split("\n")) {
     const path = line.split(":").slice(2).join(":");
     if (path.length === 0) continue;
-    const docker = /docker-([0-9a-f]{12,64})\.scope/.exec(path) ?? /\/docker\/([0-9a-f]{12,64})/.exec(path);
+    const docker =
+      /docker-([0-9a-f]{12,64})\.scope/.exec(path) ?? /\/docker\/([0-9a-f]{12,64})/.exec(path);
     if (docker) return { kind: "docker", containerId: docker[1]! };
     const segments = path.split("/").filter(Boolean);
-    const service = segments.toReversed().find((s) => s.endsWith(".service") && !s.startsWith("user@"));
+    const service = segments
+      .toReversed()
+      .find((s) => s.endsWith(".service") && !s.startsWith("user@"));
     if (service && result === null) result = { kind: "service", unit: service };
   }
   return result;

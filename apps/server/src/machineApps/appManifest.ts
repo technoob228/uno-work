@@ -189,8 +189,7 @@ export function validateManifest(
       url,
       command,
       cwd,
-      autostart:
-        typeof record["autostart"] === "boolean" ? record["autostart"] : command !== null,
+      autostart: typeof record["autostart"] === "boolean" ? record["autostart"] : command !== null,
     },
   };
 }

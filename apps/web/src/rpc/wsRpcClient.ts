@@ -228,7 +228,9 @@ export interface WsRpcClient {
     readonly installApp: RpcUnaryMethod<typeof WS_METHODS.unoComputerInstallApp>;
     readonly installStatus: RpcUnaryMethod<typeof WS_METHODS.unoComputerInstallStatus>;
     readonly power: RpcUnaryMethod<typeof WS_METHODS.unoComputerPower>;
-    readonly machineApps: () => ReturnType<RpcUnaryMethod<typeof WS_METHODS.unoComputerMachineApps>>;
+    readonly machineApps: () => ReturnType<
+      RpcUnaryMethod<typeof WS_METHODS.unoComputerMachineApps>
+    >;
     readonly appAction: RpcUnaryMethod<typeof WS_METHODS.unoComputerAppAction>;
     readonly localMetrics: () => ReturnType<
       RpcUnaryMethod<typeof WS_METHODS.unoComputerLocalMetrics>

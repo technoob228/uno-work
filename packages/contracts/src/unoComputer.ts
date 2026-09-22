@@ -243,15 +243,28 @@ export type UnoMachineAppSource = typeof UnoMachineAppSource.Type;
 export const UnoMachineAppStatus = Schema.Literals(["running", "stopped", "unknown"]);
 export type UnoMachineAppStatus = typeof UnoMachineAppStatus.Type;
 
-/** A public port forward that makes the app reachable from the internet. */
-export const UnoMachineAppPublication = Schema.Struct({
-  /** Control-plane id of the forward (what "Hide" deletes). */
+/** One public forward of an app's port. */
+export const UnoMachineAppForward = Schema.Struct({
   forwardId: Schema.Number,
+  internalPort: Schema.Number,
   externalPort: Schema.NullOr(Schema.Number),
-  /** Where it answers from outside; null until the forward is applied. */
+  protocol: Schema.String,
+});
+export type UnoMachineAppForward = typeof UnoMachineAppForward.Type;
+
+/** The public forwards that make the app reachable from the internet. */
+export const UnoMachineAppPublication = Schema.Struct({
+  /** Forward of the main (TCP) port; null when only UDP ports are shown (a VPN). */
+  forwardId: Schema.NullOr(Schema.Number),
+  externalPort: Schema.NullOr(Schema.Number),
+  /** Where it answers from outside; null until the forward is applied or for UDP only. */
   url: Schema.NullOr(Schema.String),
+  /** The computer's public name, for "connect to host:port" apps. */
+  host: Schema.NullOr(Schema.String),
   /** pending | applied | failed — as the control plane reports it. */
   state: Schema.String,
+  /** Every forward "Hide" removes, UDP ones (a VPN tunnel) included. */
+  forwards: Schema.Array(UnoMachineAppForward),
 });
 export type UnoMachineAppPublication = typeof UnoMachineAppPublication.Type;
 
@@ -268,6 +281,8 @@ export const UnoMachineApp = Schema.Struct({
   status: UnoMachineAppStatus,
   /** The TCP port it answers on inside the machine, when known. */
   port: Schema.NullOr(Schema.Number),
+  /** UDP ports it publishes too (a VPN tunnel); shown on the internet together with `port`. */
+  udpPorts: Schema.Array(Schema.Number),
   /** The port answered an HTTP request — it is something to open in a browser. */
   http: Schema.Boolean,
   /** Listens on 127.0.0.1 only: nothing outside the machine can reach it. */

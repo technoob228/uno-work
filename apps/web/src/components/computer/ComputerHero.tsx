@@ -1,10 +1,13 @@
 /**
- * The top of "This computer": which computer this is, whether it is on, how
- * big it is, how long it has been awake, and its address on the internet.
- * Power buttons live here, in the words the strategy uses: Sleep, Wake up,
+ * The top of the desktop: which computer this is, whether it is on, how hard
+ * it is working right now (processor, memory, disk — live, compact), its
+ * address, and the power buttons in the strategy's words: Sleep, Wake up,
  * Turn off, Turn on.
+ *
+ * Works for a cloud computer (a box) and for the machine Uno Work runs on when
+ * that is not a box (a laptop): then there is no power and no address, only
+ * the name and the load.
  */
-import type { UnoComputerBox } from "@t3tools/contracts";
 import {
   ExternalLinkIcon,
   GlobeIcon,
@@ -29,22 +32,33 @@ import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import {
   POWER_STATE_LABEL,
-  awakeLine,
   computerPowerState,
   displayAddress,
-  sizeLine,
+  formatGb,
+  formatMemory,
+  percent,
 } from "./computerFormat";
-import { CopyButton } from "./computerUi";
+import { CopyButton, Meter } from "./computerUi";
 
-type PowerAction = "sleep" | "wake" | "stop" | "start";
+export type PowerAction = "sleep" | "wake" | "stop" | "start";
+type PowerState = ReturnType<typeof computerPowerState>;
 
-const DOT: Record<ReturnType<typeof computerPowerState>, string> = {
+const DOT: Record<PowerState, string> = {
   on: "bg-success",
   asleep: "bg-info",
   off: "bg-muted-foreground/50",
   busy: "animate-pulse bg-warning",
   unknown: "bg-muted-foreground/50",
 };
+
+/** The load, whichever way it was read (the daemon's OS or the control plane). */
+export interface ComputerLoad {
+  readonly cpuPct: number | null;
+  readonly memUsedMb: number | null;
+  readonly memTotalMb: number | null;
+  readonly diskUsedGb: number | null;
+  readonly diskTotalGb: number | null;
+}
 
 function confirmCopy(action: "sleep" | "stop", own: boolean) {
   if (action === "sleep") {
@@ -70,21 +84,30 @@ function confirmCopy(action: "sleep" | "stop", own: boolean) {
 }
 
 export function ComputerHero({
-  box,
+  name,
+  subtitle,
+  status,
+  address,
   own,
-  pendingAction,
-  powerError,
-  onPower,
+  load,
+  loadLive,
+  power,
 }: {
-  box: UnoComputerBox;
+  name: string;
+  subtitle: string | null;
+  /** Control-plane status; null for a machine that is simply on (a laptop). */
+  status: string | null;
+  address: string | null;
   own: boolean;
-  pendingAction: PowerAction | null;
-  powerError: string | null;
-  onPower: (action: PowerAction) => void;
+  load: ComputerLoad | null;
+  loadLive: boolean;
+  power: {
+    readonly pendingAction: PowerAction | null;
+    readonly error: string | null;
+    readonly onPower: (action: PowerAction) => void;
+  } | null;
 }) {
-  const state = computerPowerState(box.status);
-  const awake = awakeLine(box);
-  const size = sizeLine(box);
+  const state: PowerState = status === null ? "on" : computerPowerState(status);
   const [confirm, setConfirm] = useState<"sleep" | "stop" | null>(null);
   const copy = confirm ? confirmCopy(confirm, own) : null;
 
@@ -97,77 +120,73 @@ export function ComputerHero({
     <Button
       size="sm"
       variant={primary ? "default" : "outline"}
-      disabled={pendingAction !== null || state === "busy"}
+      disabled={power?.pendingAction != null || state === "busy"}
       onClick={() =>
-        action === "sleep" || action === "stop" ? setConfirm(action) : onPower(action)
+        action === "sleep" || action === "stop" ? setConfirm(action) : power?.onPower(action)
       }
     >
-      {pendingAction === action ? <Spinner className="size-3.5" /> : icon}
+      {power?.pendingAction === action ? <Spinner className="size-3.5" /> : icon}
       {label}
     </Button>
   );
 
   return (
-    <section className="relative overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-b from-primary/[0.06] to-card/40 p-6 sm:p-7">
-      <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
-        <div className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-primary/12 text-primary shadow-inner">
-          <MonitorIcon className="size-8" />
+    <section className="relative overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-b from-primary/[0.06] to-card/40 p-5 sm:p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+        <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-primary/12 text-primary shadow-inner">
+          <MonitorIcon className="size-6" />
         </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="truncate text-2xl font-semibold tracking-tight">{box.name}</h1>
+            <h1 className="truncate text-xl font-semibold tracking-tight">{name}</h1>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-background/70 px-2.5 py-0.5 text-xs font-medium ring-1 ring-border">
               <span className={cn("size-1.5 rounded-full", DOT[state])} aria-hidden />
               {POWER_STATE_LABEL[state]}
             </span>
           </div>
-          <p className="mt-1.5 text-sm text-muted-foreground">
-            {[size, awake].filter(Boolean).join(" · ") || "Your computer in the Uno cloud"}
-          </p>
-
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            {box.address ? (
-              <div className="flex min-w-0 items-center gap-1 rounded-xl bg-background/70 py-1 pr-1 pl-3 ring-1 ring-border">
-                <GlobeIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="truncate font-mono text-xs" title={box.address}>
-                  {displayAddress(box.address)}
-                </span>
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  render={<a href={box.address} target="_blank" rel="noopener noreferrer" />}
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            {subtitle ? <span>{subtitle}</span> : null}
+            {address ? (
+              <span className="inline-flex min-w-0 items-center gap-1">
+                <GlobeIcon className="size-3 shrink-0" />
+                <a
+                  href={address}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="truncate font-mono hover:text-foreground hover:underline"
+                  title={address}
                 >
-                  <ExternalLinkIcon />
-                  Open
-                </Button>
-                <CopyButton value={box.address} label="address" />
-              </div>
-            ) : (
-              <span className="text-xs text-muted-foreground">
-                No address on the internet yet — install an app and it gets one.
+                  {displayAddress(address)}
+                </a>
+                <ExternalLinkIcon className="size-3 shrink-0" />
+                <CopyButton value={address} label="address" />
               </span>
-            )}
+            ) : null}
           </div>
         </div>
 
-        <div className="flex shrink-0 flex-wrap gap-2 sm:flex-col sm:items-stretch">
-          {state === "on" ? (
-            <>
-              {powerButton("sleep", "Sleep", <MoonIcon />)}
-              {powerButton("stop", "Turn off", <PowerIcon />)}
-            </>
-          ) : state === "asleep" ? (
-            powerButton("wake", "Wake up", <SunIcon />, true)
-          ) : state === "off" ? (
-            powerButton("start", "Turn on", <PowerIcon />, true)
-          ) : null}
-        </div>
+        {power ? (
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {state === "on" ? (
+              <>
+                {powerButton("sleep", "Sleep", <MoonIcon />)}
+                {powerButton("stop", "Turn off", <PowerIcon />)}
+              </>
+            ) : state === "asleep" ? (
+              powerButton("wake", "Wake up", <SunIcon />, true)
+            ) : state === "off" ? (
+              powerButton("start", "Turn on", <PowerIcon />, true)
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
-      {powerError ? (
-        <p className="mt-4 text-xs text-destructive" role="alert">
-          {powerError}
+      <LoadStrip load={load} live={loadLive && state === "on"} asleep={state !== "on"} />
+
+      {power?.error ? (
+        <p className="mt-3 text-xs text-destructive" role="alert">
+          {power.error}
         </p>
       ) : null}
 
@@ -182,7 +201,7 @@ export function ComputerHero({
             <Button
               variant={confirm === "stop" ? "destructive" : "default"}
               onClick={() => {
-                if (confirm) onPower(confirm);
+                if (confirm) power?.onPower(confirm);
                 setConfirm(null);
               }}
             >
@@ -192,5 +211,68 @@ export function ComputerHero({
         </AlertDialogPopup>
       </AlertDialog>
     </section>
+  );
+}
+
+function LoadStrip({
+  load,
+  live,
+  asleep,
+}: {
+  load: ComputerLoad | null;
+  live: boolean;
+  asleep: boolean;
+}) {
+  if (asleep) {
+    return (
+      <p className="mt-4 text-xs text-muted-foreground">
+        Asleep — nothing is running, so there is nothing to measure.
+      </p>
+    );
+  }
+  const cpu = load?.cpuPct != null ? Math.round(load.cpuPct) : null;
+  const items = [
+    {
+      label: "Processor",
+      value: cpu !== null ? `${cpu}%` : "—",
+      pct: cpu ?? 0,
+    },
+    {
+      label: "Memory",
+      value:
+        load?.memUsedMb != null
+          ? `${formatMemory(load.memUsedMb)}${load.memTotalMb ? ` of ${formatMemory(load.memTotalMb)}` : ""}`
+          : "—",
+      pct: percent(load?.memUsedMb ?? null, load?.memTotalMb ?? null),
+    },
+    {
+      label: "Disk",
+      value:
+        load?.diskUsedGb != null
+          ? `${formatGb(load.diskUsedGb)}${load.diskTotalGb ? ` of ${formatGb(load.diskTotalGb)}` : ""}`
+          : "—",
+      pct: percent(load?.diskUsedGb ?? null, load?.diskTotalGb ?? null),
+    },
+  ];
+  return (
+    <div className="mt-5 grid grid-cols-3 gap-3 sm:gap-5" aria-label="How busy this computer is">
+      {items.map((item) => (
+        <div key={item.label} className="flex min-w-0 flex-col gap-1.5">
+          <div className="flex items-baseline justify-between gap-2 text-[11px]">
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              {item.label === "Processor" && live ? (
+                <span
+                  className="size-1.5 animate-pulse rounded-full bg-success"
+                  aria-label="live"
+                />
+              ) : null}
+              {item.label}
+            </span>
+            <span className="truncate tabular-nums text-foreground">{item.value}</span>
+          </div>
+          <Meter value={item.pct} />
+        </div>
+      ))}
+    </div>
   );
 }

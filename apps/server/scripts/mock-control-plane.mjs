@@ -87,10 +87,24 @@ function box() {
 }
 
 const PORTS = [
-  { id: 1, internal_port: 22, external_port: 40122, protocol: "tcp", state: "active" },
-  { id: 2, internal_port: 80, external_port: 40180, protocol: "tcp", state: "active" },
-  { id: 3, internal_port: 3000, external_port: 43000, protocol: "tcp", state: "active" },
+  {
+    id: 1,
+    internal_port: 22,
+    external_port: 40122,
+    protocol: "tcp",
+    visibility: "public",
+    state: "applied",
+  },
+  {
+    id: 2,
+    internal_port: 80,
+    external_port: 40180,
+    protocol: "tcp",
+    visibility: "public",
+    state: "applied",
+  },
 ];
+let nextPortId = 10;
 
 const SERVICES = [
   {
@@ -609,6 +623,32 @@ const server = http.createServer(async (req, res) => {
     if (Number(m[1]) !== BOX_ID) return send(res, 404, { error: "NOT_FOUND" });
     const sub = m[2] || "";
     if (sub === "") return send(res, 200, box());
+    if (sub === "/ports" && req.method === "POST") {
+      // Same contract as prod (POST /boxes/{id}/ports): a public forward on the
+      // next free external port; no URL in the answer.
+      const body = await readBody(req);
+      const port = Number(body.port ?? body.internal_port);
+      if (!port) return send(res, 400, { error: "INVALID_REQUEST" });
+      const forward = {
+        id: nextPortId++,
+        internal_port: port,
+        external_port: 42000 + nextPortId,
+        protocol: body.protocol || "tcp",
+        visibility: body.visibility || "public",
+        state: "applied",
+      };
+      PORTS.push(forward);
+      console.log(`published port ${port}/${forward.protocol} → ${forward.external_port}`);
+      return send(res, 201, forward);
+    }
+    const portMatch = sub.match(/^\/ports\/(\d+)$/);
+    if (portMatch && req.method === "DELETE") {
+      const index = PORTS.findIndex((p) => p.id === Number(portMatch[1]));
+      if (index === -1) return send(res, 404, { error: "NOT_FOUND" });
+      const [removed] = PORTS.splice(index, 1);
+      console.log(`removed forward of port ${removed.internal_port}`);
+      return send(res, 200, { status: "deleted" });
+    }
     if (sub === "/ports") return send(res, 200, { ports: PORTS });
     if (req.method === "POST" && ["/sleep", "/wake", "/stop", "/start"].includes(sub)) {
       statusOverride = sub === "/sleep" ? "sleeping" : sub === "/stop" ? "stopped" : "running";

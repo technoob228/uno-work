@@ -149,7 +149,10 @@ describe("readManifestDir", () => {
     await writeFile(path.join(dir, "notes.json"), JSON.stringify({ name: "Notes", port: 3000 }));
     await writeFile(path.join(dir, "broken.json"), "{not json");
     await writeFile(path.join(dir, "empty.json"), JSON.stringify({ name: "x" }));
-    await writeFile(path.join(dir, "big.json"), JSON.stringify({ port: 1, pad: "x".repeat(40_000) }));
+    await writeFile(
+      path.join(dir, "big.json"),
+      JSON.stringify({ port: 1, pad: "x".repeat(40_000) }),
+    );
     await writeFile(path.join(dir, "Bad Name.json"), "{}");
     await writeFile(path.join(dir, "notes.log"), "not a manifest");
     await writeFile(path.join(root, "outside.json"), JSON.stringify({ port: 2 }));

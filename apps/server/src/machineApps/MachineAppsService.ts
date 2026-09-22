@@ -37,7 +37,10 @@ import {
   computerKeyFor,
   humanizeControlPlaneError,
 } from "../workspaceRegistry/unoComputer.ts";
-import { controlPlaneErrorStatus, fetchControlPlaneJson } from "../workspaceRegistry/unoCloudParse.ts";
+import {
+  controlPlaneErrorStatus,
+  fetchControlPlaneJson,
+} from "../workspaceRegistry/unoCloudParse.ts";
 import { readIconDataUrl, readManifestDir, type AppManifest } from "./appManifest.ts";
 import { extractHtmlTitle } from "./discoveryParsers.ts";
 import { displayManifestDir, resolveManifestDir } from "./manifestDir.ts";
@@ -191,7 +194,7 @@ function toPublic(
   hostname: string | null,
 ): UnoMachineApp {
   const { control: _control, manifest: _manifest, ...rest } = app;
-  return { ...rest, publication: publicationFor(app.port, forwards, hostname) };
+  return { ...rest, publication: publicationFor(app, forwards, hostname) };
 }
 
 interface CloudView {
@@ -321,7 +324,8 @@ export const makeMachineAppsService = (
           return {
             boxId,
             apiKey,
-            forwards: portsResult.status === "fulfilled" ? parsePortForwards(portsResult.value) : [],
+            forwards:
+              portsResult.status === "fulfilled" ? parsePortForwards(portsResult.value) : [],
             hostname,
             blockedReason: null,
           };
@@ -349,8 +353,12 @@ export const makeMachineAppsService = (
 
     const publish = async (app: ScannedApp, cloud: CloudView) => {
       if (cloud.blockedReason) throw new ActionError(cloud.blockedReason);
-      if (app.port === null) throw new ActionError("This app has no port to show.");
-      if (RESERVED_FORWARD_PORTS.has(app.port)) {
+      const wanted: Array<{ port: number; protocol: "tcp" | "udp" }> = [
+        ...(app.port !== null ? [{ port: app.port, protocol: "tcp" as const }] : []),
+        ...app.udpPorts.map((port) => ({ port, protocol: "udp" as const })),
+      ].filter((p) => !RESERVED_FORWARD_PORTS.has(p.port));
+      if (wanted.length === 0) throw new ActionError("This app has no port to show.");
+      if (app.port !== null && RESERVED_FORWARD_PORTS.has(app.port)) {
         throw new ActionError("That port belongs to the computer itself.");
       }
       if (app.loopbackOnly) {
@@ -358,30 +366,34 @@ export const makeMachineAppsService = (
           "This app only listens inside the computer (127.0.0.1), so the internet can't reach it. Ask Uno to make it listen on all addresses (0.0.0.0), then try again.",
         );
       }
-      const existing = cloud.forwards.find(
-        (f) => f.internalPort === app.port && f.protocol === "tcp" && f.state !== "deleting",
-      );
-      if (existing?.visibility === "public") return;
-      if (existing) {
-        await fetchJson(cloud.apiKey, `/api/v1/boxes/${cloud.boxId}/ports/${existing.id}`, {
-          method: "PUT",
-          body: JSON.stringify({ visibility: "public" }),
+      for (const { port, protocol } of wanted) {
+        const existing = cloud.forwards.find(
+          (f) => f.internalPort === port && f.protocol === protocol && f.state !== "deleting",
+        );
+        if (existing?.visibility === "public") continue;
+        if (existing) {
+          await fetchJson(cloud.apiKey, `/api/v1/boxes/${cloud.boxId}/ports/${existing.id}`, {
+            method: "PUT",
+            body: JSON.stringify({ visibility: "public" }),
+          });
+          continue;
+        }
+        await fetchJson(cloud.apiKey, `/api/v1/boxes/${cloud.boxId}/ports`, {
+          method: "POST",
+          body: JSON.stringify({ port, protocol, visibility: "public" }),
         });
-        return;
       }
-      await fetchJson(cloud.apiKey, `/api/v1/boxes/${cloud.boxId}/ports`, {
-        method: "POST",
-        body: JSON.stringify({ port: app.port, protocol: "tcp", visibility: "public" }),
-      });
     };
 
     const unpublish = async (app: ScannedApp, cloud: CloudView) => {
       if (cloud.blockedReason) throw new ActionError(cloud.blockedReason);
-      const publication = publicationFor(app.port, cloud.forwards, cloud.hostname);
-      if (!publication) return;
-      await fetchJson(cloud.apiKey, `/api/v1/boxes/${cloud.boxId}/ports/${publication.forwardId}`, {
-        method: "DELETE",
-      });
+      const publication = publicationFor(app, cloud.forwards, cloud.hostname);
+      for (const forward of publication?.forwards ?? []) {
+        if (RESERVED_FORWARD_PORTS.has(forward.internalPort)) continue;
+        await fetchJson(cloud.apiKey, `/api/v1/boxes/${cloud.boxId}/ports/${forward.forwardId}`, {
+          method: "DELETE",
+        });
+      }
     };
 
     const startApp = async (app: ScannedApp) => {
@@ -396,7 +408,8 @@ export const makeMachineAppsService = (
           : app.control.kind === "systemd" && app.control.user
             ? await runCommand("systemctl", ["--user", "start", app.control.unit], 30_000)
             : null;
-      if (!result?.ok) throw new ActionError("The computer didn't start it. Try again in a moment.");
+      if (!result?.ok)
+        throw new ActionError("The computer didn't start it. Try again in a moment.");
     };
 
     const stopApp = async (app: ScannedApp) => {
@@ -532,7 +545,8 @@ export const makeMachineAppsService = (
     const autostart = Effect.promise(async () => {
       const scanned = await scan(true);
       for (const app of scanned.apps) {
-        if (app.source !== "manifest" || !app.manifest?.autostart || !app.manifest.command) continue;
+        if (app.source !== "manifest" || !app.manifest?.autostart || !app.manifest.command)
+          continue;
         if (app.manifest.port === null || app.status !== "stopped") continue;
         try {
           startManifestCommand(app.manifest, manifestDir, home);

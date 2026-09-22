@@ -113,7 +113,11 @@ interface KnownSoftware {
 export const KNOWN_SOFTWARE: ReadonlyArray<KnownSoftware> = [
   { match: /wg-easy|wireguard|wg-quick|amnezia/i, name: "WireGuard VPN", icon: "🔐" },
   { match: /openvpn/i, name: "OpenVPN", icon: "🔐" },
-  { match: /outline|shadowsocks|xray|v2ray|sing-box|3x-ui|marzban|hysteria/i, name: "VPN / proxy", icon: "🛡️" },
+  {
+    match: /outline|shadowsocks|xray|v2ray|sing-box|3x-ui|marzban|hysteria/i,
+    name: "VPN / proxy",
+    icon: "🛡️",
+  },
   { match: /tailscale/i, name: "Tailscale", icon: "🔗" },
   { match: /3proxy|danted|squid/i, name: "Proxy", icon: "🛡️" },
   { match: /pihole|pi-hole|adguard/i, name: "Ad blocker", icon: "🚫" },
@@ -146,7 +150,9 @@ export function knownSoftware(text: string): KnownSoftware | null {
 
 /** Uno's own units in `/etc/systemd/system` are the machine, not programs. */
 function isInfraUnit(unit: string): boolean {
-  return /^(uno-|uno_|snap\.|cloud-|ssh|systemd-|getty|serial-getty|docker\.|containerd)/.test(unit);
+  return /^(uno-|uno_|snap\.|cloud-|ssh|systemd-|getty|serial-getty|docker\.|containerd)/.test(
+    unit,
+  );
 }
 
 export interface ScanInput {
@@ -300,7 +306,8 @@ export async function scanMachineApps(
   // Probe every port that could be a program, once.
   const candidatePorts = new Set<number>();
   for (const m of input.manifests) if (m.port !== null) candidatePorts.add(m.port);
-  for (const c of containers) for (const p of c.ports) if (p.protocol === "tcp") candidatePorts.add(p.hostPort);
+  for (const c of containers)
+    for (const p of c.ports) if (p.protocol === "tcp") candidatePorts.add(p.hostPort);
   for (const l of listening) {
     if (!probe.selfPorts.has(l.port) && l.pid !== probe.selfPid && !isSystemPort(l.port)) {
       candidatePorts.add(l.port);
@@ -340,6 +347,7 @@ export async function scanMachineApps(
       iconImage: input.manifestIcons.get(m.id) ?? null,
       status: running === null ? "unknown" : running ? "running" : "stopped",
       port: m.port,
+      udpPorts: [],
       http: http || (m.port === null && m.url !== null),
       loopbackOnly: listener?.loopbackOnly ?? false,
       detail: m.port !== null ? `Registered · port ${m.port}` : "Registered",
@@ -374,6 +382,7 @@ export async function scanMachineApps(
       iconImage: null,
       status: c.running ? "running" : "stopped",
       port: primary?.hostPort ?? null,
+      udpPorts: c.ports.filter((p) => p.protocol === "udp" && !p.loopback).map((p) => p.hostPort),
       http,
       loopbackOnly: primary?.loopback ?? false,
       detail: `Docker · ${c.image.replace(/@sha256:.*$/, "").slice(0, 60)}`,
@@ -401,14 +410,16 @@ export async function scanMachineApps(
     apps.push({
       id: `systemd:${unit.user ? "user:" : ""}${unit.id}`,
       source: "systemd",
-      name: known && !unit.user && !isUserAddedUnitPath(unit.fragmentPath, probe.home)
-        ? known.name
-        : prettyName(unit.id),
+      name:
+        known && !unit.user && !isUserAddedUnitPath(unit.fragmentPath, probe.home)
+          ? known.name
+          : prettyName(unit.id),
       description: describe?.slice(0, 200) ?? null,
       icon: known?.icon ?? "⚙️",
       iconImage: null,
       status: running ? "running" : "stopped",
       port: primary?.port ?? null,
+      udpPorts: [],
       http,
       loopbackOnly: primary?.loopbackOnly ?? false,
       detail: `Service · ${unit.id}${unit.user ? "" : " · system"}`,
@@ -447,6 +458,7 @@ export async function scanMachineApps(
       iconImage: null,
       status: "running",
       port: l.port,
+      udpPorts: [],
       http,
       loopbackOnly: l.loopbackOnly,
       detail: l.process ? `${l.process} · port ${l.port}` : `Port ${l.port}`,
@@ -502,33 +514,47 @@ export function parsePortForwards(raw: unknown): PortForward[] {
 }
 
 /**
- * The public forward of an app's port, and the address it gives. The control
- * plane builds `http://<computer's name>:<external port>` for a hand-published
- * port (the `https://<app>-<computer>` names are for App Store installs).
+ * The public forwards of an app's ports, and the address they give. The
+ * control plane builds `http://<computer's name>:<external port>` for a
+ * hand-published port (the `https://<app>-<computer>` names are for App Store
+ * installs). UDP ports (a VPN tunnel) count too: they have no web address, but
+ * "Hide" must take them down with the rest.
  */
 export function publicationFor(
-  port: number | null,
+  app: { readonly port: number | null; readonly udpPorts: ReadonlyArray<number> },
   forwards: ReadonlyArray<PortForward>,
   hostname: string | null,
 ): UnoMachineAppPublication | null {
-  if (port === null || RESERVED_FORWARD_PORTS.has(port)) return null;
-  const forward = forwards.find(
+  const live = (f: PortForward) =>
+    f.visibility === "public" && f.state !== "deleting" && f.state !== "failed";
+  const main =
+    app.port !== null && !RESERVED_FORWARD_PORTS.has(app.port)
+      ? forwards.find((f) => f.internalPort === app.port && f.protocol === "tcp" && live(f))
+      : undefined;
+  const udp = forwards.filter(
     (f) =>
-      f.internalPort === port &&
-      f.protocol === "tcp" &&
-      f.visibility === "public" &&
-      f.state !== "deleting" &&
-      f.state !== "failed",
+      f.protocol === "udp" &&
+      app.udpPorts.includes(f.internalPort) &&
+      !RESERVED_FORWARD_PORTS.has(f.internalPort) &&
+      live(f),
   );
-  if (!forward) return null;
+  if (!main && udp.length === 0) return null;
   const host = hostname?.replace(/^https?:\/\//, "").replace(/\/.*$/, "") ?? null;
+  const all = [...(main ? [main] : []), ...udp];
   return {
-    forwardId: forward.id,
-    externalPort: forward.externalPort,
+    forwardId: main?.id ?? null,
+    externalPort: main?.externalPort ?? null,
     url:
-      host && forward.externalPort !== null && forward.state !== "pending"
-        ? `http://${host}:${forward.externalPort}/`
+      main && host && main.externalPort !== null && main.state !== "pending"
+        ? `http://${host}:${main.externalPort}/`
         : null,
-    state: forward.state,
+    host,
+    state: all.some((f) => f.state === "pending") ? "pending" : (all[0]?.state ?? "applied"),
+    forwards: all.map((f) => ({
+      forwardId: f.id,
+      internalPort: f.internalPort,
+      externalPort: f.externalPort,
+      protocol: f.protocol,
+    })),
   };
 }

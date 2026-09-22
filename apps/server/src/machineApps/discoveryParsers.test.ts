@@ -19,7 +19,10 @@ describe("splitHostPort", () => {
   it("handles v4, bracketed v6, bare v6, wildcards and zones", () => {
     expect(splitHostPort("0.0.0.0:22")).toEqual({ host: "0.0.0.0", port: 22 });
     expect(splitHostPort("[::]:8080")).toEqual({ host: "::", port: 8080 });
-    expect(splitHostPort("[::ffff:127.0.0.1]:3000")).toEqual({ host: "::ffff:127.0.0.1", port: 3000 });
+    expect(splitHostPort("[::ffff:127.0.0.1]:3000")).toEqual({
+      host: "::ffff:127.0.0.1",
+      port: 3000,
+    });
     expect(splitHostPort("*:80")).toEqual({ host: "*", port: 80 });
     expect(splitHostPort("127.0.0.53%lo:53")).toEqual({ host: "127.0.0.53", port: 53 });
     expect(splitHostPort("::1:631")).toEqual({ host: "::1", port: 631 });
@@ -82,7 +85,16 @@ describe("parseSsListening", () => {
 
 describe("parseLsofListening", () => {
   it("reads -F pcn output", () => {
-    const out = ["p501", "cnode", "n*:5173", "n[::1]:5173", "p777", "cpython3.11", "n127.0.0.1:8000", "n10.0.0.1:1234->10.0.0.2:80"].join("\n");
+    const out = [
+      "p501",
+      "cnode",
+      "n*:5173",
+      "n[::1]:5173",
+      "p777",
+      "cpython3.11",
+      "n127.0.0.1:8000",
+      "n10.0.0.1:1234->10.0.0.2:80",
+    ].join("\n");
     const sockets = parseLsofListening(out);
     expect(sockets).toEqual([
       { port: 5173, address: "*", loopback: false, process: "node", pid: 501 },
@@ -106,7 +118,9 @@ describe("docker", () => {
   });
 
   it("drops malformed and absurd ranges", () => {
-    expect(parseDockerPorts("0.0.0.0:1-5000->1-5000/tcp, junk->80/tcp, 0.0.0.0:80->x/tcp")).toEqual([]);
+    expect(parseDockerPorts("0.0.0.0:1-5000->1-5000/tcp, junk->80/tcp, 0.0.0.0:80->x/tcp")).toEqual(
+      [],
+    );
   });
 
   it("parses docker ps JSON lines", () => {
@@ -120,7 +134,14 @@ describe("docker", () => {
         Status: "Up 3 minutes",
         Labels: "com.docker.compose.project=vpn,uno.app.name=My VPN",
       }),
-      JSON.stringify({ ID: "def", Image: "nginx", Names: "/web", Ports: "", State: "exited", Status: "Exited (0)" }),
+      JSON.stringify({
+        ID: "def",
+        Image: "nginx",
+        Names: "/web",
+        Ports: "",
+        State: "exited",
+        Status: "Exited (0)",
+      }),
       "not json",
       JSON.stringify({ ID: "", Names: "nameless" }),
     ].join("\n");
@@ -139,7 +160,8 @@ describe("docker", () => {
   });
 
   it("parses port bindings of stopped containers", () => {
-    const out = '/web {"80/tcp":[{"HostIp":"","HostPort":"8080"}],"443/tcp":null}\n/broken not-json';
+    const out =
+      '/web {"80/tcp":[{"HostIp":"","HostPort":"8080"}],"443/tcp":null}\n/broken not-json';
     const bindings = parseDockerPortBindings(out);
     expect(bindings.get("web")).toEqual([
       { hostPort: 8080, containerPort: 80, protocol: "tcp", loopback: false },
@@ -205,7 +227,9 @@ UnitFileState=enabled
 
 describe("extractHtmlTitle", () => {
   it("reads and cleans the title", () => {
-    expect(extractHtmlTitle("<html><head><title>\n  Notes &amp; more </title>")).toBe("Notes & more");
+    expect(extractHtmlTitle("<html><head><title>\n  Notes &amp; more </title>")).toBe(
+      "Notes & more",
+    );
     expect(extractHtmlTitle("<p>no title</p>")).toBeNull();
     expect(extractHtmlTitle(`<title>${"x".repeat(100)}</title>`)?.length).toBe(60);
   });

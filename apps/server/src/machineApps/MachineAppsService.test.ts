@@ -38,6 +38,7 @@ function serviceLayer(input: {
   readonly boxToken?: string;
   readonly ports?: unknown[];
   readonly calls?: Call[];
+  readonly probe?: Partial<MachineProbe>;
 }) {
   const ports = [...(input.ports ?? [])] as Array<Record<string, unknown>>;
   const fetchJson = async (key: string, path: string, init?: RequestInit) => {
@@ -52,8 +53,8 @@ function serviceLayer(input: {
       const forward = {
         id: 100 + ports.length,
         internal_port: body.port,
-        external_port: 43000,
-        protocol: "tcp",
+        external_port: 43000 + ports.length,
+        protocol: body.protocol,
         visibility: "public",
         state: "applied",
       };
@@ -71,7 +72,7 @@ function serviceLayer(input: {
   return Layer.effect(
     MachineAppsService,
     makeMachineAppsService({
-      probe,
+      probe: input.probe ?? probe,
       fetchJson,
       home: "/home/unowork",
       manifestDir: "/nonexistent/uno-apps",
@@ -110,7 +111,9 @@ it.effect("lists programs and shows an app's public address once its port is pub
       forwardId: 7,
       externalPort: 43007,
       url: "http://work.u85.uno4.me:43007/",
+      host: "work.u85.uno4.me",
       state: "applied",
+      forwards: [{ forwardId: 7, internalPort: 3000, externalPort: 43007, protocol: "tcp" }],
     });
   }).pipe(
     Effect.provide(
@@ -118,7 +121,14 @@ it.effect("lists programs and shows an app's public address once its port is pub
         ownBoxId: 42,
         boxToken: "uno_agt_machine",
         ports: [
-          { id: 7, internal_port: 3000, external_port: 43007, protocol: "tcp", visibility: "public", state: "applied" },
+          {
+            id: 7,
+            internal_port: 3000,
+            external_port: 43007,
+            protocol: "tcp",
+            visibility: "public",
+            state: "applied",
+          },
         ],
       }),
     ),
@@ -140,6 +150,48 @@ it.effect("publishes with the machine's own token and hides again", () => {
     assert.ok(calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/boxes/42/ports/100"));
     assert.strictEqual(hidden.apps.find((a) => a.id === "port:3000")?.publication, null);
   }).pipe(Effect.provide(serviceLayer({ ownBoxId: 42, boxToken: "uno_agt_machine", calls })));
+});
+
+it.effect("shows a VPN container's web panel and its UDP tunnel together, and hides both", () => {
+  const calls: Call[] = [];
+  const dockerProbe: Partial<MachineProbe> = {
+    ...probe,
+    run: async (command, args) => {
+      if (command === "ss") return { ok: true, stdout: "LISTEN 0 4096 0.0.0.0:51821 0.0.0.0:*\n" };
+      if (command === "docker" && args[0] === "ps") {
+        return {
+          ok: true,
+          stdout: JSON.stringify({
+            ID: "c1",
+            Image: "ghcr.io/wg-easy/wg-easy",
+            Names: "wg-easy",
+            Ports: "0.0.0.0:51820->51820/udp, 0.0.0.0:51821->51821/tcp",
+            State: "running",
+          }),
+        };
+      }
+      return { ok: false, stdout: "" };
+    },
+  };
+  return Effect.gen(function* () {
+    const service = yield* MachineAppsService;
+    const shown = yield* service.action({ appId: "docker:wg-easy", action: "publish" });
+    assert.deepStrictEqual(
+      calls.filter((c) => c.method === "POST").map((c) => c.body),
+      [
+        { port: 51821, protocol: "tcp", visibility: "public" },
+        { port: 51820, protocol: "udp", visibility: "public" },
+      ],
+    );
+    const vpn = shown.apps.find((a) => a.id === "docker:wg-easy");
+    assert.strictEqual(vpn?.publication?.forwards.length, 2);
+    yield* service.action({ appId: "docker:wg-easy", action: "unpublish" });
+    assert.strictEqual(calls.filter((c) => c.method === "DELETE").length, 2);
+  }).pipe(
+    Effect.provide(
+      serviceLayer({ ownBoxId: 42, boxToken: "uno_agt_machine", calls, probe: dockerProbe }),
+    ),
+  );
 });
 
 it.effect("refuses to publish an app that only listens on 127.0.0.1", () => {

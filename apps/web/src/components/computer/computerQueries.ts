@@ -13,6 +13,8 @@ import type {
   UnoComputerMetrics,
   UnoComputerPowerInput,
   UnoComputerState,
+  UnoMachineAppActionInput,
+  UnoMachineApps,
 } from "@t3tools/contracts";
 import { mutationOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
 
@@ -22,6 +24,9 @@ const STATE_REFETCH_MS = 15_000;
 const METRICS_REFETCH_MS = 5_000;
 const ACTIVITY_REFETCH_MS = 10_000;
 const APPS_REFETCH_MS = 30_000;
+/** Programs on the machine: a new one should appear within seconds. */
+const MACHINE_APPS_REFETCH_MS = 5_000;
+const LOCAL_METRICS_REFETCH_MS = 3_000;
 /** How long a "coming soon" answer is trusted before asking again. */
 const UNAVAILABLE_RECHECK_MS = 5 * 60_000;
 
@@ -35,6 +40,10 @@ export const computerQueryKeys = {
     ["uno-computer", "activity", environmentId, boxId] as const,
   apps: (environmentId: EnvironmentId | null, boxId: number | null) =>
     ["uno-computer", "apps", environmentId, boxId] as const,
+  machineApps: (environmentId: EnvironmentId | null) =>
+    ["uno-computer", "machine-apps", environmentId] as const,
+  localMetrics: (environmentId: EnvironmentId | null) =>
+    ["uno-computer", "local-metrics", environmentId] as const,
 };
 
 function target(boxId: number | null) {
@@ -129,6 +138,40 @@ export function computerPowerMutationOptions(
       void queryClient.invalidateQueries({
         queryKey: computerQueryKeys.activity(environmentId, boxId),
       });
+    },
+  });
+}
+
+/** Programs found on the machine behind this environment (not another picked box). */
+export function machineAppsQueryOptions(environmentId: EnvironmentId | null, enabled = true) {
+  return queryOptions({
+    queryKey: computerQueryKeys.machineApps(environmentId),
+    queryFn: () => api(environmentId).machineApps(),
+    enabled: environmentId !== null && enabled,
+    refetchInterval: MACHINE_APPS_REFETCH_MS,
+  });
+}
+
+/** Live CPU / memory / disk read by the daemon from its own OS. */
+export function localMetricsQueryOptions(environmentId: EnvironmentId | null, enabled = true) {
+  return queryOptions({
+    queryKey: computerQueryKeys.localMetrics(environmentId),
+    queryFn: () => api(environmentId).localMetrics(),
+    enabled: environmentId !== null && enabled,
+    refetchInterval: LOCAL_METRICS_REFETCH_MS,
+  });
+}
+
+export function machineAppActionMutationOptions(
+  environmentId: EnvironmentId | null,
+  queryClient: QueryClient,
+) {
+  return mutationOptions({
+    mutationKey: ["uno-computer", "app-action", environmentId] as const,
+    mutationFn: (input: UnoMachineAppActionInput): Promise<UnoMachineApps> =>
+      api(environmentId).appAction(input),
+    onSuccess: (apps) => {
+      queryClient.setQueryData(computerQueryKeys.machineApps(environmentId), apps);
     },
   });
 }

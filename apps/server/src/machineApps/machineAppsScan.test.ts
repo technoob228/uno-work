@@ -31,7 +31,8 @@ const DOCKER = [
   JSON.stringify({ ID: "c2", Image: "busybox", Names: "no-ports", Ports: "", State: "running" }),
 ].join("\n");
 
-const UNIT_FILES = "notes-api.service enabled enabled\nssh.service enabled enabled\nuno-work.service enabled enabled\n";
+const UNIT_FILES =
+  "notes-api.service enabled enabled\nssh.service enabled enabled\nuno-work.service enabled enabled\n";
 const SHOW = `Id=notes-api.service
 Description=Notes API
 ActiveState=active
@@ -59,7 +60,8 @@ function fakeProbe(overrides: Partial<MachineProbe> = {}): MachineProbe {
       if (command === "ss") return { ok: true, stdout: SS };
       if (command === "docker" && args[0] === "ps") return { ok: true, stdout: DOCKER };
       if (command === "systemctl" && args[0] === "--user") return { ok: false, stdout: "" };
-      if (command === "systemctl" && args[0] === "list-unit-files") return { ok: true, stdout: UNIT_FILES };
+      if (command === "systemctl" && args[0] === "list-unit-files")
+        return { ok: true, stdout: UNIT_FILES };
       if (command === "systemctl" && args[0] === "list-units") return { ok: true, stdout: "" };
       if (command === "systemctl" && args[0] === "show") return { ok: true, stdout: SHOW };
       return { ok: false, stdout: "" };
@@ -143,6 +145,7 @@ describe("scanMachineApps", () => {
       description: "WireGuard VPN",
       icon: "🔐",
       port: 51821,
+      udpPorts: [51820],
       http: true,
       status: "running",
       canStop: true,
@@ -161,7 +164,11 @@ describe("scanMachineApps", () => {
     const probe = fakeProbe({
       run: async (command, args) => {
         if (command === "systemctl" && args[0] === "list-unit-files")
-          return { ok: true, stdout: "wg-quick@.service disabled enabled\nnginx.service enabled enabled\ncron.service enabled enabled\n" };
+          return {
+            ok: true,
+            stdout:
+              "wg-quick@.service disabled enabled\nnginx.service enabled enabled\ncron.service enabled enabled\n",
+          };
         if (command === "systemctl" && args[0] === "list-units")
           return { ok: true, stdout: "wg-quick@wg0.service loaded active exited WireGuard\n" };
         if (command === "systemctl" && args[0] === "show")
@@ -177,7 +184,10 @@ describe("scanMachineApps", () => {
       },
     });
     const apps = await scanMachineApps(probe, { manifests: [], manifestIcons: new Map() });
-    expect(apps.map((a) => a.id)).toEqual(["systemd:nginx.service", "systemd:wg-quick@wg0.service"]);
+    expect(apps.map((a) => a.id)).toEqual([
+      "systemd:nginx.service",
+      "systemd:wg-quick@wg0.service",
+    ]);
     expect(apps[1]).toMatchObject({ name: "WireGuard VPN", icon: "🔐" });
   });
 
@@ -188,11 +198,18 @@ describe("scanMachineApps", () => {
         command === "lsof"
           ? { ok: true, stdout: "p10\ncnode\nn*:5173\np11\ncSpotify\nn*:57621\n" }
           : { ok: false, stdout: "" },
-      probeHttp: async (port) => ({ http: port === 5173, title: port === 5173 ? "Vite App" : null }),
+      probeHttp: async (port) => ({
+        http: port === 5173,
+        title: port === 5173 ? "Vite App" : null,
+      }),
     });
     const apps = await scanMachineApps(probe, { manifests: [], manifestIcons: new Map() });
     expect(apps).toHaveLength(1);
-    expect(apps[0]).toMatchObject({ id: "port:5173", name: "Vite App", localUrl: "http://localhost:5173/" });
+    expect(apps[0]).toMatchObject({
+      id: "port:5173",
+      name: "Vite App",
+      localUrl: "http://localhost:5173/",
+    });
   });
 
   it("survives a machine with none of the tools", async () => {
@@ -204,36 +221,91 @@ describe("scanMachineApps", () => {
 describe("publication", () => {
   const forwards = parsePortForwards({
     ports: [
-      { id: 1, internal_port: 22, external_port: 40122, protocol: "tcp", visibility: "public", state: "applied" },
-      { id: 2, internal_port: 80, external_port: 40180, protocol: "tcp", visibility: "public", state: "applied" },
-      { id: 3, internal_port: 3000, external_port: 43000, protocol: "tcp", visibility: "public", state: "applied" },
-      { id: 4, internal_port: 4000, external_port: 44000, protocol: "tcp", visibility: "private", state: "applied" },
+      {
+        id: 1,
+        internal_port: 22,
+        external_port: 40122,
+        protocol: "tcp",
+        visibility: "public",
+        state: "applied",
+      },
+      {
+        id: 2,
+        internal_port: 80,
+        external_port: 40180,
+        protocol: "tcp",
+        visibility: "public",
+        state: "applied",
+      },
+      {
+        id: 3,
+        internal_port: 3000,
+        external_port: 43000,
+        protocol: "tcp",
+        visibility: "public",
+        state: "applied",
+      },
+      {
+        id: 4,
+        internal_port: 4000,
+        external_port: 44000,
+        protocol: "tcp",
+        visibility: "private",
+        state: "applied",
+      },
       { id: 5, internal_port: 5000, external_port: 45000, protocol: "tcp", state: "pending" },
+      {
+        id: 6,
+        internal_port: 51820,
+        external_port: 45820,
+        protocol: "udp",
+        visibility: "public",
+        state: "applied",
+      },
       { internal_port: 6000 },
     ],
   });
+  const tcp = (port: number | null) => ({ port, udpPorts: [] as number[] });
 
   it("parses the ports list", () => {
-    expect(forwards.map((f) => f.id)).toEqual([1, 2, 3, 4, 5]);
+    expect(forwards.map((f) => f.id)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
   it("gives the address of a public forward", () => {
-    expect(publicationFor(3000, forwards, "my-computer.u85.uno4.me")).toEqual({
+    expect(publicationFor(tcp(3000), forwards, "my-computer.u85.uno4.me")).toEqual({
       forwardId: 3,
       externalPort: 43000,
       url: "http://my-computer.u85.uno4.me:43000/",
+      host: "my-computer.u85.uno4.me",
       state: "applied",
+      forwards: [{ forwardId: 3, internalPort: 3000, externalPort: 43000, protocol: "tcp" }],
     });
   });
 
   it("never treats SSH or the computer's own address as an app's publication", () => {
-    expect(publicationFor(22, forwards, "h")).toBeNull();
-    expect(publicationFor(80, forwards, "h")).toBeNull();
+    expect(publicationFor(tcp(22), forwards, "h")).toBeNull();
+    expect(publicationFor(tcp(80), forwards, "h")).toBeNull();
+    expect(publicationFor({ port: null, udpPorts: [22] }, forwards, "h")).toBeNull();
   });
 
   it("ignores private forwards and holds the address back while pending", () => {
-    expect(publicationFor(4000, forwards, "h")).toBeNull();
-    expect(publicationFor(5000, forwards, "h")).toMatchObject({ forwardId: 5, url: null });
-    expect(publicationFor(null, forwards, "h")).toBeNull();
+    expect(publicationFor(tcp(4000), forwards, "h")).toBeNull();
+    expect(publicationFor(tcp(5000), forwards, "h")).toMatchObject({
+      forwardId: 5,
+      url: null,
+      state: "pending",
+    });
+    expect(publicationFor(tcp(null), forwards, "h")).toBeNull();
+  });
+
+  it("counts a VPN's UDP tunnel next to its web panel", () => {
+    const vpn = publicationFor({ port: 3000, udpPorts: [51820] }, forwards, "h");
+    expect(vpn?.forwards.map((f) => `${f.internalPort}/${f.protocol}`)).toEqual([
+      "3000/tcp",
+      "51820/udp",
+    ]);
+    const tunnelOnly = publicationFor({ port: null, udpPorts: [51820] }, forwards, "h");
+    expect(tunnelOnly).toMatchObject({ forwardId: null, url: null, host: "h" });
+    expect(tunnelOnly?.forwards).toHaveLength(1);
   });
 });
