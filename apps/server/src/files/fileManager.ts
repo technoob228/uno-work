@@ -38,7 +38,8 @@ function toEntry(rootReal: string, fullPath: string, stats: Stats, isSymlink: bo
     path: fullPath,
     kind: isDirectory ? "directory" : "file",
     size: isDirectory ? 0 : Math.max(0, Math.trunc(stats.size)),
-    modifiedAt: stats.mtime.toISOString(),
+    // mtimeMs, not the lazy `mtime` getter (see nodeStatsGuard.ts).
+    modifiedAt: new Date(Math.round(stats.mtimeMs)).toISOString(),
     hidden: isHiddenPath(rootReal, fullPath),
     isSymlink,
   };

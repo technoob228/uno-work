@@ -1,3 +1,4 @@
+import { guardNodeStatsPrototype } from "./nodeStatsGuard.ts";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -7,6 +8,9 @@ import { Command } from "effect/unstable/cli";
 import { NetService } from "@t3tools/shared/Net";
 import { cli } from "./cli.ts";
 import packageJson from "../package.json" with { type: "json" };
+
+// Before anything can format an error that holds an fs.Stats (see the module).
+guardNodeStatsPrototype();
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 

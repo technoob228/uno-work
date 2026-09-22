@@ -150,7 +150,8 @@ export function knownSoftware(text: string): KnownSoftware | null {
 
 /** Uno's own units in `/etc/systemd/system` are the machine, not programs. */
 function isInfraUnit(unit: string): boolean {
-  return /^(uno-|uno_|snap\.|cloud-|ssh|systemd-|getty|serial-getty|docker\.|containerd)/.test(
+  // fcnet: the guest network setup of every Uno cloud computer.
+  return /^(uno-|uno_|snap\.|cloud-|ssh|systemd-|getty|serial-getty|docker\.|containerd|fcnet)/.test(
     unit,
   );
 }
