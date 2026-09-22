@@ -21,6 +21,7 @@ import { ServerConfig } from "../../config.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
+import { buildMachineAppsInstructions } from "../../machineApps/machineAppsInstructions.ts";
 import { writeBrowserInstructionsFile } from "../browserInstructions.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeOpenCodeAdapter } from "../Layers/OpenCodeAdapter.ts";
@@ -85,7 +86,10 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       const instructionsFilePath = writeBrowserInstructionsFile({
         stateDir: serverConfig.stateDir,
         baseUrl: browserBridge.baseUrl,
-        extraSections: [buildPluginInstructions(serverConfig.pluginsDir)],
+        extraSections: [
+          buildPluginInstructions(serverConfig.pluginsDir),
+          buildMachineAppsInstructions(),
+        ],
       });
       const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
       const processEnv: NodeJS.ProcessEnv = {

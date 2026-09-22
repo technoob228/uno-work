@@ -22,9 +22,15 @@ import {
   UnoComputerInstallStatus,
   UnoComputerInstallStatusInput,
   UnoComputerMetrics,
+  UnoComputerLocalMetrics,
   UnoComputerPowerInput,
+  UnoComputerResizeInput,
+  UnoComputerResizeOptions,
+  UnoComputerResizeResult,
   UnoComputerState,
   UnoComputerTargetInput,
+  UnoMachineAppActionInput,
+  UnoMachineApps,
 } from "./unoComputer.ts";
 import {
   FilesCreateFolderInput,
@@ -344,6 +350,11 @@ export const WS_METHODS = {
   unoComputerInstallApp: "uno.computer.installApp",
   unoComputerInstallStatus: "uno.computer.installStatus",
   unoComputerPower: "uno.computer.power",
+  unoComputerMachineApps: "uno.computer.machineApps",
+  unoComputerAppAction: "uno.computer.appAction",
+  unoComputerLocalMetrics: "uno.computer.localMetrics",
+  unoComputerResizeOptions: "uno.computer.resizeOptions",
+  unoComputerResize: "uno.computer.resize",
 
   // Files — the computer's file manager (/files) and its public share links
   filesList: "files.list",
@@ -1336,6 +1347,40 @@ export const WsFilesCloudCopyToComputerRpc = Rpc.make(WS_METHODS.filesCloudCopyT
   error: FilesError,
 });
 
+/** Programs found on the machine this daemon runs on. Never fails: see `warnings`. */
+export const WsUnoComputerMachineAppsRpc = Rpc.make(WS_METHODS.unoComputerMachineApps, {
+  payload: Schema.Struct({}),
+  success: UnoMachineApps,
+  error: UnoCloudRpcError,
+});
+
+/** Start / stop / show on the internet / hide one of them. */
+export const WsUnoComputerAppActionRpc = Rpc.make(WS_METHODS.unoComputerAppAction, {
+  payload: UnoMachineAppActionInput,
+  success: UnoMachineApps,
+  error: UnoCloudRpcError,
+});
+
+export const WsUnoComputerLocalMetricsRpc = Rpc.make(WS_METHODS.unoComputerLocalMetrics, {
+  payload: Schema.Struct({}),
+  success: UnoComputerLocalMetrics,
+  error: UnoCloudRpcError,
+});
+
+/** Sizes this computer can take on its plan. Never fails: see `availability`. */
+export const WsUnoComputerResizeOptionsRpc = Rpc.make(WS_METHODS.unoComputerResizeOptions, {
+  payload: UnoComputerTargetInput,
+  success: UnoComputerResizeOptions,
+  error: UnoCloudRpcError,
+});
+
+/** Add memory / cores / disk. A plan limit is an answer (`plan_limit`), not an error. */
+export const WsUnoComputerResizeRpc = Rpc.make(WS_METHODS.unoComputerResize, {
+  payload: UnoComputerResizeInput,
+  success: UnoComputerResizeResult,
+  error: UnoCloudRpcError,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerProbeRpc,
@@ -1389,6 +1434,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesCloudDownloadUrlRpc,
   WsFilesCloudCopyToCloudRpc,
   WsFilesCloudCopyToComputerRpc,
+  WsUnoComputerMachineAppsRpc,
+  WsUnoComputerAppActionRpc,
+  WsUnoComputerLocalMetricsRpc,
+  WsUnoComputerResizeOptionsRpc,
+  WsUnoComputerResizeRpc,
   WsProviderInstallStartRpc,
   WsProviderInstallStatusRpc,
   WsProviderAuthStartRpc,

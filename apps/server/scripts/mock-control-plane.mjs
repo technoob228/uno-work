@@ -67,6 +67,46 @@ function status() {
   return SCENARIO === "sleeping" ? "sleeping" : "running";
 }
 
+// "Add memory / cores": the computer's size, and a Pro-like plan that lets one
+// computer reach 8 GB / 4 cores and the account run 12 GB / 6 cores at once
+// (another computer of the account holds 6 GB / 3 cores). Same checks and
+// codes as prod's ResizeBox (ValidateShape → CheckPeak → CheckDisk).
+const SHAPE = { ram_mb: 2048, vcpu: 2, disk_gb: 30 };
+const PLAN = {
+  slug: "pro",
+  max_box: { ram_mb: 8192, vcpu: 4 },
+  peak: { ram_mb: 12288, vcpu: 6 },
+  disk_gb: 80,
+};
+const OTHERS = { ram_mb: 6144, vcpu: 3, disk_gb: 20 };
+
+function subscription() {
+  const running = status() === "running";
+  return {
+    id: 1,
+    plan: PLAN.slug,
+    status: "active",
+    plan_limits: PLAN,
+    usage: {
+      running_ram_mb: OTHERS.ram_mb + (running ? SHAPE.ram_mb : 0),
+      running_vcpu: OTHERS.vcpu + (running ? SHAPE.vcpu : 0),
+      disk_gb_used: OTHERS.disk_gb + SHAPE.disk_gb,
+    },
+  };
+}
+
+function resizeRefusal(req) {
+  if (req.disk_gb < SHAPE.disk_gb) return "DISK_SHRINK_UNSUPPORTED";
+  if (req.ram_mb > PLAN.max_box.ram_mb || req.vcpu > PLAN.max_box.vcpu) return "SHAPE_TOO_LARGE";
+  if (req.disk_gb > PLAN.disk_gb) return "DISK_QUOTA_EXCEEDED";
+  if (status() === "running") {
+    if (OTHERS.ram_mb + req.ram_mb > PLAN.peak.ram_mb) return "PEAK_EXCEEDED";
+    if (OTHERS.vcpu + req.vcpu > PLAN.peak.vcpu) return "PEAK_EXCEEDED";
+  }
+  if (OTHERS.disk_gb + req.disk_gb > PLAN.disk_gb) return "DISK_QUOTA_EXCEEDED";
+  return null;
+}
+
 function box() {
   const s = status();
   return {
@@ -74,9 +114,9 @@ function box() {
     name: "my-computer",
     status: s,
     os: "ubuntu-24.04",
-    ram_mb: 2048,
-    vcpu: 2,
-    disk_gb: 30,
+    ram_mb: SHAPE.ram_mb,
+    vcpu: SHAPE.vcpu,
+    disk_gb: SHAPE.disk_gb,
     created_at: iso(minsAgo(60 * 24 * 32)),
     started_at: s === "running" ? (startedAtOverride ?? STARTED_AT) : null,
     internal_ip: "10.77.0.14",
@@ -87,10 +127,24 @@ function box() {
 }
 
 const PORTS = [
-  { id: 1, internal_port: 22, external_port: 40122, protocol: "tcp", state: "active" },
-  { id: 2, internal_port: 80, external_port: 40180, protocol: "tcp", state: "active" },
-  { id: 3, internal_port: 3000, external_port: 43000, protocol: "tcp", state: "active" },
+  {
+    id: 1,
+    internal_port: 22,
+    external_port: 40122,
+    protocol: "tcp",
+    visibility: "public",
+    state: "applied",
+  },
+  {
+    id: 2,
+    internal_port: 80,
+    external_port: 40180,
+    protocol: "tcp",
+    visibility: "public",
+    state: "applied",
+  },
 ];
+let nextPortId = 10;
 
 const SERVICES = [
   {
@@ -590,6 +644,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (path === "/api/v1/boxes") return send(res, 200, { boxes: [box()] });
   if (path === "/api/v1/apps/templates") return send(res, 200, { templates: TEMPLATES });
+  if (path === "/api/v1/box-subscription") return send(res, 200, subscription());
   if (path === "/api/v1/git/services") return send(res, 200, { services: SERVICES });
 
   const dm = path.match(/^\/api\/v1\/deployments\/(\d+)\/logs$/);
@@ -609,6 +664,48 @@ const server = http.createServer(async (req, res) => {
     if (Number(m[1]) !== BOX_ID) return send(res, 404, { error: "NOT_FOUND" });
     const sub = m[2] || "";
     if (sub === "") return send(res, 200, box());
+    if (sub === "/resize" && req.method === "POST") {
+      const body = await readBody(req);
+      const want = {
+        ram_mb: Number(body.ram_mb) || SHAPE.ram_mb,
+        vcpu: Number(body.vcpu) || SHAPE.vcpu,
+        disk_gb: Number(body.disk_gb) || SHAPE.disk_gb,
+      };
+      const refusal = resizeRefusal(want);
+      if (refusal) {
+        console.log(`resize refused: ${refusal}`, want);
+        return send(res, refusal === "DISK_SHRINK_UNSUPPORTED" ? 400 : 409, { error: refusal });
+      }
+      Object.assign(SHAPE, want);
+      console.log("resized", SHAPE);
+      return send(res, 200, box());
+    }
+    if (sub === "/ports" && req.method === "POST") {
+      // Same contract as prod (POST /boxes/{id}/ports): a public forward on the
+      // next free external port; no URL in the answer.
+      const body = await readBody(req);
+      const port = Number(body.port ?? body.internal_port);
+      if (!port) return send(res, 400, { error: "INVALID_REQUEST" });
+      const forward = {
+        id: nextPortId++,
+        internal_port: port,
+        external_port: 42000 + nextPortId,
+        protocol: body.protocol || "tcp",
+        visibility: body.visibility || "public",
+        state: "applied",
+      };
+      PORTS.push(forward);
+      console.log(`published port ${port}/${forward.protocol} → ${forward.external_port}`);
+      return send(res, 201, forward);
+    }
+    const portMatch = sub.match(/^\/ports\/(\d+)$/);
+    if (portMatch && req.method === "DELETE") {
+      const index = PORTS.findIndex((p) => p.id === Number(portMatch[1]));
+      if (index === -1) return send(res, 404, { error: "NOT_FOUND" });
+      const [removed] = PORTS.splice(index, 1);
+      console.log(`removed forward of port ${removed.internal_port}`);
+      return send(res, 200, { status: "deleted" });
+    }
     if (sub === "/ports") return send(res, 200, { ports: PORTS });
     if (req.method === "POST" && ["/sleep", "/wake", "/stop", "/start"].includes(sub)) {
       statusOverride = sub === "/sleep" ? "sleeping" : sub === "/stop" ? "stopped" : "running";

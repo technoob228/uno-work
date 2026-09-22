@@ -18,6 +18,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { ServerConfig } from "../../config.ts";
 import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
+import { buildMachineAppsInstructions } from "../../machineApps/machineAppsInstructions.ts";
 import { buildBrowserInstructions } from "../browserInstructions.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
@@ -87,6 +88,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const harnessInstructions = [
         buildBrowserInstructions(browserBridge.baseUrl),
         buildPluginInstructions(serverConfig.pluginsDir),
+        buildMachineAppsInstructions(),
       ]
         .filter((block): block is string => block !== undefined && block.length > 0)
         .join("\n\n");

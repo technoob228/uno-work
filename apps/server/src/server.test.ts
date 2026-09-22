@@ -137,6 +137,7 @@ import { WorkspaceService } from "./workspaceRegistry/WorkspaceService.ts";
 import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
 import { FilesService } from "./files/FilesService.ts";
+import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
 import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -672,6 +673,7 @@ const buildAppUnderTest = (options?: {
           Layer.mock(UnoCloudService)({}),
           Layer.mock(UnoComputerService)({}),
           Layer.mock(FilesService)({}),
+          Layer.mock(MachineAppsService)({}),
           Layer.mock(HarnessSetup)({}),
         ),
       ),

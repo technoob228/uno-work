@@ -125,9 +125,15 @@ import type {
   UnoComputerInstallStatus,
   UnoComputerInstallStatusInput,
   UnoComputerMetrics,
+  UnoComputerLocalMetrics,
   UnoComputerPowerInput,
+  UnoComputerResizeInput,
+  UnoComputerResizeOptions,
+  UnoComputerResizeResult,
   UnoComputerState,
   UnoComputerTargetInput,
+  UnoMachineAppActionInput,
+  UnoMachineApps,
 } from "./unoComputer.ts";
 import type {
   FilesCreateFolderInput,
@@ -722,6 +728,12 @@ export interface EnvironmentApi {
     installApp: (input: UnoComputerInstallAppInput) => Promise<UnoComputerInstallAppResult>;
     installStatus: (input: UnoComputerInstallStatusInput) => Promise<UnoComputerInstallStatus>;
     power: (input: UnoComputerPowerInput) => Promise<UnoComputerState>;
+    /** Programs found on this machine (manifests, docker, systemd, open ports). */
+    machineApps: () => Promise<UnoMachineApps>;
+    appAction: (input: UnoMachineAppActionInput) => Promise<UnoMachineApps>;
+    localMetrics: () => Promise<UnoComputerLocalMetrics>;
+    resizeOptions: (input?: UnoComputerTargetInput) => Promise<UnoComputerResizeOptions>;
+    resize: (input: UnoComputerResizeInput) => Promise<UnoComputerResizeResult>;
   };
   /** Files: the computer's file manager and its public share links. */
   files: {

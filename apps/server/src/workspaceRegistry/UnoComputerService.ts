@@ -20,6 +20,9 @@ import type {
   UnoComputerInstallStatus,
   UnoComputerInstallStatusInput,
   UnoComputerMetrics,
+  UnoComputerResizeInput,
+  UnoComputerResizeOptions,
+  UnoComputerResizeResult,
   UnoComputerState,
   UnoComputerTargetInput,
 } from "@t3tools/contracts";
@@ -39,6 +42,7 @@ import {
   readInstallStatus,
   type KnownInstall,
 } from "./unoComputer.ts";
+import { readResizeOptions, resizeComputer } from "./unoComputerResize.ts";
 
 const DEFAULT_ACTIVITY_TAIL = 40;
 /** Installs the daemon remembers, so a reload can re-attach to a running one. */
@@ -61,6 +65,12 @@ export interface UnoComputerServiceShape {
    * Питание СВОЕЙ машины токеном машины. `false` — не наш случай (чужой бокс
    * или токена нет): тогда питание идёт ключом аккаунта через `uno.cloud`.
    */
+  readonly resizeOptions: (
+    input?: UnoComputerTargetInput,
+  ) => Effect.Effect<UnoComputerResizeOptions>;
+  readonly resize: (
+    input: UnoComputerResizeInput,
+  ) => Effect.Effect<UnoComputerResizeResult, UnoCloudFetchError>;
   readonly powerOwnBox: (
     boxId: number,
     action: string,
@@ -189,6 +199,28 @@ export const makeUnoComputerService = (
         return status;
       });
 
+    const resizeOptions: UnoComputerServiceShape["resizeOptions"] = (input) =>
+      Effect.gen(function* () {
+        const boxId = yield* resolveBoxId(input);
+        const ctx = yield* context(boxId);
+        return yield* run(() => readResizeOptions({ ...ctx, boxId }));
+      });
+
+    const resize: UnoComputerServiceShape["resize"] = (input) =>
+      Effect.gen(function* () {
+        const boxId = yield* resolveBoxId(input);
+        const ctx = yield* context(boxId);
+        return yield* Effect.tryPromise({
+          try: () =>
+            resizeComputer({
+              ...ctx,
+              boxId,
+              shape: { ramMb: input.ramMb, vcpu: input.vcpu, diskGb: input.diskGb },
+            }),
+          catch: toFetchError,
+        });
+      });
+
     const powerOwnBox: UnoComputerServiceShape["powerOwnBox"] = (boxId, action) =>
       Effect.gen(function* () {
         const creds = yield* readCredentials;
@@ -204,6 +236,8 @@ export const makeUnoComputerService = (
       });
 
     return {
+      resizeOptions,
+      resize,
       powerOwnBox,
       resolveBoxId,
       getState,

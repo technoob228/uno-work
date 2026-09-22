@@ -20,6 +20,7 @@ import { makeClaudeTextGeneration } from "../../textGeneration/ClaudeTextGenerat
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
+import { buildMachineAppsInstructions } from "../../machineApps/machineAppsInstructions.ts";
 import { buildBrowserInstructions } from "../browserInstructions.ts";
 import { ServerConfig } from "../../config.ts";
 import { ProviderDriverError } from "../Errors.ts";
@@ -92,6 +93,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const harnessInstructionBlocks = [
         buildBrowserInstructions(browserBridge.baseUrl),
         buildPluginInstructions(serverConfig.pluginsDir),
+        buildMachineAppsInstructions(),
       ].filter((block): block is string => block !== undefined);
       const harnessInstructions =
         harnessInstructionBlocks.length > 0 ? harnessInstructionBlocks.join("\n\n") : undefined;

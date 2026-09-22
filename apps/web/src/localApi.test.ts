@@ -154,6 +154,11 @@ const rpcClientMock = {
     installApp: vi.fn(),
     installStatus: vi.fn(),
     power: vi.fn(),
+    machineApps: vi.fn(),
+    appAction: vi.fn(),
+    localMetrics: vi.fn(),
+    resizeOptions: vi.fn(),
+    resize: vi.fn(),
   },
   files: {
     list: vi.fn(),

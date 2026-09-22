@@ -43,6 +43,7 @@ import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
 import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
+import { buildMachineAppsInstructions } from "../../machineApps/machineAppsInstructions.ts";
 import { writeBrowserInstructionsFile } from "../browserInstructions.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -771,7 +772,10 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
       const instructionsFilePath = writeBrowserInstructionsFile({
         stateDir: serverConfig.stateDir,
         baseUrl: browserBridge.baseUrl,
-        extraSections: [buildPluginInstructions(serverConfig.pluginsDir)],
+        extraSections: [
+          buildPluginInstructions(serverConfig.pluginsDir),
+          buildMachineAppsInstructions(),
+        ],
       });
       const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
       const baseProcessEnv = browserBridge.applyEnvironment(

@@ -228,6 +228,17 @@ export interface WsRpcClient {
     readonly installApp: RpcUnaryMethod<typeof WS_METHODS.unoComputerInstallApp>;
     readonly installStatus: RpcUnaryMethod<typeof WS_METHODS.unoComputerInstallStatus>;
     readonly power: RpcUnaryMethod<typeof WS_METHODS.unoComputerPower>;
+    readonly machineApps: () => ReturnType<
+      RpcUnaryMethod<typeof WS_METHODS.unoComputerMachineApps>
+    >;
+    readonly appAction: RpcUnaryMethod<typeof WS_METHODS.unoComputerAppAction>;
+    readonly resizeOptions: (
+      input?: RpcInput<typeof WS_METHODS.unoComputerResizeOptions>,
+    ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.unoComputerResizeOptions>>;
+    readonly resize: RpcUnaryMethod<typeof WS_METHODS.unoComputerResize>;
+    readonly localMetrics: () => ReturnType<
+      RpcUnaryMethod<typeof WS_METHODS.unoComputerLocalMetrics>
+    >;
   };
   readonly files: {
     readonly list: RpcUnaryMethod<typeof WS_METHODS.filesList>;
@@ -524,6 +535,15 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       installStatus: (input) =>
         transport.request((client) => client[WS_METHODS.unoComputerInstallStatus](input)),
       power: (input) => transport.request((client) => client[WS_METHODS.unoComputerPower](input)),
+      machineApps: () =>
+        transport.request((client) => client[WS_METHODS.unoComputerMachineApps]({})),
+      appAction: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerAppAction](input)),
+      localMetrics: () =>
+        transport.request((client) => client[WS_METHODS.unoComputerLocalMetrics]({})),
+      resizeOptions: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerResizeOptions](input ?? {})),
+      resize: (input) => transport.request((client) => client[WS_METHODS.unoComputerResize](input)),
     },
     files: {
       list: (input) => transport.request((client) => client[WS_METHODS.filesList](input)),
