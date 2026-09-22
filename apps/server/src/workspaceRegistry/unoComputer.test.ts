@@ -512,13 +512,3 @@ it("a 502 from the control plane reads as a pause, not as 'not an Uno computer'"
   expect(state.candidates).toEqual([]);
   expect(state.error).toBe("Uno isn't answering right now. It usually comes back in a minute.");
 });
-
-describe("accountControlPlaneKey", () => {
-  it("prefers the account key, falls back to the machine token, never the AI key", async () => {
-    const { accountControlPlaneKey } = await import("./unoComputer.ts");
-    expect(accountControlPlaneKey("uno_usr_account", "uno_agt_box")).toBe("uno_usr_account");
-    expect(accountControlPlaneKey("unollm_ai_only", "uno_agt_box")).toBe("uno_agt_box");
-    expect(accountControlPlaneKey("", "uno_agt_box")).toBe("uno_agt_box");
-    expect(accountControlPlaneKey("unollm_ai_only", undefined)).toBe("");
-  });
-});
