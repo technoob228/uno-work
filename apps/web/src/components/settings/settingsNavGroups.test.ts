@@ -32,6 +32,7 @@ describe("buildSettingsNavGroups", () => {
       "/settings/app/labs",
       "/settings/vault",
       "/settings/workspace",
+      "/settings/computer-access",
       "/settings/extensions",
     ]);
     expect(machine!.entries.map((entry) => entry.to)).toEqual([
@@ -67,6 +68,7 @@ describe("buildSettingsNavGroups", () => {
       "Phone",
       "Labs",
       "My machines",
+      "Computer access",
     ]);
   });
 
