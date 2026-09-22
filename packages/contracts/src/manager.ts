@@ -24,6 +24,7 @@ import {
 } from "./baseSchemas.ts";
 import {
   ModelSelection,
+  OrchestrationCheckpointFile,
   OrchestrationLatestTurn,
   OrchestrationMessageRole,
   OrchestrationSessionStatus,
@@ -586,6 +587,95 @@ export const ManagerReadThreadDetailResult = Schema.Struct({
   omittedMessageCount: NonNegativeInt,
 });
 export type ManagerReadThreadDetailResult = typeof ManagerReadThreadDetailResult.Type;
+
+// ===============================
+// wait_for_thread / wait_for_threads
+// ===============================
+
+export const MANAGER_WAIT_DEFAULT_TIMEOUT_SEC = 900;
+export const MANAGER_WAIT_MAX_TIMEOUT_SEC = 3_600;
+export const MANAGER_WAIT_MAX_THREADS = 20;
+export const MANAGER_WAIT_REPLY_MAX_CHARS = 4_000;
+export const MANAGER_WAIT_MAX_CHANGED_FILES = 50;
+
+const ManagerWaitTimeoutSec = PositiveInt.check(
+  Schema.isLessThanOrEqualTo(MANAGER_WAIT_MAX_TIMEOUT_SEC),
+);
+
+export const ManagerWaitForThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  /** Default {@link MANAGER_WAIT_DEFAULT_TIMEOUT_SEC}. */
+  timeoutSec: Schema.optional(ManagerWaitTimeoutSec),
+});
+export type ManagerWaitForThreadInput = typeof ManagerWaitForThreadInput.Type;
+
+export const ManagerWaitMode = Schema.Literals(["any", "all"]);
+export type ManagerWaitMode = typeof ManagerWaitMode.Type;
+
+export const ManagerWaitForThreadsInput = Schema.Struct({
+  threadIds: Schema.Array(ThreadId).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MANAGER_WAIT_MAX_THREADS),
+  ),
+  /** `any` returns once one thread settles, `all` once every thread did. Default `all`. */
+  mode: Schema.optional(ManagerWaitMode),
+  timeoutSec: Schema.optional(ManagerWaitTimeoutSec),
+});
+export type ManagerWaitForThreadsInput = typeof ManagerWaitForThreadsInput.Type;
+
+/**
+ * - `completed` / `error` / `interrupted` — the thread's latest turn ended so.
+ * - `needs_user` — the thread waits for a human: an approval or a question.
+ * - `idle` — nothing ran and nothing is queued (no turn to wait for).
+ * - `timeout` — still busy when the wait ran out.
+ * - `running` — still busy; another thread settled first (`mode: "any"`).
+ */
+export const ManagerWaitStatus = Schema.Literals([
+  "completed",
+  "error",
+  "interrupted",
+  "needs_user",
+  "idle",
+  "timeout",
+  "running",
+]);
+export type ManagerWaitStatus = typeof ManagerWaitStatus.Type;
+
+export const ManagerWaitThreadResult = Schema.Struct({
+  threadId: ThreadId,
+  status: ManagerWaitStatus,
+  /** The thread was already settled when the wait began (no new turn seen). */
+  settledImmediately: Schema.Boolean,
+  turnId: Schema.NullOr(Schema.String),
+  turnStartedAt: Schema.NullOr(IsoDateTime),
+  turnCompletedAt: Schema.NullOr(IsoDateTime),
+  turnDurationMs: Schema.NullOr(NonNegativeInt),
+  /** Untrusted agent output, wrapped in <untrusted_thread_output>. */
+  lastAssistantMessage: Schema.NullOr(Schema.String),
+  lastAssistantMessageTruncated: Schema.Boolean,
+  /** Files the turn changed (checkpoint diff); null when no checkpoint exists (yet). */
+  changedFiles: Schema.NullOr(Schema.Array(OrchestrationCheckpointFile)),
+  changedFilesTotal: NonNegativeInt,
+  pendingApprovals: Schema.Array(ManagerPendingApprovalSummary),
+  /** For `needs_user`: what the thread asks (untrusted, wrapped). */
+  pendingRequest: Schema.NullOr(Schema.String),
+  error: Schema.NullOr(Schema.String),
+});
+export type ManagerWaitThreadResult = typeof ManagerWaitThreadResult.Type;
+
+export const ManagerWaitForThreadResult = Schema.Struct({
+  ...ManagerWaitThreadResult.fields,
+  waitedMs: NonNegativeInt,
+});
+export type ManagerWaitForThreadResult = typeof ManagerWaitForThreadResult.Type;
+
+export const ManagerWaitForThreadsResult = Schema.Struct({
+  mode: ManagerWaitMode,
+  waitedMs: NonNegativeInt,
+  timedOut: Schema.Boolean,
+  results: Schema.Array(ManagerWaitThreadResult),
+});
+export type ManagerWaitForThreadsResult = typeof ManagerWaitForThreadsResult.Type;
 
 export const ManagerListPendingApprovalsResult = Schema.Struct({
   approvals: Schema.Array(ManagerPendingApprovalSummary),

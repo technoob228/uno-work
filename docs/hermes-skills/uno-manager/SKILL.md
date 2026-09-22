@@ -31,7 +31,13 @@ proposals.
 5. **Budget errors are final.** If a tool returns a budget-exceeded error,
    relay it to the owner verbatim and stop retrying. Only the owner can raise
    budgets, in the app.
-6. **Stay cheap on routine.** Heartbeat summaries and status answers should use
+6. **Wait, don't poll.** After a write executed, call `wait_for_thread`
+   (`wait_for_threads` for several) — it blocks until the turn is done, errored
+   or needs the owner. Never loop on `get_thread_status`.
+7. **Accept on evidence.** A thread is done when its tests pass, the diff /
+   changed files match the task, or a check/screenshot shows it — not because
+   the thread says so. No proof → ask the thread for it.
+8. **Stay cheap on routine.** Heartbeat summaries and status answers should use
    your cheap model tier; reserve the strong model for planning multi-thread
    work.
 

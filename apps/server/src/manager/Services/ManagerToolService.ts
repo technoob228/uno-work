@@ -35,6 +35,10 @@ import type {
   ManagerSendTurnInput,
   ManagerTokenBudget,
   ManagerTokenId,
+  ManagerWaitForThreadInput,
+  ManagerWaitForThreadResult,
+  ManagerWaitForThreadsInput,
+  ManagerWaitForThreadsResult,
   ManagerWriteReceipt,
 } from "@t3tools/contracts";
 import { Context } from "effect";
@@ -61,6 +65,19 @@ export interface ManagerToolServiceShape {
     caller: ManagerCaller,
     input: ManagerGetThreadStatusInput,
   ) => Effect.Effect<ManagerGetThreadStatusResult, ManagerToolError>;
+  /**
+   * Block until the thread's current turn settles (completed / error /
+   * interrupted / needs a human) or the timeout passes. Event-driven, with a
+   * rare fallback poll; replaces `get_thread_status` polling loops.
+   */
+  readonly waitForThread: (
+    caller: ManagerCaller,
+    input: ManagerWaitForThreadInput,
+  ) => Effect.Effect<ManagerWaitForThreadResult, ManagerToolError>;
+  readonly waitForThreads: (
+    caller: ManagerCaller,
+    input: ManagerWaitForThreadsInput,
+  ) => Effect.Effect<ManagerWaitForThreadsResult, ManagerToolError>;
   readonly readThreadDetail: (
     caller: ManagerCaller,
     input: ManagerReadThreadDetailInput,

@@ -4,6 +4,9 @@ import type {
   ManagerProposedAction,
   ManagerScope,
   ManagerThreadSummary,
+  ManagerWaitMode,
+  ManagerWaitStatus,
+  ManagerWaitThreadResult,
   ManagerWriteReceipt,
   OrchestrationThreadShell,
   ProjectId,
@@ -14,15 +17,19 @@ import {
   MANAGER_PROPOSAL_TTL_MINUTES,
   MANAGER_READ_THREAD_DETAIL_DEFAULT_MESSAGES,
   MANAGER_READ_THREAD_DETAIL_MAX_MESSAGE_CHARS,
+  MANAGER_WAIT_DEFAULT_TIMEOUT_SEC,
   ManagerProposalId,
   ManagerSlackConnectorConfig,
   ManagerTelegramConnectorConfig,
   type ReminderConnectorKind,
 } from "@t3tools/contracts";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Clock, Effect, Layer, Option, Queue, Schema, Stream } from "effect";
 import * as crypto from "node:crypto";
 
+import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
+import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
 import { ManagerActionProposalRepository } from "../../persistence/Services/ManagerActionProposals.ts";
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
@@ -39,6 +46,20 @@ import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { ManagerApprovalService } from "../Services/ManagerApprovalService.ts";
 import { wrapUntrustedContent } from "../../untrustedContent.ts";
 import { ManagerBudgetService } from "../Services/ManagerBudgetService.ts";
+import {
+  changedFilesOf,
+  clipReply,
+  describePendingRequest,
+  evaluateThreadWait,
+  eventTouchesThreads,
+  findTurnReply,
+  shouldHoldForReply,
+  turnDurationMs,
+  WAIT_EVENT_DEBOUNCE_MS,
+  WAIT_FALLBACK_POLL_MS,
+  type WaitMessage,
+  type ThreadWaitVerdict,
+} from "../threadWait.ts";
 import {
   type ManagerCaller,
   ManagerToolService,
@@ -97,6 +118,8 @@ const makeManagerToolService = Effect.gen(function* () {
   const approvalService = yield* ManagerApprovalService;
   const remindersRepository = yield* RemindersRepository;
   const connectorRepository = yield* ManagerConnectorRepository;
+  const orchestrationEngine = yield* OrchestrationEngineService;
+  const projectionTurnRepository = yield* ProjectionTurnRepository;
 
   const getAllowedThreadShell = (caller: ManagerCaller, threadId: ThreadId) =>
     Effect.gen(function* () {
@@ -231,6 +254,228 @@ const makeManagerToolService = Effect.gen(function* () {
         );
       return { thread: toThreadSummary(shell), pendingApprovals: approvals };
     });
+
+  // ---------------------------------------------------------------------
+  // wait_for_thread(s): block daemon-side instead of letting the brain poll.
+  // ---------------------------------------------------------------------
+
+  type SettledProbe = {
+    readonly verdict: Extract<ThreadWaitVerdict, { settled: true }>;
+    readonly reply: WaitMessage | null;
+    readonly pendingRequest: string | null;
+    readonly pendingApprovals: ReadonlyArray<ManagerPendingApprovalSummary>;
+  };
+
+  const listPendingApprovalsOf = (threadId: ThreadId) =>
+    pendingApprovalRepository.listByThreadId({ threadId }).pipe(
+      Effect.map((rows) =>
+        rows
+          .filter((row) => row.status === "pending")
+          .map(
+            (row): ManagerPendingApprovalSummary => ({
+              threadId: row.threadId,
+              requestId: row.requestId,
+              createdAt: row.createdAt,
+            }),
+          ),
+      ),
+    );
+
+  /** One look at a thread: `null` while its turn is still in flight. */
+  const probeThread = (threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const shell = yield* projectionSnapshotQuery.getThreadShellById(threadId);
+      if (Option.isNone(shell)) {
+        return {
+          verdict: {
+            settled: true,
+            status: "error",
+            turn: null,
+            error: "The thread no longer exists.",
+          },
+          reply: null,
+          pendingRequest: null,
+          pendingApprovals: [],
+        } satisfies SettledProbe as SettledProbe;
+      }
+      const turns = yield* projectionTurnRepository.listByThreadId({ threadId });
+      const nowMs = yield* Clock.currentTimeMillis;
+      const session = shell.value.session;
+      const verdict = evaluateThreadWait({
+        hasPendingApprovals: shell.value.hasPendingApprovals,
+        hasPendingUserInput: shell.value.hasPendingUserInput,
+        session:
+          session === null
+            ? null
+            : {
+                status: session.status,
+                updatedAt: session.updatedAt,
+                lastError: session.lastError,
+              },
+        turns,
+        nowMs,
+      });
+      if (!verdict.settled) {
+        return null;
+      }
+      const detail = yield* projectionSnapshotQuery.getThreadDetailById(threadId);
+      const reply = Option.isSome(detail)
+        ? findTurnReply(verdict.turn, detail.value.messages)
+        : null;
+      if (shouldHoldForReply(verdict, reply, nowMs)) {
+        return null;
+      }
+      const needsUser = verdict.status === "needs_user";
+      return {
+        verdict,
+        reply,
+        pendingRequest:
+          needsUser && Option.isSome(detail)
+            ? describePendingRequest(detail.value.activities)
+            : null,
+        pendingApprovals: needsUser ? yield* listPendingApprovalsOf(threadId) : [],
+      } satisfies SettledProbe as SettledProbe;
+    });
+
+  const toWaitResult = (
+    threadId: ThreadId,
+    probe: SettledProbe | null,
+    unsettledStatus: Extract<ManagerWaitStatus, "timeout" | "running">,
+    settledImmediately: boolean,
+  ): ManagerWaitThreadResult => {
+    if (probe === null) {
+      return {
+        threadId,
+        status: unsettledStatus,
+        settledImmediately: false,
+        turnId: null,
+        turnStartedAt: null,
+        turnCompletedAt: null,
+        turnDurationMs: null,
+        lastAssistantMessage: null,
+        lastAssistantMessageTruncated: false,
+        changedFiles: null,
+        changedFilesTotal: 0,
+        pendingApprovals: [],
+        pendingRequest: null,
+        error: null,
+      };
+    }
+    const turn = probe.verdict.turn;
+    const reply = clipReply(probe.reply);
+    const files = changedFilesOf(turn);
+    return {
+      threadId,
+      status: probe.verdict.status,
+      settledImmediately,
+      turnId: turn?.turnId ?? null,
+      turnStartedAt: turn?.startedAt ?? null,
+      turnCompletedAt: turn?.completedAt ?? null,
+      turnDurationMs: turnDurationMs(turn),
+      lastAssistantMessage: reply.text,
+      lastAssistantMessageTruncated: reply.truncated,
+      changedFiles: files.files === null ? null : [...files.files],
+      changedFilesTotal: files.total,
+      pendingApprovals: [...probe.pendingApprovals],
+      pendingRequest: probe.pendingRequest,
+      error: probe.verdict.error,
+    };
+  };
+
+  const waitForThreadIds = (
+    caller: ManagerCaller,
+    threadIds: ReadonlyArray<ThreadId>,
+    mode: ManagerWaitMode,
+    timeoutSec: number,
+  ) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* requireScope(caller, "threads:read");
+        const unique = [...new Set(threadIds)];
+        for (const threadId of unique) {
+          yield* getAllowedThreadShell(caller, threadId);
+        }
+        const startedMs = yield* Clock.currentTimeMillis;
+        const deadlineMs = startedMs + timeoutSec * 1_000;
+
+        // Wake-ups come from the orchestration event stream (what the UI
+        // listens to); the fallback poll covers a missed or absent stream.
+        const wake = yield* Queue.sliding<void>(1);
+        const watched: ReadonlySet<string> = new Set(unique);
+        yield* orchestrationEngine.streamDomainEvents.pipe(
+          Stream.filter((event) => eventTouchesThreads(event, watched)),
+          Stream.runForEach(() => Queue.offer(wake, undefined)),
+          Effect.forkScoped,
+        );
+        yield* Effect.yieldNow;
+
+        const settled = new Map<ThreadId, SettledProbe>();
+        const settledImmediately = new Set<ThreadId>();
+        let firstPass = true;
+        let done = false;
+        while (true) {
+          for (const threadId of unique) {
+            if (settled.has(threadId)) continue;
+            const probe = yield* probeThread(threadId);
+            if (probe !== null) {
+              settled.set(threadId, probe);
+              if (firstPass) settledImmediately.add(threadId);
+            }
+          }
+          firstPass = false;
+          done = mode === "any" ? settled.size > 0 : settled.size === unique.length;
+          const nowMs = yield* Clock.currentTimeMillis;
+          if (done || nowMs >= deadlineMs) break;
+          yield* Effect.raceFirst(
+            Queue.take(wake),
+            Effect.sleep(Math.min(WAIT_FALLBACK_POLL_MS, deadlineMs - nowMs)),
+          );
+          // Coalesce an event burst into a single re-evaluation.
+          const afterWakeMs = yield* Clock.currentTimeMillis;
+          yield* Effect.sleep(
+            Math.max(0, Math.min(WAIT_EVENT_DEBOUNCE_MS, deadlineMs - afterWakeMs)),
+          );
+          yield* Queue.clear(wake);
+        }
+        const endedMs = yield* Clock.currentTimeMillis;
+        const unsettledStatus = done ? "running" : "timeout";
+        return {
+          waitedMs: Math.max(0, endedMs - startedMs),
+          timedOut: !done,
+          results: unique.map((threadId) =>
+            toWaitResult(
+              threadId,
+              settled.get(threadId) ?? null,
+              unsettledStatus,
+              settledImmediately.has(threadId),
+            ),
+          ),
+        };
+      }),
+    );
+
+  const waitForThread: ManagerToolServiceShape["waitForThread"] = (caller, input) =>
+    waitForThreadIds(
+      caller,
+      [input.threadId],
+      "all",
+      input.timeoutSec ?? MANAGER_WAIT_DEFAULT_TIMEOUT_SEC,
+    ).pipe(
+      Effect.map((outcome) => ({
+        ...(outcome.results[0] as ManagerWaitThreadResult),
+        waitedMs: outcome.waitedMs,
+      })),
+    );
+
+  const waitForThreads: ManagerToolServiceShape["waitForThreads"] = (caller, input) => {
+    const mode = input.mode ?? "all";
+    return waitForThreadIds(
+      caller,
+      input.threadIds,
+      mode,
+      input.timeoutSec ?? MANAGER_WAIT_DEFAULT_TIMEOUT_SEC,
+    ).pipe(Effect.map((outcome) => ({ mode, ...outcome })));
+  };
 
   const readThreadDetail: ManagerToolServiceShape["readThreadDetail"] = (caller, input) =>
     Effect.gen(function* () {
@@ -515,6 +760,8 @@ const makeManagerToolService = Effect.gen(function* () {
   return {
     listThreads,
     getThreadStatus,
+    waitForThread,
+    waitForThreads,
     readThreadDetail,
     listPendingApprovals,
     createThread,
@@ -529,4 +776,6 @@ const makeManagerToolService = Effect.gen(function* () {
   } satisfies ManagerToolServiceShape;
 });
 
-export const ManagerToolServiceLive = Layer.effect(ManagerToolService, makeManagerToolService);
+export const ManagerToolServiceLive = Layer.effect(ManagerToolService, makeManagerToolService).pipe(
+  Layer.provide(ProjectionTurnRepositoryLive),
+);

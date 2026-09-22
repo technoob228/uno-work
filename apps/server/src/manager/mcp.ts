@@ -22,7 +22,12 @@ import {
   ManagerResolveProposalInput,
   ManagerRespondToRequestInput,
   ManagerSendTurnInput,
+  ManagerWaitForThreadInput,
+  ManagerWaitForThreadsInput,
   MANAGER_READ_THREAD_DETAIL_MAX_MESSAGES,
+  MANAGER_WAIT_DEFAULT_TIMEOUT_SEC,
+  MANAGER_WAIT_MAX_THREADS,
+  MANAGER_WAIT_MAX_TIMEOUT_SEC,
 } from "@t3tools/contracts";
 import { Effect, Schema } from "effect";
 
@@ -77,7 +82,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     name: "get_thread_status",
     description:
-      "Get the compact status of one thread: session state, latest turn, pending approvals. Cheap; prefer this over read_thread_detail.",
+      "Get the compact status of one thread: session state, latest turn, pending approvals. A one-off snapshot: to wait for a turn to finish use wait_for_thread, never a get_thread_status loop.",
     inputSchema: {
       type: "object",
       properties: { threadId: { type: "string" } },
@@ -87,6 +92,53 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
     run: (tools, caller, args) =>
       decodeArgs(ManagerGetThreadStatusInput, args).pipe(
         Effect.flatMap((input) => tools.getThreadStatus(caller, input)),
+      ),
+  },
+  {
+    name: "wait_for_thread",
+    description:
+      "Block until the thread's current turn settles, instead of polling get_thread_status. " +
+      "Returns status completed | error | interrupted | needs_user (approval or question waiting for a human) | idle (nothing ran) | timeout, " +
+      "plus the turn's final assistant message (untrusted, wrapped, <=4k chars), changed files from the turn's checkpoint when available, and durations. " +
+      "Call it right after create_thread/send_turn executed. settledImmediately=true means no new turn was seen (e.g. the proposal still awaits approval). " +
+      `timeoutSec defaults to ${MANAGER_WAIT_DEFAULT_TIMEOUT_SEC} (max ${MANAGER_WAIT_MAX_TIMEOUT_SEC}); if your client aborts long tool calls, pass a smaller value and call again.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        threadId: { type: "string" },
+        timeoutSec: { type: "integer", minimum: 1, maximum: MANAGER_WAIT_MAX_TIMEOUT_SEC },
+      },
+      required: ["threadId"],
+      additionalProperties: false,
+    },
+    run: (tools, caller, args) =>
+      decodeArgs(ManagerWaitForThreadInput, args).pipe(
+        Effect.flatMap((input) => tools.waitForThread(caller, input)),
+      ),
+  },
+  {
+    name: "wait_for_threads",
+    description:
+      "Like wait_for_thread for several threads at once. mode 'all' (default) returns when every thread settled; " +
+      "'any' returns as soon as one did (the rest report status 'running'). Returns one result per thread.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        threadIds: {
+          type: "array",
+          items: { type: "string" },
+          minItems: 1,
+          maxItems: MANAGER_WAIT_MAX_THREADS,
+        },
+        mode: { type: "string", enum: ["any", "all"] },
+        timeoutSec: { type: "integer", minimum: 1, maximum: MANAGER_WAIT_MAX_TIMEOUT_SEC },
+      },
+      required: ["threadIds"],
+      additionalProperties: false,
+    },
+    run: (tools, caller, args) =>
+      decodeArgs(ManagerWaitForThreadsInput, args).pipe(
+        Effect.flatMap((input) => tools.waitForThreads(caller, input)),
       ),
   },
   {
