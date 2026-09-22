@@ -38,7 +38,35 @@ export const filesQueryKeys = {
     ["files", "bytes", environmentId, path, modifiedAt] as const,
   shares: (environmentId: EnvironmentId | null, path: string | null) =>
     ["files", "shares", environmentId, path] as const,
+  cloudState: (environmentId: EnvironmentId | null) =>
+    ["files", "cloud", "state", environmentId] as const,
+  cloudList: (environmentId: EnvironmentId | null, bucketId: number, prefix: string) =>
+    ["files", "cloud", "list", environmentId, bucketId, prefix] as const,
 };
+
+export function cloudStateQueryOptions(environmentId: EnvironmentId | null) {
+  return queryOptions({
+    queryKey: filesQueryKeys.cloudState(environmentId),
+    queryFn: () => filesApi(environmentId).cloudState(),
+    enabled: environmentId !== null,
+    staleTime: 30_000,
+    retry: 1,
+  });
+}
+
+export function cloudListQueryOptions(
+  environmentId: EnvironmentId | null,
+  bucketId: number,
+  prefix: string,
+) {
+  return queryOptions({
+    queryKey: filesQueryKeys.cloudList(environmentId, bucketId, prefix),
+    queryFn: () => filesApi(environmentId).cloudList({ bucketId, prefix }),
+    enabled: environmentId !== null,
+    staleTime: 10_000,
+    retry: 1,
+  });
+}
 
 export function filesApi(environmentId: EnvironmentId | null) {
   if (environmentId === null) throw new Error("This computer isn't connected.");

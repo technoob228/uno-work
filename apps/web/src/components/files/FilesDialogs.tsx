@@ -194,12 +194,19 @@ export function MoveDialog({
   entries,
   onMove,
   onOpenChange,
+  title,
+  description = "Pick the folder to move into.",
+  confirmLabel = "Move here",
 }: {
   open: boolean;
   environmentId: EnvironmentId | null;
   rootPath: string;
   startPath: string;
   entries: ReadonlyArray<FilesEntry>;
+  /** Defaults to "Move …"; used as a plain folder picker elsewhere. */
+  title?: string;
+  description?: string;
+  confirmLabel?: string;
   onMove: (destination: string) => Promise<void>;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -221,18 +228,19 @@ export function MoveDialog({
     (entry) =>
       entry.kind === "directory" && (path === entry.path || path.startsWith(`${entry.path}/`)),
   );
-  const alreadyThere = entries.every(
-    (entry) => entry.path.slice(0, entry.path.lastIndexOf("/")) === path,
-  );
+  const alreadyThere =
+    entries.length > 0 &&
+    entries.every((entry) => entry.path.slice(0, entry.path.lastIndexOf("/")) === path);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup className="max-w-md">
         <DialogHeader>
           <DialogTitle>
-            Move {entries.length === 1 ? `“${entries[0]?.name}”` : `${entries.length} items`}
+            {title ??
+              `Move ${entries.length === 1 ? `“${entries[0]?.name}”` : `${entries.length} items`}`}
           </DialogTitle>
-          <DialogDescription>Pick the folder to move into.</DialogDescription>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <DialogPanel className="flex flex-col gap-2">
           <nav className="flex flex-wrap items-center gap-0.5 text-sm" aria-label="Folder">
@@ -310,7 +318,7 @@ export function MoveDialog({
             }}
           >
             {pending ? <Loader2Icon className="animate-spin" /> : null}
-            Move here
+            {confirmLabel}
           </Button>
         </DialogFooter>
       </DialogPopup>

@@ -241,6 +241,13 @@ export interface WsRpcClient {
     readonly listShares: RpcUnaryMethod<typeof WS_METHODS.filesShareList>;
     readonly revokeShare: RpcUnaryMethod<typeof WS_METHODS.filesShareRevoke>;
     readonly publishSite: RpcUnaryMethod<typeof WS_METHODS.filesPublishSite>;
+    readonly cloudState: () => ReturnType<RpcUnaryMethod<typeof WS_METHODS.filesCloudState>>;
+    readonly cloudList: RpcUnaryMethod<typeof WS_METHODS.filesCloudList>;
+    readonly cloudCreateBucket: RpcUnaryMethod<typeof WS_METHODS.filesCloudCreateBucket>;
+    readonly cloudDelete: RpcUnaryMethod<typeof WS_METHODS.filesCloudDelete>;
+    readonly cloudDownloadUrl: RpcUnaryMethod<typeof WS_METHODS.filesCloudDownloadUrl>;
+    readonly cloudCopyToCloud: RpcUnaryMethod<typeof WS_METHODS.filesCloudCopyToCloud>;
+    readonly cloudCopyToComputer: RpcUnaryMethod<typeof WS_METHODS.filesCloudCopyToComputer>;
   };
 }
 
@@ -535,6 +542,18 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.filesShareRevoke](input)),
       publishSite: (input) =>
         transport.request((client) => client[WS_METHODS.filesPublishSite](input)),
+      cloudState: () => transport.request((client) => client[WS_METHODS.filesCloudState]({})),
+      cloudList: (input) => transport.request((client) => client[WS_METHODS.filesCloudList](input)),
+      cloudCreateBucket: (input) =>
+        transport.request((client) => client[WS_METHODS.filesCloudCreateBucket](input)),
+      cloudDelete: (input) =>
+        transport.request((client) => client[WS_METHODS.filesCloudDelete](input)),
+      cloudDownloadUrl: (input) =>
+        transport.request((client) => client[WS_METHODS.filesCloudDownloadUrl](input)),
+      cloudCopyToCloud: (input) =>
+        transport.request((client) => client[WS_METHODS.filesCloudCopyToCloud](input)),
+      cloudCopyToComputer: (input) =>
+        transport.request((client) => client[WS_METHODS.filesCloudCopyToComputer](input)),
     },
   };
 }

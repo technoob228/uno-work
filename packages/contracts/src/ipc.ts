@@ -149,6 +149,17 @@ import type {
   FilesShareListResult,
   FilesShareRevokeInput,
   FilesStatInput,
+  FilesCloudState,
+  FilesCloudListInput,
+  FilesCloudListResult,
+  FilesCloudBucket,
+  FilesCloudCreateBucketInput,
+  FilesCloudObjectInput,
+  FilesCloudDeleteResult,
+  FilesCloudDownloadUrl,
+  FilesCloudCopyToCloudInput,
+  FilesCloudCopyToComputerInput,
+  FilesCloudTransferResult,
 } from "./files.ts";
 import type {
   SourceControlCloneRepositoryInput,
@@ -725,6 +736,15 @@ export interface EnvironmentApi {
     listShares: (input: FilesShareListInput) => Promise<FilesShareListResult>;
     revokeShare: (input: FilesShareRevokeInput) => Promise<FilesShare>;
     publishSite: (input: FilesPublishSiteInput) => Promise<FilesPublishSiteResult>;
+    cloudState: () => Promise<FilesCloudState>;
+    cloudList: (input: FilesCloudListInput) => Promise<FilesCloudListResult>;
+    cloudCreateBucket: (input: FilesCloudCreateBucketInput) => Promise<FilesCloudBucket>;
+    cloudDelete: (input: FilesCloudObjectInput) => Promise<FilesCloudDeleteResult>;
+    cloudDownloadUrl: (input: FilesCloudObjectInput) => Promise<FilesCloudDownloadUrl>;
+    cloudCopyToCloud: (input: FilesCloudCopyToCloudInput) => Promise<FilesCloudTransferResult>;
+    cloudCopyToComputer: (
+      input: FilesCloudCopyToComputerInput,
+    ) => Promise<FilesCloudTransferResult>;
   };
   /** Install a harness CLI or sign it in on this environment's machine. */
   providerSetup: {

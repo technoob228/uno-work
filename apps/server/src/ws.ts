@@ -1316,6 +1316,34 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.filesShareRevoke, files.revokeShare(input), {
             "rpc.aggregate": "files",
           }),
+        [WS_METHODS.filesCloudState]: (input) =>
+          observeRpcEffect(WS_METHODS.filesCloudState, files.cloudState, {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesCloudList]: (input) =>
+          observeRpcEffect(WS_METHODS.filesCloudList, files.cloudList(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesCloudCreateBucket]: (input) =>
+          observeRpcEffect(WS_METHODS.filesCloudCreateBucket, files.cloudCreateBucket(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesCloudDelete]: (input) =>
+          observeRpcEffect(WS_METHODS.filesCloudDelete, files.cloudDelete(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesCloudDownloadUrl]: (input) =>
+          observeRpcEffect(WS_METHODS.filesCloudDownloadUrl, files.cloudDownloadUrl(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesCloudCopyToCloud]: (input) =>
+          observeRpcEffect(WS_METHODS.filesCloudCopyToCloud, files.cloudCopyToCloud(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesCloudCopyToComputer]: (input) =>
+          observeRpcEffect(WS_METHODS.filesCloudCopyToComputer, files.cloudCopyToComputer(input), {
+            "rpc.aggregate": "files",
+          }),
         [WS_METHODS.filesPublishSite]: (input) =>
           observeRpcEffect(WS_METHODS.filesPublishSite, files.publishSite(input), {
             "rpc.aggregate": "files",

@@ -8,6 +8,7 @@
  *
  * @module files/FilesService
  */
+import fsPromises from "node:fs/promises";
 import * as OS from "node:os";
 
 import {
@@ -31,6 +32,17 @@ import {
   type FilesShareRevokeInput,
   type FilesCreateFolderInput,
   type FilesStatInput,
+  type FilesCloudBucket,
+  type FilesCloudCopyToCloudInput,
+  type FilesCloudCopyToComputerInput,
+  type FilesCloudCreateBucketInput,
+  type FilesCloudDeleteResult,
+  type FilesCloudDownloadUrl,
+  type FilesCloudListInput,
+  type FilesCloudListResult,
+  type FilesCloudObjectInput,
+  type FilesCloudState,
+  type FilesCloudTransferResult,
   FILES_SHARE_ROUTE_PREFIX,
 } from "@t3tools/contracts";
 import { Context, Effect, Layer, Option } from "effect";
@@ -48,6 +60,16 @@ import {
   statResolved,
 } from "./fileManager.ts";
 import { FilesPathError, isHiddenPath, resolveFilesRoot, resolveInsideRoot } from "./filesPaths.ts";
+import {
+  cloudCreateBucket,
+  cloudDelete,
+  cloudList,
+  cloudPresign,
+  cloudState,
+  copyToCloud,
+  copyToComputer,
+  type CloudDeps,
+} from "./cloudStorage.ts";
 import { publishToUnoHosting } from "./sitePublish.ts";
 import {
   generateShareToken,
@@ -81,6 +103,25 @@ export interface FilesServiceShape {
   /** Public route: the share behind a token (any status; the caller decides). */
   readonly findShareByToken: (token: string) => Effect.Effect<FileShareRow | null, FilesError>;
   readonly recordShareAccess: (shareId: string) => Effect.Effect<void>;
+  readonly cloudState: Effect.Effect<FilesCloudState, FilesError>;
+  readonly cloudList: (
+    input: FilesCloudListInput,
+  ) => Effect.Effect<FilesCloudListResult, FilesError>;
+  readonly cloudCreateBucket: (
+    input: FilesCloudCreateBucketInput,
+  ) => Effect.Effect<FilesCloudBucket, FilesError>;
+  readonly cloudDelete: (
+    input: FilesCloudObjectInput,
+  ) => Effect.Effect<FilesCloudDeleteResult, FilesError>;
+  readonly cloudDownloadUrl: (
+    input: FilesCloudObjectInput,
+  ) => Effect.Effect<FilesCloudDownloadUrl, FilesError>;
+  readonly cloudCopyToCloud: (
+    input: FilesCloudCopyToCloudInput,
+  ) => Effect.Effect<FilesCloudTransferResult, FilesError>;
+  readonly cloudCopyToComputer: (
+    input: FilesCloudCopyToComputerInput,
+  ) => Effect.Effect<FilesCloudTransferResult, FilesError>;
 }
 
 export class FilesService extends Context.Service<FilesService, FilesServiceShape>()(
@@ -128,7 +169,12 @@ export function toFilesShare(row: FileShareRow): FilesShare {
   };
 }
 
-export const makeFilesService = (options: { readonly root?: string } = {}) =>
+const NOT_LINKED =
+  "Connect this computer to your Uno account to use Cloud storage (Settings → Uno account).";
+
+export const makeFilesService = (
+  options: { readonly root?: string; readonly cloud?: Partial<CloudDeps> } = {},
+) =>
   Effect.gen(function* () {
     const shares = yield* FileSharesRepository;
     const settings = yield* ServerSettingsService;
@@ -312,7 +358,113 @@ export const makeFilesService = (options: { readonly root?: string } = {}) =>
     const recordShareAccess: FilesServiceShape["recordShareAccess"] = (shareId) =>
       shares.recordAccess({ shareId, at: nowIso() }).pipe(Effect.ignore);
 
+    // This computer's own console token (work-machine token); the account
+    // key only when a person put one in Settings.
+    const cloudDeps = settings.getSettings.pipe(
+      Effect.map((current) => current.uno.boxToken?.trim() || current.uno.apiKey.trim()),
+      Effect.orElseSucceed(() => ""),
+      Effect.flatMap((token) =>
+        token.length > 0
+          ? Effect.succeed<CloudDeps>({ ...options.cloud, token })
+          : Effect.fail(new FilesError({ message: NOT_LINKED })),
+      ),
+    );
+    const withCloud = <A>(fallback: string, run: (deps: CloudDeps) => Promise<A>) =>
+      cloudDeps.pipe(Effect.flatMap((deps) => attempt(() => run(deps), fallback)));
+
+    const cloudStateEffect: FilesServiceShape["cloudState"] = settings.getSettings.pipe(
+      Effect.map((current) => current.uno.boxToken?.trim() || current.uno.apiKey.trim()),
+      Effect.orElseSucceed(() => ""),
+      Effect.flatMap((token) =>
+        token.length === 0
+          ? Effect.succeed<FilesCloudState>({
+              available: false,
+              message: NOT_LINKED,
+              usedBytes: 0,
+              quotaBytes: 0,
+              overQuota: false,
+              buckets: [],
+            })
+          : attempt(
+              () => cloudState({ ...options.cloud, token }),
+              "Couldn't reach Cloud storage.",
+            ).pipe(
+              Effect.catch((error) =>
+                Effect.succeed<FilesCloudState>({
+                  available: false,
+                  message: error.message,
+                  usedBytes: 0,
+                  quotaBytes: 0,
+                  overQuota: false,
+                  buckets: [],
+                }),
+              ),
+            ),
+      ),
+    );
+
+    const cloudCopyToCloudEffect: FilesServiceShape["cloudCopyToCloud"] = (input) =>
+      Effect.gen(function* () {
+        const root = yield* rootPath;
+        const resolved: string[] = [];
+        for (const path of input.paths) {
+          const target = yield* attempt(() => resolveInsideRoot(root, path), "Couldn't copy it.");
+          if (target === root) {
+            return yield* new FilesError({
+              message: "Pick files or folders inside your home folder.",
+            });
+          }
+          resolved.push(target);
+        }
+        const result = yield* withCloud("Copying to Cloud storage didn't finish.", (deps) =>
+          copyToCloud(deps, { paths: resolved, bucketId: input.bucketId, prefix: input.prefix }),
+        );
+        if (input.removeSource) {
+          // A move: drop only what actually arrived in the cloud.
+          for (const path of result.uploadedPaths) {
+            yield* attempt(() => fsPromises.rm(path, { force: true }), "Couldn't clean up.").pipe(
+              Effect.ignore,
+            );
+          }
+        }
+        yield* Effect.logInfo("files.cloud.upload", { files: result.files, bytes: result.bytes });
+        return { files: result.files, bytes: result.bytes, skipped: result.skipped };
+      });
+
+    const cloudCopyToComputerEffect: FilesServiceShape["cloudCopyToComputer"] = (input) =>
+      Effect.gen(function* () {
+        const root = yield* rootPath;
+        const destination = yield* attempt(
+          () => resolveInsideRoot(root, input.destinationPath),
+          "Couldn't copy here.",
+        );
+        const result = yield* withCloud("Copying to this computer didn't finish.", (deps) =>
+          copyToComputer(deps, {
+            bucketId: input.bucketId,
+            keys: input.keys,
+            destinationDir: destination,
+          }),
+        );
+        yield* Effect.logInfo("files.cloud.download", { files: result.files, bytes: result.bytes });
+        return result;
+      });
+
     return {
+      cloudState: cloudStateEffect,
+      cloudList: (input) =>
+        withCloud("Couldn't open this bucket.", (deps) => cloudList(deps, input)),
+      cloudCreateBucket: (input) =>
+        withCloud("Couldn't create the bucket.", (deps) => cloudCreateBucket(deps, input.name)),
+      cloudDelete: (input) =>
+        withCloud("Couldn't delete it.", async (deps) => ({
+          deleted: await cloudDelete(deps, input.bucketId, input.key),
+        })),
+      cloudDownloadUrl: (input) =>
+        withCloud("Couldn't prepare the download.", async (deps) => ({
+          url: await cloudPresign(deps, input.bucketId, input.key, "get"),
+        })),
+      cloudCopyToCloud: cloudCopyToCloudEffect,
+      cloudCopyToComputer: cloudCopyToComputerEffect,
       rootPath,
       list,
       stat,

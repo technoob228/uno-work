@@ -23,6 +23,7 @@ import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
 import { ComputerActivityCard } from "./ComputerActivityCard";
 import { ComputerAppsCard } from "./ComputerAppsCard";
+import { ComputerCloudStorageRow } from "./ComputerCloudStorageRow";
 import { ComputerEngineersDoor } from "./ComputerEngineersDoor";
 import { ComputerHero } from "./ComputerHero";
 import { ComputerMonitorCard } from "./ComputerMonitorCard";
@@ -154,6 +155,7 @@ export function ComputerView() {
                     onClearStartError={installs.clearStartError}
                   />
                 </div>
+                <ComputerCloudStorageRow environmentId={environmentId} />
                 <ComputerActivityCard
                   activity={activityQuery.data}
                   loading={activityQuery.isPending}

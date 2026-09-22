@@ -189,3 +189,107 @@ export class FilesError extends Schema.TaggedErrorClass<FilesError>()("FilesErro
   message: TrimmedNonEmptyString,
   cause: Schema.optional(Schema.Defect),
 }) {}
+
+/* ------------------------------------------------------------------
+ * Cloud storage — the Uno account's S3 buckets, shown as a second disk.
+ * The daemon talks to the console with this computer's own token; files
+ * move between the computer and S3 through short-lived presigned URLs.
+ * ------------------------------------------------------------------ */
+
+export const FilesCloudBucket = Schema.Struct({
+  id: Schema.Number,
+  name: Schema.String,
+  usedBytes: NonNegativeInt,
+});
+export type FilesCloudBucket = typeof FilesCloudBucket.Type;
+
+export const FilesCloudState = Schema.Struct({
+  /** False when this computer isn't connected to an Uno account. */
+  available: Schema.Boolean,
+  /** Why it's unavailable, in words for a person. */
+  message: Schema.NullOr(Schema.String),
+  usedBytes: NonNegativeInt,
+  /** 0 when the console didn't report a quota. */
+  quotaBytes: NonNegativeInt,
+  overQuota: Schema.Boolean,
+  buckets: Schema.Array(FilesCloudBucket),
+});
+export type FilesCloudState = typeof FilesCloudState.Type;
+
+const CloudKey = TrimmedNonEmptyString.check(Schema.isMaxLength(1024));
+/** A folder inside a bucket: "" (root) or a path ending in "/". */
+const CloudPrefix = Schema.String.check(Schema.isMaxLength(1024));
+
+export const FilesCloudObject = Schema.Struct({
+  key: Schema.String,
+  name: Schema.String,
+  size: NonNegativeInt,
+  modifiedAt: Schema.NullOr(Schema.String),
+});
+export type FilesCloudObject = typeof FilesCloudObject.Type;
+
+export const FilesCloudFolder = Schema.Struct({
+  prefix: Schema.String,
+  name: Schema.String,
+});
+export type FilesCloudFolder = typeof FilesCloudFolder.Type;
+
+export const FilesCloudListInput = Schema.Struct({
+  bucketId: Schema.Number,
+  prefix: Schema.optional(CloudPrefix),
+});
+export type FilesCloudListInput = typeof FilesCloudListInput.Type;
+
+export const FilesCloudListResult = Schema.Struct({
+  bucket: FilesCloudBucket,
+  prefix: Schema.String,
+  folders: Schema.Array(FilesCloudFolder),
+  objects: Schema.Array(FilesCloudObject),
+  truncated: Schema.Boolean,
+  /** False on a console that can't list bucket contents yet. */
+  listingSupported: Schema.Boolean,
+});
+export type FilesCloudListResult = typeof FilesCloudListResult.Type;
+
+export const FilesCloudCreateBucketInput = Schema.Struct({
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(63)),
+});
+export type FilesCloudCreateBucketInput = typeof FilesCloudCreateBucketInput.Type;
+
+export const FilesCloudObjectInput = Schema.Struct({
+  bucketId: Schema.Number,
+  /** An object key, or a folder prefix ending in "/". */
+  key: CloudKey,
+});
+export type FilesCloudObjectInput = typeof FilesCloudObjectInput.Type;
+
+export const FilesCloudDeleteResult = Schema.Struct({ deleted: NonNegativeInt });
+export type FilesCloudDeleteResult = typeof FilesCloudDeleteResult.Type;
+
+export const FilesCloudDownloadUrl = Schema.Struct({ url: Schema.String });
+export type FilesCloudDownloadUrl = typeof FilesCloudDownloadUrl.Type;
+
+export const FilesCloudCopyToCloudInput = Schema.Struct({
+  /** Files or folders on the computer. */
+  paths: Schema.Array(FilesPath).check(Schema.isMinLength(1), Schema.isMaxLength(1000)),
+  bucketId: Schema.Number,
+  prefix: Schema.optional(CloudPrefix),
+  /** Remove the originals afterwards (a move, e.g. after a browser upload). */
+  removeSource: Schema.optional(Schema.Boolean),
+});
+export type FilesCloudCopyToCloudInput = typeof FilesCloudCopyToCloudInput.Type;
+
+export const FilesCloudCopyToComputerInput = Schema.Struct({
+  bucketId: Schema.Number,
+  keys: Schema.Array(CloudKey).check(Schema.isMinLength(1), Schema.isMaxLength(1000)),
+  destinationPath: FilesPath,
+});
+export type FilesCloudCopyToComputerInput = typeof FilesCloudCopyToComputerInput.Type;
+
+export const FilesCloudTransferResult = Schema.Struct({
+  files: NonNegativeInt,
+  bytes: NonNegativeInt,
+  /** Files left out, with the reason (too big, hidden, …). */
+  skipped: Schema.Array(Schema.Struct({ name: Schema.String, reason: Schema.String })),
+});
+export type FilesCloudTransferResult = typeof FilesCloudTransferResult.Type;

@@ -167,6 +167,13 @@ const rpcClientMock = {
     listShares: vi.fn(),
     revokeShare: vi.fn(),
     publishSite: vi.fn(),
+    cloudState: vi.fn(),
+    cloudList: vi.fn(),
+    cloudCreateBucket: vi.fn(),
+    cloudDelete: vi.fn(),
+    cloudDownloadUrl: vi.fn(),
+    cloudCopyToCloud: vi.fn(),
+    cloudCopyToComputer: vi.fn(),
   },
 };
 

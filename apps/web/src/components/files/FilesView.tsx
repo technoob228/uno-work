@@ -13,6 +13,7 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   ChevronRightIcon,
+  CloudIcon,
   DownloadIcon,
   EllipsisIcon,
   EyeIcon,
@@ -74,6 +75,9 @@ import {
 } from "./filesApi";
 import { registerBuiltInFileOpeners } from "./openers";
 import { ShareDialog, SharedLinksDialog } from "./ShareDialog";
+import { CloudBrowser } from "./CloudBrowser";
+import { CopyToCloudDialog } from "./CopyToCloudDialog";
+import { FilesLocationSwitch } from "./FilesLocationSwitch";
 
 registerBuiltInFileOpeners();
 
@@ -138,7 +142,8 @@ type DialogState =
   | { type: "move"; entries: FilesEntry[] }
   | { type: "delete"; entries: FilesEntry[] }
   | { type: "share"; entry: FilesEntry }
-  | { type: "links" };
+  | { type: "links" }
+  | { type: "toCloud"; entries: FilesEntry[] };
 
 export function FilesView() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -211,7 +216,24 @@ export function FilesView() {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
-        {search.file && environmentId ? (
+        {search.cloud === "1" ? (
+          <CloudBrowser
+            environmentId={environmentId}
+            bucketId={search.bucket ?? null}
+            prefix={search.prefix ?? ""}
+            uploads={uploads}
+            onOpenComputer={() => openFolder(undefined)}
+            onNavigate={(bucket, prefix) =>
+              void navigate({
+                search: {
+                  cloud: "1",
+                  ...(bucket !== null ? { bucket } : {}),
+                  ...(prefix ? { prefix } : {}),
+                },
+              })
+            }
+          />
+        ) : search.file && environmentId ? (
           <FileViewer
             key={search.file}
             environmentId={environmentId}
@@ -231,6 +253,7 @@ export function FilesView() {
             onOpenFile={openFile}
             uploads={uploads}
             onDialog={setDialog}
+            onOpenCloud={() => void navigate({ search: { cloud: "1" } })}
             onMoveInto={(entries, destination) =>
               moveEntries(entries, destination).catch((error: unknown) =>
                 toastManager.add({
@@ -317,6 +340,12 @@ export function FilesView() {
         entry={dialog.type === "share" ? dialog.entry : null}
         onOpenChange={(open) => !open && closeDialog()}
       />
+      <CopyToCloudDialog
+        open={dialog.type === "toCloud"}
+        environmentId={environmentId}
+        entries={dialog.type === "toCloud" ? dialog.entries : []}
+        onOpenChange={(open) => !open && closeDialog()}
+      />
       <SharedLinksDialog
         open={dialog.type === "links"}
         environmentId={environmentId}
@@ -337,6 +366,7 @@ function FolderBrowser({
   uploads,
   onDialog,
   onMoveInto,
+  onOpenCloud,
 }: {
   environmentId: EnvironmentId | null;
   listing: UseQueryResult<FilesListResult>;
@@ -345,6 +375,7 @@ function FolderBrowser({
   uploads: ReturnType<typeof useFilesUploads>;
   onDialog: (dialog: DialogState) => void;
   onMoveInto: (entries: FilesEntry[], destination: string) => void;
+  onOpenCloud: () => void;
 }) {
   const queryClient = useQueryClient();
   const [showHidden, setShowHidden] = useState(false);
@@ -447,7 +478,11 @@ function FolderBrowser({
       <header className="shrink-0 border-b border-border px-3 py-2 sm:px-5 sm:py-3">
         <div className="flex items-center gap-2">
           <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-          <FolderOpenIcon className="size-4 shrink-0 text-muted-foreground" />
+          <FilesLocationSwitch
+            location="computer"
+            onComputer={() => onOpenFolder(undefined)}
+            onCloud={() => onOpenCloud()}
+          />
           <nav
             className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden text-sm"
             aria-label="Folder"
@@ -754,6 +789,7 @@ function FolderBrowser({
                   onRename={() => onDialog({ type: "rename", entry })}
                   onMove={() => onDialog({ type: "move", entries: [entry] })}
                   onDelete={() => onDialog({ type: "delete", entries: [entry] })}
+                  onCopyToCloud={() => onDialog({ type: "toCloud", entries: [entry] })}
                 />
               ))}
             </tbody>
@@ -835,6 +871,7 @@ function FileRow({
   onRename,
   onMove,
   onDelete,
+  onCopyToCloud,
 }: {
   entry: FilesEntry;
   shared: boolean;
@@ -852,6 +889,7 @@ function FileRow({
   onRename: () => void;
   onMove: () => void;
   onDelete: () => void;
+  onCopyToCloud: () => void;
 }) {
   const kind = fileKindOf(entry.name, entry.kind === "directory");
   const Icon = kind === "folder" ? FolderOpenIcon : FILE_KIND_ICON[kind];
@@ -968,6 +1006,10 @@ function FileRow({
               <MenuItem onClick={onMove}>
                 <FolderInputIcon />
                 Move
+              </MenuItem>
+              <MenuItem onClick={onCopyToCloud}>
+                <CloudIcon />
+                Copy to Cloud storage
               </MenuItem>
               <MenuItem variant="destructive" onClick={onDelete}>
                 <Trash2Icon />

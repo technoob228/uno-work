@@ -47,6 +47,17 @@ import {
   FilesShareListResult,
   FilesShareRevokeInput,
   FilesStatInput,
+  FilesCloudState,
+  FilesCloudListInput,
+  FilesCloudListResult,
+  FilesCloudBucket,
+  FilesCloudCreateBucketInput,
+  FilesCloudObjectInput,
+  FilesCloudDeleteResult,
+  FilesCloudDownloadUrl,
+  FilesCloudCopyToCloudInput,
+  FilesCloudCopyToComputerInput,
+  FilesCloudTransferResult,
 } from "./files.ts";
 import { AuthAccessStreamEvent, AuthLinkRequestStreamEvent } from "./auth.ts";
 import {
@@ -346,6 +357,13 @@ export const WS_METHODS = {
   filesShareList: "files.share.list",
   filesShareRevoke: "files.share.revoke",
   filesPublishSite: "files.publishSite",
+  filesCloudState: "files.cloud.state",
+  filesCloudList: "files.cloud.list",
+  filesCloudCreateBucket: "files.cloud.createBucket",
+  filesCloudDelete: "files.cloud.delete",
+  filesCloudDownloadUrl: "files.cloud.downloadUrl",
+  filesCloudCopyToCloud: "files.cloud.copyToCloud",
+  filesCloudCopyToComputer: "files.cloud.copyToComputer",
 
   // Provider setup: install a harness CLI / sign it in on this machine
   providerInstallStart: "provider.install.start",
@@ -1276,6 +1294,48 @@ export const WsFilesPublishSiteRpc = Rpc.make(WS_METHODS.filesPublishSite, {
   error: FilesError,
 });
 
+export const WsFilesCloudStateRpc = Rpc.make(WS_METHODS.filesCloudState, {
+  payload: Schema.Struct({}),
+  success: FilesCloudState,
+  error: FilesError,
+});
+
+export const WsFilesCloudListRpc = Rpc.make(WS_METHODS.filesCloudList, {
+  payload: FilesCloudListInput,
+  success: FilesCloudListResult,
+  error: FilesError,
+});
+
+export const WsFilesCloudCreateBucketRpc = Rpc.make(WS_METHODS.filesCloudCreateBucket, {
+  payload: FilesCloudCreateBucketInput,
+  success: FilesCloudBucket,
+  error: FilesError,
+});
+
+export const WsFilesCloudDeleteRpc = Rpc.make(WS_METHODS.filesCloudDelete, {
+  payload: FilesCloudObjectInput,
+  success: FilesCloudDeleteResult,
+  error: FilesError,
+});
+
+export const WsFilesCloudDownloadUrlRpc = Rpc.make(WS_METHODS.filesCloudDownloadUrl, {
+  payload: FilesCloudObjectInput,
+  success: FilesCloudDownloadUrl,
+  error: FilesError,
+});
+
+export const WsFilesCloudCopyToCloudRpc = Rpc.make(WS_METHODS.filesCloudCopyToCloud, {
+  payload: FilesCloudCopyToCloudInput,
+  success: FilesCloudTransferResult,
+  error: FilesError,
+});
+
+export const WsFilesCloudCopyToComputerRpc = Rpc.make(WS_METHODS.filesCloudCopyToComputer, {
+  payload: FilesCloudCopyToComputerInput,
+  success: FilesCloudTransferResult,
+  error: FilesError,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerProbeRpc,
@@ -1322,6 +1382,13 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesShareListRpc,
   WsFilesShareRevokeRpc,
   WsFilesPublishSiteRpc,
+  WsFilesCloudStateRpc,
+  WsFilesCloudListRpc,
+  WsFilesCloudCreateBucketRpc,
+  WsFilesCloudDeleteRpc,
+  WsFilesCloudDownloadUrlRpc,
+  WsFilesCloudCopyToCloudRpc,
+  WsFilesCloudCopyToComputerRpc,
   WsProviderInstallStartRpc,
   WsProviderInstallStatusRpc,
   WsProviderAuthStartRpc,
