@@ -89,6 +89,21 @@ const makeUnoAgentAccess = Effect.gen(function* () {
 
   const resolve = Effect.gen(function* () {
     const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
+    // A Work machine acts in the account as ITSELF: its own machine token
+    // (written by the console at work/session; rights set by the person in
+    // Settings → Computer access, revocable). The AI on the machine uses it
+    // to list or add computers — never the account's master key.
+    const machineToken = current?.uno.boxToken?.trim() ?? "";
+    const machineBoxId = current?.uno.boxId ?? null;
+    if (machineToken.length > 0 && typeof machineBoxId === "number") {
+      return environmentFor({
+        token: machineToken,
+        access: "read",
+        boxId: machineBoxId,
+        expiresAt: null,
+        mintedBy: "machine",
+      });
+    }
     const apiKey = current?.uno.apiKey.trim() ?? "";
     // Покупки агенту не выдаём: "purchase" из старых настроек понижается до
     // "manage", и токен с `infra:purchase` перечеканивается при первом же
