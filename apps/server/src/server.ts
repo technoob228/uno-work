@@ -4,6 +4,7 @@ import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 import { ServerConfig } from "./config.ts";
 import {
   attachmentsRouteLayer,
+  officeEngineRouteLayer,
   browserBridgeCommandResultRouteLayer,
   browserBridgeCommandRouteLayer,
   browserBridgeOpenRouteLayer,
@@ -475,6 +476,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   agentThreadsReleaseRouteLayer,
   agentThreadsSendMessageRouteLayer,
   attachmentsRouteLayer,
+  officeEngineRouteLayer,
   browserBridgeCommandRouteLayer,
   browserBridgeCommandResultRouteLayer,
   browserBridgeOpenRouteLayer,

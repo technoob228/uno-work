@@ -23,6 +23,7 @@ import { Route as SettingsConnectionsRouteImport } from './routes/settings.conne
 import { Route as SettingsBrowserRouteImport } from './routes/settings.browser'
 import { Route as SettingsAssistantRouteImport } from './routes/settings.assistant'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
+import { Route as ChatOfficeRouteImport } from './routes/_chat.office'
 import { Route as ChatFilesRouteImport } from './routes/_chat.files'
 import { Route as ChatComputerRouteImport } from './routes/_chat.computer'
 import { Route as ChatAssistantRouteImport } from './routes/_chat.assistant'
@@ -110,6 +111,11 @@ const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
   id: '/archived',
   path: '/archived',
   getParentRoute: () => SettingsRoute,
+} as any)
+const ChatOfficeRoute = ChatOfficeRouteImport.update({
+  id: '/office',
+  path: '/office',
+  getParentRoute: () => ChatRoute,
 } as any)
 const ChatFilesRoute = ChatFilesRouteImport.update({
   id: '/files',
@@ -218,6 +224,7 @@ export interface FileRoutesByFullPath {
   '/assistant': typeof ChatAssistantRouteWithChildren
   '/computer': typeof ChatComputerRoute
   '/files': typeof ChatFilesRoute
+  '/office': typeof ChatOfficeRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/browser': typeof SettingsBrowserRoute
@@ -249,6 +256,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRouteWithChildren
   '/computer': typeof ChatComputerRoute
   '/files': typeof ChatFilesRoute
+  '/office': typeof ChatOfficeRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/browser': typeof SettingsBrowserRoute
@@ -284,6 +292,7 @@ export interface FileRoutesById {
   '/_chat/assistant': typeof ChatAssistantRouteWithChildren
   '/_chat/computer': typeof ChatComputerRoute
   '/_chat/files': typeof ChatFilesRoute
+  '/_chat/office': typeof ChatOfficeRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/browser': typeof SettingsBrowserRoute
@@ -320,6 +329,7 @@ export interface FileRouteTypes {
     | '/assistant'
     | '/computer'
     | '/files'
+    | '/office'
     | '/settings/archived'
     | '/settings/assistant'
     | '/settings/browser'
@@ -351,6 +361,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/computer'
     | '/files'
+    | '/office'
     | '/settings/archived'
     | '/settings/assistant'
     | '/settings/browser'
@@ -385,6 +396,7 @@ export interface FileRouteTypes {
     | '/_chat/assistant'
     | '/_chat/computer'
     | '/_chat/files'
+    | '/_chat/office'
     | '/settings/archived'
     | '/settings/assistant'
     | '/settings/browser'
@@ -518,6 +530,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings/archived'
       preLoaderRoute: typeof SettingsArchivedRouteImport
       parentRoute: typeof SettingsRoute
+    }
+    '/_chat/office': {
+      id: '/_chat/office'
+      path: '/office'
+      fullPath: '/office'
+      preLoaderRoute: typeof ChatOfficeRouteImport
+      parentRoute: typeof ChatRoute
     }
     '/_chat/files': {
       id: '/_chat/files'
@@ -667,6 +686,7 @@ interface ChatRouteChildren {
   ChatAssistantRoute: typeof ChatAssistantRouteWithChildren
   ChatComputerRoute: typeof ChatComputerRoute
   ChatFilesRoute: typeof ChatFilesRoute
+  ChatOfficeRoute: typeof ChatOfficeRoute
   ChatIndexRoute: typeof ChatIndexRoute
   ChatEnvironmentIdThreadIdRoute: typeof ChatEnvironmentIdThreadIdRoute
   ChatDraftDraftIdRoute: typeof ChatDraftDraftIdRoute
@@ -676,6 +696,7 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatAssistantRoute: ChatAssistantRouteWithChildren,
   ChatComputerRoute: ChatComputerRoute,
   ChatFilesRoute: ChatFilesRoute,
+  ChatOfficeRoute: ChatOfficeRoute,
   ChatIndexRoute: ChatIndexRoute,
   ChatEnvironmentIdThreadIdRoute: ChatEnvironmentIdThreadIdRoute,
   ChatDraftDraftIdRoute: ChatDraftDraftIdRoute,

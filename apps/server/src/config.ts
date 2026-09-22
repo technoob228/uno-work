@@ -40,6 +40,11 @@ export interface ServerDerivedPaths {
   readonly secretsDir: string;
   readonly pluginsDir: string;
   /**
+   * Статический пакет офисного движка (см. officeEngine.ts). Общий для dev и
+   * userdata: это ~700 МБ кода, а не состояние пользователя.
+   */
+  readonly officeEngineDir: string;
+  /**
    * Scratch space for short-lived daemon files (checkpoint indexes, ...).
    * Lives next to the state on the real disk instead of the OS temp dir: on a
    * box `/tmp` is a 1 GB tmpfs and a large project fills it up.
@@ -108,6 +113,7 @@ export const deriveServerPaths = Effect.fn(function* (
     serverRuntimeStatePath: join(stateDir, "server-runtime.json"),
     secretsDir: join(stateDir, "secrets"),
     pluginsDir: join(stateDir, "plugins"),
+    officeEngineDir: join(baseDir, "office-engine"),
     // Deliberately `<baseDir>/tmp`, not under `userdata`: the systemd unit
     // points TMPDIR at the same directory, so the daemon and its subprocesses
     // share one scratch location.
