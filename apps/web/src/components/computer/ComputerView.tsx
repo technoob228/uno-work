@@ -22,7 +22,7 @@ import type { UnoMachineAppAction } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useRouter } from "@tanstack/react-router";
 import { MonitorIcon, RefreshCwIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useStore } from "../../store";
@@ -48,6 +48,8 @@ import {
   machineAppsQueryOptions,
 } from "./computerQueries";
 import { ProgramDialog } from "./ProgramDialog";
+import { ResizeDialog } from "./ResizeDialog";
+import { LOW_DISK_PCT, LOW_MEMORY_PCT, isSustained } from "./resizeModel";
 import { buildProgramTiles, isBrowserOnMachine, type ProgramTile } from "./programModel";
 import { useAppInstalls } from "./useAppInstalls";
 import { useHomeLaunchers } from "./useHomeLaunchers";
@@ -97,6 +99,7 @@ export function ComputerView() {
   const [storeOpen, setStoreOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
   const [detailsKey, setDetailsKey] = useState<string | null>(null);
+  const [resizeOpen, setResizeOpen] = useState(false);
 
   const browserOnMachine =
     thisMachine && typeof window !== "undefined" && isBrowserOnMachine(window.location.hostname);
@@ -140,6 +143,8 @@ export function ComputerView() {
           diskTotalGb: cloudMetricsQuery.data.diskTotalGb ?? box?.diskGb ?? null,
         }
       : null;
+
+  const lowResource = useLowResource(load);
 
   const local = localMetricsQuery.data;
   const heroName = box?.name ?? local?.hostname ?? "This computer";
@@ -240,6 +245,8 @@ export function ComputerView() {
                         }
                       : null
                   }
+                  onResize={box && computer?.linked ? () => setResizeOpen(true) : undefined}
+                  lowResource={box ? lowResource : null}
                 />
 
                 {!computer?.linked && thisMachine ? (
@@ -305,6 +312,13 @@ export function ComputerView() {
         onClose={() => setDetailsKey(null)}
       />
 
+      <ResizeDialog
+        environmentId={environmentId}
+        boxId={pickedBoxId}
+        open={resizeOpen}
+        onOpenChange={setResizeOpen}
+      />
+
       <ChatInFolderDialog
         environmentId={environmentId}
         open={folderOpen}
@@ -336,6 +350,34 @@ export function ComputerView() {
       />
     </SidebarInset>
   );
+}
+
+/**
+ * "Running low" only when it is steady: the last few readings (a few seconds
+ * apart) all over the line — memory > 85 %, disk > 90 %.
+ */
+function useLowResource(load: ComputerLoad | null): "memory" | "disk" | null {
+  const memory = useRef<number[]>([]);
+  const disk = useRef<number[]>([]);
+  const [low, setLow] = useState<"memory" | "disk" | null>(null);
+  const memPct =
+    load?.memUsedMb != null && load.memTotalMb ? (load.memUsedMb / load.memTotalMb) * 100 : null;
+  const diskPct =
+    load?.diskUsedGb != null && load.diskTotalGb
+      ? (load.diskUsedGb / load.diskTotalGb) * 100
+      : null;
+  useEffect(() => {
+    if (memPct !== null) memory.current = [...memory.current, memPct].slice(-10);
+    if (diskPct !== null) disk.current = [...disk.current, diskPct].slice(-10);
+    setLow(
+      isSustained(memory.current, LOW_MEMORY_PCT)
+        ? "memory"
+        : isSustained(disk.current, LOW_DISK_PCT, 2)
+          ? "disk"
+          : null,
+    );
+  }, [memPct, diskPct]);
+  return low;
 }
 
 function Notice({ title, children }: { title: string; children: React.ReactNode }) {

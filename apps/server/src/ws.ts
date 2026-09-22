@@ -1344,6 +1344,18 @@ const makeWsRpcLayer = (
             }),
             { "rpc.aggregate": "uno-computer" },
           ),
+        [WS_METHODS.unoComputerResizeOptions]: (input) =>
+          observeRpcEffect(WS_METHODS.unoComputerResizeOptions, unoComputer.resizeOptions(input), {
+            "rpc.aggregate": "uno-computer",
+          }),
+        [WS_METHODS.unoComputerResize]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerResize,
+            unoComputer
+              .resize(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
         [WS_METHODS.unoComputerMachineApps]: (_input) =>
           observeRpcEffect(WS_METHODS.unoComputerMachineApps, machineApps.list, {
             "rpc.aggregate": "uno-computer",

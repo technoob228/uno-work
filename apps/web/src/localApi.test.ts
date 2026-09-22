@@ -157,6 +157,8 @@ const rpcClientMock = {
     machineApps: vi.fn(),
     appAction: vi.fn(),
     localMetrics: vi.fn(),
+    resizeOptions: vi.fn(),
+    resize: vi.fn(),
   },
 };
 

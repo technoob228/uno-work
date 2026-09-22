@@ -127,6 +127,9 @@ import type {
   UnoComputerMetrics,
   UnoComputerLocalMetrics,
   UnoComputerPowerInput,
+  UnoComputerResizeInput,
+  UnoComputerResizeOptions,
+  UnoComputerResizeResult,
   UnoComputerState,
   UnoComputerTargetInput,
   UnoMachineAppActionInput,
@@ -697,6 +700,8 @@ export interface EnvironmentApi {
     machineApps: () => Promise<UnoMachineApps>;
     appAction: (input: UnoMachineAppActionInput) => Promise<UnoMachineApps>;
     localMetrics: () => Promise<UnoComputerLocalMetrics>;
+    resizeOptions: (input?: UnoComputerTargetInput) => Promise<UnoComputerResizeOptions>;
+    resize: (input: UnoComputerResizeInput) => Promise<UnoComputerResizeResult>;
   };
   /** Install a harness CLI or sign it in on this environment's machine. */
   providerSetup: {

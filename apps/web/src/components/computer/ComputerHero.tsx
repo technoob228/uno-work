@@ -13,8 +13,10 @@ import {
   GlobeIcon,
   MonitorIcon,
   MoonIcon,
+  PlusIcon,
   PowerIcon,
   SunIcon,
+  TriangleAlertIcon,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -92,6 +94,8 @@ export function ComputerHero({
   load,
   loadLive,
   power,
+  onResize,
+  lowResource,
 }: {
   name: string;
   subtitle: string | null;
@@ -106,6 +110,10 @@ export function ComputerHero({
     readonly error: string | null;
     readonly onPower: (action: PowerAction) => void;
   } | null;
+  /** Opens "Add memory / cores"; absent when this computer can't be resized from here. */
+  onResize?: (() => void) | undefined;
+  /** Steadily short of memory or disk: say so, next to the button that fixes it. */
+  lowResource?: "memory" | "disk" | null | undefined;
 }) {
   const state: PowerState = status === null ? "on" : computerPowerState(status);
   const [confirm, setConfirm] = useState<"sleep" | "stop" | null>(null);
@@ -183,6 +191,34 @@ export function ComputerHero({
       </div>
 
       <LoadStrip load={load} live={loadLive && state === "on"} asleep={state !== "on"} />
+
+      {onResize && state === "on" ? (
+        <div
+          className={cn(
+            "mt-4 flex flex-wrap items-center gap-3",
+            lowResource && "rounded-2xl bg-warning/10 px-3 py-2 ring-1 ring-warning/30",
+          )}
+        >
+          {lowResource ? (
+            <p className="flex min-w-0 flex-1 items-center gap-2 text-xs" role="status">
+              <TriangleAlertIcon className="size-3.5 shrink-0 text-warning" />
+              {lowResource === "memory"
+                ? "Your computer is running low on memory — programs may slow down or stop."
+                : "Your computer's disk is almost full — new files and apps may not fit."}
+            </p>
+          ) : (
+            <span className="flex-1" />
+          )}
+          <Button size="sm" variant={lowResource ? "default" : "outline"} onClick={onResize}>
+            <PlusIcon />
+            {lowResource === "disk"
+              ? "Add disk space"
+              : lowResource === "memory"
+                ? "Add memory"
+                : "Add memory / cores"}
+          </Button>
+        </div>
+      ) : null}
 
       {power?.error ? (
         <p className="mt-3 text-xs text-destructive" role="alert">

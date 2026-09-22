@@ -24,6 +24,9 @@ import {
   UnoComputerMetrics,
   UnoComputerLocalMetrics,
   UnoComputerPowerInput,
+  UnoComputerResizeInput,
+  UnoComputerResizeOptions,
+  UnoComputerResizeResult,
   UnoComputerState,
   UnoComputerTargetInput,
   UnoMachineAppActionInput,
@@ -317,6 +320,8 @@ export const WS_METHODS = {
   unoComputerMachineApps: "uno.computer.machineApps",
   unoComputerAppAction: "uno.computer.appAction",
   unoComputerLocalMetrics: "uno.computer.localMetrics",
+  unoComputerResizeOptions: "uno.computer.resizeOptions",
+  unoComputerResize: "uno.computer.resize",
 
   // Provider setup: install a harness CLI / sign it in on this machine
   providerInstallStart: "provider.install.start",
@@ -1196,6 +1201,20 @@ export const WsUnoComputerLocalMetricsRpc = Rpc.make(WS_METHODS.unoComputerLocal
   error: UnoCloudRpcError,
 });
 
+/** Sizes this computer can take on its plan. Never fails: see `availability`. */
+export const WsUnoComputerResizeOptionsRpc = Rpc.make(WS_METHODS.unoComputerResizeOptions, {
+  payload: UnoComputerTargetInput,
+  success: UnoComputerResizeOptions,
+  error: UnoCloudRpcError,
+});
+
+/** Add memory / cores / disk. A plan limit is an answer (`plan_limit`), not an error. */
+export const WsUnoComputerResizeRpc = Rpc.make(WS_METHODS.unoComputerResize, {
+  payload: UnoComputerResizeInput,
+  success: UnoComputerResizeResult,
+  error: UnoCloudRpcError,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerProbeRpc,
@@ -1234,6 +1253,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoComputerMachineAppsRpc,
   WsUnoComputerAppActionRpc,
   WsUnoComputerLocalMetricsRpc,
+  WsUnoComputerResizeOptionsRpc,
+  WsUnoComputerResizeRpc,
   WsProviderInstallStartRpc,
   WsProviderInstallStatusRpc,
   WsProviderAuthStartRpc,

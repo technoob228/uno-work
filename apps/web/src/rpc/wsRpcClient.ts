@@ -232,6 +232,10 @@ export interface WsRpcClient {
       RpcUnaryMethod<typeof WS_METHODS.unoComputerMachineApps>
     >;
     readonly appAction: RpcUnaryMethod<typeof WS_METHODS.unoComputerAppAction>;
+    readonly resizeOptions: (
+      input?: RpcInput<typeof WS_METHODS.unoComputerResizeOptions>,
+    ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.unoComputerResizeOptions>>;
+    readonly resize: RpcUnaryMethod<typeof WS_METHODS.unoComputerResize>;
     readonly localMetrics: () => ReturnType<
       RpcUnaryMethod<typeof WS_METHODS.unoComputerLocalMetrics>
     >;
@@ -517,6 +521,9 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.unoComputerAppAction](input)),
       localMetrics: () =>
         transport.request((client) => client[WS_METHODS.unoComputerLocalMetrics]({})),
+      resizeOptions: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerResizeOptions](input ?? {})),
+      resize: (input) => transport.request((client) => client[WS_METHODS.unoComputerResize](input)),
     },
   };
 }
