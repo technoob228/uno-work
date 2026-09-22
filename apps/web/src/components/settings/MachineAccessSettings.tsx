@@ -158,7 +158,9 @@ export function MachineAccessSettings() {
     queryFn: () => interfaceUnoCloud.getState(),
     enabled: transport !== "none",
   });
-  const boxes = (cloud.data?.boxes ?? []).filter((box) => box.status !== "deleted");
+  const boxes = (cloud.data?.boxes ?? []).filter(
+    (box) => box.status !== "deleted" && box.workMachine === true,
+  );
 
   return (
     <SettingsPageContainer>

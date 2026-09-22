@@ -144,9 +144,13 @@ export function SidebarEnvSwitcher({
       ? [
           {
             id: primaryDescriptor.environmentId,
+            // A cloud computer is called by its own name (the registry may still
+            // hold a generic "This machine" from older versions).
             name: isElectron
               ? localComputerName(primaryDescriptor.platform.os)
-              : (labelById.get(primaryDescriptor.environmentId) ?? primaryDescriptor.label),
+              : primaryDescriptor.machineKind === "uno_box" && primaryDescriptor.label
+                ? primaryDescriptor.label
+                : (labelById.get(primaryDescriptor.environmentId) ?? primaryDescriptor.label),
             meta: formatPlatformMeta(
               primaryDescriptor.platform.os,
               primaryDescriptor.platform.arch,
