@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  decodeLsofEscapes,
   extractHtmlTitle,
   groupListeningPorts,
   isUserAddedUnitPath,
@@ -101,6 +102,15 @@ describe("parseLsofListening", () => {
       { port: 5173, address: "::1", loopback: true, process: "node", pid: 501 },
       { port: 8000, address: "127.0.0.1", loopback: true, process: "python3.11", pid: 777 },
     ]);
+  });
+});
+
+describe("decodeLsofEscapes", () => {
+  it("turns lsof's \\xNN bytes back into UTF-8 text", () => {
+    expect(decodeLsofEscapes("\\xd0\\xaf\\xd0\\xbd\\xd0\\xb4\\xd0\\xb5\\xd0\\xba\\xd1\\x81")).toBe(
+      "Яндекс",
+    );
+    expect(decodeLsofEscapes("node")).toBe("node");
   });
 });
 

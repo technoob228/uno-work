@@ -59,6 +59,8 @@ import {
 const SCAN_TTL_MS = 4_000;
 const BACKGROUND_EVERY = Duration.seconds(20);
 const HTTP_PROBE_TTL_MS = 60_000;
+/** A port that didn't answer HTTP is asked again after this (a new port is asked at once). */
+const HTTP_PROBE_NEGATIVE_TTL_MS = 30_000;
 const HTTP_PROBE_TIMEOUT_MS = 1_200;
 const CONTROL_PLANE_TTL_MS = 15_000;
 const COMMAND_TIMEOUT_MS = 5_000;
@@ -233,9 +235,8 @@ export const makeMachineAppsService = (
       readFile: readTextFile,
       probeHttp: async (port) => {
         const cached = httpCache.get(port);
-        if (cached && Date.now() - cached.at < HTTP_PROBE_TTL_MS && cached.result.http) {
-          return cached.result;
-        }
+        const ttl = cached?.result.http ? HTTP_PROBE_TTL_MS : HTTP_PROBE_NEGATIVE_TTL_MS;
+        if (cached && Date.now() - cached.at < ttl) return cached.result;
         const result = await probeHttp(port);
         httpCache.set(port, { at: Date.now(), result });
         return result;
@@ -446,7 +447,10 @@ export const makeMachineAppsService = (
 
     const action: MachineAppsServiceShape["action"] = (input) =>
       Effect.gen(function* () {
-        const scanned = yield* Effect.promise(() => scan(true));
+        // Start / stop act on processes: look again. Show / hide only touch the
+        // cloud, so the last scan (seconds old) is enough.
+        const lifecycle = input.action === "start" || input.action === "stop";
+        const scanned = yield* Effect.promise(() => scan(lifecycle));
         const app = scanned.apps.find((a) => a.id === input.appId);
         if (!app) {
           return yield* new UnoCloudFetchError({
@@ -484,7 +488,7 @@ export const makeMachineAppsService = (
                     : humanizeControlPlaneError(cause),
             }),
         });
-        const fresh = yield* Effect.promise(() => scan(true));
+        const fresh = yield* Effect.promise(() => scan(lifecycle));
         const freshCloud = yield* cloudView(true);
         return assemble(fresh, freshCloud);
       });

@@ -101,7 +101,7 @@ export function parseLsofListening(output: string): ListeningSocket[] {
       pid = /^\d+$/.test(value) ? Number(value) : null;
       command = null;
     } else if (field === "c") {
-      command = value;
+      command = decodeLsofEscapes(value);
     } else if (field === "n") {
       // Established sockets print `a->b`; only bare listeners interest us.
       if (value.includes("->")) continue;
@@ -117,6 +117,22 @@ export function parseLsofListening(output: string): ListeningSocket[] {
     }
   }
   return sockets;
+}
+
+/** lsof prints non-ASCII bytes of a command as `\xNN`; turn them back into text. */
+export function decodeLsofEscapes(value: string): string {
+  if (!value.includes("\\x")) return value;
+  const bytes: number[] = [];
+  for (let i = 0; i < value.length; i++) {
+    const hex = value[i] === "\\" && value[i + 1] === "x" ? value.slice(i + 2, i + 4) : "";
+    if (/^[0-9a-fA-F]{2}$/.test(hex)) {
+      bytes.push(Number.parseInt(hex, 16));
+      i += 3;
+    } else {
+      bytes.push(...new TextEncoder().encode(value[i]!));
+    }
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes));
 }
 
 /** Collapses v4/v6 duplicates into one entry per port, sorted by port. */
