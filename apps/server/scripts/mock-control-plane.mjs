@@ -40,6 +40,13 @@
  *
  * Power is stateful: POST /sleep|/wake|/stop|/start flips the status the next
  * GET returns. Installs take ~6 s and then show up as a git service with a URL.
+ *
+ * App cards (GET /boxes/{id}/apps): Memos and Open WebUI come preinstalled —
+ * with sign-in details, web port, compose project, and (Open WebUI) an AI key.
+ * DELETE /boxes/{id}/apps/{deployment_id}?delete_data= takes ~3 s and removes
+ * the app; PATCH …/apps/{deployment_id} {"ai_limit_usd": n|null} sets the
+ * AI limit. MOCK_REMOVE=old answers DELETE/PATCH like a console from before
+ * app removal (405); MOCK_REMOVE=fail answers 502 APP_REMOVE_FAILED.
  */
 import { execFile } from "node:child_process";
 import http from "node:http";
@@ -147,6 +154,24 @@ const PORTS = [
 let nextPortId = 10;
 
 const SERVICES = [
+  {
+    id: -77,
+    repo_full_name: "memos",
+    branch: "main",
+    box_id: BOX_ID,
+    last_deployment_id: 77,
+    last_status: "success",
+    url: "https://memos-my-computer.app.uno4.dev",
+  },
+  {
+    id: -78,
+    repo_full_name: "open-webui",
+    branch: "main",
+    box_id: BOX_ID,
+    last_deployment_id: 78,
+    last_status: "success",
+    url: "https://open-webui-my-computer.app.uno4.dev",
+  },
   {
     id: 7,
     repo_full_name: "acme/status-page",
@@ -269,6 +294,24 @@ const TEMPLATES = [
     min_disk_gb: 1,
   },
   {
+    id: "memos",
+    name: "Memos",
+    icon: "📝",
+    category: "notes",
+    description_en: "Quick notes and a timeline of your thoughts, private to you.",
+    min_ram_mb: 256,
+    min_disk_gb: 1,
+  },
+  {
+    id: "open-webui",
+    name: "Open WebUI",
+    icon: "💬",
+    category: "ai",
+    description_en: "Your own ChatGPT-style chat, with Uno's AI behind it.",
+    min_ram_mb: 1024,
+    min_disk_gb: 2,
+  },
+  {
     id: "static-site",
     name: "Static site",
     icon: "🌐",
@@ -278,6 +321,49 @@ const TEMPLATES = [
     min_disk_gb: 1,
   },
 ];
+
+/** Rows of GET /boxes/{id}/apps, by deployment id. */
+const APP_CARDS = new Map([
+  [
+    77,
+    {
+      deployment_id: 77,
+      template_id: "memos",
+      name: "Memos",
+      icon: "📝",
+      status: "running",
+      url: "https://memos-my-computer.app.uno4.dev",
+      created_at: iso(minsAgo(60 * 24)),
+      credentials: [
+        { label_en: "Login", value: "owner" },
+        { label_en: "Password", value: "k2-violet-harbor", secret: true },
+      ],
+      notes_en: "Sign in with the login and password below.",
+      removable: true,
+      web_port: 5230,
+      compose_project: "uno-memos",
+      ai_key: null,
+    },
+  ],
+  [
+    78,
+    {
+      deployment_id: 78,
+      template_id: "open-webui",
+      name: "Open WebUI",
+      icon: "💬",
+      status: "running",
+      url: "https://open-webui-my-computer.app.uno4.dev",
+      created_at: iso(minsAgo(60 * 5)),
+      credentials: [{ label_en: "Email", value: "demo@uno4.dev" }],
+      notes_en: null,
+      removable: true,
+      web_port: 8080,
+      compose_project: "uno-open-webui",
+      ai_key: { limit_usd: 10, spent_usd: 0.12 },
+    },
+  ],
+]);
 
 const DEPLOYMENTS = new Map();
 let nextDeploymentId = 500;
@@ -312,6 +398,21 @@ function startInstall(template, env) {
   setTimeout(() => {
     push(dep, `Done — ${template.name} is running at ${url}`, "success");
     dep.done = true;
+    APP_CARDS.set(dep.id, {
+      deployment_id: dep.id,
+      template_id: template.id,
+      name: template.name,
+      icon: template.icon,
+      status: "running",
+      url,
+      created_at: iso(new Date()),
+      credentials: [],
+      notes_en: null,
+      removable: true,
+      web_port: null,
+      compose_project: `uno-${template.id}`,
+      ai_key: template.id === "open-webui" ? { limit_usd: 10, spent_usd: 0 } : null,
+    });
     SERVICES.push({
       id: serviceId,
       repo_full_name: `apps/${template.id}`,
@@ -721,6 +822,48 @@ const server = http.createServer(async (req, res) => {
       if (status() !== "running")
         return send(res, 200, { ok: false, error: "guest agent not running" });
       return send(res, 200, applogs(Number(url.searchParams.get("tail") || 200)));
+    }
+    if (req.method === "GET" && sub === "/apps") {
+      return send(res, 200, { apps: [...APP_CARDS.values()] });
+    }
+    const appMatch = sub.match(/^\/apps\/(\d+)$/);
+    if (appMatch && (req.method === "DELETE" || req.method === "PATCH")) {
+      if (process.env.MOCK_REMOVE === "old") {
+        res.writeHead(405, { "Content-Type": "text/plain" });
+        return res.end("Method Not Allowed\n");
+      }
+      const deploymentId = Number(appMatch[1]);
+      const card = APP_CARDS.get(deploymentId);
+      if (!card) return send(res, 404, { error: "NOT_FOUND", detail: "no such app" });
+      if (req.method === "PATCH") {
+        const body = await readBody(req);
+        if (!card.ai_key) return send(res, 409, { error: "APP_NO_AI_KEY" });
+        const limit = body.ai_limit_usd;
+        card.ai_key = { ...card.ai_key, limit_usd: typeof limit === "number" ? limit : null };
+        console.log(`AI limit of ${card.name} → ${card.ai_key.limit_usd ?? "none"}`);
+        return send(res, 200, { ai_key: card.ai_key });
+      }
+      const dep = DEPLOYMENTS.get(deploymentId);
+      if (dep && !dep.done) {
+        return send(res, 409, { error: "APP_BUSY", detail: "the install is still running" });
+      }
+      const deleteData = url.searchParams.get("delete_data") === "true";
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      if (process.env.MOCK_REMOVE === "fail") {
+        return send(res, 502, {
+          error: "APP_REMOVE_FAILED",
+          detail: "The app's containers didn't stop in time",
+        });
+      }
+      APP_CARDS.delete(deploymentId);
+      const index = SERVICES.findIndex((sv) => sv.last_deployment_id === deploymentId);
+      if (index !== -1) SERVICES.splice(index, 1);
+      console.log(`removed ${card.name} (data ${deleteData ? "deleted" : "kept"})`);
+      return send(res, 200, {
+        removed: true,
+        template_id: card.template_id,
+        data_deleted: deleteData,
+      });
     }
     if (req.method === "POST" && sub === "/apps") {
       const body = await readBody(req);
