@@ -99,6 +99,9 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       installApp: rpcClient.unoComputer.installApp,
       installStatus: rpcClient.unoComputer.installStatus,
       power: rpcClient.unoComputer.power,
+      machineApps: () => rpcClient.unoComputer.machineApps(),
+      appAction: rpcClient.unoComputer.appAction,
+      localMetrics: () => rpcClient.unoComputer.localMetrics(),
     },
   };
 }

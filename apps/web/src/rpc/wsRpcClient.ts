@@ -228,6 +228,11 @@ export interface WsRpcClient {
     readonly installApp: RpcUnaryMethod<typeof WS_METHODS.unoComputerInstallApp>;
     readonly installStatus: RpcUnaryMethod<typeof WS_METHODS.unoComputerInstallStatus>;
     readonly power: RpcUnaryMethod<typeof WS_METHODS.unoComputerPower>;
+    readonly machineApps: () => ReturnType<RpcUnaryMethod<typeof WS_METHODS.unoComputerMachineApps>>;
+    readonly appAction: RpcUnaryMethod<typeof WS_METHODS.unoComputerAppAction>;
+    readonly localMetrics: () => ReturnType<
+      RpcUnaryMethod<typeof WS_METHODS.unoComputerLocalMetrics>
+    >;
   };
 }
 
@@ -504,6 +509,12 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       installStatus: (input) =>
         transport.request((client) => client[WS_METHODS.unoComputerInstallStatus](input)),
       power: (input) => transport.request((client) => client[WS_METHODS.unoComputerPower](input)),
+      machineApps: () =>
+        transport.request((client) => client[WS_METHODS.unoComputerMachineApps]({})),
+      appAction: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerAppAction](input)),
+      localMetrics: () =>
+        transport.request((client) => client[WS_METHODS.unoComputerLocalMetrics]({})),
     },
   };
 }

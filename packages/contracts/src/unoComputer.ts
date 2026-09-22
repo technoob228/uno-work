@@ -220,3 +220,102 @@ export const UnoComputerPowerInput = Schema.Struct({
   action: Schema.Literals(["wake", "sleep", "start", "stop"]),
 });
 export type UnoComputerPowerInput = typeof UnoComputerPowerInput.Type;
+
+/* ------------------------------------------------------------------ *
+ * Programs found on this machine (the desktop's app grid)
+ *
+ * The daemon looks at the machine it runs on and turns what it finds into
+ * programs: an explicit manifest in `~/.uno/apps/<id>.json`, docker containers
+ * with published ports, services the user (or an agent) added to systemd, and
+ * any other process listening on a TCP port. Nothing here goes on the internet
+ * by itself — "Show on the internet" is a click.
+ * ------------------------------------------------------------------ */
+
+/**
+ * - `manifest` — registered in `~/.uno/apps/<id>.json` (by a person or an agent);
+ * - `docker`   — a container with a published port;
+ * - `systemd`  — a service unit someone added (not one the OS ships);
+ * - `port`     — any other process listening on TCP.
+ */
+export const UnoMachineAppSource = Schema.Literals(["manifest", "docker", "systemd", "port"]);
+export type UnoMachineAppSource = typeof UnoMachineAppSource.Type;
+
+export const UnoMachineAppStatus = Schema.Literals(["running", "stopped", "unknown"]);
+export type UnoMachineAppStatus = typeof UnoMachineAppStatus.Type;
+
+/** A public port forward that makes the app reachable from the internet. */
+export const UnoMachineAppPublication = Schema.Struct({
+  /** Control-plane id of the forward (what "Hide" deletes). */
+  forwardId: Schema.Number,
+  externalPort: Schema.NullOr(Schema.Number),
+  /** Where it answers from outside; null until the forward is applied. */
+  url: Schema.NullOr(Schema.String),
+  /** pending | applied | failed — as the control plane reports it. */
+  state: Schema.String,
+});
+export type UnoMachineAppPublication = typeof UnoMachineAppPublication.Type;
+
+export const UnoMachineApp = Schema.Struct({
+  /** Stable key: `manifest:<id>`, `docker:<name>`, `systemd:<unit>`, `port:<n>`. */
+  id: Schema.String,
+  source: UnoMachineAppSource,
+  name: Schema.String,
+  description: Schema.NullOr(Schema.String),
+  /** Emoji or a couple of letters. */
+  icon: Schema.NullOr(Schema.String),
+  /** `data:image/…` of a validated icon file next to the manifest. */
+  iconImage: Schema.NullOr(Schema.String),
+  status: UnoMachineAppStatus,
+  /** The TCP port it answers on inside the machine, when known. */
+  port: Schema.NullOr(Schema.Number),
+  /** The port answered an HTTP request — it is something to open in a browser. */
+  http: Schema.Boolean,
+  /** Listens on 127.0.0.1 only: nothing outside the machine can reach it. */
+  loopbackOnly: Schema.Boolean,
+  /** One short line: "Docker · weejewel/wg-easy", "Service · notes.service", "node". */
+  detail: Schema.NullOr(Schema.String),
+  /** An address the app declared itself (manifest `url`). */
+  url: Schema.NullOr(Schema.String),
+  /** `http://localhost:<port>/` — only useful when the browser runs on this machine. */
+  localUrl: Schema.NullOr(Schema.String),
+  publication: Schema.NullOr(UnoMachineAppPublication),
+  canStart: Schema.Boolean,
+  canStop: Schema.Boolean,
+});
+export type UnoMachineApp = typeof UnoMachineApp.Type;
+
+export const UnoMachineApps = Schema.Struct({
+  apps: Schema.Array(UnoMachineApp),
+  /** Where manifests go, spelled for a person (`~/.uno/apps`). */
+  manifestDir: Schema.String,
+  scannedAt: Schema.String,
+  /** Why "Show on the internet" can't work on this machine; null when it can. */
+  publishBlockedReason: Schema.NullOr(Schema.String),
+  /** Manifests that were skipped, and why — shown quietly, never as an error wall. */
+  warnings: Schema.Array(Schema.String),
+});
+export type UnoMachineApps = typeof UnoMachineApps.Type;
+
+export const UnoMachineAppAction = Schema.Literals(["start", "stop", "publish", "unpublish"]);
+export type UnoMachineAppAction = typeof UnoMachineAppAction.Type;
+
+export const UnoMachineAppActionInput = Schema.Struct({
+  appId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  action: UnoMachineAppAction,
+});
+export type UnoMachineAppActionInput = typeof UnoMachineAppActionInput.Type;
+
+/** Live load of the machine the daemon runs on, read from the OS directly. */
+export const UnoComputerLocalMetrics = Schema.Struct({
+  hostname: Schema.String,
+  /** linux | darwin | win32 */
+  platform: Schema.String,
+  cpuPct: Schema.NullOr(Schema.Number),
+  cpuCount: Schema.Number,
+  memUsedMb: Schema.Number,
+  memTotalMb: Schema.Number,
+  diskUsedGb: Schema.NullOr(Schema.Number),
+  diskTotalGb: Schema.NullOr(Schema.Number),
+  uptimeS: Schema.Number,
+});
+export type UnoComputerLocalMetrics = typeof UnoComputerLocalMetrics.Type;

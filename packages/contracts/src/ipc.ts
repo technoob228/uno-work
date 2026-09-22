@@ -125,9 +125,12 @@ import type {
   UnoComputerInstallStatus,
   UnoComputerInstallStatusInput,
   UnoComputerMetrics,
+  UnoComputerLocalMetrics,
   UnoComputerPowerInput,
   UnoComputerState,
   UnoComputerTargetInput,
+  UnoMachineAppActionInput,
+  UnoMachineApps,
 } from "./unoComputer.ts";
 import type {
   SourceControlCloneRepositoryInput,
@@ -690,6 +693,10 @@ export interface EnvironmentApi {
     installApp: (input: UnoComputerInstallAppInput) => Promise<UnoComputerInstallAppResult>;
     installStatus: (input: UnoComputerInstallStatusInput) => Promise<UnoComputerInstallStatus>;
     power: (input: UnoComputerPowerInput) => Promise<UnoComputerState>;
+    /** Programs found on this machine (manifests, docker, systemd, open ports). */
+    machineApps: () => Promise<UnoMachineApps>;
+    appAction: (input: UnoMachineAppActionInput) => Promise<UnoMachineApps>;
+    localMetrics: () => Promise<UnoComputerLocalMetrics>;
   };
   /** Install a harness CLI or sign it in on this environment's machine. */
   providerSetup: {

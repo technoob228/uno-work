@@ -22,9 +22,12 @@ import {
   UnoComputerInstallStatus,
   UnoComputerInstallStatusInput,
   UnoComputerMetrics,
+  UnoComputerLocalMetrics,
   UnoComputerPowerInput,
   UnoComputerState,
   UnoComputerTargetInput,
+  UnoMachineAppActionInput,
+  UnoMachineApps,
 } from "./unoComputer.ts";
 import { AuthAccessStreamEvent, AuthLinkRequestStreamEvent } from "./auth.ts";
 import {
@@ -311,6 +314,9 @@ export const WS_METHODS = {
   unoComputerInstallApp: "uno.computer.installApp",
   unoComputerInstallStatus: "uno.computer.installStatus",
   unoComputerPower: "uno.computer.power",
+  unoComputerMachineApps: "uno.computer.machineApps",
+  unoComputerAppAction: "uno.computer.appAction",
+  unoComputerLocalMetrics: "uno.computer.localMetrics",
 
   // Provider setup: install a harness CLI / sign it in on this machine
   providerInstallStart: "provider.install.start",
@@ -1170,6 +1176,26 @@ export const WsUnoComputerPowerRpc = Rpc.make(WS_METHODS.unoComputerPower, {
   error: UnoCloudRpcError,
 });
 
+/** Programs found on the machine this daemon runs on. Never fails: see `warnings`. */
+export const WsUnoComputerMachineAppsRpc = Rpc.make(WS_METHODS.unoComputerMachineApps, {
+  payload: Schema.Struct({}),
+  success: UnoMachineApps,
+  error: UnoCloudRpcError,
+});
+
+/** Start / stop / show on the internet / hide one of them. */
+export const WsUnoComputerAppActionRpc = Rpc.make(WS_METHODS.unoComputerAppAction, {
+  payload: UnoMachineAppActionInput,
+  success: UnoMachineApps,
+  error: UnoCloudRpcError,
+});
+
+export const WsUnoComputerLocalMetricsRpc = Rpc.make(WS_METHODS.unoComputerLocalMetrics, {
+  payload: Schema.Struct({}),
+  success: UnoComputerLocalMetrics,
+  error: UnoCloudRpcError,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerProbeRpc,
@@ -1205,6 +1231,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoComputerInstallAppRpc,
   WsUnoComputerInstallStatusRpc,
   WsUnoComputerPowerRpc,
+  WsUnoComputerMachineAppsRpc,
+  WsUnoComputerAppActionRpc,
+  WsUnoComputerLocalMetricsRpc,
   WsProviderInstallStartRpc,
   WsProviderInstallStatusRpc,
   WsProviderAuthStartRpc,
