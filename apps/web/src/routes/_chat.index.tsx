@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Navigate, useNavigate } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -12,6 +12,7 @@ import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
 import { useSavedEnvironmentRegistryStore } from "../environments/runtime";
 import { APP_BASE_NAME, APP_DISPLAY_NAME } from "~/branding";
 import { resolveDefaultLandingTarget } from "../defaultLanding";
+import { useActiveMachine } from "../hooks/useActiveMachine";
 import { useDefaultEnvironment } from "../hooks/useDefaultEnvironment";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { getProjectOrderKey } from "../logicalProject";
@@ -90,10 +91,17 @@ function ChatIndexRouteView() {
     (state) => Object.keys(state.byId).length,
   );
   const needsEnvironment = authGateState.status === "hosted-static" && savedEnvironmentCount === 0;
-  useDefaultLandingRedirect(!needsEnvironment);
+  // A cloud computer opens on its home screen (programs, files, apps); a
+  // local one resumes the most recent chat.
+  const machine = useActiveMachine();
+  const openHome = !needsEnvironment && machine.isCloud;
+  useDefaultLandingRedirect(!needsEnvironment && !openHome);
 
   if (needsEnvironment) {
     return <HostedStaticOnboardingState />;
+  }
+  if (openHome) {
+    return <Navigate to="/computer" replace />;
   }
 
   return <NoActiveThreadState />;

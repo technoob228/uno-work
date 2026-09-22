@@ -11,6 +11,7 @@ import { MonitorIcon } from "lucide-react";
 import { memo } from "react";
 
 import { usePrimaryEnvironmentId } from "../../environments/primary";
+import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { cn } from "../../lib/utils";
 import { useStore } from "../../store";
 import { POWER_STATE_LABEL, computerPowerState } from "../computer/computerFormat";
@@ -31,9 +32,12 @@ export const SidebarComputerRow = memo(function SidebarComputerRow() {
   const environmentId = activeEnvironmentId ?? primaryEnvironmentId;
   const pathname = useLocation({ select: (location) => location.pathname });
   const { isMobile, setOpenMobile } = useSidebar();
+  const machine = useActiveMachine();
   const { data } = useQuery(computerStateQueryOptions(environmentId, null));
 
-  if (!data?.linked) return null;
+  // A local computer (this Mac, a laptop) has no cloud home screen: chats,
+  // Files and Terminal cover it.
+  if (!machine.isCloud || !data?.linked) return null;
   const state = computerPowerState(data.box?.status);
   const active = pathname === "/computer";
 
@@ -52,7 +56,7 @@ export const SidebarComputerRow = memo(function SidebarComputerRow() {
       aria-current={active ? "page" : undefined}
     >
       <MonitorIcon className="size-4 shrink-0" />
-      <span className="min-w-0 flex-1 truncate font-medium">This computer</span>
+      <span className="min-w-0 flex-1 truncate font-medium">Home</span>
       {data.box ? (
         <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
           <span className={cn("size-1.5 rounded-full", DOT[state])} aria-hidden />

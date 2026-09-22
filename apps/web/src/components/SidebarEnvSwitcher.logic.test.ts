@@ -26,7 +26,7 @@ describe("groupSwitcherMachines", () => {
       machine("unowork-golden-build", { kind: "uno_box", isPrimary: true }),
       machine("vps", { kind: "server" }),
     ]);
-    expect(groups.map((group) => group.label)).toEqual(["Uno boxes", "Other machines"]);
+    expect(groups.map((group) => group.label)).toEqual(["Cloud computers", "Other machines"]);
     expect(groups.map((group) => group.items.map((item) => item.name))).toEqual([
       ["outreach-machine", "unowork-golden-build"],
       ["vps"],
@@ -41,7 +41,7 @@ describe("groupSwitcherMachines", () => {
     for (const group of groups) {
       expect(group.label).not.toMatch(/this computer/iu);
     }
-    expect(groups.map((group) => group.label)).toEqual(["Uno boxes", "Your computers"]);
+    expect(groups.map((group) => group.label)).toEqual(["Cloud computers", "Your computers"]);
   });
 
   it("puts the default machine first: its group leads and it leads its group", () => {
@@ -50,7 +50,7 @@ describe("groupSwitcherMachines", () => {
       machine("zeta-server", { kind: "server", isDefault: true }),
       machine("alpha-server", { kind: "server" }),
     ]);
-    expect(groups.map((group) => group.label)).toEqual(["Other machines", "Uno boxes"]);
+    expect(groups.map((group) => group.label)).toEqual(["Other machines", "Cloud computers"]);
     expect(groups[0]?.items.map((item) => item.name)).toEqual(["zeta-server", "alpha-server"]);
   });
 

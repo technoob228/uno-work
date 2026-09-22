@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import {
+  ArrowLeftIcon,
   FileSpreadsheetIcon,
   FileTextIcon,
   Loader2Icon,
@@ -54,6 +56,7 @@ export function OfficeView({ path }: { path: string }) {
   const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
   const environmentId = activeEnvironmentId ?? primaryEnvironmentId;
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const documentType = officeDocumentType(path);
   const saveTarget = officeSaveTarget(path);
@@ -241,6 +244,17 @@ export function OfficeView({ path }: { path: string }) {
         <header className="border-b border-border px-3 py-2">
           <div className="flex items-center gap-2">
             <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              aria-label="Back to Files"
+              onClick={() => {
+                const folder = path.slice(0, Math.max(path.lastIndexOf("/"), 1));
+                void navigate({ to: "/files", search: { path: folder, file: path } });
+              }}
+            >
+              <ArrowLeftIcon />
+            </Button>
             <Icon className="size-4 shrink-0 text-muted-foreground" />
             <span className="truncate text-sm font-medium text-foreground" title={path}>
               {fileName}

@@ -201,14 +201,14 @@ export function permissionModeConsequence(mode: RuntimeMode): string {
  * daemon reports (see `machineKind.ts`), never by whether it served the page.
  */
 export const MACHINE_KIND_LABELS: Readonly<Record<MachineKind, string>> = {
-  uno_box: "Uno box",
+  uno_box: "Cloud computer",
   computer: "Your computer",
   server: "Other machine",
 };
 
 /** Group headings when machines are listed by kind. */
 export const MACHINE_KIND_GROUP_LABELS: Readonly<Record<MachineKind, string>> = {
-  uno_box: "Uno boxes",
+  uno_box: "Cloud computers",
   computer: "Your computers",
   server: "Other machines",
 };

@@ -15,7 +15,11 @@ import {
   Trash2Icon,
   UploadIcon,
 } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
+
+import { isElectron } from "../../env";
+import { isOfficeFile } from "../office/officeFormats";
 
 import { cn } from "../../lib/utils";
 import { uploadFilesFromFileList } from "../../projectUploadPickers";
@@ -150,7 +154,11 @@ export function FileViewer({
 
   const kind = entry ? fileKindOf(entry.name) : "other";
   const Icon = FILE_KIND_ICON[kind];
-  const Editor = opener?.Editor;
+  const navigate = useNavigate();
+  // Word / Excel / PowerPoint edit in Office (the full editor). Office runs from
+  // the computer serving the page, so the desktop app keeps the simple editors.
+  const inOffice = !isElectron && isOfficeFile(path);
+  const Editor = inOffice ? undefined : opener?.Editor;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -175,6 +183,17 @@ export function FileViewer({
         </div>
         {entry && !editing ? (
           <div className="flex shrink-0 items-center gap-1.5">
+            {inOffice ? (
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid="files-open-in-office"
+                onClick={() => void navigate({ to: "/office", search: { path } })}
+              >
+                <PencilIcon />
+                <span className="hidden sm:inline">Edit in Office</span>
+              </Button>
+            ) : null}
             {Editor ? (
               <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
                 <PencilIcon />

@@ -2,6 +2,7 @@ import {
   CheckIcon,
   ChevronsUpDownIcon,
   LaptopIcon,
+  Loader2Icon,
   PlusIcon,
   RefreshCwIcon,
   StarIcon,
@@ -10,6 +11,9 @@ import { useMemo, useState } from "react";
 import type { EnvironmentId, EnvironmentConnectionState } from "@t3tools/contracts";
 
 import { AddEnvModal } from "./AddEnvModal";
+import { isElectron } from "../env";
+import { connectUnoBox, describeUnoBoxConnectProgress } from "../unoBoxConnect";
+import { toastManager } from "./ui/toast";
 import { cn } from "../lib/utils";
 import { usePrimaryEnvironmentDescriptor } from "../environments/primary";
 import {
@@ -22,7 +26,7 @@ import { useMachineRows } from "../hooks/useMachineRows";
 import { useReconnectEnvironment } from "../hooks/useReconnectEnvironment";
 import { useSwitchEnvironment } from "../hooks/useSwitchEnvironment";
 import { deriveMachineKind, type MachineKind } from "../machineKind";
-import { MACHINE_KIND_LABELS } from "../plainLanguage";
+import { MACHINE_KIND_GROUP_LABELS, MACHINE_KIND_LABELS } from "../plainLanguage";
 import { useStore } from "../store";
 import { formatElapsedAgoLabel } from "../timestampFormat";
 import { MACHINE_KIND_ICON } from "./machineKindIcons";
@@ -96,8 +100,17 @@ function formatSavedEnvironmentStatusMeta(input: {
  * `compact` is a one-line ghost trigger that sits in the chat-list sidebar's
  * utility row next to the icon buttons.
  */
-export function SidebarEnvSwitcher({ variant = "card" }: { variant?: "card" | "compact" } = {}) {
+/** What the desktop app calls the computer it runs on. */
+function localComputerName(os: string): string {
+  return os === "darwin" ? "This Mac" : "This computer";
+}
+
+export function SidebarEnvSwitcher({
+  variant = "card",
+}: { variant?: "card" | "compact" | "header" } = {}) {
   const [addEnvOpen, setAddEnvOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [connecting, setConnecting] = useState<{ boxId: number; label: string } | null>(null);
   const { reconnect, reconnectingId } = useReconnectEnvironment();
   const primaryDescriptor = usePrimaryEnvironmentDescriptor();
   const primaryEnvironmentId = primaryDescriptor?.environmentId ?? null;
@@ -131,7 +144,9 @@ export function SidebarEnvSwitcher({ variant = "card" }: { variant?: "card" | "c
       ? [
           {
             id: primaryDescriptor.environmentId,
-            name: labelById.get(primaryDescriptor.environmentId) ?? primaryDescriptor.label,
+            name: isElectron
+              ? localComputerName(primaryDescriptor.platform.os)
+              : (labelById.get(primaryDescriptor.environmentId) ?? primaryDescriptor.label),
             meta: formatPlatformMeta(
               primaryDescriptor.platform.os,
               primaryDescriptor.platform.arch,
@@ -186,6 +201,42 @@ export function SidebarEnvSwitcher({ variant = "card" }: { variant?: "card" | "c
     savedEnvironmentRuntimeById,
   ]);
 
+  // Cloud computers on the account that this app hasn't connected to yet: one
+  // click wakes, connects and opens them.
+  const accountBoxes = useMemo(
+    () =>
+      machineRows.filter(
+        (row) => row.environmentId === null && row.box !== null && row.kind === "uno_box",
+      ),
+    [machineRows],
+  );
+
+  const openMachine = (environmentId: EnvironmentId, kind: MachineKind) => {
+    setMenuOpen(false);
+    switchEnvironment(environmentId, kind === "uno_box" ? { landing: "computer" } : undefined);
+  };
+
+  const openAccountBox = async (row: (typeof accountBoxes)[number]) => {
+    if (!primaryEnvironmentId || !row.box || connecting) return;
+    setConnecting({ boxId: row.box.id, label: "Connecting…" });
+    try {
+      const record = await connectUnoBox(primaryEnvironmentId, row.box, {
+        onProgress: (progress) =>
+          setConnecting({ boxId: row.box!.id, label: describeUnoBoxConnectProgress(progress) }),
+      });
+      setMenuOpen(false);
+      switchEnvironment(record.environmentId, { landing: "computer" });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: `Couldn't open ${row.label}`,
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setConnecting(null);
+    }
+  };
+
   const currentId = activeEnvironmentId ?? primaryEnvironmentId ?? environments[0]?.id ?? null;
   const current =
     environments.find((environment) => environment.id === currentId) ??
@@ -216,7 +267,7 @@ export function SidebarEnvSwitcher({ variant = "card" }: { variant?: "card" | "c
   return (
     <>
       <div className="flex w-full items-stretch gap-1">
-        <Menu>
+        <Menu open={menuOpen} onOpenChange={setMenuOpen}>
           <MenuTrigger
             render={
               <button
@@ -225,9 +276,11 @@ export function SidebarEnvSwitcher({ variant = "card" }: { variant?: "card" | "c
                   "flex min-w-0 flex-1 items-center gap-2 rounded-md text-left transition-colors",
                   variant === "compact"
                     ? "h-8 px-2 text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
-                    : "border border-border bg-background px-2 py-1.5 hover:bg-accent",
+                    : variant === "header"
+                      ? "h-11 px-2 hover:bg-sidebar-row-hover"
+                      : "border border-border bg-background px-2 py-1.5 hover:bg-accent",
                 )}
-                aria-label="Switch machine"
+                aria-label="Switch computer"
                 title={
                   variant === "compact" && current
                     ? `${current.name} · ${MACHINE_KIND_LABELS[current.kind]} · ${current.meta}`
@@ -246,6 +299,19 @@ export function SidebarEnvSwitcher({ variant = "card" }: { variant?: "card" | "c
                   <span className="min-w-0 flex-1 truncate text-xs font-medium">
                     {current?.name ?? "No machine"}
                   </span>
+                ) : variant === "header" ? (
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-foreground">
+                      {current?.name ?? "No computer"}
+                    </div>
+                    <div className="truncate text-[11px] text-muted-foreground">
+                      {current
+                        ? current.isPrimary && isElectron
+                          ? "On this computer"
+                          : MACHINE_KIND_LABELS[current.kind]
+                        : "Connect a computer"}
+                    </div>
+                  </div>
                 ) : (
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-xs font-medium text-foreground">
@@ -262,7 +328,12 @@ export function SidebarEnvSwitcher({ variant = "card" }: { variant?: "card" | "c
               </button>
             }
           />
-          <MenuPopup align="start" side="top" sideOffset={6} className="min-w-[16rem] p-1">
+          <MenuPopup
+            align="start"
+            side={variant === "header" ? "bottom" : "top"}
+            sideOffset={6}
+            className="min-w-[16rem] p-1"
+          >
             {groups.map((group) => (
               <div key={group.kind} className="flex flex-col">
                 <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -281,7 +352,7 @@ export function SidebarEnvSwitcher({ variant = "card" }: { variant?: "card" | "c
                     >
                       <button
                         type="button"
-                        onClick={() => switchEnvironment(env.id)}
+                        onClick={() => openMachine(env.id, env.kind)}
                         className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs"
                       >
                         <span
@@ -343,9 +414,46 @@ export function SidebarEnvSwitcher({ variant = "card" }: { variant?: "card" | "c
                 })}
               </div>
             ))}
-            {groups.length === 0 ? (
+            {accountBoxes.length > 0 ? (
+              <div className="flex flex-col">
+                <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {groups.some((group) => group.kind === "uno_box")
+                    ? "More on your account"
+                    : MACHINE_KIND_GROUP_LABELS.uno_box}
+                </div>
+                {accountBoxes.map((row) => {
+                  const Icon = MACHINE_KIND_ICON.uno_box;
+                  const busy = connecting?.boxId === row.box?.id;
+                  return (
+                    <button
+                      key={row.key}
+                      type="button"
+                      disabled={connecting !== null}
+                      onClick={() => void openAccountBox(row)}
+                      className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent disabled:cursor-wait disabled:opacity-70"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="size-2 shrink-0 rounded-full bg-muted-foreground/40"
+                      />
+                      <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium">{row.label}</div>
+                        <div className="truncate text-[10px] text-muted-foreground">
+                          {busy && connecting ? connecting.label : row.detail || "Click to open"}
+                        </div>
+                      </div>
+                      {busy ? (
+                        <Loader2Icon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+            {groups.length === 0 && accountBoxes.length === 0 ? (
               <div className="px-2 py-2 text-xs text-muted-foreground">
-                No machines connected yet
+                No computers connected yet
               </div>
             ) : null}
             <div className="my-1 h-px bg-border" />
@@ -377,7 +485,7 @@ export function SidebarEnvSwitcher({ variant = "card" }: { variant?: "card" | "c
               className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-primary transition-colors hover:bg-primary/8"
             >
               <PlusIcon className="size-3.5" />
-              <span>Add a machine</span>
+              <span>Add computer</span>
             </button>
           </MenuPopup>
         </Menu>

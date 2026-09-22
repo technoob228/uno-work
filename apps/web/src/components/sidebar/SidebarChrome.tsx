@@ -14,7 +14,6 @@ import { Link, useNavigate } from "@tanstack/react-router";
 
 import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../../branding";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
-import { SidebarEnvSwitcher } from "../SidebarEnvSwitcher";
 import { SidebarWorkspaceSwitcher } from "../SidebarWorkspaceSwitcher";
 import { SidebarFooter, SidebarHeader, SidebarTrigger, useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -129,11 +128,8 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu(props: {
         <SidebarUtilityItem icon={<BotIcon />} label="Helper" onClick={handleHelperClick} />
       ) : null}
       <div className="ml-1 min-w-0 flex-1">
-        {allMachinesSidebar ? (
-          <SidebarWorkspaceSwitcher variant="compact" />
-        ) : (
-          <SidebarEnvSwitcher variant="compact" />
-        )}
+        {/* The computer switcher lives at the top of the sidebar now. */}
+        {allMachinesSidebar ? <SidebarWorkspaceSwitcher variant="compact" /> : null}
       </div>
     </div>
   );

@@ -181,6 +181,8 @@ import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarComputerRow } from "./sidebar/SidebarComputerRow";
+import { SidebarEnvSwitcher } from "./SidebarEnvSwitcher";
+import { SidebarTerminalRow } from "./sidebar/SidebarTerminalRow";
 import { SidebarFilesRow } from "./sidebar/SidebarFilesRow";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import {
@@ -2248,8 +2250,10 @@ export default function Sidebar() {
     <MachineIdentityProvider identities={machineIdentities}>
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-0">
+        <SidebarEnvSwitcher variant="header" />
         <SidebarComputerRow />
         <SidebarFilesRow />
+        <SidebarTerminalRow />
       </SidebarGroup>
       <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-1">
         <SidebarThreadHeader

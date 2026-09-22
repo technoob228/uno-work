@@ -21,8 +21,13 @@ export function useSwitchEnvironment() {
   const sidebarThreadSortOrder = useSettings((settings) => settings.sidebarThreadSortOrder);
 
   return useCallback(
-    (environmentId: EnvironmentId) => {
+    (environmentId: EnvironmentId, options?: { readonly landing?: "computer" }) => {
       setActiveEnvironmentId(environmentId);
+      // A cloud computer opens on its own home screen (programs, files, apps).
+      if (options?.landing === "computer") {
+        void navigate({ to: "/computer" });
+        return;
+      }
       const threads = selectSidebarThreadsForEnvironment(useStore.getState(), environmentId);
       const lastVisitedById = useUiStateStore.getState().threadLastVisitedAtById;
       const target = pickThreadForEnvironmentSwitch(

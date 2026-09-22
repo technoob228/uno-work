@@ -191,7 +191,8 @@ export const ChatHeader = memo(function ChatHeader({
             {...(draftId ? { draftId } : {})}
           />
         )}
-        {devMode && (
+        {/* Terminal is always one click away (it's not a developer-only tool). */}
+        {(
           <Tooltip>
             <TooltipTrigger
               render={

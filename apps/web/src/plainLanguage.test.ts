@@ -111,7 +111,7 @@ describe("machine and chat-mode vocabularies", () => {
     // Labels follow what the machine is, never its role: the daemon serving
     // the page is not "This computer" when it is a box.
     expect(MACHINE_KIND_LABELS).toEqual({
-      uno_box: "Uno box",
+      uno_box: "Cloud computer",
       computer: "Your computer",
       server: "Other machine",
     });
