@@ -13,6 +13,10 @@ import {
   readComputerState,
   humanizeControlPlaneError,
   readInstallStatus,
+  parseAppCards,
+  removeComputerApp,
+  setComputerAppAiLimit,
+  REMOVE_NEEDS_CONSOLE_UPDATE,
   type KnownInstall,
 } from "./unoComputer.ts";
 
@@ -356,6 +360,10 @@ describe("parseInstalledApps", () => {
         deploymentId: 500,
         notes: null,
         credentials: [],
+        removable: true,
+        webPort: null,
+        composeProject: "uno-uptime-kuma",
+        aiKey: null,
       },
     ]);
   });
@@ -689,4 +697,209 @@ it("a 502 from the control plane reads as a pause, not as 'not an Uno computer'"
   expect(state.box).toBe(null);
   expect(state.candidates).toEqual([]);
   expect(state.error).toBe("Uno isn't answering right now. It usually comes back in a minute.");
+});
+
+const services072 = () => ({
+  services: [
+    {
+      id: -77,
+      box_id: 123,
+      repo_full_name: "memos",
+      last_deployment_id: 77,
+      last_status: "success",
+    },
+    {
+      id: 5,
+      box_id: 123,
+      repo_full_name: "me/my-site",
+      last_deployment_id: 5,
+      last_status: "success",
+    },
+  ],
+});
+const templates072 = () => ({
+  templates: [{ id: "memos", name: "Memos", env: [] }],
+});
+
+describe("App Store 0.0.72: remove, dedupe fields, AI key", () => {
+  it("reads removable, web port, compose project and the AI key", () => {
+    const cards = parseAppCards({
+      apps: [
+        {
+          deployment_id: 77,
+          template_id: "open-webui",
+          removable: true,
+          web_port: 8080,
+          compose_project: "uno-open-webui",
+          ai_key: { limit_usd: 10, spent_usd: 0.12 },
+        },
+        { deployment_id: 78, template_id: "memos", ai_key: { limit_usd: null, spent_usd: 3 } },
+        { deployment_id: 79 },
+      ],
+    });
+    expect(cards.get(77)).toMatchObject({
+      templateId: "open-webui",
+      removable: true,
+      webPort: 8080,
+      composeProject: "uno-open-webui",
+      aiKey: { limitUsd: 10, spentUsd: 0.12 },
+    });
+    expect(cards.get(78)?.aiKey).toEqual({ limitUsd: null, spentUsd: 3 });
+    // An older console: none of the new fields, all read as "don't know".
+    expect(cards.get(79)).toMatchObject({
+      removable: null,
+      webPort: null,
+      composeProject: null,
+      aiKey: null,
+    });
+  });
+
+  it("puts them on the installed app; a git deploy is not an App Store app", async () => {
+    const plane = fakeControlPlane({
+      "/api/v1/apps/templates": templates072,
+      "/api/v1/git/services": services072,
+      "/api/v1/boxes/123/apps": () => ({
+        apps: [
+          {
+            deployment_id: 77,
+            template_id: "memos",
+            removable: true,
+            web_port: 5230,
+            compose_project: "uno-memos",
+            ai_key: null,
+          },
+        ],
+      }),
+    });
+    const apps = await readComputerApps({
+      apiKey: "key",
+      fetchJson: plane.fetchJson,
+      boxId: 123,
+      known: [],
+    });
+    expect(apps.installed.apps[0]).toMatchObject({
+      name: "Memos",
+      removable: true,
+      webPort: 5230,
+      composeProject: "uno-memos",
+      aiKey: null,
+    });
+    expect(apps.installed.apps[1]).toMatchObject({ name: "my-site", removable: false });
+  });
+
+  it("with an older console, offers Remove for App Store apps and guesses the compose project", async () => {
+    const plane = fakeControlPlane({
+      "/api/v1/apps/templates": templates072,
+      "/api/v1/git/services": services072,
+    });
+    const apps = await readComputerApps({
+      apiKey: "key",
+      fetchJson: plane.fetchJson,
+      boxId: 123,
+      known: [],
+    });
+    expect(apps.installed.apps[0]).toMatchObject({
+      removable: true,
+      webPort: null,
+      composeProject: "uno-memos",
+    });
+    expect(apps.installed.apps[1]?.removable).toBe(false);
+  });
+
+  it("removes, keeping the data unless asked", async () => {
+    const plane = fakeControlPlane({
+      "/api/v1/boxes/123/apps/77": () => ({
+        removed: true,
+        template_id: "memos",
+        data_deleted: false,
+      }),
+    });
+    const result = await removeComputerApp({
+      apiKey: "key",
+      fetchJson: plane.fetchJson,
+      boxId: 123,
+      deploymentId: 77,
+      deleteData: false,
+    });
+    expect(result).toEqual({ removed: true, templateId: "memos", dataDeleted: false });
+    expect(plane.calls[0]).toMatchObject({
+      method: "DELETE",
+      path: "/api/v1/boxes/123/apps/77?delete_data=false",
+    });
+    await removeComputerApp({
+      apiKey: "key",
+      fetchJson: plane.fetchJson,
+      boxId: 123,
+      deploymentId: 77,
+      deleteData: true,
+    });
+    expect(plane.calls[1]?.path).toBe("/api/v1/boxes/123/apps/77?delete_data=true");
+  });
+
+  it("says what went wrong in plain words", async () => {
+    const attempt = (route: Route) =>
+      removeComputerApp({
+        apiKey: "key",
+        fetchJson: fakeControlPlane({ "/api/v1/boxes/123/apps/77": route }).fetchJson,
+        boxId: 123,
+        deploymentId: 77,
+        deleteData: false,
+      });
+    await expect(attempt(http(409, '{"error":"APP_BUSY"}'))).rejects.toThrow(
+      "still being installed or updated",
+    );
+    await expect(
+      attempt(http(502, '{"error":"APP_REMOVE_FAILED","detail":"docker compose down timed out"}')),
+    ).rejects.toThrow("nothing was changed. docker compose down timed out.");
+    await expect(attempt(http(404, '{"error":"NOT_FOUND"}'))).rejects.toThrow(
+      "isn't on this computer anymore",
+    );
+    // An older console: its router's own 404, or 405 for DELETE.
+    await expect(attempt(http(404, "404 page not found"))).rejects.toThrow(
+      REMOVE_NEEDS_CONSOLE_UPDATE,
+    );
+    await expect(attempt(http(405, "Method Not Allowed"))).rejects.toThrow(
+      REMOVE_NEEDS_CONSOLE_UPDATE,
+    );
+  });
+
+  it("sets and clears the AI spending limit", async () => {
+    const bodies: unknown[] = [];
+    const plane = fakeControlPlane({
+      "/api/v1/boxes/123/apps/77": (init) => {
+        const body = JSON.parse(String(init?.body)) as { ai_limit_usd: number | null };
+        bodies.push(body);
+        return { ai_key: { limit_usd: body.ai_limit_usd, spent_usd: 0.12 } };
+      },
+    });
+    const set = await setComputerAppAiLimit({
+      apiKey: "key",
+      fetchJson: plane.fetchJson,
+      boxId: 123,
+      deploymentId: 77,
+      limitUsd: 25,
+    });
+    expect(set.aiKey).toEqual({ limitUsd: 25, spentUsd: 0.12 });
+    const cleared = await setComputerAppAiLimit({
+      apiKey: "key",
+      fetchJson: plane.fetchJson,
+      boxId: 123,
+      deploymentId: 77,
+      limitUsd: null,
+    });
+    expect(cleared.aiKey.limitUsd).toBeNull();
+    expect(bodies).toEqual([{ ai_limit_usd: 25 }, { ai_limit_usd: null }]);
+    expect(plane.calls[0]?.method).toBe("PATCH");
+    await expect(
+      setComputerAppAiLimit({
+        apiKey: "key",
+        fetchJson: fakeControlPlane({
+          "/api/v1/boxes/123/apps/77": http(409, '{"error":"APP_NO_AI_KEY"}'),
+        }).fetchJson,
+        boxId: 123,
+        deploymentId: 77,
+        limitUsd: 5,
+      }),
+    ).rejects.toThrow("doesn't have an AI key");
+  });
 });

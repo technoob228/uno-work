@@ -4,7 +4,8 @@
  * Looks at the machine the daemon runs on (see `machineAppsScan.ts`), keeps
  * the answer warm with a background pass every 20 s, and performs the few
  * things a desktop does with a program: start it, stop it, show it on the
- * internet, hide it again.
+ * internet, hide it again — and remove a docker container the person started
+ * themselves (never the computer's own, never an App Store app's).
  *
  * "Show on the internet" is always a click. It asks the control plane for a
  * public TCP forward of the app's port with this machine's own key (the
@@ -34,8 +35,10 @@ import { UnoBoxIdentity } from "../unoBoxIdentity.ts";
 import { UnoCloudFetchError } from "../workspaceRegistry/UnoCloudService.ts";
 import {
   NOT_LINKED_MESSAGE,
+  composeProjectFor,
   computerKeyFor,
   humanizeControlPlaneError,
+  parseAppCards,
 } from "../workspaceRegistry/unoComputer.ts";
 import {
   controlPlaneErrorStatus,
@@ -436,6 +439,52 @@ export const makeMachineAppsService = (
       throw new ActionError("This app can't be stopped from here.");
     };
 
+    /**
+     * Compose projects of the App Store apps on this computer. Asked fresh at
+     * removal: a container of an App Store app is never removed from here
+     * (its card does it, through Uno). Unknown (an older console, no key) is an
+     * empty set — `uno-*` projects are refused by the scan itself.
+     */
+    const storeComposeProjects = async (cloud: CloudView): Promise<ReadonlySet<string>> => {
+      if (cloud.boxId === null || cloud.apiKey.length === 0) return new Set();
+      try {
+        const cards = parseAppCards(
+          await fetchJson(cloud.apiKey, `/api/v1/boxes/${cloud.boxId}/apps`),
+        );
+        const projects = new Set<string>();
+        for (const card of cards.values()) {
+          const project = card.composeProject ?? composeProjectFor(card.templateId);
+          if (project) projects.add(project);
+        }
+        return projects;
+      } catch {
+        return new Set();
+      }
+    };
+
+    /**
+     * "Remove" of a program found on the machine: only a docker container the
+     * person started themselves. The container goes (`docker rm -f`); its
+     * volumes stay — no `-v` — so the data is still on the computer.
+     */
+    const removeApp = async (app: ScannedApp, cloud: CloudView) => {
+      if (app.source !== "docker" || app.control.kind !== "docker" || !app.canRemove) {
+        throw new ActionError("This program can't be removed from here.");
+      }
+      if (app.composeProject && (await storeComposeProjects(cloud)).has(app.composeProject)) {
+        throw new ActionError(
+          "This is part of an app from the App Store — remove it from the app's own card.",
+        );
+      }
+      // The same docker CLI the scan reads and Start/Stop use (`probe.run`), as
+      // the daemon's own user — no sudo. No docker access → the scan finds no
+      // containers, so there is nothing to remove either.
+      const result = await probe.run("docker", ["rm", "-f", app.control.container], 120_000);
+      if (!result.ok) {
+        throw new ActionError("Docker didn't remove it. Try again in a moment.");
+      }
+    };
+
     /** Waits a little for the change to show, so the answer is not stale. */
     const settle = async (appId: string, done: (app: ScannedApp | undefined) => boolean) => {
       for (let i = 0; i < 12; i++) {
@@ -447,9 +496,10 @@ export const makeMachineAppsService = (
 
     const action: MachineAppsServiceShape["action"] = (input) =>
       Effect.gen(function* () {
-        // Start / stop act on processes: look again. Show / hide only touch the
+        // Start / stop / remove act on processes: look again. Show / hide only touch the
         // cloud, so the last scan (seconds old) is enough.
-        const lifecycle = input.action === "start" || input.action === "stop";
+        const lifecycle =
+          input.action === "start" || input.action === "stop" || input.action === "remove";
         const scanned = yield* Effect.promise(() => scan(lifecycle));
         const app = scanned.apps.find((a) => a.id === input.appId);
         if (!app) {
@@ -474,6 +524,14 @@ export const makeMachineAppsService = (
                 return;
               case "unpublish":
                 await unpublish(app, cloud);
+                return;
+              case "remove":
+                await removeApp(app, cloud);
+                // A published port has nothing behind it anymore: take it down too.
+                if (!cloud.blockedReason && publicationFor(app, cloud.forwards, cloud.hostname)) {
+                  await unpublish(app, cloud).catch(() => undefined);
+                }
+                await settle(app.id, (a) => a === undefined);
                 return;
             }
           },

@@ -122,6 +122,10 @@ import type {
   UnoComputerApps,
   UnoComputerInstallAppInput,
   UnoComputerInstallAppResult,
+  UnoComputerRemoveAppInput,
+  UnoComputerRemoveAppResult,
+  UnoComputerSetAppAiLimitInput,
+  UnoComputerSetAppAiLimitResult,
   UnoComputerInstallStatus,
   UnoComputerInstallStatusInput,
   UnoComputerMetrics,
@@ -758,6 +762,10 @@ export interface EnvironmentApi {
     apps: (input?: UnoComputerTargetInput) => Promise<UnoComputerApps>;
     installApp: (input: UnoComputerInstallAppInput) => Promise<UnoComputerInstallAppResult>;
     installStatus: (input: UnoComputerInstallStatusInput) => Promise<UnoComputerInstallStatus>;
+    removeApp: (input: UnoComputerRemoveAppInput) => Promise<UnoComputerRemoveAppResult>;
+    setAppAiLimit: (
+      input: UnoComputerSetAppAiLimitInput,
+    ) => Promise<UnoComputerSetAppAiLimitResult>;
     power: (input: UnoComputerPowerInput) => Promise<UnoComputerState>;
     /** Programs found on this machine (manifests, docker, systemd, open ports). */
     machineApps: () => Promise<UnoMachineApps>;

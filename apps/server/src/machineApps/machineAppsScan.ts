@@ -51,7 +51,11 @@ export interface MachineProbe {
   /** The daemon itself and the ports it serves: never shown as programs. */
   readonly selfPid: number;
   readonly selfPorts: ReadonlySet<number>;
-  readonly run: (command: string, args: ReadonlyArray<string>) => Promise<CommandResult>;
+  readonly run: (
+    command: string,
+    args: ReadonlyArray<string>,
+    timeoutMs?: number,
+  ) => Promise<CommandResult>;
   readonly readFile: (path: string) => Promise<string | null>;
   readonly probeHttp: (port: number) => Promise<HttpProbe>;
 }
@@ -156,13 +160,36 @@ function isInfraUnit(unit: string): boolean {
   );
 }
 
+export const COMPOSE_PROJECT_LABEL = "com.docker.compose.project";
+
+/**
+ * A container that is part of Uno itself or of an App Store install (catalog
+ * apps run as compose project `uno-<template>`), never the person's own:
+ * it gets no "Remove" here. App Store apps are removed from their own card.
+ */
+export function isUnoContainer(container: {
+  readonly name: string;
+  readonly labels: Readonly<Record<string, string>>;
+}): boolean {
+  const project = container.labels[COMPOSE_PROJECT_LABEL] ?? "";
+  if (/^uno[-_]/i.test(container.name) || /^uno[-_]/i.test(project)) return true;
+  return Object.keys(container.labels).some(
+    (key) => key === "uno.system" || key === "uno.managed" || key.startsWith("uno.deploy"),
+  );
+}
+
 export interface ScanInput {
   readonly manifests: ReadonlyArray<AppManifest>;
   /** Icon data URLs by manifest id (read by the caller). */
   readonly manifestIcons: ReadonlyMap<string, string>;
 }
 
-export interface ScannedApp extends Omit<UnoMachineApp, "publication"> {
+export interface ScannedApp extends Omit<
+  UnoMachineApp,
+  "publication" | "canRemove" | "composeProject"
+> {
+  readonly canRemove: boolean;
+  readonly composeProject: string | null;
   /** Kept server-side for actions; never trusted from the client. */
   readonly control:
     | { readonly kind: "docker"; readonly container: string }
@@ -170,6 +197,14 @@ export interface ScannedApp extends Omit<UnoMachineApp, "publication"> {
     | { readonly kind: "process"; readonly pid: number }
     | { readonly kind: "none" };
   readonly manifest: AppManifest | null;
+}
+
+/** The public shape needs these; everything else of a scanned app is published as is. */
+function withDefaults(
+  app: Omit<ScannedApp, "canRemove" | "composeProject"> &
+    Partial<Pick<ScannedApp, "canRemove" | "composeProject">>,
+): ScannedApp {
+  return { canRemove: false, composeProject: null, ...app };
 }
 
 export async function readListening(probe: MachineProbe): Promise<ListeningPort[]> {
@@ -339,26 +374,28 @@ export async function scanMachineApps(
           ? { kind: "process", pid: listener.pid }
           : { kind: "none" };
     if (m.port !== null) claimed.add(m.port);
-    apps.push({
-      id: `manifest:${m.id}`,
-      source: "manifest",
-      name: m.name,
-      description: m.description,
-      icon: m.icon,
-      iconImage: input.manifestIcons.get(m.id) ?? null,
-      status: running === null ? "unknown" : running ? "running" : "stopped",
-      port: m.port,
-      udpPorts: [],
-      http: http || (m.port === null && m.url !== null),
-      loopbackOnly: listener?.loopbackOnly ?? false,
-      detail: m.port !== null ? `Registered · port ${m.port}` : "Registered",
-      url: m.url,
-      localUrl: localUrlFor(m.port, http, m.path),
-      canStart: running === false && m.command !== null,
-      canStop: running === true && control.kind !== "none",
-      control,
-      manifest: m,
-    });
+    apps.push(
+      withDefaults({
+        id: `manifest:${m.id}`,
+        source: "manifest",
+        name: m.name,
+        description: m.description,
+        icon: m.icon,
+        iconImage: input.manifestIcons.get(m.id) ?? null,
+        status: running === null ? "unknown" : running ? "running" : "stopped",
+        port: m.port,
+        udpPorts: [],
+        http: http || (m.port === null && m.url !== null),
+        loopbackOnly: listener?.loopbackOnly ?? false,
+        detail: m.port !== null ? `Registered · port ${m.port}` : "Registered",
+        url: m.url,
+        localUrl: localUrlFor(m.port, http, m.path),
+        canStart: running === false && m.command !== null,
+        canStop: running === true && control.kind !== "none",
+        control,
+        manifest: m,
+      }),
+    );
   }
 
   /* 2. Docker */
@@ -374,26 +411,30 @@ export async function scanMachineApps(
     const known = knownSoftware(`${c.image} ${c.name}`);
     const http = primary ? (httpByPort.get(primary.hostPort)?.http ?? false) : false;
     const title = primary ? httpByPort.get(primary.hostPort)?.title : null;
-    apps.push({
-      id: `docker:${c.name}`,
-      source: "docker",
-      name: c.labels["uno.app.name"]?.slice(0, 60) || c.name,
-      description: known && known.name !== c.name ? known.name : (title ?? null),
-      icon: known?.icon ?? "🐳",
-      iconImage: null,
-      status: c.running ? "running" : "stopped",
-      port: primary?.hostPort ?? null,
-      udpPorts: c.ports.filter((p) => p.protocol === "udp" && !p.loopback).map((p) => p.hostPort),
-      http,
-      loopbackOnly: primary?.loopback ?? false,
-      detail: `Docker · ${c.image.replace(/@sha256:.*$/, "").slice(0, 60)}`,
-      url: null,
-      localUrl: c.running ? localUrlFor(primary?.hostPort ?? null, http, null) : null,
-      canStart: !c.running,
-      canStop: c.running,
-      control: { kind: "docker", container: c.name },
-      manifest: null,
-    });
+    apps.push(
+      withDefaults({
+        id: `docker:${c.name}`,
+        source: "docker",
+        name: c.labels["uno.app.name"]?.slice(0, 60) || c.name,
+        description: known && known.name !== c.name ? known.name : (title ?? null),
+        icon: known?.icon ?? "🐳",
+        iconImage: null,
+        status: c.running ? "running" : "stopped",
+        port: primary?.hostPort ?? null,
+        udpPorts: c.ports.filter((p) => p.protocol === "udp" && !p.loopback).map((p) => p.hostPort),
+        http,
+        loopbackOnly: primary?.loopback ?? false,
+        detail: `Docker · ${c.image.replace(/@sha256:.*$/, "").slice(0, 60)}`,
+        url: null,
+        localUrl: c.running ? localUrlFor(primary?.hostPort ?? null, http, null) : null,
+        canStart: !c.running,
+        canStop: c.running,
+        canRemove: !isUnoContainer(c),
+        composeProject: c.labels[COMPOSE_PROJECT_LABEL] || null,
+        control: { kind: "docker", container: c.name },
+        manifest: null,
+      }),
+    );
   }
 
   /* 3. systemd */
@@ -408,30 +449,32 @@ export async function scanMachineApps(
     const known = knownSoftware(unit.id);
     const http = primary ? (httpByPort.get(primary.port)?.http ?? false) : false;
     const describe = unit.description && unit.description !== unit.id ? unit.description : null;
-    apps.push({
-      id: `systemd:${unit.user ? "user:" : ""}${unit.id}`,
-      source: "systemd",
-      name:
-        known && !unit.user && !isUserAddedUnitPath(unit.fragmentPath, probe.home)
-          ? known.name
-          : prettyName(unit.id),
-      description: describe?.slice(0, 200) ?? null,
-      icon: known?.icon ?? "⚙️",
-      iconImage: null,
-      status: running ? "running" : "stopped",
-      port: primary?.port ?? null,
-      udpPorts: [],
-      http,
-      loopbackOnly: primary?.loopbackOnly ?? false,
-      detail: `Service · ${unit.id}${unit.user ? "" : " · system"}`,
-      url: null,
-      localUrl: running ? localUrlFor(primary?.port ?? null, http, null) : null,
-      // System units need root, and the daemon deliberately has none.
-      canStart: unit.user && !running,
-      canStop: unit.user && running,
-      control: { kind: "systemd", unit: unit.id, user: unit.user },
-      manifest: null,
-    });
+    apps.push(
+      withDefaults({
+        id: `systemd:${unit.user ? "user:" : ""}${unit.id}`,
+        source: "systemd",
+        name:
+          known && !unit.user && !isUserAddedUnitPath(unit.fragmentPath, probe.home)
+            ? known.name
+            : prettyName(unit.id),
+        description: describe?.slice(0, 200) ?? null,
+        icon: known?.icon ?? "⚙️",
+        iconImage: null,
+        status: running ? "running" : "stopped",
+        port: primary?.port ?? null,
+        udpPorts: [],
+        http,
+        loopbackOnly: primary?.loopbackOnly ?? false,
+        detail: `Service · ${unit.id}${unit.user ? "" : " · system"}`,
+        url: null,
+        localUrl: running ? localUrlFor(primary?.port ?? null, http, null) : null,
+        // System units need root, and the daemon deliberately has none.
+        canStart: unit.user && !running,
+        canStop: unit.user && running,
+        control: { kind: "systemd", unit: unit.id, user: unit.user },
+        manifest: null,
+      }),
+    );
   }
 
   /* 4. Anything else that listens */
@@ -450,26 +493,28 @@ export async function scanMachineApps(
     // On a Mac every chat app listens on something; only web pages count there.
     if (!http && probe.platform === "darwin") continue;
     const known = knownSoftware(l.process ?? "");
-    apps.push({
-      id: `port:${l.port}`,
-      source: "port",
-      name: probeResult?.title ?? known?.name ?? (l.process ? `${l.process}` : `Port ${l.port}`),
-      description: null,
-      icon: known?.icon ?? null,
-      iconImage: null,
-      status: "running",
-      port: l.port,
-      udpPorts: [],
-      http,
-      loopbackOnly: l.loopbackOnly,
-      detail: l.process ? `${l.process} · port ${l.port}` : `Port ${l.port}`,
-      url: null,
-      localUrl: localUrlFor(l.port, http, null),
-      canStart: false,
-      canStop: l.pid !== null,
-      control: l.pid !== null ? { kind: "process", pid: l.pid } : { kind: "none" },
-      manifest: null,
-    });
+    apps.push(
+      withDefaults({
+        id: `port:${l.port}`,
+        source: "port",
+        name: probeResult?.title ?? known?.name ?? (l.process ? `${l.process}` : `Port ${l.port}`),
+        description: null,
+        icon: known?.icon ?? null,
+        iconImage: null,
+        status: "running",
+        port: l.port,
+        udpPorts: [],
+        http,
+        loopbackOnly: l.loopbackOnly,
+        detail: l.process ? `${l.process} · port ${l.port}` : `Port ${l.port}`,
+        url: null,
+        localUrl: localUrlFor(l.port, http, null),
+        canStart: false,
+        canStop: l.pid !== null,
+        control: l.pid !== null ? { kind: "process", pid: l.pid } : { kind: "none" },
+        manifest: null,
+      }),
+    );
   }
 
   return apps;

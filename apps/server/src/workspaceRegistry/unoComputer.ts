@@ -12,6 +12,9 @@
  *   POST /api/v1/boxes/{id}/apps       install an app        (feat/app-templates)
  *   GET  /api/v1/deployments/{id}/logs install progress (long-poll JSON, not SSE)
  *   GET  /api/v1/git/services          installed apps (services bound to the box)
+ *   GET  /api/v1/boxes/{id}/apps       sign-in, removable, web port, AI key per app
+ *   DELETE /api/v1/boxes/{id}/apps/{d} remove an App Store app (?delete_data=)
+ *   PATCH  /api/v1/boxes/{id}/apps/{d} the spending limit of the app's AI key
  *
  * Several of these ship after this client, so a route the control plane does
  * not have yet (404/405/501) folds into `availability: "unavailable"` — the UI
@@ -22,6 +25,7 @@
  */
 import type {
   UnoComputerActivity,
+  UnoComputerAppAiKey,
   UnoComputerAppCredential,
   UnoComputerAppTemplate,
   UnoComputerApps,
@@ -35,6 +39,7 @@ import type {
   UnoComputerMetrics,
   UnoComputerMetricsPoint,
   UnoComputerPort,
+  UnoComputerRemoveAppResult,
   UnoComputerState,
 } from "@t3tools/contracts";
 
@@ -470,19 +475,38 @@ function parseShowIf(raw: unknown): { name: string; value: string } | null {
   return { name: text.slice(0, at), value: text.slice(at + 1) };
 }
 
+/** One row of `GET /api/v1/boxes/{id}/apps`, as the card needs it. */
+export interface AppCard {
+  readonly templateId: string | null;
+  readonly notes: string | null;
+  readonly credentials: ReadonlyArray<UnoComputerAppCredential>;
+  /** null when the console does not say (an older console). */
+  readonly removable: boolean | null;
+  readonly webPort: number | null;
+  readonly composeProject: string | null;
+  readonly aiKey: UnoComputerAppAiKey | null;
+}
+
+export function parseAiKey(raw: unknown): UnoComputerAppAiKey | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const limit = asNullableNumber(record["limit_usd"]);
+  return {
+    limitUsd: limit !== null && limit >= 0 ? limit : null,
+    spentUsd: Math.max(0, asNullableNumber(record["spent_usd"]) ?? 0),
+  };
+}
+
 /**
  * `GET /api/v1/boxes/{id}/apps` (console 2026-09-23+): how to sign in to each
  * installed app — login, the password Uno generated, an invite link — plus the
- * template's after-install note. Keyed by deployment id. An older console
- * answers 404; the card then just has no sign-in block.
+ * template's after-install note; since 0.0.72 also whether it can be removed,
+ * its web port and compose project (so the desktop shows it once) and its own
+ * AI key. Keyed by deployment id. An older console answers 404, or leaves the
+ * newer fields out: they read as null.
  */
-export function parseAppCards(
-  raw: unknown,
-): Map<number, { notes: string | null; credentials: ReadonlyArray<UnoComputerAppCredential> }> {
-  const out = new Map<
-    number,
-    { notes: string | null; credentials: ReadonlyArray<UnoComputerAppCredential> }
-  >();
+export function parseAppCards(raw: unknown): Map<number, AppCard> {
+  const out = new Map<number, AppCard>();
   const list = asRecord(raw)?.["apps"];
   for (const item of Array.isArray(list) ? list : []) {
     const record = asRecord(item);
@@ -497,12 +521,23 @@ export function parseAppCards(
         secret: c["secret"] === true,
         link: c["link"] === true,
       }));
+    const webPort = asNullableNumber(record["web_port"]);
     out.set(deploymentId, {
+      templateId: asNullableString(record["template_id"]),
       notes: asString(record["notes_en"]) || asString(record["notes_ru"]) || null,
       credentials,
+      removable: typeof record["removable"] === "boolean" ? record["removable"] : null,
+      webPort: webPort !== null && webPort > 0 ? webPort : null,
+      composeProject: asNullableString(record["compose_project"]),
+      aiKey: parseAiKey(record["ai_key"]),
     });
   }
   return out;
+}
+
+/** Catalog apps run as compose project `uno-<template_id>` when the console doesn't say. */
+export function composeProjectFor(templateId: string | null): string | null {
+  return templateId ? `uno-${templateId}` : null;
 }
 
 function serviceState(status: string): UnoComputerInstalledAppState {
@@ -541,10 +576,33 @@ export function parseInstalledApps(
   boxId: number,
   templates: ReadonlyArray<UnoComputerAppTemplate>,
   known: ReadonlyArray<KnownInstall>,
-  cards: ReturnType<typeof parseAppCards> = new Map(),
+  cards: ReadonlyMap<number, AppCard> = new Map(),
 ): ReadonlyArray<UnoComputerInstalledApp> {
   const list = Array.isArray(raw) ? raw : (asRecord(raw)?.["services"] ?? []);
   const byTemplate = new Map(templates.map((t) => [t.id, t]));
+  // A console that knows about removal says so on every row; with an older
+  // one, any App Store app is offered for removal and the console answers.
+  const consoleSaysRemovable = [...cards.values()].some((c) => c.removable !== null);
+  const extras = (
+    deploymentId: number | null,
+    templateId: string | null,
+  ): Pick<
+    UnoComputerInstalledApp,
+    "notes" | "credentials" | "removable" | "webPort" | "composeProject" | "aiKey"
+  > => {
+    const card = deploymentId !== null ? cards.get(deploymentId) : undefined;
+    const template = templateId !== null ? byTemplate.get(templateId) : undefined;
+    return {
+      notes: card?.notes ?? template?.notes ?? null,
+      credentials: card?.credentials ?? [],
+      removable:
+        deploymentId !== null &&
+        (card?.removable ?? (!consoleSaysRemovable && templateId !== null)),
+      webPort: card?.webPort ?? null,
+      composeProject: card?.composeProject ?? composeProjectFor(card?.templateId ?? templateId),
+      aiKey: card?.aiKey ?? null,
+    };
+  };
   const knownByDeployment = new Map(known.map((k) => [k.deploymentId, k]));
   const apps: UnoComputerInstalledApp[] = [];
   const seenDeployments = new Set<number>();
@@ -565,9 +623,7 @@ export function parseInstalledApps(
       state: serviceState(asString(record["last_status"])),
       url: asNullableString(record["url"]) ?? knownInstall?.url ?? null,
       deploymentId,
-      notes:
-        (deploymentId !== null ? cards.get(deploymentId)?.notes : null) ?? template?.notes ?? null,
-      credentials: (deploymentId !== null ? cards.get(deploymentId)?.credentials : undefined) ?? [],
+      ...extras(deploymentId, template?.id ?? null),
     });
   }
   // Installs this daemon started that the service list does not show yet.
@@ -583,8 +639,7 @@ export function parseInstalledApps(
       state: install.state,
       url: install.url,
       deploymentId: install.deploymentId,
-      notes: cards.get(install.deploymentId)?.notes ?? template?.notes ?? null,
-      credentials: cards.get(install.deploymentId)?.credentials ?? [],
+      ...extras(install.deploymentId, install.templateId),
     });
   }
   return apps;
@@ -784,4 +839,126 @@ export async function readInstallStatus(
   }
 
   return { deploymentId: ctx.deploymentId, state, status, lines, nextSeq, url };
+}
+
+/* ------------------------------------------------------------------ *
+ * Remove an app, and its AI spending limit
+ * ------------------------------------------------------------------ */
+
+/** `{"error": CODE, "detail": "..."}` out of a control-plane error, when it is JSON. */
+export function controlPlaneErrorBody(cause: unknown): { code: string; detail: string } | null {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  const start = message.indexOf("{");
+  if (start < 0) return null;
+  try {
+    const record = asRecord(JSON.parse(message.slice(start)));
+    if (!record) return null;
+    return { code: asString(record["error"]), detail: asString(record["detail"]) };
+  } catch {
+    // The body is cut at 200 characters: find the code by eye.
+    const code = /"error"\s*:\s*"([A-Z_]+)"/.exec(message)?.[1];
+    return code ? { code, detail: "" } : null;
+  }
+}
+
+/**
+ * A console from before app removal answers DELETE/PATCH with its router's own
+ * 404 ("404 page not found", no JSON code) or 405. A newer console's 404 says
+ * `NOT_FOUND`: the app itself is gone.
+ */
+function isOlderConsole(cause: unknown): boolean {
+  const status = controlPlaneErrorStatus(cause);
+  if (status === 405 || status === 501) return true;
+  return status === 404 && controlPlaneErrorBody(cause) === null;
+}
+
+function readableDetail(detail: string): string {
+  const text = detail.trim();
+  if (text.length === 0 || /<[a-z!/]/i.test(text)) return "";
+  return ` ${text.slice(0, 200)}${/[.!?]$/.test(text) ? "" : "."}`;
+}
+
+export const REMOVE_NEEDS_CONSOLE_UPDATE =
+  "Removing apps needs a console update — try again later.";
+
+/**
+ * `DELETE /api/v1/boxes/{id}/apps/{deployment_id}?delete_data=` — synchronous
+ * (it stops the app's containers), so it may take a minute or two. Data is
+ * kept unless `deleteData` is exactly true.
+ */
+export async function removeComputerApp(
+  ctx: UnoComputerClientContext & {
+    readonly boxId: number | null;
+    readonly deploymentId: number;
+    readonly deleteData: boolean;
+  },
+): Promise<UnoComputerRemoveAppResult> {
+  const request = bind(ctx);
+  if (!request) throw new UnoComputerActionError(NOT_LINKED_MESSAGE);
+  if (ctx.boxId === null) throw new UnoComputerActionError(NO_COMPUTER_MESSAGE);
+  let raw: unknown;
+  try {
+    raw = await request(
+      `/api/v1/boxes/${ctx.boxId}/apps/${ctx.deploymentId}?delete_data=${ctx.deleteData === true}`,
+      { method: "DELETE" },
+    );
+  } catch (cause) {
+    if (isOlderConsole(cause)) throw new UnoComputerActionError(REMOVE_NEEDS_CONSOLE_UPDATE);
+    const body = controlPlaneErrorBody(cause);
+    switch (body?.code) {
+      case "NOT_FOUND":
+        throw new UnoComputerActionError("This app isn't on this computer anymore.");
+      case "APP_BUSY":
+        throw new UnoComputerActionError(
+          "This app is still being installed or updated. Try again when that finishes.",
+        );
+      case "APP_REMOVE_FAILED":
+        throw new UnoComputerActionError(
+          `Uno couldn't remove the app, and nothing was changed.${readableDetail(body.detail)}`,
+        );
+    }
+    throw new UnoComputerActionError(errorMessage(cause));
+  }
+  const record = asRecord(raw) ?? {};
+  return {
+    removed: record["removed"] !== false,
+    templateId: asNullableString(record["template_id"]),
+    dataDeleted: record["data_deleted"] === true,
+  };
+}
+
+/** `PATCH /api/v1/boxes/{id}/apps/{deployment_id}` `{"ai_limit_usd": n | null}`. */
+export async function setComputerAppAiLimit(
+  ctx: UnoComputerClientContext & {
+    readonly boxId: number | null;
+    readonly deploymentId: number;
+    readonly limitUsd: number | null;
+  },
+): Promise<{ aiKey: UnoComputerAppAiKey }> {
+  const request = bind(ctx);
+  if (!request) throw new UnoComputerActionError(NOT_LINKED_MESSAGE);
+  if (ctx.boxId === null) throw new UnoComputerActionError(NO_COMPUTER_MESSAGE);
+  let raw: unknown;
+  try {
+    raw = await request(`/api/v1/boxes/${ctx.boxId}/apps/${ctx.deploymentId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ ai_limit_usd: ctx.limitUsd }),
+    });
+  } catch (cause) {
+    if (isOlderConsole(cause)) {
+      throw new UnoComputerActionError(
+        "Changing the AI limit needs a console update — try again later.",
+      );
+    }
+    const body = controlPlaneErrorBody(cause);
+    if (body?.code === "APP_NO_AI_KEY") {
+      throw new UnoComputerActionError("This app doesn't have an AI key of its own.");
+    }
+    if (body?.code === "NOT_FOUND") {
+      throw new UnoComputerActionError("This app isn't on this computer anymore.");
+    }
+    throw new UnoComputerActionError(errorMessage(cause));
+  }
+  const aiKey = parseAiKey(asRecord(raw)?.["ai_key"]);
+  return { aiKey: aiKey ?? { limitUsd: ctx.limitUsd, spentUsd: 0 } };
 }

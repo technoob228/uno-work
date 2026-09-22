@@ -19,6 +19,10 @@ import {
   UnoComputerApps,
   UnoComputerInstallAppInput,
   UnoComputerInstallAppResult,
+  UnoComputerRemoveAppInput,
+  UnoComputerRemoveAppResult,
+  UnoComputerSetAppAiLimitInput,
+  UnoComputerSetAppAiLimitResult,
   UnoComputerInstallStatus,
   UnoComputerInstallStatusInput,
   UnoComputerMetrics,
@@ -349,6 +353,8 @@ export const WS_METHODS = {
   unoComputerApps: "uno.computer.apps",
   unoComputerInstallApp: "uno.computer.installApp",
   unoComputerInstallStatus: "uno.computer.installStatus",
+  unoComputerRemoveApp: "uno.computer.removeApp",
+  unoComputerSetAppAiLimit: "uno.computer.setAppAiLimit",
   unoComputerPower: "uno.computer.power",
   unoComputerMachineApps: "uno.computer.machineApps",
   unoComputerAppAction: "uno.computer.appAction",
@@ -1228,6 +1234,20 @@ export const WsUnoComputerInstallStatusRpc = Rpc.make(WS_METHODS.unoComputerInst
   error: UnoCloudRpcError,
 });
 
+/** Remove an App Store app (its data stays unless asked). Can take a couple of minutes. */
+export const WsUnoComputerRemoveAppRpc = Rpc.make(WS_METHODS.unoComputerRemoveApp, {
+  payload: UnoComputerRemoveAppInput,
+  success: UnoComputerRemoveAppResult,
+  error: UnoCloudRpcError,
+});
+
+/** The spending limit of an app's own AI key. */
+export const WsUnoComputerSetAppAiLimitRpc = Rpc.make(WS_METHODS.unoComputerSetAppAiLimit, {
+  payload: UnoComputerSetAppAiLimitInput,
+  success: UnoComputerSetAppAiLimitResult,
+  error: UnoCloudRpcError,
+});
+
 export const WsUnoComputerPowerRpc = Rpc.make(WS_METHODS.unoComputerPower, {
   payload: UnoComputerPowerInput,
   success: UnoComputerState,
@@ -1415,6 +1435,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoComputerAppsRpc,
   WsUnoComputerInstallAppRpc,
   WsUnoComputerInstallStatusRpc,
+  WsUnoComputerRemoveAppRpc,
+  WsUnoComputerSetAppAiLimitRpc,
   WsUnoComputerPowerRpc,
   WsFilesListRpc,
   WsFilesStatRpc,

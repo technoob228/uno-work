@@ -193,3 +193,34 @@ it.effect("powers its own box with the box token and leaves other boxes to the a
     ),
   );
 });
+
+it.effect("a removed app does not come back as 'an install this daemon started'", () =>
+  Effect.gen(function* () {
+    const computer = yield* UnoComputerService;
+    const started = yield* computer.installApp({ templateId: "memos" });
+    assert.strictEqual(started.deploymentId, 500);
+    const before = yield* computer.apps();
+    assert.deepStrictEqual(
+      before.installed.apps.map((a) => a.key),
+      ["install:500"],
+    );
+    const removed = yield* computer.removeApp({ deploymentId: 500 });
+    assert.strictEqual(removed.dataDeleted, false);
+    const after = yield* computer.apps();
+    assert.deepStrictEqual(after.installed.apps, []);
+  }).pipe(
+    Effect.provide(
+      serviceLayer({
+        apiKey: "key",
+        ownBoxId: 42,
+        routes: {
+          // POST (install) and GET (app cards) share the path.
+          "/api/v1/boxes/42/apps": () => ({ deployment_id: 500, apps: [] }),
+          "/api/v1/boxes/42/apps/500": () => ({ removed: true, template_id: "memos" }),
+          "/api/v1/git/services": () => ({ services: [] }),
+          "/api/v1/apps/templates": () => ({ templates: [] }),
+        },
+      }),
+    ),
+  ),
+);

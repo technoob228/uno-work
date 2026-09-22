@@ -8,7 +8,8 @@
  * one of the user's cloud computers.
  *
  * Reads never fail — see `unoComputer.ts` for how a missing route becomes
- * "coming soon". Install is an action and fails with a readable message.
+ * "coming soon". Install, remove and the AI limit are actions and fail with a
+ * readable message.
  * Power goes through `UnoCloudService.boxPower` in the RPC layer.
  */
 import type {
@@ -20,6 +21,10 @@ import type {
   UnoComputerInstallStatus,
   UnoComputerInstallStatusInput,
   UnoComputerMetrics,
+  UnoComputerRemoveAppInput,
+  UnoComputerRemoveAppResult,
+  UnoComputerSetAppAiLimitInput,
+  UnoComputerSetAppAiLimitResult,
   UnoComputerResizeInput,
   UnoComputerResizeOptions,
   UnoComputerResizeResult,
@@ -40,6 +45,8 @@ import {
   readComputerMetrics,
   readComputerState,
   readInstallStatus,
+  removeComputerApp,
+  setComputerAppAiLimit,
   type KnownInstall,
 } from "./unoComputer.ts";
 import { readResizeOptions, resizeComputer } from "./unoComputerResize.ts";
@@ -61,6 +68,13 @@ export interface UnoComputerServiceShape {
   readonly installStatus: (
     input: UnoComputerInstallStatusInput,
   ) => Effect.Effect<UnoComputerInstallStatus, UnoCloudFetchError>;
+  /** Remove an App Store app; its data stays unless `deleteData` is true. */
+  readonly removeApp: (
+    input: UnoComputerRemoveAppInput,
+  ) => Effect.Effect<UnoComputerRemoveAppResult, UnoCloudFetchError>;
+  readonly setAppAiLimit: (
+    input: UnoComputerSetAppAiLimitInput,
+  ) => Effect.Effect<UnoComputerSetAppAiLimitResult, UnoCloudFetchError>;
   /**
    * Питание СВОЕЙ машины токеном машины. `false` — не наш случай (чужой бокс
    * или токена нет): тогда питание идёт ключом аккаунта через `uno.cloud`.
@@ -200,6 +214,42 @@ export const makeUnoComputerService = (
         return status;
       });
 
+    const removeApp: UnoComputerServiceShape["removeApp"] = (input) =>
+      Effect.gen(function* () {
+        const boxId = yield* resolveBoxId(input);
+        const ctx = yield* context(boxId);
+        const result = yield* Effect.tryPromise({
+          try: () =>
+            removeComputerApp({
+              ...ctx,
+              boxId,
+              deploymentId: input.deploymentId,
+              deleteData: input.deleteData === true,
+            }),
+          catch: toFetchError,
+        });
+        // Otherwise the app list would bring it back as "an install this daemon started".
+        const index = known.findIndex((k) => k.deploymentId === input.deploymentId);
+        if (index >= 0) known.splice(index, 1);
+        return result;
+      });
+
+    const setAppAiLimit: UnoComputerServiceShape["setAppAiLimit"] = (input) =>
+      Effect.gen(function* () {
+        const boxId = yield* resolveBoxId(input);
+        const ctx = yield* context(boxId);
+        return yield* Effect.tryPromise({
+          try: () =>
+            setComputerAppAiLimit({
+              ...ctx,
+              boxId,
+              deploymentId: input.deploymentId,
+              limitUsd: input.limitUsd,
+            }),
+          catch: toFetchError,
+        });
+      });
+
     const resizeOptions: UnoComputerServiceShape["resizeOptions"] = (input) =>
       Effect.gen(function* () {
         const boxId = yield* resolveBoxId(input);
@@ -247,6 +297,8 @@ export const makeUnoComputerService = (
       apps,
       installApp,
       installStatus,
+      removeApp,
+      setAppAiLimit,
     } satisfies UnoComputerServiceShape;
   });
 

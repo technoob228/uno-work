@@ -1382,6 +1382,22 @@ const makeWsRpcLayer = (
               .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
             { "rpc.aggregate": "uno-computer" },
           ),
+        [WS_METHODS.unoComputerRemoveApp]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerRemoveApp,
+            unoComputer
+              .removeApp(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
+        [WS_METHODS.unoComputerSetAppAiLimit]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerSetAppAiLimit,
+            unoComputer
+              .setAppAiLimit(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
         // Power reuses `uno.cloud.boxPower` (same key, same control-plane call)
         // and answers with the refreshed computer.
         [WS_METHODS.unoComputerPower]: (input) =>

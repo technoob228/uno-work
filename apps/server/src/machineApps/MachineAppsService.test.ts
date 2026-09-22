@@ -39,6 +39,7 @@ function serviceLayer(input: {
   readonly ports?: unknown[];
   readonly calls?: Call[];
   readonly probe?: Partial<MachineProbe>;
+  readonly storeApps?: unknown[];
 }) {
   const ports = [...(input.ports ?? [])] as Array<Record<string, unknown>>;
   const fetchJson = async (key: string, path: string, init?: RequestInit) => {
@@ -49,6 +50,9 @@ function serviceLayer(input: {
       return { id: 42, hostname: "work.u85.uno4.me" };
     }
     if (path === "/api/v1/boxes/42/ports" && method === "GET") return { ports };
+    if (path === "/api/v1/boxes/42/apps" && method === "GET" && input.storeApps) {
+      return { apps: input.storeApps };
+    }
     if (path === "/api/v1/boxes/42/ports" && method === "POST") {
       const forward = {
         id: 100 + ports.length,
@@ -256,4 +260,89 @@ it("starts apps with a clean environment, not the daemon's", () => {
   assert.strictEqual(env["PORT"], "3000");
   assert.strictEqual(env["HOME"], "/home/unowork");
   assert.strictEqual(env["UNO_SECRET_FOR_TEST"], undefined);
+});
+
+function dockerProbeWith(
+  containers: Array<{ name: string; port: number; project?: string }>,
+  commands: string[][],
+): Partial<MachineProbe> {
+  const live = [...containers];
+  return {
+    ...probe,
+    run: async (command, args) => {
+      commands.push([command, ...args]);
+      if (command === "ss") return { ok: true, stdout: "" };
+      if (command === "docker" && args[0] === "ps") {
+        return {
+          ok: true,
+          stdout: live
+            .map((c) =>
+              JSON.stringify({
+                ID: c.name,
+                Image: "img",
+                Names: c.name,
+                Ports: `0.0.0.0:${c.port}->${c.port}/tcp`,
+                State: "running",
+                Labels: c.project ? `com.docker.compose.project=${c.project}` : "",
+              }),
+            )
+            .join("\n"),
+        };
+      }
+      if (command === "docker" && args[0] === "rm") {
+        const index = live.findIndex((c) => c.name === args[2]);
+        if (index >= 0) live.splice(index, 1);
+        return { ok: true, stdout: "" };
+      }
+      return { ok: false, stdout: "" };
+    },
+  };
+}
+
+it.effect("removes a container the person started, keeping its volumes", () => {
+  const commands: string[][] = [];
+  return Effect.gen(function* () {
+    const service = yield* MachineAppsService;
+    const after = yield* service.action({ appId: "docker:my-bot", action: "remove" });
+    const rm = commands.find((c) => c[0] === "docker" && c[1] === "rm");
+    assert.deepStrictEqual(rm, ["docker", "rm", "-f", "my-bot"]);
+    assert.ok(!after.apps.some((a) => a.id === "docker:my-bot"));
+  }).pipe(
+    Effect.provide(
+      serviceLayer({
+        ownBoxId: 42,
+        boxToken: "uno_agt_machine",
+        probe: dockerProbeWith([{ name: "my-bot", port: 7000, project: "bots" }], commands),
+        storeApps: [],
+      }),
+    ),
+  );
+});
+
+it.effect("never removes an App Store app's container or Uno's own from here", () => {
+  const commands: string[][] = [];
+  return Effect.gen(function* () {
+    const service = yield* MachineAppsService;
+    for (const appId of ["docker:notes-web", "docker:uno-memos-memos-1", "port:3000"]) {
+      const exit = yield* Effect.exit(service.action({ appId, action: "remove" }));
+      assert.ok(Exit.isFailure(exit), appId);
+    }
+    assert.ok(!commands.some((c) => c[0] === "docker" && c[1] === "rm"));
+  }).pipe(
+    Effect.provide(
+      serviceLayer({
+        ownBoxId: 42,
+        boxToken: "uno_agt_machine",
+        probe: dockerProbeWith(
+          [
+            // The console says this project is an App Store app's, whatever its name.
+            { name: "notes-web", port: 8430, project: "notetaker" },
+            { name: "uno-memos-memos-1", port: 5230, project: "uno-memos" },
+          ],
+          commands,
+        ),
+        storeApps: [{ deployment_id: 9, template_id: "notetaker", compose_project: "notetaker" }],
+      }),
+    ),
+  );
 });

@@ -175,6 +175,13 @@ export const UnoComputerAppCredential = Schema.Struct({
 });
 export type UnoComputerAppCredential = typeof UnoComputerAppCredential.Type;
 
+/** An app's own AI key. `limitUsd` null = no limit. */
+export const UnoComputerAppAiKey = Schema.Struct({
+  limitUsd: Schema.NullOr(Schema.Number),
+  spentUsd: Schema.Number,
+});
+export type UnoComputerAppAiKey = typeof UnoComputerAppAiKey.Type;
+
 export const UnoComputerInstalledApp = Schema.Struct({
   /** Stable key for the list: `service:<id>` or `port:<n>`. */
   key: Schema.String,
@@ -190,6 +197,14 @@ export const UnoComputerInstalledApp = Schema.Struct({
   notes: Schema.optional(Schema.NullOr(Schema.String)),
   /** How to sign in: login, generated password, invite link. Owner-only. */
   credentials: Schema.optional(Schema.Array(UnoComputerAppCredential)),
+  /** An App Store install the person can remove ("Remove" on the card). */
+  removable: Schema.optional(Schema.Boolean),
+  /** The app's web port inside the computer: a program found on it is this app, not another tile. */
+  webPort: Schema.optional(Schema.NullOr(Schema.Number)),
+  /** Docker compose project of the app's containers (`uno-memos`). */
+  composeProject: Schema.optional(Schema.NullOr(Schema.String)),
+  /** The app's own AI key (Open WebUI, Notetaker): what it spent and its limit. */
+  aiKey: Schema.optional(Schema.NullOr(UnoComputerAppAiKey)),
 });
 export type UnoComputerInstalledApp = typeof UnoComputerInstalledApp.Type;
 
@@ -254,6 +269,36 @@ export const UnoComputerInstallStatus = Schema.Struct({
   url: Schema.NullOr(Schema.String),
 });
 export type UnoComputerInstallStatus = typeof UnoComputerInstallStatus.Type;
+
+/** Remove an App Store app. Its data stays unless `deleteData` is explicitly true. */
+export const UnoComputerRemoveAppInput = Schema.Struct({
+  boxId: Schema.optional(Schema.Number),
+  deploymentId: Schema.Number,
+  deleteData: Schema.optional(Schema.Boolean),
+});
+export type UnoComputerRemoveAppInput = typeof UnoComputerRemoveAppInput.Type;
+
+export const UnoComputerRemoveAppResult = Schema.Struct({
+  removed: Schema.Boolean,
+  templateId: Schema.NullOr(Schema.String),
+  dataDeleted: Schema.Boolean,
+});
+export type UnoComputerRemoveAppResult = typeof UnoComputerRemoveAppResult.Type;
+
+/** Set (or, with null, remove) the spending limit of an app's own AI key. */
+export const UnoComputerSetAppAiLimitInput = Schema.Struct({
+  boxId: Schema.optional(Schema.Number),
+  deploymentId: Schema.Number,
+  limitUsd: Schema.NullOr(
+    Schema.Number.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(100_000)),
+  ),
+});
+export type UnoComputerSetAppAiLimitInput = typeof UnoComputerSetAppAiLimitInput.Type;
+
+export const UnoComputerSetAppAiLimitResult = Schema.Struct({
+  aiKey: UnoComputerAppAiKey,
+});
+export type UnoComputerSetAppAiLimitResult = typeof UnoComputerSetAppAiLimitResult.Type;
 
 export const UnoComputerPowerInput = Schema.Struct({
   boxId: Schema.optional(Schema.Number),
@@ -336,6 +381,13 @@ export const UnoMachineApp = Schema.Struct({
   publication: Schema.NullOr(UnoMachineAppPublication),
   canStart: Schema.Boolean,
   canStop: Schema.Boolean,
+  /**
+   * A docker container the person started themselves (not an App Store app,
+   * not part of the computer): "Remove" deletes the container, keeps volumes.
+   */
+  canRemove: Schema.optional(Schema.Boolean),
+  /** Docker compose project label (`com.docker.compose.project`), for docker apps. */
+  composeProject: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type UnoMachineApp = typeof UnoMachineApp.Type;
 
@@ -351,7 +403,13 @@ export const UnoMachineApps = Schema.Struct({
 });
 export type UnoMachineApps = typeof UnoMachineApps.Type;
 
-export const UnoMachineAppAction = Schema.Literals(["start", "stop", "publish", "unpublish"]);
+export const UnoMachineAppAction = Schema.Literals([
+  "start",
+  "stop",
+  "publish",
+  "unpublish",
+  "remove",
+]);
 export type UnoMachineAppAction = typeof UnoMachineAppAction.Type;
 
 export const UnoMachineAppActionInput = Schema.Struct({

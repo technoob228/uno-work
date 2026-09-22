@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AppManifest } from "./appManifest.ts";
 import {
+  isUnoContainer,
   parsePortForwards,
   publicationFor,
   scanMachineApps,
@@ -307,5 +308,75 @@ describe("publication", () => {
     const tunnelOnly = publicationFor({ port: null, udpPorts: [51820] }, forwards, "h");
     expect(tunnelOnly).toMatchObject({ forwardId: null, url: null, host: "h" });
     expect(tunnelOnly?.forwards).toHaveLength(1);
+  });
+});
+
+describe("docker containers and Remove (0.0.72)", () => {
+  const containers = [
+    {
+      ID: "u1",
+      Image: "ghcr.io/me/my-bot",
+      Names: "my-bot",
+      Ports: "0.0.0.0:7000->7000/tcp",
+      State: "running",
+      Labels: "com.docker.compose.project=bots,com.docker.compose.service=bot",
+    },
+    {
+      ID: "s1",
+      Image: "neosmemo/memos",
+      Names: "uno-memos-memos-1",
+      Ports: "0.0.0.0:5230->5230/tcp",
+      State: "running",
+      Labels: "com.docker.compose.project=uno-memos",
+    },
+    {
+      ID: "s2",
+      Image: "collabora/code",
+      Names: "office",
+      Ports: "127.0.0.1:9980->9980/tcp",
+      State: "running",
+      Labels: "uno.system=office",
+    },
+  ];
+  const probe = fakeProbe({
+    run: async (command, args) => {
+      if (command === "docker" && args[0] === "ps") {
+        return { ok: true, stdout: containers.map((c) => JSON.stringify(c)).join("\n") };
+      }
+      return { ok: false, stdout: "" };
+    },
+  });
+
+  it("reads the compose project and offers Remove only for the person's own containers", async () => {
+    const apps = await scanMachineApps(probe, { manifests: [], manifestIcons: new Map() });
+    const byId = Object.fromEntries(apps.map((a) => [a.id, a]));
+    expect(byId["docker:my-bot"]).toMatchObject({ canRemove: true, composeProject: "bots" });
+    expect(byId["docker:uno-memos-memos-1"]).toMatchObject({
+      canRemove: false,
+      composeProject: "uno-memos",
+    });
+    expect(byId["docker:office"]).toMatchObject({ canRemove: false, composeProject: null });
+  });
+
+  it("never offers Remove for anything but a container", async () => {
+    const apps = await scanMachineApps(fakeProbe(), {
+      manifests: [MANIFEST],
+      manifestIcons: new Map(),
+    });
+    for (const app of apps) {
+      expect(app.canRemove, app.id).toBe(app.source === "docker");
+    }
+  });
+});
+
+describe("isUnoContainer", () => {
+  it("knows Uno's own and App Store containers", () => {
+    expect(isUnoContainer({ name: "uno-office", labels: {} })).toBe(true);
+    expect(
+      isUnoContainer({ name: "memos-1", labels: { "com.docker.compose.project": "uno-memos" } }),
+    ).toBe(true);
+    expect(isUnoContainer({ name: "x", labels: { "uno.managed": "1" } })).toBe(true);
+    expect(isUnoContainer({ name: "my-bot", labels: { "uno.app.name": "My bot" } })).toBe(false);
+    expect(isUnoContainer({ name: "unobtainium", labels: {} })).toBe(false);
   });
 });
