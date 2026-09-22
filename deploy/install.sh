@@ -12,6 +12,7 @@
 #   UNO_WORK_API_KEY      Uno gateway key; enables the bundled harnesses
 #   UNO_WORK_HERMES_VERSION  pin the Hermes Agent release (recommended for images)
 #   UNO_WORK_SKIP_HARNESSES=1  install only the daemon
+#   UNO_WORK_INSTALL_OFFICE=1  also install the Office engine (~680 MB; golden images)
 #
 set -euo pipefail
 
@@ -254,6 +255,30 @@ WantedBy=timers.target
 UNIT
 systemctl daemon-reload
 systemctl enable --now uno-work-tmp-sweep.timer >/dev/null 2>&1 || log "  could not enable the sweep timer"
+
+# Office engine (docx/xlsx/pptx editors in the browser). Opt-in: golden images
+# bake it in; other machines get it from the "Install Office" button.
+if [ "${UNO_WORK_INSTALL_OFFICE:-0}" = "1" ]; then
+  OFFICE_URL="${UNO_WORK_OFFICE_URL:-https://console.uno4.dev/cli/work/office-engine/office-engine-oo13.tar.gz}"
+  OFFICE_SHA256="${UNO_WORK_OFFICE_SHA256:-5269aa464d77200637a8abe7c4fb2b1ce123e88deb3b89811be54ac5545c6c28}"
+  if [ -f "${STATE_DIR}/office-engine/vendor/web-apps/apps/api/documents/api.js" ]; then
+    log "Office engine already installed"
+  else
+    log "Installing the Office engine"
+    otmp="$(mktemp -d -p "${STATE_DIR}")"
+    curl -fsSL --retry 3 "${OFFICE_URL}" -o "${otmp}/office.tar.gz" || die "Office download failed"
+    echo "${OFFICE_SHA256}  ${otmp}/office.tar.gz" | sha256sum -c - >/dev/null || die "Office checksum mismatch"
+    mkdir -p "${otmp}/unpacked"
+    tar -xzf "${otmp}/office.tar.gz" -C "${otmp}/unpacked" --no-same-owner
+    rm -f "${otmp}/office.tar.gz"
+    [ -f "${otmp}/unpacked/vendor/web-apps/apps/api/documents/api.js" ] || die "Office package layout not recognised"
+    rm -rf "${STATE_DIR}/office-engine"
+    mv "${otmp}/unpacked" "${STATE_DIR}/office-engine"
+    rm -rf "${otmp}"
+    chown -R "${SERVICE_USER}:${SERVICE_USER}" "${STATE_DIR}/office-engine"
+    log "  Office engine installed ($(du -sh "${STATE_DIR}/office-engine" | cut -f1))"
+  fi
+fi
 
 log "Installing the systemd unit"
 # `curl … | bash` leaves BASH_SOURCE unset, and `set -u` turns that into a fatal
