@@ -1,10 +1,13 @@
 /**
  * One program, up close: what it is, whether it runs, where it answers, and
  * the few things a person does with it — Open, Show on the internet / Hide,
- * Start / Stop. "Show on the internet" is the only way a port gets published,
- * and it says plainly what it does before it does it.
+ * Start / Stop, Remove. "Show on the internet" is the only way a port gets
+ * published, and it says plainly what it does before it does it. App Store
+ * apps also carry how to sign in and, when they have their own AI key, what it
+ * spent and its limit.
  */
 import type {
+  UnoComputerAppAiKey,
   UnoComputerAppCredential,
   UnoMachineAppAction,
   UnoMachineApps,
@@ -17,9 +20,11 @@ import {
   EyeOffIcon,
   GlobeIcon,
   KeyRoundIcon,
+  SparklesIcon,
+  Trash2Icon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -31,11 +36,13 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
+import { Input } from "../ui/input";
 import { Spinner } from "../ui/spinner";
 import { displayAddress } from "./computerFormat";
 import { ProgramIcon } from "./ComputerPrograms";
 import { CopyButton } from "./computerUi";
-import type { ProgramTile } from "./programModel";
+import { programRemoval, type ProgramRemoval, type ProgramTile } from "./programModel";
+import { RemoveProgramDialog } from "./RemoveProgramDialog";
 
 const STATUS_WORD: Record<ProgramTile["status"], string> = {
   running: "Running",
@@ -91,48 +98,57 @@ function SignInBlock({
         <KeyRoundIcon className="size-3.5 text-muted-foreground" />
         How to sign in
       </div>
-      {credentials.map((c) => {
+      {credentials.map((c, index) => {
         const visible = !c.secret || shown.has(c.label);
+        // Uno only knows the password it generated: say so under the first one.
+        const passwordNote =
+          c.secret && !c.link && credentials.findIndex((x) => x.secret && !x.link) === index;
         return (
-          <div
-            key={c.label}
-            className="flex min-w-0 items-center gap-2 rounded-lg bg-muted/40 py-1 pr-1 pl-2.5"
-            data-credential={c.label}
-          >
-            <div className="min-w-0 flex-1">
-              <div className="text-[11px] text-muted-foreground">{c.label}</div>
-              <div className="truncate font-mono text-xs" title={visible ? c.value : undefined}>
-                {visible ? c.value : "•".repeat(12)}
+          <div key={c.label} className="flex flex-col gap-1">
+            <div
+              className="flex min-w-0 items-center gap-2 rounded-lg bg-muted/40 py-1 pr-1 pl-2.5"
+              data-credential={c.label}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] text-muted-foreground">{c.label}</div>
+                <div className="truncate font-mono text-xs" title={visible ? c.value : undefined}>
+                  {visible ? c.value : "•".repeat(12)}
+                </div>
               </div>
+              {c.secret ? (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  aria-label={visible ? `Hide ${c.label}` : `Show ${c.label}`}
+                  onClick={() =>
+                    setShown((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(c.label)) next.delete(c.label);
+                      else next.add(c.label);
+                      return next;
+                    })
+                  }
+                >
+                  {visible ? <EyeOffIcon /> : <EyeIcon />}
+                  {visible ? "Hide" : "Show"}
+                </Button>
+              ) : null}
+              <CopyButton value={c.value} label={c.label.toLowerCase()} />
+              {c.link ? (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  render={<a href={c.value} target="_blank" rel="noopener noreferrer" />}
+                >
+                  <ExternalLinkIcon />
+                  Open
+                </Button>
+              ) : null}
             </div>
-            {c.secret ? (
-              <Button
-                size="xs"
-                variant="ghost"
-                aria-label={visible ? `Hide ${c.label}` : `Show ${c.label}`}
-                onClick={() =>
-                  setShown((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(c.label)) next.delete(c.label);
-                    else next.add(c.label);
-                    return next;
-                  })
-                }
-              >
-                {visible ? <EyeOffIcon /> : <EyeIcon />}
-                {visible ? "Hide" : "Show"}
-              </Button>
-            ) : null}
-            <CopyButton value={c.value} label={c.label.toLowerCase()} />
-            {c.link ? (
-              <Button
-                size="xs"
-                variant="outline"
-                render={<a href={c.value} target="_blank" rel="noopener noreferrer" />}
-              >
-                <ExternalLinkIcon />
-                Open
-              </Button>
+            {passwordNote ? (
+              <p className="pl-2.5 text-[11px] text-muted-foreground">
+                If you changed the password inside the app, use your new one.
+              </p>
             ) : null}
           </div>
         );
@@ -140,6 +156,132 @@ function SignInBlock({
       {notes ? <p className="text-xs leading-relaxed text-muted-foreground">{notes}</p> : null}
     </section>
   );
+}
+
+function money(usd: number): string {
+  return Number.isInteger(usd) ? `$${usd}` : `$${usd.toFixed(2)}`;
+}
+
+/**
+ * What the app's own AI key spent, against its limit, and a small way to change
+ * the limit or turn it off.
+ */
+function AiSpendingBlock({
+  aiKey,
+  pending,
+  error,
+  onSave,
+}: {
+  aiKey: UnoComputerAppAiKey;
+  pending: boolean;
+  error: string | null;
+  onSave: (limitUsd: number | null) => Promise<unknown>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const parsed = Number(draft.replace(",", ".").replace(/^\$/, ""));
+  const valid = draft.trim().length > 0 && Number.isFinite(parsed) && parsed >= 0;
+  const save = (limit: number | null) => {
+    void onSave(limit).then(
+      () => setEditing(false),
+      () => undefined,
+    );
+  };
+  return (
+    <section
+      className="flex flex-col gap-2 rounded-xl border border-border/60 p-3"
+      aria-label="AI spending"
+    >
+      <div className="flex items-center gap-2 text-xs">
+        <SparklesIcon className="size-3.5 text-muted-foreground" />
+        <span className="flex-1">
+          AI spending: <span className="font-medium">{money(aiKey.spentUsd)}</span>
+          {aiKey.limitUsd !== null ? (
+            <> of {money(aiKey.limitUsd)} limit</>
+          ) : (
+            <span className="text-muted-foreground"> · no limit</span>
+          )}
+        </span>
+        {!editing ? (
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() => {
+              setDraft(aiKey.limitUsd !== null ? String(aiKey.limitUsd) : "");
+              setEditing(true);
+            }}
+          >
+            Change limit
+          </Button>
+        ) : null}
+      </div>
+      {editing ? (
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (valid) save(Math.round(parsed * 100) / 100);
+          }}
+        >
+          <span className="text-xs text-muted-foreground">$</span>
+          <Input
+            size="sm"
+            className="w-24"
+            type="number"
+            inputMode="decimal"
+            min={0}
+            step="1"
+            aria-label="AI spending limit in dollars"
+            value={draft}
+            disabled={pending}
+            onChange={(event) => setDraft(event.target.value)}
+            autoFocus
+          />
+          <Button size="xs" type="submit" disabled={pending || !valid}>
+            {pending ? <Spinner className="size-3" /> : null}
+            Save
+          </Button>
+          <Button
+            size="xs"
+            variant="outline"
+            type="button"
+            disabled={pending || aiKey.limitUsd === null}
+            onClick={() => save(null)}
+          >
+            No limit
+          </Button>
+          <Button
+            size="xs"
+            variant="ghost"
+            type="button"
+            disabled={pending}
+            onClick={() => setEditing(false)}
+          >
+            Cancel
+          </Button>
+        </form>
+      ) : null}
+      {error ? (
+        <p className="text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+export interface ProgramRemoveControls {
+  readonly pending: boolean;
+  readonly error: string | null;
+  readonly onRemove: (removal: ProgramRemoval, deleteData: boolean) => void;
+  /** Clears a previous error when the confirmation opens again. */
+  readonly onReset: () => void;
+}
+
+export interface ProgramAiLimitControls {
+  readonly pending: boolean;
+  readonly error: string | null;
+  readonly onSave: (deploymentId: number, limitUsd: number | null) => Promise<unknown>;
 }
 
 export function ProgramDialog({
@@ -150,6 +292,8 @@ export function ProgramDialog({
   actionError,
   onAction,
   onClose,
+  remove,
+  aiLimit,
 }: {
   tile: ProgramTile | null;
   machineApps: UnoMachineApps | undefined;
@@ -158,7 +302,16 @@ export function ProgramDialog({
   actionError: string | null;
   onAction: (appId: string, action: UnoMachineAppAction) => void;
   onClose: () => void;
+  remove: ProgramRemoveControls;
+  aiLimit: ProgramAiLimitControls;
 }) {
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const tileKey = tile?.key ?? null;
+  // A confirmation never carries over to the next program opened.
+  useEffect(() => setConfirmRemove(false), [tileKey]);
+  const removal = tile ? programRemoval(tile) : null;
+  const aiKey = tile?.storeApp?.aiKey ?? null;
+  const aiDeploymentId = tile?.storeApp?.deploymentId ?? null;
   const app = tile?.machineApp ?? null;
   const publication = app?.publication ?? null;
   const publishable =
@@ -167,13 +320,20 @@ export function ProgramDialog({
     (app.port !== null || app.udpPorts.length > 0) &&
     !app.loopbackOnly;
   const blocked = machineApps?.publishBlockedReason ?? null;
-  const busy = pendingAction !== null;
+  const busy = pendingAction !== null || remove.pending;
   const nonWebForwards = publication?.forwards.filter(
     (f) => f.protocol !== "tcp" || !app?.http || publication.url === null,
   );
 
   return (
-    <Dialog open={tile !== null} onOpenChange={(open) => !open && onClose()}>
+    <Dialog
+      open={tile !== null}
+      onOpenChange={(open) => {
+        if (open || remove.pending) return;
+        setConfirmRemove(false);
+        onClose();
+      }}
+    >
       <DialogPopup className="max-w-lg">
         {tile ? (
           <>
@@ -219,6 +379,14 @@ export function ProgramDialog({
                 <SignInBlock
                   credentials={tile.storeApp.credentials ?? []}
                   notes={tile.storeApp.notes ?? null}
+                />
+              ) : null}
+              {aiKey && aiDeploymentId !== null ? (
+                <AiSpendingBlock
+                  aiKey={aiKey}
+                  pending={aiLimit.pending}
+                  error={aiLimit.error}
+                  onSave={(limit) => aiLimit.onSave(aiDeploymentId, limit)}
                 />
               ) : null}
               {nonWebForwards && nonWebForwards.length > 0 && publication?.host ? (
@@ -331,6 +499,22 @@ export function ProgramDialog({
                   ) : null}
                 </div>
               ) : null}
+              {removal ? (
+                <div className="mt-1 flex justify-end border-t border-border/60 pt-3">
+                  <Button
+                    size="sm"
+                    variant="destructive-outline"
+                    disabled={busy}
+                    onClick={() => {
+                      remove.onReset();
+                      setConfirmRemove(true);
+                    }}
+                  >
+                    {remove.pending ? <Spinner className="size-3.5" /> : <Trash2Icon />}
+                    {remove.pending ? "Removing…" : "Remove"}
+                  </Button>
+                </div>
+              ) : null}
               {app && !app.canStop && app.status === "running" && app.source === "systemd" ? (
                 <p className="text-[11px] text-muted-foreground">
                   A system service: starting and stopping it needs an admin (the terminal with
@@ -341,6 +525,17 @@ export function ProgramDialog({
           </>
         ) : null}
       </DialogPopup>
+      <RemoveProgramDialog
+        open={confirmRemove}
+        name={tile?.name ?? ""}
+        removal={removal}
+        pending={remove.pending}
+        error={remove.error}
+        onOpenChange={setConfirmRemove}
+        onConfirm={(deleteData) => {
+          if (removal) remove.onRemove(removal, deleteData);
+        }}
+      />
     </Dialog>
   );
 }

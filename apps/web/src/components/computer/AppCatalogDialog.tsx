@@ -101,7 +101,7 @@ export function AppCatalogDialog({
           <DialogTitle>{configuring ? `Set up ${configuring.name}` : "Add an app"}</DialogTitle>
           <DialogDescription>
             {configuring
-              ? "A couple of details before it installs. You can change them later."
+              ? "A couple of details before it installs. These settings apply when the app is installed."
               : "Pick an app and your computer installs it by itself. It keeps running and gets its own address."}
           </DialogDescription>
         </DialogHeader>

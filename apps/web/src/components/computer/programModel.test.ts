@@ -6,6 +6,7 @@ import {
   isBrowserOnMachine,
   machineAppCaption,
   machineAppOpenUrl,
+  programRemoval,
 } from "./programModel";
 
 function pub(externalPort: number, url: string) {
@@ -156,5 +157,147 @@ describe("buildProgramTiles", () => {
       computerOn: false,
     });
     expect(tiles.every((t) => t.status === "asleep" && t.openUrl === null)).toBe(true);
+  });
+});
+
+describe("App Store apps show up once (0.0.72)", () => {
+  const memos: UnoComputerInstalledApp = {
+    key: "service:-77",
+    name: "Memos",
+    templateId: "memos",
+    icon: "📝",
+    state: "running",
+    url: "https://memos-work.app.uno4.dev",
+    deploymentId: 77,
+    removable: true,
+    webPort: 5230,
+    composeProject: "uno-memos",
+  };
+  const build = (machineApps: UnoMachineApp[], storeApps: UnoComputerInstalledApp[] = [memos]) =>
+    buildProgramTiles({
+      machineApps,
+      storeApps,
+      installs: [],
+      browserOnMachine: false,
+      computerOn: true,
+    });
+
+  it("hides the app's containers, its web port and the ports its containers publish", () => {
+    const tiles = build([
+      app({
+        id: "docker:uno-memos-memos-1",
+        source: "docker",
+        name: "uno-memos-memos-1",
+        port: 5231,
+        composeProject: "uno-memos",
+        canRemove: false,
+      }),
+      app({ id: "port:5230", name: "Port 5230", port: 5230 }),
+      app({ id: "port:5231", name: "Memos Web", port: 5231 }),
+      app({ id: "port:3000", name: "Notes" }),
+    ]);
+    expect(tiles.map((t) => t.name)).toEqual(["Memos", "Notes"]);
+  });
+
+  it("falls back to the uno-<template> project when the console doesn't send it", () => {
+    const oldConsole: UnoComputerInstalledApp = {
+      ...store,
+      templateId: "vaultwarden",
+      name: "Vaultwarden",
+      url: "https://vw-work.app.uno4.dev",
+    };
+    const tiles = build(
+      [
+        app({
+          id: "docker:vw",
+          source: "docker",
+          name: "vw",
+          port: 8090,
+          composeProject: "uno-vaultwarden",
+        }),
+        app({ id: "port:8090", name: "Vaultwarden Web", port: 8090 }),
+      ],
+      [oldConsole],
+    );
+    expect(tiles.map((t) => t.name)).toEqual(["Vaultwarden"]);
+  });
+
+  it("hides the desktop file an App Store app registers for itself", () => {
+    const tiles = build([
+      app({ id: "manifest:memos", source: "manifest", name: "Memos", port: 9999 }),
+      app({ id: "manifest:notes", source: "manifest", name: "My notes", port: 4000 }),
+    ]);
+    expect(tiles.map((t) => t.name)).toEqual(["My notes", "Memos"]);
+    expect(tiles.find((t) => t.name === "Memos")?.storeApp).not.toBeNull();
+  });
+});
+
+describe("Remove", () => {
+  it("is offered for App Store apps and the person's own containers only", () => {
+    const tiles = buildProgramTiles({
+      machineApps: [
+        app({
+          id: "docker:my-bot",
+          source: "docker",
+          name: "my-bot",
+          port: 7000,
+          canRemove: true,
+        }),
+        app({ id: "docker:uno-office", source: "docker", name: "Office", port: 7100 }),
+        app({ id: "systemd:notes.service", source: "systemd", name: "notes", port: 7200 }),
+        app({ id: "port:7300", name: "Something", port: 7300 }),
+      ],
+      storeApps: [
+        { ...store, removable: true },
+        {
+          ...store,
+          key: "service:8",
+          name: "My repo",
+          templateId: null,
+          deploymentId: 92,
+          url: null,
+        },
+      ],
+      installs: [],
+      browserOnMachine: false,
+      computerOn: true,
+    });
+    const removal = Object.fromEntries(tiles.map((t) => [t.name, programRemoval(t)]));
+    expect(removal["Uptime Kuma"]).toEqual({
+      kind: "store",
+      deploymentId: 91,
+      name: "Uptime Kuma",
+    });
+    expect(removal["my-bot"]).toEqual({
+      kind: "container",
+      appId: "docker:my-bot",
+      container: "my-bot",
+    });
+    expect(removal["Office"]).toBeNull();
+    expect(removal["notes"]).toBeNull();
+    expect(removal["Something"]).toBeNull();
+    expect(removal["My repo"]).toBeNull();
+  });
+
+  it("is on a just-installed app once the service list knows it", () => {
+    const tiles = buildProgramTiles({
+      machineApps: [],
+      storeApps: [{ ...store, removable: true }],
+      installs: [
+        {
+          deploymentId: 91,
+          name: "Uptime Kuma",
+          icon: "📈",
+          templateId: "uptime-kuma",
+          state: "running",
+          lines: [],
+          url: store.url,
+        },
+      ],
+      browserOnMachine: false,
+      computerOn: true,
+    });
+    expect(tiles).toHaveLength(1);
+    expect(programRemoval(tiles[0]!)).toMatchObject({ kind: "store", deploymentId: 91 });
   });
 });

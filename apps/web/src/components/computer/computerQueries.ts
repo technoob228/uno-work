@@ -12,6 +12,8 @@ import type {
   UnoComputerApps,
   UnoComputerMetrics,
   UnoComputerPowerInput,
+  UnoComputerRemoveAppInput,
+  UnoComputerSetAppAiLimitInput,
   UnoComputerState,
   UnoMachineAppActionInput,
   UnoMachineApps,
@@ -172,6 +174,73 @@ export function machineAppActionMutationOptions(
       api(environmentId).appAction(input),
     onSuccess: (apps) => {
       queryClient.setQueryData(computerQueryKeys.machineApps(environmentId), apps);
+    },
+  });
+}
+
+/**
+ * Remove an App Store app. On success the app leaves the list at once (the
+ * console no longer returns it), then both lists are read again.
+ */
+export function removeStoreAppMutationOptions(
+  environmentId: EnvironmentId | null,
+  boxId: number | null,
+  queryClient: QueryClient,
+) {
+  return mutationOptions({
+    mutationKey: ["uno-computer", "remove-app", environmentId, boxId] as const,
+    mutationFn: (input: Omit<UnoComputerRemoveAppInput, "boxId">) =>
+      api(environmentId).removeApp({ ...target(boxId), ...input }),
+    onSuccess: (_result, input) => {
+      queryClient.setQueryData(
+        computerQueryKeys.apps(environmentId, boxId),
+        (prev: UnoComputerApps | undefined) =>
+          prev
+            ? {
+                ...prev,
+                installed: {
+                  ...prev.installed,
+                  apps: prev.installed.apps.filter((a) => a.deploymentId !== input.deploymentId),
+                },
+              }
+            : prev,
+      );
+      void queryClient.invalidateQueries({
+        queryKey: computerQueryKeys.apps(environmentId, boxId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: computerQueryKeys.machineApps(environmentId),
+      });
+    },
+  });
+}
+
+/** The spending limit of an App Store app's own AI key. */
+export function setAppAiLimitMutationOptions(
+  environmentId: EnvironmentId | null,
+  boxId: number | null,
+  queryClient: QueryClient,
+) {
+  return mutationOptions({
+    mutationKey: ["uno-computer", "app-ai-limit", environmentId, boxId] as const,
+    mutationFn: (input: Omit<UnoComputerSetAppAiLimitInput, "boxId">) =>
+      api(environmentId).setAppAiLimit({ ...target(boxId), ...input }),
+    onSuccess: (result, input) => {
+      queryClient.setQueryData(
+        computerQueryKeys.apps(environmentId, boxId),
+        (prev: UnoComputerApps | undefined) =>
+          prev
+            ? {
+                ...prev,
+                installed: {
+                  ...prev.installed,
+                  apps: prev.installed.apps.map((a) =>
+                    a.deploymentId === input.deploymentId ? { ...a, aiKey: result.aiKey } : a,
+                  ),
+                },
+              }
+            : prev,
+      );
     },
   });
 }

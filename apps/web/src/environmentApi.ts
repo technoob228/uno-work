@@ -96,6 +96,8 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       apps: (input) => rpcClient.unoComputer.apps(input),
       installApp: rpcClient.unoComputer.installApp,
       installStatus: rpcClient.unoComputer.installStatus,
+      removeApp: rpcClient.unoComputer.removeApp,
+      setAppAiLimit: rpcClient.unoComputer.setAppAiLimit,
       power: rpcClient.unoComputer.power,
       machineApps: () => rpcClient.unoComputer.machineApps(),
       appAction: rpcClient.unoComputer.appAction,

@@ -47,8 +47,10 @@ import {
   localMetricsQueryOptions,
   machineAppActionMutationOptions,
   machineAppsQueryOptions,
+  removeStoreAppMutationOptions,
+  setAppAiLimitMutationOptions,
 } from "./computerQueries";
-import { ProgramDialog } from "./ProgramDialog";
+import { ProgramDialog, type ProgramRemoveControls } from "./ProgramDialog";
 import { ResizeDialog } from "./ResizeDialog";
 import { LOW_DISK_PCT, LOW_MEMORY_PCT, isSustained } from "./resizeModel";
 import { buildProgramTiles, isBrowserOnMachine, type ProgramTile } from "./programModel";
@@ -90,6 +92,12 @@ export function ComputerView() {
     computerPowerMutationOptions(environmentId, pickedBoxId, queryClient),
   );
   const appAction = useMutation(machineAppActionMutationOptions(environmentId, queryClient));
+  const removeStoreApp = useMutation(
+    removeStoreAppMutationOptions(environmentId, pickedBoxId, queryClient),
+  );
+  const setAiLimit = useMutation(
+    setAppAiLimitMutationOptions(environmentId, pickedBoxId, queryClient),
+  );
   const installs = useAppInstalls({
     environmentId,
     boxId: pickedBoxId,
@@ -176,12 +184,51 @@ export function ComputerView() {
           : null,
   };
 
+  const resetTileMutations = () => {
+    appAction.reset();
+    removeStoreApp.reset();
+    setAiLimit.reset();
+  };
+
+  const removingContainer = appAction.isPending && appAction.variables?.action === "remove";
+  const remove: ProgramRemoveControls = {
+    pending: removeStoreApp.isPending || removingContainer,
+    error:
+      removeStoreApp.error instanceof Error
+        ? removeStoreApp.error.message
+        : appAction.variables?.action === "remove" && appAction.error instanceof Error
+          ? appAction.error.message
+          : null,
+    onReset: () => {
+      removeStoreApp.reset();
+      if (appAction.variables?.action === "remove") appAction.reset();
+    },
+    onRemove: (removal, deleteData) => {
+      if (removal.kind === "store") {
+        removeStoreApp.mutate(
+          { deploymentId: removal.deploymentId, deleteData },
+          {
+            onSuccess: () => {
+              installs.dismiss(removal.deploymentId);
+              setDetailsKey(null);
+            },
+          },
+        );
+        return;
+      }
+      appAction.mutate(
+        { appId: removal.appId, action: "remove" },
+        { onSuccess: () => setDetailsKey(null) },
+      );
+    },
+  };
+
   const openTile = (tile: ProgramTile) => {
     if (tile.openUrl) {
       window.open(tile.openUrl, "_blank", "noopener,noreferrer");
       return;
     }
-    appAction.reset();
+    resetTileMutations();
     setDetailsKey(tile.key);
   };
 
@@ -279,7 +326,7 @@ export function ComputerView() {
                   loading={thisMachine && machineAppsQuery.isPending}
                   onOpenTile={openTile}
                   onTileDetails={(tile) => {
-                    appAction.reset();
+                    resetTileMutations();
                     setDetailsKey(tile.key);
                   }}
                 />
@@ -309,9 +356,19 @@ export function ComputerView() {
             ? (appAction.variables?.action ?? null)
             : (null as UnoMachineAppAction | null)
         }
-        actionError={appAction.error instanceof Error ? appAction.error.message : null}
+        actionError={
+          appAction.error instanceof Error && appAction.variables?.action !== "remove"
+            ? appAction.error.message
+            : null
+        }
         onAction={(appId, action) => appAction.mutate({ appId, action })}
         onClose={() => setDetailsKey(null)}
+        remove={remove}
+        aiLimit={{
+          pending: setAiLimit.isPending,
+          error: setAiLimit.error instanceof Error ? setAiLimit.error.message : null,
+          onSave: (deploymentId, limitUsd) => setAiLimit.mutateAsync({ deploymentId, limitUsd }),
+        }}
       />
 
       <ResizeDialog

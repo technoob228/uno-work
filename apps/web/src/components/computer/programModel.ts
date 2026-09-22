@@ -35,6 +35,32 @@ export interface ProgramTile {
   readonly install: AppInstall | null;
 }
 
+/**
+ * What "Remove" does for a tile, or null when the tile has no Remove:
+ *
+ * - `store`     — an App Store app: Uno stops it and takes it off the computer
+ *                 (its data stays unless the person ticks "also delete");
+ * - `container` — a docker container the person started themselves: the
+ *                 daemon deletes the container, its volumes stay.
+ *
+ * Nothing else gets one: the computer's own programs, services, processes.
+ */
+export type ProgramRemoval =
+  | { readonly kind: "store"; readonly deploymentId: number; readonly name: string }
+  | { readonly kind: "container"; readonly appId: string; readonly container: string };
+
+export function programRemoval(tile: ProgramTile): ProgramRemoval | null {
+  const store = tile.storeApp;
+  if (store?.removable === true && store.deploymentId !== null && store.state !== "installing") {
+    return { kind: "store", deploymentId: store.deploymentId, name: tile.name };
+  }
+  const app = tile.machineApp;
+  if (app?.source === "docker" && app.canRemove === true) {
+    return { kind: "container", appId: app.id, container: app.id.replace(/^docker:/, "") };
+  }
+  return null;
+}
+
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 /** True when this page is served from the machine it looks at (a laptop, a local stand). */
@@ -82,6 +108,55 @@ function storeStatus(app: UnoComputerInstalledApp, computerOn: boolean): Program
         : "unknown";
 }
 
+interface StoreFootprint {
+  readonly templateIds: ReadonlySet<string>;
+  readonly projects: ReadonlySet<string>;
+  readonly ports: ReadonlySet<number>;
+}
+
+/**
+ * What of the machine belongs to App Store apps: their compose projects (the
+ * console's `compose_project`, or the `uno-<template>` convention of catalog
+ * apps when an older console doesn't say), their web ports, their template ids
+ * (an app may register its own `~/.uno/apps/<template>.json`).
+ */
+export function storeFootprint(
+  storeApps: ReadonlyArray<UnoComputerInstalledApp>,
+  installs: ReadonlyArray<AppInstall>,
+): StoreFootprint {
+  const templateIds = new Set<string>();
+  const projects = new Set<string>();
+  const ports = new Set<number>();
+  for (const app of storeApps) {
+    if (app.templateId) {
+      templateIds.add(app.templateId);
+      projects.add(`uno-${app.templateId}`);
+    }
+    if (app.composeProject) projects.add(app.composeProject);
+    if (app.webPort != null) ports.add(app.webPort);
+  }
+  for (const install of installs) {
+    if (install.state === "failed" || !install.templateId) continue;
+    templateIds.add(install.templateId);
+    projects.add(`uno-${install.templateId}`);
+  }
+  return { templateIds, projects, ports };
+}
+
+/** A program the scan found that is really an App Store app, already on the desktop. */
+function belongsToStoreApp(
+  app: UnoMachineApp,
+  store: StoreFootprint,
+  storePorts: ReadonlySet<number>,
+): boolean {
+  if (app.composeProject && store.projects.has(app.composeProject)) return true;
+  if (app.port !== null && storePorts.has(app.port)) return true;
+  if (app.source === "manifest" && store.templateIds.has(app.id.replace(/^manifest:/, ""))) {
+    return true;
+  }
+  return false;
+}
+
 /** `https://notes-work.app.uno4.dev` → `notes-work.app.uno4.dev:443` style key for matching. */
 function hostKey(url: string | null): string | null {
   if (!url) return null;
@@ -103,6 +178,10 @@ export function buildProgramTiles(input: {
   const tiles: ProgramTile[] = [];
   const tracked = new Set(input.installs.map((i) => i.deploymentId));
   const storeHosts = new Set<string>();
+  const storeByDeployment = new Map(
+    input.storeApps.flatMap((a) => (a.deploymentId !== null ? [[a.deploymentId, a] as const] : [])),
+  );
+  const store = storeFootprint(input.storeApps, input.installs);
 
   for (const install of input.installs) {
     const running = install.state === "running";
@@ -121,7 +200,8 @@ export function buildProgramTiles(input: {
       openUrl: running && input.computerOn ? install.url : null,
       online: running && install.url !== null,
       machineApp: null,
-      storeApp: null,
+      // Once the service list knows the install, its card (sign-in, Remove) is this tile's.
+      storeApp: storeByDeployment.get(install.deploymentId) ?? null,
       install,
     });
     const key = hostKey(install.url);
@@ -149,10 +229,19 @@ export function buildProgramTiles(input: {
     if (key) storeHosts.add(key);
   }
 
+  // Containers of an App Store app: their ports are the app's too.
+  const storePorts = new Set(store.ports);
+  for (const app of input.machineApps) {
+    if (app.composeProject && store.projects.has(app.composeProject) && app.port !== null) {
+      storePorts.add(app.port);
+    }
+  }
+
   for (const app of input.machineApps) {
     // An App Store app is already on the desktop under its catalog name.
     const key = hostKey(app.publication?.url ?? app.url);
     if (key && storeHosts.has(key)) continue;
+    if (belongsToStoreApp(app, store, storePorts)) continue;
     tiles.push({
       key: app.id,
       name: app.name,
