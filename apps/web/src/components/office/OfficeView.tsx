@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FileSpreadsheetIcon,
   FileTextIcon,
@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FILESYSTEM_READ_FILE_HARD_MAX_BYTES } from "@t3tools/contracts";
 
+import { isElectron } from "../../env";
 import { readEnvironmentApi } from "../../environmentApi";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useStore } from "../../store";
@@ -29,6 +30,11 @@ import {
   type OfficeDocumentType,
 } from "./officeFormats";
 import { writeOfficeBytes } from "./officeSave";
+import {
+  fetchOfficeEngineStatus,
+  installProgressLabel,
+  requestOfficeEngineInstall,
+} from "./officeInstall";
 import { normalizeXlsxForEngine } from "./normalizeXlsx";
 
 const TYPE_ICON: Record<OfficeDocumentType, typeof FileTextIcon> = {
@@ -59,6 +65,36 @@ export function OfficeView({ path }: { path: string }) {
     queryFn: () => isOfficeEngineInstalled(),
     staleTime: 60_000,
   });
+
+  // The engine is served by the daemon behind this page, so it is installed
+  // there (not on whichever computer the file lives on).
+  const canInstallEngine = !isElectron && primaryEnvironmentId !== null;
+  const installStatusQuery = useQuery({
+    queryKey: ["officeEngineInstallStatus", primaryEnvironmentId],
+    enabled: canInstallEngine && engineQuery.data === false,
+    queryFn: () => fetchOfficeEngineStatus(primaryEnvironmentId!),
+    refetchInterval: (query) => (query.state.data?.state === "installing" ? 1500 : false),
+  });
+  const installMutation = useMutation({
+    mutationFn: () => requestOfficeEngineInstall(primaryEnvironmentId!),
+    onSuccess: (status) => {
+      queryClient.setQueryData(["officeEngineInstallStatus", primaryEnvironmentId], status);
+    },
+    onError: (error) => {
+      toastManager.add({
+        type: "error",
+        title: "Couldn't install Office",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    },
+  });
+  const installStatus = installStatusQuery.data;
+  useEffect(() => {
+    if (installStatus?.installed) {
+      void queryClient.invalidateQueries({ queryKey: ["officeEngineInstalled"] });
+    }
+  }, [installStatus?.installed, queryClient]);
+  const installing = installMutation.isPending || installStatus?.state === "installing";
 
   const fileQuery = useQuery({
     queryKey: ["officeFile", environmentId, path],
@@ -174,10 +210,19 @@ export function OfficeView({ path }: { path: string }) {
         body: "Office opens Word, Excel and PowerPoint files (docx, xlsx, pptx and older doc/xls/ppt).",
       }
     : engineQuery.data === false
-      ? {
-          title: "Office isn't installed on this computer yet",
-          body: "The office engine runs in your browser, but its files (~300 MB download) live on the computer. Install it once and every document opens here.",
-        }
+      ? isElectron
+        ? {
+            title: "Office opens on your cloud computer",
+            body: "In the desktop app, open this file with Word, Pages or Numbers on your Mac. To edit it in the browser, switch to a cloud computer and open it in Files there.",
+          }
+        : {
+            title: "Office isn't installed on this computer yet",
+            body:
+              installStatus?.state === "error" && installStatus.error
+                ? `The last install failed: ${installStatus.error}`
+                : "Word, Excel and PowerPoint files open right here once Office is installed. It's a one-time ~320 MB download.",
+            action: "install" as const,
+          }
       : fileQuery.isError
         ? {
             title: "Couldn't open the file",
@@ -238,6 +283,19 @@ export function OfficeView({ path }: { path: string }) {
               <div className="max-w-md space-y-2 text-center">
                 <p className="text-sm font-medium text-foreground">{blocking.title}</p>
                 <p className="text-sm text-muted-foreground">{blocking.body}</p>
+                {"action" in blocking && blocking.action === "install" && canInstallEngine ? (
+                  <div className="pt-2">
+                    <Button
+                      size="sm"
+                      onClick={() => installMutation.mutate()}
+                      disabled={installing}
+                      data-testid="office-install"
+                    >
+                      {installing ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
+                      {installing ? installProgressLabel(installStatus) : "Install Office"}
+                    </Button>
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : loading ? (

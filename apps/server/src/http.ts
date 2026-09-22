@@ -47,6 +47,7 @@ import { executeBridgeCommand, executeBridgeOpenUrl } from "./browserCommandRout
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { OFFICE_ENGINE_ROUTE_PREFIX, resolveOfficeEngineFilePath } from "./officeEngine.ts";
+import { getOfficeEngineStatus, startOfficeEngineInstall } from "./officeEngineInstall.ts";
 import { isAllowedCorsOrigin, isLoopbackHostname } from "./corsOrigins.ts";
 import { HealthCheck } from "./health.ts";
 import { decodeOtlpTraceRecords } from "./observability/TraceRecord.ts";
@@ -716,6 +717,40 @@ export const officeEngineRouteLayer = HttpRouter.add(
       ),
     );
   }),
+);
+
+/**
+ * Office engine install (owner only): `GET` reports status, `POST` starts a
+ * background download from Uno's host with a pinned sha256 (officeEngineInstall.ts).
+ */
+export const officeEngineStatusRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/office-engine/status",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const serverAuth = yield* ServerAuth;
+    yield* serverAuth.authenticateHttpRequest(request);
+    const config = yield* ServerConfig;
+    const status = yield* Effect.promise(() => getOfficeEngineStatus(config.officeEngineDir));
+    return HttpServerResponse.jsonUnsafe(status, { headers: { "Cache-Control": "no-store" } });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const officeEngineInstallRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/office-engine/install",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const serverAuth = yield* ServerAuth;
+    yield* serverAuth.authenticateHttpRequest(request);
+    const config = yield* ServerConfig;
+    startOfficeEngineInstall(config.officeEngineDir);
+    const status = yield* Effect.promise(() => getOfficeEngineStatus(config.officeEngineDir));
+    return HttpServerResponse.jsonUnsafe(status, {
+      status: 202,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
 export const staticAndDevRouteLayer = HttpRouter.add(

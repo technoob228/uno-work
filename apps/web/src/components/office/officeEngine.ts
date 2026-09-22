@@ -44,7 +44,10 @@ export function officeEngineApiUrl(): string {
 export async function isOfficeEngineInstalled(fetchImpl: typeof fetch = fetch): Promise<boolean> {
   try {
     const response = await fetchImpl(officeEngineApiUrl(), { method: "HEAD", cache: "no-store" });
-    return response.ok;
+    // An SPA fallback (desktop t3:// protocol, dev server) answers 200 with
+    // index.html for any path — only a real script counts.
+    const type = response.headers.get("content-type") ?? "";
+    return response.ok && type.includes("javascript");
   } catch {
     return false;
   }

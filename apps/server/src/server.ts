@@ -5,6 +5,8 @@ import { ServerConfig } from "./config.ts";
 import {
   attachmentsRouteLayer,
   officeEngineRouteLayer,
+  officeEngineStatusRouteLayer,
+  officeEngineInstallRouteLayer,
   browserBridgeCommandResultRouteLayer,
   browserBridgeCommandRouteLayer,
   browserBridgeOpenRouteLayer,
@@ -477,6 +479,8 @@ export const makeRoutesLayer = Layer.mergeAll(
   agentThreadsSendMessageRouteLayer,
   attachmentsRouteLayer,
   officeEngineRouteLayer,
+  officeEngineStatusRouteLayer,
+  officeEngineInstallRouteLayer,
   browserBridgeCommandRouteLayer,
   browserBridgeCommandResultRouteLayer,
   browserBridgeOpenRouteLayer,

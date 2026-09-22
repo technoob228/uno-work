@@ -47,9 +47,13 @@ if (isOfficeFile(path)) navigate({ to: "/office", search: { path } });
      before opening. Verified on 2026-09-22.
 2. **Save is not atomic.** There is no rename RPC, so a dropped connection in
    the middle of a save of more than 3 MB leaves a truncated file.
-3. **The engine source is a third-party release** (`sweetwisdom/onlyoffice-web-local`,
-   release-13). Before production, build our own package, host it on our S3
-   and bake it into the Work golden image.
+3. **The engine is a re-hosted third-party build** (`sweetwisdom/onlyoffice-web-local`,
+   release-13, unmodified). Since 0.0.70 it is served from
+   `https://console.uno4.dev/cli/work/office-engine/` with pinned sha256
+   (`office-engine-oo13.zip` 710153df…, `office-engine-oo13.tar.gz` 5269aa46…),
+   baked into the Work golden image, and installable with the "Install Office"
+   button (`POST /api/office-engine/install`, officeEngineInstall.ts). Building
+   our own package from ONLYOFFICE sources is still open.
 4. **Legacy formats save beside the original.** doc/xls/ppt are saved as a
    new .docx/.xlsx/.pptx next to the original.
 
