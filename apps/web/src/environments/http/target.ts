@@ -146,6 +146,23 @@ export async function environmentFetchJson<T>(request: EnvironmentRequest): Prom
   return (await response.json()) as T;
 }
 
+/**
+ * Same routing as {@link environmentFetchJson}, but hands back the raw
+ * response (file bytes, streams). Non-2xx still throws.
+ */
+export async function environmentFetchResponse(request: EnvironmentRequest): Promise<Response> {
+  const target = await resolveEnvironmentHttpTarget(request.environmentId);
+  const response = await sendRequest(target, request);
+  if (!response.ok) {
+    throw new EnvironmentHttpError(
+      response.status,
+      await readErrorMessage(response),
+      request.environmentId,
+    );
+  }
+  return response;
+}
+
 async function sendRequest(
   target: EnvironmentHttpTarget,
   request: EnvironmentRequest,

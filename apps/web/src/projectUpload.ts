@@ -82,6 +82,16 @@ export async function uploadFilesIntoDirectory(
     readonly filterIgnored: boolean;
     readonly onProgress?: (progress: ProjectUploadProgress) => void;
     readonly signal?: AbortSignal;
+    /**
+     * Write each file under another relative path first (e.g. a hidden temp
+     * name next to it) and hand it to `onFileWritten` to put in place — so a
+     * half-uploaded file never shows up under its real name.
+     */
+    readonly stagedPathFor?: (relativePath: string) => string;
+    readonly onFileWritten?: (file: {
+      readonly relativePath: string;
+      readonly stagedRelativePath: string;
+    }) => Promise<void>;
   },
 ): Promise<ProjectUploadResult> {
   const readChunkBase64 = deps.readChunkBase64 ?? readFileAsBase64;
@@ -104,12 +114,13 @@ export async function uploadFilesIntoDirectory(
     const file = byRelativePath.get(entry.relativePath);
     if (!file) continue;
     report(entry.relativePath);
+    const writePath = input.stagedPathFor?.(entry.relativePath) ?? entry.relativePath;
 
     if (file.size === 0) {
       throwIfAborted(input.signal);
       await deps.writeFile({
         cwd: input.targetDir,
-        relativePath: entry.relativePath,
+        relativePath: writePath,
         contents: "",
         encoding: "base64",
       });
@@ -121,7 +132,7 @@ export async function uploadFilesIntoDirectory(
         const contents = await readChunkBase64(chunk);
         await deps.writeFile({
           cwd: input.targetDir,
-          relativePath: entry.relativePath,
+          relativePath: writePath,
           contents,
           encoding: "base64",
           ...(offset === 0 ? {} : { mode: "append" as const }),
@@ -132,6 +143,9 @@ export async function uploadFilesIntoDirectory(
       }
     }
 
+    if (input.onFileWritten) {
+      await input.onFileWritten({ relativePath: entry.relativePath, stagedRelativePath: writePath });
+    }
     completedFiles += 1;
     report(null);
   }

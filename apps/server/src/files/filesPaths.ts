@@ -98,11 +98,19 @@ export async function resolveInsideRoot(
     throw new FilesPathError("invalid_path", "That path isn't valid.");
   }
   const lexical = nodePath.resolve(candidate);
-  if (!isSameOrInside(lexical, rootReal)) {
-    throw new FilesPathError("outside_root", "Files can only open things inside your home folder.");
+  const real = await realpathOrNull(lexical);
+  // A path may reach the root through a symlinked prefix (macOS /tmp →
+  // /private/tmp); what counts is where it really lands.
+  if (!isSameOrInside(lexical, rootReal) && (real === null || !isSameOrInside(real, rootReal))) {
+    const parentReal = real === null ? await realpathOrNull(nodePath.dirname(lexical)) : null;
+    if (mustExist || parentReal === null || !isSameOrInside(parentReal, rootReal)) {
+      throw new FilesPathError(
+        "outside_root",
+        "Files can only open things inside your home folder.",
+      );
+    }
   }
 
-  const real = await realpathOrNull(lexical);
   if (real !== null) {
     if (!isSameOrInside(real, rootReal)) {
       throw new FilesPathError(

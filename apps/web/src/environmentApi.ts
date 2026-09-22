@@ -100,6 +100,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       installStatus: rpcClient.unoComputer.installStatus,
       power: rpcClient.unoComputer.power,
     },
+    files: rpcClient.files,
   };
 }
 

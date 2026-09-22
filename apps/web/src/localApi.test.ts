@@ -155,6 +155,19 @@ const rpcClientMock = {
     installStatus: vi.fn(),
     power: vi.fn(),
   },
+  files: {
+    list: vi.fn(),
+    stat: vi.fn(),
+    createFolder: vi.fn(),
+    rename: vi.fn(),
+    move: vi.fn(),
+    delete: vi.fn(),
+    search: vi.fn(),
+    createShare: vi.fn(),
+    listShares: vi.fn(),
+    revokeShare: vi.fn(),
+    publishSite: vi.fn(),
+  },
 };
 
 vi.mock("./environments/runtime", () => ({

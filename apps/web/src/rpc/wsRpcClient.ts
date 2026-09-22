@@ -229,6 +229,19 @@ export interface WsRpcClient {
     readonly installStatus: RpcUnaryMethod<typeof WS_METHODS.unoComputerInstallStatus>;
     readonly power: RpcUnaryMethod<typeof WS_METHODS.unoComputerPower>;
   };
+  readonly files: {
+    readonly list: RpcUnaryMethod<typeof WS_METHODS.filesList>;
+    readonly stat: RpcUnaryMethod<typeof WS_METHODS.filesStat>;
+    readonly createFolder: RpcUnaryMethod<typeof WS_METHODS.filesCreateFolder>;
+    readonly rename: RpcUnaryMethod<typeof WS_METHODS.filesRename>;
+    readonly move: RpcUnaryMethod<typeof WS_METHODS.filesMove>;
+    readonly delete: RpcUnaryMethod<typeof WS_METHODS.filesDelete>;
+    readonly search: RpcUnaryMethod<typeof WS_METHODS.filesSearch>;
+    readonly createShare: RpcUnaryMethod<typeof WS_METHODS.filesShareCreate>;
+    readonly listShares: RpcUnaryMethod<typeof WS_METHODS.filesShareList>;
+    readonly revokeShare: RpcUnaryMethod<typeof WS_METHODS.filesShareRevoke>;
+    readonly publishSite: RpcUnaryMethod<typeof WS_METHODS.filesPublishSite>;
+  };
 }
 
 export function createWsRpcClient(transport: WsTransport): WsRpcClient {
@@ -504,6 +517,24 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       installStatus: (input) =>
         transport.request((client) => client[WS_METHODS.unoComputerInstallStatus](input)),
       power: (input) => transport.request((client) => client[WS_METHODS.unoComputerPower](input)),
+    },
+    files: {
+      list: (input) => transport.request((client) => client[WS_METHODS.filesList](input)),
+      stat: (input) => transport.request((client) => client[WS_METHODS.filesStat](input)),
+      createFolder: (input) =>
+        transport.request((client) => client[WS_METHODS.filesCreateFolder](input)),
+      rename: (input) => transport.request((client) => client[WS_METHODS.filesRename](input)),
+      move: (input) => transport.request((client) => client[WS_METHODS.filesMove](input)),
+      delete: (input) => transport.request((client) => client[WS_METHODS.filesDelete](input)),
+      search: (input) => transport.request((client) => client[WS_METHODS.filesSearch](input)),
+      createShare: (input) =>
+        transport.request((client) => client[WS_METHODS.filesShareCreate](input)),
+      listShares: (input) =>
+        transport.request((client) => client[WS_METHODS.filesShareList](input)),
+      revokeShare: (input) =>
+        transport.request((client) => client[WS_METHODS.filesShareRevoke](input)),
+      publishSite: (input) =>
+        transport.request((client) => client[WS_METHODS.filesPublishSite](input)),
     },
   };
 }
