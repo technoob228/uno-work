@@ -206,7 +206,11 @@ export function SidebarEnvSwitcher({
   const accountBoxes = useMemo(
     () =>
       machineRows.filter(
-        (row) => row.environmentId === null && row.box !== null && row.kind === "uno_box",
+        (row) =>
+          row.environmentId === null &&
+          row.box !== null &&
+          row.box.workMachine === true &&
+          row.box.status !== "deleted",
       ),
     [machineRows],
   );

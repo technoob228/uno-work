@@ -44,6 +44,7 @@ export function parseUnoBox(raw: unknown): UnoBox | null {
     sleepDeadlineAt: asNullableString(record["sleep_deadline_at"]),
     hostname: asNullableString(record["hostname"]),
     url: asNullableString(record["url"]),
+    workMachine: record["work_machine"] === true || record["role"] === "work",
   };
 }
 

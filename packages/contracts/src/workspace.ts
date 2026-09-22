@@ -168,6 +168,8 @@ export const UnoBox = Schema.Struct({
   hostname: Schema.optional(Schema.NullOr(Schema.String)),
   /** `https://<hostname>` when the box serves HTTP on port 80 (the Uno Work daemon does). */
   url: Schema.optional(Schema.NullOr(Schema.String)),
+  /** An Uno Work computer (console `work_machine`), not a plain server. */
+  workMachine: Schema.optional(Schema.Boolean),
 });
 export type UnoBox = typeof UnoBox.Type;
 

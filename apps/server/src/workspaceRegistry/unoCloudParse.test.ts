@@ -45,6 +45,7 @@ describe("parseUnoBox", () => {
       // app.uno4.work need it to reach the daemon directly.
       hostname: "my-app-u85.app.uno4.dev",
       url: "https://my-app-u85.app.uno4.dev",
+      workMachine: false,
     });
   });
 
