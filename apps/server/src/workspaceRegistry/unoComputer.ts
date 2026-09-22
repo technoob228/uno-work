@@ -421,10 +421,12 @@ export function parseAppTemplates(raw: unknown): ReadonlyArray<UnoComputerAppTem
       .filter((env): env is Record<string, unknown> => env !== null && asString(env["name"]) !== "")
       .map((env) => ({
         name: asString(env["name"]),
+        // The interface is English: a Russian-only description is not shown
+        // (it read like a stray line in the middle of the form).
         description:
           asString(env["description_en"]) ||
           asString(env["description"]) ||
-          asString(env["description_ru"]),
+          (env["secret"] === true ? "Password" : asString(env["name"])),
         secret: env["secret"] === true,
         defaultValue: asNullableString(env["default"]),
       }));

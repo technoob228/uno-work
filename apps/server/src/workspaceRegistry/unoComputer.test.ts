@@ -298,7 +298,7 @@ describe("readComputerApps", () => {
       ["n8n", "Автоматизации"],
     ]);
     expect(apps.catalog.templates[1]?.settings).toEqual([
-      { name: "N8N_ADMIN_PASSWORD", description: "Пароль", secret: true, defaultValue: null },
+      { name: "N8N_ADMIN_PASSWORD", description: "Password", secret: true, defaultValue: null },
     ]);
     expect(apps.installed.apps.map((a) => [a.name, a.state, a.icon])).toEqual([
       ["status-page", "running", null],
