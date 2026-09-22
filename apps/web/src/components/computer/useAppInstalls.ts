@@ -39,6 +39,7 @@ export function useAppInstalls(input: {
   const [installs, setInstalls] = useState<ReadonlyArray<AppInstall>>([]);
   const [startError, setStartError] = useState<string | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<{ templateId: string; message: string } | null>(null);
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
 
   useEffect(() => {
@@ -123,16 +124,31 @@ export function useAppInstalls(input: {
   }, [follow, input.inFlight]);
 
   const install = useCallback(
-    async (template: UnoComputerAppTemplate, settings?: Record<string, string>) => {
+    async (
+      template: UnoComputerAppTemplate,
+      settings?: Record<string, string>,
+      options?: { allowLowMemory?: boolean },
+    ) => {
       if (environmentId === null) return false;
       setStartError(null);
+      setConfirm(null);
       setStarting(template.id);
       try {
-        const { deploymentId } = await ensureEnvironmentApi(environmentId).unoComputer.installApp({
+        const result = await ensureEnvironmentApi(environmentId).unoComputer.installApp({
           ...(boxId === null ? {} : { boxId }),
           templateId: template.id,
           ...(settings && Object.keys(settings).length > 0 ? { settings } : {}),
+          ...(options?.allowLowMemory ? { allowLowMemory: true } : {}),
         });
+        const deploymentId = result.deploymentId;
+        if (deploymentId === null) {
+          // Uno wants the person's answer first (the app needs more memory).
+          setConfirm({
+            templateId: template.id,
+            message: result.confirm?.message ?? "This app needs your confirmation to install.",
+          });
+          return false;
+        }
         setInstalls((prev) => [
           ...prev.filter((i) => i.deploymentId !== deploymentId),
           {
@@ -171,6 +187,8 @@ export function useAppInstalls(input: {
     starting,
     startError,
     clearStartError: () => setStartError(null),
+    confirm,
+    clearConfirm: () => setConfirm(null),
     dismiss,
   };
 }

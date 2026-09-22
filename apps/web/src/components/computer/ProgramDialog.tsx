@@ -4,15 +4,22 @@
  * Start / Stop. "Show on the internet" is the only way a port gets published,
  * and it says plainly what it does before it does it.
  */
-import type { UnoMachineAppAction, UnoMachineApps } from "@t3tools/contracts";
+import type {
+  UnoComputerAppCredential,
+  UnoMachineAppAction,
+  UnoMachineApps,
+} from "@t3tools/contracts";
 import {
   CirclePlayIcon,
   CircleStopIcon,
+  EyeIcon,
   ExternalLinkIcon,
   EyeOffIcon,
   GlobeIcon,
+  KeyRoundIcon,
   TriangleAlertIcon,
 } from "lucide-react";
+import { useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -58,6 +65,80 @@ function AddressRow({ label, url }: { label: string; url: string }) {
         Open
       </Button>
     </div>
+  );
+}
+
+/**
+ * How to sign in to an App Store app: the login, the password Uno generated at
+ * install, an invite link for other people. Only the owner sees this (the
+ * console answers it for this computer only). Secrets stay hidden until "Show".
+ */
+function SignInBlock({
+  credentials,
+  notes,
+}: {
+  credentials: ReadonlyArray<UnoComputerAppCredential>;
+  notes: string | null;
+}) {
+  const [shown, setShown] = useState<ReadonlySet<string>>(new Set());
+  if (credentials.length === 0 && !notes) return null;
+  return (
+    <section
+      className="flex flex-col gap-2 rounded-xl border border-border/60 p-3"
+      aria-label="How to sign in"
+    >
+      <div className="flex items-center gap-1.5 text-xs font-medium">
+        <KeyRoundIcon className="size-3.5 text-muted-foreground" />
+        How to sign in
+      </div>
+      {credentials.map((c) => {
+        const visible = !c.secret || shown.has(c.label);
+        return (
+          <div
+            key={c.label}
+            className="flex min-w-0 items-center gap-2 rounded-lg bg-muted/40 py-1 pr-1 pl-2.5"
+            data-credential={c.label}
+          >
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] text-muted-foreground">{c.label}</div>
+              <div className="truncate font-mono text-xs" title={visible ? c.value : undefined}>
+                {visible ? c.value : "•".repeat(12)}
+              </div>
+            </div>
+            {c.secret ? (
+              <Button
+                size="xs"
+                variant="ghost"
+                aria-label={visible ? `Hide ${c.label}` : `Show ${c.label}`}
+                onClick={() =>
+                  setShown((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(c.label)) next.delete(c.label);
+                    else next.add(c.label);
+                    return next;
+                  })
+                }
+              >
+                {visible ? <EyeOffIcon /> : <EyeIcon />}
+                {visible ? "Hide" : "Show"}
+              </Button>
+            ) : null}
+            <CopyButton value={c.value} label={c.label.toLowerCase()} />
+            {c.link ? (
+              <Button
+                size="xs"
+                variant="outline"
+                render={<a href={c.value} target="_blank" rel="noopener noreferrer" />}
+              >
+                <ExternalLinkIcon />
+                Open
+              </Button>
+            ) : null}
+          </div>
+        );
+      })}
+      {notes ? <p className="text-xs leading-relaxed text-muted-foreground">{notes}</p> : null}
+    </section>
   );
 }
 
@@ -133,6 +214,12 @@ export function ProgramDialog({
               ) : null}
               {publication?.url ? (
                 <AddressRow label="On the internet" url={publication.url} />
+              ) : null}
+              {tile.storeApp ? (
+                <SignInBlock
+                  credentials={tile.storeApp.credentials ?? []}
+                  notes={tile.storeApp.notes ?? null}
+                />
               ) : null}
               {nonWebForwards && nonWebForwards.length > 0 && publication?.host ? (
                 <div className="rounded-xl bg-muted/40 px-3 py-2 text-xs">

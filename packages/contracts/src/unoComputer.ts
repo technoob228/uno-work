@@ -121,11 +121,25 @@ export const UnoComputerActivity = Schema.Struct({
 });
 export type UnoComputerActivity = typeof UnoComputerActivity.Type;
 
+export const UnoComputerAppSettingOption = Schema.Struct({
+  value: Schema.String,
+  label: Schema.String,
+});
+export type UnoComputerAppSettingOption = typeof UnoComputerAppSettingOption.Type;
+
 export const UnoComputerAppSetting = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   secret: Schema.Boolean,
   defaultValue: Schema.NullOr(Schema.String),
+  /** Must be filled in (when the field applies, see showIf). */
+  required: Schema.optional(Schema.Boolean),
+  /** A choice: render a picker, not a text box. */
+  options: Schema.optional(Schema.Array(UnoComputerAppSettingOption)),
+  /** The field only applies when another field has this value. */
+  showIf: Schema.optional(
+    Schema.NullOr(Schema.Struct({ name: Schema.String, value: Schema.String })),
+  ),
 });
 export type UnoComputerAppSetting = typeof UnoComputerAppSetting.Type;
 
@@ -138,6 +152,8 @@ export const UnoComputerAppTemplate = Schema.Struct({
   minRamMb: Schema.Number,
   minDiskGb: Schema.Number,
   settings: Schema.Array(UnoComputerAppSetting),
+  /** What to know after install (how to sign in, limits). */
+  notes: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type UnoComputerAppTemplate = typeof UnoComputerAppTemplate.Type;
 
@@ -148,6 +164,16 @@ export const UnoComputerInstalledAppState = Schema.Literals([
   "unknown",
 ]);
 export type UnoComputerInstalledAppState = typeof UnoComputerInstalledAppState.Type;
+
+export const UnoComputerAppCredential = Schema.Struct({
+  label: Schema.String,
+  value: Schema.String,
+  /** Hidden until "Show"; always copyable. */
+  secret: Schema.Boolean,
+  /** The value is an address (an invite link). */
+  link: Schema.Boolean,
+});
+export type UnoComputerAppCredential = typeof UnoComputerAppCredential.Type;
 
 export const UnoComputerInstalledApp = Schema.Struct({
   /** Stable key for the list: `service:<id>` or `port:<n>`. */
@@ -160,6 +186,10 @@ export const UnoComputerInstalledApp = Schema.Struct({
   url: Schema.NullOr(Schema.String),
   /** Last deployment, so a running install can be re-attached after a reload. */
   deploymentId: Schema.NullOr(Schema.Number),
+  /** What to know after install. */
+  notes: Schema.optional(Schema.NullOr(Schema.String)),
+  /** How to sign in: login, generated password, invite link. Owner-only. */
+  credentials: Schema.optional(Schema.Array(UnoComputerAppCredential)),
 });
 export type UnoComputerInstalledApp = typeof UnoComputerInstalledApp.Type;
 
@@ -181,11 +211,21 @@ export const UnoComputerInstallAppInput = Schema.Struct({
   boxId: Schema.optional(Schema.Number),
   templateId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
   settings: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  /** Install even though the computer has less memory than the app asks for. */
+  allowLowMemory: Schema.optional(Schema.Boolean),
 });
 export type UnoComputerInstallAppInput = typeof UnoComputerInstallAppInput.Type;
 
 export const UnoComputerInstallAppResult = Schema.Struct({
-  deploymentId: Schema.Number,
+  /** null when the install did not start and needs the person's answer (confirm). */
+  deploymentId: Schema.NullOr(Schema.Number),
+  /**
+   * Set when Uno asks to confirm first — today only "low_memory": the app wants
+   * more memory than this computer has. Resend with allowLowMemory to proceed.
+   */
+  confirm: Schema.optional(
+    Schema.NullOr(Schema.Struct({ kind: Schema.String, message: Schema.String })),
+  ),
 });
 export type UnoComputerInstallAppResult = typeof UnoComputerInstallAppResult.Type;
 

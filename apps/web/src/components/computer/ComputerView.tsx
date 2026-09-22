@@ -332,7 +332,10 @@ export function ComputerView() {
         open={storeOpen}
         onOpenChange={(open) => {
           setStoreOpen(open);
-          if (!open) installs.clearStartError();
+          if (!open) {
+            installs.clearStartError();
+            installs.clearConfirm();
+          }
         }}
         templates={catalog?.templates ?? []}
         installedTemplateIds={
@@ -346,9 +349,11 @@ export function ComputerView() {
         starting={installs.starting}
         error={installs.startError}
         computerOn={computerOn}
-        onInstall={async (template, settings) => {
-          if (await installs.install(template, settings)) setStoreOpen(false);
+        onInstall={async (template, settings, options) => {
+          if (await installs.install(template, settings, options)) setStoreOpen(false);
         }}
+        confirm={installs.confirm}
+        onCancelConfirm={installs.clearConfirm}
       />
     </SidebarInset>
   );

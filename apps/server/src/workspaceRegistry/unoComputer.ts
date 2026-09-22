@@ -22,11 +22,13 @@
  */
 import type {
   UnoComputerActivity,
+  UnoComputerAppCredential,
   UnoComputerAppTemplate,
   UnoComputerApps,
   UnoComputerAvailability,
   UnoComputerBox,
   UnoComputerCandidate,
+  UnoComputerInstallAppResult,
   UnoComputerInstallStatus,
   UnoComputerInstalledApp,
   UnoComputerInstalledAppState,
@@ -429,6 +431,9 @@ export function parseAppTemplates(raw: unknown): ReadonlyArray<UnoComputerAppTem
           (env["secret"] === true ? "Password" : asString(env["name"])),
         secret: env["secret"] === true,
         defaultValue: asNullableString(env["default"]),
+        required: env["required"] === true,
+        options: parseSettingOptions(env["options"]),
+        showIf: parseShowIf(env["show_if"]),
       }));
     out.push({
       id,
@@ -440,6 +445,61 @@ export function parseAppTemplates(raw: unknown): ReadonlyArray<UnoComputerAppTem
       minRamMb: asNumber(record["min_ram_mb"]),
       minDiskGb: asNumber(record["min_disk_gb"]),
       settings,
+      notes: asString(record["notes_en"]) || asString(record["notes_ru"]) || null,
+    });
+  }
+  return out;
+}
+
+function parseSettingOptions(raw: unknown): ReadonlyArray<{ value: string; label: string }> {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map(asRecord)
+    .filter((o): o is Record<string, unknown> => o !== null && asString(o["value"]) !== "")
+    .map((o) => ({
+      value: asString(o["value"]),
+      label: asString(o["label_en"]) || asString(o["label_ru"]) || asString(o["value"]),
+    }));
+}
+
+/** "STORAGE=s3" → { name: "STORAGE", value: "s3" }. */
+function parseShowIf(raw: unknown): { name: string; value: string } | null {
+  const text = asString(raw);
+  const at = text.indexOf("=");
+  if (at <= 0) return null;
+  return { name: text.slice(0, at), value: text.slice(at + 1) };
+}
+
+/**
+ * `GET /api/v1/boxes/{id}/apps` (console 2026-09-23+): how to sign in to each
+ * installed app — login, the password Uno generated, an invite link — plus the
+ * template's after-install note. Keyed by deployment id. An older console
+ * answers 404; the card then just has no sign-in block.
+ */
+export function parseAppCards(
+  raw: unknown,
+): Map<number, { notes: string | null; credentials: ReadonlyArray<UnoComputerAppCredential> }> {
+  const out = new Map<
+    number,
+    { notes: string | null; credentials: ReadonlyArray<UnoComputerAppCredential> }
+  >();
+  const list = asRecord(raw)?.["apps"];
+  for (const item of Array.isArray(list) ? list : []) {
+    const record = asRecord(item);
+    const deploymentId = asNullableNumber(record?.["deployment_id"]);
+    if (!record || deploymentId === null) continue;
+    const credentials = (Array.isArray(record["credentials"]) ? record["credentials"] : [])
+      .map(asRecord)
+      .filter((c): c is Record<string, unknown> => c !== null && asString(c["value"]) !== "")
+      .map((c) => ({
+        label: asString(c["label_en"]) || asString(c["label_ru"]) || "Sign-in",
+        value: asString(c["value"]),
+        secret: c["secret"] === true,
+        link: c["link"] === true,
+      }));
+    out.set(deploymentId, {
+      notes: asString(record["notes_en"]) || asString(record["notes_ru"]) || null,
+      credentials,
     });
   }
   return out;
@@ -481,6 +541,7 @@ export function parseInstalledApps(
   boxId: number,
   templates: ReadonlyArray<UnoComputerAppTemplate>,
   known: ReadonlyArray<KnownInstall>,
+  cards: ReturnType<typeof parseAppCards> = new Map(),
 ): ReadonlyArray<UnoComputerInstalledApp> {
   const list = Array.isArray(raw) ? raw : (asRecord(raw)?.["services"] ?? []);
   const byTemplate = new Map(templates.map((t) => [t.id, t]));
@@ -504,6 +565,9 @@ export function parseInstalledApps(
       state: serviceState(asString(record["last_status"])),
       url: asNullableString(record["url"]) ?? knownInstall?.url ?? null,
       deploymentId,
+      notes:
+        (deploymentId !== null ? cards.get(deploymentId)?.notes : null) ?? template?.notes ?? null,
+      credentials: (deploymentId !== null ? cards.get(deploymentId)?.credentials : undefined) ?? [],
     });
   }
   // Installs this daemon started that the service list does not show yet.
@@ -519,6 +583,8 @@ export function parseInstalledApps(
       state: install.state,
       url: install.url,
       deploymentId: install.deploymentId,
+      notes: cards.get(install.deploymentId)?.notes ?? template?.notes ?? null,
+      credentials: cards.get(install.deploymentId)?.credentials ?? [],
     });
   }
   return apps;
@@ -546,10 +612,14 @@ export async function readComputerApps(
   if (ctx.boxId === null) return fail("error", NO_COMPUTER_MESSAGE);
   const boxId = ctx.boxId;
 
-  const [catalogResult, servicesResult] = await Promise.allSettled([
+  const [catalogResult, servicesResult, cardsResult] = await Promise.allSettled([
     request("/api/v1/apps/templates"),
     request("/api/v1/git/services"),
+    request(`/api/v1/boxes/${boxId}/apps`),
   ]);
+  // The sign-in cards are extra: an older console (404) or a hiccup just
+  // leaves them out — the app list itself does not depend on them.
+  const cards = cardsResult.status === "fulfilled" ? parseAppCards(cardsResult.value) : new Map();
   const templates =
     catalogResult.status === "fulfilled" ? parseAppTemplates(catalogResult.value) : [];
   const catalogFailure =
@@ -570,6 +640,7 @@ export async function readComputerApps(
         boxId,
         templates,
         ctx.known,
+        cards,
       ),
     },
   };
@@ -580,8 +651,9 @@ export async function installComputerApp(
     readonly boxId: number | null;
     readonly templateId: string;
     readonly settings: Readonly<Record<string, string>> | undefined;
+    readonly allowLowMemory?: boolean | undefined;
   },
-): Promise<{ readonly deploymentId: number }> {
+): Promise<UnoComputerInstallAppResult> {
   const request = bind(ctx);
   if (!request) throw new UnoComputerActionError(NOT_LINKED_MESSAGE);
   if (ctx.boxId === null) throw new UnoComputerActionError(NO_COMPUTER_MESSAGE);
@@ -589,13 +661,45 @@ export async function installComputerApp(
   try {
     raw = await request(`/api/v1/boxes/${ctx.boxId}/apps`, {
       method: "POST",
-      body: JSON.stringify({ template_id: ctx.templateId, env: ctx.settings ?? {} }),
+      body: JSON.stringify({
+        template_id: ctx.templateId,
+        env: ctx.settings ?? {},
+        ...(ctx.allowLowMemory ? { allow_low_memory: true } : {}),
+      }),
     });
   } catch (cause) {
     // Raw text to recognise the error code; errorMessage() for anything shown.
     const message = cause instanceof Error ? cause.message : String(cause);
     if (message.includes("TEMPLATE_NOT_FOUND")) {
       throw new UnoComputerActionError("That app isn't in the catalog anymore.");
+    }
+    // Pre-flight refusals come as 501 (a console workaround for 0.0.69, which
+    // could only say "coming soon" on 501) — recognise them by code first.
+    if (message.includes("APP_NEEDS_MORE_MEMORY")) {
+      return {
+        deploymentId: null,
+        confirm: {
+          kind: "low_memory",
+          message:
+            "This app needs more memory than this computer has. It may be slow or stop. " +
+            "You can give the computer more memory, or install it anyway.",
+        },
+      };
+    }
+    if (message.includes("APP_NEEDS_DOCKER")) {
+      throw new UnoComputerActionError(
+        "This app needs docker, and this computer doesn't have it. Pick another app, or create a new computer.",
+      );
+    }
+    if (message.includes("APP_INSTALL_UNAVAILABLE")) {
+      throw new UnoComputerActionError(
+        "This computer can't install apps yet — restart it from Uno once, or create a new computer.",
+      );
+    }
+    if (message.includes("APP_PORT_UNAVAILABLE")) {
+      throw new UnoComputerActionError(
+        "Uno couldn't open a network port this app needs. Try again in a minute.",
+      );
     }
     if (isRouteMissing(cause)) {
       throw new UnoComputerActionError("Installing apps is coming soon to this computer.");
@@ -611,7 +715,7 @@ export async function installComputerApp(
   if (deploymentId === null) {
     throw new UnoComputerActionError("The install started without a progress handle.");
   }
-  return { deploymentId };
+  return { deploymentId, confirm: null };
 }
 
 const TERMINAL_OK = new Set(["success"]);

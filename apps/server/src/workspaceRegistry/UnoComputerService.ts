@@ -161,10 +161,11 @@ export const makeUnoComputerService = (
               boxId,
               templateId: input.templateId,
               settings: input.settings,
+              allowLowMemory: input.allowLowMemory,
             }),
           catch: toFetchError,
         });
-        if (boxId !== null) {
+        if (boxId !== null && result.deploymentId !== null) {
           known.push({
             deploymentId: result.deploymentId,
             boxId,

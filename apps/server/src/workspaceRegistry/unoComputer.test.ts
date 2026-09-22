@@ -5,6 +5,7 @@ import {
   NOT_LINKED_MESSAGE,
   classifyFailure,
   installComputerApp,
+  parseAppTemplates,
   parseInstalledApps,
   readComputerActivity,
   readComputerApps,
@@ -298,7 +299,15 @@ describe("readComputerApps", () => {
       ["n8n", "Автоматизации"],
     ]);
     expect(apps.catalog.templates[1]?.settings).toEqual([
-      { name: "N8N_ADMIN_PASSWORD", description: "Password", secret: true, defaultValue: null },
+      {
+        name: "N8N_ADMIN_PASSWORD",
+        description: "Password",
+        secret: true,
+        defaultValue: null,
+        required: false,
+        options: [],
+        showIf: null,
+      },
     ]);
     expect(apps.installed.apps.map((a) => [a.name, a.state, a.icon])).toEqual([
       ["status-page", "running", null],
@@ -345,6 +354,8 @@ describe("parseInstalledApps", () => {
         state: "installing",
         url: null,
         deploymentId: 500,
+        notes: null,
+        credentials: [],
       },
     ]);
   });
@@ -366,7 +377,7 @@ describe("installComputerApp", () => {
       templateId: "n8n",
       settings: { N8N_ADMIN_PASSWORD: "pw" },
     });
-    expect(result).toEqual({ deploymentId: 500 });
+    expect(result).toEqual({ deploymentId: 500, confirm: null });
     expect(plane.calls[0]?.method).toBe("POST");
     expect(body).toEqual({ template_id: "n8n", env: { N8N_ADMIN_PASSWORD: "pw" } });
   });
@@ -404,6 +415,173 @@ describe("installComputerApp", () => {
         settings: undefined,
       }),
     ).rejects.toThrow(NOT_LINKED_MESSAGE);
+  });
+});
+
+describe("App Store 0.0.71", () => {
+  it("reads choices, show_if and required from the catalog", () => {
+    const [t] = parseAppTemplates({
+      templates: [
+        {
+          id: "nextcloud",
+          name: "Nextcloud",
+          description_en: "Files",
+          notes_en: "Your login is on the app card.",
+          env: [
+            {
+              name: "STORAGE",
+              description_en: "Where to keep files",
+              default: "disk",
+              options: [
+                { value: "disk", label_en: "On this computer's disk", label_ru: "На диске" },
+                { value: "s3", label_en: "In S3", label_ru: "В S3" },
+              ],
+            },
+            { name: "S3_HOST", description_en: "S3 host", required: true, show_if: "STORAGE=s3" },
+          ],
+        },
+      ],
+    });
+    expect(t?.notes).toBe("Your login is on the app card.");
+    expect(t?.settings[0]?.options).toEqual([
+      { value: "disk", label: "On this computer's disk" },
+      { value: "s3", label: "In S3" },
+    ]);
+    expect(t?.settings[1]).toMatchObject({
+      required: true,
+      showIf: { name: "STORAGE", value: "s3" },
+    });
+  });
+
+  it("puts sign-in details from /boxes/{id}/apps on the installed app", async () => {
+    const plane = fakeControlPlane({
+      "/api/v1/apps/templates": () => ({ templates: [{ id: "memos", name: "Memos", env: [] }] }),
+      "/api/v1/git/services": () => ({
+        services: [
+          {
+            id: -77,
+            box_id: 123,
+            repo_full_name: "memos",
+            last_deployment_id: 77,
+            last_status: "success",
+            url: "https://memos-x.app.uno4.dev",
+          },
+        ],
+      }),
+      "/api/v1/boxes/123/apps": () => ({
+        apps: [
+          {
+            deployment_id: 77,
+            notes_en: "Your account is ready.",
+            credentials: [
+              { label_en: "Login", value: "owner" },
+              { label_en: "Password", value: "s3cret", secret: true },
+              {
+                label_en: "Invite link",
+                value: "https://memos-x.app.uno4.dev/uno-invite/k",
+                link: true,
+                secret: true,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    const apps = await readComputerApps({
+      apiKey: "key",
+      fetchJson: plane.fetchJson,
+      boxId: 123,
+      known: [],
+    });
+    expect(apps.installed.apps[0]).toMatchObject({
+      name: "Memos",
+      state: "running",
+      notes: "Your account is ready.",
+      credentials: [
+        { label: "Login", value: "owner", secret: false, link: false },
+        { label: "Password", value: "s3cret", secret: true, link: false },
+        {
+          label: "Invite link",
+          value: "https://memos-x.app.uno4.dev/uno-invite/k",
+          secret: true,
+          link: true,
+        },
+      ],
+    });
+  });
+
+  it("an older console without /boxes/{id}/apps still lists the apps", async () => {
+    const plane = fakeControlPlane({
+      "/api/v1/apps/templates": () => ({ templates: [] }),
+      "/api/v1/git/services": () => ({
+        services: [
+          {
+            id: -5,
+            box_id: 123,
+            repo_full_name: "memos",
+            last_deployment_id: 5,
+            last_status: "success",
+          },
+        ],
+      }),
+    });
+    const apps = await readComputerApps({
+      apiKey: "key",
+      fetchJson: plane.fetchJson,
+      boxId: 123,
+      known: [],
+    });
+    expect(apps.installed.availability).toBe("ok");
+    expect(apps.installed.apps[0]?.credentials).toEqual([]);
+  });
+
+  it("asks to confirm when the computer has less memory, then sends allow_low_memory", async () => {
+    let body: unknown = null;
+    const refuse = fakeControlPlane({
+      "/api/v1/boxes/123/apps": http(
+        501,
+        '{"error":"APP_NEEDS_MORE_MEMORY","detail":"Immich needs 4 GB"}',
+      ),
+    });
+    const first = await installComputerApp({
+      apiKey: "key",
+      fetchJson: refuse.fetchJson,
+      boxId: 123,
+      templateId: "immich",
+      settings: undefined,
+    });
+    expect(first.deploymentId).toBeNull();
+    expect(first.confirm?.kind).toBe("low_memory");
+    const ok = fakeControlPlane({
+      "/api/v1/boxes/123/apps": (init) => {
+        body = JSON.parse(String(init?.body));
+        return { deployment_id: 9 };
+      },
+    });
+    const second = await installComputerApp({
+      apiKey: "key",
+      fetchJson: ok.fetchJson,
+      boxId: 123,
+      templateId: "immich",
+      settings: undefined,
+      allowLowMemory: true,
+    });
+    expect(second.deploymentId).toBe(9);
+    expect(body).toEqual({ template_id: "immich", env: {}, allow_low_memory: true });
+  });
+
+  it("says plainly when the computer has no docker (not 'coming soon')", async () => {
+    await expect(
+      installComputerApp({
+        apiKey: "key",
+        fetchJson: fakeControlPlane({
+          "/api/v1/boxes/123/apps": http(501, '{"error":"APP_NEEDS_DOCKER","detail":"x"}'),
+        }).fetchJson,
+        boxId: 123,
+        templateId: "memos",
+        settings: undefined,
+      }),
+    ).rejects.toThrow(/needs docker/);
   });
 });
 
