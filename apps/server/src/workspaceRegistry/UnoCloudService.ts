@@ -13,6 +13,7 @@
  * The API key is the account credential from server settings. There is no
  * separate login: a workspace is "linked" exactly when the daemon has a key.
  */
+import { accountControlPlaneKey } from "./unoComputer.ts";
 import type {
   UnoBoxConnection,
   UnoBoxCreateJobStatus,
@@ -176,7 +177,8 @@ const makeUnoCloudService = Effect.gen(function* () {
   const readApiKey = Effect.gen(function* () {
     const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
     return {
-      apiKey: current?.uno.apiKey.trim() ?? "",
+      // Account key, or on a Work machine its own token (see accountControlPlaneKey).
+      apiKey: accountControlPlaneKey(current?.uno.apiKey ?? "", current?.uno.boxToken),
       goldenImageId: current?.uno.goldenImageId ?? null,
     };
   });

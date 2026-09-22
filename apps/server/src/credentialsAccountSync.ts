@@ -21,6 +21,7 @@
  *
  * @module CredentialsAccountSync
  */
+import { accountControlPlaneKey } from "./workspaceRegistry/unoComputer.ts";
 import { Effect } from "effect";
 
 import { CredentialsVaultService, type CredentialsBundle } from "./credentialsVault.ts";
@@ -125,7 +126,10 @@ export function decodeBundle(raw: string): CredentialsBundle | null {
 const readSyncConfig = Effect.gen(function* () {
   const settingsService = yield* ServerSettingsService;
   const settings = yield* settingsService.getSettings;
-  return { apiKey: settings.uno.apiKey.trim(), enabled: settings.uno.credentialsSync };
+  return {
+    apiKey: accountControlPlaneKey(settings.uno.apiKey, settings.uno.boxToken),
+    enabled: settings.uno.credentialsSync,
+  };
 }).pipe(Effect.catch(() => Effect.succeed({ apiKey: "", enabled: false })));
 
 function disabledOutcome(apiKey: string, enabled: boolean): AccountSyncOutcome | null {

@@ -90,8 +90,22 @@ export function computerKeyFor(creds: UnoComputerCredentials, targetBoxId: numbe
   if (boxToken.length > 0 && targetBoxId !== null && targetBoxId === creds.ownBoxId) {
     return boxToken;
   }
-  const account = creds.accountKey.trim();
-  return account.length > 0 && !account.startsWith(GATEWAY_KEY_PREFIX) ? account : "";
+  return accountControlPlaneKey(creds.accountKey, creds.boxToken);
+}
+
+/**
+ * Каким ключом ходить в control plane за делами АККАУНТА (список машин,
+ * разбудить/подключить/создать другую машину, синк хранилища паролей).
+ *
+ * Ключ аккаунта, если в `uno.apiKey` лежит он. На Work-машине там ключ ИИ
+ * `unollm_` (консоль его не принимает) — тогда токен машины: с 0.0.70 консоль
+ * даёт ему узкие права на машины своего аккаунта (`machines:account`).
+ * Пустая строка = не привязано.
+ */
+export function accountControlPlaneKey(apiKey: string, boxToken: string | undefined): string {
+  const account = apiKey.trim();
+  if (account.length > 0 && !account.startsWith(GATEWAY_KEY_PREFIX)) return account;
+  return boxToken?.trim() ?? "";
 }
 
 function bind(ctx: UnoComputerClientContext): ControlPlaneFetch | null {
