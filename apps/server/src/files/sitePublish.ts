@@ -114,6 +114,9 @@ function deployErrorMessage(status: number, body: DeployResponse | null): string
   if (status === 401 || code === "INVALID_API_KEY") {
     return "Uno Hosting didn't accept this computer's account key. Reconnect your Uno account in Settings.";
   }
+  if (status === 403) {
+    return "This computer isn't allowed to publish sites yet. Reopen it from the Uno console to refresh its access, then try again.";
+  }
   if (status === 409 || code === "SLUG_ERROR") {
     return "That site name is taken. Pick another one.";
   }

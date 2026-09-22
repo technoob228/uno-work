@@ -323,7 +323,9 @@ export const makeFilesService = (
           });
         }
         const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
-        const apiKey = current?.uno.apiKey.trim() ?? "";
+        // The machine's own token (hosting:publish); the account key only
+        // when a person put one in Settings.
+        const apiKey = current?.uno.boxToken?.trim() || current?.uno.apiKey.trim() || "";
         if (apiKey.length === 0) {
           return yield* new FilesError({
             message:

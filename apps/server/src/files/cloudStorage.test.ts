@@ -54,7 +54,12 @@ function fakeCloud(options: { listing?: boolean } = {}) {
     if (!match) return new Response("bad", { status: 400 });
     const key = decodeURIComponent(match[2]!);
     if (match[1] === "put") {
-      objects.set(key, new Uint8Array(await new Response(init?.body as ConstructorParameters<typeof Response>[0]).arrayBuffer()));
+      objects.set(
+        key,
+        new Uint8Array(
+          await new Response(init?.body as ConstructorParameters<typeof Response>[0]).arrayBuffer(),
+        ),
+      );
       return new Response(null, { status: 200 });
     }
     const bytes = objects.get(key);
