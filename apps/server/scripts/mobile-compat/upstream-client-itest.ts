@@ -54,8 +54,13 @@ if (!PAIRING) throw new Error("SHIM_PAIRING credential or SHIM_PAIR_URL pair lin
 // ссылка из кнопки «Connect your phone» должна сама вести к нужному демону.
 const BASE =
   process.env.SHIM_BASE ??
-  (process.env.SHIM_PAIR_URL ? new URL(process.env.SHIM_PAIR_URL).origin : "http://127.0.0.1:13791");
-console.log("[itest] pair target:", JSON.stringify({ base: BASE, code: `${PAIRING.slice(0, 4)}…` }));
+  (process.env.SHIM_PAIR_URL
+    ? new URL(process.env.SHIM_PAIR_URL).origin
+    : "http://127.0.0.1:13791");
+console.log(
+  "[itest] pair target:",
+  JSON.stringify({ base: BASE, code: `${PAIRING.slice(0, 4)}…` }),
+);
 
 const log = (step: string, detail: unknown) =>
   console.log(`[itest] ${step}:`, typeof detail === "string" ? detail : JSON.stringify(detail));
@@ -73,8 +78,8 @@ const descriptor = decodeJson(ExecutionEnvironmentDescriptor)(descriptorRaw);
 log("descriptor", {
   environmentId: descriptor.environmentId,
   serverVersion: descriptor.serverVersion,
-  protocolVersion: (descriptorRaw as { orchestrationProtocolVersion?: number })
-    .orchestrationProtocolVersion ?? 1,
+  protocolVersion:
+    (descriptorRaw as { orchestrationProtocolVersion?: number }).orchestrationProtocolVersion ?? 1,
 });
 
 const tokenRes = await fetch(`${BASE}/oauth/token`, {
@@ -90,7 +95,8 @@ const tokenRes = await fetch(`${BASE}/oauth/token`, {
     client_os: "ios",
   }),
 });
-if (!tokenRes.ok) throw new Error(`oauth/token failed: ${tokenRes.status} ${await tokenRes.text()}`);
+if (!tokenRes.ok)
+  throw new Error(`oauth/token failed: ${tokenRes.status} ${await tokenRes.text()}`);
 const token = decodeJson(AuthAccessTokenResult)(await tokenRes.json());
 log("oauth/token", {
   token_type: token.token_type,
@@ -130,9 +136,12 @@ const wsUrl =
   `&connectionMethod=direct&clientOs=ios&clientAppVersion=0.0.42`;
 
 const socketLayer = Socket.layerWebSocket(wsUrl, { openTimeout: "15 seconds" }).pipe(
-  Layer.provide(Layer.succeed(Socket.WebSocketConstructor, (url, protocols) =>
-    new globalThis.WebSocket(url, protocols),
-  )),
+  Layer.provide(
+    Layer.succeed(
+      Socket.WebSocketConstructor,
+      (url, protocols) => new globalThis.WebSocket(url, protocols),
+    ),
+  ),
 );
 const protocolLayer = Layer.effect(
   RpcClient.Protocol,
@@ -169,13 +178,22 @@ const program = Effect.gen(function* () {
     Stream.take(1),
     Stream.runCollect,
   );
-  const shellFirst = shellItems[0] as { kind: string; snapshot?: { projects: unknown[]; threads: unknown[] } };
+  const shellFirst = shellItems[0] as {
+    kind: string;
+    snapshot?: { projects: unknown[]; threads: unknown[] };
+  };
   log("ws orchestration.subscribeShell", {
     kind: shellFirst.kind,
     projects: shellFirst.snapshot?.projects.length,
     threads: shellFirst.snapshot?.threads.length,
   });
-  const project = (shellFirst.snapshot?.projects as Array<{ id: string; title: string; defaultModelSelection: unknown }>)[0];
+  const project = (
+    shellFirst.snapshot?.projects as Array<{
+      id: string;
+      title: string;
+      defaultModelSelection: unknown;
+    }>
+  )[0];
   if (!project) throw new Error("no project in shell snapshot");
 
   // 4. Создание треда — как «＋» в мобилке.
@@ -202,7 +220,10 @@ const program = Effect.gen(function* () {
     Stream.take(1),
     Stream.runCollect,
   );
-  const threadFirst = threadItems[0] as { kind: string; snapshot?: { thread: { id: string; title: string } } };
+  const threadFirst = threadItems[0] as {
+    kind: string;
+    snapshot?: { thread: { id: string; title: string } };
+  };
   log("ws orchestration.subscribeThread", {
     kind: threadFirst.kind,
     threadId: threadFirst.snapshot?.thread.id,
@@ -235,9 +256,13 @@ const program = Effect.gen(function* () {
   );
   log(
     "ws thread events after turn.start",
-    (followUp as Array<{ kind: string; snapshot?: { thread?: { session?: unknown } }; event?: { type?: string } }>).map(
-      (item) => item.kind + (item.event ? `:${item.event.type}` : ""),
-    ),
+    (
+      followUp as Array<{
+        kind: string;
+        snapshot?: { thread?: { session?: unknown } };
+        event?: { type?: string };
+      }>
+    ).map((item) => item.kind + (item.event ? `:${item.event.type}` : "")),
   );
 
   log("RESULT", "OK — апстримный клиент видит треды и пишет в чат через шим");

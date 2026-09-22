@@ -19,14 +19,14 @@ and a one-time download of about 300 MB per browser, which is then cached.
 
 ## Files
 
-| File | Role |
-|---|---|
-| `apps/web/src/components/office/officeFormats.ts` | Extension → editor, save target. `isOfficeFile()` is the hook for Files. |
-| `apps/web/src/components/office/officeEngine.ts` | Loads `api.js`, mounts DocEditor, exports bytes by intercepting `AscCommon.DownloadFileFromBytes` inside the editor iframe. |
-| `apps/web/src/components/office/normalizeXlsx.ts` | Workaround for the x2t `inlineStr` bug (below). |
-| `apps/web/src/components/office/officeSave.ts` | Chunked write-back. |
-| `apps/web/src/components/office/OfficeView.tsx`, `routes/_chat.office.tsx` | The screen. |
-| `scripts/install-office-engine.sh` | Installs the engine package. |
+| File                                                                       | Role                                                                                                                        |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/src/components/office/officeFormats.ts`                          | Extension → editor, save target. `isOfficeFile()` is the hook for Files.                                                    |
+| `apps/web/src/components/office/officeEngine.ts`                           | Loads `api.js`, mounts DocEditor, exports bytes by intercepting `AscCommon.DownloadFileFromBytes` inside the editor iframe. |
+| `apps/web/src/components/office/normalizeXlsx.ts`                          | Workaround for the x2t `inlineStr` bug (below).                                                                             |
+| `apps/web/src/components/office/officeSave.ts`                             | Chunked write-back.                                                                                                         |
+| `apps/web/src/components/office/OfficeView.tsx`, `routes/_chat.office.tsx` | The screen.                                                                                                                 |
+| `scripts/install-office-engine.sh`                                         | Installs the engine package.                                                                                                |
 
 ## Hooking into Files
 

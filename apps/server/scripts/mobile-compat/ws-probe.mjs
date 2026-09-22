@@ -21,7 +21,13 @@ ws.onopen = () => {
   // как rc.115: счётчик с нуля, id — ЧИСЛО
   ws.send(JSON.stringify({ _tag: "Ping" }));
   ws.send(
-    JSON.stringify({ _tag: "Request", id: 0, tag: "subscribeServerConfig", payload: {}, headers: [] }),
+    JSON.stringify({
+      _tag: "Request",
+      id: 0,
+      tag: "subscribeServerConfig",
+      payload: {},
+      headers: [],
+    }),
   );
   ws.send(
     JSON.stringify({ _tag: "Request", id: 1, tag: "server.probe", payload: {}, headers: [] }),
@@ -50,7 +56,10 @@ ws.onopen = () => {
 ws.onmessage = (ev) => {
   const frame = JSON.parse(ev.data);
   frames.push(frame);
-  const rid = "requestId" in frame ? `rid=${JSON.stringify(frame.requestId)} (${typeof frame.requestId})` : "";
+  const rid =
+    "requestId" in frame
+      ? `rid=${JSON.stringify(frame.requestId)} (${typeof frame.requestId})`
+      : "";
   const kind = frame.values?.[0]?.kind ?? frame.values?.[0]?.type ?? "";
   console.log(`<= ${frame._tag} ${rid} ${kind}`);
   if (frame._tag === "Defect") console.log("   DEFECT:", JSON.stringify(frame).slice(0, 300));
@@ -59,8 +68,14 @@ ws.onmessage = (ev) => {
     setTimeout(() => done(), 1500);
   }
 };
-ws.onerror = (e) => { console.log("ws error", e.message ?? e); done(); };
-ws.onclose = (e) => { console.log("ws close", e.code, e.reason); done(); };
+ws.onerror = (e) => {
+  console.log("ws error", e.message ?? e);
+  done();
+};
+ws.onclose = (e) => {
+  console.log("ws close", e.code, e.reason);
+  done();
+};
 
 await finished;
 
@@ -71,12 +86,18 @@ const summary = {
   defects: frames.filter((f) => f._tag === "Defect").length,
   pong: frames.some((f) => f._tag === "Pong"),
   serverConfigChunk: frames.some((f) => f._tag === "Chunk" && f.requestId === 0),
-  probeExitOk: frames.some((f) => f._tag === "Exit" && f.requestId === 1 && f.exit?._tag === "Success"),
-  activityExitOk: frames.some((f) => f._tag === "Exit" && f.requestId === 2 && f.exit?._tag === "Success"),
+  probeExitOk: frames.some(
+    (f) => f._tag === "Exit" && f.requestId === 1 && f.exit?._tag === "Success",
+  ),
+  activityExitOk: frames.some(
+    (f) => f._tag === "Exit" && f.requestId === 2 && f.exit?._tag === "Success",
+  ),
   shellSnapshotChunk: frames.some(
     (f) => f._tag === "Chunk" && f.requestId === 3 && f.values?.[0]?.kind === "snapshot",
   ),
 };
 console.log("SUMMARY", JSON.stringify(summary, null, 2));
 ws.close();
-process.exit(summary.defects === 0 && summary.serverConfigChunk && summary.shellSnapshotChunk ? 0 : 1);
+process.exit(
+  summary.defects === 0 && summary.serverConfigChunk && summary.shellSnapshotChunk ? 0 : 1,
+);

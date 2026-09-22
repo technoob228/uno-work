@@ -207,9 +207,7 @@ export const orchestrationThreadDetailRouteLayer = HttpRouter.add(
     yield* requireAuthenticatedSession;
     const params = yield* HttpRouter.params;
     const threadId = yield* Schema.decodeUnknownEffect(ThreadId)(params["threadId"]).pipe(
-      Effect.mapError(
-        () => new AuthError({ message: "Invalid thread id.", status: 400 }),
-      ),
+      Effect.mapError(() => new AuthError({ message: "Invalid thread id.", status: 400 })),
     );
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
     const [threadDetail, sequence] = yield* Effect.all([

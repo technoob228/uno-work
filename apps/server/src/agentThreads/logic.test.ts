@@ -283,9 +283,9 @@ describe("threadRelation / parseListScope", () => {
     const caller = { id: "c" as ThreadId, spawnedByThreadId: "p" as ThreadId };
     expect(threadRelation(caller, { id: "c" as ThreadId })).toBe("self");
     expect(threadRelation(caller, { id: "p" as ThreadId })).toBe("parent");
-    expect(threadRelation(caller, { id: "k" as ThreadId, spawnedByThreadId: "c" as ThreadId })).toBe(
-      "child",
-    );
+    expect(
+      threadRelation(caller, { id: "k" as ThreadId, spawnedByThreadId: "c" as ThreadId }),
+    ).toBe("child");
     expect(threadRelation(caller, { id: "x" as ThreadId, spawnedByThreadId: null })).toBe("peer");
   });
 

@@ -36,9 +36,7 @@ export const KNOWN_SCOPES: ReadonlySet<string> = new Set(OWNER_SCOPES);
  * wsTicket-коннекты). Наши клиенты после расширения союза в contracts
  * переваривают оба написания.
  */
-export function toUpstreamSessionMethod<M extends string>(
-  method: M,
-): M | "bearer-access-token" {
+export function toUpstreamSessionMethod<M extends string>(method: M): M | "bearer-access-token" {
   return method === "bearer-session-token" ? "bearer-access-token" : method;
 }
 

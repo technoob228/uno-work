@@ -73,7 +73,9 @@ function knownPattern(): RegExp | null {
   if (knownSecrets.size === 0) return null;
   if (knownSecretsPattern === null) {
     // Длинные первыми: значение, содержащее другое, маскируется целиком.
-    const alternatives = [...knownSecrets].toSorted((a, b) => b.length - a.length).map(escapeRegExp);
+    const alternatives = [...knownSecrets]
+      .toSorted((a, b) => b.length - a.length)
+      .map(escapeRegExp);
     knownSecretsPattern = new RegExp(alternatives.join("|"), "g");
   }
   return knownSecretsPattern;
@@ -145,8 +147,7 @@ export function redactSecretsDeep<T>(value: T): T {
   return redactValue(value, 0, new WeakMap()) as T;
 }
 
-const UNO_SECRET_VALUE =
-  /^(unollm_|uno_(?:usr|agt|box|gpu|gpc|gps|gpa)_|unor_)[A-Za-z0-9_-]{12,}$/;
+const UNO_SECRET_VALUE = /^(unollm_|uno_(?:usr|agt|box|gpu|gpc|gps|gpa)_|unor_)[A-Za-z0-9_-]{12,}$/;
 
 /** Имена переменных, которые харнессу не нужны ни при каком значении. */
 const HARNESS_DENIED_ENV_NAMES = new Set([

@@ -192,7 +192,7 @@ export const ChatHeader = memo(function ChatHeader({
           />
         )}
         {/* Terminal is always one click away (it's not a developer-only tool). */}
-        {(
+        {
           <Tooltip>
             <TooltipTrigger
               render={
@@ -217,7 +217,7 @@ export const ChatHeader = memo(function ChatHeader({
                   : "Toggle terminal drawer"}
             </TooltipPopup>
           </Tooltip>
-        )}
+        }
         {devMode && (
           <Tooltip>
             <TooltipTrigger

@@ -222,7 +222,11 @@ describe("decider agent-spawned threads: thread.turn.start", () => {
 
   it("lets any agent message a peer thread without touching control", async () => {
     // A non-parent agent into someone else's agent-driven child.
-    const peer = await decideAndApply(await seedChild(), turnStart(CHILD_ID), agentOrigin(OTHER_ID));
+    const peer = await decideAndApply(
+      await seedChild(),
+      turnStart(CHILD_ID),
+      agentOrigin(OTHER_ID),
+    );
     expect(peer.events.map((event) => event.type)).toEqual([
       "thread.message-sent",
       "thread.turn-start-requested",

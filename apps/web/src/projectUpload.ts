@@ -144,7 +144,10 @@ export async function uploadFilesIntoDirectory(
     }
 
     if (input.onFileWritten) {
-      await input.onFileWritten({ relativePath: entry.relativePath, stagedRelativePath: writePath });
+      await input.onFileWritten({
+        relativePath: entry.relativePath,
+        stagedRelativePath: writePath,
+      });
     }
     completedFiles += 1;
     report(null);
