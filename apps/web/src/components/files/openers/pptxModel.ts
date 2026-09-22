@@ -92,7 +92,10 @@ function relsPathFor(partPath: string): string {
   return [...parts, "_rels", `${name}.rels`].join("/");
 }
 
-async function readRels(zip: JSZip, partPath: string): Promise<Map<string, { target: string; type: string }>> {
+async function readRels(
+  zip: JSZip,
+  partPath: string,
+): Promise<Map<string, { target: string; type: string }>> {
   const rels = new Map<string, { target: string; type: string }>();
   const file = zip.file(relsPathFor(partPath));
   if (!file) return rels;
@@ -101,7 +104,10 @@ async function readRels(zip: JSZip, partPath: string): Promise<Map<string, { tar
     const id = rel.getAttribute("Id");
     const target = rel.getAttribute("Target");
     if (id && target && rel.getAttribute("TargetMode") !== "External") {
-      rels.set(id, { target: resolveTarget(partPath, target), type: rel.getAttribute("Type") ?? "" });
+      rels.set(id, {
+        target: resolveTarget(partPath, target),
+        type: rel.getAttribute("Type") ?? "",
+      });
     }
   }
   return rels;
@@ -145,12 +151,11 @@ function matchPlaceholder(
   ph: Placeholder,
   candidates: ReadonlyArray<{ ph: Placeholder; box: SlideBox }>,
 ): SlideBox | null {
-  const normalize = (type: string) => (type === "ctrTitle" ? "title" : type === "subTitle" ? "body" : type);
+  const normalize = (type: string) =>
+    type === "ctrTitle" ? "title" : type === "subTitle" ? "body" : type;
   const byIdx = ph.idx !== null ? candidates.find((entry) => entry.ph.idx === ph.idx) : undefined;
   if (byIdx) return byIdx.box;
-  return (
-    candidates.find((entry) => normalize(entry.ph.type) === normalize(ph.type))?.box ?? null
-  );
+  return candidates.find((entry) => normalize(entry.ph.type) === normalize(ph.type))?.box ?? null;
 }
 
 function paragraphsOf(shape: Element): SlideParagraph[] {
@@ -207,7 +212,9 @@ export async function readPresentation(bytes: ArrayBuffer): Promise<Presentation
     const cached = layoutCache.get(partPath);
     if (cached) return cached;
     const file = zip.file(partPath);
-    const boxes = file ? placeholderBoxes(parseXml(await file.async("text")), slideWidth, slideHeight) : [];
+    const boxes = file
+      ? placeholderBoxes(parseXml(await file.async("text")), slideWidth, slideHeight)
+      : [];
     layoutCache.set(partPath, boxes);
     return boxes;
   };
@@ -219,8 +226,9 @@ export async function readPresentation(bytes: ArrayBuffer): Promise<Presentation
     const layoutPath = [...rels.values()].find((rel) => rel.type.endsWith("/slideLayout"))?.target;
     const layoutBoxes = layoutPath ? await inherited(layoutPath) : [];
     const masterPath = layoutPath
-      ? [...(await readRels(zip, layoutPath)).values()].find((rel) => rel.type.endsWith("/slideMaster"))
-          ?.target
+      ? [...(await readRels(zip, layoutPath)).values()].find((rel) =>
+          rel.type.endsWith("/slideMaster"),
+        )?.target
       : undefined;
     const masterBoxes = masterPath ? await inherited(masterPath) : [];
 
@@ -231,7 +239,8 @@ export async function readPresentation(bytes: ArrayBuffer): Promise<Presentation
       if (node.namespaceURI !== NS.p) continue;
       if (node.localName === "sp") {
         const paragraphs = paragraphsOf(node);
-        if (!paragraphs.some((paragraph) => paragraph.runs.some((run) => run.text.trim()))) continue;
+        if (!paragraphs.some((paragraph) => paragraph.runs.some((run) => run.text.trim())))
+          continue;
         const ph = placeholderOf(node);
         const box =
           boxOf(node, slideWidth, slideHeight) ??
@@ -247,7 +256,11 @@ export async function readPresentation(bytes: ArrayBuffer): Promise<Presentation
         const blip = children(node, NS.a, "blip")[0];
         const target = rels.get(blip?.getAttributeNS(NS.r, "embed") ?? "")?.target;
         if (target && zip.file(target)) {
-          items.push({ type: "image", box: boxOf(node, slideWidth, slideHeight), mediaPath: target });
+          items.push({
+            type: "image",
+            box: boxOf(node, slideWidth, slideHeight),
+            mediaPath: target,
+          });
         }
       }
     }
@@ -289,6 +302,8 @@ export async function mediaObjectUrl(zip: JSZip, path: string): Promise<string |
   const file = zip.file(path);
   if (!file || !isDrawableMedia(path)) return null;
   const ext = path.split(".").pop()!.toLowerCase();
-  const blob = new Blob([await file.async("arraybuffer")], { type: IMAGE_TYPES[ext] ?? "application/octet-stream" });
+  const blob = new Blob([await file.async("arraybuffer")], {
+    type: IMAGE_TYPES[ext] ?? "application/octet-stream",
+  });
   return URL.createObjectURL(blob);
 }

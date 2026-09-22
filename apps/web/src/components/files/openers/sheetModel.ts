@@ -11,6 +11,7 @@
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
 
+import { evaluateFormula } from "./formulaEval";
 import {
   parseDelimitedRows,
   serializeDelimitedRows,
@@ -70,7 +71,9 @@ function rectangle(
 ): ReadonlyArray<ReadonlyArray<SheetCell>> {
   const cols = Math.max(1, ...rows.map((row) => row.length));
   const padded = rows.map((row) =>
-    row.length === cols ? row : [...row, ...Array.from({ length: cols - row.length }, () => EMPTY_CELL)],
+    row.length === cols
+      ? row
+      : [...row, ...Array.from({ length: cols - row.length }, () => EMPTY_CELL)],
   );
   return padded.length > 0 ? padded : [Array.from({ length: cols }, () => EMPTY_CELL)];
 }
@@ -99,11 +102,14 @@ function cellInput(cell: XLSX.CellObject | undefined): string {
   return String(cell.v);
 }
 
-function cellDisplay(cell: XLSX.CellObject | undefined): string {
+function cellDisplay(sheet: XLSX.WorkSheet, cell: XLSX.CellObject | undefined): string {
   if (!cell) return "";
-  // A formula nobody has calculated yet (typed here, saved before Excel ran it).
+  // A formula nobody has calculated yet (edited here, Excel hasn't opened it
+  // since): work it out when it's simple, else show the formula itself.
   if (cell.v === undefined || cell.v === null || (cell.f && cell.v === "")) {
-    return cell.f ? `=${cell.f}` : "";
+    if (!cell.f) return "";
+    const computed = evaluateFormula(sheet, cell.f);
+    return computed === null ? `=${cell.f}` : String(computed);
   }
   try {
     return XLSX.utils.format_cell(cell);
@@ -124,7 +130,7 @@ function sheetFromWorksheet(name: string, sheet: XLSX.WorkSheet): SheetData {
     const row: SheetCell[] = [];
     for (let c = 0; c < Math.min(totalCols, SHEET_VIEW_MAX_COLS); c += 1) {
       const cell = sheet[XLSX.utils.encode_cell({ r, c })] as XLSX.CellObject | undefined;
-      row.push({ display: cellDisplay(cell), input: cellInput(cell) });
+      row.push({ display: cellDisplay(sheet, cell), input: cellInput(cell) });
     }
     rows.push(row);
   }
@@ -227,7 +233,10 @@ function coerce(input: string): XLSX.CellObject | null {
 export function writeWorkbookWithEdits(
   data: WorkbookData,
   edits: SheetEdits,
-  appended: { readonly rows: ReadonlyMap<number, number>; readonly cols: ReadonlyMap<number, number> },
+  appended: {
+    readonly rows: ReadonlyMap<number, number>;
+    readonly cols: ReadonlyMap<number, number>;
+  },
 ): Uint8Array {
   if (data.format === "csv" || data.format === "tsv") {
     const sheet = data.sheets[0];
@@ -262,12 +271,32 @@ export function writeWorkbookWithEdits(
       delete sheet[address];
     } else {
       // Keep the cell's number format / style reference when it had one.
-      sheet[address] = { ...next, ...(previous?.z ? { z: previous.z } : {}), ...(previous?.s ? { s: previous.s } : {}) };
+      sheet[address] = {
+        ...next,
+        ...(previous?.z ? { z: previous.z } : {}),
+        ...(previous?.s ? { s: previous.s } : {}),
+      };
     }
-    const range = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
+    const range = sheet["!ref"]
+      ? XLSX.utils.decode_range(sheet["!ref"])
+      : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
     range.e.r = Math.max(range.e.r, row);
     range.e.c = Math.max(range.e.c, col);
     sheet["!ref"] = XLSX.utils.encode_range(range);
+  }
+  // The browser can't recalculate: every formula's cached result may now be
+  // stale, so drop them — the grid shows the formula, Excel/LibreOffice
+  // compute it on open (see markFullCalcOnLoad).
+  if (edits.size > 0) {
+    for (const sheet of Object.values(workbook.Sheets)) {
+      for (const [address, cell] of Object.entries(sheet)) {
+        if (address.startsWith("!") || !cell || typeof cell !== "object") continue;
+        const formulaCell = cell as XLSX.CellObject;
+        if (formulaCell.f) {
+          sheet[address] = { ...formulaCell, t: "s", v: "", w: "" } as XLSX.CellObject;
+        }
+      }
+    }
   }
   const bookType: XLSX.BookType = data.format === "xlsm" ? "xlsm" : "xlsx";
   const out = XLSX.write(workbook, { type: "array", bookType, compression: true }) as ArrayBuffer;

@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import { registerFileOpener, resolveFileOpener, type FileDescriptor } from "./fileOpeners";
 import { breadcrumbs, fileKindOf, numberedCopyName } from "./fileTypes";
 import { parseFilesRouteSearch } from "./filesRouteSearch";
+import { evaluateFormula } from "./openers/formulaEval";
 import {
   detectUnsupportedParts,
   editKey,
@@ -90,7 +91,13 @@ describe("file openers", () => {
   });
 
   it("refuses files bigger than the opener allows", () => {
-    const remove = registerFileOpener({ id: "t.small", label: "Small", match: () => 50, View, maxBytes: 5 });
+    const remove = registerFileOpener({
+      id: "t.small",
+      label: "Small",
+      match: () => 50,
+      View,
+      maxBytes: 5,
+    });
     expect(resolveFileOpener(file("a.txt"))).toBeNull();
     remove();
   });
@@ -139,7 +146,9 @@ describe("spreadsheet model", () => {
     expect(saved.Sheets["Notes"]?.["A1"]?.v).toBe("keep me");
     // The new formula shows as a formula until Excel computes it on open.
     const reopened = await parseWorkbook("budget.xlsx", toArrayBuffer(bytes));
-    expect(reopened.sheets[0]?.cells[4]?.[1]).toEqual({ display: "=B4*2", input: "=B4*2" });
+    expect(reopened.sheets[0]?.cells[4]?.[1]).toEqual({ display: "12", input: "=B4*2" });
+    // Formulas whose inputs changed are worked out again, not left stale.
+    expect(reopened.sheets[0]?.cells[3]?.[1]).toEqual({ display: "6", input: "=SUM(B2:B3)" });
     const JSZip = (await import("jszip")).default;
     const workbookXml = await (await JSZip.loadAsync(bytes)).file("xl/workbook.xml")!.async("text");
     expect(workbookXml).toContain('fullCalcOnLoad="1"');
@@ -169,5 +178,28 @@ describe("spreadsheet model", () => {
       ]),
     ).toEqual(["charts", "pictures", "pivot tables"]);
     expect(detectUnsupportedParts(["xl/workbook.xml", "xl/worksheets/sheet1.xml"])).toEqual([]);
+  });
+});
+
+describe("formula evaluator", () => {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    [2, 3, "text"],
+    [4, 5, null],
+  ]);
+  sheet["D1"] = { t: "s", v: "", f: "A1*B1" };
+  it("computes arithmetic, ranges and common functions", () => {
+    expect(evaluateFormula(sheet, "A1+B1*A2")).toBe(14);
+    expect(evaluateFormula(sheet, "(A1+B1)^2/5")).toBe(5);
+    expect(evaluateFormula(sheet, "SUM(A1:B2)")).toBe(14);
+    expect(evaluateFormula(sheet, "AVERAGE(A1:A2)+MAX($B$1:B2)-MIN(A1,A2)")).toBe(6);
+    expect(evaluateFormula(sheet, "ROUND(10/3,2)")).toBe(3.33);
+    expect(evaluateFormula(sheet, "D1+1")).toBe(7);
+    expect(evaluateFormula(sheet, "COUNT(A1:C2)")).toBe(4);
+  });
+  it("gives up on what it doesn't know instead of guessing", () => {
+    expect(evaluateFormula(sheet, "VLOOKUP(A1,A1:B2,2)")).toBeNull();
+    expect(evaluateFormula(sheet, "Sheet2!A1")).toBeNull();
+    expect(evaluateFormula(sheet, "C1*2")).toBeNull();
+    expect(evaluateFormula(sheet, "A1/0")).toBeNull();
   });
 });

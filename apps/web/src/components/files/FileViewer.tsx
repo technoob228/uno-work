@@ -31,11 +31,7 @@ import {
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { toastManager } from "../ui/toast";
-import {
-  fileOpenersVersion,
-  resolveFileOpener,
-  subscribeFileOpeners,
-} from "./fileOpeners";
+import { fileOpenersVersion, resolveFileOpener, subscribeFileOpeners } from "./fileOpeners";
 import {
   FILE_KIND_ICON,
   FILE_KIND_LABEL,
@@ -129,7 +125,11 @@ export function FileViewer({
         })
         .then((ok) => {
           if (ok) {
-            toastManager.add({ type: "success", title: "New version uploaded", description: entry.name });
+            toastManager.add({
+              type: "success",
+              title: "New version uploaded",
+              description: entry.name,
+            });
             void stat.refetch();
           }
         });
@@ -155,7 +155,12 @@ export function FileViewer({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 sm:px-4">
-        <Button size="icon-sm" variant="ghost" aria-label="Back to folder" onClick={() => guard(onBack)}>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label="Back to folder"
+          onClick={() => guard(onBack)}
+        >
           <ArrowLeftIcon />
         </Button>
         <Icon className={cn("size-5 shrink-0", FILE_KIND_TINT[kind])} />
@@ -185,7 +190,9 @@ export function FileViewer({
               <span className="hidden sm:inline">Share</span>
             </Button>
             <Menu>
-              <MenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label="More actions" />}>
+              <MenuTrigger
+                render={<Button size="icon-sm" variant="ghost" aria-label="More actions" />}
+              >
                 <EllipsisIcon />
               </MenuTrigger>
               <MenuPopup align="end" className="w-56">
@@ -231,7 +238,9 @@ export function FileViewer({
           <ViewerLoading />
         ) : stat.isError || !entry || !source ? (
           <ViewerMessage kind={kind} title="This file isn't there anymore" tone="error">
-            {stat.error instanceof Error ? stat.error.message : "It may have been moved or deleted."}
+            {stat.error instanceof Error
+              ? stat.error.message
+              : "It may have been moved or deleted."}
           </ViewerMessage>
         ) : !opener ? (
           <ViewerMessage kind={kind} title="This file is too big to open in the browser">
@@ -244,7 +253,10 @@ export function FileViewer({
         )}
       </div>
 
-      <AlertDialog open={confirmLeave !== null} onOpenChange={(open) => !open && setConfirmLeave(null)}>
+      <AlertDialog
+        open={confirmLeave !== null}
+        onOpenChange={(open) => !open && setConfirmLeave(null)}
+      >
         <AlertDialogPopup>
           <AlertDialogHeader>
             <AlertDialogTitle>Leave without saving?</AlertDialogTitle>

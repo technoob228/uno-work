@@ -30,7 +30,11 @@ function ImageView({ source }: FileViewProps) {
   const [zoom, setZoom] = useState<number | null>(null); // null = fit
   const [failed, setFailed] = useState(false);
   if (error) {
-    return <ViewerMessage kind="image" title="Couldn't open this image" tone="error">{viewerErrorText(error)}</ViewerMessage>;
+    return (
+      <ViewerMessage kind="image" title="Couldn't open this image" tone="error">
+        {viewerErrorText(error)}
+      </ViewerMessage>
+    );
   }
   if (!url) return <ViewerLoading />;
   if (failed) {
@@ -91,7 +95,11 @@ function ImageView({ source }: FileViewProps) {
 function PdfView({ source }: FileViewProps) {
   const { url, error } = useFileUrl(source, "application/pdf");
   if (error) {
-    return <ViewerMessage kind="pdf" title="Couldn't open this PDF" tone="error">{viewerErrorText(error)}</ViewerMessage>;
+    return (
+      <ViewerMessage kind="pdf" title="Couldn't open this PDF" tone="error">
+        {viewerErrorText(error)}
+      </ViewerMessage>
+    );
   }
   if (!url) return <ViewerLoading />;
   return <iframe title={source.name} src={url} className="h-full w-full border-0 bg-white" />;
@@ -116,7 +124,11 @@ function MediaView({ source }: FileViewProps) {
   const mime = MEDIA_MIME[fileExtension(source.name)] ?? "application/octet-stream";
   const { url, error } = useFileUrl(source, mime);
   if (error) {
-    return <ViewerMessage kind={source.kind} title="Couldn't open this file" tone="error">{viewerErrorText(error)}</ViewerMessage>;
+    return (
+      <ViewerMessage kind={source.kind} title="Couldn't open this file" tone="error">
+        {viewerErrorText(error)}
+      </ViewerMessage>
+    );
   }
   if (!url) return <ViewerLoading />;
   return (
@@ -134,7 +146,11 @@ function HtmlView({ source }: FileViewProps) {
   const { data, error, isPending } = useFileText(source);
   if (isPending) return <ViewerLoading />;
   if (error) {
-    return <ViewerMessage kind="html" title="Couldn't open this page" tone="error">{viewerErrorText(error)}</ViewerMessage>;
+    return (
+      <ViewerMessage kind="html" title="Couldn't open this page" tone="error">
+        {viewerErrorText(error)}
+      </ViewerMessage>
+    );
   }
   return (
     <iframe
@@ -154,7 +170,8 @@ export const mediaOpeners: ReadonlyArray<FileOpener> = [
     label: "Image viewer",
     match: (file) => (file.kind === "image" ? 10 : 0),
     View: ImageView,
-    editOutsideHint: "To change this image, download it, edit it in any photo app, then upload the new version.",
+    editOutsideHint:
+      "To change this image, download it, edit it in any photo app, then upload the new version.",
   },
   {
     id: "builtin.pdf",

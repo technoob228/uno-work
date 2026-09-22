@@ -103,13 +103,14 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("files share routes"
 
       // Nothing next to the shared file is reachable through its link.
       for (const path of [
+        `${share.urlPath}/budget.xlsx`,
         `${share.urlPath}/budget.xlsx/x`,
         `${share.urlPath}/..%2Fbudget.xlsx`,
         `${share.urlPath}/%2e%2e/budget.xlsx`,
         `${share.urlPath}/.env`,
       ]) {
         const response = yield* request(path);
-        assert.notEqual(response.status, 200, path);
+        assert.equal(response.status, 404, path);
         assert.notInclude(yield* text(response), "xlsx-bytes", path);
       }
       const listed = yield* files.listShares({});

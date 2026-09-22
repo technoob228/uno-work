@@ -369,6 +369,10 @@ const handleShare = Effect.gen(function* () {
     if (segments.length > 1) return htmlPage(renderUnavailablePage("missing"), 404);
     const target = yield* Effect.promise(() => resolveShareTarget(share, []));
     if (target.kind !== "file") return htmlPage(renderUnavailablePage("gone"), 404);
+    // The one name segment must be the file's own name — nothing else resolves.
+    if (segments.length === 1 && segments[0] !== nodePath.basename(target.path)) {
+      return htmlPage(renderUnavailablePage("missing"), 404);
+    }
     const stats = yield* Effect.promise(() => fsPromises.stat(target.path));
     if (segments.length === 1 || download) {
       if (download) yield* files.recordShareAccess(share.shareId);

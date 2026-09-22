@@ -181,17 +181,24 @@ export function FilesView() {
       type: "success",
       title: entries.length === 1 ? `Moved “${entries[0]?.name}”` : `Moved ${entries.length} items`,
     });
-    const openedMoved = result.entries.find((entry) => search.file && entry.name === search.file.split("/").pop());
+    const openedMoved = result.entries.find(
+      (entry) => search.file && entry.name === search.file.split("/").pop(),
+    );
     if (search.file && openedMoved) openFile(openedMoved);
   };
   const deleteEntries = async (entries: ReadonlyArray<FilesEntry>) => {
-    const result = await filesApi(environmentId).delete({ paths: entries.map((entry) => entry.path) });
+    const result = await filesApi(environmentId).delete({
+      paths: entries.map((entry) => entry.path),
+    });
     await refreshAll();
     toastManager.add({
       type: "success",
-      title: entries.length === 1 ? `Deleted “${entries[0]?.name}”` : `Deleted ${entries.length} items`,
+      title:
+        entries.length === 1 ? `Deleted “${entries[0]?.name}”` : `Deleted ${entries.length} items`,
       ...(result.revokedShares > 0
-        ? { description: `${result.revokedShares} share ${result.revokedShares === 1 ? "link" : "links"} turned off.` }
+        ? {
+            description: `${result.revokedShares} share ${result.revokedShares === 1 ? "link" : "links"} turned off.`,
+          }
         : {}),
     });
     if (search.file && entries.some((entry) => entry.path === search.file)) openFolder(search.path);
@@ -226,7 +233,11 @@ export function FilesView() {
             onDialog={setDialog}
             onMoveInto={(entries, destination) =>
               moveEntries(entries, destination).catch((error: unknown) =>
-                toastManager.add({ type: "error", title: "Couldn't move", description: errorText(error) }),
+                toastManager.add({
+                  type: "error",
+                  title: "Couldn't move",
+                  description: errorText(error),
+                }),
               )
             }
           />
@@ -381,7 +392,11 @@ function FolderBrowser({
   const onDownload = (entry: FilesEntry) =>
     environmentId &&
     void downloadFile(environmentId, entry.path).catch((error: unknown) =>
-      toastManager.add({ type: "error", title: "Couldn't download", description: errorText(error) }),
+      toastManager.add({
+        type: "error",
+        title: "Couldn't download",
+        description: errorText(error),
+      }),
     );
 
   const draggedEntries = (event: React.DragEvent): FilesEntry[] | null => {
@@ -433,35 +448,42 @@ function FolderBrowser({
         <div className="flex items-center gap-2">
           <SidebarTrigger className="size-7 shrink-0 md:hidden" />
           <FolderOpenIcon className="size-4 shrink-0 text-muted-foreground" />
-          <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden text-sm" aria-label="Folder">
-            {rootPath && currentPath
-              ? breadcrumbs(rootPath, currentPath).map((crumb, index, all) => (
-                  <span key={crumb.path} className="flex min-w-0 items-center gap-0.5">
-                    <button
-                      type="button"
-                      onClick={() => onOpenFolder(index === 0 ? undefined : crumb.path)}
-                      onDragOver={(event) => {
-                        if (event.dataTransfer.types.includes(INTERNAL_DRAG_TYPE)) {
-                          event.preventDefault();
-                          setDropTarget(crumb.path);
-                        }
-                      }}
-                      onDragLeave={() => setDropTarget(null)}
-                      onDrop={(event) => onDropInto(event, crumb.path)}
-                      className={cn(
-                        "truncate rounded-md px-1.5 py-0.5 hover:bg-accent",
-                        index === all.length - 1 ? "font-medium text-foreground" : "text-muted-foreground",
-                        dropTarget === crumb.path ? "bg-primary/15 ring-1 ring-primary" : "",
-                      )}
-                    >
-                      {index === 0 ? "Files" : crumb.label}
-                    </button>
-                    {index < all.length - 1 ? (
-                      <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
-                    ) : null}
-                  </span>
-                ))
-              : <span className="font-medium">Files</span>}
+          <nav
+            className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden text-sm"
+            aria-label="Folder"
+          >
+            {rootPath && currentPath ? (
+              breadcrumbs(rootPath, currentPath).map((crumb, index, all) => (
+                <span key={crumb.path} className="flex min-w-0 items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => onOpenFolder(index === 0 ? undefined : crumb.path)}
+                    onDragOver={(event) => {
+                      if (event.dataTransfer.types.includes(INTERNAL_DRAG_TYPE)) {
+                        event.preventDefault();
+                        setDropTarget(crumb.path);
+                      }
+                    }}
+                    onDragLeave={() => setDropTarget(null)}
+                    onDrop={(event) => onDropInto(event, crumb.path)}
+                    className={cn(
+                      "truncate rounded-md px-1.5 py-0.5 hover:bg-accent",
+                      index === all.length - 1
+                        ? "font-medium text-foreground"
+                        : "text-muted-foreground",
+                      dropTarget === crumb.path ? "bg-primary/15 ring-1 ring-primary" : "",
+                    )}
+                  >
+                    {index === 0 ? "Files" : crumb.label}
+                  </button>
+                  {index < all.length - 1 ? (
+                    <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
+                  ) : null}
+                </span>
+              ))
+            ) : (
+              <span className="font-medium">Files</span>
+            )}
           </nav>
           <div className="relative hidden sm:block">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -529,7 +551,9 @@ function FolderBrowser({
             </MenuPopup>
           </Menu>
           <Menu>
-            <MenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label="View options" />}>
+            <MenuTrigger
+              render={<Button size="icon-sm" variant="ghost" aria-label="View options" />}
+            >
               <EllipsisIcon />
             </MenuTrigger>
             <MenuPopup align="end" className="w-52">
@@ -537,7 +561,9 @@ function FolderBrowser({
                 {showHidden ? <EyeOffIcon /> : <EyeIcon />}
                 {showHidden ? "Hide hidden files" : "Show hidden files"}
               </MenuItem>
-              <MenuItem onClick={() => void queryClient.invalidateQueries({ queryKey: filesQueryKeys.all })}>
+              <MenuItem
+                onClick={() => void queryClient.invalidateQueries({ queryKey: filesQueryKeys.all })}
+              >
                 <RefreshCwIcon />
                 Refresh
               </MenuItem>
@@ -560,7 +586,11 @@ function FolderBrowser({
         <div className="flex shrink-0 items-center gap-2 border-b border-border bg-primary/5 px-3 py-1.5 sm:px-5">
           <span className="text-sm font-medium">{selectedEntries.length} selected</span>
           <span className="flex-1" />
-          <Button size="xs" variant="outline" onClick={() => onDialog({ type: "move", entries: selectedEntries })}>
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => onDialog({ type: "move", entries: selectedEntries })}
+          >
             <FolderInputIcon />
             Move
           </Button>
@@ -573,11 +603,20 @@ function FolderBrowser({
             <DownloadIcon />
             Download
           </Button>
-          <Button size="xs" variant="destructive-outline" onClick={() => onDialog({ type: "delete", entries: selectedEntries })}>
+          <Button
+            size="xs"
+            variant="destructive-outline"
+            onClick={() => onDialog({ type: "delete", entries: selectedEntries })}
+          >
             <Trash2Icon />
             Delete
           </Button>
-          <Button size="icon-xs" variant="ghost" aria-label="Clear selection" onClick={() => setSelected(new Set())}>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Clear selection"
+            onClick={() => setSelected(new Set())}
+          >
             <XIcon />
           </Button>
         </div>
@@ -594,7 +633,11 @@ function FolderBrowser({
           <EmptyState
             title="Files can't reach this folder"
             detail={errorText(listing.error)}
-            action={<Button size="sm" variant="outline" onClick={() => onOpenFolder(undefined)}>Go to Home</Button>}
+            action={
+              <Button size="sm" variant="outline" onClick={() => onOpenFolder(undefined)}>
+                Go to Home
+              </Button>
+            }
           />
         ) : trimmedQuery && searchResults.isPending ? (
           <div className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
@@ -603,14 +646,20 @@ function FolderBrowser({
           </div>
         ) : entries.length === 0 ? (
           trimmedQuery ? (
-            <EmptyState title={`Nothing called “${trimmedQuery}” here`} detail="Search looks in this folder and the folders inside it." />
+            <EmptyState
+              title={`Nothing called “${trimmedQuery}” here`}
+              detail="Search looks in this folder and the folders inside it."
+            />
           ) : (
             <EmptyState
               title="This folder is empty"
               detail="Drop files here from your computer, or use Upload. You can also create a document, a spreadsheet or a web page."
               action={
                 <div className="flex gap-2">
-                  <Button size="sm" onClick={() => pickFilesForProjectUpload((files) => upload(files))}>
+                  <Button
+                    size="sm"
+                    onClick={() => pickFilesForProjectUpload((files) => upload(files))}
+                  >
                     <UploadIcon />
                     Upload files
                   </Button>
@@ -629,16 +678,34 @@ function FolderBrowser({
                 <th className="w-10 py-2 pl-3 sm:pl-5">
                   <Checkbox
                     aria-label="Select all"
-                    checked={selectedEntries.length > 0 && selectedEntries.length === entries.length}
-                    indeterminate={selectedEntries.length > 0 && selectedEntries.length < entries.length}
+                    checked={
+                      selectedEntries.length > 0 && selectedEntries.length === entries.length
+                    }
+                    indeterminate={
+                      selectedEntries.length > 0 && selectedEntries.length < entries.length
+                    }
                     onCheckedChange={(checked) =>
-                      setSelected(checked === true ? new Set(entries.map((entry) => entry.path)) : new Set())
+                      setSelected(
+                        checked === true ? new Set(entries.map((entry) => entry.path)) : new Set(),
+                      )
                     }
                   />
                 </th>
                 <SortHeader label="Name" sortKey="name" sort={sort} onSort={setSort} />
-                <SortHeader label="Modified" sortKey="modified" sort={sort} onSort={setSort} className="hidden w-36 md:table-cell" />
-                <SortHeader label="Size" sortKey="size" sort={sort} onSort={setSort} className="hidden w-24 text-right sm:table-cell" />
+                <SortHeader
+                  label="Modified"
+                  sortKey="modified"
+                  sort={sort}
+                  onSort={setSort}
+                  className="hidden w-36 md:table-cell"
+                />
+                <SortHeader
+                  label="Size"
+                  sortKey="size"
+                  sort={sort}
+                  onSort={setSort}
+                  className="hidden w-24 text-right sm:table-cell"
+                />
                 <th className="w-28 pr-3 sm:pr-5" />
               </tr>
             </thead>
@@ -650,7 +717,9 @@ function FolderBrowser({
                   shared={sharedPaths.has(entry.path)}
                   selected={selected.has(entry.path)}
                   dropTarget={dropTarget === entry.path}
-                  locationHint={trimmedQuery && currentPath ? relativeFolder(currentPath, entry.path) : null}
+                  locationHint={
+                    trimmedQuery && currentPath ? relativeFolder(currentPath, entry.path) : null
+                  }
                   onToggle={(value) =>
                     setSelected((previous) => {
                       const next = new Set(previous);
@@ -659,7 +728,9 @@ function FolderBrowser({
                       return next;
                     })
                   }
-                  onOpen={() => (entry.kind === "directory" ? onOpenFolder(entry.path) : onOpenFile(entry))}
+                  onOpen={() =>
+                    entry.kind === "directory" ? onOpenFolder(entry.path) : onOpenFile(entry)
+                  }
                   onDragStart={(event) => {
                     const paths = selected.has(entry.path) ? [...selected] : [entry.path];
                     event.dataTransfer.setData(INTERNAL_DRAG_TYPE, JSON.stringify(paths));
@@ -674,7 +745,9 @@ function FolderBrowser({
                       setDropTarget(entry.path);
                     }
                   }}
-                  onDragLeave={() => setDropTarget((current) => (current === entry.path ? null : current))}
+                  onDragLeave={() =>
+                    setDropTarget((current) => (current === entry.path ? null : current))
+                  }
                   onDrop={(event) => entry.kind === "directory" && onDropInto(event, entry.path)}
                   onShare={() => onDialog({ type: "share", entry })}
                   onDownload={() => onDownload(entry)}
@@ -730,8 +803,13 @@ function SortHeader({
     <th className={cn("py-2 font-normal", className)}>
       <button
         type="button"
-        onClick={() => onSort({ key: sortKey, ascending: active ? !sort.ascending : sortKey === "name" })}
-        className={cn("inline-flex items-center gap-1 hover:text-foreground", active && "text-foreground")}
+        onClick={() =>
+          onSort({ key: sortKey, ascending: active ? !sort.ascending : sortKey === "name" })
+        }
+        className={cn(
+          "inline-flex items-center gap-1 hover:text-foreground",
+          active && "text-foreground",
+        )}
       >
         {label}
         {active ? <Arrow className="size-3" /> : null}
@@ -793,16 +871,26 @@ function FileRow({
       )}
     >
       <td className="py-1.5 pl-3 sm:pl-5">
-        <Checkbox aria-label={`Select ${entry.name}`} checked={selected} onCheckedChange={(checked) => onToggle(checked === true)} />
+        <Checkbox
+          aria-label={`Select ${entry.name}`}
+          checked={selected}
+          onCheckedChange={(checked) => onToggle(checked === true)}
+        />
       </td>
       <td className="py-1.5">
-        <button type="button" onClick={onOpen} className="flex w-full min-w-0 items-center gap-3 text-left">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="flex w-full min-w-0 items-center gap-3 text-left"
+        >
           <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/60">
             <Icon className={cn("size-4.5", FILE_KIND_TINT[kind])} />
           </span>
           <span className="min-w-0">
             <span className="flex items-center gap-1.5">
-              <span className="truncate font-medium text-foreground group-hover:underline">{entry.name}</span>
+              <span className="truncate font-medium text-foreground group-hover:underline">
+                {entry.name}
+              </span>
               {shared ? (
                 <span title="Shared by link" className="shrink-0 text-primary">
                   <LinkIcon className="size-3.5" />
@@ -810,12 +898,16 @@ function FileRow({
               ) : null}
             </span>
             {locationHint ? (
-              <span className="block truncate text-xs text-muted-foreground">in {locationHint}</span>
+              <span className="block truncate text-xs text-muted-foreground">
+                in {locationHint}
+              </span>
             ) : null}
           </span>
         </button>
       </td>
-      <td className="hidden py-1.5 text-muted-foreground md:table-cell">{formatModified(entry.modifiedAt)}</td>
+      <td className="hidden py-1.5 text-muted-foreground md:table-cell">
+        {formatModified(entry.modifiedAt)}
+      </td>
       <td className="hidden py-1.5 text-right text-muted-foreground tabular-nums sm:table-cell">
         {entry.kind === "directory" ? "—" : formatFileSize(entry.size)}
       </td>
@@ -842,7 +934,15 @@ function FileRow({
             </Button>
           ) : null}
           <Menu>
-            <MenuTrigger render={<Button size="icon-xs" variant="ghost" aria-label={`More actions for ${entry.name}`} />}>
+            <MenuTrigger
+              render={
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={`More actions for ${entry.name}`}
+                />
+              }
+            >
               <EllipsisIcon />
             </MenuTrigger>
             <MenuPopup align="end" className="w-48">
@@ -901,4 +1001,3 @@ function EmptyState({
     </div>
   );
 }
-

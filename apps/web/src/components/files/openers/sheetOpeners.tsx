@@ -133,7 +133,11 @@ function SheetView({ source }: FileViewProps) {
           }
         />
       </div>
-      <SheetTabs names={data.sheets.map((entry) => entry.name)} active={active} onSelect={setActive} />
+      <SheetTabs
+        names={data.sheets.map((entry) => entry.name)}
+        active={active}
+        onSelect={setActive}
+      />
     </div>
   );
 }
@@ -156,10 +160,7 @@ function SheetEditor({ source, onClose, onDirtyChange }: FileEditorProps) {
     const extraCols = addedCols.get(active) ?? 0;
     const width = (sheet.cells[0]?.length ?? 1) + extraCols;
     const blank: SheetCell = { display: "", input: "" };
-    const base = [
-      ...sheet.cells,
-      ...Array.from({ length: extraRows }, () => [] as SheetCell[]),
-    ];
+    const base = [...sheet.cells, ...Array.from({ length: extraRows }, () => [] as SheetCell[])];
     return base.map((row, rowIndex) => {
       let next: SheetCell[] | null = null;
       for (let col = 0; col < width; col += 1) {
@@ -257,7 +258,11 @@ function SheetEditor({ source, onClose, onDirtyChange }: FileEditorProps) {
         <Button
           size="sm"
           variant="outline"
-          onClick={() => setAddedRows((previous) => new Map(previous).set(active, (previous.get(active) ?? 0) + 1))}
+          onClick={() =>
+            setAddedRows((previous) =>
+              new Map(previous).set(active, (previous.get(active) ?? 0) + 1),
+            )
+          }
         >
           <PlusIcon />
           Row
@@ -265,17 +270,31 @@ function SheetEditor({ source, onClose, onDirtyChange }: FileEditorProps) {
         <Button
           size="sm"
           variant="outline"
-          onClick={() => setAddedCols((previous) => new Map(previous).set(active, (previous.get(active) ?? 0) + 1))}
+          onClick={() =>
+            setAddedCols((previous) =>
+              new Map(previous).set(active, (previous.get(active) ?? 0) + 1),
+            )
+          }
         >
           <PlusIcon />
           Column
         </Button>
         <span className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className={cn("size-1.5 rounded-full", dirty ? "bg-warning" : "bg-success")} aria-hidden />
-          {dirty ? `${edits.size} ${edits.size === 1 ? "cell" : "cells"} changed` : "No changes yet"}
+          <span
+            className={cn("size-1.5 rounded-full", dirty ? "bg-warning" : "bg-success")}
+            aria-hidden
+          />
+          {dirty
+            ? `${edits.size} ${edits.size === 1 ? "cell" : "cells"} changed`
+            : "No changes yet"}
         </span>
         <span className="flex-1" />
-        <Button size="sm" variant="outline" onClick={() => onClose(false)} disabled={saving !== null}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => onClose(false)}
+          disabled={saving !== null}
+        >
           Cancel
         </Button>
         {risky ? (
@@ -289,13 +308,21 @@ function SheetEditor({ source, onClose, onDirtyChange }: FileEditorProps) {
               {saving === "replace" ? <Loader2Icon className="animate-spin" /> : null}
               Overwrite original
             </Button>
-            <Button size="sm" onClick={() => void save("copy")} disabled={saving !== null || !dirty}>
+            <Button
+              size="sm"
+              onClick={() => void save("copy")}
+              disabled={saving !== null || !dirty}
+            >
               {saving === "copy" ? <Loader2Icon className="animate-spin" /> : null}
               Save as a copy
             </Button>
           </>
         ) : (
-          <Button size="sm" onClick={() => void save("replace")} disabled={saving !== null || !dirty}>
+          <Button
+            size="sm"
+            onClick={() => void save("replace")}
+            disabled={saving !== null || !dirty}
+          >
             {saving === "replace" ? <Loader2Icon className="animate-spin" /> : null}
             Save
           </Button>
@@ -316,9 +343,19 @@ function SheetEditor({ source, onClose, onDirtyChange }: FileEditorProps) {
         </div>
       ) : null}
       <div className="min-h-0 flex-1">
-        <SheetGrid key={active} cells={cells} editable editedCells={editedCells} onCommit={onCommit} />
+        <SheetGrid
+          key={active}
+          cells={cells}
+          editable
+          editedCells={editedCells}
+          onCommit={onCommit}
+        />
       </div>
-      <SheetTabs names={data.sheets.map((entry) => entry.name)} active={active} onSelect={setActive} />
+      <SheetTabs
+        names={data.sheets.map((entry) => entry.name)}
+        active={active}
+        onSelect={setActive}
+      />
     </div>
   );
 }

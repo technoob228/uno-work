@@ -16,10 +16,7 @@ import {
 import { queryOptions } from "@tanstack/react-query";
 
 import { ensureEnvironmentApi, readEnvironmentApi } from "../../environmentApi";
-import {
-  environmentFetchResponse,
-  isPrimaryEnvironmentId,
-} from "../../environments/http/target";
+import { environmentFetchResponse, isPrimaryEnvironmentId } from "../../environments/http/target";
 import { resolvePrimaryEnvironmentHttpUrl } from "../../environments/primary/target";
 import {
   PROJECT_UPLOAD_CHUNK_BYTES,
@@ -306,9 +303,7 @@ export async function uploadIntoFolder(options: FilesUploadOptions) {
   } catch (error) {
     // Leave nothing half-uploaded behind.
     for (const path of staged.values()) {
-      await api.files
-        .delete({ paths: [joinPath(options.targetDir, path)] })
-        .catch(() => undefined);
+      await api.files.delete({ paths: [joinPath(options.targetDir, path)] }).catch(() => undefined);
     }
     throw error;
   }

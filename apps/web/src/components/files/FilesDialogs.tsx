@@ -145,9 +145,7 @@ export function DeleteDialog({
   const first = entries[0];
   const folders = entries.filter((entry) => entry.kind === "directory").length;
   const title =
-    entries.length === 1 && first
-      ? `Delete “${first.name}”?`
-      : `Delete ${entries.length} items?`;
+    entries.length === 1 && first ? `Delete “${first.name}”?` : `Delete ${entries.length} items?`;
   const detail =
     folders > 0
       ? "Folders are deleted with everything inside them. This can't be undone, and any share links to them stop working."
@@ -220,9 +218,12 @@ export function MoveDialog({
     (entry) => entry.kind === "directory" && !moving.has(entry.path),
   );
   const intoItself = entries.some(
-    (entry) => entry.kind === "directory" && (path === entry.path || path.startsWith(`${entry.path}/`)),
+    (entry) =>
+      entry.kind === "directory" && (path === entry.path || path.startsWith(`${entry.path}/`)),
   );
-  const alreadyThere = entries.every((entry) => entry.path.slice(0, entry.path.lastIndexOf("/")) === path);
+  const alreadyThere = entries.every(
+    (entry) => entry.path.slice(0, entry.path.lastIndexOf("/")) === path,
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -242,12 +243,20 @@ export function MoveDialog({
                   onClick={() => setPath(crumb.path)}
                   className={cn(
                     "rounded px-1.5 py-0.5 hover:bg-accent",
-                    index === all.length - 1 ? "font-medium text-foreground" : "text-muted-foreground",
+                    index === all.length - 1
+                      ? "font-medium text-foreground"
+                      : "text-muted-foreground",
                   )}
                 >
-                  {index === 0 ? <HomeIcon className="inline size-3.5 -translate-y-px" /> : crumb.label}
+                  {index === 0 ? (
+                    <HomeIcon className="inline size-3.5 -translate-y-px" />
+                  ) : (
+                    crumb.label
+                  )}
                 </button>
-                {index < all.length - 1 ? <ChevronRightIcon className="size-3 text-muted-foreground" /> : null}
+                {index < all.length - 1 ? (
+                  <ChevronRightIcon className="size-3 text-muted-foreground" />
+                ) : null}
               </span>
             ))}
           </nav>

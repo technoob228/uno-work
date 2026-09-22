@@ -157,11 +157,19 @@ function useRevokeShare(environmentId: EnvironmentId | null) {
   return useMutation({
     mutationFn: (id: string) => filesApi(environmentId).revokeShare({ id }),
     onSuccess: () => {
-      toastManager.add({ type: "success", title: "Link turned off", description: "It no longer opens." });
+      toastManager.add({
+        type: "success",
+        title: "Link turned off",
+        description: "It no longer opens.",
+      });
       void queryClient.invalidateQueries({ queryKey: ["files", "shares"] });
     },
     onError: (error) =>
-      toastManager.add({ type: "error", title: "Couldn't turn off the link", description: errorText(error) }),
+      toastManager.add({
+        type: "error",
+        title: "Couldn't turn off the link",
+        description: errorText(error),
+      }),
   });
 }
 
@@ -208,7 +216,12 @@ function PublishSection({
       {publish.data ? (
         <div className="flex items-center gap-2 rounded-lg bg-success/10 px-3 py-2 text-sm">
           <CheckIcon className="size-4 text-success" />
-          <a href={publish.data.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-medium hover:underline">
+          <a
+            href={publish.data.url}
+            target="_blank"
+            rel="noreferrer"
+            className="min-w-0 flex-1 truncate font-medium hover:underline"
+          >
             {publish.data.url}
           </a>
           <Button size="xs" variant="outline" onClick={() => void copy(publish.data.url)}>
@@ -234,7 +247,9 @@ function PublishSection({
           </Button>
         </div>
       )}
-      {publish.error ? <p className="text-xs text-destructive">{errorText(publish.error)}</p> : null}
+      {publish.error ? (
+        <p className="text-xs text-destructive">{errorText(publish.error)}</p>
+      ) : null}
     </section>
   );
 }
@@ -276,7 +291,9 @@ export function ShareDialog({
       }),
     onSuccess: (share) => {
       void queryClient.invalidateQueries({ queryKey: filesQueryKeys.shares(environmentId, null) });
-      void queryClient.invalidateQueries({ queryKey: filesQueryKeys.shares(environmentId, entry!.path) });
+      void queryClient.invalidateQueries({
+        queryKey: filesQueryKeys.shares(environmentId, entry!.path),
+      });
       setPassword("");
       setWithPassword(false);
       const url = shareUrl(base, share.urlPath);
@@ -312,7 +329,9 @@ export function ShareDialog({
           {liveShares.length > 0 ? (
             <section className="flex flex-col gap-2">
               <div className="text-xs font-medium text-muted-foreground">
-                {liveShares.length === 1 ? "Link that works now" : `${liveShares.length} links that work now`}
+                {liveShares.length === 1
+                  ? "Link that works now"
+                  : `${liveShares.length} links that work now`}
               </div>
               {liveShares.map((share) => (
                 <ShareRow
@@ -379,12 +398,17 @@ export function ShareDialog({
               <span className="text-xs text-muted-foreground">
                 The link is copied as soon as it's made.
               </span>
-              <Button onClick={() => create.mutate()} disabled={create.isPending || passwordTooShort}>
+              <Button
+                onClick={() => create.mutate()}
+                disabled={create.isPending || passwordTooShort}
+              >
                 {create.isPending ? <Loader2Icon className="animate-spin" /> : <LinkIcon />}
                 Create link
               </Button>
             </div>
-            {create.error ? <p className="text-xs text-destructive">{errorText(create.error)}</p> : null}
+            {create.error ? (
+              <p className="text-xs text-destructive">{errorText(create.error)}</p>
+            ) : null}
           </section>
 
           {canPublish ? <PublishSection environmentId={environmentId} entry={entry} /> : null}

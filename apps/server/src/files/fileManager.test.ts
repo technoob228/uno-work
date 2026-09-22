@@ -185,11 +185,16 @@ describe("symlinked prefixes", () => {
   it("accepts a path that reaches the root through a symlink, and still refuses the outside", async () => {
     const alias = nodePath.join(sandbox, "alias");
     fs.symlinkSync(root, alias);
-    expect(await resolveInsideRoot(root, `${alias}/notes.md`)).toBe(nodePath.join(root, "notes.md"));
+    expect(await resolveInsideRoot(root, `${alias}/notes.md`)).toBe(
+      nodePath.join(root, "notes.md"),
+    );
     expect(await resolveInsideRoot(root, `${alias}/new.md`, { mustExist: false })).toBe(
       nodePath.join(root, "new.md"),
     );
     await expectRefusal(resolveInsideRoot(root, `${alias}/escape/secret.txt`), "outside_root");
-    await expectRefusal(resolveInsideRoot(root, `${alias}/../elsewhere/secret.txt`), "outside_root");
+    await expectRefusal(
+      resolveInsideRoot(root, `${alias}/../elsewhere/secret.txt`),
+      "outside_root",
+    );
   });
 });

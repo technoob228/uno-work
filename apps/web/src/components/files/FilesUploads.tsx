@@ -56,7 +56,9 @@ export function useFilesUploads(environmentId: EnvironmentId | null) {
         id,
         label:
           input.label ??
-          (files.length === 1 ? first : `${files.length} files${first.includes(".") ? "" : ` in ${first}`}`),
+          (files.length === 1
+            ? first
+            : `${files.length} files${first.includes(".") ? "" : ` in ${first}`}`),
         totalFiles: files.length,
         totalBytes: files.reduce((sum, file) => sum + file.size, 0),
         sentBytes: 0,
@@ -66,7 +68,10 @@ export function useFilesUploads(environmentId: EnvironmentId | null) {
         skipped: tooBig.length,
         controller,
       };
-      setBatches((previous) => [...previous.filter((entry) => entry.status === "uploading"), batch]);
+      setBatches((previous) => [
+        ...previous.filter((entry) => entry.status === "uploading"),
+        batch,
+      ]);
       if (files.length === 0) return Promise.resolve(false);
 
       let lastPaint = 0;
@@ -173,7 +178,12 @@ export function UploadPanel({
                   Cancel
                 </Button>
               ) : (
-                <Button size="icon-xs" variant="ghost" aria-label="Dismiss" onClick={() => onDismiss(batch.id)}>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label="Dismiss"
+                  onClick={() => onDismiss(batch.id)}
+                >
                   <XIcon />
                 </Button>
               )}

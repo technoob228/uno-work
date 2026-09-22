@@ -263,7 +263,9 @@ export function SheetGrid({
                 cells={row}
                 edited={editedCells?.get(rowIndex)}
                 cursorCol={cursor.row === rowIndex ? cursor.col : null}
-                editingCol={editing && !editing.inBar && editing.row === rowIndex ? editing.col : null}
+                editingCol={
+                  editing && !editing.inBar && editing.row === rowIndex ? editing.col : null
+                }
                 editValue={editing?.row === rowIndex ? editing.value : ""}
                 onSelect={onSelect}
                 onEditValue={setEditValue}

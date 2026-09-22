@@ -88,7 +88,10 @@ function DocxView({ source }: FileViewProps) {
       ) : null}
       <div ref={styleRef} />
       {/* docx-preview draws white pages on its own grey desk; keep ours. */}
-      <div ref={bodyRef} className="files-docx min-h-full [&_.docx-wrapper]:bg-transparent! [&_.docx-wrapper]:py-6!" />
+      <div
+        ref={bodyRef}
+        className="files-docx min-h-full [&_.docx-wrapper]:bg-transparent! [&_.docx-wrapper]:py-6!"
+      />
     </div>
   );
 }
@@ -220,7 +223,12 @@ function SlideCanvas({
             item.type === "text" ? (
               <SlideText key={index} item={item} />
             ) : media.get(item.mediaPath) ? (
-              <img key={index} src={media.get(item.mediaPath)} alt="" className="max-h-40 object-contain" />
+              <img
+                key={index}
+                src={media.get(item.mediaPath)}
+                alt=""
+                className="max-h-40 object-contain"
+              />
             ) : null,
           )}
         </div>
