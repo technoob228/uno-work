@@ -27,5 +27,6 @@ export * from "./unoComputer.ts";
 export * from "./editor.ts";
 export * from "./project.ts";
 export * from "./filesystem.ts";
+export * from "./files.ts";
 export * from "./threadContinue.ts";
 export * from "./rpc.ts";

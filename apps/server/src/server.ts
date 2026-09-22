@@ -25,6 +25,9 @@ import { SelfWatchdogLive } from "./selfWatchdog.ts";
 import { ServerBrowserLive } from "./serverBrowser.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
+import { filesRawRouteLayer, filesShareRouteLayers } from "./files/http.ts";
+import { FilesServiceLive } from "./files/FilesService.ts";
+import { FileSharesRepositoryLive } from "./persistence/Layers/FileShares.ts";
 import { OpenLive } from "./open.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
@@ -325,6 +328,8 @@ const WorkspaceRegistryLayerLive = Layer.mergeAll(
   // "This computer" reads the same account key and this machine's box id
   // (UnoBoxIdentity, provided further down the runtime pipe).
   UnoComputerServiceLive,
+  // Files app: file manager + public share links (`file_shares` table).
+  FilesServiceLive.pipe(Layer.provide(FileSharesRepositoryLive)),
 );
 
 const AuthLayerLive = ServerAuthLive.pipe(
@@ -504,6 +509,8 @@ export const makeRoutesLayer = Layer.mergeAll(
   serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
+  filesRawRouteLayer,
+  ...filesShareRouteLayers,
 ).pipe(Layer.provide(browserApiCorsLayer));
 
 export const makeServerLayer = Layer.unwrap(

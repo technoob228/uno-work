@@ -136,6 +136,7 @@ import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.
 import { WorkspaceService } from "./workspaceRegistry/WorkspaceService.ts";
 import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
+import { FilesService } from "./files/FilesService.ts";
 import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -670,6 +671,7 @@ const buildAppUnderTest = (options?: {
           Layer.mock(WorkspaceService)({}),
           Layer.mock(UnoCloudService)({}),
           Layer.mock(UnoComputerService)({}),
+          Layer.mock(FilesService)({}),
           Layer.mock(HarnessSetup)({}),
         ),
       ),
@@ -1275,70 +1277,68 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect(
-    "oauth token exchange caps issued scopes at the session role (mobile-compat)",
-    () =>
-      Effect.gen(function* () {
-        yield* buildAppUnderTest({ config: { host: "0.0.0.0" } });
+  it.effect("oauth token exchange caps issued scopes at the session role (mobile-compat)", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({ config: { host: "0.0.0.0" } });
 
-        const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-        const mintClientCredential = Effect.gen(function* () {
-          const response = yield* HttpClient.post("/api/auth/pairing-token", {
-            headers: { cookie: ownerCookie },
-          });
-          const body = (yield* response.json) as { readonly credential: string };
-          return body.credential;
+      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+      const mintClientCredential = Effect.gen(function* () {
+        const response = yield* HttpClient.post("/api/auth/pairing-token", {
+          headers: { cookie: ownerCookie },
         });
-        const tokenUrl = yield* getHttpServerUrl("/oauth/token");
-        const exchange = (subjectToken: string, scope?: string) =>
-          Effect.promise(() =>
-            fetch(tokenUrl, {
-              method: "POST",
-              headers: { "content-type": "application/x-www-form-urlencoded" },
-              body: new URLSearchParams({
-                grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
-                subject_token: subjectToken,
-                ...(scope !== undefined ? { scope } : {}),
-              }),
+        const body = (yield* response.json) as { readonly credential: string };
+        return body.credential;
+      });
+      const tokenUrl = yield* getHttpServerUrl("/oauth/token");
+      const exchange = (subjectToken: string, scope?: string) =>
+        Effect.promise(() =>
+          fetch(tokenUrl, {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+              subject_token: subjectToken,
+              ...(scope !== undefined ? { scope } : {}),
             }),
-          );
-
-        // Client-роль запрашивает owner-скоупы вперемешку с клиентскими:
-        // в ответе только клиентское пересечение, без access/relay:write.
-        const mixed = yield* exchange(
-          yield* mintClientCredential,
-          "access:write relay:write orchestration:read",
-        );
-        const mixedBody = (yield* Effect.promise(() => mixed.json())) as {
-          readonly scope: string;
-        };
-        assert.equal(mixed.status, 200);
-        assert.equal(mixedBody.scope, "orchestration:read");
-
-        // Только owner-скоупы: сессия уже создана обменом, отдаём честный
-        // downgrade — полный набор клиентской роли, без admin-скоупов.
-        const ownerOnly = yield* exchange(yield* mintClientCredential, "access:write relay:write");
-        const ownerOnlyBody = (yield* Effect.promise(() => ownerOnly.json())) as {
-          readonly scope: string;
-        };
-        assert.equal(ownerOnly.status, 200);
-        assert.equal(
-          ownerOnlyBody.scope,
-          "orchestration:read orchestration:operate terminal:operate review:write relay:read",
+          }),
         );
 
-        // Неизвестное имя скоупа режется ДО обмена (invalid_scope), и
-        // одноразовый credential при этом не сжигается.
-        const credential = yield* mintClientCredential;
-        const unknown = yield* exchange(credential, "galaxy:conquer");
-        const unknownBody = (yield* Effect.promise(() => unknown.json())) as {
-          readonly error: string;
-        };
-        assert.equal(unknown.status, 400);
-        assert.equal(unknownBody.error, "invalid_scope");
-        const retry = yield* exchange(credential);
-        assert.equal(retry.status, 200);
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+      // Client-роль запрашивает owner-скоупы вперемешку с клиентскими:
+      // в ответе только клиентское пересечение, без access/relay:write.
+      const mixed = yield* exchange(
+        yield* mintClientCredential,
+        "access:write relay:write orchestration:read",
+      );
+      const mixedBody = (yield* Effect.promise(() => mixed.json())) as {
+        readonly scope: string;
+      };
+      assert.equal(mixed.status, 200);
+      assert.equal(mixedBody.scope, "orchestration:read");
+
+      // Только owner-скоупы: сессия уже создана обменом, отдаём честный
+      // downgrade — полный набор клиентской роли, без admin-скоупов.
+      const ownerOnly = yield* exchange(yield* mintClientCredential, "access:write relay:write");
+      const ownerOnlyBody = (yield* Effect.promise(() => ownerOnly.json())) as {
+        readonly scope: string;
+      };
+      assert.equal(ownerOnly.status, 200);
+      assert.equal(
+        ownerOnlyBody.scope,
+        "orchestration:read orchestration:operate terminal:operate review:write relay:read",
+      );
+
+      // Неизвестное имя скоупа режется ДО обмена (invalid_scope), и
+      // одноразовый credential при этом не сжигается.
+      const credential = yield* mintClientCredential;
+      const unknown = yield* exchange(credential, "galaxy:conquer");
+      const unknownBody = (yield* Effect.promise(() => unknown.json())) as {
+        readonly error: string;
+      };
+      assert.equal(unknown.status, 400);
+      assert.equal(unknownBody.error, "invalid_scope");
+      const retry = yield* exchange(credential);
+      assert.equal(retry.status, 200);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("issues short-lived websocket tokens for authenticated bearer sessions", () =>

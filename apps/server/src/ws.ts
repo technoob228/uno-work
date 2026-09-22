@@ -71,6 +71,7 @@ import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePat
 import { WorkspaceService } from "./workspaceRegistry/WorkspaceService.ts";
 import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
+import { FilesService } from "./files/FilesService.ts";
 import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
 import {
   GENERATED_INSTRUCTIONS_RELATIVE_PATH,
@@ -238,6 +239,7 @@ const makeWsRpcLayer = (
       const workspaceRegistry = yield* WorkspaceService;
       const unoCloud = yield* UnoCloudService;
       const unoComputer = yield* UnoComputerService;
+      const files = yield* FilesService;
       const harnessSetup = yield* HarnessSetup;
       const serverCommandId = (tag: string) =>
         CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
@@ -1279,6 +1281,45 @@ const makeWsRpcLayer = (
           ),
         // "This computer": reads answer with an availability instead of failing,
         // so a control-plane route that is not deployed yet reads as "coming soon".
+        // Files app: the computer's file manager and its public share links.
+        [WS_METHODS.filesList]: (input) =>
+          observeRpcEffect(WS_METHODS.filesList, files.list(input), { "rpc.aggregate": "files" }),
+        [WS_METHODS.filesStat]: (input) =>
+          observeRpcEffect(WS_METHODS.filesStat, files.stat(input), { "rpc.aggregate": "files" }),
+        [WS_METHODS.filesCreateFolder]: (input) =>
+          observeRpcEffect(WS_METHODS.filesCreateFolder, files.createFolder(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesRename]: (input) =>
+          observeRpcEffect(WS_METHODS.filesRename, files.rename(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesMove]: (input) =>
+          observeRpcEffect(WS_METHODS.filesMove, files.move(input), { "rpc.aggregate": "files" }),
+        [WS_METHODS.filesDelete]: (input) =>
+          observeRpcEffect(WS_METHODS.filesDelete, files.remove(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesSearch]: (input) =>
+          observeRpcEffect(WS_METHODS.filesSearch, files.search(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesShareCreate]: (input) =>
+          observeRpcEffect(WS_METHODS.filesShareCreate, files.createShare(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesShareList]: (input) =>
+          observeRpcEffect(WS_METHODS.filesShareList, files.listShares(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesShareRevoke]: (input) =>
+          observeRpcEffect(WS_METHODS.filesShareRevoke, files.revokeShare(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesPublishSite]: (input) =>
+          observeRpcEffect(WS_METHODS.filesPublishSite, files.publishSite(input), {
+            "rpc.aggregate": "files",
+          }),
         [WS_METHODS.unoComputerGetState]: (input) =>
           observeRpcEffect(WS_METHODS.unoComputerGetState, unoComputer.getState(input), {
             "rpc.aggregate": "uno-computer",

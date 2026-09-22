@@ -130,6 +130,27 @@ import type {
   UnoComputerTargetInput,
 } from "./unoComputer.ts";
 import type {
+  FilesCreateFolderInput,
+  FilesDeleteInput,
+  FilesDeleteResult,
+  FilesEntry,
+  FilesListInput,
+  FilesListResult,
+  FilesMoveInput,
+  FilesMoveResult,
+  FilesPublishSiteInput,
+  FilesPublishSiteResult,
+  FilesRenameInput,
+  FilesSearchInput,
+  FilesSearchResult,
+  FilesShare,
+  FilesShareCreateInput,
+  FilesShareListInput,
+  FilesShareListResult,
+  FilesShareRevokeInput,
+  FilesStatInput,
+} from "./files.ts";
+import type {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
   SourceControlDiscoveryResult,
@@ -690,6 +711,20 @@ export interface EnvironmentApi {
     installApp: (input: UnoComputerInstallAppInput) => Promise<UnoComputerInstallAppResult>;
     installStatus: (input: UnoComputerInstallStatusInput) => Promise<UnoComputerInstallStatus>;
     power: (input: UnoComputerPowerInput) => Promise<UnoComputerState>;
+  };
+  /** Files: the computer's file manager and its public share links. */
+  files: {
+    list: (input: FilesListInput) => Promise<FilesListResult>;
+    stat: (input: FilesStatInput) => Promise<FilesEntry>;
+    createFolder: (input: FilesCreateFolderInput) => Promise<FilesEntry>;
+    rename: (input: FilesRenameInput) => Promise<FilesEntry>;
+    move: (input: FilesMoveInput) => Promise<FilesMoveResult>;
+    delete: (input: FilesDeleteInput) => Promise<FilesDeleteResult>;
+    search: (input: FilesSearchInput) => Promise<FilesSearchResult>;
+    createShare: (input: FilesShareCreateInput) => Promise<FilesShare>;
+    listShares: (input: FilesShareListInput) => Promise<FilesShareListResult>;
+    revokeShare: (input: FilesShareRevokeInput) => Promise<FilesShare>;
+    publishSite: (input: FilesPublishSiteInput) => Promise<FilesPublishSiteResult>;
   };
   /** Install a harness CLI or sign it in on this environment's machine. */
   providerSetup: {

@@ -26,6 +26,28 @@ import {
   UnoComputerState,
   UnoComputerTargetInput,
 } from "./unoComputer.ts";
+import {
+  FilesCreateFolderInput,
+  FilesDeleteInput,
+  FilesDeleteResult,
+  FilesEntry,
+  FilesError,
+  FilesListInput,
+  FilesListResult,
+  FilesMoveInput,
+  FilesMoveResult,
+  FilesPublishSiteInput,
+  FilesPublishSiteResult,
+  FilesRenameInput,
+  FilesSearchInput,
+  FilesSearchResult,
+  FilesShare,
+  FilesShareCreateInput,
+  FilesShareListInput,
+  FilesShareListResult,
+  FilesShareRevokeInput,
+  FilesStatInput,
+} from "./files.ts";
 import { AuthAccessStreamEvent, AuthLinkRequestStreamEvent } from "./auth.ts";
 import {
   FilesystemBrowseInput,
@@ -311,6 +333,19 @@ export const WS_METHODS = {
   unoComputerInstallApp: "uno.computer.installApp",
   unoComputerInstallStatus: "uno.computer.installStatus",
   unoComputerPower: "uno.computer.power",
+
+  // Files — the computer's file manager (/files) and its public share links
+  filesList: "files.list",
+  filesStat: "files.stat",
+  filesCreateFolder: "files.createFolder",
+  filesRename: "files.rename",
+  filesMove: "files.move",
+  filesDelete: "files.delete",
+  filesSearch: "files.search",
+  filesShareCreate: "files.share.create",
+  filesShareList: "files.share.list",
+  filesShareRevoke: "files.share.revoke",
+  filesPublishSite: "files.publishSite",
 
   // Provider setup: install a harness CLI / sign it in on this machine
   providerInstallStart: "provider.install.start",
@@ -1170,6 +1205,77 @@ export const WsUnoComputerPowerRpc = Rpc.make(WS_METHODS.unoComputerPower, {
   error: UnoCloudRpcError,
 });
 
+/* ------------------------------------------------------------------
+ * Files — the computer's file manager. Paths are absolute and confined
+ * to the Work user's home; shares are public `/s/<token>` links.
+ * ------------------------------------------------------------------ */
+
+export const WsFilesListRpc = Rpc.make(WS_METHODS.filesList, {
+  payload: FilesListInput,
+  success: FilesListResult,
+  error: FilesError,
+});
+
+export const WsFilesStatRpc = Rpc.make(WS_METHODS.filesStat, {
+  payload: FilesStatInput,
+  success: FilesEntry,
+  error: FilesError,
+});
+
+export const WsFilesCreateFolderRpc = Rpc.make(WS_METHODS.filesCreateFolder, {
+  payload: FilesCreateFolderInput,
+  success: FilesEntry,
+  error: FilesError,
+});
+
+export const WsFilesRenameRpc = Rpc.make(WS_METHODS.filesRename, {
+  payload: FilesRenameInput,
+  success: FilesEntry,
+  error: FilesError,
+});
+
+export const WsFilesMoveRpc = Rpc.make(WS_METHODS.filesMove, {
+  payload: FilesMoveInput,
+  success: FilesMoveResult,
+  error: FilesError,
+});
+
+export const WsFilesDeleteRpc = Rpc.make(WS_METHODS.filesDelete, {
+  payload: FilesDeleteInput,
+  success: FilesDeleteResult,
+  error: FilesError,
+});
+
+export const WsFilesSearchRpc = Rpc.make(WS_METHODS.filesSearch, {
+  payload: FilesSearchInput,
+  success: FilesSearchResult,
+  error: FilesError,
+});
+
+export const WsFilesShareCreateRpc = Rpc.make(WS_METHODS.filesShareCreate, {
+  payload: FilesShareCreateInput,
+  success: FilesShare,
+  error: FilesError,
+});
+
+export const WsFilesShareListRpc = Rpc.make(WS_METHODS.filesShareList, {
+  payload: FilesShareListInput,
+  success: FilesShareListResult,
+  error: FilesError,
+});
+
+export const WsFilesShareRevokeRpc = Rpc.make(WS_METHODS.filesShareRevoke, {
+  payload: FilesShareRevokeInput,
+  success: FilesShare,
+  error: FilesError,
+});
+
+export const WsFilesPublishSiteRpc = Rpc.make(WS_METHODS.filesPublishSite, {
+  payload: FilesPublishSiteInput,
+  success: FilesPublishSiteResult,
+  error: FilesError,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerProbeRpc,
@@ -1205,6 +1311,17 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoComputerInstallAppRpc,
   WsUnoComputerInstallStatusRpc,
   WsUnoComputerPowerRpc,
+  WsFilesListRpc,
+  WsFilesStatRpc,
+  WsFilesCreateFolderRpc,
+  WsFilesRenameRpc,
+  WsFilesMoveRpc,
+  WsFilesDeleteRpc,
+  WsFilesSearchRpc,
+  WsFilesShareCreateRpc,
+  WsFilesShareListRpc,
+  WsFilesShareRevokeRpc,
+  WsFilesPublishSiteRpc,
   WsProviderInstallStartRpc,
   WsProviderInstallStatusRpc,
   WsProviderAuthStartRpc,
