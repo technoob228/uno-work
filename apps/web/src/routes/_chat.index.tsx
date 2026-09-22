@@ -1,4 +1,4 @@
-import { createFileRoute, Navigate, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -96,12 +96,22 @@ function ChatIndexRouteView() {
   const machine = useActiveMachine();
   const openHome = !needsEnvironment && machine.isCloud;
   useDefaultLandingRedirect(!needsEnvironment && !openHome);
+  // Once, not <Navigate>: this view stays mounted while the root's async
+  // beforeLoad is pending, and a <Navigate> re-fired the same navigation on
+  // every render — React "Maximum update depth exceeded" (#185).
+  const navigate = useNavigate();
+  const homeRedirected = useRef(false);
+  useEffect(() => {
+    if (!openHome || homeRedirected.current) return;
+    homeRedirected.current = true;
+    void navigate({ to: "/computer", replace: true });
+  }, [navigate, openHome]);
 
   if (needsEnvironment) {
     return <HostedStaticOnboardingState />;
   }
   if (openHome) {
-    return <Navigate to="/computer" replace />;
+    return null;
   }
 
   return <NoActiveThreadState />;
