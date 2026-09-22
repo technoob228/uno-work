@@ -20,6 +20,7 @@ import { Route as SettingsSourceControlRouteImport } from './routes/settings.sou
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsExtensionsRouteImport } from './routes/settings.extensions'
 import { Route as SettingsConnectionsRouteImport } from './routes/settings.connections'
+import { Route as SettingsComputerAccessRouteImport } from './routes/settings.computer-access'
 import { Route as SettingsBrowserRouteImport } from './routes/settings.browser'
 import { Route as SettingsAssistantRouteImport } from './routes/settings.assistant'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
@@ -95,6 +96,11 @@ const SettingsExtensionsRoute = SettingsExtensionsRouteImport.update({
 const SettingsConnectionsRoute = SettingsConnectionsRouteImport.update({
   id: '/connections',
   path: '/connections',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsComputerAccessRoute = SettingsComputerAccessRouteImport.update({
+  id: '/computer-access',
+  path: '/computer-access',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsBrowserRoute = SettingsBrowserRouteImport.update({
@@ -228,6 +234,7 @@ export interface FileRoutesByFullPath {
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/browser': typeof SettingsBrowserRoute
+  '/settings/computer-access': typeof SettingsComputerAccessRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
@@ -260,6 +267,7 @@ export interface FileRoutesByTo {
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/browser': typeof SettingsBrowserRoute
+  '/settings/computer-access': typeof SettingsComputerAccessRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
@@ -296,6 +304,7 @@ export interface FileRoutesById {
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/browser': typeof SettingsBrowserRoute
+  '/settings/computer-access': typeof SettingsComputerAccessRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
@@ -333,6 +342,7 @@ export interface FileRouteTypes {
     | '/settings/archived'
     | '/settings/assistant'
     | '/settings/browser'
+    | '/settings/computer-access'
     | '/settings/connections'
     | '/settings/extensions'
     | '/settings/general'
@@ -365,6 +375,7 @@ export interface FileRouteTypes {
     | '/settings/archived'
     | '/settings/assistant'
     | '/settings/browser'
+    | '/settings/computer-access'
     | '/settings/connections'
     | '/settings/extensions'
     | '/settings/general'
@@ -400,6 +411,7 @@ export interface FileRouteTypes {
     | '/settings/archived'
     | '/settings/assistant'
     | '/settings/browser'
+    | '/settings/computer-access'
     | '/settings/connections'
     | '/settings/extensions'
     | '/settings/general'
@@ -508,6 +520,13 @@ declare module '@tanstack/react-router' {
       path: '/connections'
       fullPath: '/settings/connections'
       preLoaderRoute: typeof SettingsConnectionsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/computer-access': {
+      id: '/settings/computer-access'
+      path: '/computer-access'
+      fullPath: '/settings/computer-access'
+      preLoaderRoute: typeof SettingsComputerAccessRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/browser': {
@@ -735,6 +754,7 @@ interface SettingsRouteChildren {
   SettingsArchivedRoute: typeof SettingsArchivedRoute
   SettingsAssistantRoute: typeof SettingsAssistantRoute
   SettingsBrowserRoute: typeof SettingsBrowserRoute
+  SettingsComputerAccessRoute: typeof SettingsComputerAccessRoute
   SettingsConnectionsRoute: typeof SettingsConnectionsRoute
   SettingsExtensionsRoute: typeof SettingsExtensionsRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
@@ -753,6 +773,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsArchivedRoute: SettingsArchivedRoute,
   SettingsAssistantRoute: SettingsAssistantRoute,
   SettingsBrowserRoute: SettingsBrowserRoute,
+  SettingsComputerAccessRoute: SettingsComputerAccessRoute,
   SettingsConnectionsRoute: SettingsConnectionsRoute,
   SettingsExtensionsRoute: SettingsExtensionsRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,

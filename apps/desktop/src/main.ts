@@ -109,6 +109,7 @@ import {
 } from "./updateMachine.ts";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch.ts";
 import { resolveDesktopAppBranding } from "./appBranding.ts";
+import { UnoAccountService } from "./unoAccount.ts";
 import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider.ts";
 
 syncShellEnvironment();
@@ -164,12 +165,18 @@ const BROWSER_CREDENTIALS_DELETE_CHANNEL = "desktop:browser-credentials-delete";
 const BROWSER_CREDENTIALS_REVEAL_CHANNEL = "desktop:browser-credentials-reveal";
 const BROWSER_CLEAR_DATA_CHANNEL = "desktop:browser-clear-data";
 const BROWSER_OPEN_URL_CHANNEL = "desktop:browser-open-url";
+const UNO_ACCOUNT_STATUS_CHANNEL = "desktop:uno-account-status";
+const UNO_ACCOUNT_SIGN_IN_CHANNEL = "desktop:uno-account-sign-in";
+const UNO_ACCOUNT_SIGN_OUT_CHANNEL = "desktop:uno-account-sign-out";
+const UNO_ACCOUNT_REQUEST_CHANNEL = "desktop:uno-account-request";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".unowork");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
 const CLIENT_SETTINGS_PATH = Path.join(STATE_DIR, "client-settings.json");
 const SAVED_ENVIRONMENT_REGISTRY_PATH = Path.join(STATE_DIR, "saved-environments.json");
 const BROWSER_CREDENTIALS_PATH = Path.join(STATE_DIR, "browser-credentials.json");
+// Encrypted with safeStorage (macOS Keychain); see unoAccount.ts.
+const UNO_ACCOUNT_PATH = Path.join(STATE_DIR, "uno-account.bin");
 const DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
@@ -1938,6 +1945,46 @@ function registerIpcHandlers(): void {
 
   ipcMain.removeHandler(GET_CLIENT_SETTINGS_CHANNEL);
   ipcMain.handle(GET_CLIENT_SETTINGS_CHANNEL, async () => readClientSettings(CLIENT_SETTINGS_PATH));
+
+  // "Sign in with Uno": the account belongs to this app, the token to the main process.
+  const unoAccount = new UnoAccountService({
+    filePath: UNO_ACCOUNT_PATH,
+    codec: {
+      isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+      encryptString: (value: string) => safeStorage.encryptString(value),
+      decryptString: (value: Buffer) => safeStorage.decryptString(value),
+    },
+    openExternal: (url: string) => shell.openExternal(url),
+    fetch: (input, init) => net.fetch(input as string, init),
+  });
+  ipcMain.removeHandler(UNO_ACCOUNT_STATUS_CHANNEL);
+  ipcMain.handle(UNO_ACCOUNT_STATUS_CHANNEL, async () => unoAccount.status());
+  ipcMain.removeHandler(UNO_ACCOUNT_SIGN_IN_CHANNEL);
+  ipcMain.handle(UNO_ACCOUNT_SIGN_IN_CHANNEL, async () => {
+    const status = await unoAccount.signIn();
+    const window = BrowserWindow.getAllWindows()[0];
+    if (window) {
+      if (window.isMinimized()) window.restore();
+      window.focus();
+    }
+    return status;
+  });
+  ipcMain.removeHandler(UNO_ACCOUNT_SIGN_OUT_CHANNEL);
+  ipcMain.handle(UNO_ACCOUNT_SIGN_OUT_CHANNEL, async () => unoAccount.signOut());
+  ipcMain.removeHandler(UNO_ACCOUNT_REQUEST_CHANNEL);
+  ipcMain.handle(UNO_ACCOUNT_REQUEST_CHANNEL, async (_event, raw: unknown) => {
+    const input = raw as { method?: unknown; path?: unknown; body?: unknown } | null;
+    const method = input?.method;
+    const path = input?.path;
+    if ((method !== "GET" && method !== "POST" && method !== "PUT") || typeof path !== "string") {
+      return { status: 400, body: { error: "INVALID_REQUEST" } };
+    }
+    return unoAccount.request({
+      method,
+      path,
+      ...(input?.body === undefined ? {} : { body: input.body }),
+    });
+  });
 
   ipcMain.removeHandler(SET_CLIENT_SETTINGS_CHANNEL);
   ipcMain.handle(SET_CLIENT_SETTINGS_CHANNEL, async (_event, rawSettings: unknown) => {

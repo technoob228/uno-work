@@ -1,4 +1,5 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { AccountSignInCta } from "./account/AccountSignInCta";
 import {
   ChevronLeftIcon,
   ChevronsLeftRightEllipsisIcon,
@@ -980,9 +981,7 @@ function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => vo
             <RefreshCwIcon className="size-4 animate-spin" />
           </div>
         ) : cloud && !cloud.connected ? (
-          <div className="px-6 py-10 text-center text-muted-foreground text-sm">
-            This app isn't linked to your Uno account yet. Link it in Settings → Machine → Account.
-          </div>
+          <AccountSignInCta className="px-6 py-8 text-center" />
         ) : boxes.length === 0 ? (
           <div className="px-6 py-10 text-center text-muted-foreground text-sm">
             No computers on this account yet — create one below.

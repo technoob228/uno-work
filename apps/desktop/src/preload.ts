@@ -22,6 +22,10 @@ const UNO_CODE_RETRY_INSTALL_CHANNEL = "desktop:uno-code-retry-install";
 const GET_APP_BRANDING_CHANNEL = "desktop:get-app-branding";
 const GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL = "desktop:get-local-environment-bootstrap";
 const GET_CLIENT_SETTINGS_CHANNEL = "desktop:get-client-settings";
+const UNO_ACCOUNT_STATUS_CHANNEL = "desktop:uno-account-status";
+const UNO_ACCOUNT_SIGN_IN_CHANNEL = "desktop:uno-account-sign-in";
+const UNO_ACCOUNT_SIGN_OUT_CHANNEL = "desktop:uno-account-sign-out";
+const UNO_ACCOUNT_REQUEST_CHANNEL = "desktop:uno-account-request";
 const SET_CLIENT_SETTINGS_CHANNEL = "desktop:set-client-settings";
 const GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL = "desktop:get-saved-environment-registry";
 const SET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL = "desktop:set-saved-environment-registry";
@@ -67,6 +71,12 @@ function unwrapEnsureSshEnvironmentResult(result: unknown) {
 }
 
 contextBridge.exposeInMainWorld("desktopBridge", {
+  unoAccount: {
+    status: () => ipcRenderer.invoke(UNO_ACCOUNT_STATUS_CHANNEL),
+    signIn: () => ipcRenderer.invoke(UNO_ACCOUNT_SIGN_IN_CHANNEL),
+    signOut: () => ipcRenderer.invoke(UNO_ACCOUNT_SIGN_OUT_CHANNEL),
+    request: (input) => ipcRenderer.invoke(UNO_ACCOUNT_REQUEST_CHANNEL, input),
+  },
   getAppBranding: () => {
     const result = ipcRenderer.sendSync(GET_APP_BRANDING_CHANNEL);
     if (typeof result !== "object" || result === null) {

@@ -13,6 +13,7 @@
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import {
+  ShieldCheckIcon,
   ArchiveIcon,
   BotIcon,
   CircleUserIcon,
@@ -99,6 +100,7 @@ const FLAT_APP_NAV_ITEMS: ReadonlyArray<FlatNavItem> = [
   // The machines list is always on; the `workspace` flag now only gates the
   // "Advanced sharing" fold inside the page.
   { label: "My machines", to: "/settings/workspace", icon: LayersIcon },
+  { label: "Computer access", to: "/settings/computer-access", icon: ShieldCheckIcon },
   { label: "Extensions", to: "/settings/extensions", icon: PuzzleIcon, flag: "plugins" },
 ];
 

@@ -399,7 +399,38 @@ export interface PickFolderOptions {
   initialPath?: string | null;
 }
 
+/** The person signed in to Uno in the desktop app ("Sign in with Uno"). */
+export interface DesktopUnoAccountStatus {
+  readonly signedIn: boolean;
+  readonly email: string | null;
+}
+
+export interface DesktopUnoAccountRequest {
+  readonly method: "GET" | "POST" | "PUT";
+  /** Console API path, e.g. `/api/v1/boxes`. The main process allowlists it. */
+  readonly path: string;
+  readonly body?: unknown;
+}
+
+export interface DesktopUnoAccountResponse {
+  readonly status: number;
+  readonly body: unknown;
+}
+
+/**
+ * Account calls from the desktop app. The token lives in the OS keychain and
+ * stays in the main process; the renderer only sees responses.
+ */
+export interface DesktopUnoAccountBridge {
+  status: () => Promise<DesktopUnoAccountStatus>;
+  signIn: () => Promise<DesktopUnoAccountStatus>;
+  signOut: () => Promise<DesktopUnoAccountStatus>;
+  request: (input: DesktopUnoAccountRequest) => Promise<DesktopUnoAccountResponse>;
+}
+
 export interface DesktopBridge {
+  /** Absent in desktop builds before 0.0.70. */
+  unoAccount?: DesktopUnoAccountBridge;
   getAppBranding: () => DesktopAppBranding | null;
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
   getClientSettings: () => Promise<ClientSettings | null>;

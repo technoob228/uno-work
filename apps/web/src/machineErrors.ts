@@ -53,17 +53,17 @@ interface Rule {
  */
 const RULES: ReadonlyArray<Rule> = [
   {
-    test: /connect your uno account first|no api key|not linked/i,
-    title: "Uno account not connected",
+    test: /connect your uno account first|no api key|not linked|sign in with uno|managed at app\.uno4\.work/i,
+    title: "Not signed in to Uno",
     message:
-      "This app isn't linked to your Uno account yet, so it can't see or create computers. Link it in Settings → Machine → Account.",
+      "Sign in with your Uno account (in the desktop app) or open app.uno4.work to see and add computers.",
     transient: false,
   },
   {
     test: /\b401\b|unauthori[sz]ed|invalid api key|forbidden|\b403\b/i,
-    title: "Uno didn't accept this account",
+    title: "Uno didn't allow this",
     message:
-      "Your Uno account key was refused. Check it in Settings → Machine → Account, or copy a fresh one from the Uno console.",
+      "Uno refused this request. Sign in again, or check that this is allowed for your account.",
     transient: false,
   },
   {

@@ -1,4 +1,5 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { useServerConfig } from "../rpc/serverState";
 import { useCallback, useEffect, useRef } from "react";
 
 import { OnboardingShell } from "~/components/onboarding/OnboardingShell";
@@ -35,12 +36,21 @@ function OnboardingRouteView() {
   const openAddProjectRef = useRef(false);
 
   const markCompleted = useCallback(() => {
-    void updateSettings({ onboardingCompleted: true });
+    void updateSettings({ onboardingCompleted: true, machineOnboarded: true });
   }, [updateSettings]);
 
   // In the browser flow the last step opens a real chat itself; completion is
   // recorded just before that navigation so the root guard lets it through.
   const firstChat = useFirstChatLaunch({ onBeforeNavigate: markCompleted });
+
+  // Setup is remembered per machine too: the same computer opened from another
+  // address or device (its own localStorage) goes straight in.
+  const machineOnboarded = useServerConfig()?.settings.machineOnboarded === true;
+  useEffect(() => {
+    if (!machineOnboarded) return;
+    void updateSettings({ onboardingCompleted: true });
+    void navigate({ to: "/", replace: true });
+  }, [machineOnboarded, navigate, updateSettings]);
 
   useEffect(() => {
     return () => {

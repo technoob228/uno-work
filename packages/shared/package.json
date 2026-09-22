@@ -95,6 +95,14 @@
     "./handoff": {
       "types": "./src/handoff.ts",
       "import": "./src/handoff.ts"
+    },
+    "./unoCloud": {
+      "types": "./src/unoCloud.ts",
+      "import": "./src/unoCloud.ts"
+    },
+    "./unoBoxProvision": {
+      "types": "./src/unoBoxProvision.ts",
+      "import": "./src/unoBoxProvision.ts"
     }
   },
   "scripts": {

@@ -1,5 +1,6 @@
 import type { EnvironmentId, EnvironmentApi } from "@t3tools/contracts";
 
+import { interfaceUnoCloud } from "./account/unoAccount";
 import type { WsRpcClient } from "./rpc/wsRpcClient";
 import { readEnvironmentConnection } from "./environments/runtime";
 
@@ -84,13 +85,10 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       authStatus: rpcClient.providerSetup.authStatus,
       authSubmitCode: rpcClient.providerSetup.authSubmitCode,
     },
-    unoCloud: {
-      getState: (input) => rpcClient.unoCloud.getState(input),
-      boxPower: rpcClient.unoCloud.boxPower,
-      connectBox: rpcClient.unoCloud.connectBox,
-      createBox: rpcClient.unoCloud.createBox,
-      createBoxStatus: rpcClient.unoCloud.createBoxStatus,
-    },
+    // The Uno account belongs to the interface (the signed-in person), not to
+    // whichever machine this is: see account/unoAccount.ts. The daemon's own
+    // uno.cloud.* RPCs are no longer used by this client.
+    unoCloud: interfaceUnoCloud,
     unoComputer: {
       getState: (input) => rpcClient.unoComputer.getState(input),
       metrics: (input) => rpcClient.unoComputer.metrics(input),

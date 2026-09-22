@@ -22,7 +22,7 @@ describe("describeMachineError", () => {
     ],
     ["500: INTERNAL_ERROR", "The computer isn't answering yet", true],
     ['409: {"error":"NO_NODE_CAPACITY"}', "No free capacity right now", false],
-    ["Connect your Uno account first.", "Uno account not connected", false],
+    ["Connect your Uno account first.", "Not signed in to Uno", false],
     [
       "curl -fsSL https://console.uno4.dev/cli/work/install.sh | sudo bash",
       "Uno Work isn't installed there",

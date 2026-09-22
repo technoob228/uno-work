@@ -252,15 +252,15 @@ export function ComputerView() {
 
                 {!computer?.linked && thisMachine ? (
                   <p className="-mt-3 text-xs text-muted-foreground">
-                    Add your Uno account key in{" "}
+                    This computer has no access to your Uno account right now, so it can't turn
+                    itself on and off or add apps. Give it access in{" "}
                     <Link
-                      to="/settings"
+                      to="/settings/computer-access"
                       className="text-primary underline-offset-4 hover:underline"
                     >
-                      Settings
-                    </Link>{" "}
-                    to turn this computer on and off, add apps from the App Store and show them on
-                    the internet.
+                      Settings → Computer access
+                    </Link>
+                    .
                   </p>
                 ) : null}
 
