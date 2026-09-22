@@ -16,7 +16,7 @@
     },
     "apps/desktop": {
       "name": "@t3tools/desktop",
-      "version": "0.0.30",
+      "version": "0.0.69",
       "dependencies": {
         "@effect/platform-node": "catalog:",
         "effect": "catalog:",
@@ -53,7 +53,7 @@
     },
     "apps/server": {
       "name": "t3",
-      "version": "0.0.30",
+      "version": "0.0.69",
       "bin": {
         "t3": "./dist/bin.mjs",
       },
@@ -89,7 +89,7 @@
     },
     "apps/web": {
       "name": "@t3tools/web",
-      "version": "0.0.30",
+      "version": "0.0.69",
       "dependencies": {
         "@base-ui/react": "^1.2.0",
         "@dnd-kit/core": "^6.3.1",
@@ -111,6 +111,7 @@
         "@xterm/xterm": "^6.0.0",
         "class-variance-authority": "^0.7.1",
         "effect": "catalog:",
+        "jszip": "^3.10.1",
         "lexical": "^0.41.0",
         "lucide-react": "^0.564.0",
         "mammoth": "^1.12.0",
@@ -159,7 +160,7 @@
     },
     "packages/contracts": {
       "name": "@t3tools/contracts",
-      "version": "0.0.30",
+      "version": "0.0.69",
       "dependencies": {
         "effect": "catalog:",
       },

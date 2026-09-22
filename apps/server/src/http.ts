@@ -46,6 +46,7 @@ import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts
 import { executeBridgeCommand, executeBridgeOpenUrl } from "./browserCommandRouter.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
+import { OFFICE_ENGINE_ROUTE_PREFIX, resolveOfficeEngineFilePath } from "./officeEngine.ts";
 import { isAllowedCorsOrigin, isLoopbackHostname } from "./corsOrigins.ts";
 import { HealthCheck } from "./health.ts";
 import { decodeOtlpTraceRecords } from "./observability/TraceRecord.ts";
@@ -671,6 +672,50 @@ export const projectFaviconRouteLayer = HttpRouter.add(
       ),
     );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * Статический пакет офисного движка (`<baseDir>/office-engine`). Без авторизации:
+ * там только публичный AGPL-код редакторов, а файлы пользователя идут через
+ * авторизованный WS (filesystem.readFile / projects.writeFile). Отдаём потоком
+ * (x2t.wasm ~60 МБ) и с кэшем: движок грузится один раз на браузер.
+ */
+export const officeEngineRouteLayer = HttpRouter.add(
+  "GET",
+  `${OFFICE_ENGINE_ROUTE_PREFIX}/*`,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) {
+      return HttpServerResponse.text("Bad Request", { status: 400 });
+    }
+    const config = yield* ServerConfig;
+    const filePath = resolveOfficeEngineFilePath({
+      engineDir: config.officeEngineDir,
+      requestPathname: url.value.pathname,
+    });
+    if (!filePath) {
+      return HttpServerResponse.text("Invalid office engine path", { status: 400 });
+    }
+    const fileSystem = yield* FileSystem.FileSystem;
+    const fileInfo = yield* fileSystem
+      .stat(filePath)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+    if (!fileInfo || fileInfo.type !== "File") {
+      return HttpServerResponse.text("Not Found", { status: 404 });
+    }
+    return yield* HttpServerResponse.file(filePath, {
+      status: 200,
+      contentType: Mime.getType(filePath) ?? "application/octet-stream",
+      headers: {
+        "Cache-Control": "public, max-age=86400",
+      },
+    }).pipe(
+      Effect.catch(() =>
+        Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
+      ),
+    );
+  }),
 );
 
 export const staticAndDevRouteLayer = HttpRouter.add(

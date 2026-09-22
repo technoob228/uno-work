@@ -102,6 +102,10 @@ export default defineConfig({
               target: devProxyTarget,
               changeOrigin: true,
             },
+            "/office-engine": {
+              target: devProxyTarget,
+              changeOrigin: true,
+            },
           },
         }
       : {}),
