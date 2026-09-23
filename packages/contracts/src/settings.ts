@@ -638,6 +638,18 @@ export type UnoPin = typeof UnoPin.Type;
 
 export const MAX_UNO_PINS = 50;
 
+/**
+ * Settings → Apps → "AI for apps": what an app gets from the App SDK when it
+ * does not name a model or a harness (docs/app-sdk.md).
+ */
+export const AppsAiSettings = Schema.Struct({
+  /** Gateway model for `/v1/chat/completions` with model "default"; "" = built-in default. */
+  chatModel: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  /** Harness + model for app tasks; absent/null = the machine's default harness. */
+  taskModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+});
+export type AppsAiSettings = typeof AppsAiSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // The first-run setup was finished or skipped on this machine. Kept on the
@@ -691,6 +703,7 @@ export const ServerSettings = Schema.Struct({
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   browser: ServerBrowserSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   uno: UnoAccountSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  appsAi: AppsAiSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -781,6 +794,12 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       executor: Schema.optionalKey(BrowserExecutor),
       serverAutomationLevel: Schema.optionalKey(BrowserAutomationLevel),
+    }),
+  ),
+  appsAi: Schema.optionalKey(
+    Schema.Struct({
+      chatModel: Schema.optionalKey(Schema.String),
+      taskModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
     }),
   ),
   uno: Schema.optionalKey(

@@ -215,6 +215,18 @@ export function toOpenCodeFileParts(input: {
   return parts;
 }
 
+/**
+ * OpenCode permission rules for a Work runtime mode (the last matching rule
+ * wins, so the specific rules follow the catch-all).
+ *
+ * - `full-access` — everything is allowed.
+ * - `approval-required` — reading the project is allowed (as with Codex and
+ *   Claude); edits, commands, the network and folders outside the project
+ *   wait for the person.
+ * - `auto-accept-edits` ("Edit files freely") — the same, plus edits inside
+ *   the project. Before this, both modes asked even to read a file, so
+ *   "Edit files freely" asked for every read and every write.
+ */
 export function buildOpenCodePermissionRules(runtimeMode: RuntimeMode): PermissionRuleset {
   if (runtimeMode === "full-access") {
     return [{ permission: "*", pattern: "*", action: "allow" }];
@@ -222,11 +234,22 @@ export function buildOpenCodePermissionRules(runtimeMode: RuntimeMode): Permissi
 
   return [
     { permission: "*", pattern: "*", action: "ask" },
+    { permission: "read", pattern: "*", action: "allow" },
+    { permission: "glob", pattern: "*", action: "allow" },
+    { permission: "grep", pattern: "*", action: "allow" },
+    { permission: "list", pattern: "*", action: "allow" },
+    { permission: "lsp", pattern: "*", action: "allow" },
+    { permission: "todowrite", pattern: "*", action: "allow" },
     { permission: "bash", pattern: "*", action: "ask" },
-    { permission: "edit", pattern: "*", action: "ask" },
+    {
+      permission: "edit",
+      pattern: "*",
+      action: runtimeMode === "auto-accept-edits" ? "allow" : "ask",
+    },
     { permission: "webfetch", pattern: "*", action: "ask" },
     { permission: "websearch", pattern: "*", action: "ask" },
     { permission: "codesearch", pattern: "*", action: "ask" },
+    // Last: a path outside the project asks even for a read.
     { permission: "external_directory", pattern: "*", action: "ask" },
     { permission: "doom_loop", pattern: "*", action: "ask" },
     { permission: "question", pattern: "*", action: "allow" },

@@ -30,3 +30,4 @@ export * from "./filesystem.ts";
 export * from "./files.ts";
 export * from "./threadContinue.ts";
 export * from "./rpc.ts";
+export * from "./appSdk.ts";

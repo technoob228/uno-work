@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uno-app"
+version = "0.1.0"
+description = "Uno App SDK — the AI of this Uno computer for any app on it (chat, speech-to-text, agent tasks)."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = []
+classifiers = ["Programming Language :: Python :: 3", "License :: OSI Approved :: MIT License"]
+
+[tool.setuptools]
+py-modules = ["uno_app"]

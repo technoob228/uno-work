@@ -1253,6 +1253,18 @@ export const OrchestrationAgentCommandOrigin = Schema.Struct({
 });
 export type OrchestrationAgentCommandOrigin = typeof OrchestrationAgentCommandOrigin.Type;
 
+/**
+ * A command an app on this machine dispatched through the App SDK
+ * (`POST /v1/tasks`, docs/app-sdk.md). `appId` is the manifest id resolved
+ * from the app's token — never taken from the request body.
+ */
+export const OrchestrationAppCommandOrigin = Schema.Struct({
+  kind: Schema.Literal("app"),
+  appId: TrimmedNonEmptyString,
+  taskId: Schema.optional(TrimmedNonEmptyString),
+});
+export type OrchestrationAppCommandOrigin = typeof OrchestrationAppCommandOrigin.Type;
+
 /** A command dispatched by the assistant bootstrapper on the daemon's behalf. */
 export const OrchestrationAssistantCommandOrigin = Schema.Struct({
   kind: Schema.Literal("assistant"),
@@ -1276,6 +1288,7 @@ export const OrchestrationCommandOrigin = Schema.Union([
   OrchestrationConnectorCommandOrigin,
   OrchestrationAssistantCommandOrigin,
   OrchestrationAgentCommandOrigin,
+  OrchestrationAppCommandOrigin,
   OrchestrationSystemCommandOrigin,
 ]);
 export type OrchestrationCommandOrigin = typeof OrchestrationCommandOrigin.Type;

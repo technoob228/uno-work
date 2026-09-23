@@ -23,7 +23,7 @@ import type {
   UnoMachineApps,
 } from "@t3tools/contracts";
 import { execFile, spawn } from "node:child_process";
-import { closeSync, mkdirSync, openSync, statSync, truncateSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, statSync, truncateSync } from "node:fs";
 import { readFile, statfs } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -44,6 +44,8 @@ import {
   controlPlaneErrorStatus,
   fetchControlPlaneJson,
 } from "../workspaceRegistry/unoCloudParse.ts";
+import { resolveAppApiPort } from "../appSdk/appApiPort.ts";
+import { resolveAppKeysDir } from "../appSdk/appKeys.ts";
 import { readIconDataUrl, readManifestDir, type AppManifest } from "./appManifest.ts";
 import { extractHtmlTitle } from "./discoveryParsers.ts";
 import { displayManifestDir, resolveManifestDir } from "./manifestDir.ts";
@@ -153,6 +155,26 @@ export async function probeHttp(port: number): Promise<HttpProbe> {
   return { http: false, title: null };
 }
 
+/**
+ * App SDK variables for an app whose manifest asks for AI: its id, and — once
+ * the App SDK service has issued it — the API address and the app's own token
+ * from `~/.uno/app-keys/<id>/env` (never another app's).
+ */
+export function appSdkEnvironment(manifest: Pick<AppManifest, "id" | "ai">, home: string) {
+  if (!manifest.ai) return {};
+  const env: Record<string, string> = { UNO_APP_ID: manifest.id };
+  try {
+    const text = readFileSync(path.join(resolveAppKeysDir(home), manifest.id, "env"), "utf8");
+    for (const line of text.split("\n")) {
+      const match = /^(UNO_APP_[A-Z_]+)=(.*)$/.exec(line.trim());
+      if (match?.[1] && match[2] !== undefined) env[match[1]] = match[2];
+    }
+  } catch {
+    // Not issued yet: the SDK waits for the key folder by itself.
+  }
+  return env;
+}
+
 /** The environment a user's app starts with: theirs, not the daemon's secrets. */
 export function appEnvironment(home: string, port: number | null): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
@@ -184,7 +206,7 @@ function startManifestCommand(manifest: AppManifest, manifestDir: string, home: 
       cwd: manifest.cwd ?? home,
       detached: true,
       stdio: ["ignore", fd, fd],
-      env: appEnvironment(home, manifest.port),
+      env: { ...appEnvironment(home, manifest.port), ...appSdkEnvironment(manifest, home) },
     });
     child.on("error", () => undefined);
     child.unref();
@@ -233,7 +255,10 @@ export const makeMachineAppsService = (
       platform: process.platform,
       home,
       selfPid: process.pid,
-      selfPorts: new Set([config.port]),
+      // The daemon's own ports: its web port and the App SDK's local API.
+      selfPorts: new Set(
+        [config.port, resolveAppApiPort()].filter((port): port is number => port !== null),
+      ),
       run: runCommand,
       readFile: readTextFile,
       probeHttp: async (port) => {

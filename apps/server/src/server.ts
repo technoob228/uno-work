@@ -42,6 +42,7 @@ import { WorkspaceServiceLive } from "./workspaceRegistry/WorkspaceService.ts";
 import { UnoCloudServiceLive } from "./workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerServiceLive } from "./workspaceRegistry/UnoComputerService.ts";
 import { MachineAppsServiceLive } from "./machineApps/MachineAppsService.ts";
+import { AppSdkServiceLive } from "./appSdk/AppSdkService.ts";
 import { HarnessSetupLive } from "./provider/setup/HarnessSetupService.ts";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
 import { ProviderEventLoggersLive } from "./provider/Layers/ProviderEventLoggers.ts";
@@ -362,6 +363,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // Plugin runtime consumes the registry plus the orchestration engine
       // provided further down this pipe (same positioning as the manager).
       PluginRuntimeLive,
+      // App SDK: local App API for apps on this machine (docs/app-sdk.md) —
+      // starts tasks through the same engine, forwards chat with the gateway key.
+      AppSdkServiceLive,
     ),
   ),
   // Manager tool layer (MCP surface for the manager brain). Sits above the

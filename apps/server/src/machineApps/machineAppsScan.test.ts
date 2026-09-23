@@ -91,6 +91,7 @@ const MANIFEST: AppManifest = {
   command: "node server.js",
   cwd: null,
   autostart: true,
+  ai: null,
 };
 
 describe("scanMachineApps", () => {

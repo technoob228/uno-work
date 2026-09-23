@@ -27,6 +27,7 @@ import {
   PuzzleIcon,
   Settings2Icon,
   SmartphoneIcon,
+  SparklesIcon,
 } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -66,6 +67,7 @@ const ENVIRONMENT_NAV_ITEMS: ReadonlyArray<EnvironmentNavItem> = [
   { label: "General", section: "general", icon: Settings2Icon },
   { label: "Agents", section: "providers", icon: PlugIcon },
   { label: "Telegram", section: "assistants", icon: BotIcon },
+  { label: "Apps", section: "apps", icon: SparklesIcon },
   { label: "Source Control", section: "source-control", icon: GitBranchIcon },
   { label: "Archive", section: "archived", icon: ArchiveIcon },
 ];
@@ -79,6 +81,7 @@ const WEB_ENVIRONMENT_NAV_ITEMS: ReadonlyArray<EnvironmentNavItem> = [
   { label: "Account", section: "general", icon: CircleUserIcon },
   { label: "Agents", section: "providers", icon: PlugIcon },
   { label: "Telegram", section: "assistants", icon: BotIcon },
+  { label: "Apps", section: "apps", icon: SparklesIcon },
   { label: "Source Control", section: "source-control", icon: GitBranchIcon },
   { label: "Archive", section: "archived", icon: ArchiveIcon },
 ];

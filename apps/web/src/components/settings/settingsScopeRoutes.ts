@@ -24,6 +24,7 @@ export type EnvironmentSettingsSection =
   | "general"
   | "providers"
   | "assistants"
+  | "apps"
   | "source-control"
   | "archived";
 
@@ -39,6 +40,7 @@ export const ENVIRONMENT_SETTINGS_SECTIONS: ReadonlyArray<EnvironmentSettingsSec
   "general",
   "providers",
   "assistants",
+  "apps",
   "source-control",
   "archived",
 ];
