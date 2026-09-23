@@ -23,6 +23,7 @@ import {
   PuzzleIcon,
   TableIcon,
   XIcon,
+  AppWindowIcon,
 } from "lucide-react";
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -48,6 +49,7 @@ import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/to
 import {
   detectFileKind,
   DUAL_VIEW_KINDS,
+  isAppTab,
   isBrowserTab,
   isPluginPanelTab,
   makePluginPanelFile,
@@ -69,6 +71,7 @@ import {
   usePluginPanels,
   type PluginPanelDescriptor,
 } from "./PluginPanelChat";
+import { AppFrame } from "../apps/AppFrame";
 import { BrowserViews } from "./BrowserPane";
 import { useSidebar } from "../ui/sidebar";
 import { CodeFileView } from "./CodeFileView";
@@ -89,6 +92,7 @@ const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   text: FileCode2Icon,
   browser: GlobeIcon,
   "plugin-panel": PuzzleIcon,
+  app: AppWindowIcon,
   unknown: FileIcon,
 };
 
@@ -105,6 +109,7 @@ const KIND_LABEL: Record<PreviewFileKind, string> = {
   text: "Text",
   browser: "Браузер",
   "plugin-panel": "Панель плагина",
+  app: "Приложение",
   unknown: "File",
 };
 
@@ -1321,6 +1326,9 @@ function Body({ file }: { file: PreviewFile }) {
   if (file.kind === "plugin-panel") {
     return <PluginPanelBody file={file} />;
   }
+  if (file.kind === "app" && file.url) {
+    return <AppFrame url={file.url} name={file.name} icon={file.content || null} compact />;
+  }
   const hasInlineContent = Boolean(file.content) || Boolean(file.blobUrl);
   const sourceView = DUAL_VIEW_KINDS.has(file.kind) && sourceViewFileIds.includes(file.id);
 
@@ -1914,7 +1922,11 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
           <XIcon />
         </Button>
       </header>
-      {paneVisible && active && !isBrowserTab(active) && !isPluginPanelTab(active) ? (
+      {paneVisible &&
+      active &&
+      !isBrowserTab(active) &&
+      !isPluginPanelTab(active) &&
+      !isAppTab(active) ? (
         <PathBar file={active} onOpenAt={handleOpenAt} />
       ) : null}
       <div className={cn("relative min-h-0 flex-1", isFocusMode && "pb-36")}>

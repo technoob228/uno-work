@@ -142,6 +142,8 @@ import type {
   UnoComputerResizeResult,
   UnoComputerState,
   UnoComputerTargetInput,
+  UnoEmbedCheck,
+  UnoEmbedCheckInput,
   UnoMachineAppActionInput,
   UnoMachineApps,
 } from "./unoComputer.ts";
@@ -784,6 +786,8 @@ export interface EnvironmentApi {
     localMetrics: () => Promise<UnoComputerLocalMetrics>;
     resizeOptions: (input?: UnoComputerTargetInput) => Promise<UnoComputerResizeOptions>;
     resize: (input: UnoComputerResizeInput) => Promise<UnoComputerResizeResult>;
+    /** Whether a web app can be shown inside Uno Work (frame headers). */
+    embedCheck: (input: UnoEmbedCheckInput) => Promise<UnoEmbedCheck>;
   };
   /** Files: the computer's file manager and its public share links. */
   files: {

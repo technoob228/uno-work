@@ -616,12 +616,36 @@ export const UnoAccountSettings = Schema.Struct({
 });
 export type UnoAccountSettings = typeof UnoAccountSettings.Type;
 
+/**
+ * A sidebar pin: an app, a file, a folder or a link, one click away in every
+ * sidebar mode. Chats are pinned on the chat itself (`pinnedAt`), not here.
+ * Kept on the machine (like `machineOnboarded`): the same computer is opened
+ * from app.uno4.work, its own address, the desktop app and a phone.
+ */
+export const UnoPinKind = Schema.Literals(["app", "file", "folder", "link"]);
+export type UnoPinKind = typeof UnoPinKind.Type;
+
+export const UnoPin = Schema.Struct({
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
+  kind: UnoPinKind,
+  title: Schema.String.check(Schema.isMaxLength(200)),
+  /** App or link: its web address. File or folder: an absolute path. */
+  target: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)),
+  /** App icon (an emoji or a letter), when the app has one. */
+  icon: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMaxLength(64)))),
+});
+export type UnoPin = typeof UnoPin.Type;
+
+export const MAX_UNO_PINS = 50;
+
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // The first-run setup was finished or skipped on this machine. Kept on the
   // machine, not in the browser: one computer is opened from app.uno4.work,
   // its own address and a phone, and each has its own localStorage.
   machineOnboarded: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Sidebar pins (apps, files, folders, links) — see `UnoPin`.
+  pins: Schema.Array(UnoPin).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   // Where a chat's agent may spawn threads through the bridge
   // (`POST /api/threads`): only its own project, or any project.
   agentThreadsScope: Schema.Literals(["own-project", "any-project"]).pipe(
@@ -742,6 +766,7 @@ export const ServerSettingsPatch = Schema.Struct({
   // Server settings
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   machineOnboarded: Schema.optionalKey(Schema.Boolean),
+  pins: Schema.optionalKey(Schema.Array(UnoPin)),
   agentThreadsScope: Schema.optionalKey(Schema.Literals(["own-project", "any-project"])),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   addProjectBaseDirectory: Schema.optionalKey(Schema.String),

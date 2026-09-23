@@ -242,6 +242,7 @@ export interface WsRpcClient {
       input?: RpcInput<typeof WS_METHODS.unoComputerResizeOptions>,
     ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.unoComputerResizeOptions>>;
     readonly resize: RpcUnaryMethod<typeof WS_METHODS.unoComputerResize>;
+    readonly embedCheck: RpcUnaryMethod<typeof WS_METHODS.unoComputerEmbedCheck>;
     readonly localMetrics: () => ReturnType<
       RpcUnaryMethod<typeof WS_METHODS.unoComputerLocalMetrics>
     >;
@@ -562,6 +563,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       resizeOptions: (input) =>
         transport.request((client) => client[WS_METHODS.unoComputerResizeOptions](input ?? {})),
       resize: (input) => transport.request((client) => client[WS_METHODS.unoComputerResize](input)),
+      embedCheck: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerEmbedCheck](input)),
     },
     files: {
       list: (input) => transport.request((client) => client[WS_METHODS.filesList](input)),

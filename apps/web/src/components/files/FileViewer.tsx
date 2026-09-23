@@ -20,6 +20,7 @@ import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 
 import { isElectron } from "../../env";
 import { isOfficeFile } from "../office/officeFormats";
+import { PinPathButton } from "./PinPathButton";
 
 import { cn } from "../../lib/utils";
 import { uploadFilesFromFileList } from "../../projectUploadPickers";
@@ -200,6 +201,7 @@ export function FileViewer({
                 <span className="hidden sm:inline">{opener?.editLabel ?? "Edit"}</span>
               </Button>
             ) : null}
+            <PinPathButton kind="file" path={entry.path} />
             <Button size="sm" variant="outline" onClick={download}>
               <DownloadIcon />
               <span className="hidden sm:inline">Download</span>

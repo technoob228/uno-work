@@ -74,6 +74,7 @@ import {
   filesSharesQueryOptions,
 } from "./filesApi";
 import { registerBuiltInFileOpeners } from "./openers";
+import { PinPathButton } from "./PinPathButton";
 import { ShareDialog, SharedLinksDialog } from "./ShareDialog";
 import { CloudBrowser } from "./CloudBrowser";
 import { CopyToCloudDialog } from "./CopyToCloudDialog";
@@ -540,6 +541,7 @@ function FolderBrowser({
               </button>
             ) : null}
           </div>
+          {currentPath ? <PinPathButton kind="folder" path={currentPath} /> : null}
           <Button size="sm" variant="ghost" onClick={() => onDialog({ type: "links" })}>
             <LinkIcon />
             <span className="hidden lg:inline">Shared links</span>

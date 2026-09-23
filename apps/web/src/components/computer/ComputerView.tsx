@@ -20,11 +20,12 @@
  */
 import type { UnoMachineAppAction } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useRouter } from "@tanstack/react-router";
+import { Link, getRouteApi, useNavigate, useRouter } from "@tanstack/react-router";
 import { MonitorIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { usePrimaryEnvironmentId } from "../../environments/primary";
+import { useOpenApp } from "../../navigation/useOpenApp";
 import { useStore } from "../../store";
 import { Button } from "../ui/button";
 import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
@@ -58,6 +59,8 @@ import { LOW_DISK_PCT, LOW_MEMORY_PCT, isSustained } from "./resizeModel";
 import { buildProgramTiles, isBrowserOnMachine, type ProgramTile } from "./programModel";
 import { useAppInstalls } from "./useAppInstalls";
 import { useHomeLaunchers } from "./useHomeLaunchers";
+
+const routeApi = getRouteApi("/_chat/computer");
 
 const PLATFORM_WORD: Record<string, string> = {
   linux: "Linux",
@@ -109,6 +112,9 @@ export function ComputerView() {
   const launchers = useHomeLaunchers(environmentId);
 
   const [storeOpen, setStoreOpen] = useState(false);
+  const { openHere } = useOpenApp();
+  const routeSearch = routeApi.useSearch();
+  const navigate = useNavigate();
   const [folderOpen, setFolderOpen] = useState(false);
   const [detailsKey, setDetailsKey] = useState<string | null>(null);
   const [resizeOpen, setResizeOpen] = useState(false);
@@ -229,18 +235,28 @@ export function ComputerView() {
   const openTile = (tile: ProgramTile) => {
     const store = tile.storeApp;
     if (tile.openUrl && store?.sso && store.deploymentId !== null) {
-      // Sign in with Uno: the app opens already signed in.
+      // Sign in with Uno: the app opens already signed in, in its own tab —
+      // the Uno sign-in cookie can't work inside Uno Work's cross-site frame.
       const deploymentId = store.deploymentId;
       void openAppSignedIn(() => signIn.openLink(deploymentId), tile.openUrl);
       return;
     }
+    // Other apps open inside Uno Work; the app bar has "New tab" for the rest.
     if (tile.openUrl) {
-      window.open(tile.openUrl, "_blank", "noopener,noreferrer");
+      openHere({ url: tile.openUrl, name: tile.name, icon: tile.icon });
       return;
     }
     resetTileMutations();
     setDetailsKey(tile.key);
   };
+
+  // The sidebar's "App Store" row lands here with ?store=1.
+  const storeAvailable = builtIns.onAppStore !== null;
+  useEffect(() => {
+    if (routeSearch.store !== "1" || !storeAvailable) return;
+    setStoreOpen(true);
+    void navigate({ to: "/computer", search: {}, replace: true });
+  }, [navigate, routeSearch.store, storeAvailable]);
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: computerQueryKeys.all });

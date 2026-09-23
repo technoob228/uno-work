@@ -477,6 +477,26 @@ export const UnoMachineAppActionInput = Schema.Struct({
 });
 export type UnoMachineAppActionInput = typeof UnoMachineAppActionInput.Type;
 
+/**
+ * Can this web app be shown inside Uno Work (an iframe in the page at
+ * `embedderOrigin`)? The browser can't read a cross-origin frame's headers, so
+ * the daemon fetches the app and reads `X-Frame-Options` and CSP
+ * `frame-ancestors` for it. `unknown` = the app didn't answer; the frame is
+ * tried anyway, with "Open in a new tab" at hand.
+ */
+export const UnoEmbedCheckInput = Schema.Struct({
+  url: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2048)),
+  embedderOrigin: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
+});
+export type UnoEmbedCheckInput = typeof UnoEmbedCheckInput.Type;
+
+export const UnoEmbedCheck = Schema.Struct({
+  verdict: Schema.Literals(["ok", "blocked", "unknown"]),
+  /** Short human reason for `blocked` / `unknown`. */
+  reason: Schema.NullOr(Schema.String),
+});
+export type UnoEmbedCheck = typeof UnoEmbedCheck.Type;
+
 /** Live load of the machine the daemon runs on, read from the OS directly. */
 export const UnoComputerLocalMetrics = Schema.Struct({
   hostname: Schema.String,

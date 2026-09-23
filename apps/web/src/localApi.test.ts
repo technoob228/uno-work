@@ -161,6 +161,7 @@ const rpcClientMock = {
     localMetrics: vi.fn(),
     resizeOptions: vi.fn(),
     resize: vi.fn(),
+    embedCheck: vi.fn(),
   },
   files: {
     list: vi.fn(),
