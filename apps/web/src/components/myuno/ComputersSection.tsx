@@ -234,7 +234,18 @@ function ComputerCard({
             size="sm"
             variant="outline"
             disabled={power.isPending}
-            onClick={() => power.mutate("sleep")}
+            onClick={() => {
+              // A workspace may be the very computer this window works on.
+              if (
+                computer.workMachine &&
+                !window.confirm(
+                  `Put ${computer.name} to sleep? Chats and apps on it stop until you wake it; nothing is lost.`,
+                )
+              ) {
+                return;
+              }
+              power.mutate("sleep");
+            }}
           >
             {power.isPending ? <Loader2Icon className="animate-spin" /> : <MoonIcon />}
             Put to sleep

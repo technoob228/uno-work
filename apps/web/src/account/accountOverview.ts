@@ -122,6 +122,37 @@ export async function createServerComputer(input: {
   return parseAccountComputer(raw);
 }
 
+/**
+ * Why a new computer wasn't created, in words: the console answers with a
+ * code (SHAPE_TOO_LARGE, PEAK_EXCEEDED…) inside the error text. `plan` = the
+ * fix is a bigger plan (the dialog then offers "See plans").
+ */
+export function describeCreateError(error: unknown): { message: string; plan: boolean } {
+  const raw = error instanceof Error ? error.message : String(error);
+  const has = (code: string) => raw.includes(code);
+  if (has("SHAPE_TOO_LARGE")) {
+    return { message: "That's bigger than one computer on your plan can be.", plan: true };
+  }
+  if (has("PEAK_EXCEEDED") || has("POOL_EXHAUSTED")) {
+    return {
+      message:
+        "Your plan is already running as much as it can at once. Put a computer to sleep or pick a bigger plan.",
+      plan: true,
+    };
+  }
+  if (has("DISK_QUOTA_EXCEEDED")) {
+    return { message: "Your plan's working disk is full.", plan: true };
+  }
+  if (has("NO_SUBSCRIPTION") || has("SUBSCRIPTION_REQUIRED")) {
+    return { message: "Computers in the cloud come with a plan.", plan: true };
+  }
+  if (has("BOX_LIMIT") || has("QUOTA")) {
+    return { message: "Your plan has no room for another computer.", plan: true };
+  }
+  const detail = raw.replace(/^\d{3}:\s*/, "").replace(/^\{"error":"(.*)"\}$/, "$1");
+  return { message: `Uno couldn't create it: ${detail.slice(0, 200)}`, plan: false };
+}
+
 // ---- a server without Uno Work: monitor, apps, logs ----
 
 export interface ComputerMetrics {
@@ -455,6 +486,12 @@ export interface PaymentRow {
   readonly at: string;
 }
 
+/**
+ * Charges of the other product on the same balance (getuno.xyz: SMS numbers,
+ * VPS, proxies) — not part of Uno. `/pay/spending` labels them by category.
+ */
+const OTHER_PRODUCT_CATEGORIES = new Set(["sms", "vps", "isp_proxy", "proxy"]);
+
 const METHOD_LABEL: Record<string, string> = {
   direct: "USDT (TRC-20)",
   nowpayments: "Crypto",
@@ -482,7 +519,7 @@ export function parsePayments(history: unknown, spending: unknown): ReadonlyArra
   let index = 0;
   for (const item of list(spending, "spending")) {
     const s = rec(item);
-    if (!s) continue;
+    if (!s || OTHER_PRODUCT_CATEGORIES.has(str(s["category"]))) continue;
     index += 1;
     rows.push({
       key: `out-${index}-${str(s["created_at"])}`,
@@ -493,7 +530,10 @@ export function parsePayments(history: unknown, spending: unknown): ReadonlyArra
       at: str(s["created_at"]),
     });
   }
-  return rows.filter((row) => row.at).toSorted((a, b) => b.at.localeCompare(a.at));
+  // A metered cent that rounds to $0 is not a payment a person looks for.
+  return rows
+    .filter((row) => row.at && row.amountUsd >= 0.005)
+    .toSorted((a, b) => b.at.localeCompare(a.at));
 }
 
 export async function fetchPayments(): Promise<ReadonlyArray<PaymentRow>> {

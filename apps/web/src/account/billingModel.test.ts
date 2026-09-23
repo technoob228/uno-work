@@ -205,10 +205,13 @@ describe("account payloads", () => {
         spending: [
           {
             amount: -20,
-            category: "box_plan",
+            category: "other",
             description: "Plan Plus",
             created_at: "2026-09-10T00:00:00Z",
           },
+          // getuno.xyz charges on the same balance are not Uno's.
+          { amount: -3, category: "vps", description: "VPS", created_at: "2026-09-11T00:00:00Z" },
+          { amount: -1, category: "sms", description: "SMS", created_at: "2026-09-12T00:00:00Z" },
         ],
       },
     );
@@ -223,5 +226,17 @@ describe("account payloads", () => {
     expect(formatBytes(512 * 1024 ** 2)).toBe("512 MB");
     expect(formatBytes(1.5 * 1024 ** 3)).toBe("1.5 GB");
     expect(formatBytes(1024 ** 4)).toBe("1 TB");
+  });
+});
+
+describe("create errors", () => {
+  it("say what to do", async () => {
+    const { describeCreateError } = await import("./accountOverview");
+    expect(describeCreateError(new Error('409: {"error":"PEAK_EXCEEDED"}')).plan).toBe(true);
+    expect(describeCreateError(new Error("403: SHAPE_TOO_LARGE")).plan).toBe(true);
+    expect(describeCreateError(new Error('400: {"error":"INVALID_NAME"}'))).toEqual({
+      message: "Uno couldn't create it: INVALID_NAME",
+      plan: false,
+    });
   });
 });

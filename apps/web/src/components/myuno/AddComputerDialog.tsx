@@ -14,13 +14,13 @@ import {
   type AccountComputer,
   type AccountSubscription,
   createServerComputer,
+  describeCreateError,
 } from "../../account/accountOverview";
 import { computerSize, formatRam, planTitle } from "../../account/billingModel";
 import { ALL_ROLES, ROLE_BLURB, ROLE_LABEL, type ComputerRole } from "../../account/computerRoles";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useSwitchEnvironment } from "../../hooks/useSwitchEnvironment";
 import { cn } from "../../lib/utils";
-import { describeMachineError } from "../../machineErrors";
 import { normalizeUnoBoxName } from "../../unoBoxCreation";
 import { CreateUnoBoxSection } from "../CreateUnoBoxSection";
 import { Button } from "../ui/button";
@@ -124,7 +124,7 @@ export function AddComputerDialog({
     },
   });
 
-  const createError = create.error ? describeMachineError(create.error) : null;
+  const createError = create.error ? describeCreateError(create.error) : null;
   const planWord = subscription ? planTitle(limits, subscription.plan) : null;
 
   return (
@@ -299,20 +299,21 @@ export function AddComputerDialog({
               </div>
               {createError ? (
                 <div className="flex flex-col gap-2 rounded-xl bg-destructive/8 px-3 py-2.5 text-xs">
-                  <p className="font-medium text-destructive-foreground">{createError.title}</p>
-                  <p className="text-muted-foreground">{createError.message}</p>
-                  <div>
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      onClick={() => {
-                        onOpenChange(false);
-                        onSeePlans();
-                      }}
-                    >
-                      See plans
-                    </Button>
-                  </div>
+                  <p className="text-destructive-foreground">{createError.message}</p>
+                  {createError.plan ? (
+                    <div>
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() => {
+                          onOpenChange(false);
+                          onSeePlans();
+                        }}
+                      >
+                        See plans
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </DialogPanel>
