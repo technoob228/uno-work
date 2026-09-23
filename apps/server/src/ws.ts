@@ -73,6 +73,7 @@ import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
 import { FilesService } from "./files/FilesService.ts";
 import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
+import { AppSdkService } from "./appSdk/AppSdkService.ts";
 import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
 import {
   GENERATED_INSTRUCTIONS_RELATIVE_PATH,
@@ -242,6 +243,7 @@ const makeWsRpcLayer = (
       const unoComputer = yield* UnoComputerService;
       const files = yield* FilesService;
       const machineApps = yield* MachineAppsService;
+      const appSdk = yield* AppSdkService;
       const harnessSetup = yield* HarnessSetup;
       const serverCommandId = (tag: string) =>
         CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
@@ -1436,6 +1438,18 @@ const makeWsRpcLayer = (
               .action(input)
               .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
             { "rpc.aggregate": "uno-computer" },
+          ),
+        [WS_METHODS.appAiList]: (_input) =>
+          observeRpcEffect(WS_METHODS.appAiList, appSdk.overview, {
+            "rpc.aggregate": "app-sdk",
+          }),
+        [WS_METHODS.appAiUpdate]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.appAiUpdate,
+            appSdk
+              .update(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "app-sdk" },
           ),
         [WS_METHODS.unoComputerLocalMetrics]: (_input) =>
           observeRpcEffect(WS_METHODS.unoComputerLocalMetrics, machineApps.localMetrics, {

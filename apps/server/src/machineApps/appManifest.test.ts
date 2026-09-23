@@ -4,7 +4,9 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  MANIFEST_AI_MAX_LIMIT_USD,
   manifestIdFromFileName,
+  parseAppAiRequest,
   parseAppPath,
   parseAppUrl,
   parseIconText,
@@ -94,6 +96,7 @@ describe("validateManifest", () => {
         command: "node server.js",
         cwd: "/home/unowork/projects/notes",
         autostart: true,
+        ai: null,
       },
     });
   });
@@ -186,5 +189,28 @@ describe("readManifestDir", () => {
     expect(evil?.iconFile).toBeNull();
     expect(warnings.some((w) => w.startsWith("evil.json"))).toBe(true);
     expect(await readIconDataUrl(notes!.iconFile!)).toBe("data:image/png;base64,iVBORw==");
+  });
+});
+
+describe("parseAppAiRequest", () => {
+  it("reads chat/tasks and caps the limit a manifest may ask for", () => {
+    expect(parseAppAiRequest({ chat: true, tasks: true, limitUsd: 3 })).toEqual({
+      chat: true,
+      tasks: true,
+      limitUsd: 3,
+    });
+    expect(parseAppAiRequest({ chat: true, limitUsd: 5000 })).toEqual({
+      chat: true,
+      tasks: false,
+      limitUsd: MANIFEST_AI_MAX_LIMIT_USD,
+    });
+    expect(parseAppAiRequest(true)).toEqual({ chat: true, tasks: false, limitUsd: 10 });
+  });
+
+  it("asks for nothing unless chat or tasks is literally true", () => {
+    expect(parseAppAiRequest(undefined)).toBeNull();
+    expect(parseAppAiRequest({ chat: "yes" })).toBeNull();
+    expect(parseAppAiRequest({ limitUsd: 5 })).toBeNull();
+    expect(parseAppAiRequest({ chat: true, limitUsd: -1 })?.limitUsd).toBe(10);
   });
 });

@@ -11,7 +11,8 @@
  *     "description": "My notes",
  *     "command": "node server.js",  // optional: how to start it
  *     "cwd": "~/projects/notes",    // optional: where to run the command (inside home)
- *     "autostart": true             // optional: start it when the computer starts (default with a command)
+ *     "autostart": true,            // optional: start it when the computer starts (default with a command)
+ *     "ai": {"chat": true}          // optional: use the machine's AI through the App SDK (docs/app-sdk.md)
  *   }
  *
  * Everything in the file is untrusted text written by whoever can write to the
@@ -57,6 +58,37 @@ export interface AppManifest {
   /** Absolute, inside home. */
   readonly cwd: string | null;
   readonly autostart: boolean;
+  /** What the app asks of the machine's AI (App SDK); null = nothing. */
+  readonly ai: AppAiRequest | null;
+}
+
+/**
+ * `"ai": {"chat": true, "tasks": false, "limitUsd": 10}` — or `"ai": true`
+ * for chat only. The limit an app may ask for is capped: a manifest is
+ * written by whoever can write to home (often an agent), so only the person
+ * can raise it above {@link MANIFEST_AI_MAX_LIMIT_USD} in Settings → Apps.
+ */
+export interface AppAiRequest {
+  readonly chat: boolean;
+  readonly tasks: boolean;
+  readonly limitUsd: number;
+}
+
+export const MANIFEST_AI_MAX_LIMIT_USD = 10;
+
+export function parseAppAiRequest(value: unknown): AppAiRequest | null {
+  if (value === true) return { chat: true, tasks: false, limitUsd: MANIFEST_AI_MAX_LIMIT_USD };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const chat = record["chat"] === true;
+  const tasks = record["tasks"] === true;
+  if (!chat && !tasks) return null;
+  const rawLimit = record["limitUsd"];
+  const limitUsd =
+    typeof rawLimit === "number" && Number.isFinite(rawLimit) && rawLimit >= 0
+      ? Math.min(rawLimit, MANIFEST_AI_MAX_LIMIT_USD)
+      : MANIFEST_AI_MAX_LIMIT_USD;
+  return { chat, tasks, limitUsd: Math.round(limitUsd * 100) / 100 };
 }
 
 export type ManifestResult =
@@ -190,6 +222,7 @@ export function validateManifest(
       command,
       cwd,
       autostart: typeof record["autostart"] === "boolean" ? record["autostart"] : command !== null,
+      ai: parseAppAiRequest(record["ai"]),
     },
   };
 }

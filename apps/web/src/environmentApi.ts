@@ -99,6 +99,8 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       power: rpcClient.unoComputer.power,
       machineApps: () => rpcClient.unoComputer.machineApps(),
       appAction: rpcClient.unoComputer.appAction,
+      appAiList: () => rpcClient.unoComputer.appAiList(),
+      appAiUpdate: rpcClient.unoComputer.appAiUpdate,
       localMetrics: () => rpcClient.unoComputer.localMetrics(),
       resizeOptions: (input) => rpcClient.unoComputer.resizeOptions(input),
       resize: rpcClient.unoComputer.resize,

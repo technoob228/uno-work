@@ -39,6 +39,7 @@ describe("buildSettingsNavGroups", () => {
       "/settings/environment/env-box/general",
       "/settings/environment/env-box/providers",
       "/settings/environment/env-box/assistants",
+      "/settings/environment/env-box/apps",
       "/settings/environment/env-box/source-control",
       "/settings/environment/env-box/archived",
     ]);

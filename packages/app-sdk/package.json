@@ -1,0 +1,36 @@
+{
+  "name": "@uno4/app",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Uno App SDK — the AI of this Uno computer for any app on it (chat, speech-to-text, agent tasks).",
+  "license": "MIT",
+  "files": [
+    "src/uno-app.mjs",
+    "src/uno-app.d.ts",
+    "README.md"
+  ],
+  "type": "module",
+  "main": "./src/uno-app.mjs",
+  "types": "./src/uno-app.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/uno-app.d.ts",
+      "default": "./src/uno-app.mjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

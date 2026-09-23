@@ -135,6 +135,7 @@ import type {
   UnoMachineAppActionInput,
   UnoMachineApps,
 } from "./unoComputer.ts";
+import type { AppAiOverview, AppAiUpdateInput } from "./appSdk.ts";
 import type {
   FilesCreateFolderInput,
   FilesDeleteInput,
@@ -762,6 +763,9 @@ export interface EnvironmentApi {
     /** Programs found on this machine (manifests, docker, systemd, open ports). */
     machineApps: () => Promise<UnoMachineApps>;
     appAction: (input: UnoMachineAppActionInput) => Promise<UnoMachineApps>;
+    /** Apps that use this machine's AI through the App SDK (Settings → Apps). */
+    appAiList: () => Promise<AppAiOverview>;
+    appAiUpdate: (input: AppAiUpdateInput) => Promise<AppAiOverview>;
     localMetrics: () => Promise<UnoComputerLocalMetrics>;
     resizeOptions: (input?: UnoComputerTargetInput) => Promise<UnoComputerResizeOptions>;
     resize: (input: UnoComputerResizeInput) => Promise<UnoComputerResizeResult>;
