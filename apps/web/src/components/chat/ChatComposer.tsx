@@ -74,6 +74,13 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerSecretRequestPanel } from "./ComposerSecretRequestPanel";
+import {
+  PersonalAiPanel,
+  isPersonalAiModel,
+  personalAiCanSend,
+  personalAiModelId,
+  usePersonalAi,
+} from "./PersonalAiPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
@@ -877,6 +884,20 @@ export const ChatComposer = memo(
     );
     const hasKnownUnsupportedCodingTools =
       selectedProvider === "uno" && modelCannotRunCodingAgent(selectedModelCapabilities);
+    // Personal AI: модель на личном GPU. Пока не поднята — сообщение ждёт в
+    // поле ввода и уходит само, когда модель готова.
+    const personalAiId =
+      selectedProvider === "uno" && isPersonalAiModel(selectedModelCapabilities)
+        ? personalAiModelId(normalizeModelSlug(selectedModel, selectedProvider) ?? selectedModel)
+        : null;
+    const personalAi = usePersonalAi(personalAiId);
+    const personalAiModel = personalAi.model;
+    const startPersonalAi = personalAi.start;
+    const personalAiBlocksSend = personalAiId !== null && !personalAiCanSend(personalAi.model);
+    const [personalAiQueued, setPersonalAiQueued] = useState(false);
+    useEffect(() => {
+      setPersonalAiQueued(false);
+    }, [personalAiId]);
     const imageAttachmentSupport = useMemo(
       () => deriveImageAttachmentSupport(selectedModelCapabilities),
       [selectedModelCapabilities],
@@ -1856,6 +1877,15 @@ export const ChatComposer = memo(
           });
           return;
         }
+        if (personalAiBlocksSend) {
+          event?.preventDefault();
+          setPersonalAiQueued(true);
+          const state = personalAiModel?.state;
+          if (state === "off" || state === "failed") {
+            void startPersonalAi();
+          }
+          return;
+        }
         onSend(event);
         if (shouldBlurMobileComposerOnSubmit()) {
           blurMobileComposerAfterSend();
@@ -1866,9 +1896,19 @@ export const ChatComposer = memo(
         hasKnownUnsupportedCodingTools,
         hasKnownUnsupportedImageAttachments,
         onSend,
+        personalAiBlocksSend,
+        personalAiModel,
+        startPersonalAi,
         shouldBlurMobileComposerOnSubmit,
       ],
     );
+    // Модель поднялась — отправляем то, что ждало в поле ввода.
+    useEffect(() => {
+      if (!personalAiQueued || personalAiId === null) return;
+      if (personalAiModel === null || !personalAiCanSend(personalAiModel)) return;
+      setPersonalAiQueued(false);
+      onSend();
+    }, [onSend, personalAiId, personalAiModel, personalAiQueued]);
     const expandMobileComposer = useCallback(() => {
       if (composerBlurFrameRef.current !== null) {
         window.cancelAnimationFrame(composerBlurFrameRef.current);
@@ -2736,6 +2776,7 @@ export const ChatComposer = memo(
               "rounded-[20px] border bg-card transition-colors duration-200 has-focus-visible:border-ring/45",
               isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border",
               environmentUnavailable ? "opacity-75" : null,
+              personalAiBlocksSend ? "bg-muted/30" : null,
               composerProviderState.composerSurfaceClassName,
             )}
             onFocusCapture={(event) => {
@@ -2758,6 +2799,13 @@ export const ChatComposer = memo(
             }}
           >
             <ComposerSecretRequestPanel threadId={activeThread?.id} />
+            {personalAiId !== null ? (
+              <PersonalAiPanel
+                handle={personalAi}
+                queued={personalAiQueued}
+                onCancelQueued={() => setPersonalAiQueued(false)}
+              />
+            ) : null}
             {!isComposerCollapsedMobile &&
               (activePendingApproval ? (
                 <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">

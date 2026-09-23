@@ -111,6 +111,9 @@ export const ModelListRow = memo(function ModelListRow(props: {
         ? "Global"
         : null;
   const estimatedCost = metadata?.pricing?.estimatedSeriousTaskUsd;
+  // Personal AI: платится время на личном GPU, а не токены.
+  const perHourUsd = metadata?.pricing?.perHourUsd;
+  const isPersonal = metadata?.personal !== undefined;
   const supportsTools = modelSupportsTools(props.model.capabilities);
   const supportsImageInput = modelSupportsImageInput(props.model.capabilities);
   const supportsImageOutput = modelSupportsImageOutput(props.model.capabilities);
@@ -202,6 +205,22 @@ export const ModelListRow = memo(function ModelListRow(props: {
             ) : null}
             {routeLabel ? (
               <span className="rounded border border-border/70 px-1 py-0.5">{routeLabel}</span>
+            ) : null}
+            {isPersonal ? (
+              <span
+                className="rounded border border-sky-500/30 bg-sky-500/10 px-1 py-0.5 text-sky-700 dark:border-sky-400/25 dark:bg-sky-400/10 dark:text-sky-300"
+                title="Runs on your own private GPU. Start it once, then chat as usual."
+              >
+                Private GPU
+              </span>
+            ) : null}
+            {typeof perHourUsd === "number" && Number.isFinite(perHourUsd) ? (
+              <span
+                className="rounded border border-border/70 px-1 py-0.5"
+                title="Billed for the time the model is working; it sleeps when idle and sleep is free."
+              >
+                ${perHourUsd.toFixed(perHourUsd >= 10 ? 0 : 2)}/hour
+              </span>
             ) : null}
             {typeof estimatedCost === "number" && Number.isFinite(estimatedCost) ? (
               <span className="rounded border border-border/70 px-1 py-0.5">

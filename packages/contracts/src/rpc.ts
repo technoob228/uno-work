@@ -333,6 +333,9 @@ export const WS_METHODS = {
 
   // Uno account / billing methods
   unoCreateLlmTopUpAction: "uno.createLlmTopUpAction",
+  unoPersonalAiList: "uno.personalAi.list",
+  unoPersonalAiStart: "uno.personalAi.start",
+  unoPersonalAiStop: "uno.personalAi.stop",
   unoVideoCreateUpload: "uno.video.createUpload",
   unoVideoCompleteUpload: "uno.video.completeUpload",
   unoVideoCreateJob: "uno.video.createJob",
@@ -593,6 +596,75 @@ export const WsUnoCreateLlmTopUpActionRpc = Rpc.make(WS_METHODS.unoCreateLlmTopU
   payload: UnoCreateLlmTopUpActionInput,
   success: UnoCreateLlmTopUpActionResult,
   error: UnoBillingRpcError,
+});
+
+// ---- Personal AI (модели на личном GPU, Uno GPU) ----
+
+export const PersonalAiModelState = Schema.Literals([
+  "off",
+  "starting",
+  "ready",
+  "sleeping",
+  "failed",
+]);
+export type PersonalAiModelState = typeof PersonalAiModelState.Type;
+
+export const PersonalAiStep = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  state: Schema.String,
+});
+
+export const PersonalAiModel = Schema.Struct({
+  /** Served name — то же, что уходит в поле model; slug в Uno — `uno-personal/<id>`. */
+  id: Schema.String,
+  name: Schema.String,
+  size: Schema.String,
+  contextTokens: Schema.optional(Schema.Number),
+  priceUsdPerHour: Schema.Number,
+  idleSleepS: Schema.Number,
+  state: PersonalAiModelState,
+  etaS: Schema.optional(Schema.Number),
+  startedAt: Schema.optional(Schema.String),
+  steps: Schema.optional(Schema.Array(PersonalAiStep)),
+  error: Schema.optional(Schema.String),
+});
+export type PersonalAiModel = typeof PersonalAiModel.Type;
+
+export const PersonalAiListResult = Schema.Struct({
+  /** false — у аккаунта нет доступа к Personal AI (нет флага или ключа). */
+  available: Schema.Boolean,
+  models: Schema.Array(PersonalAiModel),
+});
+export type PersonalAiListResult = typeof PersonalAiListResult.Type;
+
+export const PersonalAiModelInput = Schema.Struct({ modelId: Schema.String });
+export type PersonalAiModelInput = typeof PersonalAiModelInput.Type;
+
+export class PersonalAiRpcError extends Schema.TaggedErrorClass<PersonalAiRpcError>()(
+  "PersonalAiRpcError",
+  {
+    message: Schema.String,
+    code: Schema.optional(Schema.String),
+  },
+) {}
+
+export const WsUnoPersonalAiListRpc = Rpc.make(WS_METHODS.unoPersonalAiList, {
+  payload: Schema.Struct({}),
+  success: PersonalAiListResult,
+  error: PersonalAiRpcError,
+});
+
+export const WsUnoPersonalAiStartRpc = Rpc.make(WS_METHODS.unoPersonalAiStart, {
+  payload: PersonalAiModelInput,
+  success: PersonalAiModel,
+  error: PersonalAiRpcError,
+});
+
+export const WsUnoPersonalAiStopRpc = Rpc.make(WS_METHODS.unoPersonalAiStop, {
+  payload: PersonalAiModelInput,
+  success: PersonalAiModel,
+  error: PersonalAiRpcError,
 });
 
 export const WsUnoVideoCreateUploadRpc = Rpc.make(WS_METHODS.unoVideoCreateUpload, {
@@ -1587,6 +1659,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsPluginsResolvePanelThreadRpc,
   WsSubscribePluginsRpc,
   WsUnoCreateLlmTopUpActionRpc,
+  WsUnoPersonalAiListRpc,
+  WsUnoPersonalAiStartRpc,
+  WsUnoPersonalAiStopRpc,
   WsUnoVideoCreateUploadRpc,
   WsUnoVideoCompleteUploadRpc,
   WsUnoVideoCreateJobRpc,

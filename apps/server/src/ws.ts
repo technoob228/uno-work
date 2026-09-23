@@ -26,6 +26,7 @@ import {
   ThreadId,
   type TerminalEvent,
   UnoBillingRpcError,
+  PersonalAiRpcError,
   UnoCloudRpcError,
   UNO_GATEWAY_BASE_URL,
   WS_METHODS,
@@ -64,6 +65,11 @@ import {
 } from "./credentialsAccountSync.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
+import {
+  PersonalAiRequestError,
+  fetchPersonalAiModels,
+  personalAiAction,
+} from "./unoPersonalAi.ts";
 import { CredentialsVaultService } from "./credentialsVault.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
@@ -713,6 +719,29 @@ const makeWsRpcLayer = (
           settings,
         };
       });
+
+      // Personal AI: ключ — тот же, что у пополнения (ключ аккаунта или шлюза;
+      // бэкенд пускает оба). Ошибки — человеческим текстом для тоста.
+      const personalAiKey = serverSettings.getSettings.pipe(
+        Effect.map((settings) => settings.uno.apiKey.trim()),
+        Effect.orElseSucceed(() => ""),
+      );
+      const toPersonalAiError = (cause: unknown) =>
+        new PersonalAiRpcError({
+          message: cause instanceof Error ? cause.message : String(cause),
+          ...(cause instanceof PersonalAiRequestError && cause.code ? { code: cause.code } : {}),
+        });
+      const listPersonalAi = () =>
+        Effect.flatMap(personalAiKey, (key) =>
+          Effect.tryPromise({ try: () => fetchPersonalAiModels(key), catch: toPersonalAiError }),
+        );
+      const personalAiDo = (modelId: string, action: "start" | "stop") =>
+        Effect.flatMap(personalAiKey, (key) =>
+          Effect.tryPromise({
+            try: () => personalAiAction(key, modelId, action),
+            catch: toPersonalAiError,
+          }),
+        );
 
       const createUnoLlmTopUpAction = (input: { readonly amount?: number | undefined }) =>
         Effect.gen(function* () {
@@ -1560,6 +1589,18 @@ const makeWsRpcLayer = (
         [WS_METHODS.pluginsResolvePanelThread]: (input) =>
           observeRpcEffect(WS_METHODS.pluginsResolvePanelThread, resolvePluginPanelThread(input), {
             "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.unoPersonalAiList]: () =>
+          observeRpcEffect(WS_METHODS.unoPersonalAiList, listPersonalAi(), {
+            "rpc.aggregate": "uno",
+          }),
+        [WS_METHODS.unoPersonalAiStart]: (input) =>
+          observeRpcEffect(WS_METHODS.unoPersonalAiStart, personalAiDo(input.modelId, "start"), {
+            "rpc.aggregate": "uno",
+          }),
+        [WS_METHODS.unoPersonalAiStop]: (input) =>
+          observeRpcEffect(WS_METHODS.unoPersonalAiStop, personalAiDo(input.modelId, "stop"), {
+            "rpc.aggregate": "uno",
           }),
         [WS_METHODS.unoCreateLlmTopUpAction]: (input) =>
           observeRpcEffect(WS_METHODS.unoCreateLlmTopUpAction, createUnoLlmTopUpAction(input), {
