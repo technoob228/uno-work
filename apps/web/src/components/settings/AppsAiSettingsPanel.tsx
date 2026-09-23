@@ -65,6 +65,30 @@ export function appUsageLine(app: Pick<AppAiApp, "name" | "spentUsd" | "limitUsd
   return `${app.name} used ${formatUsd(app.spentUsd)} of ${formatUsd(app.limitUsd)}`;
 }
 
+/**
+ * "answers $0.10, jobs $0.30" — where the money went, once the app gives jobs
+ * (both count against the one limit). null for an app that only answers.
+ */
+export function appSpendBreakdown(
+  app: Pick<AppAiApp, "tasks" | "chatSpentUsd" | "tasksSpentUsd">,
+): string | null {
+  if (!app.tasks && app.tasksSpentUsd === 0) return null;
+  return `answers ${formatUsd(app.chatSpentUsd)}, jobs ${formatUsd(app.tasksSpentUsd)}`;
+}
+
+/** Why jobs might not show in an app's spending — null when they do. */
+export function taskSpendNote(
+  overview: Pick<AppAiOverview, "taskSpend" | "taskHarnessUsesUnoAi">,
+): string | null {
+  if (!overview.taskHarnessUsesUnoAi) {
+    return "This agent runs on your own subscription or keys — its jobs don't count against an app's limit.";
+  }
+  if (overview.taskSpend === "unavailable") {
+    return "Uno AI can't report what jobs cost yet — until it can, jobs don't count against an app's limit.";
+  }
+  return null;
+}
+
 /** "5 GB", "1.5 GB", "500 MB" — a storage limit as a person reads it. */
 export function formatLimitBytes(bytes: number): string {
   const gb = bytes / 1024 ** 3;
@@ -133,6 +157,7 @@ function AppRow({
           {usesAi ? (
             <span className="block">
               {appUsageLine(app)}
+              {appSpendBreakdown(app) ? ` (${appSpendBreakdown(app)})` : ""}
               {` · uses AI for ${uses}`}
               {app.tasksStarted > 0
                 ? ` · ${app.tasksStarted} job${app.tasksStarted === 1 ? "" : "s"}`
@@ -386,6 +411,7 @@ export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId:
         <SettingsRow
           title="Agent for jobs"
           description="Which agent does the jobs apps hand over. Each job appears as a chat named after the app, where you can watch it and approve its steps."
+          status={data ? taskSpendNote(data) : null}
           resetAction={
             chosen ? (
               <SettingResetButton

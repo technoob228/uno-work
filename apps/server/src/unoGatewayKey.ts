@@ -23,6 +23,7 @@
 import { Context, Effect, Layer, Ref } from "effect";
 import os from "node:os";
 
+import { type ThreadAppLabels, makeThreadAppLabels } from "./appSdk/appTaskLabel.ts";
 import { ServerSecretStore } from "./auth/Services/ServerSecretStore.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 import { fetchControlPlaneJson } from "./unoBoxIdentity.ts";
@@ -57,12 +58,15 @@ export function isGatewayScopedKey(key: string): boolean {
   return key.startsWith(UNO_GATEWAY_KEY_PREFIX);
 }
 
-export interface UnoGatewayKeyShape {
+export interface UnoGatewayKeyShape extends ThreadAppLabels {
   /**
    * Ключ для окружения харнессов и их конфигов. Пустая строка — ключа нет
    * (не задан, не вычеканился); никогда не возвращает ключ аккаунта.
    */
   readonly harnessKey: () => Effect.Effect<string>;
+  // labelThread / appOfThread — чей тред: задача приложения машины (Uno App
+  // SDK) идёт в шлюз тем же ключом, но с меткой приложения
+  // (appSdk/appTaskLabel.ts). Метку ставит только демон.
 }
 
 export class UnoGatewayKey extends Context.Service<UnoGatewayKey, UnoGatewayKeyShape>()(
@@ -162,11 +166,14 @@ const makeUnoGatewayKey = Effect.gen(function* () {
       return key;
     });
 
-  return { harnessKey } satisfies UnoGatewayKeyShape;
+  return { harnessKey, ...makeThreadAppLabels() } satisfies UnoGatewayKeyShape;
 });
 
 export const UnoGatewayKeyLive = Layer.effect(UnoGatewayKey, makeUnoGatewayKey);
 
 /** Тестовый стаб: харнессы получают то, что передали (по умолчанию ничего). */
 export const UnoGatewayKeyTest = (key = "") =>
-  Layer.succeed(UnoGatewayKey, { harnessKey: () => Effect.succeed(key) });
+  Layer.sync(UnoGatewayKey, () => ({
+    harnessKey: () => Effect.succeed(key),
+    ...makeThreadAppLabels(),
+  }));

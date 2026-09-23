@@ -44,6 +44,7 @@ import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGen
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
+import { withAppLabelHeaders } from "../../appSdk/appTaskLabel.ts";
 import {
   UNO_PERSONAL_PROVIDER_ID,
   UNO_PERSONAL_WARMUP_HEADERS,
@@ -635,6 +636,26 @@ function buildUnoConfigContent(
   return JSON.stringify(config);
 }
 
+/**
+ * Per-session env of a Uno thread. A thread that is an app's task (Uno App
+ * SDK) gets the app label on its gateway calls (`appSdk/appTaskLabel.ts`),
+ * so the gateway counts what it spends against the app's limit.
+ */
+export function unoSessionEnvironment(input: {
+  readonly bridge: Record<string, string>;
+  readonly configContent: string | undefined;
+  readonly appId: string | null;
+}): Record<string, string> {
+  if (input.appId === null) return input.bridge;
+  const labelled = withAppLabelHeaders(input.configContent, input.appId, [
+    UNO_PROVIDER_ID,
+    UNO_RUSSIA_PROVIDER_ID,
+  ]);
+  return labelled === undefined || labelled === input.configContent
+    ? input.bridge
+    : { ...input.bridge, OPENCODE_CONFIG_CONTENT: labelled };
+}
+
 const UNO_DEFAULT_DISPLAY_NAME = "Uno";
 
 function isUnoModelSlug(slug: string): boolean {
@@ -831,7 +852,8 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         Effect.orElseSucceed(() => undefined),
       );
       // Только ключ шлюза: ключ аккаунта в процесс харнесса не уходит.
-      const unoApiKey = yield* (yield* UnoGatewayKey).harnessKey();
+      const gatewayKey = yield* UnoGatewayKey;
+      const unoApiKey = yield* gatewayKey.harnessKey();
       const catalogFailures: string[] = [];
       const unoCatalog = yield* Effect.promise(() =>
         fetchUnoModelsCatalogWithRetry(unoApiKey, {
@@ -914,7 +936,12 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
       const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
         instanceId,
         environment: processEnv,
-        bridgeEnvironment: (context) => browserBridge.scopedEnvironment(context),
+        bridgeEnvironment: (context) =>
+          unoSessionEnvironment({
+            bridge: browserBridge.scopedEnvironment(context),
+            configContent: processEnv.OPENCODE_CONFIG_CONTENT,
+            appId: gatewayKey.appOfThread(context.threadId),
+          }),
         // uno-code's per-directory `/event` stream is silent (only
         // `server.connected`); session events only reach `/global/event`.
         // Without this the turn finishes on the server and the UI shows

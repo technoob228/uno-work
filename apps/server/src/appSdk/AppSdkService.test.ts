@@ -9,7 +9,8 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
-import { UnoGatewayKeyTest } from "../unoGatewayKey.ts";
+import { UnoGatewayKey, type UnoGatewayKeyShape, UnoGatewayKeyTest } from "../unoGatewayKey.ts";
+import { makeAppApiHandler } from "./appApiHttp.ts";
 import { makeAppSdkService } from "./AppSdkService.ts";
 
 let root: string;
@@ -33,7 +34,11 @@ const writeManifest = (id: string, body: unknown) =>
   writeFile(path.join(appsDir, `${id}.json`), JSON.stringify(body));
 
 const run = <A>(
-  body: (service: Effect.Success<ReturnType<typeof makeAppSdkService>>) => Promise<A>,
+  body: (
+    service: Effect.Success<ReturnType<typeof makeAppSdkService>>,
+    gatewayKey: UnoGatewayKeyShape,
+  ) => Promise<A>,
+  extra: { readonly fetch?: typeof fetch } = {},
 ) =>
   Effect.runPromise(
     Effect.scoped(
@@ -45,8 +50,10 @@ const run = <A>(
           storePath: path.join(root, "state", "app-ai.json"),
           port: null,
           background: false,
+          ...extra,
         });
-        return yield* Effect.promise(() => body(service));
+        const gatewayKey = yield* UnoGatewayKey;
+        return yield* Effect.promise(() => body(service, gatewayKey));
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -192,4 +199,135 @@ describe("AppSdkService", () => {
       expect(await service.core.authenticate(await tokenOf("notes"))).not.toBeNull();
     });
   });
+  it("what an app's tasks spend on the gateway counts against its limit; then new tasks are refused", async () => {
+    await writeManifest("digest", {
+      name: "Digest",
+      port: 3000,
+      ai: { chat: true, tasks: true, limitUsd: 1 },
+    });
+    let gatewayTotal = 0.4;
+    const asked: string[] = [];
+    const fakeGateway = (async (url: string) => {
+      asked.push(String(url));
+      return Response.json({ object: "list", data: [{ app: "digest", cost_usd: gatewayTotal }] });
+    }) as typeof fetch;
+    await mkdir(path.join(root, "state"), { recursive: true });
+    // The app already gave a job (as if before a restart): its thread keeps the label.
+    await writeFile(
+      path.join(root, "state", "app-ai.json"),
+      JSON.stringify({
+        version: 1,
+        apps: {
+          digest: {
+            tasksStarted: 1,
+            spentUsd: 0.25,
+            tasks: [
+              {
+                id: "task_1",
+                threadId: "thread-1",
+                createdAt: "2026-09-23T00:00:00.000Z",
+                tools: "edit",
+                harness: "uno",
+                turnCountAtStart: 0,
+              },
+            ],
+          },
+        },
+      }),
+    );
+    await run(
+      async (service, gatewayKey) => {
+        expect(gatewayKey.appOfThread("thread-1")).toBe("digest");
+        await service.sync();
+        const token = await tokenOf("digest");
+        const caller = await service.core.authenticate(token);
+        expect(asked[0]).toMatch(/\/usage\/apps$/);
+        expect(caller).toMatchObject({ spentUsd: 0.65, tasksSpentUsd: 0.4 });
+        let overview = await Effect.runPromise(service.overview);
+        expect(overview.taskSpend).toBe("metered");
+        expect(overview.apps[0]).toMatchObject({
+          spentUsd: 0.65,
+          chatSpentUsd: 0.25,
+          tasksSpentUsd: 0.4,
+          status: "active",
+        });
+
+        // The task keeps working and the gateway total grows past the limit.
+        gatewayTotal = 0.9;
+        await service.taskMeter.refresh(0);
+        overview = await Effect.runPromise(service.overview);
+        expect(overview.apps[0]).toMatchObject({ tasksSpentUsd: 0.9, status: "over-limit" });
+
+        const handler = makeAppApiHandler(service.core);
+        const reply = await callHandler(handler, token, "POST", "/v1/tasks", { prompt: "again" });
+        expect(reply.status).toBe(402);
+        expect(JSON.parse(reply.body).error.code).toBe("app_limit_reached");
+
+        // Reset zeroes the ledger; only new gateway growth counts from here.
+        await Effect.runPromise(service.update({ appId: "digest", resetSpent: true }));
+        gatewayTotal = 1.0;
+        await service.taskMeter.refresh(0);
+        overview = await Effect.runPromise(service.overview);
+        expect(overview.apps[0]?.tasksSpentUsd).toBeCloseTo(0.1);
+        expect(overview.apps[0]?.status).toBe("active");
+      },
+      { fetch: fakeGateway },
+    );
+  });
+
+  it("an older gateway without per-app totals: tasks aren't counted, and Settings says so", async () => {
+    await writeManifest("digest", { name: "Digest", port: 3000, ai: { tasks: true } });
+    await mkdir(path.join(root, "state"), { recursive: true });
+    await writeFile(
+      path.join(root, "state", "app-ai.json"),
+      JSON.stringify({ version: 1, apps: { digest: { tasksStarted: 1 } } }),
+    );
+    await run(
+      async (service) => {
+        await service.sync();
+        const overview = await Effect.runPromise(service.overview);
+        expect(overview.taskSpend).toBe("unavailable");
+        expect(overview.apps[0]?.tasksSpentUsd).toBe(0);
+      },
+      {
+        fetch: (async () =>
+          new Response("404 page not found", { status: 404 })) as unknown as typeof fetch,
+      },
+    );
+  });
 });
+
+/** One request through the App API handler, without a socket. */
+async function callHandler(
+  handler: ReturnType<typeof makeAppApiHandler>,
+  token: string,
+  method: string,
+  url: string,
+  body: unknown,
+): Promise<{ status: number; body: string }> {
+  const { PassThrough } = await import("node:stream");
+  const req = Object.assign(new PassThrough(), {
+    method,
+    url,
+    headers: { authorization: `Bearer ${token}`, host: "127.0.0.1" },
+  });
+  let status = 0;
+  let out = "";
+  const done = new Promise<void>((resolve) => {
+    const res = {
+      headersSent: false,
+      writeHead: (code: number) => {
+        status = code;
+        return res;
+      },
+      end: (chunk?: string) => {
+        out += chunk ?? "";
+        resolve();
+      },
+    };
+    void handler(req as never, res as never);
+  });
+  req.end(JSON.stringify(body));
+  await done;
+  return { status, body: out };
+}

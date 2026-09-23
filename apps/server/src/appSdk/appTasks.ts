@@ -85,6 +85,12 @@ export interface AppTasksDeps {
   /** Settings → Apps → "AI for apps" (null = the machine's default harness). */
   readonly getTaskModelSelection: Effect.Effect<ModelSelection | null>;
   readonly home: string;
+  /**
+   * Marks the thread as this app's before its first turn starts, so the
+   * harness session gets the app label on its gateway calls
+   * (`appTaskLabel.ts`) — the task's spending counts against the app's limit.
+   */
+  readonly labelThread: (threadId: string, appId: string) => void;
 }
 
 export interface AppApiReply {
@@ -345,6 +351,7 @@ export function makeAppTasks(deps: AppTasksDeps) {
       const threadId = ThreadId.make(crypto.randomUUID());
       const modes = modesForTools(tools);
       const createdAt = new Date().toISOString();
+      deps.labelThread(threadId, caller.appId);
       const outcome = yield* Effect.gen(function* () {
         const projectId = yield* projectFor(cwd.cwd, selection.selection, caller, taskId);
         yield* dispatch(

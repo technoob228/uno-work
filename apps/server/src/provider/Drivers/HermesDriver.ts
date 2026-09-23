@@ -27,7 +27,7 @@ import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
 import type { TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
-import { buildHermesSpawnEnvironment } from "../acp/HermesAcpSupport.ts";
+import { buildHermesSpawnEnvironment, hermesAppLabelEnvironment } from "../acp/HermesAcpSupport.ts";
 import { makeHermesAdapter } from "../Layers/HermesAdapter.ts";
 import {
   buildInitialHermesProviderSnapshot,
@@ -110,7 +110,8 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
         Effect.orElseSucceed(() => undefined),
       );
       // Только ключ шлюза: ключ аккаунта в процесс харнесса не уходит.
-      const unoApiKey = yield* (yield* UnoGatewayKey).harnessKey();
+      const gatewayKey = yield* UnoGatewayKey;
+      const unoApiKey = yield* gatewayKey.harnessKey();
 
       const hermesEnvironment = buildHermesSpawnEnvironment({
         unoApiKey,
@@ -148,7 +149,13 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
 
       const adapter = yield* makeHermesAdapter(effectiveConfig, {
         environment: processEnv,
-        bridgeEnvironment: (context) => browserBridge.scopedEnvironment(context),
+        bridgeEnvironment: (context) => ({
+          ...browserBridge.scopedEnvironment(context),
+          // Задача приложения машины (Uno App SDK): вызовы шлюза с меткой
+          // приложения. OpenAI SDK Hermes'а не берёт заголовки из env —
+          // метка в base URL (`/v1/apps/<id>`, шлюз обслуживает те же ручки).
+          ...hermesAppLabelEnvironment(gatewayKey.appOfThread(context.threadId)),
+        }),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
       });

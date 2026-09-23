@@ -30,6 +30,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
+import { gatewayBaseUrlForApp, isAppLabel } from "../../appSdk/appTaskLabel.ts";
 import {
   AcpSessionRuntime,
   type AcpSessionRuntimeOptions,
@@ -81,6 +82,17 @@ export function buildHermesSpawnEnvironment(
     // применяет только в паре с stt.openai.api_key, а секрет в файл не пишем.
     STT_OPENAI_BASE_URL: UNO_GATEWAY_BASE_URL,
   };
+}
+
+/**
+ * Env overlay of a Hermes thread that is an app's task (Uno App SDK): the
+ * gateway base URL carries the app label (`/v1/apps/<id>`), so what the task
+ * spends counts against the app's limit. STT stays unlabelled. Not an app
+ * thread → nothing.
+ */
+export function hermesAppLabelEnvironment(appId: string | null): Record<string, string> {
+  if (appId === null || !isAppLabel(appId)) return {};
+  return { OPENAI_BASE_URL: gatewayBaseUrlForApp(UNO_GATEWAY_BASE_URL, appId) };
 }
 
 export function buildHermesAcpSpawnInput(

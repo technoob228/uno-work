@@ -119,7 +119,18 @@ export interface UnoTask extends TaskState {
 
 export interface WhoAmI {
   app: { id: string; name: string };
-  ai: { chat: boolean; tasks: boolean; limitUsd: number; spentUsd: number; remainingUsd: number };
+  ai: {
+    chat: boolean;
+    tasks: boolean;
+    limitUsd: number;
+    /** Everything counted against the limit: answers + jobs. */
+    spentUsd: number;
+    /** Answers and transcription. */
+    chatSpentUsd?: number;
+    /** Agent tasks on the Uno AI gateway (not on the person's own subscription). */
+    tasksSpentUsd?: number;
+    remainingUsd: number;
+  };
   storage: { enabled: boolean; limitBytes?: number; usedBytes?: number | null };
   defaults: { chatModel: string; taskHarness: string };
   home: string;
