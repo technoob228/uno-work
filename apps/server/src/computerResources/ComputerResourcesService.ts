@@ -80,6 +80,7 @@ import {
   type MemoryReading,
   type RawProcess,
 } from "./resourceParsers.ts";
+import { CpuLoadWindow } from "./cpuWindow.ts";
 
 const HISTORY_STEP = Duration.seconds(5);
 const HISTORY_POINTS = 120;
@@ -409,6 +410,9 @@ export const makeComputerResourcesService = (options: ComputerResourcesOptions =
     let lastCpu: { idle: number; total: number } | null = null;
     let lastNet: { rx: number; tx: number; at: number } | null = null;
     let lastPoint: UnoResourcesPoint | null = null;
+    // The headline share covers ~15 s (three samples), not the last 5 s alone.
+    const headlineWindow = new CpuLoadWindow();
+    let headlineCpuPct: number | null = null;
 
     const sampleHistory = async () => {
       const [cpu, memory, net] = await Promise.all([readCpuTotals(), readMemory(), readNet()]);
@@ -420,6 +424,7 @@ export const makeComputerResourcesService = (options: ComputerResourcesOptions =
       }
       lastCpu = cpu;
       const now = Date.now();
+      headlineCpuPct = headlineWindow.sample(now, cpu);
       let rx: number | null = null;
       let tx: number | null = null;
       if (net && lastNet && now > lastNet.at) {
@@ -728,7 +733,10 @@ export const makeComputerResourcesService = (options: ComputerResourcesOptions =
             platform,
             sampledAt: new Date().toISOString(),
             cpuCount: cpuCount(),
-            cpuPct: point?.cpuPct ?? round1(grouped.groups.reduce((s, g) => s + g.cpuPct, 0)),
+            cpuPct:
+              (headlineCpuPct === null ? null : round1(headlineCpuPct)) ??
+              point?.cpuPct ??
+              round1(grouped.groups.reduce((s, g) => s + g.cpuPct, 0)),
             load1: platform === "win32" || load === undefined ? null : round2(load),
             memory,
             volumes: vols,

@@ -41,7 +41,14 @@ import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("opencode");
-const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
+/**
+ * The periodic re-probe starts a whole `serve` process to read models and
+ * agents: several seconds of a full processor on a small cloud computer. At
+ * every five minutes that made an idle computer look busy on its own screen.
+ * Settings changes, a finished install/sign-in and "Refresh" still probe at
+ * once, so only a model added upstream shows up later.
+ */
+export const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(30);
 
 export type OpenCodeDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
