@@ -57,6 +57,11 @@ export interface AccountComputer {
   /** The comment without the role tag — the person's own note. */
   readonly note: string;
   readonly comment: string;
+  /**
+   * The console keeps the role in its own `computer_role` field (migration
+   * 139). False = an older console: the role is written as a comment tag.
+   */
+  readonly roleInField: boolean;
   readonly alwaysOn: boolean;
   readonly wakeOnHttp: boolean;
   readonly startedAt: string | null;
@@ -73,6 +78,7 @@ export function parseAccountComputer(raw: unknown): AccountComputer | null {
   if (status === "deleted") return null;
   const workMachine = r["work_machine"] === true || r["role"] === "work";
   const comment = str(r["comment"]);
+  const roleInField = "computer_role" in r;
   return {
     id,
     name: str(r["name"]) || `computer-${id}`,
@@ -81,9 +87,10 @@ export function parseAccountComputer(raw: unknown): AccountComputer | null {
     vcpu: num(r["vcpu"]),
     diskGb: num(r["disk_gb"]),
     workMachine,
-    role: computerRole({ workMachine, comment }),
+    role: computerRole({ workMachine, roleField: r["computer_role"], comment }),
     note: parseRoleComment(comment).note,
     comment,
+    roleInField,
     alwaysOn: r["always_on"] === true,
     wakeOnHttp: r["wake_on_http"] === true,
     startedAt: strOrNull(r["started_at"]),
@@ -99,10 +106,18 @@ export async function fetchAccountComputers(): Promise<ReadonlyArray<AccountComp
     .filter((box): box is AccountComputer => box !== null);
 }
 
+/**
+ * The body that changes a computer's role: the field alone on a console that
+ * has it (the person's note is left untouched), the comment tag otherwise.
+ */
+export function roleChangeBody(computer: AccountComputer, role: ComputerRole) {
+  return computer.roleInField
+    ? { computer_role: role }
+    : { comment: withRole(computer.comment, role) };
+}
+
 export async function setComputerRole(computer: AccountComputer, role: ComputerRole) {
-  await accountRequest("PATCH", `/api/v1/boxes/${computer.id}`, {
-    comment: withRole(computer.comment, role),
-  });
+  await accountRequest("PATCH", `/api/v1/boxes/${computer.id}`, roleChangeBody(computer, role));
 }
 
 export async function createServerComputer(input: {
@@ -117,6 +132,9 @@ export async function createServerComputer(input: {
     ram_mb: input.ramMb,
     vcpu: input.vcpu,
     disk_gb: input.diskGb,
+    // Both: a console with the field takes computer_role (and drops the tag
+    // from the comment); an older one ignores the field and keeps the tag.
+    computer_role: input.role,
     comment: withRole("", input.role),
   });
   return parseAccountComputer(raw);
