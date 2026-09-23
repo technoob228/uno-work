@@ -20,6 +20,8 @@ import { createHash, randomBytes } from "node:crypto";
 import fsPromises from "node:fs/promises";
 import nodePath from "node:path";
 
+import { mergeDocxComments } from "./docxComments.ts";
+
 export type OfficeShareDocumentType = "word" | "cell" | "slide";
 
 const WORD = new Set(["docx", "doc", "odt", "rtf", "dotx"]);
@@ -37,11 +39,21 @@ export const SHARE_OFFICE_MAX_BYTES = 60 * 1024 * 1024;
 /** Previous versions kept per link. */
 export const SHARE_OFFICE_KEEP_VERSIONS = 20;
 
+/**
+ * Formats a "Can comment" link can save. The daemon only accepts a comment
+ * save after checking that nothing but comments changed (docxComments.ts);
+ * that check exists for Word documents only. A comment link to a spreadsheet
+ * or presentation opens read-only.
+ */
+const COMMENTABLE = new Set(["docx"]);
+
 export interface OfficeShareInfo {
   readonly extension: string;
   readonly documentType: OfficeShareDocumentType;
-  /** A link to this file may be given comment/edit access. */
+  /** A link to this file may be given edit access. */
   readonly writable: boolean;
+  /** A "Can comment" link to this file may save its comments. */
+  readonly commentable: boolean;
 }
 
 export function officeShareInfo(filePath: string): OfficeShareInfo | null {
@@ -57,7 +69,24 @@ export function officeShareInfo(filePath: string): OfficeShareInfo | null {
         ? "slide"
         : null;
   if (!documentType) return null;
-  return { extension, documentType, writable: WRITABLE.has(extension) };
+  return {
+    extension,
+    documentType,
+    writable: WRITABLE.has(extension),
+    commentable: COMMENTABLE.has(extension),
+  };
+}
+
+export type OfficeShareAccess = "view" | "comment" | "edit";
+
+/** What a link may actually do with this file, whatever the owner picked. */
+export function effectiveOfficeAccess(
+  info: OfficeShareInfo,
+  access: OfficeShareAccess,
+): OfficeShareAccess {
+  if (access === "edit") return info.writable ? "edit" : "view";
+  if (access === "comment") return info.commentable ? "comment" : "view";
+  return "view";
 }
 
 /** Short content hash; changes whenever the bytes do. */
@@ -82,7 +111,13 @@ export function looksLikeOfficeArchive(bytes: Uint8Array): boolean {
 export type ShareOfficeSaveResult =
   | { readonly kind: "saved"; readonly version: string; readonly modifiedAt: string }
   | { readonly kind: "conflict"; readonly currentVersion: string; readonly modifiedAt: string }
-  | { readonly kind: "rejected"; readonly status: number; readonly message: string };
+  | {
+      readonly kind: "rejected";
+      readonly status: number;
+      readonly message: string;
+      /** `comment_only`: a comment link tried to change more than comments. */
+      readonly code?: "comment_only";
+    };
 
 const locks = new Map<string, Promise<unknown>>();
 
@@ -137,11 +172,24 @@ export async function saveSharedOfficeFile(input: {
   readonly baseVersion: string | null;
   readonly force: boolean;
   readonly versionsDir: string;
+  /** The link's access; "comment" saves only the comments of `bytes`. */
+  readonly access?: OfficeShareAccess;
   readonly now?: Date;
 }): Promise<ShareOfficeSaveResult> {
   const info = officeShareInfo(input.filePath);
   if (!info?.writable) {
     return { kind: "rejected", status: 400, message: "This file can't be saved from a link." };
+  }
+  const access = effectiveOfficeAccess(info, input.access ?? "edit");
+  if (access === "view") {
+    return {
+      kind: "rejected",
+      status: 403,
+      message:
+        input.access === "comment"
+          ? "Comments on this kind of file can't be saved through a link yet."
+          : "This link can only view the document.",
+    };
   }
   if (input.bytes.length === 0 || input.bytes.length > SHARE_OFFICE_MAX_BYTES) {
     return { kind: "rejected", status: 413, message: "The document is too large to save." };
@@ -161,6 +209,21 @@ export async function saveSharedOfficeFile(input: {
     if (!input.force && currentVersion !== input.baseVersion) {
       return { kind: "conflict", currentVersion, modifiedAt: stats.mtime.toISOString() };
     }
+    let bytes = input.bytes;
+    if (access === "comment") {
+      // Never the visitor's file: the current one with their comments in it.
+      const merged = mergeDocxComments({ current, upload: input.bytes });
+      if (merged.kind === "rejected") {
+        return {
+          kind: "rejected",
+          status:
+            merged.reason === "text_changed" ? 403 : merged.reason === "unsupported" ? 403 : 400,
+          message: merged.message,
+          ...(merged.reason === "text_changed" ? { code: "comment_only" as const } : {}),
+        };
+      }
+      bytes = merged.bytes;
+    }
     const fileName = nodePath.basename(input.filePath);
     await keepPreviousVersion({
       versionsDir: input.versionsDir,
@@ -174,7 +237,7 @@ export async function saveSharedOfficeFile(input: {
       `.${fileName}.uno-share-${randomBytes(6).toString("hex")}.tmp`,
     );
     try {
-      await fsPromises.writeFile(temp, input.bytes, { mode: stats.mode & 0o777 });
+      await fsPromises.writeFile(temp, bytes, { mode: stats.mode & 0o777 });
       await fsPromises.rename(temp, input.filePath);
     } catch (error) {
       await fsPromises.rm(temp, { force: true });
@@ -183,7 +246,7 @@ export async function saveSharedOfficeFile(input: {
     const after = await fsPromises.stat(input.filePath);
     return {
       kind: "saved",
-      version: contentVersion(input.bytes),
+      version: contentVersion(bytes),
       modifiedAt: after.mtime.toISOString(),
     };
   });

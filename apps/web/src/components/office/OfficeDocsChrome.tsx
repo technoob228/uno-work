@@ -13,6 +13,8 @@ import {
   BoldIcon,
   ChevronDownIcon,
   CloudAlertIcon,
+  CloudIcon,
+  HistoryIcon,
   CheckIcon,
   EllipsisVerticalIcon,
   FileDownIcon,
@@ -406,6 +408,10 @@ export interface OfficeDocsChromeProps {
   onShare?: (() => void) | undefined;
   onShowInFiles: () => void;
   onRename?: ((newName: string) => Promise<void>) | undefined;
+  /** Older copies of the document (Versions dialog). */
+  onVersions?: (() => void) | undefined;
+  /** Set for a document opened from Cloud storage. */
+  cloud?: { writable: boolean } | undefined;
 }
 
 export function OfficeDocsChrome(props: OfficeDocsChromeProps) {
@@ -437,6 +443,16 @@ export function OfficeDocsChrome(props: OfficeDocsChromeProps) {
           <FileTextIcon className="ms-0.5 size-5 shrink-0 text-blue-600" aria-hidden />
           <div className="flex min-w-0 items-center gap-2">
             <DocName fileName={fileName} onRename={props.onRename} />
+            {props.cloud ? (
+              <span
+                className="flex shrink-0 items-center gap-1 rounded-full bg-sky-500/10 px-2 py-0.5 text-[11px] text-sky-700 dark:text-sky-300"
+                title="Opened from Cloud storage and saved back there. Older copies are kept in the .versions folder next to it."
+                data-testid="office-cloud-badge"
+              >
+                <CloudIcon className="size-3" />
+                {props.cloud.writable ? "Cloud storage" : "Cloud storage · read-only"}
+              </span>
+            ) : null}
             <SaveStatusLabel status={status} />
           </div>
           <div className="ms-auto flex shrink-0 items-center gap-1.5">
@@ -471,6 +487,12 @@ export function OfficeDocsChrome(props: OfficeDocsChromeProps) {
                   >
                     <PencilIcon />
                     Rename
+                  </MenuItem>
+                ) : null}
+                {props.onVersions ? (
+                  <MenuItem onClick={props.onVersions} data-testid="office-versions">
+                    <HistoryIcon />
+                    Versions
                   </MenuItem>
                 ) : null}
                 <MenuItem onClick={props.onShowInFiles}>

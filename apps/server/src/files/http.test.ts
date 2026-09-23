@@ -20,7 +20,15 @@ import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { FileSharesRepository } from "../persistence/Services/FileShares.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { FilesService, makeFilesService } from "./FilesService.ts";
-import { filesRawRouteLayer, filesShareRouteLayers, parseRangeHeader } from "./http.ts";
+import { docxBodyText } from "./docxComments.ts";
+import {
+  filesOfficeVersionsRouteLayer,
+  filesRawRouteLayer,
+  filesShareRouteLayers,
+  parseRangeHeader,
+} from "./http.ts";
+import { contentVersion } from "./shareOffice.ts";
+import { readZip } from "./zipPackage.ts";
 
 const AUTH_HEADER = "x-test-session";
 
@@ -89,7 +97,7 @@ const makeFixture = Effect.gen(function* () {
     Layer.mergeAll(filesLayer, authLayer, configLayer, NodeServices.layer, NodeHttpPlatform.layer),
   );
   const { handler, dispose } = HttpRouter.toWebHandler(
-    Layer.mergeAll(filesRawRouteLayer, ...filesShareRouteLayers),
+    Layer.mergeAll(filesRawRouteLayer, filesOfficeVersionsRouteLayer, ...filesShareRouteLayers),
     { disableLogger: true },
   );
   yield* Effect.addFinalizer(() => Effect.promise(() => dispose()));
@@ -399,6 +407,77 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("files share routes"
       // Reserved names never reach a folder link's files.
       const folder = yield* files.createShare({ path: `${home}/docs` });
       assert.equal((yield* request(`${folder.urlPath}/.file`)).status, 404);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("a comment link saves comments only, checked on the computer", () =>
+    Effect.gen(function* () {
+      const { home, sandbox, request, files, json } = yield* makeFixture;
+      const fixtures = nodePath.join(import.meta.dirname, "fixtures");
+      const read = (name: string) => fs.readFileSync(nodePath.join(fixtures, name));
+      const doc = `${home}/docs/review.docx`;
+      fs.writeFileSync(doc, read("comment-base.docx"));
+      const share = yield* files.createShare({ path: doc, access: "comment" });
+      const opened = yield* request(`${share.urlPath}/.file`);
+      const version = opened.headers.get("x-uno-version")!;
+      const save = (body: Buffer, base: string) =>
+        request(`${share.urlPath}/.save`, {
+          method: "POST",
+          body: new Uint8Array(body),
+          headers: { "x-uno-base-version": base },
+        });
+
+      // Text typed through a comment link (a crafted request): refused, file untouched.
+      const refused = yield* save(read("comment-engine-text-edited.docx"), version);
+      assert.equal(refused.status, 403);
+      const refusal = yield* json(refused);
+      assert.equal(refusal.code, "comment_only");
+      assert.include(refusal.error as string, "can only comment");
+      assert.deepEqual(fs.readFileSync(doc), read("comment-base.docx"));
+
+      // Comments from the engine: saved into the file on the computer, the
+      // rest of it as it was; the old bytes kept as a version.
+      const saved = yield* save(read("comment-engine-added.docx"), version);
+      assert.equal(saved.status, 200);
+      const after = fs.readFileSync(doc);
+      assert.equal((yield* json(saved)).version, contentVersion(after));
+      assert.notDeepEqual(after, read("comment-engine-added.docx"));
+      assert.equal(docxBodyText(after), docxBodyText(read("comment-base.docx")));
+      const names = readZip(after).map((entry) => entry.name);
+      assert.include(names, "word/comments.xml");
+      const kept = fs.readdirSync(nodePath.join(sandbox, "base", "share-versions", share.id));
+      assert.equal(kept.length, 1);
+
+      // The owner sees it in Office → Versions and can download it.
+      const versionsUrl = `/api/files/office-versions?path=${encodeURIComponent(doc)}`;
+      assert.equal((yield* request(versionsUrl)).status, 401);
+      const listed = yield* json(
+        yield* request(versionsUrl, { headers: { [AUTH_HEADER]: "yes" } }),
+      );
+      const versions = listed.versions as Array<{ id: string; size: number }>;
+      assert.equal(versions.length, 1);
+      assert.equal(versions[0]!.size, read("comment-base.docx").length);
+      const downloaded = yield* request(
+        `${versionsUrl}&version=${encodeURIComponent(versions[0]!.id)}`,
+        { headers: { [AUTH_HEADER]: "yes" } },
+      );
+      assert.equal(downloaded.status, 200);
+      assert.deepEqual(
+        Buffer.from(yield* Effect.promise(() => downloaded.arrayBuffer())),
+        read("comment-base.docx"),
+      );
+      // Another file can't reach this file's versions.
+      const other = `/api/files/office-versions?path=${encodeURIComponent(`${home}/docs/letter.docx`)}`;
+      const foreign = yield* request(`${other}&version=${encodeURIComponent(versions[0]!.id)}`, {
+        headers: { [AUTH_HEADER]: "yes" },
+      });
+      assert.equal(foreign.status, 404);
+
+      // Spreadsheets and presentations: no comment links (not checked yet).
+      const sheet = yield* files
+        .createShare({ path: `${home}/docs/budget.xlsx`, access: "comment" })
+        .pipe(Effect.flip);
+      assert.include(sheet.message, "Word documents");
     }).pipe(Effect.scoped),
   );
 

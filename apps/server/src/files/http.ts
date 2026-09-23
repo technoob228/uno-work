@@ -17,7 +17,11 @@ import fsPromises from "node:fs/promises";
 import nodePath from "node:path";
 
 import Mime from "@effect/platform-node/Mime";
-import { FILES_RAW_ROUTE_PATH, FILES_SHARE_ROUTE_PREFIX } from "@t3tools/contracts";
+import {
+  FILES_OFFICE_VERSIONS_ROUTE_PATH,
+  FILES_RAW_ROUTE_PATH,
+  FILES_SHARE_ROUTE_PREFIX,
+} from "@t3tools/contracts";
 import { Cause, Effect, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse, UrlParams } from "effect/unstable/http";
 
@@ -48,8 +52,10 @@ import {
   shareStatus,
   verifySharePassword,
 } from "./shareTokens.ts";
+import { listShareOfficeVersions, resolveShareOfficeVersion } from "./officeVersions.ts";
 import {
   contentVersion,
+  effectiveOfficeAccess,
   officeShareInfo,
   saveSharedOfficeFile,
   SHARE_OFFICE_MAX_BYTES,
@@ -212,6 +218,67 @@ export const filesRawRouteLayer = HttpRouter.add(
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
+// ── Owner: older versions of an Office document on the computer ────────────
+
+export const filesOfficeVersionsRouteLayer = HttpRouter.add(
+  "GET",
+  FILES_OFFICE_VERSIONS_ROUTE_PATH,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const serverAuth = yield* ServerAuth;
+    yield* serverAuth.authenticateHttpRequest(request);
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) return HttpServerResponse.text("Bad Request", { status: 400 });
+    const requested = url.value.searchParams.get("path");
+    if (!requested) return HttpServerResponse.text("Missing path", { status: 400 });
+    const files = yield* FilesService;
+    const resolved = yield* files.resolveOwnerFile(requested).pipe(Effect.result);
+    if (resolved._tag === "Failure") {
+      return HttpServerResponse.jsonUnsafe({ error: resolved.failure.message }, { status: 404 });
+    }
+    const config = yield* ServerConfig;
+    const versionsDir = nodePath.join(config.baseDir, "share-versions");
+    const shareIds = yield* files
+      .shareIdsForPath(resolved.success)
+      .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
+    const versionId = url.value.searchParams.get("version");
+    if (versionId === null) {
+      const versions = yield* Effect.promise(() =>
+        listShareOfficeVersions({ versionsDir, shareIds }),
+      );
+      return HttpServerResponse.jsonUnsafe(
+        { versions },
+        { headers: { "cache-control": "private, no-store" } },
+      );
+    }
+    const file = resolveShareOfficeVersion({ versionsDir, shareIds, id: versionId });
+    const stats = file
+      ? yield* Effect.promise(() => fsPromises.stat(file).catch(() => null))
+      : null;
+    if (!file || !stats?.isFile()) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: "This version doesn't exist anymore." },
+        { status: 404 },
+      );
+    }
+    return yield* HttpServerResponse.file(file, {
+      contentType: "application/octet-stream",
+      headers: {
+        "cache-control": "private, no-store",
+        "content-disposition": contentDisposition(
+          "attachment",
+          nodePath.basename(resolved.success),
+        ),
+        "x-content-type-options": "nosniff",
+      },
+    }).pipe(
+      Effect.catch(() =>
+        Effect.succeed(HttpServerResponse.text("Couldn't read the file.", { status: 500 })),
+      ),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
 // ── Public share links ─────────────────────────────────────────────────────
 
 const SHARE_HEADERS: Record<string, string> = {
@@ -348,6 +415,8 @@ const readOfficeSharePage = Effect.gen(function* () {
 export interface OfficeSharePageConfig {
   readonly name: string;
   readonly access: "view" | "comment" | "edit";
+  /** The owner chose "comment", but this kind of file can only be viewed by link. */
+  readonly commentsReadOnly?: boolean;
   readonly documentType: "word" | "cell" | "slide";
   readonly extension: string;
   readonly fileUrl: string;
@@ -419,11 +488,22 @@ function handleOfficeShareOp(input: {
         bytes: new Uint8Array(body),
         baseVersion: request.headers["x-uno-base-version"] ?? null,
         force,
+        access: share.access,
         versionsDir: nodePath.join(config.baseDir, "share-versions"),
       }),
     ).pipe(Effect.orElseSucceed(() => null));
     if (result === null) return jsonReply({ error: "Couldn't save on the computer." }, 500);
-    if (result.kind === "rejected") return jsonReply({ error: result.message }, result.status);
+    if (result.kind === "rejected") {
+      if (result.code === "comment_only") {
+        yield* Effect.logWarning("files.share.save.comment_only_refused", {
+          shareId: share.shareId,
+        });
+      }
+      return jsonReply(
+        { error: result.message, ...(result.code ? { code: result.code } : {}) },
+        result.status,
+      );
+    }
     if (result.kind === "conflict") {
       yield* Effect.logInfo("files.share.save.conflict", { shareId: share.shareId });
       return jsonReply(
@@ -565,11 +645,12 @@ const handleShare = Effect.gen(function* () {
       if (page !== null) {
         yield* files.recordShareAccess(share.shareId);
         const name = nodePath.basename(target.path);
-        const access = office.writable ? share.access : "view";
+        const access = effectiveOfficeAccess(office, share.access);
         return htmlPage(
           injectOfficeShareConfig(page, {
             name,
             access,
+            ...(share.access === "comment" && access === "view" ? { commentsReadOnly: true } : {}),
             documentType: office.documentType,
             extension: office.extension,
             fileUrl: `${base}/.file`,
