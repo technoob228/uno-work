@@ -14,6 +14,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FILESYSTEM_READ_FILE_HARD_MAX_BYTES } from "@t3tools/contracts";
 
 import { isElectron } from "../../env";
+import { useFeatureFlag } from "../../hooks/useFeatureFlags";
+import { ShareDialog } from "../files/ShareDialog";
+import { filesApi, filesQueryKeys, filesStatQueryOptions } from "../files/filesApi";
 import { readEnvironmentApi } from "../../environmentApi";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useStore } from "../../store";
@@ -48,6 +51,17 @@ import {
   saveCloudDocument,
   type OfficeCloudRef,
 } from "./officeCloud";
+import { OfficeDocsChrome, type DocsSaveStatus } from "./OfficeDocsChrome";
+import type { DocsShell } from "./officeDocsShell";
+
+/** Docs shell autosave: this long after the last edit. */
+const DOCS_AUTOSAVE_MS = 3_000;
+/**
+ * Cloud documents autosave only after a longer pause: every cloud save keeps
+ * the previous copy in `.versions` (last 10), so saving every few seconds
+ * would push the useful older copies out within a minute of typing.
+ */
+const DOCS_CLOUD_AUTOSAVE_MS = 30_000;
 
 /** OOXML/ODF formats are zip archives; anything else under that name is broken. */
 const ARCHIVE_FORMATS = new Set([
@@ -124,6 +138,11 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
     : localSaveTarget;
   const fileName = officeFileName(path);
   const Icon = documentType ? TYPE_ICON[documentType] : FileTextIcon;
+  // Our own Google-Docs-like toolbar instead of the ribbon (Labs, Word only).
+  const docsShellFlag = useFeatureFlag("officeDocsShell");
+  const docsShell = docsShellFlag && documentType === "word";
+  const [shell, setShell] = useState<DocsShell | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const engineQuery = useQuery({
     queryKey: ["officeEngineInstalled"],
@@ -204,16 +223,34 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
   const [editorReady, setEditorReady] = useState(false);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  /** Bumped on every "the document changed", so a save knows if it missed edits. */
+  const editsRef = useRef(0);
   const [saveState, setSaveState] = useState<SaveState>({ kind: "idle" });
   const [versionsOpen, setVersionsOpen] = useState(false);
+  /** Edit count when the last save failed: autosave waits for a new edit. */
+  const failedAtEditsRef = useRef<number | null>(null);
+  const [editCount, setEditCount] = useState(0);
   const saveRef = useRef<() => Promise<void>>(async () => {});
 
+  const savingRef = useRef(false);
   const save = useCallback(
     async (options: { force?: boolean; bytes?: Uint8Array } = {}) => {
       const editor = editorRef.current;
       const api = environmentId ? readEnvironmentApi(environmentId) : undefined;
-      if (!editor || !api || !saveTarget) return;
+      if (!editor || !api || !saveTarget || savingRef.current) return;
+      savingRef.current = true;
       setSaveState({ kind: "saving" });
+      // In the Docs shell, mark the document clean before taking the snapshot:
+      // an edit made while this save runs sets it dirty again and gets its own
+      // autosave, instead of being wiped by a late "saved".
+      if (docsShell) editor.markSaved();
+      const editsAtStart = editsRef.current;
+      const markSavedAfter = () => {
+        // Edits typed while saving aren't in this file: stay dirty for them.
+        if (editsRef.current === editsAtStart) setDirty(false);
+        failedAtEditsRef.current = null;
+        setSaveState({ kind: "saved", at: new Date() });
+      };
       try {
         const bytes = options.bytes ?? (await editor.exportBytes(saveTarget.extension));
         const session = cloudSessionRef.current;
@@ -227,19 +264,18 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
             force: options.force === true,
           });
           if (result.kind === "conflict") {
+            if (docsShell) setDirty(true);
             setSaveState({ kind: "conflict", mine: bytes });
             return;
           }
           session.version = result.version;
-          editor.markSaved();
-          setDirty(false);
-          setSaveState({ kind: "saved", at: new Date() });
+          if (!docsShell) editor.markSaved();
+          markSavedAfter();
           void queryClient.invalidateQueries({ queryKey: ["files", "cloud"] });
           return;
         }
         await writeOfficeBytes((input) => api.projects.writeFile(input), saveTarget.path, bytes);
-        setDirty(false);
-        setSaveState({ kind: "saved", at: new Date() });
+        markSavedAfter();
         if (saveTarget.path !== path) {
           toastManager.add({
             type: "success",
@@ -250,11 +286,15 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
         void queryClient.invalidateQueries({ queryKey: ["previewReadFile"] });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        if (docsShell) setDirty(true);
+        failedAtEditsRef.current = editsRef.current;
         setSaveState({ kind: "error", message });
         toastManager.add({ type: "error", title: "Couldn't save", description: message });
+      } finally {
+        savingRef.current = false;
       }
     },
-    [cloud, environmentId, path, queryClient, saveTarget],
+    [cloud, docsShell, environmentId, path, queryClient, saveTarget],
   );
   saveRef.current = save;
 
@@ -290,6 +330,7 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
     setEditorReady(false);
     setEditorError(null);
     setDirty(false);
+    setShell(null);
     void createOfficeEditor({
       container,
       bytes,
@@ -301,12 +342,21 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
         if (!cancelled) setEditorReady(true);
       },
       onDirtyChange: (value) => {
-        if (!cancelled) setDirty(value);
+        if (cancelled) return;
+        if (value) {
+          editsRef.current += 1;
+          setEditCount(editsRef.current);
+        }
+        setDirty(value);
       },
       onError: (message) => {
         if (!cancelled) setEditorError(message);
       },
       onSaveRequest: () => void saveRef.current(),
+      docsShell,
+      onShell: (value) => {
+        if (!cancelled) setShell(value);
+      },
     })
       .then((editor) => {
         if (cancelled) editor.destroy();
@@ -320,7 +370,100 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
       editorRef.current?.destroy();
       editorRef.current = null;
     };
-  }, [bytes, documentType, engineQuery.data, fileName, path, readOnly]);
+  }, [bytes, docsShell, documentType, engineQuery.data, fileName, path, readOnly]);
+
+  // Docs shell saves on its own, like Google Docs: a few seconds after the
+  // last edit, into the same file. (Old .doc files would become a new .docx
+  // on every autosave, so those keep the explicit Save.)
+  const autosave = docsShell && saveTarget?.path === path;
+  useEffect(() => {
+    if (!autosave || !dirty || !editorReady) return;
+    // A conflict waits for the person's choice; a failed save waits for the
+    // next edit (or an explicit save), so it doesn't retry in a loop.
+    if (saveState.kind === "saving" || saveState.kind === "conflict") return;
+    if (saveState.kind === "error" && failedAtEditsRef.current === editCount) return;
+    const timer = window.setTimeout(
+      () => void saveRef.current(),
+      cloud ? DOCS_CLOUD_AUTOSAVE_MS : DOCS_AUTOSAVE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [autosave, cloud, dirty, editCount, editorReady, saveState.kind]);
+
+  const statQuery = useQuery({
+    ...filesStatQueryOptions(environmentId, path),
+    enabled: docsShell && !cloud && environmentId !== null && shareOpen,
+  });
+  useEffect(() => {
+    if (!shareOpen || !statQuery.isError) return;
+    setShareOpen(false);
+    toastManager.add({
+      type: "error",
+      title: "Couldn't share this file",
+      description:
+        statQuery.error instanceof Error ? statQuery.error.message : String(statQuery.error),
+    });
+  }, [shareOpen, statQuery.error, statQuery.isError]);
+  const goToFiles = useCallback(
+    (target: string) => {
+      if (cloud) {
+        const prefix = cloudDocumentFolder(cloud.key);
+        void navigate({
+          to: "/files",
+          search: { cloud: "1", bucket: cloud.bucketId, ...(prefix ? { prefix } : {}) },
+        });
+        return;
+      }
+      const folder = target.slice(0, Math.max(target.lastIndexOf("/"), 1));
+      void navigate({ to: "/files", search: { path: folder, file: target } });
+    },
+    [cloud, navigate],
+  );
+  const rename = useCallback(
+    async (newName: string) => {
+      if (!environmentId) return;
+      try {
+        if (dirty) await saveRef.current();
+        const entry = await filesApi(environmentId).rename({ path, newName, onConflict: "fail" });
+        void queryClient.invalidateQueries({ queryKey: filesQueryKeys.all });
+        void navigate({ to: "/office", search: { path: entry.path }, replace: true });
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Couldn't rename",
+          description: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    },
+    [dirty, environmentId, navigate, path, queryClient],
+  );
+  const download = useCallback(
+    (format: "docx" | "pdf" | "odt") => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      const base = fileName.replace(/\.[^.]+$/, "");
+      editor.downloadAs(format, `${base}.${format}`).catch((error: unknown) =>
+        toastManager.add({
+          type: "error",
+          title: "Couldn't download",
+          description: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    },
+    [fileName],
+  );
+  const docsStatus: DocsSaveStatus =
+    saveState.kind === "saving"
+      ? { kind: "saving" }
+      : saveState.kind === "error"
+        ? saveState
+        : saveState.kind === "conflict"
+          ? { kind: "error", message: "A newer version was saved in Cloud storage." }
+          : dirty
+            ? { kind: "edited" }
+            : saveState.kind === "saved"
+              ? saveState
+              : { kind: "idle" };
 
   useEffect(() => {
     if (!dirty) return;
@@ -374,83 +517,100 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-        <header className="border-b border-border px-3 py-2">
-          <div className="flex items-center gap-2">
-            <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              aria-label="Back to Files"
-              onClick={() => {
-                if (cloud) {
-                  const prefix = cloudDocumentFolder(cloud.key);
-                  void navigate({
-                    to: "/files",
-                    search: { cloud: "1", bucket: cloud.bucketId, ...(prefix ? { prefix } : {}) },
-                  });
-                  return;
-                }
-                const folder = path.slice(0, Math.max(path.lastIndexOf("/"), 1));
-                void navigate({ to: "/files", search: { path: folder, file: path } });
-              }}
-            >
-              <ArrowLeftIcon />
-            </Button>
-            <Icon className="size-4 shrink-0 text-muted-foreground" />
-            <span className="truncate text-sm font-medium text-foreground" title={path}>
-              {fileName}
-            </span>
-            {cloud ? (
-              <span
-                className="flex shrink-0 items-center gap-1 rounded-full bg-sky-500/10 px-2 py-0.5 text-[11px] text-sky-700 dark:text-sky-300"
-                title="Opened from Cloud storage and saved back there. Older copies are kept in the .versions folder next to it."
-                data-testid="office-cloud-badge"
-              >
-                <CloudIcon className="size-3" />
-                {cloudWritable ? "Cloud storage" : "Cloud storage · read-only"}
-              </span>
-            ) : null}
-            <span
-              className="shrink-0 text-xs text-muted-foreground"
-              data-testid="office-save-state"
-            >
-              {saveState.kind === "saving"
-                ? "Saving…"
-                : saveState.kind === "error" || saveState.kind === "conflict"
-                  ? "Not saved"
-                  : dirty
-                    ? "Unsaved changes"
-                    : saveState.kind === "saved"
-                      ? `Saved ${saveState.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-                      : null}
-            </span>
-            <div className="ml-auto flex items-center gap-1">
+        {docsShell ? (
+          <OfficeDocsChrome
+            fileName={fileName}
+            shell={shell}
+            status={docsStatus}
+            canSave={editorReady && saveTarget !== null && saveState.kind !== "saving"}
+            onBack={() => goToFiles(path)}
+            onSave={() => void save()}
+            onDownload={download}
+            onShowInFiles={() => goToFiles(path)}
+            onVersions={documentType ? () => setVersionsOpen(true) : undefined}
+            cloud={cloud ? { writable: cloudWritable } : undefined}
+            onShare={environmentId && !cloud ? () => setShareOpen(true) : undefined}
+            onRename={autosave && environmentId && !cloud ? rename : undefined}
+          />
+        ) : (
+          <header className="border-b border-border px-3 py-2">
+            <div className="flex items-center gap-2">
+              <SidebarTrigger className="size-7 shrink-0 md:hidden" />
               <Button
-                size="xs"
+                size="icon-xs"
                 variant="ghost"
-                onClick={() => setVersionsOpen(true)}
-                disabled={!documentType}
-                data-testid="office-versions"
+                aria-label="Back to Files"
+                onClick={() => {
+                  if (cloud) {
+                    const prefix = cloudDocumentFolder(cloud.key);
+                    void navigate({
+                      to: "/files",
+                      search: { cloud: "1", bucket: cloud.bucketId, ...(prefix ? { prefix } : {}) },
+                    });
+                    return;
+                  }
+                  const folder = path.slice(0, Math.max(path.lastIndexOf("/"), 1));
+                  void navigate({ to: "/files", search: { path: folder, file: path } });
+                }}
               >
-                <HistoryIcon className="size-3.5" />
-                Versions
+                <ArrowLeftIcon />
               </Button>
-              <Button
-                size="xs"
-                onClick={() => void save()}
-                disabled={!editorReady || !saveTarget || saveState.kind === "saving"}
-                data-testid="office-save"
+              <Icon className="size-4 shrink-0 text-muted-foreground" />
+              <span className="truncate text-sm font-medium text-foreground" title={path}>
+                {fileName}
+              </span>
+              {cloud ? (
+                <span
+                  className="flex shrink-0 items-center gap-1 rounded-full bg-sky-500/10 px-2 py-0.5 text-[11px] text-sky-700 dark:text-sky-300"
+                  title="Opened from Cloud storage and saved back there. Older copies are kept in the .versions folder next to it."
+                  data-testid="office-cloud-badge"
+                >
+                  <CloudIcon className="size-3" />
+                  {cloudWritable ? "Cloud storage" : "Cloud storage · read-only"}
+                </span>
+              ) : null}
+              <span
+                className="shrink-0 text-xs text-muted-foreground"
+                data-testid="office-save-state"
               >
-                {saveState.kind === "saving" ? (
-                  <Loader2Icon className="size-3.5 animate-spin" />
-                ) : (
-                  <SaveIcon className="size-3.5" />
-                )}
-                Save
-              </Button>
+                {saveState.kind === "saving"
+                  ? "Saving…"
+                  : saveState.kind === "error" || saveState.kind === "conflict"
+                    ? "Not saved"
+                    : dirty
+                      ? "Unsaved changes"
+                      : saveState.kind === "saved"
+                        ? `Saved ${saveState.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                        : null}
+              </span>
+              <div className="ml-auto flex items-center gap-1">
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => setVersionsOpen(true)}
+                  disabled={!documentType}
+                  data-testid="office-versions"
+                >
+                  <HistoryIcon className="size-3.5" />
+                  Versions
+                </Button>
+                <Button
+                  size="xs"
+                  onClick={() => void save()}
+                  disabled={!editorReady || !saveTarget || saveState.kind === "saving"}
+                  data-testid="office-save"
+                >
+                  {saveState.kind === "saving" ? (
+                    <Loader2Icon className="size-3.5 animate-spin" />
+                  ) : (
+                    <SaveIcon className="size-3.5" />
+                  )}
+                  Save
+                </Button>
+              </div>
             </div>
-          </div>
-        </header>
+          </header>
+        )}
         {saveState.kind === "conflict" ? (
           <div
             className="flex flex-wrap items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm"
@@ -496,7 +656,11 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
             </Button>
           </div>
         ) : null}
-        <div className="relative min-h-0 flex-1">
+        <div
+          className={
+            docsShell ? "relative min-h-0 flex-1 border-t border-border" : "relative min-h-0 flex-1"
+          }
+        >
           <div ref={containerRef} className="absolute inset-0" data-testid="office-editor" />
           {blocking ? (
             <div className="absolute inset-0 flex items-center justify-center bg-background p-6">
@@ -547,6 +711,14 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
         source={cloud ? { kind: "cloud", ref: cloud } : { kind: "computer", path }}
         documentName={fileName}
       />
+      {docsShell && !cloud ? (
+        <ShareDialog
+          open={shareOpen && statQuery.data !== undefined}
+          environmentId={environmentId}
+          entry={shareOpen ? (statQuery.data ?? null) : null}
+          onOpenChange={setShareOpen}
+        />
+      ) : null}
     </SidebarInset>
   );
 }

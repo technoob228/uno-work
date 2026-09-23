@@ -13,6 +13,12 @@
  * same-origin, и перехват работает независимо от того, с какой машины файл.
  */
 import type { OfficeDocumentType } from "./officeFormats";
+import {
+  attachDocsShell,
+  installDocsShellStyle,
+  type DocsEngineWindow,
+  type DocsShell,
+} from "./officeDocsShell";
 
 export const OFFICE_ENGINE_BASE = "/office-engine/";
 
@@ -127,6 +133,12 @@ export interface OfficeEditorOptions {
   onError?: (message: string) => void;
   /** Пользователь нажал Ctrl/Cmd+S или «Сохранить» внутри редактора. */
   onSaveRequest?: () => void;
+  /**
+   * Our own toolbar instead of the engine's ribbon (Word only, see
+   * officeDocsShell.ts). `onShell` gets it once the document is open.
+   */
+  docsShell?: boolean;
+  onShell?: (shell: DocsShell) => void;
 }
 
 export interface OfficeEditorHandle {
@@ -137,6 +149,12 @@ export interface OfficeEditorHandle {
    * `onDirtyChange(true)` again (offline, the engine never clears it itself).
    */
   markSaved: () => void;
+  /**
+   * "Download as…": converts through the same export queue as saving (so a
+   * PDF can never be taken for the bytes of an autosave) and hands the file
+   * to the browser.
+   */
+  downloadAs: (format: string, fileName: string) => Promise<void>;
   destroy: () => void;
 }
 
@@ -162,6 +180,7 @@ export async function createOfficeEditor(
   let hookedWindow: Window | null = null;
   let exportChain: Promise<unknown> = Promise.resolve();
   let destroyed = false;
+  let shell: DocsShell | null = null;
 
   const frameWindow = ():
     | (Window & { AscCommon?: { DownloadFileFromBytes?: DownloadFn } })
@@ -208,9 +227,31 @@ export async function createOfficeEditor(
     return true;
   };
 
+  /** Hide the ribbon as soon as the iframe has a document, before it paints. */
+  const styleFrame = (): boolean => {
+    if (!options.docsShell) return true;
+    try {
+      const doc = frameWindow()?.document;
+      // The iframe starts on about:blank; style the editor's own document.
+      if (!doc || !doc.location.href.includes(OFFICE_ENGINE_BASE)) return false;
+      return installDocsShellStyle(doc);
+    } catch {
+      return false;
+    }
+  };
+  const attachShell = () => {
+    if (!options.docsShell || shell || destroyed) return;
+    const win = frameWindow();
+    if (!win) return;
+    shell = attachDocsShell(win as unknown as DocsEngineWindow);
+    if (shell) options.onShell?.(shell);
+  };
+
+  let styled = false;
   const hookTimer = window.setInterval(() => {
-    if (hookFrame() || destroyed) window.clearInterval(hookTimer);
-  }, 250);
+    if (!styled) styled = styleFrame();
+    if ((hookFrame() && styled) || destroyed) window.clearInterval(hookTimer);
+  }, 50);
   window.addEventListener("keydown", onKeyDown, true);
 
   const access: OfficeAccess = options.access ?? (options.readOnly ? "view" : "edit");
@@ -248,6 +289,7 @@ export async function createOfficeEditor(
       onAppReady: () => options.onReady?.(),
       onDocumentReady: () => {
         hookFrame();
+        attachShell();
       },
       onDocumentStateChange: (event: { data?: boolean }) =>
         options.onDirtyChange?.(Boolean(event?.data)),
@@ -290,6 +332,15 @@ export async function createOfficeEditor(
       }
     });
 
+  const exportBytes = (format: string) => {
+    const result = exportChain.then(
+      () => runExport(format),
+      () => runExport(format),
+    );
+    exportChain = result.catch(() => undefined);
+    return result;
+  };
+
   return {
     markSaved() {
       const win = frameWindow() as
@@ -304,17 +355,23 @@ export async function createOfficeEditor(
         /* older engine: autosave just waits for the next explicit save */
       }
     },
-    exportBytes(format) {
-      const result = exportChain.then(
-        () => runExport(format),
-        () => runExport(format),
-      );
-      exportChain = result.catch(() => undefined);
-      return result;
+    async downloadAs(format, fileName) {
+      const bytes = await exportBytes(format);
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
     },
+    exportBytes,
     destroy() {
       destroyed = true;
       window.clearInterval(hookTimer);
+      shell?.detach();
+      shell = null;
       window.removeEventListener("keydown", onKeyDown, true);
       hookedWindow?.removeEventListener("keydown", onKeyDown, true);
       pendingExport?.reject(new Error("Редактор закрыт"));

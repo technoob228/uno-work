@@ -19,14 +19,15 @@ and a one-time download of about 300 MB per browser, which is then cached.
 
 ## Files
 
-| File                                                                       | Role                                                                                                                        |
-| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `apps/web/src/components/office/officeFormats.ts`                          | Extension → editor, save target. `isOfficeFile()` is the hook for Files.                                                    |
-| `apps/web/src/components/office/officeEngine.ts`                           | Loads `api.js`, mounts DocEditor, exports bytes by intercepting `AscCommon.DownloadFileFromBytes` inside the editor iframe. |
-| `apps/web/src/components/office/normalizeXlsx.ts`                          | Workaround for the x2t `inlineStr` bug (below).                                                                             |
-| `apps/web/src/components/office/officeSave.ts`                             | Chunked write-back.                                                                                                         |
-| `apps/web/src/components/office/OfficeView.tsx`, `routes/_chat.office.tsx` | The screen.                                                                                                                 |
-| `scripts/install-office-engine.sh`                                         | Installs the engine package.                                                                                                |
+| File                                                                        | Role                                                                                                                        |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/src/components/office/officeFormats.ts`                           | Extension → editor, save target. `isOfficeFile()` is the hook for Files.                                                    |
+| `apps/web/src/components/office/officeEngine.ts`                            | Loads `api.js`, mounts DocEditor, exports bytes by intercepting `AscCommon.DownloadFileFromBytes` inside the editor iframe. |
+| `apps/web/src/components/office/normalizeXlsx.ts`                           | Workaround for the x2t `inlineStr` bug (below).                                                                             |
+| `apps/web/src/components/office/officeSave.ts`                              | Chunked write-back.                                                                                                         |
+| `apps/web/src/components/office/officeDocsShell.ts`, `OfficeDocsChrome.tsx` | Docs shell (Labs): our toolbar for Word on top of the engine (below).                                                       |
+| `apps/web/src/components/office/OfficeView.tsx`, `routes/_chat.office.tsx`  | The screen.                                                                                                                 |
+| `scripts/install-office-engine.sh`                                          | Installs the engine package.                                                                                                |
 
 ## Hooking into Files
 
@@ -136,6 +137,42 @@ account's Cloud storage (Files → Cloud storage → click the document, or
 **Share links to Cloud documents: not yet** — links serve files of the
 computer. The Cloud menu says so ("Share link — not yet for Cloud"); copy the
 document to this computer to share it.
+
+## Docs shell: our own toolbar for Word (0.0.78, Labs, off by default)
+
+Settings → Labs → **Simple toolbar for Word documents** (`officeDocsShell`)
+opens docx/doc/odt/rtf with a Google-Docs-like title bar and one toolbar
+instead of the engine's ribbon. Spreadsheets and presentations are untouched.
+
+How (`officeDocsShell.ts`, `OfficeDocsChrome.tsx`):
+
+- a stylesheet injected into the editor iframe hides `#toolbar`, `#statusbar`,
+  `#left-menu`, `#right-menu`; the engine's layout skips hidden panels, so the
+  page takes the room. Rulers are switched off with `asc_SetViewRulers(false)`
+  (session only). The engine package itself is not modified;
+- buttons call the same editor API the ribbon calls (`put_TextPrBold`,
+  `put_Style`, `put_ListTypeCustom`…); the buttons follow the cursor through
+  the engine's callbacks (`asc_onBold`, `asc_onParaStyleName`…);
+- anything with a dialog goes to the engine's own controllers, so its dialogs
+  open unchanged: link (`Links.onHyperlinkClick`), table, image by URL,
+  comment, find (`search:show`), find & replace (shows the left bar), print;
+- ⋯ → **Show full toolbar** brings the ribbon back for everything else;
+- the document autosaves 3 s after the last edit (not for legacy .doc, which
+  would become a new .docx each time); File → Download .docx/.pdf/.odt goes
+  through the same export queue as saving; the name renames the file; Share
+  opens the Files share dialog; File → Versions opens the Versions dialog.
+- Cloud documents work in the shell too: the same save (conflict banner,
+  versions), the "Cloud storage" badge, no rename/Share (not for Cloud yet).
+  They autosave after **30 s** without edits, not 3 s — each cloud save keeps
+  a copy in `.versions` (last 10), so 3 s would flush the useful ones out.
+- a failed autosave waits for the next edit (no retry loop); a conflict waits
+  for the person's choice.
+
+Kludges: the shell reaches into engine internals (`window.DE` controllers,
+`Asc.editor` methods, DOM ids) — an engine upgrade can break it; the unit tests
+pin the calls we make, not the engine. List info must be built with the
+iframe's own `JSON` (an object from the parent page is silently ignored).
+The ONLYOFFICE logo stays in the title bar (AGPL-3.0 §7(b)).
 
 ## Known workarounds (kludges)
 
