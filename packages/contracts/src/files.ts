@@ -21,6 +21,11 @@ export const FILES_SHARE_MAX_TTL_SECONDS = 365 * 24 * 60 * 60;
 export const FILES_SHARE_ROUTE_PREFIX = "/s";
 /** Owner-only raw bytes of a file (Range-capable); `?path=…&download=1`. */
 export const FILES_RAW_ROUTE_PATH = "/api/files/raw";
+/**
+ * Older copies of an Office document on the computer (kept by share-link
+ * saves): `?path=<file>` → `{versions}`; `&version=<id>` → that copy's bytes.
+ */
+export const FILES_OFFICE_VERSIONS_ROUTE_PATH = "/api/files/office-versions";
 
 const FilesPath = TrimmedNonEmptyString.check(Schema.isMaxLength(FILES_PATH_MAX_LENGTH));
 const FilesName = TrimmedNonEmptyString.check(Schema.isMaxLength(FILES_NAME_MAX_LENGTH));
@@ -348,3 +353,18 @@ export const FilesCloudOfficeSaveResult = Schema.Struct({
   version: Schema.NullOr(Schema.String),
 });
 export type FilesCloudOfficeSaveResult = typeof FilesCloudOfficeSaveResult.Type;
+
+/** One older copy of an Office document, newest first in a list. */
+export const FilesOfficeVersion = Schema.Struct({
+  /** Cloud: the object key (download it with cloud.downloadUrl). Computer: an opaque id. */
+  id: Schema.String,
+  /** When it was replaced by a newer save. */
+  createdAt: Schema.NullOr(Schema.String),
+  size: NonNegativeInt,
+});
+export type FilesOfficeVersion = typeof FilesOfficeVersion.Type;
+
+export const FilesOfficeVersionList = Schema.Struct({
+  versions: Schema.Array(FilesOfficeVersion),
+});
+export type FilesOfficeVersionList = typeof FilesOfficeVersionList.Type;

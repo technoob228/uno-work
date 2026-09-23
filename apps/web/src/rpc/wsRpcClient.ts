@@ -281,6 +281,7 @@ export interface WsRpcClient {
     readonly cloudCopyToComputer: RpcUnaryMethod<typeof WS_METHODS.filesCloudCopyToComputer>;
     readonly cloudOfficeOpen: RpcUnaryMethod<typeof WS_METHODS.filesCloudOfficeOpen>;
     readonly cloudOfficeSave: RpcUnaryMethod<typeof WS_METHODS.filesCloudOfficeSave>;
+    readonly cloudOfficeVersions: RpcUnaryMethod<typeof WS_METHODS.filesCloudOfficeVersions>;
   };
 }
 
@@ -631,6 +632,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.filesCloudOfficeOpen](input)),
       cloudOfficeSave: (input) =>
         transport.request((client) => client[WS_METHODS.filesCloudOfficeSave](input)),
+      cloudOfficeVersions: (input) =>
+        transport.request((client) => client[WS_METHODS.filesCloudOfficeVersions](input)),
     },
   };
 }

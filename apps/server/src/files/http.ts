@@ -17,7 +17,11 @@ import fsPromises from "node:fs/promises";
 import nodePath from "node:path";
 
 import Mime from "@effect/platform-node/Mime";
-import { FILES_RAW_ROUTE_PATH, FILES_SHARE_ROUTE_PREFIX } from "@t3tools/contracts";
+import {
+  FILES_OFFICE_VERSIONS_ROUTE_PATH,
+  FILES_RAW_ROUTE_PATH,
+  FILES_SHARE_ROUTE_PREFIX,
+} from "@t3tools/contracts";
 import { Cause, Effect, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse, UrlParams } from "effect/unstable/http";
 
@@ -48,6 +52,7 @@ import {
   shareStatus,
   verifySharePassword,
 } from "./shareTokens.ts";
+import { listShareOfficeVersions, resolveShareOfficeVersion } from "./officeVersions.ts";
 import {
   contentVersion,
   effectiveOfficeAccess,
@@ -210,6 +215,67 @@ export const filesRawRouteLayer = HttpRouter.add(
       download: url.value.searchParams.get("download") === "1",
       extraHeaders: { "cache-control": "private, no-store" },
     });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+// ── Owner: older versions of an Office document on the computer ────────────
+
+export const filesOfficeVersionsRouteLayer = HttpRouter.add(
+  "GET",
+  FILES_OFFICE_VERSIONS_ROUTE_PATH,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const serverAuth = yield* ServerAuth;
+    yield* serverAuth.authenticateHttpRequest(request);
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) return HttpServerResponse.text("Bad Request", { status: 400 });
+    const requested = url.value.searchParams.get("path");
+    if (!requested) return HttpServerResponse.text("Missing path", { status: 400 });
+    const files = yield* FilesService;
+    const resolved = yield* files.resolveOwnerFile(requested).pipe(Effect.result);
+    if (resolved._tag === "Failure") {
+      return HttpServerResponse.jsonUnsafe({ error: resolved.failure.message }, { status: 404 });
+    }
+    const config = yield* ServerConfig;
+    const versionsDir = nodePath.join(config.baseDir, "share-versions");
+    const shareIds = yield* files
+      .shareIdsForPath(resolved.success)
+      .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
+    const versionId = url.value.searchParams.get("version");
+    if (versionId === null) {
+      const versions = yield* Effect.promise(() =>
+        listShareOfficeVersions({ versionsDir, shareIds }),
+      );
+      return HttpServerResponse.jsonUnsafe(
+        { versions },
+        { headers: { "cache-control": "private, no-store" } },
+      );
+    }
+    const file = resolveShareOfficeVersion({ versionsDir, shareIds, id: versionId });
+    const stats = file
+      ? yield* Effect.promise(() => fsPromises.stat(file).catch(() => null))
+      : null;
+    if (!file || !stats?.isFile()) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: "This version doesn't exist anymore." },
+        { status: 404 },
+      );
+    }
+    return yield* HttpServerResponse.file(file, {
+      contentType: "application/octet-stream",
+      headers: {
+        "cache-control": "private, no-store",
+        "content-disposition": contentDisposition(
+          "attachment",
+          nodePath.basename(resolved.success),
+        ),
+        "x-content-type-options": "nosniff",
+      },
+    }).pipe(
+      Effect.catch(() =>
+        Effect.succeed(HttpServerResponse.text("Couldn't read the file.", { status: 500 })),
+      ),
+    );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

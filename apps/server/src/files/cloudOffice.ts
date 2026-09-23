@@ -24,6 +24,7 @@ import fsPromises from "node:fs/promises";
 import nodePath from "node:path";
 
 import {
+  CLOUD_VERSIONS_FOLDER,
   CloudError,
   cloudDelete,
   cloudList,
@@ -62,7 +63,7 @@ function nameOf(key: string): string {
 /** Where the older copies of `key` live: `<folder>/.versions/<name>/`. */
 export function cloudVersionsPrefix(key: string): string {
   const slash = key.lastIndexOf("/");
-  return `${key.slice(0, slash + 1)}.versions/${key.slice(slash + 1)}/`;
+  return `${key.slice(0, slash + 1)}${CLOUD_VERSIONS_FOLDER}/${key.slice(slash + 1)}/`;
 }
 
 function versionStamp(date: Date): string {
@@ -72,7 +73,7 @@ function versionStamp(date: Date): string {
 function checkKey(key: string) {
   const info = officeShareInfo(nameOf(key));
   if (!info || key.endsWith("/")) throw new CloudError("Office can't open this file.");
-  if (key.split("/").includes(".versions")) {
+  if (key.split("/").includes(CLOUD_VERSIONS_FOLDER)) {
     throw new CloudError("This is an older copy. Download it, or copy it to this computer.");
   }
   return info;

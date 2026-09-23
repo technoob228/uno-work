@@ -1385,6 +1385,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.filesCloudOfficeOpen, files.cloudOfficeOpen(input), {
             "rpc.aggregate": "files",
           }),
+        [WS_METHODS.filesCloudOfficeVersions]: (input) =>
+          observeRpcEffect(WS_METHODS.filesCloudOfficeVersions, files.cloudOfficeVersions(input), {
+            "rpc.aggregate": "files",
+          }),
         [WS_METHODS.filesCloudOfficeSave]: (input) =>
           observeRpcEffect(WS_METHODS.filesCloudOfficeSave, files.cloudOfficeSave(input), {
             "rpc.aggregate": "files",

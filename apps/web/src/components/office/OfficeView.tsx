@@ -5,6 +5,7 @@ import {
   CloudIcon,
   FileSpreadsheetIcon,
   FileTextIcon,
+  HistoryIcon,
   Loader2Icon,
   PresentationIcon,
   SaveIcon,
@@ -33,6 +34,7 @@ import {
   type OfficeDocumentType,
 } from "./officeFormats";
 import { writeOfficeBytes } from "./officeSave";
+import { OfficeVersionsDialog } from "./OfficeVersionsDialog";
 import {
   fetchOfficeEngineStatus,
   installProgressLabel,
@@ -203,6 +205,7 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
   const [editorError, setEditorError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>({ kind: "idle" });
+  const [versionsOpen, setVersionsOpen] = useState(false);
   const saveRef = useRef<() => Promise<void>>(async () => {});
 
   const save = useCallback(
@@ -424,6 +427,16 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
             <div className="ml-auto flex items-center gap-1">
               <Button
                 size="xs"
+                variant="ghost"
+                onClick={() => setVersionsOpen(true)}
+                disabled={!documentType}
+                data-testid="office-versions"
+              >
+                <HistoryIcon className="size-3.5" />
+                Versions
+              </Button>
+              <Button
+                size="xs"
                 onClick={() => void save()}
                 disabled={!editorReady || !saveTarget || saveState.kind === "saving"}
                 data-testid="office-save"
@@ -527,6 +540,13 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
           ) : null}
         </div>
       </div>
+      <OfficeVersionsDialog
+        open={versionsOpen}
+        onOpenChange={setVersionsOpen}
+        environmentId={environmentId}
+        source={cloud ? { kind: "cloud", ref: cloud } : { kind: "computer", path }}
+        documentName={fileName}
+      />
     </SidebarInset>
   );
 }

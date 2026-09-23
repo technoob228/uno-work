@@ -21,7 +21,12 @@ import { FileSharesRepository } from "../persistence/Services/FileShares.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { FilesService, makeFilesService } from "./FilesService.ts";
 import { docxBodyText } from "./docxComments.ts";
-import { filesRawRouteLayer, filesShareRouteLayers, parseRangeHeader } from "./http.ts";
+import {
+  filesOfficeVersionsRouteLayer,
+  filesRawRouteLayer,
+  filesShareRouteLayers,
+  parseRangeHeader,
+} from "./http.ts";
 import { contentVersion } from "./shareOffice.ts";
 import { readZip } from "./zipPackage.ts";
 
@@ -92,7 +97,7 @@ const makeFixture = Effect.gen(function* () {
     Layer.mergeAll(filesLayer, authLayer, configLayer, NodeServices.layer, NodeHttpPlatform.layer),
   );
   const { handler, dispose } = HttpRouter.toWebHandler(
-    Layer.mergeAll(filesRawRouteLayer, ...filesShareRouteLayers),
+    Layer.mergeAll(filesRawRouteLayer, filesOfficeVersionsRouteLayer, ...filesShareRouteLayers),
     { disableLogger: true },
   );
   yield* Effect.addFinalizer(() => Effect.promise(() => dispose()));
@@ -442,6 +447,31 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("files share routes"
       assert.include(names, "word/comments.xml");
       const kept = fs.readdirSync(nodePath.join(sandbox, "base", "share-versions", share.id));
       assert.equal(kept.length, 1);
+
+      // The owner sees it in Office → Versions and can download it.
+      const versionsUrl = `/api/files/office-versions?path=${encodeURIComponent(doc)}`;
+      assert.equal((yield* request(versionsUrl)).status, 401);
+      const listed = yield* json(
+        yield* request(versionsUrl, { headers: { [AUTH_HEADER]: "yes" } }),
+      );
+      const versions = listed.versions as Array<{ id: string; size: number }>;
+      assert.equal(versions.length, 1);
+      assert.equal(versions[0]!.size, read("comment-base.docx").length);
+      const downloaded = yield* request(
+        `${versionsUrl}&version=${encodeURIComponent(versions[0]!.id)}`,
+        { headers: { [AUTH_HEADER]: "yes" } },
+      );
+      assert.equal(downloaded.status, 200);
+      assert.deepEqual(
+        Buffer.from(yield* Effect.promise(() => downloaded.arrayBuffer())),
+        read("comment-base.docx"),
+      );
+      // Another file can't reach this file's versions.
+      const other = `/api/files/office-versions?path=${encodeURIComponent(`${home}/docs/letter.docx`)}`;
+      const foreign = yield* request(`${other}&version=${encodeURIComponent(versions[0]!.id)}`, {
+        headers: { [AUTH_HEADER]: "yes" },
+      });
+      assert.equal(foreign.status, 404);
 
       // Spreadsheets and presentations: no comment links (not checked yet).
       const sheet = yield* files

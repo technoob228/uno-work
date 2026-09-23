@@ -48,6 +48,7 @@ import {
   type FilesCloudOfficeOpened,
   type FilesCloudOfficeSaveInput,
   type FilesCloudOfficeSaveResult,
+  type FilesOfficeVersionList,
   FILES_SHARE_ROUTE_PREFIX,
 } from "@t3tools/contracts";
 import { Context, Effect, Layer, Option } from "effect";
@@ -76,6 +77,7 @@ import {
   type CloudDeps,
 } from "./cloudStorage.ts";
 import { CLOUD_OFFICE_STAGING_DIR, openCloudOffice, saveCloudOffice } from "./cloudOffice.ts";
+import { listCloudOfficeVersions } from "./officeVersions.ts";
 import { publishToUnoHosting } from "./sitePublish.ts";
 import {
   generateShareToken,
@@ -135,6 +137,11 @@ export interface FilesServiceShape {
   readonly cloudOfficeSave: (
     input: FilesCloudOfficeSaveInput,
   ) => Effect.Effect<FilesCloudOfficeSaveResult, FilesError>;
+  readonly cloudOfficeVersions: (
+    input: FilesCloudOfficeOpenInput,
+  ) => Effect.Effect<FilesOfficeVersionList, FilesError>;
+  /** Ids of every link (live or not) ever made to this exact path. */
+  readonly shareIdsForPath: (path: string) => Effect.Effect<ReadonlyArray<string>, FilesError>;
 }
 
 export class FilesService extends Context.Service<FilesService, FilesServiceShape>()(
@@ -537,6 +544,15 @@ export const makeFilesService = (
       });
 
     return {
+      cloudOfficeVersions: (input) =>
+        withCloud("Couldn't list the older versions.", async (deps) => ({
+          versions: await listCloudOfficeVersions(deps, input),
+        })),
+      shareIdsForPath: (path) =>
+        shares.list({ path }).pipe(
+          Effect.map((rows) => rows.map((row) => row.shareId)),
+          Effect.mapError(persistenceError),
+        ),
       cloudOfficeOpen: cloudOfficeOpenEffect,
       cloudOfficeSave: cloudOfficeSaveEffect,
       cloudState: cloudStateEffect,

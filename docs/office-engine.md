@@ -67,6 +67,11 @@ Guarantees (tests in `files/http.test.ts`):
 - one writer per file at a time; the previous bytes are kept in
   `<baseDir>/share-versions/<shareId>/` (last 20), then temp file + rename.
 
+Office → **Versions** on a file of the computer lists these copies (from
+every link that ever pointed at the file) and downloads them through
+`GET /api/files/office-versions?path=…[&version=<id>]` (owner session; a
+version id is only accepted for a link of that same file).
+
 The page autosaves 3 s after an edit (plus Ctrl/Cmd+S and Save). Visitors type
 a name once (localStorage) — it's the author of their comments.
 
@@ -123,8 +128,9 @@ account's Cloud storage (Files → Cloud storage → click the document, or
   the same choice as a share link: _Download my version_ / _Replace with my
   version_ / _Reload the latest_;
 - the previous content is kept as `<folder>/.versions/<name>/<time>.<ext>`,
-  the last **10** (they count toward the Cloud quota). Older copies only
-  download — Office won't open them;
+  the last **10** (they count toward the Cloud quota). Files doesn't show
+  `.versions` folders; Office → **Versions** lists the copies (time, size)
+  with a download for each (RPC `files.cloud.officeVersions`, presigned link);
 - doc/xls/ppt open read-only from the cloud (saving would change the format).
 
 **Share links to Cloud documents: not yet** — links serve files of the
