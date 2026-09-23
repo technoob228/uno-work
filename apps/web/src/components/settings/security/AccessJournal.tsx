@@ -233,6 +233,12 @@ function HowChecked() {
             <code className="rounded bg-muted px-1">/etc/ssh/uno_exec_authorized_keys</code> on the
             computer; every login with it is matched against those records. The terminal and AI
             agents inside Uno Work run within your Uno Work sessions, which are listed here.
+            <br />
+            <br />
+            What this can't show yet: Uno's automation keeps one connection to the computer open for
+            a few minutes and sends several operations through it, so the computer's journal records
+            the connection, not each operation. The operations themselves are the Uno records in
+            this list. A record written by the computer itself for every operation is the next step.
           </>
         ) : (
           "Where this list comes from, and how you can check it yourself."

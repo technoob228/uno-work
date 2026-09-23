@@ -168,7 +168,7 @@ export function NetworkAccess({ box }: { readonly box: UnoBox }) {
         description={
           open
             ? "Apps and ports you opened answer from the internet, the way you choose below."
-            : "Closed. Apps and ports don't answer from the internet. Your apps still open for you inside Uno Work."
+            : "Closed. Apps and ports don't answer from the internet (only SSH, if it's on). Your apps still open for you inside Uno Work."
         }
         control={
           <Switch

@@ -224,9 +224,9 @@ export function verdictFor(summary: AccessSummary, days = 30): Verdict {
   }
   return {
     tone: "good",
-    title: `Nobody from Uno logged in by hand in the last ${days} days.`,
+    title: `No unexplained logins with Uno's key in the last ${days} days.`,
     description:
-      "Every login with Uno's key matches an automatic operation listed below. Any access, including ours, is visible to you.",
+      "Every time Uno's key signed in to this computer, it matches an operation listed below. Any access, including ours, is visible to you.",
   };
 }
 
@@ -262,5 +262,5 @@ export function overviewBadge(computer: SecurityComputer): {
 } {
   const n = computer.uno_unexplained_30d;
   if (n > 0) return { tone: "bad", text: `${n} Uno login${n === 1 ? "" : "s"} without a record` };
-  return { tone: "good", text: "No Uno staff access (30 days)" };
+  return { tone: "good", text: "No unexplained Uno logins (30 days)" };
 }

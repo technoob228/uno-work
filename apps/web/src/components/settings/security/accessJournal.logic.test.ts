@@ -118,8 +118,10 @@ describe("verdict and notes", () => {
   it("is green when every Uno-key login is matched", () => {
     const v = verdictFor(summary());
     expect(v.tone).toBe("good");
-    expect(v.title).toBe("Nobody from Uno logged in by hand in the last 30 days.");
-    expect(v.description).toContain("Every login with Uno's key matches an automatic operation");
+    expect(v.title).toBe("No unexplained logins with Uno's key in the last 30 days.");
+    expect(v.description).toContain(
+      "Every time Uno's key signed in to this computer, it matches an operation",
+    );
     expect(v.description).not.toMatch(/cannot access/i);
   });
 
@@ -156,7 +158,10 @@ describe("verdict and notes", () => {
     };
     expect(lastAccessLine(base, NOW)).toBe("Last access: 5 minutes ago — You");
     expect(lastAccessLine({ ...base, last_access: null }, NOW)).toBe("No access recorded yet");
-    expect(overviewBadge(base)).toEqual({ tone: "good", text: "No Uno staff access (30 days)" });
+    expect(overviewBadge(base)).toEqual({
+      tone: "good",
+      text: "No unexplained Uno logins (30 days)",
+    });
     expect(overviewBadge({ ...base, uno_unexplained_30d: 2 })).toEqual({
       tone: "bad",
       text: "2 Uno logins without a record",

@@ -82,7 +82,7 @@ export const MODE_OPTIONS: ReadonlyArray<{
   {
     value: "vpn",
     title: "Only through your own private network (VPN)",
-    description: "Nothing answers from the internet except the VPN itself.",
+    description: "Nothing answers from the internet except the VPN itself (and SSH, if it's on).",
   },
 ];
 
