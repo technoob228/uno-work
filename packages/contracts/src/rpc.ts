@@ -46,6 +46,15 @@ import {
   UnoMachineApps,
 } from "./unoComputer.ts";
 import {
+  UnoComputerResources,
+  UnoDiskCleanInput,
+  UnoDiskCleanResult,
+  UnoDiskUsage,
+  UnoDiskUsageInput,
+  UnoResourceActionInput,
+  UnoResourceActionResult,
+} from "./unoComputerResources.ts";
+import {
   FilesCreateFolderInput,
   FilesDeleteInput,
   FilesDeleteResult,
@@ -377,6 +386,10 @@ export const WS_METHODS = {
   unoComputerResizeOptions: "uno.computer.resizeOptions",
   unoComputerResize: "uno.computer.resize",
   unoComputerEmbedCheck: "uno.computer.embedCheck",
+  unoComputerResources: "uno.computer.resources",
+  unoComputerDiskUsage: "uno.computer.diskUsage",
+  unoComputerDiskClean: "uno.computer.diskClean",
+  unoComputerResourceAction: "uno.computer.resourceAction",
 
   // Files — the computer's file manager (/files) and its public share links
   filesList: "files.list",
@@ -1464,6 +1477,34 @@ export const WsUnoComputerResizeRpc = Rpc.make(WS_METHODS.unoComputerResize, {
   error: UnoCloudRpcError,
 });
 
+/** What is using the processor and memory, grouped for a person. Never fails. */
+export const WsUnoComputerResourcesRpc = Rpc.make(WS_METHODS.unoComputerResources, {
+  payload: Schema.Struct({}),
+  success: UnoComputerResources,
+  error: UnoCloudRpcError,
+});
+
+/** What takes the disk: folders of home (measured in the background), docker, caches. */
+export const WsUnoComputerDiskUsageRpc = Rpc.make(WS_METHODS.unoComputerDiskUsage, {
+  payload: UnoDiskUsageInput,
+  success: UnoDiskUsage,
+  error: UnoCloudRpcError,
+});
+
+/** Empty one of the fixed, safe clean-up targets the disk answer offered. */
+export const WsUnoComputerDiskCleanRpc = Rpc.make(WS_METHODS.unoComputerDiskClean, {
+  payload: UnoDiskCleanInput,
+  success: UnoDiskCleanResult,
+  error: UnoCloudRpcError,
+});
+
+/** Quit a process of this user, or stop / start / restart a group the daemon found. */
+export const WsUnoComputerResourceActionRpc = Rpc.make(WS_METHODS.unoComputerResourceAction, {
+  payload: UnoResourceActionInput,
+  success: UnoResourceActionResult,
+  error: UnoCloudRpcError,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerProbeRpc,
@@ -1531,6 +1572,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoComputerLocalMetricsRpc,
   WsUnoComputerResizeOptionsRpc,
   WsUnoComputerResizeRpc,
+  WsUnoComputerResourcesRpc,
+  WsUnoComputerDiskUsageRpc,
+  WsUnoComputerDiskCleanRpc,
+  WsUnoComputerResourceActionRpc,
   WsProviderInstallStartRpc,
   WsProviderInstallStatusRpc,
   WsProviderAuthStartRpc,

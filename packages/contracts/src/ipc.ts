@@ -149,6 +149,15 @@ import type {
 } from "./unoComputer.ts";
 import type { AppAiOverview, AppAiUpdateInput } from "./appSdk.ts";
 import type {
+  UnoComputerResources,
+  UnoDiskCleanInput,
+  UnoDiskCleanResult,
+  UnoDiskUsage,
+  UnoDiskUsageInput,
+  UnoResourceActionInput,
+  UnoResourceActionResult,
+} from "./unoComputerResources.ts";
+import type {
   FilesCreateFolderInput,
   FilesDeleteInput,
   FilesDeleteResult,
@@ -792,6 +801,12 @@ export interface EnvironmentApi {
     resize: (input: UnoComputerResizeInput) => Promise<UnoComputerResizeResult>;
     /** Whether a web app can be shown inside Uno Work (frame headers). */
     embedCheck: (input: UnoEmbedCheckInput) => Promise<UnoEmbedCheck>;
+    /** What is using the processor and memory, grouped (apps, containers, chats, system). */
+    resources: () => Promise<UnoComputerResources>;
+    /** What takes the disk; measured in the background, `scanning` until done. */
+    diskUsage: (input: UnoDiskUsageInput) => Promise<UnoDiskUsage>;
+    diskClean: (input: UnoDiskCleanInput) => Promise<UnoDiskCleanResult>;
+    resourceAction: (input: UnoResourceActionInput) => Promise<UnoResourceActionResult>;
   };
   /** Files: the computer's file manager and its public share links. */
   files: {

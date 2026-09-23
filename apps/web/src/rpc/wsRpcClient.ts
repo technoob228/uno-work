@@ -248,6 +248,10 @@ export interface WsRpcClient {
     readonly localMetrics: () => ReturnType<
       RpcUnaryMethod<typeof WS_METHODS.unoComputerLocalMetrics>
     >;
+    readonly resources: () => ReturnType<RpcUnaryMethod<typeof WS_METHODS.unoComputerResources>>;
+    readonly diskUsage: RpcUnaryMethod<typeof WS_METHODS.unoComputerDiskUsage>;
+    readonly diskClean: RpcUnaryMethod<typeof WS_METHODS.unoComputerDiskClean>;
+    readonly resourceAction: RpcUnaryMethod<typeof WS_METHODS.unoComputerResourceAction>;
   };
   readonly files: {
     readonly list: RpcUnaryMethod<typeof WS_METHODS.filesList>;
@@ -569,6 +573,13 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       resize: (input) => transport.request((client) => client[WS_METHODS.unoComputerResize](input)),
       embedCheck: (input) =>
         transport.request((client) => client[WS_METHODS.unoComputerEmbedCheck](input)),
+      resources: () => transport.request((client) => client[WS_METHODS.unoComputerResources]({})),
+      diskUsage: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerDiskUsage](input)),
+      diskClean: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerDiskClean](input)),
+      resourceAction: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerResourceAction](input)),
     },
     files: {
       list: (input) => transport.request((client) => client[WS_METHODS.filesList](input)),

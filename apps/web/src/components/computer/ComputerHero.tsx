@@ -9,6 +9,7 @@
  * the name and the load.
  */
 import {
+  ChevronRightIcon,
   ExternalLinkIcon,
   GlobeIcon,
   MonitorIcon,
@@ -41,6 +42,7 @@ import {
   percent,
 } from "./computerFormat";
 import { CopyButton, Meter } from "./computerUi";
+import type { ResourceLook } from "./resources/resourceModel";
 
 export type PowerAction = "sleep" | "wake" | "stop" | "start";
 type PowerState = ReturnType<typeof computerPowerState>;
@@ -96,6 +98,7 @@ export function ComputerHero({
   power,
   onResize,
   lowResource,
+  onOpenLook,
 }: {
   name: string;
   subtitle: string | null;
@@ -114,6 +117,8 @@ export function ComputerHero({
   onResize?: (() => void) | undefined;
   /** Steadily short of memory or disk: say so, next to the button that fixes it. */
   lowResource?: "memory" | "disk" | null | undefined;
+  /** Opens "What's using your computer" at a tile; absent when there's nothing to drill into. */
+  onOpenLook?: ((look: ResourceLook) => void) | undefined;
 }) {
   const state: PowerState = status === null ? "on" : computerPowerState(status);
   const [confirm, setConfirm] = useState<"sleep" | "stop" | null>(null);
@@ -190,7 +195,12 @@ export function ComputerHero({
         ) : null}
       </div>
 
-      <LoadStrip load={load} live={loadLive && state === "on"} asleep={state !== "on"} />
+      <LoadStrip
+        load={load}
+        live={loadLive && state === "on"}
+        asleep={state !== "on"}
+        onOpenLook={onOpenLook}
+      />
 
       {onResize && state === "on" ? (
         <div
@@ -205,6 +215,15 @@ export function ComputerHero({
               {lowResource === "memory"
                 ? "Your computer is running low on memory — programs may slow down or stop."
                 : "Your computer's disk is almost full — new files and apps may not fit."}
+              {onOpenLook ? (
+                <button
+                  type="button"
+                  className="shrink-0 text-primary underline-offset-4 hover:underline"
+                  onClick={() => onOpenLook(lowResource)}
+                >
+                  {lowResource === "memory" ? "See what's using it" : "See what takes the space"}
+                </button>
+              ) : null}
             </p>
           ) : (
             <span className="flex-1" />
@@ -254,10 +273,12 @@ function LoadStrip({
   load,
   live,
   asleep,
+  onOpenLook,
 }: {
   load: ComputerLoad | null;
   live: boolean;
   asleep: boolean;
+  onOpenLook?: ((look: ResourceLook) => void) | undefined;
 }) {
   if (asleep) {
     return (
@@ -267,13 +288,15 @@ function LoadStrip({
     );
   }
   const cpu = load?.cpuPct != null ? Math.round(load.cpuPct) : null;
-  const items = [
+  const items: Array<{ look: ResourceLook; label: string; value: string; pct: number }> = [
     {
+      look: "cpu",
       label: "Processor",
       value: cpu !== null ? `${cpu}%` : "—",
       pct: cpu ?? 0,
     },
     {
+      look: "memory",
       label: "Memory",
       value:
         load?.memUsedMb != null
@@ -282,6 +305,7 @@ function LoadStrip({
       pct: percent(load?.memUsedMb ?? null, load?.memTotalMb ?? null),
     },
     {
+      look: "disk",
       label: "Disk",
       value:
         load?.diskUsedGb != null
@@ -290,25 +314,53 @@ function LoadStrip({
       pct: percent(load?.diskUsedGb ?? null, load?.diskTotalGb ?? null),
     },
   ];
+  const tile = (item: (typeof items)[number]) => (
+    <>
+      <div className="flex items-baseline justify-between gap-2 text-[11px]">
+        <span className="flex items-center gap-1.5 text-muted-foreground">
+          {item.label === "Processor" && live ? (
+            <span className="size-1.5 animate-pulse rounded-full bg-success" aria-label="live" />
+          ) : null}
+          {item.label}
+          {onOpenLook ? (
+            <ChevronRightIcon className="size-3 opacity-0 transition-opacity group-hover:opacity-100" />
+          ) : null}
+        </span>
+        <span className="truncate tabular-nums text-foreground">{item.value}</span>
+      </div>
+      <Meter value={item.pct} />
+    </>
+  );
   return (
-    <div className="mt-5 grid grid-cols-3 gap-3 sm:gap-5" aria-label="How busy this computer is">
-      {items.map((item) => (
-        <div key={item.label} className="flex min-w-0 flex-col gap-1.5">
-          <div className="flex items-baseline justify-between gap-2 text-[11px]">
-            <span className="flex items-center gap-1.5 text-muted-foreground">
-              {item.label === "Processor" && live ? (
-                <span
-                  className="size-1.5 animate-pulse rounded-full bg-success"
-                  aria-label="live"
-                />
-              ) : null}
-              {item.label}
-            </span>
-            <span className="truncate tabular-nums text-foreground">{item.value}</span>
-          </div>
-          <Meter value={item.pct} />
-        </div>
-      ))}
+    <div className="mt-5 flex flex-col gap-1.5">
+      <div className="grid grid-cols-3 gap-3 sm:gap-5" aria-label="How busy this computer is">
+        {items.map((item) =>
+          onOpenLook ? (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => onOpenLook(item.look)}
+              title={`See what's using the ${item.label.toLowerCase()}`}
+              className="group -m-1.5 flex min-w-0 flex-col gap-1.5 rounded-xl p-1.5 text-left outline-hidden transition-colors hover:bg-background/60 focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {tile(item)}
+            </button>
+          ) : (
+            <div key={item.label} className="flex min-w-0 flex-col gap-1.5">
+              {tile(item)}
+            </div>
+          ),
+        )}
+      </div>
+      {onOpenLook ? (
+        <button
+          type="button"
+          onClick={() => onOpenLook("cpu")}
+          className="self-start text-[11px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        >
+          What's using my computer?
+        </button>
+      ) : null}
     </div>
   );
 }
