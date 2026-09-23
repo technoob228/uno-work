@@ -194,6 +194,11 @@ import type {
   FilesCloudDownloadUrl,
   FilesCloudCopyToCloudInput,
   FilesCloudCopyToComputerInput,
+  FilesCloudOfficeOpenInput,
+  FilesCloudOfficeOpened,
+  FilesCloudOfficeSaveInput,
+  FilesCloudOfficeSaveResult,
+  FilesOfficeVersionList,
   FilesCloudTransferResult,
 } from "./files.ts";
 import type {
@@ -844,6 +849,9 @@ export interface EnvironmentApi {
     cloudCopyToComputer: (
       input: FilesCloudCopyToComputerInput,
     ) => Promise<FilesCloudTransferResult>;
+    cloudOfficeOpen: (input: FilesCloudOfficeOpenInput) => Promise<FilesCloudOfficeOpened>;
+    cloudOfficeSave: (input: FilesCloudOfficeSaveInput) => Promise<FilesCloudOfficeSaveResult>;
+    cloudOfficeVersions: (input: FilesCloudOfficeOpenInput) => Promise<FilesOfficeVersionList>;
   };
   /** Install a harness CLI or sign it in on this environment's machine. */
   providerSetup: {

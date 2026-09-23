@@ -2,8 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
+  CloudIcon,
   FileSpreadsheetIcon,
   FileTextIcon,
+  HistoryIcon,
   Loader2Icon,
   PresentationIcon,
   SaveIcon,
@@ -32,6 +34,7 @@ import {
   type OfficeDocumentType,
 } from "./officeFormats";
 import { writeOfficeBytes } from "./officeSave";
+import { OfficeVersionsDialog } from "./OfficeVersionsDialog";
 import {
   fetchOfficeEngineStatus,
   installProgressLabel,
@@ -39,6 +42,12 @@ import {
 } from "./officeInstall";
 import { normalizeXlsxForEngine } from "./normalizeXlsx";
 import { blankExtensionFor, blankOfficeFile, isZipArchive } from "./officeBlank";
+import {
+  cloudDocumentFolder,
+  openCloudDocument,
+  saveCloudDocument,
+  type OfficeCloudRef,
+} from "./officeCloud";
 
 /** OOXML/ODF formats are zip archives; anything else under that name is broken. */
 const ARCHIVE_FORMATS = new Set([
@@ -70,9 +79,33 @@ type SaveState =
   | { kind: "idle" }
   | { kind: "saving" }
   | { kind: "saved"; at: Date }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string }
+  /** Someone saved a newer version in the cloud; `mine` is what wasn't saved. */
+  | { kind: "conflict"; mine: Uint8Array };
 
-export function OfficeView({ path }: { path: string }) {
+/** What the page knows about a Cloud document it opened. */
+interface CloudSession {
+  version: string | null;
+  writable: boolean;
+  stagingDir: string;
+}
+
+function downloadBytes(bytes: Uint8Array, name: string) {
+  const url = URL.createObjectURL(new Blob([bytes as BlobPart]));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/**
+ * `path` is a file on the computer — or, with `cloud`, the object key of a
+ * document in Cloud storage (names and formats come from it the same way).
+ */
+export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudRef }) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
   const environmentId = activeEnvironmentId ?? primaryEnvironmentId;
@@ -80,7 +113,15 @@ export function OfficeView({ path }: { path: string }) {
   const navigate = useNavigate();
 
   const documentType = officeDocumentType(path);
-  const saveTarget = officeSaveTarget(path);
+  const cloudSessionRef = useRef<CloudSession | null>(null);
+  const [cloudWritable, setCloudWritable] = useState(true);
+  // A Cloud document saves back only in its own format (no "save as .docx" next to it).
+  const localSaveTarget = officeSaveTarget(path);
+  const saveTarget = cloud
+    ? localSaveTarget?.path === path && cloudWritable
+      ? localSaveTarget
+      : null
+    : localSaveTarget;
   const fileName = officeFileName(path);
   const Icon = documentType ? TYPE_ICON[documentType] : FileTextIcon;
 
@@ -128,6 +169,18 @@ export function OfficeView({ path }: { path: string }) {
     queryFn: async () => {
       const api = environmentId ? readEnvironmentApi(environmentId) : undefined;
       if (!api) throw new Error("This computer is not connected right now.");
+      if (cloud) {
+        const opened = await openCloudDocument(api, cloud);
+        cloudSessionRef.current = {
+          version: opened.version,
+          writable: opened.writable,
+          stagingDir: opened.stagingDir,
+        };
+        setCloudWritable(opened.writable);
+        return officeExtension(path) === "xlsx"
+          ? await normalizeXlsxForEngine(opened.bytes)
+          : opened.bytes;
+      }
       const result = await api.filesystem.readFile({
         path,
         maxBytes: FILESYSTEM_READ_FILE_HARD_MAX_BYTES,
@@ -152,32 +205,57 @@ export function OfficeView({ path }: { path: string }) {
   const [editorError, setEditorError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>({ kind: "idle" });
+  const [versionsOpen, setVersionsOpen] = useState(false);
   const saveRef = useRef<() => Promise<void>>(async () => {});
 
-  const save = useCallback(async () => {
-    const editor = editorRef.current;
-    const api = environmentId ? readEnvironmentApi(environmentId) : undefined;
-    if (!editor || !api || !saveTarget) return;
-    setSaveState({ kind: "saving" });
-    try {
-      const bytes = await editor.exportBytes(saveTarget.extension);
-      await writeOfficeBytes((input) => api.projects.writeFile(input), saveTarget.path, bytes);
-      setDirty(false);
-      setSaveState({ kind: "saved", at: new Date() });
-      if (saveTarget.path !== path) {
-        toastManager.add({
-          type: "success",
-          title: "Saved as a new file",
-          description: officeFileName(saveTarget.path),
-        });
+  const save = useCallback(
+    async (options: { force?: boolean; bytes?: Uint8Array } = {}) => {
+      const editor = editorRef.current;
+      const api = environmentId ? readEnvironmentApi(environmentId) : undefined;
+      if (!editor || !api || !saveTarget) return;
+      setSaveState({ kind: "saving" });
+      try {
+        const bytes = options.bytes ?? (await editor.exportBytes(saveTarget.extension));
+        const session = cloudSessionRef.current;
+        if (cloud && session) {
+          const result = await saveCloudDocument({
+            api,
+            ref: cloud,
+            bytes,
+            baseVersion: session.version,
+            stagingDir: session.stagingDir,
+            force: options.force === true,
+          });
+          if (result.kind === "conflict") {
+            setSaveState({ kind: "conflict", mine: bytes });
+            return;
+          }
+          session.version = result.version;
+          editor.markSaved();
+          setDirty(false);
+          setSaveState({ kind: "saved", at: new Date() });
+          void queryClient.invalidateQueries({ queryKey: ["files", "cloud"] });
+          return;
+        }
+        await writeOfficeBytes((input) => api.projects.writeFile(input), saveTarget.path, bytes);
+        setDirty(false);
+        setSaveState({ kind: "saved", at: new Date() });
+        if (saveTarget.path !== path) {
+          toastManager.add({
+            type: "success",
+            title: "Saved as a new file",
+            description: officeFileName(saveTarget.path),
+          });
+        }
+        void queryClient.invalidateQueries({ queryKey: ["previewReadFile"] });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setSaveState({ kind: "error", message });
+        toastManager.add({ type: "error", title: "Couldn't save", description: message });
       }
-      void queryClient.invalidateQueries({ queryKey: ["previewReadFile"] });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setSaveState({ kind: "error", message });
-      toastManager.add({ type: "error", title: "Couldn't save", description: message });
-    }
-  }, [environmentId, path, queryClient, saveTarget]);
+    },
+    [cloud, environmentId, path, queryClient, saveTarget],
+  );
   saveRef.current = save;
 
   const loadedBytes = fileQuery.data;
@@ -204,6 +282,7 @@ export function OfficeView({ path }: { path: string }) {
         description: error instanceof Error ? error.message : String(error),
       }),
   });
+  const readOnly = saveTarget === null;
   useEffect(() => {
     const container = containerRef.current;
     if (!container || !bytes || !documentType || engineQuery.data !== true) return;
@@ -217,6 +296,7 @@ export function OfficeView({ path }: { path: string }) {
       fileName,
       fileType: officeExtension(path),
       documentType,
+      readOnly,
       onReady: () => {
         if (!cancelled) setEditorReady(true);
       },
@@ -240,7 +320,7 @@ export function OfficeView({ path }: { path: string }) {
       editorRef.current?.destroy();
       editorRef.current = null;
     };
-  }, [bytes, documentType, engineQuery.data, fileName, path]);
+  }, [bytes, documentType, engineQuery.data, fileName, path, readOnly]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -302,6 +382,14 @@ export function OfficeView({ path }: { path: string }) {
               variant="ghost"
               aria-label="Back to Files"
               onClick={() => {
+                if (cloud) {
+                  const prefix = cloudDocumentFolder(cloud.key);
+                  void navigate({
+                    to: "/files",
+                    search: { cloud: "1", bucket: cloud.bucketId, ...(prefix ? { prefix } : {}) },
+                  });
+                  return;
+                }
                 const folder = path.slice(0, Math.max(path.lastIndexOf("/"), 1));
                 void navigate({ to: "/files", search: { path: folder, file: path } });
               }}
@@ -312,13 +400,23 @@ export function OfficeView({ path }: { path: string }) {
             <span className="truncate text-sm font-medium text-foreground" title={path}>
               {fileName}
             </span>
+            {cloud ? (
+              <span
+                className="flex shrink-0 items-center gap-1 rounded-full bg-sky-500/10 px-2 py-0.5 text-[11px] text-sky-700 dark:text-sky-300"
+                title="Opened from Cloud storage and saved back there. Older copies are kept in the .versions folder next to it."
+                data-testid="office-cloud-badge"
+              >
+                <CloudIcon className="size-3" />
+                {cloudWritable ? "Cloud storage" : "Cloud storage · read-only"}
+              </span>
+            ) : null}
             <span
               className="shrink-0 text-xs text-muted-foreground"
               data-testid="office-save-state"
             >
               {saveState.kind === "saving"
                 ? "Saving…"
-                : saveState.kind === "error"
+                : saveState.kind === "error" || saveState.kind === "conflict"
                   ? "Not saved"
                   : dirty
                     ? "Unsaved changes"
@@ -329,8 +427,18 @@ export function OfficeView({ path }: { path: string }) {
             <div className="ml-auto flex items-center gap-1">
               <Button
                 size="xs"
+                variant="ghost"
+                onClick={() => setVersionsOpen(true)}
+                disabled={!documentType}
+                data-testid="office-versions"
+              >
+                <HistoryIcon className="size-3.5" />
+                Versions
+              </Button>
+              <Button
+                size="xs"
                 onClick={() => void save()}
-                disabled={!editorReady || saveState.kind === "saving"}
+                disabled={!editorReady || !saveTarget || saveState.kind === "saving"}
                 data-testid="office-save"
               >
                 {saveState.kind === "saving" ? (
@@ -343,6 +451,51 @@ export function OfficeView({ path }: { path: string }) {
             </div>
           </div>
         </header>
+        {saveState.kind === "conflict" ? (
+          <div
+            className="flex flex-wrap items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm"
+            data-testid="office-conflict"
+          >
+            <span className="min-w-0 flex-1 text-foreground">
+              Someone saved a newer version of this document in Cloud storage after you opened it.
+              Your edits aren't saved yet — nothing was overwritten.
+            </span>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => downloadBytes(saveState.mine, fileName)}
+            >
+              Download my version
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "Replace the document in Cloud storage with your version? The newer one will be kept as an older copy in .versions.",
+                  )
+                ) {
+                  void save({ force: true, bytes: saveState.mine });
+                }
+              }}
+            >
+              Replace with my version
+            </Button>
+            <Button
+              size="xs"
+              onClick={() => {
+                if (window.confirm("Reload? Your unsaved edits will be lost.")) {
+                  setDirty(false);
+                  setSaveState({ kind: "idle" });
+                  void fileQuery.refetch();
+                }
+              }}
+            >
+              Reload the latest
+            </Button>
+          </div>
+        ) : null}
         <div className="relative min-h-0 flex-1">
           <div ref={containerRef} className="absolute inset-0" data-testid="office-editor" />
           {blocking ? (
@@ -363,7 +516,7 @@ export function OfficeView({ path }: { path: string }) {
                     </Button>
                   </div>
                 ) : null}
-                {"action" in blocking && blocking.action === "blank" && blankKind ? (
+                {"action" in blocking && blocking.action === "blank" && blankKind && !cloud ? (
                   <div className="pt-2">
                     <Button
                       size="sm"
@@ -387,6 +540,13 @@ export function OfficeView({ path }: { path: string }) {
           ) : null}
         </div>
       </div>
+      <OfficeVersionsDialog
+        open={versionsOpen}
+        onOpenChange={setVersionsOpen}
+        environmentId={environmentId}
+        source={cloud ? { kind: "cloud", ref: cloud } : { kind: "computer", path }}
+        documentName={fileName}
+      />
     </SidebarInset>
   );
 }

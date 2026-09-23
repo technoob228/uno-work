@@ -6,6 +6,7 @@
  */
 import type { EnvironmentId, FilesCloudObject } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import {
   ChevronRightIcon,
   CloudIcon,
@@ -13,7 +14,9 @@ import {
   EllipsisIcon,
   FolderDownIcon,
   FolderOpenIcon,
+  LinkIcon,
   Loader2Icon,
+  PencilIcon,
   PlusIcon,
   RefreshCwIcon,
   Trash2Icon,
@@ -21,7 +24,9 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
+import { isOfficeFile } from "../office/officeFormats";
 import {
   pickFilesForProjectUpload,
   pickFolderForProjectUpload,
@@ -167,6 +172,17 @@ export function CloudBrowser({
         .catch(() => undefined);
       refresh();
     }
+  };
+
+  const navigate = useNavigate();
+  // Word/Excel/PowerPoint open in Office and save back into the bucket. Office
+  // runs on the computer serving the page, so not in the desktop app.
+  // Older copies under `.versions/` only download.
+  const opensInOffice = (key: string) =>
+    !isElectron && isOfficeFile(key) && bucketId !== null && !key.split("/").includes(".versions");
+  const openInOffice = (object: FilesCloudObject) => {
+    if (bucketId === null) return;
+    void navigate({ to: "/office", search: { bucket: bucketId, key: object.key } });
   };
 
   const download = async (object: FilesCloudObject) => {
@@ -407,7 +423,10 @@ export function CloudBrowser({
                   <button
                     type="button"
                     onClick={() =>
-                      row.isFolder ? onNavigate(bucketId, row.key) : object && void download(object)
+                      row.isFolder
+                        ? onNavigate(bucketId, row.key)
+                        : object &&
+                          (opensInOffice(row.key) ? openInOffice(object) : void download(object))
                     }
                     className="flex w-full min-w-0 items-center gap-3 text-left"
                   >
@@ -449,10 +468,22 @@ export function CloudBrowser({
                         <EllipsisIcon />
                       </MenuTrigger>
                       <MenuPopup align="end" className="w-52">
+                        {object && opensInOffice(row.key) ? (
+                          <MenuItem onClick={() => openInOffice(object)}>
+                            <PencilIcon />
+                            Open in Office
+                          </MenuItem>
+                        ) : null}
                         {object ? (
                           <MenuItem onClick={() => void download(object)}>
                             <DownloadIcon />
                             Download
+                          </MenuItem>
+                        ) : null}
+                        {object && isOfficeFile(row.name) ? (
+                          <MenuItem disabled>
+                            <LinkIcon />
+                            Share link — not yet for Cloud
                           </MenuItem>
                         ) : null}
                         <MenuItem onClick={() => setCopyTarget(row)}>

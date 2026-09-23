@@ -10,6 +10,7 @@
  */
 import fsPromises from "node:fs/promises";
 import * as OS from "node:os";
+import nodePath from "node:path";
 
 import {
   FilesError,
@@ -43,6 +44,11 @@ import {
   type FilesCloudObjectInput,
   type FilesCloudState,
   type FilesCloudTransferResult,
+  type FilesCloudOfficeOpenInput,
+  type FilesCloudOfficeOpened,
+  type FilesCloudOfficeSaveInput,
+  type FilesCloudOfficeSaveResult,
+  type FilesOfficeVersionList,
   FILES_SHARE_ROUTE_PREFIX,
 } from "@t3tools/contracts";
 import { Context, Effect, Layer, Option } from "effect";
@@ -70,6 +76,8 @@ import {
   copyToComputer,
   type CloudDeps,
 } from "./cloudStorage.ts";
+import { CLOUD_OFFICE_STAGING_DIR, openCloudOffice, saveCloudOffice } from "./cloudOffice.ts";
+import { listCloudOfficeVersions } from "./officeVersions.ts";
 import { publishToUnoHosting } from "./sitePublish.ts";
 import {
   generateShareToken,
@@ -123,6 +131,17 @@ export interface FilesServiceShape {
   readonly cloudCopyToComputer: (
     input: FilesCloudCopyToComputerInput,
   ) => Effect.Effect<FilesCloudTransferResult, FilesError>;
+  readonly cloudOfficeOpen: (
+    input: FilesCloudOfficeOpenInput,
+  ) => Effect.Effect<FilesCloudOfficeOpened, FilesError>;
+  readonly cloudOfficeSave: (
+    input: FilesCloudOfficeSaveInput,
+  ) => Effect.Effect<FilesCloudOfficeSaveResult, FilesError>;
+  readonly cloudOfficeVersions: (
+    input: FilesCloudOfficeOpenInput,
+  ) => Effect.Effect<FilesOfficeVersionList, FilesError>;
+  /** Ids of every link (live or not) ever made to this exact path. */
+  readonly shareIdsForPath: (path: string) => Effect.Effect<ReadonlyArray<string>, FilesError>;
 }
 
 export class FilesService extends Context.Service<FilesService, FilesServiceShape>()(
@@ -269,6 +288,12 @@ export const makeFilesService = (
           if (!office.writable) {
             return yield* new FilesError({
               message: `Old .${office.extension} files can only be shared to view. Save it as .docx, .xlsx or .pptx to let people edit.`,
+            });
+          }
+          if (access === "comment" && !office.commentable) {
+            return yield* new FilesError({
+              message:
+                "Comment links work for Word documents (.docx) for now. Share this file to view or to edit.",
             });
           }
         }
@@ -470,7 +495,66 @@ export const makeFilesService = (
         return result;
       });
 
+    const cloudOfficeOpenEffect: FilesServiceShape["cloudOfficeOpen"] = (input) =>
+      Effect.gen(function* () {
+        const root = yield* rootPath;
+        const opened = yield* withCloud("Couldn't open the document from Cloud storage.", (deps) =>
+          openCloudOffice(deps, { bucketId: input.bucketId, key: input.key, homeDir: root }),
+        );
+        yield* Effect.logInfo("files.cloud.office.open", {
+          bucketId: input.bucketId,
+          bytes: opened.size,
+        });
+        return opened;
+      });
+
+    const cloudOfficeSaveEffect: FilesServiceShape["cloudOfficeSave"] = (input) =>
+      Effect.gen(function* () {
+        const root = yield* rootPath;
+        const staged = yield* attempt(
+          () => resolveInsideRoot(root, input.stagedPath),
+          "Couldn't read the document to save.",
+        );
+        const stagingRoot = nodePath.join(root, CLOUD_OFFICE_STAGING_DIR) + nodePath.sep;
+        if (!staged.startsWith(stagingRoot)) {
+          return yield* new FilesError({ message: "Couldn't read the document to save." });
+        }
+        const bytes = yield* attempt(
+          () => fsPromises.readFile(staged),
+          "Couldn't read the document to save.",
+        ).pipe(Effect.ensuring(Effect.promise(() => fsPromises.rm(staged, { force: true }))));
+        const result = yield* withCloud("Couldn't save to Cloud storage.", (deps) =>
+          saveCloudOffice(deps, {
+            bucketId: input.bucketId,
+            key: input.key,
+            bytes: new Uint8Array(bytes),
+            baseVersion: input.baseVersion,
+            force: input.force === true,
+          }),
+        );
+        yield* Effect.logInfo("files.cloud.office.save", {
+          bucketId: input.bucketId,
+          result: result.kind,
+          bytes: bytes.length,
+          forced: input.force === true,
+        });
+        return result.kind === "saved"
+          ? { kind: "saved" as const, version: result.version }
+          : { kind: "conflict" as const, version: result.currentVersion };
+      });
+
     return {
+      cloudOfficeVersions: (input) =>
+        withCloud("Couldn't list the older versions.", async (deps) => ({
+          versions: await listCloudOfficeVersions(deps, input),
+        })),
+      shareIdsForPath: (path) =>
+        shares.list({ path }).pipe(
+          Effect.map((rows) => rows.map((row) => row.shareId)),
+          Effect.mapError(persistenceError),
+        ),
+      cloudOfficeOpen: cloudOfficeOpenEffect,
+      cloudOfficeSave: cloudOfficeSaveEffect,
       cloudState: cloudStateEffect,
       cloudList: (input) =>
         withCloud("Couldn't open this bucket.", (deps) => cloudList(deps, input)),

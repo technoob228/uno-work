@@ -28,7 +28,11 @@ import { SelfWatchdogLive } from "./selfWatchdog.ts";
 import { ServerBrowserLive } from "./serverBrowser.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
-import { filesRawRouteLayer, filesShareRouteLayers } from "./files/http.ts";
+import {
+  filesOfficeVersionsRouteLayer,
+  filesRawRouteLayer,
+  filesShareRouteLayers,
+} from "./files/http.ts";
 import { FilesServiceLive } from "./files/FilesService.ts";
 import { FileSharesRepositoryLive } from "./persistence/Layers/FileShares.ts";
 import { OpenLive } from "./open.ts";
@@ -525,6 +529,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
   filesRawRouteLayer,
+  filesOfficeVersionsRouteLayer,
   ...filesShareRouteLayers,
 ).pipe(Layer.provide(browserApiCorsLayer));
 

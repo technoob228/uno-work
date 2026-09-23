@@ -29,6 +29,9 @@ import {
 } from "../workspaceRegistry/unoCloudParse.ts";
 import { FilesPathError, uniqueDestination } from "./filesPaths.ts";
 
+/** Where Office keeps older copies of a Cloud document (see cloudOffice.ts). */
+export const CLOUD_VERSIONS_FOLDER = ".versions";
+
 /** Hostkey S3 drops single PUTs of a few hundred MB; stay under that. */
 export const CLOUD_SINGLE_PUT_MAX_BYTES = 256 * 1024 * 1024;
 const PRESIGN_TTL_SECONDS = 3600;
@@ -151,7 +154,9 @@ export function parseListing(raw: unknown, prefix: string) {
   const folders = (Array.isArray(record["folders"]) ? record["folders"] : [])
     .map(str)
     .filter((folder) => folder.startsWith(prefix) && folder.endsWith("/"))
-    .map((folder) => ({ prefix: folder, name: lastSegment(folder) }));
+    .map((folder) => ({ prefix: folder, name: lastSegment(folder) }))
+    // Older copies of Office documents; people reach them via Office → Versions.
+    .filter((folder) => folder.name !== CLOUD_VERSIONS_FOLDER);
   const objects = (Array.isArray(record["objects"]) ? record["objects"] : []).flatMap((item) => {
     if (!item || typeof item !== "object") return [];
     const object = item as Record<string, unknown>;

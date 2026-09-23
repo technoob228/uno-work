@@ -26,6 +26,8 @@ import "./officeShare.css";
 interface ShareConfig {
   readonly name: string;
   readonly access: OfficeAccess;
+  /** The owner picked "comment", but comments on this kind of file aren't saved by link yet. */
+  readonly commentsReadOnly?: boolean;
   readonly documentType: "word" | "cell" | "slide";
   readonly extension: string;
   readonly fileUrl: string;
@@ -108,7 +110,9 @@ async function start(config: ShareConfig) {
       el("div", { className: "us-name", text: config.name, attrs: { title: config.name } }),
       el("div", {
         className: "us-access",
-        text: ACCESS_LABEL[config.access],
+        text: config.commentsReadOnly
+          ? "Anyone with the link can view — comments on spreadsheets and presentations aren't saved by link yet"
+          : ACCESS_LABEL[config.access],
         attrs: { "data-testid": "share-access" },
       }),
     ]),
@@ -212,7 +216,11 @@ async function start(config: ShareConfig) {
           ...(baseVersion ? { "x-uno-base-version": baseVersion } : {}),
         },
       });
-      const body = (await reply.json().catch(() => ({}))) as { version?: string; error?: string };
+      const body = (await reply.json().catch(() => ({}))) as {
+        version?: string;
+        error?: string;
+        code?: string;
+      };
       if (reply.status === 409) {
         blocked = true;
         setStatus("Not saved");
@@ -241,6 +249,26 @@ async function start(config: ShareConfig) {
                   dirty = false;
                   location.reload();
                 }
+              },
+              true,
+            ],
+          ],
+        );
+        return;
+      }
+      if (reply.status === 403 && body.code === "comment_only") {
+        // The daemon only takes comments from this link; the text change was refused.
+        blocked = true;
+        setStatus("Not saved");
+        showBanner(
+          "This link can only comment. A change to the text can't be saved — nothing was changed on the computer.",
+          [
+            ["Download my version", () => downloadBytes(out, config.name)],
+            [
+              "Reload the latest",
+              () => {
+                dirty = false;
+                location.reload();
               },
               true,
             ],

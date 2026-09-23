@@ -44,6 +44,14 @@ export function canShareForEditing(name: string): boolean {
   return EDITABLE_BY_LINK.has(name.split(".").pop()?.toLowerCase() ?? "");
 }
 
+/**
+ * "Can comment" is checked on the computer: a save through such a link may
+ * only add comments. That check exists for Word documents so far.
+ */
+export function canShareForCommenting(name: string): boolean {
+  return name.split(".").pop()?.toLowerCase() === "docx";
+}
+
 const ACCESS_OPTIONS: ReadonlyArray<{
   value: FilesShareAccess;
   label: string;
@@ -309,6 +317,7 @@ export function ShareDialog({
     enabled: open && entry !== null && environmentId !== null,
   });
   const editable = entry !== null && entry.kind !== "directory" && canShareForEditing(entry.name);
+  const commentable = entry !== null && editable && canShareForCommenting(entry.name);
   const create = useMutation({
     mutationFn: () =>
       filesApi(environmentId).createShare({
@@ -384,31 +393,33 @@ export function ShareDialog({
               <div className="flex flex-col gap-1.5">
                 <span className="text-xs text-muted-foreground">Anyone with the link</span>
                 <div
-                  className="grid grid-cols-3 gap-1.5"
+                  className={cn("grid gap-1.5", commentable ? "grid-cols-3" : "grid-cols-2")}
                   role="radiogroup"
                   aria-label="What people with the link can do"
                 >
-                  {ACCESS_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={access === option.value}
-                      data-testid={`share-access-${option.value}`}
-                      onClick={() => setAccess(option.value)}
-                      className={cn(
-                        "flex flex-col items-start gap-0.5 rounded-lg border px-2.5 py-2 text-left transition-colors",
-                        access === option.value
-                          ? "border-primary bg-primary/10"
-                          : "border-border hover:bg-accent",
-                      )}
-                    >
-                      <span className="text-sm font-medium text-foreground">{option.label}</span>
-                      <span className="text-[11px] leading-tight text-muted-foreground">
-                        {option.hint}
-                      </span>
-                    </button>
-                  ))}
+                  {ACCESS_OPTIONS.filter((option) => option.value !== "comment" || commentable).map(
+                    (option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={access === option.value}
+                        data-testid={`share-access-${option.value}`}
+                        onClick={() => setAccess(option.value)}
+                        className={cn(
+                          "flex flex-col items-start gap-0.5 rounded-lg border px-2.5 py-2 text-left transition-colors",
+                          access === option.value
+                            ? "border-primary bg-primary/10"
+                            : "border-border hover:bg-accent",
+                        )}
+                      >
+                        <span className="text-sm font-medium text-foreground">{option.label}</span>
+                        <span className="text-[11px] leading-tight text-muted-foreground">
+                          {option.hint}
+                        </span>
+                      </button>
+                    ),
+                  )}
                 </div>
               </div>
             ) : null}
