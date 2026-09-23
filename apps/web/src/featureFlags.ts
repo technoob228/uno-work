@@ -78,6 +78,13 @@ export const FEATURE_FLAGS = [
       "Legacy sidebar only: sorts each project's chats into Pinned, Active, Snoozed and Done, and lets you snooze a chat until later. Off keeps one flat list per project.",
     default: true,
   },
+  {
+    key: "officeDocsShell",
+    label: "Simple toolbar for Word documents",
+    description:
+      "Opens docx files with a calm, Google-Docs-like toolbar instead of the full Office ribbon. The ribbon stays one click away (⋯ → Show full toolbar). Spreadsheets and presentations are not affected.",
+    default: false,
+  },
 ] as const satisfies readonly FeatureFlagDefinition[];
 
 export type FeatureFlagKey = (typeof FEATURE_FLAGS)[number]["key"];
