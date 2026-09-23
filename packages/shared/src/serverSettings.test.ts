@@ -195,3 +195,21 @@ describe("serverSettings helpers", () => {
     });
   });
 });
+
+describe("applyServerSettingsPatch pins", () => {
+  it("replaces the pins array whole instead of merging it index by index", () => {
+    const withTwo = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      pins: [
+        { id: "app:https://a.dev", kind: "app", title: "A", target: "https://a.dev" },
+        { id: "link:https://b.dev", kind: "link", title: "B", target: "https://b.dev" },
+      ],
+    });
+    expect(withTwo.pins).toHaveLength(2);
+    const withOne = applyServerSettingsPatch(withTwo, {
+      pins: [{ id: "link:https://b.dev", kind: "link", title: "B", target: "https://b.dev" }],
+    });
+    expect(Array.isArray(withOne.pins)).toBe(true);
+    expect(withOne.pins.map((pin) => pin.id)).toEqual(["link:https://b.dev"]);
+    expect(applyServerSettingsPatch(withOne, { machineOnboarded: true }).pins).toHaveLength(1);
+  });
+});

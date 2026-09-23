@@ -34,9 +34,9 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
         <TooltipTrigger
           render={
             <Link
-              aria-label="Go to chats"
+              aria-label="Home"
               className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
-              to="/"
+              to="/computer"
             >
               <span
                 aria-hidden="true"
@@ -54,7 +54,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           }
         />
         <TooltipPopup side="bottom" sideOffset={2}>
-          Version {APP_VERSION}
+          Home · version {APP_VERSION}
         </TooltipPopup>
       </Tooltip>
     </div>

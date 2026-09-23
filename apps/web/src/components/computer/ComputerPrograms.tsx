@@ -28,7 +28,7 @@ import { Skeleton } from "../ui/skeleton";
 import { Spinner } from "../ui/spinner";
 import type { ProgramStatus, ProgramTile } from "./programModel";
 
-const STATUS_DOT: Record<ProgramStatus, string | null> = {
+export const STATUS_DOT: Record<ProgramStatus, string | null> = {
   running: "bg-success",
   stopped: "bg-muted-foreground/60",
   installing: null,
@@ -63,24 +63,31 @@ export function ProgramIcon({
   iconImage: string | null;
   className?: string;
 }) {
-  const base = cn(
-    "flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl shadow-sm ring-1 ring-black/5 dark:ring-white/10",
-    className,
-  );
+  // The caller's className goes last so a small icon (sidebar rows, the app
+  // bar) can shrink the glyph too, not only the box.
+  const base =
+    "flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl shadow-sm ring-1 ring-black/5 dark:ring-white/10";
   if (iconImage) {
     return (
-      <span className={cn(base, "bg-card")}>
+      <span className={cn(base, "bg-card", className)}>
         <img src={iconImage} alt="" className="size-full object-cover" draggable={false} />
       </span>
     );
   }
   if (icon) {
-    return <span className={cn(base, "bg-card text-[1.75rem] leading-none")}>{icon}</span>;
+    return (
+      <span className={cn(base, "bg-card text-[1.75rem] leading-none", className)}>{icon}</span>
+    );
   }
   const letter = Array.from(name.trim())[0]?.toUpperCase() ?? "?";
   return (
     <span
-      className={cn(base, "bg-gradient-to-br text-xl font-semibold text-white", colorFor(name))}
+      className={cn(
+        base,
+        "bg-gradient-to-br text-xl font-semibold text-white",
+        colorFor(name),
+        className,
+      )}
     >
       {letter}
     </span>

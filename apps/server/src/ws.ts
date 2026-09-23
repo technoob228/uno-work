@@ -73,6 +73,7 @@ import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
 import { FilesService } from "./files/FilesService.ts";
 import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
+import { checkEmbed } from "./machineApps/embedCheck.ts";
 import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
 import {
   GENERATED_INSTRUCTIONS_RELATIVE_PATH,
@@ -1435,6 +1436,12 @@ const makeWsRpcLayer = (
             machineApps
               .action(input)
               .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
+        [WS_METHODS.unoComputerEmbedCheck]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerEmbedCheck,
+            Effect.promise(() => checkEmbed(input)),
             { "rpc.aggregate": "uno-computer" },
           ),
         [WS_METHODS.unoComputerLocalMetrics]: (_input) =>

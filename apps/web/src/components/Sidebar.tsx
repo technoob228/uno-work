@@ -182,8 +182,11 @@ import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarComputerRow } from "./sidebar/SidebarComputerRow";
 import { SidebarEnvSwitcher } from "./SidebarEnvSwitcher";
-import { SidebarTerminalRow } from "./sidebar/SidebarTerminalRow";
-import { SidebarFilesRow } from "./sidebar/SidebarFilesRow";
+import { SidebarAppsList } from "./sidebar/SidebarAppsList";
+import { SidebarFilesTree } from "./sidebar/SidebarFilesTree";
+import { SidebarModeSwitch } from "./sidebar/SidebarModeSwitch";
+import { SidebarPinned } from "./sidebar/SidebarPinned";
+import { useNavStore } from "../navigation/navStore";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import {
   useSidebarEnvironmentLabelResolver,
@@ -1081,6 +1084,7 @@ function useErrorToast() {
 }
 
 export default function Sidebar() {
+  const sidebarMode = useNavStore((state) => state.sidebarMode);
   const pathname = useLocation({ select: (location) => location.pathname });
   const isOnSettings = pathname.startsWith("/settings");
   const router = useRouter();
@@ -2115,7 +2119,8 @@ export default function Sidebar() {
 
   const renderRow = (thread: SidebarThreadSummary, section: SidebarSection) => {
     const threadKey = threadKeyOf(thread);
-    const variant = section === "active" || section === "pinned" ? "card" : "slim";
+    // Pinned chats live in the compact Pinned group above every sidebar mode.
+    const variant = section === "active" ? "card" : "slim";
     const projectKey = projectKeyOf(thread);
     return (
       <SidebarThreadRow
@@ -2149,8 +2154,8 @@ export default function Sidebar() {
       />
     );
   };
-  const totalThreadCount =
-    pinnedThreads.length + activeThreads.length + snoozedThreads.length + settledThreads.length;
+  // Pinned chats render in the Pinned group, not in the list below.
+  const totalThreadCount = activeThreads.length + snoozedThreads.length + settledThreads.length;
 
   const projectScopePicker: ReactNode = (
     <Combobox
@@ -2252,133 +2257,162 @@ export default function Sidebar() {
       <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-0">
         <SidebarEnvSwitcher variant="header" />
         <SidebarComputerRow />
-        <SidebarFilesRow />
-        <SidebarTerminalRow />
+        <div className="pt-1.5 pb-1">
+          <SidebarModeSwitch />
+        </div>
       </SidebarGroup>
-      <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-1">
-        <SidebarThreadHeader
-          searchFieldRef={headerSearchRef}
-          hasProjects={projects.length > 0}
-          projectScope={projectScopePicker}
-          onNewProject={openAddProject}
-          onNewThread={handleNewThreadClick}
-          newThreadDisabled={projects.length === 0}
-          newThreadShortcutLabel={newThreadShortcutLabel}
-          newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
-          showNewThreadInProjectHint={projectGroups.length > 1 && scopedProjectGroup === null}
-          searchInputRef={threadSearchInputRef}
-          searchQuery={threadSearchQuery}
-          onSearchQueryChange={(value) => {
-            setThreadSearchQuery(value);
-            setActiveSearchResultIndex(0);
-          }}
-          onSearchKeyDown={handleThreadSearchKeyDown}
-          isSearching={isSearchingThreads}
-          searchResultCount={threadSearchResults.length}
-          activeSearchResultIndex={activeSearchResultIndex}
-          onClearSearch={clearThreadSearch}
+      <SidebarGroup className="max-h-[40%] shrink-0 overflow-y-auto px-[var(--sidebar-content-inset)] pt-1 pb-1">
+        <SidebarPinned
+          hasPinnedChats={pinnedThreads.length > 0}
+          pinnedChats={pinnedThreads.map((thread) => renderRow(thread, "pinned"))}
         />
       </SidebarGroup>
-      <SidebarContent className="min-h-full gap-0">
-        <SidebarGroup className="min-h-full flex-1 ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pt-0 pb-1">
-          {isSearchingThreads ? (
-            threadSearchResults.length > 0 ? (
-              <ul
-                id="sidebar-thread-search-results"
-                role="listbox"
-                aria-label="Chat search results"
-                className="flex flex-col gap-px"
-              >
-                {threadSearchResults.map((thread, index) => {
-                  const threadKey = threadKeyOf(thread);
-                  return (
-                    <SidebarSearchResultRow
-                      key={threadKey}
-                      thread={thread}
-                      project={projectByKey.get(projectKeyOf(thread)) ?? null}
-                      isHighlighted={activeSearchResultIndex === index}
-                      isRouteActive={routeThreadKey === threadKey}
-                      resultId={`sidebar-thread-search-result-${index}`}
-                      onHighlight={() => setActiveSearchResultIndex(index)}
-                      onSelect={() => selectThreadSearchResult(thread)}
-                    />
-                  );
-                })}
-              </ul>
-            ) : (
-              <p
-                role="status"
-                className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
-              >
-                No chats found
-              </p>
-            )
-          ) : (
-            <TooltipProvider delay={150} closeDelay={0} timeout={400}>
-              <ul
-                role="list"
-                className={cn("relative flex flex-col gap-px", totalThreadCount > 0 && "flex-1")}
-              >
-                {pinnedThreads.map((thread) => renderRow(thread, "pinned"))}
-                {activeThreads.map((thread) => renderRow(thread, "active"))}
-                {snoozedThreads.length > 0 ? (
-                  <SidebarSectionHeader
-                    kind="snoozed"
-                    className="mt-auto"
-                    label={snoozedShelfExpanded ? "Snoozed" : `Snoozed (${snoozedThreads.length})`}
-                    expanded={snoozedShelfExpanded}
-                    onToggle={() => setSnoozedShelfExpanded((value) => !value)}
-                  />
-                ) : null}
-                {renderedSnoozedThreads.map((thread) => renderRow(thread, "snoozed"))}
-                {settledThreads.length > 0 ? (
-                  <SidebarSectionHeader
-                    kind="settled"
-                    className={cn(snoozedThreads.length === 0 && "mt-auto")}
-                    label={settledShelfExpanded ? "Settled" : `Settled (${settledThreads.length})`}
-                    expanded={settledShelfExpanded}
-                    onToggle={() => setSettledShelfExpanded((value) => !value)}
-                  />
-                ) : null}
-                {renderedSettledThreads.map((thread) => renderRow(thread, "settled"))}
-                {settledShelfExpanded && hiddenSettledCount > 0 ? (
-                  <li className="list-none">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT)
-                      }
-                      className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-                    >
-                      <PlusIcon aria-hidden className="size-4 shrink-0" />
-                      Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
-                    </button>
-                  </li>
-                ) : null}
-              </ul>
-            </TooltipProvider>
-          )}
-          {!isSearchingThreads && totalThreadCount === 0 ? (
-            <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
-              {projects.length === 0 ? (
-                <>
-                  <span>No projects yet</span>
-                  <Button size="xs" variant="outline" onClick={openAddProject}>
-                    <PlusIcon className="-mx-0.5 size-3" />
-                    Add project
-                  </Button>
-                </>
-              ) : scopedProjectGroup ? (
-                `No chats in ${scopedProjectGroup.displayName} yet`
-              ) : isHelperScope ? (
-                "No Helper chats yet"
+      {sidebarMode === "files" ? (
+        <SidebarContent className="min-h-full gap-0 border-t border-border/50">
+          <SidebarGroup className="px-[var(--sidebar-content-inset)] pt-1.5 pb-1">
+            <SidebarFilesTree />
+          </SidebarGroup>
+        </SidebarContent>
+      ) : sidebarMode === "apps" ? (
+        <SidebarContent className="min-h-full gap-0 border-t border-border/50">
+          <SidebarGroup className="min-h-full flex-1 px-[var(--sidebar-content-inset)] pt-1.5 pb-1">
+            <SidebarAppsList />
+          </SidebarGroup>
+        </SidebarContent>
+      ) : (
+        <>
+          <SidebarGroup className="shrink-0 border-t border-border/50 px-[var(--sidebar-content-inset)] pt-1.5 pb-1">
+            <SidebarThreadHeader
+              searchFieldRef={headerSearchRef}
+              hasProjects={projects.length > 0}
+              projectScope={projectScopePicker}
+              onNewProject={openAddProject}
+              onNewThread={handleNewThreadClick}
+              newThreadDisabled={projects.length === 0}
+              newThreadShortcutLabel={newThreadShortcutLabel}
+              newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
+              showNewThreadInProjectHint={projectGroups.length > 1 && scopedProjectGroup === null}
+              searchInputRef={threadSearchInputRef}
+              searchQuery={threadSearchQuery}
+              onSearchQueryChange={(value) => {
+                setThreadSearchQuery(value);
+                setActiveSearchResultIndex(0);
+              }}
+              onSearchKeyDown={handleThreadSearchKeyDown}
+              isSearching={isSearchingThreads}
+              searchResultCount={threadSearchResults.length}
+              activeSearchResultIndex={activeSearchResultIndex}
+              onClearSearch={clearThreadSearch}
+            />
+          </SidebarGroup>
+          <SidebarContent className="min-h-full gap-0">
+            <SidebarGroup className="min-h-full flex-1 ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pt-0 pb-1">
+              {isSearchingThreads ? (
+                threadSearchResults.length > 0 ? (
+                  <ul
+                    id="sidebar-thread-search-results"
+                    role="listbox"
+                    aria-label="Chat search results"
+                    className="flex flex-col gap-px"
+                  >
+                    {threadSearchResults.map((thread, index) => {
+                      const threadKey = threadKeyOf(thread);
+                      return (
+                        <SidebarSearchResultRow
+                          key={threadKey}
+                          thread={thread}
+                          project={projectByKey.get(projectKeyOf(thread)) ?? null}
+                          isHighlighted={activeSearchResultIndex === index}
+                          isRouteActive={routeThreadKey === threadKey}
+                          resultId={`sidebar-thread-search-result-${index}`}
+                          onHighlight={() => setActiveSearchResultIndex(index)}
+                          onSelect={() => selectThreadSearchResult(thread)}
+                        />
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p
+                    role="status"
+                    className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
+                  >
+                    No chats found
+                  </p>
+                )
               ) : (
-                "No chats yet"
+                <TooltipProvider delay={150} closeDelay={0} timeout={400}>
+                  <ul
+                    role="list"
+                    className={cn(
+                      "relative flex flex-col gap-px",
+                      totalThreadCount > 0 && "flex-1",
+                    )}
+                  >
+                    {activeThreads.map((thread) => renderRow(thread, "active"))}
+                    {snoozedThreads.length > 0 ? (
+                      <SidebarSectionHeader
+                        kind="snoozed"
+                        className="mt-auto"
+                        label={
+                          snoozedShelfExpanded ? "Snoozed" : `Snoozed (${snoozedThreads.length})`
+                        }
+                        expanded={snoozedShelfExpanded}
+                        onToggle={() => setSnoozedShelfExpanded((value) => !value)}
+                      />
+                    ) : null}
+                    {renderedSnoozedThreads.map((thread) => renderRow(thread, "snoozed"))}
+                    {settledThreads.length > 0 ? (
+                      <SidebarSectionHeader
+                        kind="settled"
+                        className={cn(snoozedThreads.length === 0 && "mt-auto")}
+                        label={
+                          settledShelfExpanded ? "Settled" : `Settled (${settledThreads.length})`
+                        }
+                        expanded={settledShelfExpanded}
+                        onToggle={() => setSettledShelfExpanded((value) => !value)}
+                      />
+                    ) : null}
+                    {renderedSettledThreads.map((thread) => renderRow(thread, "settled"))}
+                    {settledShelfExpanded && hiddenSettledCount > 0 ? (
+                      <li className="list-none">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT)
+                          }
+                          className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                        >
+                          <PlusIcon aria-hidden className="size-4 shrink-0" />
+                          Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
+                        </button>
+                      </li>
+                    ) : null}
+                  </ul>
+                </TooltipProvider>
               )}
-            </div>
-          ) : null}
-        </SidebarGroup>
-      </SidebarContent>
+              {!isSearchingThreads && totalThreadCount === 0 && pinnedThreads.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
+                  {projects.length === 0 ? (
+                    <>
+                      <span>No projects yet</span>
+                      <Button size="xs" variant="outline" onClick={openAddProject}>
+                        <PlusIcon className="-mx-0.5 size-3" />
+                        Add project
+                      </Button>
+                    </>
+                  ) : scopedProjectGroup ? (
+                    `No chats in ${scopedProjectGroup.displayName} yet`
+                  ) : isHelperScope ? (
+                    "No Helper chats yet"
+                  ) : (
+                    "No chats yet"
+                  )}
+                </div>
+              ) : null}
+            </SidebarGroup>
+          </SidebarContent>
+        </>
+      )}
       <SidebarChromeFooter showHelper={hasHelperProjects} />
 
       <ContinueOnMachineDialog

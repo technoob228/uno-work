@@ -29,6 +29,8 @@ import {
   UnoComputerResizeResult,
   UnoComputerState,
   UnoComputerTargetInput,
+  UnoEmbedCheck,
+  UnoEmbedCheckInput,
   UnoMachineAppActionInput,
   UnoMachineApps,
 } from "./unoComputer.ts";
@@ -355,6 +357,7 @@ export const WS_METHODS = {
   unoComputerLocalMetrics: "uno.computer.localMetrics",
   unoComputerResizeOptions: "uno.computer.resizeOptions",
   unoComputerResize: "uno.computer.resize",
+  unoComputerEmbedCheck: "uno.computer.embedCheck",
 
   // Files — the computer's file manager (/files) and its public share links
   filesList: "files.list",
@@ -1354,6 +1357,13 @@ export const WsUnoComputerMachineAppsRpc = Rpc.make(WS_METHODS.unoComputerMachin
   error: UnoCloudRpcError,
 });
 
+/** Can a web app be shown inside Uno Work? Never fails: `unknown` when unsure. */
+export const WsUnoComputerEmbedCheckRpc = Rpc.make(WS_METHODS.unoComputerEmbedCheck, {
+  payload: UnoEmbedCheckInput,
+  success: UnoEmbedCheck,
+  error: UnoCloudRpcError,
+});
+
 /** Start / stop / show on the internet / hide one of them. */
 export const WsUnoComputerAppActionRpc = Rpc.make(WS_METHODS.unoComputerAppAction, {
   payload: UnoMachineAppActionInput,
@@ -1436,6 +1446,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesCloudCopyToComputerRpc,
   WsUnoComputerMachineAppsRpc,
   WsUnoComputerAppActionRpc,
+  WsUnoComputerEmbedCheckRpc,
   WsUnoComputerLocalMetricsRpc,
   WsUnoComputerResizeOptionsRpc,
   WsUnoComputerResizeRpc,

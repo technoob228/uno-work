@@ -76,13 +76,15 @@ export function applyServerSettingsPatch(
 ): ServerSettings {
   const selectionPatch = patch.textGenerationModelSelection;
   const next = deepMerge(current, patch);
-  const nextWithReplacements =
-    patch.providerInstances !== undefined
-      ? {
-          ...next,
-          providerInstances: patch.providerInstances,
-        }
-      : next;
+  // Arrays and instance maps are replaced whole: deepMerge would merge an
+  // array index by index and leave removed entries behind.
+  const nextWithReplacements = {
+    ...next,
+    ...(patch.providerInstances !== undefined
+      ? { providerInstances: patch.providerInstances }
+      : {}),
+    ...(patch.pins !== undefined ? { pins: patch.pins } : {}),
+  };
   if (!selectionPatch) {
     return nextWithReplacements;
   }

@@ -45,6 +45,7 @@ export type PreviewFileKind =
   | "text"
   | "browser"
   | "plugin-panel"
+  | "app"
   | "unknown";
 
 export interface PreviewFile {
@@ -72,6 +73,32 @@ export function isBrowserTab(file: Pick<PreviewFile, "kind">): boolean {
 
 export function isPluginPanelTab(file: Pick<PreviewFile, "kind">): boolean {
   return file.kind === "plugin-panel";
+}
+
+/** A web app of the computer (Nextcloud, Vaultwarden…) shown in a frame. */
+export function isAppTab(file: Pick<PreviewFile, "kind">): boolean {
+  return file.kind === "app";
+}
+
+/** One tab per app address: opening the same app again focuses its tab. */
+export function makeAppFile(input: {
+  url: string;
+  name: string;
+  icon?: string | null;
+}): PreviewFile {
+  let origin = input.url;
+  try {
+    origin = new URL(input.url).origin;
+  } catch {
+    // keep the raw address as the id
+  }
+  return {
+    id: `app:${origin}`,
+    name: input.name,
+    kind: "app",
+    content: input.icon ?? "",
+    url: input.url,
+  };
 }
 
 const PLUGIN_PANEL_ID_PREFIX = "plugin-panel:";
@@ -152,6 +179,13 @@ interface PreviewPaneState {
    * трогается.
    */
   openFileForTarget: (target: PreviewTabTarget, scope: PreviewTabScope, file: PreviewFile) => void;
+  /** Открыть приложение компьютера во вкладке уровня «везде» (видна в любом чате). */
+  openAppTab: (file: PreviewFile) => void;
+  /**
+   * То же, но после перехода в чат `threadId`: вкладка откроется, когда этот
+   * чат станет текущим (вид панели живёт в бакете его проекта).
+   */
+  queueAppTab: (file: PreviewFile, threadId: string) => void;
   /** Открыть URL в браузерной вкладке (без аргумента — пустая «новая вкладка»). */
   openUrl: (url?: string) => void;
   /** То же для конкретного треда/проекта и уровня — bridge-события харнессов. */
@@ -389,6 +423,26 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
     },
     [currentTarget, openFileForTarget],
   );
+
+  const openAppTab = useCallback(
+    (file: PreviewFile) => {
+      openFileForTarget(currentTarget, "global", file);
+    },
+    [currentTarget, openFileForTarget],
+  );
+
+  const [pendingAppTab, setPendingAppTab] = useState<{
+    file: PreviewFile;
+    threadId: string;
+  } | null>(null);
+  const queueAppTab = useCallback((file: PreviewFile, threadId: string) => {
+    setPendingAppTab({ file, threadId });
+  }, []);
+  useEffect(() => {
+    if (!pendingAppTab || currentChatThreadId !== pendingAppTab.threadId) return;
+    openFileForTarget(currentTarget, "global", pendingAppTab.file);
+    setPendingAppTab(null);
+  }, [currentChatThreadId, currentTarget, openFileForTarget, pendingAppTab]);
 
   const openUrlForTarget = useCallback(
     (target: PreviewTabTarget, scope: PreviewTabScope, url?: string) => {
@@ -636,6 +690,8 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       togglePreviewLayoutMode,
       openFile,
       openFileForTarget,
+      openAppTab,
+      queueAppTab,
       openUrl,
       openUrlForTarget,
       updateBrowserTab,
@@ -666,6 +722,8 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       togglePreviewLayoutMode,
       openFile,
       openFileForTarget,
+      openAppTab,
+      queueAppTab,
       openUrl,
       openUrlForTarget,
       updateBrowserTab,
