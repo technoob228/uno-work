@@ -60,6 +60,7 @@ import Migration0043 from "./Migrations/043_ProjectionThreadsSnoozed.ts";
 import Migration0044 from "./Migrations/044_AgentSpawnedThreads.ts";
 import Migration0045 from "./Migrations/045_ProjectionThreadsSettled.ts";
 import Migration0046 from "./Migrations/046_FileShares.ts";
+import Migration0047 from "./Migrations/047_FileShareAccess.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -118,6 +119,7 @@ export const migrationEntries = [
   [44, "AgentSpawnedThreads", Migration0044],
   [45, "ProjectionThreadsSettled", Migration0045],
   [46, "FileShares", Migration0046],
+  [47, "FileShareAccess", Migration0047],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

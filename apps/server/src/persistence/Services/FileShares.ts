@@ -22,6 +22,8 @@ export interface FileShareRow {
   readonly expiresAt: string | null;
   readonly revokedAt: string | null;
   readonly passwordHash: string | null;
+  /** view | comment | edit — see FilesShareAccess. */
+  readonly access: "view" | "comment" | "edit";
   readonly accessCount: number;
   readonly lastAccessedAt: string | null;
 }

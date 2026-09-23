@@ -5,7 +5,7 @@
  * Hosting, which gives them their own address that stays up while the
  * computer sleeps. Plus "Shared links": every live link on this computer.
  */
-import type { EnvironmentId, FilesEntry, FilesShare } from "@t3tools/contracts";
+import type { EnvironmentId, FilesEntry, FilesShare, FilesShareAccess } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckIcon,
@@ -36,6 +36,29 @@ import { toastManager } from "../ui/toast";
 import { FILE_KIND_ICON, FILE_KIND_TINT, fileKindOf } from "./fileTypes";
 import { filesApi, filesQueryKeys, filesSharesQueryOptions } from "./filesApi";
 import { shareUrl, useShareBaseUrl, type ShareBase } from "./useShareBaseUrl";
+
+/** Formats a link can edit in place (the engine writes them back as they are). */
+const EDITABLE_BY_LINK = new Set(["docx", "xlsx", "pptx", "odt", "ods", "odp"]);
+
+export function canShareForEditing(name: string): boolean {
+  return EDITABLE_BY_LINK.has(name.split(".").pop()?.toLowerCase() ?? "");
+}
+
+const ACCESS_OPTIONS: ReadonlyArray<{
+  value: FilesShareAccess;
+  label: string;
+  hint: string;
+}> = [
+  { value: "view", label: "Can view", hint: "Opens in the browser, read-only." },
+  { value: "comment", label: "Can comment", hint: "Can add comments, not change the text." },
+  { value: "edit", label: "Can edit", hint: "Changes save into this file on your computer." },
+];
+
+const ACCESS_META: Record<FilesShareAccess, string | null> = {
+  view: null,
+  comment: "Can comment",
+  edit: "Can edit",
+};
 
 const EXPIRY_OPTIONS = [
   { label: "Never", seconds: null },
@@ -87,6 +110,7 @@ function ShareRow({
   const kind = share.kind === "folder" ? "folder" : fileKindOf(share.name);
   const Icon = FILE_KIND_ICON[kind];
   const meta = [
+    ACCESS_META[share.access],
     share.expiresAt ? `Expires ${formatDate(share.expiresAt)}` : "No expiry",
     share.hasPassword ? "Password" : null,
     share.accessCount > 0
@@ -270,8 +294,10 @@ export function ShareDialog({
   const [expiry, setExpiry] = useState<number | null>(null);
   const [withPassword, setWithPassword] = useState(false);
   const [password, setPassword] = useState("");
+  const [access, setAccess] = useState<FilesShareAccess>("view");
   useEffect(() => {
     if (open) {
+      setAccess("view");
       setExpiry(null);
       setWithPassword(false);
       setPassword("");
@@ -282,12 +308,14 @@ export function ShareDialog({
     ...filesSharesQueryOptions(environmentId, entry?.path ?? null),
     enabled: open && entry !== null && environmentId !== null,
   });
+  const editable = entry !== null && entry.kind !== "directory" && canShareForEditing(entry.name);
   const create = useMutation({
     mutationFn: () =>
       filesApi(environmentId).createShare({
         path: entry!.path,
         expiresInSeconds: expiry,
         password: withPassword ? password : null,
+        ...(editable ? { access } : {}),
       }),
     onSuccess: (share) => {
       void queryClient.invalidateQueries({ queryKey: filesQueryKeys.shares(environmentId, null) });
@@ -321,7 +349,9 @@ export function ShareDialog({
           <DialogDescription>
             {isFolder
               ? "Anyone with the link can browse and download what's in this folder — nothing else on your computer. If the folder has an index.html, the link opens it as a website."
-              : "Anyone with the link can view and download this file — nothing else on your computer. They don't need an Uno account."}
+              : editable
+                ? "Anyone with the link opens this file right in their browser — no Uno account needed. Choose whether they can only view it, comment, or edit. The link reaches this one file and nothing else on your computer."
+                : "Anyone with the link can view and download this file — nothing else on your computer. They don't need an Uno account."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="flex flex-col gap-4">
@@ -350,6 +380,38 @@ export function ShareDialog({
             <div className="text-sm font-medium">
               {liveShares.length > 0 ? "Create another link" : "Create a link"}
             </div>
+            {editable ? (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs text-muted-foreground">Anyone with the link</span>
+                <div
+                  className="grid grid-cols-3 gap-1.5"
+                  role="radiogroup"
+                  aria-label="What people with the link can do"
+                >
+                  {ACCESS_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={access === option.value}
+                      data-testid={`share-access-${option.value}`}
+                      onClick={() => setAccess(option.value)}
+                      className={cn(
+                        "flex flex-col items-start gap-0.5 rounded-lg border px-2.5 py-2 text-left transition-colors",
+                        access === option.value
+                          ? "border-primary bg-primary/10"
+                          : "border-border hover:bg-accent",
+                      )}
+                    >
+                      <span className="text-sm font-medium text-foreground">{option.label}</span>
+                      <span className="text-[11px] leading-tight text-muted-foreground">
+                        {option.hint}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="flex flex-col gap-1.5">
               <span className="text-xs text-muted-foreground">Link stops working</span>
               <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Link expiry">

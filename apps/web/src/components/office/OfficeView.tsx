@@ -38,6 +38,27 @@ import {
   requestOfficeEngineInstall,
 } from "./officeInstall";
 import { normalizeXlsxForEngine } from "./normalizeXlsx";
+import { blankExtensionFor, blankOfficeFile, isZipArchive } from "./officeBlank";
+
+/** OOXML/ODF formats are zip archives; anything else under that name is broken. */
+const ARCHIVE_FORMATS = new Set([
+  "docx",
+  "xlsx",
+  "pptx",
+  "odt",
+  "ods",
+  "odp",
+  "dotx",
+  "xltx",
+  "xlsm",
+  "potx",
+  "ppsx",
+]);
+const KIND_NAME: Record<OfficeDocumentType, string> = {
+  word: "Word document",
+  cell: "spreadsheet",
+  slide: "presentation",
+};
 
 const TYPE_ICON: Record<OfficeDocumentType, typeof FileTextIcon> = {
   word: FileTextIcon,
@@ -159,7 +180,30 @@ export function OfficeView({ path }: { path: string }) {
   }, [environmentId, path, queryClient, saveTarget]);
   saveRef.current = save;
 
-  const bytes = fileQuery.data;
+  const loadedBytes = fileQuery.data;
+  // A text file (or an empty one) wearing a .pptx/.docx/.xlsx name: the engine
+  // would spin forever on it, so say what it is and offer a blank document.
+  const notADocument =
+    loadedBytes !== undefined &&
+    ARCHIVE_FORMATS.has(officeExtension(path)) &&
+    !isZipArchive(loadedBytes);
+  const bytes = notADocument ? undefined : loadedBytes;
+  const blankKind = blankExtensionFor(path);
+  const replaceWithBlank = useMutation({
+    mutationFn: async () => {
+      const api = environmentId ? readEnvironmentApi(environmentId) : undefined;
+      if (!api || !blankKind) throw new Error("This computer is not connected right now.");
+      const blank = await blankOfficeFile(blankKind);
+      await writeOfficeBytes((input) => api.projects.writeFile(input), path, blank);
+    },
+    onSuccess: () => void fileQuery.refetch(),
+    onError: (error) =>
+      toastManager.add({
+        type: "error",
+        title: "Couldn't make a blank document",
+        description: error instanceof Error ? error.message : String(error),
+      }),
+  });
   useEffect(() => {
     const container = containerRef.current;
     if (!container || !bytes || !documentType || engineQuery.data !== true) return;
@@ -232,9 +276,18 @@ export function OfficeView({ path }: { path: string }) {
             body:
               fileQuery.error instanceof Error ? fileQuery.error.message : String(fileQuery.error),
           }
-        : editorError
-          ? { title: "Office couldn't open this document", body: editorError }
-          : null;
+        : notADocument && documentType
+          ? {
+              title: `This isn't a real ${KIND_NAME[documentType]}`,
+              body:
+                loadedBytes && loadedBytes.length > 0
+                  ? `It's ${loadedBytes.length} bytes of plain text saved with a .${officeExtension(path)} name, so Office can't open it. You can replace it with a blank ${KIND_NAME[documentType]} — the text in it will be lost.`
+                  : `The file is empty. Start a blank ${KIND_NAME[documentType]} in it.`,
+              action: "blank" as const,
+            }
+          : editorError
+            ? { title: "Office couldn't open this document", body: editorError }
+            : null;
 
   const loading = !blocking && (engineQuery.isPending || fileQuery.isPending || !editorReady);
 
@@ -307,6 +360,21 @@ export function OfficeView({ path }: { path: string }) {
                     >
                       {installing ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
                       {installing ? installProgressLabel(installStatus) : "Install Office"}
+                    </Button>
+                  </div>
+                ) : null}
+                {"action" in blocking && blocking.action === "blank" && blankKind ? (
+                  <div className="pt-2">
+                    <Button
+                      size="sm"
+                      onClick={() => replaceWithBlank.mutate()}
+                      disabled={replaceWithBlank.isPending}
+                      data-testid="office-make-blank"
+                    >
+                      {replaceWithBlank.isPending ? (
+                        <Loader2Icon className="size-3.5 animate-spin" />
+                      ) : null}
+                      {`Make it a blank ${documentType ? KIND_NAME[documentType] : "document"}`}
                     </Button>
                   </div>
                 ) : null}

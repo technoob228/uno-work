@@ -15,6 +15,37 @@
 import type { OfficeDocumentType } from "./officeFormats";
 
 export const OFFICE_ENGINE_BASE = "/office-engine/";
+
+export type OfficeAccess = "view" | "comment" | "edit";
+
+/**
+ * DocsAPI config for an access level. "comment" is the engine's own
+ * comment-only mode: edit mode with editing off and commenting on.
+ *
+ * Macros and plugins are always off: ONLYOFFICE macros are JavaScript stored
+ * inside the document and would run on this page's origin — the same origin
+ * as the owner's Work session — so a document edited by someone else could
+ * act as the owner.
+ */
+export function officeAccessConfig(access: OfficeAccess): {
+  mode: "view" | "edit";
+  permissions: Record<string, boolean>;
+} {
+  return {
+    mode: access === "view" ? "view" : "edit",
+    permissions: {
+      edit: access === "edit",
+      comment: access !== "view",
+      review: false,
+      download: true,
+      print: true,
+      copy: true,
+      modifyFilter: access === "edit",
+      modifyContentControl: access === "edit",
+      fillForms: access === "edit",
+    },
+  };
+}
 export const OFFICE_ENGINE_API_PATH = "vendor/web-apps/apps/api/documents/api.js";
 
 type DownloadFn = (data: ArrayBuffer | Uint8Array, fileName: string, mime?: string) => void;
@@ -83,7 +114,14 @@ export interface OfficeEditorOptions {
   documentType: OfficeDocumentType;
   lang?: string;
   userName?: string;
+  /** Stable per person, so comments keep their author. */
+  userId?: string;
   readOnly?: boolean;
+  /**
+   * What the person may do, like Google Docs' Viewer/Commenter/Editor.
+   * Defaults to "edit" (or "view" when `readOnly`).
+   */
+  access?: OfficeAccess;
   onReady?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   onError?: (message: string) => void;
@@ -94,6 +132,11 @@ export interface OfficeEditorOptions {
 export interface OfficeEditorHandle {
   /** Конвертирует текущий документ в `format` и возвращает байты файла. */
   exportBytes: (format: string) => Promise<Uint8Array>;
+  /**
+   * Tell the engine the document is saved, so the next edit fires
+   * `onDirtyChange(true)` again (offline, the engine never clears it itself).
+   */
+  markSaved: () => void;
   destroy: () => void;
 }
 
@@ -170,6 +213,8 @@ export async function createOfficeEditor(
   }, 250);
   window.addEventListener("keydown", onKeyDown, true);
 
+  const access: OfficeAccess = options.access ?? (options.readOnly ? "view" : "edit");
+  const accessConfig = officeAccessConfig(access);
   const editor = new api.DocEditor(mountId, {
     documentType: options.documentType,
     width: "100%",
@@ -180,12 +225,12 @@ export async function createOfficeEditor(
       title: options.fileName,
       fileType: options.fileType,
       key: `uno-${Date.now()}-${editorSeq}`,
-      permissions: { edit: !options.readOnly, download: true, print: true, comment: true },
+      permissions: accessConfig.permissions,
     },
     editorConfig: {
-      mode: options.readOnly ? "view" : "edit",
+      mode: accessConfig.mode,
       lang: options.lang ?? "en",
-      user: { id: "uno-user", name: options.userName ?? "Uno" },
+      user: { id: options.userId ?? "uno-user", name: options.userName ?? "Uno" },
       customization: {
         // Автосохранение в офлайн-движке — это скачивание; сохраняем сами.
         autosave: false,
@@ -194,6 +239,9 @@ export async function createOfficeEditor(
         hideRightMenu: false,
         uiTheme: "theme-light",
         features: { featuresTips: false },
+        macros: false,
+        macrosMode: "disable",
+        plugins: false,
       },
     },
     events: {
@@ -243,6 +291,19 @@ export async function createOfficeEditor(
     });
 
   return {
+    markSaved() {
+      const win = frameWindow() as
+        | (Window & {
+            editor?: { SetDocumentModified?: (value: boolean) => void };
+            Asc?: { editor?: { SetDocumentModified?: (value: boolean) => void } };
+          })
+        | null;
+      try {
+        (win?.editor ?? win?.Asc?.editor)?.SetDocumentModified?.(false);
+      } catch {
+        /* older engine: autosave just waits for the next explicit save */
+      }
+    },
     exportBytes(format) {
       const result = exportChain.then(
         () => runExport(format),

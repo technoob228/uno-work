@@ -77,6 +77,7 @@ import {
   shareExpiresAt,
   shareStatus,
 } from "./shareTokens.ts";
+import { officeShareInfo } from "./shareOffice.ts";
 
 /** Overrides the files root (tests, unusual installs). Defaults to the home dir. */
 export const FILES_ROOT_ENV = "UNO_WORK_FILES_ROOT";
@@ -163,6 +164,7 @@ export function toFilesShare(row: FileShareRow): FilesShare {
     expiresAt: row.expiresAt,
     revokedAt: row.revokedAt,
     hasPassword: row.passwordHash !== null,
+    access: row.access,
     accessCount: row.accessCount,
     lastAccessedAt: row.lastAccessedAt,
     urlPath: `${FILES_SHARE_ROUTE_PREFIX}/${row.token}`,
@@ -255,6 +257,21 @@ export const makeFilesService = (
           });
         }
         const entry = yield* attempt(() => statResolved(root, target), "Couldn't share this item.");
+        const access = input.access ?? "view";
+        if (access !== "view") {
+          const office = entry.kind === "directory" ? null : officeShareInfo(target);
+          if (!office) {
+            return yield* new FilesError({
+              message:
+                "Only Word, Excel and PowerPoint files can be shared for commenting or editing.",
+            });
+          }
+          if (!office.writable) {
+            return yield* new FilesError({
+              message: `Old .${office.extension} files can only be shared to view. Save it as .docx, .xlsx or .pptx to let people edit.`,
+            });
+          }
+        }
         const passwordHash =
           input.password === null || input.password === undefined
             ? null
@@ -272,6 +289,7 @@ export const makeFilesService = (
           expiresAt: shareExpiresAt(now, input.expiresInSeconds),
           revokedAt: null,
           passwordHash,
+          access,
           accessCount: 0,
           lastAccessedAt: null,
         };
@@ -281,6 +299,7 @@ export const makeFilesService = (
           kind: row.kind,
           expiresAt: row.expiresAt,
           password: passwordHash !== null,
+          access,
         });
         return toFilesShare(row);
       });

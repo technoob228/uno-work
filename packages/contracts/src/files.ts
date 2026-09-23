@@ -121,6 +121,14 @@ export type FilesSearchResult = typeof FilesSearchResult.Type;
 export const FilesShareKind = Schema.Literals(["file", "folder"]);
 export type FilesShareKind = typeof FilesShareKind.Type;
 
+/**
+ * What a link lets people do with a Word/Excel/PowerPoint file, like Google
+ * Docs' "Viewer / Commenter / Editor". Anything that isn't an office document
+ * (and every folder) is view-only.
+ */
+export const FilesShareAccess = Schema.Literals(["view", "comment", "edit"]);
+export type FilesShareAccess = typeof FilesShareAccess.Type;
+
 export const FilesShare = Schema.Struct({
   id: Schema.String,
   token: Schema.String,
@@ -131,6 +139,7 @@ export const FilesShare = Schema.Struct({
   expiresAt: Schema.NullOr(Schema.String),
   revokedAt: Schema.NullOr(Schema.String),
   hasPassword: Schema.Boolean,
+  access: FilesShareAccess,
   accessCount: NonNegativeInt,
   lastAccessedAt: Schema.NullOr(Schema.String),
   /** Path on the machine's address, e.g. `/s/<token>`. */
@@ -140,6 +149,8 @@ export type FilesShare = typeof FilesShare.Type;
 
 export const FilesShareCreateInput = Schema.Struct({
   path: FilesPath,
+  /** Default "view". "comment"/"edit" only for office documents. */
+  access: Schema.optional(FilesShareAccess),
   /** Link lifetime; null or absent = until revoked. */
   expiresInSeconds: Schema.optional(
     Schema.NullOr(PositiveInt.check(Schema.isLessThanOrEqualTo(FILES_SHARE_MAX_TTL_SECONDS))),

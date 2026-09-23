@@ -17,6 +17,7 @@ interface FileShareDbRow {
   readonly expires_at: string | null;
   readonly revoked_at: string | null;
   readonly password_hash: string | null;
+  readonly access: string | null;
   readonly access_count: number | bigint;
   readonly last_accessed_at: string | null;
 }
@@ -31,6 +32,7 @@ function toRow(row: FileShareDbRow): FileShareRow {
     expiresAt: row.expires_at,
     revokedAt: row.revoked_at,
     passwordHash: row.password_hash,
+    access: row.access === "edit" || row.access === "comment" ? row.access : "view",
     accessCount: Number(row.access_count),
     lastAccessedAt: row.last_accessed_at,
   };
@@ -54,10 +56,10 @@ const makeFileSharesRepository = Effect.gen(function* () {
     sql`
       INSERT INTO file_shares (
         share_id, token, path, kind, created_at, expires_at, revoked_at,
-        password_hash, access_count, last_accessed_at
+        password_hash, access, access_count, last_accessed_at
       ) VALUES (
         ${row.shareId}, ${row.token}, ${row.path}, ${row.kind}, ${row.createdAt},
-        ${row.expiresAt}, ${row.revokedAt}, ${row.passwordHash}, ${row.accessCount},
+        ${row.expiresAt}, ${row.revokedAt}, ${row.passwordHash}, ${row.access}, ${row.accessCount},
         ${row.lastAccessedAt}
       )
     `.pipe(Effect.asVoid, Effect.mapError(toPersistenceSqlError("FileShares.create")));
