@@ -7,8 +7,10 @@
  * spent and its limit.
  */
 import type {
+  UnoComputerAppAccess,
   UnoComputerAppAiKey,
   UnoComputerAppCredential,
+  UnoComputerInstalledApp,
   UnoMachineAppAction,
   UnoMachineApps,
 } from "@t3tools/contracts";
@@ -23,8 +25,11 @@ import {
   SparklesIcon,
   Trash2Icon,
   TriangleAlertIcon,
+  UserPlusIcon,
+  UsersIcon,
+  XIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -53,7 +58,16 @@ const STATUS_WORD: Record<ProgramTile["status"], string> = {
   unknown: "Status unknown",
 };
 
-function AddressRow({ label, url }: { label: string; url: string }) {
+function AddressRow({
+  label,
+  url,
+  onOpen,
+}: {
+  label: string;
+  url: string;
+  /** Open differently (already signed in with Uno) instead of a plain link. */
+  onOpen?: (() => void) | undefined;
+}) {
   return (
     <div className="flex min-w-0 items-center gap-2 rounded-xl bg-muted/40 py-1.5 pr-1.5 pl-3">
       <div className="min-w-0 flex-1">
@@ -63,14 +77,21 @@ function AddressRow({ label, url }: { label: string; url: string }) {
         </div>
       </div>
       <CopyButton value={url} label={label.toLowerCase()} />
-      <Button
-        size="xs"
-        variant="outline"
-        render={<a href={url} target="_blank" rel="noopener noreferrer" />}
-      >
-        <ExternalLinkIcon />
-        Open
-      </Button>
+      {onOpen ? (
+        <Button size="xs" variant="outline" onClick={onOpen}>
+          <ExternalLinkIcon />
+          Open
+        </Button>
+      ) : (
+        <Button
+          size="xs"
+          variant="outline"
+          render={<a href={url} target="_blank" rel="noopener noreferrer" />}
+        >
+          <ExternalLinkIcon />
+          Open
+        </Button>
+      )}
     </div>
   );
 }
@@ -83,12 +104,14 @@ function AddressRow({ label, url }: { label: string; url: string }) {
 function SignInBlock({
   credentials,
   notes,
+  sso,
 }: {
   credentials: ReadonlyArray<UnoComputerAppCredential>;
   notes: string | null;
+  sso: UnoComputerInstalledApp["sso"];
 }) {
   const [shown, setShown] = useState<ReadonlySet<string>>(new Set());
-  if (credentials.length === 0 && !notes) return null;
+  if (credentials.length === 0 && !notes && !sso) return null;
   return (
     <section
       className="flex flex-col gap-2 rounded-xl border border-border/60 p-3"
@@ -98,6 +121,22 @@ function SignInBlock({
         <KeyRoundIcon className="size-3.5 text-muted-foreground" />
         How to sign in
       </div>
+      {sso === "oidc" ? (
+        <p className="text-xs leading-relaxed" data-sso="oidc">
+          <span className="font-medium">With your Uno account.</span>{" "}
+          <span className="text-muted-foreground">
+            Open signs you in — no password to type.
+            {credentials.length > 0 ? " The password below is a spare way in." : ""}
+          </span>
+        </p>
+      ) : sso === "edge" ? (
+        <p className="text-xs leading-relaxed" data-sso="edge">
+          <span className="font-medium">Only you and people you share it with can reach it.</span>{" "}
+          <span className="text-muted-foreground">
+            Its address asks for the Uno account first, then the app's own sign-in.
+          </span>
+        </p>
+      ) : null}
       {credentials.map((c, index) => {
         const visible = !c.secret || shown.has(c.label);
         // Uno only knows the password it generated: say so under the first one.
@@ -154,6 +193,136 @@ function SignInBlock({
         );
       })}
       {notes ? <p className="text-xs leading-relaxed text-muted-foreground">{notes}</p> : null}
+    </section>
+  );
+}
+
+/**
+ * «Share app»: people (their Uno accounts) who can sign in to this app. They
+ * sign in with their own Uno account — no passwords to hand over; everyone
+ * else is refused. Only for apps that sign in with Uno.
+ */
+function ShareBlock({
+  deploymentId,
+  sso,
+  sharedWith,
+  controls,
+}: {
+  deploymentId: number;
+  sso: "oidc" | "edge";
+  sharedWith: number | null;
+  controls: ProgramSignInControls;
+}) {
+  const [open, setOpen] = useState(false);
+  const [access, setAccess] = useState<UnoComputerAppAccess | null>(null);
+  const [login, setLogin] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // The parent re-creates `controls` on every poll; the list is read once per opening.
+  const controlsRef = useRef(controls);
+  controlsRef.current = controls;
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setError(null);
+    controlsRef.current
+      .access(deploymentId)
+      .then((a) => alive && setAccess(a))
+      .catch((e: unknown) => alive && setError(e instanceof Error ? e.message : String(e)));
+    return () => {
+      alive = false;
+    };
+  }, [open, deploymentId]);
+
+  const run = (p: Promise<UnoComputerAppAccess>, after?: () => void) => {
+    setBusy(true);
+    setError(null);
+    p.then((a) => {
+      setAccess(a);
+      after?.();
+    })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+
+  const count = access?.people.length ?? sharedWith ?? 0;
+  return (
+    <section
+      className="flex flex-col gap-2 rounded-xl border border-border/60 p-3"
+      aria-label="Share app"
+    >
+      <div className="flex items-center gap-1.5 text-xs font-medium">
+        <UsersIcon className="size-3.5 text-muted-foreground" />
+        <span className="flex-1">
+          {count > 0 ? `Shared with ${count} ${count === 1 ? "person" : "people"}` : "Only you"}
+        </span>
+        {!open ? (
+          <Button size="xs" variant="outline" onClick={() => setOpen(true)}>
+            <UserPlusIcon />
+            Share app
+          </Button>
+        ) : null}
+      </div>
+      {open ? (
+        <>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            {sso === "oidc"
+              ? "They sign in with their own Uno account and get their own space in the app. Nobody else can sign in."
+              : "They sign in with their own Uno account to reach it, then use the app's own sign-in. Nobody else can reach it."}
+          </p>
+          {access && !access.ready ? (
+            <p className="text-[11px] text-warning-foreground">
+              This app was installed before Sign in with Uno. Remove it (keep the data) and install
+              it again to share it.
+            </p>
+          ) : null}
+          {access?.people.map((p) => (
+            <div
+              key={p.userId}
+              className="flex min-w-0 items-center gap-2 rounded-lg bg-muted/40 py-1 pr-1 pl-2.5"
+              data-person={p.email ?? p.name}
+            >
+              <span className="min-w-0 flex-1 truncate text-xs">{p.email ?? p.name}</span>
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={busy}
+                aria-label={`Stop sharing with ${p.email ?? p.name}`}
+                onClick={() => run(controls.unshare(deploymentId, p.userId))}
+              >
+                <XIcon />
+              </Button>
+            </div>
+          ))}
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!login.trim()) return;
+              run(controls.share(deploymentId, login.trim()), () => setLogin(""));
+            }}
+          >
+            <Input
+              type="email"
+              value={login}
+              placeholder="Their Uno account email"
+              aria-label="Email of their Uno account"
+              onChange={(e) => setLogin(e.target.value)}
+              disabled={busy}
+            />
+            <Button type="submit" size="sm" disabled={busy || !login.trim()}>
+              {busy ? <Spinner /> : null}
+              Share
+            </Button>
+          </form>
+          {error ? (
+            <p className="text-xs text-destructive-foreground" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </>
+      ) : null}
     </section>
   );
 }
@@ -278,6 +447,14 @@ export interface ProgramRemoveControls {
   readonly onReset: () => void;
 }
 
+/** Sign in with Uno on the card: Open already signed in, and Share app. */
+export interface ProgramSignInControls {
+  readonly open: (deploymentId: number, fallbackUrl: string | null) => void;
+  readonly access: (deploymentId: number) => Promise<UnoComputerAppAccess>;
+  readonly share: (deploymentId: number, login: string) => Promise<UnoComputerAppAccess>;
+  readonly unshare: (deploymentId: number, userId: number) => Promise<UnoComputerAppAccess>;
+}
+
 export interface ProgramAiLimitControls {
   readonly pending: boolean;
   readonly error: string | null;
@@ -294,6 +471,7 @@ export function ProgramDialog({
   onClose,
   remove,
   aiLimit,
+  signIn,
 }: {
   tile: ProgramTile | null;
   machineApps: UnoMachineApps | undefined;
@@ -304,6 +482,7 @@ export function ProgramDialog({
   onClose: () => void;
   remove: ProgramRemoveControls;
   aiLimit: ProgramAiLimitControls;
+  signIn?: ProgramSignInControls | undefined;
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const tileKey = tile?.key ?? null;
@@ -312,6 +491,9 @@ export function ProgramDialog({
   const removal = tile ? programRemoval(tile) : null;
   const aiKey = tile?.storeApp?.aiKey ?? null;
   const aiDeploymentId = tile?.storeApp?.deploymentId ?? null;
+  const store = tile?.storeApp ?? null;
+  const sso = store?.sso ?? null;
+  const storeUrl = store?.url ?? tile?.install?.url ?? null;
   const app = tile?.machineApp ?? null;
   const publication = app?.publication ?? null;
   const publishable =
@@ -366,10 +548,15 @@ export function ProgramDialog({
               ) : null}
 
               {app?.url ? <AddressRow label="Its address" url={app.url} /> : null}
-              {tile.storeApp?.url || tile.install?.url ? (
+              {storeUrl ? (
                 <AddressRow
                   label="On the internet"
-                  url={(tile.storeApp?.url ?? tile.install?.url)!}
+                  url={storeUrl}
+                  onOpen={
+                    sso && signIn && store?.deploymentId != null && store.state === "running"
+                      ? () => signIn.open(store.deploymentId!, storeUrl)
+                      : undefined
+                  }
                 />
               ) : null}
               {publication?.url ? (
@@ -379,6 +566,15 @@ export function ProgramDialog({
                 <SignInBlock
                   credentials={tile.storeApp.credentials ?? []}
                   notes={tile.storeApp.notes ?? null}
+                  sso={sso}
+                />
+              ) : null}
+              {sso && signIn && store?.deploymentId != null ? (
+                <ShareBlock
+                  deploymentId={store.deploymentId}
+                  sso={sso}
+                  sharedWith={store.sharedWith ?? null}
+                  controls={signIn}
                 />
               ) : null}
               {aiKey && aiDeploymentId !== null ? (

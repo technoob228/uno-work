@@ -38,6 +38,7 @@ import { ComputerHero, type ComputerLoad } from "./ComputerHero";
 import { ComputerPrograms, type BuiltInPrograms } from "./ComputerPrograms";
 import { awakeLine, computerPowerState, humanDuration, sizeLine } from "./computerFormat";
 import {
+  appSignInApi,
   computerActivityQueryOptions,
   computerAppsQueryOptions,
   computerMetricsQueryOptions,
@@ -51,6 +52,7 @@ import {
   setAppAiLimitMutationOptions,
 } from "./computerQueries";
 import { ProgramDialog, type ProgramRemoveControls } from "./ProgramDialog";
+import { openAppSignedIn } from "./openSignedIn";
 import { ResizeDialog } from "./ResizeDialog";
 import { LOW_DISK_PCT, LOW_MEMORY_PCT, isSustained } from "./resizeModel";
 import { buildProgramTiles, isBrowserOnMachine, type ProgramTile } from "./programModel";
@@ -98,6 +100,7 @@ export function ComputerView() {
   const setAiLimit = useMutation(
     setAppAiLimitMutationOptions(environmentId, pickedBoxId, queryClient),
   );
+  const signIn = appSignInApi(environmentId, pickedBoxId);
   const installs = useAppInstalls({
     environmentId,
     boxId: pickedBoxId,
@@ -224,6 +227,13 @@ export function ComputerView() {
   };
 
   const openTile = (tile: ProgramTile) => {
+    const store = tile.storeApp;
+    if (tile.openUrl && store?.sso && store.deploymentId !== null) {
+      // Sign in with Uno: the app opens already signed in.
+      const deploymentId = store.deploymentId;
+      void openAppSignedIn(() => signIn.openLink(deploymentId), tile.openUrl);
+      return;
+    }
     if (tile.openUrl) {
       window.open(tile.openUrl, "_blank", "noopener,noreferrer");
       return;
@@ -368,6 +378,25 @@ export function ComputerView() {
           pending: setAiLimit.isPending,
           error: setAiLimit.error instanceof Error ? setAiLimit.error.message : null,
           onSave: (deploymentId, limitUsd) => setAiLimit.mutateAsync({ deploymentId, limitUsd }),
+        }}
+        signIn={{
+          open: (deploymentId, fallbackUrl) =>
+            void openAppSignedIn(() => signIn.openLink(deploymentId), fallbackUrl),
+          access: signIn.access,
+          share: (deploymentId, login) =>
+            signIn.share(deploymentId, login).then((r) => {
+              void queryClient.invalidateQueries({
+                queryKey: computerQueryKeys.apps(environmentId, pickedBoxId),
+              });
+              return r;
+            }),
+          unshare: (deploymentId, userId) =>
+            signIn.unshare(deploymentId, userId).then((r) => {
+              void queryClient.invalidateQueries({
+                queryKey: computerQueryKeys.apps(environmentId, pickedBoxId),
+              });
+              return r;
+            }),
         }}
       />
 

@@ -205,6 +205,14 @@ export const UnoComputerInstalledApp = Schema.Struct({
   composeProject: Schema.optional(Schema.NullOr(Schema.String)),
   /** The app's own AI key (Open WebUI, Notetaker): what it spent and its limit. */
   aiKey: Schema.optional(Schema.NullOr(UnoComputerAppAiKey)),
+  /**
+   * How the app signs in with the Uno account: "oidc" — the app itself signs in
+   * with Uno (Open opens it already signed in); "edge" — the address is closed
+   * behind Uno sign-in, then the app's own sign-in. null — only its own sign-in.
+   */
+  sso: Schema.optional(Schema.NullOr(Schema.Literals(["oidc", "edge"]))),
+  /** How many people (Uno accounts) the owner shared the app with. */
+  sharedWith: Schema.optional(Schema.NullOr(Schema.Number)),
 });
 export type UnoComputerInstalledApp = typeof UnoComputerInstalledApp.Type;
 
@@ -299,6 +307,57 @@ export const UnoComputerSetAppAiLimitResult = Schema.Struct({
   aiKey: UnoComputerAppAiKey,
 });
 export type UnoComputerSetAppAiLimitResult = typeof UnoComputerSetAppAiLimitResult.Type;
+
+/** A link that opens an App Store app already signed in with the Uno account. */
+export const UnoComputerOpenAppInput = Schema.Struct({
+  boxId: Schema.optional(Schema.Number),
+  deploymentId: Schema.Number,
+});
+export type UnoComputerOpenAppInput = typeof UnoComputerOpenAppInput.Type;
+
+export const UnoComputerOpenAppResult = Schema.Struct({
+  /** One-time sign-in link (valid once, for a minute), or the app address. */
+  url: Schema.String,
+  /** false — `url` is just the address: the app asks for its own sign-in. */
+  signedIn: Schema.Boolean,
+});
+export type UnoComputerOpenAppResult = typeof UnoComputerOpenAppResult.Type;
+
+/** A person the app is shared with (their Uno account). */
+export const UnoComputerAppPerson = Schema.Struct({
+  userId: Schema.Number,
+  name: Schema.String,
+  email: Schema.NullOr(Schema.String),
+});
+export type UnoComputerAppPerson = typeof UnoComputerAppPerson.Type;
+
+export const UnoComputerAppAccessInput = Schema.Struct({
+  boxId: Schema.optional(Schema.Number),
+  deploymentId: Schema.Number,
+});
+export type UnoComputerAppAccessInput = typeof UnoComputerAppAccessInput.Type;
+
+export const UnoComputerAppAccess = Schema.Struct({
+  people: Schema.Array(UnoComputerAppPerson),
+  /** false — installed before Sign in with Uno: reinstall (data is kept) to share it. */
+  ready: Schema.Boolean,
+});
+export type UnoComputerAppAccess = typeof UnoComputerAppAccess.Type;
+
+export const UnoComputerShareAppInput = Schema.Struct({
+  boxId: Schema.optional(Schema.Number),
+  deploymentId: Schema.Number,
+  /** Email (or username) of their Uno account. */
+  login: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(254)),
+});
+export type UnoComputerShareAppInput = typeof UnoComputerShareAppInput.Type;
+
+export const UnoComputerUnshareAppInput = Schema.Struct({
+  boxId: Schema.optional(Schema.Number),
+  deploymentId: Schema.Number,
+  userId: Schema.Number,
+});
+export type UnoComputerUnshareAppInput = typeof UnoComputerUnshareAppInput.Type;
 
 export const UnoComputerPowerInput = Schema.Struct({
   boxId: Schema.optional(Schema.Number),

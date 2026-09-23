@@ -23,6 +23,12 @@ import {
   UnoComputerRemoveAppResult,
   UnoComputerSetAppAiLimitInput,
   UnoComputerSetAppAiLimitResult,
+  UnoComputerOpenAppInput,
+  UnoComputerOpenAppResult,
+  UnoComputerAppAccess,
+  UnoComputerAppAccessInput,
+  UnoComputerShareAppInput,
+  UnoComputerUnshareAppInput,
   UnoComputerInstallStatus,
   UnoComputerInstallStatusInput,
   UnoComputerMetrics,
@@ -355,6 +361,10 @@ export const WS_METHODS = {
   unoComputerInstallStatus: "uno.computer.installStatus",
   unoComputerRemoveApp: "uno.computer.removeApp",
   unoComputerSetAppAiLimit: "uno.computer.setAppAiLimit",
+  unoComputerOpenApp: "uno.computer.openApp",
+  unoComputerAppAccess: "uno.computer.appAccess",
+  unoComputerShareApp: "uno.computer.shareApp",
+  unoComputerUnshareApp: "uno.computer.unshareApp",
   unoComputerPower: "uno.computer.power",
   unoComputerMachineApps: "uno.computer.machineApps",
   unoComputerAppAction: "uno.computer.appAction",
@@ -1248,6 +1258,32 @@ export const WsUnoComputerSetAppAiLimitRpc = Rpc.make(WS_METHODS.unoComputerSetA
   error: UnoCloudRpcError,
 });
 
+/** A one-time link that opens the app already signed in with the Uno account. */
+export const WsUnoComputerOpenAppRpc = Rpc.make(WS_METHODS.unoComputerOpenApp, {
+  payload: UnoComputerOpenAppInput,
+  success: UnoComputerOpenAppResult,
+  error: UnoCloudRpcError,
+});
+
+/** Who the app is shared with ("Share app"). */
+export const WsUnoComputerAppAccessRpc = Rpc.make(WS_METHODS.unoComputerAppAccess, {
+  payload: UnoComputerAppAccessInput,
+  success: UnoComputerAppAccess,
+  error: UnoCloudRpcError,
+});
+
+export const WsUnoComputerShareAppRpc = Rpc.make(WS_METHODS.unoComputerShareApp, {
+  payload: UnoComputerShareAppInput,
+  success: UnoComputerAppAccess,
+  error: UnoCloudRpcError,
+});
+
+export const WsUnoComputerUnshareAppRpc = Rpc.make(WS_METHODS.unoComputerUnshareApp, {
+  payload: UnoComputerUnshareAppInput,
+  success: UnoComputerAppAccess,
+  error: UnoCloudRpcError,
+});
+
 export const WsUnoComputerPowerRpc = Rpc.make(WS_METHODS.unoComputerPower, {
   payload: UnoComputerPowerInput,
   success: UnoComputerState,
@@ -1437,6 +1473,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoComputerInstallStatusRpc,
   WsUnoComputerRemoveAppRpc,
   WsUnoComputerSetAppAiLimitRpc,
+  WsUnoComputerOpenAppRpc,
+  WsUnoComputerAppAccessRpc,
+  WsUnoComputerShareAppRpc,
+  WsUnoComputerUnshareAppRpc,
   WsUnoComputerPowerRpc,
   WsFilesListRpc,
   WsFilesStatRpc,

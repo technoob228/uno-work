@@ -16,6 +16,8 @@ import {
   parseAppCards,
   removeComputerApp,
   setComputerAppAiLimit,
+  openComputerApp,
+  computerAppAccess,
   REMOVE_NEEDS_CONSOLE_UPDATE,
   type KnownInstall,
 } from "./unoComputer.ts";
@@ -364,6 +366,8 @@ describe("parseInstalledApps", () => {
         webPort: null,
         composeProject: "uno-uptime-kuma",
         aiKey: null,
+        sso: null,
+        sharedWith: null,
       },
     ]);
   });
@@ -901,5 +905,129 @@ describe("App Store 0.0.72: remove, dedupe fields, AI key", () => {
         limitUsd: 5,
       }),
     ).rejects.toThrow("doesn't have an AI key");
+  });
+});
+
+describe("Sign in with Uno", () => {
+  it("reads sso and sharing from the app cards", () => {
+    const cards = parseAppCards({
+      apps: [
+        {
+          deployment_id: 1,
+          template_id: "nextcloud",
+          sso: "oidc",
+          shared_with: 2,
+          credentials: [],
+        },
+        { deployment_id: 2, template_id: "uptime-kuma", sso: "edge", credentials: [] },
+        { deployment_id: 3, template_id: "ghost", sso: null, credentials: [] },
+        { deployment_id: 4, template_id: "x", sso: "something-new", credentials: [] },
+      ],
+    });
+    expect(cards.get(1)).toMatchObject({ sso: "oidc", sharedWith: 2 });
+    expect(cards.get(2)).toMatchObject({ sso: "edge", sharedWith: null });
+    expect(cards.get(3)?.sso).toBeNull();
+    expect(cards.get(4)?.sso).toBeNull();
+  });
+
+  it("asks the console for a one-time link at the click", async () => {
+    const plane = fakeControlPlane({
+      "/api/v1/boxes/123/apps/77/open": () => ({
+        url: "https://console.uno4.dev/api/v1/oidc/ticket?t=abc",
+        signed_in: true,
+      }),
+    });
+    const result = await openComputerApp({
+      apiKey: "key",
+      fetchJson: plane.fetchJson,
+      boxId: 123,
+      deploymentId: 77,
+      fallbackUrl: "https://memos-box.app.uno4.dev",
+    });
+    expect(result).toEqual({
+      url: "https://console.uno4.dev/api/v1/oidc/ticket?t=abc",
+      signedIn: true,
+    });
+    expect(plane.calls[0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/boxes/123/apps/77/open",
+    });
+  });
+
+  it("falls back to the plain address on an older console", async () => {
+    const plane = fakeControlPlane({});
+    const result = await openComputerApp({
+      apiKey: "key",
+      fetchJson: plane.fetchJson,
+      boxId: 123,
+      deploymentId: 77,
+      fallbackUrl: "https://memos-box.app.uno4.dev",
+    });
+    expect(result).toEqual({ url: "https://memos-box.app.uno4.dev", signedIn: false });
+  });
+
+  it("never follows a non-http link", async () => {
+    const plane = fakeControlPlane({
+      "/api/v1/boxes/123/apps/77/open": () => ({ url: "javascript:alert(1)", signed_in: true }),
+    });
+    const result = await openComputerApp({
+      apiKey: "key",
+      fetchJson: plane.fetchJson,
+      boxId: 123,
+      deploymentId: 77,
+      fallbackUrl: "https://memos-box.app.uno4.dev",
+    });
+    expect(result).toEqual({ url: "https://memos-box.app.uno4.dev", signedIn: false });
+  });
+
+  it("shares, lists and unshares", async () => {
+    const list = {
+      people: [{ user_id: 5, username: "anna", email: "anna@example.com" }],
+      sso: "oidc",
+      sso_ready: true,
+    };
+    const plane = fakeControlPlane({
+      "/api/v1/boxes/123/apps/77/access": () => list,
+      "/api/v1/boxes/123/apps/77/access/5": () => ({ people: [], sso: "oidc", sso_ready: true }),
+    });
+    const base = { apiKey: "key", fetchJson: plane.fetchJson, boxId: 123, deploymentId: 77 };
+    await expect(
+      computerAppAccess({ ...base, action: { kind: "share", login: " anna@example.com " } }),
+    ).resolves.toEqual({
+      people: [{ userId: 5, name: "anna", email: "anna@example.com" }],
+      ready: true,
+    });
+    expect(plane.calls[0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/boxes/123/apps/77/access",
+    });
+    await expect(
+      computerAppAccess({ ...base, action: { kind: "unshare", userId: 5 } }),
+    ).resolves.toEqual({
+      people: [],
+      ready: true,
+    });
+    expect(plane.calls[1]).toMatchObject({
+      method: "DELETE",
+      path: "/api/v1/boxes/123/apps/77/access/5",
+    });
+  });
+
+  it("says why sharing didn't work", async () => {
+    const attempt = (route: Route) =>
+      computerAppAccess({
+        apiKey: "key",
+        fetchJson: fakeControlPlane({ "/api/v1/boxes/123/apps/77/access": route }).fetchJson,
+        boxId: 123,
+        deploymentId: 77,
+        action: { kind: "share", login: "nobody@example.com" },
+      });
+    await expect(attempt(http(404, '{"error":"USER_NOT_FOUND"}'))).rejects.toThrow(
+      /no Uno account/,
+    );
+    await expect(attempt(http(409, '{"error":"APP_NO_SSO"}'))).rejects.toThrow(
+      /doesn't sign in with Uno/,
+    );
+    await expect(attempt(http(404, "404 page not found"))).rejects.toThrow(/console update/);
   });
 });

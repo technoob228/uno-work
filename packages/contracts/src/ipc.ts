@@ -126,6 +126,12 @@ import type {
   UnoComputerRemoveAppResult,
   UnoComputerSetAppAiLimitInput,
   UnoComputerSetAppAiLimitResult,
+  UnoComputerOpenAppInput,
+  UnoComputerOpenAppResult,
+  UnoComputerAppAccess,
+  UnoComputerAppAccessInput,
+  UnoComputerShareAppInput,
+  UnoComputerUnshareAppInput,
   UnoComputerInstallStatus,
   UnoComputerInstallStatusInput,
   UnoComputerMetrics,
@@ -766,6 +772,11 @@ export interface EnvironmentApi {
     setAppAiLimit: (
       input: UnoComputerSetAppAiLimitInput,
     ) => Promise<UnoComputerSetAppAiLimitResult>;
+    /** A one-time link that opens the app already signed in with Uno. */
+    openApp: (input: UnoComputerOpenAppInput) => Promise<UnoComputerOpenAppResult>;
+    appAccess: (input: UnoComputerAppAccessInput) => Promise<UnoComputerAppAccess>;
+    shareApp: (input: UnoComputerShareAppInput) => Promise<UnoComputerAppAccess>;
+    unshareApp: (input: UnoComputerUnshareAppInput) => Promise<UnoComputerAppAccess>;
     power: (input: UnoComputerPowerInput) => Promise<UnoComputerState>;
     /** Programs found on this machine (manifests, docker, systemd, open ports). */
     machineApps: () => Promise<UnoMachineApps>;

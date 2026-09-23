@@ -229,6 +229,10 @@ export interface WsRpcClient {
     readonly installStatus: RpcUnaryMethod<typeof WS_METHODS.unoComputerInstallStatus>;
     readonly removeApp: RpcUnaryMethod<typeof WS_METHODS.unoComputerRemoveApp>;
     readonly setAppAiLimit: RpcUnaryMethod<typeof WS_METHODS.unoComputerSetAppAiLimit>;
+    readonly openApp: RpcUnaryMethod<typeof WS_METHODS.unoComputerOpenApp>;
+    readonly appAccess: RpcUnaryMethod<typeof WS_METHODS.unoComputerAppAccess>;
+    readonly shareApp: RpcUnaryMethod<typeof WS_METHODS.unoComputerShareApp>;
+    readonly unshareApp: RpcUnaryMethod<typeof WS_METHODS.unoComputerUnshareApp>;
     readonly power: RpcUnaryMethod<typeof WS_METHODS.unoComputerPower>;
     readonly machineApps: () => ReturnType<
       RpcUnaryMethod<typeof WS_METHODS.unoComputerMachineApps>
@@ -540,6 +544,14 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.unoComputerRemoveApp](input)),
       setAppAiLimit: (input) =>
         transport.request((client) => client[WS_METHODS.unoComputerSetAppAiLimit](input)),
+      openApp: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerOpenApp](input)),
+      appAccess: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerAppAccess](input)),
+      shareApp: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerShareApp](input)),
+      unshareApp: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerUnshareApp](input)),
       power: (input) => transport.request((client) => client[WS_METHODS.unoComputerPower](input)),
       machineApps: () =>
         transport.request((client) => client[WS_METHODS.unoComputerMachineApps]({})),

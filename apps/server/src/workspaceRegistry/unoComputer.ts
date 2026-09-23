@@ -25,6 +25,7 @@
  */
 import type {
   UnoComputerActivity,
+  UnoComputerAppAccess,
   UnoComputerAppAiKey,
   UnoComputerAppCredential,
   UnoComputerAppTemplate,
@@ -38,6 +39,7 @@ import type {
   UnoComputerInstalledAppState,
   UnoComputerMetrics,
   UnoComputerMetricsPoint,
+  UnoComputerOpenAppResult,
   UnoComputerPort,
   UnoComputerRemoveAppResult,
   UnoComputerState,
@@ -485,6 +487,9 @@ export interface AppCard {
   readonly webPort: number | null;
   readonly composeProject: string | null;
   readonly aiKey: UnoComputerAppAiKey | null;
+  /** Sign in with Uno: "oidc" / "edge"; null — the app's own sign-in only. */
+  readonly sso: "oidc" | "edge" | null;
+  readonly sharedWith: number | null;
 }
 
 export function parseAiKey(raw: unknown): UnoComputerAppAiKey | null {
@@ -530,9 +535,16 @@ export function parseAppCards(raw: unknown): Map<number, AppCard> {
       webPort: webPort !== null && webPort > 0 ? webPort : null,
       composeProject: asNullableString(record["compose_project"]),
       aiKey: parseAiKey(record["ai_key"]),
+      sso: parseSso(record["sso"]),
+      sharedWith: asNullableNumber(record["shared_with"]),
     });
   }
   return out;
+}
+
+/** "oidc" / "edge" from the console's `sso`; anything else — the app's own sign-in only. */
+function parseSso(raw: unknown): "oidc" | "edge" | null {
+  return raw === "oidc" || raw === "edge" ? raw : null;
 }
 
 /** Catalog apps run as compose project `uno-<template_id>` when the console doesn't say. */
@@ -588,7 +600,14 @@ export function parseInstalledApps(
     templateId: string | null,
   ): Pick<
     UnoComputerInstalledApp,
-    "notes" | "credentials" | "removable" | "webPort" | "composeProject" | "aiKey"
+    | "notes"
+    | "credentials"
+    | "removable"
+    | "webPort"
+    | "composeProject"
+    | "aiKey"
+    | "sso"
+    | "sharedWith"
   > => {
     const card = deploymentId !== null ? cards.get(deploymentId) : undefined;
     const template = templateId !== null ? byTemplate.get(templateId) : undefined;
@@ -601,6 +620,8 @@ export function parseInstalledApps(
       webPort: card?.webPort ?? null,
       composeProject: card?.composeProject ?? composeProjectFor(card?.templateId ?? templateId),
       aiKey: card?.aiKey ?? null,
+      sso: card?.sso ?? null,
+      sharedWith: card?.sharedWith ?? null,
     };
   };
   const knownByDeployment = new Map(known.map((k) => [k.deploymentId, k]));
@@ -961,4 +982,132 @@ export async function setComputerAppAiLimit(
   }
   const aiKey = parseAiKey(asRecord(raw)?.["ai_key"]);
   return { aiKey: aiKey ?? { limitUsd: ctx.limitUsd, spentUsd: 0 } };
+}
+
+/* ------------------------------------------------------------------
+ * Sign in with Uno: open an app already signed in, share it
+ * ------------------------------------------------------------------ */
+
+/**
+ * `POST /api/v1/boxes/{id}/apps/{deployment_id}/open` — a one-time link that
+ * signs the owner in to Uno for this computer's apps and lands in the app
+ * already signed in (valid once, for a minute: ask at the moment of the click).
+ * A console from before Sign in with Uno has no such route: then the app's own
+ * address, and the app asks for its password as before.
+ */
+export async function openComputerApp(
+  ctx: UnoComputerClientContext & {
+    readonly boxId: number | null;
+    readonly deploymentId: number;
+    readonly fallbackUrl: string | null;
+  },
+): Promise<UnoComputerOpenAppResult> {
+  const request = bind(ctx);
+  if (!request) throw new UnoComputerActionError(NOT_LINKED_MESSAGE);
+  if (ctx.boxId === null) throw new UnoComputerActionError(NO_COMPUTER_MESSAGE);
+  let raw: unknown;
+  try {
+    raw = await request(`/api/v1/boxes/${ctx.boxId}/apps/${ctx.deploymentId}/open`, {
+      method: "POST",
+    });
+  } catch (cause) {
+    if (isOlderConsole(cause) && ctx.fallbackUrl) {
+      return { url: ctx.fallbackUrl, signedIn: false };
+    }
+    const body = controlPlaneErrorBody(cause);
+    if (body?.code === "NOT_FOUND") {
+      throw new UnoComputerActionError("This app isn't on this computer anymore.");
+    }
+    if (body?.code === "APP_NOT_RUNNING") {
+      throw new UnoComputerActionError("This app isn't running yet — try again when it's ready.");
+    }
+    throw new UnoComputerActionError(errorMessage(cause));
+  }
+  const record = asRecord(raw) ?? {};
+  const url = asString(record["url"]);
+  if (!/^https?:\/\//.test(url)) {
+    if (ctx.fallbackUrl) return { url: ctx.fallbackUrl, signedIn: false };
+    throw new UnoComputerActionError("Uno didn't give an address for this app.");
+  }
+  return { url, signedIn: record["signed_in"] === true };
+}
+
+export function parseAppAccess(raw: unknown): UnoComputerAppAccess {
+  const record = asRecord(raw) ?? {};
+  const list = Array.isArray(record["people"]) ? record["people"] : [];
+  const people = list
+    .map(asRecord)
+    .filter(
+      (p): p is Record<string, unknown> => p !== null && asNullableNumber(p["user_id"]) !== null,
+    )
+    .map((p) => {
+      const email = asNullableString(p["email"]);
+      return {
+        userId: asNumber(p["user_id"]),
+        name: asString(p["username"]) || email || `Uno account ${asNumber(p["user_id"])}`,
+        email,
+      };
+    });
+  return { people, ready: record["sso_ready"] !== false };
+}
+
+function accessError(cause: unknown): UnoComputerActionError {
+  if (isOlderConsole(cause)) {
+    return new UnoComputerActionError("Sharing apps needs a console update — try again later.");
+  }
+  const body = controlPlaneErrorBody(cause);
+  switch (body?.code) {
+    case "USER_NOT_FOUND":
+      return new UnoComputerActionError(
+        "There's no Uno account with this email. Ask them to sign up at console.uno4.dev, then share again.",
+      );
+    case "ALREADY_OWNER":
+      return new UnoComputerActionError("That's you — you always have access.");
+    case "APP_NO_SSO":
+      return new UnoComputerActionError(
+        "This app doesn't sign in with Uno, so it can't be shared from here. Share its sign-in details instead.",
+      );
+    case "NOT_FOUND":
+      return new UnoComputerActionError("This app isn't on this computer anymore.");
+    case "SSO_NOT_CONFIGURED":
+      return new UnoComputerActionError("Sharing apps isn't available on this Uno console yet.");
+  }
+  return new UnoComputerActionError(errorMessage(cause));
+}
+
+/** `GET|POST|DELETE /api/v1/boxes/{id}/apps/{deployment_id}/access[/{user_id}]`. */
+export async function computerAppAccess(
+  ctx: UnoComputerClientContext & {
+    readonly boxId: number | null;
+    readonly deploymentId: number;
+    readonly action:
+      | { readonly kind: "list" }
+      | { readonly kind: "share"; readonly login: string }
+      | {
+          readonly kind: "unshare";
+          readonly userId: number;
+        };
+  },
+): Promise<UnoComputerAppAccess> {
+  const request = bind(ctx);
+  if (!request) throw new UnoComputerActionError(NOT_LINKED_MESSAGE);
+  if (ctx.boxId === null) throw new UnoComputerActionError(NO_COMPUTER_MESSAGE);
+  const base = `/api/v1/boxes/${ctx.boxId}/apps/${ctx.deploymentId}/access`;
+  try {
+    switch (ctx.action.kind) {
+      case "list":
+        return parseAppAccess(await request(base, { method: "GET" }));
+      case "share":
+        return parseAppAccess(
+          await request(base, {
+            method: "POST",
+            body: JSON.stringify({ login: ctx.action.login.trim() }),
+          }),
+        );
+      case "unshare":
+        return parseAppAccess(await request(`${base}/${ctx.action.userId}`, { method: "DELETE" }));
+    }
+  } catch (cause) {
+    throw accessError(cause);
+  }
 }

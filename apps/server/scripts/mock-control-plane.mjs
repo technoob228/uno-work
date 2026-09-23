@@ -343,6 +343,8 @@ const APP_CARDS = new Map([
       web_port: 5230,
       compose_project: "uno-memos",
       ai_key: null,
+      sso: "oidc",
+      shared_with: 1,
     },
   ],
   [
@@ -361,6 +363,7 @@ const APP_CARDS = new Map([
       web_port: 8080,
       compose_project: "uno-open-webui",
       ai_key: { limit_usd: 10, spent_usd: 0.12 },
+      sso: null,
     },
   ],
 ]);
@@ -825,6 +828,46 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "GET" && sub === "/apps") {
       return send(res, 200, { apps: [...APP_CARDS.values()] });
+    }
+    // Sign in with Uno: a one-time link (here — straight to the app) and sharing.
+    const openMatch = sub.match(/^\/apps\/(\d+)\/open$/);
+    if (openMatch && req.method === "POST") {
+      const card = APP_CARDS.get(Number(openMatch[1]));
+      if (!card) return send(res, 404, { error: "NOT_FOUND" });
+      const signedIn = Boolean(card.sso);
+      return send(res, 200, {
+        url: signedIn ? `${card.url}/?uno-signed-in=1` : card.url,
+        app_url: card.url,
+        signed_in: signedIn,
+        sso: card.sso ?? null,
+      });
+    }
+    const accessMatch = sub.match(/^\/apps\/(\d+)\/access(?:\/(\d+))?$/);
+    if (accessMatch) {
+      const card = APP_CARDS.get(Number(accessMatch[1]));
+      if (!card) return send(res, 404, { error: "NOT_FOUND" });
+      if (!card.sso) return send(res, 409, { error: "APP_NO_SSO" });
+      card.people ??= [{ user_id: 501, username: "anna", email: "anna@example.com" }];
+      if (req.method === "POST") {
+        const body = await readBody(req);
+        const login = String(body.login || "").toLowerCase();
+        if (!login.includes("@")) return send(res, 404, { error: "USER_NOT_FOUND" });
+        if (!card.people.some((p) => p.email === login)) {
+          card.people.push({
+            user_id: 500 + card.people.length + 1,
+            username: login,
+            email: login,
+          });
+        }
+      } else if (req.method === "DELETE" && accessMatch[2]) {
+        card.people = card.people.filter((p) => p.user_id !== Number(accessMatch[2]));
+      }
+      card.shared_with = card.people.length;
+      return send(res, req.method === "POST" ? 201 : 200, {
+        people: card.people,
+        sso: card.sso,
+        sso_ready: true,
+      });
     }
     const appMatch = sub.match(/^\/apps\/(\d+)$/);
     if (appMatch && (req.method === "DELETE" || req.method === "PATCH")) {

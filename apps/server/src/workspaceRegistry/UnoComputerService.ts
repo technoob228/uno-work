@@ -25,6 +25,12 @@ import type {
   UnoComputerRemoveAppResult,
   UnoComputerSetAppAiLimitInput,
   UnoComputerSetAppAiLimitResult,
+  UnoComputerOpenAppInput,
+  UnoComputerOpenAppResult,
+  UnoComputerAppAccess,
+  UnoComputerAppAccessInput,
+  UnoComputerShareAppInput,
+  UnoComputerUnshareAppInput,
   UnoComputerResizeInput,
   UnoComputerResizeOptions,
   UnoComputerResizeResult,
@@ -47,6 +53,8 @@ import {
   readInstallStatus,
   removeComputerApp,
   setComputerAppAiLimit,
+  openComputerApp,
+  computerAppAccess,
   type KnownInstall,
 } from "./unoComputer.ts";
 import { readResizeOptions, resizeComputer } from "./unoComputerResize.ts";
@@ -75,6 +83,19 @@ export interface UnoComputerServiceShape {
   readonly setAppAiLimit: (
     input: UnoComputerSetAppAiLimitInput,
   ) => Effect.Effect<UnoComputerSetAppAiLimitResult, UnoCloudFetchError>;
+  /** A one-time link that opens the app already signed in with the Uno account. */
+  readonly openApp: (
+    input: UnoComputerOpenAppInput,
+  ) => Effect.Effect<UnoComputerOpenAppResult, UnoCloudFetchError>;
+  readonly appAccess: (
+    input: UnoComputerAppAccessInput,
+  ) => Effect.Effect<UnoComputerAppAccess, UnoCloudFetchError>;
+  readonly shareApp: (
+    input: UnoComputerShareAppInput,
+  ) => Effect.Effect<UnoComputerAppAccess, UnoCloudFetchError>;
+  readonly unshareApp: (
+    input: UnoComputerUnshareAppInput,
+  ) => Effect.Effect<UnoComputerAppAccess, UnoCloudFetchError>;
   /**
    * Питание СВОЕЙ машины токеном машины. `false` — не наш случай (чужой бокс
    * или токена нет): тогда питание идёт ключом аккаунта через `uno.cloud`.
@@ -250,6 +271,37 @@ export const makeUnoComputerService = (
         });
       });
 
+    const openApp: UnoComputerServiceShape["openApp"] = (input) =>
+      Effect.gen(function* () {
+        const boxId = yield* resolveBoxId(input);
+        const ctx = yield* context(boxId);
+        const fallbackUrl = known.find((k) => k.deploymentId === input.deploymentId)?.url ?? null;
+        return yield* Effect.tryPromise({
+          try: () =>
+            openComputerApp({ ...ctx, boxId, deploymentId: input.deploymentId, fallbackUrl }),
+          catch: toFetchError,
+        });
+      });
+
+    const access = (
+      input: { readonly boxId?: number | undefined; readonly deploymentId: number },
+      action: Parameters<typeof computerAppAccess>[0]["action"],
+    ) =>
+      Effect.gen(function* () {
+        const boxId = yield* resolveBoxId(input);
+        const ctx = yield* context(boxId);
+        return yield* Effect.tryPromise({
+          try: () => computerAppAccess({ ...ctx, boxId, deploymentId: input.deploymentId, action }),
+          catch: toFetchError,
+        });
+      });
+    const appAccess: UnoComputerServiceShape["appAccess"] = (input) =>
+      access(input, { kind: "list" });
+    const shareApp: UnoComputerServiceShape["shareApp"] = (input) =>
+      access(input, { kind: "share", login: input.login });
+    const unshareApp: UnoComputerServiceShape["unshareApp"] = (input) =>
+      access(input, { kind: "unshare", userId: input.userId });
+
     const resizeOptions: UnoComputerServiceShape["resizeOptions"] = (input) =>
       Effect.gen(function* () {
         const boxId = yield* resolveBoxId(input);
@@ -299,6 +351,10 @@ export const makeUnoComputerService = (
       installStatus,
       removeApp,
       setAppAiLimit,
+      openApp,
+      appAccess,
+      shareApp,
+      unshareApp,
     } satisfies UnoComputerServiceShape;
   });
 

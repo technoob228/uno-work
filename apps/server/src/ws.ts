@@ -1398,6 +1398,38 @@ const makeWsRpcLayer = (
               .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
             { "rpc.aggregate": "uno-computer" },
           ),
+        [WS_METHODS.unoComputerOpenApp]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerOpenApp,
+            unoComputer
+              .openApp(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
+        [WS_METHODS.unoComputerAppAccess]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerAppAccess,
+            unoComputer
+              .appAccess(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
+        [WS_METHODS.unoComputerShareApp]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerShareApp,
+            unoComputer
+              .shareApp(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
+        [WS_METHODS.unoComputerUnshareApp]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerUnshareApp,
+            unoComputer
+              .unshareApp(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
         // Power reuses `uno.cloud.boxPower` (same key, same control-plane call)
         // and answers with the refreshed computer.
         [WS_METHODS.unoComputerPower]: (input) =>

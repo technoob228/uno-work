@@ -244,3 +244,22 @@ export function setAppAiLimitMutationOptions(
     },
   });
 }
+
+/**
+ * Sign in with Uno on the app card: a one-time link that opens the app already
+ * signed in, and who the app is shared with. Plain calls rather than queries:
+ * the link must be asked for at the moment of the click (it works once, for a
+ * minute), and the share list lives only while its card is open.
+ */
+export function appSignInApi(environmentId: EnvironmentId | null, boxId: number | null) {
+  return {
+    openLink: (deploymentId: number) =>
+      api(environmentId).openApp({ ...target(boxId), deploymentId }),
+    access: (deploymentId: number) =>
+      api(environmentId).appAccess({ ...target(boxId), deploymentId }),
+    share: (deploymentId: number, login: string) =>
+      api(environmentId).shareApp({ ...target(boxId), deploymentId, login }),
+    unshare: (deploymentId: number, userId: number) =>
+      api(environmentId).unshareApp({ ...target(boxId), deploymentId, userId }),
+  };
+}
