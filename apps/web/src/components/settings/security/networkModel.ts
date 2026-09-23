@@ -93,7 +93,9 @@ export function portTitle(port: NetworkPort): string {
     case "ssh":
       return "SSH";
     case "vpn":
-      return port.app_name ? `${port.app_name} (VPN)` : "VPN";
+      return port.app_name ? `${port.app_name} — connection for devices` : "VPN connection";
+    case "app":
+      return port.app_name ? `${port.app_name} — web page` : `Port ${port.internal_port}`;
     default:
       return (
         port.app_name ?? `Port ${port.internal_port}${port.protocol === "udp" ? " (UDP)" : ""}`

@@ -69,8 +69,8 @@ describe("ports", () => {
     expect(PORTS.map(portTitle)).toEqual([
       "Uno Work",
       "SSH",
-      "Nextcloud",
-      "WireGuard (VPN)",
+      "Nextcloud — web page",
+      "WireGuard — connection for devices",
       "Port 3000",
       "Port 3000 (UDP)",
     ]);
@@ -79,8 +79,8 @@ describe("ports", () => {
   it("offers every port except Uno Work and SSH, once per inside port", () => {
     expect(choosablePorts(PORTS)).toEqual([
       { internalPort: 3000, title: "Port 3000" },
-      { internalPort: 8090, title: "Nextcloud" },
-      { internalPort: 51820, title: "WireGuard (VPN)" },
+      { internalPort: 8090, title: "Nextcloud — web page" },
+      { internalPort: 51820, title: "WireGuard — connection for devices" },
     ]);
   });
 
@@ -103,7 +103,7 @@ describe("reachability", () => {
       "private",
     ]);
     expect(rows.find((r) => r.title === "SSH")?.statusLabel).toBe("Only your addresses");
-    expect(rows.find((r) => r.title === "Nextcloud")?.statusLabel).toBe("Closed");
+    expect(rows.find((r) => r.title === "Nextcloud — web page")?.statusLabel).toBe("Closed");
     expect(rows[0]?.address).toBe("185.1.2.3:20080");
   });
 });
