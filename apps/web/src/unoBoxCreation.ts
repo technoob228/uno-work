@@ -7,9 +7,6 @@
  * state handling can be unit-tested without a daemon.
  */
 import {
-  UNO_BOX_DEFAULT_DISK_GB,
-  UNO_BOX_DEFAULT_RAM_MB,
-  UNO_BOX_DEFAULT_VCPU,
   type EnvironmentId,
   type UnoBoxCreateJobState,
   type UnoBoxCreateJobStatus,
@@ -24,7 +21,11 @@ import {
   type UnoBoxConnectProgress,
 } from "./unoBoxConnect";
 
-export type UnoBoxSizePreset = "small" | "medium";
+/**
+ * Uno Work machines boot from the Work image, which needs 4 GB of memory
+ * (`min_ram_mb` 4096). Smaller sizes are not offered: they start, then wedge.
+ */
+export type UnoBoxSizePreset = "medium";
 
 export interface UnoBoxSizeSpec {
   readonly label: string;
@@ -35,13 +36,6 @@ export interface UnoBoxSizeSpec {
 }
 
 export const UNO_BOX_SIZE_PRESETS: Record<UnoBoxSizePreset, UnoBoxSizeSpec> = {
-  small: {
-    label: "Small",
-    description: "2 GB RAM · 1 vCPU · 10 GB",
-    ramMb: UNO_BOX_DEFAULT_RAM_MB,
-    vcpu: UNO_BOX_DEFAULT_VCPU,
-    diskGb: UNO_BOX_DEFAULT_DISK_GB,
-  },
   medium: {
     label: "Medium",
     description: "4 GB RAM · 2 vCPU · 20 GB",

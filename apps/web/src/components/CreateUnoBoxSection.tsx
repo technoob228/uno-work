@@ -48,7 +48,7 @@ const STILL_STARTING_ATTEMPT_BUDGET_MS = 45_000;
 /** Stop retrying on our own after this long; the button keeps working. */
 const STILL_STARTING_GIVE_UP_MS = 10 * 60_000;
 
-const PRESET_ORDER: ReadonlyArray<UnoBoxSizePreset> = ["small", "medium"];
+const PRESET_ORDER: ReadonlyArray<UnoBoxSizePreset> = ["medium"];
 
 interface CreateUnoBoxSectionProps {
   /** Environment holding the Uno account (normally the primary one). */
@@ -70,13 +70,13 @@ interface StillStarting {
 export function CreateUnoBoxSection({
   environmentId,
   defaultName,
-  submitLabel = "Create box",
+  submitLabel = "Create computer",
   onCreated,
   disabled = false,
 }: CreateUnoBoxSectionProps) {
   const queryClient = useQueryClient();
   const [name, setName] = useState(() => normalizeUnoBoxName(defaultName ?? ""));
-  const [preset, setPreset] = useState<UnoBoxSizePreset>("small");
+  const [preset, setPreset] = useState<UnoBoxSizePreset>("medium");
   const [stage, setStage] = useState<UnoBoxCreateStage | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [stillStarting, setStillStarting] = useState<StillStarting | null>(null);
@@ -207,7 +207,7 @@ export function CreateUnoBoxSection({
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="uno-box-name" className="text-xs text-muted-foreground">
-          Box name
+          Computer name
         </Label>
         <Input
           id="uno-box-name"
@@ -229,28 +229,34 @@ export function CreateUnoBoxSection({
 
       <div className="flex flex-col gap-1.5">
         <span className="text-xs text-muted-foreground">Size</span>
-        <div className="grid grid-cols-2 gap-2">
-          {PRESET_ORDER.map((option) => {
-            const spec = UNO_BOX_SIZE_PRESETS[option];
-            const selected = preset === option;
-            return (
-              <button
-                key={option}
-                type="button"
-                disabled={disabled || isPending}
-                aria-pressed={selected}
-                onClick={() => setPreset(option)}
-                className={cn(
-                  "rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-60",
-                  selected ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50",
-                )}
-              >
-                <span className="block text-sm font-medium text-foreground">{spec.label}</span>
-                <span className="block text-[11px] text-muted-foreground">{spec.description}</span>
-              </button>
-            );
-          })}
-        </div>
+        {PRESET_ORDER.length === 1 ? (
+          <p className="text-sm text-foreground">{UNO_BOX_SIZE_PRESETS[preset].description}</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-2">
+            {PRESET_ORDER.map((option) => {
+              const spec = UNO_BOX_SIZE_PRESETS[option];
+              const selected = preset === option;
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  disabled={disabled || isPending}
+                  aria-pressed={selected}
+                  onClick={() => setPreset(option)}
+                  className={cn(
+                    "rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-60",
+                    selected ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50",
+                  )}
+                >
+                  <span className="block text-sm font-medium text-foreground">{spec.label}</span>
+                  <span className="block text-[11px] text-muted-foreground">
+                    {spec.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {showSteps && stepStage ? (

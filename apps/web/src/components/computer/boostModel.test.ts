@@ -37,7 +37,7 @@ describe("boost copy", () => {
     const copy = boostConfirmCopy(OFF);
     expect(copy.title).toBe("Boost this computer ×2 for 1 hour?");
     expect(copy.body).toBe(
-      "4 GB → 8 GB memory and 2 → 4 cores. Your computer restarts for about 15 seconds. A reply the AI is writing right now will stop; chats, files and apps come back on their own.",
+      "4 GB → 8 GB memory and 2 → 4 cores. Your computer restarts for about 15 seconds now and again when the hour ends. A reply the AI is writing at that moment will stop; chats, files and apps come back on their own.",
     );
     expect(copy.allowance).toBe("3 of 4 boost hours left today.");
     expect(copy.confirm).toBe("Boost for 1 hour");
