@@ -106,6 +106,7 @@ const CALLERS: Record<string, AppApiCaller> = {
     tasks: false,
     limitUsd: 0,
     spentUsd: 0,
+    tasksSpentUsd: 0,
     manifestCwd: null,
     taskToolsCap: "edit",
     storage: { limitBytes: 1000, folder: "album@computer-7/" },
