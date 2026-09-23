@@ -36,8 +36,12 @@ export interface AppApiCaller {
   readonly spentUsd: number;
   readonly manifestCwd: string | null;
   readonly taskToolsCap: AppTaskTools;
-  /** Cloud storage the manifest asks for (`"storage"`); null = none. */
-  readonly storage: { readonly limitBytes: number } | null;
+  /**
+   * Cloud storage the manifest asks for (`"storage"`); null = none. `folder`
+   * is the app's folder in the `apps` bucket — shared (`<id>/`) or this
+   * computer's own (`<id>@computer-<box>/`), as the person chose.
+   */
+  readonly storage: { readonly limitBytes: number; readonly folder: string } | null;
 }
 
 export interface AppApiTaskDetail {
@@ -172,7 +176,7 @@ export function makeAppApiHandler(core: AppApiCore) {
           ? {
               enabled: true,
               limitBytes: caller.storage.limitBytes,
-              usedBytes: core.storage?.cachedUsage(caller.appId)?.usedBytes ?? null,
+              usedBytes: core.storage?.cachedUsage(caller.storage.folder)?.usedBytes ?? null,
             }
           : { enabled: false },
         defaults,
@@ -524,7 +528,13 @@ export function makeAppApiHandler(core: AppApiCore) {
           );
         }
         const reply = await core.storage.handle(
-          { appId: caller.appId, limitBytes: caller.storage.limitBytes, method, route, url },
+          {
+            folder: caller.storage.folder,
+            limitBytes: caller.storage.limitBytes,
+            method,
+            route,
+            url,
+          },
           req,
           res,
         );

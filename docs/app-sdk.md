@@ -217,7 +217,7 @@ browser then downloads straight from the cloud, not through the app. Serve
 through `GET /v1/storage/files/…` only when the page can't take a redirect.
 
 **How it is kept safe.** The app holds only its `uno_app_` token. The daemon
-checks the key, puts it under `apps/<id>/`, checks the app's limit, then asks
+checks the key, puts it under the app's folder (`apps/<id>/`), checks the app's limit, then asks
 the Uno console for a presigned URL with the computer's own token and moves
 the bytes. The app never sees an S3 key, the computer's token, the rest of the
 account's cloud or another app's folder; a link from `url()` opens exactly one
@@ -225,8 +225,23 @@ file for at most an hour. The account's plan quota is enforced by the console
 (402 `cloud_full`), the app's own limit by the daemon (507).
 
 The person sees everything an app stored in Files → Cloud storage → `apps` →
-`<id>`, and how much each app uses in Settings → Apps. Removing an app does
-not delete its files.
+`<id>`, and how much each app uses in Settings → Apps.
+
+**One folder for all computers, or one per computer.** By default the folder
+`apps/<id>/` is shared by every computer of the account that has an app with
+the same id. In Settings → Apps the person can switch an app to "Only this
+computer": the folder becomes `apps/<id>@computer-<box id>/` (off Uno
+computers `apps/<id>@local-<random id>/`). The two folders are siblings, so
+neither lists, counts nor deletes the other's files, and the app's limit counts
+the folder it uses now. Switching moves nothing — the app just starts seeing
+the other folder; the API and the app's keys stay the same, the app is not
+told.
+
+**Removing an app.** Its cloud files stay unless the person ticks "Also delete
+its files in the cloud" in the Remove dialog (App Store apps; shown with the
+folder's size, and a warning when the folder is shared with other
+computers). The daemon deletes the app's current folder after the app is gone
+(`appAiUpdate {deleteCloudFiles: true}`, allowed once the manifest is gone).
 
 ## 3. SDKs
 

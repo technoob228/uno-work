@@ -34,6 +34,7 @@ const writeManifest = (id: string, body: unknown) =>
 
 const run = <A>(
   body: (service: Effect.Success<ReturnType<typeof makeAppSdkService>>) => Promise<A>,
+  settings: Parameters<typeof ServerSettingsService.layerTest>[0] = {},
 ) =>
   Effect.runPromise(
     Effect.scoped(
@@ -54,7 +55,7 @@ const run = <A>(
               port: 80,
               stateDir: path.join(root, "state"),
             } as ServerConfigShape),
-            ServerSettingsService.layerTest({}),
+            ServerSettingsService.layerTest(settings),
             UnoGatewayKeyTest("unollm_machine"),
             Layer.mock(OrchestrationEngineService)({}),
             Layer.mock(ProjectionSnapshotQuery)({}),
@@ -179,6 +180,59 @@ describe("AppSdkService", () => {
       await writeManifest("album", { name: "Album", port: 3002 });
       await service.sync();
       await expect(stat(path.join(keysDir, "album", "token"))).rejects.toThrow();
+    });
+  });
+
+  it("keeps an app's files in this computer's own cloud folder when the person says so", async () => {
+    await writeManifest("album", { name: "Album", port: 3002, storage: true });
+    await run(
+      async (service) => {
+        await service.sync();
+        const token = await tokenOf("album");
+        expect((await service.core.authenticate(token))?.storage?.folder).toBe("album/");
+        let overview = await Effect.runPromise(service.overview);
+        expect(overview.apps[0]?.storage).toMatchObject({ scope: "account", prefix: "album/" });
+
+        overview = await Effect.runPromise(
+          service.update({ appId: "album", storageScope: "computer" }),
+        );
+        expect(overview.apps[0]?.storage).toMatchObject({
+          scope: "computer",
+          prefix: "album@computer-1920/",
+        });
+        // Same token, other folder: the app itself knows nothing about it.
+        expect((await service.core.authenticate(token))?.storage?.folder).toBe(
+          "album@computer-1920/",
+        );
+      },
+      { uno: { boxId: 1920 } },
+    );
+    // Remembered across restarts; off an Uno computer the folder gets a stable local name.
+    await run(async (service) => {
+      const first = await Effect.runPromise(service.overview);
+      const prefix = first.apps[0]?.storage?.prefix ?? "";
+      expect(prefix).toMatch(/^album@local-[0-9a-f]{12}\/$/);
+      expect((await Effect.runPromise(service.overview)).apps[0]?.storage?.prefix).toBe(prefix);
+    });
+  });
+
+  it("deleting an app's cloud files still works once its manifest is gone", async () => {
+    await writeManifest("album", { name: "Album", port: 3002, storage: true });
+    await run(async (service) => {
+      await service.sync();
+      await rm(path.join(appsDir, "album.json"));
+      await service.sync();
+      // Other changes need the app; deleting its files doesn't. With no Uno
+      // account on this test computer, it reaches the cloud step and says why.
+      await expect(
+        Effect.runPromise(service.update({ appId: "album", storageScope: "computer" })),
+      ).rejects.toThrow(/isn't on this computer/);
+      await expect(
+        Effect.runPromise(service.update({ appId: "album", deleteCloudFiles: true })),
+      ).rejects.toThrow(/Couldn't delete the app's files in the cloud/);
+      await expect(
+        Effect.runPromise(service.update({ appId: "ghost", deleteCloudFiles: true })),
+      ).rejects.toThrow(/isn't on this computer/);
     });
   });
 

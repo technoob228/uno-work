@@ -31,6 +31,7 @@ import { useStore } from "../../store";
 import { Button } from "../ui/button";
 import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
+import { toastManager } from "../ui/toast";
 import { AppCatalogDialog } from "./AppCatalogDialog";
 import { BoostControl } from "./BoostControl";
 import { ChatInFolderDialog } from "./ChatInFolderDialog";
@@ -41,6 +42,9 @@ import { ComputerHero, type ComputerLoad } from "./ComputerHero";
 import { ComputerPrograms, type BuiltInPrograms } from "./ComputerPrograms";
 import { awakeLine, computerPowerState, humanDuration, sizeLine } from "./computerFormat";
 import {
+  appAiQueryKey,
+  appAiQueryOptions,
+  appAiUpdate,
   appSignInApi,
   computerActivityQueryOptions,
   computerAppsQueryOptions,
@@ -60,7 +64,12 @@ import { ResizeDialog } from "./ResizeDialog";
 import { ResourcesView } from "./resources/ResourcesView";
 import type { ResourceLook } from "./resources/resourceModel";
 import { LOW_DISK_PCT, LOW_MEMORY_PCT, isSustained } from "./resizeModel";
-import { buildProgramTiles, isBrowserOnMachine, type ProgramTile } from "./programModel";
+import {
+  buildProgramTiles,
+  isBrowserOnMachine,
+  removalCloudFiles,
+  type ProgramTile,
+} from "./programModel";
 import { useAppInstalls } from "./useAppInstalls";
 import { useComputerBoost } from "./useComputerBoost";
 import { useHomeLaunchers } from "./useHomeLaunchers";
@@ -97,6 +106,12 @@ export function ComputerView() {
   const machineAppsQuery = useQuery(machineAppsQueryOptions(environmentId, thisMachine));
   const activityQuery = useQuery(computerActivityQueryOptions(environmentId, pickedBoxId, hasBox));
   const appsQuery = useQuery(computerAppsQueryOptions(environmentId, pickedBoxId, hasBox));
+  // Apps' cloud folders (Settings → Apps): only this machine's daemon knows them.
+  const appAiQuery = useQuery({
+    ...appAiQueryOptions(environmentId, thisMachine),
+    // Read when the screen opens; Settings → Apps is the one that keeps polling.
+    refetchInterval: false,
+  });
 
   const powerMutation = useMutation(
     computerPowerMutationOptions(environmentId, pickedBoxId, queryClient),
@@ -204,6 +219,23 @@ export function ComputerView() {
     setAiLimit.reset();
   };
 
+  const deleteAppCloudFiles = (appId: string, name: string) => {
+    appAiUpdate(environmentId, { appId, deleteCloudFiles: true })
+      .then((overview) => {
+        queryClient.setQueryData(appAiQueryKey(environmentId), overview);
+        toastManager.add({ type: "success", title: `Deleted ${name}'s files in the cloud` });
+      })
+      .catch((error: unknown) =>
+        toastManager.add({
+          type: "error",
+          title: `${name} is removed, but its cloud files are still there`,
+          description: `${
+            error instanceof Error ? error.message : String(error)
+          } You can delete them in Files → Cloud storage → apps.`,
+        }),
+      );
+  };
+
   const removingContainer = appAction.isPending && appAction.variables?.action === "remove";
   const remove: ProgramRemoveControls = {
     pending: removeStoreApp.isPending || removingContainer,
@@ -217,14 +249,22 @@ export function ComputerView() {
       removeStoreApp.reset();
       if (appAction.variables?.action === "remove") appAction.reset();
     },
-    onRemove: (removal, deleteData) => {
+    cloudFiles: (removal) =>
+      thisMachine ? removalCloudFiles(removal, appAiQuery.data?.apps) : null,
+    onRemove: (removal, deleteData, deleteCloudFiles) => {
       if (removal.kind === "store") {
+        // Asked when the dialog opened; the app's id on this computer.
+        const cloudFiles = deleteCloudFiles
+          ? removalCloudFiles(removal, appAiQuery.data?.apps)
+          : null;
         removeStoreApp.mutate(
           { deploymentId: removal.deploymentId, deleteData },
           {
             onSuccess: () => {
               installs.dismiss(removal.deploymentId);
               setDetailsKey(null);
+              // After the app is gone, so it can't write new files meanwhile.
+              if (cloudFiles) deleteAppCloudFiles(cloudFiles.appId, removal.name);
             },
           },
         );

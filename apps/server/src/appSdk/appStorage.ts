@@ -7,7 +7,15 @@
  * documents, uploads, exports, archives — belong in the cloud, so an app that
  * asks for `"storage"` in its manifest gets a folder there:
  *
- *   Cloud → bucket `apps` → `<appId>/…`
+ *   Cloud → bucket `apps` → `<appId>/…`                 (shared, the default)
+ *   Cloud → bucket `apps` → `<appId>@computer-<box>/…`   ("Only this computer")
+ *
+ * By default an app's folder is shared by every computer of the account that
+ * has the same app. The person can switch an app to a folder of its own on
+ * this computer (Settings → Apps). The two folders are siblings, not nested:
+ * `notes/` never lists, counts or deletes `notes@computer-7/`, and the other
+ * way round (an app id can't contain "@", see appManifest.ts). Switching
+ * moves nothing: the app simply sees the other folder from then on.
  *
  * The app never sees an S3 key, the machine's console token or another app's
  * folder. It talks to the local App API with its own `uno_app_` token; the
@@ -95,8 +103,26 @@ export function validateStoragePrefix(raw: unknown): string | null {
   return validateStorageKey(withSlash, "folder");
 }
 
-export function appFolder(appId: string): string {
-  return `${appId}/`;
+/** Where an app keeps its files: shared by the account's computers, or this computer only. */
+export type AppStorageScope = "account" | "computer";
+
+/**
+ * The app's folder in the `apps` bucket. `computerKey` (from
+ * `appStorageComputerKey`) is given for the "Only this computer" folder.
+ */
+export function appFolder(appId: string, computerKey: string | null = null): string {
+  return computerKey ? `${appId}@${computerKey}/` : `${appId}/`;
+}
+
+/**
+ * Names this computer inside folder names: `computer-<box id>` on an Uno
+ * computer (a copy made from its image is another box, so another folder),
+ * otherwise `local-<random id kept in the daemon's state>`.
+ */
+export function appStorageComputerKey(boxId: number | null | undefined, localId: string): string {
+  return typeof boxId === "number" && Number.isInteger(boxId) && boxId > 0
+    ? `computer-${boxId}`
+    : `local-${localId}`;
 }
 
 export interface AppStorageUsage {
@@ -113,6 +139,9 @@ export interface AppStorageDeps {
   readonly fetchImpl?: typeof fetch;
   readonly now?: () => number;
 }
+
+/** A failed `deleteFolder`, with a message a person can read. */
+export class AppStorageError extends Error {}
 
 class StorageFailure extends Error {
   readonly reply: AppStorageReply;
@@ -145,13 +174,20 @@ function fromConsoleError(cause: unknown): AppStorageReply {
 }
 
 export interface AppStorage {
-  readonly usage: (appId: string, options?: { fresh?: boolean }) => Promise<AppStorageUsage>;
+  /** Size of one app folder (`appFolder(...)`), walked at most every few minutes. */
+  readonly usage: (folder: string, options?: { fresh?: boolean }) => Promise<AppStorageUsage>;
   /** Last measured usage without touching the network (null = not measured yet). */
-  readonly cachedUsage: (appId: string) => AppStorageUsage | null;
+  readonly cachedUsage: (folder: string) => AppStorageUsage | null;
+  /**
+   * Deletes everything in one app folder (the person asked, when removing the
+   * app). Resolves to the number of files deleted; throws `AppStorageError`.
+   */
+  readonly deleteFolder: (folder: string) => Promise<number>;
   readonly bucketId: () => Promise<number | null>;
   readonly handle: (
     input: {
-      readonly appId: string;
+      /** The caller's folder, e.g. `album/` — every key lands inside it. */
+      readonly folder: string;
       readonly limitBytes: number;
       readonly method: string;
       readonly route: string;
@@ -292,13 +328,13 @@ export function makeAppStorage(deps: AppStorageDeps): AppStorage {
     }
   };
 
-  const measure = async (appId: string): Promise<AppStorageUsage> => {
+  const measure = async (folder: string): Promise<AppStorageUsage> => {
     const cd = await cloudDeps();
     const bucketId = await ensureBucket(cd);
     let usedBytes = 0;
     let files = 0;
     let folders = 0;
-    const queue = [appFolder(appId)];
+    const queue = [folder];
     while (queue.length > 0 && folders < USAGE_MAX_FOLDERS) {
       folders += 1;
       const listing = await listLevel(cd, bucketId, queue.shift()!);
@@ -315,22 +351,22 @@ export function makeAppStorage(deps: AppStorageDeps): AppStorage {
       measuredAt: new Date(now()).toISOString(),
       partial: queue.length > 0,
     };
-    usageCache.set(appId, { ...usage, at: now(), stale: false });
+    usageCache.set(folder, { ...usage, at: now(), stale: false });
     return usage;
   };
 
-  const usage: AppStorage["usage"] = async (appId, options = {}) => {
-    const cached = usageCache.get(appId);
+  const usage: AppStorage["usage"] = async (folder, options = {}) => {
+    const cached = usageCache.get(folder);
     if (!options.fresh && cached && !cached.stale && now() - cached.at < USAGE_TTL_MS) {
       return cached;
     }
-    return measure(appId);
+    return measure(folder);
   };
 
-  const adjustUsage = (appId: string, deltaBytes: number, deltaFiles: number) => {
-    const cached = usageCache.get(appId);
+  const adjustUsage = (folder: string, deltaBytes: number, deltaFiles: number) => {
+    const cached = usageCache.get(folder);
     if (!cached) return;
-    usageCache.set(appId, {
+    usageCache.set(folder, {
       ...cached,
       usedBytes: Math.max(0, cached.usedBytes + deltaBytes),
       files: Math.max(0, cached.files + deltaFiles),
@@ -341,14 +377,14 @@ export function makeAppStorage(deps: AppStorageDeps): AppStorage {
 
   // ── routes ───────────────────────────────────────────────────────────────
 
-  const info = async (appId: string, limitBytes: number): Promise<AppStorageReply> => {
-    const measured = await usage(appId);
+  const info = async (folder: string, limitBytes: number): Promise<AppStorageReply> => {
+    const measured = await usage(folder);
     const cd = await cloudDeps();
     const bucketId = await ensureBucket(cd);
     return {
       status: 200,
       body: {
-        folder: `Cloud storage → ${APP_STORAGE_BUCKET}/${appFolder(appId)}`,
+        folder: `Cloud storage → ${APP_STORAGE_BUCKET}/${folder}`,
         bucketId,
         usedBytes: measured.usedBytes,
         files: measured.files,
@@ -358,14 +394,14 @@ export function makeAppStorage(deps: AppStorageDeps): AppStorage {
     };
   };
 
-  const list = async (appId: string, url: URL): Promise<AppStorageReply> => {
+  const list = async (folder: string, url: URL): Promise<AppStorageReply> => {
     const prefix = validateStoragePrefix(url.searchParams.get("prefix"));
     if (prefix === null) {
       return err(400, "invalid_key", 'The folder must look like "photos/2026/".');
     }
     const cd = await cloudDeps();
     const bucketId = await ensureBucket(cd);
-    const base = appFolder(appId);
+    const base = folder;
     const listing = await listLevel(cd, bucketId, base + prefix);
     if (!listing.listingSupported) {
       return err(501, "listing_not_supported", "This Uno console can't list cloud folders yet.");
@@ -387,7 +423,7 @@ export function makeAppStorage(deps: AppStorageDeps): AppStorage {
   };
 
   const put = async (
-    appId: string,
+    folder: string,
     limitBytes: number,
     key: string,
     req: IncomingMessage,
@@ -408,13 +444,13 @@ export function makeAppStorage(deps: AppStorageDeps): AppStorage {
         `One file can be at most ${CLOUD_SINGLE_PUT_MAX_BYTES / 1024 / 1024} MB for now.`,
       );
     }
-    const measured = await usage(appId);
+    const measured = await usage(folder);
     if (measured.usedBytes + size > limitBytes) {
       return err(507, "app_storage_full", APP_STORAGE_FULL_MESSAGE);
     }
     const cd = await cloudDeps();
     const bucketId = await ensureBucket(cd);
-    const url = await presign(cd, bucketId, appFolder(appId) + key, "put");
+    const url = await presign(cd, bucketId, folder + key, "put");
     const contentType = req.headers["content-type"];
     const headers: Record<string, string> = { "content-length": String(size) };
     if (typeof contentType === "string" && contentType.length < 200) {
@@ -437,14 +473,14 @@ export function makeAppStorage(deps: AppStorageDeps): AppStorage {
         `Cloud storage refused the file (answered ${upstream.status}).`,
       );
     }
-    adjustUsage(appId, size, 1);
+    adjustUsage(folder, size, 1);
     return { status: 201, body: { key, size } };
   };
 
-  const get = async (appId: string, key: string, req: IncomingMessage, res: ServerResponse) => {
+  const get = async (folder: string, key: string, req: IncomingMessage, res: ServerResponse) => {
     const cd = await cloudDeps();
     const bucketId = await ensureBucket(cd);
-    const url = await presign(cd, bucketId, appFolder(appId) + key, "get");
+    const url = await presign(cd, bucketId, folder + key, "get");
     const headers: Record<string, string> = {};
     const range = req.headers["range"];
     if (typeof range === "string") headers["range"] = range;
@@ -494,22 +530,22 @@ export function makeAppStorage(deps: AppStorageDeps): AppStorage {
     return null;
   };
 
-  const remove = async (appId: string, key: string): Promise<AppStorageReply> => {
+  const remove = async (folder: string, key: string): Promise<AppStorageReply> => {
     const cd = await cloudDeps();
     const bucketId = await ensureBucket(cd);
     const raw = await consoleJson(
       cd,
-      `/api/v1/buckets/${bucketId}/objects?key=${encodeURIComponent(appFolder(appId) + key)}`,
+      `/api/v1/buckets/${bucketId}/objects?key=${encodeURIComponent(folder + key)}`,
       { method: "DELETE" },
     );
     const deleted = typeof raw?.["deleted"] === "number" ? raw["deleted"] : 0;
     // Sizes of deleted files aren't known here: measure again next time.
-    const cached = usageCache.get(appId);
-    if (cached) usageCache.set(appId, { ...cached, stale: true });
+    const cached = usageCache.get(folder);
+    if (cached) usageCache.set(folder, { ...cached, stale: true });
     return { status: 200, body: { deleted } };
   };
 
-  const link = async (appId: string, body: unknown): Promise<AppStorageReply> => {
+  const link = async (folder: string, body: unknown): Promise<AppStorageReply> => {
     const record = (typeof body === "object" && body !== null ? body : {}) as Record<
       string,
       unknown
@@ -524,23 +560,46 @@ export function makeAppStorage(deps: AppStorageDeps): AppStorage {
         : APP_STORAGE_URL_DEFAULT_SECONDS;
     const cd = await cloudDeps();
     const bucketId = await ensureBucket(cd);
-    const url = await presign(cd, bucketId, appFolder(appId) + key, "get", ttl);
+    const url = await presign(cd, bucketId, folder + key, "get", ttl);
     return {
       status: 200,
       body: { url, key, expiresAt: new Date(now() + ttl * 1000).toISOString() },
     };
   };
 
+  const deleteFolder: AppStorage["deleteFolder"] = async (folder) => {
+    if (validateStorageKey(folder, "folder") === null || folder.split("/").length !== 2) {
+      throw new AppStorageError("That isn't an app folder.");
+    }
+    try {
+      const cd = await cloudDeps();
+      const bucketId = await ensureBucket(cd);
+      const raw = await consoleJson(
+        cd,
+        `/api/v1/buckets/${bucketId}/objects?key=${encodeURIComponent(folder)}`,
+        { method: "DELETE" },
+      );
+      usageCache.delete(folder);
+      return typeof raw?.["deleted"] === "number" ? raw["deleted"] : 0;
+    } catch (cause) {
+      if (cause instanceof StorageFailure) {
+        const body = cause.reply.body as { error?: { message?: string } };
+        throw new AppStorageError(body.error?.message ?? "Cloud storage failed.");
+      }
+      throw new AppStorageError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
   const handle: AppStorage["handle"] = async (
-    { appId, limitBytes, method, route, url },
+    { folder, limitBytes, method, route, url },
     req,
     res,
   ) => {
     try {
-      if (route === "/v1/storage" && method === "GET") return await info(appId, limitBytes);
-      if (route === "/v1/storage/list" && method === "GET") return await list(appId, url);
+      if (route === "/v1/storage" && method === "GET") return await info(folder, limitBytes);
+      if (route === "/v1/storage/list" && method === "GET") return await list(folder, url);
       if (route === "/v1/storage/url" && method === "POST") {
-        return await link(appId, await readJson(req));
+        return await link(folder, await readJson(req));
       }
       if (route.startsWith("/v1/storage/files/")) {
         let decoded: string;
@@ -554,10 +613,10 @@ export function makeAppStorage(deps: AppStorageDeps): AppStorage {
           return err(400, "invalid_key", "The file key isn't valid.");
         }
         // The router trims trailing slashes; a folder delete says so explicitly.
-        const folder = url.searchParams.get("folder") === "1";
+        const folderKey = url.searchParams.get("folder") === "1";
         const key = validateStorageKey(
-          folder ? `${decoded}/` : decoded,
-          folder ? "folder" : "file",
+          folderKey ? `${decoded}/` : decoded,
+          folderKey ? "folder" : "file",
         );
         if (key === null) {
           return err(
@@ -566,11 +625,11 @@ export function makeAppStorage(deps: AppStorageDeps): AppStorage {
             'File keys look like "photos/2026/cat.jpg": no leading "/", no "..", at most 512 characters.',
           );
         }
-        if (method === "PUT" && !folder) return await put(appId, limitBytes, key, req);
-        if ((method === "GET" || method === "HEAD") && !folder) {
-          return await get(appId, key, req, res);
+        if (method === "PUT" && !folderKey) return await put(folder, limitBytes, key, req);
+        if ((method === "GET" || method === "HEAD") && !folderKey) {
+          return await get(folder, key, req, res);
         }
-        if (method === "DELETE") return await remove(appId, key);
+        if (method === "DELETE") return await remove(folder, key);
       }
       return err(404, "not_found", `No ${method} ${route} in the Uno App API.`);
     } catch (cause) {
@@ -582,7 +641,8 @@ export function makeAppStorage(deps: AppStorageDeps): AppStorage {
 
   return {
     usage,
-    cachedUsage: (appId) => usageCache.get(appId) ?? null,
+    cachedUsage: (folder) => usageCache.get(folder) ?? null,
+    deleteFolder,
     bucketId: async () => {
       try {
         return await ensureBucket(await cloudDeps());

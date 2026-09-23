@@ -7,6 +7,9 @@ import type { AppApiCaller, AppApiCore } from "./appApiHttp.ts";
 import { makeAppApiHandler } from "./appApiHttp.ts";
 import {
   APP_STORAGE_BUCKET,
+  AppStorageError,
+  appFolder,
+  appStorageComputerKey,
   makeAppStorage,
   validateStorageKey,
   validateStoragePrefix,
@@ -92,7 +95,19 @@ const CALLERS: Record<string, AppApiCaller> = {
     spentUsd: 0,
     manifestCwd: null,
     taskToolsCap: "edit",
-    storage: { limitBytes: 1000 },
+    storage: { limitBytes: 1000, folder: "album/" },
+  },
+  // The same app on a computer where the person chose "Only this computer".
+  uno_app_album_here: {
+    appId: "album",
+    appName: "Album",
+    chat: false,
+    tasks: false,
+    limitUsd: 0,
+    spentUsd: 0,
+    manifestCwd: null,
+    taskToolsCap: "edit",
+    storage: { limitBytes: 1000, folder: "album@computer-7/" },
   },
   uno_app_other: {
     appId: "other",
@@ -103,7 +118,7 @@ const CALLERS: Record<string, AppApiCaller> = {
     spentUsd: 0,
     manifestCwd: null,
     taskToolsCap: "edit",
-    storage: { limitBytes: 1000 },
+    storage: { limitBytes: 1000, folder: "other/" },
   },
   uno_app_nostorage: {
     appId: "nostorage",
@@ -320,6 +335,52 @@ describe("App API cloud storage", () => {
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(UnoAppError);
     expect(error).toMatchObject({ status: 403, code: "storage_not_allowed" });
+  });
+
+  it("keeps this computer's own folder apart from the shared one, both ways", async () => {
+    const shared = album();
+    const here = createClient({ url: apiUrl, token: "uno_app_album_here" });
+    await shared.storage.put("shared.txt", "s");
+    await here.storage.put("mine.txt", "m");
+    expect(objects.get("album@computer-7/mine.txt")?.body.toString()).toBe("m");
+    expect(
+      (await shared.storage.listAll()).map((f: { key: string }) => f.key).includes("mine.txt"),
+    ).toBe(false);
+    expect((await here.storage.listAll()).map((f: { key: string }) => f.key)).toEqual(["mine.txt"]);
+    await expect(here.storage.getText("shared.txt")).rejects.toMatchObject({ status: 404 });
+    // The limit counts the folder the app uses now.
+    await here.storage.put("big.bin", new Uint8Array(900));
+    await expect(here.storage.put("more.bin", new Uint8Array(200))).rejects.toMatchObject({
+      code: "app_storage_full",
+    });
+    await shared.storage.put("more.bin", new Uint8Array(200));
+    expect((await here.storage.usage()).folder).toBe("Cloud storage → apps/album@computer-7/");
+  });
+
+  it("deletes one whole app folder, and only that folder", async () => {
+    await album().storage.put("keep.txt", "k");
+    await createClient({ url: apiUrl, token: "uno_app_album_here" }).storage.put("x.txt", "x");
+    const before = [...objects.keys()].filter((key) => key.startsWith("album@computer-7/")).length;
+    expect(before).toBeGreaterThan(0);
+    expect(await storage.deleteFolder("album@computer-7/")).toBe(before);
+    expect([...objects.keys()].some((key) => key.startsWith("album@computer-7/"))).toBe(false);
+    expect(objects.has("album/keep.txt")).toBe(true);
+    expect(objects.has("other/secret.txt")).toBe(true);
+    // Never the bucket root or a folder inside an app's folder.
+    await expect(storage.deleteFolder("")).rejects.toBeInstanceOf(AppStorageError);
+    await expect(storage.deleteFolder("album/photos/")).rejects.toBeInstanceOf(AppStorageError);
+    await expect(storage.deleteFolder("../")).rejects.toBeInstanceOf(AppStorageError);
+    machineToken = "";
+    await expect(storage.deleteFolder("album/")).rejects.toThrow(/Sign in to Uno/);
+  });
+
+  it("names folders: shared, an Uno computer's own, a computer off Uno", () => {
+    expect(appFolder("notes")).toBe("notes/");
+    expect(appFolder("notes", appStorageComputerKey(1920, "abc123abc123"))).toBe(
+      "notes@computer-1920/",
+    );
+    expect(appStorageComputerKey(null, "abc123abc123")).toBe("local-abc123abc123");
+    expect(appStorageComputerKey(0, "abc123abc123")).toBe("local-abc123abc123");
   });
 
   it("requires a length for uploads", async () => {

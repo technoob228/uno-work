@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 import { ProgramDialog } from "./ProgramDialog";
-import { buildProgramTiles } from "./programModel";
+import { buildProgramTiles, type RemovalCloudFiles } from "./programModel";
 
 const memos: UnoComputerInstalledApp = {
   key: "service:-77",
@@ -63,6 +63,7 @@ function renderDialog(input: {
   tile: ReturnType<typeof tileFor>;
   pending?: boolean;
   onRemove?: (...args: unknown[]) => void;
+  cloudFiles?: RemovalCloudFiles | null;
   onSave?: (deploymentId: number, limit: number | null) => Promise<unknown>;
 }) {
   return render(
@@ -79,6 +80,7 @@ function renderDialog(input: {
         error: null,
         onRemove: input.onRemove ?? (() => undefined),
         onReset: () => undefined,
+        cloudFiles: () => input.cloudFiles ?? null,
       }}
       aiLimit={{
         pending: false,
@@ -114,8 +116,9 @@ describe("ProgramDialog — Remove and AI limit", () => {
       await expect.element(confirm).toBeInTheDocument();
       await confirm.click();
       expect(onRemove).toHaveBeenCalledWith(
-        { kind: "store", deploymentId: 77, name: "Memos" },
+        { kind: "store", deploymentId: 77, name: "Memos", templateId: "memos" },
         true,
+        false,
       );
     } finally {
       await screen.unmount();
@@ -134,6 +137,34 @@ describe("ProgramDialog — Remove and AI limit", () => {
       expect(onRemove).toHaveBeenCalledWith(
         { kind: "container", appId: "docker:my-bot", container: "my-bot" },
         false,
+        false,
+      );
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("asks separately about the app's files in the cloud, and says when the folder is shared", async () => {
+    const onRemove = vi.fn();
+    const screen = await renderDialog({
+      tile: tileFor([memos], []),
+      onRemove,
+      cloudFiles: { appId: "memos", usedBytes: 120 * 1024 * 1024, scope: "account" },
+    });
+    try {
+      await page.getByRole("button", { name: "Remove" }).click();
+      const box = page.getByRole("checkbox", { name: /Also delete its files in the cloud/ });
+      await expect.element(box).not.toBeChecked();
+      await expect.element(page.getByText(/\(120 MB\)/)).toBeInTheDocument();
+      await expect
+        .element(page.getByText(/this folder is shared\. Memos on your other computers/))
+        .toBeInTheDocument();
+      await box.click();
+      await page.getByRole("button", { name: "Remove and delete files" }).click();
+      expect(onRemove).toHaveBeenCalledWith(
+        { kind: "store", deploymentId: 77, name: "Memos", templateId: "memos" },
+        false,
+        true,
       );
     } finally {
       await screen.unmount();

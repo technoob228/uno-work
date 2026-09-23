@@ -54,8 +54,18 @@ export const AppAiStatus = Schema.Literals(["active", "over-limit", "revoked"]);
 export type AppAiStatus = typeof AppAiStatus.Type;
 
 /**
+ * Which cloud folder an app uses:
+ * - `account`  — `<appId>/`, shared by every computer of the account that has
+ *                the same app (the default);
+ * - `computer` — `<appId>@computer-<box>/`, this computer's own.
+ * Switching moves no files: the app sees the other folder from then on.
+ */
+export const AppStorageScope = Schema.Literals(["account", "computer"]);
+export type AppStorageScope = typeof AppStorageScope.Type;
+
+/**
  * An app's folder in the account's cloud (`"storage"` in the manifest):
- * Cloud storage → bucket `apps` → `<appId>/`.
+ * Cloud storage → bucket `apps` → `<appId>/` (or `<appId>@computer-<box>/`).
  */
 export const AppStorageInfo = Schema.Struct({
   limitBytes: Schema.Number,
@@ -66,8 +76,9 @@ export const AppStorageInfo = Schema.Struct({
   files: Schema.NullOr(Schema.Number),
   /** The `apps` bucket, for "Open in Files"; null until it exists. */
   bucketId: Schema.NullOr(Schema.Number),
-  /** Folder inside the bucket, e.g. `photos/`. */
+  /** The folder the app uses now, inside the bucket, e.g. `photos/`. */
   prefix: Schema.String,
+  scope: AppStorageScope,
 });
 export type AppStorageInfo = typeof AppStorageInfo.Type;
 
@@ -123,5 +134,12 @@ export const AppAiUpdateInput = Schema.Struct({
   resetSpent: Schema.optionalKey(Schema.Boolean),
   /** Cloud storage limit in GB; null returns to the manifest's limit. */
   storageLimitGb: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  /** Shared cloud folder or this computer's own; files are not moved. */
+  storageScope: Schema.optionalKey(AppStorageScope),
+  /**
+   * Delete every file in the app's current cloud folder (asked when the app
+   * is removed). Allowed after the app's manifest is gone.
+   */
+  deleteCloudFiles: Schema.optionalKey(Schema.Boolean),
 });
 export type AppAiUpdateInput = typeof AppAiUpdateInput.Type;

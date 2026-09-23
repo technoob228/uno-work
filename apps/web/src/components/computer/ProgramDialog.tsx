@@ -46,7 +46,12 @@ import { Spinner } from "../ui/spinner";
 import { displayAddress } from "./computerFormat";
 import { ProgramIcon } from "./ComputerPrograms";
 import { CopyButton } from "./computerUi";
-import { programRemoval, type ProgramRemoval, type ProgramTile } from "./programModel";
+import {
+  programRemoval,
+  type ProgramRemoval,
+  type ProgramTile,
+  type RemovalCloudFiles,
+} from "./programModel";
 import { RemoveProgramDialog } from "./RemoveProgramDialog";
 
 const STATUS_WORD: Record<ProgramTile["status"], string> = {
@@ -442,7 +447,13 @@ function AiSpendingBlock({
 export interface ProgramRemoveControls {
   readonly pending: boolean;
   readonly error: string | null;
-  readonly onRemove: (removal: ProgramRemoval, deleteData: boolean) => void;
+  readonly onRemove: (
+    removal: ProgramRemoval,
+    deleteData: boolean,
+    deleteCloudFiles: boolean,
+  ) => void;
+  /** The app's folder in the account's cloud, when Remove may also delete it. */
+  readonly cloudFiles?: (removal: ProgramRemoval) => RemovalCloudFiles | null;
   /** Clears a previous error when the confirmation opens again. */
   readonly onReset: () => void;
 }
@@ -725,11 +736,12 @@ export function ProgramDialog({
         open={confirmRemove}
         name={tile?.name ?? ""}
         removal={removal}
+        cloudFiles={removal ? (remove.cloudFiles?.(removal) ?? null) : null}
         pending={remove.pending}
         error={remove.error}
         onOpenChange={setConfirmRemove}
-        onConfirm={(deleteData) => {
-          if (removal) remove.onRemove(removal, deleteData);
+        onConfirm={(deleteData, deleteCloudFiles) => {
+          if (removal) remove.onRemove(removal, deleteData, deleteCloudFiles);
         }}
       />
     </Dialog>

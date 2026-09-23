@@ -15,6 +15,7 @@ import {
   type AppAiApp,
   type AppAiOverview,
   type AppAiUpdateInput,
+  type AppStorageScope,
   type AppTaskTools,
   type EnvironmentId,
 } from "@t3tools/contracts";
@@ -23,7 +24,6 @@ import { createModelSelection } from "@t3tools/shared/model";
 import { CloudIcon, SparklesIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 
-import { ensureEnvironmentApi } from "~/environmentApi";
 import {
   useEnvironmentProviders,
   useEnvironmentSettings,
@@ -34,6 +34,7 @@ import { getCustomModelOptionsByInstance } from "~/modelSelection";
 import { deriveProviderInstanceEntries, sortProviderInstanceEntries } from "~/providerInstances";
 
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { appAiQueryKey, appAiQueryOptions, appAiUpdate } from "../computer/computerQueries";
 import { formatFileSize } from "../files/fileTypes";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -53,6 +54,18 @@ const TOOLS_LABELS: Record<AppTaskTools, string> = {
   edit: "Edit files, ask before commands",
   full: "Do everything on its own",
 };
+
+const SCOPE_LABELS: Record<AppStorageScope, string> = {
+  account: "Shared across my computers",
+  computer: "Only this computer",
+};
+
+/** What the cloud folder choice means, in one line under the app. */
+export function appStorageScopeHint(scope: AppStorageScope): string {
+  return scope === "account"
+    ? "Same folder on every computer of yours that has this app"
+    : "This computer's own folder. Files in the shared folder stay there";
+}
 
 export function formatUsd(value: number): string {
   if (value === 0) return "$0";
@@ -88,8 +101,6 @@ function relativeTime(iso: string | null): string | null {
   if (seconds < 86_400) return `${Math.round(seconds / 3600)} h ago`;
   return `${Math.round(seconds / 86_400)} d ago`;
 }
-
-const queryKey = (environmentId: EnvironmentId) => ["app-ai", environmentId] as const;
 
 function AppRow({
   app,
@@ -156,6 +167,11 @@ function AppRow({
                   </Link>
                 </>
               ) : null}
+            </span>
+          ) : null}
+          {storage ? (
+            <span className="block text-xs" data-testid={`app-storage-scope-${app.id}`}>
+              {appStorageScopeHint(storage.scope)}
             </span>
           ) : null}
         </>
@@ -226,6 +242,32 @@ function AppRow({
               />
             </label>
           ) : null}
+          {storage ? (
+            <Select
+              value={storage.scope}
+              onValueChange={(value) => {
+                if (value !== storage.scope) {
+                  onUpdate({ appId: app.id, storageScope: value as AppStorageScope });
+                }
+              }}
+            >
+              <SelectTrigger
+                size="sm"
+                className="w-52"
+                aria-label={`Cloud folder of ${app.name}`}
+                title="Cloud folder. Switching moves no files: the app starts using the other folder."
+              >
+                <SelectValue>{SCOPE_LABELS[storage.scope]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup>
+                {(Object.keys(SCOPE_LABELS) as AppStorageScope[]).map((scope) => (
+                  <SelectItem key={scope} value={scope}>
+                    {SCOPE_LABELS[scope]}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          ) : null}
           {app.tasks ? (
             <Select
               value={app.taskToolsCap}
@@ -288,15 +330,11 @@ export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId:
   const { updateSettings, mutationBlockedReason } = useUpdateEnvironmentSettings(environmentId);
   const settings = serverSettings ?? DEFAULT_UNIFIED_SETTINGS;
 
-  const overview = useQuery({
-    queryKey: queryKey(environmentId),
-    queryFn: () => ensureEnvironmentApi(environmentId).unoComputer.appAiList(),
-    refetchInterval: 10_000,
-  });
+  const overview = useQuery(appAiQueryOptions(environmentId));
   const update = useMutation({
-    mutationFn: (input: AppAiUpdateInput) =>
-      ensureEnvironmentApi(environmentId).unoComputer.appAiUpdate(input),
-    onSuccess: (data: AppAiOverview) => queryClient.setQueryData(queryKey(environmentId), data),
+    mutationFn: (input: AppAiUpdateInput) => appAiUpdate(environmentId, input),
+    onSuccess: (data: AppAiOverview) =>
+      queryClient.setQueryData(appAiQueryKey(environmentId), data),
     onError: (error) =>
       toastManager.add({
         type: "error",
@@ -308,7 +346,7 @@ export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId:
   const save = useCallback(
     (patch: Parameters<typeof updateSettings>[0], title: string) => {
       void updateSettings(patch)
-        .then(() => queryClient.invalidateQueries({ queryKey: queryKey(environmentId) }))
+        .then(() => queryClient.invalidateQueries({ queryKey: appAiQueryKey(environmentId) }))
         .catch((error: unknown) => {
           toastManager.add({
             type: "error",
