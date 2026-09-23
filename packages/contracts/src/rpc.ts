@@ -87,6 +87,10 @@ import {
   FilesCloudDownloadUrl,
   FilesCloudCopyToCloudInput,
   FilesCloudCopyToComputerInput,
+  FilesCloudOfficeOpenInput,
+  FilesCloudOfficeOpened,
+  FilesCloudOfficeSaveInput,
+  FilesCloudOfficeSaveResult,
   FilesCloudTransferResult,
 } from "./files.ts";
 import { AuthAccessStreamEvent, AuthLinkRequestStreamEvent } from "./auth.ts";
@@ -417,6 +421,8 @@ export const WS_METHODS = {
   filesCloudDownloadUrl: "files.cloud.downloadUrl",
   filesCloudCopyToCloud: "files.cloud.copyToCloud",
   filesCloudCopyToComputer: "files.cloud.copyToComputer",
+  filesCloudOfficeOpen: "files.cloud.officeOpen",
+  filesCloudOfficeSave: "files.cloud.officeSave",
 
   // Provider setup: install a harness CLI / sign it in on this machine
   providerInstallStart: "provider.install.start",
@@ -1498,6 +1504,18 @@ export const WsFilesCloudCopyToComputerRpc = Rpc.make(WS_METHODS.filesCloudCopyT
   error: FilesError,
 });
 
+export const WsFilesCloudOfficeOpenRpc = Rpc.make(WS_METHODS.filesCloudOfficeOpen, {
+  payload: FilesCloudOfficeOpenInput,
+  success: FilesCloudOfficeOpened,
+  error: FilesError,
+});
+
+export const WsFilesCloudOfficeSaveRpc = Rpc.make(WS_METHODS.filesCloudOfficeSave, {
+  payload: FilesCloudOfficeSaveInput,
+  success: FilesCloudOfficeSaveResult,
+  error: FilesError,
+});
+
 /** Programs found on the machine this daemon runs on. Never fails: see `warnings`. */
 export const WsUnoComputerMachineAppsRpc = Rpc.make(WS_METHODS.unoComputerMachineApps, {
   payload: Schema.Struct({}),
@@ -1654,6 +1672,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesCloudDownloadUrlRpc,
   WsFilesCloudCopyToCloudRpc,
   WsFilesCloudCopyToComputerRpc,
+  WsFilesCloudOfficeOpenRpc,
+  WsFilesCloudOfficeSaveRpc,
   WsUnoComputerMachineAppsRpc,
   WsUnoComputerAppActionRpc,
   WsUnoComputerEmbedCheckRpc,

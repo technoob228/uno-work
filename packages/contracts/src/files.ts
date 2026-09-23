@@ -304,3 +304,47 @@ export const FilesCloudTransferResult = Schema.Struct({
   skipped: Schema.Array(Schema.Struct({ name: Schema.String, reason: Schema.String })),
 });
 export type FilesCloudTransferResult = typeof FilesCloudTransferResult.Type;
+
+/* ------------------------------------------------------------------
+ * Office documents in Cloud storage: opened from a bucket, saved back
+ * there, older copies kept under `<folder>/.versions/<name>/`. Bytes pass
+ * through a hidden staging folder in the home (the page reads/writes it
+ * with the usual file calls); the version is a content hash, so a save
+ * over someone else's newer save is a conflict, never an overwrite.
+ * ------------------------------------------------------------------ */
+
+export const FilesCloudOfficeOpenInput = Schema.Struct({
+  bucketId: Schema.Number,
+  key: CloudKey,
+});
+export type FilesCloudOfficeOpenInput = typeof FilesCloudOfficeOpenInput.Type;
+
+export const FilesCloudOfficeOpened = Schema.Struct({
+  /** Hidden copy on the computer to read the bytes from; the page deletes it. */
+  stagedPath: Schema.String,
+  version: Schema.String,
+  name: Schema.String,
+  size: NonNegativeInt,
+  /** False for doc/xls/ppt: Office reads them, but can't save them back as they are. */
+  writable: Schema.Boolean,
+});
+export type FilesCloudOfficeOpened = typeof FilesCloudOfficeOpened.Type;
+
+export const FilesCloudOfficeSaveInput = Schema.Struct({
+  bucketId: Schema.Number,
+  key: CloudKey,
+  /** The new bytes, already written to a file in the staging folder. */
+  stagedPath: FilesPath,
+  /** The version the page opened (or last saved). */
+  baseVersion: Schema.NullOr(Schema.String),
+  /** Replace even if someone saved in between (the person chose to). */
+  force: Schema.optional(Schema.Boolean),
+});
+export type FilesCloudOfficeSaveInput = typeof FilesCloudOfficeSaveInput.Type;
+
+export const FilesCloudOfficeSaveResult = Schema.Struct({
+  kind: Schema.Literals(["saved", "conflict"]),
+  /** saved: the new version. conflict: the version in the cloud now (null = deleted). */
+  version: Schema.NullOr(Schema.String),
+});
+export type FilesCloudOfficeSaveResult = typeof FilesCloudOfficeSaveResult.Type;

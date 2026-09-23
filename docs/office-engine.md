@@ -70,16 +70,66 @@ Guarantees (tests in `files/http.test.ts`):
 The page autosaves 3 s after an edit (plus Ctrl/Cmd+S and Save). Visitors type
 a name once (localStorage) — it's the author of their comments.
 
-**Comment links are enforced by the editor UI, not the server:** comments live
-inside the document, so a comment save is a whole-file write. Someone who
-crafts requests by hand with a comment link can change the text. Every save is
-kept as a version, so it can be rolled back. (Same limit as the future co-edit
-relay — see the research report of 2026-09-23.)
+**Comment links are enforced on the computer (0.0.78).** The editor saves a
+whole docx, and the in-browser engine rewrites the entire package on every
+save (a 1 MB styles part, split runs, dropped parts) even when only a comment
+was added — so no diff against a file made by Word can tell "only comments"
+from "also edits". The daemon therefore never writes the visitor's file for a
+comment link (`files/docxComments.ts`):
+
+1. the upload's body text must equal the current file's — characters, tabs,
+   breaks, paragraph ends, one mark per picture/object — or the save is a
+   `403 {code: "comment_only"}` and the page shows "This link can only
+   comment" with _Download my version_ / _Reload the latest_;
+2. the upload's comment markers are placed into the **current** file at the
+   same text positions (a run is split where a comment starts mid-word);
+3. the comment parts (comments, commentsExtended, commentsIds,
+   commentsExtensible, people) are rebuilt from the upload as plain text with
+   whitelisted attributes and wired in with fresh relationships/content types.
+
+Everything else — formatting, pictures, styles, headers, macros, any extra
+part in the upload — is the current file's. Tests use real engine exports
+(`files/fixtures/comment-*.docx`, recorded 2026-09-23 with oo13); the check
+was also run on six Word-made documents (round trip + two comments), and
+LibreOffice and the engine both read the merged comments back.
+
+Limits: **Word only** — comment links can't be made for xlsx/pptx/odt (the
+share dialog hides the option; such links made before 0.0.78 open read-only
+with a note). A document whose headers/footers/notes already carry comments
+refuses comment saves ("ask for an edit link"). A comment's author name is
+whatever the visitor typed. Deleting a comment can leave the run split where
+it was anchored (invisible).
 
 **Macros and plugins are off** in every mode. ONLYOFFICE macros are
 JavaScript stored in the document and would run on the machine's origin —
 the same origin as the owner's session — so a document edited through a link
 could otherwise act as the owner.
+
+## Documents in Cloud storage (0.0.78)
+
+`/office?bucket=<id>&key=<key>` opens a docx/xlsx/pptx straight from the
+account's Cloud storage (Files → Cloud storage → click the document, or
+"Open in Office" in its menu) and saves it back there
+(`files/cloudOffice.ts`, RPCs `files.cloud.officeOpen` / `officeSave`):
+
+- the daemon downloads the object (presigned GET — S3 keys stay in the
+  console) into `~/.uno-office-cloud/<random>/`, the page reads it and
+  deletes it; a save goes the same way in reverse. Leftovers older than an
+  hour are swept on the next open. The disk only holds a document while it
+  is being moved;
+- the version is the sha256 prefix of the bytes. On save the daemon downloads
+  the current object again: if someone saved in between (another computer, an
+  upload in Files) — or deleted it — nothing is overwritten and Office shows
+  the same choice as a share link: _Download my version_ / _Replace with my
+  version_ / _Reload the latest_;
+- the previous content is kept as `<folder>/.versions/<name>/<time>.<ext>`,
+  the last **10** (they count toward the Cloud quota). Older copies only
+  download — Office won't open them;
+- doc/xls/ppt open read-only from the cloud (saving would change the format).
+
+**Share links to Cloud documents: not yet** — links serve files of the
+computer. The Cloud menu says so ("Share link — not yet for Cloud"); copy the
+document to this computer to share it.
 
 ## Known workarounds (kludges)
 
