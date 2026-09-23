@@ -18,6 +18,7 @@ import {
   DEFAULT_UNIFIED_SETTINGS,
   UnifiedSettings,
 } from "@t3tools/contracts/settings";
+import { resetOldSidebarsOnce } from "~/featureFlags";
 import { ensureLocalApi } from "~/localApi";
 import { Struct } from "effect";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
@@ -69,8 +70,14 @@ async function hydrateClientSettings(): Promise<void> {
   const nextHydration = (async () => {
     try {
       const persistedSettings = await ensureLocalApi().persistence.getClientSettings();
-      if (persistedSettings) {
-        replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings });
+      const loaded = persistedSettings
+        ? { ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings }
+        : clientSettingsSnapshot;
+      const reset = resetOldSidebarsOnce(loaded, DEFAULT_CLIENT_SETTINGS.sidebarEnvironmentScope);
+      if (reset.changed) {
+        persistClientSettings(reset.settings);
+      } else if (persistedSettings) {
+        replaceClientSettingsSnapshot(loaded);
       }
     } catch (error) {
       console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} hydrate failed`, error);

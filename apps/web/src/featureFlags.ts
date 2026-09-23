@@ -141,3 +141,36 @@ export function readStoredFeatureFlag(
 ): boolean | undefined {
   return migrateFeatureFlagOverrides(stored)[key];
 }
+
+/**
+ * One-time reset done by 0.0.78: devices that still had the old sidebars on
+ * from earlier versions (Labs "Sidebar (legacy)" / "All machines in one
+ * sidebar") are moved to the current navigation once. The marker rides in
+ * the same open featureFlags map, so the person can turn either flag back on
+ * afterwards and it stays on.
+ */
+export const SIDEBAR_RESET_MARKER = "_resetOldSidebars0078";
+const SIDEBAR_RESET_KEYS = ["legacySidebar", "allMachinesSidebar", "sidebarInbox"] as const;
+
+export function resetOldSidebarsOnce<
+  T extends {
+    readonly featureFlags: Readonly<Record<string, boolean>>;
+    readonly sidebarEnvironmentScope: string;
+  },
+>(settings: T, defaultScope: T["sidebarEnvironmentScope"]): { settings: T; changed: boolean } {
+  if (settings.featureFlags[SIDEBAR_RESET_MARKER] === true) return { settings, changed: false };
+  const featureFlags: Record<string, boolean> = { ...settings.featureFlags };
+  const hadAllMachines =
+    featureFlags.allMachinesSidebar === true || featureFlags.sidebarInbox === true;
+  for (const key of SIDEBAR_RESET_KEYS) delete featureFlags[key];
+  featureFlags[SIDEBAR_RESET_MARKER] = true;
+  return {
+    settings: {
+      ...settings,
+      featureFlags,
+      // "All machines" carried the sidebar scope with it; put it back too.
+      ...(hadAllMachines ? { sidebarEnvironmentScope: defaultScope } : {}),
+    },
+    changed: true,
+  };
+}
