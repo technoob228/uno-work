@@ -21,6 +21,8 @@ import {
   type AppAiOverview,
   type AppAiUpdateInput,
   type AppStorageInfo,
+  type ModelSelection,
+  type ServerProvider,
   UNO_GATEWAY_BASE_URL,
 } from "@t3tools/contracts";
 import { Context, Duration, Effect, Layer, Schedule } from "effect";
@@ -52,6 +54,7 @@ import {
 } from "./appKeys.ts";
 import { resolveAppApiPort } from "./appApiPort.ts";
 import { makeAppTasks } from "./appTasks.ts";
+import { makeTaskMeter } from "./appTaskMeter.ts";
 import { GB, appFolder, makeAppStorage } from "./appStorage.ts";
 import { type ModelPrice, parseModelPrices } from "./pricing.ts";
 import { installSdkFiles } from "./sdkFiles.ts";
@@ -105,6 +108,24 @@ export async function dockerBridgeAddress(
   });
 }
 
+/** Harnesses that run on the Uno AI gateway — the ones whose tasks cost Uno money. */
+const UNO_AI_DRIVERS: ReadonlySet<string> = new Set(["uno", "hermes"]);
+
+/** Whether tasks on this selection spend Uno AI (and so count against an app's limit). */
+export function selectionUsesUnoAi(
+  selection: ModelSelection | null,
+  providers: ReadonlyArray<ServerProvider>,
+): boolean {
+  if (selection === null) return false;
+  const provider = providers.find((p) => p.instanceId === selection.instanceId);
+  return UNO_AI_DRIVERS.has(provider?.driver ?? selection.instanceId);
+}
+
+/** Chat + tasks: what counts against the app's limit. */
+export function totalSpentUsd(stored: StoredApp): number {
+  return Math.round((stored.spentUsd + stored.taskSpentUsd) * 1e6) / 1e6;
+}
+
 export function effectiveLimitUsd(stored: StoredApp, manifest: AppManifest | undefined): number {
   return stored.limitOverrideUsd ?? manifest?.ai?.limitUsd ?? 0;
 }
@@ -132,6 +153,8 @@ export const makeAppSdkService = (
     readonly gatewayBaseUrl?: string;
     /** Tests turn the listener, watcher and background passes off. */
     readonly background?: boolean;
+    /** Tests: the gateway's per-app spend (`/usage/apps`). */
+    readonly fetch?: typeof fetch;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -156,6 +179,11 @@ export const makeAppSdkService = (
     const store = yield* Effect.promise(() =>
       openAppAiStore(options.storePath ?? path.join(config.stateDir, "app-ai.json")),
     );
+    // Threads of app tasks keep their app label across restarts: a session
+    // restarted tomorrow is still that app's (appTaskLabel.ts).
+    for (const stored of store.all()) {
+      for (const task of stored.tasks) gatewayKey.labelThread(task.threadId, stored.id);
+    }
 
     let manifests = new Map<string, AppManifest>();
     let listening: string | null = null;
@@ -230,7 +258,8 @@ export const makeAppSdkService = (
         chat: manifest.ai?.chat ?? false,
         tasks: manifest.ai?.tasks ?? false,
         limitUsd: effectiveLimitUsd(stored, manifest),
-        spentUsd: stored.spentUsd,
+        spentUsd: totalSpentUsd(stored),
+        tasksSpentUsd: stored.taskSpentUsd,
         manifestCwd: manifest.cwd,
         taskToolsCap: stored.taskToolsCap,
         storage: manifest.storage
@@ -262,18 +291,34 @@ export const makeAppSdkService = (
         Effect.map((current) => current?.appsAi.taskModelSelection ?? null),
       ),
       home,
+      labelThread: gatewayKey.labelThread,
+    });
+
+    const machineGateway = async () => {
+      const key = await runPromise(gatewayKey.harnessKey());
+      return key.length > 0 ? { baseUrl: gatewayBaseUrl, key } : null;
+    };
+
+    // What tasks spent comes from the gateway, by app label (appTaskMeter.ts).
+    const taskMeter = makeTaskMeter({
+      gateway: machineGateway,
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+      apps: () => store.all().filter((stored) => stored.tasksStarted > 0),
+      persist: () => store.flush(),
     });
 
     const core: AppApiCore = {
       home,
       authenticate: async (token) => {
         const stored = store.findByTokenHash(hashAppToken(token));
-        return stored ? callerFor(stored) : null;
+        if (!stored) return null;
+        // An app that runs tasks is checked against fresh task spending (the
+        // gateway is asked at most every 20 s), so a new task or answer after
+        // the limit is refused rather than one refresh late.
+        if (stored.tasksStarted > 0) await taskMeter.refresh();
+        return callerFor(stored);
       },
-      gateway: async () => {
-        const key = await runPromise(gatewayKey.harnessKey());
-        return key.length > 0 ? { baseUrl: gatewayBaseUrl, key } : null;
-      },
+      gateway: machineGateway,
       defaults: async () => {
         const current = await runPromise(readSettings);
         const providers = await runPromise(providerRegistry.getProviders);
@@ -364,12 +409,14 @@ export const makeAppSdkService = (
         tasks: manifest?.ai?.tasks ?? false,
         status: stored.revoked
           ? "revoked"
-          : manifest?.ai && stored.spentUsd >= limitUsd
+          : manifest?.ai && totalSpentUsd(stored) >= limitUsd
             ? "over-limit"
             : "active",
         limitUsd,
         limitSetByPerson: stored.limitOverrideUsd !== null,
-        spentUsd: Math.round(stored.spentUsd * 1e6) / 1e6,
+        spentUsd: totalSpentUsd(stored),
+        chatSpentUsd: Math.round(stored.spentUsd * 1e6) / 1e6,
+        tasksSpentUsd: Math.round(stored.taskSpentUsd * 1e6) / 1e6,
         requests: stored.requests,
         tasksStarted: stored.tasksStarted,
         taskToolsCap: stored.taskToolsCap,
@@ -381,6 +428,7 @@ export const makeAppSdkService = (
 
     const overview: AppSdkServiceShape["overview"] = Effect.gen(function* () {
       yield* Effect.promise(() => sync());
+      yield* Effect.promise(() => taskMeter.refresh());
       const current = yield* readSettings;
       const key = yield* gatewayKey.harnessKey().pipe(Effect.orElseSucceed(() => ""));
       const providers = yield* providerRegistry.getProviders;
@@ -405,6 +453,11 @@ export const makeAppSdkService = (
             : APP_SDK_DEFAULT_CHAT_MODEL,
         taskModelSelection: current?.appsAi.taskModelSelection ?? null,
         taskModelDefault: selectAutoBootstrapModelSelection(providers),
+        taskSpend: taskMeter.status(),
+        taskHarnessUsesUnoAi: selectionUsesUnoAi(
+          current?.appsAi.taskModelSelection ?? selectAutoBootstrapModelSelection(providers),
+          providers,
+        ),
       } satisfies AppAiOverview;
     });
 
@@ -455,7 +508,11 @@ export const makeAppSdkService = (
               app.storageLimitOverrideGb =
                 input.storageLimitGb === null ? null : Math.round(input.storageLimitGb * 100) / 100;
             }
-            if (input.resetSpent === true) app.spentUsd = 0;
+            if (input.resetSpent === true) {
+              // The gateway's total stays; only its growth from now on counts.
+              app.spentUsd = 0;
+              app.taskSpentUsd = 0;
+            }
             if (input.revoked === true) {
               app.revoked = true;
               app.tokenHash = null;
@@ -534,9 +591,10 @@ export const makeAppSdkService = (
       }
     }
 
-    return { overview, update, core, sync } satisfies AppSdkServiceShape & {
+    return { overview, update, core, sync, taskMeter } satisfies AppSdkServiceShape & {
       readonly core: AppApiCore;
       readonly sync: () => Promise<void>;
+      readonly taskMeter: typeof taskMeter;
     };
   });
 

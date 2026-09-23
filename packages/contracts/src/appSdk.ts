@@ -82,7 +82,12 @@ export const AppAiApp = Schema.Struct({
   limitUsd: Schema.Number,
   /** True when the person set the limit (rather than the manifest). */
   limitSetByPerson: Schema.Boolean,
+  /** Everything counted against the limit: chat + tasks. */
   spentUsd: Schema.Number,
+  /** Answers and transcription (metered by the daemon). */
+  chatSpentUsd: Schema.Number,
+  /** Agent tasks on the Uno AI gateway (the gateway's own numbers, by app label). */
+  tasksSpentUsd: Schema.Number,
   requests: Schema.Number,
   tasksStarted: Schema.Number,
   /** The most a task of this app may do on its own. */
@@ -94,6 +99,14 @@ export const AppAiApp = Schema.Struct({
   storage: Schema.NullOr(AppStorageInfo),
 });
 export type AppAiApp = typeof AppAiApp.Type;
+
+/**
+ * Whether what apps' tasks spend is known: "metered" — the gateway reports it
+ * per app; "unavailable" — this gateway can't yet (tasks aren't counted);
+ * "no-key" — no Uno AI on this machine; "unknown" — not asked yet / offline.
+ */
+export const AppTaskSpendStatus = Schema.Literals(["metered", "unavailable", "no-key", "unknown"]);
+export type AppTaskSpendStatus = typeof AppTaskSpendStatus.Type;
 
 export const AppAiOverview = Schema.Struct({
   apps: Schema.Array(AppAiApp),
@@ -109,6 +122,13 @@ export const AppAiOverview = Schema.Struct({
   taskModelSelection: Schema.NullOr(ModelSelection),
   /** What tasks actually run on when the person chose nothing (null = no agent ready). */
   taskModelDefault: Schema.NullOr(ModelSelection),
+  taskSpend: AppTaskSpendStatus,
+  /**
+   * False when tasks run on an agent that doesn't use Uno AI (Claude Code,
+   * Codex, Cursor, OpenCode — the person's own subscription or keys): such
+   * tasks cost Uno nothing and don't count against an app's limit.
+   */
+  taskHarnessUsesUnoAi: Schema.Boolean,
 });
 export type AppAiOverview = typeof AppAiOverview.Type;
 

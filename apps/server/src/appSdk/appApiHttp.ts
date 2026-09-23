@@ -33,7 +33,10 @@ export interface AppApiCaller {
   readonly chat: boolean;
   readonly tasks: boolean;
   readonly limitUsd: number;
+  /** Everything counted against the limit: chat + tasks. */
   readonly spentUsd: number;
+  /** The part of `spentUsd` the app's tasks spent (gateway, `appTaskMeter.ts`). */
+  readonly tasksSpentUsd: number;
   readonly manifestCwd: string | null;
   readonly taskToolsCap: AppTaskTools;
   /** Cloud storage the manifest asks for (`"storage"`); null = none. */
@@ -165,6 +168,8 @@ export function makeAppApiHandler(core: AppApiCore) {
           tasks: caller.tasks,
           limitUsd: caller.limitUsd,
           spentUsd: Math.round(caller.spentUsd * 1e6) / 1e6,
+          chatSpentUsd: Math.round((caller.spentUsd - caller.tasksSpentUsd) * 1e6) / 1e6,
+          tasksSpentUsd: Math.round(caller.tasksSpentUsd * 1e6) / 1e6,
           remainingUsd: Math.round(remaining(caller) * 1e6) / 1e6,
           taskToolsCap: caller.taskToolsCap,
         },

@@ -113,7 +113,15 @@ container `http://host.docker.internal:3779`). Every call:
 ```json
 {
   "app": { "id": "translator", "name": "Translator" },
-  "ai": { "chat": true, "tasks": false, "limitUsd": 5, "spentUsd": 0.012, "remainingUsd": 4.988 },
+  "ai": {
+    "chat": true,
+    "tasks": false,
+    "limitUsd": 5,
+    "spentUsd": 0.012,
+    "chatSpentUsd": 0.012,
+    "tasksSpentUsd": 0,
+    "remainingUsd": 4.988
+  },
   "defaults": { "chatModel": "deepseek/deepseek-v3.2", "taskHarness": "uno" },
   "home": "/home/unowork"
 }
@@ -161,6 +169,24 @@ Response `202`:
 
 The task is a normal Work chat titled `[Translator] …`, so the person sees
 it, can watch, answer approvals and stop it.
+
+**Tasks and the app's limit.** What a task spends on the Uno AI gateway
+counts against the app's `limitUsd`, together with its chat. The daemon marks
+every gateway call of the task's chat with the app's id — and only the daemon
+does; the app can't set it — and the gateway reports the billed sum per app
+for the machine's key (`GET /v1/usage/apps`):
+
+| Harness                              | How the label travels                                                    | Counted                 |
+| ------------------------------------ | ------------------------------------------------------------------------ | ----------------------- |
+| Uno (built in, OpenCode engine)      | `X-Uno-App` header on the Uno providers of the session                   | yes                     |
+| Hermes                               | base URL `…/v1/apps/<id>` (its OpenAI SDK takes no env headers)          | yes                     |
+| Claude Code, Codex, Cursor, OpenCode | — they don't use the Uno gateway (the person's subscription or own keys) | no, Uno charges nothing |
+
+The daemon asks the gateway at most every 20 s, so the limit can be overshot
+by what a running task spends meanwhile; once over it, `POST /v1/tasks` (and
+chat) answer `402 app_limit_reached`. A task already running is not stopped.
+The chat stays the app's: if the person keeps talking in it, that counts too.
+Settings → Apps shows the split ("answers $…, jobs $…").
 
 ### `GET /v1/tasks/:id`
 

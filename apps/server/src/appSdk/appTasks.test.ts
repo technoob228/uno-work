@@ -48,11 +48,19 @@ describe("createTask", () => {
     const dispatched: Array<{
       command: OrchestrationCommand;
       origin?: OrchestrationCommandOrigin;
+      /** Label of the thread at the moment the command went out. */
+      labelAtDispatch?: string | null;
     }> = [];
+    const labels = new Map<string, string>();
     const tasks = makeAppTasks({
       engine: {
         dispatch: (command, options) => {
-          dispatched.push({ command, ...(options?.origin ? { origin: options.origin } : {}) });
+          dispatched.push({
+            command,
+            ...(options?.origin ? { origin: options.origin } : {}),
+            labelAtDispatch:
+              "threadId" in command ? (labels.get(String(command.threadId)) ?? null) : null,
+          });
           return Effect.succeed({ sequence: dispatched.length });
         },
       },
@@ -65,8 +73,9 @@ describe("createTask", () => {
       getProviders: Effect.succeed([]),
       getTaskModelSelection: Effect.succeed({ instanceId: "uno", model: "uno/m" } as never),
       home,
+      labelThread: (threadId, appId) => labels.set(threadId, appId),
     });
-    return { tasks, dispatched };
+    return { tasks, dispatched, labels };
   };
   const caller = {
     appId: "digest",
@@ -92,6 +101,20 @@ describe("createTask", () => {
     expect(create.title).toBe("[Digest] Summarise the Inbox");
     expect(create.runtimeMode).toBe("auto-accept-edits");
     expect((reply.body as { note?: string }).note).toContain("narrowed");
+  });
+
+  it("labels the thread with the app before its first turn, so the harness meters it", async () => {
+    const { tasks, dispatched, labels } = setup();
+    const { task } = await Effect.runPromise(tasks.createTask(caller, { prompt: "x" }));
+    expect(labels.get(task!.threadId)).toBe("digest");
+    const turn = dispatched.find((d) => d.command.type === "thread.turn.start");
+    expect(turn?.labelAtDispatch).toBe("digest");
+  });
+
+  it("does not label anything when the task is refused", async () => {
+    const { tasks, labels } = setup();
+    await Effect.runPromise(tasks.createTask(caller, { prompt: "x", cwd: "/etc" }));
+    expect(labels.size).toBe(0);
   });
 
   it("defaults to asking the person for every change", async () => {

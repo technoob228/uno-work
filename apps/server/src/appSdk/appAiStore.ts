@@ -36,9 +36,19 @@ export interface StoredApp {
   readonly id: string;
   tokenHash: string | null;
   tokenIssuedAt: string | null;
+  /** Chat and transcription, metered by the daemon call by call. */
   spentUsd: number;
   requests: number;
   tasksStarted: number;
+  /**
+   * What the app's tasks spent on the Uno AI gateway (the harness calls carry
+   * the app label; `appTaskMeter.ts`). Counts against the same limit.
+   */
+  taskSpentUsd: number;
+  /** The gateway's running total for this app last time we looked … */
+  taskGatewaySeenUsd: number;
+  /** … and for which machine key (a sha256 prefix; a new key starts from 0). */
+  taskGatewayKeyTag: string | null;
   lastUsedAt: string | null;
   /** Set by the person in Settings → Apps; null = the manifest's limit. */
   limitOverrideUsd: number | null;
@@ -76,6 +86,9 @@ function normalizeApp(id: string, raw: unknown): StoredApp {
     spentUsd: money(r["spentUsd"]),
     requests: money(r["requests"]),
     tasksStarted: money(r["tasksStarted"]),
+    taskSpentUsd: money(r["taskSpentUsd"]),
+    taskGatewaySeenUsd: money(r["taskGatewaySeenUsd"]),
+    taskGatewayKeyTag: typeof r["taskGatewayKeyTag"] === "string" ? r["taskGatewayKeyTag"] : null,
     lastUsedAt: typeof r["lastUsedAt"] === "string" ? r["lastUsedAt"] : null,
     limitOverrideUsd:
       typeof r["limitOverrideUsd"] === "number" && r["limitOverrideUsd"] >= 0
