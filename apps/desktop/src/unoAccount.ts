@@ -67,6 +67,10 @@ const ALLOWED: ReadonlyArray<{ method: string; pattern: RegExp }> = [
   { method: "GET", pattern: /^\/api\/v1\/boxes\/\d+\/machine-access$/ },
   { method: "PUT", pattern: /^\/api\/v1\/boxes\/\d+\/machine-access$/ },
   { method: "POST", pattern: /^\/api\/v1\/boxes\/\d+\/machine-access\/revoke$/ },
+  { method: "GET", pattern: /^\/api\/v1\/security\/summary$/ },
+  { method: "GET", pattern: /^\/api\/v1\/boxes\/\d+\/security\/access-log$/ },
+  { method: "GET", pattern: /^\/api\/v1\/boxes\/\d+\/security\/network$/ },
+  { method: "PUT", pattern: /^\/api\/v1\/boxes\/\d+\/security\/network$/ },
 ];
 
 export function isAllowedAccountRequest(method: string, path: string): boolean {
