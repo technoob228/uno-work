@@ -118,6 +118,8 @@ export interface ResourcesViewProps {
   onResize?: (() => void) | undefined;
   /** Starts a chat with a note already typed. */
   onAskUno: (prompt: string) => void | Promise<void>;
+  /** "Boost ×2 for 1 hour" next to "Add memory"; absent when boost isn't offered. */
+  boost?: ReactNode;
 }
 
 export function ResourcesView({
@@ -127,6 +129,7 @@ export function ResourcesView({
   onBack,
   onResize,
   onAskUno,
+  boost,
 }: ResourcesViewProps) {
   const resourcesQuery = useQuery(resourcesQueryOptions(environmentId));
   const [diskPath, setDiskPath] = useState<string | null>(null);
@@ -160,6 +163,7 @@ export function ResourcesView({
             {asking ? <Spinner className="size-3.5" /> : <SparklesIcon />}
             Ask Uno to look
           </Button>
+          {look !== "disk" ? boost : null}
           {onResize ? (
             <Button size="sm" onClick={onResize}>
               <PlusIcon />

@@ -34,6 +34,8 @@ import type {
   UnoComputerResizeInput,
   UnoComputerResizeOptions,
   UnoComputerResizeResult,
+  UnoComputerBoostInput,
+  UnoComputerBoostResult,
   UnoComputerState,
   UnoComputerTargetInput,
 } from "@t3tools/contracts";
@@ -58,6 +60,7 @@ import {
   type KnownInstall,
 } from "./unoComputer.ts";
 import { readResizeOptions, resizeComputer } from "./unoComputerResize.ts";
+import { endBoost as endComputerBoost, startBoost } from "./unoComputerBoost.ts";
 
 const DEFAULT_ACTIVITY_TAIL = 40;
 /** Installs the daemon remembers, so a reload can re-attach to a running one. */
@@ -106,6 +109,13 @@ export interface UnoComputerServiceShape {
   readonly resize: (
     input: UnoComputerResizeInput,
   ) => Effect.Effect<UnoComputerResizeResult, UnoCloudFetchError>;
+  /** Boost ×2 for an hour; a refusal is an answer (`refused`). */
+  readonly boost: (
+    input: UnoComputerBoostInput,
+  ) => Effect.Effect<UnoComputerBoostResult, UnoCloudFetchError>;
+  readonly endBoost: (
+    input?: UnoComputerTargetInput,
+  ) => Effect.Effect<UnoComputerBoostResult, UnoCloudFetchError>;
   readonly powerOwnBox: (
     boxId: number,
     action: string,
@@ -332,6 +342,33 @@ export const makeUnoComputerService = (
         });
       });
 
+    // Uninterruptible: the computer that restarts into the boost may be the one
+    // this daemon runs on, and the browser that asked may be gone by then.
+    const boost: UnoComputerServiceShape["boost"] = (input) =>
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          const boxId = yield* resolveBoxId(input);
+          const ctx = yield* context(boxId);
+          return yield* Effect.tryPromise({
+            try: () =>
+              startBoost({ ...ctx, boxId, ...(input.hours ? { hours: input.hours } : {}) }),
+            catch: toFetchError,
+          });
+        }),
+      );
+
+    const endBoost: UnoComputerServiceShape["endBoost"] = (input) =>
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          const boxId = yield* resolveBoxId(input);
+          const ctx = yield* context(boxId);
+          return yield* Effect.tryPromise({
+            try: () => endComputerBoost({ ...ctx, boxId }),
+            catch: toFetchError,
+          });
+        }),
+      );
+
     const powerOwnBox: UnoComputerServiceShape["powerOwnBox"] = (boxId, action) =>
       Effect.gen(function* () {
         const creds = yield* readCredentials;
@@ -349,6 +386,8 @@ export const makeUnoComputerService = (
     return {
       resizeOptions,
       resize,
+      boost,
+      endBoost,
       powerOwnBox,
       resolveBoxId,
       getState,

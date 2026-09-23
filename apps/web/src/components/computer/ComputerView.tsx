@@ -31,6 +31,7 @@ import { Button } from "../ui/button";
 import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
 import { AppCatalogDialog } from "./AppCatalogDialog";
+import { BoostControl } from "./BoostControl";
 import { ChatInFolderDialog } from "./ChatInFolderDialog";
 import { ComputerActivityCard } from "./ComputerActivityCard";
 import { ComputerEngineersDoor } from "./ComputerEngineersDoor";
@@ -60,6 +61,7 @@ import type { ResourceLook } from "./resources/resourceModel";
 import { LOW_DISK_PCT, LOW_MEMORY_PCT, isSustained } from "./resizeModel";
 import { buildProgramTiles, isBrowserOnMachine, type ProgramTile } from "./programModel";
 import { useAppInstalls } from "./useAppInstalls";
+import { useComputerBoost } from "./useComputerBoost";
 import { useHomeLaunchers } from "./useHomeLaunchers";
 
 const routeApi = getRouteApi("/_chat/computer");
@@ -264,7 +266,19 @@ export function ComputerView() {
   const look = thisMachine ? routeSearch.look : undefined;
   const openLook = (next: ResourceLook, replace = false) =>
     void navigate({ to: "/computer", search: { look: next }, replace });
-  const canResize = box !== null && computer?.linked === true;
+  const boostControls = useComputerBoost({
+    environmentId,
+    boxId: pickedBoxId,
+    boost: computer?.linked ? box?.boost : undefined,
+    stateUpdatedAt: stateQuery.dataUpdatedAt,
+  });
+  // Resizing a boosted computer would fight the boost: one at a time.
+  const boosting = boostControls !== null && boostControls.state !== "off";
+  const canResize = box !== null && computer?.linked === true && !boosting;
+  const boostNode =
+    boostControls && (power === "on" || boosting) ? (
+      <BoostControl controls={boostControls} />
+    ) : null;
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: computerQueryKeys.all });
@@ -301,6 +315,7 @@ export function ComputerView() {
                 onBack={() => void navigate({ to: "/computer", search: {} })}
                 onResize={canResize ? () => setResizeOpen(true) : undefined}
                 onAskUno={launchers.askUno}
+                boost={boostNode}
               />
             ) : stateQuery.isPending ? (
               <>
@@ -336,8 +351,9 @@ export function ComputerView() {
                         }
                       : null
                   }
-                  onResize={box && computer?.linked ? () => setResizeOpen(true) : undefined}
+                  onResize={canResize ? () => setResizeOpen(true) : undefined}
                   lowResource={box ? lowResource : null}
+                  boost={boostNode}
                   onOpenLook={thisMachine ? (next) => openLook(next) : undefined}
                 />
 

@@ -1479,6 +1479,22 @@ const makeWsRpcLayer = (
               .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
             { "rpc.aggregate": "uno-computer" },
           ),
+        [WS_METHODS.unoComputerBoost]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerBoost,
+            unoComputer
+              .boost(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
+        [WS_METHODS.unoComputerEndBoost]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerEndBoost,
+            unoComputer
+              .endBoost(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
         [WS_METHODS.unoComputerMachineApps]: (_input) =>
           observeRpcEffect(WS_METHODS.unoComputerMachineApps, machineApps.list, {
             "rpc.aggregate": "uno-computer",

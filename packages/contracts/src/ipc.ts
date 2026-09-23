@@ -140,6 +140,8 @@ import type {
   UnoComputerResizeInput,
   UnoComputerResizeOptions,
   UnoComputerResizeResult,
+  UnoComputerBoostInput,
+  UnoComputerBoostResult,
   UnoComputerState,
   UnoComputerTargetInput,
   UnoEmbedCheck,
@@ -799,6 +801,10 @@ export interface EnvironmentApi {
     localMetrics: () => Promise<UnoComputerLocalMetrics>;
     resizeOptions: (input?: UnoComputerTargetInput) => Promise<UnoComputerResizeOptions>;
     resize: (input: UnoComputerResizeInput) => Promise<UnoComputerResizeResult>;
+    /** Boost ×2 for an hour: the computer restarts into the bigger size. */
+    boost: (input: UnoComputerBoostInput) => Promise<UnoComputerBoostResult>;
+    /** End a boost early: the computer restarts back to its normal size. */
+    endBoost: (input?: UnoComputerTargetInput) => Promise<UnoComputerBoostResult>;
     /** Whether a web app can be shown inside Uno Work (frame headers). */
     embedCheck: (input: UnoEmbedCheckInput) => Promise<UnoEmbedCheck>;
     /** What is using the processor and memory, grouped (apps, containers, chats, system). */
