@@ -85,8 +85,10 @@ export const AppAiOverview = Schema.Struct({
   gatewayConnected: Schema.Boolean,
   /** The model apps get when they ask for "default". */
   chatModel: Schema.String,
-  /** The harness/model tasks run on by default; null = the machine's default. */
+  /** The harness/model the person chose for tasks; null = the machine's default. */
   taskModelSelection: Schema.NullOr(ModelSelection),
+  /** What tasks actually run on when the person chose nothing (null = no agent ready). */
+  taskModelDefault: Schema.NullOr(ModelSelection),
 });
 export type AppAiOverview = typeof AppAiOverview.Type;
 

@@ -28,6 +28,8 @@ export interface StoredAppTask {
   readonly tools: AppTaskTools;
   readonly harness: string;
   readonly turnCountAtStart: number;
+  /** Real path the task ran in (older entries may lack it). */
+  readonly cwd?: string;
 }
 
 export interface StoredApp {

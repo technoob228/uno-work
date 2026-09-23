@@ -235,10 +235,10 @@ export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId:
   const merged = useMemo(() => ({ ...clientSettings, ...settings }), [clientSettings, settings]);
   const instanceEntries = sortProviderInstanceEntries(deriveProviderInstanceEntries(providers));
   const chosen = settings.appsAi?.taskModelSelection ?? null;
-  const fallbackEntry =
-    instanceEntries.find((entry) => entry.instanceId === "uno") ?? instanceEntries[0];
-  const taskInstanceId = chosen?.instanceId ?? fallbackEntry?.instanceId ?? null;
-  const taskModel = chosen?.model ?? fallbackEntry?.models[0]?.slug ?? "";
+  // What jobs run on now: the person's choice, else the machine's default.
+  const effective = chosen ?? overview.data?.taskModelDefault ?? null;
+  const taskInstanceId = effective?.instanceId ?? instanceEntries[0]?.instanceId ?? null;
+  const taskModel = effective?.model ?? instanceEntries[0]?.models[0]?.slug ?? "";
   const modelOptionsByInstance = getCustomModelOptionsByInstance(
     merged,
     providers,

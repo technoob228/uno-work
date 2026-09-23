@@ -21,6 +21,7 @@ import {
   UNO_GATEWAY_BASE_URL,
 } from "@t3tools/contracts";
 import { Context, Duration, Effect, Layer, Schedule } from "effect";
+import { execFile } from "node:child_process";
 import { watch } from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -46,11 +47,11 @@ import {
   resolveAppKeysDir,
   writeAppKey,
 } from "./appKeys.ts";
+import { resolveAppApiPort } from "./appApiPort.ts";
 import { makeAppTasks } from "./appTasks.ts";
 import { type ModelPrice, parseModelPrices } from "./pricing.ts";
 import { installSdkFiles } from "./sdkFiles.ts";
 
-export const APP_API_PORT_ENV = "UNO_WORK_APP_API_PORT";
 export const APP_API_GATEWAY_ENV = "UNO_WORK_APP_GATEWAY_URL";
 const SYNC_EVERY = Duration.seconds(5);
 const BRIDGE_CHECK_EVERY = Duration.seconds(30);
@@ -70,19 +71,33 @@ export class AppSdkService extends Context.Service<AppSdkService, AppSdkServiceS
   "t3/appSdk/AppSdkService",
 ) {}
 
-export function resolveAppApiPort(): number | null {
-  const raw = process.env[APP_API_PORT_ENV]?.trim();
-  if (raw === undefined || raw === "") return APP_SDK_DEFAULT_PORT;
-  const port = Number(raw);
-  return Number.isInteger(port) && port > 0 && port < 65_536 ? port : null;
+/** `ip -4 -o addr show dev docker0` → `172.17.0.1`. */
+export function parseIpAddrShow(output: string): string | null {
+  return /\binet\s+(\d{1,3}(?:\.\d{1,3}){3})\//.exec(output)?.[1] ?? null;
 }
 
-/** IPv4 of the default docker bridge — the address `host-gateway` resolves to. */
-export function dockerBridgeAddress(
+/**
+ * IPv4 of the default docker bridge — the address `host-gateway` resolves to.
+ * `os.networkInterfaces()` hides an interface without carrier, and docker0
+ * has none until the first container starts, so `ip` is asked as well: the
+ * address can be bound while the bridge is down, and then the first container
+ * finds the App API already there.
+ */
+export async function dockerBridgeAddress(
   interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]> = os.networkInterfaces(),
-): string | null {
+): Promise<string | null> {
   const docker0 = interfaces["docker0"] ?? [];
-  return docker0.find((entry) => entry.family === "IPv4" && !entry.internal)?.address ?? null;
+  const found = docker0.find((entry) => entry.family === "IPv4" && !entry.internal)?.address;
+  if (found) return found;
+  if (process.platform !== "linux") return null;
+  return new Promise((resolve) => {
+    execFile(
+      "ip",
+      ["-4", "-o", "addr", "show", "dev", "docker0"],
+      { timeout: 3_000 },
+      (error, stdout) => resolve(error ? null : parseIpAddrShow(String(stdout))),
+    );
+  });
 }
 
 export function effectiveLimitUsd(stored: StoredApp, manifest: AppManifest | undefined): number {
@@ -284,7 +299,7 @@ export const makeAppSdkService = (
         status: stored.revoked ? "revoked" : stored.spentUsd >= limitUsd ? "over-limit" : "active",
         limitUsd,
         limitSetByPerson: stored.limitOverrideUsd !== null,
-        spentUsd: Math.round(stored.spentUsd * 1e4) / 1e4,
+        spentUsd: Math.round(stored.spentUsd * 1e6) / 1e6,
         requests: stored.requests,
         tasksStarted: stored.tasksStarted,
         taskToolsCap: stored.taskToolsCap,
@@ -297,6 +312,7 @@ export const makeAppSdkService = (
       yield* Effect.promise(() => sync());
       const current = yield* readSettings;
       const key = yield* gatewayKey.harnessKey().pipe(Effect.orElseSucceed(() => ""));
+      const providers = yield* providerRegistry.getProviders;
       const apps = store
         .all()
         .filter((stored) => manifests.get(stored.id)?.ai || stored.revoked)
@@ -313,6 +329,7 @@ export const makeAppSdkService = (
             ? current.appsAi.chatModel
             : APP_SDK_DEFAULT_CHAT_MODEL,
         taskModelSelection: current?.appsAi.taskModelSelection ?? null,
+        taskModelDefault: selectAutoBootstrapModelSelection(providers),
       } satisfies AppAiOverview;
     });
 
@@ -404,7 +421,7 @@ export const makeAppSdkService = (
         }
         // docker0 appears when docker starts, maybe after the daemon.
         const checkBridge = Effect.promise(async () => {
-          const address = dockerBridgeAddress();
+          const address = await dockerBridgeAddress();
           if (address === bridgeAddress) return;
           if (bridgeAddress !== null) {
             servers.get(bridgeAddress)?.close();

@@ -32,7 +32,7 @@ import {
 } from "@t3tools/contracts";
 import { Effect, Option } from "effect";
 import * as crypto from "node:crypto";
-import { realpath, stat } from "node:fs/promises";
+import { lstat, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -191,6 +191,43 @@ export function changedFilesOf(
     for (const file of checkpoint.files) files.add(file.path);
   }
   return [...files].toSorted();
+}
+
+const SCAN_SKIP = new Set([".git", "node_modules", ".venv", "__pycache__", ".cache"]);
+
+/**
+ * Files under `cwd` modified since `sinceIso` — the changed files of a task in
+ * a folder that is not a git repository (no checkpoints there). Bounded: a
+ * few levels deep and a few thousand entries, never following links.
+ */
+export async function filesChangedSince(
+  cwd: string,
+  sinceIso: string,
+  limits: { readonly maxDepth: number; readonly maxEntries: number } = {
+    maxDepth: 4,
+    maxEntries: 5_000,
+  },
+): Promise<string[]> {
+  const since = Date.parse(sinceIso);
+  const changed: string[] = [];
+  let seen = 0;
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    if (depth > limits.maxDepth) return;
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (++seen > limits.maxEntries) return;
+      if (SCAN_SKIP.has(entry.name) || entry.isSymbolicLink()) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full, depth + 1);
+      } else if (entry.isFile()) {
+        const info = await lstat(full).catch(() => null);
+        if (info && info.mtimeMs >= since) changed.push(path.relative(cwd, full));
+      }
+    }
+  };
+  await walk(cwd, 0);
+  return changed.toSorted().slice(0, 200);
 }
 
 export function makeAppTasks(deps: AppTasksDeps) {
@@ -370,6 +407,7 @@ export function makeAppTasks(deps: AppTasksDeps) {
         tools,
         harness: selection.selection.instanceId,
         turnCountAtStart: 0,
+        cwd: cwd.cwd,
       };
       return {
         reply: {
@@ -418,13 +456,19 @@ export function makeAppTasks(deps: AppTasksDeps) {
         .getThreadDetailById(threadId)
         .pipe(Effect.orElseSucceed(() => Option.none()));
       const text = Option.isSome(detail) ? lastAssistantAnswer(detail.value) : null;
+      const fromCheckpoints = Option.isSome(detail)
+        ? changedFilesOf(detail.value, task.turnCountAtStart)
+        : [];
+      // A folder that is not a git repository has no checkpoints: look at mtimes.
+      const changedFiles =
+        fromCheckpoints.length > 0 || status === "running" || task.cwd === undefined
+          ? fromCheckpoints
+          : yield* Effect.promise(() => filesChangedSince(task.cwd!, task.createdAt));
       return {
         ...base,
         status,
         result: text !== null && status !== "running" ? { text } : null,
-        changedFiles: Option.isSome(detail)
-          ? changedFilesOf(detail.value, task.turnCountAtStart)
-          : [],
+        changedFiles,
         waitingFor,
         error:
           status === "error"

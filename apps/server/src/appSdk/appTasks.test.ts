@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { makeAppTasks, resolveTaskCwd } from "./appTasks.ts";
+import { filesChangedSince, makeAppTasks, resolveTaskCwd } from "./appTasks.ts";
 
 let root: string;
 let home: string;
@@ -111,5 +111,20 @@ describe("createTask", () => {
     );
     expect(reply.status).toBe(400);
     expect(dispatched).toEqual([]);
+  });
+});
+
+describe("filesChangedSince", () => {
+  it("lists files written after the task started, skipping node_modules", async () => {
+    const { writeFile, utimes } = await import("node:fs/promises");
+    const inbox = path.join(home, "Inbox");
+    await writeFile(path.join(inbox, "old.txt"), "old");
+    const past = new Date(Date.now() - 60_000);
+    await utimes(path.join(inbox, "old.txt"), past, past);
+    const since = new Date(Date.now() - 1_000).toISOString();
+    await writeFile(path.join(inbox, "todo.md"), "- a");
+    await mkdir(path.join(inbox, "node_modules"), { recursive: true });
+    await writeFile(path.join(inbox, "node_modules", "x.js"), "x");
+    expect(await filesChangedSince(inbox, since)).toEqual(["todo.md"]);
   });
 });

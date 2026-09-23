@@ -41,6 +41,7 @@ import {
   controlPlaneErrorStatus,
   fetchControlPlaneJson,
 } from "../workspaceRegistry/unoCloudParse.ts";
+import { resolveAppApiPort } from "../appSdk/appApiPort.ts";
 import { resolveAppKeysDir } from "../appSdk/appKeys.ts";
 import { readIconDataUrl, readManifestDir, type AppManifest } from "./appManifest.ts";
 import { extractHtmlTitle } from "./discoveryParsers.ts";
@@ -251,7 +252,10 @@ export const makeMachineAppsService = (
       platform: process.platform,
       home,
       selfPid: process.pid,
-      selfPorts: new Set([config.port]),
+      // The daemon's own ports: its web port and the App SDK's local API.
+      selfPorts: new Set(
+        [config.port, resolveAppApiPort()].filter((port): port is number => port !== null),
+      ),
       run: runCommand,
       readFile: readTextFile,
       probeHttp: async (port) => {

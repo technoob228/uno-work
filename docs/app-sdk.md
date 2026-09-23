@@ -60,7 +60,12 @@ services:
 ```
 
 The token is removed when the manifest (or its `ai` block) is removed, and
-rotated when the person presses **Revoke**.
+when the person presses **Revoke**; "Turn AI back on" issues a new one. The
+folder itself stays (only its files go), so a container's bind mount keeps
+pointing at the right place and sees the new token without a restart.
+The App API binds 127.0.0.1 and the docker0 address even while the bridge
+has no containers (`ip -4 addr show docker0`), so the first container finds
+it already there.
 
 ## 2. The HTTP API
 
@@ -145,6 +150,13 @@ it, can watch, answer approvals and stop it.
 ```
 
 `waitingFor` is `"approval"` / `"input"` when the agent waits for the person.
+`changedFiles` comes from Work's checkpoints in a git folder, otherwise from
+files modified under `cwd` since the task started.
+
+How strictly a harness asks is its own: the built-in Uno agent (OpenCode
+engine) asks before reading and writing files even in `"edit"`, so an
+unattended job needs `"full"` from the person, or the person answers the
+approvals in the chat.
 `?waitMs=30000` long-polls until the task is no longer running (max 60 s).
 
 ### `GET /v1/tasks/:id/events` — SSE progress
