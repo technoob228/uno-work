@@ -505,6 +505,19 @@ export function createClient(options = {}) {
     return json("GET", "/v1/models");
   }
 
+  /**
+   * Tell the person something — it lands in the Inbox of Uno Work (manifest
+   * `"notify": true`). `open`: `{file: "~/…"}`, `{url: "https://…"}` or
+   * `{app: true, path: "/…"}` (this app, inside Uno). Same `group` while
+   * unread → one item that updates instead of many.
+   * @param {string | {title: string, body?: string, open?: any, group?: string}} input
+   * @param {{body?: string, open?: any, group?: string}} [opts]
+   */
+  async function notify(input, opts = {}) {
+    const payload = typeof input === "string" ? { title: input, ...opts } : input;
+    return json("POST", "/v1/notify", payload);
+  }
+
   // ---- cloud storage: the app's own folder in the account's cloud --------
 
   /** @param {string} key */
@@ -680,6 +693,7 @@ export function createClient(options = {}) {
     tasks,
     whoami,
     models,
+    notify,
     storage,
     config,
   };
@@ -751,6 +765,8 @@ export const tasks = () => client().tasks();
 export const whoami = () => client().whoami();
 /** @type {any} */
 export const models = () => client().models();
+/** @type {any} */
+export const notify = (input, opts) => client().notify(input, opts);
 /** The app's folder in the account's cloud (needs "storage" in the manifest). */
 export const storage = /** @type {any} */ (
   new Proxy(

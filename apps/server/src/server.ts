@@ -32,6 +32,8 @@ import {
   filesOfficeVersionsRouteLayer,
   filesRawRouteLayer,
   filesShareRouteLayers,
+  previewSiteFileRouteLayer,
+  previewSiteIssueRouteLayer,
 } from "./files/http.ts";
 import { FilesServiceLive } from "./files/FilesService.ts";
 import { FileSharesRepositoryLive } from "./persistence/Layers/FileShares.ts";
@@ -47,6 +49,7 @@ import { UnoCloudServiceLive } from "./workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerServiceLive } from "./workspaceRegistry/UnoComputerService.ts";
 import { MachineAppsServiceLive } from "./machineApps/MachineAppsService.ts";
 import { AppSdkServiceLive } from "./appSdk/AppSdkService.ts";
+import { InboxServiceLive } from "./inbox/InboxService.ts";
 import { ComputerResourcesServiceLive } from "./computerResources/ComputerResourcesService.ts";
 import { HarnessSetupLive } from "./provider/setup/HarnessSetupService.ts";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
@@ -377,7 +380,14 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // Manager tool layer (MCP surface for the manager brain). Sits above the
   // orchestration/persistence layers provided further down this pipe so it
   // shares the same engine and SqlClient instances.
-  Layer.provideMerge(ManagerLayerLive),
+  Layer.provideMerge(
+    Layer.mergeAll(
+      ManagerLayerLive,
+      // Inbox: agents' and apps' news for the person. Below the App SDK (apps
+      // post through it) and above orchestration (it listens to the events).
+      InboxServiceLive,
+    ),
+  ),
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
@@ -530,6 +540,8 @@ export const makeRoutesLayer = Layer.mergeAll(
   websocketRpcRouteLayer,
   filesRawRouteLayer,
   filesOfficeVersionsRouteLayer,
+  previewSiteIssueRouteLayer,
+  previewSiteFileRouteLayer,
   ...filesShareRouteLayers,
 ).pipe(Layer.provide(browserApiCorsLayer));
 

@@ -208,6 +208,19 @@ export interface UnoStorage {
   usage(): Promise<StorageUsage>;
 }
 
+/** Where "Open" on a notification leads. */
+export type NotifyOpen = { file: string } | { url: string } | { app: true; path?: string } | string;
+
+export interface NotifyInput {
+  /** One line, at most 140 characters: "Boris commented on report.docx". */
+  title: string;
+  /** Optional second line, at most 500 characters. */
+  body?: string;
+  open?: NotifyOpen;
+  /** Same group while unread → the item updates instead of stacking. */
+  group?: string;
+}
+
 export interface UnoAppClient {
   /** One answer as text. */
   ask(input: PromptInput, opts?: AskOptions): Promise<string>;
@@ -226,6 +239,11 @@ export interface UnoAppClient {
   tasks(): Promise<any>;
   whoami(): Promise<WhoAmI>;
   models(): Promise<any>;
+  /** Put a notification into the person's Inbox (manifest `"notify": true`). */
+  notify(
+    input: string | NotifyInput,
+    opts?: Omit<NotifyInput, "title">,
+  ): Promise<{ ok: true; id: string }>;
   /** The app's folder in the account's cloud — for files the person keeps. */
   storage: UnoStorage;
   /** Resolved address + token (waits up to 15 s for the daemon to write the key). */
@@ -252,5 +270,6 @@ export declare const getTask: UnoAppClient["getTask"];
 export declare const tasks: UnoAppClient["tasks"];
 export declare const whoami: UnoAppClient["whoami"];
 export declare const models: UnoAppClient["models"];
+export declare const notify: UnoAppClient["notify"];
 export declare const storage: UnoStorage;
 export declare function guessContentType(name: string): string;

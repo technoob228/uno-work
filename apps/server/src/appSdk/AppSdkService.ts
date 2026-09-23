@@ -40,6 +40,7 @@ import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSna
 import { selectAutoBootstrapModelSelection } from "../provider/autoBootstrapModelSelection.ts";
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { InboxService } from "../inbox/InboxService.ts";
 import { UnoGatewayKey } from "../unoGatewayKey.ts";
 import { type StoredApp, hashAppToken, newAppToken, openAppAiStore } from "./appAiStore.ts";
 import { type AppApiCaller, type AppApiCore, makeAppApiHandler } from "./appApiHttp.ts";
@@ -144,9 +145,9 @@ export function effectiveStorageLimitBytes(
   return Math.round(gb * GB);
 }
 
-/** An app gets a token when its manifest asks for AI or cloud storage. */
+/** An app gets a token when its manifest asks for AI, cloud storage or notifications. */
 export function wantsAppToken(manifest: AppManifest | undefined): boolean {
-  return Boolean(manifest?.ai || manifest?.storage);
+  return Boolean(manifest?.ai || manifest?.storage || manifest?.notify);
 }
 
 export const makeAppSdkService = (
@@ -170,6 +171,7 @@ export const makeAppSdkService = (
     const engine = yield* OrchestrationEngineService;
     const projections = yield* ProjectionSnapshotQuery;
     const providerRegistry = yield* ProviderRegistry;
+    const inbox = yield* InboxService;
     const context = yield* Effect.context<never>();
     const runPromise = Effect.runPromiseWith(context);
 
@@ -282,6 +284,8 @@ export const makeAppSdkService = (
               folder: folderOf(stored, await computerKey()),
             }
           : null,
+        notify: manifest.notify === true,
+        appIcon: manifest.icon,
       };
     };
 
@@ -385,6 +389,25 @@ export const makeAppSdkService = (
       },
       stopTask: (caller, task) => runPromise(tasks.stopTask(caller, task)),
       storage: appStorage,
+      notify: async (caller, notification) => {
+        const item = await runPromise(
+          inbox.post({
+            kind: "app",
+            source: {
+              kind: "app",
+              id: caller.appId,
+              name: caller.appName,
+              icon: caller.appIcon ?? null,
+            },
+            title: notification.title,
+            body: notification.body,
+            open: notification.open,
+            groupKey:
+              notification.group === null ? null : `app:${caller.appId}:${notification.group}`,
+          }),
+        );
+        return { id: item.id };
+      },
     };
 
     let storageBucketId: number | null = null;
@@ -427,6 +450,7 @@ export const makeAppSdkService = (
         icon: manifest?.icon ?? null,
         chat: manifest?.ai?.chat ?? false,
         tasks: manifest?.ai?.tasks ?? false,
+        notify: manifest?.notify === true,
         status: stored.revoked
           ? "revoked"
           : manifest?.ai && totalSpentUsd(stored) >= limitUsd

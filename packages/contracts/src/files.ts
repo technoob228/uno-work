@@ -26,6 +26,12 @@ export const FILES_RAW_ROUTE_PATH = "/api/files/raw";
  * saves): `?path=<file>` → `{versions}`; `&version=<id>` → that copy's bytes.
  */
 export const FILES_OFFICE_VERSIONS_ROUTE_PATH = "/api/files/office-versions";
+/**
+ * A web page previewed in the right panel, with its CSS, images and fonts:
+ * `POST` (owner) `{path}` → `{url}`; `GET <prefix>/<token>/<relative path>`
+ * serves files of that page's folder only (the token names the folder).
+ */
+export const PREVIEW_SITE_ROUTE_PREFIX = "/api/preview-site";
 
 const FilesPath = TrimmedNonEmptyString.check(Schema.isMaxLength(FILES_PATH_MAX_LENGTH));
 const FilesName = TrimmedNonEmptyString.check(Schema.isMaxLength(FILES_NAME_MAX_LENGTH));

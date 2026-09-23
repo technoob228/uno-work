@@ -187,7 +187,12 @@ import { SidebarAppsList } from "./sidebar/SidebarAppsList";
 import { SidebarFilesTree } from "./sidebar/SidebarFilesTree";
 import { SidebarModeSwitch } from "./sidebar/SidebarModeSwitch";
 import { SidebarPinned } from "./sidebar/SidebarPinned";
-import { useNavStore } from "../navigation/navStore";
+import { type SidebarMode, useNavStore } from "../navigation/navStore";
+import { useNavLayout } from "../navigation/useNavLayout";
+import { InboxNeedsYouList, InboxPanel } from "./inbox/InboxPanel";
+import { RailPanelHeader } from "./sidebar/NavRail";
+import { SidebarInboxRow } from "./sidebar/SidebarInboxRow";
+import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import {
   useSidebarEnvironmentLabelResolver,
@@ -221,7 +226,7 @@ import {
 } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
-import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
+import { SidebarContent, SidebarFooter, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 
@@ -1093,6 +1098,17 @@ function useErrorToast() {
 
 export default function Sidebar() {
   const sidebarMode = useNavStore((state) => state.sidebarMode);
+  const lastListMode = useNavStore((state) => state.lastListMode);
+  const setSidebarMode = useNavStore((state) => state.setSidebarMode);
+  // Rail layout: this sidebar is the panel next to the rail and shows one
+  // section at a time. Standard layout: "Home" lives in the main area, so a
+  // "home" left over from the rail reads as Chats.
+  const railLayout = useNavLayout() === "rail";
+  const listMode: SidebarMode = railLayout
+    ? sidebarMode
+    : sidebarMode === "home"
+      ? "chats"
+      : sidebarMode;
   const pathname = useLocation({ select: (location) => location.pathname });
   const isOnSettings = pathname.startsWith("/settings");
   const router = useRouter();
@@ -2105,6 +2121,14 @@ export default function Sidebar() {
       setOpenMobile,
     ],
   );
+  // "New chat" on the rail: this sidebar knows which project it goes to.
+  const newChatRequest = useNavStore((state) => state.newChatRequest);
+  const handledNewChatRequest = useRef(newChatRequest);
+  useEffect(() => {
+    if (newChatRequest === handledNewChatRequest.current) return;
+    handledNewChatRequest.current = newChatRequest;
+    handleNewThreadClick();
+  }, [handleNewThreadClick, newChatRequest]);
   const newThreadShortcutLabel =
     shortcutLabelForCommand(keybindings, "chat.new", platform) ??
     (projectGroups.length <= 1
@@ -2259,30 +2283,70 @@ export default function Sidebar() {
     </Combobox>
   );
 
+  const pinnedGroup = (
+    <SidebarGroup
+      className={cn(
+        "shrink-0 overflow-y-auto px-[var(--sidebar-content-inset)] pt-1 pb-1",
+        !railLayout && "max-h-[40%]",
+      )}
+    >
+      <SidebarPinned
+        hasPinnedChats={pinnedThreads.length > 0}
+        pinnedChats={pinnedThreads.map((thread) => renderRow(thread, "pinned"))}
+      />
+    </SidebarGroup>
+  );
+
   return (
     <MachineIdentityProvider identities={machineIdentities}>
-      <SidebarChromeHeader isElectron={isElectron} />
-      <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-0">
-        <SidebarEnvSwitcher variant="header" />
-        <SidebarComputerRow />
-        <SidebarMyUnoRow />
-        <div className="pt-1.5 pb-1">
-          <SidebarModeSwitch />
-        </div>
-      </SidebarGroup>
-      <SidebarGroup className="max-h-[40%] shrink-0 overflow-y-auto px-[var(--sidebar-content-inset)] pt-1 pb-1">
-        <SidebarPinned
-          hasPinnedChats={pinnedThreads.length > 0}
-          pinnedChats={pinnedThreads.map((thread) => renderRow(thread, "pinned"))}
-        />
-      </SidebarGroup>
-      {sidebarMode === "files" ? (
+      {railLayout ? (
+        <RailPanelHeader mode={listMode} isElectron={isElectron} />
+      ) : (
+        <SidebarChromeHeader isElectron={isElectron} />
+      )}
+      {railLayout ? (
+        listMode === "home" ? (
+          <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-0">
+            <SidebarEnvSwitcher variant="header" />
+            <SidebarMyUnoRow />
+          </SidebarGroup>
+        ) : null
+      ) : (
+        <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-0">
+          <SidebarEnvSwitcher variant="header" />
+          <SidebarComputerRow />
+          <SidebarInboxRow />
+          <SidebarMyUnoRow />
+          <div className="pt-1.5 pb-1">
+            <SidebarModeSwitch />
+          </div>
+        </SidebarGroup>
+      )}
+      {!railLayout || listMode === "home" ? pinnedGroup : null}
+      {listMode === "home" ? (
+        <SidebarContent className="min-h-full gap-0 border-t border-border/50">
+          <SidebarGroup className="px-[var(--sidebar-content-inset)] pt-1.5 pb-1">
+            <InboxNeedsYouList />
+          </SidebarGroup>
+        </SidebarContent>
+      ) : listMode === "inbox" ? (
+        <SidebarContent
+          className={cn("min-h-full gap-0", !railLayout && "border-t border-border/50")}
+        >
+          <SidebarGroup className="min-h-full flex-1 px-[var(--sidebar-content-inset)] pt-1 pb-1">
+            <InboxPanel
+              showTitle={!railLayout}
+              {...(railLayout ? {} : { onBack: () => setSidebarMode(lastListMode) })}
+            />
+          </SidebarGroup>
+        </SidebarContent>
+      ) : listMode === "files" ? (
         <SidebarContent className="min-h-full gap-0 border-t border-border/50">
           <SidebarGroup className="px-[var(--sidebar-content-inset)] pt-1.5 pb-1">
             <SidebarFilesTree />
           </SidebarGroup>
         </SidebarContent>
-      ) : sidebarMode === "apps" ? (
+      ) : listMode === "apps" ? (
         <SidebarContent className="min-h-full gap-0 border-t border-border/50">
           <SidebarGroup className="min-h-full flex-1 px-[var(--sidebar-content-inset)] pt-1.5 pb-1">
             <SidebarAppsList />
@@ -2422,7 +2486,13 @@ export default function Sidebar() {
           </SidebarContent>
         </>
       )}
-      <SidebarChromeFooter showHelper={hasHelperProjects} />
+      {railLayout ? (
+        <SidebarFooter className="gap-1 px-[var(--sidebar-content-inset)] py-1.5">
+          <SidebarUpdatePill />
+        </SidebarFooter>
+      ) : (
+        <SidebarChromeFooter showHelper={hasHelperProjects} />
+      )}
 
       <ContinueOnMachineDialog
         threadRef={continueThreadTarget}

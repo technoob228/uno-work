@@ -71,6 +71,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"text": "hello from audio"})
         if path == "/v1/whoami":
             return self._send(200, {"app": {"id": "t", "name": "T"}})
+        if path == "/v1/notify":
+            return self._send(201, {"ok": True, "id": "inb_1"})
         if path == "/v1/tasks" and self.command == "POST":
             STATE["polls"] = 0
             return self._send(202, {"id": "task_1", "threadId": "th_1", "status": "running",
@@ -177,6 +179,13 @@ class UnoAppTest(unittest.TestCase):
         with self.assertRaises(uno_app.UnoAppError) as cm:
             st.get("../other/secret.txt")
         self.assertEqual((cm.exception.status, cm.exception.code), (400, "invalid_key"))
+
+    def test_notify(self):
+        self.assertEqual(self.c.notify("Backup finished", body="12 files", open={"file": "~/b.zip"},
+                                       group="backup"), {"ok": True, "id": "inb_1"})
+        self.assertEqual(SEEN[-1]["path"], "/v1/notify")
+        self.assertEqual(json.loads(SEEN[-1]["body"]), {"title": "Backup finished", "body": "12 files",
+                                                        "open": {"file": "~/b.zip"}, "group": "backup"})
 
     def test_ask(self):
         self.assertEqual(self.c.ask("hi", system="brief", max_tokens=20, temperature=0), "echo:default")

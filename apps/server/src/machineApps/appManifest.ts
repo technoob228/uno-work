@@ -14,6 +14,7 @@
  *     "autostart": true,            // optional: start it when the computer starts (default with a command)
  *     "ai": {"chat": true}          // optional: use the machine's AI through the App SDK (docs/app-sdk.md)
  *     "storage": {"limitGb": 5}     // optional: keep files in the account's cloud (App SDK)
+ *     "notify": true                // optional: put notifications into the person's Inbox (App SDK)
  *   }
  *
  * Everything in the file is untrusted text written by whoever can write to the
@@ -63,6 +64,8 @@ export interface AppManifest {
   readonly ai: AppAiRequest | null;
   /** Cloud storage the app asks for (App SDK, docs/app-sdk.md); null = none. */
   readonly storage: AppStorageRequest | null;
+  /** May put notifications into the person's Inbox (`"notify": true`, App SDK). */
+  readonly notify?: boolean;
 }
 
 /**
@@ -119,6 +122,13 @@ export function parseAppStorageRequest(value: unknown): AppStorageRequest | null
       ? Math.min(raw, MANIFEST_STORAGE_MAX_LIMIT_GB)
       : MANIFEST_STORAGE_DEFAULT_LIMIT_GB;
   return { limitGb: Math.round(limitGb * 100) / 100 };
+}
+
+/** `"notify": true` (or `{"enabled": true}`): the app may notify the person (Inbox). */
+export function parseAppNotifyRequest(value: unknown): boolean {
+  if (value === true) return true;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  return (value as Record<string, unknown>)["enabled"] !== false;
 }
 
 export type ManifestResult =
@@ -254,6 +264,7 @@ export function validateManifest(
       autostart: typeof record["autostart"] === "boolean" ? record["autostart"] : command !== null,
       ai: parseAppAiRequest(record["ai"]),
       storage: parseAppStorageRequest(record["storage"]),
+      ...(parseAppNotifyRequest(record["notify"]) ? { notify: true } : {}),
     },
   };
 }

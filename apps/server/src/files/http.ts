@@ -21,6 +21,7 @@ import {
   FILES_OFFICE_VERSIONS_ROUTE_PATH,
   FILES_RAW_ROUTE_PATH,
   FILES_SHARE_ROUTE_PREFIX,
+  PREVIEW_SITE_ROUTE_PREFIX,
 } from "@t3tools/contracts";
 import { Cause, Effect, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse, UrlParams } from "effect/unstable/http";
@@ -29,6 +30,8 @@ import { respondToAuthError } from "../auth/http.ts";
 import { resolveStaticDir, ServerConfig } from "../config.ts";
 import { OFFICE_ENGINE_API_SCRIPT } from "../officeEngine.ts";
 import { ServerAuth } from "../auth/Services/ServerAuth.ts";
+import { InboxService } from "../inbox/InboxService.ts";
+import { type InboxPost, cleanInboxText } from "../inbox/inboxModel.ts";
 import type { FileShareRow } from "../persistence/Services/FileShares.ts";
 import { FilesService } from "./FilesService.ts";
 import {
@@ -53,6 +56,12 @@ import {
   verifySharePassword,
 } from "./shareTokens.ts";
 import { listShareOfficeVersions, resolveShareOfficeVersion } from "./officeVersions.ts";
+import {
+  PreviewSiteError,
+  issuePreviewSite,
+  previewSiteTokens,
+  resolvePreviewSiteFile,
+} from "./previewSite.ts";
 import {
   contentVersion,
   effectiveOfficeAccess,
@@ -216,6 +225,96 @@ export const filesRawRouteLayer = HttpRouter.add(
       extraHeaders: { "cache-control": "private, no-store" },
     });
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+// ── Owner: a web page in the right panel, with its CSS, images and fonts ───
+
+export const previewSiteIssueRouteLayer = HttpRouter.add(
+  "POST",
+  PREVIEW_SITE_ROUTE_PREFIX,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const serverAuth = yield* ServerAuth;
+    yield* serverAuth.authenticateHttpRequest(request);
+    const body = yield* request.json.pipe(Effect.orElseSucceed(() => null));
+    const path = body && typeof body === "object" ? (body as { path?: unknown }).path : undefined;
+    if (typeof path !== "string" || path.length === 0 || path.length > 4096) {
+      return HttpServerResponse.jsonUnsafe({ error: "Expected {path}." }, { status: 400 });
+    }
+    const issued = yield* Effect.tryPromise(() =>
+      issuePreviewSite(previewSiteTokens, path, PREVIEW_SITE_ROUTE_PREFIX),
+    ).pipe(Effect.result);
+    if (issued._tag === "Failure") {
+      const cause = issued.failure.cause;
+      return HttpServerResponse.jsonUnsafe(
+        { error: cause instanceof PreviewSiteError ? cause.message : "Couldn't open the page." },
+        { status: cause instanceof PreviewSiteError ? cause.status : 500 },
+      );
+    }
+    return HttpServerResponse.jsonUnsafe(
+      { url: issued.success.url },
+      { headers: { "cache-control": "no-store" } },
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * No frame-ancestors on purpose: the window framing a page may be another
+ * origin than this daemon (the desktop app or app.uno4.work showing a cloud
+ * computer). The token in the path is what guards the folder.
+ */
+const PREVIEW_PAGE_CSP =
+  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals";
+
+/** How a previewed page's files are served: never cached, no referrer to leak the token. */
+const PREVIEW_SITE_HEADERS = {
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  // Fonts and module scripts from an opaque-origin (sandboxed) page are CORS
+  // requests; the token in the path is the only key anyway.
+  "access-control-allow-origin": "*",
+} as const;
+
+export const previewSiteFileRouteLayer = HttpRouter.add(
+  "GET",
+  `${PREVIEW_SITE_ROUTE_PREFIX}/*`,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) return HttpServerResponse.text("Bad Request", { status: 400 });
+    const after = url.value.pathname.slice(PREVIEW_SITE_ROUTE_PREFIX.length + 1);
+    const slash = after.indexOf("/");
+    const token = slash === -1 ? after : after.slice(0, slash);
+    const rest = slash === -1 ? "" : after.slice(slash + 1);
+    const filePath = yield* Effect.promise(() =>
+      resolvePreviewSiteFile(previewSiteTokens, token, rest),
+    );
+    if (filePath === null) {
+      return HttpServerResponse.text("Not found", {
+        status: 404,
+        headers: PREVIEW_SITE_HEADERS,
+      });
+    }
+    const contentType = contentTypeFor(filePath);
+    const isPage = contentType === "text/html" || contentType === "application/xhtml+xml";
+    return yield* HttpServerResponse.file(filePath, {
+      contentType: withCharset(contentType),
+      headers: {
+        ...PREVIEW_SITE_HEADERS,
+        // A page lives in an opaque origin (like the Files viewer's frame):
+        // it can't reach this app, its storage or the daemon's session. The
+        // frame's own sandbox narrows it further (the right panel runs no scripts).
+        ...(isPage || contentType === "image/svg+xml"
+          ? { "content-security-policy": PREVIEW_PAGE_CSP }
+          : {}),
+      },
+    }).pipe(
+      Effect.catch(() =>
+        Effect.succeed(HttpServerResponse.text("Couldn't read the file.", { status: 500 })),
+      ),
+    );
+  }),
 );
 
 // ── Owner: older versions of an Office document on the computer ────────────
@@ -438,6 +537,36 @@ export function injectOfficeShareConfig(html: string, config: OfficeSharePageCon
   return html.includes("</head>") ? html.replace("</head>", `${tag}</head>`) : tag + html;
 }
 
+/** The Inbox item for a save through a comment / edit link. */
+export function officeShareInboxPost(input: {
+  readonly shareId: string;
+  readonly access: "comment" | "edit";
+  readonly filePath: string;
+  /** `x-uno-visitor`: the name the visitor typed, URI-encoded (headers are ASCII). */
+  readonly visitorHeader: string | undefined;
+}): InboxPost {
+  let visitor = "";
+  try {
+    visitor = decodeURIComponent(input.visitorHeader ?? "");
+  } catch {
+    visitor = "";
+  }
+  visitor = cleanInboxText(visitor, 60) || "Someone";
+  const fileName = nodePath.basename(input.filePath);
+  const verb = input.access === "comment" ? "commented on" : "edited";
+  return {
+    kind: "app",
+    source: { kind: "app", id: "office", name: "Office", icon: null },
+    title: `${visitor} ${verb} ${fileName}`,
+    body:
+      input.access === "comment"
+        ? "A new comment through your share link."
+        : "Changes through your share link — older versions are kept.",
+    open: { kind: "file", path: input.filePath },
+    groupKey: `office:${input.shareId}:${input.access}:${visitor.toLowerCase()}`,
+  };
+}
+
 function handleOfficeShareOp(input: {
   readonly op: OfficeShareOp;
   readonly share: FileShareRow;
@@ -521,6 +650,18 @@ function handleOfficeShareOp(input: {
       bytes: body.byteLength,
       forced: force,
     });
+    // The owner hears about it in the Inbox: "Boris commented on report.docx".
+    // Repeated autosaves of the same visitor fold into one unread item.
+    const inbox = yield* Effect.serviceOption(InboxService);
+    if (Option.isSome(inbox)) {
+      const post = officeShareInboxPost({
+        shareId: share.shareId,
+        access: share.access === "comment" ? "comment" : "edit",
+        filePath,
+        visitorHeader: request.headers["x-uno-visitor"],
+      });
+      yield* inbox.value.post(post).pipe(Effect.ignore);
+    }
     return jsonReply({ version: result.version, modifiedAt: result.modifiedAt });
   });
 }

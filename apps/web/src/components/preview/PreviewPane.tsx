@@ -75,6 +75,7 @@ import { AppFrame } from "../apps/AppFrame";
 import { BrowserViews } from "./BrowserPane";
 import { useSidebar } from "../ui/sidebar";
 import { CodeFileView } from "./CodeFileView";
+import { HtmlFileFrame } from "./HtmlFileFrame";
 import { MemoizedScrollArea, useScrollMemoryRef } from "./previewScrollArea";
 import { TableEditableBody } from "./TableEditor";
 import { parseDelimitedRows, resolveWriteTarget, spreadsheetColumnLabel } from "./previewFileUtils";
@@ -775,11 +776,12 @@ function renderLoadedBody(file: PreviewFile, data: LoadedFileData, sourceView: b
     }
     if (file.kind === "html") {
       return (
-        <iframe
-          title={file.name}
-          srcDoc={wrapHtmlForPreview(data.content)}
-          sandbox=""
-          className="h-full w-full border-0"
+        <HtmlFileFrame
+          name={file.name}
+          environmentId={file.environmentId}
+          path={file.path}
+          content={data.content}
+          fallbackSrcDoc={wrapHtmlForPreview(data.content)}
         />
       );
     }
