@@ -2,14 +2,20 @@
  * What every harness is told about the desktop: an app or service it builds
  * on this machine should be registered in the apps folder, so it appears on
  * the Uno Work home screen as a program the person can open, stop, start and
- * show on the internet. Appended next to the plugin instructions in each
+ * show on the internet; it uses the machine's AI and keeps the person's files
+ * in the account's cloud through the Uno App SDK, the disk only for running. Appended next to the plugin instructions in each
  * driver (Claude, Codex, Cursor, Hermes, OpenCode and the built-in Uno AI).
  */
+import os from "node:os";
+import path from "node:path";
+
 import { displayManifestDir, resolveManifestDir } from "./manifestDir.ts";
 
 export function buildMachineAppsInstructions(manifestDir = resolveManifestDir()): string {
   const dir = displayManifestDir(manifestDir);
   const sdkDir = "~/.uno/sdk";
+  // Node can't import "~/…": examples use the real path.
+  const sdkJs = path.join(os.homedir(), ".uno", "sdk", "js", "uno-app.mjs");
   return `## Apps on this computer — register what you build
 
 Uno Work shows this machine as a computer with a home screen of programs. Services running here appear there by themselves (listening ports, docker containers, systemd services), but a program **you** create for the person — a web app, a bot with a dashboard, a tool, a site — must be registered so it gets a proper name, icon and Start button.
@@ -42,11 +48,36 @@ This computer has its own AI. An app you build for the person (translator, summa
 1. Ask for AI in the manifest: \`"ai": {"chat": true}\` (answers, translation, summaries, transcription) and/or \`"tasks": true\` (hand a job to an agent that works on files in a folder). Optional \`"limitUsd"\` ≤ 10. Without the \`ai\` block the app gets no AI.
 2. Within a few seconds the app's token appears in \`~/.uno/app-keys/<id>/\`; an app started by its manifest \`command\` also gets \`UNO_APP_ID\`, \`UNO_APP_API_URL\`, \`UNO_APP_TOKEN\` in its environment. The SDK finds all of this by itself — give it the app id if you start the app some other way.
 3. Use the SDK that is already on this machine (zero dependencies):
-   - JavaScript/TypeScript (Node ≥ 18): \`import { createClient } from "${sdkDir}/js/uno-app.mjs";\` → \`const ai = createClient({ appId: "<id>" });\` → \`await ai.ask("Translate to English: …")\`, \`for await (const t of ai.stream(prompt)) …\`, \`await ai.transcribe(audioBuffer)\`, \`const t = await ai.task({ prompt, cwd: "~/Inbox", tools: "edit" }); const done = await t.wait();\`, \`await ai.whoami()\`. Or copy the file into the project, or \`npm i ${sdkDir}/js\` (package \`@uno4/app\`).
+   - JavaScript/TypeScript (Node ≥ 18): \`import { createClient } from "${sdkJs}";\` → \`const ai = createClient({ appId: "<id>" });\` → \`await ai.ask("Translate to English: …")\`, \`for await (const t of ai.stream(prompt)) …\`, \`await ai.transcribe(audioBuffer)\`, \`const t = await ai.task({ prompt, cwd: "~/Inbox", tools: "edit" }); const done = await t.wait();\`, \`await ai.whoami()\`. Or copy the file into the project, or \`npm i ${sdkDir}/js\` (package \`@uno4/app\`).
    - Python ≥ 3.9: \`sys.path.insert(0, os.path.expanduser("~/.uno/sdk/python")); import uno_app\` → \`ai = uno_app.Client(app_id="<id>")\` → \`ai.ask(...)\`, \`ai.stream(...)\`, \`ai.transcribe(path)\`, \`ai.task(prompt, cwd="~/Inbox", tools="edit").wait()\`.
    - Any other language: it is plain OpenAI-compatible HTTP — \`POST $UNO_APP_API_URL/v1/chat/completions\` with \`Authorization: Bearer <token from ~/.uno/app-keys/<id>/token>\` and \`"model": "default"\`; tasks: \`POST /v1/tasks {"prompt","cwd","tools"}\`, \`GET /v1/tasks/<id>?waitMs=30000\`.
 4. Tasks run as a Work chat titled "[App name] …" the person can see; \`tools\`: "read" (only looks), "ask" (every change waits for the person), "edit" (edits files itself, commands wait). The app gets at most what the person allowed. A task's \`cwd\` must be inside the home folder and must exist.
 5. Handle errors in the UI in plain words: 402 \`app_limit_reached\` → "This app used its AI limit — raise it in Uno Work → Settings → Apps"; 503 \`ai_not_connected\` → "Sign in to Uno in Uno Work".
 6. Something that must run on a schedule (e.g. once a day) belongs inside the app (a timer in the server process) or in a user systemd timer — not a cron job the person can't see. Show the last result in the app's page.
-7. In docker (only if the person's machine allows it): mount only \`~/.uno/app-keys/<id>:/run/uno-app:ro\` (never all of \`~/.uno\`) and add \`extra_hosts: ["host.docker.internal:host-gateway"]\`.`;
+7. In docker (only if the person's machine allows it): mount only \`~/.uno/app-keys/<id>:/run/uno-app:ro\` (never all of \`~/.uno\`) and add \`extra_hosts: ["host.docker.internal:host-gateway"]\`.
+
+## Where an app keeps data — the person's files go to the cloud, not the disk
+
+This computer's disk is its **working disk**: small, paid for by the gigabyte, meant for programs to run. The person's Uno account also has **cloud storage** (S3): cheap and roomy, visible in Files → Cloud storage. Default for every app you build:
+
+- **Cloud (through the SDK)** — everything the person keeps or uploads: photos, images, documents, PDFs, attachments, audio/video, recordings, exports, reports, backups, archives, any file larger than a few hundred KB.
+- **Working disk** — only what the app needs to run: its code, the database (SQLite/Postgres rows with metadata and the cloud *key* of each file, never the bytes), caches, thumbnails-cache, indexes, temporary files while processing (delete them afterwards).
+
+How: add \`"storage": true\` (5 GB) or \`"storage": {"limitGb": 10}\` to the manifest (next to or instead of \`"ai"\`) — the app gets its own folder \`Cloud storage → apps/<id>/\` and the same token as for AI. Never ask for S3 keys, never write to S3 directly, never create a bucket yourself.
+
+\`\`\`js
+import { createClient } from "${sdkJs}";
+const uno = createClient({ appId: "album" });
+// upload handler: the browser's file → cloud; the database keeps only the key
+const key = \`photos/\${id}-\${safeName}\`;
+await uno.storage.put(key, bytes, { contentType: file.type });   // or uno.storage.upload(tmpPath, key)
+db.prepare("INSERT INTO photos (id, key, name) VALUES (?, ?, ?)").run(id, key, name);
+// show / download: redirect to a temporary link (≤ 1 h) — the browser loads it from the cloud
+app.get("/photos/:id", async (req, res) => res.redirect(await uno.storage.url(keyOf(req.params.id))));
+// also: uno.storage.get(key) / getText / getJson, list("photos/"), listAll(), delete(key), exists(key), usage()
+\`\`\`
+
+Python: \`st = uno_app.Client(app_id="album").storage\` → \`st.upload(tmp_path, key)\`, \`st.put(key, data)\`, \`st.url(key)\`, \`st.get(key)\`, \`st.list("photos/")\`, \`st.delete(key)\`. Other languages: HTTP to \`$UNO_APP_API_URL\` with the app token — \`PUT /v1/storage/files/<key>\` (body + Content-Length), \`GET /v1/storage/files/<key>\`, \`DELETE …\`, \`GET /v1/storage/list?prefix=\`, \`POST /v1/storage/url {"key"}\`.
+
+Handle in the UI in plain words: 507 \`app_storage_full\` → "This app filled its cloud space — raise it in Uno Work → Settings → Apps"; 402 \`cloud_full\` → "Your Uno cloud storage is full"; 503 \`storage_not_connected\` → "Sign in to Uno in Uno Work". One file is at most 256 MB. When you tell the person the app is ready, say where the files live ("your photos are kept in your Uno cloud, Files → Cloud storage → apps → album").`;
 }

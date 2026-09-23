@@ -16,6 +16,7 @@ const TOKENS: Record<string, AppApiCaller> = {
     spentUsd: 0,
     manifestCwd: null,
     taskToolsCap: "edit",
+    storage: null,
   },
   uno_app_other: {
     appId: "other",
@@ -26,6 +27,7 @@ const TOKENS: Record<string, AppApiCaller> = {
     spentUsd: 0,
     manifestCwd: null,
     taskToolsCap: "edit",
+    storage: null,
   },
   uno_app_notasks: {
     appId: "notasks",
@@ -36,6 +38,7 @@ const TOKENS: Record<string, AppApiCaller> = {
     spentUsd: 0,
     manifestCwd: null,
     taskToolsCap: "edit",
+    storage: null,
   },
   uno_app_broke: {
     appId: "broke",
@@ -46,6 +49,7 @@ const TOKENS: Record<string, AppApiCaller> = {
     spentUsd: 1,
     manifestCwd: null,
     taskToolsCap: "edit",
+    storage: null,
   },
 };
 

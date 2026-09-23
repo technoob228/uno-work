@@ -92,6 +92,7 @@ const MANIFEST: AppManifest = {
   cwd: null,
   autostart: true,
   ai: null,
+  storage: null,
 };
 
 describe("scanMachineApps", () => {

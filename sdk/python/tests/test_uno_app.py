@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -14,6 +15,7 @@ import uno_app  # noqa: E402
 
 TOKEN = "uno_app_test"
 SEEN = []
+FILES = {}
 STATE = {"polls": 0}
 
 
@@ -88,9 +90,36 @@ class Handler(BaseHTTPRequestHandler):
                               'event: status\ndata: {"status":"after"}\n\n'])
         if path == "/v1/tasks/task_1/stop":
             return self._send(200, {"id": "task_1", "status": "stopped"})
+        if path.startswith("/v1/storage/files/"):
+            key = urllib.parse.unquote(path[len("/v1/storage/files/"):])
+            if self.command == "PUT":
+                FILES[key] = (body, self.headers.get("Content-Type", ""))
+                return self._send(201, {"key": key, "size": len(body)})
+            if self.command in ("GET", "HEAD"):
+                if key not in FILES:
+                    return self._send(404, {"error": {"type": "file_not_found", "code": "file_not_found",
+                                                      "message": "No such file"}})
+                data, ctype = FILES[key]
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                if self.command == "GET":
+                    self.wfile.write(data)
+                return None
+            if self.command == "DELETE":
+                return self._send(200, {"deleted": 1 if FILES.pop(key, None) is not None else 0})
+        if path == "/v1/storage/list":
+            return self._send(200, {"prefix": "", "folders": [], "files": [
+                {"key": k, "name": k, "size": len(v[0]), "modifiedAt": None} for k, v in FILES.items()],
+                "truncated": False})
+        if path == "/v1/storage/url":
+            return self._send(200, {"url": "https://s3.example/x?sig=1", "key": json.loads(body)["key"]})
+        if path == "/v1/storage":
+            return self._send(200, {"usedBytes": sum(len(v[0]) for v in FILES.values()), "limitBytes": 100})
         return self._send(404, {"error": {"type": "nf", "code": "not_found", "message": "nope"}})
 
-    do_GET = do_POST = _handle
+    do_GET = do_POST = do_PUT = do_DELETE = do_HEAD = _handle
 
 
 ENV = ("UNO_APP_API_URL", "UNO_APP_TOKEN", "UNO_APP_KEY_DIR", "UNO_APP_ID")
@@ -119,6 +148,35 @@ class UnoAppTest(unittest.TestCase):
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+
+    def test_storage(self):
+        st = self.c.storage
+        self.assertEqual(st.put("notes/Заметка 1.md", "# hi"), {"key": "notes/Заметка 1.md", "size": 4})
+        self.assertEqual(SEEN[-1]["path"], "/v1/storage/files/notes/%D0%97%D0%B0%D0%BC%D0%B5%D1%82%D0%BA%D0%B0%201.md")
+        self.assertEqual(SEEN[-1]["ctype"], "text/markdown; charset=utf-8")
+        self.assertEqual(st.get_text("notes/Заметка 1.md"), "# hi")
+        st.put_json("data.json", {"a": 1})
+        self.assertEqual(st.get_json("data.json"), {"a": 1})
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "cat.jpg")
+            with open(src, "wb") as fh:
+                fh.write(b"\xff\xd8jpeg")
+            self.assertEqual(st.upload(src, "photos/cat.jpg")["size"], 6)
+            self.assertEqual(SEEN[-1]["ctype"], "image/jpeg")
+            out = st.download("photos/cat.jpg", os.path.join(d, "back.jpg"))
+            with open(out, "rb") as fh:
+                self.assertEqual(fh.read(), b"\xff\xd8jpeg")
+        self.assertTrue(st.exists("photos/cat.jpg"))
+        self.assertFalse(st.exists("photos/dog.jpg"))
+        self.assertIn("photos/cat.jpg", [f["key"] for f in st.list()["files"]])
+        self.assertTrue(st.url("photos/cat.jpg").startswith("https://"))
+        self.assertEqual(st.delete("photos/cat.jpg"), {"deleted": 1})
+        with self.assertRaises(uno_app.UnoAppError) as cm:
+            st.get("photos/cat.jpg")
+        self.assertEqual(cm.exception.code, "file_not_found")
+        with self.assertRaises(uno_app.UnoAppError) as cm:
+            st.get("../other/secret.txt")
+        self.assertEqual((cm.exception.status, cm.exception.code), (400, "invalid_key"))
 
     def test_ask(self):
         self.assertEqual(self.c.ask("hi", system="brief", max_tokens=20, temperature=0), "echo:default")
@@ -219,7 +277,7 @@ class UnoAppTest(unittest.TestCase):
         with self.assertRaises(uno_app.UnoAppError) as cm:
             uno_app.resolve_config(app_id="myapp", wait=0.2)
         self.assertEqual(str(cm.exception),
-                         'No Uno app token. Add "ai": {"chat": true} to ~/.uno/apps/myapp.json')
+                         'No Uno app token. Add "ai": {"chat": true} and/or "storage": true to ~/.uno/apps/myapp.json')
         self.assertIsNone(uno_app.find_config(app_id="myapp"))
 
 

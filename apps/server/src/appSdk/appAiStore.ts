@@ -42,6 +42,8 @@ export interface StoredApp {
   lastUsedAt: string | null;
   /** Set by the person in Settings → Apps; null = the manifest's limit. */
   limitOverrideUsd: number | null;
+  /** Cloud storage limit set by the person in Settings → Apps; null = the manifest's. */
+  storageLimitOverrideGb: number | null;
   revoked: boolean;
   taskToolsCap: AppTaskTools;
   tasks: StoredAppTask[];
@@ -78,6 +80,10 @@ function normalizeApp(id: string, raw: unknown): StoredApp {
     limitOverrideUsd:
       typeof r["limitOverrideUsd"] === "number" && r["limitOverrideUsd"] >= 0
         ? r["limitOverrideUsd"]
+        : null,
+    storageLimitOverrideGb:
+      typeof r["storageLimitOverrideGb"] === "number" && r["storageLimitOverrideGb"] > 0
+        ? r["storageLimitOverrideGb"]
         : null,
     revoked: r["revoked"] === true,
     taskToolsCap: APP_TASK_TOOLS_ORDER.includes(cap as AppTaskTools)

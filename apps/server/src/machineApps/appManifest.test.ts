@@ -97,6 +97,7 @@ describe("validateManifest", () => {
         cwd: "/home/unowork/projects/notes",
         autostart: true,
         ai: null,
+        storage: null,
       },
     });
   });

@@ -293,7 +293,7 @@ describe("config", () => {
     expect((await resolveConfig({ waitMs: 3000 })).token).toBe(TOKEN);
     fs.rmSync(path.join(dir, "token"));
     await expect(resolveConfig({ appId: "myapp", waitMs: 200 })).rejects.toThrow(
-      'No Uno app token. Add "ai": {"chat": true} to ~/.uno/apps/myapp.json',
+      'No Uno app token. Add "ai": {"chat": true} and/or "storage": true to ~/.uno/apps/myapp.json',
     );
     fs.rmSync(dir, { recursive: true });
   });

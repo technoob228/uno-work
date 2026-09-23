@@ -10,8 +10,24 @@ may spend.
 app ──HTTP──▶ Work daemon (App API, 127.0.0.1:3779 + docker0)
                  ├── /v1/chat/completions ─▶ Uno AI gateway (machine key, metered per app)
                  ├── /v1/audio/transcriptions ─▶ Uno AI gateway
-                 └── /v1/tasks ─▶ a Work chat (thread) on the harness the person chose
+                 ├── /v1/tasks ─▶ a Work chat (thread) on the harness the person chose
+                 └── /v1/storage/* ─▶ the app's folder in the account's cloud (S3)
 ```
+
+**Where an app keeps data.** A computer has two kinds of storage:
+
+- the **working disk** — fast, small, paid for by the gigabyte: the place
+  where programs run. Databases, caches, indexes, temporary files and the
+  app's own code belong here;
+- the **cloud** (the account's Uno cloud storage, S3) — cheap and roomy: the
+  place for things the person keeps. Photos, documents, uploads, attachments,
+  recordings, exports, backups and archives belong here, through
+  `storage` below.
+
+The rule for every app (ours and the ones agents build): **files the person
+keeps go to the cloud; the working disk keeps only what the app needs to
+run.** A database row stores the cloud key (`photos/2026/cat.jpg`), not the
+bytes.
 
 ## 1. Access: the manifest
 
@@ -33,9 +49,13 @@ An app asks for AI in its manifest `~/.uno/apps/<id>.json`:
 - `ai.limitUsd` — spending cap for the app, **at most $10** from the manifest
   (default $10). Only the person can raise it (Settings → Apps).
 - `"ai": true` is short for `{ "chat": true }`.
-- No `ai` in the manifest → no token, every call is 401/403.
+- No `ai` in the manifest → no AI (403 `ai_not_allowed`).
+- `"storage": {"limitGb": 5}` (or `"storage": true`, 5 GB) — the app gets its
+  own folder in the account's cloud, `Cloud storage → apps/<id>/`. A manifest
+  may ask for at most 20 GB; the person can give more in Settings → Apps.
+- Neither `ai` nor `storage` → no token, every call is 401.
 
-When the daemon sees such a manifest it issues the app its own token
+When the daemon sees a manifest with `ai` or `storage` it issues the app its own token
 (`uno_app_…`, only a hash is stored) and writes:
 
 ```
@@ -81,6 +101,12 @@ container `http://host.docker.internal:3779`). Every call:
 | 402    | `app_limit_reached`                    | the app spent its limit — the person raises it in Settings → Apps |
 | 503    | `ai_not_connected`                     | this computer has no Uno AI key (not linked)                      |
 | 400    | `invalid_request` / `cwd_outside_home` | bad input                                                         |
+| 403    | `storage_not_allowed`                  | the manifest does not ask for `storage`                           |
+| 507    | `app_storage_full`                     | the app filled its cloud limit — the person raises it in Settings |
+| 402    | `cloud_full`                           | the whole account's cloud is full (plan quota)                    |
+| 404    | `file_not_found`                       | no such file in the app's folder                                  |
+| 400    | `invalid_key`                          | a key with `..`, a leading `/`, empty segments, > 512 chars       |
+| 503    | `storage_not_connected`                | this computer is not linked to an Uno account                     |
 
 ### `GET /v1/whoami`
 
@@ -172,6 +198,36 @@ event: done     data: {"status":"done","result":{"text":"…"},"changedFiles":[�
 
 List the app's own tasks; stop a running one.
 
+### Cloud storage — the app's own folder (`"storage"` in the manifest)
+
+Keys are relative to the app's folder: `photos/2026/cat.jpg`. Folders are
+implicit (like S3). One file is at most 256 MB for now.
+
+| Call                                       | What it does                                                                                               |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `PUT /v1/storage/files/<key>`              | save the request body (needs `Content-Length`; `Content-Type` is kept) → `201 {"key","size"}`              |
+| `GET /v1/storage/files/<key>`              | the file, streamed; `Range` works (video/audio seeking); `HEAD` for "exists"                               |
+| `DELETE /v1/storage/files/<key>`           | delete a file; `?folder=1` deletes the whole folder `<key>/`                                               |
+| `GET /v1/storage/list?prefix=photos/`      | one level: `{"prefix","folders":["photos/2026/"],"files":[{"key","name","size","modifiedAt"}]}`            |
+| `POST /v1/storage/url {"key","expiresIn"}` | a temporary https link (default 15 min, max 1 h) to hand to a browser: `<img src>`, `<a href>`, a redirect |
+| `GET /v1/storage`                          | `{"folder","usedBytes","files","limitBytes","remainingBytes"}`                                             |
+
+Show files in a web page by redirecting to (or embedding) `url(key)` — the
+browser then downloads straight from the cloud, not through the app. Serve
+through `GET /v1/storage/files/…` only when the page can't take a redirect.
+
+**How it is kept safe.** The app holds only its `uno_app_` token. The daemon
+checks the key, puts it under `apps/<id>/`, checks the app's limit, then asks
+the Uno console for a presigned URL with the computer's own token and moves
+the bytes. The app never sees an S3 key, the computer's token, the rest of the
+account's cloud or another app's folder; a link from `url()` opens exactly one
+file for at most an hour. The account's plan quota is enforced by the console
+(402 `cloud_full`), the app's own limit by the daemon (507).
+
+The person sees everything an app stored in Files → Cloud storage → `apps` →
+`<id>`, and how much each app uses in Settings → Apps. Removing an app does
+not delete its files.
+
 ## 3. SDKs
 
 Zero-dependency single files; the daemon keeps a copy on every machine:
@@ -193,6 +249,28 @@ const done = await t.wait();
 import sys, os; sys.path.insert(0, os.path.expanduser("~/.uno/sdk/python"))
 import uno_app
 print(uno_app.ask("Translate to English: привет"))
+```
+
+Cloud storage (manifest `"storage": true`):
+
+```js
+import { createClient } from "/home/unowork/.uno/sdk/js/uno-app.mjs";
+const uno = createClient({ appId: "album" });
+await uno.storage.put(`photos/${id}.jpg`, buffer, { contentType: "image/jpeg" });
+await uno.storage.upload("/tmp/upload-123", `photos/${id}.jpg`); // streamed from disk
+const link = await uno.storage.url(`photos/${id}.jpg`); // → <img src={link}>, or res.redirect(link)
+const bytes = await uno.storage.get("notes/attachments/a.pdf");
+const { folders, files } = await uno.storage.list("photos/");
+await uno.storage.delete(`photos/${id}.jpg`);
+const { usedBytes, limitBytes } = await uno.storage.usage();
+```
+
+```python
+st = uno_app.Client(app_id="album").storage
+st.upload("/tmp/upload-123", f"photos/{pid}.jpg")
+link = st.url(f"photos/{pid}.jpg")          # redirect the browser here
+data = st.get("notes/attachments/a.pdf")
+st.delete(f"photos/{pid}.jpg")
 ```
 
 Config comes from the environment (`UNO_APP_API_URL`, `UNO_APP_TOKEN`), then
@@ -218,7 +296,7 @@ from `/run/uno-app/` (docker), then from `~/.uno/app-keys/<UNO_APP_ID or appId>/
 - The App API listens on loopback and the docker bridge only — never on the
   public interface.
 - A token is bound to one app id. It opens only: chat for that app, tasks
-  started by that app. It is not an account key and not a machine key; it
+  started by that app, and that app's cloud folder `apps/<id>/`. It is not an account key and not a machine key; it
   cannot read other apps' tasks, settings, files or the account.
 - Spending is checked before each call and settled after it; a call that
   would start above the limit gets 402.

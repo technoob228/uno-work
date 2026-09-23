@@ -10,6 +10,8 @@
  * - Forwards chat / transcription to the Uno AI gateway with the machine's AI
  *   key, and keeps a per-app ledger against the app's limit.
  * - Starts app tasks as Work chats (`appTasks.ts`).
+ * - Gives an app that asks for `"storage"` its own folder in the account's
+ *   cloud (`appStorage.ts`), through the machine's console token.
  * - Answers Settings → Apps: list, limit, revoke, task autonomy.
  */
 import {
@@ -18,6 +20,7 @@ import {
   type AppAiApp,
   type AppAiOverview,
   type AppAiUpdateInput,
+  type AppStorageInfo,
   UNO_GATEWAY_BASE_URL,
 } from "@t3tools/contracts";
 import { Context, Duration, Effect, Layer, Schedule } from "effect";
@@ -49,6 +52,7 @@ import {
 } from "./appKeys.ts";
 import { resolveAppApiPort } from "./appApiPort.ts";
 import { makeAppTasks } from "./appTasks.ts";
+import { GB, appFolder, makeAppStorage } from "./appStorage.ts";
 import { type ModelPrice, parseModelPrices } from "./pricing.ts";
 import { installSdkFiles } from "./sdkFiles.ts";
 
@@ -57,6 +61,7 @@ const SYNC_EVERY = Duration.seconds(5);
 const BRIDGE_CHECK_EVERY = Duration.seconds(30);
 const PRICES_TTL_MS = 60 * 60_000;
 export const PERSON_MAX_LIMIT_USD = 1000;
+export const PERSON_MAX_STORAGE_GB = 10_000;
 
 export interface AppSdkServiceShape {
   readonly overview: Effect.Effect<AppAiOverview>;
@@ -102,6 +107,19 @@ export async function dockerBridgeAddress(
 
 export function effectiveLimitUsd(stored: StoredApp, manifest: AppManifest | undefined): number {
   return stored.limitOverrideUsd ?? manifest?.ai?.limitUsd ?? 0;
+}
+
+export function effectiveStorageLimitBytes(
+  stored: StoredApp,
+  manifest: AppManifest | undefined,
+): number {
+  const gb = stored.storageLimitOverrideGb ?? manifest?.storage?.limitGb ?? 0;
+  return Math.round(gb * GB);
+}
+
+/** An app gets a token when its manifest asks for AI or cloud storage. */
+export function wantsAppToken(manifest: AppManifest | undefined): boolean {
+  return Boolean(manifest?.ai || manifest?.storage);
 }
 
 export const makeAppSdkService = (
@@ -157,7 +175,7 @@ export const makeAppSdkService = (
       const next = new Map(scan.manifests.map((m) => [m.id, m]));
       manifests = next;
       for (const manifest of next.values()) {
-        if (!manifest.ai) continue;
+        if (!wantsAppToken(manifest)) continue;
         const stored = store.ensure(manifest.id);
         if (stored.revoked) {
           if (stored.tokenHash !== null) {
@@ -177,9 +195,9 @@ export const makeAppSdkService = (
           app.tokenIssuedAt = new Date().toISOString();
         });
       }
-      // Manifest gone or no longer asks for AI: the token dies with it.
+      // Manifest gone or no longer asks for AI or storage: the token dies with it.
       for (const stored of store.all()) {
-        if (next.get(stored.id)?.ai) continue;
+        if (wantsAppToken(next.get(stored.id))) continue;
         if (stored.tokenHash !== null) {
           await store.update(stored.id, (app) => {
             app.tokenHash = null;
@@ -187,7 +205,9 @@ export const makeAppSdkService = (
         }
       }
       for (const id of await listAppKeyIds(keysDir)) {
-        if (!next.get(id)?.ai || store.get(id)?.revoked) await removeAppKey(keysDir, id);
+        if (!wantsAppToken(next.get(id)) || store.get(id)?.revoked) {
+          await removeAppKey(keysDir, id);
+        }
       }
     };
     const sync = () => {
@@ -203,18 +223,34 @@ export const makeAppSdkService = (
 
     const callerFor = (stored: StoredApp): AppApiCaller | null => {
       const manifest = manifests.get(stored.id);
-      if (!manifest?.ai || stored.revoked) return null;
+      if (!manifest || !wantsAppToken(manifest) || stored.revoked) return null;
       return {
         appId: stored.id,
         appName: manifest.name,
-        chat: manifest.ai.chat,
-        tasks: manifest.ai.tasks,
+        chat: manifest.ai?.chat ?? false,
+        tasks: manifest.ai?.tasks ?? false,
         limitUsd: effectiveLimitUsd(stored, manifest),
         spentUsd: stored.spentUsd,
         manifestCwd: manifest.cwd,
         taskToolsCap: stored.taskToolsCap,
+        storage: manifest.storage
+          ? { limitBytes: effectiveStorageLimitBytes(stored, manifest) }
+          : null,
       };
     };
+
+    // The machine's own console token (work-machine token, storage:*); the
+    // account key only on machines linked the old way.
+    const appStorage = makeAppStorage({
+      token: () =>
+        runPromise(
+          readSettings.pipe(
+            Effect.map((current) =>
+              current ? current.uno.boxToken?.trim() || current.uno.apiKey.trim() : "",
+            ),
+          ),
+        ),
+    });
 
     let pricesCache: { at: number; prices: ReadonlyMap<string, ModelPrice> } | null = null;
 
@@ -286,6 +322,36 @@ export const makeAppSdkService = (
         };
       },
       stopTask: (caller, task) => runPromise(tasks.stopTask(caller, task)),
+      storage: appStorage,
+    };
+
+    let storageBucketId: number | null = null;
+    const storageInfo = (
+      stored: StoredApp,
+      manifest: AppManifest | undefined,
+    ): AppStorageInfo | null => {
+      if (!manifest?.storage) return null;
+      const usage = appStorage.cachedUsage(stored.id);
+      return {
+        limitBytes: effectiveStorageLimitBytes(stored, manifest),
+        limitSetByPerson: stored.storageLimitOverrideGb !== null,
+        usedBytes: usage?.usedBytes ?? null,
+        files: usage?.files ?? null,
+        bucketId: storageBucketId,
+        prefix: appFolder(stored.id),
+      };
+    };
+
+    /** Measure storage apps in the background, so Settings never waits on S3. */
+    let measuring: Promise<void> | null = null;
+    const measureStorage = (ids: ReadonlyArray<string>) => {
+      if (measuring || ids.length === 0) return;
+      measuring = (async () => {
+        storageBucketId = await appStorage.bucketId();
+        for (const id of ids) await appStorage.usage(id).catch(() => undefined);
+      })().finally(() => {
+        measuring = null;
+      });
     };
 
     const toApp = (stored: StoredApp, manifest: AppManifest | undefined): AppAiApp => {
@@ -296,7 +362,11 @@ export const makeAppSdkService = (
         icon: manifest?.icon ?? null,
         chat: manifest?.ai?.chat ?? false,
         tasks: manifest?.ai?.tasks ?? false,
-        status: stored.revoked ? "revoked" : stored.spentUsd >= limitUsd ? "over-limit" : "active",
+        status: stored.revoked
+          ? "revoked"
+          : manifest?.ai && stored.spentUsd >= limitUsd
+            ? "over-limit"
+            : "active",
         limitUsd,
         limitSetByPerson: stored.limitOverrideUsd !== null,
         spentUsd: Math.round(stored.spentUsd * 1e6) / 1e6,
@@ -305,6 +375,7 @@ export const makeAppSdkService = (
         taskToolsCap: stored.taskToolsCap,
         lastUsedAt: stored.lastUsedAt,
         keyDir: displayManifestDir(appKeyDir(keysDir, stored.id), home),
+        storage: storageInfo(stored, manifest),
       };
     };
 
@@ -313,10 +384,14 @@ export const makeAppSdkService = (
       const current = yield* readSettings;
       const key = yield* gatewayKey.harnessKey().pipe(Effect.orElseSucceed(() => ""));
       const providers = yield* providerRegistry.getProviders;
-      const apps = store
+      const listed = store
         .all()
-        .filter((stored) => manifests.get(stored.id)?.ai || stored.revoked)
-        .filter((stored) => manifests.has(stored.id))
+        .filter((stored) => wantsAppToken(manifests.get(stored.id)) || stored.revoked)
+        .filter((stored) => manifests.has(stored.id));
+      measureStorage(
+        listed.filter((stored) => manifests.get(stored.id)?.storage).map((stored) => stored.id),
+      );
+      const apps = listed
         .map((stored) => toApp(stored, manifests.get(stored.id)))
         .toSorted((a, b) => a.name.localeCompare(b.name));
       return {
@@ -354,6 +429,21 @@ export const makeAppSdkService = (
             new AppSdkUpdateError(`The limit must be between $0 and $${PERSON_MAX_LIMIT_USD}.`),
           );
         }
+        if (
+          input.storageLimitGb !== undefined &&
+          input.storageLimitGb !== null &&
+          !(
+            Number.isFinite(input.storageLimitGb) &&
+            input.storageLimitGb > 0 &&
+            input.storageLimitGb <= PERSON_MAX_STORAGE_GB
+          )
+        ) {
+          return yield* Effect.fail(
+            new AppSdkUpdateError(
+              `The cloud limit must be more than 0 and at most ${PERSON_MAX_STORAGE_GB} GB.`,
+            ),
+          );
+        }
         yield* Effect.promise(() =>
           store.update(input.appId, (app) => {
             if (input.limitUsd !== undefined) {
@@ -361,6 +451,10 @@ export const makeAppSdkService = (
                 input.limitUsd === null ? null : Math.round(input.limitUsd * 100) / 100;
             }
             if (input.taskToolsCap !== undefined) app.taskToolsCap = input.taskToolsCap;
+            if (input.storageLimitGb !== undefined) {
+              app.storageLimitOverrideGb =
+                input.storageLimitGb === null ? null : Math.round(input.storageLimitGb * 100) / 100;
+            }
             if (input.resetSpent === true) app.spentUsd = 0;
             if (input.revoked === true) {
               app.revoked = true;

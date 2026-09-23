@@ -47,11 +47,29 @@ export function narrowAppTaskTools(requested: AppTaskTools, cap: AppTaskTools): 
 
 /**
  * - `active`       — the app has a token and may use what its manifest asks for;
- * - `over-limit`   — spent its limit, calls get 402 until the person raises it;
+ * - `over-limit`   — spent its AI limit, calls get 402 until the person raises it;
  * - `revoked`      — the person turned its AI off; the manifest must not bring it back;
  */
 export const AppAiStatus = Schema.Literals(["active", "over-limit", "revoked"]);
 export type AppAiStatus = typeof AppAiStatus.Type;
+
+/**
+ * An app's folder in the account's cloud (`"storage"` in the manifest):
+ * Cloud storage → bucket `apps` → `<appId>/`.
+ */
+export const AppStorageInfo = Schema.Struct({
+  limitBytes: Schema.Number,
+  /** True when the person set the limit (rather than the manifest). */
+  limitSetByPerson: Schema.Boolean,
+  /** Last measured size of the app's folder; null until measured. */
+  usedBytes: Schema.NullOr(Schema.Number),
+  files: Schema.NullOr(Schema.Number),
+  /** The `apps` bucket, for "Open in Files"; null until it exists. */
+  bucketId: Schema.NullOr(Schema.Number),
+  /** Folder inside the bucket, e.g. `photos/`. */
+  prefix: Schema.String,
+});
+export type AppStorageInfo = typeof AppStorageInfo.Type;
 
 export const AppAiApp = Schema.Struct({
   id: Schema.String,
@@ -72,6 +90,8 @@ export const AppAiApp = Schema.Struct({
   lastUsedAt: Schema.NullOr(Schema.String),
   /** Where the app's token lives, for people who wire a container by hand. */
   keyDir: Schema.String,
+  /** Cloud storage of the app; null = the manifest doesn't ask for it. */
+  storage: Schema.NullOr(AppStorageInfo),
 });
 export type AppAiApp = typeof AppAiApp.Type;
 
@@ -101,5 +121,7 @@ export const AppAiUpdateInput = Schema.Struct({
   taskToolsCap: Schema.optionalKey(AppTaskTools),
   /** Start counting from zero (keeps the limit). */
   resetSpent: Schema.optionalKey(Schema.Boolean),
+  /** Cloud storage limit in GB; null returns to the manifest's limit. */
+  storageLimitGb: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 });
 export type AppAiUpdateInput = typeof AppAiUpdateInput.Type;

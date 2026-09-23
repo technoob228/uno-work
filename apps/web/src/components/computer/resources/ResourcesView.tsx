@@ -25,6 +25,7 @@ import {
   ArrowUpIcon,
   BoxIcon,
   ChevronRightIcon,
+  CloudIcon,
   CpuIcon,
   FolderOpenIcon,
   HardDriveIcon,
@@ -93,7 +94,7 @@ import {
 const LOOKS: ReadonlyArray<{ look: ResourceLook; label: string; icon: ReactNode }> = [
   { look: "cpu", label: "Processor", icon: <CpuIcon /> },
   { look: "memory", label: "Memory", icon: <MemoryStickIcon /> },
-  { look: "disk", label: "Disk", icon: <HardDriveIcon /> },
+  { look: "disk", label: "Working disk", icon: <HardDriveIcon /> },
   { look: "network", label: "Network", icon: <NetworkIcon /> },
 ];
 
@@ -1092,6 +1093,21 @@ function DiskPanel({
             Docker.
           </p>
         ) : null}
+        <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+          <CloudIcon className="mt-0.5 size-3.5 shrink-0 text-sky-500" aria-hidden />
+          <span>
+            The working disk is where programs run: their databases, caches and temporary files.
+            Photos, documents and archives belong in{" "}
+            <button
+              type="button"
+              className="text-primary hover:underline"
+              onClick={() => void navigate({ to: "/files", search: { cloud: "1" } })}
+            >
+              Cloud storage
+            </button>{" "}
+            — it costs much less and apps you make here keep their files there.
+          </span>
+        </p>
       </Card>
 
       <Card

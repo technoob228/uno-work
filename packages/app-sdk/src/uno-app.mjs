@@ -160,7 +160,7 @@ export async function resolveConfig(opts = {}) {
   throw new UnoAppError(
     0,
     "no_app_token",
-    `No Uno app token. Add "ai": {"chat": true} to ~/.uno/apps/${appId || "<id>"}.json`,
+    `No Uno app token. Add "ai": {"chat": true} and/or "storage": true to ~/.uno/apps/${appId || "<id>"}.json`,
   );
 }
 
@@ -314,14 +314,14 @@ export function createClient(options = {}) {
   /**
    * @param {string} method
    * @param {string} path
-   * @param {{json?: any, body?: any, signal?: AbortSignal}} [init]
+   * @param {{json?: any, body?: any, headers?: Record<string, string>, signal?: AbortSignal}} [init]
    * @returns {Promise<Response>}
    */
   async function request(method, path, init = {}) {
     for (let attempt = 0; ; attempt++) {
       const cfg = await config();
       /** @type {Record<string, string>} */
-      const headers = { Authorization: `Bearer ${cfg.token}` };
+      const headers = { ...init.headers, Authorization: `Bearer ${cfg.token}` };
       let body = init.body;
       if (init.json !== undefined) {
         headers["Content-Type"] = "application/json";
@@ -334,6 +334,8 @@ export function createClient(options = {}) {
           headers,
           body,
           signal: init.signal,
+          // A stream body (a big file) needs half-duplex in Node's fetch.
+          ...(body && typeof body.getReader === "function" ? { duplex: "half" } : {}),
         });
       } catch (err) {
         if (/** @type {any} */ (err)?.name === "AbortError") throw err;
@@ -503,6 +505,170 @@ export function createClient(options = {}) {
     return json("GET", "/v1/models");
   }
 
+  // ---- cloud storage: the app's own folder in the account's cloud --------
+
+  /** @param {string} key */
+  function filePath(key) {
+    const folder = typeof key === "string" && key.endsWith("/");
+    const clean = typeof key === "string" ? (folder ? key.slice(0, -1) : key) : "";
+    // Checked here too: fetch would quietly resolve "../" in the URL path.
+    if (clean === "" || clean.split("/").some((s) => s === "" || s === "." || s === "..")) {
+      throw new UnoAppError(400, "invalid_key", 'A file key looks like "photos/cat.jpg".');
+    }
+    const encoded = clean.split("/").map(encodeURIComponent).join("/");
+    return `/v1/storage/files/${encoded}${folder ? "?folder=1" : ""}`;
+  }
+
+  /**
+   * @param {any} data
+   * @param {string} key
+   * @param {string | undefined} contentType
+   * @returns {Promise<{body: any, type: string, size: number | null}>}
+   */
+  async function toUploadBody(data, key, contentType) {
+    const guessed = contentType || guessContentType(key);
+    if (typeof data === "string") {
+      const bytes = new TextEncoder().encode(data);
+      return {
+        body: bytes,
+        type: contentType || (guessed === DEFAULT_TYPE ? "text/plain; charset=utf-8" : guessed),
+        size: bytes.byteLength,
+      };
+    }
+    if (typeof Blob !== "undefined" && data instanceof Blob) {
+      return { body: data, type: contentType || data.type || guessed, size: data.size };
+    }
+    if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+      const bytes =
+        data instanceof ArrayBuffer
+          ? new Uint8Array(data)
+          : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      return { body: bytes, type: guessed, size: bytes.byteLength };
+    }
+    throw new UnoAppError(
+      0,
+      "invalid_request",
+      "storage.put() takes a string, Blob, Buffer or bytes; use storage.upload(path, key) for a file on disk.",
+    );
+  }
+
+  const storage = {
+    /** @param {string} key @param {any} data @param {{contentType?: string, signal?: AbortSignal}} [o] */
+    async put(key, data, o = {}) {
+      const { body, type } = await toUploadBody(data, key, o.contentType);
+      const res = await request("PUT", filePath(key), {
+        body,
+        headers: { "Content-Type": type },
+        signal: o.signal,
+      });
+      return res.json();
+    },
+    /** @param {string} key @param {any} value */
+    async putJson(key, value) {
+      return storage.put(key, JSON.stringify(value), { contentType: "application/json" });
+    },
+    /** Upload a file from disk (Node/Bun), streamed. */
+    async upload(/** @type {string} */ localPath, /** @type {string} */ key, o = {}) {
+      const node = await nodeBuiltins();
+      if (!node) throw new UnoAppError(0, "invalid_request", "upload() needs Node or Bun");
+      const target = key || node.path.basename(localPath);
+      const fs = node.fs;
+      /** @type {any} */
+      let blob;
+      if (typeof fs.openAsBlob === "function") {
+        blob = await fs.openAsBlob(localPath);
+      } else {
+        blob = new Blob([await fs.promises.readFile(localPath)]);
+      }
+      return storage.put(target, blob, {
+        contentType: /** @type {any} */ (o).contentType || guessContentType(target),
+        signal: /** @type {any} */ (o).signal,
+      });
+    },
+    /** The raw Response (streaming body, Range supported) — pipe it to a browser. */
+    async open(
+      /** @type {string} */ key,
+      o = /** @type {{range?: string, signal?: AbortSignal}} */ ({}),
+    ) {
+      return request("GET", filePath(key), {
+        headers: o.range ? { Range: o.range } : {},
+        signal: o.signal,
+      });
+    },
+    /** @param {string} key @returns {Promise<Uint8Array>} */
+    async get(key) {
+      const res = await storage.open(key);
+      return new Uint8Array(await res.arrayBuffer());
+    },
+    /** @param {string} key */
+    async getText(key) {
+      const res = await storage.open(key);
+      return res.text();
+    },
+    /** @param {string} key */
+    async getJson(key) {
+      const res = await storage.open(key);
+      return res.json();
+    },
+    /** Download to a file on disk (Node/Bun). */
+    async download(/** @type {string} */ key, /** @type {string} */ localPath) {
+      const node = await nodeBuiltins();
+      if (!node) throw new UnoAppError(0, "invalid_request", "download() needs Node or Bun");
+      const res = await storage.open(key);
+      const { Readable } = await import("node:stream");
+      const { pipeline } = await import("node:stream/promises");
+      await pipeline(
+        Readable.fromWeb(/** @type {any} */ (res.body)),
+        node.fs.createWriteStream(localPath),
+      );
+      return localPath;
+    },
+    /** true when the file is there. */
+    async exists(/** @type {string} */ key) {
+      try {
+        await request("HEAD", filePath(key));
+        return true;
+      } catch (err) {
+        if (err instanceof UnoAppError && err.status === 404) return false;
+        throw err;
+      }
+    },
+    /** One folder level: {prefix, folders: ["photos/2026/"], files: [{key, name, size, modifiedAt}]}. */
+    async list(prefix = "") {
+      return json("GET", `/v1/storage/list?prefix=${encodeURIComponent(prefix)}`);
+    },
+    /** Every file under a folder, walking sub-folders. */
+    async listAll(prefix = "") {
+      /** @type {any[]} */
+      const out = [];
+      const queue = [prefix];
+      while (queue.length) {
+        const level = await storage.list(/** @type {string} */ (queue.shift()));
+        out.push(...level.files);
+        queue.push(...level.folders);
+      }
+      return out;
+    },
+    /** Delete a file, or a whole folder when the key ends in "/". */
+    async delete(/** @type {string} */ key) {
+      const res = await request("DELETE", filePath(key));
+      return res.json();
+    },
+    /**
+     * A temporary https link to the file (default 15 min, at most 1 h) — put
+     * it in <img src>, <a href> or a redirect so the browser downloads
+     * straight from the cloud, not through your app.
+     */
+    async url(/** @type {string} */ key, o = /** @type {{expiresIn?: number}} */ ({})) {
+      const data = await json("POST", "/v1/storage/url", { key, expiresIn: o.expiresIn });
+      return String(data.url);
+    },
+    /** {folder, usedBytes, limitBytes, remainingBytes, files}. */
+    async usage() {
+      return json("GET", "/v1/storage");
+    },
+  };
+
   return {
     ask,
     stream,
@@ -514,8 +680,46 @@ export function createClient(options = {}) {
     tasks,
     whoami,
     models,
+    storage,
     config,
   };
+}
+
+const DEFAULT_TYPE = "application/octet-stream";
+/** @type {Record<string, string>} */
+const CONTENT_TYPES = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  avif: "image/avif",
+  heic: "image/heic",
+  svg: "image/svg+xml",
+  pdf: "application/pdf",
+  txt: "text/plain; charset=utf-8",
+  md: "text/markdown; charset=utf-8",
+  csv: "text/csv; charset=utf-8",
+  html: "text/html; charset=utf-8",
+  json: "application/json",
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  ogg: "audio/ogg",
+  wav: "audio/wav",
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mov: "video/quicktime",
+  zip: "application/zip",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
+
+/** Content-Type from a file name (what the browser gets back on download). */
+export function guessContentType(/** @type {string} */ name) {
+  const dot = name.lastIndexOf(".");
+  const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
+  return CONTENT_TYPES[ext] || DEFAULT_TYPE;
 }
 
 // ---- top-level functions on a lazily created default client ----------------
@@ -547,3 +751,12 @@ export const tasks = () => client().tasks();
 export const whoami = () => client().whoami();
 /** @type {any} */
 export const models = () => client().models();
+/** The app's folder in the account's cloud (needs "storage" in the manifest). */
+export const storage = /** @type {any} */ (
+  new Proxy(
+    {},
+    {
+      get: (_target, name) => /** @type {any} */ (client().storage)[name],
+    },
+  )
+);

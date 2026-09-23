@@ -1,13 +1,15 @@
 /**
  * Settings → Apps: which apps on this computer use its AI (the App SDK,
  * docs/app-sdk.md), how much each spent against its limit, how much an app's
- * jobs may do on their own, and turning an app's AI off. Plus "AI for apps":
+ * jobs may do on their own, how much of the account's cloud each app keeps
+ * its files in, and turning an app's access off. Plus "AI for apps":
  * the model apps get for answers and the agent that does their jobs.
  *
  * Read from and written to the machine named in the URL: the daemon there
  * keeps the ledger and the tokens.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import {
   APP_SDK_DEFAULT_CHAT_MODEL,
   type AppAiApp,
@@ -18,7 +20,7 @@ import {
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
-import { SparklesIcon } from "lucide-react";
+import { CloudIcon, SparklesIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 
 import { ensureEnvironmentApi } from "~/environmentApi";
@@ -32,6 +34,7 @@ import { getCustomModelOptionsByInstance } from "~/modelSelection";
 import { deriveProviderInstanceEntries, sortProviderInstanceEntries } from "~/providerInstances";
 
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { formatFileSize } from "../files/fileTypes";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
@@ -62,6 +65,21 @@ export function appUsageLine(app: Pick<AppAiApp, "name" | "spentUsd" | "limitUsd
   return `${app.name} used ${formatUsd(app.spentUsd)} of ${formatUsd(app.limitUsd)}`;
 }
 
+/** "5 GB", "1.5 GB", "500 MB" — a storage limit as a person reads it. */
+export function formatLimitBytes(bytes: number): string {
+  const gb = bytes / 1024 ** 3;
+  if (gb >= 1) return `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB`;
+  return formatFileSize(bytes);
+}
+
+/** "Keeps 120 MB of 5 GB in your cloud" — or "Nothing in your cloud yet". */
+export function appStorageLine(storage: NonNullable<AppAiApp["storage"]>): string {
+  const limit = formatLimitBytes(storage.limitBytes);
+  if (storage.usedBytes === null) return `Can keep up to ${limit} in your cloud`;
+  if (storage.usedBytes === 0) return `Nothing in your cloud yet · up to ${limit}`;
+  return `Keeps ${formatFileSize(storage.usedBytes)} of ${limit} in your cloud`;
+}
+
 function relativeTime(iso: string | null): string | null {
   if (!iso) return null;
   const seconds = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
@@ -82,11 +100,17 @@ function AppRow({
   readonly onUpdate: (input: AppAiUpdateInput) => void;
   readonly pending: boolean;
 }) {
+  const usesAi = app.chat || app.tasks;
   const uses = [app.chat ? "answers" : null, app.tasks ? "jobs" : null]
     .filter(Boolean)
     .join(" and ");
   const lastUsed = relativeTime(app.lastUsedAt);
   const percent = app.limitUsd > 0 ? Math.min(100, (app.spentUsd / app.limitUsd) * 100) : 100;
+  const storage = app.storage;
+  const storagePercent =
+    storage && storage.usedBytes !== null && storage.limitBytes > 0
+      ? Math.min(100, (storage.usedBytes / storage.limitBytes) * 100)
+      : 0;
   return (
     <SettingsRow
       title={
@@ -95,7 +119,7 @@ function AppRow({
           {app.name}
           {app.status === "revoked" ? (
             <Badge variant="outline" size="sm">
-              AI off
+              {usesAi ? "AI off" : "Turned off"}
             </Badge>
           ) : app.status === "over-limit" ? (
             <Badge variant="outline" size="sm" className="text-amber-700 dark:text-amber-400">
@@ -106,43 +130,102 @@ function AppRow({
       }
       description={
         <>
-          {appUsageLine(app)}
-          {` · uses AI for ${uses || "nothing"}`}
-          {app.tasksStarted > 0
-            ? ` · ${app.tasksStarted} job${app.tasksStarted === 1 ? "" : "s"}`
-            : ""}
-          {lastUsed ? ` · last used ${lastUsed}` : ""}
+          {usesAi ? (
+            <span className="block">
+              {appUsageLine(app)}
+              {` · uses AI for ${uses}`}
+              {app.tasksStarted > 0
+                ? ` · ${app.tasksStarted} job${app.tasksStarted === 1 ? "" : "s"}`
+                : ""}
+              {lastUsed ? ` · last used ${lastUsed}` : ""}
+            </span>
+          ) : null}
+          {storage ? (
+            <span className="flex items-center gap-1" data-testid={`app-storage-${app.id}`}>
+              <CloudIcon className="size-3 shrink-0 text-sky-500" aria-hidden />
+              {appStorageLine(storage)}
+              {storage.bucketId !== null ? (
+                <>
+                  {" · "}
+                  <Link
+                    to="/files"
+                    search={{ cloud: "1", bucket: storage.bucketId, prefix: storage.prefix }}
+                    className="underline-offset-4 hover:text-foreground hover:underline"
+                  >
+                    Open in Files
+                  </Link>
+                </>
+              ) : null}
+            </span>
+          ) : null}
         </>
       }
       status={
-        <span className="block h-1 w-full max-w-72 overflow-hidden rounded bg-muted">
-          <span
-            className={
-              app.status === "over-limit"
-                ? "block h-full bg-amber-500"
-                : "block h-full bg-primary/70"
-            }
-            style={{ width: `${percent}%` }}
-          />
+        <span className="flex w-full max-w-72 flex-col gap-1">
+          {usesAi ? (
+            <span className="block h-1 w-full overflow-hidden rounded bg-muted">
+              <span
+                className={
+                  app.status === "over-limit"
+                    ? "block h-full bg-amber-500"
+                    : "block h-full bg-primary/70"
+                }
+                style={{ width: `${percent}%` }}
+              />
+            </span>
+          ) : null}
+          {storage ? (
+            <span className="block h-1 w-full overflow-hidden rounded bg-muted">
+              <span
+                className={
+                  storagePercent >= 90 ? "block h-full bg-amber-500" : "block h-full bg-sky-500"
+                }
+                style={{ width: `${storagePercent}%` }}
+              />
+            </span>
+          ) : null}
         </span>
       }
       control={
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <label className="flex items-center gap-1 text-xs text-muted-foreground">
-            Limit $
-            <DraftInput
-              className="w-20"
-              inputMode="decimal"
-              value={String(app.limitUsd)}
-              aria-label={`${app.name} AI limit in dollars`}
-              onCommit={(next) => {
-                const value = Number(next.replace(",", "."));
-                if (Number.isFinite(value) && value >= 0 && value !== app.limitUsd) {
-                  onUpdate({ appId: app.id, limitUsd: value });
-                }
-              }}
-            />
-          </label>
+          {usesAi ? (
+            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+              Limit $
+              <DraftInput
+                className="w-20"
+                inputMode="decimal"
+                value={String(app.limitUsd)}
+                aria-label={`${app.name} AI limit in dollars`}
+                onCommit={(next) => {
+                  const value = Number(next.replace(",", "."));
+                  if (Number.isFinite(value) && value >= 0 && value !== app.limitUsd) {
+                    onUpdate({ appId: app.id, limitUsd: value });
+                  }
+                }}
+              />
+            </label>
+          ) : null}
+          {storage ? (
+            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+              Cloud GB
+              <DraftInput
+                className="w-16"
+                inputMode="decimal"
+                value={String(Math.round((storage.limitBytes / 1024 ** 3) * 100) / 100)}
+                aria-label={`${app.name} cloud storage limit in gigabytes`}
+                onCommit={(next) => {
+                  const value = Number(next.replace(",", "."));
+                  if (
+                    Number.isFinite(value) &&
+                    value > 0 &&
+                    Math.round(value * 1024 ** 3) !== storage.limitBytes
+                  ) {
+                    onUpdate({ appId: app.id, storageLimitGb: value });
+                  }
+                }}
+              />
+            </label>
+          ) : null}
           {app.tasks ? (
             <Select
               value={app.taskToolsCap}
@@ -173,7 +256,7 @@ function AppRow({
               disabled={pending}
               onClick={() => onUpdate({ appId: app.id, revoked: false })}
             >
-              Turn AI back on
+              {usesAi ? "Turn AI back on" : "Turn back on"}
             </Button>
           ) : (
             <Button
@@ -181,6 +264,11 @@ function AppRow({
               variant="destructive-outline"
               disabled={pending}
               data-testid={`app-ai-revoke-${app.id}`}
+              title={
+                storage
+                  ? "Turns off this app's AI and cloud access. Its files stay in your cloud."
+                  : undefined
+              }
               onClick={() => onUpdate({ appId: app.id, revoked: true })}
             >
               Revoke
@@ -332,7 +420,7 @@ export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId:
         />
       </SettingsSection>
 
-      <SettingsSection title="Apps using AI">
+      <SettingsSection title="Apps using AI or cloud storage">
         {overview.isError ? (
           <SettingsRow
             title="Couldn't read the apps"
@@ -344,9 +432,9 @@ export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId:
           <SettingsRow title="Loading…" description="" />
         ) : data.apps.length === 0 ? (
           <SettingsRow
-            title="No app uses this computer's AI yet"
+            title="No app uses this computer's AI or your cloud yet"
             description={
-              'Ask Uno "make me an app that translates text" — it builds the app and connects it here with a $10 limit.'
+              'Ask Uno "make me an app that translates text" or "a photo album" — it builds the app and connects it here: AI with a $10 limit, files in your cloud.'
             }
           />
         ) : (

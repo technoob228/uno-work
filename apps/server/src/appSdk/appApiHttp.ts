@@ -9,6 +9,7 @@ import type { AppTaskTools } from "@t3tools/contracts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { StoredAppTask } from "./appAiStore.ts";
+import type { AppStorage } from "./appStorage.ts";
 import type { AppApiReply, AppTaskView } from "./appTasks.ts";
 import {
   type ModelPrice,
@@ -35,6 +36,8 @@ export interface AppApiCaller {
   readonly spentUsd: number;
   readonly manifestCwd: string | null;
   readonly taskToolsCap: AppTaskTools;
+  /** Cloud storage the manifest asks for (`"storage"`); null = none. */
+  readonly storage: { readonly limitBytes: number } | null;
 }
 
 export interface AppApiTaskDetail {
@@ -71,6 +74,8 @@ export interface AppApiCore {
   readonly viewTask: (task: StoredAppTask) => Promise<AppTaskView>;
   readonly taskDetail: (task: StoredAppTask) => Promise<AppApiTaskDetail | null>;
   readonly stopTask: (caller: AppApiCaller, task: StoredAppTask) => Promise<boolean>;
+  /** The app's folder in the account's cloud; absent when the daemon has none. */
+  readonly storage?: AppStorage;
 }
 
 class BodyTooLarge extends Error {}
@@ -163,6 +168,13 @@ export function makeAppApiHandler(core: AppApiCore) {
           remainingUsd: Math.round(remaining(caller) * 1e6) / 1e6,
           taskToolsCap: caller.taskToolsCap,
         },
+        storage: caller.storage
+          ? {
+              enabled: true,
+              limitBytes: caller.storage.limitBytes,
+              usedBytes: core.storage?.cachedUsage(caller.appId)?.usedBytes ?? null,
+            }
+          : { enabled: false },
         defaults,
         home: core.home,
       },
@@ -471,7 +483,7 @@ export function makeAppApiHandler(core: AppApiCore) {
           err(
             401,
             "invalid_app_token",
-            'Missing or unknown app token. An app gets one when its manifest ~/.uno/apps/<id>.json has an "ai" block.',
+            'Missing or unknown app token. An app gets one when its manifest ~/.uno/apps/<id>.json has an "ai" or "storage" block.',
           ),
         );
       }
@@ -493,6 +505,31 @@ export function makeAppApiHandler(core: AppApiCore) {
         if (method === "GET" && tail === undefined) return await getTask(caller, taskId, url, res);
         if (method === "GET" && tail === "/events") return await taskEvents(caller, taskId, res);
         if (method === "POST" && tail === "/stop") return await stopTask(caller, taskId, res);
+      }
+      if (route === "/v1/storage" || route.startsWith("/v1/storage/")) {
+        if (!caller.storage) {
+          return send(
+            res,
+            err(
+              403,
+              "storage_not_allowed",
+              'This app\'s manifest does not ask for cloud storage. Add "storage": {"limitGb": 5} to ~/.uno/apps/<id>.json.',
+            ),
+          );
+        }
+        if (!core.storage) {
+          return send(
+            res,
+            err(503, "storage_unavailable", "Cloud storage isn't available on this computer."),
+          );
+        }
+        const reply = await core.storage.handle(
+          { appId: caller.appId, limitBytes: caller.storage.limitBytes, method, route, url },
+          req,
+          res,
+        );
+        if (reply) send(res, reply);
+        return;
       }
       send(res, err(404, "not_found", `No ${method} ${route} in the Uno App API.`));
     } catch (cause) {
