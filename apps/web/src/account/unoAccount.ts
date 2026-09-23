@@ -65,7 +65,7 @@ export class AccountUnavailableError extends Error {
   }
 }
 
-type Method = "GET" | "POST" | "PUT";
+type Method = "GET" | "POST" | "PUT" | "PATCH";
 
 function errorFrom(status: number, body: unknown): Error {
   if (status === 401) return new AccountSignInRequiredError();

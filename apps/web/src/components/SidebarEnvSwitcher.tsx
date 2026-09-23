@@ -2,14 +2,17 @@ import {
   CheckIcon,
   ChevronsUpDownIcon,
   LaptopIcon,
+  LayoutGridIcon,
   Loader2Icon,
   PlusIcon,
   RefreshCwIcon,
   StarIcon,
 } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import type { EnvironmentId, EnvironmentConnectionState } from "@t3tools/contracts";
 
+import { accountTransport } from "../account/unoAccount";
 import { AddEnvModal } from "./AddEnvModal";
 import { isElectron } from "../env";
 import { connectUnoBox, describeUnoBoxConnectProgress } from "../unoBoxConnect";
@@ -109,6 +112,7 @@ export function SidebarEnvSwitcher({
   variant = "card",
 }: { variant?: "card" | "compact" | "header" } = {}) {
   const [addEnvOpen, setAddEnvOpen] = useState(false);
+  const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [connecting, setConnecting] = useState<{ boxId: number; label: string } | null>(null);
   const { reconnect, reconnectingId } = useReconnectEnvironment();
@@ -485,6 +489,19 @@ export function SidebarEnvSwitcher({
                     {unlinkedLocalDaemon.label} · Uno Work is running here
                   </div>
                 </div>
+              </button>
+            ) : null}
+            {accountTransport() !== "none" ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  void navigate({ to: "/my-uno" });
+                }}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
+              >
+                <LayoutGridIcon className="size-3.5 text-muted-foreground" />
+                <span>All computers, sites and plan</span>
               </button>
             ) : null}
             <button

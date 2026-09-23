@@ -1976,7 +1976,10 @@ function registerIpcHandlers(): void {
     const input = raw as { method?: unknown; path?: unknown; body?: unknown } | null;
     const method = input?.method;
     const path = input?.path;
-    if ((method !== "GET" && method !== "POST" && method !== "PUT") || typeof path !== "string") {
+    if (
+      (method !== "GET" && method !== "POST" && method !== "PUT" && method !== "PATCH") ||
+      typeof path !== "string"
+    ) {
       return { status: 400, body: { error: "INVALID_REQUEST" } };
     }
     return unoAccount.request({

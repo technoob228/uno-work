@@ -585,6 +585,8 @@ function fleetBox(id, name, status, daemon, edgePort) {
     createdAt: iso(minsAgo(60 * 24 * 3)),
     addressReadyAt: 0,
     edge: null,
+    comment: "",
+    workMachine: Boolean(daemon),
   };
   fleet.set(id, b);
   if (daemon && edgePort) startEdge(b);
@@ -604,6 +606,10 @@ function fleetJson(b) {
     created_at: b.createdAt,
     internal_ip: `10.77.0.${b.id % 250}`,
     ssh_command: `ssh -p ${40000 + b.id} uno@203.0.113.42`,
+    comment: b.comment,
+    work_machine: b.workMachine,
+    always_on: !b.workMachine,
+    started_at: b.status === "running" ? b.createdAt : null,
     ...(hasEdge
       ? { hostname: `127.0.0.1:${b.edgePort}`, url: `http://127.0.0.1:${b.edgePort}` }
       : {}),
@@ -720,6 +726,280 @@ function initFleet() {
   fleetBox(201, "night-owl", "sleeping", parseDaemon(process.env.MOCK_SLEEPING_DAEMON), 18201);
   fleetBox(202, "outreach-machine", "running", null, null);
   fleetBox(203, "old-experiment", "error", null, null);
+  // "My Uno": roles live in the comment; Work computers are workspaces.
+  fleet.get(BOX_ID).workMachine = true;
+  fleet.get(BOX_ID).ramMb = 4096;
+  fleet.get(BOX_ID).vcpu = 2;
+  fleet.get(BOX_ID).diskGb = 20;
+  fleet.get(201).workMachine = true;
+  fleet.get(202).comment = "[production] sends the outreach emails";
+  fleet.get(202).ramMb = 1024;
+  fleet.get(203).comment = "[sandbox]";
+  fleet.get(203).ramMb = 1024;
+}
+
+// ---------------------------------------------------------------- My Uno ---
+// The account in one window (Uno Work → My Uno): plans v2, sites, cloud,
+// payments, roles, "Add computer" for servers, and a server's monitor/apps/logs.
+
+const PLANS_V2 = [
+  ["small", "Small", 5, 15, 20, 1, 1, 15, 25, 5],
+  ["plus", "Plus", 20, 30, 50, 4, 2, 40, 100, 10],
+  ["pro-v2", "Pro", 70, 50, 120, 16, 8, 120, 300, 20],
+  ["max", "Max", 200, 100, 300, 48, 16, 300, 1024, 40],
+].flatMap(([slug, name, compute, ai, aiPrice, ramGb, vcpu, disk, s3, boost]) =>
+  [false, true].map((withAi) => ({
+    slug: withAi ? `${slug}-ai` : slug,
+    name,
+    price_usd: withAi ? aiPrice : compute,
+    compute_price_usd: compute,
+    generation: 2,
+    base_slug: slug,
+    ai_bundle: withAi,
+    ai_credits_usd: withAi ? ai : 0,
+    max_box: { ram_mb: ramGb * 1024, vcpu },
+    peak: { ram_mb: ramGb * 1024, vcpu },
+    pool: { ram_hours: ramGb * 750, vcpu_hours: vcpu * 750 },
+    disk_gb: disk,
+    s3_gb: s3,
+    boost_hours: boost,
+    cloud_work: ramGb >= 4,
+    legacy: false,
+  })),
+);
+const MY_PLAN = PLANS_V2.find((p) => p.slug === (process.env.MOCK_PLAN || "pro-v2-ai"));
+
+const SITES = [
+  {
+    slug: "q3-report-7f2a",
+    size_bytes: 2_400_000,
+    files_count: 12,
+    has_password: true,
+    updated_at: iso(minsAgo(60 * 5)),
+  },
+  {
+    slug: "landing-caba",
+    size_bytes: 18_700_000,
+    files_count: 64,
+    custom_domain: "caba.example.com",
+    updated_at: iso(minsAgo(60 * 24 * 2)),
+  },
+  {
+    slug: "wedding-photos",
+    size_bytes: 120_000_000,
+    files_count: 230,
+    updated_at: iso(minsAgo(60 * 24 * 20)),
+  },
+].map((d, i) => ({ id: i + 1, url: `https://${d.slug}.uno4.dev`, has_password: false, ...d }));
+
+const SERVER_APPS = new Map([
+  [
+    202,
+    [
+      {
+        deployment_id: 901,
+        template_id: "wg-easy",
+        name: "WireGuard VPN",
+        icon: "🛡️",
+        status: "running",
+        url: "https://wg-202.app.uno4.dev",
+      },
+      {
+        deployment_id: 902,
+        template_id: "n8n",
+        name: "n8n",
+        icon: "🔁",
+        status: "running",
+        url: "https://n8n-202.app.uno4.dev",
+      },
+    ],
+  ],
+  [
+    BOX_ID,
+    [
+      {
+        deployment_id: 77,
+        template_id: "memos",
+        name: "Memos",
+        icon: "📝",
+        status: "running",
+        url: "https://memos-123.app.uno4.dev",
+      },
+    ],
+  ],
+]);
+
+function myUnoSubscription() {
+  const running = [...fleet.values()].filter((b) => b.status === "running");
+  return {
+    id: 1,
+    plan: MY_PLAN.slug,
+    status: "active",
+    price_usd: MY_PLAN.price_usd,
+    period_start: iso(minsAgo(60 * 24 * 9)),
+    next_billing_at: iso(new Date(Date.now() + 21 * 86400_000)),
+    pending_plan: null,
+    plan_limits: MY_PLAN,
+    ai_credits: {
+      monthly_usd: MY_PLAN.ai_credits_usd,
+      period_usd: MY_PLAN.ai_credits_usd,
+      carry_usd: 4.2,
+    },
+    usage: {
+      running_ram_mb: running.reduce((sum, b) => sum + b.ramMb, 0),
+      running_vcpu: running.reduce((sum, b) => sum + b.vcpu, 0),
+      disk_gb_used: [...fleet.values()].reduce((sum, b) => sum + b.diskGb, 0) * 0.6,
+      box_count: fleet.size,
+    },
+  };
+}
+
+async function handleMyUno(req, res, url) {
+  const p = url.pathname;
+  const GET = req.method === "GET";
+  if (GET && p === "/api/v1/box-subscription") return (send(res, 200, myUnoSubscription()), true);
+  if (GET && p === "/api/v1/work/plans") {
+    return (send(res, 200, { plans: PLANS_V2, plans_v2: true }), true);
+  }
+  if (GET && p === "/api/v1/work/sites") {
+    const used = SITES.reduce((sum, d) => sum + d.size_bytes, 0);
+    return (
+      send(res, 200, {
+        deploys: SITES,
+        storage_used_bytes: used,
+        storage_limit_bytes: 10 * 1024 ** 3,
+      }),
+      true
+    );
+  }
+  if (GET && p === "/api/v1/buckets") {
+    return (
+      send(res, 200, {
+        buckets: [{ id: 7, name: "files", used_bytes: 23.4 * 1024 ** 3, quota_bytes: 0 }],
+        storage: {
+          used_bytes: 23.4 * 1024 ** 3,
+          quota_bytes: MY_PLAN.s3_gb * 1024 ** 3,
+          over_quota: false,
+        },
+      }),
+      true
+    );
+  }
+  if (GET && p === "/pay/history") {
+    return (
+      send(res, 200, {
+        success: true,
+        payments: [
+          {
+            order_id: "d-1",
+            amount: 100,
+            payment_method: "direct",
+            status: "completed",
+            created_at: iso(minsAgo(60 * 24 * 9 + 30)),
+            completed_at: iso(minsAgo(60 * 24 * 9 + 20)),
+          },
+          {
+            order_id: "n-2",
+            amount: 50,
+            payment_method: "nowpayments",
+            status: "expired",
+            created_at: iso(minsAgo(60 * 24 * 15)),
+          },
+          {
+            order_id: "d-3",
+            amount: 25,
+            payment_method: "direct",
+            status: "completed",
+            created_at: iso(minsAgo(60 * 24 * 40)),
+            completed_at: iso(minsAgo(60 * 24 * 40)),
+          },
+        ],
+      }),
+      true
+    );
+  }
+  if (GET && p === "/pay/spending") {
+    return (
+      send(res, 200, {
+        success: true,
+        spending: [
+          {
+            amount: -MY_PLAN.price_usd,
+            category: "box_subscription",
+            description: `Plan ${MY_PLAN.name}${MY_PLAN.ai_bundle ? " + Uno AI" : ""} — monthly`,
+            created_at: iso(minsAgo(60 * 24 * 9)),
+          },
+          {
+            amount: -10,
+            category: "llm",
+            description: "Uno AI credits",
+            created_at: iso(minsAgo(60 * 24 * 12)),
+          },
+        ],
+      }),
+      true
+    );
+  }
+  if (req.method === "POST" && p === "/api/v1/work/servers") {
+    const body = await readBody(req);
+    if (!body.name || !body.ram_mb) return (send(res, 400, { error: "MISSING_FIELDS" }), true);
+    if (body.ram_mb > MY_PLAN.max_box.ram_mb) {
+      return (
+        send(res, 403, { error: "SHAPE_TOO_LARGE", detail: "Bigger than your plan allows" }), true
+      );
+    }
+    const id = nextBoxId++;
+    const b = fleetBox(id, body.name, "provisioning", null, null);
+    b.ramMb = body.ram_mb;
+    b.vcpu = body.vcpu;
+    b.diskGb = body.disk_gb;
+    b.comment = body.comment || "";
+    b.workMachine = false;
+    setStatusLater(b, "running", BOOT_MS);
+    console.log(`created server #${id} ${b.name} (${b.comment})`);
+    return (send(res, 201, fleetJson(b)), true);
+  }
+  const m = p.match(/^\/api\/v1\/boxes\/(\d+)(\/[a-z]+)?$/);
+  if (!m) return false;
+  const b = fleet.get(Number(m[1]));
+  if (!b) return false;
+  const sub = m[2] || "";
+  if (req.method === "PATCH" && sub === "") {
+    const body = await readBody(req);
+    b.comment = typeof body.comment === "string" ? body.comment : b.comment;
+    console.log(`box #${b.id} comment → ${b.comment}`);
+    return (send(res, 200, fleetJson(b)), true);
+  }
+  if (b.id === BOX_ID) return false; // "my-computer" keeps the single-box mock below
+  if (GET && sub === "/apps") return (send(res, 200, { apps: SERVER_APPS.get(b.id) ?? [] }), true);
+  if (GET && sub === "/metrics") {
+    if (b.status !== "running")
+      return (send(res, 409, { ok: false, error: "box is not running" }), true);
+    return (
+      send(res, 200, {
+        ok: true,
+        box_id: b.id,
+        live: true,
+        uptime_s: 3 * 86400 + 7200,
+        cpu: { usage_pct: 12 + Math.random() * 20, vcpu: b.vcpu },
+        mem: { used_mb: Math.round(b.ramMb * 0.46), limit_mb: b.ramMb },
+        disk: { used_gb: b.diskGb * 0.38, total_gb: b.diskGb },
+        history: [],
+      }),
+      true
+    );
+  }
+  if (GET && sub === "/applogs") {
+    const t = Date.now();
+    const lines = Array.from({ length: 24 }, (_, i) => {
+      const at = new Date(t - (24 - i) * 37_000).toISOString().replace("T", " ").slice(0, 19);
+      return {
+        line: `${at} wg-easy[412]: peer ${["phone", "laptop", "tablet"][i % 3]} handshake ok`,
+      };
+    });
+    return (send(res, 200, { ok: true, source: "docker", lines, truncated: false }), true);
+  }
+  return false;
 }
 
 async function handleFleet(req, res, url) {
@@ -829,10 +1109,27 @@ const server = http.createServer(async (req, res) => {
   const path = url.pathname;
   console.log(`${req.method} ${url.pathname}${url.search}`);
 
+  // "Sign in with Uno" for the desktop app: the console page bounces straight
+  // back to the app's loopback with a code; the code is exchanged for a token.
+  if (path === "/work/desktop") {
+    const port = url.searchParams.get("port");
+    const state = url.searchParams.get("state");
+    res.writeHead(302, {
+      Location: `http://127.0.0.1:${port}/uno-callback?code=mock-code&state=${encodeURIComponent(state ?? "")}`,
+    });
+    return res.end();
+  }
+  if (path === "/api/v1/work/desktop-token" && req.method === "POST") {
+    return send(res, 200, {
+      token: "uno_usr_mock_desktop",
+      user: { id: 85, email: "demo@uno4.dev", username: "demo" },
+    });
+  }
   if (!req.headers.authorization?.startsWith("Bearer ")) {
     return send(res, 401, { error: "UNAUTHORIZED" });
   }
   if (SCENARIO === "not-deployed" && NOT_DEPLOYED.test(path)) return notFound(res);
+  if (SCENARIO === "fleet" && (await handleMyUno(req, res, url))) return;
   if (SCENARIO === "fleet" && (await handleFleet(req, res, url))) return;
 
   if (path === "/auth/me") {

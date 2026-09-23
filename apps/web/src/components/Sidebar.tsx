@@ -181,6 +181,7 @@ import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarComputerRow } from "./sidebar/SidebarComputerRow";
+import { SidebarMyUnoRow } from "./sidebar/SidebarMyUnoRow";
 import { SidebarEnvSwitcher } from "./SidebarEnvSwitcher";
 import { SidebarAppsList } from "./sidebar/SidebarAppsList";
 import { SidebarFilesTree } from "./sidebar/SidebarFilesTree";
@@ -2264,6 +2265,7 @@ export default function Sidebar() {
       <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-0">
         <SidebarEnvSwitcher variant="header" />
         <SidebarComputerRow />
+        <SidebarMyUnoRow />
         <div className="pt-1.5 pb-1">
           <SidebarModeSwitch />
         </div>
