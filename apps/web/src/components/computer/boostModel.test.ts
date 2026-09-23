@@ -8,6 +8,7 @@ import {
   boostConfirmCopy,
   boostDisabledReason,
   boostPillLabel,
+  boostResetDay,
   boostRefetchMs,
   isConnectionDrop,
   minutesLeft,
@@ -25,21 +26,23 @@ const OFF: UnoComputerBoost = {
   hours: 1,
   startedAt: null,
   endsAt: null,
-  hoursLeftToday: 3,
-  hoursPerDay: 4,
+  hoursPerMonth: 10,
+  hoursUsed: 7,
+  hoursLeft: 3,
+  periodResetsAt: "2026-10-01T00:00:00Z",
   reason: null,
 };
 const NOW = Date.parse("2026-09-24T12:00:00Z");
 const at = (minutes: number) => new Date(NOW + minutes * 60_000).toISOString();
 
 describe("boost copy", () => {
-  it("says the sizes, the restart and today's hours", () => {
+  it("says the sizes, the restart and this month's hours", () => {
     const copy = boostConfirmCopy(OFF);
     expect(copy.title).toBe("Boost this computer ×2 for 1 hour?");
     expect(copy.body).toBe(
       "4 GB → 8 GB memory and 2 → 4 cores. Your computer restarts for about 15 seconds now and again when the hour ends. A reply the AI is writing at that moment will stop; chats, files and apps come back on their own.",
     );
-    expect(copy.allowance).toBe("3 of 4 boost hours left today.");
+    expect(copy.allowance).toBe("3 of 10 boost hours left this month.");
     expect(copy.confirm).toBe("Boost for 1 hour");
   });
 
@@ -49,6 +52,19 @@ describe("boost copy", () => {
       "Used up today",
     );
     expect(boostDisabledReason({ ...OFF, available: false })).toMatch(/isn't available/);
+  });
+
+  it("says when the plan has no boost hours or they are used up", () => {
+    const none = { ...OFF, available: false, hoursPerMonth: 0, hoursLeft: 0, reason: "x" };
+    expect(boostDisabledReason(none)).toBe("Your plan has no boost hours.");
+    const usedUp = { ...OFF, available: false, hoursUsed: 10, hoursLeft: 0, reason: "x" };
+    expect(boostDisabledReason(usedUp)).toBe("Boost hours are used up until Oct 1.");
+    expect(boostDisabledReason({ ...usedUp, periodResetsAt: null })).toBe(
+      "This month's boost hours are used up.",
+    );
+    // The reset is 00:00 UTC: the day is the UTC calendar day, wherever the person is.
+    expect(boostResetDay("2027-01-01T00:00:00Z")).toBe("Jan 1");
+    expect(boostResetDay("nope")).toBeNull();
   });
 });
 
