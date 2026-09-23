@@ -149,6 +149,39 @@ describe("AppSdkService", () => {
     });
   });
 
+  it("an app that asks only for cloud storage gets a token, no AI, and a storage limit", async () => {
+    await writeManifest("album", { name: "Album", port: 3002, storage: { limitGb: 500 } });
+    await run(async (service) => {
+      await service.sync();
+      const caller = await service.core.authenticate(await tokenOf("album"));
+      // A manifest may ask for at most 20 GB; no AI without an "ai" block.
+      expect(caller).toMatchObject({
+        appId: "album",
+        chat: false,
+        tasks: false,
+        storage: { limitBytes: 20 * 1024 ** 3 },
+      });
+      let overview = await Effect.runPromise(service.overview);
+      expect(overview.apps[0]).toMatchObject({
+        id: "album",
+        status: "active",
+        storage: { limitBytes: 20 * 1024 ** 3, limitSetByPerson: false, prefix: "album/" },
+      });
+      overview = await Effect.runPromise(service.update({ appId: "album", storageLimitGb: 100 }));
+      expect(overview.apps[0]?.storage).toMatchObject({
+        limitBytes: 100 * 1024 ** 3,
+        limitSetByPerson: true,
+      });
+      await expect(
+        Effect.runPromise(service.update({ appId: "album", storageLimitGb: 0 })),
+      ).rejects.toThrow();
+      // Dropping "storage" from the manifest takes the token away.
+      await writeManifest("album", { name: "Album", port: 3002 });
+      await service.sync();
+      await expect(stat(path.join(keysDir, "album", "token"))).rejects.toThrow();
+    });
+  });
+
   it("a token file tampered on disk is replaced, the old one stops working", async () => {
     await writeManifest("notes", { name: "Notes", port: 3000, ai: { chat: true } });
     await run(async (service) => {

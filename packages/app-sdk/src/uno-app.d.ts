@@ -8,7 +8,7 @@ export declare class UnoAppError extends Error {
   constructor(status: number, code: string, message: string, type?: string);
   /** HTTP status; 0 when there was no response (config missing, API unreachable). */
   readonly status: number;
-  /** `invalid_app_token` | `ai_not_allowed` | `app_limit_reached` | `ai_not_connected` | `invalid_request` | `cwd_outside_home` | `no_app_token` | `unreachable` | … */
+  /** `invalid_app_token` | `ai_not_allowed` | `app_limit_reached` | `ai_not_connected` | `invalid_request` | `cwd_outside_home` | `no_app_token` | `unreachable` | `storage_not_allowed` | `app_storage_full` | `cloud_full` | `file_not_found` | `invalid_key` | `storage_not_connected` | … */
   readonly code: string;
   readonly type: string;
 }
@@ -120,6 +120,7 @@ export interface UnoTask extends TaskState {
 export interface WhoAmI {
   app: { id: string; name: string };
   ai: { chat: boolean; tasks: boolean; limitUsd: number; spentUsd: number; remainingUsd: number };
+  storage: { enabled: boolean; limitBytes?: number; usedBytes?: number | null };
   defaults: { chatModel: string; taskHarness: string };
   home: string;
   [key: string]: unknown;
@@ -129,6 +130,71 @@ export interface TranscriptionJson {
   text: string;
   segments?: Array<{ start: number; end: number; text: string; [key: string]: unknown }>;
   [key: string]: unknown;
+}
+
+export interface StorageFile {
+  /** Relative to the app's folder, e.g. "photos/2026/cat.jpg". */
+  key: string;
+  name: string;
+  size: number;
+  modifiedAt: string | null;
+}
+
+export interface StorageListing {
+  prefix: string;
+  /** Sub-folders, each ending in "/". */
+  folders: string[];
+  files: StorageFile[];
+  truncated: boolean;
+}
+
+export interface StorageUsage {
+  /** Where the person finds the files: "Cloud storage → apps/<id>/". */
+  folder: string;
+  bucketId: number;
+  usedBytes: number;
+  files: number;
+  limitBytes: number;
+  remainingBytes: number;
+}
+
+export type StorageData = string | Blob | ArrayBuffer | ArrayBufferView;
+
+/**
+ * The app's own folder in the Uno account's cloud (manifest `"storage"`).
+ * Keys are relative to that folder: "photos/2026/cat.jpg". One file ≤ 256 MB.
+ */
+export interface UnoStorage {
+  /** Save bytes/text under a key (overwrites). Content-Type from `contentType` or the extension. */
+  put(
+    key: string,
+    data: StorageData,
+    opts?: { contentType?: string; signal?: AbortSignal },
+  ): Promise<{ key: string; size: number }>;
+  putJson(key: string, value: unknown): Promise<{ key: string; size: number }>;
+  /** Upload a file from disk, streamed (Node/Bun). `key` defaults to the file name. */
+  upload(
+    localPath: string,
+    key?: string,
+    opts?: { contentType?: string; signal?: AbortSignal },
+  ): Promise<{ key: string; size: number }>;
+  /** Raw Response with a streaming body; `range` = an HTTP Range header ("bytes=0-1023"). */
+  open(key: string, opts?: { range?: string; signal?: AbortSignal }): Promise<Response>;
+  get(key: string): Promise<Uint8Array>;
+  getText(key: string): Promise<string>;
+  getJson<T = unknown>(key: string): Promise<T>;
+  /** Download to a file on disk (Node/Bun); resolves with the path. */
+  download(key: string, localPath: string): Promise<string>;
+  exists(key: string): Promise<boolean>;
+  /** One folder level ("" = the app's whole folder). */
+  list(prefix?: string): Promise<StorageListing>;
+  /** Every file under a folder, walking sub-folders. */
+  listAll(prefix?: string): Promise<StorageFile[]>;
+  /** Delete a file, or a whole folder when the key ends in "/". */
+  delete(key: string): Promise<{ deleted: number }>;
+  /** Temporary https link (default 15 min, max 1 h) for <img src>, <a href> or a redirect. */
+  url(key: string, opts?: { expiresIn?: number }): Promise<string>;
+  usage(): Promise<StorageUsage>;
 }
 
 export interface UnoAppClient {
@@ -149,6 +215,8 @@ export interface UnoAppClient {
   tasks(): Promise<any>;
   whoami(): Promise<WhoAmI>;
   models(): Promise<any>;
+  /** The app's folder in the account's cloud — for files the person keeps. */
+  storage: UnoStorage;
   /** Resolved address + token (waits up to 15 s for the daemon to write the key). */
   config(): Promise<ResolvedConfig>;
 }
@@ -173,3 +241,5 @@ export declare const getTask: UnoAppClient["getTask"];
 export declare const tasks: UnoAppClient["tasks"];
 export declare const whoami: UnoAppClient["whoami"];
 export declare const models: UnoAppClient["models"];
+export declare const storage: UnoStorage;
+export declare function guessContentType(name: string): string;

@@ -1,6 +1,7 @@
 /**
- * "Cloud storage: X of Y GB" on the This computer screen — the account's S3
- * as the computer's second disk, one click from Files.
+ * "Cloud storage · X of Y GB" on the This computer screen — the account's S3,
+ * where files live, next to the working disk where programs run; one click
+ * from Files.
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
@@ -27,8 +28,15 @@ export function ComputerCloudStorageRow({
         <CloudIcon className="size-4.5 text-sky-500" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium">
-          Cloud storage: {formatQuota(state.usedBytes, state.quotaBytes)}
+        <span className="flex flex-wrap items-baseline gap-x-2 text-sm">
+          <span className="font-medium">Cloud storage</span>
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {formatQuota(state.usedBytes, state.quotaBytes)}
+          </span>
+        </span>
+        <span className="mt-0.5 block text-xs text-muted-foreground">
+          Where your files live — photos, documents, archives. Roomy and cheap; apps keep their
+          files here, the working disk is just for running them.
         </span>
         <span className="mt-1.5 block max-w-sm">
           <CloudUsageBar used={state.usedBytes} quota={state.quotaBytes} />

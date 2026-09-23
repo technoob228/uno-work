@@ -306,7 +306,7 @@ function LoadStrip({
     },
     {
       look: "disk",
-      label: "Disk",
+      label: "Working disk",
       value:
         load?.diskUsedGb != null
           ? `${formatGb(load.diskUsedGb)}${load.diskTotalGb ? ` of ${formatGb(load.diskTotalGb)}` : ""}`

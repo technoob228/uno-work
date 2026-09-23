@@ -35,6 +35,25 @@ const done = await t.wait(); // { status: "done", result: { text }, changedFiles
 Without `model` the person's choice for apps is used (`"default"`).
 `chat(body)` is the raw OpenAI-compatible call; `models()` lists gateway models.
 
+## 3. Keep the person's files in the cloud
+
+Add `"storage": true` (5 GB) or `"storage": {"limitGb": 10}` to the manifest.
+The app gets its own folder in the account's cloud (`Cloud storage → apps/<id>/`)
+— for photos, documents, uploads, exports. The computer's disk is for the
+database, cache and temporary files only.
+
+```js
+import { storage } from "@uno4/app";
+await storage.put("photos/cat.jpg", bytes); // or storage.upload(localPath, key)
+const link = await storage.url("photos/cat.jpg"); // <img src={link}> / redirect, ≤ 1 h
+const text = await storage.getText("notes/today.md");
+const { folders, files } = await storage.list("photos/");
+await storage.delete("photos/"); // a whole folder
+```
+
+Errors: `storage_not_allowed` (403, no `"storage"` in the manifest),
+`app_storage_full` (507, the app's limit), `cloud_full` (402, the account's plan).
+
 ## Config
 
 First match wins:

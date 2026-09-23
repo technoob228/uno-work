@@ -47,3 +47,16 @@ person raises the limit in Uno Work → Settings → Apps), `ai_not_connected`
 503, `no_app_token` / `unreachable` (status 0).
 
 Tests: `python3 -m unittest discover -s tests`.
+
+## Cloud storage
+
+With `"storage": true` in the manifest the app gets its own folder in the
+account's cloud — keep the person's files there, not on the computer's disk:
+
+```python
+st = uno_app.storage                      # or uno_app.Client(app_id="notes").storage
+st.upload("/tmp/upload.jpg", "photos/cat.jpg")
+st.put("notes/today.md", "# Today")
+link = st.url("photos/cat.jpg")          # temporary https link for a browser (<= 1 h)
+st.get_text("notes/today.md"); st.list("photos/"); st.delete("photos/cat.jpg")
+```

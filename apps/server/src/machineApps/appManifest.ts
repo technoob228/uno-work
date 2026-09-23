@@ -13,6 +13,7 @@
  *     "cwd": "~/projects/notes",    // optional: where to run the command (inside home)
  *     "autostart": true,            // optional: start it when the computer starts (default with a command)
  *     "ai": {"chat": true}          // optional: use the machine's AI through the App SDK (docs/app-sdk.md)
+ *     "storage": {"limitGb": 5}     // optional: keep files in the account's cloud (App SDK)
  *   }
  *
  * Everything in the file is untrusted text written by whoever can write to the
@@ -60,6 +61,8 @@ export interface AppManifest {
   readonly autostart: boolean;
   /** What the app asks of the machine's AI (App SDK); null = nothing. */
   readonly ai: AppAiRequest | null;
+  /** Cloud storage the app asks for (App SDK, docs/app-sdk.md); null = none. */
+  readonly storage: AppStorageRequest | null;
 }
 
 /**
@@ -89,6 +92,33 @@ export function parseAppAiRequest(value: unknown): AppAiRequest | null {
       ? Math.min(rawLimit, MANIFEST_AI_MAX_LIMIT_USD)
       : MANIFEST_AI_MAX_LIMIT_USD;
   return { chat, tasks, limitUsd: Math.round(limitUsd * 100) / 100 };
+}
+
+/**
+ * `"storage": {"limitGb": 5}` — or `"storage": true` — the app keeps its
+ * files (photos, documents, uploads, exports) in the Uno account's cloud,
+ * in its own folder `Cloud → apps/<id>/`, through the App API. As with the AI
+ * limit, a manifest may ask for at most {@link MANIFEST_STORAGE_MAX_LIMIT_GB};
+ * only the person can give more in Settings → Apps.
+ */
+export interface AppStorageRequest {
+  readonly limitGb: number;
+}
+
+export const MANIFEST_STORAGE_DEFAULT_LIMIT_GB = 5;
+export const MANIFEST_STORAGE_MAX_LIMIT_GB = 20;
+
+export function parseAppStorageRequest(value: unknown): AppStorageRequest | null {
+  if (value === true) return { limitGb: MANIFEST_STORAGE_DEFAULT_LIMIT_GB };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (record["enabled"] === false) return null;
+  const raw = record["limitGb"];
+  const limitGb =
+    typeof raw === "number" && Number.isFinite(raw) && raw > 0
+      ? Math.min(raw, MANIFEST_STORAGE_MAX_LIMIT_GB)
+      : MANIFEST_STORAGE_DEFAULT_LIMIT_GB;
+  return { limitGb: Math.round(limitGb * 100) / 100 };
 }
 
 export type ManifestResult =
@@ -223,6 +253,7 @@ export function validateManifest(
       cwd,
       autostart: typeof record["autostart"] === "boolean" ? record["autostart"] : command !== null,
       ai: parseAppAiRequest(record["ai"]),
+      storage: parseAppStorageRequest(record["storage"]),
     },
   };
 }
