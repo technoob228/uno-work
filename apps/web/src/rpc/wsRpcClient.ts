@@ -148,6 +148,9 @@ export interface WsRpcClient {
     readonly resolvePluginPanelThread: RpcUnaryMethod<typeof WS_METHODS.pluginsResolvePanelThread>;
     readonly subscribePlugins: RpcStreamMethod<typeof WS_METHODS.subscribePlugins>;
     readonly createUnoLlmTopUpAction: RpcUnaryMethod<typeof WS_METHODS.unoCreateLlmTopUpAction>;
+    readonly listPersonalAi: RpcUnaryNoArgMethod<typeof WS_METHODS.unoPersonalAiList>;
+    readonly startPersonalAi: RpcUnaryMethod<typeof WS_METHODS.unoPersonalAiStart>;
+    readonly stopPersonalAi: RpcUnaryMethod<typeof WS_METHODS.unoPersonalAiStop>;
     readonly createUnoVideoUpload: RpcUnaryMethod<typeof WS_METHODS.unoVideoCreateUpload>;
     readonly completeUnoVideoUpload: RpcUnaryMethod<typeof WS_METHODS.unoVideoCompleteUpload>;
     readonly createUnoVideoJob: RpcUnaryMethod<typeof WS_METHODS.unoVideoCreateJob>;
@@ -417,6 +420,11 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         }),
       createUnoLlmTopUpAction: (input) =>
         transport.request((client) => client[WS_METHODS.unoCreateLlmTopUpAction](input)),
+      listPersonalAi: () => transport.request((client) => client[WS_METHODS.unoPersonalAiList]({})),
+      startPersonalAi: (input) =>
+        transport.request((client) => client[WS_METHODS.unoPersonalAiStart](input)),
+      stopPersonalAi: (input) =>
+        transport.request((client) => client[WS_METHODS.unoPersonalAiStop](input)),
       createUnoVideoUpload: (input) =>
         transport.request((client) => client[WS_METHODS.unoVideoCreateUpload](input)),
       completeUnoVideoUpload: (input) =>

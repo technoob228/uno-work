@@ -116,6 +116,18 @@ export const ModelCapabilitiesMetadata = Schema.Struct({
       completionPer1MUsd: Schema.optional(Schema.Number),
       blendedPer1MUsd: Schema.optional(Schema.Number),
       estimatedSeriousTaskUsd: Schema.optional(Schema.Number),
+      /** Personal AI: цена активного часа модели на личном GPU. */
+      perHourUsd: Schema.optional(Schema.Number),
+    }),
+  ),
+  /**
+   * Personal AI: модель живёт на личном GPU аккаунта. Перед работой её надо
+   * запустить (несколько минут), платится время, а не токены.
+   */
+  personal: Schema.optional(
+    Schema.Struct({
+      idleSleepS: Schema.optional(Schema.Number),
+      size: Schema.optional(Schema.String),
     }),
   ),
   modalities: Schema.optional(

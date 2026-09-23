@@ -557,6 +557,13 @@ export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 export const UNO_GATEWAY_BASE_URL = "https://api.getuno.xyz/v1";
 
 /**
+ * Personal AI — модели на личном GPU аккаунта (Uno GPU). OpenAI-совместимый
+ * вход — `${UNO_PERSONAL_AI_BASE_URL}/v1`, список/старт/стоп —
+ * `${UNO_PERSONAL_AI_BASE_URL}/personal/models`. Ключ — тот же ключ шлюза.
+ */
+export const UNO_PERSONAL_AI_BASE_URL = "https://gpu.uno4.dev";
+
+/**
  * Уровень доступа агентских сессий к аккаунту Uno. Демон чеканит на боксе
  * scoped-токен этого уровня и кладёт его в env харнесов; "off" выключает
  * выдачу целиком.

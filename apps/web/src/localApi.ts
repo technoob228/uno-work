@@ -143,6 +143,18 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
         rpcClient
           ? rpcClient.server.createUnoLlmTopUpAction(input ?? {})
           : Promise.reject(unavailableLocalBackendError()),
+      listPersonalAi: () =>
+        rpcClient
+          ? rpcClient.server.listPersonalAi()
+          : Promise.reject(unavailableLocalBackendError()),
+      startPersonalAi: (input) =>
+        rpcClient
+          ? rpcClient.server.startPersonalAi(input)
+          : Promise.reject(unavailableLocalBackendError()),
+      stopPersonalAi: (input) =>
+        rpcClient
+          ? rpcClient.server.stopPersonalAi(input)
+          : Promise.reject(unavailableLocalBackendError()),
       createUnoVideoUpload: (input) =>
         rpcClient
           ? rpcClient.server.createUnoVideoUpload(input)

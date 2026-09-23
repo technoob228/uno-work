@@ -115,7 +115,12 @@ import type {
   CredentialId,
   CredentialMetadata,
 } from "./credentialsVault.ts";
-import type { UnoCreateLlmTopUpActionResult } from "./rpc.ts";
+import type {
+  PersonalAiListResult,
+  PersonalAiModel,
+  PersonalAiModelInput,
+  UnoCreateLlmTopUpActionResult,
+} from "./rpc.ts";
 import type {
   UnoComputerActivity,
   UnoComputerActivityInput,
@@ -608,6 +613,9 @@ export interface LocalApi {
     createUnoLlmTopUpAction: (input?: {
       readonly amount?: number;
     }) => Promise<UnoCreateLlmTopUpActionResult>;
+    listPersonalAi: () => Promise<PersonalAiListResult>;
+    startPersonalAi: (input: PersonalAiModelInput) => Promise<PersonalAiModel>;
+    stopPersonalAi: (input: PersonalAiModelInput) => Promise<PersonalAiModel>;
     createUnoVideoUpload: (input: UnoVideoCreateUploadInput) => Promise<UnoVideoCreateUploadResult>;
     completeUnoVideoUpload: (
       input: UnoVideoCompleteUploadInput,

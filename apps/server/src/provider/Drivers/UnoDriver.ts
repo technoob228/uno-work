@@ -32,7 +32,9 @@ import {
   ProviderDriverKind,
   UNO_CODE_MINIMUM_VERSION,
   UNO_GATEWAY_BASE_URL,
+  UNO_PERSONAL_AI_BASE_URL,
   type ModelCapabilitiesMetadata,
+  type PersonalAiModel,
   type ServerProvider,
 } from "@t3tools/contracts";
 import { Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
@@ -42,6 +44,11 @@ import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGen
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
+import {
+  UNO_PERSONAL_PROVIDER_ID,
+  UNO_PERSONAL_WARMUP_HEADERS,
+  fetchPersonalAiModels,
+} from "../../unoPersonalAi.ts";
 import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
 import { buildMachineAppsInstructions } from "../../machineApps/machineAppsInstructions.ts";
 import { writeBrowserInstructionsFile } from "../browserInstructions.ts";
@@ -527,6 +534,7 @@ function buildUnoConfigContent(
   unoApiKey: string,
   models: UnoCatalog,
   instructionsFilePath?: string,
+  personalModels: ReadonlyArray<PersonalAiModel> = [],
 ): string {
   // opencode's config schema only accepts `{ name }`-shaped model entries;
   // strip the local tier metadata before injecting via OPENCODE_CONFIG_CONTENT.
@@ -576,6 +584,24 @@ function buildUnoConfigContent(
         },
         models: opencodeModelsByProvider[UNO_RUSSIA_PROVIDER_ID],
       },
+      // Personal AI — модели на личном GPU аккаунта. Только когда аккаунту
+      // они доступны (флаг gpu): иначе группы в выборе модели нет вовсе.
+      ...(personalModels.length > 0
+        ? {
+            [UNO_PERSONAL_PROVIDER_ID]: {
+              npm: "@ai-sdk/openai-compatible",
+              name: UNO_PERSONAL_SUBPROVIDER,
+              options: {
+                baseURL: `${UNO_PERSONAL_AI_BASE_URL}/v1`,
+                apiKey: "{env:UNO_API_KEY}",
+                headers: { ...UNO_PERSONAL_WARMUP_HEADERS },
+              },
+              models: Object.fromEntries(
+                personalModels.map((model) => [model.id, { name: model.name }]),
+              ),
+            },
+          }
+        : {}),
     },
     // Инструкции про встроенный браузер (путь к файлу). opencode дописывает
     // их к собственным инструкциям проекта.
@@ -612,7 +638,32 @@ function buildUnoConfigContent(
 const UNO_DEFAULT_DISPLAY_NAME = "Uno";
 
 function isUnoModelSlug(slug: string): boolean {
-  return slug.startsWith(`${UNO_PROVIDER_ID}/`) || slug.startsWith(`${UNO_RUSSIA_PROVIDER_ID}/`);
+  return (
+    slug.startsWith(`${UNO_PROVIDER_ID}/`) ||
+    slug.startsWith(`${UNO_RUSSIA_PROVIDER_ID}/`) ||
+    slug.startsWith(`${UNO_PERSONAL_PROVIDER_ID}/`)
+  );
+}
+
+/** Подпись группы в выборе модели (фильтр «провайдер»). */
+const UNO_PERSONAL_SUBPROVIDER = "Personal AI";
+
+type PersonalCatalog = Record<string, PersonalAiModel>;
+
+function personalCatalogBySlug(models: ReadonlyArray<PersonalAiModel>): PersonalCatalog {
+  return Object.fromEntries(
+    models.map((model) => [`${UNO_PERSONAL_PROVIDER_ID}/${model.id}`, model]),
+  );
+}
+
+export function metadataForPersonalModel(model: PersonalAiModel): ModelCapabilitiesMetadata {
+  return {
+    ...(model.contextTokens !== undefined ? { contextLength: model.contextTokens } : {}),
+    supports: { streaming: true, tools: true },
+    pricing: { perHourUsd: model.priceUsdPerHour },
+    personal: { idleSleepS: model.idleSleepS, size: model.size },
+    modalities: { input: ["text"], output: ["text"] },
+  };
 }
 
 export function metadataForCatalogModel(model: UnoCatalogModel): ModelCapabilitiesMetadata {
@@ -668,10 +719,22 @@ const stripUnoPrefix = (slug: string): string => {
 };
 
 const withCatalogMetadata =
-  (catalog: UnoCatalog) =>
+  (catalog: UnoCatalog, personal: PersonalCatalog = {}) =>
   (snapshot: ServerProviderDraft): ServerProviderDraft => ({
     ...snapshot,
     models: snapshot.models.map(({ subProvider: _drop, ...model }) => {
+      const personalModel = personal[model.slug];
+      if (personalModel) {
+        return {
+          ...model,
+          name: personalModel.name,
+          subProvider: UNO_PERSONAL_SUBPROVIDER,
+          capabilities: {
+            ...model.capabilities,
+            metadata: metadataForPersonalModel(personalModel),
+          },
+        };
+      }
       const catalogModel = catalog[model.slug];
       const metadata = catalogModel
         ? metadataForCatalogModel(catalogModel)
@@ -693,6 +756,13 @@ const sortUnoModels =
   (snapshot: ServerProviderDraft): ServerProviderDraft => ({
     ...snapshot,
     models: snapshot.models.toSorted((a, b) => {
+      // Personal AI — отдельной группой в конце: это «своя машина», а не
+      // очередная модель по токенам, и выбирают её осознанно.
+      const aPersonal = a.slug.startsWith(`${UNO_PERSONAL_PROVIDER_ID}/`);
+      const bPersonal = b.slug.startsWith(`${UNO_PERSONAL_PROVIDER_ID}/`);
+      if (aPersonal !== bPersonal) return aPersonal ? 1 : -1;
+      if (aPersonal) return a.slug.localeCompare(b.slug);
+
       const aId = stripUnoPrefix(a.slug);
       const bId = stripUnoPrefix(b.slug);
 
@@ -720,8 +790,11 @@ export const __unoDriverTest = {
   catalogKey,
   fetchUnoModelsCatalog,
   metadataForCatalogModel,
+  metadataForPersonalModel,
   normalizeUnoCatalogEntry,
+  personalCatalogBySlug,
   sortUnoModels,
+  withCatalogMetadata,
 } as const;
 
 const withInstanceIdentity =
@@ -775,6 +848,14 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
           failedAttempts: catalogFailures,
         });
       }
+      // Personal AI: список моделей личного GPU. Нет доступа или нет сети —
+      // пустой список, харнесс работает как раньше.
+      const personalModels = yield* Effect.promise(() =>
+        fetchPersonalAiModels(unoApiKey)
+          .then((result) => result.models)
+          .catch(() => [] as ReadonlyArray<PersonalAiModel>),
+      );
+      const personalCatalog = personalCatalogBySlug(personalModels);
       const browserBridge = yield* BrowserBridge;
       const instructionsFilePath = writeBrowserInstructionsFile({
         stateDir: serverConfig.stateDir,
@@ -791,7 +872,12 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
       const processEnv: NodeJS.ProcessEnv = {
         ...unoAgentEnv,
         ...baseProcessEnv,
-        OPENCODE_CONFIG_CONTENT: buildUnoConfigContent(unoApiKey, unoCatalog, instructionsFilePath),
+        OPENCODE_CONFIG_CONTENT: buildUnoConfigContent(
+          unoApiKey,
+          unoCatalog,
+          instructionsFilePath,
+          personalModels,
+        ),
         ...(unoApiKey.length > 0 ? { UNO_API_KEY: unoApiKey } : {}),
       };
       const continuationIdentity = defaultProviderContinuationIdentity({
@@ -847,7 +933,7 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         UNO_PRESENTATION,
       ).pipe(
         Effect.map(filterUnoModels),
-        Effect.map(withCatalogMetadata(unoCatalog)),
+        Effect.map(withCatalogMetadata(unoCatalog, personalCatalog)),
         Effect.map(sortByCatalog),
         Effect.map(stampIdentity),
         Effect.provideService(OpenCodeRuntime, openCodeRuntime),
@@ -860,9 +946,10 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         initialSnapshot: (settings) =>
           stampIdentity(
             sortByCatalog(
-              withCatalogMetadata(unoCatalog)(
-                filterUnoModels(makePendingOpenCodeProvider(settings, UNO_PRESENTATION)),
-              ),
+              withCatalogMetadata(
+                unoCatalog,
+                personalCatalog,
+              )(filterUnoModels(makePendingOpenCodeProvider(settings, UNO_PRESENTATION))),
             ),
           ),
         checkProvider,
