@@ -524,12 +524,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
 
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
   const status = resolveSidebarThreadStatus(thread);
-  const shouldRecede = shouldRecedeSidebarThread({
-    status,
-    isUnread,
-    isActive: props.isActive,
-    isSelected,
-  });
+  // Pinned chats sit with the other pins and never recede like history.
+  const isPinnedRow = section === "pinned";
+  const shouldRecede =
+    !isPinnedRow &&
+    shouldRecedeSidebarThread({
+      status,
+      isUnread,
+      isActive: props.isActive,
+      isSelected,
+    });
   // Status hues follow the system-wide convention: amber approval, indigo
   // input, sky working, red failed, emerald for an unread completion.
   const topStatus =
@@ -682,9 +686,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               "group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
               props.isActive || status === "input"
                 ? "text-foreground"
-                : isUnread
-                  ? "text-muted-foreground"
-                  : "text-secondary-label/70",
+                : isPinnedRow
+                  ? "text-sidebar-foreground/90"
+                  : isUnread
+                    ? "text-muted-foreground"
+                    : "text-secondary-label/70",
             ),
       )}
     >
@@ -790,7 +796,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           <span
             className={cn(
               "flex shrink-0 transition-opacity",
-              (!props.isActive || section === "settled") &&
+              !isPinnedRow &&
+                (!props.isActive || section === "settled") &&
                 "opacity-40 grayscale group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:grayscale-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
             )}
           >
