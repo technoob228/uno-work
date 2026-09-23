@@ -3,6 +3,7 @@
  * reason when Uno can't boost), the honest confirm — the computer restarts
  * twice — and, while boosted, a pill with the time left and "End boost".
  */
+import { useNavigate } from "@tanstack/react-router";
 import { RocketIcon, ZapIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -20,6 +21,7 @@ import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import {
+  BOOST_NO_HOURS_REASON,
   BOOST_RESTART_WARNING,
   boostConfirmCopy,
   boostDisabledReason,
@@ -51,6 +53,19 @@ export function BoostControl({
   const now = useNow(state === "active");
   const copy = boostConfirmCopy(boost);
   const disabledReason = state === "off" ? boostDisabledReason(boost) : null;
+  const navigate = useNavigate();
+  // A plan without boost hours: the button stays (greyed) as a pointer to a bigger plan.
+  const seePlans =
+    disabledReason === BOOST_NO_HOURS_REASON ? (
+      <Button
+        size={size}
+        variant="link"
+        className="px-1"
+        onClick={() => void navigate({ to: "/my-uno", search: { tab: "billing" } })}
+      >
+        See plans
+      </Button>
+    ) : null;
 
   const body =
     state === "off" ? (
@@ -69,6 +84,7 @@ export function BoostControl({
               {disabledReason}
             </TooltipPopup>
           </Tooltip>
+          {seePlans}
         </TooltipProvider>
       ) : (
         <Button

@@ -65,8 +65,12 @@ export const UnoComputerBoost = Schema.Struct({
   startedAt: Schema.NullOr(Schema.String),
   /** Set while starting / active / ending. */
   endsAt: Schema.NullOr(Schema.String),
-  hoursLeftToday: Schema.Number,
-  hoursPerDay: Schema.Number,
+  /** Boost hours of the account's plan for a calendar month (UTC); 0 = the plan has none. */
+  hoursPerMonth: Schema.Number,
+  hoursUsed: Schema.Number,
+  hoursLeft: Schema.Number,
+  /** When this month's hours come back (1st of next month, 00:00 UTC); null if unknown. */
+  periodResetsAt: Schema.NullOr(Schema.String),
   /** Plain words why a boost can't start; null when it can. */
   reason: Schema.NullOr(Schema.String),
 });

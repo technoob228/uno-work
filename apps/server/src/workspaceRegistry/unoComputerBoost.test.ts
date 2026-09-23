@@ -20,8 +20,12 @@ const BOOST_OFF = {
   hours: 1,
   started_at: null,
   ends_at: null,
+  hours_per_month: 10,
+  hours_used: 7,
+  hours_left: 3,
+  period_resets_at: "2026-10-01T00:00:00Z",
   hours_left_today: 3,
-  hours_per_day: 4,
+  hours_per_day: 10,
   reason: "",
 };
 const BOX = { id: 42, status: "running", ram_mb: 4096, vcpu: 2, disk_gb: 10, boost: BOOST_OFF };
@@ -41,9 +45,29 @@ describe("parseComputerBoost", () => {
       hours: 1,
       startedAt: null,
       endsAt: null,
-      hoursLeftToday: 3,
-      hoursPerDay: 4,
+      hoursPerMonth: 10,
+      hoursUsed: 7,
+      hoursLeft: 3,
+      periodResetsAt: "2026-10-01T00:00:00Z",
       reason: null,
+    });
+  });
+
+  it("reads a control plane from before monthly hours", () => {
+    const old = {
+      ...BOOST_OFF,
+      hours_per_month: undefined,
+      hours_used: undefined,
+      hours_left: undefined,
+      period_resets_at: undefined,
+      hours_left_today: 2,
+      hours_per_day: 4,
+    };
+    expect(parseComputerBoost(old)).toMatchObject({
+      hoursPerMonth: 4,
+      hoursUsed: 0,
+      hoursLeft: 2,
+      periodResetsAt: null,
     });
   });
 
@@ -71,6 +95,7 @@ describe("boost refusals", () => {
       "Uno can't boost right now — try again in a few minutes.",
     );
     expect(boostRefusalMessage(refusal(429, "BOOST_DAILY_LIMIT"))).toMatch(/today's boost hours/);
+    expect(boostRefusalMessage(refusal(429, "BOOST_HOURS_USED_UP"))).toMatch(/month's boost hours/);
     expect(boostRefusalMessage(refusal(409, "BOX_NOT_RUNNING"))).toMatch(/needs to be on/);
     expect(boostRefusalMessage(new ControlPlaneHttpError(500, "500: boom"))).toBeNull();
   });
@@ -116,7 +141,29 @@ describe("startBoost / endBoost", () => {
     const result = await startBoost({ apiKey: "k", fetchJson, boxId: 42 });
     expect(result.outcome).toBe("refused");
     expect(result.message).toMatch(/today's boost hours/);
-    expect(result.boost?.hoursLeftToday).toBe(3);
+    expect(result.boost?.hoursLeft).toBe(3);
+  });
+
+  it("names the day the month's hours come back", async () => {
+    const usedUp = {
+      ...BOX,
+      boost: {
+        ...BOOST_OFF,
+        available: false,
+        hours_left: 0,
+        hours_used: 10,
+        reason: "Boost hours are used up until Oct 1.",
+      },
+    };
+    const { fetchJson } = routes(() => {
+      throw refusal(429, "BOOST_HOURS_USED_UP");
+    }, usedUp);
+    const result = await startBoost({ apiKey: "k", fetchJson, boxId: 42 });
+    expect(result).toMatchObject({
+      outcome: "refused",
+      message: "Boost hours are used up until Oct 1.",
+      boost: { hoursLeft: 0 },
+    });
   });
 
   it("prefers the control plane's reason when boost is not available", async () => {

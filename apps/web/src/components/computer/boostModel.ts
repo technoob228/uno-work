@@ -1,5 +1,6 @@
 /**
  * Boost ×2 for an hour — the words and the timing, kept free of React.
+ * A boost spends the plan's boost hours for the month (counted per account).
  *
  * The computer restarts into the boost and back, and this screen may be
  * served from that very computer: the answer to "boost" can be lost with the
@@ -103,14 +104,40 @@ export function boostConfirmCopy(boost: UnoComputerBoost) {
     body:
       `${formatMemory(boost.baseRamMb)} → ${formatMemory(boost.ramMb)} memory and ` +
       `${boost.baseVcpu} → ${cores(boost.vcpu)}. ${BOOST_START_RESTART_WARNING}`,
-    allowance: `${boost.hoursLeftToday} of ${boost.hoursPerDay} boost hours left today.`,
+    allowance: boostAllowance(boost),
     confirm: `Boost for ${boost.hours === 1 ? "1 hour" : `${boost.hours} hours`}`,
   };
 }
 
+/** "Oct 1" — the calendar day the month's hours come back (the reset is 00:00 UTC). */
+export function boostResetDay(periodResetsAt: string | null): string | null {
+  if (!periodResetsAt) return null;
+  const at = Date.parse(periodResetsAt);
+  if (Number.isNaN(at)) return null;
+  return new Date(at).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** "3 of 10 boost hours left this month." */
+export function boostAllowance(boost: UnoComputerBoost): string {
+  const left = Math.max(0, boost.hoursLeft);
+  return `${left} of ${boost.hoursPerMonth} boost ${boost.hoursPerMonth === 1 ? "hour" : "hours"} left this month.`;
+}
+
+export const BOOST_NO_HOURS_REASON = "Your plan has no boost hours.";
+
 /** Why the button is greyed out; null when it can be pressed. */
 export function boostDisabledReason(boost: UnoComputerBoost): string | null {
   if (boost.available) return null;
+  // The hours come first: they are what the person can do something about.
+  if (boost.hoursPerMonth <= 0) return BOOST_NO_HOURS_REASON;
+  if (boost.hoursLeft < 1) {
+    const day = boostResetDay(boost.periodResetsAt);
+    return day ? `Boost hours are used up until ${day}.` : "This month's boost hours are used up.";
+  }
   return boost.reason ?? "Boost isn't available for this computer right now.";
 }
 

@@ -52,10 +52,10 @@
  * default in every scenario but "not-deployed". POST switches off → starting →
  * (MOCK_BOOST_SWITCH_MS, default 4 s) active for MOCK_BOOST_MINUTES (default
  * 60), then ending → off; DELETE ends it early the same way. The box reports
- * the doubled size while boosted. MOCK_BOOST=off hides boost (flag off for the
- * account); MOCK_BOOST=unavailable greys the button out with a reason;
+ * the doubled size while boosted. MOCK_BOOST=off hides boost (switched off by
+ * Uno); MOCK_BOOST=unavailable is a plan with no boost hours;
  * MOCK_BOOST=no-capacity answers 409 BOOST_NO_CAPACITY; MOCK_BOOST=limit has
- * today's hours used up (429 BOOST_DAILY_LIMIT). MOCK_BOOST=active starts
+ * this month's hours used up (429 BOOST_HOURS_USED_UP). MOCK_BOOST=active starts
  * boosted, 43 minutes left.
  */
 import { execFile } from "node:child_process";
@@ -128,12 +128,12 @@ function resizeRefusal(req) {
 const BOOST_MODE = process.env.MOCK_BOOST || (SCENARIO === "not-deployed" ? "off" : "on");
 const BOOST_SWITCH_MS = Number(process.env.MOCK_BOOST_SWITCH_MS || 4000);
 const BOOST_MINUTES = Number(process.env.MOCK_BOOST_MINUTES || 60);
-const BOOST_HOURS_PER_DAY = 4;
+const BOOST_HOURS_PER_MONTH = 10; // a Plus plan
 const boost = {
   state: BOOST_MODE === "active" ? "active" : "off",
   startedAt: BOOST_MODE === "active" ? iso(minsAgo(17)) : null,
   endsAt: BOOST_MODE === "active" ? iso(new Date(Date.now() + 43 * 60_000)) : null,
-  hoursUsed: BOOST_MODE === "limit" ? BOOST_HOURS_PER_DAY : BOOST_MODE === "active" ? 1 : 0,
+  hoursUsed: BOOST_MODE === "limit" ? BOOST_HOURS_PER_MONTH : BOOST_MODE === "active" ? 1 : 0,
   timer: null,
 };
 
@@ -162,10 +162,14 @@ if (boost.state === "active") boostSwitch("active", 0);
 
 function boostJson() {
   if (BOOST_MODE === "off") return null;
-  const hoursLeft = Math.max(0, BOOST_HOURS_PER_DAY - boost.hoursUsed);
+  const perMonth = BOOST_MODE === "unavailable" ? 0 : BOOST_HOURS_PER_MONTH;
+  const hoursLeft = Math.max(0, perMonth - boost.hoursUsed);
+  const now = new Date();
+  const resets = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
   let reason = "";
-  if (BOOST_MODE === "unavailable") reason = "Boost comes with paid plans.";
-  else if (hoursLeft === 0) reason = "You've used today's boost hours. They come back tomorrow.";
+  if (BOOST_MODE === "unavailable") reason = "Your plan has no boost hours.";
+  else if (hoursLeft === 0)
+    reason = `Boost hours are used up until ${resets.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}.`;
   else if (status() !== "running") reason = "Turn your computer on to boost it.";
   return {
     available: boost.state === "off" && reason === "",
@@ -177,8 +181,12 @@ function boostJson() {
     hours: 1,
     started_at: boost.startedAt,
     ends_at: boost.endsAt,
+    hours_per_month: perMonth,
+    hours_used: Math.min(boost.hoursUsed, perMonth),
+    hours_left: hoursLeft,
+    period_resets_at: iso(resets),
     hours_left_today: hoursLeft,
-    hours_per_day: BOOST_HOURS_PER_DAY,
+    hours_per_day: perMonth,
     reason,
   };
 }
@@ -192,7 +200,7 @@ function boostStart(hours) {
   if (boost.state !== "off") return [409, { error: "BOOST_ACTIVE" }];
   if (status() !== "running") return [409, { error: "BOX_NOT_RUNNING" }];
   if (BOOST_MODE === "no-capacity") return [409, { error: "BOOST_NO_CAPACITY" }];
-  if (boost.hoursUsed >= BOOST_HOURS_PER_DAY) return [429, { error: "BOOST_DAILY_LIMIT" }];
+  if (boost.hoursUsed >= BOOST_HOURS_PER_MONTH) return [429, { error: "BOOST_HOURS_USED_UP" }];
   boost.hoursUsed += 1;
   boost.state = "starting";
   boost.startedAt = iso(new Date());

@@ -2,11 +2,12 @@
  * "Boost ×2 for 1 hour" — this computer restarts into twice its size for an
  * hour, then restarts once more back to normal.
  *
- *   GET    /api/v1/boxes/{id}        → `boost` (only when offered to the account)
+ *   GET    /api/v1/boxes/{id}        → `boost` (absent only when Uno switched boost off)
  *   POST   /api/v1/boxes/{id}/boost  {"hours":1} → 202 {"boost": {…state "starting"}}
  *   DELETE /api/v1/boxes/{id}/boost  → 202 {"boost": {…state "ending"}}
  *
- * The control plane is the only judge (daily hours, capacity, the computer
+ * The control plane is the only judge (the plan's boost hours this month,
+ * capacity, the computer
  * being on); a refusal comes back as `refused` with plain words, never as
  * an error. "Already boosted" / "not boosted any more" are not refusals: the
  * person wanted that state and has it, so the fresh state is returned.
@@ -73,8 +74,12 @@ export function parseComputerBoost(raw: unknown): UnoComputerBoost | null {
     hours: num(record["hours"], BOOST_HOURS),
     startedAt: asNullableString(record["started_at"]),
     endsAt: asNullableString(record["ends_at"]),
-    hoursLeftToday: num(record["hours_left_today"]),
-    hoursPerDay: num(record["hours_per_day"]),
+    // A control plane older than 0.0.78 counts per day and only sends
+    // hours_per_day / hours_left_today.
+    hoursPerMonth: num(record["hours_per_month"], num(record["hours_per_day"])),
+    hoursUsed: num(record["hours_used"]),
+    hoursLeft: num(record["hours_left"], num(record["hours_left_today"])),
+    periodResetsAt: asNullableString(record["period_resets_at"]),
     reason: reason.length > 0 ? reason : null,
   };
 }
@@ -100,6 +105,7 @@ const REFUSAL_WORDS: Record<string, string> = {
   BOOST_INVALID_HOURS: "A boost lasts one hour.",
   BOX_NOT_RUNNING: "Your computer needs to be on to boost. Wake it up and try again.",
   BOOST_NO_CAPACITY: "Uno can't boost right now — try again in a few minutes.",
+  BOOST_HOURS_USED_UP: "This month's boost hours are used up.",
   BOOST_DAILY_LIMIT: "You've used all of today's boost hours. They come back tomorrow.",
 };
 
@@ -155,19 +161,21 @@ export async function startBoost(
     if (boostErrorCode(cause) === "BOOST_ACTIVE") {
       return { outcome: "started", message: null, boost: await freshBoost(request, ctx.boxId) };
     }
+    const code = boostErrorCode(cause);
     const message = boostRefusalMessage(cause);
     if (message) {
       const boost = await freshBoost(request, ctx.boxId);
-      // The control plane's own words are more precise ("resets at 00:00 UTC").
-      const reason =
-        boostErrorCode(cause) === "BOOST_NOT_AVAILABLE" && boost?.reason ? boost.reason : message;
+      // The control plane's own words are more precise ("used up until Oct 1").
+      const precise = code === "BOOST_NOT_AVAILABLE" || code === "BOOST_HOURS_USED_UP";
+      const reason = precise && boost?.reason ? boost.reason : message;
       return { outcome: "refused", message: reason, boost };
     }
     if (controlPlaneErrorStatus(cause) === 429) {
+      const boost = await freshBoost(request, ctx.boxId);
       return {
         outcome: "refused",
-        message: REFUSAL_WORDS["BOOST_DAILY_LIMIT"]!,
-        boost: await freshBoost(request, ctx.boxId),
+        message: boost?.reason ?? REFUSAL_WORDS["BOOST_HOURS_USED_UP"]!,
+        boost,
       };
     }
     throw actionError(cause, "boost");
