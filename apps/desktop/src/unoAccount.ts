@@ -53,7 +53,7 @@ interface StoredAccount {
 }
 
 /** Console routes the interface may call (mirrors the console's allowlist). */
-const ALLOWED: ReadonlyArray<{ method: string; pattern: RegExp }> = [
+const ALLOWED: ReadonlyArray<{ method: string; pattern: RegExp; query?: RegExp }> = [
   { method: "GET", pattern: /^\/auth\/me$/ },
   { method: "GET", pattern: /^\/api\/v1\/box-subscription$/ },
   { method: "GET", pattern: /^\/api\/v1\/boxes$/ },
@@ -71,11 +71,32 @@ const ALLOWED: ReadonlyArray<{ method: string; pattern: RegExp }> = [
   { method: "GET", pattern: /^\/api\/v1\/boxes\/\d+\/security\/access-log$/ },
   { method: "GET", pattern: /^\/api\/v1\/boxes\/\d+\/security\/network$/ },
   { method: "PUT", pattern: /^\/api\/v1\/boxes\/\d+\/security\/network$/ },
+  // "My Uno": the whole account in one window — plans, sites, cloud, payments,
+  // roles and servers without Uno Work. Money still moves only in the console.
+  { method: "GET", pattern: /^\/api\/v1\/work\/(plans|sites)$/ },
+  { method: "POST", pattern: /^\/api\/v1\/work\/servers$/ },
+  { method: "GET", pattern: /^\/api\/v1\/buckets$/ },
+  { method: "GET", pattern: /^\/pay\/(history|spending)$/ },
+  { method: "PATCH", pattern: /^\/api\/v1\/boxes\/\d+$/ },
+  { method: "GET", pattern: /^\/api\/v1\/boxes\/\d+\/(metrics|apps)$/ },
+  {
+    method: "GET",
+    pattern: /^\/api\/v1\/boxes\/\d+\/applogs$/,
+    query: /^source=(auto|journal|docker)&tail=\d{1,4}$/,
+  },
 ];
 
 export function isAllowedAccountRequest(method: string, path: string): boolean {
-  if (path.includes("?") || path.includes("#") || path.includes("..")) return false;
-  return ALLOWED.some((rule) => rule.method === method && rule.pattern.test(path));
+  if (path.includes("#") || path.includes("..")) return false;
+  const mark = path.indexOf("?");
+  const pathname = mark === -1 ? path : path.slice(0, mark);
+  const query = mark === -1 ? undefined : path.slice(mark + 1);
+  return ALLOWED.some(
+    (rule) =>
+      rule.method === method &&
+      rule.pattern.test(pathname) &&
+      (query === undefined || (rule.query !== undefined && rule.query.test(query))),
+  );
 }
 
 function defaultDeviceName(): string {

@@ -21,9 +21,10 @@
 import type { UnoMachineAppAction } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, getRouteApi, useNavigate, useRouter } from "@tanstack/react-router";
-import { MonitorIcon, RefreshCwIcon } from "lucide-react";
+import { LayoutGridIcon, MonitorIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { accountTransport } from "../../account/unoAccount";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useOpenApp } from "../../navigation/useOpenApp";
 import { useStore } from "../../store";
@@ -298,6 +299,17 @@ export function ComputerView() {
               </Button>
             ) : null}
             <div className="ml-auto flex items-center gap-1">
+              {accountTransport() !== "none" ? (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  render={<Link to="/my-uno" />}
+                  data-testid="home-my-uno"
+                >
+                  <LayoutGridIcon className="size-3.5" />
+                  All my computers
+                </Button>
+              ) : null}
               <Button size="xs" variant="ghost" onClick={refresh} aria-label="Refresh">
                 <RefreshCwIcon className="size-3.5" />
               </Button>

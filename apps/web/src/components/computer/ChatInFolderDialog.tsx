@@ -35,11 +35,22 @@ export function ChatInFolderDialog({
   open,
   onOpenChange,
   onStart,
+  title = "Start a chat in a folder",
+  description = "Uno works with the files in the folder you pick. Open a folder, then start the chat.",
+  actionLabel = (folderName) => `Chat in ${folderName}`,
+  actionIcon = <MessageSquarePlusIcon />,
+  errorFallback = "Couldn't start the chat.",
 }: {
   environmentId: EnvironmentId | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onStart: (folder: string) => Promise<void>;
+  /** The same picker for other jobs ("Update a site from a folder"). */
+  title?: string;
+  description?: string;
+  actionLabel?: (folderName: string) => string;
+  actionIcon?: React.ReactNode;
+  errorFallback?: string;
 }) {
   /** null = home (`~`), resolved by the daemon. */
   const [folder, setFolder] = useState<string | null>(null);
@@ -84,7 +95,7 @@ export function ChatInFolderDialog({
       await onStart(current);
       onOpenChange(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Couldn't start the chat.");
+      setError(cause instanceof Error ? cause.message : errorFallback);
     } finally {
       setStarting(false);
     }
@@ -94,10 +105,8 @@ export function ChatInFolderDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Start a chat in a folder</DialogTitle>
-          <DialogDescription>
-            Uno works with the files in the folder you pick. Open a folder, then start the chat.
-          </DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <DialogPanel className="flex flex-col gap-3">
           <div className="flex items-center gap-1.5">
@@ -164,8 +173,10 @@ export function ChatInFolderDialog({
             Cancel
           </Button>
           <Button disabled={!current || starting || listing.isPending} onClick={() => void start()}>
-            {starting ? <Spinner className="size-3.5" /> : <MessageSquarePlusIcon />}
-            Chat in {current ? (current === home ? "home" : current.split("/").pop()) : "…"}
+            {starting ? <Spinner className="size-3.5" /> : actionIcon}
+            {actionLabel(
+              current ? (current === home ? "home" : (current.split("/").pop() ?? "…")) : "…",
+            )}
           </Button>
         </DialogFooter>
       </DialogPopup>

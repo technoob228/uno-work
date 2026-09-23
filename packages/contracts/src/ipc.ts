@@ -435,7 +435,7 @@ export interface DesktopUnoAccountStatus {
 }
 
 export interface DesktopUnoAccountRequest {
-  readonly method: "GET" | "POST" | "PUT";
+  readonly method: "GET" | "POST" | "PUT" | "PATCH";
   /** Console API path, e.g. `/api/v1/boxes`. The main process allowlists it. */
   readonly path: string;
   readonly body?: unknown;

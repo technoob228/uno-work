@@ -73,6 +73,24 @@ describe("UnoAccountService", () => {
     expect(isAllowedAccountRequest("GET", "/api/v1/boxes/12")).toBe(true);
     expect(isAllowedAccountRequest("POST", "/api/v1/boxes/12/delete")).toBe(false);
     expect(isAllowedAccountRequest("GET", "/api/v1/boxes/../tokens")).toBe(false);
+    // "My Uno": read the account, set a role, add a server — never move money.
+    expect(isAllowedAccountRequest("GET", "/api/v1/work/plans")).toBe(true);
+    expect(isAllowedAccountRequest("GET", "/api/v1/work/sites")).toBe(true);
+    expect(isAllowedAccountRequest("POST", "/api/v1/work/servers")).toBe(true);
+    expect(isAllowedAccountRequest("GET", "/pay/history")).toBe(true);
+    expect(isAllowedAccountRequest("PATCH", "/api/v1/boxes/12")).toBe(true);
+    expect(isAllowedAccountRequest("GET", "/api/v1/boxes/12/metrics")).toBe(true);
+    expect(isAllowedAccountRequest("GET", "/api/v1/boxes/12/applogs?source=auto&tail=200")).toBe(
+      true,
+    );
+    expect(isAllowedAccountRequest("GET", "/api/v1/boxes/12/applogs?source=auto&tail=2?x")).toBe(
+      false,
+    );
+    expect(isAllowedAccountRequest("GET", "/api/v1/boxes/12/metrics?token=x")).toBe(false);
+    expect(isAllowedAccountRequest("GET", "/api/v1/boxes?x=1")).toBe(false);
+    expect(isAllowedAccountRequest("POST", "/api/v1/box-subscription/change")).toBe(false);
+    expect(isAllowedAccountRequest("POST", "/pay/direct/create")).toBe(false);
+    expect(isAllowedAccountRequest("POST", "/api/v1/boxes")).toBe(false);
     expect(await service.request({ method: "GET", path: "/api/v1/boxes" })).toEqual({
       status: 401,
       body: { error: "NOT_SIGNED_IN" },
