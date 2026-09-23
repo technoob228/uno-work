@@ -77,7 +77,7 @@ describe("waitForUnoBoxCreateJob", () => {
         intervalMs: 1,
         maxConsecutiveErrors: 3,
       }),
-    ).rejects.toThrow(/Lost track of the box creation job/);
+    ).rejects.toThrow(/Lost track of creating the computer/);
     expect(alwaysFails).toHaveBeenCalledTimes(3);
   });
 

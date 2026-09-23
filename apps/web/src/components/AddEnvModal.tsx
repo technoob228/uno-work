@@ -1033,7 +1033,7 @@ function UnoVpsStep({ onBack, onClose }: { onBack: () => void; onClose: () => vo
               onClick={() => setCreatingOpen(true)}
             >
               <PlusIcon className="size-3.5" />
-              Create a new box
+              Create a new computer
             </Button>
           )}
         </div>

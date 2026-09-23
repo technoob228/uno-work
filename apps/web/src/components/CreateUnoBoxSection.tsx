@@ -310,7 +310,7 @@ export function CreateUnoBoxSection({
         {createBox.isPending ? "Creating…" : retrying ? "Connecting…" : submitLabel}
       </Button>
       <p className="text-[11px] text-muted-foreground">
-        A new box is billed to your Uno account from the moment it starts.
+        A new computer is billed to your Uno account from the moment it starts.
       </p>
     </div>
   );

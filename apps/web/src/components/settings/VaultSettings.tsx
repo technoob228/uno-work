@@ -397,7 +397,7 @@ export function VaultSettings() {
           <div className={ROW_CLASSNAME}>
             <p className="text-xs text-muted-foreground/60">
               No credentials yet. Add website logins here instead of pasting them into chat — the
-              password stays on the box and never reaches the model.
+              password stays on the computer and never reaches the model.
             </p>
           </div>
         ) : (
@@ -451,7 +451,7 @@ export function VaultSettings() {
           <DialogHeader>
             <DialogTitle>{editingId ? "Edit credential" : "Add credential"}</DialogTitle>
             <DialogDescription>
-              Passwords are stored on the box and never returned to the app.
+              Passwords are stored on the computer and never returned to the app.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-3">

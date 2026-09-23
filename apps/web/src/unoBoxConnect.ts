@@ -152,7 +152,7 @@ export async function connectUnoBoxWith(
     options.onProgress?.({ phase, attempt, lastProblem });
 
   if (isBoxDead(box.status)) {
-    throw new Error(`Box #${box.id} entered status "${box.status}".`);
+    throw new Error(`Computer #${box.id} entered status "${box.status}".`);
   }
 
   // --- Wake. The control plane answers before the box is up, so poll.
@@ -165,10 +165,10 @@ export async function connectUnoBoxWith(
       const current = findBox(state, box.id);
       if (current && isBoxRunning(current.status)) break;
       if (current && isBoxDead(current.status)) {
-        throw new Error(`Box #${box.id} entered status "${current.status}".`);
+        throw new Error(`Computer #${box.id} entered status "${current.status}".`);
       }
       if (deps.now() >= deadline) {
-        throw new UnoBoxStillStartingError(box.id, new Error("the box did not wake up in time"));
+        throw new UnoBoxStillStartingError(box.id, new Error("the computer did not wake up in time"));
       }
       await deps.sleep(wakePollIntervalMs);
       throwIfAborted(options.signal);

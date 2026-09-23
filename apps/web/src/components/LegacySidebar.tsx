@@ -1844,7 +1844,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             buildTargetedItem("rename", "Rename project"),
             buildTargetedItem("grouping", "Project grouping…"),
             buildTargetedItem("copy-path", "Copy Project Path"),
-            buildTargetedItem("move-to-box", "Move to a box…"),
+            buildTargetedItem("move-to-box", "Move to a computer…"),
             buildTargetedItem("delete", "Remove project", {
               destructive: true,
             }),

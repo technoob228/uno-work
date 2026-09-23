@@ -165,14 +165,14 @@ export async function waitForUnoBoxCreateJob(
       lastError = cause;
       if (consecutiveErrors >= maxConsecutiveErrors) {
         throw new Error(
-          `Lost track of the box creation job: ${cause instanceof Error ? cause.message : String(cause)}. The box may still be created — check the box list.`,
+          `Lost track of creating the computer: ${cause instanceof Error ? cause.message : String(cause)}. The computer may still be created — check your computers list.`,
           { cause },
         );
       }
     }
     if (now() >= deadline) {
       throw new Error(
-        "Box creation is taking longer than expected. It may still finish — check the box list in a minute." +
+        "Creating the computer is taking longer than expected. It may still finish — check your computers list in a minute." +
           (lastError instanceof Error ? ` (${lastError.message})` : ""),
       );
     }

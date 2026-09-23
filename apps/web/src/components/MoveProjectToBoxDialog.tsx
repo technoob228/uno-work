@@ -41,7 +41,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
 const STEP_LABELS: Record<MoveProjectToBoxStep, string> = {
-  connecting: "Connecting to the box…",
+  connecting: "Connecting to the computer…",
   cloning: "Cloning the repository…",
   "copying-env": "Copying .env…",
   "creating-project": "Creating the project…",
@@ -176,7 +176,7 @@ export function MoveProjectToBoxDialog({
         handleOpenChange(false);
         toastManager.add({
           type: "success",
-          title: `"${result.title}" is on the box`,
+          title: `"${result.title}" is on the computer`,
           description: describeMoveProjectResult(result),
         });
         // Opening a thread in the new project also switches the active
@@ -219,13 +219,13 @@ export function MoveProjectToBoxDialog({
           >
             <div className="flex flex-col gap-1 border-b border-border p-6">
               <DialogPrimitive.Title className="font-heading font-semibold text-lg leading-none">
-                Move to a box
+                Move to a computer
               </DialogPrimitive.Title>
               <DialogPrimitive.Description className="mt-1 text-muted-foreground text-sm">
                 {project
                   ? mode === "clone"
-                    ? `"${project.name}" will be cloned from its git remote onto the box you pick.`
-                    : `"${project.name}" has no git remote, so only an empty project can be created on the box.`
+                    ? `"${project.name}" will be cloned from its git remote onto the computer you pick.`
+                    : `"${project.name}" has no git remote, so only an empty project can be created on the computer.`
                   : "Pick a project first."}
               </DialogPrimitive.Description>
             </div>
@@ -239,10 +239,10 @@ export function MoveProjectToBoxDialog({
             <ScrollArea className="max-h-80">
               <div className="flex flex-col gap-4 px-6 py-4">
                 <div className="flex flex-col gap-2">
-                  <span className="text-muted-foreground text-xs">Target box</span>
+                  <span className="text-muted-foreground text-xs">Target computer</span>
                   {targets.length === 0 ? (
                     <p className="text-muted-foreground text-sm">
-                      No other environments yet — create a box below.
+                      No other environments yet — create a computer below.
                     </p>
                   ) : (
                     <div className="flex flex-col gap-1.5">
@@ -296,7 +296,7 @@ export function MoveProjectToBoxDialog({
                 {creatingBox ? (
                   <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
                     <div className="flex items-center justify-between gap-2">
-                      <h3 className="font-medium text-foreground text-sm">Create a new box</h3>
+                      <h3 className="font-medium text-foreground text-sm">Create a new computer</h3>
                       <Button
                         variant="ghost"
                         size="xs"
@@ -309,7 +309,7 @@ export function MoveProjectToBoxDialog({
                     <CreateUnoBoxSection
                       environmentId={primaryEnvironmentId}
                       defaultName={project?.name ?? ""}
-                      submitLabel="Create box and move"
+                      submitLabel="Create computer and move"
                       disabled={pending}
                       onCreated={async ({ record }) => {
                         setCreatingBox(false);
@@ -329,7 +329,7 @@ export function MoveProjectToBoxDialog({
                     }}
                   >
                     <ServerIcon className="size-3.5" />
-                    Create a new box
+                    Create a new computer
                   </Button>
                 )}
 
@@ -366,7 +366,7 @@ export function MoveProjectToBoxDialog({
                 {pending
                   ? "Moving…"
                   : mode === "clone"
-                    ? "Clone onto the box"
+                    ? "Clone onto the computer"
                     : "Create empty project there"}
               </Button>
             </div>
