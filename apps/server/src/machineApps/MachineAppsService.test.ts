@@ -346,3 +346,36 @@ it.effect("never removes an App Store app's container or Uno's own from here", (
     ),
   );
 });
+
+it.effect("the regular refresh asks systemd for its units at most every 30 s", () => {
+  const systemctl: string[] = [];
+  const counting: Partial<MachineProbe> = {
+    ...probe,
+    run: async (command, args) => {
+      if (command === "systemctl") systemctl.push(args.join(" "));
+      return command === "ss" ? { ok: true, stdout: SS } : { ok: false, stdout: "" };
+    },
+  };
+  const realNow = Date.now;
+  let now = realNow();
+  const listUnitFiles = () => systemctl.filter((a) => a.includes("list-unit-files")).length;
+  return Effect.gen(function* () {
+    Date.now = () => now;
+    const service = yield* MachineAppsService;
+    yield* service.list;
+    const first = listUnitFiles();
+    assert.isAbove(first, 0);
+    // The screen refreshes every 5 s: past the 4 s scan cache, inside 30 s.
+    for (let i = 0; i < 4; i++) {
+      now += 5_000;
+      yield* service.list;
+    }
+    assert.strictEqual(listUnitFiles(), first);
+    now += 30_000;
+    yield* service.list;
+    assert.strictEqual(listUnitFiles(), first * 2);
+  }).pipe(
+    Effect.ensuring(Effect.sync(() => (Date.now = realNow))),
+    Effect.provide(serviceLayer({ ownBoxId: 42, probe: counting })),
+  );
+});

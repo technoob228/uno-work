@@ -46,7 +46,8 @@ import {
 } from "../workspaceRegistry/unoCloudParse.ts";
 import { resolveAppApiPort } from "../appSdk/appApiPort.ts";
 import { resolveAppKeysDir } from "../appSdk/appKeys.ts";
-import { parseVmStat } from "../computerResources/resourceParsers.ts";
+import { CpuLoadWindow, type CpuTotals } from "../computerResources/cpuWindow.ts";
+import { parseCpuTotals, parseVmStat } from "../computerResources/resourceParsers.ts";
 import { readIconDataUrl, readManifestDir, type AppManifest } from "./appManifest.ts";
 import { extractHtmlTitle } from "./discoveryParsers.ts";
 import { displayManifestDir, resolveManifestDir } from "./manifestDir.ts";
@@ -54,6 +55,7 @@ import {
   RESERVED_FORWARD_PORTS,
   parsePortForwards,
   publicationFor,
+  readSystemd,
   scanMachineApps,
   type CommandResult,
   type HttpProbe,
@@ -63,6 +65,13 @@ import {
 } from "./machineAppsScan.ts";
 
 const SCAN_TTL_MS = 4_000;
+/**
+ * systemd units are re-read at most this often by the regular refresh (a
+ * Start/Stop or any fresh scan reads them at once). Asking systemd for every
+ * unit is the costliest part of a scan — about half a second of processor —
+ * and at the 5-second refresh it alone kept an idle computer at 10–20%.
+ */
+export const SYSTEMD_TTL_MS = 30_000;
 const BACKGROUND_EVERY = Duration.seconds(20);
 const HTTP_PROBE_TTL_MS = 60_000;
 /** A port that didn't answer HTTP is asked again after this (a new port is asked at once). */
@@ -282,7 +291,17 @@ export const makeMachineAppsService = (
     let lastScan: { at: number; apps: ScannedApp[]; warnings: string[] } | null = null;
     let inFlight: Promise<{ apps: ScannedApp[]; warnings: string[] }> | null = null;
 
-    const scanNow = async () => {
+    let unitsCache: { at: number; units: Awaited<ReturnType<typeof readSystemd>> } | null = null;
+    const readUnitsCached = async (p: MachineProbe, fresh: boolean) => {
+      if (!fresh && unitsCache && Date.now() - unitsCache.at < SYSTEMD_TTL_MS) {
+        return unitsCache.units;
+      }
+      const units = await readSystemd(p);
+      unitsCache = { at: Date.now(), units };
+      return units;
+    };
+
+    const scanNow = async (fresh: boolean) => {
       const { manifests, warnings } = await readManifestDir({ manifestDir, home });
       const icons = new Map<string, string>();
       await Promise.all(
@@ -292,7 +311,11 @@ export const makeMachineAppsService = (
           if (data) icons.set(m.id, data);
         }),
       );
-      const apps = await scanMachineApps(probe, { manifests, manifestIcons: icons });
+      const apps = await scanMachineApps(probe, {
+        manifests,
+        manifestIcons: icons,
+        readUnits: (p) => readUnitsCached(p, fresh),
+      });
       lastScan = { at: Date.now(), apps, warnings: [...warnings] };
       return lastScan;
     };
@@ -302,7 +325,7 @@ export const makeMachineAppsService = (
         return Promise.resolve(lastScan);
       }
       if (inFlight) return inFlight;
-      inFlight = scanNow().finally(() => {
+      inFlight = scanNow(fresh).finally(() => {
         inFlight = null;
       });
       return inFlight;
@@ -583,25 +606,25 @@ export const makeMachineAppsService = (
         return assemble(fresh, freshCloud);
       });
 
-    let cpuSample = os.cpus().map((c) => c.times);
-    let cpuSampleAt = Date.now();
-    const cpuPercent = async (): Promise<number | null> => {
-      if (Date.now() - cpuSampleAt < 200) await new Promise((r) => setTimeout(r, 250));
-      const now = os.cpus().map((c) => c.times);
+    // The share over at least the last ~15 s, whoever asks and how often
+    // (see cpuWindow.ts) — not since the previous caller's read.
+    const cpuWindow = new CpuLoadWindow();
+    const cpuTotals = async (): Promise<CpuTotals | null> => {
+      if (process.platform === "linux") {
+        const parsed = parseCpuTotals((await readTextFile("/proc/stat")) ?? "");
+        if (parsed) return parsed;
+      }
       let idle = 0;
       let total = 0;
-      now.forEach((t, i) => {
-        const prev = cpuSample[i];
-        if (!prev) return;
-        const d = (k: keyof typeof t) => t[k] - prev[k];
-        const all = d("user") + d("nice") + d("sys") + d("idle") + d("irq");
-        idle += d("idle");
-        total += all;
-      });
-      cpuSample = now;
-      cpuSampleAt = Date.now();
-      return total > 0 ? Math.max(0, Math.min(100, (1 - idle / total) * 100)) : null;
+      for (const { times: t } of os.cpus()) {
+        idle += t.idle;
+        total += t.user + t.nice + t.sys + t.idle + t.irq;
+      }
+      return total > 0 ? { idle, total } : null;
     };
+    void cpuTotals().then((t) => cpuWindow.sample(Date.now(), t));
+    const cpuPercent = async (): Promise<number | null> =>
+      cpuWindow.sample(Date.now(), await cpuTotals());
 
     const memoryMb = async () => {
       const totalMb = os.totalmem() / 1024 / 1024;

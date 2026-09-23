@@ -182,6 +182,12 @@ export interface ScanInput {
   readonly manifests: ReadonlyArray<AppManifest>;
   /** Icon data URLs by manifest id (read by the caller). */
   readonly manifestIcons: ReadonlyMap<string, string>;
+  /**
+   * Reads the systemd units. Defaults to `readSystemd`; the service passes a
+   * cached one, because listing and describing every unit costs systemd about
+   * half a second of processor — every few seconds while the screen is open.
+   */
+  readonly readUnits?: (probe: MachineProbe) => ReturnType<typeof readSystemd>;
 }
 
 export interface ScannedApp extends Omit<
@@ -329,7 +335,7 @@ export async function scanMachineApps(
   const [listening, containers, units] = await Promise.all([
     readListening(probe),
     readDocker(probe),
-    readSystemd(probe),
+    (input.readUnits ?? readSystemd)(probe),
   ]);
   const listeningByPort = new Map(listening.map((l) => [l.port, l]));
   const owners = new Map<number, Awaited<ReturnType<typeof ownerOf>>>();

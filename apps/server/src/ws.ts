@@ -53,6 +53,7 @@ import {
 import { makePanelThreadResolver, makePanelThreadSender } from "./plugins/panelThread.ts";
 import { PluginRegistry } from "./plugins/PluginRegistry.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
+import { staleProviderInstanceIds } from "./provider/staleProviders.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { BrowserBridge } from "./browserBridge.ts";
 import { fillCredentialInBrowser } from "./credentialsFill.ts";
@@ -1917,9 +1918,21 @@ const makeWsRpcLayer = (
                 })),
               );
 
-              yield* providerRegistry
-                .refresh()
-                .pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped);
+              // Re-probe only what the periodic refresh has clearly missed:
+              // probing every harness on each connect cost several seconds
+              // of a full processor per page open (see staleProviders.ts).
+              yield* (providerRegistry.awaitBootProbes ?? Effect.void).pipe(
+                Effect.andThen(providerRegistry.getProviders),
+                Effect.flatMap((providers) =>
+                  Effect.forEach(
+                    staleProviderInstanceIds(providers, Date.now()),
+                    (instanceId) => providerRegistry.refreshInstance(instanceId),
+                    { concurrency: "unbounded", discard: true },
+                  ),
+                ),
+                Effect.ignoreCause({ log: true }),
+                Effect.forkScoped,
+              );
 
               const liveUpdates = Stream.merge(
                 keybindingsUpdates,
