@@ -154,8 +154,31 @@ export const UnoComputerAppTemplate = Schema.Struct({
   settings: Schema.Array(UnoComputerAppSetting),
   /** What to know after install (how to sign in, limits). */
   notes: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Storefront (console with App Store v2; older consoles leave these out). */
+  /** Place in the store: lower = higher. 0 = unknown. */
+  rank: Schema.optional(Schema.Number),
+  /** In the "Recommended" row. */
+  featured: Schema.optional(Schema.Boolean),
+  /** Built by Uno (Notetaker). */
+  madeByUno: Schema.optional(Schema.Boolean),
+  /** One plain line on what the app gives you. */
+  tagline: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Other words people search it by ("google drive", "1password"). */
+  keywords: Schema.optional(Schema.Array(Schema.String)),
+  /** The brand logo, served by Uno (absolute URL). */
+  iconUrl: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Signs in with the Uno account: "oidc" — inside the app, "edge" — at its door. */
+  sso: Schema.optional(Schema.NullOr(Schema.Literals(["oidc", "edge"]))),
 });
 export type UnoComputerAppTemplate = typeof UnoComputerAppTemplate.Type;
+
+export const UnoComputerAppCategory = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  /** For developers: shown last, never in "Recommended". */
+  technical: Schema.Boolean,
+});
+export type UnoComputerAppCategory = typeof UnoComputerAppCategory.Type;
 
 export const UnoComputerInstalledAppState = Schema.Literals([
   "running",
@@ -189,6 +212,8 @@ export const UnoComputerInstalledApp = Schema.Struct({
   /** Catalog template this came from, when known. */
   templateId: Schema.NullOr(Schema.String),
   icon: Schema.NullOr(Schema.String),
+  /** Brand logo of the catalog template, when Uno has one. */
+  iconUrl: Schema.optional(Schema.NullOr(Schema.String)),
   state: UnoComputerInstalledAppState,
   url: Schema.NullOr(Schema.String),
   /** Last deployment, so a running install can be re-attached after a reload. */
@@ -221,6 +246,8 @@ export const UnoComputerApps = Schema.Struct({
     availability: UnoComputerAvailability,
     message: Schema.NullOr(Schema.String),
     templates: Schema.Array(UnoComputerAppTemplate),
+    /** Store sections in tab order (empty with an older console). */
+    categories: Schema.optional(Schema.Array(UnoComputerAppCategory)),
   }),
   installed: Schema.Struct({
     availability: UnoComputerAvailability,

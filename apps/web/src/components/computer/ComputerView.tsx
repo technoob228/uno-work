@@ -458,6 +458,8 @@ export function ComputerView() {
           }
         }}
         templates={catalog?.templates ?? []}
+        categories={catalog?.categories ?? []}
+        memTotalMb={load?.memTotalMb ?? null}
         installedTemplateIds={
           new Set(
             [

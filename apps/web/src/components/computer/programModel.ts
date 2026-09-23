@@ -189,7 +189,7 @@ export function buildProgramTiles(input: {
       key: `install:${install.deploymentId}`,
       name: install.name,
       icon: install.icon,
-      iconImage: null,
+      iconImage: install.iconUrl ?? null,
       status: running ? (input.computerOn ? "running" : "asleep") : install.state,
       caption:
         install.state === "installing"
@@ -215,7 +215,7 @@ export function buildProgramTiles(input: {
       key: app.key,
       name: app.name,
       icon: app.icon,
-      iconImage: null,
+      iconImage: app.iconUrl ?? null,
       status,
       caption:
         status === "asleep" ? "Asleep" : status === "installing" ? "Installing…" : "App Store",

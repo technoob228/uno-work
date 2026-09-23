@@ -68,9 +68,16 @@ export function ProgramIcon({
   const base =
     "flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl shadow-sm ring-1 ring-black/5 dark:ring-white/10";
   if (iconImage) {
+    // App Store logos (served by Uno) are brand marks: whole, on white, with air.
+    const logo = iconImage.includes("/api/v1/apps/icons/");
     return (
-      <span className={cn(base, "bg-card", className)}>
-        <img src={iconImage} alt="" className="size-full object-cover" draggable={false} />
+      <span className={cn(base, logo ? "bg-white p-[18%]" : "bg-card", className)}>
+        <img
+          src={iconImage}
+          alt=""
+          className={cn("size-full", logo ? "object-contain" : "object-cover")}
+          draggable={false}
+        />
       </span>
     );
   }
