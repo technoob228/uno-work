@@ -50,6 +50,7 @@ import {
 } from "./shareTokens.ts";
 import {
   contentVersion,
+  effectiveOfficeAccess,
   officeShareInfo,
   saveSharedOfficeFile,
   SHARE_OFFICE_MAX_BYTES,
@@ -348,6 +349,8 @@ const readOfficeSharePage = Effect.gen(function* () {
 export interface OfficeSharePageConfig {
   readonly name: string;
   readonly access: "view" | "comment" | "edit";
+  /** The owner chose "comment", but this kind of file can only be viewed by link. */
+  readonly commentsReadOnly?: boolean;
   readonly documentType: "word" | "cell" | "slide";
   readonly extension: string;
   readonly fileUrl: string;
@@ -419,11 +422,22 @@ function handleOfficeShareOp(input: {
         bytes: new Uint8Array(body),
         baseVersion: request.headers["x-uno-base-version"] ?? null,
         force,
+        access: share.access,
         versionsDir: nodePath.join(config.baseDir, "share-versions"),
       }),
     ).pipe(Effect.orElseSucceed(() => null));
     if (result === null) return jsonReply({ error: "Couldn't save on the computer." }, 500);
-    if (result.kind === "rejected") return jsonReply({ error: result.message }, result.status);
+    if (result.kind === "rejected") {
+      if (result.code === "comment_only") {
+        yield* Effect.logWarning("files.share.save.comment_only_refused", {
+          shareId: share.shareId,
+        });
+      }
+      return jsonReply(
+        { error: result.message, ...(result.code ? { code: result.code } : {}) },
+        result.status,
+      );
+    }
     if (result.kind === "conflict") {
       yield* Effect.logInfo("files.share.save.conflict", { shareId: share.shareId });
       return jsonReply(
@@ -565,11 +579,12 @@ const handleShare = Effect.gen(function* () {
       if (page !== null) {
         yield* files.recordShareAccess(share.shareId);
         const name = nodePath.basename(target.path);
-        const access = office.writable ? share.access : "view";
+        const access = effectiveOfficeAccess(office, share.access);
         return htmlPage(
           injectOfficeShareConfig(page, {
             name,
             access,
+            ...(share.access === "comment" && access === "view" ? { commentsReadOnly: true } : {}),
             documentType: office.documentType,
             extension: office.extension,
             fileUrl: `${base}/.file`,

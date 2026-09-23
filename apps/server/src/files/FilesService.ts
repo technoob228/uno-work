@@ -271,6 +271,12 @@ export const makeFilesService = (
               message: `Old .${office.extension} files can only be shared to view. Save it as .docx, .xlsx or .pptx to let people edit.`,
             });
           }
+          if (access === "comment" && !office.commentable) {
+            return yield* new FilesError({
+              message:
+                "Comment links work for Word documents (.docx) for now. Share this file to view or to edit.",
+            });
+          }
         }
         const passwordHash =
           input.password === null || input.password === undefined
