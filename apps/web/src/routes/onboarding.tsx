@@ -10,7 +10,9 @@ import { HarnessesStep } from "~/components/onboarding/steps/HarnessesStep";
 import { PermissionsStep } from "~/components/onboarding/steps/PermissionsStep";
 import { RulesStep } from "~/components/onboarding/steps/RulesStep";
 import { UnoLlmStep } from "~/components/onboarding/steps/UnoLlmStep";
-import { WelcomeStep } from "~/components/onboarding/steps/WelcomeStep";
+import { ConnectAgentStep } from "~/components/onboarding/steps/ConnectAgentStep";
+import { PathStep } from "~/components/onboarding/steps/PathStep";
+import { SshAccessStep } from "~/components/onboarding/steps/SshAccessStep";
 import { WhatItDoesStep } from "~/components/onboarding/steps/WhatItDoesStep";
 import { ComputerAwayStep } from "~/components/onboarding/steps/web/ComputerAwayStep";
 import { ComputerChatStep } from "~/components/onboarding/steps/web/ComputerChatStep";
@@ -30,7 +32,8 @@ export const Route = createFileRoute("/onboarding")({
 });
 
 function OnboardingRouteView() {
-  const state = useOnboardingState(isWebApp ? "web" : "desktop");
+  const flow = isWebApp ? "web" : "desktop";
+  const state = useOnboardingState(flow);
   const { updateSettings } = useUpdateSettings();
   const navigate = useNavigate();
   const openAddProjectRef = useRef(false);
@@ -72,6 +75,12 @@ function OnboardingRouteView() {
       state.next();
       return;
     }
+    // The agent and SSH paths end in the normal app: nothing is locked by the
+    // choice, Uno Work is simply there when the person wants it.
+    if (state.path !== "work") {
+      handleSkip();
+      return;
+    }
     if (isWebApp) {
       // Same path as the suggestion chips, just without a pre-filled message.
       void firstChat.launch(null);
@@ -85,7 +94,15 @@ function OnboardingRouteView() {
     void navigate({ to: "/", replace: true });
   };
 
-  const continueLabelProps = isWebApp && state.isLast ? { continueLabel: "Open my computer" } : {};
+  const continueLabel =
+    state.stepId === "agent-connect"
+      ? "Done — open Uno Work anyway"
+      : state.stepId === "ssh-access"
+        ? "Done — open Uno Work"
+        : isWebApp && state.isLast
+          ? "Open my computer"
+          : undefined;
+  const continueLabelProps = continueLabel ? { continueLabel } : {};
 
   return (
     <OnboardingShell
@@ -101,7 +118,18 @@ function OnboardingRouteView() {
       onContinue={handleContinue}
       onSkip={handleSkip}
     >
-      {state.stepId === "welcome" && <WelcomeStep />}
+      {state.stepId === "path" && (
+        <PathStep
+          flow={flow}
+          value={state.path}
+          onChange={state.setPath}
+          onConfirm={state.next}
+        />
+      )}
+      {state.stepId === "agent-connect" && <ConnectAgentStep />}
+      {state.stepId === "ssh-access" && (
+        <SshAccessStep flow={flow} onContinueInUnoWork={() => state.setPath("work")} />
+      )}
       {state.stepId === "perms" && <PermissionsStep />}
       {state.stepId === "what" && <WhatItDoesStep />}
       {state.stepId === "dev" && <DevModeStep />}
