@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Fiber, Layer } from "effect";
 
 import { ServerSettingsService } from "../serverSettings.ts";
 import { UnoBoxIdentity } from "../unoBoxIdentity.ts";
@@ -224,3 +224,40 @@ it.effect("a removed app does not come back as 'an install this daemon started'"
     ),
   ),
 );
+
+it.effect("a removal finishes forgetting the install even if the browser goes away", () => {
+  let finishRemoval: (() => void) | null = null;
+  return Effect.gen(function* () {
+    const computer = yield* UnoComputerService;
+    yield* computer.installApp({ templateId: "nextcloud" });
+    // The browser that asked for the removal disconnects mid-way: the RPC
+    // fiber is interrupted while the console is still deleting the data.
+    const fiber = yield* Effect.forkChild(
+      computer.removeApp({ deploymentId: 500, deleteData: true }),
+    );
+    yield* Effect.promise(() => new Promise((r) => setTimeout(r, 10)));
+    const interrupted = Fiber.interrupt(fiber).pipe(Effect.forkChild);
+    const waiter = yield* interrupted;
+    yield* Effect.promise(() => new Promise((r) => setTimeout(r, 10)));
+    finishRemoval?.();
+    yield* Fiber.join(waiter);
+    const after = yield* computer.apps();
+    assert.deepStrictEqual(after.installed.apps, []);
+  }).pipe(
+    Effect.provide(
+      serviceLayer({
+        apiKey: "key",
+        ownBoxId: 42,
+        routes: {
+          "/api/v1/boxes/42/apps": () => ({ deployment_id: 500, apps: [] }),
+          "/api/v1/boxes/42/apps/500": () =>
+            new Promise((resolve) => {
+              finishRemoval = () => resolve({ removed: true, template_id: "nextcloud" });
+            }),
+          "/api/v1/git/services": () => ({ services: [] }),
+          "/api/v1/apps/templates": () => ({ templates: [] }),
+        },
+      }),
+    ),
+  );
+});

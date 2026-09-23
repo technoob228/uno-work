@@ -235,25 +235,33 @@ export const makeUnoComputerService = (
         return status;
       });
 
+    // Uninterruptible: the console finishes a removal even when the browser
+    // that asked for it goes away (tab closed, reload, reconnect) — deleting an
+    // app's data can take a while. Interrupted here, the daemon would skip
+    // forgetting its own install record, and the removed app would stay on
+    // the home screen as "an install this daemon started" until a restart.
     const removeApp: UnoComputerServiceShape["removeApp"] = (input) =>
-      Effect.gen(function* () {
-        const boxId = yield* resolveBoxId(input);
-        const ctx = yield* context(boxId);
-        const result = yield* Effect.tryPromise({
-          try: () =>
-            removeComputerApp({
-              ...ctx,
-              boxId,
-              deploymentId: input.deploymentId,
-              deleteData: input.deleteData === true,
-            }),
-          catch: toFetchError,
-        });
-        // Otherwise the app list would bring it back as "an install this daemon started".
-        const index = known.findIndex((k) => k.deploymentId === input.deploymentId);
-        if (index >= 0) known.splice(index, 1);
-        return result;
-      });
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          const boxId = yield* resolveBoxId(input);
+          const ctx = yield* context(boxId);
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              removeComputerApp({
+                ...ctx,
+                boxId,
+                deploymentId: input.deploymentId,
+                deleteData: input.deleteData === true,
+              }),
+            catch: toFetchError,
+          });
+          // Otherwise the app list would bring it back as "an install this daemon started".
+          for (let i = known.length - 1; i >= 0; i--) {
+            if (known[i]!.deploymentId === input.deploymentId) known.splice(i, 1);
+          }
+          return result;
+        }),
+      );
 
     const setAppAiLimit: UnoComputerServiceShape["setAppAiLimit"] = (input) =>
       Effect.gen(function* () {
