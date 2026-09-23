@@ -99,6 +99,7 @@ export function ComputerHero({
   onResize,
   lowResource,
   onOpenLook,
+  boost,
 }: {
   name: string;
   subtitle: string | null;
@@ -119,6 +120,8 @@ export function ComputerHero({
   lowResource?: "memory" | "disk" | null | undefined;
   /** Opens "What's using your computer" at a tile; absent when there's nothing to drill into. */
   onOpenLook?: ((look: ResourceLook) => void) | undefined;
+  /** "Boost ×2 for 1 hour" (or the boosted pill); absent when boost isn't offered. */
+  boost?: React.ReactNode;
 }) {
   const state: PowerState = status === null ? "on" : computerPowerState(status);
   const [confirm, setConfirm] = useState<"sleep" | "stop" | null>(null);
@@ -202,14 +205,17 @@ export function ComputerHero({
         onOpenLook={onOpenLook}
       />
 
-      {onResize && state === "on" ? (
+      {(onResize && state === "on") || boost ? (
         <div
           className={cn(
             "mt-4 flex flex-wrap items-center gap-3",
-            lowResource && "rounded-2xl bg-warning/10 px-3 py-2 ring-1 ring-warning/30",
+            lowResource &&
+              onResize &&
+              state === "on" &&
+              "rounded-2xl bg-warning/10 px-3 py-2 ring-1 ring-warning/30",
           )}
         >
-          {lowResource ? (
+          {lowResource && onResize && state === "on" ? (
             <p className="flex min-w-0 flex-1 items-center gap-2 text-xs" role="status">
               <TriangleAlertIcon className="size-3.5 shrink-0 text-warning" />
               {lowResource === "memory"
@@ -228,14 +234,17 @@ export function ComputerHero({
           ) : (
             <span className="flex-1" />
           )}
-          <Button size="sm" variant={lowResource ? "default" : "outline"} onClick={onResize}>
-            <PlusIcon />
-            {lowResource === "disk"
-              ? "Add disk space"
-              : lowResource === "memory"
-                ? "Add memory"
-                : "Add memory / cores"}
-          </Button>
+          {boost}
+          {onResize && state === "on" ? (
+            <Button size="sm" variant={lowResource ? "default" : "outline"} onClick={onResize}>
+              <PlusIcon />
+              {lowResource === "disk"
+                ? "Add disk space"
+                : lowResource === "memory"
+                  ? "Add memory"
+                  : "Add memory / cores"}
+            </Button>
+          ) : null}
         </div>
       ) : null}
 

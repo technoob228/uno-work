@@ -21,6 +21,7 @@ import type {
 import { mutationOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
 
 import { ensureEnvironmentApi } from "../../environmentApi";
+import { boostRefetchMs } from "./boostModel";
 
 const STATE_REFETCH_MS = 15_000;
 const METRICS_REFETCH_MS = 5_000;
@@ -65,7 +66,13 @@ export function computerStateQueryOptions(
     queryKey: computerQueryKeys.state(environmentId, boxId),
     queryFn: () => api(environmentId).getState(target(boxId)),
     enabled: environmentId !== null,
-    refetchInterval: STATE_REFETCH_MS,
+    // A boost restarts the computer: read it every few seconds while it switches.
+    refetchInterval: (query) =>
+      boostRefetchMs(
+        (query.state.data as UnoComputerState | undefined)?.box?.boost,
+        Date.now(),
+        STATE_REFETCH_MS,
+      ),
   });
 }
 

@@ -34,6 +34,44 @@ export const UnoComputerPort = Schema.Struct({
 });
 export type UnoComputerPort = typeof UnoComputerPort.Type;
 
+/* ------------------------------------------------------------------ *
+ * Boost ×2 for an hour
+ *
+ * The computer restarts into twice its size for an hour and restarts once
+ * more back. The control plane sends `boost` on `GET /boxes/{id}` only when
+ * the feature is on for the account — absent means nothing about boost shows.
+ * ------------------------------------------------------------------ */
+
+/**
+ * - `off`      — not boosted; `ramMb`/`vcpu` are what a boost would give;
+ * - `starting` — restarting into the boosted size;
+ * - `active`   — boosted until `endsAt`;
+ * - `ending`   — restarting back to the normal size.
+ */
+export const UnoComputerBoostState = Schema.Literals(["off", "starting", "active", "ending"]);
+export type UnoComputerBoostState = typeof UnoComputerBoostState.Type;
+
+export const UnoComputerBoost = Schema.Struct({
+  /** Can a boost start now; when false and off, `reason` says why. */
+  available: Schema.Boolean,
+  state: UnoComputerBoostState,
+  /** The boosted size. */
+  ramMb: Schema.Number,
+  vcpu: Schema.Number,
+  /** The normal size it returns to. */
+  baseRamMb: Schema.Number,
+  baseVcpu: Schema.Number,
+  hours: Schema.Number,
+  startedAt: Schema.NullOr(Schema.String),
+  /** Set while starting / active / ending. */
+  endsAt: Schema.NullOr(Schema.String),
+  hoursLeftToday: Schema.Number,
+  hoursPerDay: Schema.Number,
+  /** Plain words why a boost can't start; null when it can. */
+  reason: Schema.NullOr(Schema.String),
+});
+export type UnoComputerBoost = typeof UnoComputerBoost.Type;
+
 export const UnoComputerBox = Schema.Struct({
   id: Schema.Number,
   name: Schema.String,
@@ -50,6 +88,8 @@ export const UnoComputerBox = Schema.Struct({
   /** Ready-to-run SSH command for the "For engineers" door. */
   ssh: Schema.NullOr(Schema.String),
   ports: Schema.Array(UnoComputerPort),
+  /** Boost ×2; absent when boost is not offered to this account. */
+  boost: Schema.optional(UnoComputerBoost),
 });
 export type UnoComputerBox = typeof UnoComputerBox.Type;
 
@@ -595,3 +635,28 @@ export const UnoComputerResizeResult = Schema.Struct({
   upgradeUrl: Schema.String,
 });
 export type UnoComputerResizeResult = typeof UnoComputerResizeResult.Type;
+
+/* ------------------------------------------------------------------ *
+ * Boost ×2 — start / end
+ * ------------------------------------------------------------------ */
+
+export const UnoComputerBoostInput = Schema.Struct({
+  boxId: Schema.optional(Schema.Number),
+  hours: Schema.optional(
+    Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(24)),
+  ),
+});
+export type UnoComputerBoostInput = typeof UnoComputerBoostInput.Type;
+
+/**
+ * - `started` — the computer is restarting into the boost (or already boosted);
+ * - `ended`   — it is restarting back to normal (or was not boosted any more);
+ * - `refused` — Uno said no; `message` says why in plain words.
+ * `boost` is the fresh boost state when Uno sent it.
+ */
+export const UnoComputerBoostResult = Schema.Struct({
+  outcome: Schema.Literals(["started", "ended", "refused"]),
+  message: Schema.NullOr(Schema.String),
+  boost: Schema.NullOr(UnoComputerBoost),
+});
+export type UnoComputerBoostResult = typeof UnoComputerBoostResult.Type;

@@ -38,6 +38,8 @@ import {
   UnoComputerResizeInput,
   UnoComputerResizeOptions,
   UnoComputerResizeResult,
+  UnoComputerBoostInput,
+  UnoComputerBoostResult,
   UnoComputerState,
   UnoComputerTargetInput,
   UnoEmbedCheck,
@@ -385,6 +387,8 @@ export const WS_METHODS = {
   unoComputerLocalMetrics: "uno.computer.localMetrics",
   unoComputerResizeOptions: "uno.computer.resizeOptions",
   unoComputerResize: "uno.computer.resize",
+  unoComputerBoost: "uno.computer.boost",
+  unoComputerEndBoost: "uno.computer.endBoost",
   unoComputerEmbedCheck: "uno.computer.embedCheck",
   unoComputerResources: "uno.computer.resources",
   unoComputerDiskUsage: "uno.computer.diskUsage",
@@ -1477,6 +1481,20 @@ export const WsUnoComputerResizeRpc = Rpc.make(WS_METHODS.unoComputerResize, {
   error: UnoCloudRpcError,
 });
 
+/** Boost ×2 for an hour. A refusal is an answer (`refused`), not an error. */
+export const WsUnoComputerBoostRpc = Rpc.make(WS_METHODS.unoComputerBoost, {
+  payload: UnoComputerBoostInput,
+  success: UnoComputerBoostResult,
+  error: UnoCloudRpcError,
+});
+
+/** End a boost early: the computer restarts back to its normal size. */
+export const WsUnoComputerEndBoostRpc = Rpc.make(WS_METHODS.unoComputerEndBoost, {
+  payload: UnoComputerTargetInput,
+  success: UnoComputerBoostResult,
+  error: UnoCloudRpcError,
+});
+
 /** What is using the processor and memory, grouped for a person. Never fails. */
 export const WsUnoComputerResourcesRpc = Rpc.make(WS_METHODS.unoComputerResources, {
   payload: Schema.Struct({}),
@@ -1572,6 +1590,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoComputerLocalMetricsRpc,
   WsUnoComputerResizeOptionsRpc,
   WsUnoComputerResizeRpc,
+  WsUnoComputerBoostRpc,
+  WsUnoComputerEndBoostRpc,
   WsUnoComputerResourcesRpc,
   WsUnoComputerDiskUsageRpc,
   WsUnoComputerDiskCleanRpc,

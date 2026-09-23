@@ -47,6 +47,16 @@
  * the app; PATCH …/apps/{deployment_id} {"ai_limit_usd": n|null} sets the
  * AI limit. MOCK_REMOVE=old answers DELETE/PATCH like a console from before
  * app removal (405); MOCK_REMOVE=fail answers 502 APP_REMOVE_FAILED.
+ *
+ * Boost ×2 (GET /boxes/{id} → "boost", POST|DELETE /boxes/{id}/boost): on by
+ * default in every scenario but "not-deployed". POST switches off → starting →
+ * (MOCK_BOOST_SWITCH_MS, default 4 s) active for MOCK_BOOST_MINUTES (default
+ * 60), then ending → off; DELETE ends it early the same way. The box reports
+ * the doubled size while boosted. MOCK_BOOST=off hides boost (flag off for the
+ * account); MOCK_BOOST=unavailable greys the button out with a reason;
+ * MOCK_BOOST=no-capacity answers 409 BOOST_NO_CAPACITY; MOCK_BOOST=limit has
+ * today's hours used up (429 BOOST_DAILY_LIMIT). MOCK_BOOST=active starts
+ * boosted, 43 minutes left.
  */
 import { execFile } from "node:child_process";
 import http from "node:http";
@@ -114,15 +124,103 @@ function resizeRefusal(req) {
   return null;
 }
 
+// Boost ×2 for an hour — same contract as prod's /boxes/{id}/boost.
+const BOOST_MODE = process.env.MOCK_BOOST || (SCENARIO === "not-deployed" ? "off" : "on");
+const BOOST_SWITCH_MS = Number(process.env.MOCK_BOOST_SWITCH_MS || 4000);
+const BOOST_MINUTES = Number(process.env.MOCK_BOOST_MINUTES || 60);
+const BOOST_HOURS_PER_DAY = 4;
+const boost = {
+  state: BOOST_MODE === "active" ? "active" : "off",
+  startedAt: BOOST_MODE === "active" ? iso(minsAgo(17)) : null,
+  endsAt: BOOST_MODE === "active" ? iso(new Date(Date.now() + 43 * 60_000)) : null,
+  hoursUsed: BOOST_MODE === "limit" ? BOOST_HOURS_PER_DAY : BOOST_MODE === "active" ? 1 : 0,
+  timer: null,
+};
+
+function boostSwitch(to, after) {
+  clearTimeout(boost.timer);
+  boost.timer = setTimeout(() => {
+    boost.state = to;
+    console.log(`boost → ${to}`);
+    if (to === "active") {
+      const ms = new Date(boost.endsAt).getTime() - Date.now();
+      boost.timer = setTimeout(() => boostEnd(), Math.max(0, ms));
+    }
+    if (to === "off") {
+      boost.startedAt = null;
+      boost.endsAt = null;
+    }
+  }, after);
+}
+
+function boostEnd() {
+  boost.state = "ending";
+  console.log("boost → ending");
+  boostSwitch("off", BOOST_SWITCH_MS);
+}
+if (boost.state === "active") boostSwitch("active", 0);
+
+function boostJson() {
+  if (BOOST_MODE === "off") return null;
+  const hoursLeft = Math.max(0, BOOST_HOURS_PER_DAY - boost.hoursUsed);
+  let reason = "";
+  if (BOOST_MODE === "unavailable") reason = "Boost comes with paid plans.";
+  else if (hoursLeft === 0) reason = "You've used today's boost hours. They come back tomorrow.";
+  else if (status() !== "running") reason = "Turn your computer on to boost it.";
+  return {
+    available: boost.state === "off" && reason === "",
+    state: boost.state,
+    ram_mb: SHAPE.ram_mb * 2,
+    vcpu: SHAPE.vcpu * 2,
+    base_ram_mb: SHAPE.ram_mb,
+    base_vcpu: SHAPE.vcpu,
+    hours: 1,
+    started_at: boost.startedAt,
+    ends_at: boost.endsAt,
+    hours_left_today: hoursLeft,
+    hours_per_day: BOOST_HOURS_PER_DAY,
+    reason,
+  };
+}
+
+/** POST /boxes/{id}/boost → [status, body]. */
+function boostStart(hours) {
+  if (BOOST_MODE === "off" || BOOST_MODE === "unavailable") {
+    return [403, { error: "BOOST_NOT_AVAILABLE" }];
+  }
+  if (hours !== 1) return [400, { error: "BOOST_INVALID_HOURS" }];
+  if (boost.state !== "off") return [409, { error: "BOOST_ACTIVE" }];
+  if (status() !== "running") return [409, { error: "BOX_NOT_RUNNING" }];
+  if (BOOST_MODE === "no-capacity") return [409, { error: "BOOST_NO_CAPACITY" }];
+  if (boost.hoursUsed >= BOOST_HOURS_PER_DAY) return [429, { error: "BOOST_DAILY_LIMIT" }];
+  boost.hoursUsed += 1;
+  boost.state = "starting";
+  boost.startedAt = iso(new Date());
+  boost.endsAt = iso(new Date(Date.now() + BOOST_SWITCH_MS + BOOST_MINUTES * 60_000));
+  console.log("boost → starting");
+  boostSwitch("active", BOOST_SWITCH_MS);
+  return [202, { boost: boostJson() }];
+}
+
+/** DELETE /boxes/{id}/boost → [status, body]. */
+function boostStop() {
+  if (boost.state !== "active") return [409, { error: "BOOST_NOT_ACTIVE" }];
+  clearTimeout(boost.timer);
+  boostEnd();
+  return [202, { boost: boostJson() }];
+}
+
 function box() {
   const s = status();
+  const boosted = boost.state === "active" && BOOST_MODE !== "off";
+  const boostInfo = boostJson();
   return {
     id: BOX_ID,
     name: "my-computer",
     status: s,
     os: "ubuntu-24.04",
-    ram_mb: SHAPE.ram_mb,
-    vcpu: SHAPE.vcpu,
+    ram_mb: boosted ? SHAPE.ram_mb * 2 : SHAPE.ram_mb,
+    vcpu: boosted ? SHAPE.vcpu * 2 : SHAPE.vcpu,
     disk_gb: SHAPE.disk_gb,
     created_at: iso(minsAgo(60 * 24 * 32)),
     started_at: s === "running" ? (startedAtOverride ?? STARTED_AT) : null,
@@ -130,6 +228,7 @@ function box() {
     network_public_ip: "203.0.113.42",
     ssh_command: "ssh -p 40122 uno@203.0.113.42",
     hostname: "my-computer.u85.uno4.me",
+    ...(boostInfo ? { boost: boostInfo } : {}),
   };
 }
 
@@ -768,6 +867,13 @@ const server = http.createServer(async (req, res) => {
     if (Number(m[1]) !== BOX_ID) return send(res, 404, { error: "NOT_FOUND" });
     const sub = m[2] || "";
     if (sub === "") return send(res, 200, box());
+    if (sub === "/boost" && (req.method === "POST" || req.method === "DELETE")) {
+      const body = req.method === "POST" ? await readBody(req) : {};
+      const [code, answer] =
+        req.method === "POST" ? boostStart(Number(body.hours ?? 1)) : boostStop();
+      if (code >= 400) console.log(`boost refused: ${answer.error}`);
+      return send(res, code, answer);
+    }
     if (sub === "/resize" && req.method === "POST") {
       const body = await readBody(req);
       const want = {
