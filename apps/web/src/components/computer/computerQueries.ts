@@ -8,6 +8,8 @@
  * route is not there yet ("coming soon") — no point hammering a 404.
  */
 import type {
+  AppAiOverview,
+  AppAiUpdateInput,
   EnvironmentId,
   UnoComputerApps,
   UnoComputerMetrics,
@@ -269,4 +271,27 @@ export function appSignInApi(environmentId: EnvironmentId | null, boxId: number 
     unshare: (deploymentId: number, userId: number) =>
       api(environmentId).unshareApp({ ...target(boxId), deploymentId, userId }),
   };
+}
+
+/**
+ * Settings → Apps and the Remove dialog read the same list: apps on this
+ * computer that use its AI or keep files in the account's cloud.
+ */
+export const appAiQueryKey = (environmentId: EnvironmentId | null) =>
+  ["app-ai", environmentId] as const;
+
+export function appAiQueryOptions(environmentId: EnvironmentId | null, enabled = true) {
+  return queryOptions({
+    queryKey: appAiQueryKey(environmentId),
+    queryFn: (): Promise<AppAiOverview> => api(environmentId).appAiList(),
+    enabled: environmentId !== null && enabled,
+    refetchInterval: 10_000,
+  });
+}
+
+export function appAiUpdate(
+  environmentId: EnvironmentId | null,
+  input: AppAiUpdateInput,
+): Promise<AppAiOverview> {
+  return api(environmentId).appAiUpdate(input);
 }

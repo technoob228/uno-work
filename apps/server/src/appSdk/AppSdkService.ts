@@ -55,7 +55,13 @@ import {
 import { resolveAppApiPort } from "./appApiPort.ts";
 import { makeAppTasks } from "./appTasks.ts";
 import { makeTaskMeter } from "./appTaskMeter.ts";
-import { GB, appFolder, makeAppStorage } from "./appStorage.ts";
+import {
+  AppStorageError,
+  GB,
+  appFolder,
+  appStorageComputerKey,
+  makeAppStorage,
+} from "./appStorage.ts";
 import { type ModelPrice, parseModelPrices } from "./pricing.ts";
 import { installSdkFiles } from "./sdkFiles.ts";
 
@@ -249,7 +255,15 @@ export const makeAppSdkService = (
       return syncing;
     };
 
-    const callerFor = (stored: StoredApp): AppApiCaller | null => {
+    /** `computer-<box>` (or `local-<id>` off Uno computers) — see appStorage.ts. */
+    const computerKey = async () => {
+      const current = await runPromise(readSettings);
+      return appStorageComputerKey(current?.uno.boxId ?? null, await store.localComputerId());
+    };
+    const folderOf = (stored: StoredApp, key: string) =>
+      appFolder(stored.id, stored.storageScope === "computer" ? key : null);
+
+    const callerFor = async (stored: StoredApp): Promise<AppApiCaller | null> => {
       const manifest = manifests.get(stored.id);
       if (!manifest || !wantsAppToken(manifest) || stored.revoked) return null;
       return {
@@ -263,7 +277,10 @@ export const makeAppSdkService = (
         manifestCwd: manifest.cwd,
         taskToolsCap: stored.taskToolsCap,
         storage: manifest.storage
-          ? { limitBytes: effectiveStorageLimitBytes(stored, manifest) }
+          ? {
+              limitBytes: effectiveStorageLimitBytes(stored, manifest),
+              folder: folderOf(stored, await computerKey()),
+            }
           : null,
       };
     };
@@ -374,32 +391,35 @@ export const makeAppSdkService = (
     const storageInfo = (
       stored: StoredApp,
       manifest: AppManifest | undefined,
+      key: string,
     ): AppStorageInfo | null => {
       if (!manifest?.storage) return null;
-      const usage = appStorage.cachedUsage(stored.id);
+      const folder = folderOf(stored, key);
+      const usage = appStorage.cachedUsage(folder);
       return {
         limitBytes: effectiveStorageLimitBytes(stored, manifest),
         limitSetByPerson: stored.storageLimitOverrideGb !== null,
         usedBytes: usage?.usedBytes ?? null,
         files: usage?.files ?? null,
         bucketId: storageBucketId,
-        prefix: appFolder(stored.id),
+        prefix: folder,
+        scope: stored.storageScope,
       };
     };
 
     /** Measure storage apps in the background, so Settings never waits on S3. */
     let measuring: Promise<void> | null = null;
-    const measureStorage = (ids: ReadonlyArray<string>) => {
-      if (measuring || ids.length === 0) return;
+    const measureStorage = (folders: ReadonlyArray<string>) => {
+      if (measuring || folders.length === 0) return;
       measuring = (async () => {
         storageBucketId = await appStorage.bucketId();
-        for (const id of ids) await appStorage.usage(id).catch(() => undefined);
+        for (const folder of folders) await appStorage.usage(folder).catch(() => undefined);
       })().finally(() => {
         measuring = null;
       });
     };
 
-    const toApp = (stored: StoredApp, manifest: AppManifest | undefined): AppAiApp => {
+    const toApp = (stored: StoredApp, manifest: AppManifest | undefined, key: string): AppAiApp => {
       const limitUsd = effectiveLimitUsd(stored, manifest);
       return {
         id: stored.id,
@@ -422,7 +442,7 @@ export const makeAppSdkService = (
         taskToolsCap: stored.taskToolsCap,
         lastUsedAt: stored.lastUsedAt,
         keyDir: displayManifestDir(appKeyDir(keysDir, stored.id), home),
-        storage: storageInfo(stored, manifest),
+        storage: storageInfo(stored, manifest, key),
       };
     };
 
@@ -432,15 +452,18 @@ export const makeAppSdkService = (
       const current = yield* readSettings;
       const key = yield* gatewayKey.harnessKey().pipe(Effect.orElseSucceed(() => ""));
       const providers = yield* providerRegistry.getProviders;
+      const thisComputer = yield* Effect.promise(computerKey);
       const listed = store
         .all()
         .filter((stored) => wantsAppToken(manifests.get(stored.id)) || stored.revoked)
         .filter((stored) => manifests.has(stored.id));
       measureStorage(
-        listed.filter((stored) => manifests.get(stored.id)?.storage).map((stored) => stored.id),
+        listed
+          .filter((stored) => manifests.get(stored.id)?.storage)
+          .map((stored) => folderOf(stored, thisComputer)),
       );
       const apps = listed
-        .map((stored) => toApp(stored, manifests.get(stored.id)))
+        .map((stored) => toApp(stored, manifests.get(stored.id), thisComputer))
         .toSorted((a, b) => a.name.localeCompare(b.name));
       return {
         apps,
@@ -464,10 +487,33 @@ export const makeAppSdkService = (
     const update: AppSdkServiceShape["update"] = (input) =>
       Effect.gen(function* () {
         yield* Effect.promise(() => sync());
-        if (!manifests.has(input.appId) || !store.get(input.appId)) {
+        const known = store.get(input.appId);
+        // Deleting an app's cloud files comes right after the app is removed,
+        // when its manifest may be gone already: the stored entry is enough.
+        const onlyDeletesFiles = Object.keys(input).every(
+          (field) => field === "appId" || field === "deleteCloudFiles",
+        );
+        if (!known || (!manifests.has(input.appId) && !onlyDeletesFiles)) {
           return yield* Effect.fail(
             new AppSdkUpdateError("That app isn't on this computer anymore."),
           );
+        }
+        if (input.deleteCloudFiles === true) {
+          const folder = folderOf(known, yield* Effect.promise(computerKey));
+          const deleted = yield* Effect.tryPromise({
+            try: () => appStorage.deleteFolder(folder),
+            catch: (cause) =>
+              new AppSdkUpdateError(
+                `Couldn't delete the app's files in the cloud: ${
+                  cause instanceof AppStorageError ? cause.message : String(cause)
+                }`,
+              ),
+          });
+          yield* Effect.logInfo("app sdk: app's cloud files deleted by the person", {
+            appId: input.appId,
+            folder,
+            deleted,
+          });
         }
         if (
           input.limitUsd !== undefined &&
@@ -508,6 +554,7 @@ export const makeAppSdkService = (
               app.storageLimitOverrideGb =
                 input.storageLimitGb === null ? null : Math.round(input.storageLimitGb * 100) / 100;
             }
+            if (input.storageScope !== undefined) app.storageScope = input.storageScope;
             if (input.resetSpent === true) {
               // The gateway's total stays; only its growth from now on counts.
               app.spentUsd = 0;

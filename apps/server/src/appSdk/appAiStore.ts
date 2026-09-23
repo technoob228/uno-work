@@ -54,6 +54,11 @@ export interface StoredApp {
   limitOverrideUsd: number | null;
   /** Cloud storage limit set by the person in Settings → Apps; null = the manifest's. */
   storageLimitOverrideGb: number | null;
+  /**
+   * Which cloud folder the app uses: the one shared by the account's computers
+   * (default) or this computer's own (`appStorage.ts`, `appFolder`).
+   */
+  storageScope: "account" | "computer";
   revoked: boolean;
   taskToolsCap: AppTaskTools;
   tasks: StoredAppTask[];
@@ -62,6 +67,8 @@ export interface StoredApp {
 interface StoreFile {
   readonly version: 1;
   readonly apps: Record<string, StoredApp>;
+  /** Names this computer in cloud folder names when it isn't an Uno computer. */
+  readonly localComputerId?: string;
 }
 
 export function hashAppToken(token: string): string {
@@ -98,6 +105,7 @@ function normalizeApp(id: string, raw: unknown): StoredApp {
       typeof r["storageLimitOverrideGb"] === "number" && r["storageLimitOverrideGb"] > 0
         ? r["storageLimitOverrideGb"]
         : null,
+    storageScope: r["storageScope"] === "computer" ? "computer" : "account",
     revoked: r["revoked"] === true,
     taskToolsCap: APP_TASK_TOOLS_ORDER.includes(cap as AppTaskTools)
       ? (cap as AppTaskTools)
@@ -124,14 +132,23 @@ export interface AppAiStore {
   readonly addSpend: (id: string, usd: number) => Promise<void>;
   readonly addTask: (id: string, task: StoredAppTask) => Promise<void>;
   readonly flush: () => Promise<void>;
+  /** A random id for this computer, made once and kept (see `appStorageComputerKey`). */
+  readonly localComputerId: () => Promise<string>;
 }
 
 /** Loads the store (a missing or broken file is an empty store, never a crash). */
 export async function openAppAiStore(filePath: string): Promise<AppAiStore> {
   const apps = new Map<string, StoredApp>();
+  let localComputerId: string | null = null;
   try {
     const parsed = JSON.parse(await readFile(filePath, "utf8")) as Partial<StoreFile>;
     for (const [id, raw] of Object.entries(parsed.apps ?? {})) apps.set(id, normalizeApp(id, raw));
+    if (
+      typeof parsed.localComputerId === "string" &&
+      /^[a-z0-9]{8,32}$/.test(parsed.localComputerId)
+    ) {
+      localComputerId = parsed.localComputerId;
+    }
   } catch {
     // First start, or a corrupt file: start empty (tokens are re-issued on sync).
   }
@@ -143,7 +160,11 @@ export async function openAppAiStore(filePath: string): Promise<AppAiStore> {
     writing = writing.then(async () => {
       if (!dirty) return;
       dirty = false;
-      const body: StoreFile = { version: 1, apps: Object.fromEntries(apps) };
+      const body: StoreFile = {
+        version: 1,
+        apps: Object.fromEntries(apps),
+        ...(localComputerId ? { localComputerId } : {}),
+      };
       await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
       const tmp = `${filePath}.${process.pid}.tmp`;
       await writeFile(tmp, `${JSON.stringify(body, null, 2)}\n`, { mode: 0o600 });
@@ -190,5 +211,12 @@ export async function openAppAiStore(filePath: string): Promise<AppAiStore> {
       await persist();
     },
     flush: () => persist(),
+    localComputerId: async () => {
+      if (!localComputerId) {
+        localComputerId = randomBytes(6).toString("hex");
+        await persist();
+      }
+      return localComputerId;
+    },
   };
 }

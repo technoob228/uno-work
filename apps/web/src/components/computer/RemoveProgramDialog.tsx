@@ -7,6 +7,12 @@
  * person started themselves: the daemon deletes the container, its volumes
  * stay. Either can take a minute, so the dialog shows it working and can't be
  * sent twice.
+ *
+ * An app that keeps files in the account's cloud (the App SDK's storage) gets
+ * one more box, also unticked: "Also delete its files in the cloud". Those
+ * files are not on the computer, so removing the app never touches them on
+ * its own. A shared folder says so — the same app on the account's other
+ * computers uses the same files.
  */
 import { useEffect, useState } from "react";
 
@@ -21,13 +27,21 @@ import {
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Label } from "../ui/label";
+import { formatFileSize } from "../files/fileTypes";
 import { Spinner } from "../ui/spinner";
-import type { ProgramRemoval } from "./programModel";
+import type { ProgramRemoval, RemovalCloudFiles } from "./programModel";
+
+/** "Also delete its files in the cloud (120 MB)." */
+export function cloudFilesLabel(cloudFiles: RemovalCloudFiles): string {
+  const size = cloudFiles.usedBytes === null ? "" : ` (${formatFileSize(cloudFiles.usedBytes)})`;
+  return `Also delete its files in the cloud${size}.`;
+}
 
 export function RemoveProgramDialog({
   open,
   name,
   removal,
+  cloudFiles = null,
   pending,
   error,
   onConfirm,
@@ -36,19 +50,28 @@ export function RemoveProgramDialog({
   open: boolean;
   name: string;
   removal: ProgramRemoval | null;
+  /** The app's cloud folder, when it has one worth asking about. */
+  cloudFiles?: RemovalCloudFiles | null;
   pending: boolean;
   error: string | null;
-  onConfirm: (deleteData: boolean) => void;
+  onConfirm: (deleteData: boolean, deleteCloudFiles: boolean) => void;
   onOpenChange: (open: boolean) => void;
 }) {
   const [deleteData, setDeleteData] = useState(false);
-  // Every time it opens, it starts from "keep the data".
+  const [deleteCloud, setDeleteCloud] = useState(false);
+  // Every time it opens, it starts from "keep the data" and "keep the files".
   useEffect(() => {
-    if (open) setDeleteData(false);
+    if (open) {
+      setDeleteData(false);
+      setDeleteCloud(false);
+    }
   }, [open]);
 
   const store = removal?.kind === "store";
-  const destructive = store && deleteData;
+  const cloud = store && cloudFiles !== null;
+  const wipeData = store && deleteData;
+  const wipeCloud = cloud && deleteCloud;
+  const destructive = wipeData || wipeCloud;
 
   return (
     <AlertDialog
@@ -99,6 +122,29 @@ export function RemoveProgramDialog({
             </div>
           ) : null}
 
+          {cloud && cloudFiles ? (
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="remove-app-delete-cloud"
+                className="mt-0.5"
+                checked={deleteCloud}
+                disabled={pending}
+                onCheckedChange={(checked) => setDeleteCloud(checked === true)}
+              />
+              <Label
+                htmlFor="remove-app-delete-cloud"
+                className="flex flex-col items-start gap-0.5 text-sm leading-snug font-normal text-foreground"
+              >
+                <span>{cloudFilesLabel(cloudFiles)}</span>
+                <span className="text-xs text-muted-foreground">
+                  {cloudFiles.scope === "account"
+                    ? `Careful: this folder is shared. ${name} on your other computers uses the same files.`
+                    : "Only this computer's folder. This can't be undone."}
+                </span>
+              </Label>
+            </div>
+          ) : null}
+
           {pending ? (
             <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
               <Spinner className="size-3.5" />
@@ -120,10 +166,10 @@ export function RemoveProgramDialog({
           <Button
             variant={destructive || !store ? "destructive" : "default"}
             disabled={pending}
-            onClick={() => onConfirm(store && deleteData)}
+            onClick={() => onConfirm(wipeData, wipeCloud)}
           >
             {pending ? <Spinner className="size-3.5" /> : null}
-            {destructive ? "Remove and delete data" : "Remove"}
+            {wipeData ? "Remove and delete data" : wipeCloud ? "Remove and delete files" : "Remove"}
           </Button>
         </AlertDialogFooter>
       </AlertDialogPopup>

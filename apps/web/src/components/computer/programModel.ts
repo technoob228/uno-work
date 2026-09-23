@@ -12,7 +12,12 @@
  * With none of those, a tile opens its details, where "Show on the internet"
  * lives. Kept free of React so the rules are tested directly.
  */
-import type { UnoComputerInstalledApp, UnoMachineApp } from "@t3tools/contracts";
+import type {
+  AppAiApp,
+  AppStorageScope,
+  UnoComputerInstalledApp,
+  UnoMachineApp,
+} from "@t3tools/contracts";
 
 import type { AppInstall } from "./useAppInstalls";
 
@@ -46,19 +51,54 @@ export interface ProgramTile {
  * Nothing else gets one: the computer's own programs, services, processes.
  */
 export type ProgramRemoval =
-  | { readonly kind: "store"; readonly deploymentId: number; readonly name: string }
+  | {
+      readonly kind: "store";
+      readonly deploymentId: number;
+      readonly name: string;
+      /** The catalog id — also the app's id on this computer (`~/.uno/apps/<id>.json`). */
+      readonly templateId: string | null;
+    }
   | { readonly kind: "container"; readonly appId: string; readonly container: string };
 
 export function programRemoval(tile: ProgramTile): ProgramRemoval | null {
   const store = tile.storeApp;
   if (store?.removable === true && store.deploymentId !== null && store.state !== "installing") {
-    return { kind: "store", deploymentId: store.deploymentId, name: tile.name };
+    return {
+      kind: "store",
+      deploymentId: store.deploymentId,
+      name: tile.name,
+      templateId: store.templateId ?? null,
+    };
   }
   const app = tile.machineApp;
   if (app?.source === "docker" && app.canRemove === true) {
     return { kind: "container", appId: app.id, container: app.id.replace(/^docker:/, "") };
   }
   return null;
+}
+
+/** An app's folder in the account's cloud, offered for deletion when the app is removed. */
+export interface RemovalCloudFiles {
+  readonly appId: string;
+  /** Last measured size; null when not measured yet. */
+  readonly usedBytes: number | null;
+  /** `account` — shared with the account's other computers that have the app. */
+  readonly scope: AppStorageScope;
+}
+
+/**
+ * The cloud folder "Remove" may also delete: only an App Store app that
+ * keeps files in the cloud through this computer (Settings → Apps knows it),
+ * and only when there is something there (or it wasn't measured yet).
+ */
+export function removalCloudFiles(
+  removal: ProgramRemoval | null,
+  apps: ReadonlyArray<AppAiApp> | undefined,
+): RemovalCloudFiles | null {
+  if (removal?.kind !== "store" || !removal.templateId || !apps) return null;
+  const storage = apps.find((app) => app.id === removal.templateId)?.storage;
+  if (!storage || storage.usedBytes === 0) return null;
+  return { appId: removal.templateId, usedBytes: storage.usedBytes, scope: storage.scope };
 }
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);

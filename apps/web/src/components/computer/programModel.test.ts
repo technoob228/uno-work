@@ -1,4 +1,4 @@
-import type { UnoComputerInstalledApp, UnoMachineApp } from "@t3tools/contracts";
+import type { AppAiApp, UnoComputerInstalledApp, UnoMachineApp } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -7,6 +7,7 @@ import {
   machineAppCaption,
   machineAppOpenUrl,
   programRemoval,
+  removalCloudFiles,
 } from "./programModel";
 
 function pub(externalPort: number, url: string) {
@@ -267,6 +268,7 @@ describe("Remove", () => {
       kind: "store",
       deploymentId: 91,
       name: "Uptime Kuma",
+      templateId: "uptime-kuma",
     });
     expect(removal["my-bot"]).toEqual({
       kind: "container",
@@ -299,5 +301,51 @@ describe("Remove", () => {
     });
     expect(tiles).toHaveLength(1);
     expect(programRemoval(tiles[0]!)).toMatchObject({ kind: "store", deploymentId: 91 });
+  });
+
+  it("offers an App Store app's cloud folder only when this computer knows it has files", () => {
+    const removal = {
+      kind: "store",
+      deploymentId: 77,
+      name: "Notetaker",
+      templateId: "notetaker",
+    } as const;
+    const withStorage = (usedBytes: number | null, scope: "account" | "computer") =>
+      ({
+        id: "notetaker",
+        storage: {
+          limitBytes: 5 * 1024 ** 3,
+          limitSetByPerson: false,
+          usedBytes,
+          files: null,
+          bucketId: 40,
+          prefix: "notetaker/",
+          scope,
+        },
+      }) as unknown as AppAiApp;
+    expect(removalCloudFiles(removal, [withStorage(1_200_000, "account")])).toEqual({
+      appId: "notetaker",
+      usedBytes: 1_200_000,
+      scope: "account",
+    });
+    // Not measured yet: still asked, without a size.
+    expect(removalCloudFiles(removal, [withStorage(null, "computer")])).toMatchObject({
+      usedBytes: null,
+      scope: "computer",
+    });
+    // Nothing there, no storage, another computer's list not loaded, a container.
+    expect(removalCloudFiles(removal, [withStorage(0, "account")])).toBeNull();
+    expect(
+      removalCloudFiles(removal, [{ id: "notetaker", storage: null } as unknown as AppAiApp]),
+    ).toBeNull();
+    expect(removalCloudFiles(removal, undefined)).toBeNull();
+    expect(
+      removalCloudFiles({ ...removal, templateId: null }, [withStorage(10, "account")]),
+    ).toBeNull();
+    expect(
+      removalCloudFiles({ kind: "container", appId: "docker:x", container: "x" }, [
+        withStorage(10, "account"),
+      ]),
+    ).toBeNull();
   });
 });
