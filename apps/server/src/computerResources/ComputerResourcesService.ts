@@ -85,7 +85,9 @@ const HISTORY_STEP = Duration.seconds(5);
 const HISTORY_POINTS = 120;
 /** A process snapshot older than this can't be diffed for CPU: sample twice. */
 const CPU_BASELINE_MAX_AGE_MS = 20_000;
-const CPU_BASELINE_WAIT_MS = 500;
+const CPU_BASELINE_WAIT_MS = 1_000;
+/** A window shorter than this mostly measures the daemon reading /proc. */
+const CPU_BASELINE_MIN_AGE_MS = 2_000;
 const DOCKER_TTL_MS = 10_000;
 const DISK_SCAN_TTL_MS = 10 * 60_000;
 const DISK_SCAN_TIMEOUT_MS = 5 * 60_000;
@@ -410,6 +412,7 @@ export const makeComputerResourcesService = (options: ComputerResourcesOptions =
 
     const sampleHistory = async () => {
       const [cpu, memory, net] = await Promise.all([readCpuTotals(), readMemory(), readNet()]);
+      if (platform === "linux") rememberTicks(Date.now(), await readLinuxTicks());
       let cpuPct: number | null = null;
       if (cpu && lastCpu && cpu.total > lastCpu.total) {
         const dt = cpu.total - lastCpu.total;
@@ -496,9 +499,48 @@ export const makeComputerResourcesService = (options: ComputerResourcesOptions =
       return parseMacPs(ps.stdout).map((p) => ({ ...p, command: commands.get(p.pid) ?? null }));
     };
 
-    let tickBaseline: { at: number; ticks: Map<string, number> } | null = null;
+    /**
+     * Per-process CPU ticks at a few recent moments. A share of the processor
+     * needs two readings; the history sampler takes one every few seconds
+     * (stat files only), so the screen compares against a reading 2–20 s old
+     * instead of sampling twice — a short window would mostly measure the
+     * daemon reading /proc.
+     */
+    const baselines: Array<{ at: number; ticks: Map<string, number> }> = [];
+    const tickKey = (pid: number, startToken: string) => `${pid}:${startToken}`;
+    const rememberTicks = (at: number, ticks: Map<string, number>) => {
+      baselines.push({ at, ticks });
+      if (baselines.length > 4) baselines.splice(0, baselines.length - 4);
+    };
+    const usableBaseline = (now: number) =>
+      baselines
+        .filter(
+          (b) => now - b.at >= CPU_BASELINE_MIN_AGE_MS && now - b.at <= CPU_BASELINE_MAX_AGE_MS,
+        )
+        .at(-1) ?? null;
 
-    /** Processes with their share of the processor since the last read. */
+    /** Only `/proc/<pid>/stat`: cheap enough for the sampler every few seconds. */
+    const readLinuxTicks = async (): Promise<Map<string, number>> => {
+      const ticks = new Map<string, number>();
+      let names: string[] = [];
+      try {
+        names = await readdir("/proc");
+      } catch {
+        return ticks;
+      }
+      await Promise.all(
+        names
+          .filter((n) => /^\d+$/.test(n))
+          .map(async (pid) => {
+            const text = await readText(`/proc/${pid}/stat`);
+            const s = text ? parseProcStat(text) : null;
+            if (s) ticks.set(tickKey(s.pid, `l${s.starttime}`), s.utime + s.stime);
+          }),
+      );
+      return ticks;
+    };
+
+    /** Processes with their share of the processor since a recent reading. */
     const readProcesses = async (fresh: boolean): Promise<MeasuredProcess[]> => {
       const cores = cpuCount();
       if (platform === "darwin") {
@@ -506,26 +548,25 @@ export const makeComputerResourcesService = (options: ComputerResourcesOptions =
         return raw.map((p) => ({ ...p, cpuPct: clampPct((p.cpuPctPerCore ?? 0) / cores) }));
       }
       if (platform !== "linux") return [];
-      const key = (p: RawProcess) => `${p.pid}:${p.startToken}`;
-      if (fresh && (!tickBaseline || Date.now() - tickBaseline.at > CPU_BASELINE_MAX_AGE_MS)) {
-        const first = await readLinuxProcesses();
-        tickBaseline = {
-          at: Date.now(),
-          ticks: new Map(first.map((p) => [key(p), p.cpuTicks ?? 0])),
-        };
+      if (fresh && usableBaseline(Date.now()) === null) {
+        rememberTicks(Date.now(), await readLinuxTicks());
         await sleep(CPU_BASELINE_WAIT_MS);
       }
       const now = Date.now();
       const raw = await readLinuxProcesses();
-      const baseline = tickBaseline;
+      const baseline = usableBaseline(now) ?? baselines.at(-1) ?? null;
       const seconds = baseline ? Math.max(0.1, (now - baseline.at) / 1000) : 1;
       const measured = raw.map((p) => {
-        const before = baseline?.ticks.get(key(p));
+        const before = baseline?.ticks.get(tickKey(p.pid, p.startToken));
         const delta = before === undefined ? 0 : Math.max(0, (p.cpuTicks ?? 0) - before);
         return { ...p, cpuPct: clampPct((delta / clockTicks / seconds / cores) * 100) };
       });
-      if (fresh)
-        tickBaseline = { at: now, ticks: new Map(raw.map((p) => [key(p), p.cpuTicks ?? 0])) };
+      if (fresh) {
+        rememberTicks(
+          now,
+          new Map(raw.map((p) => [tickKey(p.pid, p.startToken), p.cpuTicks ?? 0])),
+        );
+      }
       return measured;
     };
 
@@ -649,6 +690,7 @@ export const makeComputerResourcesService = (options: ComputerResourcesOptions =
         dockerAccess: docker.access === "ok",
         services,
         cwdByPid,
+        home,
       });
       return { ...result, processes, docker, containers };
     };
@@ -677,7 +719,7 @@ export const makeComputerResourcesService = (options: ComputerResourcesOptions =
             grouped.groups.some((g) => g.kind === "docker")
           ) {
             notes.push(
-              "Uno Work may not ask Docker about containers on this computer, so they show without names and can't be stopped from here.",
+              "Uno Work may not ask Docker about containers on this computer, so they show by the program they run and can't be stopped from here.",
             );
           }
           const load = os.loadavg()[0];

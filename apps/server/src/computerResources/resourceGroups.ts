@@ -62,6 +62,8 @@ export interface GroupingInput {
   readonly cwdByPid: ReadonlyMap<number, string>;
   /** How many processes a group lists (heaviest first). */
   readonly processLimit?: number;
+  /** The home folder, to call it that when a chat works there. */
+  readonly home?: string;
 }
 
 /** AI agents Uno Work starts for chats (by program name or command line). */
@@ -185,6 +187,12 @@ export function groupProcesses(input: GroupingInput): GroupingResult {
     if (byPid.has(root)) manifestRoots.set(root, app);
   }
   const servicesByUnit = new Map(input.services.map((s) => [s.unit, s]));
+  // The first process of each container (its lowest pid) — what it runs.
+  const containerMain = new Map<string, string>();
+  for (const p of input.processes.toSorted((a, b) => a.pid - b.pid)) {
+    const id = containerIdOf(p);
+    if (id && !containerMain.has(id)) containerMain.set(id, p.name);
+  }
 
   const assignments = new Map<number, Assignment>();
   const protectedReason = new Map<number, string>();
@@ -221,13 +229,17 @@ export function groupProcesses(input: GroupingInput): GroupingResult {
     const containerId = containerIdOf(p);
     if (containerId) {
       const ref = input.containers?.get(containerId) ?? null;
-      const name = ref?.displayName ?? ref?.name ?? `Container ${containerId.slice(0, 12)}`;
-      const known = knownSoftware(`${ref?.image ?? ""} ${ref?.name ?? ""}`);
+      // Without docker access, the program the container runs is the best name there is.
+      const main = containerMain.get(containerId) ?? null;
+      const name = ref?.displayName ?? ref?.name ?? main ?? `Container ${containerId.slice(0, 12)}`;
+      const known = knownSoftware(`${ref?.image ?? ""} ${ref?.name ?? main ?? ""}`);
       return {
         key: `docker:${ref?.name ?? containerId.slice(0, 12)}`,
         kind: "docker",
-        name,
-        detail: ref ? `Docker · ${ref.image.replace(/@sha256:.*$/, "").slice(0, 60)}` : "Docker",
+        name: known && !ref ? known.name : name,
+        detail: ref
+          ? `Docker · ${ref.image.replace(/@sha256:.*$/, "").slice(0, 60)}`
+          : `Docker container ${containerId.slice(0, 12)}`,
         icon: known?.icon ?? "🐳",
         machineAppId: ref?.machineAppId ?? null,
         anchorPid: null,
@@ -391,17 +403,19 @@ export function groupProcesses(input: GroupingInput): GroupingResult {
       };
     });
     const { actions, blocked } = groupActions(a, members, protectedReason, input);
+    const cwd = a.anchorPid !== null ? (input.cwdByPid.get(a.anchorPid) ?? null) : null;
+    const folder = cwd === null ? null : cwd === input.home ? "Home folder" : cwd.split("/").pop();
     groups.push({
       id: a.key,
       kind: a.kind,
       name: a.name,
-      detail: a.detail,
+      detail: a.kind === "chat" && folder ? `${a.detail} · ${folder}` : a.detail,
       icon: a.icon,
       cpuPct: round1(Math.min(100, cpuPct)),
       memMb: Math.round(memMb),
       processes,
       processCount: members.length,
-      cwd: a.anchorPid !== null ? (input.cwdByPid.get(a.anchorPid) ?? null) : null,
+      cwd,
       machineAppId: a.machineAppId,
       actions,
       actionsBlockedReason: blocked,

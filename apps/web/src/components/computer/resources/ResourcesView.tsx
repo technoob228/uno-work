@@ -882,14 +882,7 @@ function GroupRow({
   onGroupAction: (action: "stop" | "restart") => void;
   onQuit: (process: UnoResourceProcess) => void;
 }) {
-  const detail =
-    group.kind === "chat"
-      ? chatTitle
-        ? `Chat · ${chatTitle}`
-        : group.cwd
-          ? `Chat agent · ${group.cwd.split("/").pop()}`
-          : "Chat agent"
-      : group.detail;
+  const detail = group.kind === "chat" && chatTitle ? `Chat · ${chatTitle}` : group.detail;
   return (
     <li className={cn("py-2", highlighted && "-mx-2 rounded-xl bg-warning/5 px-2")}>
       <div className="flex items-center gap-3">

@@ -173,7 +173,8 @@ describe("groupProcesses", () => {
   it("names unknown containers when docker can't be asked", () => {
     const blind = groupProcesses(input(machine));
     const docker = blind.groups.find((g) => g.kind === "docker")!;
-    expect(docker.name).toBe(`Container ${DOCKER_ID.slice(0, 12)}`);
+    expect(docker.name).toBe("node");
+    expect(docker.detail).toBe(`Docker container ${DOCKER_ID.slice(0, 12)}`);
     expect(docker.actions).toEqual([]);
     expect(docker.actionsBlockedReason).toBeTruthy();
   });
