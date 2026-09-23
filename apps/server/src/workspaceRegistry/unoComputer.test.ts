@@ -5,6 +5,8 @@ import {
   NOT_LINKED_MESSAGE,
   classifyFailure,
   installComputerApp,
+  catalogIconUrl,
+  parseAppCategories,
   parseAppTemplates,
   parseInstalledApps,
   readComputerActivity,
@@ -329,7 +331,12 @@ describe("readComputerApps", () => {
       boxId: 123,
       known: [],
     });
-    expect(apps.catalog).toEqual({ availability: "unavailable", message: null, templates: [] });
+    expect(apps.catalog).toEqual({
+      availability: "unavailable",
+      message: null,
+      templates: [],
+      categories: [],
+    });
     expect(apps.installed.availability).toBe("ok");
   });
 
@@ -357,6 +364,7 @@ describe("parseInstalledApps", () => {
         name: "uptime-kuma",
         templateId: "uptime-kuma",
         icon: null,
+        iconUrl: null,
         state: "installing",
         url: null,
         deploymentId: 500,
@@ -1029,5 +1037,64 @@ describe("Sign in with Uno", () => {
       /doesn't sign in with Uno/,
     );
     await expect(attempt(http(404, "404 page not found"))).rejects.toThrow(/console update/);
+  });
+});
+
+describe("App Store storefront fields", () => {
+  it("reads rank, the line, keywords, Uno sign-in and the logo", () => {
+    const [t] = parseAppTemplates({
+      templates: [
+        {
+          id: "nextcloud",
+          name: "Nextcloud",
+          description_en: "Files",
+          category: "files",
+          icon: "☁️",
+          min_ram_mb: 2048,
+          min_disk_gb: 5,
+          rank: 10,
+          featured: true,
+          tagline_en: "Your files on every device",
+          tagline_ru: "Файлы",
+          keywords: ["google drive", 3],
+          icon_url: "/api/v1/apps/icons/nextcloud.svg",
+          sso: { mode: "oidc" },
+        },
+      ],
+    });
+    expect(t).toMatchObject({
+      rank: 10,
+      featured: true,
+      madeByUno: false,
+      tagline: "Your files on every device",
+      keywords: ["google drive"],
+      sso: "oidc",
+    });
+    expect(t?.iconUrl).toMatch(/^https?:\/\/.+\/api\/v1\/apps\/icons\/nextcloud\.svg$/);
+  });
+
+  it("only takes logos from the console's own icon path", () => {
+    expect(catalogIconUrl("/api/v1/apps/icons/memos.png", "https://c")).toBe(
+      "https://c/api/v1/apps/icons/memos.png",
+    );
+    for (const bad of ["https://evil.example/x.svg", "/api/v1/apps/icons/../x.svg", "", 5]) {
+      expect(catalogIconUrl(bad, "https://c")).toBeNull();
+    }
+  });
+
+  it("reads sections in tab order", () => {
+    expect(
+      parseAppCategories({
+        categories: [
+          { id: "files", name_en: "Files & documents", name_ru: "Файлы" },
+          { id: "developer", name_en: "For developers", technical: true },
+          { name_en: "no id" },
+        ],
+      }),
+    ).toEqual([
+      { id: "files", name: "Files & documents", technical: false },
+      { id: "developer", name: "For developers", technical: true },
+    ]);
+    expect(parseAppCategories({ templates: [] })).toEqual([]);
   });
 });

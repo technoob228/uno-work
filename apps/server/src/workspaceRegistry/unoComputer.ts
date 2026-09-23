@@ -28,6 +28,7 @@ import type {
   UnoComputerAppAccess,
   UnoComputerAppAiKey,
   UnoComputerAppCredential,
+  UnoComputerAppCategory,
   UnoComputerAppTemplate,
   UnoComputerApps,
   UnoComputerAvailability,
@@ -49,6 +50,7 @@ import {
   asNullableString,
   asNumber,
   asString,
+  controlPlaneBaseUrl,
   controlPlaneErrorStatus,
   fetchControlPlaneJson,
 } from "./unoCloudParse.ts";
@@ -453,9 +455,48 @@ export function parseAppTemplates(raw: unknown): ReadonlyArray<UnoComputerAppTem
       minDiskGb: asNumber(record["min_disk_gb"]),
       settings,
       notes: asString(record["notes_en"]) || asString(record["notes_ru"]) || null,
+      rank: asNumber(record["rank"]),
+      featured: record["featured"] === true,
+      madeByUno: record["made_by_uno"] === true,
+      tagline: asString(record["tagline_en"]) || asString(record["tagline_ru"]) || null,
+      keywords: Array.isArray(record["keywords"])
+        ? record["keywords"].filter((k): k is string => typeof k === "string" && k.length > 0)
+        : [],
+      iconUrl: catalogIconUrl(record["icon_url"]),
+      sso: parseSsoMode(record["sso"]),
     });
   }
   return out;
+}
+
+/**
+ * The console serves the brand logos itself (`/api/v1/apps/icons/<file>`);
+ * only that path (or an https URL on the console) becomes an <img> source —
+ * never an address the catalog could point anywhere.
+ */
+export function catalogIconUrl(raw: unknown, base: string = controlPlaneBaseUrl()): string | null {
+  const text = asString(raw);
+  if (!/^\/api\/v1\/apps\/icons\/[a-z0-9-]+\.(svg|png)$/.test(text)) return null;
+  return `${base}${text}`;
+}
+
+function parseSsoMode(raw: unknown): "oidc" | "edge" | null {
+  const mode = asString(asRecord(raw)?.["mode"]);
+  return mode === "oidc" || mode === "edge" ? mode : null;
+}
+
+/** Store sections, in tab order; `name` is English (Work speaks English). */
+export function parseAppCategories(raw: unknown): ReadonlyArray<UnoComputerAppCategory> {
+  const list = asRecord(raw)?.["categories"];
+  if (!Array.isArray(list)) return [];
+  return list
+    .map(asRecord)
+    .filter((c): c is Record<string, unknown> => c !== null && asString(c["id"]) !== "")
+    .map((c) => ({
+      id: asString(c["id"]),
+      name: asString(c["name_en"]) || asString(c["name_ru"]) || asString(c["id"]),
+      technical: c["technical"] === true,
+    }));
 }
 
 function parseSettingOptions(raw: unknown): ReadonlyArray<{ value: string; label: string }> {
@@ -641,6 +682,7 @@ export function parseInstalledApps(
       name: template?.name ?? (slug || `App ${asNumber(record["id"])}`),
       templateId: template?.id ?? null,
       icon: template?.icon ?? null,
+      iconUrl: template?.iconUrl ?? null,
       state: serviceState(asString(record["last_status"])),
       url: asNullableString(record["url"]) ?? knownInstall?.url ?? null,
       deploymentId,
@@ -657,6 +699,7 @@ export function parseInstalledApps(
       name: template?.name ?? install.templateId,
       templateId: install.templateId,
       icon: template?.icon ?? null,
+      iconUrl: template?.iconUrl ?? null,
       state: install.state,
       url: install.url,
       deploymentId: install.deploymentId,
@@ -707,6 +750,8 @@ export async function readComputerApps(
       availability: catalogFailure?.availability ?? "ok",
       message: catalogFailure?.message ?? null,
       templates,
+      categories:
+        catalogResult.status === "fulfilled" ? parseAppCategories(catalogResult.value) : [],
     },
     installed: {
       availability: servicesFailure?.availability ?? "ok",

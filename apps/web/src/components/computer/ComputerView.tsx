@@ -458,6 +458,9 @@ export function ComputerView() {
           }
         }}
         templates={catalog?.templates ?? []}
+        categories={catalog?.categories ?? []}
+        // The machine's size (what the console compares against), else what it reports.
+        memTotalMb={box?.ramMb || load?.memTotalMb || null}
         installedTemplateIds={
           new Set(
             [

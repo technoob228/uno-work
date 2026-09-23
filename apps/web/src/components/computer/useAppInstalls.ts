@@ -22,6 +22,8 @@ export interface AppInstall {
   readonly deploymentId: number;
   readonly name: string;
   readonly icon: string | null;
+  /** Brand logo from the catalog, when Uno has one. */
+  readonly iconUrl?: string | null;
   readonly templateId: string | null;
   readonly state: "installing" | "running" | "failed";
   readonly lines: ReadonlyArray<string>;
@@ -108,6 +110,7 @@ export function useAppInstalls(input: {
                 deploymentId,
                 name: app.name,
                 icon: app.icon,
+                iconUrl: app.iconUrl ?? null,
                 templateId: app.templateId,
                 state: "installing",
                 lines: [],
@@ -155,6 +158,7 @@ export function useAppInstalls(input: {
             deploymentId,
             name: template.name,
             icon: template.icon || null,
+            iconUrl: template.iconUrl ?? null,
             templateId: template.id,
             state: "installing",
             lines: [],
