@@ -586,11 +586,25 @@ function fleetBox(id, name, status, daemon, edgePort) {
     addressReadyAt: 0,
     edge: null,
     comment: "",
+    computerRole: null,
     workMachine: Boolean(daemon),
   };
   fleet.set(id, b);
   if (daemon && edgePort) startEdge(b);
   return b;
+}
+
+// Like the console after migration 139: an explicit computer_role wins; a
+// "[role] " tag at the start of the comment (Uno Work 0.0.77) is moved into
+// the field and cut from the note.
+const ROLE_TAG = /^\s*\[(workspace|server|production|staging|sandbox)\]\s*/i;
+function applyRoleLabels(b, body) {
+  if (typeof body.comment === "string") {
+    const tag = ROLE_TAG.exec(body.comment);
+    b.comment = (tag ? body.comment.slice(tag[0].length) : body.comment).trim();
+    if (tag) b.computerRole = tag[1].toLowerCase();
+  }
+  if ("computer_role" in body) b.computerRole = body.computer_role || null;
 }
 
 function fleetJson(b) {
@@ -607,6 +621,7 @@ function fleetJson(b) {
     internal_ip: `10.77.0.${b.id % 250}`,
     ssh_command: `ssh -p ${40000 + b.id} uno@203.0.113.42`,
     comment: b.comment,
+    computer_role: b.computerRole,
     work_machine: b.workMachine,
     always_on: !b.workMachine,
     started_at: b.status === "running" ? b.createdAt : null,
@@ -726,15 +741,17 @@ function initFleet() {
   fleetBox(201, "night-owl", "sleeping", parseDaemon(process.env.MOCK_SLEEPING_DAEMON), 18201);
   fleetBox(202, "outreach-machine", "running", null, null);
   fleetBox(203, "old-experiment", "error", null, null);
-  // "My Uno": roles live in the comment; Work computers are workspaces.
+  // "My Uno": roles live in computer_role (console 139); Work computers are
+  // workspaces.
   fleet.get(BOX_ID).workMachine = true;
   fleet.get(BOX_ID).ramMb = 4096;
   fleet.get(BOX_ID).vcpu = 2;
   fleet.get(BOX_ID).diskGb = 20;
   fleet.get(201).workMachine = true;
-  fleet.get(202).comment = "[production] sends the outreach emails";
+  fleet.get(202).computerRole = "production";
+  fleet.get(202).comment = "sends the outreach emails";
   fleet.get(202).ramMb = 1024;
-  fleet.get(203).comment = "[sandbox]";
+  fleet.get(203).computerRole = "sandbox";
   fleet.get(203).ramMb = 1024;
 }
 
@@ -953,10 +970,10 @@ async function handleMyUno(req, res, url) {
     b.ramMb = body.ram_mb;
     b.vcpu = body.vcpu;
     b.diskGb = body.disk_gb;
-    b.comment = body.comment || "";
+    applyRoleLabels(b, body);
     b.workMachine = false;
     setStatusLater(b, "running", BOOT_MS);
-    console.log(`created server #${id} ${b.name} (${b.comment})`);
+    console.log(`created server #${id} ${b.name} (${b.computerRole}; ${b.comment})`);
     return (send(res, 201, fleetJson(b)), true);
   }
   const m = p.match(/^\/api\/v1\/boxes\/(\d+)(\/[a-z]+)?$/);
@@ -966,8 +983,8 @@ async function handleMyUno(req, res, url) {
   const sub = m[2] || "";
   if (req.method === "PATCH" && sub === "") {
     const body = await readBody(req);
-    b.comment = typeof body.comment === "string" ? body.comment : b.comment;
-    console.log(`box #${b.id} comment → ${b.comment}`);
+    applyRoleLabels(b, body);
+    console.log(`box #${b.id} role → ${b.computerRole}, comment → ${b.comment}`);
     return (send(res, 200, fleetJson(b)), true);
   }
   if (b.id === BOX_ID) return false; // "my-computer" keeps the single-box mock below

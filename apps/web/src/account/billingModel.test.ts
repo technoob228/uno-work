@@ -7,6 +7,7 @@ import {
   parsePlanCatalog,
   parseSites,
   parseSubscription,
+  roleChangeBody,
 } from "./accountOverview";
 import {
   computerMonthlyShare,
@@ -152,6 +153,25 @@ describe("account payloads", () => {
       "workspace",
     );
     expect(parseAccountComputer({ id: 7, status: "deleted" })).toBeNull();
+  });
+
+  it("computers: role from the computer_role field (console 139), writes go where it lives", () => {
+    const fresh = parseAccountComputer({
+      id: 8,
+      status: "running",
+      comment: "shop backend",
+      computer_role: "staging",
+    })!;
+    expect(fresh).toMatchObject({ role: "staging", note: "shop backend", roleInField: true });
+    expect(roleChangeBody(fresh, "production")).toEqual({ computer_role: "production" });
+    // Field present but unset — a plain server, still written through the field.
+    const unset = parseAccountComputer({ id: 9, status: "running", computer_role: null })!;
+    expect(unset.role).toBe("server");
+    expect(roleChangeBody(unset, "sandbox")).toEqual({ computer_role: "sandbox" });
+    // Older console: no field — role from the tag, written back as a tag.
+    const legacy = parseAccountComputer({ id: 10, status: "running", comment: "[sandbox] vpn" })!;
+    expect(legacy).toMatchObject({ role: "sandbox", note: "vpn", roleInField: false });
+    expect(roleChangeBody(legacy, "production")).toEqual({ comment: "[production] vpn" });
   });
 
   it("sites: custom domain wins, newest first", () => {

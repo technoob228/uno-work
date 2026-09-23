@@ -3,11 +3,12 @@
  * picks: the Uno Work computer where you work, a server for a VPN or a bot,
  * production, staging, a sandbox.
  *
- * Where the role lives: the console has no role field a person may set
- * (`boxes.role` is the control plane's own: standalone / replica / work…),
- * so the role rides at the start of the box's free-form `comment` as a tag —
- * `[production] anything else the person wrote`. The console shows that
- * comment as is, so the role is readable there too. An Uno Work computer is
+ * Where the role lives: its own field on the box, `computer_role` (console
+ * migration 139; not `role`, which is the control plane's own: standalone /
+ * replica / work…). Before that the role rode at the start of the free-form
+ * `comment` as a tag — `[production] anything else the person wrote` — and a
+ * console that hasn't got the field yet still works that way, so the tag stays
+ * the fallback for reading and the way to write there. An Uno Work computer is
  * always "Workspace": that is what it is, not a label.
  *
  * Kept free of React so the parsing is unit-tested.
@@ -67,15 +68,24 @@ export function withRole(comment: string | null | undefined, role: ComputerRole)
   return note ? `[${role}] ${note}` : `[${role}]`;
 }
 
+/** A role as the console sends it in `computer_role`, or null. */
+export function parseRoleField(value: unknown): ComputerRole | null {
+  if (typeof value !== "string") return null;
+  const role = value.trim().toLowerCase();
+  return (ALL_ROLES as ReadonlyArray<string>).includes(role) ? (role as ComputerRole) : null;
+}
+
 /**
  * The role a computer plays: an Uno Work computer is the workspace; otherwise
- * the tag in its comment; with no tag, a plain server.
+ * the console's `computer_role` field; failing that (an older console) the tag
+ * in its comment; with neither, a plain server.
  */
 export function computerRole(input: {
   readonly workMachine: boolean;
+  readonly roleField?: unknown;
   readonly comment: string | null | undefined;
 }): ComputerRole {
   if (input.workMachine) return "workspace";
-  const { role } = parseRoleComment(input.comment);
+  const role = parseRoleField(input.roleField) ?? parseRoleComment(input.comment).role;
   return role && role !== "workspace" ? role : "server";
 }

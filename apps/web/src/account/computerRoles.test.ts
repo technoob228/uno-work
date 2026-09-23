@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { computerRole, parseRoleComment, withRole } from "./computerRoles";
+import { computerRole, parseRoleComment, parseRoleField, withRole } from "./computerRoles";
 
 describe("computer roles", () => {
   it("reads the role tag at the start of the comment", () => {
@@ -26,5 +26,21 @@ describe("computer roles", () => {
     expect(computerRole({ workMachine: false, comment: "" })).toBe("server");
     expect(computerRole({ workMachine: false, comment: "[workspace]" })).toBe("server");
     expect(computerRole({ workMachine: false, comment: "[staging] try" })).toBe("staging");
+  });
+
+  it("the console's computer_role field wins; the comment tag is the fallback", () => {
+    expect(parseRoleField("Production ")).toBe("production");
+    expect(parseRoleField("prod")).toBeNull();
+    expect(parseRoleField(null)).toBeNull();
+    expect(
+      computerRole({ workMachine: false, roleField: "staging", comment: "[production]" }),
+    ).toBe("staging");
+    expect(computerRole({ workMachine: false, roleField: null, comment: "[sandbox]" })).toBe(
+      "sandbox",
+    );
+    expect(computerRole({ workMachine: false, roleField: null, comment: "" })).toBe("server");
+    expect(computerRole({ workMachine: true, roleField: "production", comment: "" })).toBe(
+      "workspace",
+    );
   });
 });
