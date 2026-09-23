@@ -51,6 +51,8 @@ import {
 } from "./computerQueries";
 import { ProgramDialog } from "./ProgramDialog";
 import { ResizeDialog } from "./ResizeDialog";
+import { ResourcesView } from "./resources/ResourcesView";
+import type { ResourceLook } from "./resources/resourceModel";
 import { LOW_DISK_PCT, LOW_MEMORY_PCT, isSustained } from "./resizeModel";
 import { buildProgramTiles, isBrowserOnMachine, type ProgramTile } from "./programModel";
 import { useAppInstalls } from "./useAppInstalls";
@@ -200,6 +202,12 @@ export function ComputerView() {
     void navigate({ to: "/computer", search: {}, replace: true });
   }, [navigate, routeSearch.store, storeAvailable]);
 
+  // "What's using your computer": this machine's own daemon reads it.
+  const look = thisMachine ? routeSearch.look : undefined;
+  const openLook = (next: ResourceLook, replace = false) =>
+    void navigate({ to: "/computer", search: { look: next }, replace });
+  const canResize = box !== null && computer?.linked === true;
+
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: computerQueryKeys.all });
   };
@@ -227,7 +235,16 @@ export function ComputerView() {
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-            {stateQuery.isPending ? (
+            {look ? (
+              <ResourcesView
+                environmentId={environmentId}
+                look={look}
+                onLookChange={(next) => openLook(next, true)}
+                onBack={() => void navigate({ to: "/computer", search: {} })}
+                onResize={canResize ? () => setResizeOpen(true) : undefined}
+                onAskUno={launchers.askUno}
+              />
+            ) : stateQuery.isPending ? (
               <>
                 <Skeleton className="h-36 w-full rounded-3xl" />
                 <Skeleton className="h-56 w-full rounded-2xl" />
@@ -263,6 +280,7 @@ export function ComputerView() {
                   }
                   onResize={box && computer?.linked ? () => setResizeOpen(true) : undefined}
                   lowResource={box ? lowResource : null}
+                  onOpenLook={thisMachine ? (next) => openLook(next) : undefined}
                 />
 
                 {!computer?.linked && thisMachine ? (

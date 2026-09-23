@@ -103,6 +103,10 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       resizeOptions: (input) => rpcClient.unoComputer.resizeOptions(input),
       resize: rpcClient.unoComputer.resize,
       embedCheck: rpcClient.unoComputer.embedCheck,
+      resources: () => rpcClient.unoComputer.resources(),
+      diskUsage: rpcClient.unoComputer.diskUsage,
+      diskClean: rpcClient.unoComputer.diskClean,
+      resourceAction: rpcClient.unoComputer.resourceAction,
     },
     files: rpcClient.files,
   };

@@ -160,6 +160,10 @@ const rpcClientMock = {
     resizeOptions: vi.fn(),
     resize: vi.fn(),
     embedCheck: vi.fn(),
+    resources: vi.fn(),
+    diskUsage: vi.fn(),
+    diskClean: vi.fn(),
+    resourceAction: vi.fn(),
   },
   files: {
     list: vi.fn(),

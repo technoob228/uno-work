@@ -140,5 +140,30 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
     openTerminalIn(await startNewLocalThreadFromContext(context()));
   }, [chatInFolder, context, environmentId, openTerminalIn]);
 
-  return { newChat, openTerminal, chatInFolder };
+  /**
+   * "Ask Uno": a new chat in the home folder with the note already typed in
+   * the composer — the person reads it and presses Send.
+   */
+  const askUno = useCallback(
+    async (prompt: string) => {
+      if (environmentId === null) return;
+      let home: string | null = null;
+      try {
+        home = (await ensureEnvironmentApi(environmentId).filesystem.browse({ partialPath: "~" }))
+          .parentPath;
+      } catch {
+        home = null;
+      }
+      if (home) await chatInFolder(home, "Home folder");
+      else await startNewLocalThreadFromContext(context());
+      const params = router.state.matches[router.state.matches.length - 1]?.params ?? {};
+      const target = resolveThreadRouteTarget(params);
+      const store = useComposerDraftStore.getState();
+      if (target?.kind === "draft") store.setPrompt(target.draftId, prompt);
+      else if (target?.kind === "server") store.setPrompt(target.threadRef, prompt);
+    },
+    [chatInFolder, context, environmentId, router],
+  );
+
+  return { newChat, openTerminal, chatInFolder, askUno };
 }

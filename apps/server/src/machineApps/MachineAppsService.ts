@@ -41,6 +41,7 @@ import {
   controlPlaneErrorStatus,
   fetchControlPlaneJson,
 } from "../workspaceRegistry/unoCloudParse.ts";
+import { parseVmStat } from "../computerResources/resourceParsers.ts";
 import { readIconDataUrl, readManifestDir, type AppManifest } from "./appManifest.ts";
 import { extractHtmlTitle } from "./discoveryParsers.ts";
 import { displayManifestDir, resolveManifestDir } from "./manifestDir.ts";
@@ -76,6 +77,12 @@ export interface MachineAppsServiceShape {
     input: UnoMachineAppActionInput,
   ) => Effect.Effect<UnoMachineApps, UnoCloudFetchError>;
   readonly localMetrics: Effect.Effect<UnoComputerLocalMetrics>;
+  /**
+   * The last scan with what the daemon keeps for itself (listener pids,
+   * container and unit names) — for the "what is using my computer" view,
+   * never sent to the browser as is. At most a few seconds old.
+   */
+  readonly scanned: Effect.Effect<ReadonlyArray<ScannedApp>>;
 }
 
 export class MachineAppsService extends Context.Service<
@@ -515,6 +522,13 @@ export const makeMachineAppsService = (
 
     const memoryMb = async () => {
       const totalMb = os.totalmem() / 1024 / 1024;
+      if (process.platform === "darwin") {
+        // os.freemem() on a Mac leaves out the file cache it gives back on demand,
+        // so memory would always look full: count it the way Activity Monitor does.
+        const vm = await runCommand("vm_stat", [], 3_000);
+        const parsed = vm.ok ? parseVmStat(vm.stdout, os.totalmem()) : null;
+        if (parsed) return { usedMb: parsed.usedMb, totalMb };
+      }
       const meminfo = process.platform === "linux" ? await readTextFile("/proc/meminfo") : null;
       const available = meminfo ? /MemAvailable:\s+(\d+) kB/.exec(meminfo) : null;
       const availableMb = available ? Number(available[1]) / 1024 : os.freemem() / 1024 / 1024;
@@ -575,7 +589,11 @@ export const makeMachineAppsService = (
       );
     }
 
-    return { list, action, localMetrics } satisfies MachineAppsServiceShape;
+    const scanned: MachineAppsServiceShape["scanned"] = Effect.promise(() => scan()).pipe(
+      Effect.map((result) => result.apps),
+    );
+
+    return { list, action, localMetrics, scanned } satisfies MachineAppsServiceShape;
   });
 
 export const MachineAppsServiceLive = Layer.effect(MachineAppsService, makeMachineAppsService());

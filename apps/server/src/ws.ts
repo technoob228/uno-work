@@ -73,6 +73,7 @@ import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
 import { FilesService } from "./files/FilesService.ts";
 import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
+import { ComputerResourcesService } from "./computerResources/ComputerResourcesService.ts";
 import { checkEmbed } from "./machineApps/embedCheck.ts";
 import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
 import {
@@ -243,6 +244,7 @@ const makeWsRpcLayer = (
       const unoComputer = yield* UnoComputerService;
       const files = yield* FilesService;
       const machineApps = yield* MachineAppsService;
+      const computerResources = yield* ComputerResourcesService;
       const harnessSetup = yield* HarnessSetup;
       const serverCommandId = (tag: string) =>
         CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
@@ -1448,6 +1450,34 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.unoComputerLocalMetrics, machineApps.localMetrics, {
             "rpc.aggregate": "uno-computer",
           }),
+        [WS_METHODS.unoComputerResources]: (_input) =>
+          observeRpcEffect(WS_METHODS.unoComputerResources, computerResources.snapshot, {
+            "rpc.aggregate": "uno-computer",
+          }),
+        [WS_METHODS.unoComputerDiskUsage]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerDiskUsage,
+            computerResources
+              .diskUsage(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
+        [WS_METHODS.unoComputerDiskClean]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerDiskClean,
+            computerResources
+              .clean(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
+        [WS_METHODS.unoComputerResourceAction]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerResourceAction,
+            computerResources
+              .action(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
         [WS_METHODS.serverListPlugins]: (_input) =>
           observeRpcEffect(WS_METHODS.serverListPlugins, pluginRegistry.getSnapshot, {
             "rpc.aggregate": "server",

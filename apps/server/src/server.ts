@@ -42,6 +42,7 @@ import { WorkspaceServiceLive } from "./workspaceRegistry/WorkspaceService.ts";
 import { UnoCloudServiceLive } from "./workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerServiceLive } from "./workspaceRegistry/UnoComputerService.ts";
 import { MachineAppsServiceLive } from "./machineApps/MachineAppsService.ts";
+import { ComputerResourcesServiceLive } from "./computerResources/ComputerResourcesService.ts";
 import { HarnessSetupLive } from "./provider/setup/HarnessSetupService.ts";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
 import { ProviderEventLoggersLive } from "./provider/Layers/ProviderEventLoggers.ts";
@@ -335,7 +336,8 @@ const WorkspaceRegistryLayerLive = Layer.mergeAll(
   // Files app: file manager + public share links (`file_shares` table).
   FilesServiceLive.pipe(Layer.provide(FileSharesRepositoryLive)),
   // Programs found on this machine: same key and box id, plus ServerConfig.
-  MachineAppsServiceLive,
+  // "What is using my computer" reads the same scan to name apps and containers.
+  ComputerResourcesServiceLive.pipe(Layer.provideMerge(MachineAppsServiceLive)),
 );
 
 const AuthLayerLive = ServerAuthLive.pipe(
