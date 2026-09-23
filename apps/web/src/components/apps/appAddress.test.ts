@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { appHost, belongsToComputer, isCrossSite, parseAppUrl } from "./appAddress";
+import { appHost, belongsToComputer, parseAppUrl } from "./appAddress";
 
 describe("app address rules", () => {
   it("parses only web addresses", () => {
@@ -17,9 +17,7 @@ describe("app address rules", () => {
     expect(belongsToComputer("https://evil.example/nc-box.app.uno4.dev", known)).toBe(false);
     expect(belongsToComputer("https://nc-box.app.uno4.dev.evil.example", known)).toBe(false);
   });
-  it("tells cross-site framing apart", () => {
-    expect(isCrossSite("https://nc-box.app.uno4.dev", "app.uno4.work")).toBe(true);
-    expect(isCrossSite("https://nc-box.app.uno4.dev", "box-me.app.uno4.dev")).toBe(false);
+  it("shows the host of an app address", () => {
     expect(appHost("https://nc-box.app.uno4.dev/a")).toBe("nc-box.app.uno4.dev");
   });
 });

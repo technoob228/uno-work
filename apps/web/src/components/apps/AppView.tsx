@@ -20,11 +20,9 @@ import {
   PinIcon,
   PinOffIcon,
   RotateCwIcon,
-  XIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import { useNavStore } from "../../navigation/navStore";
 import { useGoHome } from "../../navigation/useGoHome";
@@ -37,19 +35,9 @@ import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AppFrame } from "./AppFrame";
-import { appHost, belongsToComputer, isCrossSite } from "./appAddress";
+import { appHost, belongsToComputer } from "./appAddress";
 
 const routeApi = getRouteApi("/_chat/app");
-
-const HINT_DISMISSED_KEY = "uno:app-signin-hint-dismissed";
-
-function readDismissed(): Set<string> {
-  try {
-    return new Set(JSON.parse(window.localStorage.getItem(HINT_DISMISSED_KEY) ?? "[]"));
-  } catch {
-    return new Set();
-  }
-}
 
 export function AppView() {
   const search = routeApi.useSearch();
@@ -80,16 +68,6 @@ export function AppView() {
 
   // Leaving the app (Home, another screen) always ends full screen.
   useEffect(() => () => setFullscreen(false), [setFullscreen]);
-
-  const [dismissed, setDismissed] = useState<Set<string>>(() => readDismissed());
-  const hostKey = url ? appHost(url) : "";
-  const showSigninHint =
-    !isElectron &&
-    known &&
-    url !== null &&
-    typeof window !== "undefined" &&
-    isCrossSite(url, window.location.host) &&
-    !dismissed.has(hostKey);
 
   const pinned = url ? isPinned("app", url) : false;
   const app = url ? { url, name, icon } : null;
@@ -196,7 +174,10 @@ export function AppView() {
               >
                 <PanelRightIcon />
               </BarButton>
-              <BarButton label="Open in a new tab" onClick={() => openInNewTab(app.url)}>
+              <BarButton
+                label="Open in a new tab (if the app can't keep you signed in here)"
+                onClick={() => openInNewTab(app.url)}
+              >
                 <ExternalLinkIcon />
               </BarButton>
               <BarButton label="Full screen" onClick={() => setFullscreen(true)}>
@@ -205,33 +186,6 @@ export function AppView() {
             </div>
           ) : null}
         </header>
-        {showSigninHint ? (
-          <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
-            <span className="min-w-0 flex-1">
-              If {name} keeps asking you to sign in here, open it in a new tab — some browsers don't
-              let apps keep you signed in inside other pages.
-            </span>
-            <Button size="xs" variant="ghost" onClick={() => openInNewTab(url!)}>
-              New tab
-            </Button>
-            <button
-              type="button"
-              aria-label="Dismiss"
-              className="rounded p-0.5 hover:bg-accent hover:text-foreground"
-              onClick={() => {
-                const next = new Set(dismissed).add(hostKey);
-                setDismissed(next);
-                try {
-                  window.localStorage.setItem(HINT_DISMISSED_KEY, JSON.stringify([...next]));
-                } catch {
-                  // the hint just comes back next time
-                }
-              }}
-            >
-              <XIcon className="size-3.5" />
-            </button>
-          </div>
-        ) : null}
         <div className="relative min-h-0 flex-1">{frame}</div>
       </div>
     </SidebarInset>

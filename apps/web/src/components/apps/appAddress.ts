@@ -43,22 +43,3 @@ export function belongsToComputer(url: string, knownUrls: ReadonlyArray<string |
     }
   });
 }
-
-/** Registrable-ish site: the last two labels of the host (enough for our domains). */
-function siteOf(host: string): string {
-  const labels = host.split(":")[0]!.split(".");
-  return labels.slice(-2).join(".");
-}
-
-/**
- * The app lives on another site than Uno Work (app.uno4.work framing
- * *.app.uno4.dev). Browsers then treat its cookies as third-party, and an app
- * may not keep you signed in inside the frame — worth a quiet hint.
- */
-export function isCrossSite(appUrl: string, pageHost: string): boolean {
-  try {
-    return siteOf(new URL(appUrl).host) !== siteOf(pageHost);
-  } catch {
-    return false;
-  }
-}
