@@ -98,7 +98,7 @@ function Tag({
   tone = "muted",
 }: {
   children: ReactNode;
-  tone?: "muted" | "good" | "uno";
+  tone?: "muted" | "good" | "uno" | "warn";
 }) {
   return (
     <span
@@ -107,6 +107,7 @@ function Tag({
         tone === "good" && "bg-success/10 text-success-foreground",
         tone === "uno" && "bg-primary/10 text-primary",
         tone === "muted" && "bg-muted text-muted-foreground",
+        tone === "warn" && "bg-warning/15 text-warning-foreground",
       )}
     >
       {children}
@@ -117,9 +118,12 @@ function Tag({
 function AppTags({
   template,
   installed,
+  fits = null,
 }: {
   template: UnoComputerAppTemplate;
   installed: boolean;
+  /** false — this computer has less memory than the app asks for. */
+  fits?: boolean | null;
 }) {
   return (
     <div className="flex flex-wrap gap-1">
@@ -138,7 +142,13 @@ function AppTags({
           <KeyRoundIcon className="size-3" /> Sign in with Uno
         </Tag>
       ) : null}
-      {template.minRamMb > 0 ? <Tag>{formatMemory(template.minRamMb)} memory</Tag> : null}
+      {template.minRamMb > 0 ? (
+        fits === false ? (
+          <Tag tone="warn">Needs {formatMemory(template.minRamMb)} memory</Tag>
+        ) : (
+          <Tag>{formatMemory(template.minRamMb)} memory</Tag>
+        )
+      ) : null}
     </div>
   );
 }
@@ -298,7 +308,11 @@ export function AppCatalogDialog({
           </div>
         </div>
         <div className="mt-auto flex items-end justify-between gap-2">
-          <AppTags template={template} installed={installedTemplateIds.has(template.id)} />
+          <AppTags
+            template={template}
+            installed={installedTemplateIds.has(template.id)}
+            fits={memTotalMb === null ? null : fitsMemory(template, memTotalMb)}
+          />
           {installButton(template)}
         </div>
       </div>
@@ -345,12 +359,15 @@ export function AppCatalogDialog({
           className="size-16 rounded-2xl p-2 text-3xl"
         />
         <div className="min-w-0 flex-1">
-          <div className="text-lg font-semibold leading-tight">{viewing.name}</div>
           {viewing.tagline ? (
-            <p className="mt-1 text-sm text-muted-foreground">{viewing.tagline}</p>
+            <p className="text-sm text-muted-foreground">{viewing.tagline}</p>
           ) : null}
           <div className="mt-2">
-            <AppTags template={viewing} installed={installedTemplateIds.has(viewing.id)} />
+            <AppTags
+              template={viewing}
+              installed={installedTemplateIds.has(viewing.id)}
+              fits={memTotalMb === null ? null : fitsMemory(viewing, memTotalMb)}
+            />
           </div>
         </div>
       </div>
@@ -401,7 +418,7 @@ export function AppCatalogDialog({
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2.5">
         <div className="relative">
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+          <SearchIcon className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -421,7 +438,7 @@ export function AppCatalogDialog({
           ) : null}
         </div>
         <div
-          className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1"
+          className="flex flex-wrap gap-1.5"
           role="tablist"
           aria-label="Sections"
         >
