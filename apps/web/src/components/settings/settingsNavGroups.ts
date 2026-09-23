@@ -22,6 +22,7 @@ import {
   GlobeIcon,
   KeyRoundIcon,
   LayersIcon,
+  LockIcon,
   Link2Icon,
   PlugIcon,
   PuzzleIcon,
@@ -104,6 +105,7 @@ const FLAT_APP_NAV_ITEMS: ReadonlyArray<FlatNavItem> = [
   // "Advanced sharing" fold inside the page.
   { label: "My machines", to: "/settings/workspace", icon: LayersIcon },
   { label: "Computer access", to: "/settings/computer-access", icon: ShieldCheckIcon },
+  { label: "Security", to: "/settings/security", icon: LockIcon },
   { label: "Extensions", to: "/settings/extensions", icon: PuzzleIcon, flag: "plugins" },
 ];
 
