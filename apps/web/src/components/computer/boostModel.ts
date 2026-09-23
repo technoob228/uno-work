@@ -87,13 +87,17 @@ function cores(n: number): string {
   return `${n} ${n === 1 ? "core" : "cores"}`;
 }
 
+/** What the restart costs, said the same way on start and on "End boost". */
+export const BOOST_RESTART_WARNING =
+  "Your computer restarts for about 15 seconds. A reply the AI is writing right now will stop; " +
+  "chats, files and apps come back on their own.";
+
 export function boostConfirmCopy(boost: UnoComputerBoost) {
   return {
     title: `Boost this computer ×2 for ${boost.hours === 1 ? "1 hour" : `${boost.hours} hours`}?`,
     body:
       `${formatMemory(boost.baseRamMb)} → ${formatMemory(boost.ramMb)} memory and ` +
-      `${boost.baseVcpu} → ${cores(boost.vcpu)}. Your computer will restart for a few seconds ` +
-      "to switch, and once more when the hour is up. Chats, files and apps come back on their own.",
+      `${boost.baseVcpu} → ${cores(boost.vcpu)}. ${BOOST_RESTART_WARNING}`,
     allowance: `${boost.hoursLeftToday} of ${boost.hoursPerDay} boost hours left today.`,
     confirm: `Boost for ${boost.hours === 1 ? "1 hour" : `${boost.hours} hours`}`,
   };

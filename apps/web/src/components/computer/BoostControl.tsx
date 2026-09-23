@@ -19,7 +19,12 @@ import {
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
-import { boostConfirmCopy, boostDisabledReason, boostPillLabel } from "./boostModel";
+import {
+  BOOST_RESTART_WARNING,
+  boostConfirmCopy,
+  boostDisabledReason,
+  boostPillLabel,
+} from "./boostModel";
 import type { ComputerBoostControls } from "./useComputerBoost";
 
 /** Ticks the countdown; a boost is counted in minutes, so a few seconds is plenty. */
@@ -127,9 +132,7 @@ export function BoostControl({
           {confirm === "end" ? (
             <AlertDialogHeader>
               <AlertDialogTitle>End boost now?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Your computer will restart for a few seconds.
-              </AlertDialogDescription>
+              <AlertDialogDescription>{BOOST_RESTART_WARNING}</AlertDialogDescription>
             </AlertDialogHeader>
           ) : (
             <AlertDialogHeader>

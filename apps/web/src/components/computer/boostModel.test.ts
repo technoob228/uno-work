@@ -33,11 +33,11 @@ const NOW = Date.parse("2026-09-24T12:00:00Z");
 const at = (minutes: number) => new Date(NOW + minutes * 60_000).toISOString();
 
 describe("boost copy", () => {
-  it("says the sizes, the two restarts and today's hours", () => {
+  it("says the sizes, the restart and today's hours", () => {
     const copy = boostConfirmCopy(OFF);
     expect(copy.title).toBe("Boost this computer ×2 for 1 hour?");
     expect(copy.body).toBe(
-      "4 GB → 8 GB memory and 2 → 4 cores. Your computer will restart for a few seconds to switch, and once more when the hour is up. Chats, files and apps come back on their own.",
+      "4 GB → 8 GB memory and 2 → 4 cores. Your computer restarts for about 15 seconds. A reply the AI is writing right now will stop; chats, files and apps come back on their own.",
     );
     expect(copy.allowance).toBe("3 of 4 boost hours left today.");
     expect(copy.confirm).toBe("Boost for 1 hour");
