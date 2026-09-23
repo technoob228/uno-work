@@ -256,6 +256,24 @@ ExecStart=/usr/local/sbin/uno-work-hostname
 WantedBy=multi-user.target
 UNIT
 
+# 8. root без пароля в образ не везём.
+#
+# Базовый rootfs Firecracker (от него все шаблоны Uno и Work-образ) приходил с
+# ПУСТЫМ паролем root (+ pam_unix nullok) и автологином root на ttyS0. Пустой
+# пароль = `su` даёт root любому процессу машины. Демон Work и его агенты живут
+# с NoNewPrivileges и `su` не могут, но всё, что пользователь поставит сам
+# (docker-приложения, сервисы из App Store), — может. Пароль блокируем, override
+# serial-getty убираем (ttyS0 остаётся обычным getty). Вход — только ключами.
+log "Блокирую пароль root и убираю автологин root на ttyS0"
+passwd -l root >/dev/null
+rm -f /etc/systemd/system/serial-getty@ttyS0.service.d/override.conf
+rmdir /etc/systemd/system/serial-getty@ttyS0.service.d 2>/dev/null || true
+root_pw="$(awk -F: '$1=="root"{print $2}' /etc/shadow)"
+case "${root_pw}" in
+  '!'* | '*'*) ;;
+  *) die "root password is not locked" ;;
+esac
+
 systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl enable ssh uno-work-sshkeys.service uno-work-hostname.service uno-work-identity.service uno-work-identity.path >/dev/null 2>&1 || true
 
