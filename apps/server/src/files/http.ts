@@ -22,6 +22,8 @@ import { Cause, Effect, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse, UrlParams } from "effect/unstable/http";
 
 import { respondToAuthError } from "../auth/http.ts";
+import { resolveStaticDir, ServerConfig } from "../config.ts";
+import { OFFICE_ENGINE_API_SCRIPT } from "../officeEngine.ts";
 import { ServerAuth } from "../auth/Services/ServerAuth.ts";
 import type { FileShareRow } from "../persistence/Services/FileShares.ts";
 import { FilesService } from "./FilesService.ts";
@@ -46,6 +48,12 @@ import {
   shareStatus,
   verifySharePassword,
 } from "./shareTokens.ts";
+import {
+  contentVersion,
+  officeShareInfo,
+  saveSharedOfficeFile,
+  SHARE_OFFICE_MAX_BYTES,
+} from "./shareOffice.ts";
 
 // ── Content types and headers ──────────────────────────────────────────────
 
@@ -278,6 +286,165 @@ async function listingEntries(input: {
   );
 }
 
+// ── Office documents behind a link ─────────────────────────────────────────
+
+/**
+ * The editor page runs the office engine (served by this daemon under
+ * `/office-engine/`) and our small bundle from the web build. Everything is
+ * same-origin; nothing may frame the page.
+ */
+const OFFICE_PAGE_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "frame-src 'self' blob:",
+  "worker-src 'self' blob:",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+/** Reserved sub-paths of a file link; a dot-name can never be a real segment. */
+type OfficeShareOp = "file" | "state" | "save";
+function officeShareOp(remainder: string): OfficeShareOp | null {
+  if (remainder === "/.file") return "file";
+  if (remainder === "/.state") return "state";
+  if (remainder === "/.save") return "save";
+  return null;
+}
+
+function jsonReply(body: unknown, status = 200) {
+  return HttpServerResponse.jsonUnsafe(body, {
+    status,
+    headers: { ...SHARE_HEADERS, "x-content-type-options": "nosniff" },
+  });
+}
+
+/** `<staticDir>/office-share.html`, or null (dev without a build, old client). */
+const readOfficeSharePage = Effect.gen(function* () {
+  const config = yield* ServerConfig;
+  const staticDir =
+    config.staticDir ??
+    (config.devUrl
+      ? yield* resolveStaticDir().pipe(Effect.orElseSucceed(() => undefined))
+      : undefined);
+  if (!staticDir) return null;
+  const html = yield* Effect.promise(() =>
+    fsPromises.readFile(nodePath.join(staticDir, "office-share.html"), "utf8").catch(() => null),
+  );
+  const engineReady = yield* Effect.promise(() =>
+    fsPromises
+      .stat(nodePath.join(config.officeEngineDir, OFFICE_ENGINE_API_SCRIPT))
+      .then((stats) => stats.isFile())
+      .catch(() => false),
+  );
+  return html && engineReady ? html : null;
+});
+
+export interface OfficeSharePageConfig {
+  readonly name: string;
+  readonly access: "view" | "comment" | "edit";
+  readonly documentType: "word" | "cell" | "slide";
+  readonly extension: string;
+  readonly fileUrl: string;
+  readonly stateUrl: string;
+  readonly saveUrl: string | null;
+  readonly downloadUrl: string;
+  readonly expiresAt: string | null;
+}
+
+/** Puts the link's config into the page as inert JSON (never as script). */
+export function injectOfficeShareConfig(html: string, config: OfficeSharePageConfig): string {
+  const json = JSON.stringify(config)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+  const tag = `<script id="uno-share-config" type="application/json">${json}</script>`;
+  return html.includes("</head>") ? html.replace("</head>", `${tag}</head>`) : tag + html;
+}
+
+function handleOfficeShareOp(input: {
+  readonly op: OfficeShareOp;
+  readonly share: FileShareRow;
+  readonly filePath: string;
+  readonly request: HttpServerRequest.HttpServerRequest;
+}) {
+  return Effect.gen(function* () {
+    const { op, share, filePath, request } = input;
+    if (op === "file") {
+      // Bytes + the version they are, read in one go so they always match.
+      const bytes = yield* Effect.promise(() => fsPromises.readFile(filePath));
+      if (bytes.length > SHARE_OFFICE_MAX_BYTES) {
+        return jsonReply({ error: "This document is too large to open in the browser." }, 413);
+      }
+      return HttpServerResponse.uint8Array(bytes, {
+        status: 200,
+        contentType: "application/octet-stream",
+        headers: {
+          ...SHARE_HEADERS,
+          "x-content-type-options": "nosniff",
+          "content-disposition": "attachment",
+          "x-uno-version": contentVersion(bytes),
+        },
+      });
+    }
+    if (op === "state") {
+      const bytes = yield* Effect.promise(() => fsPromises.readFile(filePath));
+      const stats = yield* Effect.promise(() => fsPromises.stat(filePath));
+      return jsonReply({ version: contentVersion(bytes), modifiedAt: stats.mtime.toISOString() });
+    }
+    // save
+    if (share.access === "view") {
+      return jsonReply({ error: "This link can only view the document." }, 403);
+    }
+    const length = Number(request.headers["content-length"] ?? "0");
+    if (length > SHARE_OFFICE_MAX_BYTES) {
+      return jsonReply({ error: "The document is too large to save." }, 413);
+    }
+    const body = yield* request.arrayBuffer.pipe(Effect.orElseSucceed(() => null));
+    if (body === null) return jsonReply({ error: "Couldn't read the upload." }, 400);
+    const config = yield* ServerConfig;
+    const url = HttpServerRequest.toURL(request);
+    const force = Option.isSome(url) && url.value.searchParams.get("force") === "1";
+    const result = yield* Effect.tryPromise(() =>
+      saveSharedOfficeFile({
+        filePath,
+        shareId: share.shareId,
+        bytes: new Uint8Array(body),
+        baseVersion: request.headers["x-uno-base-version"] ?? null,
+        force,
+        versionsDir: nodePath.join(config.baseDir, "share-versions"),
+      }),
+    ).pipe(Effect.orElseSucceed(() => null));
+    if (result === null) return jsonReply({ error: "Couldn't save on the computer." }, 500);
+    if (result.kind === "rejected") return jsonReply({ error: result.message }, result.status);
+    if (result.kind === "conflict") {
+      yield* Effect.logInfo("files.share.save.conflict", { shareId: share.shareId });
+      return jsonReply(
+        {
+          error: "The file changed on the computer after you opened it.",
+          currentVersion: result.currentVersion,
+          modifiedAt: result.modifiedAt,
+        },
+        409,
+      );
+    }
+    yield* Effect.logInfo("files.share.saved", {
+      shareId: share.shareId,
+      access: share.access,
+      bytes: body.byteLength,
+      forced: force,
+    });
+    return jsonReply({ version: result.version, modifiedAt: result.modifiedAt });
+  });
+}
+
 const handleShare = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const url = HttpServerRequest.toURL(request);
@@ -300,14 +467,23 @@ const handleShare = Effect.gen(function* () {
   const base = shareBase(token);
   const pathname = url.value.pathname;
   const remainder = pathname.startsWith(base) ? pathname.slice(base.length) : "";
-  const segments = decodeShareSubpath(remainder);
+  const op = share.kind === "file" ? officeShareOp(remainder) : null;
+  const segments = op ? [] : decodeShareSubpath(remainder);
   if (segments === null) return htmlPage(renderUnavailablePage("missing"), 404);
   const shareName = nodePath.basename(share.path);
+  if (op === "save" ? request.method !== "POST" : op !== null && request.method !== "GET") {
+    return jsonReply({ error: "Method not allowed" }, 405);
+  }
 
   // ── Password gate ──
   if (share.passwordHash !== null) {
     const cookieName = sharePasswordCookieName(token);
-    if (request.method === "POST") {
+    if (op !== null) {
+      // The editor's own calls ride on the cookie the password page set.
+      if (!isValidSharePasswordProof(token, share.passwordHash, request.cookies[cookieName])) {
+        return jsonReply({ error: "This link needs its password again." }, 401);
+      }
+    } else if (request.method === "POST") {
       const now = Date.now();
       if (passwordAttempts.isLocked(share.shareId, now)) {
         return htmlPage(
@@ -356,7 +532,7 @@ const handleShare = Effect.gen(function* () {
         401,
       );
     }
-  } else if (request.method === "POST") {
+  } else if (request.method === "POST" && op === null) {
     return HttpServerResponse.redirect(pathname, { status: 303, headers: SHARE_HEADERS });
   }
 
@@ -373,7 +549,40 @@ const handleShare = Effect.gen(function* () {
     if (segments.length === 1 && segments[0] !== nodePath.basename(target.path)) {
       return htmlPage(renderUnavailablePage("missing"), 404);
     }
+    const office = officeShareInfo(target.path);
+    if (op !== null) {
+      if (!office) return jsonReply({ error: "Not a document" }, 404);
+      return yield* handleOfficeShareOp({ op, share, filePath: target.path, request });
+    }
     const stats = yield* Effect.promise(() => fsPromises.stat(target.path));
+    if (
+      office &&
+      segments.length === 0 &&
+      !download &&
+      url.value.searchParams.get("card") !== "1"
+    ) {
+      const page = yield* readOfficeSharePage;
+      if (page !== null) {
+        yield* files.recordShareAccess(share.shareId);
+        const name = nodePath.basename(target.path);
+        const access = office.writable ? share.access : "view";
+        return htmlPage(
+          injectOfficeShareConfig(page, {
+            name,
+            access,
+            documentType: office.documentType,
+            extension: office.extension,
+            fileUrl: `${base}/.file`,
+            stateUrl: `${base}/.state`,
+            saveUrl: access === "view" ? null : `${base}/.save`,
+            downloadUrl: `${base}/${encodeSegment(name)}?download=1`,
+            expiresAt: share.expiresAt,
+          }),
+          200,
+          { "content-security-policy": OFFICE_PAGE_CSP, "x-frame-options": "DENY" },
+        );
+      }
+    }
     if (segments.length === 1 || download) {
       if (download) yield* files.recordShareAccess(share.shareId);
       return yield* serveFile({

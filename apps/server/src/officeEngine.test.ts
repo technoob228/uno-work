@@ -24,7 +24,21 @@ describe("resolveOfficeEngineFilePath", () => {
     ).toBe(nodePath.join(engineDir, "fonts/My Font.ttf"));
   });
 
+  it("drops empty segments (the slide editor asks for themes//themes.js) but stays inside", () => {
+    expect(
+      resolveOfficeEngineFilePath({
+        engineDir,
+        requestPathname: "/office-engine/vendor/sdkjs/slide/themes//themes.js",
+      }),
+    ).toBe(nodePath.join(engineDir, "vendor/sdkjs/slide/themes/themes.js"));
+    expect(
+      resolveOfficeEngineFilePath({ engineDir, requestPathname: "/office-engine//etc/passwd" }),
+    ).toBe(nodePath.join(engineDir, "etc/passwd"));
+  });
+
   it.each([
+    "/office-engine///",
+    "/office-engine/vendor//../../etc",
     "/office-engine/../secret",
     "/office-engine/vendor/../../etc/passwd",
     "/office-engine/%2e%2e/etc/passwd",
@@ -32,7 +46,6 @@ describe("resolveOfficeEngineFilePath", () => {
     "/office-engine/a%00b",
     "/office-engine/a\\..\\b",
     "/office-engine/",
-    "/office-engine//etc/passwd",
     "/office-enginex/api.js",
     "/office-engine/%E0%A4%A",
   ])("rejects %s", (requestPathname) => {

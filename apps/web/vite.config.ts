@@ -121,5 +121,13 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: buildSourcemap,
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        // The page behind a share link to a Word/Excel/PowerPoint file; the
+        // daemon serves it at /s/<token> (apps/server/src/files/http.ts).
+        officeShare: "office-share.html",
+      },
+    },
   },
 });

@@ -33,12 +33,15 @@ export function resolveOfficeEngineFilePath(input: {
     return null;
   }
   if (relative.length === 0 || relative.includes("\0") || relative.includes("\\")) return null;
-  const segments = relative.split("/");
-  if (segments.some((segment) => segment === ".." || segment === "." || segment === "")) {
+  // The presentation editor asks for `slide/themes//themes.js` (an empty
+  // segment from its own URL joining). Empty segments are harmless — drop
+  // them — but `.`/`..` never pass.
+  const segments = relative.split("/").filter((segment) => segment !== "");
+  if (segments.length === 0 || segments.some((segment) => segment === ".." || segment === ".")) {
     return null;
   }
   const root = nodePath.resolve(engineDir);
-  const resolved = nodePath.resolve(root, relative);
+  const resolved = nodePath.resolve(root, ...segments);
   if (!resolved.startsWith(`${root}${nodePath.sep}`)) return null;
   return resolved;
 }

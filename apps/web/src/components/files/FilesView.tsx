@@ -27,6 +27,7 @@ import {
   LinkIcon,
   Loader2Icon,
   PlusIcon,
+  PresentationIcon,
   RefreshCwIcon,
   SearchIcon,
   Share2Icon,
@@ -36,7 +37,6 @@ import {
   XIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as XLSX from "xlsx";
 
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { cn } from "../../lib/utils";
@@ -75,6 +75,7 @@ import {
 } from "./filesApi";
 import { registerBuiltInFileOpeners } from "./openers";
 import { ShareDialog, SharedLinksDialog } from "./ShareDialog";
+import { blankExtensionFor, blankOfficeFile } from "../office/officeBlank";
 import { CloudBrowser } from "./CloudBrowser";
 import { CopyToCloudDialog } from "./CopyToCloudDialog";
 import { FilesLocationSwitch } from "./FilesLocationSwitch";
@@ -108,30 +109,47 @@ function sortEntries(
   });
 }
 
-function blankSpreadsheet(): Uint8Array {
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([[""]]), "Sheet1");
-  return new Uint8Array(XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer);
-}
-
+/**
+ * "New → …". Word, Excel and PowerPoint get real blank files; the file type
+ * follows the extension actually typed (see `newFileContents`).
+ */
 const NEW_FILE_TEMPLATES = {
-  document: {
-    name: "Untitled.md",
-    title: "New document",
-    contents: () => "# Untitled\n\n",
+  word: {
+    name: "Untitled.docx",
+    title: "New Word document",
+    contents: (): Promise<string | Uint8Array> => blankOfficeFile("docx"),
   },
   spreadsheet: {
     name: "Untitled.xlsx",
     title: "New spreadsheet",
-    contents: blankSpreadsheet,
+    contents: (): Promise<string | Uint8Array> => blankOfficeFile("xlsx"),
+  },
+  presentation: {
+    name: "Untitled.pptx",
+    title: "New presentation",
+    contents: (): Promise<string | Uint8Array> => blankOfficeFile("pptx"),
+  },
+  document: {
+    name: "Untitled.md",
+    title: "New text document",
+    contents: async (): Promise<string | Uint8Array> => "# Untitled\n\n",
   },
   page: {
     name: "index.html",
     title: "New web page",
-    contents: () =>
+    contents: async (): Promise<string | Uint8Array> =>
       '<!doctype html>\n<html lang="en">\n<head>\n  <meta charset="utf-8">\n  <meta name="viewport" content="width=device-width,initial-scale=1">\n  <title>My page</title>\n</head>\n<body>\n  <h1>Hello!</h1>\n  <p>Edit this page, then share it or publish it as a website.</p>\n</body>\n</html>\n',
   },
 } as const;
+
+/**
+ * Whatever template was picked, a name ending in .docx/.xlsx/.pptx gets a
+ * real blank document of that kind — never text with an office extension.
+ */
+function newFileContents(kind: NewFileKind, name: string): Promise<string | Uint8Array> {
+  const blank = blankExtensionFor(name);
+  return blank ? blankOfficeFile(blank) : NEW_FILE_TEMPLATES[kind].contents();
+}
 type NewFileKind = keyof typeof NEW_FILE_TEMPLATES;
 
 type DialogState =
@@ -294,7 +312,7 @@ export function FilesView() {
             environmentId,
             currentPath,
             name,
-            NEW_FILE_TEMPLATES[dialog.kind].contents(),
+            await newFileContents(dialog.kind, name),
           );
           await refreshAll();
           openFile(created);
@@ -555,13 +573,21 @@ function FolderBrowser({
                 Folder
               </MenuItem>
               <MenuSeparator />
-              <MenuItem onClick={() => createNew("document")}>
+              <MenuItem onClick={() => createNew("word")}>
                 <FileTextIcon />
-                Document
+                Word document
               </MenuItem>
               <MenuItem onClick={() => createNew("spreadsheet")}>
                 <FileSpreadsheetIcon />
                 Spreadsheet
+              </MenuItem>
+              <MenuItem onClick={() => createNew("presentation")}>
+                <PresentationIcon />
+                Presentation
+              </MenuItem>
+              <MenuItem onClick={() => createNew("document")}>
+                <FileTextIcon />
+                Text (Markdown)
               </MenuItem>
               <MenuItem onClick={() => createNew("page")}>
                 <GlobeIcon />

@@ -14,6 +14,7 @@ import { Effect, Layer } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 
 import { AuthError, ServerAuth, type AuthenticatedSession } from "../auth/Services/ServerAuth.ts";
+import { ServerConfig } from "../config.ts";
 import { FileSharesRepositoryLive } from "../persistence/Layers/FileShares.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { FileSharesRepository } from "../persistence/Services/FileShares.ts";
@@ -34,6 +35,12 @@ const settingsLayer = Layer.mock(ServerSettingsService)({
   getSettings: Effect.succeed({ uno: { apiKey: "" } } as never),
 });
 
+/** Minimal zip local-file headers: enough for the "is this a document" check. */
+const OFFICE_V1 = Buffer.from("PK\u0003\u0004 version-one");
+const OFFICE_V2 = Buffer.from("PK\u0003\u0004 version-two");
+const OFFICE_V3 = Buffer.from("PK\u0003\u0004 version-three");
+const OFFICE_OTHER = Buffer.from("PK\u0003\u0004 other-file");
+
 const makeFixture = Effect.gen(function* () {
   const sandbox = fs.realpathSync(fs.mkdtempSync(nodePath.join(os.tmpdir(), "uno-files-http-")));
   yield* Effect.addFinalizer(() =>
@@ -52,6 +59,26 @@ const makeFixture = Effect.gen(function* () {
   fs.writeFileSync(nodePath.join(home, "site", ".env"), "SECRET=1");
   fs.writeFileSync(nodePath.join(home, ".ssh", "id_rsa"), "key");
   fs.writeFileSync(nodePath.join(sandbox, "outside.txt"), "outside");
+  // A real-looking docx (a zip) and a legacy .doc for the office link tests.
+  fs.writeFileSync(nodePath.join(home, "docs", "letter.docx"), OFFICE_V1);
+  fs.writeFileSync(nodePath.join(home, "docs", "other.docx"), OFFICE_OTHER);
+  fs.writeFileSync(nodePath.join(home, "docs", "old.doc"), "legacy");
+  // The web build's editor page and an installed engine.
+  const staticDir = nodePath.join(sandbox, "static");
+  const engineDir = nodePath.join(sandbox, "base", "office-engine");
+  fs.mkdirSync(staticDir, { recursive: true });
+  fs.writeFileSync(
+    nodePath.join(staticDir, "office-share.html"),
+    "<!doctype html><html><head><title>x</title></head><body>EDITOR</body></html>",
+  );
+  fs.mkdirSync(nodePath.join(engineDir, "vendor/web-apps/apps/api/documents"), { recursive: true });
+  fs.writeFileSync(nodePath.join(engineDir, "vendor/web-apps/apps/api/documents/api.js"), "//");
+  const configLayer = Layer.succeed(ServerConfig, {
+    baseDir: nodePath.join(sandbox, "base"),
+    staticDir,
+    devUrl: undefined,
+    officeEngineDir: engineDir,
+  } as never);
 
   const filesLayer = Layer.effect(FilesService, makeFilesService({ root: home })).pipe(
     Layer.provideMerge(FileSharesRepositoryLive),
@@ -59,7 +86,7 @@ const makeFixture = Effect.gen(function* () {
     Layer.provide(settingsLayer),
   );
   const context = yield* Layer.build(
-    Layer.mergeAll(filesLayer, authLayer, NodeServices.layer, NodeHttpPlatform.layer),
+    Layer.mergeAll(filesLayer, authLayer, configLayer, NodeServices.layer, NodeHttpPlatform.layer),
   );
   const { handler, dispose } = HttpRouter.toWebHandler(
     Layer.mergeAll(filesRawRouteLayer, ...filesShareRouteLayers),
@@ -74,7 +101,9 @@ const makeFixture = Effect.gen(function* () {
   const files = yield* Effect.service(FilesService).pipe(Effect.provide(context));
   const repository = yield* Effect.service(FileSharesRepository).pipe(Effect.provide(context));
   const text = (response: Response) => Effect.promise(() => response.text());
-  return { home, sandbox, request, files, repository, text };
+  const json = (response: Response) =>
+    Effect.promise(() => response.json() as Promise<Record<string, unknown>>);
+  return { home, sandbox, request, files, repository, text, json };
 });
 
 it.layer(NodeServices.layer, { excludeTestServices: true })("files share routes", (it) => {
@@ -120,10 +149,11 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("files share routes"
 
   it.effect("HTML is served inside a sandbox so it can't act as the owner", () =>
     Effect.gen(function* () {
-      const { home, request, files } = yield* makeFixture;
+      const { home, request, files, text } = yield* makeFixture;
       const share = yield* files.createShare({ path: `${home}/docs/page.html` });
       const raw = yield* request(`${share.urlPath}/page.html`);
       assert.equal(raw.status, 200);
+      yield* text(raw); // drain the file stream before the sandbox is deleted
       assert.include(raw.headers.get("content-security-policy") ?? "", "sandbox allow-scripts");
       assert.notInclude(raw.headers.get("content-security-policy") ?? "", "allow-same-origin");
     }).pipe(Effect.scoped),
@@ -152,6 +182,7 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("files share routes"
         expiresAt: "2020-01-02T00:00:00.000Z",
         revokedAt: null,
         passwordHash: null,
+        access: "view",
         accessCount: 0,
         lastAccessedAt: null,
       });
@@ -265,6 +296,134 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("files share routes"
       const deleted = yield* files.remove({ paths: [`${home}/site`] });
       assert.equal(deleted.revokedShares, 1);
       assert.equal((yield* request(`${folderShare.urlPath}/`)).status, 404);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("an office link opens the editor page with its own access level", () =>
+    Effect.gen(function* () {
+      const { home, request, files, text } = yield* makeFixture;
+      const share = yield* files.createShare({ path: `${home}/docs/letter.docx`, access: "edit" });
+      assert.equal(share.access, "edit");
+      const page = yield* request(share.urlPath);
+      assert.equal(page.status, 200);
+      assert.include(page.headers.get("content-security-policy") ?? "", "frame-ancestors 'none'");
+      assert.equal(page.headers.get("x-frame-options"), "DENY");
+      const html = yield* text(page);
+      assert.include(html, "EDITOR");
+      const config = JSON.parse(
+        /<script id="uno-share-config" type="application\/json">(.*?)<\/script>/.exec(html)![1]!,
+      );
+      assert.equal(config.access, "edit");
+      assert.equal(config.documentType, "word");
+      assert.equal(config.fileUrl, `${share.urlPath}/.file`);
+      assert.equal(config.saveUrl, `${share.urlPath}/.save`);
+      // The plain card is still one click away.
+      assert.include(yield* text(yield* request(`${share.urlPath}?card=1`)), "Download");
+
+      const viewOnly = yield* files.createShare({ path: `${home}/docs/letter.docx` });
+      assert.equal(viewOnly.access, "view");
+      const viewHtml = yield* text(yield* request(viewOnly.urlPath));
+      assert.include(viewHtml, '"saveUrl":null');
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("comment/edit only for office files a link can write back", () =>
+    Effect.gen(function* () {
+      const { home, files } = yield* makeFixture;
+      for (const path of [`${home}/notes.txt`, `${home}/site`, `${home}/docs/old.doc`]) {
+        const failed = yield* files.createShare({ path, access: "edit" }).pipe(Effect.flip);
+        assert.equal(failed._tag, "FilesError", path);
+      }
+      const comment = yield* files.createShare({
+        path: `${home}/docs/letter.docx`,
+        access: "comment",
+      });
+      assert.equal(comment.access, "comment");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("saving by link writes only that file, refuses view links and stale versions", () =>
+    Effect.gen(function* () {
+      const { home, sandbox, request, files, json } = yield* makeFixture;
+      const letter = `${home}/docs/letter.docx`;
+      const edit = yield* files.createShare({ path: letter, access: "edit" });
+      const view = yield* files.createShare({ path: letter });
+
+      const opened = yield* request(`${edit.urlPath}/.file`);
+      assert.equal(opened.status, 200);
+      const version = opened.headers.get("x-uno-version")!;
+      assert.isString(version);
+      assert.equal((yield* json(yield* request(`${edit.urlPath}/.state`))).version, version);
+
+      const save = (urlPath: string, body: Buffer, base: string | null, force = false) =>
+        request(`${urlPath}/.save${force ? "?force=1" : ""}`, {
+          method: "POST",
+          body: new Uint8Array(body),
+          headers: base ? { "x-uno-base-version": base } : {},
+        });
+
+      // A view link can't save; GET can't save; junk isn't a document.
+      assert.equal((yield* save(view.urlPath, OFFICE_V2, version)).status, 403);
+      assert.equal((yield* request(`${edit.urlPath}/.save`)).status, 405);
+      assert.equal((yield* save(edit.urlPath, Buffer.from("not a zip"), version)).status, 400);
+      assert.deepEqual(fs.readFileSync(letter), OFFICE_V1);
+
+      const saved = yield* save(edit.urlPath, OFFICE_V2, version);
+      assert.equal(saved.status, 200);
+      const v2 = (yield* json(saved)).version as string;
+      assert.deepEqual(fs.readFileSync(letter), OFFICE_V2);
+      // Nothing else was touched, and the old bytes were kept.
+      assert.deepEqual(fs.readFileSync(`${home}/docs/other.docx`), OFFICE_OTHER);
+      const kept = fs.readdirSync(nodePath.join(sandbox, "base", "share-versions", edit.id));
+      assert.equal(kept.length, 1);
+      assert.deepEqual(
+        fs.readFileSync(nodePath.join(sandbox, "base", "share-versions", edit.id, kept[0]!)),
+        OFFICE_V1,
+      );
+      assert.notInclude(fs.readdirSync(`${home}/docs`).join(","), ".tmp");
+
+      // The file changed on the computer meanwhile: a save from the old version is a conflict.
+      fs.writeFileSync(letter, OFFICE_V3);
+      const conflict = yield* save(edit.urlPath, OFFICE_V2, v2);
+      assert.equal(conflict.status, 409);
+      assert.deepEqual(fs.readFileSync(letter), OFFICE_V3);
+      // …until the visitor explicitly chooses to replace it.
+      assert.equal((yield* save(edit.urlPath, OFFICE_V2, v2, true)).status, 200);
+      assert.deepEqual(fs.readFileSync(letter), OFFICE_V2);
+
+      // A revoked link can't save any more.
+      yield* files.revokeShare({ id: edit.id });
+      assert.equal((yield* save(edit.urlPath, OFFICE_V1, null, true)).status, 404);
+      assert.deepEqual(fs.readFileSync(letter), OFFICE_V2);
+
+      // Reserved names never reach a folder link's files.
+      const folder = yield* files.createShare({ path: `${home}/docs` });
+      assert.equal((yield* request(`${folder.urlPath}/.file`)).status, 404);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("a password link's editor calls need the unlocked cookie", () =>
+    Effect.gen(function* () {
+      const { home, request, files } = yield* makeFixture;
+      const share = yield* files.createShare({
+        path: `${home}/docs/letter.docx`,
+        access: "edit",
+        password: "secret-pass",
+      });
+      assert.equal((yield* request(`${share.urlPath}/.file`)).status, 401);
+      const bad = yield* request(`${share.urlPath}/.save?force=1`, {
+        method: "POST",
+        body: new Uint8Array(OFFICE_V2),
+      });
+      assert.equal(bad.status, 401);
+      const unlocked = yield* request(share.urlPath, {
+        method: "POST",
+        body: new URLSearchParams({ password: "secret-pass" }),
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+      });
+      assert.equal(unlocked.status, 303);
+      const cookie = (unlocked.headers.get("set-cookie") ?? "").split(";")[0]!;
+      assert.equal((yield* request(`${share.urlPath}/.file`, { headers: { cookie } })).status, 200);
     }).pipe(Effect.scoped),
   );
 
