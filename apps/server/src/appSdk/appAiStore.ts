@@ -11,11 +11,14 @@
 import {
   APP_TASK_TOOLS_DEFAULT_CAP,
   APP_TASK_TOOLS_ORDER,
+  type AppAiProviderChoice,
   type AppTaskTools,
 } from "@t3tools/contracts";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+import { normalizeProviderChoice } from "./appAiProviders.ts";
 
 export const APP_TOKEN_PREFIX = "uno_app_";
 /** Tasks remembered per app (the rest is in Work's own thread history). */
@@ -61,6 +64,8 @@ export interface StoredApp {
   storageScope: "account" | "computer";
   revoked: boolean;
   taskToolsCap: AppTaskTools;
+  /** Where the app's answers go (Settings → Apps); null = Uno AI with the default model. */
+  provider: AppAiProviderChoice | null;
   tasks: StoredAppTask[];
 }
 
@@ -107,6 +112,7 @@ function normalizeApp(id: string, raw: unknown): StoredApp {
         : null,
     storageScope: r["storageScope"] === "computer" ? "computer" : "account",
     revoked: r["revoked"] === true,
+    provider: normalizeProviderChoice(r["provider"]),
     taskToolsCap: APP_TASK_TOOLS_ORDER.includes(cap as AppTaskTools)
       ? (cap as AppTaskTools)
       : APP_TASK_TOOLS_DEFAULT_CAP,

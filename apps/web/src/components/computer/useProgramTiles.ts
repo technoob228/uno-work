@@ -10,11 +10,17 @@ import { useMemo } from "react";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { computerPowerState } from "./computerFormat";
 import {
+  appAiQueryOptions,
   computerAppsQueryOptions,
   computerStateQueryOptions,
   machineAppsQueryOptions,
 } from "./computerQueries";
-import { buildProgramTiles, isBrowserOnMachine, type ProgramTile } from "./programModel";
+import {
+  buildProgramTiles,
+  isBrowserOnMachine,
+  type ProgramTile,
+  withAiNotes,
+} from "./programModel";
 
 export interface ProgramTilesState {
   readonly tiles: ReadonlyArray<ProgramTile>;
@@ -32,19 +38,24 @@ export function useProgramTiles(): ProgramTilesState {
   const computerOn = box ? computerPowerState(box.status) === "on" : true;
   const machineAppsQuery = useQuery(machineAppsQueryOptions(environmentId, true));
   const appsQuery = useQuery(computerAppsQueryOptions(environmentId, null, hasBox));
+  // "Uses AI" on a tile's tooltip; read once, Settings → Apps keeps polling.
+  const appAiQuery = useQuery({ ...appAiQueryOptions(environmentId), refetchInterval: false });
   const browserOnMachine =
     typeof window !== "undefined" && isBrowserOnMachine(window.location.hostname);
 
   const tiles = useMemo(
     () =>
-      buildProgramTiles({
-        machineApps: machineAppsQuery.data?.apps ?? [],
-        storeApps: appsQuery.data?.installed.apps ?? [],
-        installs: [],
-        browserOnMachine,
-        computerOn,
-      }),
-    [appsQuery.data, browserOnMachine, computerOn, machineAppsQuery.data],
+      withAiNotes(
+        buildProgramTiles({
+          machineApps: machineAppsQuery.data?.apps ?? [],
+          storeApps: appsQuery.data?.installed.apps ?? [],
+          installs: [],
+          browserOnMachine,
+          computerOn,
+        }),
+        appAiQuery.data?.apps,
+      ),
+    [appAiQuery.data, appsQuery.data, browserOnMachine, computerOn, machineAppsQuery.data],
   );
 
   return {

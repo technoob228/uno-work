@@ -9,6 +9,12 @@ import type { AppTaskTools } from "@t3tools/contracts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { StoredAppTask } from "./appAiStore.ts";
+import {
+  type AppAiRoute,
+  type AppAiRouteResult,
+  NOT_CONNECTED_MESSAGE,
+  probeOpenAiEndpoint,
+} from "./appAiProviders.ts";
 import { type ParsedNotify, makeNotifyLimiter, parseNotifyBody } from "./appNotify.ts";
 import type { AppStorage } from "./appStorage.ts";
 import type { AppApiReply, AppTaskView } from "./appTasks.ts";
@@ -77,6 +83,11 @@ export interface AppApiCore {
   }>;
   readonly prices: () => Promise<ReadonlyMap<string, ModelPrice>>;
   readonly charge: (appId: string, usd: number) => Promise<void>;
+  /**
+   * Where this app's answers go now (Settings → Apps). Absent (older tests,
+   * embedders): always the Uno gateway, metered.
+   */
+  readonly route?: (caller: AppApiCaller) => Promise<AppAiRouteResult>;
   readonly createTask: (
     caller: AppApiCaller,
     body: unknown,
@@ -156,8 +167,21 @@ function sseHeaders(res: ServerResponse) {
   });
 }
 
+function upstreamHeaders(route: AppAiRoute, caller: AppApiCaller, contentType?: string) {
+  return {
+    ...(route.apiKey ? { authorization: `Bearer ${route.apiKey}` } : {}),
+    ...(contentType ? { "content-type": contentType } : {}),
+    "user-agent": `UnoWork-AppSDK/${caller.appId}`,
+    ...route.headers,
+  };
+}
+
 export function makeAppApiHandler(core: AppApiCore) {
-  const requireAi = (caller: AppApiCaller, what: "chat" | "tasks"): AppApiReply | null => {
+  const requireAi = (
+    caller: AppApiCaller,
+    what: "chat" | "tasks",
+    metered = true,
+  ): AppApiReply | null => {
     if (!caller[what]) {
       return err(
         403,
@@ -167,12 +191,67 @@ export function makeAppApiHandler(core: AppApiCore) {
           : 'This app\'s manifest does not ask for AI tasks. Add "ai": {"tasks": true} to ~/.uno/apps/<id>.json.',
       );
     }
-    if (remaining(caller) <= 0) return err(402, "app_limit_reached", LIMIT_REACHED_MESSAGE);
+    if (metered && remaining(caller) <= 0) {
+      return err(402, "app_limit_reached", LIMIT_REACHED_MESSAGE);
+    }
     return null;
+  };
+
+  const gatewayRoute = async (): Promise<AppAiRouteResult> => {
+    const gateway = await core.gateway();
+    if (!gateway) {
+      return { ok: false, status: 503, code: "ai_not_connected", message: NOT_CONNECTED_MESSAGE };
+    }
+    const defaults = await core.defaults();
+    return {
+      ok: true,
+      route: {
+        kind: "uno",
+        baseUrl: gateway.baseUrl,
+        apiKey: gateway.key,
+        headers: {},
+        metered: true,
+        defaultModel: defaults.chatModel,
+        label: "Uno AI",
+      },
+    };
+  };
+  const routeOf = (caller: AppApiCaller) => (core.route ? core.route(caller) : gatewayRoute());
+  const routeError = (result: Extract<AppAiRouteResult, { ok: false }>) =>
+    err(result.status, result.code, result.message);
+  const unreachable = (route: AppAiRoute) =>
+    err(
+      502,
+      route.kind === "uno" ? "gateway_unreachable" : "provider_unreachable",
+      route.kind === "uno"
+        ? "The Uno AI gateway did not answer."
+        : `${route.label} did not answer. Is it running? The person can pick another provider in Uno Work → Settings → Apps.`,
+    );
+  /**
+   * An error of the upstream, passed on. A provider holding the person's key
+   * gets its body replaced: some echo (part of) the key back.
+   */
+  const passError = async (route: AppAiRoute, upstream: Response, res: ServerResponse) => {
+    const text = await upstream.text().catch(() => "");
+    if (route.kind === "byok") {
+      return send(
+        res,
+        err(
+          upstream.status,
+          "provider_error",
+          `${route.label} answered ${upstream.status}${upstream.status === 401 || upstream.status === 403 ? " — the key was refused" : ""}.`,
+        ),
+      );
+    }
+    res.writeHead(upstream.status, {
+      "content-type": upstream.headers.get("content-type") ?? "application/json",
+    });
+    res.end(text);
   };
 
   const whoami = async (caller: AppApiCaller): Promise<AppApiReply> => {
     const defaults = await core.defaults();
+    const routed = await routeOf(caller);
     return {
       status: 200,
       body: {
@@ -194,7 +273,20 @@ export function makeAppApiHandler(core: AppApiCore) {
               usedBytes: core.storage?.cachedUsage(caller.storage.folder)?.usedBytes ?? null,
             }
           : { enabled: false },
-        defaults,
+        provider: routed.ok
+          ? {
+              kind: routed.route.kind,
+              label: routed.route.label,
+              model: routed.route.defaultModel,
+              metered: routed.route.metered,
+            }
+          : { kind: null, label: null, model: null, metered: false, error: routed.message },
+        defaults: {
+          ...defaults,
+          chatModel: routed.ok
+            ? (routed.route.defaultModel ?? defaults.chatModel)
+            : defaults.chatModel,
+        },
         home: core.home,
       },
     };
@@ -203,31 +295,33 @@ export function makeAppApiHandler(core: AppApiCore) {
   const models = async (caller: AppApiCaller, res: ServerResponse) => {
     const denied = requireAi(caller, "chat");
     if (denied && denied.status === 403) return send(res, denied);
-    const gateway = await core.gateway();
-    if (!gateway) return send(res, notConnected());
-    const upstream = await fetch(`${gateway.baseUrl}/models`, {
-      headers: { authorization: `Bearer ${gateway.key}` },
+    const routed = await routeOf(caller);
+    if (!routed.ok) return send(res, routeError(routed));
+    const route = routed.route;
+    const upstream = await fetch(`${route.baseUrl}/models`, {
+      headers: upstreamHeaders(route, caller),
       signal: AbortSignal.timeout(20_000),
     }).catch(() => null);
-    if (!upstream)
-      return send(res, err(502, "gateway_unreachable", "The Uno AI gateway did not answer."));
+    if (!upstream) return send(res, unreachable(route));
+    if (!upstream.ok) return passError(route, upstream, res);
     res.writeHead(upstream.status, { "content-type": "application/json; charset=utf-8" });
     res.end(Buffer.from(await upstream.arrayBuffer()));
   };
 
-  const notConnected = () =>
-    err(
-      503,
-      "ai_not_connected",
-      "This computer has no Uno AI connected yet. Sign in to Uno in Uno Work to turn it on.",
-    );
+  const notConnected = () => err(503, "ai_not_connected", NOT_CONNECTED_MESSAGE);
 
   const chatCompletions = async (
     caller: AppApiCaller,
     req: IncomingMessage,
     res: ServerResponse,
   ) => {
-    const denied = requireAi(caller, "chat");
+    const permission = requireAi(caller, "chat", false);
+    if (permission) return send(res, permission);
+    const routed = await routeOf(caller);
+    if (!routed.ok) return send(res, routeError(routed));
+    const route = routed.route;
+    // The limit is Uno AI's: a local server or the person's own key isn't capped here.
+    const denied = requireAi(caller, "chat", route.metered);
     if (denied) return send(res, denied);
     const raw = await readBody(req, CHAT_BODY_MAX_BYTES);
     let body: Record<string, unknown>;
@@ -244,18 +338,34 @@ export function makeAppApiHandler(core: AppApiCore) {
     if (!Array.isArray(body["messages"]) || body["messages"].length === 0) {
       return send(res, err(400, "invalid_request", '"messages" must be a non-empty array.'));
     }
-    const gateway = await core.gateway();
-    if (!gateway) return send(res, notConnected());
-    const defaults = await core.defaults();
-    const model =
+    let model =
       typeof body["model"] === "string" &&
       body["model"].trim() !== "" &&
       body["model"] !== "default"
         ? body["model"].trim()
-        : defaults.chatModel;
+        : route.defaultModel;
+    if (model === null) {
+      // A local server / own key without a chosen model: its first one.
+      const listed = await probeOpenAiEndpoint(route.baseUrl, {
+        timeoutMs: 5_000,
+        ...(route.apiKey ? { apiKey: route.apiKey } : {}),
+      });
+      if (!listed) return send(res, unreachable(route));
+      model = listed.ids[0] ?? null;
+      if (model === null) {
+        return send(
+          res,
+          err(
+            503,
+            "no_model",
+            `${route.label} has no model loaded. Load one (e.g. \`ollama pull qwen3:4b\`) or pick a model in Uno Work → Settings → Apps.`,
+          ),
+        );
+      }
+    }
     const streaming = body["stream"] === true;
     const outgoing: Record<string, unknown> = { ...body, model };
-    if (streaming) {
+    if (streaming && route.metered) {
       const options =
         typeof body["stream_options"] === "object" && body["stream_options"] !== null
           ? (body["stream_options"] as Record<string, unknown>)
@@ -268,29 +378,21 @@ export function makeAppApiHandler(core: AppApiCore) {
     res.on("close", () => {
       if (!res.writableFinished) abort.abort();
     });
-    const upstream = await fetch(`${gateway.baseUrl}/chat/completions`, {
+    const upstream = await fetch(`${route.baseUrl}/chat/completions`, {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${gateway.key}`,
-        "content-type": "application/json",
-        "user-agent": `UnoWork-AppSDK/${caller.appId}`,
-      },
+      headers: upstreamHeaders(route, caller, "application/json"),
       body: JSON.stringify(outgoing),
       signal: abort.signal,
     }).catch(() => null);
-    if (!upstream)
-      return send(res, err(502, "gateway_unreachable", "The Uno AI gateway did not answer."));
-    const prices = await core.prices().catch(() => new Map<string, ModelPrice>());
+    if (!upstream) return send(res, unreachable(route));
+    const prices = route.metered
+      ? await core.prices().catch(() => new Map<string, ModelPrice>())
+      : new Map<string, ModelPrice>();
     const price = prices.get(model);
+    // Only Uno AI is charged against the app's limit; other providers count a use.
+    const settle = (usd: number) => core.charge(caller.appId, route.metered ? usd : 0);
 
-    if (!upstream.ok || !upstream.body) {
-      const text = await upstream.text().catch(() => "");
-      res.writeHead(upstream.status, {
-        "content-type": upstream.headers.get("content-type") ?? "application/json",
-      });
-      res.end(text);
-      return;
-    }
+    if (!upstream.ok || !upstream.body) return passError(route, upstream, res);
 
     if (!streaming) {
       const text = await upstream.text();
@@ -303,7 +405,7 @@ export function makeAppApiHandler(core: AppApiCore) {
       } catch {
         cost = estimateChatCostFromChars(promptChars, text.length, price);
       }
-      await core.charge(caller.appId, cost);
+      await settle(cost);
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(text);
       return;
@@ -324,7 +426,7 @@ export function makeAppApiHandler(core: AppApiCore) {
       const cost = usage
         ? chatCostUsd(usage, price)
         : estimateChatCostFromChars(promptChars, contentChars, price);
-      await core.charge(caller.appId, cost);
+      await settle(cost);
       res.end();
     }
   };
@@ -334,8 +436,8 @@ export function makeAppApiHandler(core: AppApiCore) {
     req: IncomingMessage,
     res: ServerResponse,
   ) => {
-    const denied = requireAi(caller, "chat");
-    if (denied) return send(res, denied);
+    const permission = requireAi(caller, "chat", false);
+    if (permission) return send(res, permission);
     const contentType = req.headers["content-type"];
     if (typeof contentType !== "string" || !contentType.startsWith("multipart/form-data")) {
       return send(
@@ -344,22 +446,29 @@ export function makeAppApiHandler(core: AppApiCore) {
       );
     }
     const raw = await readBody(req, AUDIO_BODY_MAX_BYTES);
-    const gateway = await core.gateway();
-    if (!gateway) return send(res, notConnected());
-    const upstream = await fetch(`${gateway.baseUrl}/audio/transcriptions`, {
+    // Speech-to-text follows the person's own key; a local server or the GPU
+    // rarely has it, so those stay on Uno AI (metered).
+    const chosen = await routeOf(caller);
+    let route: AppAiRoute;
+    if (chosen.ok && chosen.route.kind === "byok") {
+      route = chosen.route;
+    } else {
+      const gateway = await gatewayRoute();
+      if (!gateway.ok) return send(res, notConnected());
+      route = gateway.route;
+    }
+    const denied = requireAi(caller, "chat", route.metered);
+    if (denied) return send(res, denied);
+    const upstream = await fetch(`${route.baseUrl}/audio/transcriptions`, {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${gateway.key}`,
-        "content-type": contentType,
-        "user-agent": `UnoWork-AppSDK/${caller.appId}`,
-      },
+      headers: upstreamHeaders(route, caller, contentType),
       body: raw,
       signal: AbortSignal.timeout(10 * 60_000),
     }).catch(() => null);
-    if (!upstream)
-      return send(res, err(502, "gateway_unreachable", "The Uno AI gateway did not answer."));
+    if (!upstream) return send(res, unreachable(route));
+    if (!upstream.ok && route.kind === "byok") return passError(route, upstream, res);
     const text = await upstream.text();
-    if (upstream.ok) {
+    if (upstream.ok && route.metered) {
       let duration: number | null = null;
       try {
         const parsed = JSON.parse(text) as { duration?: unknown };

@@ -8,6 +8,8 @@
  * route is not there yet ("coming soon") — no point hammering a 404.
  */
 import type {
+  AppAiModels,
+  AppAiModelsInput,
   AppAiOverview,
   AppAiUpdateInput,
   EnvironmentId,
@@ -286,6 +288,19 @@ export function appAiQueryOptions(environmentId: EnvironmentId | null, enabled =
     queryFn: (): Promise<AppAiOverview> => api(environmentId).appAiList(),
     enabled: environmentId !== null && enabled,
     refetchInterval: 10_000,
+  });
+}
+
+export function appAiModelsQueryOptions(
+  environmentId: EnvironmentId | null,
+  input: AppAiModelsInput | null,
+) {
+  return queryOptions({
+    queryKey: ["app-ai-models", environmentId, input] as const,
+    queryFn: (): Promise<AppAiModels> =>
+      input ? api(environmentId).appAiModels(input) : Promise.resolve({ models: [], error: null }),
+    enabled: environmentId !== null && input !== null,
+    staleTime: 60_000,
   });
 }
 

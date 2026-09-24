@@ -8,6 +8,7 @@
  */
 import { Schema } from "effect";
 
+import { AiProviderKeySummary, ByokProviderId } from "./aiProviders.ts";
 import { ModelSelection } from "./orchestration.ts";
 
 /** Default local port of the App API (loopback and the docker bridge only). */
@@ -82,6 +83,102 @@ export const AppStorageInfo = Schema.Struct({
 });
 export type AppStorageInfo = typeof AppStorageInfo.Type;
 
+/**
+ * Where an app's answers (`/v1/chat/completions`, `/v1/models`) come from —
+ * chosen per app in Settings → Apps; the app's code doesn't change:
+ *
+ * - `uno`      — the Uno AI gateway with the machine's key (default). The
+ *                app's spending limit applies, the account's credits pay;
+ * - `local`    — an OpenAI-compatible server on this computer (Ollama, LM
+ *                Studio, vLLM, llama.cpp…) at `baseUrl`. Free, no limit;
+ * - `personal` — Personal AI, a model on the account's own GPU (Uno GPU),
+ *                paid by the hour while it is on. No per-app limit;
+ * - `byok`     — a key the person stored in Settings → Agents (`keyProvider`:
+ *                xAI, OpenRouter, OpenAI or a custom base URL). That provider
+ *                bills the person; no per-app limit.
+ *
+ * Transcription follows `byok`; for `local` / `personal` it stays on the Uno
+ * gateway (metered). Tasks (`/v1/tasks`) always run on the agent chosen for
+ * jobs, whatever the provider.
+ */
+export const AppAiProviderKind = Schema.Literals(["uno", "local", "personal", "byok"]);
+export type AppAiProviderKind = typeof AppAiProviderKind.Type;
+
+export const APP_AI_PROVIDER_KINDS: ReadonlyArray<AppAiProviderKind> = [
+  "uno",
+  "local",
+  "personal",
+  "byok",
+];
+
+export const APP_AI_PROVIDER_LABELS: Readonly<Record<AppAiProviderKind, string>> = {
+  uno: "Uno AI",
+  local: "AI on this computer",
+  personal: "Personal AI (your GPU)",
+  byok: "Your own key",
+};
+
+export const AppAiProviderChoice = Schema.Struct({
+  kind: AppAiProviderKind,
+  /** `local`: the server's OpenAI base URL, e.g. `http://127.0.0.1:11434/v1`. */
+  baseUrl: Schema.optionalKey(Schema.String),
+  /** `byok`: which stored key. */
+  keyProvider: Schema.optionalKey(ByokProviderId),
+  /**
+   * The model an app gets for `"default"` (or no model). Absent/empty: the
+   * gateway's "Model for answers", or the first model the provider lists.
+   */
+  model: Schema.optionalKey(Schema.NullOr(Schema.String)),
+});
+export type AppAiProviderChoice = typeof AppAiProviderChoice.Type;
+
+/** An OpenAI-compatible AI server found on (or added to) this computer. */
+export const LocalAiEndpoint = Schema.Struct({
+  /** `ollama`, `lmstudio`, `vllm`, `llamacpp`, `jan`, … or `manual`. */
+  id: Schema.String,
+  /** "Ollama", "LM Studio", … */
+  label: Schema.String,
+  baseUrl: Schema.String,
+  models: Schema.Array(Schema.String),
+  /** False: typed in by the person (and maybe not answering right now). */
+  detected: Schema.Boolean,
+  /** Answered its `/models` on the last look. */
+  reachable: Schema.Boolean,
+});
+export type LocalAiEndpoint = typeof LocalAiEndpoint.Type;
+
+export const PersonalAiOption = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  priceUsdPerHour: Schema.Number,
+});
+export type PersonalAiOption = typeof PersonalAiOption.Type;
+
+/** What apps on this computer could use for answers right now. */
+export const AppAiProviders = Schema.Struct({
+  /** False: no Uno AI key on this computer. */
+  unoConnected: Schema.Boolean,
+  local: Schema.Array(LocalAiEndpoint),
+  personal: Schema.Array(PersonalAiOption),
+  /** Keys the person stored (configured ones only; never the key itself). */
+  keys: Schema.Array(AiProviderKeySummary),
+  checkedAt: Schema.NullOr(Schema.String),
+});
+export type AppAiProviders = typeof AppAiProviders.Type;
+
+export const AppAiModelsInput = Schema.Struct({
+  kind: AppAiProviderKind,
+  baseUrl: Schema.optionalKey(Schema.String),
+  keyProvider: Schema.optionalKey(ByokProviderId),
+});
+export type AppAiModelsInput = typeof AppAiModelsInput.Type;
+
+export const AppAiModels = Schema.Struct({
+  models: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  error: Schema.NullOr(Schema.String),
+});
+export type AppAiModels = typeof AppAiModels.Type;
+
 export const AppAiApp = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -110,6 +207,12 @@ export const AppAiApp = Schema.Struct({
   keyDir: Schema.String,
   /** Cloud storage of the app; null = the manifest doesn't ask for it. */
   storage: Schema.NullOr(AppStorageInfo),
+  /** Where its answers come from (absent on older daemons = Uno AI). */
+  provider: Schema.optional(AppAiProviderChoice),
+  /** "Uno AI · deepseek/deepseek-v3.2", "Ollama on this computer · qwen3:4b". */
+  providerLabel: Schema.optional(Schema.String),
+  /** True when its answers spend Uno AI and so count against its limit. */
+  metered: Schema.optional(Schema.Boolean),
 });
 export type AppAiApp = typeof AppAiApp.Type;
 
@@ -142,6 +245,8 @@ export const AppAiOverview = Schema.Struct({
    * tasks cost Uno nothing and don't count against an app's limit.
    */
   taskHarnessUsesUnoAi: Schema.Boolean,
+  /** What apps can use for answers here (absent on older daemons). */
+  providers: Schema.optional(AppAiProviders),
 });
 export type AppAiOverview = typeof AppAiOverview.Type;
 
@@ -163,6 +268,8 @@ export const AppAiUpdateInput = Schema.Struct({
    * is removed). Allowed after the app's manifest is gone.
    */
   deleteCloudFiles: Schema.optionalKey(Schema.Boolean),
+  /** Where the app's answers come from from now on. */
+  provider: Schema.optionalKey(AppAiProviderChoice),
 });
 export type AppAiUpdateInput = typeof AppAiUpdateInput.Type;
 

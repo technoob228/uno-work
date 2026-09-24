@@ -187,6 +187,19 @@ export const UnoComputerAppSetting = Schema.Struct({
 });
 export type UnoComputerAppSetting = typeof UnoComputerAppSetting.Type;
 
+/**
+ * What an app asks of the computer's AI (its manifest's `"ai"`): answers
+ * (`chat`), agent jobs (`tasks`) and at most how much it may spend a month on
+ * Uno AI (`limitUsd`; null = the default $10). Shown before install and on
+ * its tile.
+ */
+export const UnoAppAiUse = Schema.Struct({
+  chat: Schema.Boolean,
+  tasks: Schema.Boolean,
+  limitUsd: Schema.NullOr(Schema.Number),
+});
+export type UnoAppAiUse = typeof UnoAppAiUse.Type;
+
 export const UnoComputerAppTemplate = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -213,6 +226,8 @@ export const UnoComputerAppTemplate = Schema.Struct({
   iconUrl: Schema.optional(Schema.NullOr(Schema.String)),
   /** Signs in with the Uno account: "oidc" — inside the app, "edge" — at its door. */
   sso: Schema.optional(Schema.NullOr(Schema.Literals(["oidc", "edge"]))),
+  /** Uses this computer's AI (catalog `ai`); null/absent = no AI. */
+  ai: Schema.optional(Schema.NullOr(UnoAppAiUse)),
 });
 export type UnoComputerAppTemplate = typeof UnoComputerAppTemplate.Type;
 

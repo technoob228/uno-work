@@ -19,6 +19,7 @@ import {
   LayoutGridIcon,
   SearchIcon,
   SparklesIcon,
+  WandSparklesIcon,
   XIcon,
 } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
@@ -48,6 +49,7 @@ import {
   type StoreFilters,
 } from "./appStoreModel";
 import { formatMemory } from "./computerFormat";
+import { installAiLines, storeAiLine } from "../settings/appAiProviderModel";
 
 /** The app's logo: the brand mark Uno serves, the catalog emoji if there is none (or it fails). */
 export function AppIcon({
@@ -142,6 +144,13 @@ function AppTags({
           <KeyRoundIcon className="size-3" /> Sign in with Uno
         </Tag>
       ) : null}
+      {template.ai ? (
+        <span title={storeAiLine(template.ai)} data-testid={`store-ai-${template.id}`}>
+          <Tag tone="uno">
+            <WandSparklesIcon className="size-3" /> Uses AI
+          </Tag>
+        </span>
+      ) : null}
       {template.minRamMb > 0 ? (
         fits === false ? (
           <Tag tone="warn">Needs {formatMemory(template.minRamMb)} memory</Tag>
@@ -222,7 +231,8 @@ export function AppCatalogDialog({
   const [filters, setFilters] = useState<StoreFilters>(NO_FILTERS);
 
   const begin = (template: UnoComputerAppTemplate) => {
-    if (template.settings.length === 0) {
+    // An app that uses AI always gets a confirm step that says so.
+    if (template.settings.length === 0 && !template.ai) {
       setLastSettings(undefined);
       onInstall(template);
       return;
@@ -344,6 +354,14 @@ export function AppCatalogDialog({
           <p className="truncate text-xs text-muted-foreground">
             {template.tagline || template.description}
           </p>
+          {template.ai ? (
+            <p
+              className="truncate text-[11px] text-primary"
+              data-testid={`store-ai-line-${template.id}`}
+            >
+              {storeAiLine(template.ai)}
+            </p>
+          ) : null}
         </div>
         {installButton(template)}
       </div>
@@ -399,6 +417,15 @@ export function AppCatalogDialog({
               "Has its own sign-in. Uno creates your account and shows the password after install."}
           </span>
         </li>
+        {viewing.ai ? (
+          <li className="flex gap-2" data-testid="store-detail-ai">
+            <WandSparklesIcon className="mt-0.5 size-3.5 shrink-0 text-primary" />
+            <span>
+              {storeAiLine(viewing.ai)}. You can switch it to AI on this computer or your own key,
+              change the limit or turn it off in Settings → Apps.
+            </span>
+          </li>
+        ) : null}
         <li className="flex gap-2">
           <SparklesIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
           <span>
@@ -437,11 +464,7 @@ export function AppCatalogDialog({
             </button>
           ) : null}
         </div>
-        <div
-          className="flex flex-wrap gap-1.5"
-          role="tablist"
-          aria-label="Sections"
-        >
+        <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Sections">
           <Chip active={tab === ALL_TAB} onClick={() => setTab(ALL_TAB)}>
             All
           </Chip>
@@ -552,11 +575,19 @@ export function AppCatalogDialog({
             </button>
           ) : null}
           <DialogTitle>
-            {configuring ? `Set up ${configuring.name}` : viewing ? viewing.name : "App Store"}
+            {configuring
+              ? configuring.settings.length === 0
+                ? `Install ${configuring.name}?`
+                : `Set up ${configuring.name}`
+              : viewing
+                ? viewing.name
+                : "App Store"}
           </DialogTitle>
           <DialogDescription className={viewing && !configuring ? "sr-only" : undefined}>
             {configuring
-              ? "A couple of details before it installs. These settings apply when the app is installed."
+              ? configuring.settings.length === 0
+                ? "Before it installs, here is what it will use."
+                : "A couple of details before it installs. These settings apply when the app is installed."
               : "Apps for your computer. Pick one and it installs by itself, keeps running and gets its own address."}
           </DialogDescription>
         </DialogHeader>
@@ -581,6 +612,19 @@ export function AppCatalogDialog({
                 onInstall(configuring, filled);
               }}
             >
+              {configuring.ai ? (
+                <div
+                  className="flex gap-2.5 rounded-xl bg-primary/5 px-3 py-2.5 text-xs leading-relaxed ring-1 ring-primary/15"
+                  data-testid="install-ai-notice"
+                >
+                  <WandSparklesIcon className="mt-0.5 size-4 shrink-0 text-primary" />
+                  <ul className="flex flex-col gap-1">
+                    {installAiLines(configuring.ai).map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               {configuring.settings.filter(visible).map((setting) =>
                 setting.options && setting.options.length > 0 ? (
                   <fieldset key={setting.name} className="flex flex-col gap-1.5 text-sm">

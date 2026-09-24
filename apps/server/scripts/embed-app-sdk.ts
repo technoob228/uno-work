@@ -14,6 +14,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.
 export const SOURCES = {
   jsModule: "packages/app-sdk/src/uno-app.mjs",
   jsTypes: "packages/app-sdk/src/uno-app.d.ts",
+  chatComponent: "packages/app-sdk/src/uno-chat.js",
   python: "sdk/python/uno_app.py",
 } as const;
 export const TARGET = "apps/server/src/appSdk/sdkBundle.generated.ts";

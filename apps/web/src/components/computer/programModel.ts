@@ -19,6 +19,7 @@ import type {
   UnoMachineApp,
 } from "@t3tools/contracts";
 
+import { tileAiNote } from "../settings/appAiProviderModel";
 import type { AppInstall } from "./useAppInstalls";
 
 export type ProgramStatus = "running" | "stopped" | "installing" | "failed" | "asleep" | "unknown";
@@ -38,6 +39,28 @@ export interface ProgramTile {
   readonly machineApp: UnoMachineApp | null;
   readonly storeApp: UnoComputerInstalledApp | null;
   readonly install: AppInstall | null;
+  /** "Uses AI for answers · Uno AI · $0.40 of $10" for its tooltip; null = no AI. */
+  readonly aiNote?: string | null;
+}
+
+/** The id an app has in Settings → Apps (`~/.uno/apps/<id>.json`, or its catalog id). */
+export function tileAppId(tile: ProgramTile): string | null {
+  if (tile.machineApp?.source === "manifest") return tile.machineApp.id.replace(/^manifest:/, "");
+  return tile.storeApp?.templateId ?? tile.install?.templateId ?? null;
+}
+
+/** Tiles with their "Uses AI" note from Settings → Apps. */
+export function withAiNotes(
+  tiles: ReadonlyArray<ProgramTile>,
+  apps: ReadonlyArray<AppAiApp> | undefined,
+): ProgramTile[] {
+  if (!apps || apps.length === 0) return [...tiles];
+  const byId = new Map(apps.map((app) => [app.id, app]));
+  return tiles.map((tile) => {
+    const id = tileAppId(tile);
+    const app = id ? byId.get(id) : undefined;
+    return app ? { ...tile, aiNote: tileAiNote(app) } : tile;
+  });
 }
 
 /**

@@ -7,7 +7,9 @@
   "files": [
     "src/uno-app.mjs",
     "src/uno-app.d.ts",
-    "README.md"
+    "src/uno-chat.js",
+    "README.md",
+    "src/uno-chat.d.ts"
   ],
   "type": "module",
   "main": "./src/uno-app.mjs",
@@ -16,6 +18,10 @@
     ".": {
       "types": "./src/uno-app.d.ts",
       "default": "./src/uno-app.mjs"
+    },
+    "./chat": {
+      "types": "./src/uno-chat.d.ts",
+      "default": "./src/uno-chat.js"
     }
   },
   "publishConfig": {

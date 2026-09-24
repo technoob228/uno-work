@@ -33,6 +33,7 @@ __all__ = [
     "DEFAULT_URL", "UnoAppError", "Client", "Task", "resolve_config", "find_config",
     "ask", "stream", "chat", "transcribe", "transcribe_json", "task", "get_task", "tasks",
     "whoami", "models", "Storage", "storage", "guess_content_type",
+    "clean_chat_messages", "chat_component_js", "chat_sse", "handle_chat_request",
 ]
 
 DEFAULT_URL = "http://127.0.0.1:3779"
@@ -290,6 +291,36 @@ class Client:
                     continue
                 if isinstance(delta, str) and delta:
                     yield delta
+
+    # -- <uno-chat>: the backend of the drop-in chat component
+
+    def chat_sse(self, body: Any, system: Optional[str] = None, model: Optional[str] = None,
+                 temperature: Optional[float] = None, max_tokens: Optional[int] = None,
+                 max_messages: int = 20, max_chars: int = 8000) -> Iterator[bytes]:
+        """Server-Sent Events for <uno-chat>: pass the page's JSON body
+        ({"messages": [...]}); yields `data: {"delta": ...}` chunks, an
+        `{"error": ...}` chunk on failure, then `data: [DONE]`. The system
+        prompt is yours — the page can send only user/assistant turns.
+
+            # FastAPI / Starlette
+            @app.post("/uno/chat")
+            async def chat(request: Request):
+                return StreamingResponse(ai.chat_sse(await request.json(), system="…"),
+                                         media_type="text/event-stream")
+        """
+        messages = clean_chat_messages((body or {}).get("messages") if isinstance(body, dict) else None,
+                                       max_messages=max_messages, max_chars=max_chars)
+        if not messages or messages[-1]["role"] != "user":
+            yield _sse_line({"error": {"code": "invalid_request",
+                                       "message": "The last message must be the person's."}})
+            yield b"data: [DONE]\n\n"
+            return
+        try:
+            for delta in self.stream(messages, model, system, temperature, max_tokens):
+                yield _sse_line({"delta": delta})
+        except UnoAppError as err:
+            yield _sse_line({"error": {"code": err.code, "message": _friendly_chat_error(err)}})
+        yield b"data: [DONE]\n\n"
 
     # -- speech to text
 
@@ -620,6 +651,100 @@ class _DefaultStorage:
 
 
 storage = _DefaultStorage()
+
+
+# ---- <uno-chat> helpers ---------------------------------------------------------
+
+
+def clean_chat_messages(messages: Any, max_messages: int = 20,
+                        max_chars: int = 8000) -> List[Dict[str, str]]:
+    """Only user/assistant text turns from the page, the last `max_messages`,
+    each cut to `max_chars`. A "system" turn from the browser is dropped."""
+    if not isinstance(messages, list):
+        return []
+    out: List[Dict[str, str]] = []
+    for m in messages:
+        if not isinstance(m, dict) or m.get("role") not in ("user", "assistant"):
+            continue
+        content = m.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        out.append({"role": m["role"], "content": content[:max_chars]})
+    return out[-max_messages:]
+
+
+def _sse_line(data: Any) -> bytes:
+    return ("data: " + json.dumps(data, ensure_ascii=False) + "\n\n").encode("utf-8")
+
+
+def _friendly_chat_error(err: UnoAppError) -> str:
+    if err.code == "app_limit_reached":
+        return "This app used its AI limit. Raise it in Uno Work → Settings → Apps."
+    if err.code == "ai_not_connected":
+        return "AI isn't connected on this computer — sign in to Uno in Uno Work."
+    if err.code in ("unreachable", "no_token"):
+        return "This app can't reach the computer's AI right now."
+    return str(err) or "The AI couldn't answer."
+
+
+def chat_component_js() -> str:
+    """The <uno-chat> web component (uno-chat.js) as text — serve it at e.g.
+    /uno/chat/uno-chat.js with Content-Type text/javascript."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for path in (os.path.join(here, "uno-chat.js"),
+                 os.path.expanduser("~/.uno/sdk/js/uno-chat.js"),
+                 os.path.expanduser("~/.uno/sdk/python/uno-chat.js")):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read()
+        except OSError:
+            continue
+    raise UnoAppError(0, "not_found", "uno-chat.js is missing (expected next to uno_app.py)")
+
+
+def handle_chat_request(handler: Any, client: Optional["Client"] = None, **opts: Any) -> None:
+    """For http.server.BaseHTTPRequestHandler: call it from do_GET (serves
+    uno-chat.js) and do_POST (streams the answer) of your chat path.
+
+        class H(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path.startswith("/uno/chat"): return uno_app.handle_chat_request(self)
+            def do_POST(self):
+                if self.path == "/uno/chat": return uno_app.handle_chat_request(self, system="…")
+    """
+    if handler.command in ("GET", "HEAD"):
+        body = chat_component_js().encode("utf-8")
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/javascript; charset=utf-8")
+        handler.send_header("Content-Length", str(len(body)))
+        handler.send_header("Cache-Control", "public, max-age=300")
+        handler.end_headers()
+        if handler.command == "GET":
+            handler.wfile.write(body)
+        return
+    length = int(handler.headers.get("Content-Length") or 0)
+    if length > 512 * 1024:
+        handler.send_error(413)
+        return
+    try:
+        payload = json.loads(handler.rfile.read(length) or b"{}")
+    except ValueError:
+        handler.send_error(400, "Send JSON: {\"messages\": [...]}")
+        return
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    for chunk in (client or _client()).chat_sse(payload, **opts):
+        try:
+            handler.wfile.write(chunk)
+            handler.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return
+
+
+def chat_sse(body: Any, **opts: Any) -> Iterator[bytes]:
+    return _client().chat_sse(body, **opts)
 
 
 # ---- module-level functions on a lazily created default client ---------------

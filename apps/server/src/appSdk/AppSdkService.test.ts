@@ -1,3 +1,4 @@
+import type { LocalAiEndpoint } from "@t3tools/contracts";
 import { Effect, Layer } from "effect";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -48,6 +49,7 @@ const run = <A>(
   }: {
     readonly fetch?: typeof fetch;
     readonly settings?: Parameters<typeof ServerSettingsService.layerTest>[0];
+    readonly detectLocal?: (extra: ReadonlyArray<string>) => Promise<never[] | LocalAiEndpoint[]>;
   } = {},
 ) =>
   Effect.runPromise(
@@ -93,6 +95,63 @@ const tokenOf = (id: string) =>
   readFile(path.join(keysDir, id, "token"), "utf8").then((t) => t.trim());
 
 describe("AppSdkService", () => {
+  it("per-app provider: listed with what is on the computer, switched, routed, written for agents", async () => {
+    await writeManifest("notes", { name: "Notes", port: 3000, ai: { chat: true } });
+    const ollama: LocalAiEndpoint = {
+      id: "ollama",
+      label: "Ollama",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      models: ["qwen3:4b"],
+      detected: true,
+      reachable: true,
+    };
+    await run(
+      async (service) => {
+        await service.sync();
+        const before = await Effect.runPromise(service.overview);
+        expect(before.providers).toMatchObject({ unoConnected: true, local: [ollama], keys: [] });
+        expect(before.apps[0]).toMatchObject({
+          provider: { kind: "uno" },
+          providerLabel: "Uno AI · deepseek/deepseek-v3.2",
+          metered: true,
+        });
+
+        const after = await Effect.runPromise(
+          service.update({
+            appId: "notes",
+            provider: { kind: "local", baseUrl: "http://127.0.0.1:11434/v1/", model: "qwen3:4b" },
+          }),
+        );
+        expect(after.apps[0]).toMatchObject({
+          provider: { kind: "local", baseUrl: "http://127.0.0.1:11434/v1", model: "qwen3:4b" },
+          providerLabel: "Ollama on this computer · qwen3:4b",
+          metered: false,
+        });
+        const caller = await service.core.authenticate(await tokenOf("notes"));
+        const route = await service.core.route!(caller!);
+        expect(route).toMatchObject({ ok: true, route: { kind: "local", metered: false } });
+
+        // No stored key → a clear refusal, the choice stays.
+        await expect(
+          Effect.runPromise(
+            service.update({ appId: "notes", provider: { kind: "byok", keyProvider: "openai" } }),
+          ),
+        ).rejects.toThrow(/No key is stored/);
+        await expect(
+          Effect.runPromise(
+            service.update({ appId: "notes", provider: { kind: "local", baseUrl: "ftp://x" } }),
+          ),
+        ).rejects.toThrow(/address/);
+
+        await Effect.runPromise(service.overview);
+        const brief = await readFile(path.join(home, ".uno", "ai-providers.md"), "utf8");
+        expect(brief).toContain("Ollama on this computer** — http://127.0.0.1:11434/v1");
+        expect(brief).toContain("`notes` (Notes) → Ollama on this computer · qwen3:4b");
+      },
+      { detectLocal: async () => [ollama] },
+    );
+  });
+
   it("gives a token only to apps whose manifest asks for AI, in a private folder", async () => {
     await writeManifest("notes", { name: "Notes", port: 3000, ai: { chat: true, limitUsd: 500 } });
     await writeManifest("plain", { name: "Plain", port: 3001 });

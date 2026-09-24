@@ -24,6 +24,7 @@
  * key and a fetcher, so tests drive them with recorded payloads.
  */
 import type {
+  UnoAppAiUse,
   UnoComputerActivity,
   UnoComputerAppAccess,
   UnoComputerAppAiKey,
@@ -422,6 +423,25 @@ export async function readComputerActivity(
  * Apps
  * ------------------------------------------------------------------ */
 
+/**
+ * The catalog's `ai` (the app's manifest `"ai"`): `true` = answers only;
+ * `{chat, tasks, limit_usd | limitUsd}`. Anything else = the app uses no AI.
+ */
+export function parseTemplateAi(raw: unknown): UnoAppAiUse | null {
+  if (raw === true) return { chat: true, tasks: false, limitUsd: null };
+  const record = asRecord(raw);
+  if (!record) return null;
+  const chat = record["chat"] === true;
+  const tasks = record["tasks"] === true;
+  if (!chat && !tasks) return null;
+  const limit = record["limit_usd"] ?? record["limitUsd"];
+  return {
+    chat,
+    tasks,
+    limitUsd: typeof limit === "number" && Number.isFinite(limit) && limit >= 0 ? limit : null,
+  };
+}
+
 export function parseAppTemplates(raw: unknown): ReadonlyArray<UnoComputerAppTemplate> {
   const list = Array.isArray(raw) ? raw : (asRecord(raw)?.["templates"] ?? []);
   if (!Array.isArray(list)) return [];
@@ -467,6 +487,7 @@ export function parseAppTemplates(raw: unknown): ReadonlyArray<UnoComputerAppTem
         : [],
       iconUrl: catalogIconUrl(record["icon_url"]),
       sso: parseSsoMode(record["sso"]),
+      ai: parseTemplateAi(record["ai"]),
     });
   }
   return out;

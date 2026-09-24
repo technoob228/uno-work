@@ -279,6 +279,7 @@ export function AppsWidget({
             status={tile.status}
             online={tile.online}
             title={tile.openUrl ? `Open ${tile.name}` : `${tile.name} — details`}
+            aiNote={tile.aiNote ?? null}
             icon={
               <ProgramIcon
                 name={tile.name}

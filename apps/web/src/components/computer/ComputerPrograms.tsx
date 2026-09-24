@@ -22,6 +22,7 @@ import {
   ShoppingBagIcon,
   SparklesIcon,
   SquareTerminalIcon,
+  WandSparklesIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -122,8 +123,11 @@ export function TileShell({
   onClick,
   onDetails,
   title,
+  aiNote = null,
   small = false,
 }: {
+  /** "Uses AI for answers · Uno AI · $0.40 of $10" — a small mark and a tooltip line. */
+  aiNote?: string | null;
   /** Home's Apps widget: tighter, no caption. */
   small?: boolean;
   label: string;
@@ -143,7 +147,7 @@ export function TileShell({
         type="button"
         disabled={disabled}
         onClick={onClick}
-        title={title ?? label}
+        title={aiNote ? `${title ?? label}\n${aiNote}` : (title ?? label)}
         className={cn(
           "flex w-full flex-col items-center rounded-2xl px-1 text-center outline-hidden transition-colors",
           // Room above the icon for the "on the internet" badge, so a card edge
@@ -167,6 +171,15 @@ export function TileShell({
               )}
               aria-hidden
             />
+          ) : null}
+          {aiNote ? (
+            <span
+              className="absolute -top-1 -left-1 flex size-4 items-center justify-center rounded-full bg-background text-primary shadow-sm ring-1 ring-border"
+              aria-label={aiNote}
+              data-testid="program-ai-badge"
+            >
+              <WandSparklesIcon className="size-2.5" />
+            </span>
           ) : null}
           {online ? (
             <span
@@ -337,6 +350,7 @@ export function ComputerPrograms({
             status={tile.status}
             online={tile.online}
             title={tile.openUrl ? `Open ${tile.name}` : `${tile.name} — details`}
+            aiNote={tile.aiNote ?? null}
             icon={<ProgramIcon name={tile.name} icon={tile.icon} iconImage={tile.iconImage} />}
             onClick={() => onOpenTile(tile)}
             onDetails={() => onTileDetails(tile)}
