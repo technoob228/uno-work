@@ -31,6 +31,14 @@ import { Skeleton } from "../ui/skeleton";
 import { Spinner } from "../ui/spinner";
 import type { ProgramStatus, ProgramTile } from "./programModel";
 
+/**
+ * The "on the internet" badge: a solid circle with a border and a shadow, so
+ * it reads on any icon colour and on cards in both themes (a `bg-background`
+ * circle looked see-through on a card).
+ */
+export const ONLINE_BADGE_CLASS =
+  "absolute -top-1.5 -right-1.5 z-[1] flex size-5 items-center justify-center rounded-full border border-black/10 bg-white text-primary shadow-sm dark:border-white/15 dark:bg-neutral-800";
+
 export const STATUS_DOT: Record<ProgramStatus, string | null> = {
   running: "bg-success",
   stopped: "bg-muted-foreground/60",
@@ -138,7 +146,9 @@ export function TileShell({
         title={title ?? label}
         className={cn(
           "flex w-full flex-col items-center rounded-2xl px-1 text-center outline-hidden transition-colors",
-          small ? "gap-1.5 pt-1.5 pb-1.5" : "gap-2 pt-3 pb-2",
+          // Room above the icon for the "on the internet" badge, so a card edge
+          // never cuts it.
+          small ? "gap-1.5 pt-2.5 pb-1.5" : "gap-2 pt-3 pb-2",
           "hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring",
           "disabled:cursor-default disabled:opacity-55 disabled:hover:bg-transparent",
         )}
@@ -160,8 +170,9 @@ export function TileShell({
           ) : null}
           {online ? (
             <span
-              className="absolute -top-1 -right-1 flex size-5 items-center justify-center rounded-full bg-background text-primary ring-1 ring-border"
+              className={ONLINE_BADGE_CLASS}
               title="On the internet"
+              data-testid="program-online-badge"
             >
               <GlobeIcon className="size-3" />
             </span>
