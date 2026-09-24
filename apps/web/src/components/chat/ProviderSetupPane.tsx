@@ -6,21 +6,31 @@
  *
  * @module components/chat/ProviderSetupPane
  */
-import { CheckCircle2, Loader2, TriangleAlert } from "lucide-react";
-import { memo } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { CheckCircle2, Copy, Loader2, TriangleAlert } from "lucide-react";
+import { memo, useState } from "react";
 
 import type { EnvironmentId } from "@t3tools/contracts";
 
-import { usePrimaryEnvironmentDescriptor } from "../../environments/primary";
+import {
+  usePrimaryEnvironmentDescriptor,
+  usePrimaryEnvironmentId,
+} from "../../environments/primary";
 import { useEnvironmentScope } from "../../environments/scope/scopes";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+import { CURSOR_LOGIN_COMMAND, HARNESS_REAUTH_COPY } from "../harness/harnessAuthLoss";
 import { describeSignInState, HarnessSignInPanel } from "../harness/HarnessSignInDialog";
+import { OpenCodeKeyForm } from "../harness/OpenCodeKeyForm";
 import { isAuthableDriver, isJobActive, progressLine } from "../harness/harnessSetupState";
 import { SetupLogDetails } from "../harness/SetupLogDetails";
 import type { HarnessSetupApi } from "../harness/useHarnessSetup";
 import { Button } from "../ui/button";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
-import { providerPaneBadgeLabel, type ProviderPaneKind } from "./modelPickerProviderPane";
+import {
+  providerPaneBadgeLabel,
+  SIGN_IN_ELSEWHERE_DRIVERS,
+  type ProviderPaneKind,
+} from "./modelPickerProviderPane";
 
 /** Label of the machine the install runs on, as the user knows it. */
 function useMachineLabel(environmentId: EnvironmentId | null): string {
@@ -119,10 +129,90 @@ function InstallPane(props: {
   );
 }
 
-function SignInPane(props: { entry: ProviderInstanceEntry; setup: HarnessSetupApi }) {
+/**
+ * Sign-in for a harness without the in-app dialog — the same fix the chat's
+ * signed-out card offers: OpenCode takes a new key, Uno AI / Hermes sign in
+ * with the Uno key in Settings, Cursor logs in from a terminal.
+ */
+function SignInElsewherePane(props: {
+  entry: ProviderInstanceEntry;
+  environmentId: EnvironmentId | null;
+}) {
+  const { entry } = props;
+  const navigate = useNavigate();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const environmentId = props.environmentId ?? primaryEnvironmentId;
+  const [copied, setCopied] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const driver = String(entry.driverKind);
+  const openSettings = () => {
+    if (!environmentId) return;
+    void navigate({
+      to: "/settings/environment/$environmentId/providers",
+      params: { environmentId },
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-3" data-model-picker-pane="signin">
+      <PaneHeader entry={entry} badge={providerPaneBadgeLabel({ kind: "signin" })} />
+      {driver === "opencode" ? (
+        <>
+          <p className="text-xs leading-snug text-muted-foreground">
+            {saved ? "Key saved. Checking OpenCode…" : HARNESS_REAUTH_COPY.openCodeMessage}
+          </p>
+          {saved ? null : <OpenCodeKeyForm className="mt-0" onSaved={() => setSaved(true)} />}
+        </>
+      ) : driver === "cursor" ? (
+        <>
+          <p className="text-xs leading-snug text-muted-foreground">
+            {HARNESS_REAUTH_COPY.cursorMessage}
+          </p>
+          <button
+            type="button"
+            onClick={() =>
+              void navigator.clipboard
+                ?.writeText(CURSOR_LOGIN_COMMAND)
+                .then(() => setCopied(true))
+                .catch(() => setCopied(false))
+            }
+            className="inline-flex items-center gap-2 self-start rounded-md border border-border bg-background px-2 py-1 font-mono text-xs hover:bg-muted"
+          >
+            {CURSOR_LOGIN_COMMAND}
+            <Copy className="size-3 text-muted-foreground" />
+          </button>
+          {copied ? (
+            <span className="text-[11px] text-muted-foreground">
+              {HARNESS_REAUTH_COPY.copyCommandDone}
+            </span>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <p className="text-xs leading-snug text-muted-foreground">
+            {HARNESS_REAUTH_COPY.unoMessage}
+          </p>
+          <Button size="sm" className="self-start" onClick={openSettings}>
+            {HARNESS_REAUTH_COPY.signInAction}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SignInPane(props: {
+  entry: ProviderInstanceEntry;
+  setup: HarnessSetupApi;
+  environmentId: EnvironmentId | null;
+}) {
   const { entry, setup } = props;
   const driver = entry.driverKind;
-  if (!isAuthableDriver(driver)) return null;
+  if (!isAuthableDriver(driver)) {
+    return SIGN_IN_ELSEWHERE_DRIVERS.has(driver) ? (
+      <SignInElsewherePane entry={entry} environmentId={props.environmentId} />
+    ) : null;
+  }
   const job = setup.authJobs[driver];
 
   return (
@@ -156,7 +246,7 @@ export const ProviderSetupPane = memo(function ProviderSetupPane(props: {
       {props.kind === "install" ? (
         <InstallPane entry={props.entry} setup={props.setup} environmentId={props.environmentId} />
       ) : (
-        <SignInPane entry={props.entry} setup={props.setup} />
+        <SignInPane entry={props.entry} setup={props.setup} environmentId={props.environmentId} />
       )}
     </div>
   );

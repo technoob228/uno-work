@@ -34,6 +34,7 @@ import {
 } from "@t3tools/shared/model";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
+import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 import { Debouncer } from "@tanstack/react-pacer";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -172,6 +173,9 @@ import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./Branch
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { UnoBillingTopUpBanner } from "./chat/UnoBillingTopUpBanner";
+import { HarnessReauthCard } from "./chat/HarnessReauthCard";
+import { resolveThreadHarnessAuthLoss, shouldReprobeProvider } from "./harness/harnessAuthLoss";
+import { refreshEnvironmentProviders } from "~/environments/settings/serverSettings";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { AssistantEngineBanner } from "./chat/AssistantEngine";
 import { ThreadControlBar } from "./chat/ThreadControlBar";
@@ -1785,6 +1789,38 @@ export default function ChatView(props: ChatViewProps) {
       model: getDefaultServerModel(providerStatuses, uno.driver),
     };
   }, [activeProviderStatus, providerStatuses]);
+  // A harness that lost its sign-in gets the in-chat "You were signed out"
+  // card instead of the red banners. Assistant chats are always Hermes.
+  const harnessAuth = useMemo(
+    () =>
+      activeThread
+        ? resolveThreadHarnessAuthLoss({
+            thread: activeThread,
+            providerStatuses,
+            activeProviderStatus,
+          })
+        : null,
+    [activeThread, activeProviderStatus, providerStatuses],
+  );
+  // A turn failed on an auth error but the snapshot still says signed in:
+  // ask the daemon to re-probe once, so the picker badge catches up.
+  const reprobedAuthErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    const status = harnessAuth?.providerStatus ?? null;
+    if (!harnessAuth || !status || !shouldReprobeProvider(harnessAuth.loss, status)) return;
+    const key = `${activeThread?.id}:${status.instanceId}:${activeThread?.session?.updatedAt ?? activeThread?.error ?? ""}`;
+    if (reprobedAuthErrorRef.current === key) return;
+    reprobedAuthErrorRef.current = key;
+    void refreshEnvironmentProviders(environmentId, status.instanceId).catch(() => {
+      // Best effort: the daemon re-probes on its own schedule anyway.
+    });
+  }, [
+    activeThread?.error,
+    activeThread?.id,
+    activeThread?.session?.updatedAt,
+    environmentId,
+    harnessAuth,
+  ]);
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
@@ -3462,6 +3498,94 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
+  // "Signed in. Retry" on the re-auth card: send the thread's last user
+  // message again as a new turn. Text only — the failed turn's attachments
+  // are not re-uploaded (their files live in the old message; re-sending them
+  // would mean re-reading blobs we don't keep client-side).
+  const lastUserMessageText = useMemo(() => {
+    const messages = activeThread?.messages ?? [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index]!;
+      if (message.role === "user" && message.text.trim().length > 0) return message.text;
+    }
+    return null;
+  }, [activeThread?.messages]);
+  const onRetryAfterReauth = useCallback(async () => {
+    const api = readEnvironmentApi(environmentId);
+    if (
+      !api ||
+      !activeThread ||
+      !isServerThread ||
+      !lastUserMessageText ||
+      isSendBusy ||
+      isConnecting ||
+      sendInFlightRef.current
+    ) {
+      return;
+    }
+    const threadIdForSend = activeThread.id;
+    const messageIdForSend = newMessageId();
+    const messageCreatedAt = new Date().toISOString();
+    const modelSelection =
+      composerRef.current?.getSendContext()?.selectedModelSelection ?? activeThread.modelSelection;
+
+    sendInFlightRef.current = true;
+    beginLocalDispatch({ preparingWorktree: false });
+    setThreadError(threadIdForSend, null);
+    isAtEndRef.current = true;
+    setOptimisticUserMessages((existing) => [
+      ...existing,
+      {
+        id: messageIdForSend,
+        role: "user",
+        text: lastUserMessageText,
+        createdAt: messageCreatedAt,
+        streaming: false,
+      },
+    ]);
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.turn.start",
+        commandId: newCommandId(),
+        threadId: threadIdForSend,
+        message: {
+          messageId: messageIdForSend,
+          role: "user",
+          text: lastUserMessageText,
+          attachments: [],
+        },
+        modelSelection,
+        titleSeed: activeThread.title,
+        runtimeMode,
+        interactionMode,
+        createdAt: messageCreatedAt,
+      });
+      sendInFlightRef.current = false;
+    } catch (err) {
+      setOptimisticUserMessages((existing) =>
+        existing.filter((message) => message.id !== messageIdForSend),
+      );
+      setThreadError(
+        threadIdForSend,
+        err instanceof Error ? err.message : "Failed to send message.",
+      );
+      sendInFlightRef.current = false;
+      resetLocalDispatch();
+    }
+  }, [
+    activeThread,
+    beginLocalDispatch,
+    environmentId,
+    interactionMode,
+    isConnecting,
+    isSendBusy,
+    isServerThread,
+    lastUserMessageText,
+    resetLocalDispatch,
+    runtimeMode,
+    setThreadError,
+  ]);
+
   const onImplementPlanInNewThread = useCallback(async () => {
     const api = readEnvironmentApi(environmentId);
     if (
@@ -3833,7 +3957,11 @@ export default function ChatView(props: ChatViewProps) {
       {!isPreviewFocusMode ? (
         <>
           <ProviderStatusBanner
-            status={activeProviderStatus}
+            status={
+              // Assistant chats show Hermes' state in AssistantEngine; a lost
+              // sign-in gets the in-chat HarnessReauthCard instead.
+              harnessAuth?.isAssistant || harnessAuth?.loss ? null : activeProviderStatus
+            }
             action={
               unoProviderFallbackTarget && lockedProvider === null
                 ? {
@@ -3858,7 +3986,10 @@ export default function ChatView(props: ChatViewProps) {
           />
           <ThreadErrorBanner
             error={
-              activeThread.session?.lastErrorClass === "billing_error" ? null : activeThread.error
+              activeThread.session?.lastErrorClass === "billing_error" ||
+              harnessAuth?.suppressThreadError
+                ? null
+                : activeThread.error
             }
             onDismiss={() => setThreadError(activeThread.id, null)}
           />
@@ -4031,8 +4162,34 @@ export default function ChatView(props: ChatViewProps) {
                     controller={activeThread.controller}
                   />
                 ) : null}
-                {activeThread?.assistantRole === "chat" ? (
+                {activeThread && isAssistantConversation(activeThread) ? (
                   <AssistantEngineBanner environmentId={activeThread.environmentId} />
+                ) : null}
+                {harnessAuth?.loss ? (
+                  <HarnessReauthCard
+                    key={`${activeThread.id}:${harnessAuth.loss.kind}:${harnessAuth.loss.driver}`}
+                    loss={harnessAuth.loss}
+                    environmentId={activeThread.environmentId}
+                    providerStatus={harnessAuth.providerStatus}
+                    {...(isServerThread && lastUserMessageText
+                      ? { onRetry: onRetryAfterReauth }
+                      : {})}
+                    fallbackAction={
+                      !harnessAuth.isAssistant &&
+                      unoProviderFallbackTarget &&
+                      lockedProvider === null
+                        ? {
+                            label: "Switch to built-in Uno AI",
+                            onClick: () =>
+                              onProviderModelSelect(
+                                unoProviderFallbackTarget.instanceId,
+                                unoProviderFallbackTarget.model,
+                              ),
+                          }
+                        : null
+                    }
+                    onDismiss={() => setThreadError(activeThread.id, null)}
+                  />
                 ) : null}
                 <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                 <div className="relative z-10">

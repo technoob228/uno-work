@@ -63,13 +63,28 @@ describe("resolveProviderPaneKind", () => {
     ).toBe("signin");
   });
 
-  it("blocks an unauthenticated provider that has no in-app sign-in", () => {
+  it("offers the sign-in pane for a signed-out harness without the in-app dialog", () => {
+    for (const driver of ["cursor", "opencode", "uno"]) {
+      expect(
+        resolveProviderPaneKind(
+          entryFor({
+            instanceId: ProviderInstanceId.make(driver),
+            driver: ProviderDriverKind.make(driver),
+            auth: { status: "unauthenticated" },
+            status: "error",
+          }),
+        ),
+      ).toBe("signin");
+    }
+  });
+
+  it("does not guess a sign-out from unknown auth on those harnesses", () => {
     expect(
       resolveProviderPaneKind(
         entryFor({
           instanceId: ProviderInstanceId.make("cursor"),
           driver: ProviderDriverKind.make("cursor"),
-          auth: { status: "unauthenticated" },
+          auth: { status: "unknown" },
           status: "error",
         }),
       ),
