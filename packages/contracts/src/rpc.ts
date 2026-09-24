@@ -501,6 +501,7 @@ export const WS_METHODS = {
   browserLiveResize: "browserLive.resize",
   browserLiveCopySelection: "browserLive.copySelection",
   browserLiveSetProxy: "browserLive.setProxy",
+  browserLiveSetup: "browserLive.setup",
   subscribePlugins: "subscribePlugins",
   subscribeInbox: "subscribeInbox",
 
@@ -1156,6 +1157,13 @@ export const WsBrowserLiveCopySelectionRpc = Rpc.make(WS_METHODS.browserLiveCopy
 
 export const WsBrowserLiveSetProxyRpc = Rpc.make(WS_METHODS.browserLiveSetProxy, {
   payload: BrowserLiveSetProxyInput,
+  success: BrowserLiveState,
+  error: BrowserLiveError,
+});
+
+/** Set up the machine's browser now (the "Try again" button after a failed setup). */
+export const WsBrowserLiveSetupRpc = Rpc.make(WS_METHODS.browserLiveSetup, {
+  payload: Schema.Struct({}),
   success: BrowserLiveState,
   error: BrowserLiveError,
 });
@@ -1973,6 +1981,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsBrowserLiveResizeRpc,
   WsBrowserLiveCopySelectionRpc,
   WsBrowserLiveSetProxyRpc,
+  WsBrowserLiveSetupRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,

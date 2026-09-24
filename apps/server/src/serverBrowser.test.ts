@@ -7,6 +7,9 @@ import { assert, it } from "@effect/vitest";
 import { Effect, Fiber, Layer, Option, Stream } from "effect";
 import { chromium } from "playwright-core";
 
+import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
+
+import { BROWSER_SETUP_REQUEST_ENV, BROWSER_SETUP_STATUS_ENV } from "./browserSetup.ts";
 import type { ServerConfigShape } from "./config.ts";
 import { ServerConfig } from "./config.ts";
 import {
@@ -304,4 +307,52 @@ it.live.skipIf(!hasChromium)(
       yield* serverBrowser.shutdown;
     }).pipe(Effect.provide(testLayer)),
   120_000,
+);
+
+it.live.skipIf(hasChromium)(
+  "browser not set up yet: the agent gets 'try again in N s', the person gets the setup tab",
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "t3-server-browser-setup-"));
+    const requestFile = join(root, "browser-setup", "request");
+    const saved = {
+      request: process.env[BROWSER_SETUP_REQUEST_ENV],
+      status: process.env[BROWSER_SETUP_STATUS_ENV],
+    };
+    process.env[BROWSER_SETUP_REQUEST_ENV] = requestFile;
+    process.env[BROWSER_SETUP_STATUS_ENV] = join(root, "status.json");
+    const restore = () => {
+      for (const [key, value] of [
+        [BROWSER_SETUP_REQUEST_ENV, saved.request],
+        [BROWSER_SETUP_STATUS_ENV, saved.status],
+      ] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    };
+    const layer = ServerBrowserLive.pipe(
+      Layer.provide(
+        Layer.succeed(ServerConfig, {
+          stateDir: join(root, "userdata"),
+        } as ServerConfigShape),
+      ),
+    );
+    return Effect.gen(function* () {
+      const serverBrowser = yield* ServerBrowser;
+      const result = yield* serverBrowser.execute(
+        { command: "openUrl", url: "https://example.com" },
+        { threadId: "setup-thread" },
+      );
+      assert.isFalse(result.ok);
+      assert.match(result.error ?? "", /being set up.*Try the same command again in \d+ s/);
+      assert.isTrue(existsSync(requestFile));
+
+      const opened = yield* serverBrowser.live.open({ threadId: "setup-thread" }, "");
+      assert.equal(opened.pageId, BROWSER_LIVE_SETUP_PAGE_ID);
+
+      const state = yield* serverBrowser.live.state;
+      assert.equal(state.setup.status, "installing");
+      assert.deepEqual(state.setup.context, { threadId: "setup-thread" });
+      assert.equal(state.pages.length, 0);
+    }).pipe(Effect.provide(layer), Effect.ensuring(Effect.sync(restore)));
+  },
 );

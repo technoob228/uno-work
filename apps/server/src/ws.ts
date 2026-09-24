@@ -2283,6 +2283,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.browserLiveSetProxy, serverBrowser.live.setProxy(input), {
             "rpc.aggregate": "browser",
           }),
+        [WS_METHODS.browserLiveSetup]: (_input) =>
+          observeRpcEffect(WS_METHODS.browserLiveSetup, serverBrowser.live.setup, {
+            "rpc.aggregate": "browser",
+          }),
         [WS_METHODS.browserLiveClose]: (input) =>
           observeRpcEffect(WS_METHODS.browserLiveClose, serverBrowser.live.close(input.pageId), {
             "rpc.aggregate": "browser",

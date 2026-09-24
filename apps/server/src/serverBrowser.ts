@@ -17,9 +17,10 @@ import type {
   BrowserLiveNavigateInput,
   BrowserLivePage,
   BrowserLiveSetProxyInput,
+  BrowserLiveSetup,
   BrowserLiveState,
 } from "@t3tools/contracts";
-import { BrowserLiveError } from "@t3tools/contracts";
+import { BROWSER_LIVE_SETUP_PAGE_ID, BrowserLiveError } from "@t3tools/contracts";
 import {
   buildClickSelectorScript,
   buildClickTextScript,
@@ -42,6 +43,14 @@ import {
   commandTimeoutMs,
   normalizeBridgeRequestContext,
 } from "./browserBridge.ts";
+import {
+  browserSetupPathsFromEnv,
+  isChromiumInstalled,
+  makeBrowserSetupController,
+  READY_SETUP,
+  setupMessageForAgent,
+  type BrowserSetupController,
+} from "./browserSetup.ts";
 import { ServerConfig } from "./config.ts";
 
 /**
@@ -92,6 +101,8 @@ export interface ServerBrowserLiveShape {
   readonly setProxy: (
     input: BrowserLiveSetProxyInput,
   ) => Effect.Effect<BrowserLiveState, BrowserLiveError>;
+  /** Поставить браузер машины сейчас (кнопка «Try again»). */
+  readonly setup: Effect.Effect<BrowserLiveState, BrowserLiveError>;
 }
 
 export interface ServerBrowserShape {
@@ -464,6 +475,27 @@ export const makeServerBrowser = Effect.gen(function* () {
   let proxy: BrowserProxyConfig | null = yield* Effect.promise(readProxy);
   const stateListeners = new Set<(state: BrowserLiveState) => void>();
 
+  // Браузер не в образе: машина ставит его при первом использовании
+  // (browserSetup.ts). Свой бинарь (UNO_WORK_BROWSER_EXECUTABLE) — ставить нечего.
+  const setupPaths = process.env[SERVER_BROWSER_EXECUTABLE_ENV]?.trim()
+    ? null
+    : browserSetupPathsFromEnv();
+  const setup: BrowserSetupController | null = setupPaths
+    ? makeBrowserSetupController({
+        paths: setupPaths,
+        isInstalled: async () => {
+          const { chromium } = await import("playwright-core");
+          return isChromiumInstalled(chromium.executablePath(), setupPaths.browsersDir);
+        },
+      })
+    : null;
+  const setupState = (): BrowserLiveSetup => setup?.current() ?? READY_SETUP;
+  /** Страницы, которые человек открыл, пока браузер ставился: откроются сами. */
+  const pendingOpens = new Map<
+    string,
+    { readonly context: BrowserBridgeRequestContext; readonly url: string }
+  >();
+
   const pageSnapshot = (entry: PageEntry): BrowserLivePage => ({
     pageId: entry.pageId,
     url: entry.page.isClosed() ? "" : entry.page.url(),
@@ -491,6 +523,7 @@ export const makeServerBrowser = Effect.gen(function* () {
       country: exit?.country ?? null,
       proxy: proxy ? { server: proxy.server, username: proxy.username ?? null } : null,
     },
+    setup: setupState(),
     pages: [...pagesById.values()].map(pageSnapshot),
   });
 
@@ -837,6 +870,22 @@ export const makeServerBrowser = Effect.gen(function* () {
   const execute: ServerBrowserShape["execute"] = (input, context) =>
     Effect.gen(function* () {
       const commandId = `server-${randomBytes(12).toString("hex")}`;
+      // Браузер ещё не поставлен: запускаем установку и сразу отвечаем агенту,
+      // когда повторить, — а не держим команду минуту.
+      if (setup && setup.current().status !== "ready") {
+        const current = yield* Effect.promise(() =>
+          setup.ensure({ context }).catch(
+            (cause: unknown): BrowserLiveSetup => ({
+              ...setup.current(),
+              status: "failed",
+              error: cause instanceof Error ? cause.message : String(cause),
+            }),
+          ),
+        );
+        if (current.status !== "ready") {
+          return { ok: false, commandId, error: setupMessageForAgent(current) };
+        }
+      }
       const timeoutMs = commandTimeoutMs(input);
       const attempt: Effect.Effect<unknown, ServerBrowserCommandError> =
         input.command === "requestHelp"
@@ -879,6 +928,21 @@ export const makeServerBrowser = Effect.gen(function* () {
   });
 
   const liveError = (detail: string) => new BrowserLiveError({ detail });
+
+  /** Страница чата, которую открыл человек: рулит он, пока не отдаст агенту. */
+  const openForPerson = (context: BrowserBridgeRequestContext, target: string) =>
+    Effect.gen(function* () {
+      const entry = yield* getPageEntry(context).pipe(
+        Effect.mapError((error) => liveError(error.message)),
+      );
+      entry.control = "human";
+      entry.attention += 1;
+      emitState();
+      if (target !== "") {
+        yield* livePromise(() => entry.page.goto(target, { waitUntil: "domcontentloaded" }));
+      }
+      return entry.pageId;
+    });
 
   const requirePage = (pageId: string) =>
     Effect.suspend(() => {
@@ -1035,17 +1099,22 @@ export const makeServerBrowser = Effect.gen(function* () {
         if (target !== "" && !/^https?:\/\//i.test(target)) {
           return yield* liveError("Only http(s) addresses open here.");
         }
-        const entry = yield* getPageEntry(context).pipe(
-          Effect.mapError((error) => liveError(error.message)),
-        );
-        // Страницу открыл человек — он и рулит, пока не отдаст агенту.
-        entry.control = "human";
-        entry.attention += 1;
-        emitState();
-        if (target !== "") {
-          yield* livePromise(() => entry.page.goto(target, { waitUntil: "domcontentloaded" }));
+        if (setup && setup.current().status !== "ready") {
+          const current = yield* Effect.tryPromise({
+            try: () => setup.ensure({ context, force: true }),
+            catch: (cause) => liveError(cause instanceof Error ? cause.message : String(cause)),
+          });
+          if (current.status !== "ready") {
+            // Страница откроется сама, когда браузер встанет; пока приложение
+            // показывает установку.
+            pendingOpens.set(pageKeyFor(normalizeBridgeRequestContext(context)), {
+              context,
+              url: target,
+            });
+            return { pageId: BROWSER_LIVE_SETUP_PAGE_ID };
+          }
         }
-        return { pageId: entry.pageId };
+        return { pageId: yield* openForPerson(context, target) };
       }),
     close: (pageId) =>
       Effect.gen(function* () {
@@ -1071,6 +1140,15 @@ export const makeServerBrowser = Effect.gen(function* () {
         const text = yield* livePromise(() => entry.page.evaluate(SELECTION_SCRIPT));
         return typeof text === "string" ? text : "";
       }),
+    setup: Effect.gen(function* () {
+      if (setup) {
+        yield* Effect.tryPromise({
+          try: () => setup.ensure({ force: true }),
+          catch: (cause) => liveError(cause instanceof Error ? cause.message : String(cause)),
+        });
+      }
+      return snapshot();
+    }),
     setProxy: (input) =>
       Effect.gen(function* () {
         const server = input.server.trim();
@@ -1109,7 +1187,22 @@ export const makeServerBrowser = Effect.gen(function* () {
       }),
   };
 
+  if (setup) {
+    setup.onChange((next) => {
+      emitState();
+      if (next.status !== "ready" || pendingOpens.size === 0) return;
+      const opens = [...pendingOpens.values()];
+      pendingOpens.clear();
+      for (const pending of opens) {
+        void Effect.runPromise(openForPerson(pending.context, pending.url).pipe(Effect.ignore));
+      }
+    });
+    // Установка могла идти до рестарта демона — подхватываем её прогресс.
+    void setup.refresh();
+  }
+
   const shutdown = Effect.gen(function* () {
+    setup?.stop();
     yield* shutdownBrowser;
     if (display) {
       display.process.kill("SIGTERM");
@@ -1136,6 +1229,7 @@ export const unavailableServerBrowserLive: ServerBrowserLiveShape = {
       country: null,
       proxy: null,
     },
+    setup: READY_SETUP,
     pages: [],
   }),
   changes: Stream.empty,
@@ -1148,6 +1242,7 @@ export const unavailableServerBrowserLive: ServerBrowserLiveShape = {
   resize: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
   copySelection: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
   setProxy: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
+  setup: Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
 };
 
 /** Стаб для тестов: серверного браузера нет, любая команда — ошибка. */

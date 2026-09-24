@@ -306,6 +306,25 @@ if getent group docker >/dev/null 2>&1; then
   done
 fi
 
+# 11. Браузер машины — НЕ в образе (решение 24.09: +1,1 ГБ на каждую машину,
+# пул нод почти полон). Клон ставит его при первом использовании через
+# uno-work-browser-setup.path (install.sh 0.0.85+). Если на эталоне браузер
+# успели поставить — Chromium убираем; системные либы/Xvfb из apt так просто не
+# вынуть: предупреждаем, образ лучше снять с чистого бокса.
+log "Проверяю, что браузера машины нет в образе (ставится при первом использовании)"
+[ -f /etc/systemd/system/uno-work-browser-setup.path ] \
+  || die "uno-work-browser-setup.path missing — rerun install.sh from 0.0.85+ (browser on first use)"
+systemctl enable uno-work-browser-setup.path >/dev/null 2>&1 || die "could not enable uno-work-browser-setup.path"
+if [ -n "$(ls -A /opt/uno-work/browsers 2>/dev/null)" ]; then
+  log "  на эталоне стоит Chromium — удаляю из образа"
+  rm -rf /opt/uno-work/browsers/* /opt/uno-work/browsers/.links 2>/dev/null || true
+fi
+rm -f "${STATE_DIR}/browser-setup/request" /var/lib/uno-work-browser/status.json \
+  /var/lib/uno-work-browser/setup.log 2>/dev/null || true
+if command -v Xvfb >/dev/null 2>&1; then
+  log "  ВНИМАНИЕ: на эталоне стоят Xvfb и либы браузера (~350 МБ) — снимай образ с чистого бокса"
+fi
+
 systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl enable ssh uno-work-sshkeys.service uno-work-hostname.service uno-work-identity.service uno-work-identity.path >/dev/null 2>&1 || true
 

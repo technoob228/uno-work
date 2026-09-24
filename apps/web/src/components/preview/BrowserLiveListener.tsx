@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { BrowserLiveState, EnvironmentId } from "@t3tools/contracts";
+import type { BrowserLiveSetupStatus, BrowserLiveState, EnvironmentId } from "@t3tools/contracts";
+import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
 
 import { readEnvironmentApi } from "../../environmentApi";
 import {
@@ -10,7 +11,12 @@ import { useSettings } from "../../hooks/useSettings";
 import { useStore } from "../../store";
 import { liveBrowserTabId, liveBrowserTabName, setBrowserLiveState } from "./browserLiveStore";
 import { resolveBridgeEventProjectKey } from "./browserBridgeRouting";
-import { findTabScopeKey, makeLiveBrowserFile, usePreviewPane } from "./PreviewPaneContext";
+import {
+  findTabScopeKey,
+  makeBrowserSetupFile,
+  makeLiveBrowserFile,
+  usePreviewPane,
+} from "./PreviewPaneContext";
 
 /**
  * Невидимый слушатель браузеров машин (`subscribeBrowserLive`) всех
@@ -55,10 +61,40 @@ export function BrowserLiveListener() {
       if (!api) return undefined;
       // attention, которое мы уже видели, по странице. null = первый снимок.
       let seen: Map<string, number> | null = null;
+      let setupStatus: BrowserLiveSetupStatus | null = null;
 
       const apply = (state: BrowserLiveState) => {
         setBrowserLiveState(environmentId, state);
         const first = seen === null;
+
+        // Браузер машины ставится при первом использовании. Установку начал
+        // агент — показываем прогресс в его чате; встал — вкладка установки
+        // уходит (страницу, которую ждал человек, машина откроет сама).
+        const setupTabId = liveBrowserTabId(environmentId, BROWSER_LIVE_SETUP_PAGE_ID);
+        const previousSetup = setupStatus;
+        setupStatus = state.setup.status;
+        if (state.setup.status === "ready") {
+          if (findTabScopeKey(statesRef.current, setupTabId)) closeRef.current(setupTabId);
+        } else if (
+          !first &&
+          previousSetup !== state.setup.status &&
+          (state.setup.status === "installing" || state.setup.status === "failed") &&
+          state.setup.context &&
+          !findTabScopeKey(statesRef.current, setupTabId)
+        ) {
+          const projectKey =
+            resolveBridgeEventProjectKey({
+              context: state.setup.context,
+              environmentId,
+              state: useStore.getState(),
+              groupingSettings: groupingSettingsRef.current,
+            }) ?? currentProjectKeyRef.current;
+          openRef.current(
+            { projectKey, threadId: state.setup.context.threadId ?? null },
+            "chat",
+            makeBrowserSetupFile({ environmentId, projectKey }),
+          );
+        }
         const previous = seen ?? new Map<string, number>();
         const next = new Map<string, number>();
 

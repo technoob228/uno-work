@@ -84,6 +84,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       resize: (input) => rpcClient.browserLive.resize(input),
       copySelection: (input) => rpcClient.browserLive.copySelection(input),
       setProxy: (input) => rpcClient.browserLive.setProxy(input),
+      setup: () => rpcClient.browserLive.setup({}),
       listLogins: () => rpcClient.vault.list(),
       fillLogin: (payload) => rpcClient.vault.fill(payload),
     },

@@ -816,6 +816,8 @@ export interface EnvironmentApi {
     resize: (input: BrowserLiveResizeInput) => Promise<void>;
     copySelection: (input: BrowserLiveCopyInput) => Promise<BrowserLiveCopyResult>;
     setProxy: (input: BrowserLiveSetProxyInput) => Promise<BrowserLiveState>;
+    /** Set up the machine's browser now (retry after a failed setup). */
+    setup: () => Promise<BrowserLiveState>;
     listLogins: () => Promise<readonly CredentialMetadata[]>;
     fillLogin: (payload: CredentialFillPayload) => Promise<CredentialFillResult>;
   };

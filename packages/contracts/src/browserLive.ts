@@ -65,6 +65,32 @@ export const BrowserLivePage = Schema.Struct({
 });
 export type BrowserLivePage = typeof BrowserLivePage.Type;
 
+/**
+ * The machine's browser is not in the Work image (it would add ~1 GB to every
+ * machine): the machine sets it up the first time an agent or the person opens
+ * it. `ready` — it can start; `missing` — not set up yet; `installing` — being
+ * set up now; `failed` — the last attempt failed (`error` says why).
+ */
+export const BrowserLiveSetupStatus = Schema.Literals(["ready", "missing", "installing", "failed"]);
+export type BrowserLiveSetupStatus = typeof BrowserLiveSetupStatus.Type;
+
+export const BrowserLiveSetup = Schema.Struct({
+  status: BrowserLiveSetupStatus,
+  /** What is happening now, for the person ("Downloading the browser"). */
+  step: Schema.NullOr(Schema.String),
+  /** When this attempt started (ISO); null when not installing. */
+  startedAt: Schema.NullOr(Schema.String),
+  /** Rough seconds left while installing; null otherwise. */
+  secondsLeft: Schema.NullOr(NonNegativeInt),
+  error: Schema.NullOr(Schema.String),
+  /** The chat whose agent or person started the setup — the app shows progress there. */
+  context: Schema.optional(BrowserBridgeRequestContext),
+});
+export type BrowserLiveSetup = typeof BrowserLiveSetup.Type;
+
+/** `pageId` of the tab that shows the setup instead of a page (open() while the browser is not ready). */
+export const BROWSER_LIVE_SETUP_PAGE_ID = "setup";
+
 export const BrowserLiveState = Schema.Struct({
   /**
    * The agents of this machine browse here (a machine in the cloud). The app
@@ -72,6 +98,7 @@ export const BrowserLiveState = Schema.Struct({
    */
   agentsBrowseHere: Schema.Boolean,
   location: BrowserLiveLocation,
+  setup: BrowserLiveSetup,
   pages: Schema.Array(BrowserLivePage),
 });
 export type BrowserLiveState = typeof BrowserLiveState.Type;
@@ -160,6 +187,10 @@ export const BrowserLiveOpenInput = Schema.Struct({
 });
 export type BrowserLiveOpenInput = typeof BrowserLiveOpenInput.Type;
 
+/**
+ * `pageId` is {@link BROWSER_LIVE_SETUP_PAGE_ID} while the browser is being set
+ * up: the page opens by itself once it is ready.
+ */
 export const BrowserLiveOpenResult = Schema.Struct({ pageId: Schema.String });
 export type BrowserLiveOpenResult = typeof BrowserLiveOpenResult.Type;
 

@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import type { BrowserLivePage, EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
 
 import { liveBrowserTabId, liveBrowserTabName } from "./browserLiveStore";
 import { browserTabNameForUrl } from "./browserUrl";
@@ -95,6 +96,26 @@ export function makeLiveBrowserFile(input: {
     content: "",
     url: input.page.url,
     livePageId: input.page.pageId,
+    environmentId: input.environmentId,
+    ...(input.projectKey ? { projectKey: input.projectKey } : {}),
+  };
+}
+
+/**
+ * Вкладка «браузер ставится»: браузера машины ещё нет (он не в образе Work),
+ * страница откроется сама, когда установка закончится.
+ */
+export function makeBrowserSetupFile(input: {
+  environmentId: EnvironmentId;
+  projectKey?: string;
+}): PreviewFile {
+  return {
+    id: liveBrowserTabId(input.environmentId, BROWSER_LIVE_SETUP_PAGE_ID),
+    name: "Browser",
+    kind: "live-browser",
+    content: "",
+    url: "",
+    livePageId: BROWSER_LIVE_SETUP_PAGE_ID,
     environmentId: input.environmentId,
     ...(input.projectKey ? { projectKey: input.projectKey } : {}),
   };

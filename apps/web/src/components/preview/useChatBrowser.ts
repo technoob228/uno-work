@@ -3,7 +3,9 @@ import { useCallback } from "react";
 import { readEnvironmentApi } from "../../environmentApi";
 import { toastManager } from "../ui/toast";
 import { useBrowserLiveState } from "./browserLiveStore";
-import { makeLiveBrowserFile, usePreviewPane } from "./PreviewPaneContext";
+import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
+
+import { makeBrowserSetupFile, makeLiveBrowserFile, usePreviewPane } from "./PreviewPaneContext";
 
 /**
  * «Открыть браузер» для текущего чата. Если агенты чата работают в браузере
@@ -47,14 +49,24 @@ export function useChatBrowser(): {
       return;
     }
     // Новую страницу вкладкой откроет BrowserLiveListener, когда она появится
-    // в состоянии машины.
-    void readEnvironmentApi(currentChatEnvironmentId)
+    // в состоянии машины. Браузер ещё ставится (первое использование) —
+    // показываем установку; страница откроется сама.
+    const environmentId = currentChatEnvironmentId;
+    void readEnvironmentApi(environmentId)
       ?.browserLive.open({
         context: {
           ...(currentChatThreadId ? { threadId: currentChatThreadId } : {}),
           ...(currentChatProjectCwd ? { cwd: currentChatProjectCwd } : {}),
         },
         url: "",
+      })
+      .then((result) => {
+        if (result.pageId !== BROWSER_LIVE_SETUP_PAGE_ID) return;
+        openFileForTarget(
+          target,
+          "chat",
+          makeBrowserSetupFile({ environmentId, projectKey: currentProjectKey }),
+        );
       })
       .catch((error: unknown) => {
         toastManager.add({

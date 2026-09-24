@@ -13,15 +13,18 @@ import type {
   BrowserLiveInputEvent,
   BrowserLiveLocation,
   BrowserLivePage,
+  BrowserLiveSetup,
   CredentialMetadata,
   EnvironmentId,
 } from "@t3tools/contracts";
+import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
 
 import { readEnvironmentApi } from "../../environmentApi";
 import { cn, isMacPlatform } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
 import { Button } from "../ui/button";
+import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
 import { matchCredentialsForOrigin } from "./BrowserPane";
 import { useBrowserLivePage, useBrowserLiveState } from "./browserLiveStore";
@@ -80,6 +83,9 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
   }
   if (!state || !api) {
     return <Placeholder text="Connecting to the computer's browser…" />;
+  }
+  if (pageId === BROWSER_LIVE_SETUP_PAGE_ID || (!page && state.setup.status !== "ready")) {
+    return <BrowserSetupView environmentId={environmentId} setup={state.setup} />;
   }
   if (!page) {
     return <Placeholder text="This page was closed." />;
@@ -270,6 +276,81 @@ function LocationStrip({
           </span>
         </form>
       ) : null}
+    </div>
+  );
+}
+
+function formatWait(seconds: number): string {
+  return seconds >= 90 ? `~${Math.round(seconds / 60)} min` : `~${Math.max(10, seconds)} s`;
+}
+
+/**
+ * Браузера машины нет в образе Work — он ставится при первом открытии (агентом
+ * или человеком). Здесь прогресс и «Try again» после неудачи; страница чата
+ * откроется сама, когда браузер встанет.
+ */
+function BrowserSetupView({
+  environmentId,
+  setup,
+}: {
+  environmentId: EnvironmentId;
+  setup: BrowserLiveSetup;
+}) {
+  const [retrying, setRetrying] = useState(false);
+  const retry = useCallback(async () => {
+    setRetrying(true);
+    try {
+      await readEnvironmentApi(environmentId)?.browserLive.setup();
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Couldn't set up the browser",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setRetrying(false);
+    }
+  }, [environmentId]);
+
+  if (setup.status === "ready") {
+    return <Placeholder text="The browser is ready. Opening the page…" />;
+  }
+  if (setup.status === "failed") {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-sm">
+        <MonitorIcon className="size-6 text-muted-foreground" />
+        <div className="font-medium">Couldn't set up the browser</div>
+        <div className="max-w-sm text-muted-foreground">{setup.error}</div>
+        <Button size="sm" disabled={retrying} onClick={() => void retry()}>
+          {retrying ? <Spinner /> : <RotateCwIcon />}
+          Try again
+        </Button>
+      </div>
+    );
+  }
+  if (setup.status === "missing") {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-sm">
+        <MonitorIcon className="size-6 text-muted-foreground" />
+        <div className="max-w-sm text-muted-foreground">
+          This computer's browser isn't set up yet. It takes about a minute, once.
+        </div>
+        <Button size="sm" disabled={retrying} onClick={() => void retry()}>
+          Set up the browser
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-sm">
+      <Spinner className="size-6 text-muted-foreground" />
+      <div className="font-medium">
+        Setting up the browser… {formatWait(setup.secondsLeft ?? 45)}
+      </div>
+      <div className="max-w-sm text-muted-foreground">
+        {setup.step ? `${setup.step}. ` : ""}This happens once on this computer. The page opens by
+        itself when it's ready — you can keep working.
+      </div>
     </div>
   );
 }
