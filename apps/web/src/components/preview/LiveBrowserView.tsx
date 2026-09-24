@@ -489,6 +489,9 @@ function Screen({
   const imageRef = useRef<HTMLImageElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const lastHoverRef = useRef(0);
+  // У pointer-событий detail всегда 0: двойной/тройной клик считаем сами,
+  // иначе выделение слова и строки на странице не работает.
+  const clickRef = useRef({ at: 0, x: 0, y: 0, count: 0 });
   const [hint, setHint] = useState(false);
 
   const send = useCallback(
@@ -578,12 +581,17 @@ function Screen({
         const point = toPage(event.clientX, event.clientY);
         if (!point) return;
         event.currentTarget.setPointerCapture(event.pointerId);
+        const last = clickRef.current;
+        const now = performance.now();
+        const repeat =
+          now - last.at < 500 && Math.abs(point.x - last.x) < 5 && Math.abs(point.y - last.y) < 5;
+        clickRef.current = { at: now, ...point, count: repeat ? last.count + 1 : 1 };
         send({
           type: "mouse",
           action: "down",
           ...point,
           button: buttonOf(event.button),
-          clickCount: Math.max(1, event.detail),
+          clickCount: clickRef.current.count,
           modifiers: modifiersOf(event),
         });
       }}
@@ -596,7 +604,7 @@ function Screen({
           action: "up",
           ...point,
           button: buttonOf(event.button),
-          clickCount: Math.max(1, event.detail),
+          clickCount: Math.max(1, clickRef.current.count),
           modifiers: modifiersOf(event),
         });
       }}

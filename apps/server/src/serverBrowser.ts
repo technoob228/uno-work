@@ -354,7 +354,9 @@ async function startVirtualDisplay(): Promise<{ display: string; process: ChildP
   });
 }
 
-const TRACE_URL = "https://1.1.1.1/cdn-cgi/trace";
+// По имени, не по IP: запрос браузера через прокси к голому IP падает на
+// проверке сертификата в playwright (SNI уходит как localhost).
+const TRACE_URL = "https://one.one.one.one/cdn-cgi/trace";
 
 /** Адрес и страна выхода из ответа Cloudflare trace (`ip=…`, `loc=…`). */
 export function parseTrace(body: string): { ip: string | null; country: string | null } {
