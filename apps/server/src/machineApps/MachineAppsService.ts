@@ -4,8 +4,11 @@
  * Looks at the machine the daemon runs on (see `machineAppsScan.ts`), keeps
  * the answer warm with a background pass every 20 s, and performs the few
  * things a desktop does with a program: start it, stop it, show it on the
- * internet, hide it again — and remove a docker container the person started
- * themselves (never the computer's own, never an App Store app's).
+ * internet, hide it again — remove a docker container the person started
+ * themselves (never the computer's own, never an App Store app's), remove an
+ * app registered in `~/.uno/apps` (see `removeRegisteredApp.ts`), and take a
+ * found program off the home screen ("Hide", `hiddenApps.ts`) without
+ * touching it.
  *
  * "Show on the internet" is always a click. It asks the control plane for a
  * public TCP forward of the app's port with this machine's own key (the
@@ -24,7 +27,7 @@ import type {
 } from "@t3tools/contracts";
 import { execFile, spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, statSync, truncateSync } from "node:fs";
-import { readFile, statfs } from "node:fs/promises";
+import { readFile, rmdir, statfs } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Context, Duration, Effect, Layer, Schedule } from "effect";
@@ -45,12 +48,26 @@ import {
   fetchControlPlaneJson,
 } from "../workspaceRegistry/unoCloudParse.ts";
 import { resolveAppApiPort } from "../appSdk/appApiPort.ts";
-import { resolveAppKeysDir } from "../appSdk/appKeys.ts";
+import { appKeyDir, removeAppKey, resolveAppKeysDir } from "../appSdk/appKeys.ts";
 import { CpuLoadWindow, type CpuTotals } from "../computerResources/cpuWindow.ts";
 import { parseCpuTotals, parseVmStat } from "../computerResources/resourceParsers.ts";
 import { readIconDataUrl, readManifestDir, type AppManifest } from "./appManifest.ts";
-import { extractHtmlTitle } from "./discoveryParsers.ts";
+import { extractHtmlTitle, parseCgroupOwner } from "./discoveryParsers.ts";
+import { openHiddenApps } from "./hiddenApps.ts";
 import { displayManifestDir, resolveManifestDir } from "./manifestDir.ts";
+import {
+  APP_MARKER_ENV,
+  codeFolderFor,
+  pickAppProcesses,
+  pickAppUnits,
+  readProcessTable,
+  readUserUnitFiles,
+  removePaths,
+  resolvedPath,
+  stopProcesses,
+  type CodeFolder,
+  type ProcessInfo,
+} from "./removeRegisteredApp.ts";
 import {
   RESERVED_FORWARD_PORTS,
   parsePortForwards,
@@ -222,7 +239,12 @@ function startManifestCommand(manifest: AppManifest, manifestDir: string, home: 
       cwd: manifest.cwd ?? home,
       detached: true,
       stdio: ["ignore", fd, fd],
-      env: { ...appEnvironment(home, manifest.port), ...appSdkEnvironment(manifest, home) },
+      env: {
+        ...appEnvironment(home, manifest.port),
+        ...appSdkEnvironment(manifest, home),
+        // So "Remove" finds it again, whatever it forks into.
+        [APP_MARKER_ENV]: manifest.id,
+      },
     });
     child.on("error", () => undefined);
     child.unref();
@@ -231,13 +253,33 @@ function startManifestCommand(manifest: AppManifest, manifestDir: string, home: 
   }
 }
 
+/** A scanned app with what only the daemon knows: hidden, its code folder. */
+interface KnownApp extends ScannedApp {
+  readonly hidden: boolean;
+  readonly code: (CodeFolder & { readonly display: string }) | null;
+}
+
+/** `~`, `~/projects/notes` — or the absolute path outside home. */
+function displayInHome(dir: string, home: string): string {
+  return dir === home ? "~" : displayManifestDir(dir, home);
+}
+
 function toPublic(
-  app: ScannedApp,
+  app: KnownApp,
   forwards: ReadonlyArray<PortForward>,
   hostname: string | null,
 ): UnoMachineApp {
-  const { control: _control, manifest: _manifest, ...rest } = app;
-  return { ...rest, publication: publicationFor(app, forwards, hostname) };
+  const { control: _control, manifest: _manifest, code, ...rest } = app;
+  return {
+    ...rest,
+    publication: publicationFor(app, forwards, hostname),
+    ...(app.source === "manifest"
+      ? {
+          codeDir: code?.display ?? null,
+          codeDirKeepReason: code?.keepReason ?? null,
+        }
+      : {}),
+  };
 }
 
 interface CloudView {
@@ -254,6 +296,14 @@ export const makeMachineAppsService = (
     readonly fetchJson?: (apiKey: string, path: string, init?: RequestInit) => Promise<unknown>;
     readonly manifestDir?: string;
     readonly home?: string;
+    /** `~/.uno/app-keys` (App SDK tokens), deleted with a removed app. */
+    readonly keysDir?: string;
+    /** Where "Hide" is remembered; null = memory only. Defaults to the state folder. */
+    readonly hiddenPath?: string | null;
+    /** Tests: the processes of this machine (Linux `/proc`). */
+    readonly processTable?: () => Promise<ReadonlyArray<ProcessInfo>>;
+    /** Tests: stop these pids; returns the ones still alive. */
+    readonly stopProcesses?: (pids: ReadonlyArray<number>) => Promise<number[]>;
     /** Tests turn the background pass and autostart off. */
     readonly background?: boolean;
   } = {},
@@ -265,6 +315,18 @@ export const makeMachineAppsService = (
     const home = options.home ?? os.homedir();
     const manifestDir = options.manifestDir ?? resolveManifestDir(home);
     const fetchJson = options.fetchJson ?? fetchControlPlaneJson;
+    const keysDir = options.keysDir ?? resolveAppKeysDir(home);
+    const hiddenApps = yield* Effect.promise(() =>
+      openHiddenApps(
+        options.hiddenPath !== undefined
+          ? options.hiddenPath
+          : config.stateDir
+            ? path.join(config.stateDir, "machine-apps-hidden.json")
+            : null,
+      ),
+    );
+    const processTable = options.processTable ?? readProcessTable;
+    const stopPids = options.stopProcesses ?? ((pids) => stopProcesses(pids));
 
     const httpCache = new Map<number, { at: number; result: HttpProbe }>();
     const probe: MachineProbe = {
@@ -288,8 +350,41 @@ export const makeMachineAppsService = (
       ...options.probe,
     };
 
-    let lastScan: { at: number; apps: ScannedApp[]; warnings: string[] } | null = null;
-    let inFlight: Promise<{ apps: ScannedApp[]; warnings: string[] }> | null = null;
+    let lastScan: { at: number; apps: KnownApp[]; warnings: string[] } | null = null;
+    let inFlight: Promise<{ apps: KnownApp[]; warnings: string[] }> | null = null;
+
+    /** Folders "also delete the code" must never reach. */
+    const protectedDirs = [
+      manifestDir,
+      keysDir,
+      path.join(home, ".uno"),
+      ...(config.stateDir ? [config.stateDir] : []),
+    ];
+
+    /** Each manifest's code folder, symlinks resolved, judged against the others. */
+    const codeFolders = async (manifests: ReadonlyArray<AppManifest>) => {
+      const [realHome, realProtected, resolved] = await Promise.all([
+        resolvedPath(home),
+        Promise.all(protectedDirs.map(resolvedPath)),
+        Promise.all(
+          manifests.map(async (m) => ({
+            id: m.id,
+            name: m.name,
+            cwd: m.cwd ? await resolvedPath(m.cwd) : null,
+          })),
+        ),
+      ]);
+      const out = new Map<string, (CodeFolder & { readonly display: string }) | null>();
+      for (const m of resolved) {
+        const folder = codeFolderFor(m, {
+          home: realHome,
+          protectedDirs: realProtected,
+          others: resolved,
+        });
+        out.set(m.id, folder ? { ...folder, display: displayInHome(folder.path, realHome) } : null);
+      }
+      return out;
+    };
 
     let unitsCache: { at: number; units: Awaited<ReturnType<typeof readSystemd>> } | null = null;
     const readUnitsCached = async (p: MachineProbe, fresh: boolean) => {
@@ -311,11 +406,27 @@ export const makeMachineAppsService = (
           if (data) icons.set(m.id, data);
         }),
       );
-      const apps = await scanMachineApps(probe, {
-        manifests,
-        manifestIcons: icons,
-        readUnits: (p) => readUnitsCached(p, fresh),
-      });
+      const [scanned, code] = await Promise.all([
+        scanMachineApps(probe, {
+          manifests,
+          manifestIcons: icons,
+          readUnits: (p) => readUnitsCached(p, fresh),
+        }),
+        codeFolders(manifests),
+      ]);
+      const apps = scanned.map(
+        (app): KnownApp =>
+          app.source === "manifest" && app.manifest
+            ? {
+                ...app,
+                // A registered app can be removed; an App Store app's own
+                // manifest is refused at removal (it is removed from its card).
+                canRemove: true,
+                hidden: false,
+                code: code.get(app.manifest.id) ?? null,
+              }
+            : { ...app, hidden: hiddenApps.has(app.id), code: null },
+      );
       lastScan = { at: Date.now(), apps, warnings: [...warnings] };
       return lastScan;
     };
@@ -394,7 +505,7 @@ export const makeMachineAppsService = (
       });
 
     const assemble = (
-      scanned: { apps: ScannedApp[]; warnings: string[] },
+      scanned: { apps: KnownApp[]; warnings: string[] },
       cloud: CloudView,
     ): UnoMachineApps => ({
       apps: scanned.apps.map((app) => toPublic(app, cloud.forwards, cloud.hostname)),
@@ -522,7 +633,7 @@ export const makeMachineAppsService = (
      * person started themselves. The container goes (`docker rm -f`); its
      * volumes stay — no `-v` — so the data is still on the computer.
      */
-    const removeApp = async (app: ScannedApp, cloud: CloudView) => {
+    const removeContainer = async (app: ScannedApp, cloud: CloudView) => {
       if (app.source !== "docker" || app.control.kind !== "docker" || !app.canRemove) {
         throw new ActionError("This program can't be removed from here.");
       }
@@ -540,6 +651,157 @@ export const makeMachineAppsService = (
       }
     };
 
+    /** The catalog ids of the App Store apps on this computer (fresh; empty when unknown). */
+    const storeTemplateIds = async (cloud: CloudView): Promise<ReadonlySet<string>> => {
+      if (cloud.boxId === null || cloud.apiKey.length === 0) return new Set();
+      try {
+        const cards = parseAppCards(
+          await fetchJson(cloud.apiKey, `/api/v1/boxes/${cloud.boxId}/apps`),
+        );
+        return new Set(
+          [...cards.values()].flatMap((card) => (card.templateId ? [card.templateId] : [])),
+        );
+      } catch {
+        return new Set();
+      }
+    };
+
+    /** The service a process runs in, when it is one of this user's units. */
+    const ownerUnitOf = async (pid: number): Promise<string | null> => {
+      if (probe.platform !== "linux") return null;
+      const owner = parseCgroupOwner((await probe.readFile(`/proc/${pid}/cgroup`)) ?? "");
+      return owner?.kind === "service" ? owner.unit : null;
+    };
+
+    const uid = typeof process.getuid === "function" ? process.getuid() : null;
+
+    /**
+     * "Remove" of an app registered in the apps folder (what an AI built here):
+     * stop what runs it, delete its manifest, icon, log and App SDK key, and —
+     * only when asked — its code folder. See `removeRegisteredApp.ts`.
+     */
+    const removeRegistered = async (app: KnownApp, cloud: CloudView, deleteCode: boolean) => {
+      const manifest = app.manifest;
+      if (app.source !== "manifest" || !manifest) {
+        throw new ActionError("This program can't be removed from here.");
+      }
+      if ((await storeTemplateIds(cloud)).has(manifest.id)) {
+        throw new ActionError(
+          "This app came from the App Store — remove it from the app's own card.",
+        );
+      }
+      const code = app.code;
+      if (deleteCode && code?.keepReason) {
+        throw new ActionError(`Its code folder can't be deleted: ${code.keepReason}`);
+      }
+      const codeDir = code?.path ?? null;
+      // Processes and units are matched by folder only when the folder is the
+      // app's alone: a manifest whose cwd is home must not stop everything in home.
+      const ownDir = code && code.keepReason === null ? code.path : null;
+      const manifestPath = path.join(manifestDir, `${manifest.id}.json`);
+      const listenerPid = app.control.kind === "process" ? app.control.pid : null;
+
+      // 1. Units that run it: stopped and disabled first, or they'd restart it.
+      const linux = probe.platform === "linux";
+      const ownerUnit = listenerPid !== null ? await ownerUnitOf(listenerPid) : null;
+      const units = linux
+        ? pickAppUnits(await readUserUnitFiles(home), {
+            appId: manifest.id,
+            codeDir: ownDir,
+            ownerUnits: ownerUnit ? [ownerUnit] : [],
+            manifestPath,
+          })
+        : [];
+      if (units.length > 0) {
+        await probe.run(
+          "systemctl",
+          ["--user", "disable", "--now", ...units.map((u) => u.name)],
+          60_000,
+        );
+      }
+      if (app.control.kind === "docker") {
+        await probe.run("docker", ["stop", app.control.container], 60_000);
+      }
+
+      // 2. Its processes.
+      if (linux) {
+        const table = await processTable();
+        const listener = listenerPid !== null ? table.find((p) => p.pid === listenerPid) : null;
+        if (listener && uid !== null && listener.uid !== null && listener.uid !== uid) {
+          throw new ActionError(
+            `${manifest.name} runs as another user, so Uno can't stop it. Stop it in the Terminal (with sudo), then remove it again.`,
+          );
+        }
+        const pids = pickAppProcesses(table, {
+          appId: manifest.id,
+          selfPid: process.pid,
+          uid,
+          listenerPids: listenerPid !== null ? [listenerPid] : [],
+          codeDir: ownDir,
+        });
+        const left = await stopPids(pids);
+        if (left.length > 0) {
+          throw new ActionError(
+            `${manifest.name} didn't stop. Try again in a moment, or stop it in the Terminal.`,
+          );
+        }
+      } else if (listenerPid !== null) {
+        const left = await stopPids([listenerPid]);
+        if (left.length > 0) throw new ActionError(`${manifest.name} didn't stop.`);
+      }
+
+      // 3. Its files. An icon file another manifest uses stays.
+      const otherIcons = new Set(
+        (lastScan?.apps ?? [])
+          .filter((a) => a.manifest && a.manifest.id !== manifest.id && a.manifest.iconFile)
+          .map((a) => a.manifest!.iconFile!),
+      );
+      const removed = await removePaths([
+        ...units.map((u) => ({ path: u.path })),
+        { path: manifestPath },
+        ...(manifest.iconFile && !otherIcons.has(manifest.iconFile)
+          ? [{ path: manifest.iconFile }]
+          : []),
+        { path: path.join(manifestDir, `${manifest.id}.log`) },
+      ]);
+      if (units.length > 0) {
+        await probe.run("systemctl", ["--user", "daemon-reload"], 30_000);
+        await probe.run("systemctl", ["--user", "reset-failed"], 10_000);
+      }
+      // The token is withdrawn by the App SDK when it sees the manifest gone
+      // (at once, through its folder watcher); the files go now.
+      await removeAppKey(keysDir, manifest.id).catch(() => undefined);
+      // The app is gone, so its (now empty) key folder too; anything else in it stays.
+      await rmdir(appKeyDir(keysDir, manifest.id)).catch(() => undefined);
+      if (removed.errors.some((e) => e.startsWith(manifestPath))) {
+        throw new ActionError(
+          `Couldn't delete ${manifest.name}'s file in ${displayManifestDir(manifestDir, home)}. Try again, or delete ${manifest.id}.json there.`,
+        );
+      }
+
+      // 4. The code, only when asked, and only a folder that is the app's alone.
+      if (deleteCode && codeDir) {
+        // Judged again against the apps registered now (one may have appeared meanwhile).
+        const again = (
+          await codeFolders([...(await remainingManifests()), { ...manifest, cwd: codeDir }])
+        ).get(manifest.id);
+        if (again?.keepReason) {
+          throw new ActionError(`Its code folder was kept: ${again.keepReason}`);
+        }
+        const result = await removePaths([{ path: codeDir, recursive: true }]);
+        if (result.errors.length > 0) {
+          throw new ActionError(
+            `${manifest.name} is removed, but some of its code in ${code?.display ?? codeDir} couldn't be deleted (files of another user?).`,
+          );
+        }
+      }
+    };
+
+    /** The other manifests right now (the removed one is already gone). */
+    const remainingManifests = async (): Promise<AppManifest[]> => [
+      ...(await readManifestDir({ manifestDir, home })).manifests,
+    ];
+
     /** Waits a little for the change to show, so the answer is not stale. */
     const settle = async (appId: string, done: (app: ScannedApp | undefined) => boolean) => {
       for (let i = 0; i < 12; i++) {
@@ -555,6 +817,18 @@ export const makeMachineAppsService = (
         // cloud, so the last scan (seconds old) is enough.
         const lifecycle =
           input.action === "start" || input.action === "stop" || input.action === "remove";
+        if (input.action === "hide" || input.action === "unhide") {
+          // Anything the scan knows may be hidden, even if it's gone meanwhile when shown again.
+          const known = yield* Effect.promise(() => scan());
+          if (input.action === "hide" && !known.apps.some((a) => a.id === input.appId)) {
+            return yield* new UnoCloudFetchError({
+              message: "That program isn't on this computer anymore.",
+            });
+          }
+          yield* Effect.promise(() => hiddenApps.set(input.appId, input.action === "hide"));
+          const fresh = yield* Effect.promise(() => scan(true));
+          return assemble(fresh, yield* cloudView(false));
+        }
         const scanned = yield* Effect.promise(() => scan(lifecycle));
         const app = scanned.apps.find((a) => a.id === input.appId);
         if (!app) {
@@ -580,8 +854,15 @@ export const makeMachineAppsService = (
               case "unpublish":
                 await unpublish(app, cloud);
                 return;
+              case "hide":
+              case "unhide":
+                return;
               case "remove":
-                await removeApp(app, cloud);
+                if (app.source === "manifest") {
+                  await removeRegistered(app, cloud, input.deleteCode === true);
+                } else {
+                  await removeContainer(app, cloud);
+                }
                 // A published port has nothing behind it anymore: take it down too.
                 if (!cloud.blockedReason && publicationFor(app, cloud.forwards, cloud.hostname)) {
                   await unpublish(app, cloud).catch(() => undefined);

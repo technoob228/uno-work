@@ -46,9 +46,15 @@ export interface ProgramTile {
  * - `store`     — an App Store app: Uno stops it and takes it off the computer
  *                 (its data stays unless the person ticks "also delete");
  * - `container` — a docker container the person started themselves: the
- *                 daemon deletes the container, its volumes stay.
+ *                 daemon deletes the container, its volumes stay;
+ * - `registered` — an app registered in `~/.uno/apps`, which an AI (or the
+ *                 person) built on this computer: the daemon stops it, deletes
+ *                 its manifest and withdraws its App SDK token; its code stays
+ *                 unless the person ticks "also delete the code".
  *
- * Nothing else gets one: the computer's own programs, services, processes.
+ * Nothing else gets one: the computer's own programs, services, processes
+ * (those can be hidden from the home screen instead), and the built-ins
+ * (Uno, Files, Terminal, App Store), which are not tiles at all.
  */
 export type ProgramRemoval =
   | {
@@ -58,7 +64,18 @@ export type ProgramRemoval =
       /** The catalog id — also the app's id on this computer (`~/.uno/apps/<id>.json`). */
       readonly templateId: string | null;
     }
-  | { readonly kind: "container"; readonly appId: string; readonly container: string };
+  | { readonly kind: "container"; readonly appId: string; readonly container: string }
+  | {
+      readonly kind: "registered";
+      /** `manifest:<id>` — the program's id on the desktop. */
+      readonly appId: string;
+      /** `<id>` of `~/.uno/apps/<id>.json` — also its id in Settings → Apps. */
+      readonly manifestId: string;
+      /** Its code folder, spelled for a person; null when the manifest names none. */
+      readonly codeDir: string | null;
+      /** Why its code folder can't be deleted with it; null when it can. */
+      readonly codeDirKeepReason: string | null;
+    };
 
 export function programRemoval(tile: ProgramTile): ProgramRemoval | null {
   const store = tile.storeApp;
@@ -74,7 +91,33 @@ export function programRemoval(tile: ProgramTile): ProgramRemoval | null {
   if (app?.source === "docker" && app.canRemove === true) {
     return { kind: "container", appId: app.id, container: app.id.replace(/^docker:/, "") };
   }
+  if (app?.source === "manifest" && app.canRemove === true) {
+    return {
+      kind: "registered",
+      appId: app.id,
+      manifestId: app.id.replace(/^manifest:/, ""),
+      codeDir: app.codeDir ?? null,
+      codeDirKeepReason: app.codeDirKeepReason ?? null,
+    };
+  }
   return null;
+}
+
+/**
+ * "Hide" (from the home screen) is for what the daemon found by itself — a
+ * port, a docker container, a service. A registered app is removed instead.
+ */
+export function canHideProgram(app: UnoMachineApp | null): boolean {
+  return app !== null && app.source !== "manifest" && app.hidden !== true;
+}
+
+/** The found programs the person hid, for "Show" under the home screen. */
+export function hiddenMachineApps(
+  machineApps: ReadonlyArray<UnoMachineApp>,
+): ReadonlyArray<UnoMachineApp> {
+  return machineApps
+    .filter((app) => app.hidden === true)
+    .toSorted((a, b) => a.name.localeCompare(b.name));
 }
 
 /** An app's folder in the account's cloud, offered for deletion when the app is removed. */
@@ -87,18 +130,25 @@ export interface RemovalCloudFiles {
 }
 
 /**
- * The cloud folder "Remove" may also delete: only an App Store app that
- * keeps files in the cloud through this computer (Settings → Apps knows it),
- * and only when there is something there (or it wasn't measured yet).
+ * The cloud folder "Remove" may also delete: an App Store app or an app built
+ * on this computer that keeps files in the cloud through this computer
+ * (Settings → Apps knows it), and only when there is something there (or it
+ * wasn't measured yet).
  */
 export function removalCloudFiles(
   removal: ProgramRemoval | null,
   apps: ReadonlyArray<AppAiApp> | undefined,
 ): RemovalCloudFiles | null {
-  if (removal?.kind !== "store" || !removal.templateId || !apps) return null;
-  const storage = apps.find((app) => app.id === removal.templateId)?.storage;
+  const appId =
+    removal?.kind === "store"
+      ? removal.templateId
+      : removal?.kind === "registered"
+        ? removal.manifestId
+        : null;
+  if (!appId || !apps) return null;
+  const storage = apps.find((app) => app.id === appId)?.storage;
   if (!storage || storage.usedBytes === 0) return null;
-  return { appId: removal.templateId, usedBytes: storage.usedBytes, scope: storage.scope };
+  return { appId, usedBytes: storage.usedBytes, scope: storage.scope };
 }
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
@@ -278,6 +328,8 @@ export function buildProgramTiles(input: {
   }
 
   for (const app of input.machineApps) {
+    // Hidden by the person: listed under the home screen, "Show" brings it back.
+    if (app.hidden === true) continue;
     // An App Store app is already on the desktop under its catalog name.
     const key = hostKey(app.publication?.url ?? app.url);
     if (key && storeHosts.has(key)) continue;

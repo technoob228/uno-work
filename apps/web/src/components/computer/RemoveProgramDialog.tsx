@@ -5,8 +5,11 @@
  * unless the person ticks "Also delete … data" (unticked by default, and the
  * button turns red and says so when it is ticked). A docker container the
  * person started themselves: the daemon deletes the container, its volumes
- * stay. Either can take a minute, so the dialog shows it working and can't be
- * sent twice.
+ * stay. An app built on this computer (registered in `~/.uno/apps`): the
+ * daemon stops it and takes it off the computer; its code folder stays unless
+ * the person ticks "Also delete its code" (unticked by default, and the
+ * dialog says where the code stays). Any of these can take a minute, so the
+ * dialog shows it working and can't be sent twice.
  *
  * An app that keeps files in the account's cloud (the App SDK's storage) gets
  * one more box, also unticked: "Also delete its files in the cloud". Those
@@ -54,24 +57,31 @@ export function RemoveProgramDialog({
   cloudFiles?: RemovalCloudFiles | null;
   pending: boolean;
   error: string | null;
-  onConfirm: (deleteData: boolean, deleteCloudFiles: boolean) => void;
+  onConfirm: (deleteData: boolean, deleteCloudFiles: boolean, deleteCode: boolean) => void;
   onOpenChange: (open: boolean) => void;
 }) {
   const [deleteData, setDeleteData] = useState(false);
   const [deleteCloud, setDeleteCloud] = useState(false);
-  // Every time it opens, it starts from "keep the data" and "keep the files".
+  const [deleteCode, setDeleteCode] = useState(false);
+  // Every time it opens, it starts from "keep the data", "keep the files", "keep the code".
   useEffect(() => {
     if (open) {
       setDeleteData(false);
       setDeleteCloud(false);
+      setDeleteCode(false);
     }
   }, [open]);
 
   const store = removal?.kind === "store";
-  const cloud = store && cloudFiles !== null;
+  const registered = removal?.kind === "registered" ? removal : null;
+  const cloud = (store || registered !== null) && cloudFiles !== null;
+  const codeDir = registered?.codeDir ?? null;
+  const codeDeletable = codeDir !== null && registered?.codeDirKeepReason === null;
   const wipeData = store && deleteData;
   const wipeCloud = cloud && deleteCloud;
-  const destructive = wipeData || wipeCloud;
+  const wipeCode = codeDeletable && deleteCode;
+  const destructive = wipeData || wipeCloud || wipeCode;
+  const hasOptions = store || registered !== null;
 
   return (
     <AlertDialog
@@ -91,6 +101,19 @@ export function RemoveProgramDialog({
                 <span className="font-mono text-foreground">{removal.container}</span>. Its data
                 volumes are kept.
               </>
+            ) : registered ? (
+              <>
+                {name} was made on this computer. Uno will stop it, take it off this computer and
+                turn off its access to AI and to the cloud.{" "}
+                {codeDir ? (
+                  <>
+                    Its code stays in <span className="font-mono text-foreground">{codeDir}</span>{" "}
+                    unless you tick below.
+                  </>
+                ) : (
+                  "Its code, wherever it is, stays on the computer."
+                )}
+              </>
             ) : (
               <>
                 {name} will stop and disappear from this computer. Its data (notes, files, accounts)
@@ -102,7 +125,7 @@ export function RemoveProgramDialog({
 
         <div
           className="-mt-2 flex flex-col gap-3 px-6 pb-5 empty:hidden"
-          hidden={!store && !pending && !error}
+          hidden={!hasOptions && !pending && !error}
         >
           {store ? (
             <div className="flex items-start gap-2">
@@ -145,6 +168,33 @@ export function RemoveProgramDialog({
             </div>
           ) : null}
 
+          {registered && codeDir ? (
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="remove-app-delete-code"
+                className="mt-0.5"
+                checked={wipeCode}
+                disabled={pending || !codeDeletable}
+                onCheckedChange={(checked) => setDeleteCode(checked === true)}
+              />
+              <Label
+                htmlFor="remove-app-delete-code"
+                className="flex flex-col items-start gap-0.5 text-sm leading-snug font-normal text-foreground"
+              >
+                <span>
+                  Also delete its code in <span className="font-mono">{codeDir}</span>.
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {codeDeletable
+                    ? wipeCode
+                      ? "The whole folder goes. This can't be undone."
+                      : `If you leave this unticked, the code stays in ${codeDir} — Uno can bring the app back from it.`
+                    : `The code stays. ${registered.codeDirKeepReason ?? ""}`}
+                </span>
+              </Label>
+            </div>
+          ) : null}
+
           {pending ? (
             <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
               <Spinner className="size-3.5" />
@@ -166,10 +216,18 @@ export function RemoveProgramDialog({
           <Button
             variant={destructive || !store ? "destructive" : "default"}
             disabled={pending}
-            onClick={() => onConfirm(wipeData, wipeCloud)}
+            onClick={() => onConfirm(wipeData, wipeCloud, wipeCode)}
           >
             {pending ? <Spinner className="size-3.5" /> : null}
-            {wipeData ? "Remove and delete data" : wipeCloud ? "Remove and delete files" : "Remove"}
+            {wipeData
+              ? "Remove and delete data"
+              : wipeCode && wipeCloud
+                ? "Remove and delete code and files"
+                : wipeCode
+                  ? "Remove and delete code"
+                  : wipeCloud
+                    ? "Remove and delete files"
+                    : "Remove"}
           </Button>
         </AlertDialogFooter>
       </AlertDialogPopup>

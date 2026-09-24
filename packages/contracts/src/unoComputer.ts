@@ -512,12 +512,26 @@ export const UnoMachineApp = Schema.Struct({
   canStart: Schema.Boolean,
   canStop: Schema.Boolean,
   /**
-   * A docker container the person started themselves (not an App Store app,
-   * not part of the computer): "Remove" deletes the container, keeps volumes.
+   * "Remove" is offered: a docker container the person started themselves
+   * (deletes the container, keeps volumes), or an app registered in
+   * `~/.uno/apps` — one an AI or the person made on this computer (stops it,
+   * deletes its manifest and withdraws its App SDK token).
    */
   canRemove: Schema.optional(Schema.Boolean),
   /** Docker compose project label (`com.docker.compose.project`), for docker apps. */
   composeProject: Schema.optional(Schema.NullOr(Schema.String)),
+  /** The person hid it from the home screen ("Hide"); it still runs. */
+  hidden: Schema.optional(Schema.Boolean),
+  /**
+   * A registered app's code folder (its manifest `cwd`), spelled for a person
+   * (`~/projects/notes`). Null when the manifest names none.
+   */
+  codeDir: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * Why Remove can't also delete `codeDir` (it is home itself, a shared
+   * folder, another app's…); null when it can.
+   */
+  codeDirKeepReason: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type UnoMachineApp = typeof UnoMachineApp.Type;
 
@@ -539,12 +553,20 @@ export const UnoMachineAppAction = Schema.Literals([
   "publish",
   "unpublish",
   "remove",
+  /** Take it off the home screen (it keeps running); `unhide` brings it back. */
+  "hide",
+  "unhide",
 ]);
 export type UnoMachineAppAction = typeof UnoMachineAppAction.Type;
 
 export const UnoMachineAppActionInput = Schema.Struct({
   appId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
   action: UnoMachineAppAction,
+  /**
+   * `remove` of a registered app: also delete its code folder (`codeDir`).
+   * Off by default — the code stays on the computer.
+   */
+  deleteCode: Schema.optional(Schema.Boolean),
 });
 export type UnoMachineAppActionInput = typeof UnoMachineAppActionInput.Type;
 

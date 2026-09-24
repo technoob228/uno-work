@@ -66,6 +66,7 @@ import type { ResourceLook } from "./resources/resourceModel";
 import { LOW_DISK_PCT, LOW_MEMORY_PCT, isSustained } from "./resizeModel";
 import {
   buildProgramTiles,
+  hiddenMachineApps,
   isBrowserOnMachine,
   removalCloudFiles,
   type ProgramTile,
@@ -251,7 +252,7 @@ export function ComputerView() {
     },
     cloudFiles: (removal) =>
       thisMachine ? removalCloudFiles(removal, appAiQuery.data?.apps) : null,
-    onRemove: (removal, deleteData, deleteCloudFiles) => {
+    onRemove: (removal, deleteData, deleteCloudFiles, deleteCode) => {
       if (removal.kind === "store") {
         // Asked when the dialog opened; the app's id on this computer.
         const cloudFiles = deleteCloudFiles
@@ -265,6 +266,31 @@ export function ComputerView() {
               setDetailsKey(null);
               // After the app is gone, so it can't write new files meanwhile.
               if (cloudFiles) deleteAppCloudFiles(cloudFiles.appId, removal.name);
+            },
+          },
+        );
+        return;
+      }
+      if (removal.kind === "registered") {
+        const cloudFiles = deleteCloudFiles
+          ? removalCloudFiles(removal, appAiQuery.data?.apps)
+          : null;
+        const name = detailsTile?.name ?? removal.manifestId;
+        appAction.mutate(
+          { appId: removal.appId, action: "remove", ...(deleteCode ? { deleteCode: true } : {}) },
+          {
+            onSuccess: () => {
+              setDetailsKey(null);
+              toastManager.add({
+                type: "success",
+                title: `Removed ${name}`,
+                ...(removal.codeDir && !deleteCode
+                  ? { description: `Its code stays in ${removal.codeDir}.` }
+                  : {}),
+              });
+              // After the app is stopped and its token withdrawn, so nothing writes meanwhile.
+              if (cloudFiles) deleteAppCloudFiles(cloudFiles.appId, name);
+              else void queryClient.invalidateQueries({ queryKey: appAiQueryKey(environmentId) });
             },
           },
         );
@@ -441,6 +467,13 @@ export function ComputerView() {
                     resetTileMutations();
                     setDetailsKey(tile.key);
                   }}
+                  hidden={thisMachine ? hiddenMachineApps(machineAppsQuery.data?.apps ?? []) : []}
+                  unhidingId={
+                    appAction.isPending && appAction.variables?.action === "unhide"
+                      ? appAction.variables.appId
+                      : null
+                  }
+                  onUnhide={(appId) => appAction.mutate({ appId, action: "unhide" })}
                 />
 
                 {box ? (
@@ -473,7 +506,13 @@ export function ComputerView() {
             ? appAction.error.message
             : null
         }
-        onAction={(appId, action) => appAction.mutate({ appId, action })}
+        onAction={(appId, action) =>
+          appAction.mutate(
+            { appId, action },
+            // Hidden: it leaves the home screen, and its details with it.
+            action === "hide" ? { onSuccess: () => setDetailsKey(null) } : undefined,
+          )
+        }
         onClose={() => setDetailsKey(null)}
         remove={remove}
         aiLimit={{

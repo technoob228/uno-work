@@ -1,4 +1,7 @@
 import { assert, it } from "@effect/vitest";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { Effect, Exit, Layer } from "effect";
 
 import { ServerConfig, type ServerConfigShape } from "../config.ts";
@@ -40,6 +43,7 @@ function serviceLayer(input: {
   readonly calls?: Call[];
   readonly probe?: Partial<MachineProbe>;
   readonly storeApps?: unknown[];
+  readonly options?: Partial<Parameters<typeof makeMachineAppsService>[0]>;
 }) {
   const ports = [...(input.ports ?? [])] as Array<Record<string, unknown>>;
   const fetchJson = async (key: string, path: string, init?: RequestInit) => {
@@ -80,7 +84,9 @@ function serviceLayer(input: {
       fetchJson,
       home: "/home/unowork",
       manifestDir: "/nonexistent/uno-apps",
+      hiddenPath: null,
       background: false,
+      ...input.options,
     }),
   ).pipe(
     Layer.provide(Layer.succeed(ServerConfig, { port: 80 } as ServerConfigShape)),
@@ -378,4 +384,275 @@ it.effect("the regular refresh asks systemd for its units at most every 30 s", (
     Effect.ensuring(Effect.sync(() => (Date.now = realNow))),
     Effect.provide(serviceLayer({ ownBoxId: 42, probe: counting })),
   );
+});
+
+/* ------------------------------------------------------------------ *
+ * Removing an app an AI built here (registered in ~/.uno/apps), Hide
+ * ------------------------------------------------------------------ */
+
+async function registeredAppHome(manifest: Record<string, unknown>) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uno-remove-app-"));
+  const home = path.join(root, "home");
+  const manifestDir = path.join(home, ".uno", "apps");
+  const keysDir = path.join(home, ".uno", "app-keys");
+  const codeDir = path.join(home, "projects", "notes");
+  const unitDir = path.join(home, ".config", "systemd", "user");
+  await mkdir(manifestDir, { recursive: true });
+  await mkdir(path.join(keysDir, "notes"), { recursive: true });
+  await mkdir(codeDir, { recursive: true });
+  await mkdir(unitDir, { recursive: true });
+  await writeFile(path.join(codeDir, "server.js"), "// notes\n");
+  await writeFile(path.join(manifestDir, "notes.json"), JSON.stringify(manifest));
+  await writeFile(path.join(manifestDir, "notes.png"), "png");
+  await writeFile(path.join(manifestDir, "notes.log"), "started\n");
+  await writeFile(path.join(keysDir, "notes", "token"), "uno_app_x\n");
+  await writeFile(
+    path.join(unitDir, "notes-digest.service"),
+    "[Service]\nExecStart=/usr/bin/node digest.js\n",
+  );
+  await writeFile(path.join(unitDir, "notes-digest.timer"), "[Timer]\nOnCalendar=daily\n");
+  await writeFile(
+    path.join(unitDir, "other.service"),
+    "[Service]\nExecStart=/usr/bin/node other.js\n",
+  );
+  return { root, home, manifestDir, keysDir, codeDir, unitDir };
+}
+
+const exists = (p: string) =>
+  stat(p).then(
+    () => true,
+    () => false,
+  );
+
+function registeredProbe(commands: string[][]): Partial<MachineProbe> {
+  return {
+    ...probe,
+    run: async (command, args) => {
+      commands.push([command, ...args]);
+      return command === "ss" ? { ok: true, stdout: SS } : { ok: false, stdout: "" };
+    },
+  };
+}
+
+const NOTES = {
+  name: "Notes",
+  icon: "notes.png",
+  port: 3000,
+  command: "node server.js",
+  cwd: "~/projects/notes",
+  ai: { chat: true },
+  storage: true,
+};
+
+it.effect(
+  "removes an app an AI built here: stops it, its units and files go, the code stays",
+  () => {
+    const commands: string[][] = [];
+    const stopped: number[] = [];
+    const uid = process.getuid?.() ?? 0;
+    let dirs: Awaited<ReturnType<typeof registeredAppHome>>;
+    return Effect.gen(function* () {
+      dirs = yield* Effect.promise(() => registeredAppHome(NOTES));
+      const layer = serviceLayer({
+        ownBoxId: 42,
+        boxToken: "uno_agt_machine",
+        probe: registeredProbe(commands),
+        storeApps: [],
+        options: {
+          home: dirs.home,
+          manifestDir: dirs.manifestDir,
+          keysDir: dirs.keysDir,
+          processTable: async () => [
+            // The app, listening on its port.
+            { pid: 1234, ppid: 1, uid, comm: "node", cwd: dirs.codeDir, appMarker: null },
+            // Its worker, started by the daemon (marked).
+            { pid: 1300, ppid: 1, uid, comm: "python3", cwd: dirs.home, appMarker: "notes" },
+            // A terminal of Uno Work sitting in the app's folder: never.
+            {
+              pid: 2000,
+              ppid: process.pid,
+              uid,
+              comm: "bash",
+              cwd: dirs.codeDir,
+              appMarker: null,
+            },
+            // Something else of the person's: never.
+            { pid: 3000, ppid: 1, uid, comm: "node", cwd: dirs.home, appMarker: null },
+          ],
+          stopProcesses: async (pids) => {
+            stopped.push(...pids);
+            return [];
+          },
+        },
+      });
+      yield* Effect.gen(function* () {
+        const service = yield* MachineAppsService;
+        const before = yield* service.list;
+        const notes = before.apps.find((a) => a.id === "manifest:notes");
+        assert.strictEqual(notes?.canRemove, true);
+        assert.strictEqual(notes?.codeDir, "~/projects/notes");
+        assert.strictEqual(notes?.codeDirKeepReason, null);
+
+        const after = yield* service.action({ appId: "manifest:notes", action: "remove" });
+        assert.ok(!after.apps.some((a) => a.id === "manifest:notes"));
+      }).pipe(Effect.provide(layer));
+
+      assert.deepStrictEqual(stopped, [1234, 1300]);
+      assert.ok(
+        commands.some(
+          (c) =>
+            c.join(" ") ===
+            "systemctl --user disable --now notes-digest.service notes-digest.timer",
+        ),
+      );
+      for (const gone of [
+        path.join(dirs.manifestDir, "notes.json"),
+        path.join(dirs.manifestDir, "notes.png"),
+        path.join(dirs.manifestDir, "notes.log"),
+        path.join(dirs.keysDir, "notes"),
+        path.join(dirs.unitDir, "notes-digest.service"),
+        path.join(dirs.unitDir, "notes-digest.timer"),
+      ]) {
+        assert.isFalse(yield* Effect.promise(() => exists(gone)), gone);
+      }
+      assert.isTrue(yield* Effect.promise(() => exists(path.join(dirs.unitDir, "other.service"))));
+      assert.isTrue(
+        yield* Effect.promise(() => exists(path.join(dirs.codeDir, "server.js"))),
+        "the code stays unless asked",
+      );
+    }).pipe(Effect.ensuring(Effect.promise(() => rm(dirs.root, { recursive: true, force: true }))));
+  },
+);
+
+it.effect("deletes the code folder only when asked", () => {
+  let dirs: Awaited<ReturnType<typeof registeredAppHome>>;
+  return Effect.gen(function* () {
+    dirs = yield* Effect.promise(() => registeredAppHome(NOTES));
+    yield* Effect.gen(function* () {
+      const service = yield* MachineAppsService;
+      yield* service.action({ appId: "manifest:notes", action: "remove", deleteCode: true });
+    }).pipe(
+      Effect.provide(
+        serviceLayer({
+          ownBoxId: 42,
+          boxToken: "uno_agt_machine",
+          probe: registeredProbe([]),
+          storeApps: [],
+          options: {
+            home: dirs.home,
+            manifestDir: dirs.manifestDir,
+            keysDir: dirs.keysDir,
+            processTable: async () => [],
+            stopProcesses: async () => [],
+          },
+        }),
+      ),
+    );
+    assert.isFalse(yield* Effect.promise(() => exists(dirs.codeDir)));
+    assert.isTrue(yield* Effect.promise(() => exists(path.join(dirs.home, "projects"))));
+  }).pipe(Effect.ensuring(Effect.promise(() => rm(dirs.root, { recursive: true, force: true }))));
+});
+
+it.effect(
+  "an app running from home: home is never deleted, and nothing is stopped for being in it",
+  () => {
+    const stopped: number[] = [];
+    const uid = process.getuid?.() ?? 0;
+    let dirs: Awaited<ReturnType<typeof registeredAppHome>>;
+    return Effect.gen(function* () {
+      dirs = yield* Effect.promise(() => registeredAppHome({ ...NOTES, cwd: "~" }));
+      const layer = serviceLayer({
+        ownBoxId: 42,
+        boxToken: "uno_agt_machine",
+        probe: registeredProbe([]),
+        storeApps: [],
+        options: {
+          home: dirs.home,
+          manifestDir: dirs.manifestDir,
+          keysDir: dirs.keysDir,
+          processTable: async () => [
+            { pid: 1234, ppid: 1, uid, comm: "node", cwd: dirs.home, appMarker: null },
+            { pid: 3000, ppid: 1, uid, comm: "node", cwd: dirs.home, appMarker: null },
+          ],
+          stopProcesses: async (pids) => {
+            stopped.push(...pids);
+            return [];
+          },
+        },
+      });
+      yield* Effect.gen(function* () {
+        const service = yield* MachineAppsService;
+        const listed = yield* service.list;
+        const notes = listed.apps.find((a) => a.id === "manifest:notes");
+        assert.strictEqual(notes?.codeDir, "~");
+        assert.match(notes?.codeDirKeepReason ?? "", /home folder/);
+        const refused = yield* Effect.exit(
+          service.action({ appId: "manifest:notes", action: "remove", deleteCode: true }),
+        );
+        assert.ok(Exit.isFailure(refused));
+        assert.deepStrictEqual(stopped, []);
+        yield* service.action({ appId: "manifest:notes", action: "remove" });
+      }).pipe(Effect.provide(layer));
+      // Only the listener on its port.
+      assert.deepStrictEqual(stopped, [1234]);
+      assert.isTrue(yield* Effect.promise(() => exists(path.join(dirs.codeDir, "server.js"))));
+    }).pipe(Effect.ensuring(Effect.promise(() => rm(dirs.root, { recursive: true, force: true }))));
+  },
+);
+
+it.effect("an App Store app's own manifest is removed from its card, not from here", () => {
+  let dirs: Awaited<ReturnType<typeof registeredAppHome>>;
+  return Effect.gen(function* () {
+    dirs = yield* Effect.promise(() => registeredAppHome(NOTES));
+    yield* Effect.gen(function* () {
+      const service = yield* MachineAppsService;
+      const exit = yield* Effect.exit(
+        service.action({ appId: "manifest:notes", action: "remove" }),
+      );
+      assert.ok(Exit.isFailure(exit));
+    }).pipe(
+      Effect.provide(
+        serviceLayer({
+          ownBoxId: 42,
+          boxToken: "uno_agt_machine",
+          probe: registeredProbe([]),
+          storeApps: [{ deployment_id: 9, template_id: "notes" }],
+          options: {
+            home: dirs.home,
+            manifestDir: dirs.manifestDir,
+            keysDir: dirs.keysDir,
+            processTable: async () => [],
+            stopProcesses: async () => [],
+          },
+        }),
+      ),
+    );
+    assert.isTrue(yield* Effect.promise(() => exists(path.join(dirs.manifestDir, "notes.json"))));
+  }).pipe(Effect.ensuring(Effect.promise(() => rm(dirs.root, { recursive: true, force: true }))));
+});
+
+it.effect("Hide takes a found program off Home and remembers it; Show brings it back", () => {
+  let root = "";
+  return Effect.gen(function* () {
+    root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "uno-hidden-")));
+    const hiddenPath = path.join(root, "machine-apps-hidden.json");
+    const layer = () =>
+      serviceLayer({ ownBoxId: 42, boxToken: "uno_agt_machine", options: { hiddenPath } });
+    yield* Effect.gen(function* () {
+      const service = yield* MachineAppsService;
+      const after = yield* service.action({ appId: "port:3000", action: "hide" });
+      assert.strictEqual(after.apps.find((a) => a.id === "port:3000")?.hidden, true);
+      assert.strictEqual(after.apps.find((a) => a.id === "port:8787")?.hidden, false);
+      const gone = yield* Effect.exit(service.action({ appId: "port:9999", action: "hide" }));
+      assert.ok(Exit.isFailure(gone));
+    }).pipe(Effect.provide(layer()));
+    // A restarted daemon still knows.
+    yield* Effect.gen(function* () {
+      const service = yield* MachineAppsService;
+      const listed = yield* service.list;
+      assert.strictEqual(listed.apps.find((a) => a.id === "port:3000")?.hidden, true);
+      const shown = yield* service.action({ appId: "port:3000", action: "unhide" });
+      assert.strictEqual(shown.apps.find((a) => a.id === "port:3000")?.hidden, false);
+    }).pipe(Effect.provide(layer()));
+  }).pipe(Effect.ensuring(Effect.promise(() => rm(root, { recursive: true, force: true }))));
 });

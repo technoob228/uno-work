@@ -77,6 +77,24 @@ export interface AppSdkServiceShape {
   readonly update: (input: AppAiUpdateInput) => Effect.Effect<AppAiOverview, AppSdkUpdateError>;
 }
 
+/**
+ * The cloud folders "Also delete its files in the cloud" empties: the one the
+ * app uses now, and this computer's own one (left from a time it was set to
+ * "Only this computer"). The shared folder only when it is the one in use.
+ */
+export function cloudFoldersToDelete(
+  appId: string,
+  scope: "account" | "computer",
+  computerKey: string,
+): string[] {
+  return [
+    ...new Set([
+      appFolder(appId, scope === "computer" ? computerKey : null),
+      appFolder(appId, computerKey),
+    ]),
+  ];
+}
+
 export class AppSdkUpdateError extends Error {
   readonly _tag = "AppSdkUpdateError";
 }
@@ -499,9 +517,18 @@ export const makeAppSdkService = (
           );
         }
         if (input.deleteCloudFiles === true) {
-          const folder = folderOf(known, yield* Effect.promise(computerKey));
+          const folders = cloudFoldersToDelete(
+            known.id,
+            known.storageScope,
+            yield* Effect.promise(computerKey),
+          );
+          const folder = folders.join(", ");
           const deleted = yield* Effect.tryPromise({
-            try: () => appStorage.deleteFolder(folder),
+            try: async () => {
+              let count = 0;
+              for (const one of folders) count += await appStorage.deleteFolder(one);
+              return count;
+            },
             catch: (cause) =>
               new AppSdkUpdateError(
                 `Couldn't delete the app's files in the cloud: ${
