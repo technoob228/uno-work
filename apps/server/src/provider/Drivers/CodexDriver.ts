@@ -34,6 +34,7 @@ import { buildMachineAppsInstructions } from "../../machineApps/machineAppsInstr
 import { buildBrowserInstructions } from "../browserInstructions.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
+import { customMcpServersGetter } from "../../mcp/customMcpServers.ts";
 import { checkCodexProviderStatus, makePendingCodexProvider } from "../Layers/CodexProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
@@ -142,7 +143,9 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       // here; the registry only has to worry about snapshot-build and
       // spawner-availability failures surfaced from `checkCodexProviderStatus`
       // below.
+      const customMcpServers = yield* customMcpServersGetter;
       const adapter = yield* makeCodexAdapter(effectiveConfig, {
+        customMcpServers,
         instanceId,
         environment: processEnv,
         bridgeEnvironment: (context) => browserBridge.scopedEnvironment(context),

@@ -646,6 +646,57 @@ export type UnoPin = typeof UnoPin.Type;
 export const MAX_UNO_PINS = 50;
 
 /**
+ * "Set up your computer" (the guided setup after the welcome screen). Kept on
+ * the machine, like `machineOnboarded`: the sidebar's "Set up N/8" row and
+ * the answers survive opening the same computer from another address.
+ * Step ids are plain strings so a newer client's steps round-trip through an
+ * older daemon. Whatever the setup did for real (the default AI, the project,
+ * AGENTS.md, skills, channels) lives in its own place; this is only progress.
+ */
+export const UnoSetupProject = Schema.Struct({
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+  path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)),
+  name: Schema.String.check(Schema.isMaxLength(200)),
+  /** What kind of work: website, bot, data, docs, other. */
+  kind: Schema.String.check(Schema.isMaxLength(32)),
+});
+export type UnoSetupProject = typeof UnoSetupProject.Type;
+
+export const UnoSetupProgress = Schema.Struct({
+  /** Picked on the welcome screen: "simple" = just a computer, "ai" = with AI. */
+  mode: Schema.NullOr(Schema.Literals(["simple", "ai"])).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  visited: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  skipped: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  /** Reached the last step (or skipped the whole setup). */
+  finished: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** The sidebar row was hidden by hand. */
+  dismissed: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  project: Schema.NullOr(UnoSetupProject).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  /** AGENTS.md interview answers, by question id. */
+  answers: Schema.Record(Schema.String, Schema.String.check(Schema.isMaxLength(2000))).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+});
+export type UnoSetupProgress = typeof UnoSetupProgress.Type;
+
+/**
+ * A remote MCP server the owner added by address ("Your own tool"). Every
+ * agent on the machine gets it in new chats: Claude and Codex through their
+ * launch options, OpenCode and Uno through their inline config.
+ */
+export const UNO_MCP_SERVER_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,47}$/;
+export const UnoMcpServer = Schema.Struct({
+  name: Schema.String.check(Schema.isPattern(UNO_MCP_SERVER_NAME_PATTERN)),
+  url: Schema.String.check(Schema.isMinLength(8), Schema.isMaxLength(2048)),
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+});
+export type UnoMcpServer = typeof UnoMcpServer.Type;
+
+export const MAX_UNO_MCP_SERVERS = 20;
+
+/**
  * Settings → Apps → "AI for apps": what an app gets from the App SDK when it
  * does not name a model or a harness (docs/app-sdk.md).
  */
@@ -665,6 +716,10 @@ export const ServerSettings = Schema.Struct({
   machineOnboarded: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // Sidebar pins (apps, files, folders, links) — see `UnoPin`.
   pins: Schema.Array(UnoPin).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  // Guided setup progress — see `UnoSetupProgress`.
+  setup: UnoSetupProgress.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  // Remote MCP servers every agent gets — see `UnoMcpServer`.
+  mcpServers: Schema.Array(UnoMcpServer).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   // Where a chat's agent may spawn threads through the bridge
   // (`POST /api/threads`): only its own project, or any project.
   agentThreadsScope: Schema.Literals(["own-project", "any-project"]).pipe(
@@ -787,6 +842,9 @@ export const ServerSettingsPatch = Schema.Struct({
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   machineOnboarded: Schema.optionalKey(Schema.Boolean),
   pins: Schema.optionalKey(Schema.Array(UnoPin)),
+  // Both replaced whole (see applyServerSettingsPatch).
+  setup: Schema.optionalKey(UnoSetupProgress),
+  mcpServers: Schema.optionalKey(Schema.Array(UnoMcpServer)),
   agentThreadsScope: Schema.optionalKey(Schema.Literals(["own-project", "any-project"])),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   addProjectBaseDirectory: Schema.optionalKey(Schema.String),

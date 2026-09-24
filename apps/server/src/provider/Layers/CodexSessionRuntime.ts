@@ -87,6 +87,8 @@ export interface CodexSessionRuntimeOptions {
   readonly resumeCursor?: CodexResumeCursor;
   /** Доп. инструкции, добавляемые к developer_instructions каждого хода. */
   readonly appendDeveloperInstructions?: string;
+  /** Extra `codex app-server` arguments (`-c key=value` overrides). */
+  readonly extraArgs?: ReadonlyArray<string>;
 }
 
 export interface CodexSessionRuntimeSendTurnInput {
@@ -708,7 +710,7 @@ export const makeCodexSessionRuntime = (
     };
     const child = yield* spawner
       .spawn(
-        ChildProcess.make(options.binaryPath, ["app-server"], {
+        ChildProcess.make(options.binaryPath, ["app-server", ...(options.extraArgs ?? [])], {
           cwd: options.cwd,
           env,
           shell: process.platform === "win32",

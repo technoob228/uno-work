@@ -84,6 +84,8 @@ export function applyServerSettingsPatch(
       ? { providerInstances: patch.providerInstances }
       : {}),
     ...(patch.pins !== undefined ? { pins: patch.pins } : {}),
+    ...(patch.setup !== undefined ? { setup: patch.setup } : {}),
+    ...(patch.mcpServers !== undefined ? { mcpServers: patch.mcpServers } : {}),
   };
   if (!selectionPatch) {
     return nextWithReplacements;

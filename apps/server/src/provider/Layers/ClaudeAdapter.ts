@@ -42,8 +42,10 @@ import {
   RuntimeTaskId,
   ThreadId,
   TurnId,
+  type UnoMcpServer,
   type UserInputQuestion,
 } from "@t3tools/contracts";
+import { claudeMcpServers } from "../../mcp/customMcpServers.ts";
 import {
   applyClaudePromptEffortPrefix,
   getModelSelectionBooleanOptionValue,
@@ -206,6 +208,8 @@ export interface ClaudeAdapterLiveOptions {
     readonly threadId?: string;
     readonly cwd?: string;
   }) => Record<string, string>;
+  /** Remote MCP servers the owner added (settings.mcpServers), read per query. */
+  readonly customMcpServers?: () => ReadonlyArray<UnoMcpServer>;
 }
 
 function isUuid(value: string): boolean {
@@ -2902,6 +2906,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(fastMode ? { fastMode: true } : {}),
         ...(ultracode ? { ultracode: true } : {}),
       };
+      const customMcp = claudeMcpServers(options?.customMcpServers?.() ?? []);
+      const customMcpServerEntries = Object.keys(customMcp).length > 0 ? customMcp : null;
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
@@ -2926,6 +2932,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(Object.keys(settings).length > 0 ? { settings } : {}),
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
         ...(newSessionId ? { sessionId: newSessionId } : {}),
+        ...(customMcpServerEntries ? { mcpServers: customMcpServerEntries } : {}),
         includePartialMessages: true,
         canUseTool,
         env: {

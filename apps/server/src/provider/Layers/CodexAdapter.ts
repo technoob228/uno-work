@@ -24,7 +24,9 @@ import {
   ProviderApprovalDecision,
   ThreadId,
   ProviderSendTurnInput,
+  type UnoMcpServer,
 } from "@t3tools/contracts";
+import { codexMcpConfigArgs } from "../../mcp/customMcpServers.ts";
 import { Effect, Exit, Fiber, FileSystem, Queue, Schema, Scope, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexErrors from "effect-codex-app-server/errors";
@@ -81,6 +83,8 @@ export interface CodexAdapterLiveOptions {
     readonly threadId?: string;
     readonly cwd?: string;
   }) => Record<string, string>;
+  /** Remote MCP servers the owner added (settings.mcpServers), read per session. */
+  readonly customMcpServers?: () => ReadonlyArray<UnoMcpServer>;
 }
 
 interface CodexAdapterSessionContext {
@@ -1384,6 +1388,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(options?.environment ?? {}),
           ...(options?.bridgeEnvironment?.({ threadId: input.threadId, cwd: sessionCwd }) ?? {}),
         };
+        const customMcpArgs = codexMcpConfigArgs(options?.customMcpServers?.() ?? []);
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
@@ -1395,6 +1400,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(options?.appendDeveloperInstructions
             ? { appendDeveloperInstructions: options.appendDeveloperInstructions }
             : {}),
+          ...(customMcpArgs.length > 0 ? { extraArgs: customMcpArgs } : {}),
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
           ...(Schema.is(CodexResumeCursorSchema)(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }

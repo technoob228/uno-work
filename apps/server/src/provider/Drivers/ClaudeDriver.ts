@@ -24,6 +24,7 @@ import { buildMachineAppsInstructions } from "../../machineApps/machineAppsInstr
 import { buildBrowserInstructions } from "../browserInstructions.ts";
 import { ServerConfig } from "../../config.ts";
 import { ProviderDriverError } from "../Errors.ts";
+import { customMcpServersGetter } from "../../mcp/customMcpServers.ts";
 import { makeClaudeAdapter } from "../Layers/ClaudeAdapter.ts";
 import {
   checkClaudeProviderStatus,
@@ -110,8 +111,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         continuationGroupKey,
       });
 
+      const customMcpServers = yield* customMcpServersGetter;
       const adapterOptions = {
         instanceId,
+        customMcpServers,
         environment: processEnv,
         bridgeEnvironment: (context: { readonly threadId?: string; readonly cwd?: string }) =>
           browserBridge.scopedEnvironment(context),

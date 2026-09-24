@@ -25,6 +25,7 @@ import { buildMachineAppsInstructions } from "../../machineApps/machineAppsInstr
 import { writeBrowserInstructionsFile } from "../browserInstructions.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeOpenCodeAdapter } from "../Layers/OpenCodeAdapter.ts";
+import { customMcpServersGetter, withOpenCodeMcpServers } from "../../mcp/customMcpServers.ts";
 import {
   checkOpenCodeProviderStatus,
   makePendingOpenCodeProvider,
@@ -124,10 +125,20 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       });
       const effectiveConfig = { ...config, enabled } satisfies OpenCodeSettings;
 
+      const customMcpServers = yield* customMcpServersGetter;
       const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
         instanceId,
         environment: processEnv,
-        bridgeEnvironment: (context) => browserBridge.scopedEnvironment(context),
+        bridgeEnvironment: (context) => {
+          const bridge = browserBridge.scopedEnvironment(context);
+          const configContent = withOpenCodeMcpServers(
+            processEnv.OPENCODE_CONFIG_CONTENT,
+            customMcpServers(),
+          );
+          return configContent === undefined || configContent === processEnv.OPENCODE_CONFIG_CONTENT
+            ? bridge
+            : { ...bridge, OPENCODE_CONFIG_CONTENT: configContent };
+        },
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
       const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, processEnv);

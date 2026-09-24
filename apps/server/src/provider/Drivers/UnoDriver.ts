@@ -36,7 +36,9 @@ import {
   type ModelCapabilitiesMetadata,
   type PersonalAiModel,
   type ServerProvider,
+  type UnoMcpServer,
 } from "@t3tools/contracts";
+import { customMcpServersGetter, withOpenCodeMcpServers } from "../../mcp/customMcpServers.ts";
 import { Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
@@ -645,12 +647,14 @@ export function unoSessionEnvironment(input: {
   readonly bridge: Record<string, string>;
   readonly configContent: string | undefined;
   readonly appId: string | null;
+  /** Remote MCP servers the owner added (settings.mcpServers). */
+  readonly mcpServers?: ReadonlyArray<UnoMcpServer>;
 }): Record<string, string> {
-  if (input.appId === null) return input.bridge;
-  const labelled = withAppLabelHeaders(input.configContent, input.appId, [
-    UNO_PROVIDER_ID,
-    UNO_RUSSIA_PROVIDER_ID,
-  ]);
+  const withMcp = withOpenCodeMcpServers(input.configContent, input.mcpServers ?? []);
+  const labelled =
+    input.appId === null
+      ? withMcp
+      : withAppLabelHeaders(withMcp, input.appId, [UNO_PROVIDER_ID, UNO_RUSSIA_PROVIDER_ID]);
   return labelled === undefined || labelled === input.configContent
     ? input.bridge
     : { ...input.bridge, OPENCODE_CONFIG_CONTENT: labelled };
@@ -933,6 +937,7 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         enabled,
       } satisfies OpenCodeSettings;
 
+      const customMcpServers = yield* customMcpServersGetter;
       const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
         instanceId,
         environment: processEnv,
@@ -941,6 +946,7 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
             bridge: browserBridge.scopedEnvironment(context),
             configContent: processEnv.OPENCODE_CONFIG_CONTENT,
             appId: gatewayKey.appOfThread(context.threadId),
+            mcpServers: customMcpServers(),
           }),
         // uno-code's per-directory `/event` stream is silent (only
         // `server.connected`); session events only reach `/global/event`.
