@@ -118,6 +118,7 @@ function makeFixture(options?: {
   readonly messages?: ReadonlyArray<OrchestrationMessage>;
   readonly dispatchError?: OrchestrationDispatchError;
   readonly onSleep?: (threads: Map<string, OrchestrationThreadShell>) => void;
+  readonly assistantAllowlist?: "all" | ReadonlyArray<string>;
 }): Fixture {
   const dispatched: Fixture["dispatched"] = [];
   const threads = new Map<string, OrchestrationThreadShell>(
@@ -180,6 +181,9 @@ function makeFixture(options?: {
       getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
     },
     getAgentThreadsScope: Effect.succeed(options?.scope ?? "own-project"),
+    ...(options?.assistantAllowlist !== undefined
+      ? { getAssistantProjectAllowlist: Effect.succeed(options.assistantAllowlist) }
+      : {}),
     getProviders: Effect.succeed(providers),
     pollIntervalMs: 1_000,
     nowMs: () => clock,
@@ -801,6 +805,84 @@ describe("agent threads bridge: peers (plan 22)", () => {
           ["agent", "thread-x"],
         ],
       );
+    }),
+  );
+});
+
+describe("agent threads bridge: the assistant's project scope (0.0.85)", () => {
+  const ASSISTANT_HOME = "assistant-home" as ProjectId;
+  const THIRD_PROJECT = "project-third" as ProjectId;
+  const assistantFixture = (allowlist: "all" | ReadonlyArray<string>) =>
+    makeFixture({
+      // The person's own agent-threads setting stays narrow: the assistant
+      // follows its own allowlist instead.
+      scope: "own-project",
+      assistantAllowlist: allowlist,
+      projects: [
+        projectShell(ASSISTANT_HOME),
+        projectShell(OWN_PROJECT),
+        projectShell(OTHER_PROJECT),
+        projectShell(THIRD_PROJECT),
+      ],
+      threads: [
+        threadShell(CALLER, { projectId: ASSISTANT_HOME }),
+        threadShell("thread-in-own" as ThreadId, { projectId: OWN_PROJECT }),
+        threadShell("thread-in-other" as ThreadId, { projectId: OTHER_PROJECT }),
+      ],
+    });
+
+  it.effect("reaches every project with All projects", () =>
+    Effect.gen(function* () {
+      const { handlers } = assistantFixture("all");
+      const list = yield* handlers.listThreads(scoped(), { scope: "all" });
+      assert.strictEqual(list.status, 200);
+      assert.deepStrictEqual(
+        (body(list).threads as ReadonlyArray<{ id: string }>).map((thread) => thread.id).toSorted(),
+        [CALLER, "thread-in-other", "thread-in-own"].toSorted(),
+      );
+      const created = yield* handlers.createThread(scoped(), {
+        text: "Fix the build",
+        projectId: THIRD_PROJECT,
+      });
+      assert.strictEqual(created.status, 200);
+    }),
+  );
+
+  it.effect("lists, creates and messages only in the allowed projects", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = assistantFixture([ASSISTANT_HOME, OWN_PROJECT]);
+      const list = yield* handlers.listThreads(scoped(), { scope: "all" });
+      assert.strictEqual(list.status, 200);
+      assert.deepStrictEqual(
+        (body(list).threads as ReadonlyArray<{ id: string }>).map((thread) => thread.id).toSorted(),
+        [CALLER, "thread-in-own"].toSorted(),
+      );
+      const denied = yield* handlers.createThread(scoped(), {
+        text: "Fix the build",
+        projectId: OTHER_PROJECT,
+      });
+      assert.strictEqual(denied.status, 403);
+      assert.strictEqual(body(denied).error, "project_not_allowed");
+      const hidden = yield* handlers.getThread(scoped(), {
+        threadId: "thread-in-other",
+        limit: null,
+        waitMs: null,
+      });
+      assert.strictEqual(hidden.status, 404);
+      const allowed = yield* handlers.createThread(scoped(), {
+        text: "Fix the build",
+        projectId: OWN_PROJECT,
+      });
+      assert.strictEqual(allowed.status, 200);
+      assert.strictEqual(dispatched.length, 2);
+    }),
+  );
+
+  it.effect("leaves a regular chat on the person's agent-threads setting", () =>
+    Effect.gen(function* () {
+      const { handlers } = makeFixture({ scope: "own-project", assistantAllowlist: "all" });
+      const list = yield* handlers.listThreads(scoped(), { scope: "all" });
+      assert.strictEqual(list.status, 403);
     }),
   );
 });

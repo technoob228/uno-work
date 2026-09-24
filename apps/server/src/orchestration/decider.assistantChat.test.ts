@@ -240,11 +240,48 @@ describe("decider: the assistant chat runs on Hermes (0.0.84)", () => {
     expect((turnStart?.payload as { modelSelection?: unknown }).modelSelection).toBeUndefined();
   });
 
-  it("leaves other chats' harness choices alone", async () => {
+  it("runs every other conversation in the assistant's workspace on Hermes too (0.0.85)", async () => {
     const readModel = await decideAndApply(
       await assistantChatOnHermes(),
       metaUpdate(OTHER_ID, { instanceId: ProviderInstanceId.make("uno"), model: "uno/kimi" }),
     );
-    expect(threadOf(readModel, OTHER_ID).modelSelection.instanceId).toBe("uno");
+    expect(threadOf(readModel, OTHER_ID).modelSelection.instanceId).toBe("hermes");
+  });
+
+  it("leaves chats in other projects and chats an agent started alone", async () => {
+    let readModel = await assistantChatOnHermes();
+    readModel = await decideAndApply(readModel, {
+      type: "project.create",
+      commandId: CommandId.make("cmd-project-work"),
+      projectId: ProjectId.make("project-work"),
+      title: "Work",
+      workspaceRoot: "/tmp/work",
+      defaultModelSelection: null,
+      createdAt: new Date().toISOString(),
+    });
+    readModel = await decideAndApply(readModel, {
+      ...threadCreate(ThreadId.make("thread-work")),
+      projectId: ProjectId.make("project-work"),
+    });
+    expect(threadOf(readModel, ThreadId.make("thread-work")).modelSelection.instanceId).toBe(
+      "codex",
+    );
+    readModel = await decideAndApply(
+      readModel,
+      metaUpdate(ThreadId.make("thread-work"), {
+        instanceId: ProviderInstanceId.make("uno"),
+        model: "uno/kimi",
+      }),
+    );
+    expect(threadOf(readModel, ThreadId.make("thread-work")).modelSelection.instanceId).toBe("uno");
+    // The assistant asked an agent to start a chat in its own folder, on Codex.
+    readModel = await decideAndApply(
+      readModel,
+      { ...threadCreate(ThreadId.make("thread-agent-child")), spawnedByThreadId: LEGACY_ID },
+      { kind: "agent", threadId: LEGACY_ID },
+    );
+    expect(threadOf(readModel, ThreadId.make("thread-agent-child")).modelSelection.instanceId).toBe(
+      "codex",
+    );
   });
 });

@@ -35,7 +35,9 @@
  * and persisted alongside, so the settings UI can show it.
  */
 import { cleanUnoFinalAnswerText } from "@t3tools/shared/unoFinalAnswer";
+import { findMarkedAssistantChat } from "@t3tools/shared/assistantChat";
 import {
+  ASSISTANT_PROJECT_ID,
   CommandId,
   ManagerTelegramConnectorConfig,
   MessageId,
@@ -133,6 +135,15 @@ import {
   type TelegramMediaDescriptor,
 } from "../telegramMedia.ts";
 import { renderTelegramHtml } from "../telegramMarkdown.ts";
+import {
+  matchesTelegramPairing,
+  newTelegramPairing,
+  parseTelegramStartPayload,
+  shouldReplyToStranger,
+  telegramLinkedReply,
+  telegramStrangerReply,
+  type TelegramPairing,
+} from "../telegramPairing.ts";
 
 export interface ManagerTelegramRuntimeStatus {
   readonly botUsername: string | null;
@@ -154,6 +165,25 @@ export interface ManagerTelegramServiceShape {
     readonly chatId: string;
     readonly text: string;
   }) => Effect.Effect<boolean>;
+  /**
+   * Issue the one-time code the app shows as the bot's deep link
+   * (telegramPairing.ts). A new code replaces the previous one.
+   */
+  readonly startPairing: (projectId: ProjectId) => Effect.Effect<{
+    readonly code: string;
+    readonly expiresAt: string;
+    readonly botUsername: string | null;
+  }>;
+  /**
+   * Send a test message to every linked chat; per chat whether Telegram
+   * accepted it (and why not).
+   */
+  readonly sendTestMessage: (input: {
+    readonly projectId: ProjectId;
+    readonly text: string;
+  }) => Effect.Effect<
+    ReadonlyArray<{ readonly chatId: string; readonly ok: boolean; readonly error: string | null }>
+  >;
 }
 
 export class ManagerTelegramService extends Context.Service<
@@ -374,6 +404,11 @@ const makeTelegramConnector = Effect.gen(function* () {
   const telegramFilesDir = nodePath.join(serverConfig.stateDir, "telegram-files");
 
   const runtimesRef = yield* Ref.make<ReadonlyMap<ProjectId, BotRuntime>>(new Map());
+  // Pending link codes (telegramPairing.ts), one per assistant; in memory —
+  // a restart only means pressing "Get a new link".
+  const pairingsRef = yield* Ref.make<ReadonlyMap<ProjectId, TelegramPairing>>(new Map());
+  // When a not-linked private chat last heard the "how to link" hint.
+  const strangerRepliesRef = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
 
   const updateRuntime = (projectId: ProjectId, patch: Partial<BotRuntime>) =>
     Ref.update(runtimesRef, (runtimes) => {
@@ -1038,6 +1073,65 @@ const makeTelegramConnector = Effect.gen(function* () {
       ),
     );
 
+  /**
+   * The chat that pressed Start on the app's link: allowlist it (re-reading
+   * the stored config so a concurrent save is not lost) and, for the
+   * default assistant's private chat, point it at the main conversation.
+   * The code is spent.
+   */
+  const linkChat = (
+    projectId: ProjectId,
+    config: ManagerTelegramConnectorConfig,
+    message: TelegramIncomingMessage,
+  ) =>
+    Effect.gen(function* () {
+      const chatId = String(message.chat?.id);
+      yield* Ref.update(pairingsRef, (map) => {
+        const next = new Map(map);
+        next.delete(projectId);
+        return next;
+      });
+      const stored = yield* connectorRepository.get({ projectId, kind: "telegram" });
+      const current = Option.isSome(stored)
+        ? Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(stored.value.config)
+        : null;
+      const base = current !== null && current._tag === "Success" ? current.value : config;
+      if (!base.allowedChatIds.includes(chatId)) {
+        yield* connectorRepository.upsert({
+          projectId,
+          kind: "telegram",
+          config: { ...base, allowedChatIds: [...base.allowedChatIds, chatId] },
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      let toMainConversation = false;
+      if (projectId === ASSISTANT_PROJECT_ID && message.chat?.type === "private") {
+        const snapshot = yield* projectionSnapshotQuery.getShellSnapshot();
+        const main = findMarkedAssistantChat(snapshot.threads);
+        if (main !== null) {
+          const existing = yield* bindingRepository.get({ kind: "telegram", chatId });
+          yield* bindingRepository.upsert({
+            kind: "telegram",
+            chatId,
+            connectorProjectId: projectId,
+            target: { kind: "thread", threadId: main.id },
+            notifyOnComplete: Option.isSome(existing) ? existing.value.notifyOnComplete : false,
+            updatedAt: new Date().toISOString(),
+          });
+          toMainConversation = true;
+        }
+      }
+      yield* Effect.logInfo("telegram chat linked by code").pipe(
+        Effect.annotateLogs({ projectId, chatId, toMainConversation }),
+      );
+      yield* sendTelegramText(
+        projectId,
+        config.botToken,
+        chatId,
+        telegramLinkedReply({ toMainConversation }),
+      );
+    });
+
   const handleUpdate = (
     projectId: ProjectId,
     config: ManagerTelegramConnectorConfig,
@@ -1056,10 +1150,35 @@ const makeTelegramConnector = Effect.gen(function* () {
         return;
       }
       const chatId = String(chatIdNumber);
+      const startPayload = parseTelegramStartPayload(text);
+      if (startPayload !== null) {
+        const pairing = (yield* Ref.get(pairingsRef)).get(projectId);
+        if (matchesTelegramPairing(pairing, startPayload, Date.now())) {
+          yield* linkChat(projectId, config, message);
+          return;
+        }
+      }
       if (!config.allowedChatIds.includes(chatId)) {
         yield* Effect.logDebug("telegram message from non-allowlisted chat ignored").pipe(
           Effect.annotateLogs({ projectId, chatId }),
         );
+        // A private chat hears how to link (at most every few minutes), so
+        // the owner is never left talking to a silent bot.
+        if (message.chat?.type === "private" && message.from?.is_bot !== true) {
+          const nowMs = Date.now();
+          const last = (yield* Ref.get(strangerRepliesRef)).get(`${projectId}:${chatId}`);
+          if (shouldReplyToStranger(last, nowMs)) {
+            yield* Ref.update(strangerRepliesRef, (map) =>
+              new Map(map).set(`${projectId}:${chatId}`, nowMs),
+            );
+            yield* sendTelegramText(
+              projectId,
+              config.botToken,
+              chatId,
+              telegramStrangerReply(chatId),
+            );
+          }
+        }
         return;
       }
 
@@ -1461,9 +1580,46 @@ const makeTelegramConnector = Effect.gen(function* () {
       };
     });
 
+  const startPairing: ManagerTelegramServiceShape["startPairing"] = (projectId) =>
+    Effect.gen(function* () {
+      const pairing = newTelegramPairing(Date.now());
+      yield* Ref.update(pairingsRef, (map) => new Map(map).set(projectId, pairing));
+      const runtime = yield* getRuntime(projectId);
+      return {
+        code: pairing.code,
+        expiresAt: new Date(pairing.expiresAtMs).toISOString(),
+        botUsername: runtime.botUsername,
+      };
+    });
+
+  const sendTestMessage: ManagerTelegramServiceShape["sendTestMessage"] = (input) =>
+    Effect.gen(function* () {
+      const record = yield* connectorRepository
+        .get({ projectId: input.projectId, kind: "telegram" })
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      if (Option.isNone(record)) return [];
+      const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(record.value.config);
+      if (decoded._tag !== "Success") return [];
+      const config = decoded.value;
+      return yield* Effect.forEach(
+        config.allowedChatIds,
+        (chatId) =>
+          sendTelegramText(input.projectId, config.botToken, chatId, input.text).pipe(
+            Effect.map((result) => ({
+              chatId,
+              ok: result.ok,
+              error: result.ok ? null : (result.description ?? "Telegram refused the message."),
+            })),
+          ),
+        { concurrency: 2 },
+      );
+    });
+
   return {
     getRuntimeStatus,
     sendText,
+    startPairing,
+    sendTestMessage,
   } satisfies ManagerTelegramServiceShape;
 });
 
