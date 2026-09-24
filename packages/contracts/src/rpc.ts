@@ -192,6 +192,16 @@ import {
   ProviderSetupRpcError,
 } from "./providerSetup.ts";
 import {
+  CustomHarnessInstallStartInput,
+  CustomHarnessInstallStatus,
+  CustomHarnessInstallStatusInput,
+  CustomHarnessListResult,
+  CustomHarnessRpcError,
+  CustomHarnessSetSecretInput,
+  CustomHarnessTestInput,
+  CustomHarnessTestResult,
+} from "./customHarness.ts";
+import {
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
@@ -437,6 +447,13 @@ export const WS_METHODS = {
   providerAuthStart: "provider.auth.start",
   providerAuthStatus: "provider.auth.status",
   providerAuthSubmitCode: "provider.auth.submitCode",
+
+  // Custom (ACP) harnesses: list, test, secrets of file harnesses, install
+  customHarnessList: "customHarness.list",
+  customHarnessTest: "customHarness.test",
+  customHarnessSetSecret: "customHarness.setSecret",
+  customHarnessInstallStart: "customHarness.install.start",
+  customHarnessInstallStatus: "customHarness.install.status",
 
   // Streaming subscriptions
   subscribeFileChanges: "subscribeFileChanges",
@@ -1272,6 +1289,40 @@ export const WsProviderAuthSubmitCodeRpc = Rpc.make(WS_METHODS.providerAuthSubmi
   error: ProviderSetupRpcError,
 });
 
+/* ------------------------------------------------------------------ *
+ * Custom (ACP) harnesses
+ * ------------------------------------------------------------------ */
+
+export const WsCustomHarnessListRpc = Rpc.make(WS_METHODS.customHarnessList, {
+  payload: Schema.Struct({}),
+  success: CustomHarnessListResult,
+  error: CustomHarnessRpcError,
+});
+
+export const WsCustomHarnessTestRpc = Rpc.make(WS_METHODS.customHarnessTest, {
+  payload: CustomHarnessTestInput,
+  success: CustomHarnessTestResult,
+  error: CustomHarnessRpcError,
+});
+
+export const WsCustomHarnessSetSecretRpc = Rpc.make(WS_METHODS.customHarnessSetSecret, {
+  payload: CustomHarnessSetSecretInput,
+  success: Schema.Struct({}),
+  error: CustomHarnessRpcError,
+});
+
+export const WsCustomHarnessInstallStartRpc = Rpc.make(WS_METHODS.customHarnessInstallStart, {
+  payload: CustomHarnessInstallStartInput,
+  success: CustomHarnessInstallStatus,
+  error: CustomHarnessRpcError,
+});
+
+export const WsCustomHarnessInstallStatusRpc = Rpc.make(WS_METHODS.customHarnessInstallStatus, {
+  payload: CustomHarnessInstallStatusInput,
+  success: CustomHarnessInstallStatus,
+  error: CustomHarnessRpcError,
+});
+
 /**
  * Creating a box is billable, so the RPC returns immediately with a job id and
  * the client polls `createBoxStatus`. One RPC call = at most one launch call to
@@ -1733,6 +1784,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsProviderAuthStartRpc,
   WsProviderAuthStatusRpc,
   WsProviderAuthSubmitCodeRpc,
+  WsCustomHarnessListRpc,
+  WsCustomHarnessTestRpc,
+  WsCustomHarnessSetSecretRpc,
+  WsCustomHarnessInstallStartRpc,
+  WsCustomHarnessInstallStatusRpc,
   WsServerListPluginsRpc,
   WsServerSetPluginEnabledRpc,
   WsPluginsSendToThreadRpc,

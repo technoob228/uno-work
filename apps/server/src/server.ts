@@ -52,6 +52,8 @@ import { AppSdkServiceLive } from "./appSdk/AppSdkService.ts";
 import { InboxServiceLive } from "./inbox/InboxService.ts";
 import { ComputerResourcesServiceLive } from "./computerResources/ComputerResourcesService.ts";
 import { HarnessSetupLive } from "./provider/setup/HarnessSetupService.ts";
+import { CustomHarnessServiceLive } from "./provider/customHarness/CustomHarnessService.ts";
+import { CustomHarnessFilesLive } from "./provider/customHarness/CustomHarnessFiles.ts";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
 import { ProviderEventLoggersLive } from "./provider/Layers/ProviderEventLoggers.ts";
 import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
@@ -407,6 +409,8 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // Install / sign-in jobs for harness CLIs; reads settings and re-probes
       // through the provider registry, both provided further down this pipe.
       HarnessSetupLive,
+      // Settings → Harnesses RPCs (list / test / secrets / install).
+      CustomHarnessServiceLive,
     ),
   ),
   Layer.provideMerge(PersistenceLayerLive),
@@ -417,7 +421,13 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
   // `providerInstances` hydration merges `settings.providers.<kind>`
   // with explicit `providerInstances` entries on boot.
-  Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+  // `~/.uno/harnesses/*.json` (custom harnesses registered as files) is
+  // provided into the hydration, which merges them into the registry.
+  Layer.provideMerge(
+    ProviderInstanceRegistryHydrationLive.pipe(
+      Layer.provideMerge(CustomHarnessFilesLive.pipe(Layer.provide(ServerSecretStoreLive))),
+    ),
+  ),
   // Shared native/canonical NDJSON writers used by both the per-instance
   // drivers (native stream, written from inside each `<X>Adapter`) and
   // `ProviderService` (canonical stream, written after event normalization).

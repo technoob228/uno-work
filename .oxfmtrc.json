@@ -10,6 +10,7 @@
     "*.tsbuildinfo",
     "**/routeTree.gen.ts",
     "**/sdkBundle.generated.ts",
+    "**/harnessGuide.generated.ts",
     "apps/web/public/mockServiceWorker.js",
     "apps/web/src/lib/vendor/qrcodegen.ts",
     "*.icon/**"

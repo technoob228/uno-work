@@ -99,5 +99,15 @@ app.get("/photos/:id", async (req, res) => res.redirect(await uno.storage.url(ke
 
 Python: \`st = uno_app.Client(app_id="album").storage\` → \`st.upload(tmp_path, key)\`, \`st.put(key, data)\`, \`st.url(key)\`, \`st.get(key)\`, \`st.list("photos/")\`, \`st.delete(key)\`. Other languages: HTTP to \`$UNO_APP_API_URL\` with the app token — \`PUT /v1/storage/files/<key>\` (body + Content-Length), \`GET /v1/storage/files/<key>\`, \`DELETE …\`, \`GET /v1/storage/list?prefix=\`, \`POST /v1/storage/url {"key"}\`.
 
-Handle in the UI in plain words: 507 \`app_storage_full\` → "This app filled its cloud space — raise it in Uno Work → Settings → Apps"; 402 \`cloud_full\` → "Your Uno cloud storage is full"; 503 \`storage_not_connected\` → "Sign in to Uno in Uno Work". One file is at most 256 MB. When you tell the person the app is ready, say where the files live ("your photos are kept in your Uno cloud, Files → Cloud storage → apps → album").`;
+Handle in the UI in plain words: 507 \`app_storage_full\` → "This app filled its cloud space — raise it in Uno Work → Settings → Apps"; 402 \`cloud_full\` → "Your Uno cloud storage is full"; 503 \`storage_not_connected\` → "Sign in to Uno in Uno Work". One file is at most 256 MB. When you tell the person the app is ready, say where the files live ("your photos are kept in your Uno cloud, Files → Cloud storage → apps → album").
+
+${CUSTOM_HARNESS_POINTER}`;
 }
+
+/**
+ * How an agent adds another agent to Uno Work for the person (custom
+ * harness, docs/custom-harness.md): one JSON file, secrets through Settings.
+ */
+export const CUSTOM_HARNESS_POINTER = `## Adding another AI agent to Uno Work (custom harness)
+
+When the person wants to use their own agent or another agent CLI (Gemini CLI, opencode, Kimi Code, Goose, an agent they wrote…) inside Uno Work's chat: it must speak the Agent Client Protocol (ACP) over stdio. Read \`~/.uno/docs/custom-harness.md\` first (the full contract, with a minimal example agent in \`~/.uno/docs/examples/\`), install the tool if needed, then write \`~/.uno/harnesses/<id>.json\` (\`<id>\` = short lowercase name) — e.g. \`{"name": "Gemini CLI", "command": "gemini", "args": ["--acp"], "secretEnv": ["GEMINI_API_KEY"]}\`. It appears in the model picker within seconds. \`command\` is an absolute path or a program on PATH, never a shell line. Never write API keys into the file: list their names in \`secretEnv\` and ask the person to enter the values in Uno Work → Settings → Harnesses, then press Test connection there.`;

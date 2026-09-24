@@ -45,6 +45,15 @@ import type {
   ProviderInstallStatusInput,
 } from "./providerSetup.ts";
 import type {
+  CustomHarnessInstallStartInput,
+  CustomHarnessInstallStatus,
+  CustomHarnessInstallStatusInput,
+  CustomHarnessListResult,
+  CustomHarnessSetSecretInput,
+  CustomHarnessTestInput,
+  CustomHarnessTestResult,
+} from "./customHarness.ts";
+import type {
   BrowserBridgeStreamEvent,
   ServerConfig,
   ServerProviderUpdatedPayload,
@@ -862,5 +871,13 @@ export interface EnvironmentApi {
     authStart: (input: ProviderAuthStartInput) => Promise<ProviderAuthStartResult>;
     authStatus: (input: ProviderAuthStatusInput) => Promise<ProviderAuthJobStatus>;
     authSubmitCode: (input: ProviderAuthSubmitCodeInput) => Promise<ProviderAuthJobStatus>;
+  };
+  /** Custom (ACP) harnesses on this environment's machine. */
+  customHarness: {
+    list: () => Promise<CustomHarnessListResult>;
+    test: (input: CustomHarnessTestInput) => Promise<CustomHarnessTestResult>;
+    setSecret: (input: CustomHarnessSetSecretInput) => Promise<void>;
+    installStart: (input: CustomHarnessInstallStartInput) => Promise<CustomHarnessInstallStatus>;
+    installStatus: (input: CustomHarnessInstallStatusInput) => Promise<CustomHarnessInstallStatus>;
   };
 }

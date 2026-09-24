@@ -86,6 +86,7 @@ import { checkEmbed } from "./machineApps/embedCheck.ts";
 import { AppSdkService } from "./appSdk/AppSdkService.ts";
 import { InboxService } from "./inbox/InboxService.ts";
 import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
+import { CustomHarnessService } from "./provider/customHarness/CustomHarnessService.ts";
 import {
   GENERATED_INSTRUCTIONS_RELATIVE_PATH,
   WORKSPACE_INSTRUCTIONS_SCOPE,
@@ -258,6 +259,7 @@ const makeWsRpcLayer = (
       const inbox = yield* InboxService;
       const computerResources = yield* ComputerResourcesService;
       const harnessSetup = yield* HarnessSetup;
+      const customHarness = yield* CustomHarnessService;
       const serverCommandId = (tag: string) =>
         CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
 
@@ -2125,6 +2127,34 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.providerAuthSubmitCode, harnessSetup.authSubmitCode(input), {
             "rpc.aggregate": "provider-setup",
           }),
+        [WS_METHODS.customHarnessList]: (_input) =>
+          observeRpcEffect(WS_METHODS.customHarnessList, customHarness.list, {
+            "rpc.aggregate": "custom-harness",
+          }),
+        [WS_METHODS.customHarnessTest]: (input) =>
+          observeRpcEffect(WS_METHODS.customHarnessTest, customHarness.test(input), {
+            "rpc.aggregate": "custom-harness",
+          }),
+        [WS_METHODS.customHarnessSetSecret]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.customHarnessSetSecret,
+            customHarness.setSecret(input).pipe(Effect.as({})),
+            { "rpc.aggregate": "custom-harness" },
+          ),
+        [WS_METHODS.customHarnessInstallStart]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.customHarnessInstallStart,
+            customHarness.installStart(input),
+            {
+              "rpc.aggregate": "custom-harness",
+            },
+          ),
+        [WS_METHODS.customHarnessInstallStatus]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.customHarnessInstallStatus,
+            customHarness.installStatus(input),
+            { "rpc.aggregate": "custom-harness" },
+          ),
         [WS_METHODS.subscribeBrowserBridge]: (_input) =>
           observeRpcStreamEffect(
             WS_METHODS.subscribeBrowserBridge,

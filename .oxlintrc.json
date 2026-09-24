@@ -7,7 +7,8 @@
     "bun.lock",
     "*.tsbuildinfo",
     "**/routeTree.gen.ts",
-    "**/sdkBundle.generated.ts"
+    "**/sdkBundle.generated.ts",
+    "**/harnessGuide.generated.ts"
   ],
   "plugins": ["eslint", "oxc", "react", "unicorn", "typescript"],
   "categories": {

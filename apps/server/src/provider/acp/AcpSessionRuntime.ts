@@ -1,6 +1,18 @@
 import { randomUUID } from "node:crypto";
 
-import { Cause, Deferred, Effect, Exit, Layer, Queue, Ref, Scope, Context, Stream } from "effect";
+import {
+  Cause,
+  Context,
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Layer,
+  Queue,
+  Ref,
+  Scope,
+  Stream,
+} from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as EffectAcpClient from "effect-acp/client";
 import * as EffectAcpErrors from "effect-acp/errors";
@@ -24,6 +36,25 @@ export interface AcpSpawnInput {
   readonly args: ReadonlyArray<string>;
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
+  /**
+   * Run through a shell. Defaults to Windows-only (for `.cmd` shims);
+   * custom harnesses pass `false` — their argv is untrusted and must never be
+   * interpolated.
+   */
+  readonly shell?: boolean;
+  /**
+   * Merge the daemon's `process.env` under `env` (default). Custom harnesses
+   * pass `false`: their `env` is already the sanitized daemon environment
+   * (Uno secrets stripped, see ProviderInstanceEnvironment) and re-merging
+   * `process.env` would hand those secrets back.
+   */
+  readonly inheritProcessEnv?: boolean;
+  /**
+   * SIGKILL this long after SIGTERM when the session closes. Unset = wait
+   * for the process to exit (the historical behaviour). Custom harnesses set
+   * it: an agent that ignores SIGTERM must not hang stop / reaper / tests.
+   */
+  readonly forceKillAfterMs?: number;
 }
 
 export interface AcpSessionRuntimeOptions {
@@ -36,12 +67,29 @@ export interface AcpSessionRuntimeOptions {
    * (например Hermes); Cursor/Claude оставляют поле пустым.
    */
   readonly mcpServers?: EffectAcpSchema.NewSessionRequest["mcpServers"];
+  /**
+   * Drop `http`/`sse` MCP servers the agent did not advertise in
+   * `agentCapabilities.mcpCapabilities` (ACP: stdio is the only transport an
+   * agent must support). Used for custom harnesses, whose support is unknown.
+   */
+  readonly dropUnsupportedMcpTransports?: boolean;
   readonly clientCapabilities?: EffectAcpSchema.InitializeRequest["clientCapabilities"];
   readonly clientInfo: {
     readonly name: string;
     readonly version: string;
   };
-  readonly authMethodId: string;
+  /**
+   * ACP `authenticate` method id sent after `initialize`. Omitted/empty →
+   * no `authenticate` call (agents that need no auth, custom harnesses
+   * without a configured method).
+   */
+  readonly authMethodId?: string;
+  /**
+   * Receives the agent's stderr as it arrives. When set, stderr is drained
+   * (a chatty agent can't block on a full pipe) — custom harnesses keep a
+   * tail of it for diagnostics.
+   */
+  readonly onStderr?: (text: string) => void;
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
     readonly logIncoming?: boolean;
@@ -201,8 +249,15 @@ const makeAcpSessionRuntime = (
       .spawn(
         ChildProcess.make(options.spawn.command, [...options.spawn.args], {
           ...(options.spawn.cwd ? { cwd: options.spawn.cwd } : {}),
-          ...(options.spawn.env ? { env: { ...process.env, ...options.spawn.env } } : {}),
-          shell: process.platform === "win32",
+          ...(options.spawn.env
+            ? {
+                env:
+                  options.spawn.inheritProcessEnv === false
+                    ? options.spawn.env
+                    : { ...process.env, ...options.spawn.env },
+              }
+            : {}),
+          shell: options.spawn.shell ?? process.platform === "win32",
         }),
       )
       .pipe(
@@ -215,6 +270,38 @@ const makeAcpSessionRuntime = (
             }),
         ),
       );
+
+    const forceKillAfterMs = options.spawn.forceKillAfterMs;
+    if (forceKillAfterMs !== undefined) {
+      // Added after the spawn, so it runs first on close. The spawner's own
+      // release awaits the exit after SIGTERM with no deadline (its
+      // forceKillAfter only bounds sending the signal), so an agent that
+      // ignores SIGTERM would hang the session's scope forever.
+      yield* Scope.addFinalizer(
+        runtimeScope,
+        child.kill({ killSignal: "SIGTERM" }).pipe(
+          Effect.timeoutOption(Duration.millis(forceKillAfterMs)),
+          Effect.flatMap((exited) =>
+            exited._tag === "Some"
+              ? Effect.void
+              : child
+                  .kill({ killSignal: "SIGKILL" })
+                  .pipe(Effect.timeoutOption(Duration.millis(forceKillAfterMs))),
+          ),
+          Effect.ignore,
+        ),
+      );
+    }
+
+    if (options.onStderr) {
+      const onStderr = options.onStderr;
+      yield* child.stderr.pipe(
+        Stream.decodeText(),
+        Stream.runForEach((text) => Effect.sync(() => onStderr(text))),
+        Effect.ignore,
+        Effect.forkIn(runtimeScope),
+      );
+    }
 
     const acpContext = yield* Layer.build(
       EffectAcpClient.layerChildProcess(child, {
@@ -379,22 +466,31 @@ const makeAcpSessionRuntime = (
         acp.agent.initialize(initializePayload),
       );
 
-      const authenticatePayload = {
-        methodId: options.authMethodId,
-      } satisfies EffectAcpSchema.AuthenticateRequest;
+      const authMethodId = options.authMethodId?.trim();
+      if (authMethodId) {
+        const authenticatePayload = {
+          methodId: authMethodId,
+        } satisfies EffectAcpSchema.AuthenticateRequest;
 
-      yield* runLoggedRequest(
-        "authenticate",
-        authenticatePayload,
-        acp.agent.authenticate(authenticatePayload),
-      );
+        yield* runLoggedRequest(
+          "authenticate",
+          authenticatePayload,
+          acp.agent.authenticate(authenticatePayload),
+        );
+      }
 
       let sessionId: string;
       let sessionSetupResult:
         | EffectAcpSchema.LoadSessionResponse
         | EffectAcpSchema.NewSessionResponse
         | EffectAcpSchema.ResumeSessionResponse;
-      const mcpServers = options.mcpServers ?? [];
+      const mcpCapabilities = initializeResult.agentCapabilities?.mcpCapabilities;
+      const mcpServers = (options.mcpServers ?? []).filter((server) => {
+        if (!options.dropUnsupportedMcpTransports || !("type" in server)) return true;
+        if (server.type === "http") return mcpCapabilities?.http === true;
+        if (server.type === "sse") return mcpCapabilities?.sse === true;
+        return true;
+      });
       if (options.resumeSessionId) {
         const loadPayload = {
           sessionId: options.resumeSessionId,
