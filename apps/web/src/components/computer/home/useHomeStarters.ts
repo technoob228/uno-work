@@ -13,9 +13,11 @@ import { selectProjectsAcrossEnvironments, useStore } from "../../../store";
 import { filesListQueryOptions } from "../../files/filesApi";
 import { accountReachable, sitesQuery } from "../../myuno/myUnoQueries";
 import { programRemoval, type ProgramTile } from "../programModel";
+import { useInboxEntries } from "../../../inbox/inboxStore";
 import {
-  isHomeVisibleThread,
-  pickContinueThreads,
+  inboxSnoozedThreadIds,
+  isContinueCandidate,
+  pickContinueItems,
   recentHomeEntries,
   threadActivityAt,
   type HomeThread,
@@ -33,12 +35,17 @@ export function useHomeStarters(input: {
   const { environmentId, threads, now, tiles } = input;
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const files = useQuery(filesListQueryOptions(environmentId, null, false)).data?.entries;
+  const inbox = useInboxEntries();
   const sites = useQuery({ ...sitesQuery(), enabled: accountReachable() }).data?.sites;
 
   return useMemo(() => {
+    const snoozedInInbox = inboxSnoozedThreadIds(inbox, now);
     const chats: StarterChat[] = threads
+      // Same bar as Continue: settled or Inbox-snoozed chats are never suggested.
       .filter(
-        (thread) => thread.environmentId === environmentId && isHomeVisibleThread(thread, now),
+        (thread) =>
+          thread.environmentId === environmentId &&
+          isContinueCandidate(thread, now, snoozedInInbox),
       )
       .map((thread) => {
         const project = projects.find(
@@ -60,9 +67,30 @@ export function useHomeStarters(input: {
     }
     // Exactly the cards Continue shows (same input, same pick), so a starter
     // never repeats a card right below the composer.
-    const continueTitles = pickContinueThreads(threads, { now }).map((thread) => thread.title);
+    const continueCards = pickContinueItems(threads, inbox, { now });
+    const continueTitles = continueCards.flatMap((card) =>
+      card.kind === "chat" ? [card.thread.title] : [],
+    );
+    // Notifications already on a Continue card are suggested too: the card
+    // opens the app, the chip asks Uno to deal with it.
+    const notifications = inbox
+      .filter(
+        (item) =>
+          item.kind === "app" &&
+          item.environmentId === environmentId &&
+          item.readAt === null &&
+          !(item.snoozedUntil && Date.parse(item.snoozedUntil) > now),
+      )
+      .slice(0, 3)
+      .map((item) => ({
+        id: item.id,
+        source: item.source.name,
+        title: item.title,
+        body: item.body,
+      }));
     return homeStarters({
       continueTitles,
+      notifications,
       chats,
       apps,
       files: recentHomeEntries(files ?? [], 6).map((entry) => ({
@@ -72,5 +100,5 @@ export function useHomeStarters(input: {
       })),
       sites: (sites ?? []).map((site) => ({ name: site.customDomain ?? site.slug })),
     });
-  }, [environmentId, files, now, projects, sites, threads, tiles]);
+  }, [environmentId, files, inbox, now, projects, sites, threads, tiles]);
 }

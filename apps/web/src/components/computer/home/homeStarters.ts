@@ -38,11 +38,21 @@ export interface StarterSite {
   readonly name: string;
 }
 
+/** An unread app notification from the Inbox. */
+export interface StarterNotification {
+  readonly id: string;
+  /** The app's name. */
+  readonly source: string;
+  readonly title: string;
+  readonly body: string | null;
+}
+
 export interface StarterContext {
   readonly chats: ReadonlyArray<StarterChat>;
   readonly apps: ReadonlyArray<StarterApp>;
   readonly files: ReadonlyArray<StarterFile>;
   readonly sites: ReadonlyArray<StarterSite>;
+  readonly notifications?: ReadonlyArray<StarterNotification>;
   /**
    * Titles of the chats Home already shows under "Continue": a starter for
    * them would repeat the card right below, so they are skipped.
@@ -50,7 +60,7 @@ export interface StarterContext {
   readonly continueTitles?: ReadonlyArray<string>;
 }
 
-export type StarterSource = "chat" | "app" | "file" | "site" | "generic";
+export type StarterSource = "chat" | "notification" | "app" | "file" | "site" | "generic";
 
 export interface HomeStarter {
   readonly id: string;
@@ -140,6 +150,30 @@ function chatStarters(
     });
   }
   return out;
+}
+
+const REPLY_WORDS = /\b(comment(ed)?|replied|reply|message|asked|mentioned|question)\b/i;
+
+function notificationStarters(items: ReadonlyArray<StarterNotification>): HomeStarter[] {
+  return items
+    .filter((item) => item.title.trim())
+    .map((item) => {
+      const title = item.title.trim();
+      const body = item.body?.trim() ? ` ${item.body.trim()}` : "";
+      return REPLY_WORDS.test(`${title} ${item.body ?? ""}`)
+        ? {
+            id: `notification:${item.id}`,
+            label: `Reply to “${shortName(title, 28)}”`,
+            prompt: `${item.source} says: “${title}”${body} Help me reply to it.`,
+            source: "notification" as const,
+          }
+        : {
+            id: `notification:${item.id}`,
+            label: `Look at ${shortName(item.source, 20)} alert`,
+            prompt: `${item.source} on this computer says: “${title}”${body} Look into it and tell me what to do.`,
+            source: "notification" as const,
+          };
+    });
 }
 
 function appStarters(apps: ReadonlyArray<StarterApp>): HomeStarter[] {
@@ -243,6 +277,7 @@ export function homeStarters(
 ): HomeStarter[] {
   const pools = [
     chatStarters(context.chats, context.continueTitles ?? []),
+    notificationStarters(context.notifications ?? []),
     appStarters(context.apps),
     fileStarters(context.files),
     siteStarters(context.sites),

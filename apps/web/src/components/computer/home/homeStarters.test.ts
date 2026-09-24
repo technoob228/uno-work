@@ -148,6 +148,25 @@ describe("homeStarters", () => {
   });
 });
 
+describe("notification starters", () => {
+  it("offers a reply for comments and a look for other alerts, after a chat", () => {
+    const starters = homeStarters({
+      ...EMPTY,
+      chats: [{ title: "Old landing", activityAt: 1, folder: null }],
+      notifications: [
+        { id: "n1", source: "Office", title: "Boris commented on report.docx", body: null },
+        { id: "n2", source: "Shop", title: "Payment failed for order 42", body: "Card declined." },
+      ],
+    });
+    expect(starters.map((s) => s.label)).toEqual([
+      "Next step for “Old landing”",
+      "Reply to “Boris commented on…”",
+      "Look at Shop alert",
+    ]);
+    expect(starters[2]!.prompt).toContain("Card declined.");
+  });
+});
+
 describe("shortName", () => {
   it("keeps short names and cuts long ones at a word", () => {
     expect(shortName("Notes")).toBe("Notes");

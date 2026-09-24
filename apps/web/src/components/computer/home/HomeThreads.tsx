@@ -10,6 +10,7 @@ import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime";
 import type { ProviderApprovalDecision } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
+  CheckIcon,
   ChevronRightIcon,
   MessageCircleQuestionIcon,
   MessagesSquareIcon,
@@ -27,14 +28,18 @@ import { createThreadSelectorByRef } from "../../../storeSelectors";
 import { useMinuteClock } from "../../../hooks/useMinuteClock";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../../store";
 import { buildThreadRouteParams } from "../../../threadRoutes";
+import { markChatDone, markInboxItemDone } from "../../../inbox/inboxDone";
+import { useInboxEntries } from "../../../inbox/inboxStore";
+import { useOpenInboxItem } from "../../../inbox/useOpenInboxItem";
 import { useUiStateStore } from "../../../uiStateStore";
+import { ItemIcon } from "../../inbox/InboxPanel";
 import { Button } from "../../ui/button";
 import { toastManager } from "../../ui/toast";
 import {
   approvalQuestion,
   attentionThreads,
   homeThreadStatus,
-  pickContinueThreads,
+  pickContinueItems,
   recentThreads,
   shortAgo,
   threadActivityAt,
@@ -114,39 +119,126 @@ function threadLine(thread: HomeThread): string {
   return "";
 }
 
-/** The three chats most worth picking up. */
+function DoneButton({ onDone, label }: { onDone: () => Promise<void>; label: string }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={busy}
+      data-testid="continue-done"
+      onClick={(event) => {
+        event.stopPropagation();
+        setBusy(true);
+        onDone()
+          .catch((error: unknown) =>
+            toastManager.add({
+              type: "error",
+              title: "Couldn't mark it done",
+              description: error instanceof Error ? error.message : String(error),
+            }),
+          )
+          .finally(() => setBusy(false));
+      }}
+      className="-my-1 -mr-1.5 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover/continue:opacity-100 hover:bg-accent hover:text-foreground focus-visible:opacity-100 max-md:opacity-100"
+    >
+      <CheckIcon className="size-3.5" />
+    </button>
+  );
+}
+
+const CARD_CLASS =
+  "group/continue flex min-w-0 cursor-pointer flex-col gap-1.5 rounded-2xl border border-border/70 bg-card/40 p-3.5 text-left transition-colors hover:bg-accent/40";
+
+/**
+ * What needs the person or is worth picking up: chats and unread app
+ * notifications (the same items as the Inbox), most urgent first. Every card
+ * has Done — for a chat it settles it, for a notification it dismisses it —
+ * so Continue, the sidebar and the Inbox stay in agreement.
+ */
 export function ContinueCards({ threads, now }: { threads: HomeThread[]; now: number }) {
   const open = useOpenThread();
-  const cards = pickContinueThreads(threads, { now });
+  const openItem = useOpenInboxItem();
+  const inbox = useInboxEntries();
+  const cards = pickContinueItems(threads, inbox, { now });
   if (cards.length === 0) {
     return (
       <p className="rounded-2xl border border-dashed border-border/80 px-4 py-3 text-sm text-muted-foreground">
-        No chats yet. Type a task above and Uno starts on it.
+        Nothing to pick up. Type a task above and Uno starts on it.
       </p>
     );
   }
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" data-testid="home-continue">
-      {cards.map((thread) => {
+    <div
+      className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
+      data-testid="home-continue"
+    >
+      {cards.map((card) => {
+        if (card.kind === "notification") {
+          const item = card.item;
+          return (
+            <div
+              key={card.key}
+              role="button"
+              tabIndex={0}
+              data-testid="continue-notification"
+              onClick={() => void openItem(item)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void openItem(item);
+              }}
+              className={CARD_CLASS}
+            >
+              <div className="flex min-h-4 items-center gap-2">
+                <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-primary">
+                  <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-hidden />
+                  <span className="truncate">{item.source.name}</span>
+                </span>
+                <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
+                  {shortAgo(Date.parse(item.updatedAt), now)}
+                </span>
+                <DoneButton label="Done" onDone={() => markInboxItemDone(item)} />
+              </div>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="[&>span]:size-5 [&>span]:rounded-md [&>span]:text-[12px] [&_svg]:size-3">
+                  <ItemIcon item={item} />
+                </span>
+                <span className="truncate text-sm font-medium">{item.title}</span>
+              </div>
+              {item.body ? (
+                <span className="line-clamp-2 text-xs text-muted-foreground">{item.body}</span>
+              ) : null}
+            </div>
+          );
+        }
+        const thread = card.thread;
         const line = threadLine(thread);
         return (
-          <button
-            key={`${thread.environmentId}:${thread.id}`}
-            type="button"
+          <div
+            key={card.key}
+            role="button"
+            tabIndex={0}
             onClick={() => open(thread)}
-            className="flex min-w-0 flex-col gap-1.5 rounded-2xl border border-border/70 bg-card/40 p-3.5 text-left transition-colors hover:bg-accent/40"
+            onKeyDown={(event) => {
+              if (event.key === "Enter") open(thread);
+            }}
+            className={CARD_CLASS}
           >
             <div className="flex min-h-4 items-center gap-2">
               <StatusLabel thread={thread} />
               <span className="ml-auto text-[11px] text-muted-foreground">
                 {shortAgo(threadActivityAt(thread), now)}
               </span>
+              <DoneButton
+                label="Done: settle this chat"
+                onDone={() => markChatDone(thread.environmentId, thread.id)}
+              />
             </div>
             <div className="truncate text-sm font-medium">{thread.title}</div>
             {line ? (
               <span className="line-clamp-2 text-xs text-muted-foreground">{line}</span>
             ) : null}
-          </button>
+          </div>
         );
       })}
     </div>
