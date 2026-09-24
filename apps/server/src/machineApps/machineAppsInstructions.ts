@@ -35,7 +35,7 @@ When you create or run an app or long-running service on this machine, write \`$
 
 - \`name\` — what the person sees. \`icon\` — one emoji (or a png/svg file placed in the same folder, e.g. \`"notes.png"\`).
 - \`port\` — the TCP port the app listens on. Make web apps listen on \`0.0.0.0\` (not only 127.0.0.1), otherwise they can't be shown on the internet later.
-- \`command\` + \`cwd\` — how to start it (run with \`bash -lc\` inside the home folder, \`PORT\` is set). With a command the app gets a Start button and is started again automatically when the computer boots (\`"autostart": false\` turns that off). Its output goes to \`${dir}/<id>.log\`.
+- \`command\` + \`cwd\` — how to start it (run with \`bash -lc\` inside the home folder, \`PORT\` is set). With a command the app gets a Start button; Uno starts it by itself within ~20 seconds of the manifest appearing and again whenever the computer boots (\`"autostart": false\` turns that off), so don't also start a second copy after writing the manifest. Its output goes to \`${dir}/<id>.log\`.
 - Optional: \`"path": "/admin"\` — what to open on that port; \`"url"\` — an https address the app already has elsewhere.
 - Start the app (e.g. \`nohup … &\` or via its command) so it is running when you finish, then tell the person it is on their home screen ("This computer").
 - Never put secrets in the manifest. Don't publish ports to the internet yourself — the person does that with the "Show on the internet" button.

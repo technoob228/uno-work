@@ -205,6 +205,30 @@ export interface ScannedApp extends Omit<
   readonly manifest: AppManifest | null;
 }
 
+/**
+ * Registered apps that should start on their own, from one scan.
+ *
+ * `seen` holds the manifest ids already looked at: every app present at the
+ * daemon's start (autostart on boot) and every app registered since (autostart
+ * as soon as it appears in ~/.uno/apps). An app is picked once — the first time
+ * it is seen — so one the person stopped later is left stopped.
+ */
+export function pickAutostartApps(
+  apps: ReadonlyArray<ScannedApp>,
+  seen: Set<string>,
+): ScannedApp[] {
+  const picked: ScannedApp[] = [];
+  for (const app of apps) {
+    if (app.source !== "manifest" || !app.manifest) continue;
+    if (seen.has(app.manifest.id)) continue;
+    seen.add(app.manifest.id);
+    if (!app.manifest.autostart || !app.manifest.command) continue;
+    if (app.manifest.port === null || app.status !== "stopped") continue;
+    picked.push(app);
+  }
+  return picked;
+}
+
 /** The public shape needs these; everything else of a scanned app is published as is. */
 function withDefaults(
   app: Omit<ScannedApp, "canRemove" | "composeProject"> &

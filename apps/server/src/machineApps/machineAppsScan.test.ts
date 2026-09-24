@@ -4,9 +4,11 @@ import type { AppManifest } from "./appManifest.ts";
 import {
   isUnoContainer,
   parsePortForwards,
+  pickAutostartApps,
   publicationFor,
   scanMachineApps,
   type MachineProbe,
+  type ScannedApp,
 } from "./machineAppsScan.ts";
 
 const SS = `LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=612,fd=3))
@@ -380,5 +382,50 @@ describe("isUnoContainer", () => {
     expect(isUnoContainer({ name: "x", labels: { "uno.managed": "1" } })).toBe(true);
     expect(isUnoContainer({ name: "my-bot", labels: { "uno.app.name": "My bot" } })).toBe(false);
     expect(isUnoContainer({ name: "unobtainium", labels: {} })).toBe(false);
+  });
+});
+
+describe("pickAutostartApps", () => {
+  const app = (manifest: Partial<AppManifest>, status: ScannedApp["status"] = "stopped") =>
+    ({
+      id: `manifest:${manifest.id ?? MANIFEST.id}`,
+      source: "manifest",
+      status,
+      manifest: { ...MANIFEST, ...manifest },
+    }) as unknown as ScannedApp;
+
+  it("starts a registered app the first time it is seen — at boot or registered later", () => {
+    const seen = new Set<string>();
+    // Daemon start: Notes is registered and stopped → start it.
+    expect(pickAutostartApps([app({ id: "notes" })], seen).map((a) => a.id)).toEqual([
+      "manifest:notes",
+    ]);
+    // Later the agent writes a manifest for Bookings → start it on the next pass,
+    // without starting Notes again.
+    expect(
+      pickAutostartApps([app({ id: "notes" }), app({ id: "bookings", port: 3100 })], seen).map(
+        (a) => a.id,
+      ),
+    ).toEqual(["manifest:bookings"]);
+  });
+
+  it("leaves an app the person stopped alone", () => {
+    const seen = new Set<string>();
+    pickAutostartApps([app({ id: "notes" }, "running")], seen);
+    expect(pickAutostartApps([app({ id: "notes" }, "stopped")], seen)).toEqual([]);
+  });
+
+  it("skips apps that opt out or have nothing to start", () => {
+    const seen = new Set<string>();
+    expect(
+      pickAutostartApps(
+        [
+          app({ id: "off", autostart: false }),
+          app({ id: "nocmd", command: null }),
+          app({ id: "noport", port: null }),
+        ],
+        seen,
+      ),
+    ).toEqual([]);
   });
 });

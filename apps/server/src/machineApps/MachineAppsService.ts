@@ -54,6 +54,7 @@ import { displayManifestDir, resolveManifestDir } from "./manifestDir.ts";
 import {
   RESERVED_FORWARD_PORTS,
   parsePortForwards,
+  pickAutostartApps,
   publicationFor,
   readSystemd,
   scanMachineApps,
@@ -665,13 +666,15 @@ export const makeMachineAppsService = (
     /**
      * Apps registered with a command and a port come back when the computer
      * does (a cold boot, a wake from an archived snapshot): once, at start.
+     * An app registered later (the agent just wrote its manifest) starts on the
+     * next background pass, without anyone pressing Start. Each app is started
+     * on its own at most once per daemon run — see pickAutostartApps.
      */
+    const autostartSeen = new Set<string>();
     const autostart = Effect.promise(async () => {
       const scanned = await scan(true);
-      for (const app of scanned.apps) {
-        if (app.source !== "manifest" || !app.manifest?.autostart || !app.manifest.command)
-          continue;
-        if (app.manifest.port === null || app.status !== "stopped") continue;
+      for (const app of pickAutostartApps(scanned.apps, autostartSeen)) {
+        if (!app.manifest) continue;
         try {
           startManifestCommand(app.manifest, manifestDir, home);
         } catch {
@@ -685,12 +688,12 @@ export const makeMachineAppsService = (
         Effect.sleep(AUTOSTART_DELAY).pipe(
           Effect.andThen(autostart),
           Effect.catchCause(() => Effect.void),
-        ),
-      );
-      yield* Effect.forkScoped(
-        Effect.promise(() => scan(true)).pipe(
-          Effect.catchCause(() => Effect.void),
-          Effect.repeat(Schedule.spaced(BACKGROUND_EVERY)),
+          Effect.andThen(
+            autostart.pipe(
+              Effect.catchCause(() => Effect.void),
+              Effect.repeat(Schedule.spaced(BACKGROUND_EVERY)),
+            ),
+          ),
         ),
       );
     }
