@@ -1,7 +1,8 @@
 /**
  * One program, up close: what it is, whether it runs, where it answers, and
  * the few things a person does with it — Open, Show on the internet / Hide,
- * Start / Stop, Remove. "Show on the internet" is the only way a port gets
+ * Start / Stop, Remove (or, for a program the computer found by itself, Hide
+ * from the home screen). "Show on the internet" is the only way a port gets
  * published, and it says plainly what it does before it does it. App Store
  * apps also carry how to sign in and, when they have their own AI key, what it
  * spent and its limit.
@@ -21,6 +22,7 @@ import {
   ExternalLinkIcon,
   EyeOffIcon,
   GlobeIcon,
+  LayoutGridIcon,
   KeyRoundIcon,
   SparklesIcon,
   Trash2Icon,
@@ -47,6 +49,7 @@ import { displayAddress } from "./computerFormat";
 import { ProgramIcon } from "./ComputerPrograms";
 import { CopyButton } from "./computerUi";
 import {
+  canHideProgram,
   programRemoval,
   type ProgramRemoval,
   type ProgramTile,
@@ -451,6 +454,7 @@ export interface ProgramRemoveControls {
     removal: ProgramRemoval,
     deleteData: boolean,
     deleteCloudFiles: boolean,
+    deleteCode: boolean,
   ) => void;
   /** The app's folder in the account's cloud, when Remove may also delete it. */
   readonly cloudFiles?: (removal: ProgramRemoval) => RemovalCloudFiles | null;
@@ -706,8 +710,44 @@ export function ProgramDialog({
                   ) : null}
                 </div>
               ) : null}
+              {!removal && canHideProgram(app) && app ? (
+                <div className="mt-1 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    Uno found it running here. Hiding takes it off the home screen only — it keeps
+                    running, and you can show it again.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => onAction(app.id, "hide")}
+                  >
+                    {pendingAction === "hide" ? (
+                      <Spinner className="size-3.5" />
+                    ) : (
+                      <LayoutGridIcon />
+                    )}
+                    Hide from Home
+                  </Button>
+                </div>
+              ) : null}
               {removal ? (
-                <div className="mt-1 flex justify-end border-t border-border/60 pt-3">
+                <div className="mt-1 flex justify-end gap-2 border-t border-border/60 pt-3">
+                  {canHideProgram(app) && app ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => onAction(app.id, "hide")}
+                    >
+                      {pendingAction === "hide" ? (
+                        <Spinner className="size-3.5" />
+                      ) : (
+                        <LayoutGridIcon />
+                      )}
+                      Hide from Home
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
                     variant="destructive-outline"
@@ -740,8 +780,8 @@ export function ProgramDialog({
         pending={remove.pending}
         error={remove.error}
         onOpenChange={setConfirmRemove}
-        onConfirm={(deleteData, deleteCloudFiles) => {
-          if (removal) remove.onRemove(removal, deleteData, deleteCloudFiles);
+        onConfirm={(deleteData, deleteCloudFiles, deleteCode) => {
+          if (removal) remove.onRemove(removal, deleteData, deleteCloudFiles, deleteCode);
         }}
       />
     </Dialog>

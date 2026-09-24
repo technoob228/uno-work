@@ -13,7 +13,7 @@ import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { UnoGatewayKey, type UnoGatewayKeyShape, UnoGatewayKeyTest } from "../unoGatewayKey.ts";
 import { makeAppApiHandler } from "./appApiHttp.ts";
-import { makeAppSdkService } from "./AppSdkService.ts";
+import { cloudFoldersToDelete, makeAppSdkService } from "./AppSdkService.ts";
 
 let root: string;
 let home: string;
@@ -452,3 +452,14 @@ async function callHandler(
   await done;
   return { status, body: out };
 }
+
+describe("cloudFoldersToDelete", () => {
+  it("empties the folder in use and this computer's own, never another computer's", () => {
+    expect(cloudFoldersToDelete("album", "account", "computer-7")).toEqual([
+      "album/",
+      "album@computer-7/",
+    ]);
+    // "Only this computer": the shared folder may be other computers' — it stays.
+    expect(cloudFoldersToDelete("album", "computer", "computer-7")).toEqual(["album@computer-7/"]);
+  });
+});

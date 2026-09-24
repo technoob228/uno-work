@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildProgramTiles,
+  canHideProgram,
+  hiddenMachineApps,
   isBrowserOnMachine,
   machineAppCaption,
   machineAppOpenUrl,
@@ -347,5 +349,79 @@ describe("Remove", () => {
         withStorage(10, "account"),
       ]),
     ).toBeNull();
+  });
+});
+
+describe("apps built on this computer, and hiding found programs", () => {
+  const notes = app({
+    id: "manifest:notes",
+    source: "manifest",
+    name: "Notes",
+    canRemove: true,
+    codeDir: "~/projects/notes",
+    codeDirKeepReason: null,
+  });
+
+  it("an app registered in ~/.uno/apps gets Remove, with its code folder", () => {
+    const tiles = buildProgramTiles({
+      machineApps: [notes],
+      storeApps: [],
+      installs: [],
+      browserOnMachine: false,
+      computerOn: true,
+    });
+    expect(programRemoval(tiles[0]!)).toEqual({
+      kind: "registered",
+      appId: "manifest:notes",
+      manifestId: "notes",
+      codeDir: "~/projects/notes",
+      codeDirKeepReason: null,
+    });
+  });
+
+  it("an App Store app's own manifest stays the store's: no second Remove", () => {
+    const tiles = buildProgramTiles({
+      machineApps: [app({ ...notes, id: "manifest:uptime-kuma", name: "Kuma", port: 3001 })],
+      storeApps: [{ ...store, removable: true }],
+      installs: [],
+      browserOnMachine: false,
+      computerOn: true,
+    });
+    expect(tiles.map((t) => programRemoval(t)?.kind)).toEqual(["store"]);
+  });
+
+  it("offers its cloud folder under its manifest id", () => {
+    const removal = programRemoval({ machineApp: notes, storeApp: null } as never);
+    const apps = [
+      {
+        id: "notes",
+        storage: { usedBytes: 2048, scope: "computer" },
+      } as unknown as AppAiApp,
+    ];
+    expect(removalCloudFiles(removal, apps)).toEqual({
+      appId: "notes",
+      usedBytes: 2048,
+      scope: "computer",
+    });
+  });
+
+  it("hidden found programs leave Home and are listed to show again", () => {
+    const hidden = app({ id: "port:8080", name: "Admin", port: 8080, hidden: true });
+    const shown = app({ id: "port:9090", name: "Grafana", port: 9090 });
+    const tiles = buildProgramTiles({
+      machineApps: [hidden, shown, notes],
+      storeApps: [],
+      installs: [],
+      browserOnMachine: false,
+      computerOn: true,
+    });
+    expect(tiles.map((t) => t.key)).toEqual(["manifest:notes", "port:9090"]);
+    expect(hiddenMachineApps([hidden, shown, notes]).map((a) => a.id)).toEqual(["port:8080"]);
+    // Found programs hide; a registered app is removed instead; hidden already, no second Hide.
+    expect(canHideProgram(shown)).toBe(true);
+    expect(canHideProgram(app({ id: "systemd:bot.service", source: "systemd" }))).toBe(true);
+    expect(canHideProgram(notes)).toBe(false);
+    expect(canHideProgram(hidden)).toBe(false);
+    expect(canHideProgram(null)).toBe(false);
   });
 });

@@ -8,8 +8,11 @@
  * A click opens the program: its address in a new tab when it has one the
  * browser can reach, otherwise its details, where "Show on the internet",
  * Start and Stop live.
+ *
+ * Found programs the person hid ("Hide from Home") are listed under the grid,
+ * each with "Show on Home" to put it back.
  */
-import type { UnoMachineApps } from "@t3tools/contracts";
+import type { UnoMachineApp, UnoMachineApps } from "@t3tools/contracts";
 import {
   FolderIcon,
   FolderOpenIcon,
@@ -213,6 +216,9 @@ export function ComputerPrograms({
   loading,
   onOpenTile,
   onTileDetails,
+  hidden = [],
+  unhidingId = null,
+  onUnhide,
 }: {
   builtIns: BuiltInPrograms;
   /** False when looking at another cloud computer: the launchers act on this machine. */
@@ -222,6 +228,10 @@ export function ComputerPrograms({
   loading: boolean;
   onOpenTile: (tile: ProgramTile) => void;
   onTileDetails: (tile: ProgramTile) => void;
+  /** Found programs hidden from the home screen. */
+  hidden?: ReadonlyArray<UnoMachineApp>;
+  unhidingId?: string | null;
+  onUnhide?: (appId: string) => void;
 }) {
   return (
     <section className="flex flex-col gap-3" aria-labelledby="programs-heading">
@@ -312,7 +322,13 @@ export function ComputerPrograms({
           : null}
       </ul>
 
-      <ProgramsFootnote machineApps={machineApps} empty={tiles.length === 0} />
+      <ProgramsFootnote
+        machineApps={machineApps}
+        empty={tiles.length === 0}
+        hidden={hidden}
+        unhidingId={unhidingId}
+        onUnhide={onUnhide}
+      />
     </section>
   );
 }
@@ -320,9 +336,15 @@ export function ComputerPrograms({
 function ProgramsFootnote({
   machineApps,
   empty,
+  hidden,
+  unhidingId,
+  onUnhide,
 }: {
   machineApps: UnoMachineApps | undefined;
   empty: boolean;
+  hidden: ReadonlyArray<UnoMachineApp>;
+  unhidingId: string | null;
+  onUnhide: ((appId: string) => void) | undefined;
 }) {
   if (!machineApps) return null;
   return (
@@ -330,7 +352,7 @@ function ProgramsFootnote({
       <p className="flex items-start gap-2">
         <LayoutGridIcon className="mt-0.5 size-3.5 shrink-0 text-primary" />
         <span>
-          {empty
+          {empty && hidden.length === 0
             ? "Nothing else runs here yet. "
             : "Everything that runs on this computer shows up here by itself — a VPN, a bot, a site. "}
           Ask Uno to make you an app and it appears here too; apps can also be registered in{" "}
@@ -340,6 +362,38 @@ function ProgramsFootnote({
           .
         </span>
       </p>
+      {hidden.length > 0 && onUnhide ? (
+        <details className="pl-5.5">
+          <summary className="cursor-pointer select-none">
+            {hidden.length === 1
+              ? "1 program is hidden from Home"
+              : `${hidden.length} programs are hidden from Home`}
+          </summary>
+          <ul className="mt-1.5 flex flex-col gap-1" aria-label="Hidden programs">
+            {hidden.map((app) => (
+              <li key={app.id} className="flex items-center gap-2">
+                <ProgramIcon
+                  name={app.name}
+                  icon={app.icon}
+                  iconImage={app.iconImage}
+                  className="size-6 rounded-md text-sm shadow-none"
+                />
+                <span className="min-w-0 flex-1 truncate text-foreground">{app.name}</span>
+                <span className="truncate text-[11px]">{app.detail}</span>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={unhidingId !== null}
+                  onClick={() => onUnhide(app.id)}
+                >
+                  {unhidingId === app.id ? <Spinner className="size-3" /> : null}
+                  Show on Home
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
       {machineApps.warnings.length > 0 ? (
         <details className="pl-5.5">
           <summary className="cursor-pointer select-none">
