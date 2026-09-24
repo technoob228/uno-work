@@ -22,7 +22,7 @@ import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import { useComposerDraftStore } from "../../composerDraftStore";
+import { useComposerDraftStore, type DraftId } from "../../composerDraftStore";
 import { useCommandPaletteStore } from "../../commandPaletteStore";
 import { ensureEnvironmentApi } from "../../environmentApi";
 import { useEnvironmentProviders } from "../../environments/settings/serverSettings";
@@ -35,6 +35,7 @@ import { pickUsableDefaultModelSelection } from "../../providerModels";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import { useTerminalStateStore } from "../../terminalStateStore";
 import { resolveThreadRouteTarget } from "../../threadRoutes";
+import { usePendingSendStore } from "./pendingSendStore";
 
 export function useHomeLaunchers(environmentId: EnvironmentId | null) {
   const router = useRouter();
@@ -141,29 +142,60 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
   }, [chatInFolder, context, environmentId, openTerminalIn]);
 
   /**
+   * A new chat in `folder` (the home folder when absent) with `prompt` typed
+   * into its composer. Returns the draft it opened, when it opened one.
+   */
+  const openChatWithPrompt = useCallback(
+    async (prompt: string, folder?: string | null): Promise<DraftId | null> => {
+      if (environmentId === null) return null;
+      let target = folder ?? null;
+      if (!target) {
+        try {
+          target = (
+            await ensureEnvironmentApi(environmentId).filesystem.browse({ partialPath: "~" })
+          ).parentPath;
+        } catch {
+          target = null;
+        }
+      }
+      if (target) await chatInFolder(target, folder ? undefined : "Home folder");
+      else await startNewLocalThreadFromContext(context());
+      const params = router.state.matches[router.state.matches.length - 1]?.params ?? {};
+      const route = resolveThreadRouteTarget(params);
+      const store = useComposerDraftStore.getState();
+      if (route?.kind === "draft") {
+        store.setPrompt(route.draftId, prompt);
+        return route.draftId;
+      }
+      if (route?.kind === "server") store.setPrompt(route.threadRef, prompt);
+      return null;
+    },
+    [chatInFolder, context, environmentId, router],
+  );
+
+  /**
    * "Ask Uno": a new chat in the home folder with the note already typed in
    * the composer — the person reads it and presses Send.
    */
   const askUno = useCallback(
     async (prompt: string) => {
-      if (environmentId === null) return;
-      let home: string | null = null;
-      try {
-        home = (await ensureEnvironmentApi(environmentId).filesystem.browse({ partialPath: "~" }))
-          .parentPath;
-      } catch {
-        home = null;
-      }
-      if (home) await chatInFolder(home, "Home folder");
-      else await startNewLocalThreadFromContext(context());
-      const params = router.state.matches[router.state.matches.length - 1]?.params ?? {};
-      const target = resolveThreadRouteTarget(params);
-      const store = useComposerDraftStore.getState();
-      if (target?.kind === "draft") store.setPrompt(target.draftId, prompt);
-      else if (target?.kind === "server") store.setPrompt(target.threadRef, prompt);
+      await openChatWithPrompt(prompt);
     },
-    [chatInFolder, context, environmentId, router],
+    [openChatWithPrompt],
   );
 
-  return { newChat, openTerminal, chatInFolder, askUno };
+  /**
+   * Home's composer: a new chat in `folder` (home by default) that sends the
+   * task right away — the chat sends it itself once it has mounted (see
+   * `pendingSendStore`). If it can't, the task stays typed there.
+   */
+  const startTask = useCallback(
+    async (prompt: string, folder?: string | null) => {
+      const draftId = await openChatWithPrompt(prompt, folder);
+      if (draftId) usePendingSendStore.getState().request(draftId, prompt);
+    },
+    [openChatWithPrompt],
+  );
+
+  return { newChat, openTerminal, chatInFolder, askUno, startTask };
 }
