@@ -367,8 +367,9 @@ describe("attachDocsShell", () => {
 });
 
 describe("officeDocsShell flag", () => {
-  it("is off unless turned on in Labs", () => {
-    expect(resolveFeatureFlag({}, "officeDocsShell")).toBe(false);
+  it("is on by default, and an explicit off in Labs is kept", () => {
+    expect(resolveFeatureFlag({}, "officeDocsShell")).toBe(true);
+    expect(resolveFeatureFlag({ officeDocsShell: false }, "officeDocsShell")).toBe(false);
     expect(resolveFeatureFlag({ officeDocsShell: true }, "officeDocsShell")).toBe(true);
   });
 });

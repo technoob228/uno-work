@@ -138,11 +138,13 @@ account's Cloud storage (Files → Cloud storage → click the document, or
 computer. The Cloud menu says so ("Share link — not yet for Cloud"); copy the
 document to this computer to share it.
 
-## Docs shell: our own toolbar for Word (0.0.78, Labs, off by default)
+## Docs shell: our own toolbar for Word (0.0.78 in Labs; on by default since 0.0.82)
 
 Settings → Labs → **Simple toolbar for Word documents** (`officeDocsShell`)
 opens docx/doc/odt/rtf with a Google-Docs-like title bar and one toolbar
 instead of the engine's ribbon. Spreadsheets and presentations are untouched.
+Since 0.0.82 it is on for everyone who never touched the toggle; an explicit
+"off" in Labs is stored in the sparse `featureFlags` map and still wins.
 
 How (`officeDocsShell.ts`, `OfficeDocsChrome.tsx`):
 
