@@ -66,6 +66,15 @@ describe("deriveAssistantHarnessStatus", () => {
     expect(status.logTail).toContain("Installed 90 packages");
   });
 
+  it("waits for the probe right after a successful install", () => {
+    expect(
+      deriveAssistantHarnessStatus({
+        snapshot: snapshot({ installed: false, version: null }),
+        job: job({ state: "succeeded" }),
+      }).state,
+    ).toBe("checking");
+  });
+
   it("explains a failed install", () => {
     const status = deriveAssistantHarnessStatus({
       snapshot: snapshot({ installed: false, version: null }),
@@ -73,6 +82,19 @@ describe("deriveAssistantHarnessStatus", () => {
     });
     expect(status).toMatchObject({ state: "failed" });
     expect(status.message).toContain("curl");
+  });
+
+  it("says it is the network when the download failed", () => {
+    const status = deriveAssistantHarnessStatus({
+      snapshot: snapshot({ installed: false, version: null }),
+      job: job({
+        state: "failed",
+        error: "Installer exited with code 7.",
+        log: "curl: (7) Failed to connect to astral.sh port 443\n",
+      }),
+    });
+    expect(status.message).toContain("internet connection");
+    expect(status.logTail).toContain("curl: (7)");
   });
 
   it("marks a platform without an installer as unsupported", () => {
@@ -85,6 +107,19 @@ describe("deriveAssistantHarnessStatus", () => {
         }),
       }).state,
     ).toBe("unsupported");
+  });
+
+  it("flags a Hermes whose MCP SDK cannot do HTTP (mcp 2.x)", () => {
+    const status = deriveAssistantHarnessStatus({
+      snapshot: snapshot({}),
+      job: null,
+      mcp: "broken",
+    });
+    expect(status.state).toBe("failed");
+    expect(status.message).toContain("MCP library");
+    expect(
+      deriveAssistantHarnessStatus({ snapshot: snapshot({}), job: null, mcp: "unknown" }).state,
+    ).toBe("ready");
   });
 
   it("reports an installed hermes that does not start", () => {

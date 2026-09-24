@@ -20,7 +20,7 @@
    настроек приложения) + `OPENAI_BASE_URL=https://api.getuno.xyz/v1` +
    `--provider openai-api`. Ключ из config.yaml Hermes НЕ читает — только env.
    Модельные id на гейтвее namespaced с точками: `anthropic/claude-haiku-4.5`.
-4. ACP-extra обязателен: `uv tool install "hermes-agent[acp]" --with "mcp>=1.9"`.
+4. ACP-extra обязателен: `uv tool install --python 3.12 "hermes-agent[acp]" --with "mcp>=1.9,<2"` (mcp 2.x ломает HTTP-MCP Hermes).
 
 ## Архитектура
 

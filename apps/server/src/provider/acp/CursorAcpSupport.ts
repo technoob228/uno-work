@@ -9,6 +9,7 @@ import {
   resolveCursorAcpConfigUpdates,
 } from "../Layers/CursorProvider.ts";
 import {
+  ACP_HARNESS_FORCE_KILL_AFTER_MS,
   AcpSessionRuntime,
   type AcpSessionRuntimeOptions,
   type AcpSessionRuntimeShape,
@@ -45,6 +46,9 @@ export function buildCursorAcpSpawnInput(
     ],
     cwd,
     ...(environment ? { env: environment } : {}),
+    // Same as Hermes: the driver's env is already the sanitized daemon env.
+    inheritProcessEnv: false,
+    forceKillAfterMs: ACP_HARNESS_FORCE_KILL_AFTER_MS,
   };
 }
 

@@ -124,6 +124,8 @@ function summaryOf(
 
 function describeHttpFailure(status: number): string {
   if (status === 401 || status === 403) return `The provider rejected the key (${status}).`;
+  // xAI answers a wrong key with 400 "Incorrect API key provided".
+  if (status === 400) return "The provider refused the request (400) — usually a wrong key.";
   if (status === 404) return "No /models endpoint at this base URL (404) — check the URL.";
   if (status === 429) return "The provider is rate-limiting this key (429). Try again shortly.";
   return `The provider answered ${status}.`;

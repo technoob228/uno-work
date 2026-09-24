@@ -68,4 +68,25 @@ describe("assistant engine notice", () => {
   it("warns when the machine has no gateway key", () => {
     expect(assistantEngineNotice(status({ gatewayConfigured: false }))?.id).toBe("gateway-missing");
   });
+
+  it("leads a person who chose their own key in onboarding to add it, then to use it", () => {
+    const noKeys = status({ keys: [] });
+    expect(assistantEngineNotice(noKeys, { defaultAi: "byok" })).toMatchObject({
+      id: "byok-add-key",
+      action: "settings",
+    });
+    expect(assistantEngineNotice(status(), { defaultAi: "byok" })).toMatchObject({
+      id: "byok-use-key",
+      action: "use-key",
+      provider: "xai",
+    });
+    expect(
+      assistantEngineNotice(status(), { defaultAi: "byok", byokHintDismissed: true }),
+    ).toBeNull();
+    expect(assistantEngineNotice(status(), { defaultAi: "uno" })).toBeNull();
+    // Already on a brought key: nothing to say.
+    expect(
+      assistantEngineNotice(status({ provider: "xai", model: "grok-4.7" }), { defaultAi: "byok" }),
+    ).toBeNull();
+  });
 });

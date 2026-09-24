@@ -32,9 +32,14 @@ function logTail(log: string | undefined, lines = 3): string | null {
  * the provider probe saw; a failed job explains a Hermes that is still
  * missing.
  */
+export const HERMES_MCP_BROKEN_MESSAGE =
+  "Hermes on this computer can't reach Uno's tools — its MCP library is too new (2.x). Reinstalling it with a compatible one fixes this.";
+
 export function deriveAssistantHarnessStatus(input: {
   readonly snapshot: ServerProvider | undefined;
   readonly job: ProviderInstallJobStatus | null;
+  /** Result of the MCP probe of the installed Hermes (hermesMcpProbe.ts); null: not probed. */
+  readonly mcp?: "ok" | "broken" | "unknown" | null;
 }): AssistantHarnessStatus {
   const { snapshot, job } = input;
   if (job !== null && (job.state === "queued" || job.state === "running")) {
@@ -61,12 +66,30 @@ export function deriveAssistantHarnessStatus(input: {
         logTail: null,
       };
     }
+    if (input.mcp === "broken") {
+      return {
+        state: "failed",
+        message: HERMES_MCP_BROKEN_MESSAGE,
+        version: snapshot.version,
+        logTail: null,
+      };
+    }
     return { state: "ready", message: null, version: snapshot.version, logTail: null };
   }
+  if (job !== null && job.state === "succeeded") {
+    // Installed; the provider probe that sees it lands a moment later.
+    return { state: "checking", message: null, version: null, logTail: null };
+  }
   if (job !== null && job.state === "failed") {
+    const offline =
+      /curl: \(\d+\)|Could not resolve host|Failed to connect|failed to (fetch|download)|dns error|Connection refused/i.test(
+        `${job.error ?? ""}\n${job.log}`,
+      );
     return {
       state: job.error?.includes("not available on this machine") ? "unsupported" : "failed",
-      message: job.error ?? "Installing Hermes failed.",
+      message: offline
+        ? "Couldn't download Hermes — check this computer's internet connection, then Retry."
+        : (job.error ?? "Installing Hermes failed."),
       version: null,
       logTail: logTail(job.log, 5),
     };

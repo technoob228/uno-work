@@ -207,7 +207,17 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
       const withPickerVisibility = (snapshot: ServerProvider): ServerProvider =>
         offeredInPickers || !servesAssistant
           ? snapshot
-          : { ...snapshot, enabled: false, status: "disabled" };
+          : {
+              ...snapshot,
+              enabled: false,
+              status: "disabled",
+              ...(snapshot.installed
+                ? {
+                    message:
+                      "Runs Uno, your assistant. Turn on to offer Hermes in other chats too.",
+                  }
+                : {}),
+            };
 
       const adapter = yield* makeHermesAdapter(effectiveConfig, {
         environment: processEnv,

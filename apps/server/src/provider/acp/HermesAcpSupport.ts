@@ -32,6 +32,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { gatewayBaseUrlForApp, isAppLabel } from "../../appSdk/appTaskLabel.ts";
 import {
+  ACP_HARNESS_FORCE_KILL_AFTER_MS,
   AcpSessionRuntime,
   type AcpSessionRuntimeOptions,
   type AcpSessionRuntimeShape,
@@ -132,6 +133,10 @@ export function buildHermesAcpSpawnInput(
     args: ["acp"],
     cwd,
     ...(environment ? { env: environment } : {}),
+    // The driver's env is the sanitized daemon env + what Hermes needs; never
+    // re-merge process.env (it would bring the stripped Uno secrets back).
+    inheritProcessEnv: false,
+    forceKillAfterMs: ACP_HARNESS_FORCE_KILL_AFTER_MS,
   };
 }
 

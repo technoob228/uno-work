@@ -24,6 +24,7 @@ import {
 } from "@t3tools/shared/assistantLlm";
 import { Effect, Layer, Ref } from "effect";
 import * as crypto from "node:crypto";
+import * as os from "node:os";
 
 import { AiProviderKeys } from "../../aiProviders/AiProviderKeys.ts";
 import { assistantCommandOrigin } from "../../orchestration/commandOrigin.ts";
@@ -32,8 +33,18 @@ import { ProjectionSnapshotQuery } from "../../orchestration/Services/Projection
 import { fetchHermesModelCatalog } from "../../provider/Layers/HermesProvider.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { HarnessSetup } from "../../provider/setup/HarnessSetupService.ts";
+import { withUserLocalBinOnPath } from "../../provider/setup/harnessProcess.ts";
+import {
+  type HermesMcpProbeResult,
+  probeHermesMcpHttp,
+} from "../../provider/setup/hermesMcpProbe.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
-import { deriveAssistantHarnessStatus, orderAssistantModels } from "../assistantLlm.ts";
+import {
+  deriveAssistantHarnessStatus,
+  HERMES_MCP_BROKEN_MESSAGE,
+  orderAssistantModels,
+} from "../assistantLlm.ts";
 import {
   ManagerAssistantLlm,
   type ManagerAssistantLlmShape,
@@ -49,6 +60,7 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
   const harnessSetup = yield* HarnessSetup;
   const providerKeys = yield* AiProviderKeys;
   const gatewayKey = yield* UnoGatewayKey;
+  const serverSettings = yield* ServerSettingsService;
   const installJobId = yield* Ref.make<ProviderSetupJobId | null>(null);
 
   const toError = (detail: string) => (cause: unknown) =>
@@ -62,12 +74,45 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
       .pipe(Effect.orElseSucceed((): ProviderInstallJobStatus | null => null));
   });
 
+  // MCP probe of the installed Hermes (hermesMcpProbe.ts), once per install:
+  // keyed by the snapshot's version + the last finished install job.
+  const mcpProbe = yield* Ref.make<{
+    readonly key: string;
+    readonly result: HermesMcpProbeResult;
+  } | null>(null);
+  const autoRepairStarted = yield* Ref.make(false);
+
+  const probeMcp = (key: string) =>
+    Effect.gen(function* () {
+      const cached = yield* Ref.get(mcpProbe);
+      if (cached !== null && cached.key === key) return cached.result;
+      const settings = yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null));
+      const binaryPath = settings?.providers.hermes.binaryPath || "hermes";
+      const result = yield* Effect.promise(() =>
+        probeHermesMcpHttp({
+          binaryPath,
+          env: withUserLocalBinOnPath(process.env, os.homedir()),
+        }),
+      );
+      yield* Ref.set(mcpProbe, { key, result });
+      if (result === "broken") {
+        yield* Effect.logWarning("assistant: Hermes has no HTTP MCP client (mcp 2.x)");
+      }
+      return result;
+    });
+
   const harnessStatus = Effect.gen(function* () {
     const providers = yield* providerRegistry.getProviders;
     const snapshot = providers.find(
       (provider) => provider.instanceId === ASSISTANT_HARNESS_INSTANCE_ID,
     );
-    return deriveAssistantHarnessStatus({ snapshot, job: yield* currentJob });
+    const job = yield* currentJob;
+    const base = deriveAssistantHarnessStatus({ snapshot, job });
+    if (base.state !== "ready") return base;
+    const mcp = yield* probeMcp(
+      `${snapshot?.version ?? ""}|${job?.state === "succeeded" ? job.jobId : ""}`,
+    );
+    return deriveAssistantHarnessStatus({ snapshot, job, mcp });
   });
 
   const findChat = Effect.gen(function* () {
@@ -177,8 +222,13 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
   const ensureHarness: ManagerAssistantLlmShape["ensureHarness"] = (input) =>
     Effect.gen(function* () {
       const current = yield* harnessStatus;
+      // A Hermes that can't reach MCP servers is repaired once per daemon run
+      // without asking — the assistant is useless without its tools.
+      const mcpBroken = current.state === "failed" && current.message === HERMES_MCP_BROKEN_MESSAGE;
+      const autoRepair = mcpBroken && !(yield* Ref.getAndSet(autoRepairStarted, true));
       const shouldInstall =
         current.state === "missing" ||
+        autoRepair ||
         (input.retry && (current.state === "failed" || current.state === "unsupported"));
       if (!shouldInstall) return current;
       const started = yield* harnessSetup.installStart({ driver: HERMES_DRIVER }).pipe(

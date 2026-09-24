@@ -131,7 +131,10 @@ else
   fi
   hermes_spec="hermes-agent[acp]"
   [ -n "${UNO_WORK_HERMES_VERSION:-}" ] && hermes_spec="hermes-agent[acp]==${UNO_WORK_HERMES_VERSION}"
-  uv tool install "$hermes_spec" --with "mcp>=1.9" >/dev/null 2>&1 || echo "hermes install failed"
+  # mcp 2.x dropped the HTTP client Hermes uses: an open pin silently leaves
+  # the assistant without its uno-manager tools. Python 3.12: hermes-agent
+  # needs >=3.11,<3.14.
+  uv tool install --force --python 3.12 "$hermes_spec" --with "mcp>=1.9,<2" >/dev/null 2>&1 || echo "hermes install failed"
 fi
 HARNESS
 fi

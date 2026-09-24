@@ -1223,26 +1223,32 @@ export const ChatComposer = memo(
       [composerDraftTarget, promptRef, scheduleComposerFocus, setComposerDraftPrompt],
     );
 
-    const providerTraitsMenuContent = renderProviderTraitsMenuContent({
-      provider: selectedProvider,
-      ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
-      ...(routeKind === "draft" && draftId ? { draftId } : {}),
-      model: selectedModel,
-      models: selectedProviderModels,
-      modelOptions: composerModelOptions?.[selectedProvider],
-      prompt,
-      onPromptChange: setPromptFromTraits,
-    });
-    const providerTraitsPicker = renderProviderTraitsPicker({
-      provider: selectedProvider,
-      ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
-      ...(routeKind === "draft" && draftId ? { draftId } : {}),
-      model: selectedModel,
-      models: selectedProviderModels,
-      modelOptions: composerModelOptions?.[selectedProvider],
-      prompt,
-      onPromptChange: setPromptFromTraits,
-    });
+    // The Uno chat has no harness traits (effort, context size…) to pick: its
+    // engine picker is the whole choice.
+    const providerTraitsMenuContent = assistantEngine
+      ? null
+      : renderProviderTraitsMenuContent({
+          provider: selectedProvider,
+          ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
+          ...(routeKind === "draft" && draftId ? { draftId } : {}),
+          model: selectedModel,
+          models: selectedProviderModels,
+          modelOptions: composerModelOptions?.[selectedProvider],
+          prompt,
+          onPromptChange: setPromptFromTraits,
+        });
+    const providerTraitsPicker = assistantEngine
+      ? null
+      : renderProviderTraitsPicker({
+          provider: selectedProvider,
+          ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
+          ...(routeKind === "draft" && draftId ? { draftId } : {}),
+          model: selectedModel,
+          models: selectedProviderModels,
+          modelOptions: composerModelOptions?.[selectedProvider],
+          prompt,
+          onPromptChange: setPromptFromTraits,
+        });
     const pendingPrimaryAction = useMemo(
       () =>
         activePendingProgress

@@ -225,7 +225,9 @@ export interface HermesVersionResult {
  */
 export function parseHermesVersionOutput(result: CommandResult): HermesVersionResult {
   const combined = `${result.stdout}\n${result.stderr}`;
-  const match = combined.match(/v(\d+\.\d+(?:\.\d+)?)/i);
+  // `hermes acp --version` prints a bare `0.19.0`; `hermes --version`
+  // prints `Hermes Agent v0.19.0 (…)`.
+  const match = combined.match(/(?:^|[\sv])(\d+\.\d+(?:\.\d+)?)\b/i);
   if (match?.[1]) {
     return { version: match[1], status: "ready" };
   }
@@ -236,7 +238,7 @@ export function parseHermesVersionOutput(result: CommandResult): HermesVersionRe
     version: null,
     status: "error",
     message:
-      'Could not determine Hermes Agent version. Install with `uv tool install "hermes-agent[acp]" --with "mcp>=1.9"`.',
+      'Could not determine Hermes Agent version. Install with `uv tool install "hermes-agent[acp]" --with "mcp>=1.9,<2"`.',
   };
 }
 
@@ -323,7 +325,7 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
         status: "error",
         auth: { status: "unknown" },
         message: isCommandMissingCause(error)
-          ? 'Hermes Agent CLI (`hermes`) is not installed or not on PATH. Install with `uv tool install "hermes-agent[acp]" --with "mcp>=1.9"`.'
+          ? 'Hermes Agent CLI (`hermes`) is not installed or not on PATH. Install with `uv tool install "hermes-agent[acp]" --with "mcp>=1.9,<2"`.'
           : `Failed to execute Hermes CLI health check: ${error instanceof Error ? error.message : String(error)}.`,
       },
     });

@@ -1,7 +1,21 @@
 import { randomUUID } from "node:crypto";
 
-import { Cause, Deferred, Effect, Exit, Layer, Queue, Ref, Scope, Context, Stream } from "effect";
+import {
+  Cause,
+  Context,
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Layer,
+  Queue,
+  Ref,
+  Scope,
+  Stream,
+} from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+
+import { sanitizeInheritedHarnessEnvironment } from "../ProviderInstanceEnvironment.ts";
 import * as EffectAcpClient from "effect-acp/client";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
@@ -19,11 +33,29 @@ import {
   type AcpToolCallState,
 } from "./AcpRuntimeModel.ts";
 
+/** SIGTERM → SIGKILL deadline for a built-in ACP harness (Hermes, Cursor) on session close. */
+export const ACP_HARNESS_FORCE_KILL_AFTER_MS = 3_000;
+
 export interface AcpSpawnInput {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
+  /**
+   * Merge the daemon's `process.env` under `env` (default). Hermes and Cursor
+   * pass `false`: their `env` is already the sanitized daemon environment
+   * (Uno secrets stripped, see ProviderInstanceEnvironment) plus what the
+   * driver adds on purpose; re-merging `process.env` would hand the stripped
+   * secrets back. With no `env` the child then gets the sanitized daemon
+   * environment instead of inheriting it raw.
+   */
+  readonly inheritProcessEnv?: boolean;
+  /**
+   * SIGKILL this long after SIGTERM when the session closes. Unset = wait
+   * for the process to exit (the historical behaviour). The spawner's own
+   * release waits forever on an agent that ignores SIGTERM.
+   */
+  readonly forceKillAfterMs?: number;
 }
 
 export interface AcpSessionRuntimeOptions {
@@ -201,7 +233,11 @@ const makeAcpSessionRuntime = (
       .spawn(
         ChildProcess.make(options.spawn.command, [...options.spawn.args], {
           ...(options.spawn.cwd ? { cwd: options.spawn.cwd } : {}),
-          ...(options.spawn.env ? { env: { ...process.env, ...options.spawn.env } } : {}),
+          ...(options.spawn.inheritProcessEnv === false
+            ? { env: options.spawn.env ?? sanitizeInheritedHarnessEnvironment(process.env) }
+            : options.spawn.env
+              ? { env: { ...process.env, ...options.spawn.env } }
+              : {}),
           shell: process.platform === "win32",
         }),
       )
@@ -215,6 +251,28 @@ const makeAcpSessionRuntime = (
             }),
         ),
       );
+
+    const forceKillAfterMs = options.spawn.forceKillAfterMs;
+    if (forceKillAfterMs !== undefined) {
+      // Added after the spawn, so it runs first on close. The spawner's own
+      // release awaits the exit after SIGTERM with no deadline (its
+      // forceKillAfter only bounds sending the signal), so an agent that
+      // ignores SIGTERM would hang the session's scope forever.
+      yield* Scope.addFinalizer(
+        runtimeScope,
+        child.kill({ killSignal: "SIGTERM" }).pipe(
+          Effect.timeoutOption(Duration.millis(forceKillAfterMs)),
+          Effect.flatMap((exited) =>
+            exited._tag === "Some"
+              ? Effect.void
+              : child
+                  .kill({ killSignal: "SIGKILL" })
+                  .pipe(Effect.timeoutOption(Duration.millis(forceKillAfterMs))),
+          ),
+          Effect.ignore,
+        ),
+      );
+    }
 
     const acpContext = yield* Layer.build(
       EffectAcpClient.layerChildProcess(child, {

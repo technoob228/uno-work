@@ -63,7 +63,16 @@ describe("resolveInstallPlan", () => {
     const plan = resolveInstallPlan(driver("hermes"), baseContext);
     if (plan.kind !== "command") throw new Error("expected a command plan");
     expect(plan.command).toBe("uv");
-    expect(plan.args).toEqual(["tool", "install", "hermes-agent[acp]", "--with", "mcp>=1.9"]);
+    expect(plan.args).toEqual([
+      "tool",
+      "install",
+      "--force",
+      "--python",
+      "3.12",
+      "hermes-agent[acp]",
+      "--with",
+      "mcp>=1.9,<2",
+    ]);
   });
 
   it("bootstraps uv with astral's user-level installer when uv is missing on unix", () => {
@@ -73,7 +82,7 @@ describe("resolveInstallPlan", () => {
     expect(plan.args[0]).toBe("-c");
     expect(plan.args[1]).toContain("https://astral.sh/uv/install.sh");
     expect(plan.args[1]).toContain(
-      '"/home/unowork/.local/bin/uv" tool install "hermes-agent[acp]" --with "mcp>=1.9"',
+      "'/home/unowork/.local/bin/uv' 'tool' 'install' '--force' '--python' '3.12' 'hermes-agent[acp]' '--with' 'mcp>=1.9,<2'",
     );
   });
 

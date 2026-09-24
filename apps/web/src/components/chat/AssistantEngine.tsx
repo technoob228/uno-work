@@ -31,6 +31,7 @@ import {
 import { useMemo, useState } from "react";
 
 import { assistantEngineNotice } from "../../assistant/assistantEngine.logic";
+import { useAccountDefaultAi } from "../../assistant/useAccountDefaultAi";
 import { useAssistantLlm } from "../../assistant/useAssistantLlm";
 import { listAssistantLlmModels } from "../../lib/assistantLlmApi";
 import { cn } from "../../lib/utils";
@@ -298,13 +299,40 @@ export function AssistantModelPicker(props: {
   );
 }
 
+const BYOK_HINT_DISMISSED_KEY = "uno.assistant.byokHintDismissed";
+
 export function AssistantEngineBanner(props: { readonly environmentId: EnvironmentId }) {
   const navigate = useNavigate();
   const llm = useAssistantLlm(props.environmentId);
-  const notice = assistantEngineNotice(llm.status);
+  const defaultAi = useAccountDefaultAi(llm.supported);
+  const [byokHintDismissed, setByokHintDismissed] = useState(
+    () => globalThis.localStorage?.getItem(BYOK_HINT_DISMISSED_KEY) === "1",
+  );
+  const notice = assistantEngineNotice(llm.status, { defaultAi, byokHintDismissed });
   if (!llm.supported || notice === null) return null;
 
+  const dismiss = () => {
+    globalThis.localStorage?.setItem(BYOK_HINT_DISMISSED_KEY, "1");
+    setByokHintDismissed(true);
+  };
+
   const onAction = () => {
+    if (notice.action === "use-key" && notice.provider) {
+      const provider = notice.provider;
+      void listAssistantLlmModels({ environmentId: props.environmentId, provider })
+        .then((list) => {
+          if (!list.defaultModel) throw new Error(list.error ?? "That key lists no models.");
+          return llm.setLlm({ provider, model: list.defaultModel });
+        })
+        .catch((error: unknown) =>
+          toastManager.add({
+            type: "error",
+            title: "Couldn't switch Uno to your key",
+            description: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      return;
+    }
     if (notice.action === "settings") {
       void navigate({
         to: "/settings/environment/$environmentId/providers",
@@ -344,7 +372,11 @@ export function AssistantEngineBanner(props: { readonly environmentId: Environme
             disabled={llm.retryingHarness}
             data-testid="uno-engine-banner-action"
           >
-            {notice.action === "settings" ? (
+            {notice.action === "use-key" ? (
+              <>
+                <KeyRoundIcon /> Use my key
+              </>
+            ) : notice.action === "settings" ? (
               <>
                 <KeyRoundIcon /> Settings
               </>
@@ -355,6 +387,11 @@ export function AssistantEngineBanner(props: { readonly environmentId: Environme
               </>
             )}
           </Button>
+          {notice.dismissible ? (
+            <Button size="xs" variant="ghost" onClick={dismiss}>
+              Not now
+            </Button>
+          ) : null}
         </AlertAction>
       ) : null}
     </Alert>

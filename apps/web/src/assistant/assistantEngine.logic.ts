@@ -3,9 +3,14 @@
  * failed, or a brought key that is gone. Pure — the banner and the send guard
  * render what this decides.
  */
-import { AI_PROVIDER_LABELS, type AssistantLlmStatus } from "@t3tools/contracts";
+import {
+  AI_PROVIDER_LABELS,
+  type AssistantLlmStatus,
+  BYOK_PROVIDER_IDS,
+  type ByokProviderId,
+} from "@t3tools/contracts";
 
-export type AssistantEngineAction = "retry" | "install" | "settings";
+export type AssistantEngineAction = "retry" | "install" | "settings" | "use-key";
 
 export interface AssistantEngineNotice {
   readonly id: string;
@@ -16,10 +21,25 @@ export interface AssistantEngineNotice {
   readonly detail: string | null;
   readonly action: AssistantEngineAction | null;
   readonly busy: boolean;
+  /** For `use-key`: the brought key to switch Uno to. */
+  readonly provider?: ByokProviderId;
+  readonly dismissible?: boolean;
+}
+
+/**
+ * What the person picked for AI in onboarding (console `GET /auth/me`
+ * `default_ai`: uno | claude | codex | opencode | byok). Only `byok` changes
+ * what the Uno chat says.
+ */
+export interface AssistantEngineContext {
+  readonly defaultAi?: string | null;
+  /** The person closed the "use your key" hint. */
+  readonly byokHintDismissed?: boolean;
 }
 
 export function assistantEngineNotice(
   status: AssistantLlmStatus | null,
+  context: AssistantEngineContext = {},
 ): AssistantEngineNotice | null {
   if (status === null) return null;
   const { harness } = status;
@@ -73,6 +93,34 @@ export function assistantEngineNotice(
         busy: false,
       };
     }
+  } else if (context.defaultAi === "byok" && !context.byokHintDismissed) {
+    // Onboarding said "my own key": lead there, or to using the key once it's in.
+    const stored = BYOK_PROVIDER_IDS.find(
+      (provider) => status.keys.find((key) => key.provider === provider)?.configured,
+    );
+    return stored
+      ? {
+          id: "byok-use-key",
+          variant: "info",
+          title: `Run Uno on your ${AI_PROVIDER_LABELS[stored]} key?`,
+          description: "You chose your own AI key when you set up Uno. It's on this computer now.",
+          detail: null,
+          action: "use-key",
+          busy: false,
+          provider: stored,
+          dismissible: true,
+        }
+      : {
+          id: "byok-add-key",
+          variant: "info",
+          title: "Add your AI key",
+          description:
+            "You chose your own AI key when you set up Uno. Add it in Settings → Agents; until then Uno runs on the Uno gateway.",
+          detail: null,
+          action: "settings",
+          busy: false,
+          dismissible: true,
+        };
   } else if (!status.gatewayConfigured) {
     return {
       id: "gateway-missing",

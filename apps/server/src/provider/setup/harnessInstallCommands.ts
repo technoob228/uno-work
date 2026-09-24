@@ -12,6 +12,40 @@ import * as nodePath from "node:path";
 
 import { INSTALLABLE_PROVIDER_DRIVERS, type ProviderDriverKind } from "@t3tools/contracts";
 
+/**
+ * Python Hermes runs on. hermes-agent needs >=3.11,<3.14; without a pin uv
+ * takes the first interpreter it finds — on a stock Mac that is the system
+ * 3.9 and the install fails ("requirements are unsatisfiable"). uv fetches
+ * a managed 3.12 when the machine has none.
+ */
+export const HERMES_PYTHON = "3.12";
+
+/**
+ * The MCP SDK Hermes' tools client works with. mcp 2.x dropped
+ * `streamablehttp_client`, and Hermes then silently runs without any HTTP MCP
+ * server — the Uno assistant loses `uno-manager` (list_threads, create_thread…).
+ * An open `mcp>=1.9` resolves to 2.x today, so cap it.
+ */
+export const HERMES_MCP_SPEC = "mcp>=1.9,<2";
+
+/**
+ * `uv tool install` arguments for Hermes. `--force` so a repair (a Hermes
+ * with a broken MCP SDK) replaces the existing install instead of saying
+ * "already installed".
+ */
+export const HERMES_UV_TOOL_ARGS: ReadonlyArray<string> = [
+  "tool",
+  "install",
+  "--force",
+  "--python",
+  HERMES_PYTHON,
+  "hermes-agent[acp]",
+  "--with",
+  HERMES_MCP_SPEC,
+];
+
+export const HERMES_INSTALL_DISPLAY = `uv tool install --python ${HERMES_PYTHON} "hermes-agent[acp]" --with "${HERMES_MCP_SPEC}"`;
+
 export interface InstallPlanContext {
   readonly platform: NodeJS.Platform;
   readonly homeDir: string;
@@ -89,22 +123,24 @@ export function resolveInstallPlan(
       // installer into ~/.local/bin (uv brings its own Python). No curl or no
       // network → the job fails with the installer's own words and a Retry.
       const uvBin = nodePath.join(context.homeDir, ".local", "bin", "uv");
-      const script = `curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh && "${uvBin}" tool install "hermes-agent[acp]" --with "mcp>=1.9"`;
+      const uvArgs = HERMES_UV_TOOL_ARGS.map((arg) => `'${arg}'`).join(" ");
+      // Download first: `curl … | sh` would hide a failed download (sh of an
+      // empty script exits 0) and the error would read "uv: not found".
+      const script = `uv_installer="$(curl -LsSf https://astral.sh/uv/install.sh)" && printf '%s\n' "$uv_installer" | env UV_NO_MODIFY_PATH=1 sh && '${uvBin}' ${uvArgs}`;
       return {
         kind: "command",
         command: "sh",
         args: ["-c", script],
         env: {},
-        display: `install uv, then uv tool install "hermes-agent[acp]" --with "mcp>=1.9"`,
+        display: `install uv, then ${HERMES_INSTALL_DISPLAY}`,
       };
     }
-    const args = ["tool", "install", "hermes-agent[acp]", "--with", "mcp>=1.9"];
     return {
       kind: "command",
       command: "uv",
-      args,
+      args: HERMES_UV_TOOL_ARGS,
       env: {},
-      display: `uv tool install "hermes-agent[acp]" --with "mcp>=1.9"`,
+      display: HERMES_INSTALL_DISPLAY,
     };
   }
 
