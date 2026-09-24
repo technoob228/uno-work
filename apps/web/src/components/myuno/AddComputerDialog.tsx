@@ -37,7 +37,7 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
-import { ROLE_ICON, ROLE_TINT } from "./ComputersSection";
+import { ROLE_ICON, ROLE_TINT } from "./roleUi";
 import { refreshMyUno } from "./myUnoQueries";
 
 interface ServerSize {
@@ -135,8 +135,8 @@ export function AddComputerDialog({
             <DialogHeader>
               <DialogTitle>Add a computer</DialogTitle>
               <DialogDescription>
-                What is it for? You can change this later — except a workspace, which is where Uno
-                Work runs.
+                What is it for? A server's role can be changed later; an Uno Work computer stays
+                one.
               </DialogDescription>
             </DialogHeader>
             <DialogPanel>

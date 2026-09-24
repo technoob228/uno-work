@@ -196,8 +196,21 @@ describe("account payloads", () => {
       usedBytes: 5,
       quotaBytes: 50,
       buckets: 0,
+      bucketList: [],
     });
     expect(parseCloudUsage({ buckets: [{ used_bytes: 2 }, { used_bytes: 3 }] }).usedBytes).toBe(5);
+    expect(
+      parseCloudUsage({
+        buckets: [
+          { name: "files", used_bytes: 2 },
+          { name: "backups", used_bytes: 9 },
+          { used_bytes: 1 },
+        ],
+      }).bucketList,
+    ).toEqual([
+      { name: "backups", usedBytes: 9 },
+      { name: "files", usedBytes: 2 },
+    ]);
   });
 
   it("payments: top-ups and charges in one list, newest first, expired invoices hidden", () => {

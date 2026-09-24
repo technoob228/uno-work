@@ -24,7 +24,9 @@
  *   fleet        an account with several named boxes, for the machine flows of
  *                Uno Work (Connect / Create a box / Wake / Sleep). Box 123 is
  *                the computer serving Work; 201 "night-owl" is asleep; 202
- *                "outreach-machine" runs something else. "Create a box" works:
+ *                "outreach-machine" runs something else; 203 is not responding,
+ *                204 is a second Uno Work computer, 205 has an app that didn't
+ *                install, 206 is a stopped server. "Create a box" works:
  *                the box boots in ~6 s, and its public address then hangs
  *                (like a not-yet-routed edge) for MOCK_ADDRESS_DELAY_MS
  *                (default 25 s). Each box that runs Uno Work gets a local
@@ -762,6 +764,19 @@ function initFleet() {
   fleet.get(202).ramMb = 1024;
   fleet.get(203).computerRole = "sandbox";
   fleet.get(203).ramMb = 1024;
+  // A few more for My Uno's rows: a second Uno Work computer (no daemon —
+  // Open connects and fails, as for a machine without Work), a production
+  // server where an app didn't install, a stopped bot.
+  fleetBox(204, "design-lab", "running", null, null);
+  fleet.get(204).workMachine = true;
+  fleet.get(204).ramMb = 4096;
+  fleet.get(204).vcpu = 2;
+  fleetBox(205, "shop-api", "running", null, null);
+  fleet.get(205).computerRole = "production";
+  fleetBox(206, "tg-bot", "stopped", null, null);
+  fleet.get(206).computerRole = "server";
+  fleet.get(206).ramMb = 1024;
+  fleet.get(206).comment = "the course bot";
 }
 
 // ---------------------------------------------------------------- My Uno ---
@@ -837,6 +852,41 @@ const SERVER_APPS = new Map([
         icon: "🔁",
         status: "running",
         url: "https://n8n-202.app.uno4.dev",
+      },
+    ],
+  ],
+  [
+    204,
+    [
+      {
+        deployment_id: 911,
+        template_id: "open-webui",
+        name: "Open WebUI",
+        icon: "💬",
+        status: "success",
+        url: "https://open-webui-204.app.uno4.dev",
+      },
+    ],
+  ],
+  [
+    205,
+    [
+      {
+        deployment_id: 921,
+        template_id: "uptime-kuma",
+        name: "Uptime Kuma",
+        icon: "📈",
+        status: "success",
+        url: "https://status.shop.example.com",
+      },
+      // What the console reports when an install didn't finish.
+      {
+        deployment_id: 922,
+        template_id: "plausible",
+        name: "Plausible",
+        icon: "📊",
+        status: "failed",
+        url: null,
       },
     ],
   ],

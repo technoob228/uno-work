@@ -482,10 +482,17 @@ export async function fetchSites(): Promise<SitesState> {
 
 // ---- cloud ----
 
+export interface CloudBucket {
+  readonly name: string;
+  readonly usedBytes: number;
+}
+
 export interface CloudUsage {
   readonly usedBytes: number;
   readonly quotaBytes: number;
   readonly buckets: number;
+  /** The account's buckets by name, biggest first. */
+  readonly bucketList: ReadonlyArray<CloudBucket>;
 }
 
 export function parseCloudUsage(raw: unknown): CloudUsage {
@@ -493,10 +500,17 @@ export function parseCloudUsage(raw: unknown): CloudUsage {
   const storage = rec(r["storage"]);
   const buckets = list(r["buckets"]);
   const summed = buckets.reduce<number>((sum, b) => sum + num(rec(b)?.["used_bytes"]), 0);
+  const bucketList = buckets
+    .flatMap((b): CloudBucket[] => {
+      const name = str(rec(b)?.["name"]);
+      return name ? [{ name, usedBytes: num(rec(b)?.["used_bytes"]) }] : [];
+    })
+    .toSorted((a, b) => b.usedBytes - a.usedBytes);
   return {
     usedBytes: storage ? num(storage["used_bytes"]) : summed,
     quotaBytes: num(storage?.["quota_bytes"]),
     buckets: buckets.length,
+    bucketList,
   };
 }
 
