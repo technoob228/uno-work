@@ -53,7 +53,7 @@ This computer has its own AI. An app you build for the person (translator, summa
    - Any other language: it is plain OpenAI-compatible HTTP — \`POST $UNO_APP_API_URL/v1/chat/completions\` with \`Authorization: Bearer <token from ~/.uno/app-keys/<id>/token>\` and \`"model": "default"\`; tasks: \`POST /v1/tasks {"prompt","cwd","tools"}\`, \`GET /v1/tasks/<id>?waitMs=30000\`.
 4. Tasks run as a Work chat titled "[App name] …" the person can see; \`tools\`: "read" (only looks), "ask" (every change waits for the person), "edit" (edits files itself, commands wait). The app gets at most what the person allowed. A task's \`cwd\` must be inside the home folder and must exist.
 5. Handle errors in the UI in plain words: 402 \`app_limit_reached\` → "This app used its AI limit — raise it in Uno Work → Settings → Apps"; 503 \`ai_not_connected\` → "Sign in to Uno in Uno Work".
-6. Something that must run on a schedule (e.g. once a day) belongs inside the app (a timer in the server process) or in a user systemd timer — not a cron job the person can't see. Show the last result in the app's page.
+6. Something that must run on a schedule (e.g. once a day) belongs inside the app (a timer in the server process) or in a user systemd timer (unit files in \`~/.config/systemd/user/\`, then \`systemctl --user daemon-reload\` and \`systemctl --user enable --now <name>.timer\` so it survives a reboot) — not a cron job the person can't see. Show the last result in the app's page.
 7. In docker (only if the person's machine allows it): mount only \`~/.uno/app-keys/<id>:/run/uno-app:ro\` (never all of \`~/.uno\`) and add \`extra_hosts: ["host.docker.internal:host-gateway"]\`.
 
 ## Apps that tell the person something — notifications into the Inbox

@@ -23,6 +23,7 @@ import type { AppManifest } from "./appManifest.ts";
 import {
   groupListeningPorts,
   isUserAddedUnitPath,
+  isUserAddedUserUnitPath,
   parseCgroupOwner,
   parseDockerPortBindings,
   parseDockerPs,
@@ -306,8 +307,15 @@ async function readUnits(probe: MachineProbe, user: boolean): Promise<SystemdUni
   if (!show.ok) return [];
   return parseSystemctlShow(show.stdout).filter((unit) => {
     if (isInfraUnit(unit.id)) return false;
-    if (user) return unit.fragmentPath.length > 0;
-    if (isUserAddedUnitPath(unit.fragmentPath, probe.home)) return true;
+    // User units the distro ships (/usr/lib/systemd/user: dbus, gpg-agent,
+    // dirmngr…) come alive once the user has a lingering session; like vendor
+    // system units they are not programs the person added.
+    if (
+      user
+        ? isUserAddedUserUnitPath(unit.fragmentPath, probe.home)
+        : isUserAddedUnitPath(unit.fragmentPath, probe.home)
+    )
+      return true;
     // A vendor unit counts only for software people install on purpose, and
     // only when it is actually in use.
     return (

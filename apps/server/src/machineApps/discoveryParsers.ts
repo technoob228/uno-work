@@ -377,6 +377,17 @@ export function isUserAddedUnitPath(fragmentPath: string, home: string): boolean
   return fragmentPath.startsWith(userDir);
 }
 
+/** A user-manager unit the person (or an agent) wrote, not one the distro ships. */
+export function isUserAddedUserUnitPath(fragmentPath: string, home: string): boolean {
+  if (fragmentPath.length === 0) return false;
+  const base = home.replace(/\/$/, "");
+  return (
+    fragmentPath.startsWith(`${base}/.config/systemd/user/`) ||
+    fragmentPath.startsWith(`${base}/.local/share/systemd/user/`) ||
+    fragmentPath.startsWith("/etc/systemd/user/")
+  );
+}
+
 /**
  * The service a process belongs to, from `/proc/<pid>/cgroup`:
  *   `0::/system.slice/notes.service`

@@ -293,7 +293,34 @@ else
     || die "uno-work.service not found next to the installer"
 fi
 
+# --- User systemd session ----------------------------------------------------
+# Apps the agents build schedule work with user systemd timers (`systemctl
+# --user`), and the App SDK instructions tell them to. Without lingering the
+# service user has no user manager at all (it never logs in), so every
+# `systemctl --user` failed with "Failed to connect to bus" and no timer ever
+# ran. Linger starts user@<uid> at boot and keeps it alive; the drop-in gives
+# the daemon — and every harness and terminal it spawns — the runtime dir that
+# `systemctl --user` looks for (a system service has no XDG_RUNTIME_DIR).
+log "Keeping a user systemd session for ${SERVICE_USER}"
+service_uid="$(id -u "${SERVICE_USER}")"
+if ! loginctl enable-linger "${SERVICE_USER}" >/dev/null 2>&1; then
+  # No logind to ask (containers, chroots): the flag file is all linger is.
+  install -d -m 0755 /var/lib/systemd/linger
+  touch "/var/lib/systemd/linger/${SERVICE_USER}"
+fi
+install -d -m 0755 /etc/systemd/system/uno-work.service.d
+cat > /etc/systemd/system/uno-work.service.d/user-session.conf <<DROPIN
+# Written by install.sh — the service user's systemd session (user timers).
+[Unit]
+Wants=user@${service_uid}.service
+After=user@${service_uid}.service
+
+[Service]
+Environment=XDG_RUNTIME_DIR=/run/user/${service_uid}
+DROPIN
+
 systemctl daemon-reload
+systemctl start "user@${service_uid}.service" >/dev/null 2>&1 || log "  could not start the user session; user timers start after a reboot"
 # `enable --now` only starts a stopped unit; an upgrade leaves the old process
 # running on the old bundle. Restart unconditionally so the new code takes over.
 systemctl enable uno-work >/dev/null

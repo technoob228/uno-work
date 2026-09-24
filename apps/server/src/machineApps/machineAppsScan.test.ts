@@ -6,6 +6,7 @@ import {
   parsePortForwards,
   pickAutostartApps,
   publicationFor,
+  readSystemd,
   scanMachineApps,
   type MachineProbe,
   type ScannedApp,
@@ -427,5 +428,56 @@ describe("pickAutostartApps", () => {
         seen,
       ),
     ).toEqual([]);
+  });
+});
+
+describe("readSystemd — user units", () => {
+  const USER_SHOW = `Id=dbus.service
+Description=D-Bus User Message Bus
+ActiveState=active
+SubState=running
+FragmentPath=/usr/lib/systemd/user/dbus.service
+MainPID=801
+UnitFileState=static
+
+Id=gpg-agent.service
+Description=GnuPG cryptographic agent and passphrase cache
+ActiveState=inactive
+SubState=dead
+FragmentPath=/usr/lib/systemd/user/gpg-agent.service
+MainPID=0
+UnitFileState=static
+
+Id=clock-writer.service
+Description=Writes the time every two minutes
+ActiveState=inactive
+SubState=dead
+FragmentPath=/home/unowork/.config/systemd/user/clock-writer.service
+MainPID=0
+UnitFileState=static
+`;
+  const probe = fakeProbe({
+    run: async (command, args) => {
+      if (command !== "systemctl") return { ok: false, stdout: "" };
+      const user = args[0] === "--user";
+      const verb = user ? args[1] : args[0];
+      if (!user) return { ok: verb !== "show", stdout: "" };
+      if (verb === "list-unit-files")
+        return {
+          ok: true,
+          stdout:
+            "dbus.service static -\ngpg-agent.service static -\nclock-writer.service static -\n",
+        };
+      if (verb === "list-units") return { ok: true, stdout: "" };
+      if (verb === "show") return { ok: true, stdout: USER_SHOW };
+      return { ok: false, stdout: "" };
+    },
+  });
+
+  it("keeps units the person or an agent wrote and drops the ones the distro ships", async () => {
+    // With a lingering user session the distro's user units (dbus, gpg-agent…)
+    // are loaded too; they must not turn into "programs" on Home.
+    const units = await readSystemd(probe);
+    expect(units.map((u) => [u.id, u.user])).toEqual([["clock-writer.service", true]]);
   });
 });

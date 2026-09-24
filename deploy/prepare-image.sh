@@ -274,6 +274,20 @@ case "${root_pw}" in
   *) die "root password is not locked" ;;
 esac
 
+# 9. Пользовательская сессия systemd у unowork (таймеры приложений).
+#
+# install.sh включает linger и кладёт drop-in с XDG_RUNTIME_DIR. Образ,
+# собранный старым install.sh, этого не имеет — таймеры ИИ-приложений на
+# клонах молча не работали. Проверяем и дочиниваем здесь.
+log "Проверяю linger у ${SERVICE_USER} (systemctl --user для таймеров приложений)"
+loginctl enable-linger "${SERVICE_USER}" >/dev/null 2>&1 || {
+  install -d -m 0755 /var/lib/systemd/linger
+  touch "/var/lib/systemd/linger/${SERVICE_USER}"
+}
+[ -f "/var/lib/systemd/linger/${SERVICE_USER}" ] || die "linger for ${SERVICE_USER} is not enabled"
+[ -f /etc/systemd/system/uno-work.service.d/user-session.conf ] \
+  || die "uno-work.service.d/user-session.conf missing — rerun install.sh from 0.0.80+"
+
 systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl enable ssh uno-work-sshkeys.service uno-work-hostname.service uno-work-identity.service uno-work-identity.path >/dev/null 2>&1 || true
 
