@@ -54,6 +54,7 @@ import {
   clampToHome,
   homeCrumbs,
   isInsideHome,
+  isPickableFolder,
   recentHomeFolders,
   tildePath,
 } from "./newProject.logic";
@@ -277,7 +278,7 @@ function FolderStep({ environmentId, home, onBack, onDone }: StepProps) {
   const folders = (listing.data?.entries ?? []).filter(
     (entry: FilesystemBrowseEntry) =>
       entry.kind === "directory" &&
-      !entry.name.startsWith(".") &&
+      isPickableFolder(entry.name, current, home) &&
       isInsideHome(entry.fullPath, home),
   );
 
@@ -376,7 +377,7 @@ function FolderStep({ environmentId, home, onBack, onDone }: StepProps) {
         error={error}
         busy={busy}
         disabled={atHome || listing.isPending}
-        label={atHome ? "Open a folder first" : `Make ${folderDisplayName(current)} a project`}
+        label={atHome ? "Open a folder first" : `Make “${folderDisplayName(current)}” a project`}
         icon={<FolderIcon />}
         hint={tildePath(current, home)}
         onSubmit={() => void submit()}

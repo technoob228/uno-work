@@ -1,7 +1,8 @@
 /**
  * What the bell's popover lists: the same Inbox items as everywhere (daemon
  * snapshots merged newest first), filtered by the chips and grouped "Needs
- * you" first, then today, then earlier. Snoozed items stay out.
+ * you" first (unanswered approvals and questions), then today, then
+ * earlier. Snoozed items stay out.
  */
 import { type InboxEntry, isNeedsYou, isSnoozed } from "../../inbox/inboxStore";
 
@@ -23,7 +24,7 @@ export interface BellSection {
 function matches(item: InboxEntry, filter: BellFilter): boolean {
   switch (filter) {
     case "needs-you":
-      return isNeedsYou(item);
+      return waitsForYou(item);
     case "chats":
       return item.source.kind === "agent";
     case "apps":
@@ -31,6 +32,11 @@ function matches(item: InboxEntry, filter: BellFilter): boolean {
     default:
       return true;
   }
+}
+
+/** An approval / question not dealt with yet (answering one marks it read). */
+function waitsForYou(item: InboxEntry): boolean {
+  return isNeedsYou(item) && item.readAt === null;
 }
 
 function sameDay(a: number, b: number): boolean {
@@ -48,7 +54,7 @@ export function bellSections(
   for (const item of entries) {
     if (isSnoozed(item, nowMs) || !matches(item, filter)) continue;
     // A waiting approval / question stays on top until it is answered or dismissed.
-    if (isNeedsYou(item)) needsYou.push(item);
+    if (waitsForYou(item)) needsYou.push(item);
     else if (sameDay(Date.parse(item.updatedAt), nowMs)) today.push(item);
     else earlier.push(item);
   }

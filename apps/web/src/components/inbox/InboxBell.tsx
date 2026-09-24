@@ -43,6 +43,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ItemIcon, filterInbox } from "./InboxPanel";
 import { InboxCountBadge } from "../sidebar/SidebarInboxRow";
 import { type BellFilter, BELL_FILTERS, bellSections } from "./inboxBell.logic";
+import { useAssistantChat } from "../../assistant/useAssistantChat";
+import { ASSISTANT_CHAT_NAME } from "../../assistant/assistantChat.logic";
 
 export const InboxBell = memo(function InboxBell() {
   const [open, setOpen] = useState(false);
@@ -94,6 +96,7 @@ function BellPanel({ onClose }: { onClose: () => void }) {
   const anyUnread = entries.some((item) => item.readAt === null && !isSnoozed(item));
   const system = useSystemNotificationsState();
   const empty = sections.every((section) => section.items.length === 0);
+  const assistantChatId = useAssistantChat().chat?.id ?? null;
 
   return (
     <section aria-label="Notifications" className="-my-4 flex max-h-[min(34rem,75vh)] flex-col">
@@ -182,6 +185,13 @@ function BellPanel({ onClose }: { onClose: () => void }) {
                     <BellItem
                       key={`${item.environmentId}:${item.id}`}
                       item={item}
+                      title={
+                        assistantChatId !== null &&
+                        item.open?.kind === "thread" &&
+                        item.open.threadId === assistantChatId
+                          ? ASSISTANT_CHAT_NAME
+                          : item.title
+                      }
                       onNavigate={onClose}
                     />
                   ))}
@@ -197,9 +207,12 @@ function BellPanel({ onClose }: { onClose: () => void }) {
 
 const BellItem = memo(function BellItem({
   item,
+  title,
   onNavigate,
 }: {
   item: InboxEntry;
+  /** The chat's name as the sidebar shows it ("Uno" for the assistant chat). */
+  title: string;
   onNavigate: () => void;
 }) {
   const openItem = useOpenInboxItem();
@@ -235,7 +248,7 @@ const BellItem = memo(function BellItem({
                   unread ? "font-semibold text-foreground" : "font-medium",
                 )}
               >
-                {item.title}
+                {title}
               </span>
               <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
                 {formatRelativeTime(item.updatedAt).value}
@@ -256,8 +269,10 @@ const BellItem = memo(function BellItem({
           <div className="flex flex-wrap items-center gap-1">
             {isApproval ? (
               <ApprovalActions
+                item={item}
                 environmentId={item.environmentId}
                 threadId={threadId as ThreadId}
+                body={item.body}
                 onOpen={open}
               />
             ) : (
@@ -265,17 +280,7 @@ const BellItem = memo(function BellItem({
                 Open
               </Button>
             )}
-            {isApproval ? null : (
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() => void markInboxItemDone(item)}
-                data-testid="inbox-done"
-              >
-                <CheckIcon />
-                Done
-              </Button>
-            )}
+            {isApproval ? null : <DoneButton item={item} />}
             <SnoozeMenu item={item} />
           </div>
         </div>
@@ -284,23 +289,43 @@ const BellItem = memo(function BellItem({
   );
 });
 
+function DoneButton({ item }: { item: InboxEntry }) {
+  return (
+    <Button
+      size="xs"
+      variant="ghost"
+      onClick={() => void markInboxItemDone(item)}
+      data-testid="inbox-done"
+    >
+      <CheckIcon />
+      Done
+    </Button>
+  );
+}
+
 function ApprovalActions(props: {
+  item: InboxEntry;
   environmentId: EnvironmentId;
   threadId: ThreadId;
+  body: string | null;
   onOpen: () => void;
 }) {
   const { approval, responding, respond } = usePendingApproval(props.environmentId, props.threadId);
   if (!approval) {
+    // Answered (or gone): nothing to approve any more — open it or clear it.
     return (
-      <Button size="xs" variant="outline" onClick={props.onOpen}>
-        Open
-      </Button>
+      <>
+        <Button size="xs" variant="outline" onClick={props.onOpen}>
+          Open
+        </Button>
+        <DoneButton item={props.item} />
+      </>
     );
   }
   const question = approvalQuestion(approval);
   return (
     <>
-      {question.subject ? (
+      {question.subject && !(props.body ?? "").includes(question.subject) ? (
         <code className="mb-0.5 block w-full truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
           {question.subject}
         </code>

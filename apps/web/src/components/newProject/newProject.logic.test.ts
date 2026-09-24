@@ -7,6 +7,7 @@ import {
   clampToHome,
   homeCrumbs,
   isInsideHome,
+  isPickableFolder,
   recentHomeFolders,
   tildePath,
 } from "./newProject.logic";
@@ -37,6 +38,13 @@ describe("home fence", () => {
     expect(tildePath("/home/uno/projects", HOME)).toBe("~/projects");
     expect(tildePath(HOME, HOME)).toBe("~");
   });
+});
+
+it("hides dot-folders and system folders at the home root only", () => {
+  expect(isPickableFolder(".config", HOME, HOME)).toBe(false);
+  expect(isPickableFolder("Library", HOME, HOME)).toBe(false);
+  expect(isPickableFolder("Library", "/home/uno/projects", HOME)).toBe(true);
+  expect(isPickableFolder("projects", HOME, HOME)).toBe(true);
 });
 
 describe("recentHomeFolders", () => {

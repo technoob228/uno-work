@@ -26,6 +26,7 @@ function entry(overrides: Partial<InboxEntry> & { id: string }): InboxEntry {
 describe("bellSections", () => {
   const items = [
     entry({ id: "approval", kind: "agent.approval" }),
+    entry({ id: "answered", kind: "agent.approval", readAt: "2026-09-24T14:30:00.000Z" }),
     entry({ id: "done-today" }),
     entry({ id: "old", updatedAt: "2026-09-20T10:00:00.000Z" }),
     entry({
@@ -37,11 +38,11 @@ describe("bellSections", () => {
     entry({ id: "snoozed", snoozedUntil: "2026-09-25T00:00:00.000Z" }),
   ];
 
-  it("puts what waits for you first, then today, then earlier; hides snoozed", () => {
+  it("puts what still waits for you first, then today, then earlier; hides snoozed", () => {
     const sections = bellSections(items, "all", NOW);
     expect(sections.map((section) => section.items.map((item) => item.id))).toEqual([
       ["approval"],
-      ["done-today", "app"],
+      ["answered", "done-today", "app"],
       ["old"],
     ]);
   });
@@ -51,6 +52,6 @@ describe("bellSections", () => {
       bellSections(items, filter, NOW).flatMap((section) => section.items.map((item) => item.id));
     expect(ids("needs-you")).toEqual(["approval"]);
     expect(ids("apps")).toEqual(["app"]);
-    expect(ids("chats")).toEqual(["approval", "done-today", "old"]);
+    expect(ids("chats")).toEqual(["approval", "answered", "done-today", "old"]);
   });
 });

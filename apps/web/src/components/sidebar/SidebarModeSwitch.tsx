@@ -7,7 +7,7 @@ import { FolderTreeIcon, LayoutGridIcon, MessagesSquareIcon } from "lucide-react
 import { memo, type ComponentType } from "react";
 
 import { cn } from "../../lib/utils";
-import { type SidebarMode, useNavStore } from "../../navigation/navStore";
+import { SIDEBAR_MODES, type SidebarMode, useNavStore } from "../../navigation/navStore";
 
 const MODES: ReadonlyArray<{
   mode: SidebarMode;
@@ -20,7 +20,10 @@ const MODES: ReadonlyArray<{
 ];
 
 export const SidebarModeSwitch = memo(function SidebarModeSwitch() {
-  const mode = useNavStore((state) => state.sidebarMode);
+  // "inbox" / "home" (rail modes, or left over from an older version) show
+  // the chat list in the standard sidebar, so Chats is the selected tab.
+  const storedMode = useNavStore((state) => state.sidebarMode);
+  const mode = SIDEBAR_MODES.includes(storedMode) ? storedMode : "chats";
   const setMode = useNavStore((state) => state.setSidebarMode);
   return (
     <div

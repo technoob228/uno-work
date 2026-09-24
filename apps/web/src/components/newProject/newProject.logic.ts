@@ -33,6 +33,15 @@ export function clampToHome(path: string | null, home: string): string {
   return path !== null && isInsideHome(path, home) ? trimSlashes(path) : trimSlashes(home);
 }
 
+/** System folders a person never makes a project of (macOS / Linux home roots). */
+const SYSTEM_HOME_FOLDERS = new Set(["Library", "Applications", "snap"]);
+
+/** Folders the picker lists: no dot-folders, no system folders at the home root. */
+export function isPickableFolder(name: string, parentPath: string, home: string): boolean {
+  if (name.startsWith(".")) return false;
+  return !(trimSlashes(parentPath) === trimSlashes(home) && SYSTEM_HOME_FOLDERS.has(name));
+}
+
 export interface Crumb {
   readonly label: string;
   readonly path: string;

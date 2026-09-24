@@ -1172,6 +1172,8 @@ function OpenCommandPaletteDialog() {
     kind: "action",
     value: "action:add-project",
     searchTerms: [
+      "new project",
+      "empty project",
       "add project",
       "folder",
       "directory",
