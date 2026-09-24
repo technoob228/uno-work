@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  acpMcpServers,
   claudeMcpServers,
   codexMcpConfigArgs,
   enabledMcpServers,
@@ -55,5 +56,16 @@ describe("custom MCP servers", () => {
     });
     expect(withOpenCodeMcpServers("{}", [])).toBe("{}");
     expect(withOpenCodeMcpServers("not json", [docs])).toBe("not json");
+  });
+});
+
+describe("acpMcpServers", () => {
+  it("hands enabled servers to ACP harnesses (Hermes) as http entries", () => {
+    expect(
+      acpMcpServers([
+        { name: "notion", url: " https://mcp.notion.com/mcp ", enabled: true },
+        { name: "off", url: "https://x.dev/mcp", enabled: false },
+      ] as never),
+    ).toEqual([{ type: "http", name: "notion", url: "https://mcp.notion.com/mcp", headers: [] }]);
   });
 });

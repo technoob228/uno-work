@@ -17,6 +17,10 @@ import {
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import {
+  coerceAssistantModelSelection,
+  readAssistantLlmProvider,
+} from "@t3tools/shared/assistantLlm";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { agentMessageEnvelope } from "../../agentThreads/logic.ts";
@@ -252,6 +256,13 @@ const make = Effect.gen(function* () {
     );
 
   const threadModelSelections = new Map<string, ModelSelection>();
+  /**
+   * Selection each live session was started with. Hermes reads its LLM
+   * endpoint from the process environment, so a change of the `llmProvider`
+   * option (the assistant's "Uno gateway" / "Your key") needs a fresh
+   * process — resumed from the same Hermes session, so the context stays.
+   */
+  const sessionStartSelections = new Map<string, ModelSelection>();
 
   const appendProviderFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -359,13 +370,35 @@ const make = Effect.gen(function* () {
     }
 
     const desiredRuntimeMode = thread.runtimeMode;
-    const requestedModelSelection = options?.modelSelection;
+    // The assistant chat always runs on Hermes (0.0.84): whatever the turn
+    // asked for, its own (Hermes) selection decides.
+    const isAssistantChat = thread.assistantRole === "chat";
+    const requestedModelSelection = isAssistantChat
+      ? coerceAssistantModelSelection(options?.modelSelection ?? thread.modelSelection)
+      : options?.modelSelection;
     const resolveActiveSession = (threadId: ThreadId) =>
       providerService
         .listSessions()
         .pipe(Effect.map((sessions) => sessions.find((session) => session.threadId === threadId)));
 
-    const activeSession = yield* resolveActiveSession(threadId);
+    let activeSession = yield* resolveActiveSession(threadId);
+    if (
+      isAssistantChat &&
+      requestedModelSelection !== undefined &&
+      activeSession !== undefined &&
+      activeSession.providerInstanceId !== requestedModelSelection.instanceId
+    ) {
+      // The chat ran on another harness before it moved to Hermes: that
+      // session ends here. Hermes starts fresh and carries the visible
+      // history + NOTES.md over (hermesHandoff.ts).
+      yield* Effect.logInfo("assistant chat: stopping the previous harness session for Hermes", {
+        threadId,
+        previousInstanceId: activeSession.providerInstanceId,
+      });
+      yield* providerService.stopSession({ threadId });
+      sessionStartSelections.delete(threadId);
+      activeSession = undefined;
+    }
     const activeThreadSession =
       thread.session !== null && thread.session.status !== "stopped" && activeSession
         ? thread.session
@@ -427,6 +460,9 @@ const make = Effect.gen(function* () {
     const preferredProvider: ProviderDriverKind = desiredDriverKind;
     if (
       thread.session !== null &&
+      // The assistant chat's harness is the daemon's call (see above), not a
+      // switch the person asked for.
+      !isAssistantChat &&
       requestedModelSelection !== undefined &&
       requestedModelSelection.instanceId !== currentInstanceId
     ) {
@@ -458,15 +494,21 @@ const make = Effect.gen(function* () {
       readonly resumeCursor?: unknown;
       readonly provider?: ProviderDriverKind;
     }) =>
-      providerService.startSession(threadId, {
-        threadId,
-        ...(preferredProvider ? { provider: preferredProvider } : {}),
-        providerInstanceId: desiredInstanceId,
-        ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
-        modelSelection: desiredModelSelection,
-        ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
-        runtimeMode: desiredRuntimeMode,
-      });
+      providerService
+        .startSession(threadId, {
+          threadId,
+          ...(preferredProvider ? { provider: preferredProvider } : {}),
+          providerInstanceId: desiredInstanceId,
+          ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
+          modelSelection: desiredModelSelection,
+          ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+          runtimeMode: desiredRuntimeMode,
+        })
+        .pipe(
+          Effect.tap(() =>
+            Effect.sync(() => sessionStartSelections.set(threadId, desiredModelSelection)),
+          ),
+        );
 
     const bindSessionToThread = (session: ProviderSession) =>
       Effect.gen(function* () {
@@ -510,10 +552,16 @@ const make = Effect.gen(function* () {
         activeSession?.providerInstanceId !== requestedModelSelection.instanceId;
       const shouldRestartForModelChange = modelChanged && sessionModelSwitch === "unsupported";
       const previousModelSelection = threadModelSelections.get(threadId);
+      const sessionStartSelection = sessionStartSelections.get(threadId);
       const shouldRestartForModelSelectionChange =
-        preferredProvider === "claudeAgent" &&
-        requestedModelSelection !== undefined &&
-        !Equal.equals(previousModelSelection, requestedModelSelection);
+        (preferredProvider === "claudeAgent" &&
+          requestedModelSelection !== undefined &&
+          !Equal.equals(previousModelSelection, requestedModelSelection)) ||
+        (preferredProvider === "hermes" &&
+          requestedModelSelection !== undefined &&
+          sessionStartSelection !== undefined &&
+          readAssistantLlmProvider(sessionStartSelection) !==
+            readAssistantLlmProvider(requestedModelSelection));
 
       if (
         !runtimeModeChanged &&
@@ -567,7 +615,7 @@ const make = Effect.gen(function* () {
     return startedSession.threadId;
   });
 
-  const buildSendTurnRequestForThread = Effect.fnUntraced(function* (input: {
+  const buildSendTurnRequestForThread = Effect.fnUntraced(function* (rawInput: {
     readonly threadId: ThreadId;
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
@@ -575,12 +623,22 @@ const make = Effect.gen(function* () {
     readonly interactionMode?: ProviderInteractionMode;
     readonly createdAt: string;
   }) {
-    const thread = yield* resolveThread(input.threadId);
+    const thread = yield* resolveThread(rawInput.threadId);
     if (!thread) {
       return yield* Effect.die(
-        new Error(`Thread '${input.threadId}' was not found in read model.`),
+        new Error(`Thread '${rawInput.threadId}' was not found in read model.`),
       );
     }
+    // The assistant chat's turns always carry its (Hermes) selection.
+    const input =
+      thread.assistantRole === "chat"
+        ? {
+            ...rawInput,
+            modelSelection: coerceAssistantModelSelection(
+              rawInput.modelSelection ?? thread.modelSelection,
+            ),
+          }
+        : rawInput;
     yield* ensureSessionForThread(
       input.threadId,
       input.createdAt,

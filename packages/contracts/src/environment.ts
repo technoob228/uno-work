@@ -40,6 +40,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       chats the assistant starts ("spawned"). Absent on older servers: clients
       fall back to the newest chat of the default assistant project. */
   assistantChat: Schema.optionalKey(Schema.Boolean),
+  /** The assistant chat runs on Hermes with a chosen LLM provider (0.0.84):
+      `/api/manager/assistant/llm*` and `/api/ai-providers*` exist. Absent:
+      clients keep the generic harness picker for that chat. */
+  assistantLlm: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

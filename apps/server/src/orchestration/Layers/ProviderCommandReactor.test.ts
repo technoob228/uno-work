@@ -1225,6 +1225,106 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  describe("the assistant chat runs on Hermes (0.0.84)", () => {
+    const ASSISTANT_ORIGIN = { kind: "assistant", assistantKey: "assistant-home" } as const;
+    const hermesSelection = (provider: string, model = "~x-ai/grok-latest") =>
+      createModelSelection(ProviderInstanceId.make("hermes"), model, [
+        { id: "llmProvider", value: provider },
+      ]);
+    const turn = (index: number, modelSelection?: ModelSelection) =>
+      ({
+        type: "thread.turn.start",
+        commandId: CommandId.make(`cmd-assistant-turn-${index}`),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId(`assistant-message-${index}`),
+          role: "user",
+          text: `assistant turn ${index}`,
+          attachments: [],
+        },
+        ...(modelSelection ? { modelSelection } : {}),
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: new Date().toISOString(),
+      }) as const;
+    const markAssistantChat = (harness: Awaited<ReturnType<typeof createHarness>>) =>
+      Effect.runPromise(
+        harness.engine.dispatch(
+          {
+            type: "thread.meta.update",
+            commandId: CommandId.make("cmd-mark-assistant-chat"),
+            threadId: ThreadId.make("thread-1"),
+            assistantRole: "chat",
+          },
+          { origin: ASSISTANT_ORIGIN },
+        ),
+      );
+    const setAssistantSelection = (
+      harness: Awaited<ReturnType<typeof createHarness>>,
+      modelSelection: ModelSelection,
+      tag: string,
+    ) =>
+      Effect.runPromise(
+        harness.engine.dispatch(
+          {
+            type: "thread.meta.update",
+            commandId: CommandId.make(`cmd-assistant-selection-${tag}`),
+            threadId: ThreadId.make("thread-1"),
+            modelSelection,
+          },
+          { origin: ASSISTANT_ORIGIN },
+        ),
+      );
+
+    it("stops the previous harness and starts Hermes on the next turn", async () => {
+      const uno = createModelSelection(ProviderInstanceId.make("uno"), "uno/kimi");
+      const harness = await createHarness({ threadModelSelection: uno });
+      await Effect.runPromise(harness.engine.dispatch(turn(1, uno)));
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      expect(harness.runtimeSessions[0]?.providerInstanceId).toBe("uno");
+
+      await markAssistantChat(harness);
+      await setAssistantSelection(harness, hermesSelection("uno"), "hermes");
+      // A stale composer still asks for the old harness.
+      await Effect.runPromise(harness.engine.dispatch(turn(2, uno)));
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+
+      expect(harness.stopSession).toHaveBeenCalledTimes(1);
+      expect(harness.startSession).toHaveBeenCalledTimes(2);
+      const hermesStart = harness.startSession.mock.calls[1]?.[1] as Record<string, unknown>;
+      expect(hermesStart).toMatchObject({
+        providerInstanceId: "hermes",
+        modelSelection: hermesSelection("uno"),
+      });
+      expect(hermesStart.resumeCursor).toBeUndefined();
+      expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+        modelSelection: hermesSelection("uno"),
+      });
+    });
+
+    it("restarts Hermes with the same session when the LLM provider changes", async () => {
+      const harness = await createHarness({ threadModelSelection: hermesSelection("uno") });
+      await markAssistantChat(harness);
+      await Effect.runPromise(harness.engine.dispatch(turn(1)));
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+      // Same provider, new model: in-session switch, no restart.
+      await setAssistantSelection(harness, hermesSelection("uno", "x-ai/grok-4.6"), "model");
+      await Effect.runPromise(harness.engine.dispatch(turn(2)));
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+
+      await setAssistantSelection(harness, hermesSelection("xai", "grok-4.7"), "xai");
+      await Effect.runPromise(harness.engine.dispatch(turn(3)));
+      await waitFor(() => harness.sendTurn.mock.calls.length === 3);
+      expect(harness.startSession).toHaveBeenCalledTimes(2);
+      expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+        resumeCursor: { opaque: "resume-1" },
+        modelSelection: hermesSelection("xai", "grok-4.7"),
+      });
+    });
+  });
+
   it("restarts the provider session when runtime mode is updated on the thread", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

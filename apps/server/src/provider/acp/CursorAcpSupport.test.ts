@@ -56,6 +56,8 @@ describe("buildCursorAcpSpawnInput", () => {
       command: "agent",
       args: ["acp"],
       cwd: "/tmp/project",
+      inheritProcessEnv: false,
+      forceKillAfterMs: 3_000,
     });
   });
 
@@ -72,6 +74,8 @@ describe("buildCursorAcpSpawnInput", () => {
       command: "/usr/local/bin/agent",
       args: ["-e", "http://localhost:3000", "acp"],
       cwd: "/tmp/project",
+      inheritProcessEnv: false,
+      forceKillAfterMs: 3_000,
     });
   });
 });

@@ -6,6 +6,7 @@ import {
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
   buildHermesConfigYaml,
+  hermesLlmRouteEnvironment,
   buildHermesSpawnEnvironment,
   parseMcpJsonToAcpServers,
   resolveHermesBaseModelId,
@@ -246,5 +247,32 @@ describe("buildHermesConfigYaml skills", () => {
       skillsExternalDirs: ["/home/u/.claude/skills"],
     });
     expect(yaml).toContain('skills:\n  external_dirs:\n    - "/home/u/.claude/skills"');
+  });
+});
+
+describe("hermes LLM route (0.0.84)", () => {
+  it("points the openai-api provider at the route's endpoint and key", () => {
+    expect(
+      hermesLlmRouteEnvironment({
+        provider: "xai",
+        apiKey: "xai-key",
+        baseUrl: "https://api.x.ai/v1",
+      }),
+    ).toEqual({
+      HERMES_INFERENCE_PROVIDER: "openai-api",
+      OPENAI_API_KEY: "xai-key",
+      OPENAI_BASE_URL: "https://api.x.ai/v1",
+    });
+  });
+
+  it("turns speech-to-text off for a brought key (it would go to the gateway)", () => {
+    const yaml = buildHermesConfigYaml({
+      model: "grok-4.7",
+      mcpServers: [],
+      speechToText: false,
+    });
+    expect(yaml).toContain("stt:\n  enabled: false\n");
+    expect(yaml).not.toContain("whisper");
+    expect(buildHermesConfigYaml({ model: "m", mcpServers: [] })).toContain("  enabled: true");
   });
 });

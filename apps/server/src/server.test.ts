@@ -158,6 +158,9 @@ import { ManagerToolService } from "./manager/Services/ManagerToolService.ts";
 import { ManagerAuthError, ManagerTokenAuthService } from "./manager/Services/ManagerTokenAuth.ts";
 import { ManagerTelegramService } from "./manager/Layers/TelegramConnector.ts";
 import { ManagerAssistantService } from "./manager/Services/AssistantService.ts";
+import { ManagerAssistantLlm } from "./manager/Services/AssistantLlmService.ts";
+import { AiProviderKeys } from "./aiProviders/AiProviderKeys.ts";
+import { ManagerAccountDefaultAi } from "./manager/Layers/AccountDefaultAi.ts";
 import { ConnectorNotifyService } from "./manager/Services/ConnectorNotify.ts";
 import { ManagerCapabilityTokenRepository } from "./persistence/Services/ManagerCapabilityTokens.ts";
 import { ManagerConnectorBindingRepository } from "./persistence/Services/ManagerConnectorBindings.ts";
@@ -681,6 +684,9 @@ const buildAppUnderTest = (options?: {
           Layer.mock(InboxService)({}),
           Layer.mock(ComputerResourcesService)({}),
           Layer.mock(HarnessSetup)({}),
+          Layer.mock(ManagerAssistantLlm)({}),
+          Layer.mock(AiProviderKeys)({}),
+          Layer.mock(ManagerAccountDefaultAi)({}),
         ),
       ),
       Layer.provide(

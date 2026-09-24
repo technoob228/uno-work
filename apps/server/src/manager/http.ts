@@ -53,7 +53,7 @@ import { ManagerApprovalService } from "./Services/ManagerApprovalService.ts";
 import { ManagerTokenAuthService } from "./Services/ManagerTokenAuth.ts";
 import { ManagerToolService } from "./Services/ManagerToolService.ts";
 
-const respondToAuthError = (error: AuthError) =>
+export const respondToAuthError = (error: AuthError) =>
   Effect.succeed(
     HttpServerResponse.jsonUnsafe({ error: error.message }, { status: error.status ?? 401 }),
   );
@@ -62,12 +62,12 @@ const respondUnauthorized = Effect.succeed(
   HttpServerResponse.jsonUnsafe({ error: "Unauthorized" }, { status: 401 }),
 );
 
-const respondServerError = (context: string) => (cause: unknown) =>
+export const respondServerError = (context: string) => (cause: unknown) =>
   Effect.logError(`manager http route failed: ${context}`, { cause }).pipe(
     Effect.as(HttpServerResponse.jsonUnsafe({ error: "Internal server error." }, { status: 500 })),
   );
 
-const authenticateOwnerSession = Effect.gen(function* () {
+export const authenticateOwnerSession = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const serverAuth = yield* ServerAuth;
   const session = yield* serverAuth.authenticateHttpRequest(request);

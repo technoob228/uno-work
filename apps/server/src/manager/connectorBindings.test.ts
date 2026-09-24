@@ -333,3 +333,53 @@ describe("resolveNotifyChats", () => {
     expect(chats.map((chat) => chat.chatId)).toEqual(["900", "901"]);
   });
 });
+
+describe("decideThreadRouting: the assistant's chats run on the Uno chat's engine (0.0.84)", () => {
+  const target = { kind: "assistant" as const, projectId: assistantId };
+  const hermes = (provider: string, model = "~x-ai/grok-latest") => ({
+    instanceId: ProviderInstanceId.make("hermes"),
+    model,
+    options: [{ id: "llmProvider", value: provider }],
+  });
+
+  it("starts on Hermes ahead of the connector's own harness pick", () => {
+    const routing = decideThreadRouting({
+      target,
+      mappedThread: shell({ projectId: assistantId, modelSelection: claude }),
+      targetThread: null,
+      connectorModelSelection: claude,
+      assistantModelSelection: hermes("uno"),
+      projectModelSelection: uno,
+      inheritedModes: null,
+    });
+    expect(routing).toMatchObject({
+      kind: "create",
+      modelSelection: hermes("uno"),
+      previousThreadId: threadId,
+    });
+  });
+
+  it("reuses the thread on the same engine and starts fresh on a provider switch", () => {
+    const base = {
+      target,
+      targetThread: null,
+      connectorModelSelection: null,
+      projectModelSelection: null,
+      inheritedModes: null,
+    };
+    expect(
+      decideThreadRouting({
+        ...base,
+        mappedThread: shell({ projectId: assistantId, modelSelection: hermes("uno") }),
+        assistantModelSelection: hermes("uno"),
+      }).kind,
+    ).toBe("reuse");
+    expect(
+      decideThreadRouting({
+        ...base,
+        mappedThread: shell({ projectId: assistantId, modelSelection: hermes("uno") }),
+        assistantModelSelection: hermes("xai"),
+      }).kind,
+    ).toBe("create");
+  });
+});

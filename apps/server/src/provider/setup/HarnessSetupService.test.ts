@@ -153,16 +153,15 @@ describe("install jobs", () => {
     expect(harness.processes).toHaveLength(0);
   });
 
-  it("fails without spawning when uv is missing for hermes", async () => {
+  it("installs uv first when it is missing for hermes", async () => {
     const harness = makeHarness({ probeUvAvailable: async () => false });
-    const { jobId: id } = harness.runner.installStart({
-      driver: ProviderDriverKind.make("hermes"),
-    });
+    harness.runner.installStart({ driver: ProviderDriverKind.make("hermes") });
+    await tick();
+    expect(harness.processes).toHaveLength(1);
+    expect(harness.latest().input.command).toBe("sh");
+    expect(harness.latest().input.args.join(" ")).toContain("astral.sh/uv/install.sh");
+    harness.latest().input.onExit({ code: 0, signal: null });
     await harness.runner.drain();
-    expect(harness.processes).toHaveLength(0);
-    const status = harness.runner.installStatus({ jobId: id });
-    expect(status.state).toBe("failed");
-    expect(status.error).toContain("uv");
   });
 
   it("kills the child and fails when the install exceeds its timeout", async () => {

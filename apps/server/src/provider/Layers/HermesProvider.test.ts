@@ -39,6 +39,20 @@ describe("parseHermesVersionOutput", () => {
     ).toEqual({ version: "0.18.0", status: "ready" });
   });
 
+  it("reads the bare version newer hermes prints, and the long form", () => {
+    expect(parseHermesVersionOutput({ stdout: "0.19.0\n", stderr: "", code: 0 })).toEqual({
+      version: "0.19.0",
+      status: "ready",
+    });
+    expect(
+      parseHermesVersionOutput({
+        stdout: "Hermes Agent v0.19.0 (2026.7.20)\n",
+        stderr: "",
+        code: 0,
+      }).version,
+    ).toBe("0.19.0");
+  });
+
   it("degrades to error on unparseable failure output", () => {
     const parsed = parseHermesVersionOutput({ stdout: "", stderr: "boom", code: 1 });
     expect(parsed.status).toBe("error");

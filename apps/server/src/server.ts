@@ -161,6 +161,18 @@ import {
   managerTokensRevokeRouteLayer,
 } from "./manager/http.ts";
 import { ManagerAssistantBootstrapLive, ManagerLayerLive } from "./manager/runtimeLayer.ts";
+import { AiProviderKeysLive } from "./aiProviders/AiProviderKeys.ts";
+import {
+  aiProvidersListRouteLayer,
+  aiProvidersRemoveRouteLayer,
+  aiProvidersSetRouteLayer,
+  aiProvidersTestRouteLayer,
+  assistantDefaultAiRouteLayer,
+  assistantLlmHarnessRouteLayer,
+  assistantLlmModelsRouteLayer,
+  assistantLlmSetRouteLayer,
+  assistantLlmStatusRouteLayer,
+} from "./manager/assistantLlmHttp.ts";
 import { pluginPanelRouteLayer } from "./plugins/http.ts";
 import { PluginRegistryLive } from "./plugins/PluginRegistry.ts";
 import { PluginRuntimeLive } from "./plugins/PluginRuntime.ts";
@@ -472,6 +484,9 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provideMerge(
     UnoGatewayKeyLive.pipe(Layer.provide(ServerSettingsLive), Layer.provide(ServerSecretStoreLive)),
   ),
+  // Keys the person brought for other AI providers (the assistant's "Your
+  // key"): same secret store; read by the Hermes driver and the routes.
+  Layer.provideMerge(AiProviderKeysLive.pipe(Layer.provide(ServerSecretStoreLive))),
   Layer.provideMerge(ServerBrowserLive),
   Layer.provide(NetService.layer),
 );
@@ -518,6 +533,15 @@ export const makeRoutesLayer = Layer.mergeAll(
   managerAssistantOverviewRouteLayer,
   managerAssistantsCreateRouteLayer,
   managerAssistantChatRouteLayer,
+  assistantLlmStatusRouteLayer,
+  assistantLlmSetRouteLayer,
+  assistantLlmModelsRouteLayer,
+  assistantLlmHarnessRouteLayer,
+  assistantDefaultAiRouteLayer,
+  aiProvidersListRouteLayer,
+  aiProvidersSetRouteLayer,
+  aiProvidersRemoveRouteLayer,
+  aiProvidersTestRouteLayer,
   managerAssistantsListRouteLayer,
   managerAssistantTelegramRouteLayer,
   managerAssistantSlackRouteLayer,

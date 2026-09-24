@@ -34,3 +34,4 @@ export * from "./threadContinue.ts";
 export * from "./rpc.ts";
 export * from "./appSdk.ts";
 export * from "./inbox.ts";
+export * from "./aiProviders.ts";

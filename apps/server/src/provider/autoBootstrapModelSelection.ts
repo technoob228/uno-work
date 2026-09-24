@@ -56,7 +56,7 @@ const DRIVER_PREFERENCE: ReadonlyArray<string> = [
 ];
 
 /** Usable for an unattended default: shipped, on, installed, and logged in. */
-function isUsableForDefault(provider: ServerProvider): boolean {
+export function isUsableForDefault(provider: ServerProvider): boolean {
   return (
     isProviderAvailable(provider) &&
     provider.enabled &&

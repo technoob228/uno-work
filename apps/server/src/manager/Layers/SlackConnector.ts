@@ -62,6 +62,8 @@ import {
   transcribeTelegramAudio,
 } from "../telegramTranscription.ts";
 import { classifyWake } from "../wakeClassifier.ts";
+import { currentAssistantModelSelection } from "../assistantEngineSelection.ts";
+import { sameAssistantEngine } from "../connectorBindings.ts";
 import { resolveTurnReply } from "./TelegramConnector.ts";
 
 export interface ManagerSlackRuntimeStatus {
@@ -279,9 +281,6 @@ const makeSlackConnector = Effect.gen(function* () {
           }),
         );
 
-  const sameHarnessAndModel = (a: ModelSelection, b: ModelSelection): boolean =>
-    a.instanceId === b.instanceId && a.model === b.model;
-
   const getUnoApiKey = serverSettingsService.getSettings.pipe(
     Effect.map((settings) => settings.uno.apiKey?.trim() ?? ""),
     Effect.orElseSucceed(() => ""),
@@ -492,10 +491,10 @@ const makeSlackConnector = Effect.gen(function* () {
     readonly config: ManagerSlackConnectorConfig;
   }) =>
     Effect.gen(function* () {
-      const project = yield* projectionSnapshotQuery.getProjectShellById(input.projectId);
-      const modelSelection =
-        input.config.defaultModelSelection ??
-        (Option.isSome(project) ? project.value.defaultModelSelection : null);
+      // The assistant's Slack chats run on the Uno chat's engine (Hermes +
+      // its provider / model, 0.0.84); a provider switch starts a fresh thread.
+      const modelSelection: ModelSelection | null =
+        yield* currentAssistantModelSelection(projectionSnapshotQuery);
 
       const existing = yield* connectorRepository.getThreadForChat({
         projectId: input.projectId,
@@ -507,7 +506,7 @@ const makeSlackConnector = Effect.gen(function* () {
         if (Option.isSome(shell) && shell.value.archivedAt === null) {
           if (
             modelSelection === null ||
-            sameHarnessAndModel(shell.value.modelSelection, modelSelection)
+            sameAssistantEngine(shell.value.modelSelection, modelSelection)
           ) {
             return existing.value;
           }

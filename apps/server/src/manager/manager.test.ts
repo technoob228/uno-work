@@ -21,6 +21,7 @@ import { ManagerConnectorRepositoryLive } from "../persistence/Layers/ManagerCon
 import { RemindersRepositoryLive } from "../persistence/Layers/Reminders.ts";
 import { ProjectionPendingApprovalRepository } from "../persistence/Services/ProjectionPendingApprovals.ts";
 import { ManagerApprovalServiceLive } from "./Layers/ManagerApprovalService.ts";
+import { ManagerAccountDefaultAi } from "./Layers/AccountDefaultAi.ts";
 import { ManagerBudgetServiceLive } from "./Layers/ManagerBudgetService.ts";
 import { ManagerTokenAuthServiceLive } from "./Layers/ManagerTokenAuth.ts";
 import { ManagerToolServiceLive } from "./Layers/ManagerToolService.ts";
@@ -187,6 +188,14 @@ const makeTestLayer = (dispatched: Ref.Ref<ReadonlyArray<DispatchedCommand>>) =>
 
   return Layer.mergeAll(ManagerToolServiceLive, ManagerTokenAuthServiceLive).pipe(
     Layer.provideMerge(ManagerApprovalServiceLive),
+    Layer.provide(
+      Layer.succeed(ManagerAccountDefaultAi, {
+        get: () => Effect.succeed(null),
+        set: () => Effect.void,
+        refreshFromAccount: () => Effect.void,
+        spawnModelSelection: () => Effect.succeed(null),
+      }),
+    ),
     Layer.provide(ManagerBudgetServiceLive),
     Layer.provideMerge(repositories),
     Layer.provide(pendingApprovalsMock),

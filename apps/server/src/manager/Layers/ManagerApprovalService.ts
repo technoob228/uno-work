@@ -12,6 +12,7 @@ import { OrchestrationEngineService } from "../../orchestration/Services/Orchest
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerActionProposalRepository } from "../../persistence/Services/ManagerActionProposals.ts";
 import { ManagerCapabilityTokenRepository } from "../../persistence/Services/ManagerCapabilityTokens.ts";
+import { ManagerAccountDefaultAi } from "./AccountDefaultAi.ts";
 import {
   ManagerExecutionError,
   ManagerNotFoundError,
@@ -29,6 +30,7 @@ const makeManagerApprovalService = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const tokenRepository = yield* ManagerCapabilityTokenRepository;
+  const accountDefaultAi = yield* ManagerAccountDefaultAi;
 
   /**
    * Chats an assistant's token starts are "from Uno" (assistantRole
@@ -68,8 +70,16 @@ const makeManagerApprovalService = Effect.gen(function* () {
               detail: `Project ${action.projectId} no longer exists.`,
             });
           }
+          const fromAssistant = yield* isAssistantToken(proposal.tokenId);
+          // A chat the Uno assistant starts without naming a model runs on the
+          // person's own AI (account default_ai, when usable here), else on
+          // the project's default. The assistant itself runs on Hermes.
+          const personalDefault =
+            action.modelSelection === null && fromAssistant
+              ? yield* accountDefaultAi.spawnModelSelection()
+              : null;
           const modelSelection: ModelSelection | null =
-            action.modelSelection ?? projectShell.value.defaultModelSelection;
+            action.modelSelection ?? personalDefault ?? projectShell.value.defaultModelSelection;
           if (modelSelection === null) {
             return yield* new ManagerExecutionError({
               proposalId: proposal.proposalId,
@@ -83,7 +93,6 @@ const makeManagerApprovalService = Effect.gen(function* () {
           const createCommandId = makeCommandId();
           const turnCommandId = makeCommandId();
           const threadId = ThreadId.make(crypto.randomUUID());
-          const fromAssistant = yield* isAssistantToken(proposal.tokenId);
           yield* orchestrationEngine.dispatch(
             {
               type: "thread.create",

@@ -17,10 +17,12 @@ import * as nodePath from "node:path";
 
 import {
   ApprovalRequestId,
+  type AssistantLlmProvider,
   type HermesSettings,
   DEFAULT_MODEL_BY_PROVIDER,
   EventId,
   type ProviderApprovalDecision,
+  type ProviderContextMessage,
   type ProviderRuntimeEvent,
   type ProviderSession,
   type ProviderUserInputAnswers,
@@ -47,6 +49,7 @@ import {
 } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpSchema from "effect-acp/schema";
+import { readAssistantLlmProvider } from "@t3tools/shared/assistantLlm";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
@@ -71,12 +74,15 @@ import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
 import {
   applyHermesAcpModelSelection,
   buildHermesConfigYaml,
+  type HermesLlmRoute,
+  hermesLlmRouteEnvironment,
   makeHermesAcpRuntime,
   parseMcpJsonToAcpServers,
   resolveHermesBaseModelId,
   resolveHermesModeId,
   setHermesSessionMode,
 } from "../acp/HermesAcpSupport.ts";
+import { buildHermesHandoffPrompt } from "../acp/hermesHandoff.ts";
 import { repairHermesSessionHistory } from "../acp/hermesSessionRepair.ts";
 import { sharedSkillsRoot } from "../../skills/skillInstaller.ts";
 import { type HermesAdapterShape } from "../Services/HermesAdapter.ts";
@@ -110,7 +116,23 @@ export interface HermesAdapterLiveOptions {
    * reads the latest snapshot.
    */
   readonly resolveSettings?: Effect.Effect<HermesSettings>;
+  /**
+   * Where this session's LLM calls go, by the `llmProvider` option of its
+   * model selection (Uno gateway by default, or a key the person brought).
+   * The failure is a sentence for the person ("No xAI key on this computer…").
+   * Absent (tests): the static environment decides.
+   */
+  /** Owner-added MCP servers (settings.mcpServers), read per session. */
+  readonly extraMcpServers?: () => ReadonlyArray<EffectAcpSchema.McpServer>;
+  readonly resolveLlmRoute?: (input: {
+    readonly threadId: ThreadId;
+    readonly provider: AssistantLlmProvider;
+  }) => Effect.Effect<HermesLlmRoute, string>;
 }
+
+/** Marker of an assistant workspace (AssistantService): its NOTES.md is the assistant's memory. */
+const ASSISTANT_WORKSPACE_MARKER = ".uno-assistant.json";
+const ASSISTANT_NOTES_FILE = "NOTES.md";
 
 interface PendingApproval {
   readonly decision: Deferred.Deferred<ProviderApprovalDecision>;
@@ -132,6 +154,13 @@ interface HermesSessionContext {
   lastAppliedModeId: string | undefined;
   activeTurnId: TurnId | undefined;
   stopped: boolean;
+  /** LLM provider the hermes process was started with (env is per process). */
+  readonly llmProvider: AssistantLlmProvider;
+  /**
+   * The session starts empty (not resumed) — its first prompt carries the
+   * chat's visible history (hermesHandoff.ts). Cleared after that prompt.
+   */
+  handoffPending: boolean;
 }
 
 function settlePendingApprovalsAsCancelled(
@@ -402,12 +431,37 @@ export function makeHermesAdapter(
             ? yield* options.resolveSettings
             : hermesSettings;
 
+          const llmProvider = readAssistantLlmProvider(hermesModelSelection);
+          const llmRoute = options?.resolveLlmRoute
+            ? yield* options
+                .resolveLlmRoute({ threadId: input.threadId, provider: llmProvider })
+                .pipe(
+                  Effect.mapError(
+                    (detail) =>
+                      new ProviderAdapterProcessError({
+                        provider: PROVIDER,
+                        threadId: input.threadId,
+                        detail,
+                      }),
+                  ),
+                )
+            : undefined;
+
           // Hermes не читает project-level .mcp.json — передаём его содержимое
           // (например uno-manager воркспейса ассистента) через session/new.
           const mcpJsonRaw = yield* fileSystem
             .readFileString(nodePath.join(cwd, ".mcp.json"))
             .pipe(Effect.orElseSucceed(() => ""));
-          const mcpServers = mcpJsonRaw ? parseMcpJsonToAcpServers(mcpJsonRaw) : [];
+          // The workspace's own servers (the assistant's uno-manager) win over
+          // the owner's custom ones (settings.mcpServers) of the same name.
+          const workspaceMcpServers = mcpJsonRaw ? parseMcpJsonToAcpServers(mcpJsonRaw) : [];
+          const workspaceMcpNames = new Set(workspaceMcpServers.map((server) => server.name));
+          const mcpServers = [
+            ...workspaceMcpServers,
+            ...(options?.extraMcpServers?.() ?? []).filter(
+              (server) => !workspaceMcpNames.has(server.name),
+            ),
+          ];
 
           // Per-thread HERMES_HOME: серверы MCP и дефолтная модель зашиваются
           // в config.yaml — так `mcp-*` toolsets переживают agent-rebuild на
@@ -428,6 +482,7 @@ export function makeHermesAdapter(
                   model: configuredModel,
                   mcpServers,
                   skillsExternalDirs: [sharedSkillsRoot()],
+                  speechToText: llmProvider === "uno",
                 }),
               ),
             ),
@@ -451,6 +506,9 @@ export function makeHermesAdapter(
           const sessionEnvironment = {
             ...(options?.environment ?? {}),
             ...(options?.bridgeEnvironment?.({ threadId: input.threadId, cwd }) ?? {}),
+            // The route wins over the static gateway env and the app label of
+            // the bridge overlay: it already carries the right base URL.
+            ...(llmRoute ? hermesLlmRouteEnvironment(llmRoute) : {}),
             HERMES_HOME: threadHermesHome,
           };
           const acp = yield* makeHermesAcpRuntime({
@@ -579,6 +637,8 @@ export function makeHermesAdapter(
             lastAppliedModeId: undefined,
             activeTurnId: undefined,
             stopped: false,
+            llmProvider,
+            handoffPending: resumeSessionId === undefined || started.sessionId !== resumeSessionId,
           };
 
           yield* applyHermesSessionConfiguration({
@@ -682,6 +742,43 @@ export function makeHermesAdapter(
         }).pipe(Effect.scoped),
       );
 
+    /** First prompt of a fresh session: carried history + the assistant's NOTES.md. */
+    const readHandoffPrompt = (
+      ctx: HermesSessionContext,
+      currentText: string,
+      contextMessages: ReadonlyArray<ProviderContextMessage>,
+    ) =>
+      Effect.gen(function* () {
+        const cwd = ctx.session.cwd;
+        const isAssistantWorkspace =
+          cwd !== undefined &&
+          (yield* fileSystem
+            .exists(nodePath.join(cwd, ASSISTANT_WORKSPACE_MARKER))
+            .pipe(Effect.orElseSucceed(() => false)));
+        const notes =
+          isAssistantWorkspace && cwd !== undefined
+            ? yield* fileSystem
+                .readFileString(nodePath.join(cwd, ASSISTANT_NOTES_FILE))
+                .pipe(Effect.orElseSucceed(() => ""))
+            : "";
+        const prompt = buildHermesHandoffPrompt({
+          currentText,
+          contextMessages,
+          notes: notes.trim().length > 0 ? notes : null,
+        });
+        if (prompt !== currentText) {
+          yield* Effect.logInfo(
+            "hermes session handoff: carried chat history into a fresh session",
+            {
+              threadId: ctx.threadId,
+              contextMessages: contextMessages.length,
+              withNotes: notes.trim().length > 0,
+            },
+          );
+        }
+        return prompt;
+      });
+
     const sendTurn: HermesAdapterShape["sendTurn"] = (input) =>
       Effect.gen(function* () {
         const ctx = yield* requireSession(input.threadId);
@@ -702,9 +799,28 @@ export function makeHermesAdapter(
           payload: { model: displayModel },
         });
 
+        if (
+          turnModelSelection !== undefined &&
+          readAssistantLlmProvider(turnModelSelection) !== ctx.llmProvider
+        ) {
+          // The env of a running hermes process cannot change; the reactor
+          // restarts the session on a provider switch. Reaching here means it
+          // did not — say so instead of silently answering on the old one.
+          yield* Effect.logWarning("hermes turn asks for another LLM provider than the session", {
+            threadId: input.threadId,
+            sessionProvider: ctx.llmProvider,
+            requestedProvider: readAssistantLlmProvider(turnModelSelection),
+          });
+        }
+
         const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
-        if (input.input?.trim()) {
-          promptParts.push({ type: "text", text: input.input.trim() });
+        const userText = input.input?.trim() ?? "";
+        const handoffText = ctx.handoffPending
+          ? yield* readHandoffPrompt(ctx, userText, input.contextMessages ?? [])
+          : userText;
+        ctx.handoffPending = false;
+        if (handoffText.length > 0) {
+          promptParts.push({ type: "text", text: handoffText });
         }
         if (input.attachments && input.attachments.length > 0) {
           for (const attachment of input.attachments) {

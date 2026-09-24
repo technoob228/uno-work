@@ -110,6 +110,7 @@ import {
   type RoutingThreadShell,
 } from "../connectorBindings.ts";
 import { executeConnectorCommand } from "../connectorCommandHandler.ts";
+import { currentAssistantModelSelection } from "../assistantEngineSelection.ts";
 import { parseConnectorCommand } from "../connectorCommands.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import {
@@ -569,6 +570,11 @@ const makeTelegramConnector = Effect.gen(function* () {
           target,
           mappedThread,
           targetThread: null,
+          // The assistant's chats run on the Uno chat's engine (Hermes).
+          assistantModelSelection:
+            target.kind === "assistant"
+              ? yield* currentAssistantModelSelection(projectionSnapshotQuery)
+              : null,
           // The connector-level choice wins for the assistant only: Telegram
           // must never spawn a harness the owner didn't pick for it — while a
           // project target runs on what the project itself is configured for.

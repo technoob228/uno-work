@@ -24,6 +24,7 @@ import {
   type RuntimeMode,
   type ThreadId,
 } from "@t3tools/contracts";
+import { readAssistantLlmProvider } from "@t3tools/shared/assistantLlm";
 
 /**
  * Runtime mode of assistant chat threads. The assistant is the owner's own
@@ -108,6 +109,12 @@ export interface ThreadRoutingInput {
   readonly targetThread: RoutingThreadShell | null;
   /** Connector-level harness choice; honoured for the assistant target only. */
   readonly connectorModelSelection: ModelSelection | null;
+  /**
+   * What the Uno chat runs on (Hermes + its LLM provider and model, 0.0.84).
+   * When set it decides the assistant target: its Telegram / Slack chats run
+   * on the same engine as the pinned chat, ahead of the connector's own pick.
+   */
+  readonly assistantModelSelection?: ModelSelection | null;
   /** Default model of the target project. */
   readonly projectModelSelection: ModelSelection | null;
   /** Modes a fresh thread in the target project inherits (`project` targets). */
@@ -116,6 +123,10 @@ export interface ThreadRoutingInput {
 
 const sameHarnessAndModel = (a: ModelSelection, b: ModelSelection): boolean =>
   a.instanceId === b.instanceId && a.model === b.model;
+
+/** Harness + model, and the assistant's LLM provider (a switch = a fresh thread). */
+export const sameAssistantEngine = (a: ModelSelection, b: ModelSelection): boolean =>
+  sameHarnessAndModel(a, b) && readAssistantLlmProvider(a) === readAssistantLlmProvider(b);
 
 /**
  * Decide where an inbound message goes.
@@ -156,13 +167,17 @@ export const decideThreadRouting = (input: ThreadRoutingInput): ThreadRouting =>
 
   const isAssistant = target.kind === "assistant";
   const modelSelection = isAssistant
-    ? (input.connectorModelSelection ?? input.projectModelSelection)
+    ? (input.assistantModelSelection ??
+      input.connectorModelSelection ??
+      input.projectModelSelection)
     : input.projectModelSelection;
+  const same =
+    isAssistant && input.assistantModelSelection ? sameAssistantEngine : sameHarnessAndModel;
   const mapped = input.mappedThread;
   if (
     mapped !== null &&
     mapped.archivedAt === null &&
-    (modelSelection === null || sameHarnessAndModel(mapped.modelSelection, modelSelection))
+    (modelSelection === null || same(mapped.modelSelection, modelSelection))
   ) {
     return {
       kind: "reuse",

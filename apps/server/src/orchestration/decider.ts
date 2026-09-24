@@ -1,4 +1,5 @@
 import type {
+  ModelSelection,
   OrchestrationCommand,
   OrchestrationCommandOrigin,
   OrchestrationEvent,
@@ -6,6 +7,10 @@ import type {
   OrchestrationThread,
 } from "@t3tools/contracts";
 import { Effect } from "effect";
+import {
+  coerceAssistantModelSelection,
+  isAssistantHarnessSelection,
+} from "@t3tools/shared/assistantLlm";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import {
@@ -88,6 +93,22 @@ function assistantRoleViolation(input: {
     }
   }
   return null;
+}
+
+/**
+ * The assistant chat always runs on Hermes (0.0.84): a model selection for
+ * it that names another harness — a composer's stale pick, an old client —
+ * is dropped, a Hermes one is normalised to carry its LLM provider. Other
+ * chats keep whatever they are given.
+ */
+function modelSelectionForThread(
+  thread: Pick<OrchestrationThread, "assistantRole">,
+  modelSelection: ModelSelection | undefined,
+): ModelSelection | undefined {
+  if (modelSelection === undefined || thread.assistantRole !== "chat") return modelSelection;
+  return isAssistantHarnessSelection(modelSelection)
+    ? coerceAssistantModelSelection(modelSelection)
+    : undefined;
 }
 
 /** A user message no turn has picked up within this window is a failed start
@@ -528,11 +549,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.meta.update": {
-      yield* requireThread({
+      const metaThread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      const metaModelSelection = modelSelectionForThread(metaThread, command.modelSelection);
       if (command.assistantRole !== undefined) {
         const violation = assistantRoleViolation({
           readModel,
@@ -559,9 +581,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           ...(command.title !== undefined ? { title: command.title } : {}),
-          ...(command.modelSelection !== undefined
-            ? { modelSelection: command.modelSelection }
-            : {}),
+          ...(metaModelSelection !== undefined ? { modelSelection: metaModelSelection } : {}),
           ...(command.branch !== undefined ? { branch: command.branch } : {}),
           ...(command.worktreePath !== undefined ? { worktreePath: command.worktreePath } : {}),
           ...(command.pinnedAt !== undefined ? { pinnedAt: command.pinnedAt } : {}),
@@ -926,8 +946,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           messageId: command.message.messageId,
-          ...(command.modelSelection !== undefined
-            ? { modelSelection: command.modelSelection }
+          ...(modelSelectionForThread(targetThread, command.modelSelection) !== undefined
+            ? { modelSelection: modelSelectionForThread(targetThread, command.modelSelection) }
             : {}),
           ...(command.titleSeed !== undefined ? { titleSeed: command.titleSeed } : {}),
           runtimeMode: targetThread.runtimeMode,

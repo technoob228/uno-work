@@ -11,7 +11,8 @@
  * Read per session, not per driver instance: the list lives in a small cache
  * kept current from the settings stream, so a tool added during setup is in
  * the very next chat without rebuilding (and interrupting) running agents.
- * Hermes gets its MCP from the assistant's `.mcp.json` and is not covered.
+ * - Hermes / ACP harnesses: ACP `mcpServers` entries (`type: "http"`), next
+ *   to the workspace's own `.mcp.json` servers.
  */
 import type { UnoMcpServer } from "@t3tools/contracts";
 import { Context, Effect, Layer, Option, Stream } from "effect";
@@ -77,6 +78,21 @@ export function claudeMcpServers(
       { type: "http" as const, url: server.url.trim() },
     ]),
   );
+}
+
+/** ACP `session/new` `mcpServers` entries (Hermes, custom ACP harnesses). */
+export function acpMcpServers(servers: ReadonlyArray<UnoMcpServer>): ReadonlyArray<{
+  readonly type: "http";
+  readonly name: string;
+  readonly url: string;
+  readonly headers: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+}> {
+  return enabledMcpServers(servers).map((server) => ({
+    type: "http" as const,
+    name: server.name,
+    url: server.url.trim(),
+    headers: [],
+  }));
 }
 
 /** TOML basic string: quotes and backslashes escaped, no newlines. */
