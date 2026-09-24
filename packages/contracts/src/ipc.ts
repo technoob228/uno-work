@@ -1,4 +1,10 @@
 import type {
+  SkillsInstallInput,
+  SkillsInstallResult,
+  SkillsStatusInput,
+  SkillsStatusResult,
+} from "./skills.ts";
+import type {
   VcsSwitchRefInput,
   VcsSwitchRefResult,
   VcsCreateRefInput,
@@ -678,6 +684,11 @@ export interface EnvironmentApi {
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
+  };
+  skills: {
+    status: (input: SkillsStatusInput) => Promise<SkillsStatusResult>;
+    install: (input: SkillsInstallInput) => Promise<SkillsInstallResult>;
+    remove: (input: SkillsInstallInput) => Promise<void>;
   };
   filesystem: {
     browse: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;

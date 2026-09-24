@@ -1,0 +1,3 @@
+presentations — Uno
+Based on executive-slide-skill by trev0rr (https://github.com/trev0rr/executive-slide-skill), Apache License 2.0.
+Modified by Uno4 Labs LLC, 2026-09-24: default output changed from React artifact to standalone HTML; added sales-copy and deck-critic steps; renamed to "presentations".

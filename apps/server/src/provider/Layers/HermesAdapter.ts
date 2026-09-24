@@ -78,6 +78,7 @@ import {
   setHermesSessionMode,
 } from "../acp/HermesAcpSupport.ts";
 import { repairHermesSessionHistory } from "../acp/hermesSessionRepair.ts";
+import { sharedSkillsRoot } from "../../skills/skillInstaller.ts";
 import { type HermesAdapterShape } from "../Services/HermesAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
@@ -423,7 +424,11 @@ export function makeHermesAdapter(
             Effect.andThen(
               fileSystem.writeFileString(
                 nodePath.join(threadHermesHome, "config.yaml"),
-                buildHermesConfigYaml({ model: configuredModel, mcpServers }),
+                buildHermesConfigYaml({
+                  model: configuredModel,
+                  mcpServers,
+                  skillsExternalDirs: [sharedSkillsRoot()],
+                }),
               ),
             ),
             Effect.mapError(

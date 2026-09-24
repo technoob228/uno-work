@@ -1,6 +1,6 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useServerConfig } from "../rpc/serverState";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { OnboardingShell } from "~/components/onboarding/OnboardingShell";
 import { useFirstChatLaunch } from "~/components/onboarding/useFirstChatLaunch";
@@ -12,9 +12,14 @@ import { RulesStep } from "~/components/onboarding/steps/RulesStep";
 import { UnoLlmStep } from "~/components/onboarding/steps/UnoLlmStep";
 import { WelcomeStep } from "~/components/onboarding/steps/WelcomeStep";
 import { WhatItDoesStep } from "~/components/onboarding/steps/WhatItDoesStep";
-import { ComputerAwayStep } from "~/components/onboarding/steps/web/ComputerAwayStep";
-import { ComputerChatStep } from "~/components/onboarding/steps/web/ComputerChatStep";
-import { ComputerHelloStep } from "~/components/onboarding/steps/web/ComputerHelloStep";
+import {
+  WorkWelcomeStep,
+  type WelcomeMode,
+} from "~/components/onboarding/steps/web/WorkWelcomeStep";
+import { OwnToolsDialog, type OwnToolsTab } from "~/components/setup/OwnToolsDialog";
+import { skipRemaining } from "~/components/setup/setupModel";
+import { useStartSetupTour } from "~/components/setup/SetupTour";
+import { useUpdateSetupProgress } from "~/components/setup/useSetupProgress";
 import { useCommandPaletteStore } from "~/commandPaletteStore";
 import { ensureClientSettingsHydrated, useUpdateSettings } from "~/hooks/useSettings";
 import { isWebApp } from "~/webMode";
@@ -35,13 +40,39 @@ function OnboardingRouteView() {
   const navigate = useNavigate();
   const openAddProjectRef = useRef(false);
 
-  const markCompleted = useCallback(() => {
-    void updateSettings({ onboardingCompleted: true, machineOnboarded: true });
-  }, [updateSettings]);
+  const markCompleted = useCallback(
+    () => updateSettings({ onboardingCompleted: true, machineOnboarded: true }),
+    [updateSettings],
+  );
+  const updateSetup = useUpdateSetupProgress();
+  const startTour = useStartSetupTour();
+  const [welcomeMode, setWelcomeMode] = useState<WelcomeMode>("ai");
+  const [ownTools, setOwnTools] = useState<OwnToolsTab | null>(null);
+  const [leaving, setLeaving] = useState(false);
+
+  // Browser: the welcome screen hands over to the tour or the guided setup,
+  // both inside the app. Completion is saved first so the root guard lets the
+  // navigation through.
+  const leaveWelcome = async (mode: WelcomeMode) => {
+    if (leaving) return;
+    setLeaving(true);
+    try {
+      await markCompleted();
+      await updateSetup((current) => ({ ...current, mode }));
+      if (mode === "simple") startTour("home");
+      else void navigate({ to: "/setup", search: { step: "ai" } });
+    } finally {
+      setLeaving(false);
+    }
+  };
 
   // In the browser flow the last step opens a real chat itself; completion is
   // recorded just before that navigation so the root guard lets it through.
-  const firstChat = useFirstChatLaunch({ onBeforeNavigate: markCompleted });
+  const firstChat = useFirstChatLaunch({
+    onBeforeNavigate: () => {
+      void markCompleted();
+    },
+  });
 
   // Setup is remembered per machine too: the same computer opened from another
   // address or device (its own localStorage) goes straight in.
@@ -62,12 +93,16 @@ function OnboardingRouteView() {
   }, []);
 
   const finish = (openProjectPicker: boolean) => {
-    markCompleted();
+    void markCompleted();
     openAddProjectRef.current = openProjectPicker;
     void navigate({ to: "/", replace: true });
   };
 
   const handleContinue = () => {
+    if (isWebApp) {
+      void leaveWelcome(welcomeMode);
+      return;
+    }
     if (!state.isLast) {
       state.next();
       return;
@@ -81,11 +116,15 @@ function OnboardingRouteView() {
   };
 
   const handleSkip = () => {
-    markCompleted();
-    void navigate({ to: "/", replace: true });
+    void (async () => {
+      await markCompleted();
+      // The browser's guided setup stays one click away: "Finish setup" in the sidebar.
+      if (isWebApp) await updateSetup((current) => skipRemaining({ ...current, mode: "ai" }));
+      void navigate({ to: "/", replace: true });
+    })();
   };
 
-  const continueLabelProps = isWebApp && state.isLast ? { continueLabel: "Open my computer" } : {};
+  const continueLabelProps = isWebApp ? { continueLabel: "Continue" } : {};
 
   return (
     <OnboardingShell
@@ -95,7 +134,7 @@ function OnboardingRouteView() {
       progressPercent={state.progressPercent}
       isFirst={state.isFirst}
       isLast={state.isLast}
-      canContinue={!firstChat.pending}
+      canContinue={!firstChat.pending && !leaving}
       {...continueLabelProps}
       onBack={state.back}
       onContinue={handleContinue}
@@ -108,22 +147,22 @@ function OnboardingRouteView() {
       {state.stepId === "harness" && <HarnessesStep />}
       {state.stepId === "unollm" && <UnoLlmStep />}
       {state.stepId === "rules" && <RulesStep />}
-      {state.stepId === "web-computer" && (
-        <ComputerHelloStep
-          onOpenComputer={() => {
-            markCompleted();
-            void navigate({ to: "/computer", replace: true });
-          }}
+      {state.stepId === "web-welcome" && (
+        <WorkWelcomeStep
+          mode={welcomeMode}
+          onModeChange={setWelcomeMode}
+          onConfirm={(mode) => void leaveWelcome(mode)}
+          onOwnTools={setOwnTools}
         />
       )}
-      {state.stepId === "web-away" && <ComputerAwayStep />}
-      {state.stepId === "web-chat" && (
-        <ComputerChatStep
-          pending={firstChat.pending}
-          error={firstChat.error}
-          onPick={(prompt) => void firstChat.launch(prompt)}
-        />
-      )}
+      <OwnToolsDialog
+        open={ownTools !== null}
+        tab={ownTools ?? "agent"}
+        onTabChange={setOwnTools}
+        onOpenChange={(open) => {
+          if (!open) setOwnTools(null);
+        }}
+      />
     </OnboardingShell>
   );
 }

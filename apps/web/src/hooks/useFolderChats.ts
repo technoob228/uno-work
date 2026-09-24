@@ -14,6 +14,7 @@ import {
   ProviderInstanceId,
   isAssistantProjectId,
   type EnvironmentId,
+  type ModelSelection,
   type ScopedProjectRef,
 } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
@@ -75,7 +76,11 @@ export function useFolderChats(environmentId: EnvironmentId | null) {
     async (
       folder: string,
       title?: string,
-      options?: { readonly createFolder?: boolean },
+      options?: {
+        readonly createFolder?: boolean;
+        /** The new project's default model; the machine's usable default otherwise. */
+        readonly defaultModelSelection?: ModelSelection | null;
+      },
     ): Promise<ScopedProjectRef> => {
       if (environmentId === null) throw new Error("No connection to this computer.");
       const existing = findProjectByPath(
@@ -85,7 +90,8 @@ export function useFolderChats(environmentId: EnvironmentId | null) {
         folder,
       );
       if (existing) return scopeProjectRef(environmentId, existing.id);
-      const selection = pickUsableDefaultModelSelection(providers);
+      const selection =
+        options?.defaultModelSelection ?? pickUsableDefaultModelSelection(providers);
       const projectId = newProjectId();
       await ensureEnvironmentApi(environmentId).orchestration.dispatchCommand({
         type: "project.create",

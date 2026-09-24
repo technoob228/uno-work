@@ -15,6 +15,7 @@ import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { SplashScreen } from "../components/SplashScreen";
 import { CommandPalette } from "../components/CommandPalette";
+import { SetupTourCoach } from "../components/setup/SetupTour";
 import { NewProjectDialog } from "../components/newProject/NewProjectDialog";
 import { PreviewPaneProvider } from "../components/preview/PreviewPaneContext";
 import { LinkRequestPromptDialog } from "../components/desktop/LinkRequestPromptDialog";
@@ -189,6 +190,7 @@ function RootRouteView() {
           <Outlet />
         </AppSidebarLayout>
         <NewProjectDialog />
+        <SetupTourCoach />
       </CommandPalette>
     </PreviewPaneProvider>
   );

@@ -25,6 +25,7 @@ import { Route as SettingsComputerAccessRouteImport } from './routes/settings.co
 import { Route as SettingsBrowserRouteImport } from './routes/settings.browser'
 import { Route as SettingsAssistantRouteImport } from './routes/settings.assistant'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
+import { Route as ChatSetupRouteImport } from './routes/_chat.setup'
 import { Route as ChatOfficeRouteImport } from './routes/_chat.office'
 import { Route as ChatMyUnoRouteImport } from './routes/_chat.my-uno'
 import { Route as ChatFilesRouteImport } from './routes/_chat.files'
@@ -126,6 +127,11 @@ const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
   id: '/archived',
   path: '/archived',
   getParentRoute: () => SettingsRoute,
+} as any)
+const ChatSetupRoute = ChatSetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
+  getParentRoute: () => ChatRoute,
 } as any)
 const ChatOfficeRoute = ChatOfficeRouteImport.update({
   id: '/office',
@@ -258,6 +264,7 @@ export interface FileRoutesByFullPath {
   '/files': typeof ChatFilesRoute
   '/my-uno': typeof ChatMyUnoRoute
   '/office': typeof ChatOfficeRoute
+  '/setup': typeof ChatSetupRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/browser': typeof SettingsBrowserRoute
@@ -295,6 +302,7 @@ export interface FileRoutesByTo {
   '/files': typeof ChatFilesRoute
   '/my-uno': typeof ChatMyUnoRoute
   '/office': typeof ChatOfficeRoute
+  '/setup': typeof ChatSetupRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/browser': typeof SettingsBrowserRoute
@@ -336,6 +344,7 @@ export interface FileRoutesById {
   '/_chat/files': typeof ChatFilesRoute
   '/_chat/my-uno': typeof ChatMyUnoRoute
   '/_chat/office': typeof ChatOfficeRoute
+  '/_chat/setup': typeof ChatSetupRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/browser': typeof SettingsBrowserRoute
@@ -378,6 +387,7 @@ export interface FileRouteTypes {
     | '/files'
     | '/my-uno'
     | '/office'
+    | '/setup'
     | '/settings/archived'
     | '/settings/assistant'
     | '/settings/browser'
@@ -415,6 +425,7 @@ export interface FileRouteTypes {
     | '/files'
     | '/my-uno'
     | '/office'
+    | '/setup'
     | '/settings/archived'
     | '/settings/assistant'
     | '/settings/browser'
@@ -455,6 +466,7 @@ export interface FileRouteTypes {
     | '/_chat/files'
     | '/_chat/my-uno'
     | '/_chat/office'
+    | '/_chat/setup'
     | '/settings/archived'
     | '/settings/assistant'
     | '/settings/browser'
@@ -605,6 +617,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings/archived'
       preLoaderRoute: typeof SettingsArchivedRouteImport
       parentRoute: typeof SettingsRoute
+    }
+    '/_chat/setup': {
+      id: '/_chat/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof ChatSetupRouteImport
+      parentRoute: typeof ChatRoute
     }
     '/_chat/office': {
       id: '/_chat/office'
@@ -785,6 +804,7 @@ interface ChatRouteChildren {
   ChatFilesRoute: typeof ChatFilesRoute
   ChatMyUnoRoute: typeof ChatMyUnoRoute
   ChatOfficeRoute: typeof ChatOfficeRoute
+  ChatSetupRoute: typeof ChatSetupRoute
   ChatIndexRoute: typeof ChatIndexRoute
   ChatEnvironmentIdThreadIdRoute: typeof ChatEnvironmentIdThreadIdRoute
   ChatDraftDraftIdRoute: typeof ChatDraftDraftIdRoute
@@ -797,6 +817,7 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatFilesRoute: ChatFilesRoute,
   ChatMyUnoRoute: ChatMyUnoRoute,
   ChatOfficeRoute: ChatOfficeRoute,
+  ChatSetupRoute: ChatSetupRoute,
   ChatIndexRoute: ChatIndexRoute,
   ChatEnvironmentIdThreadIdRoute: ChatEnvironmentIdThreadIdRoute,
   ChatDraftDraftIdRoute: ChatDraftDraftIdRoute,

@@ -150,5 +150,13 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
     [openChatWithPrompt],
   );
 
-  return { newChat, openTerminal, chatInFolder, askUno, startTask };
+  /** A new chat in `folder` with `prompt` typed, not sent (setup's first tasks). */
+  const askInFolder = useCallback(
+    async (prompt: string, folder: string) => {
+      await openChatWithPrompt(prompt, folder);
+    },
+    [openChatWithPrompt],
+  );
+
+  return { newChat, openTerminal, chatInFolder, askUno, askInFolder, startTask };
 }

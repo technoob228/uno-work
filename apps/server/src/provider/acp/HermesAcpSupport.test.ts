@@ -237,3 +237,14 @@ describe("parseMcpJsonToAcpServers", () => {
     expect(parseMcpJsonToAcpServers("null")).toEqual([]);
   });
 });
+
+describe("buildHermesConfigYaml skills", () => {
+  it("points Hermes at the shared skill folders", () => {
+    const yaml = buildHermesConfigYaml({
+      model: "openai/gpt-5.5",
+      mcpServers: [],
+      skillsExternalDirs: ["/home/u/.claude/skills"],
+    });
+    expect(yaml).toContain('skills:\n  external_dirs:\n    - "/home/u/.claude/skills"');
+  });
+});

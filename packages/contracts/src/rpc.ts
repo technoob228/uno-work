@@ -4,6 +4,13 @@ import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 import { EnvironmentId } from "./baseSchemas.ts";
 import {
+  SkillsError,
+  SkillsInstallInput,
+  SkillsInstallResult,
+  SkillsStatusInput,
+  SkillsStatusResult,
+} from "./skills.ts";
+import {
   UnoBoxConnection,
   UnoBoxCreateJobStatus,
   UnoCloudState,
@@ -274,6 +281,9 @@ export const WS_METHODS = {
   projectsRemove: "projects.remove",
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
+  skillsStatus: "skills.status",
+  skillsInstall: "skills.install",
+  skillsRemove: "skills.remove",
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
@@ -767,6 +777,23 @@ export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
   payload: ProjectWriteFileInput,
   success: ProjectWriteFileResult,
   error: ProjectWriteFileError,
+});
+
+export const WsSkillsStatusRpc = Rpc.make(WS_METHODS.skillsStatus, {
+  payload: SkillsStatusInput,
+  success: SkillsStatusResult,
+  error: SkillsError,
+});
+
+export const WsSkillsInstallRpc = Rpc.make(WS_METHODS.skillsInstall, {
+  payload: SkillsInstallInput,
+  success: SkillsInstallResult,
+  error: SkillsError,
+});
+
+export const WsSkillsRemoveRpc = Rpc.make(WS_METHODS.skillsRemove, {
+  payload: SkillsInstallInput,
+  error: SkillsError,
 });
 
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
@@ -1755,6 +1782,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlPublishRepositoryRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
+  WsSkillsStatusRpc,
+  WsSkillsInstallRpc,
+  WsSkillsRemoveRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsFilesystemReadFileRpc,

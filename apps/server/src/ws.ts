@@ -31,6 +31,8 @@ import {
   InboxError,
   UNO_GATEWAY_BASE_URL,
   WS_METHODS,
+  DEFAULT_SERVER_SETTINGS,
+  SkillsError,
   WsRpcGroup,
 } from "@t3tools/contracts";
 import { clamp } from "effect/Number";
@@ -41,7 +43,14 @@ import { layerJsonMobileCompat } from "./compat/rpcSerializationMobileCompat.ts"
 import { translateAuthDescriptorForUpstream } from "./compat/mobileScopes.ts";
 
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery.ts";
-import { ServerConfig } from "./config.ts";
+import { ServerConfig, resolveStaticDir } from "./config.ts";
+import {
+  installSkill,
+  installedSkills,
+  listCatalogSkills,
+  removeSkill,
+  skillTargetRoots,
+} from "./skills/skillInstaller.ts";
 import { Keybindings } from "./keybindings.ts";
 import { Open, resolveAvailableEditors } from "./open.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
@@ -241,6 +250,24 @@ const makeWsRpcLayer = (
       const startup = yield* ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem;
+      // Skills: the catalog ships in the UI's own dist (`<static>/skills`).
+      const skillsCatalogDir = yield* (
+        config.staticDir
+          ? Effect.succeed(config.staticDir)
+          : resolveStaticDir().pipe(Effect.orElseSucceed(() => undefined))
+      ).pipe(Effect.map((dir) => (dir ? nodePath.join(dir, "skills") : undefined)));
+      const skillsContext = serverSettings.getSettings.pipe(
+        Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS),
+        Effect.map((settings) => ({
+          catalogDir: skillsCatalogDir,
+          roots: skillTargetRoots(settings),
+        })),
+      );
+      const toSkillsError = (cause: unknown) =>
+        new SkillsError({
+          message: cause instanceof Error ? cause.message : "Couldn't change the skill.",
+          cause,
+        });
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
       const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
       const serverEnvironment = yield* ServerEnvironment;
@@ -1736,6 +1763,51 @@ const makeWsRpcLayer = (
               }),
             ),
             { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.skillsStatus]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.skillsStatus,
+            skillsContext.pipe(
+              Effect.flatMap(({ catalogDir, roots }) =>
+                Effect.tryPromise({
+                  try: async () => ({
+                    installed: await installedSkills(input.ids, roots),
+                    available: await listCatalogSkills(catalogDir),
+                  }),
+                  catch: toSkillsError,
+                }),
+              ),
+            ),
+            { "rpc.aggregate": "skills" },
+          ),
+        [WS_METHODS.skillsInstall]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.skillsInstall,
+            skillsContext.pipe(
+              Effect.flatMap(({ catalogDir, roots }) =>
+                Effect.tryPromise({
+                  try: async () => ({
+                    id: input.id,
+                    paths: await installSkill({ id: input.id, catalogDir, roots }),
+                  }),
+                  catch: toSkillsError,
+                }),
+              ),
+            ),
+            { "rpc.aggregate": "skills" },
+          ),
+        [WS_METHODS.skillsRemove]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.skillsRemove,
+            skillsContext.pipe(
+              Effect.flatMap(({ roots }) =>
+                Effect.tryPromise({
+                  try: () => removeSkill({ id: input.id, roots }),
+                  catch: toSkillsError,
+                }),
+              ),
+            ),
+            { "rpc.aggregate": "skills" },
           ),
         [WS_METHODS.shellOpenInEditor]: (input) =>
           observeRpcEffect(WS_METHODS.shellOpenInEditor, open.openInEditor(input), {

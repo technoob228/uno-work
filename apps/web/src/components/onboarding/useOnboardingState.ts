@@ -13,11 +13,11 @@ export const DESKTOP_ONBOARDING_STEP_IDS = [
 
 /**
  * Browser flow: the tab is already connected to a provisioned machine, so
- * there is nothing to install or choose. Three screens: this is your computer,
- * it works while you're away, now ask it for something — the last one ends in
- * a real chat rather than a settings page.
+ * there is nothing to install. One screen — this is your computer, how do you
+ * want to use it — and then either the tour or the guided setup, both inside
+ * the app (`/setup`), where the sidebar keeps "Set up N/8" to come back to.
  */
-export const WEB_ONBOARDING_STEP_IDS = ["web-computer", "web-away", "web-chat"] as const;
+export const WEB_ONBOARDING_STEP_IDS = ["web-welcome"] as const;
 
 /** Kept as the default export name for the desktop flow and its tests. */
 export const ONBOARDING_STEP_IDS = DESKTOP_ONBOARDING_STEP_IDS;

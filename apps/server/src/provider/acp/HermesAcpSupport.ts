@@ -227,6 +227,13 @@ export const HERMES_AGENT_INTENT_ACK_CONTINUATION = true;
 export function buildHermesConfigYaml(input: {
   readonly model: string;
   readonly mcpServers: ReadonlyArray<EffectAcpSchema.McpServer>;
+  /**
+   * Shared skill folders Hermes reads read-only (`skills.external_dirs`): the
+   * per-thread HERMES_HOME has no skills of its own, so the ones installed
+   * for every agent (`~/.claude/skills`, see skills/skillInstaller.ts) are
+   * pointed at here.
+   */
+  readonly skillsExternalDirs?: ReadonlyArray<string>;
 }): string {
   const quote = JSON.stringify;
   const lines: Array<string> = [
@@ -248,6 +255,10 @@ export function buildHermesConfigYaml(input: {
     "  openai:",
     `    model: ${quote(HERMES_STT_MODEL)}`,
   ];
+  if (input.skillsExternalDirs && input.skillsExternalDirs.length > 0) {
+    lines.push("skills:", "  external_dirs:");
+    for (const dir of input.skillsExternalDirs) lines.push(`    - ${quote(dir)}`);
+  }
   if (input.mcpServers.length > 0) {
     lines.push("mcp_servers:");
     for (const server of input.mcpServers) {

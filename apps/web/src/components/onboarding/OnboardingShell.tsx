@@ -57,7 +57,7 @@ export function OnboardingShell({
         </div>
       </header>
 
-      <div className="relative h-[3px] shrink-0 bg-muted">
+      <div className={cn("relative h-[3px] shrink-0 bg-muted", totalSteps <= 1 && "hidden")}>
         <div
           className="h-full bg-primary transition-[width] duration-300 ease-out"
           style={{ width: `${progressPercent}%` }}
@@ -78,7 +78,7 @@ export function OnboardingShell({
         ) : null}
 
         <div className="flex flex-1 justify-center">
-          <div className="flex items-center gap-1.5">
+          <div className={cn("flex items-center gap-1.5", totalSteps <= 1 && "hidden")}>
             {Array.from({ length: totalSteps }, (_unused, i) => (
               <span
                 key={i}

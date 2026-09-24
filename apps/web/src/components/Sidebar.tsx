@@ -183,6 +183,7 @@ import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarComputerRow } from "./sidebar/SidebarComputerRow";
+import { SidebarSetupRow } from "./sidebar/SidebarSetupRow";
 import { SidebarMyUnoRow } from "./sidebar/SidebarMyUnoRow";
 import { SidebarEnvSwitcher } from "./SidebarEnvSwitcher";
 import { SidebarAppsList } from "./sidebar/SidebarAppsList";
@@ -2418,12 +2419,14 @@ export default function Sidebar() {
         listMode === "home" ? (
           <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-0">
             <SidebarEnvSwitcher variant="header" />
+            <SidebarSetupRow />
             <SidebarMyUnoRow />
           </SidebarGroup>
         ) : null
       ) : (
         <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-0">
           <SidebarEnvSwitcher variant="header" />
+          <SidebarSetupRow />
           <SidebarAssistantRow />
           <SidebarComputerRow />
           <SidebarMyUnoRow />

@@ -36,6 +36,7 @@ export const SidebarComputerRow = memo(function SidebarComputerRow() {
 
   return (
     <button
+      data-tour="home"
       type="button"
       onClick={goHome}
       className={cn(

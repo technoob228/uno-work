@@ -38,6 +38,7 @@ export const SidebarModeSwitch = memo(function SidebarModeSwitch() {
             key={value}
             type="button"
             role="tab"
+            data-tour={value}
             aria-selected={active}
             onClick={() => setMode(value)}
             className={cn(

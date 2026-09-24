@@ -42,7 +42,11 @@ describe("inbox model", () => {
   it("strips control and bidi characters and cuts long text", () => {
     const { item } = addToInbox(
       [],
-      { ...officePost(`a${String.fromCharCode(0x202e)}b${String.fromCharCode(7)}c`), body: "x".repeat(900), groupKey: null },
+      {
+        ...officePost(`a${String.fromCharCode(0x202e)}b${String.fromCharCode(7)}c`),
+        body: "x".repeat(900),
+        groupKey: null,
+      },
       T0,
     );
     expect(item.title).toBe("abc");
