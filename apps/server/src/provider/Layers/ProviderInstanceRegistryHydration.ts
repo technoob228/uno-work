@@ -47,10 +47,11 @@ import {
   type ProviderInstanceConfigMap,
   ServerSettings,
 } from "@t3tools/contracts";
-import { Effect, Layer, Stream, Duration } from "effect";
+import { Effect, Layer, Option, Ref, Stream, Duration } from "effect";
 
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { accountKeyFingerprint } from "../../unoGatewayKey.ts";
+import { CustomHarnessFiles } from "../customHarness/CustomHarnessFiles.ts";
 import { BUILT_IN_DRIVERS, type BuiltInDriversEnv } from "../builtInDrivers.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderInstanceRegistryMutator } from "../Services/ProviderInstanceRegistryMutator.ts";
@@ -75,8 +76,17 @@ import { ProviderInstanceRegistryMutableLayer } from "./ProviderInstanceRegistry
  */
 export const deriveProviderInstanceConfigMap = (
   settings: ServerSettings,
+  /**
+   * Custom harnesses registered as files (`~/.uno/harnesses/<id>.json`,
+   * instance ids `harness-<id>`). An explicit `providerInstances` entry with
+   * the same id wins, like everywhere else.
+   */
+  fileHarnesses: Readonly<Record<string, ProviderInstanceConfig>> = {},
 ): ProviderInstanceConfigMap => {
-  const merged: Record<string, ProviderInstanceConfig> = { ...settings.providerInstances };
+  const merged: Record<string, ProviderInstanceConfig> = {
+    ...fileHarnesses,
+    ...settings.providerInstances,
+  };
 
   for (const driver of BUILT_IN_DRIVERS) {
     const instanceId = defaultInstanceIdForDriver(driver.driverKind);
@@ -162,15 +172,35 @@ const SettingsWatcherLive: Layer.Layer<
   Effect.gen(function* () {
     const mutator = yield* ProviderInstanceRegistryMutator;
     const serverSettings = yield* ServerSettingsService;
+    // Optional so tests (and builds without the file registry) keep working.
+    const harnessFiles = Option.getOrUndefined(yield* Effect.serviceOption(CustomHarnessFiles));
+    const fileHarnessesRef = yield* Ref.make<Readonly<Record<string, ProviderInstanceConfig>>>(
+      harnessFiles ? (yield* harnessFiles.current).configs : {},
+    );
     const reconcileWith = (next: ServerSettings) =>
-      mutator
-        .reconcile(deriveProviderInstanceConfigMap(next))
-        .pipe(
-          Effect.catchCause((cause) =>
-            Effect.logError("ProviderInstanceRegistry reconcile failed", cause),
-          ),
-        );
+      Ref.get(fileHarnessesRef).pipe(
+        Effect.flatMap((fileHarnesses) =>
+          mutator.reconcile(deriveProviderInstanceConfigMap(next, fileHarnesses)),
+        ),
+        Effect.catchCause((cause) =>
+          Effect.logError("ProviderInstanceRegistry reconcile failed", cause),
+        ),
+      );
     yield* serverSettings.streamChanges.pipe(Stream.runForEach(reconcileWith), Effect.forkScoped);
+    if (harnessFiles) {
+      yield* harnessFiles.changes.pipe(
+        Stream.runForEach((configs) =>
+          Ref.set(fileHarnessesRef, configs).pipe(
+            Effect.andThen(serverSettings.getSettings),
+            Effect.flatMap(reconcileWith),
+            Effect.catchCause((cause) =>
+              Effect.logError("ProviderInstanceRegistry harness-file reconcile failed", cause),
+            ),
+          ),
+        ),
+        Effect.forkScoped,
+      );
+    }
     // Catch-up. The registry was built from settings read before this
     // subscription existed, and change events are not replayed: a write in
     // that window was lost until the next restart. On a fresh Work box that
@@ -180,6 +210,14 @@ const SettingsWatcherLive: Layer.Layer<
     // idempotent, so re-applying the current settings once the subscription is
     // live costs nothing when nothing was missed.
     yield* Effect.sleep(Duration.seconds(1)).pipe(
+      // Same catch-up for harness files changed before the subscription.
+      Effect.andThen(
+        harnessFiles
+          ? harnessFiles.current.pipe(
+              Effect.flatMap((state) => Ref.set(fileHarnessesRef, state.configs)),
+            )
+          : Effect.void,
+      ),
       Effect.andThen(serverSettings.getSettings),
       Effect.flatMap(reconcileWith),
       Effect.catchCause((cause) =>
@@ -216,10 +254,12 @@ export const ProviderInstanceRegistryHydrationLive: Layer.Layer<
     const initialSettings: ServerSettings | undefined = yield* serverSettings.getSettings.pipe(
       Effect.orElseSucceed(() => undefined),
     );
+    const harnessFiles = Option.getOrUndefined(yield* Effect.serviceOption(CustomHarnessFiles));
+    const initialFileHarnesses = harnessFiles ? (yield* harnessFiles.current).configs : {};
     const initialConfigMap =
       initialSettings === undefined
         ? ({} as ProviderInstanceConfigMap)
-        : deriveProviderInstanceConfigMap(initialSettings);
+        : deriveProviderInstanceConfigMap(initialSettings, initialFileHarnesses);
 
     const mutableLayer = ProviderInstanceRegistryMutableLayer({
       drivers: BUILT_IN_DRIVERS,

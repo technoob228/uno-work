@@ -14,6 +14,7 @@
  * @module components/settings/EnvironmentProvidersPanel
  */
 import {
+  CUSTOM_HARNESS_DRIVER_KIND,
   defaultInstanceIdForDriver,
   type EnvironmentId,
   ProviderDriverKind,
@@ -189,6 +190,8 @@ export function EnvironmentProvidersPanel({
 
     for (const [driver, list] of instancesByDriver) {
       if (visibleDriverKinds.has(driver)) continue;
+      // Custom (ACP) harnesses have their own page: Settings → Harnesses.
+      if (driver === CUSTOM_HARNESS_DRIVER_KIND) continue;
       for (const [id, instance] of list) {
         next.push({
           instanceId: id,

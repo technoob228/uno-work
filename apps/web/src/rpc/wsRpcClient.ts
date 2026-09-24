@@ -216,6 +216,13 @@ export interface WsRpcClient {
     readonly authStatus: RpcUnaryMethod<typeof WS_METHODS.providerAuthStatus>;
     readonly authSubmitCode: RpcUnaryMethod<typeof WS_METHODS.providerAuthSubmitCode>;
   };
+  readonly customHarness: {
+    readonly list: RpcUnaryNoArgMethod<typeof WS_METHODS.customHarnessList>;
+    readonly test: RpcUnaryMethod<typeof WS_METHODS.customHarnessTest>;
+    readonly setSecret: RpcUnaryMethod<typeof WS_METHODS.customHarnessSetSecret>;
+    readonly installStart: RpcUnaryMethod<typeof WS_METHODS.customHarnessInstallStart>;
+    readonly installStatus: RpcUnaryMethod<typeof WS_METHODS.customHarnessInstallStatus>;
+  };
   readonly unoCloud: {
     readonly getState: (
       input?: RpcInput<typeof WS_METHODS.unoCloudGetState>,
@@ -560,6 +567,16 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.providerAuthStatus](input)),
       authSubmitCode: (input) =>
         transport.request((client) => client[WS_METHODS.providerAuthSubmitCode](input)),
+    },
+    customHarness: {
+      list: () => transport.request((client) => client[WS_METHODS.customHarnessList]({})),
+      test: (input) => transport.request((client) => client[WS_METHODS.customHarnessTest](input)),
+      setSecret: (input) =>
+        transport.request((client) => client[WS_METHODS.customHarnessSetSecret](input)),
+      installStart: (input) =>
+        transport.request((client) => client[WS_METHODS.customHarnessInstallStart](input)),
+      installStatus: (input) =>
+        transport.request((client) => client[WS_METHODS.customHarnessInstallStatus](input)),
     },
     unoCloud: {
       getState: (input) =>

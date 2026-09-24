@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./customHarness": {
+      "types": "./src/customHarness.ts",
+      "import": "./src/customHarness.ts"
+    },
     "./model": {
       "types": "./src/model.ts",
       "import": "./src/model.ts"

@@ -142,6 +142,7 @@ import { AppSdkService } from "./appSdk/AppSdkService.ts";
 import { InboxService } from "./inbox/InboxService.ts";
 import { ComputerResourcesService } from "./computerResources/ComputerResourcesService.ts";
 import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
+import { CustomHarnessService } from "./provider/customHarness/CustomHarnessService.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriver from "./vcs/VcsDriver.ts";
@@ -687,6 +688,7 @@ const buildAppUnderTest = (options?: {
           Layer.mock(ManagerAssistantLlm)({}),
           Layer.mock(AiProviderKeys)({}),
           Layer.mock(ManagerAccountDefaultAi)({}),
+          Layer.mock(CustomHarnessService)({}),
         ),
       ),
       Layer.provide(

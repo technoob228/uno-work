@@ -236,6 +236,7 @@ function createMockEnvironmentApi(input: {
     unoComputer: {} as EnvironmentApi["unoComputer"],
     files: {} as EnvironmentApi["files"],
     providerSetup: {} as EnvironmentApi["providerSetup"],
+    customHarness: {} as EnvironmentApi["customHarness"],
   };
 }
 

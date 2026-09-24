@@ -23,6 +23,7 @@
 import { ClaudeDriver, type ClaudeDriverEnv } from "./Drivers/ClaudeDriver.ts";
 import { CodexDriver, type CodexDriverEnv } from "./Drivers/CodexDriver.ts";
 import { CursorDriver, type CursorDriverEnv } from "./Drivers/CursorDriver.ts";
+import { CustomHarnessDriver, type CustomHarnessDriverEnv } from "./Drivers/CustomHarnessDriver.ts";
 import { HermesDriver, type HermesDriverEnv } from "./Drivers/HermesDriver.ts";
 import { OpenCodeDriver, type OpenCodeDriverEnv } from "./Drivers/OpenCodeDriver.ts";
 import { UnoDriver, type UnoDriverEnv } from "./Drivers/UnoDriver.ts";
@@ -37,6 +38,7 @@ export type BuiltInDriversEnv =
   | ClaudeDriverEnv
   | CodexDriverEnv
   | CursorDriverEnv
+  | CustomHarnessDriverEnv
   | HermesDriverEnv
   | OpenCodeDriverEnv
   | UnoDriverEnv;
@@ -53,4 +55,7 @@ export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv
   CursorDriver,
   HermesDriver,
   OpenCodeDriver,
+  // Custom (ACP) harnesses: no default instance — every entry is one the
+  // person added in Settings → Harnesses or a ~/.uno/harnesses/<id>.json.
+  CustomHarnessDriver,
 ];

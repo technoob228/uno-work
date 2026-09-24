@@ -119,6 +119,9 @@ export const ServerProvider = Schema.Struct({
   displayName: Schema.optional(TrimmedNonEmptyString),
   accentColor: Schema.optional(TrimmedNonEmptyString),
   badgeLabel: Schema.optional(TrimmedNonEmptyString),
+  // Short text icon (one emoji or two letters) for drivers without a brand
+  // icon — custom ACP harnesses set it from their config.
+  iconText: Schema.optional(TrimmedNonEmptyString),
   continuation: Schema.optional(ServerProviderContinuation),
   showInteractionModeToggle: Schema.optional(Schema.Boolean),
   enabled: Schema.Boolean,

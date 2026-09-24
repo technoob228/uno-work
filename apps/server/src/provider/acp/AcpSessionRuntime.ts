@@ -42,18 +42,25 @@ export interface AcpSpawnInput {
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
   /**
-   * Merge the daemon's `process.env` under `env` (default). Hermes and Cursor
-   * pass `false`: their `env` is already the sanitized daemon environment
-   * (Uno secrets stripped, see ProviderInstanceEnvironment) plus what the
-   * driver adds on purpose; re-merging `process.env` would hand the stripped
-   * secrets back. With no `env` the child then gets the sanitized daemon
-   * environment instead of inheriting it raw.
+   * Run through a shell. Defaults to Windows-only (for `.cmd` shims);
+   * custom harnesses pass `false` — their argv is untrusted and must never be
+   * interpolated.
+   */
+  readonly shell?: boolean;
+  /**
+   * Merge the daemon's `process.env` under `env` (default). Hermes, Cursor
+   * and custom harnesses pass `false`: their `env` is already the sanitized
+   * daemon environment (Uno secrets stripped, see ProviderInstanceEnvironment)
+   * plus what the driver adds on purpose; re-merging `process.env` would hand
+   * the stripped secrets back. With no `env` the child then gets the
+   * sanitized daemon environment instead of inheriting it raw.
    */
   readonly inheritProcessEnv?: boolean;
   /**
    * SIGKILL this long after SIGTERM when the session closes. Unset = wait
    * for the process to exit (the historical behaviour). The spawner's own
-   * release waits forever on an agent that ignores SIGTERM.
+   * release waits forever on an agent that ignores SIGTERM; Hermes, Cursor
+   * and custom harnesses set it (ACP_HARNESS_FORCE_KILL_AFTER_MS).
    */
   readonly forceKillAfterMs?: number;
 }
@@ -68,12 +75,29 @@ export interface AcpSessionRuntimeOptions {
    * (например Hermes); Cursor/Claude оставляют поле пустым.
    */
   readonly mcpServers?: EffectAcpSchema.NewSessionRequest["mcpServers"];
+  /**
+   * Drop `http`/`sse` MCP servers the agent did not advertise in
+   * `agentCapabilities.mcpCapabilities` (ACP: stdio is the only transport an
+   * agent must support). Used for custom harnesses, whose support is unknown.
+   */
+  readonly dropUnsupportedMcpTransports?: boolean;
   readonly clientCapabilities?: EffectAcpSchema.InitializeRequest["clientCapabilities"];
   readonly clientInfo: {
     readonly name: string;
     readonly version: string;
   };
-  readonly authMethodId: string;
+  /**
+   * ACP `authenticate` method id sent after `initialize`. Omitted/empty →
+   * no `authenticate` call (agents that need no auth, custom harnesses
+   * without a configured method).
+   */
+  readonly authMethodId?: string;
+  /**
+   * Receives the agent's stderr as it arrives. When set, stderr is drained
+   * (a chatty agent can't block on a full pipe) — custom harnesses keep a
+   * tail of it for diagnostics.
+   */
+  readonly onStderr?: (text: string) => void;
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
     readonly logIncoming?: boolean;
@@ -238,7 +262,7 @@ const makeAcpSessionRuntime = (
             : options.spawn.env
               ? { env: { ...process.env, ...options.spawn.env } }
               : {}),
-          shell: process.platform === "win32",
+          shell: options.spawn.shell ?? process.platform === "win32",
         }),
       )
       .pipe(
@@ -271,6 +295,16 @@ const makeAcpSessionRuntime = (
           ),
           Effect.ignore,
         ),
+      );
+    }
+
+    if (options.onStderr) {
+      const onStderr = options.onStderr;
+      yield* child.stderr.pipe(
+        Stream.decodeText(),
+        Stream.runForEach((text) => Effect.sync(() => onStderr(text))),
+        Effect.ignore,
+        Effect.forkIn(runtimeScope),
       );
     }
 
@@ -437,22 +471,31 @@ const makeAcpSessionRuntime = (
         acp.agent.initialize(initializePayload),
       );
 
-      const authenticatePayload = {
-        methodId: options.authMethodId,
-      } satisfies EffectAcpSchema.AuthenticateRequest;
+      const authMethodId = options.authMethodId?.trim();
+      if (authMethodId) {
+        const authenticatePayload = {
+          methodId: authMethodId,
+        } satisfies EffectAcpSchema.AuthenticateRequest;
 
-      yield* runLoggedRequest(
-        "authenticate",
-        authenticatePayload,
-        acp.agent.authenticate(authenticatePayload),
-      );
+        yield* runLoggedRequest(
+          "authenticate",
+          authenticatePayload,
+          acp.agent.authenticate(authenticatePayload),
+        );
+      }
 
       let sessionId: string;
       let sessionSetupResult:
         | EffectAcpSchema.LoadSessionResponse
         | EffectAcpSchema.NewSessionResponse
         | EffectAcpSchema.ResumeSessionResponse;
-      const mcpServers = options.mcpServers ?? [];
+      const mcpCapabilities = initializeResult.agentCapabilities?.mcpCapabilities;
+      const mcpServers = (options.mcpServers ?? []).filter((server) => {
+        if (!options.dropUnsupportedMcpTransports || !("type" in server)) return true;
+        if (server.type === "http") return mcpCapabilities?.http === true;
+        if (server.type === "sse") return mcpCapabilities?.sse === true;
+        return true;
+      });
       if (options.resumeSessionId) {
         const loadPayload = {
           sessionId: options.resumeSessionId,
