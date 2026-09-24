@@ -14,6 +14,7 @@ import type { AccountSubscription } from "../../account/accountOverview";
 import { formatRam, formatUsd } from "../../account/billingModel";
 import { ROLE_LABEL } from "../../account/computerRoles";
 import { cn } from "../../lib/utils";
+import { isWebLite, liteEmptyComputersCopy } from "../../lite/webLite";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import {
@@ -113,8 +114,8 @@ export function ComputersTab(props: ComputersTabProps) {
         </p>
       ) : entries.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-border/80 px-4 py-6 text-center text-sm text-muted-foreground">
-          No computers in the cloud yet. Add one — an Uno Work computer to work on, or a small
-          server for a VPN or a bot.
+          {(isWebLite ? liteEmptyComputersCopy(subscription) : null) ??
+            "No computers in the cloud yet. Add one — an Uno Work computer to work on, or a small server for a VPN or a bot."}
         </p>
       ) : (
         <>

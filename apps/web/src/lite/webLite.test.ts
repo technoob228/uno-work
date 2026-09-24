@@ -5,6 +5,7 @@ import {
   LITE_HOME_PATH,
   cheapestCloudPlan,
   isWebLite,
+  liteEmptyComputersCopy,
   liteLadder,
   liteRedirectPath,
   liteStanding,
@@ -120,5 +121,16 @@ describe("liteLadder", () => {
     const rungs = liteLadder(undefined, "free");
     expect(rungs.map((r) => r.current)).toEqual([true, false, false]);
     expect(rungs[2]?.title).toBe("Plus and up");
+  });
+});
+
+describe("liteEmptyComputersCopy", () => {
+  it("doesn't suggest an Uno Work computer on Free or Small", () => {
+    expect(liteEmptyComputersCopy(null)).toMatch(/^No computers yet\. A Small server/);
+    const small = subscribed(plan("small-ai", "small", "Small", 20, 1, 1, { cloud_work: false }));
+    expect(liteEmptyComputersCopy(small)).toMatch(/starts at Plus\.$/);
+  });
+  it("keeps the usual copy when the plan has Uno Work in the cloud", () => {
+    expect(liteEmptyComputersCopy(subscribed(plan("plus", "plus", "Plus", 20, 8, 4)))).toBeNull();
   });
 });

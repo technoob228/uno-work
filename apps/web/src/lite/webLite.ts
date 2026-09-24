@@ -136,3 +136,13 @@ export function liteLadder(
     },
   ];
 }
+
+/**
+ * My Uno's empty computer list in lite: Free and Small can't add an Uno Work
+ * computer, so don't suggest one. Null = the usual copy (a plan with Uno Work
+ * in the cloud, or not lite).
+ */
+export function liteEmptyComputersCopy(subscription: AccountSubscription | null): string | null {
+  if (liteStanding(subscription) === "cloud") return null;
+  return "No computers yet. A Small server runs your backend or bot; Uno Work in the cloud starts at Plus.";
+}
