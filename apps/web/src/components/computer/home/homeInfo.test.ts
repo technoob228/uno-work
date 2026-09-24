@@ -9,17 +9,35 @@ import {
 } from "./homeInfo";
 
 describe("personFirstName", () => {
-  it("prefers the account's own name, first word, as written", () => {
-    expect(personFirstName({ accountName: "Mikhail Torgashin", username: "bob" })).toBe("Mikhail");
+  it("prefers the Telegram first name, first word, as written", () => {
+    expect(
+      personFirstName({
+        accountName: "Mikhail Torgashin",
+        email: "anna@uno4.dev",
+        username: "bob",
+        osUser: "kate",
+      }),
+    ).toBe("Mikhail");
     expect(personFirstName({ accountName: "mikhail" })).toBe("Mikhail");
+    expect(personFirstName({ accountName: "McKenzie" })).toBe("McKenzie");
   });
 
-  it("falls back to a username, the computer's user, then the email — when they read as names", () => {
-    expect(personFirstName({ username: "mikhail.t", osUser: "anna" })).toBe("Mikhail");
-    expect(personFirstName({ username: "shubaduba4th", osUser: "mikhail" })).toBe("Mikhail");
+  it("skips a Telegram name that doesn't read as one", () => {
+    expect(personFirstName({ accountName: "🦊", email: "anna@uno4.dev" })).toBe("Anna");
+    expect(personFirstName({ accountName: "Admin", username: "boris" })).toBe("Boris");
+  });
+
+  it("then the email, then the username, then the computer's user — when they read as names", () => {
     expect(
-      personFirstName({ username: "shubaduba4th", osUser: "root", email: "anna.k@uno4.dev" }),
+      personFirstName({ email: "anna.k@uno4.dev", username: "mikhail.t", osUser: "kate" }),
     ).toBe("Anna");
+    expect(
+      personFirstName({ email: "shubaduba4th@gmail.com", username: "mikhail.t", osUser: "kate" }),
+    ).toBe("Mikhail");
+    expect(
+      personFirstName({ email: "hello@getuno.xyz", username: "shubaduba4th", osUser: "kate" }),
+    ).toBe("Kate");
+    expect(personFirstName({ username: "shubaduba4th", osUser: "mikhail" })).toBe("Mikhail");
   });
 
   it("greets without a name when nothing looks like one", () => {

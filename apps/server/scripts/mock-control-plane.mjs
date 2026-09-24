@@ -1162,6 +1162,10 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, {
       id: 85,
       username: "demo",
+      // Telegram's first name (oauth_connections.provider_first_name): Home
+      // greets by it ("Good morning, Mikhail").
+      first_name: "Mikhail",
+      telegram_username: "demo_tg",
       email: "demo@uno4.dev",
       balance: 42.5,
       llm_balance: 3,

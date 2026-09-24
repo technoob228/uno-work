@@ -407,8 +407,8 @@ export interface AccountBalance {
   readonly email: string | null;
   readonly username: string | null;
   /**
-   * The person's name, if the console ever sends one (`/auth/me` has none
-   * today; Home greets by it first).
+   * The person's first name: `/auth/me` `first_name`, taken from the linked
+   * Telegram (empty when there is none). Home greets by it first.
    */
   readonly name: string | null;
   readonly balanceUsd: number;

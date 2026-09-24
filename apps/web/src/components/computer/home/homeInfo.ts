@@ -1,8 +1,9 @@
 /**
  * Pure helpers for Home's greeting and its "Uno AI spend" widget:
  *
- * - the person's first name, from what the client already knows (the Uno
- *   account, the computer's user) — only when it looks like a name;
+ * - the person's first name, from what the client already knows (Telegram's
+ *   first name via the Uno account, the email, the username, the desktop
+ *   computer's user) — only when it looks like a name;
  * - a day-by-day spend from the running Uno AI total the daemon samples
  *   (see the server's `aiSpendLedger.ts`), cut at the person's own midnight.
  */
@@ -88,21 +89,23 @@ export function homeFolderUser(homePath: string | null | undefined): string | nu
 }
 
 /**
- * Who to greet: the account's name when it has one, else a username or the
- * computer's user that reads as a first name, else the email's local part if
- * it does. Nothing → greet without a name.
+ * Who to greet, in the founder's order: the account's first name (from the
+ * linked Telegram, `/auth/me` `first_name`), else the email's local part, else
+ * the username, else the computer's user (the caller passes it on desktop
+ * only) — each only when it reads as a first name. Nothing → greet without a
+ * name.
  */
 export function personFirstName(input: {
   readonly accountName?: string | null;
+  readonly email?: string | null;
   readonly username?: string | null;
   readonly osUser?: string | null;
-  readonly email?: string | null;
 }): string | null {
   return (
     firstWordOfName(input.accountName) ??
+    nameFromHandle(input.email?.split("@")[0]) ??
     nameFromHandle(input.username) ??
     nameFromHandle(input.osUser) ??
-    nameFromHandle(input.email?.split("@")[0]) ??
     null
   );
 }
