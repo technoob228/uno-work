@@ -532,7 +532,9 @@ describe("telling and showing", () => {
     const both = await run("open_in_panel", deps, { url: "https://a.example", file: "x" });
     expect(both._tag).toBe("Failure");
     const truncated = await run("open_in_panel", deps, { url: "http://" });
-    expect(truncated._tag === "Failure" && truncated.failure.message).toContain("not a complete address");
+    expect(truncated._tag === "Failure" && truncated.failure.message).toContain(
+      "not a complete address",
+    );
   });
 
   it("opens an app of this computer by its id", async () => {

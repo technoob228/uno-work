@@ -678,7 +678,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           type: "string",
           maxLength: 2000,
           description:
-            "How Uno starts it (bash -lc in cwd, PORT is set), e.g. \"python3 app.py\". Give it for anything you built so it has a Start button and survives reboots.",
+            'How Uno starts it (bash -lc in cwd, PORT is set), e.g. "python3 app.py". Give it for anything you built so it has a Start button and survives reboots.',
         },
         cwd: { type: "string", description: "Its folder inside home, e.g. ~/projects/notes." },
         path: { type: "string", description: 'What to open on the port, e.g. "/admin".' },
@@ -1234,7 +1234,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             "evaluate",
           ],
         },
-        url: { type: "string", description: 'For openUrl/navigate: a complete address, e.g. "http://localhost:3000/".' },
+        url: {
+          type: "string",
+          description: 'For openUrl/navigate: a complete address, e.g. "http://localhost:3000/".',
+        },
         selector: { type: "string", maxLength: 2000 },
         text: { type: "string", maxLength: 16000 },
         value: { type: "string", maxLength: 16000 },

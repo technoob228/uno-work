@@ -174,19 +174,18 @@ function tomlString(value: string): string {
 
 /** `codex app-server` arguments: `-c` overrides per server. */
 export function codexMcpConfigArgs(servers: ReadonlyArray<McpServerEntry>): ReadonlyArray<string> {
-  return enabledMcpServers(servers).flatMap((server) => {
+  const args: Array<string> = [];
+  for (const server of enabledMcpServers(servers)) {
     const key = `mcp_servers.${server.name}`;
-    return [
-      "-c",
-      `${key}.url=${tomlString(server.url.trim())}`,
-      ...(server.bearerTokenEnvVar
-        ? ["-c", `${key}.bearer_token_env_var=${tomlString(server.bearerTokenEnvVar)}`]
-        : []),
-      ...(server.toolTimeoutSec ? ["-c", `${key}.tool_timeout_sec=${server.toolTimeoutSec}`] : []),
-      // "approve" = run without asking; codex rejects unknown values at start.
-      ...(server.preApproved ? ["-c", `${key}.default_tools_approval_mode="approve"`] : []),
-    ];
-  });
+    args.push("-c", `${key}.url=${tomlString(server.url.trim())}`);
+    if (server.bearerTokenEnvVar) {
+      args.push("-c", `${key}.bearer_token_env_var=${tomlString(server.bearerTokenEnvVar)}`);
+    }
+    if (server.toolTimeoutSec) args.push("-c", `${key}.tool_timeout_sec=${server.toolTimeoutSec}`);
+    // "approve" = run without asking; codex rejects unknown values at start.
+    if (server.preApproved) args.push("-c", `${key}.default_tools_approval_mode="approve"`);
+  }
+  return args;
 }
 
 // ── OpenCode / built-in Uno ────────────────────────────────────────────
