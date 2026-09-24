@@ -35,6 +35,7 @@ import { pickUsableDefaultModelSelection } from "../../providerModels";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import { useTerminalStateStore } from "../../terminalStateStore";
 import { resolveThreadRouteTarget } from "../../threadRoutes";
+import type { HomeStartOptions } from "./home/HomeComposer";
 import { usePendingSendStore } from "./pendingSendStore";
 
 export function useHomeLaunchers(environmentId: EnvironmentId | null) {
@@ -185,14 +186,21 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
   );
 
   /**
-   * Home's composer: a new chat in `folder` (home by default) that sends the
-   * task right away — the chat sends it itself once it has mounted (see
-   * `pendingSendStore`). If it can't, the task stays typed there.
+   * Home's composer: a new chat in the chosen folder (home by default), on the
+   * chosen model and permissions, that sends the task right away — the chat
+   * sends it itself once it has mounted (see `pendingSendStore`). If it
+   * can't, the task stays typed there.
    */
   const startTask = useCallback(
-    async (prompt: string, folder?: string | null) => {
-      const draftId = await openChatWithPrompt(prompt, folder);
-      if (draftId) usePendingSendStore.getState().request(draftId, prompt);
+    async (prompt: string, options: HomeStartOptions) => {
+      const draftId = await openChatWithPrompt(prompt, options.folder);
+      if (!draftId) return;
+      const store = useComposerDraftStore.getState();
+      // Set on the draft itself: a reused draft doesn't pick up the sticky model.
+      if (options.modelSelection) store.setModelSelection(draftId, options.modelSelection);
+      store.setRuntimeMode(draftId, options.runtimeMode);
+      store.setDraftThreadContext(draftId, { runtimeMode: options.runtimeMode });
+      usePendingSendStore.getState().request(draftId, prompt);
     },
     [openChatWithPrompt],
   );

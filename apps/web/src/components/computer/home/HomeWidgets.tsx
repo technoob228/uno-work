@@ -3,8 +3,8 @@
  * themselves. Customize mode: drag to reorder, × to remove, "Add widget" to
  * bring one back; the layout is kept on this device.
  *
- * Only built-in widgets for now — apps can't bring their own until the App
- * SDK has a widget contract.
+ * Only built-in widgets for now (the prototype's set) — apps can't bring their
+ * own (Uptime Kuma, n8n…) until the App SDK has a widget contract.
  */
 import {
   closestCenter,
@@ -32,6 +32,7 @@ import {
   MessagesSquareIcon,
   MonitorIcon,
   PlusIcon,
+  WalletIcon,
   XIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -101,6 +102,12 @@ export const HOME_WIDGETS: Record<HomeWidgetId, WidgetMeta> = {
     title: "Sites",
     description: "Your sites on Uno Hosting",
     icon: <GlobeIcon />,
+    span: 1,
+  },
+  "ai-spend": {
+    title: "Uno AI spend",
+    description: "Spent today, the last 7 days, credits left",
+    icon: <WalletIcon />,
     span: 1,
   },
 };

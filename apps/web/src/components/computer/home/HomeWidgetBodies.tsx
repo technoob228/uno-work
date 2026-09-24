@@ -1,7 +1,7 @@
 /**
  * What the built-in widgets show. Each reads what the rest of the app already
  * reads — the daemon's file list and cloud state, the account's sites, the
- * computer's programs — nothing new on the server.
+ * computer's programs — plus the daemon's Uno AI spend ledger.
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
@@ -24,7 +24,10 @@ import { sitesQuery } from "../../myuno/myUnoQueries";
 import { Skeleton } from "../../ui/skeleton";
 import { BuiltInIcon, ProgramIcon, TileShell, type BuiltInPrograms } from "../ComputerPrograms";
 import type { ProgramTile } from "../programModel";
+import { useMinuteClock } from "../../../hooks/useMinuteClock";
+import { aiSpendDays, formatUsdShort, type SpendDay } from "./homeInfo";
 import { recentHomeEntries } from "./homeModel";
+import { useAiSpend } from "./useHomeInfo";
 
 /** Tiles the Apps widget shows before "+N more". */
 const APPS_WIDGET_TILES = 15;
@@ -297,5 +300,77 @@ export function AppsWidget({
           ))
         : null}
     </ul>
+  );
+}
+
+const WEEKDAY = new Intl.DateTimeFormat(undefined, { weekday: "short" });
+const TIME = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+
+/** Seven bars, today last and solid; a day this computer didn't see is a dash. */
+function SpendBars({ days }: { days: ReadonlyArray<SpendDay> }) {
+  const max = Math.max(...days.map((day) => day.usd ?? 0), 0.01);
+  return (
+    <div className="flex h-12 items-end gap-1" data-testid="home-ai-spend-bars">
+      {days.map((day) => {
+        const label = day.today ? "Today" : WEEKDAY.format(day.start);
+        return (
+          <div
+            key={day.start}
+            className="flex h-full flex-1 flex-col items-center justify-end"
+            title={`${label}: ${day.usd === null ? "not seen by this computer" : formatUsdShort(day.usd)}`}
+          >
+            {day.usd === null ? (
+              <div className="h-0.5 w-full rounded-full bg-muted-foreground/20" />
+            ) : (
+              <div
+                className={cn("w-full rounded-sm", day.today ? "bg-primary" : "bg-primary/25")}
+                style={{ height: `${Math.max(6, (day.usd / max) * 100)}%` }}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Uno AI spend: today, the last 7 days, credits left. The gateway has no
+ * per-day history for a machine, so the days come from this computer's own
+ * readings of the account's running total (see the daemon's aiSpendLedger).
+ */
+export function AiSpendWidget({ environmentId }: { environmentId: EnvironmentId | null }) {
+  const { spend, creditsUsd } = useAiSpend(environmentId);
+  const clock = useMinuteClock();
+  if (spend.isPending) return <Skeleton className="h-24 rounded-xl" />;
+  const status = spend.data?.status ?? "unknown";
+  if (status === "no-key") {
+    return (
+      <p className="text-xs text-muted-foreground">
+        This computer has no Uno AI. Chats here use your own agent subscriptions.
+      </p>
+    );
+  }
+  const days = aiSpendDays(spend.data?.samples ?? [], Math.max(Date.parse(clock), Date.now()));
+  const today = days.at(-1);
+  const seenDays = days.filter((day) => day.usd !== null).length;
+  return (
+    <div className="flex flex-col gap-2" data-testid="home-ai-spend">
+      <div className="text-2xl font-semibold tabular-nums">
+        {today?.usd != null ? formatUsdShort(today.usd) : "—"}{" "}
+        <span className="text-sm font-normal text-muted-foreground">
+          {today?.since != null ? `today since ${TIME.format(today.since)}` : "today"}
+        </span>
+      </div>
+      {seenDays > 1 ? <SpendBars days={days} /> : null}
+      <div className="text-xs text-muted-foreground">
+        {creditsUsd !== null ? `${formatUsdShort(creditsUsd)} of credits left` : null}
+        {status !== "ok" ? (
+          <span className="block">Can't read Uno AI spend just now.</span>
+        ) : seenDays <= 1 ? (
+          <span className="block">Days fill in as this computer keeps count.</span>
+        ) : null}
+      </div>
+    </div>
   );
 }

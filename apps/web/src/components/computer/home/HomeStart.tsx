@@ -15,7 +15,7 @@ import { Button } from "../../ui/button";
 import type { BuiltInPrograms } from "../ComputerPrograms";
 import type { ProgramTile } from "../programModel";
 import { ComputerDetails, type HomeComputer } from "./ComputerPill";
-import { HomeComposer } from "./HomeComposer";
+import { HomeComposer, type HomeStartOptions } from "./HomeComposer";
 import {
   ContinueCards,
   NeedsYouPill,
@@ -24,6 +24,7 @@ import {
   useHomeThreads,
 } from "./HomeThreads";
 import {
+  AiSpendWidget,
   AppsWidget,
   CloudUsageLink,
   CloudWidget,
@@ -31,6 +32,7 @@ import {
   SitesWidget,
 } from "./HomeWidgetBodies";
 import { AddWidgetDialog, HomeWidgetGrid } from "./HomeWidgets";
+import { usePersonFirstName } from "./useHomeInfo";
 import {
   DEFAULT_HOME_WIDGETS,
   HOME_WIDGET_IDS,
@@ -125,9 +127,10 @@ export function HomeStart({
   appsLoading: boolean;
   onOpenTile: (tile: ProgramTile) => void;
   onTileDetails: (tile: ProgramTile) => void;
-  onStartTask: (prompt: string, folder: string | null) => Promise<void>;
+  onStartTask: (prompt: string, options: HomeStartOptions) => Promise<void>;
 }) {
   const { threads, now } = useHomeThreads();
+  const firstName = usePersonFirstName(environmentId);
   const available = useMemo(
     () =>
       HOME_WIDGET_IDS.filter(
@@ -168,14 +171,17 @@ export function HomeStart({
         return { body: <CloudWidget environmentId={environmentId} /> };
       case "sites":
         return { body: <SitesWidget /> };
+      case "ai-spend":
+        return { body: <AiSpendWidget environmentId={environmentId} /> };
     }
   };
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 pt-6 pb-16 sm:pt-12">
       <div className="flex flex-col gap-4">
-        <h1 className="text-[28px] font-semibold tracking-tight">
+        <h1 className="text-[28px] font-semibold tracking-tight" data-testid="home-greeting">
           {greeting(new Date(now).getHours())}
+          {firstName ? `, ${firstName}` : null}
         </h1>
         <HomeComposer environmentId={environmentId} onStart={onStartTask} />
         <NeedsYouPill threads={threads} now={now} />

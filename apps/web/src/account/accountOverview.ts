@@ -405,6 +405,12 @@ export async function fetchSubscription(): Promise<AccountSubscription | null> {
 
 export interface AccountBalance {
   readonly email: string | null;
+  readonly username: string | null;
+  /**
+   * The person's name, if the console ever sends one (`/auth/me` has none
+   * today; Home greets by it first).
+   */
+  readonly name: string | null;
   readonly balanceUsd: number;
   readonly aiBalanceUsd: number;
 }
@@ -413,6 +419,12 @@ export async function fetchBalance(): Promise<AccountBalance> {
   const me = rec(await accountRequest("GET", "/auth/me")) ?? {};
   return {
     email: strOrNull(me["email"]),
+    username: strOrNull(me["username"]),
+    name:
+      strOrNull(me["first_name"]) ??
+      strOrNull(me["name"]) ??
+      strOrNull(me["full_name"]) ??
+      strOrNull(me["display_name"]),
     balanceUsd: num(me["balance"]),
     aiBalanceUsd: num(me["llm_balance"]),
   };

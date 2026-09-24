@@ -185,6 +185,7 @@ export const HOME_WIDGET_IDS = [
   "recent-chats",
   "cloud",
   "sites",
+  "ai-spend",
 ] as const;
 
 export type HomeWidgetId = (typeof HOME_WIDGET_IDS)[number];
@@ -260,4 +261,28 @@ export function recentHomeEntries<
     .filter((entry) => !entry.hidden && !entry.name.startsWith("."))
     .toSorted((a, b) => modifiedMs(b) - modifiedMs(a))
     .slice(0, limit);
+}
+
+// -------------------------------------------------------------- approvals --
+
+/**
+ * An approval as one short question for a Needs-you row: "Run `npm i`?",
+ * "Change files?". The subject is the agent's own detail, cut to one line.
+ */
+export function approvalQuestion(approval: {
+  readonly requestKind: "command" | "file-read" | "file-change" | "other";
+  readonly detail?: string | undefined;
+}): { readonly lead: string; readonly subject: string | null } {
+  const line = approval.detail?.trim().split("\n")[0]?.trim() ?? "";
+  const subject = line ? (line.length > 80 ? `${line.slice(0, 79)}…` : line) : null;
+  switch (approval.requestKind) {
+    case "command":
+      return subject ? { lead: "Run", subject } : { lead: "Run a command", subject: null };
+    case "file-read":
+      return subject ? { lead: "Read", subject } : { lead: "Read a file", subject: null };
+    case "file-change":
+      return subject ? { lead: "Change", subject } : { lead: "Change files", subject: null };
+    case "other":
+      return subject ? { lead: "Allow", subject } : { lead: "Go on", subject: null };
+  }
 }

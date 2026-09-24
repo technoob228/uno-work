@@ -3,10 +3,11 @@
  * the chat widgets (Needs you, Recent chats). All read the same thread
  * summaries the sidebar shows, with the sidebar's status colors.
  *
- * Approvals and questions are answered inside the chat (only the chat knows
- * the request), so their rows open it.
+ * Approvals get Allow / Don't right in the Needs-you widget (the row subscribes
+ * to the chat's details to learn the request); questions open the chat.
  */
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime";
+import type { ProviderApprovalDecision } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ChevronRightIcon,
@@ -15,16 +16,22 @@ import {
   PlusIcon,
   ShieldAlertIcon,
 } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import { cn } from "~/lib/utils";
+import { cn, newCommandId } from "~/lib/utils";
+import { readEnvironmentApi } from "../../../environmentApi";
+import { retainThreadDetailSubscription } from "../../../environments/runtime/service";
+import { derivePendingApprovals } from "../../../session-logic";
+import { createThreadSelectorByRef } from "../../../storeSelectors";
 import { useMinuteClock } from "../../../hooks/useMinuteClock";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../../store";
 import { buildThreadRouteParams } from "../../../threadRoutes";
 import { useUiStateStore } from "../../../uiStateStore";
 import { Button } from "../../ui/button";
+import { toastManager } from "../../ui/toast";
 import {
+  approvalQuestion,
   attentionThreads,
   homeThreadStatus,
   pickContinueThreads,
@@ -146,7 +153,100 @@ export function ContinueCards({ threads, now }: { threads: HomeThread[]; now: nu
   );
 }
 
-/** Widget: the chats waiting for an answer, each opens its chat. */
+/**
+ * An approval, answerable right here: the row keeps the chat's details
+ * subscribed (only the chat's own events name the request) and sends the same
+ * `thread.approval.respond` the chat's Approve / Decline buttons send. Until
+ * the request is known — or when it's gone — the row just opens the chat.
+ */
+function ApprovalRow({ thread, onOpen }: { thread: HomeThread; onOpen: () => void }) {
+  const ref = useMemo(() => scopeThreadRef(thread.environmentId, thread.id), [thread]);
+  useEffect(
+    () => retainThreadDetailSubscription(thread.environmentId, thread.id),
+    [thread.environmentId, thread.id],
+  );
+  const detail = useStore(useMemo(() => createThreadSelectorByRef(ref), [ref]));
+  const approval = useMemo(
+    () => (detail ? (derivePendingApprovals(detail.activities)[0] ?? null) : null),
+    [detail],
+  );
+  const [responding, setResponding] = useState(false);
+  const respond = async (decision: ProviderApprovalDecision) => {
+    if (!approval) return;
+    const api = readEnvironmentApi(thread.environmentId);
+    if (!api) return;
+    setResponding(true);
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.approval.respond",
+        commandId: newCommandId(),
+        threadId: thread.id,
+        requestId: approval.requestId,
+        decision,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Couldn't send your answer",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setResponding(false);
+    }
+  };
+  const question = approval ? approvalQuestion(approval) : null;
+  return (
+    <div
+      className="flex w-full items-center gap-3 rounded-lg px-2 py-2"
+      data-testid="home-approval"
+    >
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 [&_svg]:size-4">
+        <ShieldAlertIcon />
+      </span>
+      <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
+        <span className="block truncate text-sm font-medium">
+          {question ? (
+            <>
+              {question.lead}
+              {question.subject ? (
+                <>
+                  {" "}
+                  <span className="font-mono text-[13px]">{question.subject}</span>
+                </>
+              ) : null}
+              ?
+            </>
+          ) : (
+            thread.title
+          )}
+        </span>
+        <span className="block truncate text-xs text-muted-foreground">
+          {question ? thread.title : "Wants your OK to go on"}
+        </span>
+      </button>
+      {approval ? (
+        <span className="flex shrink-0 items-center gap-1.5">
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={responding}
+            onClick={() => void respond("decline")}
+          >
+            Don't
+          </Button>
+          <Button size="xs" disabled={responding} onClick={() => void respond("accept")}>
+            Allow
+          </Button>
+        </span>
+      ) : (
+        <span className="shrink-0 text-xs text-muted-foreground">Open</span>
+      )}
+    </div>
+  );
+}
+
+/** Widget: the chats waiting for the person — approvals answered in place, questions open the chat. */
 export function NeedsYouWidget({ threads, now }: { threads: HomeThread[]; now: number }) {
   const open = useOpenThread();
   const waiting = attentionThreads(threads, now).slice(0, 4);
@@ -162,29 +262,26 @@ export function NeedsYouWidget({ threads, now }: { threads: HomeThread[]; now: n
     <ul className="-mx-2 flex flex-col">
       {waiting.map((thread) => (
         <li key={`${thread.environmentId}:${thread.id}`}>
-          <button
-            type="button"
-            onClick={() => open(thread)}
-            className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent/50"
-          >
-            <span
-              className={cn(
-                "flex size-8 shrink-0 items-center justify-center rounded-lg [&_svg]:size-4",
-                thread.hasPendingApprovals
-                  ? "bg-amber-500/10 text-amber-600"
-                  : "bg-indigo-500/10 text-indigo-600",
-              )}
+          {thread.hasPendingApprovals ? (
+            <ApprovalRow thread={thread} onOpen={() => open(thread)} />
+          ) : (
+            <button
+              type="button"
+              onClick={() => open(thread)}
+              className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent/50"
             >
-              {thread.hasPendingApprovals ? <ShieldAlertIcon /> : <MessageCircleQuestionIcon />}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium">{thread.title}</span>
-              <span className="block truncate text-xs text-muted-foreground">
-                {thread.hasPendingApprovals ? "Wants your OK to go on" : "Asked you a question"}
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-600 [&_svg]:size-4">
+                <MessageCircleQuestionIcon />
               </span>
-            </span>
-            <span className="shrink-0 text-xs text-muted-foreground">Open</span>
-          </button>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">{thread.title}</span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  Asked you a question
+                </span>
+              </span>
+              <span className="shrink-0 text-xs text-muted-foreground">Open</span>
+            </button>
+          )}
         </li>
       ))}
     </ul>

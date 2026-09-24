@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_HOME_WIDGETS,
   addableWidgets,
+  approvalQuestion,
   attentionThreads,
   greeting,
   homeThreadStatus,
@@ -208,5 +209,32 @@ describe("recentHomeEntries", () => {
       "Projects",
       "old.txt",
     ]);
+  });
+});
+
+describe("approvalQuestion", () => {
+  it("asks about the agent's own detail, on one line", () => {
+    expect(approvalQuestion({ requestKind: "command", detail: "npm install\n--save" })).toEqual({
+      lead: "Run",
+      subject: "npm install",
+    });
+    expect(approvalQuestion({ requestKind: "other", detail: "webfetch https://x.dev" })).toEqual({
+      lead: "Allow",
+      subject: "webfetch https://x.dev",
+    });
+    expect(
+      approvalQuestion({ requestKind: "command", detail: "x".repeat(200) }).subject,
+    ).toHaveLength(80);
+  });
+
+  it("says what kind of thing it is when there's no detail", () => {
+    expect(approvalQuestion({ requestKind: "file-change" })).toEqual({
+      lead: "Change files",
+      subject: null,
+    });
+    expect(approvalQuestion({ requestKind: "other", detail: "  " })).toEqual({
+      lead: "Go on",
+      subject: null,
+    });
   });
 });
