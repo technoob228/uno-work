@@ -67,6 +67,10 @@ import {
 } from "../composerFooterLayout";
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
 import { ProviderModelPicker } from "./ProviderModelPicker";
+import { AssistantModelPicker } from "./AssistantEngine";
+import { assistantEngineSendBlock } from "../../assistant/assistantEngine.logic";
+import { useAssistantLlm } from "../../assistant/useAssistantLlm";
+import { coerceAssistantModelSelection } from "@t3tools/shared/assistantLlm";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
@@ -921,10 +925,31 @@ export const ChatComposer = memo(
       }),
       [providerStatuses, selectedProvider],
     );
+    // The Uno chat always runs on Hermes (0.0.84): its engine picker writes
+    // the chat's own selection on the daemon; turns carry exactly that.
+    const isAssistantChat = activeThread?.assistantRole === "chat";
+    const assistantLlm = useAssistantLlm(isAssistantChat ? environmentId : null);
+    const assistantEngine = isAssistantChat && assistantLlm.supported;
+    const assistantSendBlock = assistantEngine
+      ? assistantEngineSendBlock(assistantLlm.status)
+      : null;
+    const assistantThreadModelSelection = activeThread?.modelSelection;
     const selectedModelSelection = useMemo<ModelSelection>(
       () =>
-        createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
-      [selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
+        assistantEngine
+          ? coerceAssistantModelSelection(assistantThreadModelSelection)
+          : createModelSelection(
+              selectedInstanceId,
+              selectedModel,
+              selectedModelOptionsForDispatch,
+            ),
+      [
+        assistantEngine,
+        assistantThreadModelSelection,
+        selectedInstanceId,
+        selectedModel,
+        selectedModelOptionsForDispatch,
+      ],
     );
     const selectedModelForPicker = selectedModel;
     // Instance-keyed option list so the picker can show each configured
@@ -1877,6 +1902,11 @@ export const ChatComposer = memo(
           });
           return;
         }
+        if (assistantSendBlock !== null) {
+          event?.preventDefault();
+          toastManager.add({ type: "info", title: assistantSendBlock });
+          return;
+        }
         if (personalAiBlocksSend) {
           event?.preventDefault();
           setPersonalAiQueued(true);
@@ -1892,6 +1922,7 @@ export const ChatComposer = memo(
         }
       },
       [
+        assistantSendBlock,
         blurMobileComposerAfterSend,
         hasKnownUnsupportedCodingTools,
         hasKnownUnsupportedImageAttachments,
@@ -2639,24 +2670,34 @@ export const ChatComposer = memo(
             />
 
             <div className="hidden min-w-0 shrink-0 items-center gap-1 md:flex">
-              <ProviderModelPicker
-                compact
-                activeInstanceId={selectedInstanceId}
-                model={selectedModelForPickerWithCustomFallback}
-                lockedProvider={lockedProvider}
-                lockedContinuationGroupKey={lockedContinuationGroupKey}
-                instanceEntries={providerInstanceEntries}
-                environmentId={environmentId}
-                keybindings={keybindings}
-                modelOptionsByInstance={modelOptionsByInstance}
-                terminalOpen={terminalOpen}
-                open={isComposerModelPickerOpen}
-                {...(composerProviderState.modelPickerIconClassName
-                  ? { activeProviderIconClassName: composerProviderState.modelPickerIconClassName }
-                  : {})}
-                onOpenChange={setIsComposerModelPickerOpen}
-                onInstanceModelChange={onProviderModelSelect}
-              />
+              {assistantEngine ? (
+                <AssistantModelPicker
+                  environmentId={environmentId}
+                  compact
+                  testId="uno-engine-composer"
+                />
+              ) : (
+                <ProviderModelPicker
+                  compact
+                  activeInstanceId={selectedInstanceId}
+                  model={selectedModelForPickerWithCustomFallback}
+                  lockedProvider={lockedProvider}
+                  lockedContinuationGroupKey={lockedContinuationGroupKey}
+                  instanceEntries={providerInstanceEntries}
+                  environmentId={environmentId}
+                  keybindings={keybindings}
+                  modelOptionsByInstance={modelOptionsByInstance}
+                  terminalOpen={terminalOpen}
+                  open={isComposerModelPickerOpen}
+                  {...(composerProviderState.modelPickerIconClassName
+                    ? {
+                        activeProviderIconClassName: composerProviderState.modelPickerIconClassName,
+                      }
+                    : {})}
+                  onOpenChange={setIsComposerModelPickerOpen}
+                  onInstanceModelChange={onProviderModelSelect}
+                />
+              )}
 
               {composerProviderControls.showInteractionModeToggle ? (
                 <Button
@@ -3276,29 +3317,37 @@ export const ChatComposer = memo(
                       <TooltipPopup side="top">{dictationTooltip}</TooltipPopup>
                     </Tooltip>
                   ) : null}
-                  <ProviderModelPicker
-                    compact={isComposerFooterCompact}
-                    activeInstanceId={selectedInstanceId}
-                    model={selectedModelForPickerWithCustomFallback}
-                    lockedProvider={lockedProvider}
-                    lockedContinuationGroupKey={lockedContinuationGroupKey}
-                    instanceEntries={providerInstanceEntries}
-                    environmentId={environmentId}
-                    keybindings={keybindings}
-                    modelOptionsByInstance={modelOptionsByInstance}
-                    terminalOpen={terminalOpen}
-                    open={isComposerModelPickerOpen}
-                    {...(composerProviderState.modelPickerIconClassName
-                      ? {
-                          activeProviderIconClassName:
-                            composerProviderState.modelPickerIconClassName,
-                        }
-                      : {})}
-                    onOpenChange={(open) => {
-                      setIsComposerModelPickerOpen(open);
-                    }}
-                    onInstanceModelChange={onProviderModelSelect}
-                  />
+                  {assistantEngine ? (
+                    <AssistantModelPicker
+                      environmentId={environmentId}
+                      compact={isComposerFooterCompact}
+                      testId="uno-engine-composer"
+                    />
+                  ) : (
+                    <ProviderModelPicker
+                      compact={isComposerFooterCompact}
+                      activeInstanceId={selectedInstanceId}
+                      model={selectedModelForPickerWithCustomFallback}
+                      lockedProvider={lockedProvider}
+                      lockedContinuationGroupKey={lockedContinuationGroupKey}
+                      instanceEntries={providerInstanceEntries}
+                      environmentId={environmentId}
+                      keybindings={keybindings}
+                      modelOptionsByInstance={modelOptionsByInstance}
+                      terminalOpen={terminalOpen}
+                      open={isComposerModelPickerOpen}
+                      {...(composerProviderState.modelPickerIconClassName
+                        ? {
+                            activeProviderIconClassName:
+                              composerProviderState.modelPickerIconClassName,
+                          }
+                        : {})}
+                      onOpenChange={(open) => {
+                        setIsComposerModelPickerOpen(open);
+                      }}
+                      onInstanceModelChange={onProviderModelSelect}
+                    />
+                  )}
 
                   {isComposerFooterCompact ? (
                     <CompactComposerControlsMenu

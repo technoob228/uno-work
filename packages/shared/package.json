@@ -108,6 +108,10 @@
       "types": "./src/assistantChat.ts",
       "import": "./src/assistantChat.ts"
     },
+    "./assistantLlm": {
+      "types": "./src/assistantLlm.ts",
+      "import": "./src/assistantLlm.ts"
+    },
     "./unoFinalAnswer": {
       "types": "./src/unoFinalAnswer.ts",
       "import": "./src/unoFinalAnswer.ts"

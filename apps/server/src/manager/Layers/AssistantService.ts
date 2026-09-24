@@ -1,4 +1,5 @@
 import {
+  ASSISTANT_GATEWAY_LABEL,
   ASSISTANT_PROJECT_ID,
   ASSISTANT_PROJECT_ID_PREFIX,
   assistantTokenLabel,
@@ -11,16 +12,24 @@ import {
   type ManagerAssistantSummary,
   type ManagerConnectorHealth,
   type ManagerTelegramConnectorStatus,
+  type ModelSelection,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
 import { findMarkedAssistantChat, pickAssistantChatToMigrate } from "@t3tools/shared/assistantChat";
+import {
+  coerceAssistantModelSelection,
+  DEFAULT_ASSISTANT_MODEL_SELECTION,
+  readAssistantLlmProvider,
+  sameAssistantModelSelection,
+} from "@t3tools/shared/assistantLlm";
 import { Effect, Layer, Option, Path, FileSystem, Schema } from "effect";
 import * as Semaphore from "effect/Semaphore";
 import * as crypto from "node:crypto";
 import * as os from "node:os";
 
 import { ServerConfig } from "../../config.ts";
+import { UnoGatewayKey } from "../../unoGatewayKey.ts";
 import { assistantCommandOrigin } from "../../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -39,6 +48,7 @@ import {
   type ManagerAssistantServiceShape,
 } from "../Services/AssistantService.ts";
 import { ManagerTokenAuthService } from "../Services/ManagerTokenAuth.ts";
+import { ManagerAssistantLlm } from "../Services/AssistantLlmService.ts";
 import { ManagerTelegramService } from "./TelegramConnector.ts";
 import { ManagerSlackService } from "./SlackConnector.ts";
 import { ASSISTANT_THREAD_RUNTIME_MODE } from "../connectorBindings.ts";
@@ -189,6 +199,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
   const telegramService = yield* ManagerTelegramService;
   const slackService = yield* ManagerSlackService;
   const providerRegistry = yield* ProviderRegistry;
+  const gatewayKey = yield* UnoGatewayKey;
 
   const toAssistantError = (detail: string) => (cause: unknown) =>
     new ManagerAssistantError({ detail, cause });
@@ -630,6 +641,41 @@ const makeManagerAssistantService = Effect.gen(function* () {
 
   const chatSemaphore = yield* Semaphore.make(1);
 
+  /**
+   * The assistant chat always runs on Hermes (0.0.84). A chat that ran on
+   * another harness is re-pointed here; its next turn starts a Hermes session
+   * (the reactor stops the old one) that carries the visible history and the
+   * workspace's NOTES.md over (provider/acp/hermesHandoff.ts). Its gateway
+   * calls are labelled as the assistant's.
+   */
+  const settleAssistantChatHarness = (
+    threadId: ThreadId,
+    modelSelection: ModelSelection,
+    origin: ReturnType<typeof assistantCommandOrigin>,
+  ) =>
+    Effect.gen(function* () {
+      gatewayKey.labelThread(threadId, ASSISTANT_GATEWAY_LABEL);
+      const target = coerceAssistantModelSelection(modelSelection);
+      if (sameAssistantModelSelection(modelSelection, target)) return;
+      yield* orchestrationEngine.dispatch(
+        {
+          type: "thread.meta.update",
+          commandId: CommandId.make(`assistant-chat-hermes:${crypto.randomUUID()}`),
+          threadId,
+          modelSelection: target,
+        },
+        { origin },
+      );
+      yield* Effect.logInfo("assistant chat moved to Hermes").pipe(
+        Effect.annotateLogs({
+          threadId,
+          from: `${modelSelection.instanceId}/${modelSelection.model}`,
+          to: `${target.instanceId}/${target.model}`,
+          llmProvider: readAssistantLlmProvider(target),
+        }),
+      );
+    });
+
   const ensureAssistantChat: ManagerAssistantServiceShape["ensureAssistantChat"] = () =>
     chatSemaphore.withPermits(1)(
       Effect.gen(function* () {
@@ -651,6 +697,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
         if (marked !== null) {
           // The pinned chat is always there: an archived one comes back.
           if (marked.archivedAt !== null) yield* unarchive(marked.id);
+          yield* settleAssistantChatHarness(marked.id, marked.modelSelection, origin);
           return { threadId: marked.id, outcome: "existing" as const };
         }
 
@@ -674,6 +721,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
             { origin },
           );
           if (picked.archivedAt !== null) yield* unarchive(picked.id);
+          yield* settleAssistantChatHarness(picked.id, picked.modelSelection, origin);
           yield* Effect.logInfo("assistant chat migrated").pipe(
             Effect.annotateLogs({ threadId: picked.id, title: picked.title }),
           );
@@ -686,12 +734,9 @@ const makeManagerAssistantService = Effect.gen(function* () {
             detail: "The assistant is not set up on this computer yet.",
           });
         }
-        const providers = yield* providerRegistry.getProviders;
-        const modelSelection =
-          project.defaultModelSelection ??
-          selectAutoBootstrapModelSelection(providers) ??
-          FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION;
+        const modelSelection = DEFAULT_ASSISTANT_MODEL_SELECTION;
         const threadId = ThreadId.make(crypto.randomUUID());
+        gatewayKey.labelThread(threadId, ASSISTANT_GATEWAY_LABEL);
         const createdAt = new Date().toISOString();
         yield* orchestrationEngine.dispatch(
           {
@@ -754,6 +799,18 @@ export const AssistantBootstrapLive = Layer.effectDiscard(
       .pipe(
         Effect.catch((cause) =>
           Effect.logWarning("assistant chat setup failed").pipe(Effect.annotateLogs({ cause })),
+        ),
+      );
+    // The Uno chat runs on Hermes: install it now if this machine lacks it,
+    // so the first message doesn't wait on (or fail for) a missing engine.
+    const assistantLlm = yield* ManagerAssistantLlm;
+    yield* assistantLlm
+      .ensureHarness({ retry: false })
+      .pipe(
+        Effect.tap((harness) =>
+          Effect.logInfo("assistant engine").pipe(
+            Effect.annotateLogs({ state: harness.state, version: harness.version }),
+          ),
         ),
       );
     yield* assistants.scanWorkspaceFolders();

@@ -173,6 +173,7 @@ import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { UnoBillingTopUpBanner } from "./chat/UnoBillingTopUpBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { AssistantEngineBanner } from "./chat/AssistantEngine";
 import { ThreadControlBar } from "./chat/ThreadControlBar";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
@@ -4029,6 +4030,9 @@ export default function ChatView(props: ChatViewProps) {
                     spawnedByThreadId={activeThread.spawnedByThreadId}
                     controller={activeThread.controller}
                   />
+                ) : null}
+                {activeThread?.assistantRole === "chat" ? (
+                  <AssistantEngineBanner environmentId={activeThread.environmentId} />
                 ) : null}
                 <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                 <div className="relative z-10">

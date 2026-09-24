@@ -41,6 +41,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProviderSetupAction } from "../harness/ProviderSetupAction";
 import { useHarnessSetup } from "../harness/useHarnessSetup";
 import { Explain } from "../Explain";
+import { AiProviderKeysSection } from "./AiProviderKeysSection";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
@@ -415,6 +416,8 @@ export function EnvironmentProvidersPanel({
           );
         })}
       </SettingsSection>
+
+      <AiProviderKeysSection environmentId={environmentId} />
 
       <AddProviderInstanceDialog
         open={isAddInstanceDialogOpen}

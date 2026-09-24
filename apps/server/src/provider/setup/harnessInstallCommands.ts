@@ -77,10 +77,25 @@ export function resolveInstallPlan(
 
   if (driver === "hermes") {
     if (!context.uvAvailable) {
+      if (context.platform === "win32") {
+        return {
+          kind: "unsupported",
+          reason:
+            "Hermes is installed with uv, which is not available on this machine. Install uv first (https://docs.astral.sh/uv/).",
+        };
+      }
+      // The Uno assistant runs on Hermes, so a machine without uv gets it the
+      // way the Work image does (deploy/install.sh): astral's user-level
+      // installer into ~/.local/bin (uv brings its own Python). No curl or no
+      // network → the job fails with the installer's own words and a Retry.
+      const uvBin = nodePath.join(context.homeDir, ".local", "bin", "uv");
+      const script = `curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh && "${uvBin}" tool install "hermes-agent[acp]" --with "mcp>=1.9"`;
       return {
-        kind: "unsupported",
-        reason:
-          "Hermes is installed with uv, which is not available on this machine. Install uv first (https://docs.astral.sh/uv/).",
+        kind: "command",
+        command: "sh",
+        args: ["-c", script],
+        env: {},
+        display: `install uv, then uv tool install "hermes-agent[acp]" --with "mcp>=1.9"`,
       };
     }
     const args = ["tool", "install", "hermes-agent[acp]", "--with", "mcp>=1.9"];

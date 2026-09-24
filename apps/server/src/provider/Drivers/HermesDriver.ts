@@ -12,10 +12,18 @@
  *
  * @module provider/Drivers/HermesDriver
  */
-import { HermesSettings, ProviderDriverKind, TextGenerationError } from "@t3tools/contracts";
+import {
+  AI_PROVIDER_LABELS,
+  ASSISTANT_HARNESS_INSTANCE_ID,
+  HermesSettings,
+  ProviderDriverKind,
+  TextGenerationError,
+  UNO_GATEWAY_BASE_URL,
+} from "@t3tools/contracts";
 import type { ServerProvider } from "@t3tools/contracts";
 import { Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import * as os from "node:os";
 
 import { ServerConfig } from "../../config.ts";
 import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
@@ -25,9 +33,15 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
+import { AiProviderKeys } from "../../aiProviders/AiProviderKeys.ts";
+import { gatewayBaseUrlForApp, isAppLabel } from "../../appSdk/appTaskLabel.ts";
 import type { TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
-import { buildHermesSpawnEnvironment, hermesAppLabelEnvironment } from "../acp/HermesAcpSupport.ts";
+import {
+  buildHermesSpawnEnvironment,
+  hermesAppLabelEnvironment,
+  type HermesLlmRoute,
+} from "../acp/HermesAcpSupport.ts";
 import { makeHermesAdapter } from "../Layers/HermesAdapter.ts";
 import {
   buildInitialHermesProviderSnapshot,
@@ -42,6 +56,7 @@ import {
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import { withUserLocalBinOnPath } from "../setup/harnessProcess.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("hermes");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
@@ -54,6 +69,7 @@ export type HermesDriverEnv =
   | BrowserBridge
   | UnoAgentAccess
   | UnoGatewayKey
+  | AiProviderKeys
   | ServerConfig
   | ServerSettingsService;
 
@@ -112,6 +128,35 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
       // Только ключ шлюза: ключ аккаунта в процесс харнесса не уходит.
       const gatewayKey = yield* UnoGatewayKey;
       const unoApiKey = yield* gatewayKey.harnessKey();
+      const providerKeys = yield* AiProviderKeys;
+
+      // Per-session LLM route (contracts: aiProviders.ts). The gateway key is
+      // read fresh per session — on a Work box it often lands after start.
+      const resolveLlmRoute = (input: {
+        readonly threadId: string;
+        readonly provider: HermesLlmRoute["provider"];
+      }): Effect.Effect<HermesLlmRoute, string> =>
+        Effect.gen(function* () {
+          if (input.provider === "uno") {
+            const apiKey = yield* gatewayKey.harnessKey();
+            const label = gatewayKey.appOfThread(input.threadId);
+            return {
+              provider: "uno" as const,
+              apiKey,
+              baseUrl:
+                label !== null && isAppLabel(label)
+                  ? gatewayBaseUrlForApp(UNO_GATEWAY_BASE_URL, label)
+                  : UNO_GATEWAY_BASE_URL,
+            };
+          }
+          const stored = yield* providerKeys.resolve(input.provider);
+          if (stored === null) {
+            return yield* Effect.fail(
+              `No ${AI_PROVIDER_LABELS[input.provider]} key on this computer. Add it in Settings → Agents → AI provider keys, or switch Uno to the Uno gateway.`,
+            );
+          }
+          return { provider: input.provider, apiKey: stored.apiKey, baseUrl: stored.baseUrl };
+        });
 
       const hermesEnvironment = buildHermesSpawnEnvironment({
         unoApiKey,
@@ -127,7 +172,12 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
         .join("\n\n");
       const processEnv = {
         ...unoAgentEnv,
-        ...browserBridge.applyEnvironment(mergeProviderInstanceEnvironment(environment)),
+        // `uv tool install` puts hermes into ~/.local/bin, which a desktop
+        // app's PATH often lacks — the daemon's own first-use install would
+        // otherwise leave a hermes it cannot find.
+        ...browserBridge.applyEnvironment(
+          withUserLocalBinOnPath(mergeProviderInstanceEnvironment(environment), os.homedir()),
+        ),
         ...hermesEnvironment,
         // Hermes' embedder slot: appended to the stable system prompt (env wins
         // over config `agent.environment_hint`). No other system-prompt hook
@@ -145,7 +195,19 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
-      const effectiveConfig = { ...config, enabled } satisfies HermesSettings;
+      // The default Hermes instance is the Uno assistant's harness (0.0.84):
+      // it can always run a session, whether or not the person turned Hermes
+      // on for other chats. `providers.hermes.enabled` keeps meaning "offer
+      // Hermes in the pickers" — that is the snapshot's `enabled`; the probe
+      // runs either way, so the assistant knows whether Hermes is installed.
+      const servesAssistant = instanceId === ASSISTANT_HARNESS_INSTANCE_ID;
+      const runnable = servesAssistant ? true : enabled;
+      const effectiveConfig = { ...config, enabled: runnable } satisfies HermesSettings;
+      const offeredInPickers = enabled;
+      const withPickerVisibility = (snapshot: ServerProvider): ServerProvider =>
+        offeredInPickers || !servesAssistant
+          ? snapshot
+          : { ...snapshot, enabled: false, status: "disabled" };
 
       const adapter = yield* makeHermesAdapter(effectiveConfig, {
         environment: processEnv,
@@ -156,12 +218,14 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
           // метка в base URL (`/v1/apps/<id>`, шлюз обслуживает те же ручки).
           ...hermesAppLabelEnvironment(gatewayKey.appOfThread(context.threadId)),
         }),
+        resolveLlmRoute,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
       });
 
       const checkProvider = checkHermesProviderStatus(effectiveConfig, unoApiKey, processEnv).pipe(
         Effect.map(stampIdentity),
+        Effect.map(withPickerVisibility),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
 
@@ -169,7 +233,8 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
         getSettings: Effect.succeed(effectiveConfig),
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,
-        initialSnapshot: (settings) => stampIdentity(buildInitialHermesProviderSnapshot(settings)),
+        initialSnapshot: (settings) =>
+          withPickerVisibility(stampIdentity(buildInitialHermesProviderSnapshot(settings))),
         checkProvider,
         refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
       }).pipe(
@@ -190,7 +255,7 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
         continuationIdentity,
         displayName,
         accentColor,
-        enabled,
+        enabled: runnable,
         snapshot,
         adapter,
         textGeneration: makeUnsupportedTextGeneration(),

@@ -166,3 +166,85 @@ describe("decider: assistant chat role", () => {
     expect(Exit.isFailure(exit)).toBe(true);
   });
 });
+
+describe("decider: the assistant chat runs on Hermes (0.0.84)", () => {
+  const hermes = (provider: string, model = "~x-ai/grok-latest") => ({
+    instanceId: ProviderInstanceId.make("hermes"),
+    model,
+    options: [{ id: "llmProvider", value: provider }],
+  });
+  const metaUpdate = (
+    threadId: ThreadId,
+    modelSelection: { instanceId: ProviderInstanceId; model: string },
+  ): OrchestrationCommand => ({
+    type: "thread.meta.update",
+    commandId: CommandId.make(`cmd-model-${threadId}-${modelSelection.model}`),
+    threadId,
+    modelSelection,
+    title: "Uno",
+  });
+
+  async function assistantChatOnHermes() {
+    let readModel = await decideAndApply(await seed(), markChat(LEGACY_ID), SYSTEM);
+    readModel = await decideAndApply(readModel, metaUpdate(LEGACY_ID, hermes("uno")), SYSTEM);
+    return readModel;
+  }
+
+  it("the daemon moves the assistant chat to Hermes", async () => {
+    const readModel = await assistantChatOnHermes();
+    expect(threadOf(readModel, LEGACY_ID).modelSelection).toEqual(hermes("uno"));
+  });
+
+  it("drops another harness for the assistant chat but applies the rest of the update", async () => {
+    const readModel = await decideAndApply(
+      await assistantChatOnHermes(),
+      metaUpdate(LEGACY_ID, { instanceId: ProviderInstanceId.make("uno"), model: "uno/kimi" }),
+    );
+    const thread = threadOf(readModel, LEGACY_ID);
+    expect(thread.modelSelection).toEqual(hermes("uno"));
+    expect(thread.title).toBe("Uno");
+  });
+
+  it("accepts a Hermes provider / model switch for the assistant chat", async () => {
+    const readModel = await decideAndApply(
+      await assistantChatOnHermes(),
+      metaUpdate(LEGACY_ID, hermes("xai", "grok-4.7")),
+    );
+    expect(threadOf(readModel, LEGACY_ID).modelSelection).toEqual(hermes("xai", "grok-4.7"));
+  });
+
+  it("strips another harness from a turn in the assistant chat", async () => {
+    const decided = await Effect.runPromise(
+      decideOrchestrationCommand({
+        readModel: await assistantChatOnHermes(),
+        command: {
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-turn-assistant"),
+          threadId: LEGACY_ID,
+          message: {
+            messageId: "msg-1" as never,
+            role: "user",
+            text: "hi",
+            attachments: [],
+          },
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+          runtimeMode: "full-access",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          createdAt: new Date().toISOString(),
+        } as OrchestrationCommand,
+      }),
+    );
+    const events = Array.isArray(decided) ? decided : [decided];
+    const turnStart = events.find((event) => event.type === "thread.turn-start-requested");
+    expect(turnStart).toBeDefined();
+    expect((turnStart?.payload as { modelSelection?: unknown }).modelSelection).toBeUndefined();
+  });
+
+  it("leaves other chats' harness choices alone", async () => {
+    const readModel = await decideAndApply(
+      await assistantChatOnHermes(),
+      metaUpdate(OTHER_ID, { instanceId: ProviderInstanceId.make("uno"), model: "uno/kimi" }),
+    );
+    expect(threadOf(readModel, OTHER_ID).modelSelection.instanceId).toBe("uno");
+  });
+});

@@ -7,6 +7,7 @@ import { ManagerConnectorRepositoryLive } from "../persistence/Layers/ManagerCon
 import { ProjectionPendingApprovalRepositoryLive } from "../persistence/Layers/ProjectionPendingApprovals.ts";
 import { RemindersRepositoryLive } from "../persistence/Layers/Reminders.ts";
 import { AssistantBootstrapLive, ManagerAssistantServiceLive } from "./Layers/AssistantService.ts";
+import { ManagerAssistantLlmLive } from "./Layers/AssistantLlmService.ts";
 import { ConnectorEventsForwarderLive } from "./Layers/ConnectorEventsForwarder.ts";
 import { ConnectorNotifyServiceLive } from "./Layers/ConnectorNotify.ts";
 import { ManagerApprovalServiceLive } from "./Layers/ManagerApprovalService.ts";
@@ -39,6 +40,8 @@ export const ManagerLayerLive = Layer.mergeAll(
   // Pushes thread events (errors, approvals, opt-in completions) to bound
   // chats; consumes the notify service and the engine provided below.
   ConnectorEventsForwarderLive,
+  // The assistant's engine: Hermes install + which LLM the Uno chat uses.
+  ManagerAssistantLlmLive,
 ).pipe(
   // Order matters: each layer's requirements are satisfied by the layers
   // provided AFTER it in this pipe.

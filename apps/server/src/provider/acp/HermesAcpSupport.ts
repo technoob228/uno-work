@@ -23,7 +23,7 @@
  *
  * @module HermesAcpSupport
  */
-import type { HermesSettings, RuntimeMode } from "@t3tools/contracts";
+import type { AssistantLlmProvider, HermesSettings, RuntimeMode } from "@t3tools/contracts";
 import { UNO_GATEWAY_BASE_URL } from "@t3tools/contracts";
 import { Effect, Layer, Scope } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -93,6 +93,33 @@ export function buildHermesSpawnEnvironment(
 export function hermesAppLabelEnvironment(appId: string | null): Record<string, string> {
   if (appId === null || !isAppLabel(appId)) return {};
   return { OPENAI_BASE_URL: gatewayBaseUrlForApp(UNO_GATEWAY_BASE_URL, appId) };
+}
+
+/**
+ * Where a Hermes session's LLM calls go (0.0.84, contracts: aiProviders.ts):
+ * the Uno gateway with the machine's key (default), or a key the person
+ * brought for another OpenAI-compatible provider. Hermes reads the endpoint
+ * only from the environment (`openai-api` provider + `OPENAI_*`), so this is
+ * a per-process env overlay; switching providers restarts the process (the
+ * session resumes from the thread's own HERMES_HOME).
+ */
+export interface HermesLlmRoute {
+  readonly provider: AssistantLlmProvider;
+  readonly apiKey: string;
+  readonly baseUrl: string;
+}
+
+/**
+ * Env overlay of a route. On the gateway speech-to-text stays on the gateway;
+ * with a brought key it is off (see {@link buildHermesConfigYaml}) — Hermes
+ * would send that key to the gateway's STT otherwise.
+ */
+export function hermesLlmRouteEnvironment(route: HermesLlmRoute): Record<string, string> {
+  return {
+    HERMES_INFERENCE_PROVIDER: HERMES_GATEWAY_PROVIDER,
+    OPENAI_API_KEY: route.apiKey,
+    OPENAI_BASE_URL: route.baseUrl,
+  };
 }
 
 export function buildHermesAcpSpawnInput(
@@ -227,6 +254,8 @@ export const HERMES_AGENT_INTENT_ACK_CONTINUATION = true;
 export function buildHermesConfigYaml(input: {
   readonly model: string;
   readonly mcpServers: ReadonlyArray<EffectAcpSchema.McpServer>;
+  /** Off for a brought key: Hermes' STT would send it to the gateway. Default on. */
+  readonly speechToText?: boolean;
 }): string {
   const quote = JSON.stringify;
   const lines: Array<string> = [
@@ -242,11 +271,15 @@ export function buildHermesConfigYaml(input: {
     `    stale_timeout_seconds: ${HERMES_GATEWAY_STALE_TIMEOUT_SECONDS}`,
     // STT-фолбэк самого hermes: без явного provider полез бы в faster-whisper
     // (150MB модель на диск). base_url приходит из env STT_OPENAI_BASE_URL.
-    "stt:",
-    "  enabled: true",
-    `  provider: "openai"`,
-    "  openai:",
-    `    model: ${quote(HERMES_STT_MODEL)}`,
+    ...(input.speechToText === false
+      ? ["stt:", "  enabled: false"]
+      : [
+          "stt:",
+          "  enabled: true",
+          `  provider: "openai"`,
+          "  openai:",
+          `    model: ${quote(HERMES_STT_MODEL)}`,
+        ]),
   ];
   if (input.mcpServers.length > 0) {
     lines.push("mcp_servers:");

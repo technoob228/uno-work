@@ -2,7 +2,8 @@
  * The Uno chat's header: "Connect ▾" (Telegram / Slack — write there, it
  * lands with Uno; set up on the assistant settings page, which already owns
  * bot tokens, allowed chats and what each chat talks to) and the settings
- * gear (what Uno may see and do, its model, its notes).
+ * gear (what Uno may see and do, its model, its notes). Before them: Uno's
+ * engine — model and where its AI comes from (Uno gateway / your key).
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
@@ -10,6 +11,7 @@ import { ChevronDownIcon, PlugIcon, SendIcon, Settings2Icon } from "lucide-react
 
 import type { ChannelState } from "../../assistant/assistantChat.logic";
 import { useAssistantChannels } from "../../assistant/useAssistantChannels";
+import { AssistantModelPicker } from "./AssistantEngine";
 import { cn } from "../../lib/utils";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -43,6 +45,7 @@ export function AssistantChatHeaderActions({ environmentId }: { environmentId: E
 
   return (
     <div className="flex shrink-0 items-center gap-1.5" data-testid="uno-header-actions">
+      <AssistantModelPicker environmentId={environmentId} />
       <Menu>
         <MenuTrigger
           data-testid="uno-connect"
