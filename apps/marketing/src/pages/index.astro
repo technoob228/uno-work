@@ -436,6 +436,65 @@ const jsonLd = {"@context":"https://schema.org","@type":"SoftwareApplication","n
     .rung .badge { display: inline-block; margin-left: 6px; vertical-align: 2px; font-size: 10.5px; font-weight: 650; color: var(--violet-ink); background: #fff; border: 1px solid var(--vline); border-radius: 999px; padding: 0 7px; }
     .ladder-foot { margin-top: 14px; font-size: 13px; color: var(--ink-3); }
 
+
+    /* Enterprise band — copied from journeys/kit/plan-cards.css (.uno-ent + .uno-plan__cta); tokens mapped to this page. */
+    .uno-ent { --uno-violet: var(--violet); --uno-violet-deep: var(--violet-deep); --uno-violet-ink: var(--violet-ink); --uno-violet-tint: var(--tint); --uno-violet-line: var(--vline); --uno-ink: var(--ink); --uno-ink-2: var(--ink-2); --uno-ink-3: var(--ink-3); --uno-paper: var(--paper); --uno-hairline: var(--line); --uno-hairline-strong: var(--line-2); }
+    .price-ent { margin-top: 40px; }
+    .uno-plan__cta {
+      margin-top: auto; display: flex; align-items: center; justify-content: center;
+      min-height: 42px; padding: 0 14px; border-radius: 10px;
+      font-size: 14px; font-weight: 600; text-decoration: none; color: var(--uno-ink);
+      background: var(--uno-paper); border: 1px solid var(--uno-hairline-strong);
+      transition: border-color .15s, background .15s, transform .15s, box-shadow .15s;
+    }
+    .uno-plan__cta:hover { border-color: var(--uno-ink); }
+    .uno-plan__cta.is-primary {
+      color: #fff; background: var(--uno-violet); border-color: var(--uno-violet-deep);
+      box-shadow: 0 1px 2px rgba(24,24,27,.12), 0 6px 20px -8px rgba(91,91,232,.55);
+    }
+    .uno-plan__cta.is-primary:hover { background: var(--uno-violet-deep); transform: translateY(-1px); }
+    .uno-plan__cta:active { transform: translateY(0); }
+    .uno-plan__cta:focus-visible { outline: 2px solid var(--uno-violet); outline-offset: 3px; }
+
+    /* ── Enterprise band (under the row of plans, not a sixth column) ──
+     * Markup: aside.uno-ent > .uno-ent__art, .uno-ent__head (h3.uno-ent__name + p.uno-ent__for),
+     *         dl.uno-ent__specs (4 × div > dt + dd), .uno-ent__act (a.uno-plan__cta.is-primary + small). See ENTERPRISE.md. */
+    .uno-ent {
+      --uno-art: 104px;
+      margin-top: 18px; display: grid; align-items: center;
+      grid-template-columns: 112px minmax(0, 300px) minmax(0, 1fr);
+      grid-template-areas: "art head specs" "art act specs";
+      column-gap: 28px; row-gap: 14px;
+      padding: 22px 26px 22px 18px;
+      background: var(--uno-paper); border: 1px solid var(--uno-hairline); border-radius: 14px;
+    }
+    .uno-ent__art { grid-area: art; display: flex; align-items: center; justify-content: center; }
+    .uno-ent__art > svg, .uno-ent__art > img { display: block; width: var(--uno-art); height: var(--uno-art); }
+    .uno-ent__head { grid-area: head; align-self: end; }
+    .uno-ent__name { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.015em; line-height: 1.3; text-wrap: balance; }
+    .uno-ent__for { margin: 6px 0 0; font-size: 13px; line-height: 1.45; color: var(--uno-ink-2); text-wrap: pretty; }
+    .uno-ent__act { grid-area: act; align-self: start; display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; }
+    .uno-ent__act .uno-plan__cta { margin: 0; padding: 0 20px; }
+    .uno-ent__act small { font-size: 12px; line-height: 1.4; color: var(--uno-ink-3); }
+    .uno-ent__specs {
+      grid-area: specs; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 28px;
+      padding-left: 28px; border-left: 1px solid var(--uno-hairline);
+    }
+    .uno-ent__specs > div { margin: 0; }
+    .uno-ent__specs dt { font-size: 15px; line-height: 1.3; font-weight: 700; letter-spacing: -0.01em; color: var(--uno-ink); }
+    .uno-ent__specs dd { margin: 2px 0 0; font-size: 13px; line-height: 1.45; color: var(--uno-ink-2); text-wrap: pretty; }
+    @media (max-width: 1040px) {
+      .uno-ent { --uno-art: 88px; grid-template-columns: 96px minmax(0, 1fr); grid-template-areas: "art head" "art act" "specs specs"; }
+      .uno-ent__specs { padding: 16px 0 0; border-left: 0; border-top: 1px solid var(--uno-hairline); }
+    }
+    @media (max-width: 560px) {
+      .uno-ent { --uno-art: 60px; grid-template-columns: 60px minmax(0, 1fr); grid-template-areas: "art head" "specs specs" "act act"; column-gap: 14px; padding: 18px 16px; align-items: start; }
+      .uno-ent__head { align-self: center; }
+      .uno-ent__name { font-size: 17px; }
+      .uno-ent__specs { grid-template-columns: 1fr; gap: 12px; }
+      .uno-ent__act .uno-plan__cta { flex: 1 1 100%; }
+    }
+
     .final { background: var(--band); color: #fff; padding: 104px 0 110px; }
     .final h2 { font-size: clamp(38px, 5.4vw, 68px); font-weight: 720; letter-spacing: -.04em; line-height: 1.02; max-width: 16ch; text-wrap: balance; }
     .final p { margin-top: 18px; font-size: 18px; color: #e3e3fb; max-width: 48ch; }
@@ -1099,6 +1158,22 @@ const jsonLd = {"@context":"https://schema.org","@type":"SoftwareApplication","n
       </ul>
       <p class="ladder-foot">Prices without Uno AI; bring your own subscription on any plan. Full details at <a class="u" href="https://uno4.dev/pricing">uno4.dev/pricing</a>.</p>
     </div>
+  </div>
+  <div class="wrap price-ent">
+    <aside class="uno-ent" aria-labelledby="ent-h">
+      <div class="uno-ent__art"><img src="/assets/computers/enterprise.svg" alt="" width="104" height="104" loading="lazy"></div>
+      <div class="uno-ent__head">
+        <h3 class="uno-ent__name" id="ent-h">Enterprise: Uno on capacity that's only yours</h3>
+        <p class="uno-ent__for">For companies that need their own hardware, their own country, or Uno inside their own stack.</p>
+      </div>
+      <dl class="uno-ent__specs">
+        <div><dt>Dedicated capacity</dt><dd>Any CPU, RAM and GPU, reserved for you alone.</dd></div>
+        <div><dt>Your region</dt><dd>Netherlands, Germany, Finland, France, UK, Spain, Italy, Switzerland or the US.</dd></div>
+        <div><dt>Private deployment</dt><dd>Uno Work and the console on your own capacity, run without our access.</dd></div>
+        <div><dt>SSO &amp; integrations</dt><dd>Sign in with your SSO (SAML, OIDC), connect your tools, manage the team.</dd></div>
+      </dl>
+      <div class="uno-ent__act"><a class="uno-plan__cta is-primary" href="https://sales.uno4.dev/?from=work">Talk to sales</a><small>We reply by email or Telegram.</small></div>
+    </aside>
   </div>
 </section>
 
