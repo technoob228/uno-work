@@ -402,6 +402,15 @@ const bridgeOk = (reply: BridgeReply): Effect.Effect<unknown, UnoWorkToolError> 
   return Effect.fail(toolError(`${reason} (HTTP ${reply.status})`));
 };
 
+function isLocalAddress(value: string): boolean {
+  try {
+    const host = new URL(value).hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
 export function isCompleteHttpUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
@@ -740,14 +749,36 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           record.storage = typeof limitGb === "number" ? { limitGb } : true;
         }
         if (previous.widget !== undefined) record.widget = previous.widget;
+        // Models often put a path ("/widget") or a local address in `url`,
+        // which is only for apps hosted elsewhere. Be forgiving: a path
+        // becomes `path`, a local address is dropped for the port.
+        const notes: Array<string> = [];
+        const rawUrl = typeof record.url === "string" ? record.url.trim() : undefined;
+        if (rawUrl !== undefined) {
+          if (rawUrl.startsWith("/")) {
+            delete record.url;
+            if (record.path === undefined) record.path = rawUrl;
+            notes.push(
+              `"${rawUrl}" is a path, not an address, so it was saved as path. For a Home widget use app_add_widget.`,
+            );
+          } else if (isLocalAddress(rawUrl) && record.port !== undefined) {
+            delete record.url;
+            notes.push("A local address isn't needed: Uno reaches the app by its port.");
+          } else if (!isCompleteHttpUrl(rawUrl)) {
+            return yield* toolError(
+              `url "${rawUrl}" is not an address. url is only for an app hosted somewhere else (https://…); for an app on this computer leave url out and give port + command.`,
+            );
+          }
+        }
         const written = yield* writeManifestRecord(deps, id, record);
         return {
           ok: true,
           appId: `manifest:${id}`,
           file: written.file,
           next: written.manifest.command
-            ? "Uno starts it within ~20 seconds; check with apps_list / app_logs. Then open it with open_in_panel and tell the person it is on Home."
-            : "It shows on Home now. Start it yourself (it has no command), then open_in_panel.",
+            ? "Uno starts it within ~20 seconds; check with apps_list / app_logs. Then open it with open_in_panel (appId) and tell the person it is on Home."
+            : 'It shows on Home, but without a command it has no Start button and won\'t come back after a reboot. Call app_register again with command (e.g. "python3 app.py") and cwd.',
+          ...(notes.length > 0 ? { notes } : {}),
         };
       }),
   },
@@ -795,18 +826,27 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           size: str(args, "size") ?? "medium",
           ...(str(args, "title") ? { title: str(args, "title") } : {}),
         };
-        const written = yield* writeManifestRecord(deps, id, { ...record, widget });
-        if (written.manifest.port === null && written.manifest.url === null) {
+        const alreadySet = JSON.stringify(record.widget) === JSON.stringify(widget);
+        const written = alreadySet
+          ? { manifest: null }
+          : yield* writeManifestRecord(deps, id, { ...record, widget });
+        const name = written.manifest?.name ?? (typeof record.name === "string" ? record.name : id);
+        const hasAddress =
+          written.manifest === null
+            ? record.port !== undefined || record.url !== undefined
+            : written.manifest.port !== null || written.manifest.url !== null;
+        if (!hasAddress) {
           return {
             ok: true,
             warning:
               "The app has no port or url, so Home can't show the widget yet. Add a port with app_register.",
           };
         }
+        // Phrased as done: models otherwise call this again and again.
         return {
           ok: true,
           widget,
-          tellThePerson: "Add it on Home → Customize → Add widget → " + written.manifest.name,
+          done: `${alreadySet ? "The widget was already set" : "Widget saved"}; don't call app_add_widget again. Tell the person: Home → Customize → Add widget → ${name}.`,
         };
       }),
   },

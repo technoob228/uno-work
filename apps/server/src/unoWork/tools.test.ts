@@ -469,6 +469,38 @@ describe("apps and widgets", () => {
     expect(again.widget).toEqual({ path: "/widget", size: "small" });
   });
 
+  it("forgives a path or a local address put in url", async () => {
+    const { deps, home } = makeDeps();
+    const asPath = await run("app_register", deps, {
+      id: "focus",
+      name: "Focus",
+      port: 8400,
+      url: "/widget",
+      command: "python3 app.py",
+    });
+    expect(asPath._tag).toBe("Success");
+    const manifest = JSON.parse(
+      readFileSync(path.join(home, ".uno", "apps", "focus.json"), "utf8"),
+    );
+    expect(manifest.url).toBeUndefined();
+    expect(manifest.path).toBe("/widget");
+    const local = await run("app_register", deps, {
+      id: "local",
+      name: "Local",
+      port: 8124,
+      url: "http://localhost:8124/?x=1",
+      command: "node s.js",
+    });
+    expect(local._tag).toBe("Success");
+    const junk = await run("app_register", deps, {
+      id: "junk",
+      name: "Junk",
+      port: 1,
+      url: "widget",
+    });
+    expect(junk._tag === "Failure" && junk.failure.message).toContain("not an address");
+  });
+
   it("refuses a manifest the daemon would skip", async () => {
     const { deps } = makeDeps();
     const result = await run("app_register", deps, { id: "empty", name: "Empty" });
@@ -477,6 +509,15 @@ describe("apps and widgets", () => {
       expect(result.failure.message).toContain("needs a port, a url or a command");
     const outside = await run("app_register", deps, { id: "x", name: "X", port: 1, cwd: "/etc" });
     expect(outside._tag).toBe("Failure");
+  });
+
+  it("tells the model a repeated widget call is already done", async () => {
+    const { deps } = makeDeps();
+    await run("app_register", deps, { id: "w", name: "W", port: 3000, command: "node s.js" });
+    const first = await run("app_add_widget", deps, { appId: "w", path: "/widget" });
+    const second = await run("app_add_widget", deps, { appId: "w", path: "/widget" });
+    expect(first._tag === "Success" && JSON.stringify(first.success)).toContain("Widget saved");
+    expect(second._tag === "Success" && JSON.stringify(second.success)).toContain("already set");
   });
 
   it("can't add a widget to an app that isn't registered", async () => {
