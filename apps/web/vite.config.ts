@@ -50,84 +50,92 @@ function resolveDevProxyTarget(wsUrl: string | undefined): string | undefined {
 
 const devProxyTarget = resolveDevProxyTarget(configuredWsUrl);
 
-export default defineConfig({
-  plugins: [
-    tanstackRouter(),
-    react(),
-    babel({
-      // We need to be explicit about the parser options after moving to @vitejs/plugin-react v6.0.0
-      // This is because the babel plugin only automatically parses typescript and jsx based on relative paths (e.g. "**/*.ts")
-      // whereas the previous version of the plugin parsed all files with a .ts extension.
-      // This is causing our packages/ directory to fail to parse, as they are not relative to the CWD.
-      parserOpts: { plugins: ["typescript", "jsx"] },
-      presets: [reactCompilerPreset()],
-    }),
-    tailwindcss(),
-  ],
-  optimizeDeps: {
-    include: [
-      "@pierre/diffs",
-      "@pierre/diffs/react",
-      "@pierre/diffs/worker/worker.js",
-      "effect/Array",
-      "effect/Order",
+export default defineConfig(({ mode }) => {
+  // Web lite (src/lite): My Uno only, for app.uno4.work without a cloud
+  // computer. `vite build --mode lite` (or VITE_UNO_WORK_LITE=1) → dist-lite.
+  const lite = mode === "lite" || process.env.VITE_UNO_WORK_LITE?.trim() === "1";
+  return {
+    plugins: [
+      tanstackRouter(),
+      react(),
+      babel({
+        // We need to be explicit about the parser options after moving to @vitejs/plugin-react v6.0.0
+        // This is because the babel plugin only automatically parses typescript and jsx based on relative paths (e.g. "**/*.ts")
+        // whereas the previous version of the plugin parsed all files with a .ts extension.
+        // This is causing our packages/ directory to fail to parse, as they are not relative to the CWD.
+        parserOpts: { plugins: ["typescript", "jsx"] },
+        presets: [reactCompilerPreset()],
+      }),
+      tailwindcss(),
     ],
-  },
-  define: {
-    "import.meta.env.VITE_HTTP_URL": JSON.stringify(configuredHttpUrl ?? ""),
-    // In dev mode, tell the web app where the WebSocket server lives
-    "import.meta.env.VITE_WS_URL": JSON.stringify(configuredWsUrl ?? ""),
-    "import.meta.env.VITE_HOSTED_APP_URL": JSON.stringify(configuredHostedAppUrl ?? ""),
-    "import.meta.env.APP_VERSION": JSON.stringify(pkg.version),
-  },
-  resolve: {
-    tsconfigPaths: true,
-  },
-  server: {
-    host,
-    port,
-    strictPort: true,
-    ...(devProxyTarget
-      ? {
-          proxy: {
-            "/.well-known": {
-              target: devProxyTarget,
-              changeOrigin: true,
-            },
-            "/api": {
-              target: devProxyTarget,
-              changeOrigin: true,
-            },
-            "/attachments": {
-              target: devProxyTarget,
-              changeOrigin: true,
-            },
-            "/office-engine": {
-              target: devProxyTarget,
-              changeOrigin: true,
-            },
-          },
-        }
-      : {}),
-    hmr: {
-      // Explicit config so Vite's HMR WebSocket connects reliably
-      // inside Electron's BrowserWindow. Vite 8 uses console.debug for
-      // connection logs — enable "Verbose" in DevTools to see them.
-      protocol: "ws",
-      host,
+    optimizeDeps: {
+      include: [
+        "@pierre/diffs",
+        "@pierre/diffs/react",
+        "@pierre/diffs/worker/worker.js",
+        "effect/Array",
+        "effect/Order",
+      ],
     },
-  },
-  build: {
-    outDir: "dist",
-    emptyOutDir: true,
-    sourcemap: buildSourcemap,
-    rollupOptions: {
-      input: {
-        main: "index.html",
-        // The page behind a share link to a Word/Excel/PowerPoint file; the
-        // daemon serves it at /s/<token> (apps/server/src/files/http.ts).
-        officeShare: "office-share.html",
+    define: {
+      "import.meta.env.VITE_HTTP_URL": JSON.stringify(configuredHttpUrl ?? ""),
+      // In dev mode, tell the web app where the WebSocket server lives
+      "import.meta.env.VITE_WS_URL": JSON.stringify(configuredWsUrl ?? ""),
+      "import.meta.env.VITE_HOSTED_APP_URL": JSON.stringify(configuredHostedAppUrl ?? ""),
+      "import.meta.env.APP_VERSION": JSON.stringify(pkg.version),
+      "import.meta.env.VITE_UNO_WORK_LITE": JSON.stringify(lite ? "1" : ""),
+    },
+    resolve: {
+      tsconfigPaths: true,
+    },
+    server: {
+      host,
+      port,
+      strictPort: true,
+      ...(devProxyTarget
+        ? {
+            proxy: {
+              "/.well-known": {
+                target: devProxyTarget,
+                changeOrigin: true,
+              },
+              "/api": {
+                target: devProxyTarget,
+                changeOrigin: true,
+              },
+              "/attachments": {
+                target: devProxyTarget,
+                changeOrigin: true,
+              },
+              "/office-engine": {
+                target: devProxyTarget,
+                changeOrigin: true,
+              },
+            },
+          }
+        : {}),
+      hmr: {
+        // Explicit config so Vite's HMR WebSocket connects reliably
+        // inside Electron's BrowserWindow. Vite 8 uses console.debug for
+        // connection logs — enable "Verbose" in DevTools to see them.
+        protocol: "ws",
+        host,
       },
     },
-  },
+    build: {
+      outDir: lite ? "dist-lite" : "dist",
+      emptyOutDir: true,
+      sourcemap: buildSourcemap,
+      rollupOptions: {
+        input: lite
+          ? { main: "index.html" }
+          : {
+              main: "index.html",
+              // The page behind a share link to a Word/Excel/PowerPoint file; the
+              // daemon serves it at /s/<token> (apps/server/src/files/http.ts).
+              officeShare: "office-share.html",
+            },
+      },
+    },
+  };
 });

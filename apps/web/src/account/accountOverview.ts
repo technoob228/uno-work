@@ -305,7 +305,9 @@ export function parseAccountPlan(raw: unknown): AccountPlan | null {
     diskGb: num(r["disk_gb"]),
     cloudGb: num(r["s3_gb"]),
     boostHours: num(r["boost_hours"]),
-    cloudWork: r["cloud_work"] === true || maxBoxRamMb >= 4096,
+    // The console decides (the Plus+ ladder); older consoles don't send the
+    // field, and there a 4 GB computer was the line.
+    cloudWork: "cloud_work" in r ? r["cloud_work"] === true : maxBoxRamMb >= 4096,
     legacy: r["legacy"] === true,
   };
 }

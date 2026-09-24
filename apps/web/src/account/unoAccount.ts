@@ -39,6 +39,7 @@ import {
 } from "@t3tools/shared/unoBoxProvision";
 
 import { isWorkProxyHost } from "../hooks/useDirectMachineAddress";
+import { isWebLite } from "../lite/flag";
 
 export const UNO_WORK_URL = "https://app.uno4.work";
 
@@ -48,6 +49,9 @@ export function accountTransport(): AccountTransport {
   if (typeof window === "undefined") return "none";
   if (window.desktopBridge?.unoAccount) return "desktop";
   if (isWorkProxyHost(window.location.hostname)) return "work-proxy";
+  // The lite build is only ever served by app.uno4.work itself (same origin as
+  // /_account), whatever name the host goes by.
+  if (isWebLite) return "work-proxy";
   return "none";
 }
 

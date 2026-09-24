@@ -7,6 +7,8 @@ interface ImportMetaEnv {
   readonly VITE_WS_URL: string;
   readonly VITE_HOSTED_APP_URL: string;
   readonly APP_VERSION: string;
+  /** "1" in the web lite build (apps/web/src/lite). */
+  readonly VITE_UNO_WORK_LITE?: string;
 }
 
 interface ImportMeta {
