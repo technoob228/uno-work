@@ -11,7 +11,8 @@ app ──HTTP──▶ Work daemon (App API, 127.0.0.1:3779 + docker0)
                  ├── /v1/chat/completions ─▶ Uno AI gateway (machine key, metered per app)
                  ├── /v1/audio/transcriptions ─▶ Uno AI gateway
                  ├── /v1/tasks ─▶ a Work chat (thread) on the harness the person chose
-                 └── /v1/storage/* ─▶ the app's folder in the account's cloud (S3)
+                 ├── /v1/storage/* ─▶ the app's folder in the account's cloud (S3)
+                 └── /v1/notify ─▶ the person's Inbox in Uno Work (+ system notification)
 ```
 
 **Where an app keeps data.** A computer has two kinds of storage:
@@ -53,9 +54,11 @@ An app asks for AI in its manifest `~/.uno/apps/<id>.json`:
 - `"storage": {"limitGb": 5}` (or `"storage": true`, 5 GB) — the app gets its
   own folder in the account's cloud, `Cloud storage → apps/<id>/`. A manifest
   may ask for at most 20 GB; the person can give more in Settings → Apps.
-- Neither `ai` nor `storage` → no token, every call is 401.
+- `"notify": true` — the app may put notifications into the person's Inbox
+  (`POST /v1/notify`, below).
+- None of `ai`, `storage`, `notify` → no token, every call is 401.
 
-When the daemon sees a manifest with `ai` or `storage` it issues the app its own token
+When the daemon sees a manifest with `ai`, `storage` or `notify` it issues the app its own token
 (`uno_app_…`, only a hash is stored) and writes:
 
 ```
@@ -107,6 +110,8 @@ container `http://host.docker.internal:3779`). Every call:
 | 404    | `file_not_found`                       | no such file in the app's folder                                  |
 | 400    | `invalid_key`                          | a key with `..`, a leading `/`, empty segments, > 512 chars       |
 | 503    | `storage_not_connected`                | this computer is not linked to an Uno account                     |
+| 403    | `notify_not_allowed`                   | the manifest does not ask for `"notify": true`                    |
+| 429    | `notify_rate_limited`                  | too many notifications; wait `Retry-After` seconds                |
 
 ### `GET /v1/whoami`
 
@@ -269,6 +274,46 @@ folder's size, and a warning when the folder is shared with other
 computers). The daemon deletes the app's current folder after the app is gone
 (`appAiUpdate {deleteCloudFiles: true}`, allowed once the manifest is gone).
 
+### `POST /v1/notify` — tell the person something (`"notify": true`)
+
+```json
+{
+  "title": "Boris commented on report.docx",
+  "body": "Can we add October numbers once the month closes?",
+  "open": { "file": "~/Documents/report.docx" },
+  "group": "report-comments"
+}
+```
+
+→ `201 {"ok": true, "id": "inb_…"}`. The item appears in the **Inbox** of Uno
+Work (the bell / "Inbox" row in the sidebar, the Inbox icon of the rail) on
+every window connected to this computer, with the app's name and icon, and —
+if the person turned it on — as a system notification of the browser or the
+desktop app. It is kept by the daemon (survives restarts) until the person
+reads, snoozes or dismisses it.
+
+- `title` — required, ≤ 140 characters, plain words ("Backup finished").
+- `body` (or `text`) — optional second line, ≤ 500 characters.
+- `open` — where "Open" leads:
+  - `{"file": "~/…"}` or an absolute path — a file **inside home**; Word,
+    Excel and PowerPoint files open in Office, the rest in Files;
+  - `{"app": true, "path": "/notes/42"}` — this app, inside Uno (never another app);
+  - `{"url": "https://…"}` — an http(s) address, opened inside Uno;
+  - a string is short for a url (`https://…`) or a file (`~/…`, `/…`).
+- `group` — ≤ 100 characters. While an item of the same group is unread, a new
+  notification **updates** it (text, time, a "×3" counter) instead of adding
+  one. Use it for anything that repeats (autosaves, polling, progress).
+
+Rate limit per app: a burst of 10, then one every 10 s (6 a minute), at most
+200 a day → `429 notify_rate_limited` with `Retry-After`. Text is cleaned of
+control and bidi characters.
+
+Built-in parts of Uno post into the same Inbox: agents (finished, waits for an
+approval or an answer, stopped with an error) and **Office** — a save through
+a "Can comment" / "Can edit" share link becomes "Boris commented on
+report.docx" (the name the visitor typed; repeats of one visitor fold into one
+item) with Open → the document.
+
 ## 3. SDKs
 
 Zero-dependency single files; the daemon keeps a copy on every machine:
@@ -290,6 +335,25 @@ const done = await t.wait();
 import sys, os; sys.path.insert(0, os.path.expanduser("~/.uno/sdk/python"))
 import uno_app
 print(uno_app.ask("Translate to English: привет"))
+```
+
+Notifications (manifest `"notify": true`):
+
+```js
+import { notify } from "/home/unowork/.uno/sdk/js/uno-app.mjs";
+await notify("Backup finished", {
+  body: "12 files, 1.2 GB",
+  open: { app: true, path: "/backups" },
+});
+await notify({
+  title: "Anna commented on plan.docx",
+  open: { file: "~/Documents/plan.docx" },
+  group: "plan",
+});
+```
+
+```python
+uno_app.notify("Backup finished", body="12 files", open={"app": True, "path": "/backups"})
 ```
 
 Cloud storage (manifest `"storage": true`):
@@ -337,7 +401,9 @@ from `/run/uno-app/` (docker), then from `~/.uno/app-keys/<UNO_APP_ID or appId>/
 - The App API listens on loopback and the docker bridge only — never on the
   public interface.
 - A token is bound to one app id. It opens only: chat for that app, tasks
-  started by that app, and that app's cloud folder `apps/<id>/`. It is not an account key and not a machine key; it
+  started by that app, that app's cloud folder `apps/<id>/` and notifications
+  in that app's name (an "Open" link can point at a file inside home, the app
+  itself or an http(s) address — never at another app). It is not an account key and not a machine key; it
   cannot read other apps' tasks, settings, files or the account.
 - Spending is checked before each call and settled after it; a call that
   would start above the limit gets 402.

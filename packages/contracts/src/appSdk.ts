@@ -89,6 +89,8 @@ export const AppAiApp = Schema.Struct({
   /** What the manifest asks for. */
   chat: Schema.Boolean,
   tasks: Schema.Boolean,
+  /** May put notifications into the Inbox (`"notify": true`). Absent on older daemons. */
+  notify: Schema.optional(Schema.Boolean),
   status: AppAiStatus,
   limitUsd: Schema.Number,
   /** True when the person set the limit (rather than the manifest). */

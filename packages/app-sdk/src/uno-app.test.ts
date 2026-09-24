@@ -102,6 +102,9 @@ beforeAll(async () => {
       if (u.pathname === "/v1/audio/transcriptions") {
         return send(res, 200, { text: "hello from audio" });
       }
+      if (u.pathname === "/v1/notify") {
+        return send(res, 201, { ok: true, id: "inb_1" });
+      }
       if (u.pathname === "/v1/whoami") {
         return send(res, 200, { app: { id: "t", name: "T" } });
       }
@@ -218,6 +221,23 @@ describe("chat", () => {
     expect(req.contentType).toMatch(/^multipart\/form-data/);
     expect(req.body).toContain('filename="a.ogg"');
     expect(req.body).toContain('name="language"');
+  });
+});
+
+describe("notify", () => {
+  it("posts a title with body, open and group", async () => {
+    const c = createClient({ url, token: TOKEN });
+    expect(await c.notify("Backup finished", { open: { file: "~/b.zip" }, group: "b" })).toEqual({
+      ok: true,
+      id: "inb_1",
+    });
+    const last = seen.at(-1)!;
+    expect(last.url).toBe("/v1/notify");
+    expect(JSON.parse(last.body)).toEqual({
+      title: "Backup finished",
+      open: { file: "~/b.zip" },
+      group: "b",
+    });
   });
 });
 

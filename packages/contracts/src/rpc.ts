@@ -13,6 +13,7 @@ import {
   WorkspaceState,
 } from "./workspace.ts";
 import { AppAiOverview, AppAiUpdateInput } from "./appSdk.ts";
+import { InboxError, InboxSnapshot, InboxUpdateInput } from "./inbox.ts";
 import { OpenError, OpenInEditorInput } from "./editor.ts";
 import {
   UnoComputerActivity,
@@ -392,6 +393,9 @@ export const WS_METHODS = {
   unoComputerAppAction: "uno.computer.appAction",
   appAiList: "uno.appAi.list",
   appAiUpdate: "uno.appAi.update",
+
+  // Inbox: what wants the person (agents, apps) — kept by the daemon
+  inboxUpdate: "inbox.update",
   unoComputerLocalMetrics: "uno.computer.localMetrics",
   unoComputerResizeOptions: "uno.computer.resizeOptions",
   unoComputerResize: "uno.computer.resize",
@@ -443,6 +447,7 @@ export const WS_METHODS = {
   subscribeAuthLinkRequests: "subscribeAuthLinkRequests",
   subscribeBrowserBridge: "subscribeBrowserBridge",
   subscribePlugins: "subscribePlugins",
+  subscribeInbox: "subscribeInbox",
 
   // Mobile-compat: методы, которые зовёт апстримный T3-клиент (мобилка).
   // Имена должны буквально совпадать с upstream WS_METHODS.
@@ -1559,6 +1564,21 @@ export const WsAppAiUpdateRpc = Rpc.make(WS_METHODS.appAiUpdate, {
   error: UnoCloudRpcError,
 });
 
+/** Mark read / snooze / dismiss Inbox items; answers with the new list. */
+export const WsInboxUpdateRpc = Rpc.make(WS_METHODS.inboxUpdate, {
+  payload: InboxUpdateInput,
+  success: InboxSnapshot,
+  error: InboxError,
+});
+
+/** The Inbox now, then again on every change. */
+export const WsSubscribeInboxRpc = Rpc.make(WS_METHODS.subscribeInbox, {
+  payload: Schema.Struct({}),
+  success: InboxSnapshot,
+  error: InboxError,
+  stream: true,
+});
+
 export const WsUnoComputerLocalMetricsRpc = Rpc.make(WS_METHODS.unoComputerLocalMetrics, {
   payload: Schema.Struct({}),
   success: UnoComputerLocalMetrics,
@@ -1688,6 +1708,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoComputerEmbedCheckRpc,
   WsAppAiListRpc,
   WsAppAiUpdateRpc,
+  WsInboxUpdateRpc,
+  WsSubscribeInboxRpc,
   WsUnoComputerLocalMetricsRpc,
   WsUnoComputerResizeOptionsRpc,
   WsUnoComputerResizeRpc,

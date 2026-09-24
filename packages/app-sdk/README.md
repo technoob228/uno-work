@@ -54,6 +54,23 @@ await storage.delete("photos/"); // a whole folder
 Errors: `storage_not_allowed` (403, no `"storage"` in the manifest),
 `app_storage_full` (507, the app's limit), `cloud_full` (402, the account's plan).
 
+## 4. Tell the person something (Inbox)
+
+Add `"notify": true` to the manifest. The notification lands in the Inbox of
+Uno Work (and as a system notification, if the person turned them on):
+
+```js
+import { notify } from "@uno4/app";
+await notify("Anna commented on plan.docx", {
+  body: "Can we add October?",
+  open: { file: "~/Documents/plan.docx" }, // or { app: true, path: "/…" } or { url: "https://…" }
+  group: "plan-comments", // repeats update one unread item
+});
+```
+
+Errors: `notify_not_allowed` (403, no `"notify"` in the manifest),
+`notify_rate_limited` (429, a burst of 10, then 6 a minute; see `Retry-After`).
+
 ## Config
 
 First match wins:

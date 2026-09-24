@@ -177,6 +177,11 @@ export interface WsRpcClient {
   readonly browser: {
     readonly subscribeBridge: RpcStreamMethod<typeof WS_METHODS.subscribeBrowserBridge>;
   };
+  /** What wants the person on this computer (agents, apps) — kept by the daemon. */
+  readonly inbox: {
+    readonly subscribe: RpcStreamMethod<typeof WS_METHODS.subscribeInbox>;
+    readonly update: RpcUnaryMethod<typeof WS_METHODS.inboxUpdate>;
+  };
   readonly vault: {
     readonly list: RpcUnaryNoArgMethod<typeof WS_METHODS.vaultList>;
     readonly upsert: RpcUnaryMethod<typeof WS_METHODS.vaultUpsert>;
@@ -500,6 +505,14 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
           ...options,
           tag: WS_METHODS.subscribeBrowserBridge,
         }),
+    },
+    inbox: {
+      subscribe: (listener, options) =>
+        transport.subscribe((client) => client[WS_METHODS.subscribeInbox]({}), listener, {
+          ...options,
+          tag: WS_METHODS.subscribeInbox,
+        }),
+      update: (input) => transport.request((client) => client[WS_METHODS.inboxUpdate](input)),
     },
     vault: {
       list: () => transport.request((client) => client[WS_METHODS.vaultList]({})),

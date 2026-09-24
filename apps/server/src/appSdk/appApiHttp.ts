@@ -9,6 +9,7 @@ import type { AppTaskTools } from "@t3tools/contracts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { StoredAppTask } from "./appAiStore.ts";
+import { type ParsedNotify, makeNotifyLimiter, parseNotifyBody } from "./appNotify.ts";
 import type { AppStorage } from "./appStorage.ts";
 import type { AppApiReply, AppTaskView } from "./appTasks.ts";
 import {
@@ -45,6 +46,10 @@ export interface AppApiCaller {
    * computer's own (`<id>@computer-<box>/`), as the person chose.
    */
   readonly storage: { readonly limitBytes: number; readonly folder: string } | null;
+  /** The manifest asks to tell the person things (`"notify": true`). */
+  readonly notify?: boolean;
+  /** The manifest's icon (emoji / letters), shown next to its notifications. */
+  readonly appIcon?: string | null;
 }
 
 export interface AppApiTaskDetail {
@@ -83,6 +88,11 @@ export interface AppApiCore {
   readonly stopTask: (caller: AppApiCaller, task: StoredAppTask) => Promise<boolean>;
   /** The app's folder in the account's cloud; absent when the daemon has none. */
   readonly storage?: AppStorage;
+  /** Put a notification into the person's Inbox; absent when there's no Inbox. */
+  readonly notify?: (
+    caller: AppApiCaller,
+    notification: ParsedNotify,
+  ) => Promise<{ readonly id: string }>;
 }
 
 class BodyTooLarge extends Error {}
@@ -468,6 +478,49 @@ export function makeAppApiHandler(core: AppApiCore) {
     });
   };
 
+  const notifyLimiter = makeNotifyLimiter();
+  const notify = async (caller: AppApiCaller, req: IncomingMessage, res: ServerResponse) => {
+    if (!caller.notify) {
+      return send(
+        res,
+        err(
+          403,
+          "notify_not_allowed",
+          'This app\'s manifest does not ask to notify the person. Add "notify": true to ~/.uno/apps/<id>.json.',
+        ),
+      );
+    }
+    if (!core.notify) {
+      return send(res, err(503, "notify_unavailable", "Notifications aren't available here."));
+    }
+    const raw = await readBody(req, 16 * 1024);
+    let body: unknown = null;
+    try {
+      body = JSON.parse(raw.toString("utf8"));
+    } catch {
+      body = null;
+    }
+    const parsed = parseNotifyBody(body, { appId: caller.appId, home: core.home });
+    if (!parsed.ok) return send(res, err(400, "invalid_request", parsed.message));
+    const wait = notifyLimiter.take(caller.appId);
+    if (wait !== null) {
+      res.setHeader("retry-after", String(wait));
+      return send(res, {
+        status: 429,
+        body: {
+          error: {
+            type: "notify_rate_limited",
+            code: "notify_rate_limited",
+            message: `Too many notifications from this app. Try again in ${wait} s.`,
+          },
+          retryAfterSeconds: wait,
+        },
+      });
+    }
+    const posted = await core.notify(caller, parsed.value);
+    send(res, { status: 201, body: { ok: true, id: posted.id } });
+  };
+
   const listTasks = async (caller: AppApiCaller, res: ServerResponse) => {
     const tasks = await Promise.all(core.listTasks(caller.appId).slice(0, 20).map(core.viewTask));
     send(res, { status: 200, body: { tasks } });
@@ -492,7 +545,7 @@ export function makeAppApiHandler(core: AppApiCore) {
           err(
             401,
             "invalid_app_token",
-            'Missing or unknown app token. An app gets one when its manifest ~/.uno/apps/<id>.json has an "ai" or "storage" block.',
+            'Missing or unknown app token. An app gets one when its manifest ~/.uno/apps/<id>.json has an "ai", "storage" or "notify" block.',
           ),
         );
       }
@@ -504,6 +557,7 @@ export function makeAppApiHandler(core: AppApiCore) {
       if (method === "POST" && route === "/v1/audio/transcriptions") {
         return await transcriptions(caller, req, res);
       }
+      if (method === "POST" && route === "/v1/notify") return await notify(caller, req, res);
       if (route === "/v1/tasks") {
         if (method === "POST") return await createTask(caller, req, res);
         if (method === "GET") return await listTasks(caller, res);

@@ -56,6 +56,16 @@ This computer has its own AI. An app you build for the person (translator, summa
 6. Something that must run on a schedule (e.g. once a day) belongs inside the app (a timer in the server process) or in a user systemd timer — not a cron job the person can't see. Show the last result in the app's page.
 7. In docker (only if the person's machine allows it): mount only \`~/.uno/app-keys/<id>:/run/uno-app:ro\` (never all of \`~/.uno\`) and add \`extra_hosts: ["host.docker.internal:host-gateway"]\`.
 
+## Apps that tell the person something — notifications into the Inbox
+
+When something happens the person should know about — someone commented on their document, a long job finished, a backup failed, a new booking came in — the app tells them through Uno Work's **Inbox** (the bell in the sidebar; a system notification if they allowed it). Never email or message the person yourself for this.
+
+1. Add \`"notify": true\` to the manifest (next to \`"ai"\` / \`"storage"\`, or alone) — the app gets its token as above.
+2. JS: \`await uno.notify("Boris commented on report.docx", { body: "Can we add October?", open: { file: "~/Documents/report.docx" }, group: "report-comments" })\`. Python: \`uno_app.Client(app_id="<id>").notify("Backup finished", body="12 files", open={"app": True, "path": "/backups"})\`. HTTP: \`POST $UNO_APP_API_URL/v1/notify {"title","body","open","group"}\`.
+3. \`open\` is where "Open" leads: \`{"file": "~/…"}\` (a file inside home; documents open in Office), \`{"app": true, "path": "/…"}\` (this app, inside Uno), or \`{"url": "https://…"}\`. \`group\`: repeats with the same group update one unread item instead of piling up — use it for anything that can happen many times (autosaves, polling).
+4. Title ≤ 140 characters, in plain words, starting with who/what ("Boris commented on …", "Backup finished"). Body ≤ 500. At most a burst of 10 and 6 a minute (429 \`notify_rate_limited\` → wait \`Retry-After\` seconds); 403 \`notify_not_allowed\` → the manifest lacks \`"notify": true\`.
+5. Notify about what needs the person or what they asked to hear about — not every step.
+
 ## Where an app keeps data — the person's files go to the cloud, not the disk
 
 This computer's disk is its **working disk**: small, paid for by the gigabyte, meant for programs to run. The person's Uno account also has **cloud storage** (S3): cheap and roomy, visible in Files → Cloud storage. Default for every app you build:

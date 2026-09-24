@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ServerConfig, type ServerConfigShape } from "../config.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { InboxService } from "../inbox/InboxService.ts";
+import type { InboxPost, StoredInboxItem } from "../inbox/inboxModel.ts";
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { UnoGatewayKey, type UnoGatewayKeyShape, UnoGatewayKeyTest } from "../unoGatewayKey.ts";
@@ -17,6 +19,7 @@ let root: string;
 let home: string;
 let appsDir: string;
 let keysDir: string;
+let posts: InboxPost[] = [];
 
 beforeEach(async () => {
   root = await mkdtemp(path.join(os.tmpdir(), "app-sdk-"));
@@ -24,6 +27,7 @@ beforeEach(async () => {
   appsDir = path.join(home, ".uno", "apps");
   keysDir = path.join(home, ".uno", "app-keys");
   await mkdir(appsDir, { recursive: true });
+  posts = [];
 });
 
 afterEach(async () => {
@@ -72,6 +76,13 @@ const run = <A>(
             Layer.mock(OrchestrationEngineService)({}),
             Layer.mock(ProjectionSnapshotQuery)({}),
             Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+            Layer.mock(InboxService)({
+              post: (post) =>
+                Effect.sync(() => {
+                  posts.push(post);
+                  return { id: `inb_${posts.length}` } as StoredInboxItem;
+                }),
+            }),
           ),
         ),
       ),
@@ -354,6 +365,56 @@ describe("AppSdkService", () => {
       },
     );
   });
+
+  it("an app with notify in its manifest puts notifications into the Inbox; others get 403", async () => {
+    await writeManifest("office-bot", {
+      name: "Office bot",
+      icon: "📝",
+      port: 3002,
+      notify: true,
+    });
+    await writeManifest("quiet", { name: "Quiet", port: 3003, ai: { chat: true } });
+    await run(async (service) => {
+      await service.sync();
+      const handler = makeAppApiHandler(service.core);
+      const token = await tokenOf("office-bot");
+      const ok = await callHandler(handler, token, "POST", "/v1/notify", {
+        title: "Boris commented on report.docx",
+        body: "Can we add October numbers?",
+        open: { file: "~/Documents/report.docx" },
+        group: "report",
+      });
+      expect(ok.status).toBe(201);
+      expect(posts).toHaveLength(1);
+      expect(posts[0]).toMatchObject({
+        kind: "app",
+        source: { kind: "app", id: "office-bot", name: "Office bot", icon: "📝" },
+        title: "Boris commented on report.docx",
+        open: { kind: "file", path: path.join(home, "Documents", "report.docx") },
+        groupKey: "app:office-bot:report",
+      });
+
+      const outside = await callHandler(handler, token, "POST", "/v1/notify", {
+        title: "x",
+        open: { file: "/etc/passwd" },
+      });
+      expect(outside.status).toBe(400);
+
+      const quiet = await callHandler(handler, await tokenOf("quiet"), "POST", "/v1/notify", {
+        title: "hi",
+      });
+      expect(quiet.status).toBe(403);
+      expect(JSON.parse(quiet.body).error.code).toBe("notify_not_allowed");
+
+      // A burst is capped: after 10, the app is told to wait.
+      let last = 0;
+      for (let index = 0; index < 12; index += 1) {
+        last = (await callHandler(handler, token, "POST", "/v1/notify", { title: `n${index}` }))
+          .status;
+      }
+      expect(last).toBe(429);
+    });
+  });
 });
 
 /** One request through the App API handler, without a socket. */
@@ -379,6 +440,7 @@ async function callHandler(
         status = code;
         return res;
       },
+      setHeader: () => res,
       end: (chunk?: string) => {
         out += chunk ?? "";
         resolve();

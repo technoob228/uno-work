@@ -28,6 +28,7 @@ import {
   UnoBillingRpcError,
   PersonalAiRpcError,
   UnoCloudRpcError,
+  InboxError,
   UNO_GATEWAY_BASE_URL,
   WS_METHODS,
   WsRpcGroup,
@@ -83,6 +84,7 @@ import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
 import { ComputerResourcesService } from "./computerResources/ComputerResourcesService.ts";
 import { checkEmbed } from "./machineApps/embedCheck.ts";
 import { AppSdkService } from "./appSdk/AppSdkService.ts";
+import { InboxService } from "./inbox/InboxService.ts";
 import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
 import {
   GENERATED_INSTRUCTIONS_RELATIVE_PATH,
@@ -253,6 +255,7 @@ const makeWsRpcLayer = (
       const files = yield* FilesService;
       const machineApps = yield* MachineAppsService;
       const appSdk = yield* AppSdkService;
+      const inbox = yield* InboxService;
       const computerResources = yield* ComputerResourcesService;
       const harnessSetup = yield* HarnessSetup;
       const serverCommandId = (tag: string) =>
@@ -1566,6 +1569,14 @@ const makeWsRpcLayer = (
               .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
             { "rpc.aggregate": "app-sdk" },
           ),
+        [WS_METHODS.inboxUpdate]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.inboxUpdate,
+            inbox
+              .update(input)
+              .pipe(Effect.mapError((cause) => new InboxError({ message: cause.message }))),
+            { "rpc.aggregate": "inbox" },
+          ),
         [WS_METHODS.unoComputerLocalMetrics]: (_input) =>
           observeRpcEffect(WS_METHODS.unoComputerLocalMetrics, machineApps.localMetrics, {
             "rpc.aggregate": "uno-computer",
@@ -2115,6 +2126,15 @@ const makeWsRpcLayer = (
             WS_METHODS.subscribeBrowserBridge,
             Effect.succeed(browserBridge.stream),
             { "rpc.aggregate": "browser" },
+          ),
+        [WS_METHODS.subscribeInbox]: (_input) =>
+          observeRpcStreamEffect(
+            WS_METHODS.subscribeInbox,
+            Effect.gen(function* () {
+              const current = yield* inbox.snapshot;
+              return Stream.concat(Stream.make(current), inbox.changes);
+            }),
+            { "rpc.aggregate": "inbox" },
           ),
         [WS_METHODS.subscribePlugins]: (_input) =>
           observeRpcStreamEffect(

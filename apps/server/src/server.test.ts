@@ -139,6 +139,7 @@ import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
 import { FilesService } from "./files/FilesService.ts";
 import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
 import { AppSdkService } from "./appSdk/AppSdkService.ts";
+import { InboxService } from "./inbox/InboxService.ts";
 import { ComputerResourcesService } from "./computerResources/ComputerResourcesService.ts";
 import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
@@ -677,6 +678,7 @@ const buildAppUnderTest = (options?: {
           Layer.mock(FilesService)({}),
           Layer.mock(MachineAppsService)({}),
           Layer.mock(AppSdkService)({}),
+          Layer.mock(InboxService)({}),
           Layer.mock(ComputerResourcesService)({}),
           Layer.mock(HarnessSetup)({}),
         ),

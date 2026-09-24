@@ -214,6 +214,8 @@ async function start(config: ShareConfig) {
         headers: {
           "content-type": "application/octet-stream",
           ...(baseVersion ? { "x-uno-base-version": baseVersion } : {}),
+          // The owner's Inbox says who it was ("Boris commented on …").
+          ...(identity.name ? { "x-uno-visitor": encodeURIComponent(identity.name) } : {}),
         },
       });
       const body = (await reply.json().catch(() => ({}))) as {

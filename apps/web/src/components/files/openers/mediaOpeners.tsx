@@ -6,6 +6,7 @@
 import { MinusIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 
+import { HtmlFileFrame } from "../../preview/HtmlFileFrame";
 import { Button } from "../../ui/button";
 import type { FileOpener, FileViewProps } from "../fileOpeners";
 import { fileExtension } from "../fileTypes";
@@ -152,14 +153,17 @@ function HtmlView({ source }: FileViewProps) {
       </ViewerMessage>
     );
   }
+  // Served from its own folder, so its CSS, images and fonts load too. Scripts
+  // run, but without allow-same-origin the page lives in an opaque origin: no
+  // access to this app, its storage or the daemon.
   return (
-    <iframe
-      title={source.name}
-      srcDoc={data}
-      // Scripts run, but without allow-same-origin the page lives in an opaque
-      // origin: no access to this app, its storage or the daemon.
+    <HtmlFileFrame
+      name={source.name}
+      environmentId={source.environmentId}
+      path={source.path}
+      content={data}
+      fallbackSrcDoc={data}
       sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals"
-      className="h-full w-full border-0 bg-white"
     />
   );
 }

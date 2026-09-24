@@ -363,6 +363,24 @@ class Client:
     def models(self) -> Any:
         return self._json("GET", "/v1/models")
 
+    # -- notifications
+
+    def notify(self, title: str, body: Optional[str] = None, open: Any = None,
+               group: Optional[str] = None) -> Dict[str, Any]:
+        """Put a notification into the person's Inbox (manifest "notify": true).
+
+        open: {"file": "~/..."}, {"url": "https://..."} or {"app": True, "path": "/..."}.
+        Same group while unread -> one item that updates instead of many.
+        """
+        payload: Dict[str, Any] = {"title": title}
+        if body is not None:
+            payload["body"] = body
+        if open is not None:
+            payload["open"] = open
+        if group is not None:
+            payload["group"] = group
+        return self._json("POST", "/v1/notify", payload)
+
     @property
     def storage(self) -> "Storage":
         """The app's own folder in the account's cloud (manifest "storage")."""
@@ -657,6 +675,11 @@ def tasks() -> Any:
 
 def whoami() -> Dict[str, Any]:
     return _client().whoami()
+
+
+def notify(title: str, body: Optional[str] = None, open: Any = None,
+           group: Optional[str] = None) -> Dict[str, Any]:
+    return _client().notify(title, body, open, group)
 
 
 def models() -> Any:

@@ -102,7 +102,7 @@ export const SidebarPinned = memo(function SidebarPinned({
   );
 });
 
-function PinIcon({ item }: { item: UnoPin }) {
+export function PinIcon({ item }: { item: UnoPin }) {
   if (item.kind === "app") {
     return (
       <ProgramIcon
@@ -121,33 +121,28 @@ function PinIcon({ item }: { item: UnoPin }) {
   );
 }
 
-function PinRow({
-  item,
-  onUnpin,
-  onRename,
-}: {
-  item: UnoPin;
-  onUnpin: () => void;
-  onRename: () => void;
-}) {
-  const navigate = useNavigate();
-  const { openHere, openBeside } = useOpenApp();
-  const { isMobile, setOpenMobile } = useSidebar();
+/** Is this pin what the main area shows now? */
+export function usePinActive(item: UnoPin): boolean {
   const location = useLocation({
     select: (l) => ({ pathname: l.pathname, search: l.search as Record<string, unknown> }),
   });
-  const active =
-    item.kind === "app"
-      ? location.pathname === "/app" && location.search["url"] === item.target
-      : item.kind === "folder"
-        ? location.pathname === "/files" &&
-          location.search["path"] === item.target &&
-          !location.search["file"]
-        : item.kind === "file"
-          ? location.pathname === "/files" && location.search["file"] === item.target
-          : false;
+  return item.kind === "app"
+    ? location.pathname === "/app" && location.search["url"] === item.target
+    : item.kind === "folder"
+      ? location.pathname === "/files" &&
+        location.search["path"] === item.target &&
+        !location.search["file"]
+      : item.kind === "file"
+        ? location.pathname === "/files" && location.search["file"] === item.target
+        : false;
+}
 
-  const open = () => {
+/** A click on a pin: an app inside Uno, a folder or file in Files, a link in a new tab. */
+export function useOpenPin() {
+  const navigate = useNavigate();
+  const { openHere } = useOpenApp();
+  const { isMobile, setOpenMobile } = useSidebar();
+  return (item: UnoPin) => {
     if (isMobile) setOpenMobile(false);
     switch (item.kind) {
       case "app":
@@ -163,6 +158,21 @@ function PinRow({
         openInNewTab(item.target);
     }
   };
+}
+
+function PinRow({
+  item,
+  onUnpin,
+  onRename,
+}: {
+  item: UnoPin;
+  onUnpin: () => void;
+  onRename: () => void;
+}) {
+  const { openBeside } = useOpenApp();
+  const active = usePinActive(item);
+  const openPin = useOpenPin();
+  const open = () => openPin(item);
 
   const showMenu = async (position: { x: number; y: number }) => {
     const api = readLocalApi();

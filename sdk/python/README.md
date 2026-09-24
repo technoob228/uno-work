@@ -48,6 +48,15 @@ person raises the limit in Uno Work → Settings → Apps), `ai_not_connected`
 
 Tests: `python3 -m unittest discover -s tests`.
 
+## Notifications (Inbox)
+
+With `"notify": true` in the manifest:
+
+```python
+uno_app.notify("Backup finished", body="12 files", open={"app": True, "path": "/backups"})
+uno_app.notify("Anna commented on plan.docx", open={"file": "~/Documents/plan.docx"}, group="plan")
+```
+
 ## Cloud storage
 
 With `"storage": true` in the manifest the app gets its own folder in the
