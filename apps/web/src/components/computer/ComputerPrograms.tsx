@@ -101,7 +101,7 @@ export function ProgramIcon({
   );
 }
 
-function TileShell({
+export function TileShell({
   label,
   caption,
   icon,
@@ -111,7 +111,10 @@ function TileShell({
   onClick,
   onDetails,
   title,
+  small = false,
 }: {
+  /** Home's Apps widget: tighter, no caption. */
+  small?: boolean;
   label: string;
   caption: string | null;
   icon: ReactNode;
@@ -131,7 +134,8 @@ function TileShell({
         onClick={onClick}
         title={title ?? label}
         className={cn(
-          "flex w-full flex-col items-center gap-2 rounded-2xl px-1 pt-3 pb-2 text-center outline-hidden transition-colors",
+          "flex w-full flex-col items-center rounded-2xl px-1 text-center outline-hidden transition-colors",
+          small ? "gap-1.5 pt-1.5 pb-1.5" : "gap-2 pt-3 pb-2",
           "hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring",
           "disabled:cursor-default disabled:opacity-55 disabled:hover:bg-transparent",
         )}
@@ -160,8 +164,15 @@ function TileShell({
             </span>
           ) : null}
         </span>
-        <span className="w-full truncate text-xs font-medium text-foreground">{label}</span>
-        {caption ? (
+        <span
+          className={cn(
+            "w-full truncate text-foreground",
+            small ? "text-[11.5px]" : "text-xs font-medium",
+          )}
+        >
+          {label}
+        </span>
+        {caption && !small ? (
           <span className="-mt-1.5 w-full truncate text-[11px] text-muted-foreground">
             {caption}
           </span>
@@ -182,11 +193,20 @@ function TileShell({
   );
 }
 
-function BuiltInIcon({ children, className }: { children: ReactNode; className: string }) {
+export function BuiltInIcon({
+  children,
+  className,
+  small = false,
+}: {
+  children: ReactNode;
+  className: string;
+  small?: boolean;
+}) {
   return (
     <span
       className={cn(
-        "flex size-14 items-center justify-center rounded-2xl text-white shadow-sm ring-1 ring-black/5 dark:ring-white/10 [&_svg]:size-7",
+        "flex items-center justify-center text-white shadow-sm ring-1 ring-black/5 dark:ring-white/10",
+        small ? "size-11 rounded-[14px] [&_svg]:size-5" : "size-14 rounded-2xl [&_svg]:size-7",
         className,
       )}
     >

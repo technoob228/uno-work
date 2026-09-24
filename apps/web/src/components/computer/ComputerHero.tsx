@@ -47,7 +47,7 @@ import type { ResourceLook } from "./resources/resourceModel";
 export type PowerAction = "sleep" | "wake" | "stop" | "start";
 type PowerState = ReturnType<typeof computerPowerState>;
 
-const DOT: Record<PowerState, string> = {
+export const POWER_DOT: Record<PowerState, string> = {
   on: "bg-success",
   asleep: "bg-info",
   off: "bg-muted-foreground/50",
@@ -125,7 +125,6 @@ export function ComputerHero({
 }) {
   const state: PowerState = status === null ? "on" : computerPowerState(status);
   const [confirm, setConfirm] = useState<"sleep" | "stop" | null>(null);
-  const copy = confirm ? confirmCopy(confirm, own) : null;
 
   const powerButton = (
     action: PowerAction,
@@ -157,7 +156,7 @@ export function ComputerHero({
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="truncate text-xl font-semibold tracking-tight">{name}</h1>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-background/70 px-2.5 py-0.5 text-xs font-medium ring-1 ring-border">
-              <span className={cn("size-1.5 rounded-full", DOT[state])} aria-hidden />
+              <span className={cn("size-1.5 rounded-full", POWER_DOT[state])} aria-hidden />
               {POWER_STATE_LABEL[state]}
             </span>
           </div>
@@ -254,27 +253,52 @@ export function ComputerHero({
         </p>
       ) : null}
 
-      <AlertDialog open={confirm !== null} onOpenChange={(open) => !open && setConfirm(null)}>
-        <AlertDialogPopup>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{copy?.title}</AlertDialogTitle>
-            <AlertDialogDescription>{copy?.body}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-            <Button
-              variant={confirm === "stop" ? "destructive" : "default"}
-              onClick={() => {
-                if (confirm) power?.onPower(confirm);
-                setConfirm(null);
-              }}
-            >
-              {copy?.confirm}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogPopup>
-      </AlertDialog>
+      <PowerConfirmDialog
+        confirm={confirm}
+        own={own}
+        onCancel={() => setConfirm(null)}
+        onConfirm={(action) => {
+          power?.onPower(action);
+          setConfirm(null);
+        }}
+      />
     </section>
+  );
+}
+
+/** "Put your computer to sleep?" / "Turn your computer off?" — asked before either. */
+export function PowerConfirmDialog({
+  confirm,
+  own,
+  onCancel,
+  onConfirm,
+}: {
+  confirm: "sleep" | "stop" | null;
+  own: boolean;
+  onCancel: () => void;
+  onConfirm: (action: "sleep" | "stop") => void;
+}) {
+  const copy = confirm ? confirmCopy(confirm, own) : null;
+  return (
+    <AlertDialog open={confirm !== null} onOpenChange={(open) => !open && onCancel()}>
+      <AlertDialogPopup>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{copy?.title}</AlertDialogTitle>
+          <AlertDialogDescription>{copy?.body}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+          <Button
+            variant={confirm === "stop" ? "destructive" : "default"}
+            onClick={() => {
+              if (confirm) onConfirm(confirm);
+            }}
+          >
+            {copy?.confirm}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogPopup>
+    </AlertDialog>
   );
 }
 

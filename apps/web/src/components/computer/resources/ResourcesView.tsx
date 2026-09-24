@@ -120,6 +120,8 @@ export interface ResourcesViewProps {
   onAskUno: (prompt: string) => void | Promise<void>;
   /** "Boost ×2 for 1 hour" next to "Add memory"; absent when boost isn't offered. */
   boost?: ReactNode;
+  /** Under everything: what the computer's apps wrote lately, "For engineers". */
+  footer?: ReactNode;
 }
 
 export function ResourcesView({
@@ -130,6 +132,7 @@ export function ResourcesView({
   onResize,
   onAskUno,
   boost,
+  footer,
 }: ResourcesViewProps) {
   const resourcesQuery = useQuery(resourcesQueryOptions(environmentId));
   const [diskPath, setDiskPath] = useState<string | null>(null);
@@ -156,7 +159,7 @@ export function ResourcesView({
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" variant="ghost" onClick={onBack}>
           <ArrowLeftIcon />
-          This computer
+          Home
         </Button>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => void ask()} disabled={asking}>
@@ -227,6 +230,8 @@ export function ResourcesView({
           ))}
         </div>
       ) : null}
+
+      {footer}
     </div>
   );
 }
