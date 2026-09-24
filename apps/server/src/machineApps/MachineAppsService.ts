@@ -278,6 +278,7 @@ function toPublic(
       ? {
           codeDir: code?.display ?? null,
           codeDirKeepReason: code?.keepReason ?? null,
+          widget: app.manifest?.widget ?? null,
         }
       : {}),
   };

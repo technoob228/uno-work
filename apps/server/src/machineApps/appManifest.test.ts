@@ -8,6 +8,7 @@ import {
   manifestIdFromFileName,
   parseAppAiRequest,
   parseAppPath,
+  parseAppWidget,
   parseAppUrl,
   parseIconText,
   readIconDataUrl,
@@ -133,6 +134,48 @@ describe("validateManifest", () => {
     expect(noCommand.ok && noCommand.manifest.autostart).toBe(false);
     const off = validateManifest("x", { port: 1, command: "x", autostart: false }, opts);
     expect(off.ok && off.manifest.autostart).toBe(false);
+  });
+});
+
+describe("parseAppWidget", () => {
+  it("reads a path, a size and a title", () => {
+    expect(
+      parseAppWidget({ path: "/widget?compact=1", size: "wide", title: "Orders today" }),
+    ).toEqual({ path: "/widget?compact=1", size: "wide", title: "Orders today" });
+    expect(parseAppWidget("/w")).toEqual({ path: "/w", size: "medium", title: null });
+    expect(parseAppWidget({ path: "/w", size: "huge" })).toEqual({
+      path: "/w",
+      size: "medium",
+      title: null,
+    });
+  });
+
+  it("refuses anything that is not a path on the app itself", () => {
+    for (const bad of [
+      { path: "https://evil.example/w" },
+      { path: "javascript:alert(1)" },
+      { path: "//evil.example/w" },
+      { path: "widget" },
+      { path: "/w w" },
+      { size: "small" },
+      true,
+      ["/w"],
+    ]) {
+      expect(parseAppWidget(bad)).toBeNull();
+    }
+  });
+
+  it("a manifest with a broken widget is skipped with a reason; a good one carries it", () => {
+    const bad = validateManifest("shop", { port: 3000, widget: { path: "http://x/w" } }, opts);
+    expect(bad.ok).toBe(false);
+    const good = validateManifest("shop", { port: 3000, widget: { path: "/widget" } }, opts);
+    expect(good.ok && good.manifest.widget).toEqual({
+      path: "/widget",
+      size: "medium",
+      title: null,
+    });
+    const none = validateManifest("shop", { port: 3000 }, opts);
+    expect(none.ok && "widget" in none.manifest).toBe(false);
   });
 });
 

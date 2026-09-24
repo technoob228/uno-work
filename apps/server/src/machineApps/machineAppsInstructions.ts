@@ -66,6 +66,16 @@ When something happens the person should know about — someone commented on the
 4. Title ≤ 140 characters, in plain words, starting with who/what ("Boris commented on …", "Backup finished"). Body ≤ 500. At most a burst of 10 and 6 a minute (429 \`notify_rate_limited\` → wait \`Retry-After\` seconds); 403 \`notify_not_allowed\` → the manifest lacks \`"notify": true\`.
 5. Notify about what needs the person or what they asked to hear about — not every step.
 
+## Home widgets — a small live view of an app on the person's Home
+
+The person can put a widget of an app on their Uno Work Home (a card next to Files, Apps…) — e.g. "today's orders", "uptime of my sites", "my to-do list". When they ask for a widget, or an app has one obvious number or list worth glancing at:
+
+1. Serve a small page from the app itself, e.g. \`/widget\` — its own route on the app's port, no new server.
+2. Add \`"widget": {"path": "/widget", "size": "medium", "title": "Orders today"}\` to the app's manifest. \`path\` must start with \`/\` (a path on the app, never a full URL). \`size\`: \`"small"\` (a quarter of the row), \`"medium"\` (half, the default) or \`"wide"\` (the whole row). \`title\` is optional (the app's name otherwise). A widget needs a \`port\` (or \`url\`) like any web app.
+3. The page must work at about **300×200 px**: no header or navigation, one glance of content, a transparent or white background, system font, readable in light and dark (\`prefers-color-scheme\`), no horizontal scroll, and it must not need a login prompt inside the frame. Refresh its data by itself (e.g. \`setInterval\` every 30–60 s); Home also reloads it when the window gets focus.
+4. It runs in a sandboxed frame on Home: it can run scripts and call its own app, but can't navigate Uno Work or read its data. Links that should open the full app: \`target="_blank"\`.
+5. Tell the person: "Add it on Home → Customize → Add widget → <app name>".
+
 ## Where an app keeps data — the person's files go to the cloud, not the disk
 
 This computer's disk is its **working disk**: small, paid for by the gigabyte, meant for programs to run. The person's Uno account also has **cloud storage** (S3): cheap and roomy, visible in Files → Cloud storage. Default for every app you build:
