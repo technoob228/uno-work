@@ -17,6 +17,7 @@ import {
   type ScopedProjectRef,
 } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
@@ -27,6 +28,7 @@ import { findProjectByPath, inferProjectTitleFromPath } from "../lib/projectPath
 import { newCommandId, newProjectId } from "../lib/utils";
 import { pickUsableDefaultModelSelection } from "../providerModels";
 import { selectProjectsAcrossEnvironments, useStore } from "../store";
+import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useNewThreadHandler } from "./useHandleNewThread";
 
 export { HOME_FOLDER_TITLE };
@@ -65,6 +67,7 @@ export function folderDisplayName(path: string): string {
 
 export function useFolderChats(environmentId: EnvironmentId | null) {
   const { handleNewThread } = useNewThreadHandler();
+  const router = useRouter();
   const providers = useEnvironmentProviders(environmentId);
 
   /** The project for `folder` on this machine, created when it isn't one yet. */
@@ -135,21 +138,25 @@ export function useFolderChats(environmentId: EnvironmentId | null) {
         ? before.modelSelectionByProvider[before.activeProvider]
         : undefined;
       const runtimeMode = before?.runtimeMode ?? null;
-      const projectRef = await chatInFolder(target, folder ? undefined : HOME_FOLDER_TITLE);
+      await chatInFolder(target, folder ? undefined : HOME_FOLDER_TITLE);
+      // The draft the chat opened on — read from the route: a project can have
+      // drafts under two keys (scoped id / logical path), the route is the truth.
+      const params = router.state.matches[router.state.matches.length - 1]?.params ?? {};
+      const route = resolveThreadRouteTarget(params);
+      if (route?.kind !== "draft" || route.draftId === draftId) return;
+      const moved = route.draftId;
       const next = useComposerDraftStore.getState();
-      const moved = next.getDraftSessionByProjectRef(projectRef);
-      if (!moved || moved.draftId === draftId) return;
       if (prompt) {
-        next.setPrompt(moved.draftId, prompt);
+        next.setPrompt(moved, prompt);
         next.setPrompt(draftId, "");
       }
-      if (modelSelection) next.setModelSelection(moved.draftId, modelSelection);
+      if (modelSelection) next.setModelSelection(moved, modelSelection);
       if (runtimeMode) {
-        next.setRuntimeMode(moved.draftId, runtimeMode);
-        next.setDraftThreadContext(moved.draftId, { runtimeMode });
+        next.setRuntimeMode(moved, runtimeMode);
+        next.setDraftThreadContext(moved, { runtimeMode });
       }
     },
-    [chatInFolder, environmentId],
+    [chatInFolder, environmentId, router],
   );
 
   return { ensureFolderProject, chatInFolder, chatInHomeFolder, moveDraftToFolder };

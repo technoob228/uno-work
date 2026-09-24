@@ -174,32 +174,34 @@ function appStarters(apps: ReadonlyArray<StarterApp>): HomeStarter[] {
   return out;
 }
 
+/** Files first (they make concrete tasks), then at most one folder to tidy. */
 function fileStarters(files: ReadonlyArray<StarterFile>): HomeStarter[] {
-  const out: HomeStarter[] = [];
+  const fileTasks: HomeStarter[] = [];
+  let folderTask: HomeStarter | null = null;
   const recent = files
     .filter((file) => !file.name.startsWith("."))
     .toSorted((a, b) => (Date.parse(b.modifiedAt) || 0) - (Date.parse(a.modifiedAt) || 0));
   for (const file of recent) {
     const short = shortName(file.name, 28);
     if (file.isDirectory) {
-      out.push({
+      folderTask ??= {
         id: `file:${file.name}`,
         label: `Tidy up ${short}`,
         prompt: `Tidy up the folder ${file.name} in my home folder: sort what's inside and tell me what you changed.`,
         source: "file",
-      });
+      };
       continue;
     }
     const ext = extensionOf(file.name);
     if (SHEET_EXT.has(ext)) {
-      out.push({
+      fileTasks.push({
         id: `file:${file.name}`,
         label: `Make a chart from ${short}`,
         prompt: `Make a chart from ${file.name} in my home folder and tell me what stands out.`,
         source: "file",
       });
     } else if (DOC_EXT.has(ext) || DECK_EXT.has(ext)) {
-      out.push({
+      fileTasks.push({
         id: `file:${file.name}`,
         label: `Summarize ${short}`,
         prompt: `Summarize ${file.name} from my home folder in a few bullet points.`,
@@ -208,7 +210,7 @@ function fileStarters(files: ReadonlyArray<StarterFile>): HomeStarter[] {
     }
     // Other files (images, archives, code) make no obvious one-click task.
   }
-  return out;
+  return folderTask ? [...fileTasks, folderTask] : fileTasks;
 }
 
 function siteStarters(sites: ReadonlyArray<StarterSite>): HomeStarter[] {

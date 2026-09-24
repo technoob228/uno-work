@@ -98,7 +98,19 @@ describe("homeStarters", () => {
         { name: ".cache", isDirectory: true, modifiedAt: "2026-09-25T00:00:00Z" },
       ],
     });
-    expect(starters.map((s) => s.label)).toEqual(["Tidy up Downloads", "Summarize notes.md"]);
+    expect(starters.map((s) => s.label)).toEqual(["Summarize notes.md", "Tidy up Downloads"]);
+  });
+
+  it("puts files before folders and suggests tidying one folder at most", () => {
+    const starters = homeStarters({
+      ...EMPTY,
+      files: [
+        { name: "UnoWork", isDirectory: true, modifiedAt: "2026-09-24T03:00:00Z" },
+        { name: "Downloads", isDirectory: true, modifiedAt: "2026-09-24T02:00:00Z" },
+        { name: "q3.xlsx", isDirectory: false, modifiedAt: "2026-09-24T01:00:00Z" },
+      ],
+    });
+    expect(starters.map((s) => s.label)).toEqual(["Make a chart from q3.xlsx", "Tidy up UnoWork"]);
   });
 
   it("is deterministic", () => {
