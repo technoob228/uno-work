@@ -311,6 +311,15 @@ if ! loginctl enable-linger "${SERVICE_USER}" >/dev/null 2>&1; then
   install -d -m 0755 /var/lib/systemd/linger
   touch "/var/lib/systemd/linger/${SERVICE_USER}"
 fi
+# On Uno machines /var/lib/systemd is a tmpfs (var-lib-systemd.mount from the
+# base rootfs), so the linger flag written above is gone after every boot and
+# the golden image never carries it. tmpfiles recreates it early at boot, before
+# logind decides whose user managers to start.
+cat > /etc/tmpfiles.d/uno-work-linger.conf <<TMPFILES
+# Written by install.sh — keep the ${SERVICE_USER} user session (user timers) across boots.
+d /var/lib/systemd/linger 0755 root root -
+f /var/lib/systemd/linger/${SERVICE_USER} 0644 root root -
+TMPFILES
 install -d -m 0755 /etc/systemd/system/uno-work.service.d
 cat > /etc/systemd/system/uno-work.service.d/user-session.conf <<DROPIN
 # Written by install.sh — the service user's systemd session (user timers).

@@ -8,7 +8,8 @@
     "*.tsbuildinfo",
     "**/routeTree.gen.ts",
     "**/sdkBundle.generated.ts",
-    "**/harnessGuide.generated.ts"
+    "**/harnessGuide.generated.ts",
+    "apps/web/public/skills/**"
   ],
   "plugins": ["eslint", "oxc", "react", "unicorn", "typescript"],
   "categories": {
