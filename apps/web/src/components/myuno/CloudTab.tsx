@@ -8,6 +8,7 @@ import { CloudIcon, DatabaseIcon, FolderOpenIcon, HardDriveIcon } from "lucide-r
 
 import type { AccountSubscription, CloudUsage } from "../../account/accountOverview";
 import { formatBytes } from "../../account/billingModel";
+import { isWebLite } from "../../lite/flag";
 import { Meter } from "../computer/computerUi";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
@@ -68,10 +69,17 @@ export function CloudTab({
             )}
           </span>
           {cloudPct !== null ? <Meter value={cloudPct} className="w-28" /> : null}
-          <Button size="sm" variant="outline" render={<Link to="/files" search={{ cloud: "1" }} />}>
-            <FolderOpenIcon />
-            Open Files
-          </Button>
+          {/* Web lite has no Files: it browses a computer's disk. */}
+          {isWebLite ? null : (
+            <Button
+              size="sm"
+              variant="outline"
+              render={<Link to="/files" search={{ cloud: "1" }} />}
+            >
+              <FolderOpenIcon />
+              Open Files
+            </Button>
+          )}
         </div>
       )}
 

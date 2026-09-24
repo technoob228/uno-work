@@ -19,6 +19,7 @@ import {
 import { computerSize, formatRam, planTitle } from "../../account/billingModel";
 import { ALL_ROLES, ROLE_BLURB, ROLE_LABEL, type ComputerRole } from "../../account/computerRoles";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
+import { isWebLite, liteLinks, openCloudWork } from "../../lite/webLite";
 import { useSwitchEnvironment } from "../../hooks/useSwitchEnvironment";
 import { cn } from "../../lib/utils";
 import { normalizeUnoBoxName } from "../../unoBoxCreation";
@@ -88,7 +89,8 @@ export function AddComputerDialog({
   const limits = subscription?.limits ?? null;
   const maxRam = limits?.maxBoxRamMb ?? 0;
   const sizes = SERVER_SIZES.filter((s) => maxRam === 0 || s.ramMb <= maxRam);
-  const workspaceFits = maxRam >= WORKSPACE_MIN_RAM_MB;
+  // Web lite asks the plan itself (the console's cloud_work: Plus and up).
+  const workspaceFits = isWebLite ? limits?.cloudWork === true : maxRam >= WORKSPACE_MIN_RAM_MB;
 
   useEffect(() => {
     if (!open) {
@@ -189,7 +191,11 @@ export function AddComputerDialog({
             <DialogPanel>
               {!subscription || !workspaceFits ? (
                 <div className="flex flex-col gap-3 rounded-xl bg-muted/40 p-4 text-sm">
-                  <p className="font-medium">Uno Work in the cloud needs a 4 GB computer.</p>
+                  <p className="font-medium">
+                    {isWebLite
+                      ? "Uno Work in the cloud starts at Plus."
+                      : "Uno Work in the cloud needs a 4 GB computer."}
+                  </p>
                   <p className="text-xs leading-relaxed text-muted-foreground">
                     {subscription
                       ? `On ${planWord} a computer goes up to ${formatRam(maxRam)}.`
@@ -197,7 +203,7 @@ export function AddComputerDialog({
                     Plus and bigger plans include it. Until then, Uno Work on your own computer (the
                     desktop app) is free.
                   </p>
-                  <div>
+                  <div className="flex flex-wrap gap-2">
                     <Button
                       size="sm"
                       onClick={() => {
@@ -207,6 +213,29 @@ export function AddComputerDialog({
                     >
                       <SparklesIcon />
                       See plans
+                    </Button>
+                    {isWebLite ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        render={<a href={liteLinks.download} target="_blank" rel="noreferrer" />}
+                      >
+                        Download the app
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : isWebLite ? (
+                <div className="flex flex-col gap-3 rounded-xl bg-muted/40 p-4 text-sm">
+                  <p className="font-medium">{planWord} includes Uno Work in the cloud.</p>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Open it and Uno sets up your workspace. Just upgraded? Give it up to 30 seconds
+                    to catch up.
+                  </p>
+                  <div>
+                    <Button size="sm" onClick={openCloudWork}>
+                      <SparklesIcon />
+                      Open Uno Work in the cloud
                     </Button>
                   </div>
                 </div>

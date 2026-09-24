@@ -42,6 +42,9 @@ import { usePrimaryEnvironmentDescriptor } from "../../environments/primary";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useSwitchEnvironment } from "../../hooks/useSwitchEnvironment";
 import { cn } from "../../lib/utils";
+import { LiteBanner } from "../../lite/LiteBanner";
+import { isWebLite, liteLinks, openCloudWork } from "../../lite/webLite";
+import { openInNewTab } from "../../navigation/useOpenApp";
 import { useStore } from "../../store";
 import { AccountSignInCta } from "../account/AccountSignInCta";
 import { ChatInFolderDialog } from "../computer/ChatInFolderDialog";
@@ -140,6 +143,10 @@ export function MyUnoView() {
     });
   };
   const seePlans = () => setTab("billing");
+  // Web lite can't pick a folder on a computer: sites are updated in the console.
+  const updateSite = isWebLite
+    ? (_site: HostedSite) => openInNewTab(liteLinks.publishSite)
+    : setUpdating;
 
   const needsSignIn = !reachable || signedOut(computers.error) || signedOut(balance.error);
   const sub = subscription.data ?? null;
@@ -170,6 +177,14 @@ export function MyUnoView() {
 
   const openEntry = useCallback(
     (entry: ComputerEntry) => {
+      // Web lite has no computer to switch to: an Uno Work computer opens as
+      // the full app ("/" — the backend serves it once there is one), a
+      // server shows its panel (load, apps, logs, the console).
+      if (isWebLite) {
+        if (entry.box?.workMachine) openCloudWork();
+        else if (entry.box) setSelection({ kind: "computer", key: entry.key, tab: "monitor" });
+        return;
+      }
       if (entry.local) {
         if (primaryEnvironmentId) switchEnvironment(primaryEnvironmentId, { landing: "computer" });
       } else if (entry.box) void open(entry.box);
@@ -237,7 +252,7 @@ export function MyUnoView() {
         </PanelFrame>
       ) : selectedSite ? (
         <PanelFrame kind="Site" onClose={() => setSelection(null)}>
-          <SiteDetail site={selectedSite} onUpdate={() => setUpdating(selectedSite)} />
+          <SiteDetail site={selectedSite} onUpdate={() => updateSite(selectedSite)} />
         </PanelFrame>
       ) : null
     ) : null;
@@ -343,6 +358,13 @@ export function MyUnoView() {
                 />
               ) : (
                 <>
+                  {isWebLite ? (
+                    <LiteBanner
+                      subscription={sub}
+                      loading={subscription.isPending}
+                      catalog={plans.data}
+                    />
+                  ) : null}
                   <PlanLine
                     subscription={sub}
                     subscriptionLoading={subscription.isPending}
@@ -420,7 +442,7 @@ export function MyUnoView() {
                       error={sites.error}
                       selectedSlug={selection?.kind === "site" ? selection.slug : null}
                       onSelect={selectSite}
-                      onUpdate={setUpdating}
+                      onUpdate={updateSite}
                     />
                   ) : (
                     <CloudTab
@@ -459,7 +481,7 @@ export function MyUnoView() {
         onSeePlans={seePlans}
       />
       {actions.confirmSleep}
-      <UpdateSiteDialog site={updating} onClose={() => setUpdating(null)} />
+      {isWebLite ? null : <UpdateSiteDialog site={updating} onClose={() => setUpdating(null)} />}
     </SidebarInset>
   );
 }

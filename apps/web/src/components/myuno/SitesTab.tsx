@@ -9,6 +9,7 @@ import { useState } from "react";
 
 import { type HostedSite, type SitesState, consoleLinks } from "../../account/accountOverview";
 import { formatBytes } from "../../account/billingModel";
+import { isWebLite } from "../../lite/flag";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { openInNewTab, useOpenApp } from "../../navigation/useOpenApp";
 import { formatElapsedAgoLabel } from "../../timestampFormat";
@@ -70,7 +71,18 @@ export function SitesTab({
           placeholder="Name or address"
           className="ml-auto w-44 sm:w-52"
         />
-        <Button size="sm" variant="outline" render={<Link to="/files" />}>
+        <Button
+          size="sm"
+          variant="outline"
+          // Web lite has no Files to publish from: the console publishes.
+          render={
+            isWebLite ? (
+              <a href={consoleLinks.sites} target="_blank" rel="noreferrer" />
+            ) : (
+              <Link to="/files" />
+            )
+          }
+        >
           <UploadIcon />
           Publish a site
         </Button>
