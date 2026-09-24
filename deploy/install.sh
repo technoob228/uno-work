@@ -319,6 +319,23 @@ After=user@${service_uid}.service
 Environment=XDG_RUNTIME_DIR=/run/user/${service_uid}
 DROPIN
 
+# --- Docker without sudo ------------------------------------------------------
+# On a machine with docker (Work images, the docker template) the daemon lists,
+# starts and stops docker apps on Home with plain `docker` as ${SERVICE_USER},
+# and agents / the terminal run docker as ${SERVICE_USER}; `uno` is the login
+# user of Uno boxes. Neither can use sudo (NoNewPrivileges), so without the
+# docker group docker apps vanish from Home and `docker` fails with
+# "permission denied" (seen on fresh machines from Work golden 168; older
+# machines had the group). prepare-image.sh re-checks this before a snapshot.
+if getent group docker >/dev/null 2>&1; then
+  for docker_user in "${SERVICE_USER}" uno; do
+    if id "${docker_user}" >/dev/null 2>&1 && ! id -nG "${docker_user}" | tr ' ' '\n' | grep -qx docker; then
+      log "Adding ${docker_user} to the docker group"
+      usermod -aG docker "${docker_user}"
+    fi
+  done
+fi
+
 systemctl daemon-reload
 systemctl start "user@${service_uid}.service" >/dev/null 2>&1 || log "  could not start the user session; user timers start after a reboot"
 # `enable --now` only starts a stopped unit; an upgrade leaves the old process

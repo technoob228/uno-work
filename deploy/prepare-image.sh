@@ -288,6 +288,24 @@ loginctl enable-linger "${SERVICE_USER}" >/dev/null 2>&1 || {
 [ -f /etc/systemd/system/uno-work.service.d/user-session.conf ] \
   || die "uno-work.service.d/user-session.conf missing — rerun install.sh from 0.0.80+"
 
+# 10. docker без sudo у unowork и uno.
+#
+# Демон (unowork) сам зовёт `docker ps/start/stop` для приложений на Home, а
+# агенты и терминал работают под unowork; uno — логин-пользователь бокса. sudo
+# им недоступен (NoNewPrivileges). На свежих машинах из голдена 168 uno не был в
+# группе docker (на старых был) — docker-приложения пропадали с Home, docker
+# отвечал permission denied. Дочиниваем и проверяем перед съёмкой.
+if getent group docker >/dev/null 2>&1; then
+  for docker_user in "${SERVICE_USER}" uno; do
+    id "${docker_user}" >/dev/null 2>&1 || continue
+    if ! id -nG "${docker_user}" | tr ' ' '\n' | grep -qx docker; then
+      log "Добавляю ${docker_user} в группу docker"
+      usermod -aG docker "${docker_user}"
+    fi
+    id -nG "${docker_user}" | tr ' ' '\n' | grep -qx docker || die "${docker_user} is not in the docker group"
+  done
+fi
+
 systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl enable ssh uno-work-sshkeys.service uno-work-hostname.service uno-work-identity.service uno-work-identity.path >/dev/null 2>&1 || true
 
