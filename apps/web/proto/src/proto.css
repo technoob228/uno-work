@@ -1,0 +1,9 @@
+@import "../../src/index.css";
+
+@source "./";
+@source "../../src/components/ui";
+
+@keyframes proto-progress {
+  from { background-position: 0 0; }
+  to { background-position: 28px 0; }
+}
