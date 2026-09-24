@@ -2,13 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_HOME_WIDGETS,
-  addableWidgets,
   approvalQuestion,
   attentionThreads,
   greeting,
   homeThreadStatus,
-  homeWidgetsReducer,
   normalizeHomeWidgets,
+  pickContinueItems,
   pickContinueThreads,
   recentHomeEntries,
   recentThreads,
@@ -111,6 +110,86 @@ describe("pickContinueThreads", () => {
   });
 });
 
+describe("Continue and settled / Inbox state", () => {
+  const failed = (id: string, patch: Partial<HomeThread> = {}) =>
+    thread(id, {
+      session: { status: "error" } as HomeThread["session"],
+      updatedAt: minutesAgo(5),
+      ...patch,
+    });
+
+  it("a settled chat stays out, even failed or with an unseen result", () => {
+    const threads = [
+      failed("failed-settled", { settledOverride: "settled" }),
+      thread("done-settled", {
+        latestTurn: doneTurn(3),
+        updatedAt: minutesAgo(3),
+        settledOverride: "settled",
+      }),
+      thread("other", { updatedAt: minutesAgo(30) }),
+    ];
+    expect(pickContinueThreads(threads, { now: NOW }).map((t) => t.id)).toEqual(["other"]);
+  });
+
+  it("a settled chat that asks for an approval or an answer comes back", () => {
+    const threads = [
+      thread("approve", { hasPendingApprovals: true, settledOverride: "settled" }),
+      thread("asks", { hasPendingUserInput: true, settledOverride: "settled" }),
+    ];
+    expect(pickContinueThreads(threads, { now: NOW }).map((t) => t.id)).toEqual([
+      "approve",
+      "asks",
+    ]);
+  });
+
+  it("a chat snoozed in the Inbox stays out", () => {
+    const threads = [failed("snoozed-in-inbox"), thread("other", { updatedAt: minutesAgo(30) })];
+    const inbox = [
+      {
+        id: "i1",
+        kind: "agent.error",
+        updatedAt: minutesAgo(5),
+        readAt: null,
+        snoozedUntil: new Date(NOW + 3_600_000).toISOString(),
+        open: { kind: "thread", threadId: "snoozed-in-inbox" },
+      },
+    ];
+    expect(pickContinueItems(threads, inbox, { now: NOW }).map((c) => c.key)).toEqual([
+      "chat:env-1:other",
+    ]);
+  });
+
+  it("mixes unread app notifications in by urgency and time", () => {
+    const note = (id: string, patch: Record<string, unknown> = {}) => ({
+      id,
+      kind: "app",
+      updatedAt: minutesAgo(10),
+      readAt: null,
+      snoozedUntil: null,
+      open: { kind: "app" },
+      ...patch,
+    });
+    const threads = [
+      thread("approve", { hasPendingApprovals: true, updatedAt: minutesAgo(200) }),
+      failed("failed", { updatedAt: minutesAgo(20) }),
+      thread("quiet", { updatedAt: minutesAgo(1) }),
+    ];
+    const inbox = [
+      note("fresh", { updatedAt: minutesAgo(2) }),
+      note("read", { readAt: minutesAgo(1) }),
+      note("snoozed", { snoozedUntil: new Date(NOW + 60_000).toISOString() }),
+      note("agent", { kind: "agent.done" }),
+    ];
+    expect(pickContinueItems(threads, inbox, { now: NOW }).map((c) => c.key)).toEqual([
+      "chat:env-1:approve",
+      "inbox:fresh",
+      "chat:env-1:failed",
+      "chat:env-1:quiet",
+    ]);
+    expect(pickContinueItems(threads, inbox, { now: NOW, limit: 2 })).toHaveLength(2);
+  });
+});
+
 describe("attentionThreads", () => {
   it("lists approvals before questions, newest first", () => {
     const threads = [
@@ -159,33 +238,12 @@ describe("words", () => {
   });
 });
 
-describe("widget layout", () => {
+describe("0.0.81 widget list (read for the migration)", () => {
   it("cleans a stored layout", () => {
     expect(normalizeHomeWidgets(["apps", "nope", "apps", "cloud", 3])).toEqual(["apps", "cloud"]);
     expect(normalizeHomeWidgets([])).toEqual([]);
     expect(normalizeHomeWidgets("garbage")).toEqual([...DEFAULT_HOME_WIDGETS]);
     expect(normalizeHomeWidgets(null)).toEqual([...DEFAULT_HOME_WIDGETS]);
-  });
-
-  it("adds, removes, moves and resets", () => {
-    let state = homeWidgetsReducer(DEFAULT_HOME_WIDGETS, { type: "add", id: "cloud" });
-    expect(state).toEqual(["files", "apps", "cloud"]);
-    expect(homeWidgetsReducer(state, { type: "add", id: "cloud" })).toEqual(state);
-    state = homeWidgetsReducer(state, { type: "move", from: "cloud", to: "files" });
-    expect(state).toEqual(["cloud", "files", "apps"]);
-    state = homeWidgetsReducer(state, { type: "move", from: "cloud", to: "apps" });
-    expect(state).toEqual(["files", "apps", "cloud"]);
-    expect(homeWidgetsReducer(state, { type: "move", from: "sites", to: "apps" })).toEqual(state);
-    state = homeWidgetsReducer(state, { type: "remove", id: "files" });
-    expect(state).toEqual(["apps", "cloud"]);
-    expect(homeWidgetsReducer(state, { type: "reset" })).toEqual([...DEFAULT_HOME_WIDGETS]);
-  });
-
-  it("offers only what isn't on Home and is available here", () => {
-    expect(addableWidgets(["files", "apps"], ["files", "apps", "cloud", "computer"])).toEqual([
-      "cloud",
-      "computer",
-    ]);
   });
 });
 

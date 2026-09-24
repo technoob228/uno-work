@@ -1,7 +1,7 @@
 /**
  * The pure parts of Home: which chats to put under "Continue", which ones wait
- * for the person, the greeting, and the widget layout (what's on Home, in
- * which order) with the reducer the Customize mode drives.
+ * for the person, the greeting, and the built-in widget ids (the layout itself
+ * is homeLayout.ts).
  */
 import { isAssistantProjectId } from "@t3tools/contracts";
 
@@ -116,18 +116,107 @@ export function continueRank(thread: HomeThread): number {
   return status ? CONTINUE_RANK[status.kind] : 4;
 }
 
+/**
+ * Whether a chat belongs in Continue at all. A settled chat (Settle in the
+ * sidebar, Done on Home or in the Inbox) stays out unless it waits for the
+ * person right now (an approval or a question); a chat snoozed in the Inbox
+ * stays out like a chat snoozed in the sidebar.
+ */
+export function isContinueCandidate(
+  thread: HomeThread,
+  now: number,
+  inboxSnoozedThreadIds: ReadonlySet<string> = new Set(),
+): boolean {
+  if (!isHomeVisibleThread(thread, now)) return false;
+  const rank = continueRank(thread);
+  const needsYou = rank <= 1;
+  if (thread.settledOverride === "settled" && !needsYou) return false;
+  if (inboxSnoozedThreadIds.has(thread.id) && !needsYou) return false;
+  return true;
+}
+
 /** The chats to pick up where the person left off: most urgent first, then most recent. */
 export function pickContinueThreads(
   threads: ReadonlyArray<HomeThread>,
-  { now, limit = 3 }: { now: number; limit?: number },
+  {
+    now,
+    limit = 3,
+    inboxSnoozedThreadIds,
+  }: { now: number; limit?: number; inboxSnoozedThreadIds?: ReadonlySet<string> },
 ): HomeThread[] {
   return threads
-    .filter((thread) => isHomeVisibleThread(thread, now))
-    .filter((thread) => continueRank(thread) < 4 || thread.settledOverride !== "settled")
+    .filter((thread) => isContinueCandidate(thread, now, inboxSnoozedThreadIds))
     .map((thread) => ({ thread, rank: continueRank(thread), at: threadActivityAt(thread) }))
     .toSorted((a, b) => a.rank - b.rank || b.at - a.at)
     .slice(0, limit)
     .map((entry) => entry.thread);
+}
+
+/** The part of an Inbox item Continue reads (see `InboxItem`). */
+export interface ContinueInboxItem {
+  readonly id: string;
+  readonly kind: string;
+  readonly updatedAt: string;
+  readonly readAt: string | null;
+  readonly snoozedUntil: string | null;
+  readonly open: { readonly kind: string; readonly threadId?: string } | null;
+}
+
+/** Chats with an Inbox item snoozed right now (the item opens the chat). */
+export function inboxSnoozedThreadIds(
+  items: ReadonlyArray<ContinueInboxItem>,
+  now: number,
+): Set<string> {
+  const out = new Set<string>();
+  for (const item of items) {
+    if (item.open?.kind !== "thread" || !item.open.threadId) continue;
+    if (item.snoozedUntil && Date.parse(item.snoozedUntil) > now) out.add(item.open.threadId);
+  }
+  return out;
+}
+
+export type ContinueCard<I extends ContinueInboxItem = ContinueInboxItem> =
+  | { readonly kind: "chat"; readonly key: string; readonly thread: HomeThread }
+  | { readonly kind: "notification"; readonly key: string; readonly item: I };
+
+/** An unread app notification sits with results not dealt with yet. */
+const NOTIFICATION_RANK = 3;
+
+/**
+ * "What needs you / pick up": chats and unread, not snoozed app notifications
+ * from the Inbox in one list — approvals and questions first, then working
+ * chats, then results, failures and notifications by time, then the rest.
+ * Read (opened), snoozed or dismissed notifications are not here: Continue
+ * and the Inbox agree.
+ */
+export function pickContinueItems<I extends ContinueInboxItem>(
+  threads: ReadonlyArray<HomeThread>,
+  inbox: ReadonlyArray<I>,
+  { now, limit = 4 }: { now: number; limit?: number },
+): ContinueCard<I>[] {
+  const snoozed = inboxSnoozedThreadIds(inbox, now);
+  const entries: Array<{ card: ContinueCard<I>; rank: number; at: number }> = [];
+  for (const thread of threads) {
+    if (!isContinueCandidate(thread, now, snoozed)) continue;
+    entries.push({
+      card: { kind: "chat", key: `chat:${thread.environmentId}:${thread.id}`, thread },
+      rank: continueRank(thread),
+      at: threadActivityAt(thread),
+    });
+  }
+  for (const item of inbox) {
+    if (item.kind !== "app" || item.readAt !== null) continue;
+    if (item.snoozedUntil && Date.parse(item.snoozedUntil) > now) continue;
+    entries.push({
+      card: { kind: "notification", key: `inbox:${item.id}`, item },
+      rank: NOTIFICATION_RANK,
+      at: Date.parse(item.updatedAt) || 0,
+    });
+  }
+  return entries
+    .toSorted((a, b) => a.rank - b.rank || b.at - a.at)
+    .slice(0, limit)
+    .map((entry) => entry.card);
 }
 
 /** Chats waiting for the person: an approval or a question. Approvals first, newest first. */
@@ -197,7 +286,8 @@ export function isHomeWidgetId(value: unknown): value is HomeWidgetId {
 }
 
 /**
- * A stored layout, cleaned: known ids only, each once. Anything unreadable
+ * The 0.0.81 widget list (read once to migrate to homeLayout.ts), cleaned:
+ * known ids only, each once. Anything unreadable
  * gives the default layout, so a bad value in storage never blanks Home.
  */
 export function normalizeHomeWidgets(raw: unknown): HomeWidgetId[] {
@@ -207,43 +297,6 @@ export function normalizeHomeWidgets(raw: unknown): HomeWidgetId[] {
     if (isHomeWidgetId(item)) seen.add(item);
   }
   return [...seen];
-}
-
-export type HomeWidgetsAction =
-  | { readonly type: "add"; readonly id: HomeWidgetId }
-  | { readonly type: "remove"; readonly id: HomeWidgetId }
-  | { readonly type: "move"; readonly from: HomeWidgetId; readonly to: HomeWidgetId }
-  | { readonly type: "reset" };
-
-export function homeWidgetsReducer(
-  state: ReadonlyArray<HomeWidgetId>,
-  action: HomeWidgetsAction,
-): HomeWidgetId[] {
-  switch (action.type) {
-    case "add":
-      return state.includes(action.id) ? [...state] : [...state, action.id];
-    case "remove":
-      return state.filter((id) => id !== action.id);
-    case "move": {
-      const from = state.indexOf(action.from);
-      const to = state.indexOf(action.to);
-      if (from === -1 || to === -1 || from === to) return [...state];
-      const next = [...state];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved!);
-      return next;
-    }
-    case "reset":
-      return [...DEFAULT_HOME_WIDGETS];
-  }
-}
-
-/** Widgets that can still be added: not on Home yet and available here. */
-export function addableWidgets(
-  state: ReadonlyArray<HomeWidgetId>,
-  available: ReadonlyArray<HomeWidgetId>,
-): HomeWidgetId[] {
-  return available.filter((id) => !state.includes(id));
 }
 
 // ------------------------------------------------------------------ files --

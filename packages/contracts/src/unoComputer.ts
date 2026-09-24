@@ -483,6 +483,18 @@ export const UnoMachineAppPublication = Schema.Struct({
 });
 export type UnoMachineAppPublication = typeof UnoMachineAppPublication.Type;
 
+/**
+ * A Home widget an app declares in its manifest (\`"widget": {"path": "/widget"}\`):
+ * Home shows the app's page at \`path\` in a small sandboxed frame.
+ */
+export const UnoMachineAppWidget = Schema.Struct({
+  /** A path on the app's own address, starting with \`/\` (never a scheme or \`//host\`). */
+  path: Schema.String,
+  size: Schema.Literals(["small", "medium", "wide"]),
+  title: Schema.NullOr(Schema.String),
+});
+export type UnoMachineAppWidget = typeof UnoMachineAppWidget.Type;
+
 export const UnoMachineApp = Schema.Struct({
   /** Stable key: `manifest:<id>`, `docker:<name>`, `systemd:<unit>`, `port:<n>`. */
   id: Schema.String,
@@ -532,6 +544,8 @@ export const UnoMachineApp = Schema.Struct({
    * folder, another app's…); null when it can.
    */
   codeDirKeepReason: Schema.optional(Schema.NullOr(Schema.String)),
+  /** A Home widget the app declares (registered apps only); null/absent = none. */
+  widget: Schema.optional(Schema.NullOr(UnoMachineAppWidget)),
 });
 export type UnoMachineApp = typeof UnoMachineApp.Type;
 

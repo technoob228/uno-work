@@ -1,8 +1,8 @@
 /**
  * What the desktop's built-in programs do when clicked:
  *
- * - **Uno** — a new chat, exactly like "New chat" in the sidebar (last project
- *   on this machine, or a starter "Home" project on a fresh one);
+ * - **Uno** — a new chat, exactly like "New chat" in the sidebar: in the home
+ *   folder, with the folder chip on the chat to pick another one;
  * - **Start a chat in a folder…** — the folder becomes a project (or is one
  *   already) and a new chat opens there;
  * - **Terminal** — a new chat with its terminal already open: Work's terminal
@@ -11,28 +11,17 @@
  * All of it goes through the existing orchestration commands
  * (`project.create`, the draft-thread machinery); nothing new on the server.
  */
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
-import {
-  DEFAULT_MODEL,
-  ProviderInstanceId,
-  isAssistantProjectId,
-  type EnvironmentId,
-} from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
-import { useShallow } from "zustand/react/shallow";
 
 import { useComposerDraftStore, type DraftId } from "../../composerDraftStore";
 import { useCommandPaletteStore } from "../../commandPaletteStore";
-import { ensureEnvironmentApi } from "../../environmentApi";
-import { useEnvironmentProviders } from "../../environments/settings/serverSettings";
+import { HOME_FOLDER_TITLE, resolveHomeFolder, useFolderChats } from "../../hooks/useFolderChats";
 import { useHandleNewThread } from "../../hooks/useHandleNewThread";
 import { useSettings } from "../../hooks/useSettings";
 import { startNewLocalThreadFromContext } from "../../lib/chatThreadActions";
-import { findProjectByPath, inferProjectTitleFromPath } from "../../lib/projectPaths";
-import { newCommandId, newProjectId } from "../../lib/utils";
-import { pickUsableDefaultModelSelection } from "../../providerModels";
-import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import { useTerminalStateStore } from "../../terminalStateStore";
 import { resolveThreadRouteTarget } from "../../threadRoutes";
 import type { HomeStartOptions } from "./home/HomeComposer";
@@ -43,8 +32,7 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
   const newThreadContext = useHandleNewThread();
   const defaultThreadEnvMode = useSettings((s) => s.defaultThreadEnvMode);
   const openAddProject = useCommandPaletteStore((store) => store.openAddProject);
-  const projects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
-  const providers = useEnvironmentProviders(environmentId);
+  const folderChats = useFolderChats(environmentId);
   const setTerminalOpen = useTerminalStateStore((store) => store.setTerminalOpen);
 
   const context = useCallback(
@@ -64,9 +52,11 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
     [environmentId, newThreadContext, openAddProject],
   );
 
+  /** New chat: the home folder; the old project-based path only if it can't be reached. */
   const newChat = useCallback(async () => {
+    if (await folderChats.chatInHomeFolder()) return;
     await startNewLocalThreadFromContext({ ...context(), defaultThreadEnvMode });
-  }, [context, defaultThreadEnvMode]);
+  }, [context, defaultThreadEnvMode, folderChats]);
 
   const openTerminalIn = useCallback(
     (started: boolean) => {
@@ -85,39 +75,9 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
 
   const chatInFolder = useCallback(
     async (folder: string, title?: string) => {
-      if (environmentId === null) throw new Error("No connection to this computer.");
-      const existing = findProjectByPath(
-        projects.filter(
-          (project) => project.environmentId === environmentId && !isAssistantProjectId(project.id),
-        ),
-        folder,
-      );
-      if (existing) {
-        await newThreadContext.handleNewThread(scopeProjectRef(environmentId, existing.id), {
-          envMode: "local",
-        });
-        return;
-      }
-      const selection = pickUsableDefaultModelSelection(providers);
-      const projectId = newProjectId();
-      await ensureEnvironmentApi(environmentId).orchestration.dispatchCommand({
-        type: "project.create",
-        commandId: newCommandId(),
-        projectId,
-        title: title ?? inferProjectTitleFromPath(folder),
-        workspaceRoot: folder,
-        createWorkspaceRootIfMissing: false,
-        defaultModelSelection: selection ?? {
-          instanceId: ProviderInstanceId.make("codex"),
-          model: DEFAULT_MODEL,
-        },
-        createdAt: new Date().toISOString(),
-      });
-      await newThreadContext.handleNewThread(scopeProjectRef(environmentId, projectId), {
-        envMode: "local",
-      });
+      await folderChats.chatInFolder(folder, title);
     },
-    [environmentId, newThreadContext, projects, providers],
+    [folderChats],
   );
 
   /**
@@ -127,15 +87,9 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
    */
   const openTerminal = useCallback(async () => {
     if (environmentId === null) return;
-    let home: string | null = null;
-    try {
-      home = (await ensureEnvironmentApi(environmentId).filesystem.browse({ partialPath: "~" }))
-        .parentPath;
-    } catch {
-      home = null;
-    }
+    const home = await resolveHomeFolder(environmentId);
     if (home) {
-      await chatInFolder(home, "Home folder");
+      await chatInFolder(home, HOME_FOLDER_TITLE);
       openTerminalIn(true);
       return;
     }
@@ -149,17 +103,8 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
   const openChatWithPrompt = useCallback(
     async (prompt: string, folder?: string | null): Promise<DraftId | null> => {
       if (environmentId === null) return null;
-      let target = folder ?? null;
-      if (!target) {
-        try {
-          target = (
-            await ensureEnvironmentApi(environmentId).filesystem.browse({ partialPath: "~" })
-          ).parentPath;
-        } catch {
-          target = null;
-        }
-      }
-      if (target) await chatInFolder(target, folder ? undefined : "Home folder");
+      const target = folder || (await resolveHomeFolder(environmentId));
+      if (target) await chatInFolder(target, folder ? undefined : HOME_FOLDER_TITLE);
       else await startNewLocalThreadFromContext(context());
       const params = router.state.matches[router.state.matches.length - 1]?.params ?? {};
       const route = resolveThreadRouteTarget(params);

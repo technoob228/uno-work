@@ -1,6 +1,6 @@
 /**
  * "Docs shell": our own calm toolbar for Word documents on top of the
- * ONLYOFFICE engine (Labs flag `officeDocsShell`, off by default).
+ * ONLYOFFICE engine (Labs flag `officeDocsShell`, on by default since 0.0.82).
  *
  * The engine keeps doing all the real work. The shell only:
  *   - hides the engine's own chrome inside its iframe with a stylesheet (ribbon,

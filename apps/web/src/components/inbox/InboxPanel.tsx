@@ -39,6 +39,7 @@ import {
 import { useOpenInboxItem } from "../../inbox/useOpenInboxItem";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
+import { markInboxItemDone } from "../../inbox/inboxDone";
 import { resolveSnoozePresets, snoozeWakeDescription } from "../Sidebar.snooze";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -274,7 +275,7 @@ function HeaderButton(props: {
   );
 }
 
-function ItemIcon({ item }: { item: InboxEntry }) {
+export function ItemIcon({ item }: { item: InboxEntry }) {
   if (item.source.kind === "app" && item.source.icon) {
     return (
       <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-[15px] leading-none">
@@ -399,22 +400,11 @@ const InboxRow = memo(function InboxRow({ item }: { item: InboxEntry }) {
                 </MenuItem>
               ))}
               <MenuSeparator />
-              <MenuItem
-                onClick={() =>
-                  void updateInbox(item.environmentId, { action: "dismiss", ids: [item.id] })
-                }
-              >
-                Dismiss
-              </MenuItem>
+              <MenuItem onClick={() => void markInboxItemDone(item)}>Dismiss</MenuItem>
             </MenuPopup>
           </Menu>
         )}
-        <RowAction
-          label="Dismiss"
-          onClick={() =>
-            void updateInbox(item.environmentId, { action: "dismiss", ids: [item.id] })
-          }
-        >
+        <RowAction label="Dismiss" onClick={() => void markInboxItemDone(item)}>
           <XIcon className="size-3.5" />
         </RowAction>
       </div>

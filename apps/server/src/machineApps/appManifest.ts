@@ -15,6 +15,7 @@
  *     "ai": {"chat": true}          // optional: use the machine's AI through the App SDK (docs/app-sdk.md)
  *     "storage": {"limitGb": 5}     // optional: keep files in the account's cloud (App SDK)
  *     "notify": true                // optional: put notifications into the person's Inbox (App SDK)
+ *     "widget": {"path": "/widget", "size": "medium", "title": "Orders"}  // optional: a Home widget
  *   }
  *
  * Everything in the file is untrusted text written by whoever can write to the
@@ -66,6 +67,37 @@ export interface AppManifest {
   readonly storage: AppStorageRequest | null;
   /** May put notifications into the person's Inbox (`"notify": true`, App SDK). */
   readonly notify?: boolean;
+  /** A Home widget (`"widget": {"path": "/widget"}`); absent = none. */
+  readonly widget?: AppWidget;
+}
+
+export type AppWidgetSize = "small" | "medium" | "wide";
+
+export interface AppWidget {
+  /** A path on the app's own address (see {@link parseAppPath}). */
+  readonly path: string;
+  readonly size: AppWidgetSize;
+  readonly title: string | null;
+}
+
+/**
+ * `"widget": {"path": "/widget", "size": "small"|"medium"|"wide", "title": "…"}`
+ * or `"widget": "/widget"`. The path is validated like the manifest's `path`
+ * (starts with `/`, no scheme, no `//host`); anything else means no widget.
+ */
+export function parseAppWidget(value: unknown): AppWidget | null {
+  if (typeof value === "string") {
+    const path = parseAppPath(value);
+    return path ? { path, size: "medium", title: null } : null;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const path = parseAppPath(record["path"]);
+  if (!path) return null;
+  const rawSize = record["size"];
+  const size: AppWidgetSize =
+    rawSize === "small" || rawSize === "wide" || rawSize === "medium" ? rawSize : "medium";
+  return { path, size, title: cleanText(record["title"], 40) };
 }
 
 /**
@@ -236,6 +268,13 @@ export function validateManifest(
   if (record["cwd"] !== undefined && cwd === null) {
     return { ok: false, reason: "has a cwd outside the home folder" };
   }
+  const widget = record["widget"] === undefined ? null : parseAppWidget(record["widget"]);
+  if (record["widget"] !== undefined && widget === null) {
+    return {
+      ok: false,
+      reason: 'has a widget without a valid path (use {"path": "/widget"}, starting with /)',
+    };
+  }
 
   let icon: string | null = null;
   let iconFile: string | null = null;
@@ -265,6 +304,7 @@ export function validateManifest(
       ai: parseAppAiRequest(record["ai"]),
       storage: parseAppStorageRequest(record["storage"]),
       ...(parseAppNotifyRequest(record["notify"]) ? { notify: true } : {}),
+      ...(widget ? { widget } : {}),
     },
   };
 }

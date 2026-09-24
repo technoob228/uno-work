@@ -95,6 +95,7 @@ import {
 } from "../environments/threadSnoozeSupport";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useFeatureFlag } from "../hooks/useFeatureFlags";
+import { useFolderChats } from "../hooks/useFolderChats";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useMinuteClock } from "../hooks/useMinuteClock";
@@ -2082,6 +2083,7 @@ export default function Sidebar() {
   const newThreadContext = useHandleNewThread();
   const openAddProject = useCommandPaletteStore((store) => store.openAddProject);
   const openNewThreadIn = useCommandPaletteStore((store) => store.openNewThreadIn);
+  const folderChats = useFolderChats(newThreadContext.activeEnvironmentId);
   const handleNewThreadClick = useCallback(
     (event?: ReactMouseEvent) => {
       if (isMobile) setOpenMobile(false);
@@ -2095,8 +2097,8 @@ export default function Sidebar() {
         );
         return;
       }
-      if (shouldCreateNewThreadInCurrentProject(event?.shiftKey ?? false, projectGroups.length)) {
-        void startNewThreadFromContext({
+      const startInCurrentProject = () =>
+        startNewThreadFromContext({
           activeDraftThread: newThreadContext.activeDraftThread,
           activeThread: newThreadContext.activeThread ?? undefined,
           defaultProjectRef: newThreadContext.defaultProjectRef,
@@ -2106,12 +2108,26 @@ export default function Sidebar() {
           createStarterProject: newThreadContext.createStarterProject,
           onMissingProject: openAddProject,
         });
+      // Shift: a new chat in the project of the chat that's open.
+      if (event?.shiftKey) {
+        void startInCurrentProject();
         return;
       }
-      openNewThreadIn();
+      // New chat starts right away in the home folder; the folder chip on the
+      // chat picks another folder.
+      void folderChats.chatInHomeFolder().then((started) => {
+        if (started) return;
+        // Home folder unreachable: the pre-0.0.82 behaviour.
+        if (shouldCreateNewThreadInCurrentProject(false, projectGroups.length)) {
+          void startInCurrentProject();
+        } else {
+          openNewThreadIn();
+        }
+      });
     },
     [
       defaultThreadEnvMode,
+      folderChats,
       isMobile,
       newThreadContext,
       openAddProject,
@@ -2129,11 +2145,7 @@ export default function Sidebar() {
     handledNewChatRequest.current = newChatRequest;
     handleNewThreadClick();
   }, [handleNewThreadClick, newChatRequest]);
-  const newThreadShortcutLabel =
-    shortcutLabelForCommand(keybindings, "chat.new", platform) ??
-    (projectGroups.length <= 1
-      ? shortcutLabelForCommand(keybindings, "chat.newLocal", platform)
-      : null);
+  const newThreadShortcutLabel = shortcutLabelForCommand(keybindings, "chat.new", platform);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(
     keybindings,
     "chat.newLocal",
@@ -2361,10 +2373,12 @@ export default function Sidebar() {
               projectScope={projectScopePicker}
               onNewProject={openAddProject}
               onNewThread={handleNewThreadClick}
-              newThreadDisabled={projects.length === 0}
+              newThreadDisabled={
+                projects.length === 0 && newThreadContext.activeEnvironmentId === null
+              }
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
-              showNewThreadInProjectHint={projectGroups.length > 1 && scopedProjectGroup === null}
+              showNewThreadInProjectHint={projects.length > 0 && scopedProjectGroup === null}
               searchInputRef={threadSearchInputRef}
               searchQuery={threadSearchQuery}
               onSearchQueryChange={(value) => {
@@ -2467,9 +2481,12 @@ export default function Sidebar() {
                 <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
                   {projects.length === 0 ? (
                     <>
-                      <span>No projects yet</span>
-                      <Button size="xs" variant="outline" onClick={openAddProject}>
+                      <span>No chats yet</span>
+                      <Button size="xs" variant="outline" onClick={() => handleNewThreadClick()}>
                         <PlusIcon className="-mx-0.5 size-3" />
+                        New chat in your home folder
+                      </Button>
+                      <Button size="xs" variant="ghost" onClick={openAddProject}>
                         Add project
                       </Button>
                     </>

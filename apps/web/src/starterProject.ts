@@ -1,6 +1,8 @@
 /**
- * The "Home" project a machine gets when a chat is started on it and it has no
- * project yet. Used by the onboarding's first chat and by "New chat" on a
+ * The project a machine gets when a chat is started on it and it has no
+ * project yet: since 0.0.82 its home folder ("Home folder"), the same place
+ * New chat starts everywhere else; the old `~/projects/home` starter only when
+ * a base directory is configured or the home folder can't be resolved. Used by the onboarding's first chat and by "New chat" on a
  * machine that was just connected — a chat needs a project, and asking a
  * person to pick a folder on a brand-new computer is exactly the step Uno Work
  * promises to skip.
@@ -22,6 +24,7 @@ import {
   FIRST_CHAT_PROJECT_TITLE,
 } from "./components/onboarding/firstChat";
 import { ensureEnvironmentApi } from "./environmentApi";
+import { HOME_FOLDER_TITLE } from "./lib/homeFolder";
 import { joinWorkspacePath, pickFirstProjectModelSelection } from "./firstProject";
 import { newCommandId, newProjectId } from "./lib/utils";
 import { pickUsableDefaultModelSelection } from "./providerModels";
@@ -50,15 +53,24 @@ export async function createStarterProject(input: {
       })),
       { instanceId: "codex", model: DEFAULT_MODEL },
     );
-  const baseDirectory = input.baseDirectory?.trim() || DEFAULT_STARTER_WORKSPACE_ROOT;
+  const configuredBase = input.baseDirectory?.trim() || null;
+  let home: string | null = null;
+  if (!configuredBase) {
+    try {
+      home = (await api.filesystem.browse({ partialPath: "~" })).parentPath || null;
+    } catch {
+      home = null;
+    }
+  }
+  const baseDirectory = configuredBase ?? DEFAULT_STARTER_WORKSPACE_ROOT;
   const projectId = newProjectId();
   await api.orchestration.dispatchCommand({
     type: "project.create",
     commandId: newCommandId(),
     projectId,
-    title: FIRST_CHAT_PROJECT_TITLE,
-    workspaceRoot: joinWorkspacePath(baseDirectory, FIRST_CHAT_PROJECT_DIR),
-    createWorkspaceRootIfMissing: true,
+    title: home ? HOME_FOLDER_TITLE : FIRST_CHAT_PROJECT_TITLE,
+    workspaceRoot: home ?? joinWorkspacePath(baseDirectory, FIRST_CHAT_PROJECT_DIR),
+    createWorkspaceRootIfMissing: home === null,
     defaultModelSelection: {
       instanceId: ProviderInstanceId.make(modelSelection.instanceId),
       model: modelSelection.model,

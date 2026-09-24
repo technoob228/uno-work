@@ -30,6 +30,7 @@ import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { toggleDevMode, useDevMode } from "../../devMode";
 import { CONTINUE_ON_MACHINE_COPY } from "../../continueOnMachineCopy";
 import { ContinueOnMachineDialog } from "../ContinueOnMachineDialog";
+import { DraftFolderChip } from "./DraftFolderChip";
 
 const HEADER_ICON_BUTTON_CLASS =
   "inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-md border border-input px-[calc(--spacing(1)-1px)] text-muted-foreground shadow-xs/5 hover:bg-accent hover:text-foreground sm:h-6 sm:min-w-6";
@@ -40,6 +41,8 @@ interface ChatHeaderProps {
   draftId?: DraftId;
   activeThreadTitle: string;
   activeProjectName: string | undefined;
+  /** The project's folder; a new chat shows it as the folder chip. */
+  activeProjectCwd?: string | undefined;
   isGitRepo: boolean;
   openInCwd: string | null;
   activeProjectScripts: ProjectScript[] | undefined;
@@ -78,6 +81,7 @@ export const ChatHeader = memo(function ChatHeader({
   draftId,
   activeThreadTitle,
   activeProjectName,
+  activeProjectCwd,
   isGitRepo,
   openInCwd,
   activeProjectScripts,
@@ -135,11 +139,18 @@ export const ChatHeader = memo(function ChatHeader({
         >
           {activeThreadTitle}
         </h2>
-        {activeProjectName && (
+        {draftId && activeProjectName && activeProjectCwd ? (
+          <DraftFolderChip
+            environmentId={activeThreadEnvironmentId}
+            draftId={draftId}
+            projectName={activeProjectName}
+            projectCwd={activeProjectCwd}
+          />
+        ) : activeProjectName ? (
           <Badge variant="outline" className="min-w-0 shrink overflow-hidden">
             <span className="min-w-0 truncate">{activeProjectName}</span>
           </Badge>
-        )}
+        ) : null}
         <TooltipProvider delay={0} closeDelay={0}>
           <Tooltip>
             <TooltipTrigger

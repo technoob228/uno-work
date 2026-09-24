@@ -72,12 +72,12 @@ function OnboardingRouteView() {
       state.next();
       return;
     }
-    if (isWebApp) {
-      // Same path as the suggestion chips, just without a pre-filled message.
-      void firstChat.launch(null);
-      return;
-    }
-    finish(true);
+    // Both flows end in a new chat in the home folder (a starter project on a
+    // machine without projects; the chat's folder chip picks another). The
+    // desktop falls back to the old folder picker if that can't be opened.
+    void firstChat.launch(null).then((opened) => {
+      if (!opened && !isWebApp) finish(true);
+    });
   };
 
   const handleSkip = () => {

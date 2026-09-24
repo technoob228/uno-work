@@ -36,7 +36,7 @@ export function OnboardingShell({
   onSkip,
   children,
 }: OnboardingShellProps) {
-  const computedContinueLabel = continueLabel ?? (isLast ? "Choose project folder" : "Continue");
+  const computedContinueLabel = continueLabel ?? (isLast ? "Start my first chat" : "Continue");
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background text-foreground">
