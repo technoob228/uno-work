@@ -10,7 +10,7 @@
  * Every read and write is bound to the environment named by the caller; while
  * that environment is not confirmed live the page is read-only.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   BrainIcon,
@@ -109,7 +109,14 @@ interface PickerProject {
   readonly title: string;
 }
 
-export function TelegramPage({ environmentId }: { readonly environmentId: EnvironmentId }) {
+export function TelegramPage({
+  environmentId,
+  header,
+}: {
+  readonly environmentId: EnvironmentId;
+  /** Rendered first on the page (Settings → Assistant's overview, 0.0.85). */
+  readonly header?: ReactNode;
+}) {
   const scope = useEnvironmentScope(environmentId);
   const canMutate = scope?.availability.canMutate ?? false;
   const environmentLabel = scope?.label ?? "this environment";
@@ -416,6 +423,7 @@ export function TelegramPage({ environmentId }: { readonly environmentId: Enviro
 
   return (
     <SettingsPageContainer>
+      {header}
       {error ? (
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
           {error}

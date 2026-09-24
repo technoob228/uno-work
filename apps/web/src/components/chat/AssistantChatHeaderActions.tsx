@@ -1,16 +1,20 @@
 /**
- * The Uno chat's header: "Connect ▾" (Telegram / Slack — write there, it
- * lands with Uno; set up on the assistant settings page, which already owns
- * bot tokens, allowed chats and what each chat talks to) and the settings
- * gear (what Uno may see and do, its model, its notes). Before them: Uno's
- * engine — model and where its AI comes from (Uno gateway / your key).
+ * The header of a conversation with Uno: Uno's engine — model and where its
+ * AI comes from (Uno gateway / your key) — with "Runs on Hermes" (not a
+ * choice; the tooltip says why), "New conversation", "Connect ▾" (Telegram /
+ * Slack: a guided dialog, see ConnectChannelDialog) and the settings gear
+ * (what Uno may see and do, Telegram, Slack).
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronDownIcon, PlugIcon, SendIcon, Settings2Icon } from "lucide-react";
+import { ChevronDownIcon, PlugIcon, PlusIcon, SendIcon, Settings2Icon } from "lucide-react";
+import { useState } from "react";
 
-import type { ChannelState } from "../../assistant/assistantChat.logic";
+import { ASSISTANT_HARNESS_NOTE, type ChannelState } from "../../assistant/assistantChat.logic";
 import { useAssistantChannels } from "../../assistant/useAssistantChannels";
+import { useAssistantConversations } from "../../assistant/useAssistantConversations";
+import { useEnvironmentSupportsAssistantLlm } from "../../environments/assistantChatSupport";
+import { ConnectChannelDialog, type ConnectChannel } from "../assistant/ConnectChannelDialog";
 import { AssistantModelPicker } from "./AssistantEngine";
 import { cn } from "../../lib/utils";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -42,10 +46,53 @@ export function AssistantChatHeaderActions({ environmentId }: { environmentId: E
       params: { environmentId },
     });
   const anyOn = channels.telegram === "on" || channels.slack === "on";
+  const [connecting, setConnecting] = useState<ConnectChannel | null>(null);
+  const conversations = useAssistantConversations();
+  const runsOnHermes = useEnvironmentSupportsAssistantLlm(environmentId);
 
   return (
     <div className="flex shrink-0 items-center gap-1.5" data-testid="uno-header-actions">
       <AssistantModelPicker environmentId={environmentId} />
+      {runsOnHermes ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                className="hidden h-7 shrink-0 cursor-default items-center rounded-md px-1.5 text-[11px] text-muted-foreground @3xl/header-actions:inline-flex sm:h-6"
+                data-testid="uno-runs-on-hermes"
+              />
+            }
+          >
+            Runs on Hermes
+          </TooltipTrigger>
+          <TooltipPopup side="bottom" className="max-w-72">
+            {ASSISTANT_HARNESS_NOTE}
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
+      {conversations.supported ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-label="New conversation with Uno"
+                onClick={() => void conversations.createConversation()}
+                disabled={conversations.creating}
+                data-testid="uno-new-conversation"
+                className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-muted-foreground shadow-xs/5 hover:bg-accent hover:text-foreground disabled:opacity-60 sm:h-6"
+              />
+            }
+          >
+            <PlusIcon className="size-3.5" />
+            <span className="hidden @3xl/header-actions:inline">New conversation</span>
+          </TooltipTrigger>
+          <TooltipPopup side="bottom" className="max-w-64">
+            Another conversation with Uno. Same memory; Telegram and Slack keep talking to the main
+            one.
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
       <Menu>
         <MenuTrigger
           data-testid="uno-connect"
@@ -73,22 +120,21 @@ export function AssistantChatHeaderActions({ environmentId }: { environmentId: E
         <MenuPopup align="end" side="bottom" className="min-w-64">
           <MenuGroup>
             <MenuGroupLabel>Talk to Uno from</MenuGroupLabel>
-            <MenuItem onClick={openSettings} data-testid="uno-connect-telegram">
+            <MenuItem onClick={() => setConnecting("telegram")} data-testid="uno-connect-telegram">
               <span className="grid size-4 place-items-center rounded-full bg-sky-500 text-white">
                 <SendIcon className="size-2.5" />
               </span>
               <span className="flex-1">Telegram</span>
               <ChannelBadge state={channels.telegram} />
             </MenuItem>
-            <MenuItem onClick={openSettings} data-testid="uno-connect-slack">
+            <MenuItem onClick={() => setConnecting("slack")} data-testid="uno-connect-slack">
               <SlackMark className="size-4" />
               <span className="flex-1">Slack</span>
               <ChannelBadge state={channels.slack} />
             </MenuItem>
           </MenuGroup>
           <p className="px-2 pt-1 pb-1.5 text-[11px] leading-snug text-muted-foreground">
-            Set up the bot and pick which chats may write — then “what each chat talks to” decides
-            whether a chat lands here.
+            Your Telegram chat talks to Uno's main conversation: the same Uno, the same memory.
           </p>
         </MenuPopup>
       </Menu>
@@ -107,9 +153,14 @@ export function AssistantChatHeaderActions({ environmentId }: { environmentId: E
           <Settings2Icon className="size-3.5" />
         </TooltipTrigger>
         <TooltipPopup side="bottom">
-          Uno settings: what it sees and does, its model, Telegram
+          Uno settings: what it can see and manage, Telegram, Slack
         </TooltipPopup>
       </Tooltip>
+      <ConnectChannelDialog
+        environmentId={environmentId}
+        channel={connecting}
+        onClose={() => setConnecting(null)}
+      />
     </div>
   );
 }

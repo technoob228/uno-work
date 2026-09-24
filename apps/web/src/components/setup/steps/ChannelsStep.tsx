@@ -348,7 +348,7 @@ function TelegramGuide({
   );
 }
 
-function SlackGuide({
+export function SlackGuide({
   environmentId,
   summary,
   onChanged,

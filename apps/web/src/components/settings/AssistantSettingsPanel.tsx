@@ -1,15 +1,16 @@
 /**
- * Settings → Assistants (environment scope) now IS the Telegram page: the
- * Helper is one per account and its settings are how the owner connects a
- * Telegram bot, chooses which chats may talk and what each chat talks to.
+ * Settings → Assistant (environment scope): Uno's overview on top (what it
+ * is, show in sidebar, what it can see and manage, Telegram / Slack through
+ * the guided dialog — 0.0.85), then the full connector page: bot token,
+ * which chats may write, what each chat talks to, and under "Advanced" the
+ * technical rest (external MCP brains, per-assistant settings).
  *
- * Everything technical this panel used to show (external capability tokens
- * for MCP brains, links to per-assistant settings) lives under "Advanced" on
- * that page. Bound to an explicit environment because every row it edits is
- * in one daemon's database.
+ * Bound to an explicit environment because every row it edits is in one
+ * daemon's database.
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 
+import { AssistantOverviewSettings } from "../assistant/AssistantOverviewSettings";
 import { TelegramPage } from "../helper/TelegramPage";
 
 export function AssistantSettingsPanel({
@@ -17,5 +18,10 @@ export function AssistantSettingsPanel({
 }: {
   readonly environmentId: EnvironmentId;
 }) {
-  return <TelegramPage environmentId={environmentId} />;
+  return (
+    <TelegramPage
+      environmentId={environmentId}
+      header={<AssistantOverviewSettings environmentId={environmentId} />}
+    />
+  );
 }

@@ -103,6 +103,9 @@ describe("channel states", () => {
         health: { status: "auth_expired", lastOkAt: null, lastError: "401", lastErrorAt: null },
       }),
     ).toBe("problem");
+    // A bot no chat is linked to yet is not "on".
+    expect(telegramChannelState({ ...telegram, allowedChatIds: [] })).toBe("problem");
+    expect(telegramChannelState({ ...telegram, allowedChatIds: ["1"] })).toBe("on");
   });
 
   it("reads Slack from its last error", () => {

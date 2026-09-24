@@ -47,3 +47,29 @@ export function useEnvironmentSupportsAssistantLlm(
   if (primary?.environmentId === environmentId) return descriptorSupportsAssistantLlm(primary);
   return saved;
 }
+
+/**
+ * Whether the daemon has conversations with the assistant (0.0.85): "New
+ * conversation", Telegram linking by code and a test message.
+ */
+export function descriptorSupportsAssistantConversations(
+  descriptor: ExecutionEnvironmentDescriptor | null | undefined,
+): boolean {
+  return descriptor?.capabilities.assistantConversations === true;
+}
+
+export function useEnvironmentSupportsAssistantConversations(
+  environmentId: EnvironmentId | null | undefined,
+): boolean {
+  const primary = usePrimaryEnvironmentDescriptor();
+  const saved = useSavedEnvironmentRuntimeStore((state) =>
+    environmentId
+      ? descriptorSupportsAssistantConversations(state.byId[environmentId]?.descriptor)
+      : false,
+  );
+  if (!environmentId) return false;
+  if (primary?.environmentId === environmentId) {
+    return descriptorSupportsAssistantConversations(primary);
+  }
+  return saved;
+}
