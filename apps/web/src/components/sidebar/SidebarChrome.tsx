@@ -18,11 +18,15 @@ import { SidebarWorkspaceSwitcher } from "../SidebarWorkspaceSwitcher";
 import { SidebarFooter, SidebarHeader, SidebarTrigger, useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SidebarUpdatePill } from "./SidebarUpdatePill";
+import { InboxBell } from "../inbox/InboxBell";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
+  showBell = false,
 }: {
   isElectron: boolean;
+  /** The Inbox bell next to the logo (the chat-list sidebar; not settings). */
+  showBell?: boolean;
 }) {
   const wordmark = (
     <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -63,9 +67,13 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   return isElectron ? (
     <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 overflow-hidden px-4 py-0 pl-[78px] fullscreen:pl-4 wco:h-[env(titlebar-area-height)] wco:pl-[calc(env(titlebar-area-x)+1em)]">
       {wordmark}
+      {showBell ? <InboxBell /> : null}
     </SidebarHeader>
   ) : (
-    <SidebarHeader className="gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">{wordmark}</SidebarHeader>
+    <SidebarHeader className="flex-row items-center gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">
+      {wordmark}
+      {showBell ? <InboxBell /> : null}
+    </SidebarHeader>
   );
 });
 

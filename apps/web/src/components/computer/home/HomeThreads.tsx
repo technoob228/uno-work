@@ -7,7 +7,6 @@
  * to the chat's details to learn the request); questions open the chat.
  */
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime";
-import type { ProviderApprovalDecision } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
   CheckIcon,
@@ -17,14 +16,11 @@ import {
   PlusIcon,
   ShieldAlertIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import { cn, newCommandId } from "~/lib/utils";
-import { readEnvironmentApi } from "../../../environmentApi";
-import { retainThreadDetailSubscription } from "../../../environments/runtime/service";
-import { derivePendingApprovals } from "../../../session-logic";
-import { createThreadSelectorByRef } from "../../../storeSelectors";
+import { cn } from "~/lib/utils";
+import { usePendingApproval } from "../../../inbox/usePendingApproval";
 import { useMinuteClock } from "../../../hooks/useMinuteClock";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../../store";
 import { buildThreadRouteParams } from "../../../threadRoutes";
@@ -252,41 +248,7 @@ export function ContinueCards({ threads, now }: { threads: HomeThread[]; now: nu
  * the request is known — or when it's gone — the row just opens the chat.
  */
 function ApprovalRow({ thread, onOpen }: { thread: HomeThread; onOpen: () => void }) {
-  const ref = useMemo(() => scopeThreadRef(thread.environmentId, thread.id), [thread]);
-  useEffect(
-    () => retainThreadDetailSubscription(thread.environmentId, thread.id),
-    [thread.environmentId, thread.id],
-  );
-  const detail = useStore(useMemo(() => createThreadSelectorByRef(ref), [ref]));
-  const approval = useMemo(
-    () => (detail ? (derivePendingApprovals(detail.activities)[0] ?? null) : null),
-    [detail],
-  );
-  const [responding, setResponding] = useState(false);
-  const respond = async (decision: ProviderApprovalDecision) => {
-    if (!approval) return;
-    const api = readEnvironmentApi(thread.environmentId);
-    if (!api) return;
-    setResponding(true);
-    try {
-      await api.orchestration.dispatchCommand({
-        type: "thread.approval.respond",
-        commandId: newCommandId(),
-        threadId: thread.id,
-        requestId: approval.requestId,
-        decision,
-        createdAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Couldn't send your answer",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setResponding(false);
-    }
-  };
+  const { approval, responding, respond } = usePendingApproval(thread.environmentId, thread.id);
   const question = approval ? approvalQuestion(approval) : null;
   return (
     <div
