@@ -265,12 +265,14 @@ class Client:
 
     def stream(self, prompt_or_messages: Messages, model: Optional[str] = None,
                system: Optional[str] = None, temperature: Optional[float] = None,
-               max_tokens: Optional[int] = None) -> Iterator[str]:
+               max_tokens: Optional[int] = None,
+               headers: Optional[Dict[str, str]] = None) -> Iterator[str]:
         """Text deltas as they arrive."""
         body = self._chat_body(prompt_or_messages, model, system, temperature, max_tokens)
         body["stream"] = True
         resp = self._open("POST", "/v1/chat/completions", json.dumps(body).encode("utf-8"),
-                          {"Content-Type": "application/json", "Accept": "text/event-stream"})
+                          {"Content-Type": "application/json", "Accept": "text/event-stream",
+                           **(headers or {})})
         with resp:
             for ev in _sse(resp):
                 if ev["data"].strip() == "[DONE]":
@@ -296,11 +298,15 @@ class Client:
 
     def chat_sse(self, body: Any, system: Optional[str] = None, model: Optional[str] = None,
                  temperature: Optional[float] = None, max_tokens: Optional[int] = None,
-                 max_messages: int = 20, max_chars: int = 8000) -> Iterator[bytes]:
+                 max_messages: int = 20, max_chars: int = 8000,
+                 guarded: bool = False) -> Iterator[bytes]:
         """Server-Sent Events for <uno-chat>: pass the page's JSON body
         ({"messages": [...]}); yields `data: {"delta": ...}` chunks, an
         `{"error": ...}` chunk on failure, then `data: [DONE]`. The system
         prompt is yours — the page can send only user/assistant turns.
+        Pass guarded=True when your route checks sign-in: a public app whose
+        chat isn't guarded gets a warning in Uno Work ("Anyone with the link
+        can use this app's AI").
 
             # FastAPI / Starlette
             @app.post("/uno/chat")
@@ -316,7 +322,8 @@ class Client:
             yield b"data: [DONE]\n\n"
             return
         try:
-            for delta in self.stream(messages, model, system, temperature, max_tokens):
+            widget = {"X-Uno-Chat-Widget": "1", "X-Uno-Chat-Guarded": "1" if guarded else "0"}
+            for delta in self.stream(messages, model, system, temperature, max_tokens, headers=widget):
                 yield _sse_line({"delta": delta})
         except UnoAppError as err:
             yield _sse_line({"error": {"code": err.code, "message": _friendly_chat_error(err)}})
@@ -679,7 +686,7 @@ def _sse_line(data: Any) -> bytes:
 
 def _friendly_chat_error(err: UnoAppError) -> str:
     if err.code == "app_limit_reached":
-        return "This app used its AI limit. Raise it in Uno Work → Settings → Apps."
+        return "This app used its AI limit for this month. Raise it in Uno Work → Settings → Apps."
     if err.code == "ai_not_connected":
         return "AI isn't connected on this computer — sign in to Uno in Uno Work."
     if err.code in ("unreachable", "no_token"):
@@ -702,7 +709,8 @@ def chat_component_js() -> str:
     raise UnoAppError(0, "not_found", "uno-chat.js is missing (expected next to uno_app.py)")
 
 
-def handle_chat_request(handler: Any, client: Optional["Client"] = None, **opts: Any) -> None:
+def handle_chat_request(handler: Any, client: Optional["Client"] = None,
+                        allow: Any = None, **opts: Any) -> None:
     """For http.server.BaseHTTPRequestHandler: call it from do_GET (serves
     uno-chat.js) and do_POST (streams the answer) of your chat path.
 
@@ -711,6 +719,9 @@ def handle_chat_request(handler: Any, client: Optional["Client"] = None, **opts:
                 if self.path.startswith("/uno/chat"): return uno_app.handle_chat_request(self)
             def do_POST(self):
                 if self.path == "/uno/chat": return uno_app.handle_chat_request(self, system="…")
+
+    allow(handler) -> bool: your sign-in check (False → 403). Always pass it
+    when the app is on the internet.
     """
     if handler.command in ("GET", "HEAD"):
         body = chat_component_js().encode("utf-8")
@@ -721,6 +732,9 @@ def handle_chat_request(handler: Any, client: Optional["Client"] = None, **opts:
         handler.end_headers()
         if handler.command == "GET":
             handler.wfile.write(body)
+        return
+    if allow is not None and not allow(handler):
+        handler.send_error(403, "Not allowed")
         return
     length = int(handler.headers.get("Content-Length") or 0)
     if length > 512 * 1024:
@@ -735,7 +749,7 @@ def handle_chat_request(handler: Any, client: Optional["Client"] = None, **opts:
     handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
     handler.send_header("Cache-Control", "no-store")
     handler.end_headers()
-    for chunk in (client or _client()).chat_sse(payload, **opts):
+    for chunk in (client or _client()).chat_sse(payload, guarded=allow is not None, **opts):
         try:
             handler.wfile.write(chunk)
             handler.wfile.flush()

@@ -421,8 +421,8 @@ export function AppCatalogDialog({
           <li className="flex gap-2" data-testid="store-detail-ai">
             <WandSparklesIcon className="mt-0.5 size-3.5 shrink-0 text-primary" />
             <span>
-              {storeAiLine(viewing.ai)}. You can switch it to AI on this computer or your own key,
-              change the limit or turn it off in Settings → Apps.
+              {storeAiLine(viewing.ai)} (starts over on the 1st). You can switch it to AI on this
+              computer or your own key, change the limit or turn it off in Settings → Apps.
             </span>
           </li>
         ) : null}

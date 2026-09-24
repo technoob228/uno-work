@@ -22,12 +22,12 @@ export function aiUsesWords(ai: Pick<UnoAppAiUse, "chat" | "tasks">): string {
 }
 
 /**
- * The App Store line: "Uses AI for answers · up to $10 · via Uno AI". The
- * limit is the app's Uno AI budget until the person changes it.
+ * The App Store line: "Uses AI for answers · up to $10 / month · via Uno AI".
+ * The limit is the app's monthly Uno AI budget until the person changes it.
  */
 export function storeAiLine(ai: UnoAppAiUse): string {
   const limit = formatLimit(ai.limitUsd ?? APP_SDK_DEFAULT_LIMIT_USD);
-  return `Uses AI for ${aiUsesWords(ai)} · up to ${limit} · via Uno AI`;
+  return `Uses AI for ${aiUsesWords(ai)} · up to ${limit} / month · via Uno AI`;
 }
 
 /** The install confirm: what the person agrees to, in three short lines. */
@@ -35,7 +35,7 @@ export function installAiLines(ai: UnoAppAiUse): string[] {
   const limit = formatLimit(ai.limitUsd ?? APP_SDK_DEFAULT_LIMIT_USD);
   const lines = [
     `Uses this computer's AI for ${aiUsesWords(ai)} — through Uno AI, no key of its own.`,
-    `It may spend up to ${limit} of your Uno AI credits; then it stops until you raise the limit.`,
+    `It may spend up to ${limit} of your Uno AI credits a month; past that it waits for the 1st or for you to raise the limit.`,
   ];
   if (ai.tasks) {
     lines.push("Its jobs appear as chats you can watch and stop.");
@@ -62,7 +62,7 @@ export function tileAiNote(
   const spend =
     app.metered === false
       ? ""
-      : ` · ${formatUsdShort(app.spentUsd)} of ${formatLimit(app.limitUsd)}`;
+      : ` · ${formatUsdShort(app.spentUsd)} of ${formatLimit(app.limitUsd)} this month`;
   return `Uses AI for ${aiUsesWords(app)} · ${via}${spend}`;
 }
 
@@ -206,6 +206,34 @@ export function providersSummary(providers: AppAiProviders | undefined): string 
     );
   }
   return `Available here: ${parts.join(" · ")}`;
+}
+
+export const PUBLIC_CHAT_WARNING = "Anyone with the link can use this app's AI — add sign-in";
+
+/**
+ * The warning for an app whose in-page chat (`<uno-chat>`) has no sign-in
+ * check while the app is on the internet; null otherwise.
+ */
+export function publicChatWarning(
+  app: Pick<AppAiApp, "chatWidget" | "status">,
+  published: boolean,
+): string | null {
+  if (!published || app.status === "revoked") return null;
+  return app.chatWidget && !app.chatWidget.guarded ? PUBLIC_CHAT_WARNING : null;
+}
+
+/** The task a new chat opens with after "Ask Uno to add sign-in". */
+export function signInPrompt(input: {
+  readonly id: string;
+  readonly name: string;
+  readonly codeDir: string | null;
+}): string {
+  const where = input.codeDir ? ` (code in ${input.codeDir})` : "";
+  return [
+    `My app "${input.name}"${where} is on the internet and its AI chat has no sign-in: anyone with the link can use its AI.`,
+    "",
+    "Add sign-in to the app (a password I choose, or its existing login) and pass the check to the chat backend: `allow` in chatHandler (Node), or guard the /uno/chat route and call chat_sse(..., guarded=True) / handle_chat_request(..., allow=...) (Python). Keep the rest of the app working, restart it, and tell me how to sign in.",
+  ].join("\n");
 }
 
 export interface AddAiTarget {

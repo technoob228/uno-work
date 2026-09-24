@@ -12,7 +12,7 @@ import { chatComponentSource, cleanChatMessages, createClient } from "@uno4/app"
 import { parseChatEvent, renderMarkdown } from "@uno4/app/chat";
 
 const TOKEN = "uno_app_chat";
-const bodies: Array<{ auth: string; json: any }> = [];
+const bodies: Array<{ auth: string; json: any; widget: string; guarded: string }> = [];
 let appApi: http.Server;
 let appServer: http.Server;
 let appUrl = "";
@@ -30,7 +30,12 @@ beforeAll(async () => {
     req.on("data", (c) => (raw += c));
     req.on("end", () => {
       const json = JSON.parse(raw || "{}");
-      bodies.push({ auth: req.headers.authorization ?? "", json });
+      bodies.push({
+        auth: req.headers.authorization ?? "",
+        json,
+        widget: String(req.headers["x-uno-chat-widget"] ?? ""),
+        guarded: String(req.headers["x-uno-chat-guarded"] ?? ""),
+      });
       const last = json.messages?.[json.messages.length - 1]?.content;
       if (last === "over") {
         res.writeHead(402, { "content-type": "application/json" });
@@ -89,6 +94,8 @@ describe("chatHandler", () => {
     const sent = bodies.at(-1)!;
     expect(sent.auth).toBe(`Bearer ${TOKEN}`);
     expect(sent.json.model).toBe("default");
+    // No `allow` → the daemon learns the chat is unguarded (a warning once it's public).
+    expect([sent.widget, sent.guarded]).toEqual(["1", "0"]);
     expect(sent.json.messages).toEqual([
       { role: "system", content: "You are the notes helper." },
       { role: "assistant", content: "b" },

@@ -9,6 +9,8 @@ import {
   installAiLines,
   providerOptions,
   providersSummary,
+  publicChatWarning,
+  signInPrompt,
   storeAiLine,
   tileAiNote,
 } from "./appAiProviderModel";
@@ -41,14 +43,14 @@ const providers: AppAiProviders = {
 describe("store and install wording", () => {
   it("says what the app uses, how much and through what", () => {
     expect(storeAiLine({ chat: true, tasks: false, limitUsd: 5 })).toBe(
-      "Uses AI for answers · up to $5 · via Uno AI",
+      "Uses AI for answers · up to $5 / month · via Uno AI",
     );
     expect(storeAiLine({ chat: true, tasks: true, limitUsd: null })).toBe(
-      "Uses AI for answers and jobs · up to $10 · via Uno AI",
+      "Uses AI for answers and jobs · up to $10 / month · via Uno AI",
     );
     const lines = installAiLines({ chat: false, tasks: true, limitUsd: 2 });
     expect(lines[0]).toContain("for jobs");
-    expect(lines.join(" ")).toContain("up to $2 of your Uno AI credits");
+    expect(lines.join(" ")).toContain("up to $2 of your Uno AI credits a month");
     expect(lines.join(" ")).toContain("Settings → Apps");
   });
 });
@@ -63,7 +65,7 @@ describe("tileAiNote", () => {
   };
   it("shows spend only for Uno AI", () => {
     expect(tileAiNote({ ...base, providerLabel: "Uno AI · m", metered: true })).toBe(
-      "Uses AI for answers · Uno AI · m · $0.40 of $10",
+      "Uses AI for answers · Uno AI · m · $0.40 of $10 this month",
     );
     expect(
       tileAiNote({ ...base, providerLabel: "Ollama on this computer · qwen3:4b", metered: false }),
@@ -115,6 +117,22 @@ describe("Answers from", () => {
     expect(providersSummary(providers)).toBe(
       "Available here: Uno AI · Ollama on this computer (qwen3:4b, qwen2.5:7b) · your Custom key",
     );
+  });
+});
+
+describe("public chat without sign-in", () => {
+  it("warns only for an unguarded chat of an app on the internet", () => {
+    const open = { status: "active" as const, chatWidget: { guarded: false, seenAt: "x" } };
+    expect(publicChatWarning(open, true)).toBe(
+      "Anyone with the link can use this app's AI — add sign-in",
+    );
+    expect(publicChatWarning(open, false)).toBeNull();
+    expect(
+      publicChatWarning({ ...open, chatWidget: { guarded: true, seenAt: "x" } }, true),
+    ).toBeNull();
+    expect(publicChatWarning({ status: "active", chatWidget: null }, true)).toBeNull();
+    expect(publicChatWarning({ ...open, status: "revoked" }, true)).toBeNull();
+    expect(signInPrompt({ id: "a", name: "Ask Box", codeDir: "~/apps/a" })).toContain("`allow`");
   });
 });
 

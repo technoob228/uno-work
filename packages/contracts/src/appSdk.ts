@@ -21,7 +21,7 @@ export const APP_SDK_DEFAULT_PORT = 3779;
  */
 export const APP_SDK_DEFAULT_CHAT_MODEL = "deepseek/deepseek-v3.2";
 
-/** What an app may spend when neither the manifest nor the person says less. */
+/** What an app may spend a month when neither the manifest nor the person says less. */
 export const APP_SDK_DEFAULT_LIMIT_USD = 10;
 
 /**
@@ -189,6 +189,7 @@ export const AppAiApp = Schema.Struct({
   /** May put notifications into the Inbox (`"notify": true`). Absent on older daemons. */
   notify: Schema.optional(Schema.Boolean),
   status: AppAiStatus,
+  /** Uno AI spend cap per month (UTC); the month's spending resets on the 1st. */
   limitUsd: Schema.Number,
   /** True when the person set the limit (rather than the manifest). */
   limitSetByPerson: Schema.Boolean,
@@ -198,6 +199,13 @@ export const AppAiApp = Schema.Struct({
   chatSpentUsd: Schema.Number,
   /** Agent tasks on the Uno AI gateway (the gateway's own numbers, by app label). */
   tasksSpentUsd: Schema.Number,
+  /**
+   * The limit is monthly: `spentUsd` / `chatSpentUsd` / `tasksSpentUsd` are
+   * this month's (`period`, "2026-09", UTC); on the 1st they start from zero.
+   */
+  period: Schema.optional(Schema.String),
+  /** Everything the app ever spent on Uno AI, this month included. */
+  lifetimeSpentUsd: Schema.optional(Schema.Number),
   requests: Schema.Number,
   tasksStarted: Schema.Number,
   /** The most a task of this app may do on its own. */
@@ -213,6 +221,14 @@ export const AppAiApp = Schema.Struct({
   providerLabel: Schema.optional(Schema.String),
   /** True when its answers spend Uno AI and so count against its limit. */
   metered: Schema.optional(Schema.Boolean),
+  /**
+   * The app serves an in-page chat (`<uno-chat>` through the SDK); `guarded`
+   * — its backend checks sign-in (`allow`). An unguarded one on the internet
+   * lets anyone with the link spend the app's AI: Settings and the tile warn.
+   */
+  chatWidget: Schema.optional(
+    Schema.NullOr(Schema.Struct({ guarded: Schema.Boolean, seenAt: Schema.String })),
+  ),
 });
 export type AppAiApp = typeof AppAiApp.Type;
 

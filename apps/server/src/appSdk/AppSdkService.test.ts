@@ -50,6 +50,7 @@ const run = <A>(
     readonly fetch?: typeof fetch;
     readonly settings?: Parameters<typeof ServerSettingsService.layerTest>[0];
     readonly detectLocal?: (extra: ReadonlyArray<string>) => Promise<never[] | LocalAiEndpoint[]>;
+    readonly now?: () => Date;
   } = {},
 ) =>
   Effect.runPromise(
@@ -95,6 +96,34 @@ const tokenOf = (id: string) =>
   readFile(path.join(keysDir, id, "token"), "utf8").then((t) => t.trim());
 
 describe("AppSdkService", () => {
+  it("the limit is monthly: over it in September, answering again on October 1st", async () => {
+    await writeManifest("notes", { name: "Notes", port: 3000, ai: { chat: true, limitUsd: 1 } });
+    let now = new Date("2026-09-30T20:00:00Z");
+    await run(
+      async (service) => {
+        await service.sync();
+        await service.core.charge("notes", 1.2);
+        const september = await Effect.runPromise(service.overview);
+        expect(september.apps[0]).toMatchObject({
+          status: "over-limit",
+          spentUsd: 1.2,
+          period: "2026-09",
+          lifetimeSpentUsd: 1.2,
+        });
+        now = new Date("2026-10-01T00:05:00Z");
+        const caller = await service.core.authenticate(await tokenOf("notes"));
+        expect(caller).toMatchObject({ spentUsd: 0, period: "2026-10", lifetimeSpentUsd: 1.2 });
+        const october = await Effect.runPromise(service.overview);
+        expect(october.apps[0]).toMatchObject({
+          status: "active",
+          spentUsd: 0,
+          lifetimeSpentUsd: 1.2,
+        });
+      },
+      { now: () => now },
+    );
+  });
+
   it("per-app provider: listed with what is on the computer, switched, routed, written for agents", async () => {
     await writeManifest("notes", { name: "Notes", port: 3000, ai: { chat: true } });
     const ollama: LocalAiEndpoint = {

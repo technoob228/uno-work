@@ -86,6 +86,7 @@ let apiUrl = "";
 let route: () => AppAiRouteResult = () => ({ ok: false, status: 500, code: "x", message: "x" });
 let current = caller();
 const charges: Array<{ appId: string; usd: number }> = [];
+const widgets: Array<{ appId: string; guarded: boolean }> = [];
 
 const listen = (server: http.Server) =>
   new Promise<string>((resolve) =>
@@ -111,6 +112,7 @@ beforeAll(async () => {
       charges.push({ appId, usd });
     },
     route: async () => route(),
+    noteChatWidget: (appId, guarded) => widgets.push({ appId, guarded }),
     createTask: async () => ({ reply: { status: 500, body: {} }, task: null }),
     findTask: () => undefined,
     listTasks: () => [],
@@ -231,6 +233,23 @@ describe("App API provider routing", () => {
     const empty = await chat();
     expect(empty.status).toBe(503);
     expect(await empty.json()).toMatchObject({ error: { code: "no_model" } });
+  });
+
+  it("notes a <uno-chat> backend and whether it checks sign-in", async () => {
+    route = () => local("qwen3:4b");
+    widgets.length = 0;
+    await chat();
+    await fetch(`${apiUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer uno_app_notes",
+        "content-type": "application/json",
+        "x-uno-chat-widget": "1",
+        "x-uno-chat-guarded": "0",
+      },
+      body: JSON.stringify({ messages: [{ role: "user", content: "hi" }] }),
+    });
+    expect(widgets).toEqual([{ appId: "notes", guarded: false }]);
   });
 
   it("/v1/models lists the chosen provider's models", async () => {

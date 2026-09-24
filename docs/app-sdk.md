@@ -50,8 +50,10 @@ An app asks for AI in its manifest `~/.uno/apps/<id>.json`:
 
 - `ai.chat` — may call `/v1/chat/completions`, `/v1/audio/transcriptions`, `/v1/models`.
 - `ai.tasks` — may start agent tasks (`/v1/tasks`).
-- `ai.limitUsd` — spending cap for the app, **at most $10** from the manifest
-  (default $10). Only the person can raise it (Settings → Apps).
+- `ai.limitUsd` — the app's Uno AI spending cap **per month** (UTC; it starts
+  over on the 1st), **at most $10** from the manifest (default $10). Only the
+  person can raise it (Settings → Apps). What the app spent before stays in its
+  lifetime total (`whoami().ai.lifetimeSpentUsd`).
 - `"ai": true` is short for `{ "chat": true }`.
 - No `ai` in the manifest → no AI (403 `ai_not_allowed`).
 - `"storage": {"limitGb": 5}` (or `"storage": true`, 5 GB) — the app gets its
@@ -106,21 +108,21 @@ container `http://host.docker.internal:3779`). Every call:
 `Authorization: Bearer <token>`. Errors are OpenAI-shaped:
 `{"error":{"type","code","message"}}`.
 
-| Status | `code`                                 | Meaning                                                           |
-| ------ | -------------------------------------- | ----------------------------------------------------------------- |
-| 401    | `invalid_app_token`                    | unknown / revoked / rotated token                                 |
-| 403    | `ai_not_allowed`                       | the manifest does not ask for this (chat or tasks)                |
-| 402    | `app_limit_reached`                    | the app spent its limit — the person raises it in Settings → Apps |
-| 503    | `ai_not_connected`                     | this computer has no Uno AI key (not linked)                      |
-| 400    | `invalid_request` / `cwd_outside_home` | bad input                                                         |
-| 403    | `storage_not_allowed`                  | the manifest does not ask for `storage`                           |
-| 507    | `app_storage_full`                     | the app filled its cloud limit — the person raises it in Settings |
-| 402    | `cloud_full`                           | the whole account's cloud is full (plan quota)                    |
-| 404    | `file_not_found`                       | no such file in the app's folder                                  |
-| 400    | `invalid_key`                          | a key with `..`, a leading `/`, empty segments, > 512 chars       |
-| 503    | `storage_not_connected`                | this computer is not linked to an Uno account                     |
-| 403    | `notify_not_allowed`                   | the manifest does not ask for `"notify": true`                    |
-| 429    | `notify_rate_limited`                  | too many notifications; wait `Retry-After` seconds                |
+| Status | `code`                                 | Meaning                                                                                                        |
+| ------ | -------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| 401    | `invalid_app_token`                    | unknown / revoked / rotated token                                                                              |
+| 403    | `ai_not_allowed`                       | the manifest does not ask for this (chat or tasks)                                                             |
+| 402    | `app_limit_reached`                    | the app spent this month's limit — it starts over on the 1st (UTC), or the person raises it in Settings → Apps |
+| 503    | `ai_not_connected`                     | this computer has no Uno AI key (not linked)                                                                   |
+| 400    | `invalid_request` / `cwd_outside_home` | bad input                                                                                                      |
+| 403    | `storage_not_allowed`                  | the manifest does not ask for `storage`                                                                        |
+| 507    | `app_storage_full`                     | the app filled its cloud limit — the person raises it in Settings                                              |
+| 402    | `cloud_full`                           | the whole account's cloud is full (plan quota)                                                                 |
+| 404    | `file_not_found`                       | no such file in the app's folder                                                                               |
+| 400    | `invalid_key`                          | a key with `..`, a leading `/`, empty segments, > 512 chars                                                    |
+| 503    | `storage_not_connected`                | this computer is not linked to an Uno account                                                                  |
+| 403    | `notify_not_allowed`                   | the manifest does not ask for `"notify": true`                                                                 |
+| 429    | `notify_rate_limited`                  | too many notifications; wait `Retry-After` seconds                                                             |
 
 ### `GET /v1/whoami`
 
@@ -456,8 +458,14 @@ app.listen(process.env.PORT ?? 8601, "0.0.0.0");
   `uno_app.chat_component_js()` is the script to serve at `/uno/chat/uno-chat.js`,
   `uno_app.handle_chat_request(self, system="…")` does both for `http.server`.
 - The endpoint is as public as the app: anyone who can open the page can
-  spend its AI (up to its limit on Uno AI). Put it behind the app's login
-  (`allow`) when the app is on the internet.
+  spend its AI (up to its monthly limit on Uno AI). **Always set `allow`**
+  (Python: guard the route, `chat_sse(..., guarded=True)` /
+  `handle_chat_request(..., allow=…)`) when the app is on the internet. The
+  SDK tells the daemon on each chat call whether the endpoint is guarded
+  (`X-Uno-Chat-Widget` / `X-Uno-Chat-Guarded`); an unguarded chat of an app
+  shown on the internet gets a warning on its tile and in Settings → Apps
+  ("Anyone with the link can use this app's AI — add sign-in") with "Ask Uno to
+  add sign-in".
 - On the machine the component is `~/.uno/sdk/js/uno-chat.js` (also next to
   `uno_app.py`); in the package, `@uno4/app/chat`.
 

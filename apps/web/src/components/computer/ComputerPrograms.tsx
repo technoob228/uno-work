@@ -22,6 +22,7 @@ import {
   ShoppingBagIcon,
   SparklesIcon,
   SquareTerminalIcon,
+  TriangleAlertIcon,
   WandSparklesIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -124,8 +125,11 @@ export function TileShell({
   onDetails,
   title,
   aiNote = null,
+  aiWarning = null,
   small = false,
 }: {
+  /** "Anyone with the link can use this app's AI — add sign-in": an amber mark. */
+  aiWarning?: string | null;
   /** "Uses AI for answers · Uno AI · $0.40 of $10" — a small mark and a tooltip line. */
   aiNote?: string | null;
   /** Home's Apps widget: tighter, no caption. */
@@ -147,7 +151,9 @@ export function TileShell({
         type="button"
         disabled={disabled}
         onClick={onClick}
-        title={aiNote ? `${title ?? label}\n${aiNote}` : (title ?? label)}
+        title={[title ?? label, aiNote, aiWarning ? `⚠ ${aiWarning} (Settings → Apps)` : null]
+          .filter(Boolean)
+          .join("\n")}
         className={cn(
           "flex w-full flex-col items-center rounded-2xl px-1 text-center outline-hidden transition-colors",
           // Room above the icon for the "on the internet" badge, so a card edge
@@ -172,7 +178,15 @@ export function TileShell({
               aria-hidden
             />
           ) : null}
-          {aiNote ? (
+          {aiWarning ? (
+            <span
+              className="absolute -top-1 -left-1 flex size-4 items-center justify-center rounded-full bg-amber-500 text-white shadow-sm ring-1 ring-background"
+              aria-label={aiWarning}
+              data-testid="program-ai-warning"
+            >
+              <TriangleAlertIcon className="size-2.5" />
+            </span>
+          ) : aiNote ? (
             <span
               className="absolute -top-1 -left-1 flex size-4 items-center justify-center rounded-full bg-background text-primary shadow-sm ring-1 ring-border"
               aria-label={aiNote}
@@ -351,6 +365,7 @@ export function ComputerPrograms({
             online={tile.online}
             title={tile.openUrl ? `Open ${tile.name}` : `${tile.name} — details`}
             aiNote={tile.aiNote ?? null}
+            aiWarning={tile.aiWarning ?? null}
             icon={<ProgramIcon name={tile.name} icon={tile.icon} iconImage={tile.iconImage} />}
             onClick={() => onOpenTile(tile)}
             onDetails={() => onTileDetails(tile)}

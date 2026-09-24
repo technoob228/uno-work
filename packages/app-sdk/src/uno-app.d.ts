@@ -48,6 +48,8 @@ export interface AskOptions {
   temperature?: number;
   maxTokens?: number;
   signal?: AbortSignal;
+  /** Extra request headers to the App API. */
+  headers?: Record<string, string>;
 }
 
 export interface TranscribeOptions {
@@ -122,9 +124,14 @@ export interface WhoAmI {
   ai: {
     chat: boolean;
     tasks: boolean;
+    /** Uno AI spend cap per month (UTC; it starts over on the 1st). */
     limitUsd: number;
-    /** Everything counted against the limit: answers + jobs. */
+    /** This month's spending counted against the limit: answers + jobs. */
     spentUsd: number;
+    /** The month `spentUsd` belongs to, "2026-09". */
+    period?: string | null;
+    /** Everything the app ever spent on Uno AI. */
+    lifetimeSpentUsd?: number | null;
     /** Answers and transcription. */
     chatSpentUsd?: number;
     /** Agent tasks on the Uno AI gateway (not on the person's own subscription). */
@@ -243,7 +250,11 @@ export interface ChatHandlerOptions {
   /** Turns kept from the page (default 20); each cut to `maxChars` (default 8000). */
   maxMessages?: number;
   maxChars?: number;
-  /** Your own check (a session, a password): false → 403. */
+  /**
+   * Your own check (a session, a password): false → 403. Always set it when
+   * the app is on the internet — without it Uno Work warns the person that
+   * anyone with the link can use the app's AI.
+   */
   allow?: (req: any) => boolean | Promise<boolean>;
 }
 

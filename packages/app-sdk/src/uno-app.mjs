@@ -382,6 +382,7 @@ export function createClient(options = {}) {
     const res = await request("POST", "/v1/chat/completions", {
       json: { ...chatBody(input, opts), stream: true },
       signal: opts.signal,
+      headers: opts.headers,
     });
     for await (const { data } of parseSSE(res.body)) {
       if (data.trim() === "[DONE]") return;
@@ -746,6 +747,9 @@ export function createClient(options = {}) {
           temperature: opts.temperature,
           maxTokens: opts.maxTokens,
           signal: controller.signal,
+          // Uno Work warns the person when a chat without sign-in is on the
+          // internet ("Anyone with the link can use this app's AI").
+          headers: { "X-Uno-Chat-Widget": "1", "X-Uno-Chat-Guarded": opts.allow ? "1" : "0" },
         })) {
           write({ delta });
         }
@@ -819,7 +823,7 @@ export function cleanChatMessages(input, limits = {}) {
 function friendlyChatError(err) {
   const code = err?.code;
   if (code === "app_limit_reached") {
-    return "This app used its AI limit. Raise it in Uno Work → Settings → Apps.";
+    return "This app used its AI limit for this month. Raise it in Uno Work → Settings → Apps.";
   }
   if (code === "ai_not_connected")
     return "AI isn't connected on this computer — sign in to Uno in Uno Work.";

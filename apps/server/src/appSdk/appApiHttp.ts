@@ -44,6 +44,10 @@ export interface AppApiCaller {
   readonly spentUsd: number;
   /** The part of `spentUsd` the app's tasks spent (gateway, `appTaskMeter.ts`). */
   readonly tasksSpentUsd: number;
+  /** The month the limit counts ("2026-09", UTC); `spentUsd` is this month's. */
+  readonly period?: string;
+  /** Everything the app ever spent on Uno AI, this month included. */
+  readonly lifetimeSpentUsd?: number;
   readonly manifestCwd: string | null;
   readonly taskToolsCap: AppTaskTools;
   /**
@@ -88,6 +92,8 @@ export interface AppApiCore {
    * embedders): always the Uno gateway, metered.
    */
   readonly route?: (caller: AppApiCaller) => Promise<AppAiRouteResult>;
+  /** The call came from the SDK's `<uno-chat>` backend; `guarded` = it checks sign-in. */
+  readonly noteChatWidget?: (appId: string, guarded: boolean) => void;
   readonly createTask: (
     caller: AppApiCaller,
     body: unknown,
@@ -145,7 +151,7 @@ const err = (status: number, code: string, message: string): AppApiReply => ({
 });
 
 export const LIMIT_REACHED_MESSAGE =
-  "This app used its AI limit. The person who owns this computer can raise it in Uno Work → Settings → Apps.";
+  "This app used its AI limit for this month (it resets on the 1st, UTC). The person who owns this computer can raise it in Uno Work → Settings → Apps.";
 
 function bearer(req: IncomingMessage): string | null {
   const header = req.headers["authorization"];
@@ -265,6 +271,12 @@ export function makeAppApiHandler(core: AppApiCore) {
           tasksSpentUsd: Math.round(caller.tasksSpentUsd * 1e6) / 1e6,
           remainingUsd: Math.round(remaining(caller) * 1e6) / 1e6,
           taskToolsCap: caller.taskToolsCap,
+          /** The limit is per month (UTC); `spentUsd` is this month's. */
+          period: caller.period ?? null,
+          lifetimeSpentUsd:
+            caller.lifetimeSpentUsd !== undefined
+              ? Math.round(caller.lifetimeSpentUsd * 1e6) / 1e6
+              : null,
         },
         storage: caller.storage
           ? {
@@ -317,6 +329,9 @@ export function makeAppApiHandler(core: AppApiCore) {
   ) => {
     const permission = requireAi(caller, "chat", false);
     if (permission) return send(res, permission);
+    if (req.headers["x-uno-chat-widget"] === "1") {
+      core.noteChatWidget?.(caller.appId, req.headers["x-uno-chat-guarded"] === "1");
+    }
     const routed = await routeOf(caller);
     if (!routed.ok) return send(res, routeError(routed));
     const route = routed.route;

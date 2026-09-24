@@ -207,6 +207,8 @@ export const makeAppSdkService = (
     readonly background?: boolean;
     /** Tests: the gateway's per-app spend (`/usage/apps`). */
     readonly fetch?: typeof fetch;
+    /** Tests: the clock of the monthly limit. */
+    readonly now?: () => Date;
     /** Tests: what "AI on this computer" finds (skips probing ports). */
     readonly detectLocal?: (
       extraBaseUrls: ReadonlyArray<string>,
@@ -237,7 +239,10 @@ export const makeAppSdkService = (
       UNO_GATEWAY_BASE_URL
     ).replace(/\/+$/, "");
     const store = yield* Effect.promise(() =>
-      openAppAiStore(options.storePath ?? path.join(config.stateDir, "app-ai.json")),
+      openAppAiStore(
+        options.storePath ?? path.join(config.stateDir, "app-ai.json"),
+        options.now ? { now: options.now } : {},
+      ),
     );
     // Threads of app tasks keep their app label across restarts: a session
     // restarted tomorrow is still that app's (appTaskLabel.ts).
@@ -328,6 +333,8 @@ export const makeAppSdkService = (
         limitUsd: effectiveLimitUsd(stored, manifest),
         spentUsd: totalSpentUsd(stored),
         tasksSpentUsd: stored.taskSpentUsd,
+        period: stored.period,
+        lifetimeSpentUsd: Math.round((stored.lifetimeUsd + totalSpentUsd(stored)) * 1e6) / 1e6,
         manifestCwd: manifest.cwd,
         taskToolsCap: stored.taskToolsCap,
         storage: manifest.storage
@@ -521,6 +528,22 @@ export const makeAppSdkService = (
         return prices;
       },
       charge: (appId, usd) => store.addSpend(appId, usd),
+      noteChatWidget: (appId, guarded) => {
+        const stored = store.get(appId);
+        if (!stored) return;
+        const last = stored.chatWidget;
+        // Written when it changes, else at most hourly (it's shown, not metered).
+        if (
+          last &&
+          last.guarded === guarded &&
+          Date.now() - Date.parse(last.seenAt) < 60 * 60_000
+        ) {
+          return;
+        }
+        void store.update(appId, (app) => {
+          app.chatWidget = { guarded, seenAt: new Date().toISOString() };
+        });
+      },
       route: (caller) =>
         resolveAppAiRoute(store.get(caller.appId)?.provider ?? null, {
           gateway: machineGateway,
@@ -613,6 +636,7 @@ export const makeAppSdkService = (
       const limitUsd = effectiveLimitUsd(stored, manifest);
       return {
         provider: stored.provider ?? { kind: "uno" },
+        chatWidget: stored.chatWidget,
         providerLabel: describeChoice(stored.provider, providers, chatModel),
         metered: (stored.provider?.kind ?? "uno") === "uno",
         id: stored.id,
@@ -631,6 +655,8 @@ export const makeAppSdkService = (
         spentUsd: totalSpentUsd(stored),
         chatSpentUsd: Math.round(stored.spentUsd * 1e6) / 1e6,
         tasksSpentUsd: Math.round(stored.taskSpentUsd * 1e6) / 1e6,
+        period: stored.period,
+        lifetimeSpentUsd: Math.round((stored.lifetimeUsd + totalSpentUsd(stored)) * 1e6) / 1e6,
         requests: stored.requests,
         tasksStarted: stored.tasksStarted,
         taskToolsCap: stored.taskToolsCap,
@@ -788,6 +814,8 @@ export const makeAppSdkService = (
             if (input.storageScope !== undefined) app.storageScope = input.storageScope;
             if (input.resetSpent === true) {
               // The gateway's total stays; only its growth from now on counts.
+              app.lifetimeUsd =
+                Math.round((app.lifetimeUsd + app.spentUsd + app.taskSpentUsd) * 1e6) / 1e6;
               app.spentUsd = 0;
               app.taskSpentUsd = 0;
             }

@@ -23,7 +23,7 @@ import {
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
-import { CloudIcon, SparklesIcon, WandSparklesIcon } from "lucide-react";
+import { CloudIcon, SparklesIcon, TriangleAlertIcon, WandSparklesIcon } from "lucide-react";
 import { useCallback, useId, useMemo, useState } from "react";
 
 import {
@@ -60,6 +60,8 @@ import {
   choiceValue,
   providerOptions,
   providersSummary,
+  publicChatWarning,
+  signInPrompt,
 } from "./appAiProviderModel";
 import { formatFileSize } from "../files/fileTypes";
 import { Badge } from "../ui/badge";
@@ -99,9 +101,18 @@ export function formatUsd(value: number): string {
   return `$${value.toFixed(2).replace(/\.00$/, "")}`;
 }
 
-/** "Notetaker used $0.40 of $10" — the line a person reads at a glance. */
-export function appUsageLine(app: Pick<AppAiApp, "name" | "spentUsd" | "limitUsd">): string {
-  return `${app.name} used ${formatUsd(app.spentUsd)} of ${formatUsd(app.limitUsd)}`;
+/**
+ * "Notetaker used $0.40 of $10 this month ($3.20 in all)" — the line a person
+ * reads at a glance. The limit is monthly; it starts over on the 1st (UTC).
+ */
+export function appUsageLine(
+  app: Pick<AppAiApp, "name" | "spentUsd" | "limitUsd" | "lifetimeSpentUsd">,
+): string {
+  const lifetime =
+    app.lifetimeSpentUsd !== undefined && app.lifetimeSpentUsd > app.spentUsd + 0.005
+      ? ` (${formatUsd(app.lifetimeSpentUsd)} in all)`
+      : "";
+  return `${app.name} used ${formatUsd(app.spentUsd)} of ${formatUsd(app.limitUsd)} this month${lifetime}`;
 }
 
 /**
@@ -358,13 +369,19 @@ function AppRow({
   pending,
   providers,
   environmentId,
+  published = false,
+  onAddSignIn,
 }: {
   readonly app: AppAiApp;
   readonly onUpdate: (input: AppAiUpdateInput) => void;
   readonly pending: boolean;
   readonly providers: AppAiProviders | undefined;
   readonly environmentId: EnvironmentId;
+  /** Shown on the internet ("Show on the internet"). */
+  readonly published?: boolean;
+  readonly onAddSignIn?: () => void;
 }) {
+  const warning = publicChatWarning(app, published);
   const usesAi = app.chat || app.tasks;
   const uses = [app.chat ? "answers" : null, app.tasks ? "jobs" : null]
     .filter(Boolean)
@@ -468,9 +485,9 @@ function AppRow({
           {usesAi ? (
             <label
               className="flex items-center gap-1 text-xs text-muted-foreground"
-              title="What the app may spend on Uno AI. AI on this computer and your own key don't count."
+              title="What the app may spend on Uno AI a month; it starts over on the 1st (UTC). AI on this computer and your own key don't count."
             >
-              Limit $
+              Limit / month $
               <DraftInput
                 className="w-20"
                 inputMode="decimal"
@@ -583,6 +600,21 @@ function AppRow({
         </div>
       }
     >
+      {warning ? (
+        <div
+          className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300"
+          role="alert"
+          data-testid={`app-ai-public-warning-${app.id}`}
+        >
+          <TriangleAlertIcon className="size-3.5 shrink-0" />
+          <span className="min-w-0 flex-1">{warning}</span>
+          {onAddSignIn ? (
+            <Button size="xs" variant="outline" onClick={onAddSignIn}>
+              Ask Uno to add sign-in
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       {app.chat && app.status !== "revoked" ? (
         <div className="flex flex-wrap items-center gap-2 pt-3 pb-4">
           <span className="text-xs text-muted-foreground">Answers from</span>
@@ -608,6 +640,14 @@ export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId:
   const settings = serverSettings ?? DEFAULT_UNIFIED_SETTINGS;
 
   const overview = useQuery(appAiQueryOptions(environmentId));
+  // Which registered apps are on the internet (their chat without sign-in is a warning).
+  const machineApps = useQuery(machineAppsQueryOptions(environmentId));
+  const launchers = useHomeLaunchers(environmentId);
+  const registered = new Map(
+    (machineApps.data?.apps ?? [])
+      .filter((m) => m.source === "manifest")
+      .map((m) => [m.id.replace(/^manifest:/, ""), m] as const),
+  );
   const update = useMutation({
     mutationFn: (input: AppAiUpdateInput) => appAiUpdate(environmentId, input),
     onSuccess: (data: AppAiOverview) =>
@@ -761,6 +801,16 @@ export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId:
               app={app}
               providers={data.providers}
               environmentId={environmentId}
+              published={registered.get(app.id)?.publication != null}
+              onAddSignIn={() =>
+                void launchers.askUno(
+                  signInPrompt({
+                    id: app.id,
+                    name: app.name,
+                    codeDir: registered.get(app.id)?.codeDir ?? null,
+                  }),
+                )
+              }
               pending={update.isPending}
               onUpdate={(input) => update.mutate(input)}
             />
