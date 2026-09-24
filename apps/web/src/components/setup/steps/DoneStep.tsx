@@ -130,10 +130,11 @@ export function DoneStep() {
   const materials = useQuery({
     queryKey: ["uno-setup", "done-materials", environmentId, materialsRoot],
     queryFn: async () => {
-      const listing = await ensureEnvironmentApi(environmentId!).filesystem.browse({
-        partialPath: `${materialsRoot}/materials/`,
+      // files.list, not filesystem.browse: browse lists folders only.
+      const listing = await ensureEnvironmentApi(environmentId!).files.list({
+        path: `${materialsRoot}/materials`,
       });
-      return listing.entries.length;
+      return listing.entries.filter((entry) => !entry.name.startsWith(".")).length;
     },
     enabled: environmentId !== null && materialsRoot !== null,
     retry: false,

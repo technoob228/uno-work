@@ -8,7 +8,7 @@ import type { UnoSetupProgress } from "@t3tools/contracts";
 import { useCallback } from "react";
 
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
-import { getServerConfig } from "../../rpc/serverState";
+import { getServerConfig, whenServerConfigReady } from "../../rpc/serverState";
 import { EMPTY_SETUP_PROGRESS } from "./setupModel";
 
 const selectSetup = (settings: { readonly setup?: UnoSetupProgress }) =>
@@ -27,11 +27,15 @@ export function useUpdateSetupProgress(): (
 ) => Promise<void> {
   const { updateSettings } = useUpdateSettings();
   return useCallback(
-    (change) => {
-      const current = currentSetupProgress();
+    async (change) => {
+      // Never compute from the empty default: on a fresh load the first write
+      // (the step's "visited") can run before the machine's settings arrive,
+      // and would wipe the real progress.
+      const config = getServerConfig() ?? (await whenServerConfigReady());
+      const current = config.settings.setup ?? EMPTY_SETUP_PROGRESS;
       const next = change(current);
-      if (next === current) return Promise.resolve();
-      return updateSettings({ setup: next });
+      if (next === current) return;
+      await updateSettings({ setup: next });
     },
     [updateSettings],
   );

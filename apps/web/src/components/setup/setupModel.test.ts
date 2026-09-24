@@ -1,3 +1,4 @@
+import type { UnoSetupProgress } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -16,6 +17,7 @@ import {
   tildePath,
 } from "./setupModel";
 import { moreSkills, offeredSkills } from "./setupSkills";
+import { aiFromAccountDefault } from "./steps/AiStep";
 import { mcpServerNameFromUrl } from "./steps/ConnectorsStep";
 
 describe("setup progress", () => {
@@ -27,7 +29,7 @@ describe("setup progress", () => {
   });
 
   it("counts done steps, not skipped ones", () => {
-    let progress = { ...EMPTY_SETUP_PROGRESS, mode: "ai" as const };
+    let progress: UnoSetupProgress = { ...EMPTY_SETUP_PROGRESS, mode: "ai" };
     progress = markCompleted(progress, "ai");
     progress = markSkipped(progress, "project");
     progress = markCompleted(progress, "instructions");
@@ -125,5 +127,14 @@ describe("helpers", () => {
     expect(mcpServerNameFromUrl("https://mcp.context7.com/mcp", ["context7"])).toBe("context7-2");
     expect(mcpServerNameFromUrl("ftp://x.dev", [])).toBeNull();
     expect(mcpServerNameFromUrl("not a url", [])).toBeNull();
+  });
+});
+
+describe("account default AI", () => {
+  it("maps console values to harnesses", () => {
+    expect(aiFromAccountDefault("claude")).toEqual({ id: "claudeAgent", byok: false });
+    expect(aiFromAccountDefault("byok")).toEqual({ id: "opencode", byok: true });
+    expect(aiFromAccountDefault(null)).toBeNull();
+    expect(aiFromAccountDefault("gemini")).toBeNull();
   });
 });

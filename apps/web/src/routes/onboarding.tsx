@@ -40,11 +40,14 @@ function OnboardingRouteView() {
   const navigate = useNavigate();
   const openAddProjectRef = useRef(false);
 
-  const markCompleted = useCallback(
-    () => updateSettings({ onboardingCompleted: true, machineOnboarded: true }),
-    [updateSettings],
-  );
   const updateSetup = useUpdateSetupProgress();
+  const markCompleted = useCallback(async () => {
+    await updateSettings({ onboardingCompleted: true, machineOnboarded: true });
+    // The desktop flow sets up the machine itself; the guided setup (AI,
+    // project, AGENTS.md, skills…) then waits as "Set up 0/8" in the sidebar.
+    if (!isWebApp)
+      await updateSetup((current) => (current.mode ? current : { ...current, mode: "ai" }));
+  }, [updateSettings, updateSetup]);
   const startTour = useStartSetupTour();
   const [welcomeMode, setWelcomeMode] = useState<WelcomeMode>("ai");
   const [ownTools, setOwnTools] = useState<OwnToolsTab | null>(null);

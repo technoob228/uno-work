@@ -13,10 +13,12 @@ import {
   type ProviderInstanceConfig,
   type ServerProvider,
 } from "@t3tools/contracts";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Loader2Icon } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 
+import { accountRequest, accountTransport } from "../../../account/unoAccount";
 import { useComposerDraftStore } from "../../../composerDraftStore";
 import { usePrimaryEnvironmentId } from "../../../environments/primary";
 import { refreshEnvironmentProviders } from "../../../environments/settings/serverSettings";
@@ -32,6 +34,7 @@ import {
   type HarnessStatus,
 } from "../../harness/harnessSetupState";
 import { useHarnessSetup } from "../../harness/useHarnessSetup";
+import { openInstallDocs } from "../../onboarding/harnessInstallLinks";
 import { ClaudeAI, OpenAI, OpenCodeIcon, UnoIcon, type Icon } from "../../Icons";
 import { buildProviderInstanceUpdatePatch } from "../../settings/SettingsPanels.logic";
 import { Button } from "../../ui/button";
@@ -77,6 +80,48 @@ const AI_ROWS: ReadonlyArray<AiRow> = [
     description: () => "Open-source agent. Runs on its free models or any API key you add.",
   },
 ];
+
+/** Console → Settings, where the account's default AI (`default_ai`) is changed. */
+export const CONSOLE_SETTINGS_URL = "https://console.uno4.dev/settings";
+
+/** Account `default_ai` (GET /auth/me) → the harness it means here. */
+export function aiFromAccountDefault(
+  value: unknown,
+): { readonly id: AiId; readonly byok: boolean } | null {
+  switch (value) {
+    case "uno":
+      return { id: "uno", byok: false };
+    case "claude":
+      return { id: "claudeAgent", byok: false };
+    case "codex":
+      return { id: "codex", byok: false };
+    case "opencode":
+      return { id: "opencode", byok: false };
+    case "byok":
+      return { id: "opencode", byok: true };
+    default:
+      return null;
+  }
+}
+
+/**
+ * The account's default AI, read with the token this interface already has.
+ * Null where the account isn't reachable (a computer's own address) or the
+ * console predates the field — the step then starts from the machine's pick.
+ */
+function useAccountDefaultAi() {
+  const query = useQuery({
+    queryKey: ["uno-account", "me", "default-ai"],
+    queryFn: async () => {
+      const me = (await accountRequest("GET", "/auth/me")) as Record<string, unknown> | null;
+      return aiFromAccountDefault(me?.["default_ai"]);
+    },
+    enabled: accountTransport() !== "none",
+    staleTime: 60_000,
+    retry: false,
+  });
+  return query.data ?? null;
+}
 
 /** Which environment variable an OpenCode key goes into, from its prefix. */
 export function openCodeKeyVariable(key: string): string | null {
@@ -180,6 +225,17 @@ export function AiStep() {
   const initial = (AI_ROWS.find((row) => row.id === stickyActive)?.id ?? "uno") as AiId;
   const [picked, setPicked] = useState<AiId>(initial);
   const [open, setOpen] = useState<AiId | null>(null);
+  const [touched, setTouched] = useState(false);
+  const accountDefault = useAccountDefaultAi();
+
+  // The AI picked in the console (account `default_ai`) comes first, until
+  // the person picks here. "Own API key" has no harness of its own: OpenCode
+  // takes the key.
+  useEffect(() => {
+    if (touched || !accountDefault) return;
+    setPicked(accountDefault.id);
+    if (accountDefault.byok) setOpen("opencode");
+  }, [accountDefault, touched]);
 
   const statusOf = useMemo(() => {
     const byId = new Map(providers.map((provider) => [provider.instanceId, provider]));
@@ -198,6 +254,7 @@ export function AiStep() {
   const pickedReady = statusOf(picked).status === "ready";
 
   const choose = (id: AiId) => {
+    setTouched(true);
     setPicked(id);
     if (statusOf(id).status !== "ready") setOpen(id);
   };
@@ -378,6 +435,25 @@ export function AiStep() {
           );
         })}
       </div>
+      {accountDefault?.byok && picked === "opencode" ? (
+        <SetupNote>
+          You chose your own API key in the Uno console: add it to OpenCode above.
+        </SetupNote>
+      ) : null}
+      {accountDefault && accountDefault.id !== picked ? (
+        <SetupNote>
+          Your Uno account uses {AI_ROWS.find((row) => row.id === accountDefault.id)?.name} by
+          default.{" "}
+          <button
+            type="button"
+            className="text-primary hover:underline"
+            onClick={() => openInstallDocs(CONSOLE_SETTINGS_URL)}
+          >
+            Make {pickedRow.name} your default
+          </button>{" "}
+          for new computers too.
+        </SetupNote>
+      ) : null}
       <SetupNote>
         AI inside apps runs on Uno AI. Change the default any time from the model picker in a chat.
       </SetupNote>
