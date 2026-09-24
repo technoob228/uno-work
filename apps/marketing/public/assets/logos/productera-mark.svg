@@ -1,0 +1,24 @@
+<svg width="40" height="24" viewBox="0 0 40 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="productera-left" x1="10" y1="24" x2="10" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#252F6A"/>
+      <stop offset="100%" stop-color="#4555BD"/>
+    </linearGradient>
+    <linearGradient id="productera-left-top" x1="10" y1="13" x2="10" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#5B6BDC"/>
+      <stop offset="100%" stop-color="#8B98F0"/>
+    </linearGradient>
+    <linearGradient id="productera-right" x1="30" y1="24" x2="30" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#075F8C"/>
+      <stop offset="100%" stop-color="#1898CE"/>
+    </linearGradient>
+    <linearGradient id="productera-right-top" x1="30" y1="13" x2="30" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0C8CC8"/>
+      <stop offset="100%" stop-color="#44C0FA"/>
+    </linearGradient>
+  </defs>
+  <path d="M19.9724 0.585095L19.965 0.571381H6.65482L0 12L6.65482 23.4285H19.965L19.9724 23.4154L13.3256 12L19.9724 0.585095Z" fill="url(#productera-left)"/>
+  <path d="M13.3256 12L19.9724 0.585156L19.965 0.571442H6.65482L0 12" fill="url(#productera-left-top)"/>
+  <path d="M33.2903 0.571442H19.9801L19.9727 0.585156L26.6195 12L19.9727 23.4154L19.9801 23.4286H33.2903L39.9451 12L33.2903 0.571442Z" fill="url(#productera-right)"/>
+  <path d="M39.9451 12L33.2903 0.571442H19.9801L19.9727 0.585156L26.6195 12" fill="url(#productera-right-top)"/>
+</svg>

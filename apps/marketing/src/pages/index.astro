@@ -1,1401 +1,1214 @@
 ---
-import Layout from "../layouts/Layout.astro";
-import { RELEASES_URL } from "../lib/releases";
-
-const CALENDLY_URL = "https://calendly.com/michael-getuno/30min";
+// uno4.work landing v3 (2026-09-24). Standalone page with its own <head>; /careers and /download keep Layout.astro.
+const jsonLd = {"@context":"https://schema.org","@type":"SoftwareApplication","name":"Uno Work","applicationCategory":"ProductivityApplication","operatingSystem":"macOS, Windows, Web","url":"https://uno4.work/","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"publisher":{"@type":"Organization","name":"Uno4 Labs LLC","url":"https://uno4.dev"}};
 ---
 
-<Layout>
-  <section class="hero">
-    <span class="eyebrow">AI that works with your machine</span>
-    <h1 class="tagline">
-      AI works on <em>your</em><br class="mobile-break" /> computer,<br class="desktop-break" /><br
-        class="mobile-break"
-      />
-      with <em>your</em> files,<br class="mobile-break" /> under <em>your</em> control.
-    </h1>
-    <p class="subhead">
-      Uno Work is local-first, with a built-in preview pane and optional remote power when you need it.
-    </p>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#5b5be8" />
+  <title>Uno Work — Work with AI on your own computer</title>
+  <meta name="description" content="Uno Work is where you work with AI on your own computer. Make a project, tell the AI how you work, add skills and connectors, message it from Telegram or Slack. Use Uno AI or your own Claude, ChatGPT or OpenCode subscription." />
+  <link rel="canonical" href="https://uno4.work/" />
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+  <link rel="icon" href="/favicon.ico" sizes="48x48" />
+  <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta property="og:site_name" content="Uno Work" />
+  <meta property="og:title" content="Uno Work — Work with AI on your own computer" />
+  <meta property="og:description" content="Projects, instructions, skills and connectors on your own computer in the cloud, always online. Uno AI or your own subscription. The app is free on Mac, PC and in the browser." />
+  <meta property="og:url" content="https://uno4.work/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="https://uno4.work/assets/og.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Uno Work: work with AI on your own computer" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Uno Work — Work with AI on your own computer" />
+  <meta name="twitter:description" content="Projects, instructions, skills and connectors on a computer that's yours. The app is free on Mac, PC and in the browser." />
+  <meta name="twitter:image" content="https://uno4.work/assets/og.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="preconnect" href="https://console.uno4.dev" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script is:inline type="application/ld+json" set:html={JSON.stringify(jsonLd)}></script>
+  <style is:global>
+    :root {
+      --violet: #5b5be8; --violet-deep: #4343c9; --violet-ink: #3a3ab8; --tint: #f0f0fc; --vline: #dcdcf8; --band: #4a4ad6;
+      --ink: #18181b; --ink-2: #55555e; --ink-3: #6b6b74; --paper: #fff; --bg: #fafafb; --line: #e7e7ec; --line-2: #d8d8e0;
+      --ok: #1b8a4b; --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; --ease: cubic-bezier(.16,1,.3,1);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    [hidden] { display: none !important; }
+    html { color-scheme: light; scroll-behavior: smooth; scroll-padding-top: 72px; scrollbar-color: #c9c9da var(--bg); }
+    html::-webkit-scrollbar { width: 12px; }
+    html::-webkit-scrollbar-track { background: var(--bg); }
+    html::-webkit-scrollbar-thumb { background: #cfcfe0; border-radius: 12px; border: 3px solid var(--bg); }
+    html::-webkit-scrollbar-thumb:hover { background: var(--violet); }
+    body { background: var(--paper); color: var(--ink); font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; font-size: 16px; line-height: 1.55; -webkit-font-smoothing: antialiased; overflow-x: hidden; caret-color: var(--violet); font-feature-settings: "cv11", "ss01"; }
+    ::selection { background: var(--violet); color: #fff; }
+    a { color: inherit; text-decoration: none; }
+    a.u { color: var(--violet-ink); text-decoration: underline; text-decoration-color: var(--vline); text-underline-offset: 3px; text-decoration-thickness: 1.5px; }
+    a.u:hover { text-decoration-color: var(--violet); }
+    :focus-visible { outline: 2px solid var(--violet); outline-offset: 3px; border-radius: 4px; }
+    button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+    .mono { font-family: var(--mono); }
+    .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    .skip { position: absolute; left: 16px; top: -60px; z-index: 50; background: var(--ink); color: #fff; padding: 8px 14px; border-radius: 8px; font-size: 14px; font-weight: 600; }
+    .skip:focus { top: 12px; }
+    svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+    .wrap { max-width: 1184px; margin: 0 auto; padding: 0 32px; }
 
-    <div class="cta-row">
-      <a
-        href={CALENDLY_URL}
-        class="hero-button"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        <span>FREE demo</span>
-      </a>
+    /* Nav */
+    .nav { position: sticky; top: 0; z-index: 20; background: rgba(255,255,255,.88); backdrop-filter: saturate(1.6) blur(14px); -webkit-backdrop-filter: saturate(1.6) blur(14px); border-bottom: 1px solid transparent; transition: border-color .2s; }
+    .nav.scrolled { border-bottom-color: var(--line); }
+    .nav-in { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; }
+    .brand img { width: 26px; height: 26px; display: block; border-radius: 7px; box-shadow: 0 1px 2px rgba(24,24,27,.18); }
+    .brand-text { font-weight: 650; font-size: 15px; letter-spacing: -.01em; }
+    .nav-right { display: flex; align-items: center; gap: 26px; }
+    .nav-link { font-size: 14px; font-weight: 500; color: var(--ink-2); transition: color .15s; }
+    .nav-link:hover { color: var(--ink); }
+    .nav-cta { font-size: 13.5px; font-weight: 600; color: #fff; background: var(--ink); padding: 8px 15px; border-radius: 8px; transition: background .15s; }
+    .nav-cta:hover { background: var(--violet-deep); }
 
-      <a href="/download/" class="other-platforms">Download</a>
+    .btn { display: inline-flex; align-items: center; gap: 9px; font-size: 15.5px; font-weight: 600; padding: 13px 22px; border-radius: 10px; transition: background .15s, transform .15s, box-shadow .15s, border-color .15s; }
+    .btn .i { width: 16px; height: 16px; stroke-width: 2; }
+    .btn-primary { background: var(--violet); color: #fff; border: 1px solid var(--violet-deep); box-shadow: 0 1px 2px rgba(24,24,27,.12), 0 8px 22px -10px rgba(91,91,232,.6); }
+    .btn-primary:hover { background: var(--violet-deep); transform: translateY(-1px); }
+    .btn-ghost { color: var(--ink); border: 1px solid var(--line-2); background: #fff; }
+    .btn-ghost:hover { border-color: var(--ink-3); }
+
+    /* Hero */
+    .hero { padding: 64px 0 0; background: linear-gradient(180deg, #fff 0%, #fff 40%, #f5f5fb 100%); }
+    .hero-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 48px; align-items: end; }
+    .hero h1 { font-size: clamp(42px, 6vw, 78px); font-weight: 720; letter-spacing: -.042em; line-height: .99; text-wrap: balance; }
+    .hero h1 span { color: var(--violet); }
+    .hero-lede { font-size: 19px; color: var(--ink-2); max-width: 40ch; }
+    .hero-lede b { color: var(--ink); font-weight: 600; }
+    .hero-cta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
+    .hero-note { margin-top: 14px; font-size: 13.5px; color: var(--ink-3); }
+
+    /* Window chrome (shared by hero + step mocks) */
+    .win { background: #fff; border: 1px solid var(--line-2); border-radius: 14px; overflow: hidden; box-shadow: 0 2px 6px rgba(24,24,27,.05), 0 40px 90px -40px rgba(58,58,184,.4); }
+    .win-bar { display: grid; grid-template-columns: 90px 1fr 90px; align-items: center; height: 38px; padding: 0 14px; background: #f6f6f9; border-bottom: 1px solid var(--line); }
+    .dots { display: flex; gap: 7px; }
+    .dots i { width: 11px; height: 11px; border-radius: 50%; background: #dcdce3; }
+    .url { justify-self: center; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-2); background: #fff; border: 1px solid var(--line); border-radius: 7px; padding: 3px 14px; white-space: nowrap; }
+    .url .i { width: 11px; height: 11px; }
+
+    /* Hero shot: Uno Work Home replica */
+    .shot { margin-top: 56px; }
+    .shot .win { border-radius: 14px 14px 0 0; border-bottom: 0; }
+    .app { display: grid; grid-template-columns: 250px 1fr; height: 600px; font-size: 13.5px; }
+    .side { border-right: 1px solid var(--line); padding: 14px 10px; display: flex; flex-direction: column; gap: 4px; background: #fff; min-width: 0; }
+    .side-brand { display: flex; align-items: center; gap: 8px; padding: 4px 8px 12px; font-weight: 650; font-size: 14.5px; }
+    .side-brand .bm { width: 20px; height: 20px; border-radius: 6px; }
+    .alpha { font-size: 9px; font-weight: 700; letter-spacing: .08em; color: var(--violet-ink); background: var(--tint); border-radius: 5px; padding: 1px 6px; }
+    .machine { display: flex; align-items: center; gap: 9px; padding: 8px; border-radius: 9px; }
+    .machine b { display: block; font-weight: 600; font-size: 13.5px; }
+    .machine small { display: block; font-size: 11.5px; color: var(--ink-3); }
+    .machine .chev { margin-left: auto; color: var(--ink-3); }
+    .machine .chev .i { width: 14px; height: 14px; }
+    .on { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
+    .live { animation: live 5.2s ease-in-out infinite; }
+    @keyframes live { 0%,100% { box-shadow: 0 0 0 0 rgba(31,157,85,0); } 50% { box-shadow: 0 0 0 4px rgba(31,157,85,.18); } }
+    .item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--ink); font-weight: 500; }
+    .item .i { width: 16px; height: 16px; }
+    .item.act { background: #f1f1f4; }
+    .item .st { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-3); }
+    .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 3px; margin: 4px 0; background: #f4f4f7; border-radius: 9px; }
+    .seg span { display: flex; align-items: center; justify-content: center; gap: 5px; padding: 5px 0; font-size: 12px; color: var(--ink-2); border-radius: 7px; }
+    .seg span .i { width: 12px; height: 12px; }
+    .seg span.act { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(24,24,27,.08); }
+    .lbl { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding: 12px 10px 4px; }
+    .chat { padding: 7px 10px; border-radius: 8px; min-width: 0; }
+    .chat small { display: block; font-size: 10.5px; color: var(--ink-3); }
+    .chat span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+    .chat.run span::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--violet); margin-left: 6px; vertical-align: 1px; }
+    .main { background: #fcfcfd; overflow: hidden; min-width: 0; }
+    .topbar { display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 20px; border-bottom: 1px solid var(--line); background: #fff; font-weight: 500; }
+    .topbar .i { width: 16px; height: 16px; color: var(--ink-2); }
+    .pane { max-width: 820px; margin: 0 auto; padding: 22px 28px; }
+    .card { background: linear-gradient(180deg, #f7f7fe, #fff 60%); border: 1px solid var(--line); border-radius: 16px; padding: 20px 22px; }
+    .card-head { display: flex; gap: 16px; align-items: flex-start; }
+    .card-ico { width: 46px; height: 46px; border-radius: 12px; background: #e8e8fb; color: var(--violet-ink); display: grid; place-items: center; flex: none; }
+    .card-ico .i { width: 22px; height: 22px; }
+    .cname { font-size: 19px; font-weight: 650; letter-spacing: -.02em; display: flex; align-items: center; gap: 8px; }
+    .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 500; color: var(--ink); border: 1px solid var(--line-2); border-radius: 999px; padding: 1px 8px; background: #fff; letter-spacing: 0; }
+    .cmeta { font-size: 12.5px; color: var(--ink-2); margin-top: 3px; }
+    .caddr { font-family: var(--mono); font-size: 12px; color: var(--ink-2); margin-top: 4px; }
+    .cacts { margin-left: auto; display: flex; gap: 6px; }
+    .ub { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; border: 1px solid var(--line-2); border-radius: 8px; background: #fff; padding: 5px 10px; white-space: nowrap; }
+    .ub .i { width: 13px; height: 13px; }
+    .ub.v { background: var(--violet); color: #fff; border-color: var(--violet-deep); }
+    .bars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 18px; }
+    .bar > div { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--ink-2); margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+    .bar i { display: block; height: 5px; border-radius: 5px; background: #ececf2; position: relative; overflow: hidden; }
+    .bar i::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--v); background: var(--violet); border-radius: 5px; }
+    .card-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 14px; font-size: 12px; color: var(--ink-2); }
+    .sec { display: flex; justify-content: space-between; align-items: center; margin: 22px 2px 12px; font-weight: 600; font-size: 14px; }
+    .progs { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
+    .prog { text-align: center; font-size: 11.5px; min-width: 0; }
+    .prog .t { width: 48px; height: 48px; border-radius: 13px; margin: 0 auto 7px; display: grid; place-items: center; color: #fff; box-shadow: 0 1px 2px rgba(24,24,27,.1), inset 0 1px rgba(255,255,255,.25); position: relative; }
+    .prog .t .i { width: 22px; height: 22px; }
+    .prog .t img { width: 30px; height: 30px; object-fit: contain; }
+    .prog .t.img { background: #fff; border: 1px solid var(--line); }
+    .prog b { display: block; font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .prog small { color: var(--ink-3); font-size: 10.5px; }
+    .prog .t.run::after { content: ""; position: absolute; right: -2px; bottom: -2px; width: 10px; height: 10px; border-radius: 50%; background: var(--ok); border: 2px solid #fcfcfd; }
+    .t-uno { background: linear-gradient(135deg, #7474f2, #4343c9); }
+    .t-files { background: linear-gradient(135deg, #3aa0f5, #1b7fe0); }
+    .t-term { background: linear-gradient(135deg, #3b3b44, #18181b); }
+    .t-store { background: linear-gradient(135deg, #c152f0, #9a2fd8); }
+    .t-site { background: linear-gradient(135deg, #2fb98a, #16926a); }
+    .cloud { display: flex; align-items: center; gap: 12px; margin-top: 16px; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; }
+    .cloud .ci { width: 32px; height: 32px; border-radius: 9px; background: #e8f3fd; color: #1b7fe0; display: grid; place-items: center; flex: none; }
+    .cloud b { font-weight: 600; }
+    .cloud .bar { flex: 1; max-width: 260px; }
+    .cloud .go { margin-left: auto; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+
+    /* Two ways */
+    .used { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; padding: 28px 0 0; font-size: 13.5px; color: var(--ink-3); }
+    .used ul { display: flex; gap: 28px; list-style: none; flex-wrap: wrap; }
+    .used li { display: inline-flex; align-items: center; gap: 9px; font-weight: 600; color: var(--ink-2); font-size: 14.5px; }
+    .used img { height: 24px; width: auto; border-radius: 6px; }
+    .ways { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--ink); margin-top: 40px; }
+    .way { padding: 30px 40px 6px 0; display: grid; grid-template-rows: auto auto 1fr; gap: 8px; }
+    .way + .way { padding-left: 40px; padding-right: 0; border-left: 1px solid var(--line); }
+    .way h3 { font-size: 24px; font-weight: 700; letter-spacing: -.028em; line-height: 1.15; }
+    .way p { color: var(--ink-2); font-size: 16px; max-width: 42ch; }
+    .way-vis { margin-top: 18px; align-self: end; }
+    .dock { display: flex; gap: 14px; flex-wrap: wrap; }
+    .dock .prog { width: 64px; }
+    .mini-chat { display: grid; gap: 8px; max-width: 420px; }
+    .mc-me { justify-self: end; background: var(--violet); color: #fff; border-radius: 14px 14px 4px 14px; padding: 8px 12px; font-size: 14px; max-width: 86%; }
+    .mc-ai { display: flex; gap: 9px; align-items: flex-start; font-size: 14px; color: var(--ink); }
+    .mc-ai .av { width: 24px; height: 24px; border-radius: 7px; background: linear-gradient(135deg, #7474f2, #4343c9); color: #fff; display: grid; place-items: center; flex: none; }
+    .mc-ai .av .i { width: 13px; height: 13px; }
+    .mc-ai span { background: #fff; border: 1px solid var(--line); border-radius: 4px 14px 14px 14px; padding: 8px 12px; }
+
+    .section { padding: 112px 0; }
+    .section.alt { background: var(--bg); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .head { max-width: 760px; margin-bottom: 44px; }
+    h2.title { font-size: clamp(32px, 4.2vw, 52px); font-weight: 720; letter-spacing: -.035em; line-height: 1.04; text-wrap: balance; }
+    .lead { margin-top: 14px; font-size: 18px; color: var(--ink-2); max-width: 60ch; }
+
+    /* How it works: steps */
+    .steps { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 48px; align-items: start; }
+    .step-list { list-style: none; display: grid; border-top: 1px solid var(--ink); }
+    .step-tab { width: 100%; text-align: left; display: grid; grid-template-columns: 30px 1fr; gap: 2px 12px; padding: 16px 10px 16px 0; border-bottom: 1px solid var(--line); position: relative; transition: color .2s; }
+    .step-tab .n { grid-row: span 2; width: 26px; height: 26px; border-radius: 50%; border: 1.5px solid var(--line-2); display: grid; place-items: center; font-size: 12.5px; font-weight: 650; color: var(--ink-3); font-variant-numeric: tabular-nums; transition: background .25s, border-color .25s, color .25s; }
+    .step-tab b { font-size: 16px; font-weight: 640; letter-spacing: -.012em; color: var(--ink-2); transition: color .2s; }
+    .step-tab small { font-size: 14px; color: var(--ink-3); line-height: 1.45; }
+    .step-tab:hover b { color: var(--ink); }
+    .step-tab[aria-selected="true"] b { color: var(--ink); }
+    .step-tab[aria-selected="true"] .n { background: var(--violet); border-color: var(--violet); color: #fff; }
+    .step-tab[aria-selected="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--violet); }
+    .step-tab:focus-visible { outline-offset: -2px; }
+    .stage { position: relative; }
+    .panel > .win { min-height: 480px; }
+    .panel { display: none; }
+    .panel.is-active { display: block; animation: reveal .6s var(--ease) both; }
+    @keyframes reveal { from { opacity: 0; filter: blur(6px); transform: translateY(10px); } to { opacity: 1; filter: blur(0); transform: none; } }
+    .panel-head { display: none; }
+    .stage-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; font-size: 14px; color: var(--ink-3); }
+    .stage-nav .btns { display: flex; gap: 8px; }
+    .icon-btn { width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--line-2); background: #fff; display: grid; place-items: center; color: var(--ink); transition: border-color .15s, color .15s; }
+    .icon-btn:hover { border-color: var(--violet); color: var(--violet-ink); }
+    .icon-btn:disabled { opacity: .4; cursor: default; border-color: var(--line-2); color: var(--ink); }
+    .icon-btn .i { width: 16px; height: 16px; stroke-width: 2; }
+
+    /* Step mock layout */
+    .mock { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 440px; font-size: 13.5px; }
+    .mside { border-right: 1px solid var(--line); padding: 14px 10px; background: #fff; display: grid; align-content: start; gap: 2px; }
+    .mside .lbl { padding-top: 4px; }
+    .proj { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 8px; color: var(--ink-2); font-weight: 500; white-space: nowrap; }
+    .proj .i { width: 15px; height: 15px; }
+    .proj.act { background: var(--tint); color: var(--violet-ink); font-weight: 600; }
+    .proj.new { color: var(--violet-ink); }
+    .mmain { background: #fcfcfd; padding: 22px 26px; min-width: 0; }
+    .mh { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+    .mh h4 { font-size: 17px; font-weight: 650; letter-spacing: -.02em; }
+    .mh .r { margin-left: auto; }
+    .mh .crumb { font-size: 12.5px; color: var(--ink-3); }
+    .field { display: grid; gap: 6px; margin-bottom: 14px; }
+    .field > span { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+    .input { border: 1px solid var(--line-2); background: #fff; border-radius: 9px; padding: 9px 12px; font-size: 14px; display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .input.focus { border-color: var(--violet); box-shadow: 0 0 0 3px rgba(91,91,232,.14); }
+    .caret { width: 1.5px; height: 16px; background: var(--violet); animation: blink 1.1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    .popts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .popt { border: 1px solid var(--line-2); background: #fff; border-radius: 10px; padding: 10px 12px; display: grid; gap: 2px; font-size: 13px; }
+    .popt b { font-weight: 600; display: flex; align-items: center; gap: 7px; }
+    .popt b .i { width: 15px; height: 15px; color: var(--ink-2); }
+    .popt small { color: var(--ink-3); font-size: 12px; }
+    .popt.sel { border-color: var(--violet); background: #f7f7fe; box-shadow: 0 0 0 3px rgba(91,91,232,.1); }
+    .popt.sel b .i { color: var(--violet); }
+    .mfoot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+    .editor { background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+    .ed-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); background: #f7f7fa; padding: 0 8px; }
+    .ed-tabs span { font-family: var(--mono); font-size: 12px; color: var(--ink-3); padding: 8px 10px; }
+    .ed-tabs span.act { color: var(--ink); background: #fff; border: 1px solid var(--line); border-bottom-color: #fff; border-radius: 7px 7px 0 0; margin-bottom: -1px; }
+    .code { font-family: var(--mono); font-size: 12.5px; line-height: 1.75; padding: 12px 0; counter-reset: ln; }
+    .code div { display: grid; grid-template-columns: 34px 1fr; padding-right: 14px; }
+    .code div::before { counter-increment: ln; content: counter(ln); text-align: right; padding-right: 12px; color: #b5b5c2; }
+    .code .h { color: var(--violet-ink); font-weight: 500; }
+    .code .m { color: var(--ink-3); }
+    .note { margin-top: 12px; font-size: 12.5px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; }
+    .note .i { width: 15px; height: 15px; color: var(--violet); }
+    .rows { background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+    .rowx { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
+    .rowx + .rowx { border-top: 1px solid #efeff3; }
+    .rowx .lg { width: 32px; height: 32px; border-radius: 9px; border: 1px solid var(--line); background: #fff; display: grid; place-items: center; flex: none; }
+    .rowx .lg svg { width: 20px; height: 20px; }
+    .rowx .lg.sk { background: var(--tint); border-color: var(--vline); color: var(--violet-ink); }
+    .rowx .lg.sk .i { width: 16px; height: 16px; }
+    .rowx .tx { min-width: 0; }
+    .rowx .tx b { display: block; font-weight: 600; font-size: 13.5px; }
+    .rowx .tx small { display: block; color: var(--ink-3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rowx .r { margin-left: auto; flex: none; }
+    .pill-soon { font-size: 11px; font-weight: 600; color: var(--violet-ink); background: var(--tint); border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
+    .state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--ok); }
+    .tgl { width: 30px; height: 18px; border-radius: 999px; background: var(--violet); position: relative; flex: none; display: block; }
+    .tgl::after { content: ""; position: absolute; right: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+    .tgl.off { background: #d6d6df; }
+    .tgl.off::after { right: auto; left: 2px; }
+    .tgl.lock { background: #a9a9f3; }
+    .soon { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 14px; border: 1px dashed var(--line-2); border-radius: 10px; font-size: 12.5px; color: var(--ink-3); }
+    .soon .i { width: 15px; height: 15px; }
+    .soon em { font-style: normal; margin-left: auto; font-size: 11px; font-weight: 600; color: var(--violet-ink); background: var(--tint); border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
+    .msgs { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: center; min-height: 480px; padding: 28px; background: var(--tint); border: 1px solid var(--vline); border-radius: 14px; }
+    .phone { background: #e9eff5; border-radius: 22px; padding: 12px; border: 6px solid var(--ink); }
+    .phone .who { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 12.5px; margin-bottom: 10px; }
+    .phone .who img { width: 22px; height: 22px; border-radius: 7px; }
+    .phone .who small { display: block; font-weight: 400; color: var(--ink-3); font-size: 10.5px; }
+    .phone .me { margin: 0 0 8px auto; width: fit-content; max-width: 84%; background: #d9f2c3; border-radius: 10px 10px 3px 10px; padding: 6px 10px; font-size: 12.5px; }
+    .phone .it { width: fit-content; max-width: 88%; background: #fff; border-radius: 10px 10px 10px 3px; padding: 6px 10px; font-size: 12.5px; box-shadow: 0 1px 1px rgba(0,0,0,.06); }
+    .phone .it + .me { margin-top: 8px; }
+    .phone .att { display: flex; align-items: center; gap: 7px; margin-top: 6px; padding: 6px 8px; background: #f3f6f9; border-radius: 8px; font-size: 11.5px; }
+    .slack { background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 12.5px; align-self: start; }
+    .slack .sh { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); font-weight: 650; }
+    .slack .sh svg { width: 16px; height: 16px; }
+    .sm { display: grid; grid-template-columns: 28px 1fr; gap: 9px; padding: 10px 12px; }
+    .sm .a { width: 28px; height: 28px; border-radius: 7px; background: #e6d7f0; color: #5a2a7a; display: grid; place-items: center; font-weight: 700; font-size: 12px; }
+    .sm .a.bot { background: none; }
+    .sm .a.bot img { width: 28px; height: 28px; border-radius: 7px; }
+    .sm b { font-weight: 650; }
+    .sm b small { font-weight: 400; color: var(--ink-3); margin-left: 5px; font-size: 11px; }
+    .sm p { color: var(--ink); margin-top: 1px; }
+    .sm .tag { color: #1264a3; background: #e8f3fb; border-radius: 3px; padding: 0 3px; }
+    .drop { border: 1.5px dashed #b9b9e8; background: #f7f7fe; border-radius: 12px; padding: 16px; display: flex; align-items: center; gap: 12px; color: var(--violet-ink); font-weight: 600; font-size: 14px; }
+    .drop .i { width: 22px; height: 22px; }
+    .drop small { display: block; font-weight: 400; color: var(--ink-3); font-size: 12px; }
+    .up { margin-top: 12px; }
+    .upbar { width: 90px; height: 5px; border-radius: 5px; background: #ececf2; position: relative; overflow: hidden; display: block; }
+    .upbar::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--v); background: var(--violet); }
+    .doc { width: 24px; height: 28px; border-radius: 4px; display: grid; place-items: center; font-size: 9.5px; font-weight: 800; color: #fff; flex: none; }
+    .doc.w { background: #2b6cd8; } .doc.x { background: #1f8f4e; } .doc.p { background: #d4572a; } .doc.f { background: #c23a3a; } .doc.z { background: #6b6b74; }
+
+    /* Outcome: a computer that can do anything */
+    .outcome { margin-top: 88px; padding-top: 40px; border-top: 1px solid var(--line); }
+    .outcome h3 { font-size: clamp(26px, 3vw, 36px); font-weight: 720; letter-spacing: -.03em; line-height: 1.1; max-width: 22ch; text-wrap: balance; }
+    .asks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; margin-top: 32px; }
+    .ask { display: flex; flex-direction: column; min-width: 0; }
+    .req { align-self: flex-start; max-width: 92%; background: var(--violet); color: #fff; font-size: 14.5px; line-height: 1.45; padding: 10px 14px; border-radius: 16px 16px 16px 5px; box-shadow: 0 8px 20px -12px rgba(58,58,184,.7); }
+    .conn { height: 22px; margin-left: 22px; border-left: 1px dashed #b7b7cc; }
+    .res { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font-size: 13px; box-shadow: 0 1px 2px rgba(24,24,27,.04), 0 16px 30px -24px rgba(24,24,27,.35); }
+    .res-h { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+    .res-h .ok { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ok); font-weight: 600; }
+    .res-h .ok .i { width: 13px; height: 13px; stroke-width: 2.4; }
+    .mini-site { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .mini-site .ms-bar { display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: #f6f6f9; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 11px; color: var(--ink-2); }
+    .mini-site .ms-body { padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px; background: linear-gradient(135deg, #fff7ee, #fff); }
+    .mini-site b { font-size: 15px; letter-spacing: -.01em; font-weight: 750; color: #6b3e12; }
+    .mini-site small { display: block; font-size: 11px; color: #8a6a4a; }
+    .mini-site .bk { font-size: 11px; font-weight: 600; background: #6b3e12; color: #fff; border-radius: 6px; padding: 4px 8px; white-space: nowrap; }
+    .tg { background: #eef3f8; border-radius: 10px; padding: 10px; }
+    .tg .msg { background: #fff; border-radius: 10px 10px 10px 3px; padding: 7px 10px; font-size: 12.5px; box-shadow: 0 1px 1px rgba(0,0,0,.06); }
+    .tg .msg b { display: block; color: #2a7ab8; font-size: 11.5px; }
+    .tg .msg time { display: block; text-align: right; font-size: 10px; color: var(--ink-3); }
+    .sheet { width: 100%; border-collapse: collapse; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+    .sheet th, .sheet td { border: 1px solid #e3eee7; padding: 3px 7px; text-align: left; }
+    .sheet th { background: #eef7f1; color: #1d6b3f; font-weight: 600; }
+    .sheet td:last-child, .sheet th:last-child { text-align: right; }
+    .chips { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 40px; }
+    .chips > span { font-size: 14px; color: var(--ink-3); margin-right: 6px; }
+    .chip { display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 500; padding: 8px 14px; border-radius: 999px; background: #fff; border: 1px solid var(--line-2); transition: border-color .15s, color .15s; }
+    .chip:hover { border-color: var(--violet); color: var(--violet-ink); }
+    .chip .i { width: 14px; height: 14px; color: var(--violet); }
+
+    /* Pick your AI */
+    .ai-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 64px; align-items: center; }
+    .ai-points { display: grid; border-top: 1px solid var(--ink); }
+    .ai-point { padding: 22px 0; border-bottom: 1px solid var(--line); }
+    .ai-point h3 { font-size: 19px; font-weight: 680; letter-spacing: -.02em; }
+    .ai-point p { margin-top: 4px; color: var(--ink-2); font-size: 15.5px; max-width: 46ch; }
+    .names { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .names span { font-size: 12.5px; font-weight: 600; border: 1px solid var(--line-2); border-radius: 6px; padding: 2px 9px; background: #fff; }
+    .picker { background: #fff; border: 1px solid var(--line-2); border-radius: 16px; padding: 22px; box-shadow: 0 2px 6px rgba(24,24,27,.05), 0 40px 80px -44px rgba(58,58,184,.45); }
+    .picker h4 { font-size: 18px; font-weight: 680; letter-spacing: -.02em; }
+    .picker > p { font-size: 13.5px; color: var(--ink-2); margin-top: 3px; }
+    .choices { display: grid; gap: 10px; margin-top: 16px; }
+    .choice { display: grid; grid-template-columns: 20px 1fr; gap: 12px; padding: 14px 16px; border: 1px solid var(--line-2); border-radius: 12px; cursor: pointer; transition: border-color .2s, background .2s, box-shadow .2s; }
+    .choice:hover { border-color: #b9b9e8; }
+    .choice input { appearance: none; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid #b5b5c2; margin-top: 2px; display: grid; place-items: center; cursor: pointer; }
+    .choice input:checked { border-color: var(--violet); }
+    .choice input:checked::after { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--violet); }
+    .choice input:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+    .choice:has(input:checked) { border-color: var(--violet); background: #f8f8fe; box-shadow: 0 0 0 3px rgba(91,91,232,.1); }
+    .choice b { font-weight: 650; font-size: 15px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .choice b em { font-style: normal; font-size: 11px; font-weight: 600; color: var(--violet-ink); background: var(--tint); border-radius: 999px; padding: 1px 8px; }
+    .choice small { display: block; color: var(--ink-2); font-size: 13px; margin-top: 2px; }
+    .subs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .subs span { font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 1px 8px; color: var(--ink-2); background: #fff; }
+    .picker .go { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 18px; font-size: 12.5px; color: var(--ink-3); }
+    .picker .go .ub { font-size: 13.5px; padding: 8px 14px; }
+
+    /* App Store shelf */
+    .store-facts { display: flex; flex-wrap: wrap; gap: 10px 28px; margin-top: 18px; font-size: 14.5px; color: var(--ink); font-weight: 500; }
+    .store-facts span { display: inline-flex; align-items: center; gap: 8px; }
+    .store-facts .i { width: 16px; height: 16px; color: var(--violet); stroke-width: 2.1; }
+    .shelf { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); list-style: none; }
+    .appl { position: relative; text-align: center; padding: 26px 4px 18px; border-bottom: 1px solid var(--line-2); }
+    .appl .tile { width: 64px; height: 64px; margin: 0 auto; border-radius: 16px; background: #fff; border: 1px solid var(--line); display: grid; place-items: center; box-shadow: 0 1px 2px rgba(24,24,27,.05), 0 10px 22px -14px rgba(24,24,27,.35); transition: transform .35s var(--ease), box-shadow .35s var(--ease); }
+    .appl img { width: 40px; height: 40px; object-fit: contain; display: block; }
+    .appl span { display: block; margin-top: 10px; font-size: 12px; font-weight: 500; color: var(--ink-2); line-height: 1.3; }
+    .appl:hover .tile { transform: translateY(-3px); box-shadow: 0 1px 2px rgba(24,24,27,.05), 0 16px 28px -14px rgba(58,58,184,.45); }
+    .appl:hover span { color: var(--ink); }
+    .appl .by { display: block; margin-top: 2px; font-size: 10.5px; color: var(--violet-ink); font-weight: 600; font-style: normal; }
+    .store-foot { margin-top: 22px; font-size: 14px; color: var(--ink-3); }
+
+    /* Feature spec rows */
+    .frows { border-top: 1px solid var(--ink); }
+    .frow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 56px; align-items: center; padding: 40px 0; border-bottom: 1px solid var(--line); }
+    .frow h3 { font-size: 22px; font-weight: 680; letter-spacing: -.025em; line-height: 1.2; }
+    .frow p { margin-top: 8px; font-size: 15.5px; color: var(--ink-2); max-width: 44ch; }
+    .crop { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 16px; font-size: 13px; box-shadow: 0 1px 2px rgba(24,24,27,.04), 0 24px 50px -34px rgba(58,58,184,.45); min-width: 0; }
+    .crop-list { display: grid; }
+    .crow { display: flex; align-items: center; gap: 10px; padding: 9px 8px; border-radius: 8px; min-width: 0; }
+    .crow + .crow { border-top: 1px solid #f0f0f4; }
+    .crow.sel { background: #f3f3fd; border-top-color: transparent; }
+    .crow .i { width: 16px; height: 16px; color: var(--ink-2); }
+    .crow b { font-weight: 600; }
+    .crow small { color: var(--ink-3); font-size: 11.5px; display: block; }
+    .crow .r { margin-left: auto; font-size: 12px; color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .sleep { width: 7px; height: 7px; border-radius: 50%; background: #c2c2d0; }
+    .share { margin-top: 12px; border: 1px solid var(--vline); background: #fbfbff; border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .share .lnk { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .seg2 { display: inline-flex; background: #f1f1f5; border-radius: 7px; padding: 2px; font-size: 11.5px; }
+    .seg2 span { padding: 2px 8px; border-radius: 5px; color: var(--ink-2); }
+    .seg2 span.act { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(24,24,27,.08); }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .stat { border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; font-size: 11.5px; color: var(--ink-2); display: flex; flex-direction: column; gap: 2px; }
+    .stat b { font-size: 16px; color: var(--ink); font-variant-numeric: tabular-nums; }
+    .stat.sel { background: #f3f3fd; border-color: #c9c9f6; }
+    .proc { display: grid; grid-template-columns: 1fr 90px 44px; align-items: center; gap: 12px; padding: 9px 4px; border-top: 1px solid #f0f0f4; font-variant-numeric: tabular-nums; font-size: 12.5px; }
+    .proc small { display: block; color: var(--ink-3); font-size: 11px; }
+    .proc i { display: block; height: 5px; border-radius: 5px; background: #ececf2; position: relative; overflow: hidden; }
+    .proc i::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--v); background: var(--violet); }
+    .proc span:last-child { text-align: right; }
+    .journal { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); display: grid; gap: 6px; font-size: 12px; }
+    .journal div { display: flex; gap: 10px; align-items: center; }
+    .journal time { color: var(--ink-3); font-variant-numeric: tabular-nums; width: 70px; flex: none; }
+
+    /* Pricing ladder */
+    .price-grid { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 64px; align-items: start; }
+    .price-grid .lead { font-size: 17px; }
+    .price-links { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 26px; }
+    .ladder { list-style: none; border-top: 1px solid var(--ink); }
+    .rung { display: grid; grid-template-columns: 76px 64px minmax(0, 1fr) minmax(0, 1.1fr) 104px; gap: 16px; align-items: center; min-height: 84px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+    .rung .art { display: grid; place-items: center; height: 76px; }
+    .rung .art img { display: block; height: auto; }
+    .rung .nm { font-weight: 700; font-size: 16px; letter-spacing: -.01em; }
+    .rung .cp { font-weight: 600; font-size: 14.5px; font-variant-numeric: tabular-nums; }
+    .rung .cp small, .rung .wk small { display: block; font-weight: 400; font-size: 12px; color: var(--ink-3); }
+    .rung .wk { font-size: 14px; color: var(--ink-2); font-weight: 500; }
+    .rung .wk.cloudy { color: var(--violet-ink); font-weight: 600; display: flex; align-items: center; gap: 7px; }
+    .rung .wk.cloudy::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--violet); flex: none; }
+    .rung .pr { text-align: right; font-variant-numeric: tabular-nums; }
+    .rung .pr b { font-size: 19px; font-weight: 720; letter-spacing: -.02em; }
+    .rung .pr b span { font-size: 12.5px; font-weight: 500; color: var(--ink-3); letter-spacing: 0; }
+    .rung .pr small { display: block; font-size: 11.5px; color: var(--ink-3); }
+    .rung.rec { background: linear-gradient(90deg, var(--tint), rgba(240,240,252,0)); }
+    .rung .badge { display: inline-block; margin-left: 6px; vertical-align: 2px; font-size: 10.5px; font-weight: 650; color: var(--violet-ink); background: #fff; border: 1px solid var(--vline); border-radius: 999px; padding: 0 7px; }
+    .ladder-foot { margin-top: 14px; font-size: 13px; color: var(--ink-3); }
+
+    .final { background: var(--band); color: #fff; padding: 104px 0 110px; }
+    .final h2 { font-size: clamp(38px, 5.4vw, 68px); font-weight: 720; letter-spacing: -.04em; line-height: 1.02; max-width: 16ch; text-wrap: balance; }
+    .final p { margin-top: 18px; font-size: 18px; color: #e3e3fb; max-width: 48ch; }
+    .final .row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 30px; }
+    .btn-white { background: #fff; color: var(--violet-ink); border: 1px solid #fff; box-shadow: 0 10px 30px -12px rgba(16,16,70,.6); }
+    .btn-white:hover { background: #f4f4ff; transform: translateY(-1px); }
+    .btn-line { color: #fff; border: 1px solid rgba(255,255,255,.55); }
+    .btn-line:hover { border-color: #fff; }
+    .final ::selection { background: #fff; color: var(--violet-ink); }
+    .final :focus-visible { outline-color: #fff; }
+
+    footer { padding: 48px 0 36px; border-top: 1px solid var(--line); }
+    .foot { display: flex; justify-content: space-between; align-items: flex-start; gap: 32px; flex-wrap: wrap; }
+    .foot nav { display: flex; gap: 26px; flex-wrap: wrap; font-size: 14px; color: var(--ink-2); }
+    .foot nav a:hover { color: var(--violet-ink); }
+    .foot .legal { font-size: 12.5px; color: var(--ink-3); margin-top: 10px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .live, .caret { animation: none; }
+      html { scroll-behavior: auto; }
+      .panel.is-active { animation: none; }
+      .appl .tile, .btn { transition: none; }
+    }
+
+    @media (max-width: 1080px) {
+      .shelf { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+      .progs { grid-template-columns: repeat(4, 1fr); row-gap: 14px; }
+      .app { height: auto; }
+      .steps { grid-template-columns: 280px minmax(0, 1fr); gap: 32px; }
+      .mock { grid-template-columns: minmax(0, 1fr); }
+      .mside { display: none; }
+      .price-grid { grid-template-columns: 1fr; gap: 32px; }
+      .ai-grid { gap: 40px; }
+    }
+    @media (max-width: 880px) {
+      .nav-link.opt { display: none; }
+      .hero-grid { grid-template-columns: 1fr; gap: 20px; }
+      .app { grid-template-columns: 1fr; }
+      .side { display: none; }
+      .pane { padding: 16px; }
+      .card-head { flex-wrap: wrap; }
+      .cacts { margin-left: 0; width: 100%; }
+      .bars { grid-template-columns: 1fr; gap: 10px; }
+      .ways { grid-template-columns: 1fr; }
+      .way, .way + .way { padding: 26px 0 8px; border-left: 0; }
+      .way + .way { border-top: 1px solid var(--line); margin-top: 20px; }
+      /* Steps: stacked, every step visible */
+      .steps { grid-template-columns: 1fr; gap: 0; }
+      .step-list, .stage-nav { display: none; }
+      .stage { min-height: 0; display: grid; gap: 44px; }
+      .panel, .panel.is-active { display: block; animation: none; }
+      .panel-head { display: grid; grid-template-columns: 30px 1fr; gap: 2px 12px; margin-bottom: 16px; }
+      .panel-head .n { grid-row: span 2; width: 26px; height: 26px; border-radius: 50%; background: var(--violet); color: #fff; display: grid; place-items: center; font-size: 12.5px; font-weight: 650; }
+      .panel-head h3 { font-size: 18px; font-weight: 680; letter-spacing: -.015em; line-height: 1.3; }
+      .panel-head p { font-size: 14.5px; color: var(--ink-2); }
+      .asks { grid-template-columns: 1fr; gap: 28px; }
+      .mock, .panel > .win { min-height: 0; }
+      .msgs { min-height: 0; padding: 16px; }
+      .ai-grid { grid-template-columns: 1fr; }
+      .frow { grid-template-columns: 1fr; gap: 22px; padding: 32px 0; }
+    }
+    @media (max-width: 560px) {
+      .wrap { padding: 0 20px; }
+      .nav-right { gap: 16px; }
+      .hero { padding-top: 40px; }
+      .hero-lede { font-size: 17px; }
+      .hero-cta .btn { flex: 1 1 auto; justify-content: center; }
+      .win-bar { grid-template-columns: 40px 1fr 10px; }
+      .dots i:nth-child(n+2) { display: none; }
+      .caddr { font-size: 10.5px; word-break: break-all; }
+      .card-ico { display: none; }
+      .cloud .bar { display: none; }
+      .cloud { flex-wrap: wrap; }
+      .card-foot { flex-wrap: wrap; }
+      .shelf { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .appl { padding: 20px 2px 14px; }
+      .appl .tile { width: 56px; height: 56px; border-radius: 14px; }
+      .appl img { width: 34px; height: 34px; }
+      .section { padding: 80px 0; }
+      .mmain { padding: 16px; }
+      .popts { grid-template-columns: 1fr; }
+      .msgs { grid-template-columns: 1fr; }
+      .dock { gap: 6px; }
+      .dock .prog { width: 58px; }
+      .code { font-size: 11.5px; }
+      .code div { grid-template-columns: 26px 1fr; padding-right: 10px; }
+      .rowx { padding: 11px 12px; gap: 10px; }
+      .stats { grid-template-columns: 1fr 1fr 1fr; }
+      .stat b { font-size: 14px; }
+      .proc { grid-template-columns: 1fr 60px 38px; }
+      .rung { grid-template-columns: 56px minmax(0, 1fr) auto; grid-template-areas: "art nm pr" "art cp pr" "art wk pr"; gap: 0 14px; padding: 14px 0; }
+      .rung .art { grid-area: art; height: 60px; }
+      .rung .art img { transform: scale(.78); }
+      .rung .nm { grid-area: nm; }
+      .rung .cp { grid-area: cp; font-size: 13.5px; }
+      .rung .cp small { display: none; }
+      .rung .wk { grid-area: wk; font-size: 13px; }
+      .rung .wk small { display: none; }
+      .rung .pr { grid-area: pr; }
+      .picker { padding: 18px; }
+      .picker .go { flex-direction: column; align-items: stretch; }
+      .picker .go .ub { justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+<!--
+  DIRECTION CONTRACT — uno4.work, 2026-09-24 (built on yesterday's "product" variant)
+  THESIS: Uno Work is where you work with AI on your own computer; set a project up once, then just ask.
+  OWN-WORLD: Uno violet on white paper, hairline ruled rows, crisp HTML/CSS replicas of the real Uno Work UI,
+  real App Store logos, the kit's isometric computers for the ladder. Inter; JetBrains Mono only for files/addresses/code.
+  STORY: Home replica -> a computer, or a computer with AI -> six setup steps (project, AGENTS.md, skills,
+  connectors, Telegram/Slack, upload) -> "a computer that can do anything" -> pick your AI -> App Store ->
+  everything else on the screen -> app free, cloud computer from Plus (icon ladder) -> violet band.
+  FIRST VIEWPORT: H1 "Work with AI on your own computer." + Log in / Download, then a sharp Uno Work Home.
+  FORM: left-aligned, one step stage with a single blur-reveal as the authored motion moment.
+-->
+<a class="skip" href="#main">Skip to content</a>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v12M6 11l6 6 6-6M5 20h14"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M6 9l6-6 6 6M5 20h14"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></symbol>
+    <symbol id="i-updown" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 9.5 9-7 9 7V20a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 22V12h6v10"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7.5"/><path d="m21 21-4.5-4.5"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><path d="M12 2v10"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 3v4M17 5h4"/></symbol>
+    <symbol id="i-term" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6M12 19h8"/></symbol>
+    <symbol id="i-bag" viewBox="0 0 24 24"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="M2.5 12h19M12 2.5a14.5 14.5 0 0 1 0 19M12 2.5a14.5 14.5 0 0 0 0 19"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6"/></symbol>
+    <symbol id="i-window" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="16" rx="2.5"/><path d="M2.5 9h19"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0Z"/><path d="M12 17v5"/></symbol>
+    <symbol id="i-store" viewBox="0 0 24 24"><path d="M3 9 4.5 4h15L21 9"/><path d="M3 9h18v2a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0Z"/><path d="M5 13.5V20h14v-6.5"/></symbol>
+    <!-- Brand marks. Google Drive and Slack: official multicolor marks (gilbarbara/logos via @iconify-json/logos 1.2.14). -->
+    <linearGradient id="gd-a" x1="86.924%" x2="7.63%" y1="94.294%" y2="45.952%"><stop offset="9%" stop-color="#ffe921"/><stop offset="100%" stop-color="#fec700"/></linearGradient>
+    <linearGradient id="gd-b" x1="99.538%" x2="23.437%" y1="93.901%" y2="54.033%"><stop offset="15%" stop-color="#a9a8ff"/><stop offset="33%" stop-color="#6d97ff"/><stop offset="48%" stop-color="#3186ff"/></linearGradient>
+    <linearGradient id="gd-c" x1="87.128%" x2="-.639%" y1="51.518%" y2="93.078%"><stop offset="55%" stop-color="#0ebc5f"/><stop offset="85%" stop-color="#78c9ff"/></linearGradient>
+    <mask id="gd-m" fill="#fff"><path d="M77.303 29.27c22.531-39.026 78.863-39.027 101.394 0l69.373 120.158c22.531 39.027-5.633 87.81-50.698 87.81H58.628c-45.065 0-73.23-48.783-50.698-87.81z"/></mask>
+    <symbol id="b-drive" viewBox="0 0 256 238"><g mask="url(#gd-m)"><path fill="url(#gd-a)" d="M341.719 295.937H200.166l-29.293-50.735l70.777-122.589z" transform="translate(-42.87 -58.67)"/><path fill="url(#gd-b)" d="m0 295.916l100.069-173.325v.003l-29.282 50.723h58.57l70.783 122.596l-200.138.001z" transform="translate(-42.87 -58.67)"/><path fill="url(#gd-c)" d="m170.881 0l70.781 122.6l-29.286 50.726H70.812z" transform="translate(-42.87 -58.67)"/></g></symbol>
+    <symbol id="b-github" viewBox="0 0 16 16"><path fill="#18181b" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    <symbol id="b-telegram" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#2aabee"/><path fill="#fff" d="M5.4 11.7 16.5 7.4c.5-.2 1 .1.8.9l-1.9 8.9c-.1.6-.5.8-1 .5l-2.8-2.1-1.4 1.3c-.2.2-.3.3-.6.3l.2-2.9 5.3-4.8c.2-.2 0-.3-.3-.1l-6.5 4.1-2.8-.9c-.6-.2-.6-.6.1-.9z"/></symbol>
+    <symbol id="b-slack" viewBox="0 0 256 256"><path fill="#e01e5a" d="M53.841 161.32c0 14.832-11.987 26.82-26.819 26.82S.203 176.152.203 161.32c0-14.831 11.987-26.818 26.82-26.818H53.84zm13.41 0c0-14.831 11.987-26.818 26.819-26.818s26.819 11.987 26.819 26.819v67.047c0 14.832-11.987 26.82-26.82 26.82c-14.83 0-26.818-11.988-26.818-26.82z"/><path fill="#36c5f0" d="M94.07 53.638c-14.832 0-26.82-11.987-26.82-26.819S79.239 0 94.07 0s26.819 11.987 26.819 26.819v26.82zm0 13.613c14.832 0 26.819 11.987 26.819 26.819s-11.987 26.819-26.82 26.819H26.82C11.987 120.889 0 108.902 0 94.069c0-14.83 11.987-26.818 26.819-26.818z"/><path fill="#2eb67d" d="M201.55 94.07c0-14.832 11.987-26.82 26.818-26.82s26.82 11.988 26.82 26.82s-11.988 26.819-26.82 26.819H201.55zm-13.41 0c0 14.832-11.988 26.819-26.82 26.819c-14.831 0-26.818-11.987-26.818-26.82V26.82C134.502 11.987 146.489 0 161.32 0s26.819 11.987 26.819 26.819z"/><path fill="#ecb22e" d="M161.32 201.55c14.832 0 26.82 11.987 26.82 26.818s-11.988 26.82-26.82 26.82c-14.831 0-26.818-11.988-26.818-26.82V201.55zm0-13.41c-14.831 0-26.818-11.988-26.818-26.82c0-14.831 11.987-26.818 26.819-26.818h67.25c14.832 0 26.82 11.987 26.82 26.819s-11.988 26.819-26.82 26.819z"/></symbol>
+  </defs>
+</svg>
+
+<nav class="nav" id="nav" aria-label="Main">
+  <div class="wrap nav-in">
+    <a href="/" class="brand" aria-label="Uno Work home"><img src="/assets/favicon.svg" alt="" width="26" height="26" /><span class="brand-text">Uno Work</span></a>
+    <div class="nav-right">
+      <a href="#how" class="nav-link opt">How it works</a>
+      <a href="#ai" class="nav-link opt">AI</a>
+      <a href="#apps" class="nav-link opt">Apps</a>
+      <a href="#pricing" class="nav-link opt">Pricing</a>
+      <a href="https://github.com/technoob228/uno-work/releases/latest" class="nav-link js-dl-nav">Download</a>
+      <a href="https://app.uno4.work/" class="nav-cta">Log in</a>
     </div>
-  </section>
-
-  <section class="social-proof">
-    <p class="social-eyebrow">Used by teams at</p>
-    <ul class="social-list">
-      <li class="social-item">
-        <span class="social-mark social-mark--logo">
-          <img src="/favicon.svg" alt="" aria-hidden="true" />
-        </span>
-        <span class="social-name">Uno</span>
-      </li>
-      <li class="social-item">
-        <span class="social-mark social-mark--logo social-mark--unlimited">
-          <img src="/logos/unlimited-ai.svg" alt="" aria-hidden="true" />
-        </span>
-        <span class="social-name">Unlimited&nbsp;AI</span>
-      </li>
-      <li class="social-item">
-        <span class="social-mark social-mark--logo">
-          <img src="/logos/ecorouter.svg" alt="" aria-hidden="true" />
-        </span>
-        <span class="social-name">EcoRouter</span>
-      </li>
-      <li class="social-item">
-        <span class="social-mark social-mark--logo social-mark--productera">
-          <img src="/logos/productera-mark.svg" alt="" aria-hidden="true" />
-        </span>
-        <span class="social-name">Productera</span>
-      </li>
-    </ul>
-  </section>
-
-  <div class="screenshot-wrap">
-    <img
-      src="/screenshots/hero.png"
-      alt="Uno Work — projects sidebar, chat in the center, file preview pane on the right"
-      class="screenshot"
-    />
   </div>
+</nav>
 
-  <section class="features">
-    <div class="features-head">
-      <span class="section-eyebrow">Everything in one workspace</span>
-      <h2 class="section-title">A workspace, not a chat box.</h2>
-      <p class="section-lead">
-        Pick a harness. Pick a model. Drop in any file. Run on your machine or on a server — Uno Work
-        handles the rest.
-      </p>
+<main id="main">
+<header class="hero">
+  <div class="wrap">
+    <div class="hero-grid">
+      <h1>Work with AI on <span>your own computer.</span></h1>
+      <div>
+        <p class="hero-lede"><b>Your own computer in the cloud, always online.</b> Your projects, files and apps live here, with an AI that does the work. Open it in the browser, on Mac or Windows, or from Telegram.</p>
+        <div class="hero-cta">
+          <a href="https://app.uno4.work/" class="btn btn-primary">Log in <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+          <a href="https://github.com/technoob228/uno-work/releases/latest" class="btn btn-ghost js-dl"><svg class="i" aria-hidden="true"><use href="#i-down"/></svg><span class="js-dl-label">Download for Mac</span></a>
+        </div>
+        <p class="hero-note">The app is free: on Mac, on PC and in the browser. Your own computer in the cloud comes with Plus: <a href="#pricing" class="u">see plans</a>.</p>
+      </div>
     </div>
 
-    <div class="features-grid">
-      <article class="feature-mini">
-        <div class="feature-mini-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-        </div>
-        <h3 class="feature-mini-title">Any harness</h3>
-        <p class="feature-mini-body">Claude Code, Codex, Cursor, Opencode — auto-detected. No re-auth.</p>
-      </article>
-
-      <article class="feature-mini">
-        <div class="feature-mini-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v18"/><path d="M3 12h18"/></svg>
-        </div>
-        <h3 class="feature-mini-title">Any model</h3>
-        <p class="feature-mini-body">300+ models via Uno LLM, or use the subscription you already pay for.</p>
-      </article>
-
-      <article class="feature-mini">
-        <div class="feature-mini-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
-        </div>
-        <h3 class="feature-mini-title">Preview anything</h3>
-        <p class="feature-mini-body">See PDFs, Excel, HTML, JSON, images, Markdown — right next to the chat.</p>
-      </article>
-
-      <article class="feature-mini">
-        <div class="feature-mini-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 20h8"/><path d="M12 18v2"/></svg>
-        </div>
-        <h3 class="feature-mini-title">Computer access</h3>
-        <p class="feature-mini-body">Files, scripts, deploys, terminal. Real work, not just suggestions.</p>
-      </article>
-
-      <article class="feature-mini">
-        <div class="feature-mini-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14.5 14.5 0 0 1 0 18"/><path d="M12 3a14.5 14.5 0 0 0 0 18"/></svg>
-        </div>
-        <h3 class="feature-mini-title">Internet access</h3>
-        <p class="feature-mini-body">Agents can fetch, browse, and integrate with anything online.</p>
-      </article>
-
-      <article class="feature-mini">
-        <div class="feature-mini-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 6v6c0 5 3.5 9.5 8 10 4.5-.5 8-5 8-10V6l-8-4z"/><path d="M9 12l2 2 4-4"/></svg>
-        </div>
-        <h3 class="feature-mini-title">Plugins &amp; skills</h3>
-        <p class="feature-mini-body">Extend the agent with your own commands, skills, and integrations.</p>
-      </article>
-
-      <article class="feature-mini">
-        <div class="feature-mini-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/><path d="M12 16v4"/><circle cx="7" cy="9" r="0.5" fill="currentColor"/><circle cx="7" cy="12" r="0.5" fill="currentColor"/></svg>
-        </div>
-        <h3 class="feature-mini-title">24/7 on a server</h3>
-        <p class="feature-mini-body">Run agents headless on a VPS so they keep working while you sleep.</p>
-      </article>
-
-      <article class="feature-mini">
-        <div class="feature-mini-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
-        </div>
-        <h3 class="feature-mini-title">You're in control</h3>
-        <p class="feature-mini-body">Approve actions per task or per session. Tighten or loosen any time.</p>
-      </article>
-    </div>
-  </section>
-
-  <section class="pricing">
-    <div class="section-head">
-      <span class="section-eyebrow">How to pay</span>
-      <h2 class="section-title">The app is free. You only pay for tokens.</h2>
-      <p class="section-lead">
-        Uno Work itself is free forever. Tokens go through whoever you want — keep using the AI subscription
-        you already have, or get them from us.
-      </p>
-    </div>
-
-    <div class="pricing-grid">
-      <article class="pricing-card">
-        <h3 class="pricing-title">The app</h3>
-        <p class="pricing-price">Free forever</p>
-        <ul class="pricing-list">
-          <li>macOS, Windows, Linux</li>
-          <li>No accounts required</li>
-          <li>Auto-updates</li>
-        </ul>
-        <a href={RELEASES_URL} class="pricing-cta">Download &rarr;</a>
-      </article>
-
-      <article class="pricing-card">
-        <h3 class="pricing-title">Bring your own</h3>
-        <p class="pricing-price">Your existing subscription</p>
-        <ul class="pricing-list">
-          <li>Claude Code, Codex, Cursor, Opencode</li>
-          <li>Auto-detected — no re-auth</li>
-          <li>Switch providers mid-thread</li>
-        </ul>
-        <a href="/download/" class="pricing-cta">Set it up &rarr;</a>
-      </article>
-
-      <article class="pricing-card pricing-card--featured">
-        <span class="pricing-badge">Recommended</span>
-        <h3 class="pricing-title">Uno LLM</h3>
-        <p class="pricing-price">Pay as you go</p>
-        <ul class="pricing-list">
-          <li>One key, 300+ models</li>
-          <li>OpenAI, Anthropic, Google, Mistral, Llama</li>
-          <li>One balance, no per-provider billing</li>
-        </ul>
-        <a href="https://console.uno4.dev/llm" target="_blank" rel="noopener noreferrer" class="pricing-cta pricing-cta--primary">Get a key &rarr;</a>
-      </article>
-    </div>
-  </section>
-
-  <section class="enterprise">
-    <div class="enterprise-inner">
-      <span class="section-eyebrow enterprise-eyebrow">For companies</span>
-      <h2 class="enterprise-title">Uno Works on your infrastructure.</h2>
-      <p class="enterprise-lead">
-        Self-hosted, controlled, audited. We deliver the whole stack — workspace, identity,
-        network, compute, models — and wire it into your systems.
-      </p>
-
-      <div class="enterprise-grid">
-        <div class="enterprise-item">
-          <h3 class="enterprise-item-title">Corporate identity (SSO)</h3>
-          <p class="enterprise-item-body">Sign in with your IdP. Per-user access control and full audit trail.</p>
-        </div>
-        <div class="enterprise-item">
-          <h3 class="enterprise-item-title">Self-hosted chats</h3>
-          <p class="enterprise-item-body">Chat history stays on your servers. Requests proxied through your systems.</p>
-        </div>
-        <div class="enterprise-item">
-          <h3 class="enterprise-item-title">Spend controls</h3>
-          <p class="enterprise-item-body">Per-user and per-team budgets. Full usage audit across models and providers.</p>
-        </div>
-        <div class="enterprise-item">
-          <h3 class="enterprise-item-title">Granular access</h3>
-          <p class="enterprise-item-body">Control who sees which data, which knowledge bases, and which models.</p>
-        </div>
-        <div class="enterprise-item">
-          <h3 class="enterprise-item-title">Dedicated workspaces</h3>
-          <p class="enterprise-item-body">Sandboxed dev environments per engineer — no setup on their laptops.</p>
-        </div>
-        <div class="enterprise-item">
-          <h3 class="enterprise-item-title">Private network</h3>
-          <p class="enterprise-item-body">Agents reach your internal services over VPN, not the public internet.</p>
-        </div>
-        <div class="enterprise-item">
-          <h3 class="enterprise-item-title">Dedicated compute</h3>
-          <p class="enterprise-item-body">CPU and GPU servers in our DC or yours — for inference, fine-tuning, self-hosted models.</p>
-        </div>
-        <div class="enterprise-item">
-          <h3 class="enterprise-item-title">LLM + your knowledge base</h3>
-          <p class="enterprise-item-body">Custom deployments connected to your internal docs, codebases, and data.</p>
-        </div>
-        <div class="enterprise-item">
-          <h3 class="enterprise-item-title">End-to-end rollout</h3>
-          <p class="enterprise-item-body">Onboarding, training, support. We help your team actually use it, not just install it.</p>
+    <div class="shot" role="img" aria-label="Uno Work Home: the computer's name, status and address, how busy its processor, memory and disk are, its programs and apps, and cloud storage">
+      <div class="win" aria-hidden="true">
+        <div class="win-bar"><div class="dots"><i></i><i></i><i></i></div><div class="url"><svg class="i"><use href="#i-lock"/></svg>app.uno4.work</div><div></div></div>
+        <div class="app">
+          <aside class="side">
+            <div class="side-brand"><img class="bm" src="/assets/favicon.svg" alt="" />Uno Work <span class="alpha">ALPHA</span></div>
+            <div class="machine"><span class="on live"></span><svg class="i" style="width:15px;height:15px;color:var(--ink-2)"><use href="#i-cloud"/></svg><span><b>my-computer</b><small>Cloud computer</small></span><span class="chev"><svg class="i"><use href="#i-updown"/></svg></span></div>
+            <div class="item act"><svg class="i"><use href="#i-home"/></svg>Home<span class="st"><span class="on"></span>On</span></div>
+            <div class="seg"><span class="act"><svg class="i"><use href="#i-chat"/></svg>Chats</span><span><svg class="i"><use href="#i-folder"/></svg>Files</span><span><svg class="i"><use href="#i-grid"/></svg>Apps</span></div>
+            <div class="item" style="color:var(--ink-2)"><svg class="i"><use href="#i-search"/></svg>Search</div>
+            <div class="lbl">Today</div>
+            <div class="chat run"><small>Bakery</small><span>Add a booking form to the site</span></div>
+            <div class="chat"><small>Bakery</small><span>Answer yesterday’s orders</span></div>
+            <div class="chat"><small>Home</small><span>Sort my receipts into a spreadsheet</span></div>
+            <div class="lbl">This week</div>
+            <div class="chat"><small>Home</small><span>Summary of Tuesday’s call</span></div>
+            <div class="chat"><small>Home</small><span>Set up a VPN for my phone</span></div>
+          </aside>
+          <div class="main">
+            <div class="topbar"><svg class="i"><use href="#i-monitor"/></svg>This computer</div>
+            <div class="pane">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-ico"><svg class="i"><use href="#i-monitor"/></svg></div>
+                  <div>
+                    <div class="cname">my-computer <span class="pill"><span class="on"></span>On</span></div>
+                    <div class="cmeta">4 GB memory · 4 cores · 40 GB working disk · awake for 2 hours</div>
+                    <div class="caddr">my-computer.app.uno4.dev</div>
+                  </div>
+                  <div class="cacts"><span class="ub"><svg class="i"><use href="#i-moon"/></svg>Sleep</span><span class="ub"><svg class="i"><use href="#i-power"/></svg>Turn off</span></div>
+                </div>
+                <div class="bars">
+                  <div class="bar"><div><span>Processor</span><span>12%</span></div><i style="--v:12%"></i></div>
+                  <div class="bar"><div><span>Memory</span><span>1.4 GB of 3.8 GB</span></div><i style="--v:37%"></i></div>
+                  <div class="bar"><div><span>Working disk</span><span>6.2 GB of 40 GB</span></div><i style="--v:16%"></i></div>
+                </div>
+                <div class="card-foot"><span>What’s using my computer?</span><span class="ub"><svg class="i"><use href="#i-spark"/></svg>Ask Uno to look</span></div>
+              </div>
+              <div class="sec">Programs <span class="ub"><svg class="i"><use href="#i-folder"/></svg>Start a chat in a folder…</span></div>
+              <div class="progs">
+                <div class="prog"><div class="t t-uno"><svg class="i"><use href="#i-spark"/></svg></div><b>Uno</b><small>New chat</small></div>
+                <div class="prog"><div class="t t-files"><svg class="i"><use href="#i-folder"/></svg></div><b>Files</b><small>Your folders</small></div>
+                <div class="prog"><div class="t t-term"><svg class="i"><use href="#i-term"/></svg></div><b>Terminal</b><small>Command line</small></div>
+                <div class="prog"><div class="t t-store"><svg class="i"><use href="#i-bag"/></svg></div><b>App Store</b><small>Add apps</small></div>
+                <div class="prog"><div class="t t-site run"><svg class="i"><use href="#i-globe"/></svg></div><b>Bakery site</b><small>On the internet</small></div>
+                <div class="prog"><div class="t img run"><img src="https://console.uno4.dev/api/v1/apps/icons/nextcloud.svg" alt="" /></div><b>Nextcloud</b><small>App Store</small></div>
+                <div class="prog"><div class="t img run"><img src="https://console.uno4.dev/api/v1/apps/icons/vaultwarden.svg" alt="" /></div><b>Vaultwarden</b><small>App Store</small></div>
+                <div class="prog"><div class="t img run"><img src="https://console.uno4.dev/api/v1/apps/icons/notetaker.svg" alt="" /></div><b>Notetaker</b><small>Made by Uno</small></div>
+              </div>
+              <div class="cloud"><span class="ci"><svg class="i"><use href="#i-cloud"/></svg></span><span><b>Cloud storage</b> <span style="color:var(--ink-3);font-size:12.5px">18 GB of 100 GB used</span></span><div class="bar"><i style="--v:18%"></i></div><span class="go">Open in Files ›</span></div>
+            </div>
+          </div>
         </div>
       </div>
+    </div>
+  </div>
+</header>
 
-      <div class="enterprise-cta">
-        <button type="button" class="enterprise-button" id="sales-open">
-          Talk to sales
-          <span aria-hidden="true">&rarr;</span>
-        </button>
-        <div class="enterprise-contacts">
-          <a href="https://t.me/get_uno_support" target="_blank" rel="noopener noreferrer" class="enterprise-link">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0Zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.231-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635Z"/></svg>
-            t.me/get_uno_support
-          </a>
-          <a href="mailto:michael@uno4.dev?subject=Uno%20Work%20for%20business" class="enterprise-link">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
-            michael@uno4.dev
-          </a>
+<!-- A computer, or a computer with AI -->
+<section class="section" style="padding-top:0;padding-bottom:96px" aria-labelledby="ways-t">
+  <div class="wrap">
+    <div class="used">
+      <span>Used by teams at</span>
+      <ul>
+        <li><img src="/assets/logos/unlimited-ai.svg" alt="" width="24" height="24" />Unlimited AI</li>
+        <li><img src="/assets/logos/ecorouter.svg" alt="" width="24" height="24" />EcoRouter</li>
+        <li><img src="/assets/logos/productera-mark.svg" alt="" width="40" height="24" style="border-radius:0" />Productera</li>
+      </ul>
+    </div>
+    <h2 class="sr" id="ways-t">Two ways to use it</h2>
+    <div class="ways">
+      <div class="way">
+        <h3>Use it as a computer.</h3>
+        <p>Files, Office and an App Store on your own computer in the cloud, always online. Apps and sites get their own address.</p>
+        <div class="way-vis dock" aria-hidden="true">
+          <div class="prog"><div class="t t-files"><svg class="i"><use href="#i-folder"/></svg></div><b>Files</b></div>
+          <div class="prog"><div class="t img"><span class="doc w">W</span></div><b>Office</b></div>
+          <div class="prog"><div class="t t-store"><svg class="i"><use href="#i-bag"/></svg></div><b>App Store</b></div>
+          <div class="prog"><div class="t img"><img src="https://console.uno4.dev/api/v1/apps/icons/immich.svg" alt="" loading="lazy" /></div><b>Immich</b></div>
+          <div class="prog"><div class="t t-site"><svg class="i"><use href="#i-globe"/></svg></div><b>Your site</b></div>
         </div>
       </div>
+      <div class="way">
+        <h3>Or work with AI on it.</h3>
+        <p>Give it a project and your materials. It does the work, even with your laptop closed.</p>
+        <div class="way-vis mini-chat" aria-hidden="true">
+          <div class="mc-me">Turn this week’s orders into an invoice for each client.</div>
+          <div class="mc-ai"><span class="av"><svg class="i"><use href="#i-spark"/></svg></span><span>Done: 6 invoices in <b>Bakery / invoices</b>. Send them?</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
-      <dialog id="sales-dialog" class="sales-dialog">
-        <button type="button" class="sales-dialog-close" id="sales-close" aria-label="Close">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-        </button>
+<!-- How it works -->
+<section class="section alt" id="how" aria-labelledby="how-t">
+  <div class="wrap">
+    <div class="head">
+      <h2 class="title" id="how-t">Set up a project once. Then just ask.</h2>
+    </div>
+    <div class="steps">
+      <div class="step-list" role="tablist" aria-label="Six steps" aria-orientation="vertical">
+        <button class="step-tab" role="tab" id="tab-1" aria-controls="step-1" aria-selected="true"><span class="n">1</span><b>Create a project</b><small>One place for one piece of work.</small></button>
+        <button class="step-tab" role="tab" id="tab-2" aria-controls="step-2" aria-selected="false" tabindex="-1"><span class="n">2</span><b>Tell the AI how you work</b><small>Write it once in AGENTS.md.</small></button>
+        <button class="step-tab" role="tab" id="tab-3" aria-controls="step-3" aria-selected="false" tabindex="-1"><span class="n">3</span><b>Add skills</b><small>Teach it the tasks you repeat.</small></button>
+        <button class="step-tab" role="tab" id="tab-4" aria-controls="step-4" aria-selected="false" tabindex="-1"><span class="n">4</span><b>Connect your tools</b><small>Google Drive, GitHub, any MCP server.</small></button>
+        <button class="step-tab" role="tab" id="tab-5" aria-controls="step-5" aria-selected="false" tabindex="-1"><span class="n">5</span><b>Add Telegram or Slack</b><small>Ask from your phone or your team chat.</small></button>
+        <button class="step-tab" role="tab" id="tab-6" aria-controls="step-6" aria-selected="false" tabindex="-1"><span class="n">6</span><b>Upload your work</b><small>Docs, sheets, photos. It reads them all.</small></button>
+      </div>
 
-        <div class="sales-dialog-inner">
-          <span class="sales-eyebrow">Talk to sales</span>
-          <h3 class="sales-title">Tell us about your team.</h3>
-          <p class="sales-sub">
-            We'll reply within one business day with a setup proposal — models, infra, access, rollout.
-          </p>
-
-          <form class="sales-form" id="sales-form">
-            <div class="sales-form-row">
-              <label>
-                <span class="label-text">Name</span>
-                <input type="text" name="name" required />
-              </label>
-              <label>
-                <span class="label-text">Work email</span>
-                <input type="email" name="email" required />
-              </label>
-            </div>
-
-            <div class="sales-form-row">
-              <label>
-                <span class="label-text">Company</span>
-                <input type="text" name="company" required />
-              </label>
-              <label>
-                <span class="label-text">Team size</span>
-                <select name="team_size" required>
-                  <option value="">Select…</option>
-                  <option>1-10</option>
-                  <option>11-50</option>
-                  <option>51-200</option>
-                  <option>200+</option>
-                </select>
-              </label>
-            </div>
-
-            <div class="sales-group">
-              <span class="label-text">What matters to you</span>
-              <div class="sales-checks">
-                <label class="check-item"><input type="checkbox" name="needs" value="Self-hosted in our perimeter" /><span>Self-hosted in our perimeter</span></label>
-                <label class="check-item"><input type="checkbox" name="needs" value="Custom / private models" /><span>Custom or private models</span></label>
-                <label class="check-item"><input type="checkbox" name="needs" value="SSO & granular access" /><span>SSO & granular access</span></label>
-                <label class="check-item"><input type="checkbox" name="needs" value="Integration with internal infra" /><span>Integration with internal infra (repos, DBs, CI, tickets)</span></label>
-                <label class="check-item"><input type="checkbox" name="needs" value="Sandboxed dev environments" /><span>Sandboxed dev environments per engineer</span></label>
-                <label class="check-item"><input type="checkbox" name="needs" value="Spend controls & audit" /><span>Spend controls & full audit</span></label>
+      <div class="stage">
+        <!-- 1 -->
+        <div class="panel is-active" role="tabpanel" id="step-1" aria-labelledby="tab-1">
+          <div class="panel-head"><span class="n">1</span><h3>Create a project</h3><p>One place for one piece of work.</p></div>
+          <div class="win" role="img" aria-label="New project form: name Bakery, start empty, from a folder or from GitHub">
+            <div class="win-bar" aria-hidden="true"><div class="dots"><i></i><i></i><i></i></div><div class="url"><svg class="i"><use href="#i-lock"/></svg>app.uno4.work</div><div></div></div>
+            <div class="mock" aria-hidden="true">
+              <div class="mside">
+                <div class="lbl">Projects</div>
+                <div class="proj"><svg class="i"><use href="#i-home"/></svg>Home</div>
+                <div class="proj"><svg class="i"><use href="#i-folder"/></svg>Taxes 2026</div>
+                <div class="proj act"><svg class="i"><use href="#i-folder"/></svg>Bakery</div>
+                <div class="proj new"><svg class="i"><use href="#i-plus"/></svg>New project</div>
+              </div>
+              <div class="mmain">
+                <div class="mh"><h4>New project</h4></div>
+                <div class="field"><span>Name</span><div class="input focus">Bakery<i class="caret"></i></div></div>
+                <div class="field"><span>Start with</span>
+                  <div class="popts">
+                    <div class="popt sel"><b><svg class="i"><use href="#i-plus"/></svg>Empty</b><small>A new folder</small></div>
+                    <div class="popt"><b><svg class="i"><use href="#i-folder"/></svg>A folder</b><small>From your files</small></div>
+                    <div class="popt"><b><svg viewBox="0 0 16 16" width="15" height="15"><use href="#b-github"/></svg>GitHub</b><small>Clone a repo</small></div>
+                  </div>
+                </div>
+                <div class="field"><span>Folder</span><div class="input mono" style="font-size:12.5px;color:var(--ink-2)">~/projects/bakery</div></div>
+                <div class="mfoot"><span class="ub">Cancel</span><span class="ub v">Create project</span></div>
               </div>
             </div>
-
-            <label>
-              <span class="label-text">What do you want to do with Uno Work?</span>
-              <textarea name="message" rows="4" required placeholder="Briefly — current stack, what you're trying to solve, timeline if any"></textarea>
-            </label>
-
-            <label>
-              <span class="label-text">Preferred contact <span class="label-hint">(optional)</span></span>
-              <input type="text" name="contact" placeholder="Telegram @, phone, or other" />
-            </label>
-
-            <button type="submit" class="sales-submit">Send</button>
-            <p class="sales-note" id="sales-status" aria-live="polite">
-              Sends your request to the Uno team. You can also write to
-              <a href="mailto:michael@uno4.dev?subject=Uno%20Work%20for%20business">michael@uno4.dev</a>.
-            </p>
-          </form>
+          </div>
         </div>
-      </dialog>
-    </div>
-  </section>
+        <!-- 2 -->
+        <div class="panel" role="tabpanel" id="step-2" aria-labelledby="tab-2">
+          <div class="panel-head"><span class="n">2</span><h3>Tell the AI how you work</h3><p>Write it once in AGENTS.md.</p></div>
+          <div class="win" role="img" aria-label="AGENTS.md for the Bakery project: who the AI works for, tone, where prices live, where to put finished files">
+            <div class="win-bar" aria-hidden="true"><div class="dots"><i></i><i></i><i></i></div><div class="url"><svg class="i"><use href="#i-lock"/></svg>app.uno4.work</div><div></div></div>
+            <div class="mock" aria-hidden="true">
+              <div class="mside">
+                <div class="lbl">Bakery</div>
+                <div class="proj"><svg class="i"><use href="#i-chat"/></svg>Chats</div>
+                <div class="proj act"><svg class="i"><use href="#i-file"/></svg>Instructions</div>
+                <div class="proj"><svg class="i"><use href="#i-spark"/></svg>Skills</div>
+                <div class="proj"><svg class="i"><use href="#i-plug"/></svg>Connectors</div>
+                <div class="proj"><svg class="i"><use href="#i-folder"/></svg>Files</div>
+              </div>
+              <div class="mmain">
+                <div class="mh"><h4>Agent instructions</h4><span class="r ub v">Save</span></div>
+                <div class="editor">
+                  <div class="ed-tabs"><span class="act">AGENTS.md</span><span>NOTES.md</span></div>
+                  <div class="code">
+                    <div><span class="h"># Rosa’s Bakery</span></div>
+                    <div><span>You run the website and orders for a small bakery.</span></div>
+                    <div><span></span></div>
+                    <div><span class="h">## How we talk</span></div>
+                    <div><span>- Short and warm. Sign as “Rosa”.</span></div>
+                    <div><span class="h">## Rules</span></div>
+                    <div><span>- Prices are in prices.xlsx. Ask before changing them.</span></div>
+                    <div><span>- Put finished files in /deliver.</span></div>
+                    <div><span class="m">- Orders over $200: message me first.</span></div>
+                  </div>
+                </div>
+                <p class="note"><svg class="i"><use href="#i-check"/></svg>Every AI on this computer reads it before it starts.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- 3 -->
+        <div class="panel" role="tabpanel" id="step-3" aria-labelledby="tab-3">
+          <div class="panel-head"><span class="n">3</span><h3>Add skills</h3><p>Teach it the tasks you repeat.</p></div>
+          <div class="win" role="img" aria-label="Skills for the project: invoices from orders, weekly report, publish the site; a skills marketplace is coming soon">
+            <div class="win-bar" aria-hidden="true"><div class="dots"><i></i><i></i><i></i></div><div class="url"><svg class="i"><use href="#i-lock"/></svg>app.uno4.work</div><div></div></div>
+            <div class="mock" aria-hidden="true">
+              <div class="mside">
+                <div class="lbl">Bakery</div>
+                <div class="proj"><svg class="i"><use href="#i-chat"/></svg>Chats</div>
+                <div class="proj"><svg class="i"><use href="#i-file"/></svg>Instructions</div>
+                <div class="proj act"><svg class="i"><use href="#i-spark"/></svg>Skills</div>
+                <div class="proj"><svg class="i"><use href="#i-plug"/></svg>Connectors</div>
+                <div class="proj"><svg class="i"><use href="#i-folder"/></svg>Files</div>
+              </div>
+              <div class="mmain">
+                <div class="mh"><h4>Skills</h4><span class="r ub"><svg class="i"><use href="#i-plus"/></svg>Add skill</span></div>
+                <div class="rows">
+                  <div class="rowx"><span class="lg sk"><svg class="i"><use href="#i-spark"/></svg></span><span class="tx"><b>Invoices from orders</b><small>Orders → one invoice per client, as .xlsx</small></span><span class="r"><span class="tgl"></span></span></div>
+                  <div class="rowx"><span class="lg sk"><svg class="i"><use href="#i-spark"/></svg></span><span class="tx"><b>Weekly report</b><small>Every Monday: sales, top items, what ran out</small></span><span class="r"><span class="tgl"></span></span></div>
+                  <div class="rowx"><span class="lg sk"><svg class="i"><use href="#i-spark"/></svg></span><span class="tx"><b>Publish the site</b><small>Check the page, then put it online</small></span><span class="r"><span class="tgl"></span></span></div>
+                  <div class="rowx"><span class="lg sk"><svg class="i"><use href="#i-spark"/></svg></span><span class="tx"><b>Reply to reviews</b><small>Drafts only. You press send.</small></span><span class="r"><span class="tgl off"></span></span></div>
+                </div>
+                <div class="soon"><svg class="i"><use href="#i-store"/></svg>Skills made by others, in one click<em>Marketplace · soon</em></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- 4 -->
+        <div class="panel" role="tabpanel" id="step-4" aria-labelledby="tab-4">
+          <div class="panel-head"><span class="n">4</span><h3>Connect your tools</h3><p>Google Drive, GitHub, any MCP server.</p></div>
+          <div class="win" role="img" aria-label="Connectors: GitHub connected, an MCP server being added; Google Drive is coming soon">
+            <div class="win-bar" aria-hidden="true"><div class="dots"><i></i><i></i><i></i></div><div class="url"><svg class="i"><use href="#i-lock"/></svg>app.uno4.work</div><div></div></div>
+            <div class="mock" aria-hidden="true">
+              <div class="mside">
+                <div class="lbl">Bakery</div>
+                <div class="proj"><svg class="i"><use href="#i-chat"/></svg>Chats</div>
+                <div class="proj"><svg class="i"><use href="#i-file"/></svg>Instructions</div>
+                <div class="proj"><svg class="i"><use href="#i-spark"/></svg>Skills</div>
+                <div class="proj act"><svg class="i"><use href="#i-plug"/></svg>Connectors</div>
+                <div class="proj"><svg class="i"><use href="#i-folder"/></svg>Files</div>
+              </div>
+              <div class="mmain">
+                <div class="mh"><h4>Connectors</h4><span class="r ub"><svg class="i"><use href="#i-plus"/></svg>Add</span></div>
+                <div class="rows">
+                  <div class="rowx"><span class="lg"><svg viewBox="0 0 256 238"><use href="#b-drive"/></svg></span><span class="tx"><b>Google Drive</b><small>Your shared folders, read and write</small></span><span class="r pill-soon">Soon</span></div>
+                  <div class="rowx"><span class="lg"><svg viewBox="0 0 16 16"><use href="#b-github"/></svg></span><span class="tx"><b>GitHub</b><small class="mono">rosa/bakery-site</small></span><span class="r state"><svg class="i" style="width:13px;height:13px;stroke-width:2.4"><use href="#i-check"/></svg>Connected</span></div>
+                  <div class="rowx"><span class="lg sk"><svg class="i"><use href="#i-plug"/></svg></span><span class="tx"><b>MCP server</b><small>Any tool that speaks MCP</small></span><span class="r"><span class="ub">Add URL</span></span></div>
+                </div>
+                <div class="field" style="margin:14px 0 0"><span>MCP server address</span><div class="input focus mono" style="font-size:12.5px">https://mcp.example.com/sse<i class="caret"></i></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- 5 -->
+        <div class="panel" role="tabpanel" id="step-5" aria-labelledby="tab-5">
+          <div class="panel-head"><span class="n">5</span><h3>Add Telegram or Slack</h3><p>Ask from your phone or your team chat.</p></div>
+          <div class="msgs" role="img" aria-label="A Telegram chat with the computer on a phone, and a Slack channel where the team asks it for a report">
+            <div class="phone" aria-hidden="true">
+              <div class="who"><img src="/assets/favicon.svg" alt="" /><span>Bakery · my-computer<small>bot</small></span></div>
+              <div class="me">Any orders for tomorrow?</div>
+              <div class="it">4 orders, 31 items. I put the list in /deliver.<div class="att"><span class="doc x" style="width:18px;height:22px;font-size:8px">X</span>orders-sep-25.xlsx</div></div>
+              <div class="me">Send it to the kitchen</div>
+              <div class="it">Sent.</div>
+            </div>
+            <div class="slack" aria-hidden="true">
+              <div class="sh"><svg viewBox="0 0 256 256"><use href="#b-slack"/></svg># bakery-team</div>
+              <div class="sm"><span class="a">A</span><div><b>Anna<small>10:02</small></b><p><span class="tag">@Uno</span> how did last week go?</p></div></div>
+              <div class="sm"><span class="a bot"><img src="/assets/favicon.svg" alt="" /></span><div><b>Uno<small>10:03</small></b><p>Sales up on Saturday, sourdough ran out by 11. Full report in Files.</p></div></div>
+            </div>
+          </div>
+        </div>
+        <!-- 6 -->
+        <div class="panel" role="tabpanel" id="step-6" aria-labelledby="tab-6">
+          <div class="panel-head"><span class="n">6</span><h3>Upload your work</h3><p>Docs, sheets, photos. It reads them all.</p></div>
+          <div class="win" role="img" aria-label="Uploading files into the Bakery project: a menu, a price list, contracts and photos">
+            <div class="win-bar" aria-hidden="true"><div class="dots"><i></i><i></i><i></i></div><div class="url"><svg class="i"><use href="#i-lock"/></svg>app.uno4.work</div><div></div></div>
+            <div class="mock" aria-hidden="true">
+              <div class="mside">
+                <div class="lbl">Bakery</div>
+                <div class="proj"><svg class="i"><use href="#i-chat"/></svg>Chats</div>
+                <div class="proj"><svg class="i"><use href="#i-file"/></svg>Instructions</div>
+                <div class="proj"><svg class="i"><use href="#i-spark"/></svg>Skills</div>
+                <div class="proj"><svg class="i"><use href="#i-plug"/></svg>Connectors</div>
+                <div class="proj act"><svg class="i"><use href="#i-folder"/></svg>Files</div>
+              </div>
+              <div class="mmain">
+                <div class="mh"><h4>Files</h4><span class="crumb">Bakery / materials</span></div>
+                <div class="drop"><svg class="i"><use href="#i-upload"/></svg><span>Drop files here<small>They go to your cloud storage. Your AI can open them.</small></span></div>
+                <div class="rows up">
+                  <div class="rowx"><span class="doc w">W</span><span class="tx"><b>Menu autumn.docx</b><small>48 KB</small></span><span class="r state"><svg class="i" style="width:13px;height:13px;stroke-width:2.4"><use href="#i-check"/></svg>Done</span></div>
+                  <div class="rowx"><span class="doc x">X</span><span class="tx"><b>prices.xlsx</b><small>22 KB</small></span><span class="r state"><svg class="i" style="width:13px;height:13px;stroke-width:2.4"><use href="#i-check"/></svg>Done</span></div>
+                  <div class="rowx"><span class="doc f">PDF</span><span class="tx"><b>Supplier contracts.pdf</b><small>3.1 MB</small></span><span class="r"><span class="upbar" style="--v:64%"></span></span></div>
+                  <div class="rowx"><span class="doc z">ZIP</span><span class="tx"><b>Photos for the site.zip</b><small>84 MB</small></span><span class="r"><span class="upbar" style="--v:22%"></span></span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
 
-  <section class="final-cta">
-    <h2 class="final-title">Free. Yours. Ready when you are.</h2>
-    <p class="final-sub">Open the app, point it at a folder, start a conversation. That's the whole setup.</p>
-    <a href={RELEASES_URL} class="hero-button">
-      <span>Download Uno Work</span>
-    </a>
-    <a href="/download/" class="other-platforms">All platforms &amp; older versions</a>
-  </section>
-</Layout>
+        <div class="stage-nav">
+          <span id="step-count" aria-live="polite">Step 1 of 6</span>
+          <span class="btns">
+            <button class="icon-btn" type="button" id="prev" aria-label="Previous step" disabled><svg class="i" aria-hidden="true"><use href="#i-left"/></svg></button>
+            <button class="icon-btn" type="button" id="next" aria-label="Next step"><svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="outcome">
+      <h3>And now you have a computer that can do anything.</h3>
+      <div class="asks">
+        <div class="ask">
+          <div class="req">Make a page for the bakery with the menu and a booking form.</div>
+          <div class="conn" aria-hidden="true"></div>
+          <div class="res">
+            <div class="res-h">Your site is live <span class="ok"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>Online</span></div>
+            <div class="mini-site"><div class="ms-bar"><svg class="i" style="width:10px;height:10px" aria-hidden="true"><use href="#i-lock"/></svg>bakery.uno4.me</div><div class="ms-body"><span><b>Rosa’s Bakery</b><small>Menu · Opening hours</small></span><span class="bk">Book a table</span></div></div>
+          </div>
+        </div>
+        <div class="ask">
+          <div class="req">Take orders in Telegram and send them to me.</div>
+          <div class="conn" aria-hidden="true"></div>
+          <div class="res">
+            <div class="res-h">Orders bot is running <span class="ok"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>24/7</span></div>
+            <div class="tg"><div class="msg"><b>Orders bot</b>New order: 2 croissants, 1 sourdough, pickup at 10:30<time>09:12</time></div></div>
+          </div>
+        </div>
+        <div class="ask">
+          <div class="req">Put this year’s invoices into one spreadsheet.</div>
+          <div class="conn" aria-hidden="true"></div>
+          <div class="res">
+            <div class="res-h"><span class="doc x" aria-hidden="true" style="width:20px;height:24px">X</span>invoices-2026.xlsx</div>
+            <table class="sheet"><caption class="sr">Example spreadsheet</caption><tr><th scope="col">Client</th><th scope="col">Date</th><th scope="col">Total</th></tr><tr><td>Studio Nord</td><td>Jan 14</td><td>$1,240</td></tr><tr><td>Mila K.</td><td>Feb 02</td><td>$380</td></tr><tr><td>Café Lumen</td><td>Mar 21</td><td>$915</td></tr></table>
+          </div>
+        </div>
+      </div>
+      <div class="chips">
+        <span>Try first</span>
+        <a class="chip" href="https://app.uno4.work/"><svg class="i" aria-hidden="true"><use href="#i-spark"/></svg>Show me what you can do</a>
+        <a class="chip" href="https://app.uno4.work/"><svg class="i" aria-hidden="true"><use href="#i-spark"/></svg>Make me a simple website</a>
+        <a class="chip" href="https://app.uno4.work/"><svg class="i" aria-hidden="true"><use href="#i-spark"/></svg>Sort the files I upload</a>
+        <a class="chip" href="https://app.uno4.work/"><svg class="i" aria-hidden="true"><use href="#i-spark"/></svg>Set up a Telegram bot</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Pick your AI -->
+<section class="section" id="ai" aria-labelledby="ai-t">
+  <div class="wrap">
+    <div class="ai-grid">
+      <div>
+        <div class="head" style="margin-bottom:32px">
+          <h2 class="title" id="ai-t">Our AI, or the one you pay for.</h2>
+          <p class="lead">Pick the default when you start. Change it any time.</p>
+        </div>
+        <div class="ai-points">
+          <div class="ai-point"><h3>Uno AI</h3><p>Built in, 300+ models. Credits come with your plan, so it works from the first minute.</p></div>
+          <div class="ai-point"><h3>Your own subscription</h3><p>Sign in with the account you already pay for. It runs on your computer, with your files.</p>
+            <div class="names"><span>Claude</span><span>ChatGPT / Codex</span><span>OpenCode</span></div>
+          </div>
+        </div>
+      </div>
+      <form class="picker" id="picker" aria-labelledby="pk-t" onsubmit="return false">
+        <h4 id="pk-t">Which AI should your computer use?</h4>
+        <p>You can switch in any chat.</p>
+        <div class="choices" role="radiogroup" aria-labelledby="pk-t">
+          <label class="choice"><input type="radio" name="ai" value="uno" checked /><span><b>Uno AI <em>Built in</em></b><small>300+ models. Credits in your plan.</small></span></label>
+          <label class="choice"><input type="radio" name="ai" value="own" /><span><b>My subscription</b><small>Sign in once. Uno uses it on your computer.</small><span class="subs"><span>Claude</span><span>ChatGPT / Codex</span><span>OpenCode</span></span></span></label>
+        </div>
+        <div class="go"><span id="pk-note">Ready now. No setup.</span><a class="ub v" id="pk-go" href="https://app.uno4.work/">Start with Uno AI</a></div>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- App Store -->
+<section class="section alt" id="apps" aria-labelledby="apps-t">
+  <div class="wrap">
+    <div class="head" style="max-width:none">
+      <h2 class="title" id="apps-t">An App Store for your computer.</h2>
+      <div class="store-facts">
+        <span><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>One click to install</span>
+        <span><svg class="i" aria-hidden="true"><use href="#i-user"/></svg>Sign in with your Uno account</span>
+        <span><svg class="i" aria-hidden="true"><use href="#i-window"/></svg>Opens inside Uno Work</span>
+        <span><svg class="i" aria-hidden="true"><use href="#i-users"/></svg>Share with your team</span>
+      </div>
+    </div>
+    <ul class="shelf">
+      <li class="appl" title="Your files on every device, like Google Drive"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/nextcloud.svg" alt="" loading="lazy" width="40" height="40" /></div><span>Nextcloud</span></li>
+      <li class="appl" title="All your passwords in one safe place"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/vaultwarden.svg" alt="" loading="lazy" width="40" height="40" /></div><span>Vaultwarden</span></li>
+      <li class="appl" title="Jot down a thought in a second"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/memos.png" alt="" loading="lazy" width="40" height="40" /></div><span>Memos</span></li>
+      <li class="appl" title="To-do lists and project boards"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/vikunja.svg" alt="" loading="lazy" width="40" height="40" /></div><span>Vikunja</span></li>
+      <li class="appl" title="Your own ChatGPT for family or team"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/open-webui.png" alt="" loading="lazy" width="40" height="40" /></div><span>Open WebUI</span></li>
+      <li class="appl" title="Phone photos backed up, like Google Photos"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/immich.svg" alt="" loading="lazy" width="40" height="40" /></div><span>Immich</span></li>
+      <li class="appl" title="Meeting notes and summaries, written by AI"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/notetaker.svg" alt="" loading="lazy" width="40" height="40" /></div><span>Notetaker<em class="by">by Uno</em></span></li>
+      <li class="appl" title="Private VPN through your own computer"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/wg-easy.svg" alt="" loading="lazy" width="40" height="40" /></div><span>VPN</span></li>
+      <li class="appl" title="Team wiki and docs, like Notion"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/docmost.png" alt="" loading="lazy" width="40" height="40" /></div><span>Docmost</span></li>
+      <li class="appl" title="Private messenger for family or team"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/chat.svg" alt="" loading="lazy" width="40" height="40" /></div><span>Chat</span></li>
+      <li class="appl" title="Scan once, find any document later"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/paperless.svg" alt="" loading="lazy" width="40" height="40" /></div><span>Paperless-<wbr>ngx</span></li>
+      <li class="appl" title="Your movies and music, like Netflix"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/jellyfin.svg" alt="" loading="lazy" width="40" height="40" /></div><span>Jellyfin</span></li>
+      <li class="appl" title="Send big files by link"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/pingvin-share.png" alt="" loading="lazy" width="40" height="40" /></div><span>Pingvin Share</span></li>
+      <li class="appl" title="Simple photo albums for the family"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/lychee.svg" alt="" loading="lazy" width="40" height="40" /></div><span>Lychee</span></li>
+      <li class="appl" title="Budget and spending under control"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/actual.png" alt="" loading="lazy" width="40" height="40" /></div><span>Actual Budget</span></li>
+      <li class="appl" title="Online booking page, like Calendly"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/easyappointments.png" alt="" loading="lazy" width="40" height="40" /></div><span>Easy!<wbr>Appointments</span></li>
+      <li class="appl" title="Blog, website and newsletter"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/ghost.svg" alt="" loading="lazy" width="40" height="40" /></div><span>Ghost</span></li>
+      <li class="appl" title="Clients and deals in one place"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/espocrm.svg" alt="" loading="lazy" width="40" height="40" /></div><span>EspoCRM</span></li>
+      <li class="appl" title="Automate workflows, like Zapier"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/n8n.svg" alt="" loading="lazy" width="40" height="40" /></div><span>n8n</span></li>
+      <li class="appl" title="Get alerted when a website goes down"><div class="tile"><img src="https://console.uno4.dev/api/v1/apps/icons/uptime-kuma.svg" alt="" loading="lazy" width="40" height="40" /></div><span>Uptime Kuma</span></li>
+    </ul>
+    <p class="store-foot">Not here, or rather skip apps? Ask the AI to build it, hand the computer to your own AI agent, or get an SSH command. <a class="u" href="https://uno4.dev/#agent">Connect your agent</a></p>
+  </div>
+</section>
+
+<!-- Features as spec rows -->
+<section class="section" id="features" aria-labelledby="feat-t">
+  <div class="wrap">
+    <div class="head">
+      <h2 class="title" id="feat-t">Everything else on one screen.</h2>
+    </div>
+    <div class="frows">
+      <div class="frow">
+        <div><h3>Files and Office</h3><p>Word, Excel and PowerPoint open right in the browser. Share a link that can view or can edit.</p></div>
+        <div class="crop" role="img" aria-label="Files list with a Word document, an Excel sheet and a PowerPoint deck, and a share link set to can edit">
+          <div class="crop-list" aria-hidden="true">
+            <div class="crow"><span class="doc w">W</span><span><b>Menu autumn.docx</b><small>Edited 5 min ago</small></span><span class="r">48 KB</span></div>
+            <div class="crow"><span class="doc x">X</span><span><b>invoices-2026.xlsx</b><small>Made by Uno</small></span><span class="r">22 KB</span></div>
+            <div class="crow"><span class="doc p">P</span><span><b>Pitch.pptx</b><small>Shared</small></span><span class="r">1.2 MB</span></div>
+          </div>
+          <div class="share" aria-hidden="true"><svg class="i" style="width:15px;height:15px;color:var(--violet)"><use href="#i-link"/></svg><span class="lnk">app.uno4.work/s/menu-autumn</span><span class="seg2"><span>Can view</span><span class="act">Can edit</span></span></div>
+        </div>
+      </div>
+      <div class="frow">
+        <div><h3>What’s using your computer</h3><p>Processor, memory and disk, and which programs use them. Something slow? Ask Uno to look.</p></div>
+        <div class="crop" role="img" aria-label="Processor 82 percent, memory 41, disk 16; OpenCode uses the most">
+          <div aria-hidden="true">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap"><b style="font-size:14px">What’s using your computer</b><span class="ub"><svg class="i"><use href="#i-spark"/></svg>Ask Uno to look</span></div>
+            <div class="stats"><div class="stat sel">Processor<b>82%</b></div><div class="stat">Memory<b>41%</b></div><div class="stat">Disk<b>16%</b></div></div>
+            <div style="margin-top:10px">
+              <div class="proc"><span><b>OpenCode</b><small>Chat agent · Bakery</small></span><i style="--v:48%"></i><span>45%</span></div>
+              <div class="proc"><span><b>Uno Work</b><small>The background part of Uno Work</small></span><i style="--v:24%"></i><span>23%</span></div>
+              <div class="proc"><span><b>System</b><small>What the computer runs for itself</small></span><i style="--v:7%"></i><span>6%</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="frow">
+        <div><h3>Security: who can reach it, who got in</h3><p>Choose which ways in are open. Every login is listed: yours, your agents’, and ours.</p></div>
+        <div class="crop" role="img" aria-label="Ways in: Uno Work always on, SSH on, open to the internet on; recent logins by you and your AI agent">
+          <div class="crop-list" aria-hidden="true">
+            <div class="crow"><span><b>Uno Work</b><small>Always on: this is how you use the computer</small></span><span class="r"><svg class="i" style="width:13px;height:13px"><use href="#i-lock"/></svg><span class="tgl lock"></span></span></div>
+            <div class="crow"><span><b>SSH</b><small>Sign in from your own terminal</small></span><span class="r"><span class="tgl"></span></span></div>
+            <div class="crow"><span><b>Open to the internet</b><small>Only the ports you choose</small></span><span class="r"><span class="tgl off"></span></span></div>
+          </div>
+          <div class="journal" aria-hidden="true">
+            <div><time>2 min ago</time><span>You · Uno Work</span></div>
+            <div><time>32 min ago</time><span>Your AI agent · command</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="frow">
+        <div><h3>All your computers, one switch</h3><p>Home shows what a computer is doing. Switch between them at the top of the sidebar. My Uno keeps your computers, sites and plan in one place.</p></div>
+        <div class="crop" role="img" aria-label="Computer switcher: my-computer on, bakery-prod on, sandbox asleep, add a computer">
+          <div class="crop-list" aria-hidden="true">
+            <div class="crow sel"><span class="on"></span><svg class="i"><use href="#i-cloud"/></svg><span><b>my-computer</b><small>Cloud computer</small></span><span class="r">On</span></div>
+            <div class="crow"><span class="on"></span><svg class="i"><use href="#i-cloud"/></svg><span><b>bakery-prod</b><small>Cloud computer</small></span><span class="r">On</span></div>
+            <div class="crow"><span class="sleep"></span><svg class="i"><use href="#i-monitor"/></svg><span><b>This Mac</b><small>On this computer</small></span><span class="r">Local</span></div>
+            <div class="crow" style="color:var(--violet-ink)"><svg class="i" style="color:var(--violet-ink)"><use href="#i-plus"/></svg><b>Add a computer</b></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Pricing -->
+<section class="section alt" id="pricing" aria-labelledby="price-t">
+  <div class="wrap price-grid">
+    <div>
+      <h2 class="title" id="price-t">The app is free. Your computer in the cloud starts with Plus.</h2>
+      <p class="lead">On Free and Small, Uno Work runs on your Mac or PC, or as a light version in the browser. From Plus, you get your own computer in the cloud, always online: it keeps working with your laptop closed.</p>
+      <div class="price-links">
+        <a href="https://uno4.dev/pricing" class="btn btn-primary">Compare plans <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+        <a href="https://github.com/technoob228/uno-work/releases/latest" class="btn btn-ghost js-dl"><svg class="i" aria-hidden="true"><use href="#i-down"/></svg><span class="js-dl-label">Download for Mac</span></a>
+      </div>
+    </div>
+    <div>
+      <ul class="ladder" aria-label="Plans">
+        <li class="rung"><span class="art"><img src="/assets/computers/free.svg" width="44" height="44" alt="" /></span><span class="nm">Free</span><span class="cp">Sites only<small>5 GB cloud storage</small></span><span class="wk">Mac, PC or browser<small>Light version in the browser</small></span><span class="pr"><b>$0</b></span></li>
+        <li class="rung"><span class="art"><img src="/assets/computers/small.svg" width="50" height="50" alt="" /></span><span class="nm">Small</span><span class="cp">1 GB · 1 core<small>Always on: a bot, a VPN</small></span><span class="wk">Mac, PC or browser<small>Light version in the browser</small></span><span class="pr"><b>$5<span>/mo</span></b><small>$20 with Uno AI</small></span></li>
+        <li class="rung rec"><span class="art"><img src="/assets/computers/plus.svg" width="58" height="58" alt="" /></span><span class="nm">Plus</span><span class="cp">4 GB · 4 cores<small>Your everyday computer</small></span><span class="wk cloudy">Uno Work in the cloud</span><span class="pr"><b>$20<span>/mo</span></b><small>$50 with Uno AI</small></span></li>
+        <li class="rung"><span class="art"><img src="/assets/computers/pro.svg" width="66" height="66" alt="" /></span><span class="nm">Pro</span><span class="cp">16 GB · 16 cores<small>Work and production</small></span><span class="wk cloudy">Uno Work in the cloud</span><span class="pr"><b>$70<span>/mo</span></b><small>$120 with Uno AI</small></span></li>
+        <li class="rung"><span class="art"><img src="/assets/computers/max.svg" width="74" height="74" alt="" /></span><span class="nm">Max</span><span class="cp">48 GB · 32 cores<small>Up to 6 computers</small></span><span class="wk cloudy">Uno Work in the cloud</span><span class="pr"><b>$200<span>/mo</span></b><small>$300 with Uno AI</small></span></li>
+      </ul>
+      <p class="ladder-foot">Prices without Uno AI; bring your own subscription on any plan. Full details at <a class="u" href="https://uno4.dev/pricing">uno4.dev/pricing</a>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="final" aria-labelledby="final-t">
+  <div class="wrap">
+    <h2 id="final-t">It keeps working while you’re away.</h2>
+    <p>Close the tab, shut your laptop — it stays on, holds onto your files, and finishes what you started.</p>
+    <div class="row">
+      <a href="https://app.uno4.work/" class="btn btn-white">Log in <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+      <a href="https://github.com/technoob228/uno-work/releases/latest" class="btn btn-line js-dl"><svg class="i" aria-hidden="true"><use href="#i-down"/></svg><span class="js-dl-label">Download for Mac</span></a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <div>
+      <a href="/" class="brand"><img src="/assets/favicon.svg" alt="" width="26" height="26" /><span class="brand-text">Uno Work</span></a>
+      <p class="legal">Uno is operated by Uno4 Labs LLC, a Wyoming (USA) limited liability company.</p>
+    </div>
+    <nav aria-label="Footer">
+      <a href="/careers/">Careers</a>
+      <a href="https://github.com/technoob228/uno-work" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="https://uno4.dev" target="_blank" rel="noopener noreferrer">uno4.dev</a>
+      <a href="https://t.me/get_uno_support" target="_blank" rel="noopener noreferrer">Support</a>
+      <a href="https://uno4.dev/terms">Terms</a>
+      <a href="https://uno4.dev/privacy">Privacy</a>
+    </nav>
+  </div>
+</footer>
 
 <script>
-  const SALES_ENDPOINT = "https://uno-marketing-leads.shubaduba4th.workers.dev/lead";
-  const dialog = document.getElementById("sales-dialog") as HTMLDialogElement | null;
-  const openBtn = document.getElementById("sales-open");
-  const closeBtn = document.getElementById("sales-close");
-  const form = document.getElementById("sales-form") as HTMLFormElement | null;
-  const status = document.getElementById("sales-status");
-  const submit = form?.querySelector<HTMLButtonElement>(".sales-submit");
+  import { fetchLatestRelease, pickReleaseAsset, type ReleasePlatform } from "../lib/releases";
 
-  openBtn?.addEventListener("click", () => dialog?.showModal());
-  closeBtn?.addEventListener("click", () => dialog?.close());
+  // Nav: hairline border once the page scrolls.
+  const nav = document.getElementById("nav");
+  if (nav) {
+    const onScroll = () => nav.classList.toggle("scrolled", window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+  }
 
-  dialog?.addEventListener("click", (event) => {
-    if (event.target === dialog) dialog.close();
-  });
-
-  form?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (!form.checkValidity()) {
-      form.reportValidity();
-      return;
-    }
-
-    const data = new FormData(form);
-    const fields = {
-      name: String(data.get("name") ?? "").trim(),
-      email: String(data.get("email") ?? "").trim(),
-      company: String(data.get("company") ?? "").trim(),
-      team_size: String(data.get("team_size") ?? "").trim(),
-      needs: data.getAll("needs").map(String).join(", "),
-      message: String(data.get("message") ?? "").trim(),
-      contact: String(data.get("contact") ?? "").trim(),
-      source: window.location.href,
-    };
-    const payload = {
-      type: "sales",
-      fields,
-    };
-
-    if (submit) {
-      submit.disabled = true;
-      submit.textContent = "Sending...";
-    }
-    if (status) status.textContent = "Sending your request...";
-
-    try {
-      const response = await fetch(SALES_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+  // Steps: vertical tabs (arrow keys, Home/End), prev/next, #step-N deep links.
+  {
+    const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".step-tab"));
+    const panels = tabs.map((t) => document.getElementById(t.getAttribute("aria-controls") ?? ""));
+    const prev = document.getElementById("prev") as HTMLButtonElement | null;
+    const next = document.getElementById("next") as HTMLButtonElement | null;
+    const count = document.getElementById("step-count");
+    let cur = 0;
+    const show = (i: number, focus = false) => {
+      if (i < 0 || i >= tabs.length) return;
+      cur = i;
+      tabs.forEach((t, k) => {
+        const sel = k === i;
+        t.setAttribute("aria-selected", sel ? "true" : "false");
+        t.tabIndex = sel ? 0 : -1;
+        panels[k]?.classList.toggle("is-active", sel);
       });
+      if (prev) prev.disabled = i === 0;
+      if (next) next.disabled = i === tabs.length - 1;
+      if (count) count.textContent = "Step " + (i + 1) + " of " + tabs.length;
+      if (focus) tabs[i]?.focus();
+    };
+    tabs.forEach((t, k) => {
+      t.addEventListener("click", () => show(k));
+      t.addEventListener("keydown", (e: KeyboardEvent) => {
+        const map: Record<string, number> = { ArrowDown: cur + 1, ArrowRight: cur + 1, ArrowUp: cur - 1, ArrowLeft: cur - 1, Home: 0, End: tabs.length - 1 };
+        const target = map[e.key];
+        if (target !== undefined) { e.preventDefault(); show(Math.max(0, Math.min(tabs.length - 1, target)), true); }
+      });
+    });
+    prev?.addEventListener("click", () => show(cur - 1));
+    next?.addEventListener("click", () => show(cur + 1));
+    const m = /^#step-([1-6])$/.exec(location.hash);
+    if (m) show(Number(m[1]) - 1);
+  }
 
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  // AI picker: flips the button between Uno AI and "your subscription".
+  {
+    const form = document.getElementById("picker") as HTMLFormElement | null;
+    const go = document.getElementById("pk-go");
+    const note = document.getElementById("pk-note");
+    form?.addEventListener("change", () => {
+      const own = (form.elements.namedItem("ai") as RadioNodeList | null)?.value === "own";
+      if (go) go.textContent = own ? "Connect my subscription" : "Start with Uno AI";
+      if (note) note.textContent = own ? "Sign in once on your computer." : "Ready now. No setup.";
+    });
+  }
 
-      form.reset();
-      if (status) status.textContent = "Sent. We'll get back to you shortly.";
-      window.setTimeout(() => dialog?.close(), 900);
-    } catch {
-      const subject = fields.company
-        ? `Uno Work for business — ${fields.company}`
-        : "Uno Work for business";
-      const body = [
-        `Name: ${fields.name}`,
-        `Email: ${fields.email}`,
-        `Company: ${fields.company}`,
-        `Team size: ${fields.team_size}`,
-        "",
-        fields.needs ? `What matters: ${fields.needs}` : "",
-        fields.message ? `Goals / context:\n${fields.message}` : "",
-        fields.contact ? `Preferred contact: ${fields.contact}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n");
-      const mailto = `mailto:michael@uno4.dev?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-      if (status) {
-        status.innerHTML = `Could not send automatically. <a href="${mailto}">Email us instead</a>.`;
-      }
-    } finally {
-      if (submit) {
-        submit.disabled = false;
-        submit.textContent = "Send";
-      }
-    }
-  });
+  // Download: pick the installer for this platform (shared with /download).
+  const ua = navigator.userAgent || "";
+  const plat = (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform || navigator.platform || "";
+  const mobile = /Android|iPhone|iPad|iPod/i.test(ua);
+  let platform: ReleasePlatform | null = null;
+  let label = "Download for Mac or Windows";
+  if (!mobile && /Win/i.test(plat + ua)) { platform = "win-x64"; label = "Download for Windows"; }
+  else if (!mobile && /Mac/i.test(plat + ua)) { platform = "mac-arm64"; label = "Download for Mac"; }
+  document.querySelectorAll(".js-dl-label").forEach((el) => { el.textContent = label; });
+  if (platform) {
+    const target = platform;
+    fetchLatestRelease()
+      .then((release) => {
+        const asset = release?.assets && pickReleaseAsset(release.assets, target);
+        if (!asset) return;
+        document.querySelectorAll<HTMLAnchorElement>(".js-dl, .js-dl-nav").forEach((el) => { el.href = asset.browser_download_url; });
+      })
+      .catch(() => { /* keep the releases page link */ });
+  }
 </script>
-
-<style>
-  /* ── Hero ── */
-
-  .hero {
-    width: 100%;
-    max-width: 880px;
-    padding: 7vh 1.5rem 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-  }
-
-  .eyebrow {
-    display: inline-block;
-    font-size: 0.72rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--uno-violet);
-    background: var(--uno-violet-tint);
-    border: 1px solid var(--uno-violet-border);
-    padding: 0.35rem 0.75rem;
-    border-radius: 999px;
-    margin-bottom: 1.5rem;
-    opacity: 0;
-    animation: fade-in 0.8s ease-out forwards;
-  }
-
-  .tagline {
-    font-weight: 600;
-    font-size: clamp(2.1rem, 5vw, 3.5rem);
-    letter-spacing: -0.025em;
-    line-height: 1.1;
-    max-width: 100%;
-    margin: 0 0 1.25rem;
-    opacity: 0;
-    text-wrap: balance;
-    animation: fade-in 1s ease-out 0.05s forwards;
-  }
-
-  .tagline em {
-    font-style: normal;
-    color: var(--uno-violet);
-  }
-
-  .mobile-break {
-    display: none;
-  }
-
-  .subhead {
-    font-size: clamp(1rem, 1.5vw, 1.125rem);
-    line-height: 1.55;
-    color: var(--text-muted);
-    max-width: 640px;
-    margin: 0 0 2.25rem;
-    opacity: 0;
-    animation: fade-in 1s ease-out 0.1s forwards;
-  }
-
-  .cta-row {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.85rem;
-    margin-bottom: 4.5rem;
-  }
-
-  /* ── Hero button ── */
-
-  .hero-button {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.55rem;
-    background: var(--uno-violet);
-    color: #fff;
-    padding: 0.85rem 1.85rem;
-    border-radius: 999px;
-    font-weight: 600;
-    font-size: 0.95rem;
-    opacity: 0;
-    animation: fade-in 1s ease-out 0.15s forwards;
-    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
-    box-shadow: 0 4px 16px rgba(91, 91, 232, 0.25), 0 0 0 1px rgba(91, 91, 232, 0.15);
-  }
-
-  .hero-button:hover {
-    transform: translateY(-1px);
-    background: var(--uno-violet-soft);
-    box-shadow: 0 8px 24px rgba(91, 91, 232, 0.35), 0 0 0 1px rgba(91, 91, 232, 0.2);
-  }
-
-  .hero-button:active {
-    transform: translateY(0);
-  }
-
-  /* ── Other platforms link ── */
-
-  .other-platforms {
-    font-size: 0.825rem;
-    color: var(--text-muted);
-    opacity: 0;
-    animation: fade-in 1s ease-out 0.25s forwards;
-    transition: color 0.2s ease;
-    text-decoration: underline;
-    text-decoration-color: var(--line-strong);
-    text-underline-offset: 3px;
-  }
-
-  .other-platforms:hover {
-    color: var(--text);
-    text-decoration-color: var(--text);
-  }
-
-  /* ── Screenshot ── */
-
-  .screenshot-wrap {
-    margin: 0 auto;
-    width: min(95vw, 1280px);
-    padding: 0 1rem;
-    opacity: 0;
-    transform: scale(0.985);
-    animation: screenshot-in 1s ease-out 0.2s forwards;
-  }
-
-  .screenshot {
-    width: 100%;
-    height: auto;
-    display: block;
-    border-radius: 14px;
-    border: 1px solid var(--line);
-    box-shadow:
-      0 30px 80px rgba(20, 20, 30, 0.12),
-      0 8px 24px rgba(20, 20, 30, 0.06);
-    background: var(--bg-panel);
-  }
-
-  @keyframes screenshot-in {
-    from {
-      opacity: 0;
-      transform: scale(0.985);
-    }
-    to {
-      opacity: 1;
-      transform: scale(1);
-    }
-  }
-
-  /* ── Section common ── */
-
-  .section-eyebrow {
-    display: inline-block;
-    font-size: 0.72rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--uno-violet);
-    margin-bottom: 0.85rem;
-  }
-
-  .section-title {
-    font-weight: 600;
-    font-size: clamp(1.6rem, 3.5vw, 2.4rem);
-    letter-spacing: -0.02em;
-    line-height: 1.15;
-    margin-bottom: 0.85rem;
-    color: var(--text);
-  }
-
-  .section-lead {
-    font-size: 1rem;
-    line-height: 1.6;
-    color: var(--text-muted);
-    max-width: 640px;
-  }
-
-  .section-head {
-    text-align: center;
-    margin: 0 auto 3rem;
-    max-width: 680px;
-  }
-
-  .section-head .section-lead {
-    margin: 0 auto;
-  }
-
-  /* ── Social Proof ── */
-
-  .social-proof {
-    width: min(95vw, 980px);
-    margin: 3rem auto 4rem;
-    padding: 0 1rem;
-    text-align: center;
-  }
-
-  .social-eyebrow {
-    font-size: 0.72rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
-    color: var(--text-faint);
-    margin-bottom: 1.5rem;
-  }
-
-  .social-list {
-    list-style: none;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    align-items: center;
-    gap: 2rem 3rem;
-    padding: 0;
-    margin: 0;
-  }
-
-  .social-item {
-    display: flex;
-    align-items: center;
-    gap: 0.65rem;
-    opacity: 0.78;
-    transition: opacity 0.2s ease;
-  }
-
-  .social-item:hover {
-    opacity: 1;
-  }
-
-  .social-mark {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    background: var(--bg-panel);
-    border: 1px solid var(--line);
-    color: var(--text-muted);
-    font-weight: 700;
-    font-size: 0.78rem;
-    letter-spacing: -0.02em;
-    display: grid;
-    place-items: center;
-  }
-
-  .social-mark--logo {
-    overflow: hidden;
-    background: transparent;
-    border-color: transparent;
-    box-shadow: 0 1px 2px rgba(24, 24, 27, 0.08);
-  }
-
-  .social-mark--logo img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .social-mark--productera {
-    width: 44px;
-    background: var(--bg-panel);
-    border-color: var(--line);
-    box-shadow: none;
-  }
-
-  .social-mark--productera img {
-    width: 28px;
-    height: auto;
-    object-fit: contain;
-  }
-
-  .social-mark--unlimited {
-    border-color: #E6E600;
-  }
-
-  .social-name {
-    font-weight: 600;
-    font-size: 0.95rem;
-    letter-spacing: -0.01em;
-    color: var(--text);
-  }
-
-  /* ── Features ── */
-
-  .features {
-    width: min(95vw, 1180px);
-    margin: 6rem auto 0;
-    padding: 0 1rem;
-  }
-
-  .features-head {
-    text-align: center;
-    margin: 0 auto 3rem;
-    max-width: 680px;
-  }
-
-  .features-head .section-lead {
-    margin: 0 auto;
-  }
-
-  .features-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1rem;
-  }
-
-  .feature-mini {
-    background: var(--bg-panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    padding: 1.25rem 1.25rem 1.4rem;
-    transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
-  }
-
-  .feature-mini:hover {
-    border-color: var(--uno-violet-border);
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(91, 91, 232, 0.08);
-  }
-
-  .feature-mini-icon {
-    width: 34px;
-    height: 34px;
-    border-radius: 9px;
-    background: var(--uno-violet-tint);
-    color: var(--uno-violet);
-    display: grid;
-    place-items: center;
-    margin-bottom: 0.85rem;
-  }
-
-  .feature-mini-icon svg {
-    width: 18px;
-    height: 18px;
-  }
-
-  .feature-mini-title {
-    font-size: 0.95rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    line-height: 1.3;
-    margin-bottom: 0.4rem;
-    color: var(--text);
-  }
-
-  .feature-mini-body {
-    font-size: 0.83rem;
-    line-height: 1.5;
-    color: var(--text-muted);
-  }
-
-  /* ── Pricing ── */
-
-  .pricing {
-    width: min(95vw, 1180px);
-    margin: 6rem auto 0;
-    padding: 0 1rem;
-  }
-
-  .pricing-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1.25rem;
-  }
-
-  .pricing-card {
-    position: relative;
-    background: var(--bg-panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-xl);
-    padding: 1.75rem 1.65rem 1.85rem;
-    display: flex;
-    flex-direction: column;
-    transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
-  }
-
-  .pricing-card:hover {
-    border-color: var(--uno-violet-border);
-    transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(91, 91, 232, 0.08);
-  }
-
-  .pricing-card--featured {
-    border-color: var(--uno-violet);
-    box-shadow: 0 6px 24px rgba(91, 91, 232, 0.15);
-  }
-
-  .pricing-card--featured:hover {
-    border-color: var(--uno-violet);
-    box-shadow: 0 12px 36px rgba(91, 91, 232, 0.2);
-  }
-
-  .pricing-badge {
-    position: absolute;
-    top: -10px;
-    right: 1.25rem;
-    background: var(--uno-violet);
-    color: #fff;
-    font-size: 0.68rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    padding: 0.25rem 0.6rem;
-    border-radius: 999px;
-    box-shadow: 0 2px 6px rgba(91, 91, 232, 0.3);
-  }
-
-  .pricing-title {
-    font-size: 1.05rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    margin-bottom: 0.45rem;
-    color: var(--text);
-  }
-
-  .pricing-price {
-    font-size: 1.5rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    margin-bottom: 1.25rem;
-    color: var(--uno-violet);
-  }
-
-  .pricing-list {
-    list-style: none;
-    padding: 0;
-    margin: 0 0 1.5rem;
-    flex: 1;
-  }
-
-  .pricing-list li {
-    font-size: 0.88rem;
-    line-height: 1.5;
-    color: var(--text-muted);
-    padding-left: 1.1rem;
-    position: relative;
-    margin-bottom: 0.55rem;
-  }
-
-  .pricing-list li::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 0.55rem;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--uno-violet);
-  }
-
-  .pricing-cta {
-    font-size: 0.88rem;
-    font-weight: 600;
-    color: var(--uno-violet);
-    transition: gap 0.2s ease;
-  }
-
-  .pricing-cta:hover {
-    text-decoration: underline;
-    text-decoration-color: var(--uno-violet);
-    text-underline-offset: 3px;
-  }
-
-  .pricing-cta--primary {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--uno-violet);
-    color: #fff;
-    padding: 0.65rem 1.2rem;
-    border-radius: 999px;
-    box-shadow: 0 4px 12px rgba(91, 91, 232, 0.25);
-    transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
-  }
-
-  .pricing-cta--primary:hover {
-    text-decoration: none;
-    background: var(--uno-violet-soft);
-    transform: translateY(-1px);
-    box-shadow: 0 8px 20px rgba(91, 91, 232, 0.35);
-  }
-
-  /* ── Enterprise ── */
-
-  .enterprise {
-    width: min(95vw, 1180px);
-    margin: 6rem auto 0;
-    padding: 0 1rem;
-  }
-
-  .enterprise-inner {
-    background: linear-gradient(140deg, #18181B 0%, #1F1F2E 100%);
-    color: #fff;
-    border-radius: var(--radius-xl);
-    padding: 3.5rem 3rem;
-    position: relative;
-    overflow: hidden;
-  }
-
-  .enterprise-inner::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background:
-      radial-gradient(600px 300px at 20% 0%, rgba(91, 91, 232, 0.35) 0%, transparent 60%),
-      radial-gradient(500px 300px at 100% 100%, rgba(140, 140, 255, 0.18) 0%, transparent 60%);
-    pointer-events: none;
-  }
-
-  .enterprise-eyebrow {
-    color: #B8B8FF;
-    position: relative;
-  }
-
-  .enterprise-title {
-    font-weight: 600;
-    font-size: clamp(1.7rem, 3.5vw, 2.5rem);
-    letter-spacing: -0.025em;
-    line-height: 1.15;
-    margin-bottom: 0.85rem;
-    color: #fff;
-    position: relative;
-    max-width: 720px;
-  }
-
-  .enterprise-lead {
-    font-size: 1rem;
-    line-height: 1.6;
-    color: rgba(255, 255, 255, 0.7);
-    max-width: 640px;
-    margin-bottom: 2.5rem;
-    position: relative;
-  }
-
-  .enterprise-grid {
-    position: relative;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1.5rem 2rem;
-    margin-bottom: 2.5rem;
-  }
-
-  .enterprise-item {
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    padding-top: 1rem;
-  }
-
-  .enterprise-item-title {
-    font-size: 0.95rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    margin-bottom: 0.4rem;
-    color: #fff;
-  }
-
-  .enterprise-item-body {
-    font-size: 0.86rem;
-    line-height: 1.55;
-    color: rgba(255, 255, 255, 0.65);
-  }
-
-  .enterprise-cta {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    flex-wrap: wrap;
-  }
-
-  .enterprise-button {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.55rem;
-    background: #fff;
-    color: #18181B;
-    padding: 0.85rem 1.65rem;
-    border: none;
-    border-radius: 999px;
-    font-weight: 600;
-    font-size: 0.95rem;
-    font-family: inherit;
-    cursor: pointer;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-  }
-
-  .enterprise-button:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 8px 24px rgba(255, 255, 255, 0.2);
-  }
-
-  /* ── Sales dialog ── */
-
-  .sales-dialog {
-    position: fixed;
-    inset: 0;
-    margin: auto;
-    width: min(580px, calc(100vw - 2rem));
-    max-height: calc(100vh - 4rem);
-    padding: 0;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-xl);
-    background: var(--bg-panel);
-    color: var(--text);
-    box-shadow: 0 30px 80px rgba(20, 20, 30, 0.25);
-    overflow: hidden;
-  }
-
-  .sales-dialog::backdrop {
-    background: rgba(20, 20, 30, 0.55);
-    backdrop-filter: blur(4px);
-  }
-
-  .sales-dialog-inner {
-    padding: 2rem 2rem 1.75rem;
-    max-height: calc(100vh - 4rem);
-    overflow-y: auto;
-  }
-
-  .sales-dialog-close {
-    position: absolute;
-    top: 0.85rem;
-    right: 0.85rem;
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    border: none;
-    background: var(--bg-subtle);
-    color: var(--text-muted);
-    display: grid;
-    place-items: center;
-    cursor: pointer;
-    z-index: 2;
-    transition: background 0.15s ease, color 0.15s ease;
-  }
-
-  .sales-dialog-close:hover {
-    background: var(--line);
-    color: var(--text);
-  }
-
-  .sales-dialog-close svg {
-    width: 16px;
-    height: 16px;
-  }
-
-  .sales-eyebrow {
-    display: inline-block;
-    font-size: 0.72rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--uno-violet);
-    background: var(--uno-violet-tint);
-    border: 1px solid var(--uno-violet-border);
-    padding: 0.3rem 0.7rem;
-    border-radius: 999px;
-    margin-bottom: 1rem;
-  }
-
-  .sales-title {
-    font-size: 1.45rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    color: var(--text);
-    margin: 0 0 0.5rem;
-  }
-
-  .sales-sub {
-    font-size: 0.92rem;
-    line-height: 1.55;
-    color: var(--text-muted);
-    margin: 0 0 1.5rem;
-  }
-
-  .sales-form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.85rem;
-  }
-
-  .sales-form-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.65rem;
-  }
-
-  .sales-form label {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-    font-size: 0.82rem;
-    color: var(--text);
-  }
-
-  .sales-honeypot {
-    position: absolute;
-    left: -9999px;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-  }
-
-  .label-text {
-    font-weight: 500;
-    color: var(--text);
-  }
-
-  .label-hint {
-    font-weight: 400;
-    color: var(--text-faint);
-  }
-
-  .sales-form input,
-  .sales-form select,
-  .sales-form textarea {
-    font: inherit;
-    font-size: 0.88rem;
-    color: var(--text);
-    background: var(--bg-panel);
-    border: 1px solid var(--line-strong);
-    border-radius: 8px;
-    padding: 0.6rem 0.75rem;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
-    width: 100%;
-  }
-
-  .sales-form textarea {
-    resize: vertical;
-    min-height: 80px;
-    font-family: inherit;
-  }
-
-  .sales-form input:focus,
-  .sales-form select:focus,
-  .sales-form textarea:focus {
-    outline: none;
-    border-color: var(--uno-violet);
-    box-shadow: 0 0 0 3px var(--uno-violet-tint);
-  }
-
-  .sales-form input::placeholder,
-  .sales-form textarea::placeholder {
-    color: var(--text-faint);
-  }
-
-  .sales-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-
-  .sales-checks {
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    padding: 0.85rem 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    background: var(--bg-subtle);
-  }
-
-  .check-item {
-    display: flex !important;
-    flex-direction: row !important;
-    align-items: flex-start !important;
-    gap: 0.55rem !important;
-    font-size: 0.86rem !important;
-    color: var(--text-muted) !important;
-    cursor: pointer;
-  }
-
-  .check-item input[type="checkbox"] {
-    width: 16px;
-    flex-shrink: 0;
-    margin-top: 2px;
-    accent-color: var(--uno-violet);
-    cursor: pointer;
-  }
-
-  .check-item:hover {
-    color: var(--text);
-  }
-
-  .sales-submit {
-    margin-top: 0.4rem;
-    background: var(--uno-violet);
-    color: #fff;
-    border: none;
-    padding: 0.85rem 1.5rem;
-    border-radius: 999px;
-    font-weight: 600;
-    font-size: 0.93rem;
-    cursor: pointer;
-    font-family: inherit;
-    transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
-    box-shadow: 0 4px 14px rgba(91, 91, 232, 0.25);
-  }
-
-  .sales-submit:hover {
-    background: var(--uno-violet-soft);
-    transform: translateY(-1px);
-    box-shadow: 0 8px 20px rgba(91, 91, 232, 0.32);
-  }
-
-  .sales-submit:active {
-    transform: translateY(0);
-  }
-
-  .sales-submit:disabled {
-    cursor: wait;
-    opacity: 0.7;
-    transform: none;
-  }
-
-  .sales-note {
-    font-size: 0.75rem;
-    color: var(--text-faint);
-    line-height: 1.5;
-    margin: 0;
-  }
-
-  .sales-note a {
-    color: var(--uno-violet);
-    text-decoration: underline;
-    text-decoration-color: var(--uno-violet-border);
-    text-underline-offset: 2px;
-  }
-
-  .sales-note a:hover {
-    text-decoration-color: var(--uno-violet);
-  }
-
-  @media (max-width: 640px) {
-    .sales-dialog-inner {
-      padding: 1.5rem 1.25rem 1.25rem;
-    }
-
-    .sales-form-row {
-      grid-template-columns: 1fr;
-    }
-
-    .sales-title {
-      font-size: 1.25rem;
-    }
-  }
-
-  .enterprise-contacts {
-    display: flex;
-    align-items: center;
-    gap: 1.25rem;
-    flex-wrap: wrap;
-  }
-
-  .enterprise-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.7);
-    transition: color 0.2s ease;
-  }
-
-  .enterprise-link:hover {
-    color: #fff;
-  }
-
-  .enterprise-link svg {
-    width: 16px;
-    height: 16px;
-    flex-shrink: 0;
-  }
-
-  /* ── Final CTA ── */
-
-  .final-cta {
-    width: 100%;
-    max-width: 720px;
-    margin: 7rem auto 5rem;
-    padding: 0 1.5rem;
-    text-align: center;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-
-  .final-title {
-    font-weight: 600;
-    font-size: clamp(1.8rem, 4vw, 2.6rem);
-    letter-spacing: -0.025em;
-    line-height: 1.15;
-    margin-bottom: 0.85rem;
-    color: var(--text);
-  }
-
-  .final-sub {
-    font-size: 1rem;
-    line-height: 1.6;
-    color: var(--text-muted);
-    margin-bottom: 2rem;
-    max-width: 540px;
-  }
-
-  /* ── Mobile ── */
-
-  @media (max-width: 980px) {
-    .features-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-
-    .pricing-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .enterprise-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-
-    .enterprise-inner {
-      padding: 2.5rem 1.75rem;
-    }
-  }
-
-  @media (max-width: 640px) {
-    .hero {
-      padding-top: 5vh;
-    }
-
-    .eyebrow {
-      font-size: 0.64rem;
-      letter-spacing: 0.08em;
-      white-space: normal;
-    }
-
-    .tagline {
-      font-size: 2rem;
-    }
-
-    .desktop-break {
-      display: none;
-    }
-
-    .mobile-break {
-      display: block;
-    }
-
-    .subhead {
-      font-size: 0.95rem;
-      max-width: 280px;
-    }
-
-    .screenshot-wrap {
-      width: 95vw;
-      padding: 0;
-    }
-
-    .screenshot {
-      border-radius: 10px;
-    }
-
-    .features-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .enterprise-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .social-list {
-      display: grid;
-      grid-template-columns: repeat(2, max-content);
-      gap: 1rem 1.25rem;
-    }
-  }
-</style>
+</body>
+</html>
