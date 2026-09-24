@@ -402,6 +402,28 @@ const bridgeOk = (reply: BridgeReply): Effect.Effect<unknown, UnoWorkToolError> 
   return Effect.fail(toolError(`${reason} (HTTP ${reply.status})`));
 };
 
+export function isCompleteHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return (parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.hostname !== "";
+  } catch {
+    return false;
+  }
+}
+
+function joinUrlPath(base: string, extra: string | undefined): string {
+  if (!extra) return base;
+  try {
+    const url = new URL(base);
+    const [pathname = "", search = ""] = extra.split("?", 2);
+    url.pathname = `${url.pathname.replace(/\/+$/, "")}/${pathname.replace(/^\/+/, "")}`;
+    if (search) url.search = search;
+    return url.toString();
+  } catch {
+    return base;
+  }
+}
+
 const threadPath = (raw: string | undefined) => {
   const id = (raw ?? "").trim();
   return /^[A-Za-z0-9:_-]{1,200}$/.test(id) ? encodeURIComponent(id) : null;
@@ -655,13 +677,15 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         command: {
           type: "string",
           maxLength: 2000,
-          description: "How to start it (bash -lc, PORT is set), e.g. node server.js.",
+          description:
+            "How Uno starts it (bash -lc in cwd, PORT is set), e.g. \"python3 app.py\". Give it for anything you built so it has a Start button and survives reboots.",
         },
         cwd: { type: "string", description: "Its folder inside home, e.g. ~/projects/notes." },
         path: { type: "string", description: 'What to open on the port, e.g. "/admin".' },
         url: {
           type: "string",
-          description: "An https address it already has elsewhere (instead of a port).",
+          description:
+            "Only for an app hosted somewhere else (an https address). Leave it out for apps on this computer — use port + command.",
         },
         autostart: { type: "boolean", description: "Start at boot (default true with a command)." },
         ai: {
@@ -1121,11 +1145,25 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "open_in_panel",
     group: "person",
     description:
-      'Open a web page (http/https URL) or a local file in the right panel of this chat. For a static result (report, HTML page, document) open the file — don\'t start a web server just to show it. scope: "chat" (default), "project" (all chats of this project) or "global" (only when the person asks).',
+      'Show something in the right panel of this chat: an app of this computer (appId — the easiest way to show an app you just made), a web page (a full url like "http://localhost:8124/"), or a local file. For a static result (report, HTML page, document) open the file — don\'t start a web server just to show it. scope: "chat" (default), "project" (all chats of this project) or "global" (only when the person asks).',
     inputSchema: {
       type: "object",
       properties: {
-        url: { type: "string", pattern: "^https?://", maxLength: 8192 },
+        appId: {
+          type: "string",
+          maxLength: 200,
+          description: 'An app from apps_list, e.g. "notes" or "manifest:notes".',
+        },
+        path: {
+          type: "string",
+          maxLength: 2000,
+          description: 'With appId: a page of the app, e.g. "/widget".',
+        },
+        url: {
+          type: "string",
+          maxLength: 8192,
+          description: 'A complete http(s) address with host, e.g. "https://example.com/docs".',
+        },
         file: {
           type: "string",
           description: "A file path (~/…, absolute, or relative to this chat's folder).",
@@ -1135,23 +1173,41 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       additionalProperties: false,
     },
     level: "safe",
-    run: (deps, args) => {
-      const url = str(args, "url");
-      const file = str(args, "file");
-      if ((url === undefined) === (file === undefined)) {
-        return Effect.fail(toolError("Give exactly one of url or file."));
-      }
-      return deps
-        .bridge({
-          method: "POST",
-          path: "/api/browser/open",
-          body: {
-            ...(url ? { url } : { file: resolveUserPath(file!, deps) }),
-            ...(str(args, "scope") ? { scope: str(args, "scope") } : {}),
-          },
-        })
-        .pipe(Effect.flatMap(bridgeOk));
-    },
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const appId = str(args, "appId");
+        const file = str(args, "file");
+        let url = str(args, "url");
+        if ([appId, url, file].filter((value) => value !== undefined).length !== 1) {
+          return yield* toolError("Give exactly one of appId, url or file.");
+        }
+        if (appId !== undefined) {
+          const app = yield* findApp(deps, appId);
+          const base = app.publication?.url ?? app.url ?? app.localUrl;
+          if (!base) {
+            return yield* toolError(
+              `${app.name} has no web address (status: ${app.status}). Start it or give it a port first.`,
+            );
+          }
+          url = joinUrlPath(base, str(args, "path"));
+        }
+        if (url !== undefined && !isCompleteHttpUrl(url)) {
+          return yield* toolError(
+            `"${url}" is not a complete address. Pass the whole URL with host and port, e.g. "http://localhost:8124/", or use appId.`,
+          );
+        }
+        const opened = yield* deps
+          .bridge({
+            method: "POST",
+            path: "/api/browser/open",
+            body: {
+              ...(url !== undefined ? { url } : { file: resolveUserPath(file!, deps) }),
+              ...(str(args, "scope") ? { scope: str(args, "scope") } : {}),
+            },
+          })
+          .pipe(Effect.flatMap(bridgeOk));
+        return url !== undefined ? { ok: true, opened: url } : opened;
+      }),
   },
   {
     name: "browser_command",
@@ -1178,7 +1234,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             "evaluate",
           ],
         },
-        url: { type: "string", pattern: "^https?://" },
+        url: { type: "string", description: 'For openUrl/navigate: a complete address, e.g. "http://localhost:3000/".' },
         selector: { type: "string", maxLength: 2000 },
         text: { type: "string", maxLength: 16000 },
         value: { type: "string", maxLength: 16000 },
@@ -1484,8 +1540,18 @@ export function runUnoWorkTool(
     }
     const level = toolLevel(tool, args);
     if (decideUnoWorkGate(level, deps.caller.runtimeMode) === "ask") {
-      const title = tool.approvalTitle?.(args) ?? tool.name;
-      const detail = tool.approvalDetail?.(args);
+      // The person reads the app's name, not its id ("Stop Notes", not
+      // "Stop manifest:notes").
+      const appName =
+        typeof args.appId === "string"
+          ? yield* findApp(deps, args.appId).pipe(
+              Effect.map((app) => `“${app.name}”`),
+              Effect.orElseSucceed(() => undefined),
+            )
+          : undefined;
+      const described = appName ? { ...args, appId: appName } : args;
+      const title = tool.approvalTitle?.(described) ?? tool.name;
+      const detail = tool.approvalDetail?.(described);
       const outcome = yield* deps.requestApproval({
         tool: tool.name,
         title,

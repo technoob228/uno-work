@@ -30,7 +30,7 @@ If the tools are missing, the same guides are at `GET $UNO_WORK_BRIDGE_URL/api/u
 2. Call `app_register` (name, emoji icon, port, command, cwd). Uno starts it within ~20 s and after every reboot; don't start a second copy.
 3. AI, cloud files or notifications inside the app go through the Uno App SDK (`"ai"`, `"storage"`, `"notify"` in the manifest), never an API key. Read `uno_guide("app-sdk")` first.
 4. Widget: serve a small page (about 300x200 px, no header) at `/widget`, then `app_add_widget`. Tell the person: Home, then Customize, then Add widget.
-5. Finish with `open_in_panel` on the app and one `notify` when the work is done.
+5. Finish with `open_in_panel` (appId) and one `notify` when the work is done.
 
 ## Telling and showing
 
