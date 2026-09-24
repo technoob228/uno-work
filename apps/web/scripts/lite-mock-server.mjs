@@ -11,8 +11,14 @@
  *   node scripts/lite-mock-server.mjs plus     # Plus, no Uno Work machine yet
  *
  * Env: PORT (default 8093), LITE_DIST (default ./dist-lite).
+ *
+ * LITE_FIXTURES=<dir> answers GETs from recorded responses instead: the file
+ * for /api/v1/work/plans is <dir>/_api_v1_work_plans.json (a trailing
+ * "<http_code> <time>s" line from curl -w is ignored). Missing files answer
+ * as an empty account (no computers, no sites). Scenario "free" answers the
+ * subscription with 404 whatever the fixtures say.
  */
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -129,9 +135,34 @@ function send(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+const FIXTURES = process.env.LITE_FIXTURES ? path.resolve(process.env.LITE_FIXTURES) : null;
+const EMPTY = {
+  "/api/v1/boxes": { boxes: [] },
+  "/api/v1/work/sites": { deploys: [], storage_used_bytes: 0, storage_limit_bytes: 0 },
+  "/pay/history": { success: true, payments: [] },
+  "/pay/spending": { success: true, spending: [] },
+};
+
+function recorded(p) {
+  const file = path.join(FIXTURES, `${p.replace(/\//g, "_")}.json`);
+  if (!existsSync(file)) return EMPTY[p] ?? null;
+  const lines = readFileSync(file, "utf8").trimEnd().split("\n");
+  if (/^\d{3} [\d.]+s$/.test(lines.at(-1)?.trim() ?? "")) lines.pop();
+  return JSON.parse(lines.join("\n"));
+}
+
 function account(req, res, p) {
   if (req.headers["x-uno-account"] !== "1") return send(res, 403, { error: "CSRF" });
   const GET = req.method === "GET";
+  if (FIXTURES && GET) {
+    if (SCENARIO === "free" && p === "/api/v1/box-subscription") {
+      return send(res, 404, { error: "NO_SUBSCRIPTION" });
+    }
+    const body = recorded(p);
+    return body === null
+      ? send(res, 404, { error: "NOT_RECORDED", path: p })
+      : send(res, 200, body);
+  }
   if (GET && p === "/auth/me") {
     return send(res, 200, {
       id: 85,
