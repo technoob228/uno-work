@@ -1,3 +1,4 @@
+import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import type { BrowserBridgeCommandEvent } from "@t3tools/contracts";
 
@@ -16,6 +17,9 @@ import { resolveBridgeEventProjectKey } from "./browserBridgeRouting";
 import { detectFileKind, usePreviewPane } from "./PreviewPaneContext";
 import { automationScopeKeys, type PreviewTabScope } from "./previewTabScopes";
 import { addSecretRequest, removeSecretRequest } from "../../secretRequestStore";
+import { addToolApproval, removeToolApproval } from "../../toolApprovalStore";
+import { dirname } from "../files/fileTypes";
+import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
   detectBrowserExtension,
   isBrowserExtensionConnected,
@@ -81,6 +85,9 @@ export function BrowserBridgeListener() {
   openUrlForTargetRef.current = openUrlForTarget;
   const openFileForTargetRef = useRef(openFileForTarget);
   openFileForTargetRef.current = openFileForTarget;
+  const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
 
   // Ask the companion extension to announce itself early, so the first bridge
   // command does not pay for the handshake.
@@ -108,6 +115,45 @@ export function BrowserBridgeListener() {
         }
         if (event.type === "secretSettled") {
           removeSecretRequest(event.requestId);
+          return;
+        }
+        if (event.type === "toolApprovalRequest") {
+          addToolApproval({ event, environmentId: connection.environmentId });
+          return;
+        }
+        if (event.type === "toolApprovalSettled") {
+          removeToolApproval(event.requestId);
+          return;
+        }
+        if (event.type === "openInApp") {
+          const store = useStore.getState();
+          const go = () => {
+            if (store.activeEnvironmentId !== connection.environmentId) {
+              store.setActiveEnvironmentId(connection.environmentId);
+            }
+            if (event.view === "office") {
+              void navigateRef.current({ to: "/office", search: { path: event.path } });
+            } else {
+              void navigateRef.current({
+                to: "/files",
+                search: { path: dirname(event.path), file: event.path },
+              });
+            }
+          };
+          // Switch views only for the chat the person is looking at; an
+          // agent in a background chat offers it instead of yanking the screen.
+          if (!event.context?.threadId || event.context.threadId === currentThreadIdRef.current) {
+            go();
+            return;
+          }
+          const name = event.path.split("/").pop() ?? event.path;
+          toastManager.add(
+            stackedThreadToast({
+              type: "info",
+              title: `An agent wants to show you ${name}`,
+              actionProps: { children: "Open", onClick: go },
+            }),
+          );
           return;
         }
         const projectKey =

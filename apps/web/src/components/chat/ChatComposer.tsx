@@ -78,6 +78,7 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerSecretRequestPanel } from "./ComposerSecretRequestPanel";
+import { ComposerToolApprovalPanel } from "./ComposerToolApprovalPanel";
 import {
   PersonalAiPanel,
   isPersonalAiModel,
@@ -2846,6 +2847,7 @@ export const ChatComposer = memo(
             }}
           >
             <ComposerSecretRequestPanel threadId={activeThread?.id} />
+            <ComposerToolApprovalPanel threadId={activeThread?.id} />
             {personalAiId !== null ? (
               <PersonalAiPanel
                 handle={personalAi}
