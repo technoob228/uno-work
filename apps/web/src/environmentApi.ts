@@ -85,6 +85,13 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       authStatus: rpcClient.providerSetup.authStatus,
       authSubmitCode: rpcClient.providerSetup.authSubmitCode,
     },
+    customHarness: {
+      list: rpcClient.customHarness.list,
+      test: rpcClient.customHarness.test,
+      setSecret: (input) => rpcClient.customHarness.setSecret(input).then(() => undefined),
+      installStart: rpcClient.customHarness.installStart,
+      installStatus: rpcClient.customHarness.installStatus,
+    },
     // The Uno account belongs to the interface (the signed-in person), not to
     // whichever machine this is: see account/unoAccount.ts. The daemon's own
     // uno.cloud.* RPCs are no longer used by this client.

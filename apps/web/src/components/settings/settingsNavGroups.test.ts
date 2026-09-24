@@ -39,6 +39,7 @@ describe("buildSettingsNavGroups", () => {
     expect(machine!.entries.map((entry) => entry.to)).toEqual([
       "/settings/environment/env-box/general",
       "/settings/environment/env-box/providers",
+      "/settings/environment/env-box/harnesses",
       "/settings/environment/env-box/assistants",
       "/settings/environment/env-box/apps",
       "/settings/environment/env-box/source-control",

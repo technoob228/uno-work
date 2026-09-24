@@ -54,7 +54,7 @@ export interface HarnessSetupApi {
   readonly clearInstall: (driver: ProviderDriverKind) => void;
 }
 
-function resolveClient(environmentId: EnvironmentId | null): WsRpcClient {
+export function resolveClient(environmentId: EnvironmentId | null): WsRpcClient {
   if (environmentId === null || isPrimaryEnvironmentId(environmentId)) {
     return getPrimaryEnvironmentConnection().client;
   }

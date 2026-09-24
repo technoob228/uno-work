@@ -139,6 +139,13 @@ const rpcClientMock = {
     authStatus: vi.fn(),
     authSubmitCode: vi.fn(),
   },
+  customHarness: {
+    list: vi.fn(),
+    test: vi.fn(),
+    setSecret: vi.fn(),
+    installStart: vi.fn(),
+    installStatus: vi.fn(),
+  },
   unoCloud: {
     getState: vi.fn(),
     boxPower: vi.fn(),

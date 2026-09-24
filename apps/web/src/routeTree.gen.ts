@@ -42,6 +42,7 @@ import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draf
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 import { Route as SettingsEnvironmentEnvironmentIdSourceControlRouteImport } from './routes/settings.environment.$environmentId.source-control'
 import { Route as SettingsEnvironmentEnvironmentIdProvidersRouteImport } from './routes/settings.environment.$environmentId.providers'
+import { Route as SettingsEnvironmentEnvironmentIdHarnessesRouteImport } from './routes/settings.environment.$environmentId.harnesses'
 import { Route as SettingsEnvironmentEnvironmentIdGeneralRouteImport } from './routes/settings.environment.$environmentId.general'
 import { Route as SettingsEnvironmentEnvironmentIdAssistantsRouteImport } from './routes/settings.environment.$environmentId.assistants'
 import { Route as SettingsEnvironmentEnvironmentIdArchivedRouteImport } from './routes/settings.environment.$environmentId.archived'
@@ -216,6 +217,12 @@ const SettingsEnvironmentEnvironmentIdProvidersRoute =
     path: '/providers',
     getParentRoute: () => SettingsEnvironmentEnvironmentIdRoute,
   } as any)
+const SettingsEnvironmentEnvironmentIdHarnessesRoute =
+  SettingsEnvironmentEnvironmentIdHarnessesRouteImport.update({
+    id: '/harnesses',
+    path: '/harnesses',
+    getParentRoute: () => SettingsEnvironmentEnvironmentIdRoute,
+  } as any)
 const SettingsEnvironmentEnvironmentIdGeneralRoute =
   SettingsEnvironmentEnvironmentIdGeneralRouteImport.update({
     id: '/general',
@@ -283,6 +290,7 @@ export interface FileRoutesByFullPath {
   '/settings/environment/$environmentId/archived': typeof SettingsEnvironmentEnvironmentIdArchivedRoute
   '/settings/environment/$environmentId/assistants': typeof SettingsEnvironmentEnvironmentIdAssistantsRoute
   '/settings/environment/$environmentId/general': typeof SettingsEnvironmentEnvironmentIdGeneralRoute
+  '/settings/environment/$environmentId/harnesses': typeof SettingsEnvironmentEnvironmentIdHarnessesRoute
   '/settings/environment/$environmentId/providers': typeof SettingsEnvironmentEnvironmentIdProvidersRoute
   '/settings/environment/$environmentId/source-control': typeof SettingsEnvironmentEnvironmentIdSourceControlRoute
 }
@@ -321,6 +329,7 @@ export interface FileRoutesByTo {
   '/settings/environment/$environmentId/archived': typeof SettingsEnvironmentEnvironmentIdArchivedRoute
   '/settings/environment/$environmentId/assistants': typeof SettingsEnvironmentEnvironmentIdAssistantsRoute
   '/settings/environment/$environmentId/general': typeof SettingsEnvironmentEnvironmentIdGeneralRoute
+  '/settings/environment/$environmentId/harnesses': typeof SettingsEnvironmentEnvironmentIdHarnessesRoute
   '/settings/environment/$environmentId/providers': typeof SettingsEnvironmentEnvironmentIdProvidersRoute
   '/settings/environment/$environmentId/source-control': typeof SettingsEnvironmentEnvironmentIdSourceControlRoute
 }
@@ -362,6 +371,7 @@ export interface FileRoutesById {
   '/settings/environment/$environmentId/archived': typeof SettingsEnvironmentEnvironmentIdArchivedRoute
   '/settings/environment/$environmentId/assistants': typeof SettingsEnvironmentEnvironmentIdAssistantsRoute
   '/settings/environment/$environmentId/general': typeof SettingsEnvironmentEnvironmentIdGeneralRoute
+  '/settings/environment/$environmentId/harnesses': typeof SettingsEnvironmentEnvironmentIdHarnessesRoute
   '/settings/environment/$environmentId/providers': typeof SettingsEnvironmentEnvironmentIdProvidersRoute
   '/settings/environment/$environmentId/source-control': typeof SettingsEnvironmentEnvironmentIdSourceControlRoute
 }
@@ -403,6 +413,7 @@ export interface FileRouteTypes {
     | '/settings/environment/$environmentId/archived'
     | '/settings/environment/$environmentId/assistants'
     | '/settings/environment/$environmentId/general'
+    | '/settings/environment/$environmentId/harnesses'
     | '/settings/environment/$environmentId/providers'
     | '/settings/environment/$environmentId/source-control'
   fileRoutesByTo: FileRoutesByTo
@@ -441,6 +452,7 @@ export interface FileRouteTypes {
     | '/settings/environment/$environmentId/archived'
     | '/settings/environment/$environmentId/assistants'
     | '/settings/environment/$environmentId/general'
+    | '/settings/environment/$environmentId/harnesses'
     | '/settings/environment/$environmentId/providers'
     | '/settings/environment/$environmentId/source-control'
   id:
@@ -481,6 +493,7 @@ export interface FileRouteTypes {
     | '/settings/environment/$environmentId/archived'
     | '/settings/environment/$environmentId/assistants'
     | '/settings/environment/$environmentId/general'
+    | '/settings/environment/$environmentId/harnesses'
     | '/settings/environment/$environmentId/providers'
     | '/settings/environment/$environmentId/source-control'
   fileRoutesById: FileRoutesById
@@ -725,6 +738,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsEnvironmentEnvironmentIdProvidersRouteImport
       parentRoute: typeof SettingsEnvironmentEnvironmentIdRoute
     }
+    '/settings/environment/$environmentId/harnesses': {
+      id: '/settings/environment/$environmentId/harnesses'
+      path: '/harnesses'
+      fullPath: '/settings/environment/$environmentId/harnesses'
+      preLoaderRoute: typeof SettingsEnvironmentEnvironmentIdHarnessesRouteImport
+      parentRoute: typeof SettingsEnvironmentEnvironmentIdRoute
+    }
     '/settings/environment/$environmentId/general': {
       id: '/settings/environment/$environmentId/general'
       path: '/general'
@@ -809,6 +829,7 @@ interface SettingsEnvironmentEnvironmentIdRouteChildren {
   SettingsEnvironmentEnvironmentIdArchivedRoute: typeof SettingsEnvironmentEnvironmentIdArchivedRoute
   SettingsEnvironmentEnvironmentIdAssistantsRoute: typeof SettingsEnvironmentEnvironmentIdAssistantsRoute
   SettingsEnvironmentEnvironmentIdGeneralRoute: typeof SettingsEnvironmentEnvironmentIdGeneralRoute
+  SettingsEnvironmentEnvironmentIdHarnessesRoute: typeof SettingsEnvironmentEnvironmentIdHarnessesRoute
   SettingsEnvironmentEnvironmentIdProvidersRoute: typeof SettingsEnvironmentEnvironmentIdProvidersRoute
   SettingsEnvironmentEnvironmentIdSourceControlRoute: typeof SettingsEnvironmentEnvironmentIdSourceControlRoute
 }
@@ -823,6 +844,8 @@ const SettingsEnvironmentEnvironmentIdRouteChildren: SettingsEnvironmentEnvironm
       SettingsEnvironmentEnvironmentIdAssistantsRoute,
     SettingsEnvironmentEnvironmentIdGeneralRoute:
       SettingsEnvironmentEnvironmentIdGeneralRoute,
+    SettingsEnvironmentEnvironmentIdHarnessesRoute:
+      SettingsEnvironmentEnvironmentIdHarnessesRoute,
     SettingsEnvironmentEnvironmentIdProvidersRoute:
       SettingsEnvironmentEnvironmentIdProvidersRoute,
     SettingsEnvironmentEnvironmentIdSourceControlRoute:

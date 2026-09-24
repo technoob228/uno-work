@@ -34,6 +34,7 @@ export const ProviderSetupListRow = memo(function ProviderSetupListRow(props: {
     >
       <ProviderInstanceIcon
         driverKind={props.entry.driverKind}
+        iconText={props.entry.iconText}
         displayName={props.entry.displayName}
         accentColor={props.entry.accentColor}
         className="size-5"

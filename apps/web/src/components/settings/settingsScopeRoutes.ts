@@ -23,6 +23,7 @@ export type AppSettingsSection = "general" | "connections" | "phone" | "browser"
 export type EnvironmentSettingsSection =
   | "general"
   | "providers"
+  | "harnesses"
   | "assistants"
   | "apps"
   | "source-control"
@@ -39,6 +40,7 @@ export const APP_SETTINGS_SECTIONS: ReadonlyArray<AppSettingsSection> = [
 export const ENVIRONMENT_SETTINGS_SECTIONS: ReadonlyArray<EnvironmentSettingsSection> = [
   "general",
   "providers",
+  "harnesses",
   "assistants",
   "apps",
   "source-control",

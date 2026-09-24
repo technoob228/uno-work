@@ -17,6 +17,8 @@ export function providerInstanceInitials(label: string): string {
 export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   driverKind: ProviderDriverKind;
   displayName: string;
+  /** Emoji / letters of a custom harness (`ServerProvider.iconText`). */
+  iconText?: string | undefined;
   accentColor?: string | undefined;
   showBadge?: boolean;
   className?: string;
@@ -40,6 +42,10 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
     >
       {Icon ? (
         <Icon className={cn("size-5 shrink-0", props.iconClassName)} aria-hidden />
+      ) : props.iconText ? (
+        <span className={cn("text-sm leading-none", props.iconClassName)} aria-hidden>
+          {props.iconText}
+        </span>
       ) : (
         <span className={cn("text-[10px] font-semibold leading-none", props.iconClassName)}>
           {providerInstanceInitials(props.displayName)}
