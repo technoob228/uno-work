@@ -15,6 +15,7 @@ import { accountReachable, sitesQuery } from "../../myuno/myUnoQueries";
 import { programRemoval, type ProgramTile } from "../programModel";
 import {
   isHomeVisibleThread,
+  pickContinueThreads,
   recentHomeEntries,
   threadActivityAt,
   type HomeThread,
@@ -57,7 +58,11 @@ export function useHomeStarters(input: {
       const removal = programRemoval(tile);
       if (removal) apps.push({ name: tile.name, kind: removal.kind });
     }
+    // Exactly the cards Continue shows (same input, same pick), so a starter
+    // never repeats a card right below the composer.
+    const continueTitles = pickContinueThreads(threads, { now }).map((thread) => thread.title);
     return homeStarters({
+      continueTitles,
       chats,
       apps,
       files: recentHomeEntries(files ?? [], 6).map((entry) => ({

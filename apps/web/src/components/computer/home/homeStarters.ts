@@ -43,6 +43,11 @@ export interface StarterContext {
   readonly apps: ReadonlyArray<StarterApp>;
   readonly files: ReadonlyArray<StarterFile>;
   readonly sites: ReadonlyArray<StarterSite>;
+  /**
+   * Titles of the chats Home already shows under "Continue": a starter for
+   * them would repeat the card right below, so they are skipped.
+   */
+  readonly continueTitles?: ReadonlyArray<string>;
 }
 
 export type StarterSource = "chat" | "app" | "file" | "site" | "generic";
@@ -115,8 +120,11 @@ function extensionOf(name: string): string {
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
-function chatStarters(chats: ReadonlyArray<StarterChat>): HomeStarter[] {
-  const seen = new Set<string>();
+function chatStarters(
+  chats: ReadonlyArray<StarterChat>,
+  continueTitles: ReadonlyArray<string>,
+): HomeStarter[] {
+  const seen = new Set<string>(continueTitles.map((title) => title.trim().toLowerCase()));
   const out: HomeStarter[] = [];
   for (const chat of chats.toSorted((a, b) => b.activityAt - a.activityAt)) {
     const title = chat.title.trim();
@@ -234,7 +242,7 @@ export function homeStarters(
   max: number = MAX_HOME_STARTERS,
 ): HomeStarter[] {
   const pools = [
-    chatStarters(context.chats),
+    chatStarters(context.chats, context.continueTitles ?? []),
     appStarters(context.apps),
     fileStarters(context.files),
     siteStarters(context.sites),

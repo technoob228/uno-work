@@ -62,6 +62,31 @@ describe("homeStarters", () => {
     expect(starters.map((s) => s.label)).toEqual(["Next step for “Landing page”"]);
   });
 
+  it("skips chats already shown under Continue, then uses other sources", () => {
+    const starters = homeStarters({
+      ...EMPTY,
+      chats: [
+        { title: "Sales report", activityAt: 3, folder: null },
+        { title: "Invoice bot", activityAt: 2, folder: null },
+      ],
+      sites: [{ name: "blog" }],
+      continueTitles: ["Sales report", "invoice bot "],
+    });
+    expect(starters.map((s) => s.label)).toEqual(["Publish an update to blog"]);
+  });
+
+  it("keeps older chats that are not under Continue", () => {
+    const starters = homeStarters({
+      ...EMPTY,
+      chats: [
+        { title: "Sales report", activityAt: 3, folder: null },
+        { title: "Old landing", activityAt: 1, folder: null },
+      ],
+      continueTitles: ["Sales report"],
+    });
+    expect(starters.map((s) => s.label)).toEqual(["Next step for “Old landing”"]);
+  });
+
   it("carries the chat's folder so the composer switches there", () => {
     const folder = { cwd: "/home/uno/shop", name: "shop" };
     const [starter] = homeStarters({
