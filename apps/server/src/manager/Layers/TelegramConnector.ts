@@ -34,6 +34,7 @@
  * delivery_failed / provider_unavailable) is derived in `connectorHealth.ts`
  * and persisted alongside, so the settings UI can show it.
  */
+import { cleanUnoFinalAnswerText } from "@t3tools/shared/unoFinalAnswer";
 import {
   CommandId,
   ManagerTelegramConnectorConfig,
@@ -248,7 +249,10 @@ export const resolveTurnReply = (input: TurnReplyInputs): ResolvedTurnReply | nu
         message.text.trim().length > 0,
     );
   if (lastAssistantMessage !== undefined) {
-    const { text, files } = extractOutgoingFiles(lastAssistantMessage.text);
+    // The final-answer marker some models echo never goes out to a chat.
+    const { text, files } = extractOutgoingFiles(
+      cleanUnoFinalAnswerText(lastAssistantMessage.text),
+    );
     return { text: text.slice(0, TELEGRAM_MESSAGE_LIMIT), files };
   }
   // Turn терминален, а текста ещё нет: если сессия жива, подождём — харнесс

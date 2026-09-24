@@ -1,4 +1,5 @@
 import { type EnvironmentId, type MessageId, type ThreadId, type TurnId } from "@t3tools/contracts";
+import { cleanUnoFinalAnswerText } from "@t3tools/shared/unoFinalAnswer";
 import {
   createContext,
   memo,
@@ -475,14 +476,16 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
       {row.kind === "message" &&
         row.message.role === "assistant" &&
         (() => {
-          const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+          // Any harness can leak the final-answer marker; it is never shown.
+          const cleanText = cleanUnoFinalAnswerText(row.message.text ?? "");
+          const messageText = cleanText || (row.message.streaming ? "" : "(empty response)");
           const assistantTurnStillInProgress =
             ctx.activeTurnInProgress &&
             ctx.activeTurnId !== null &&
             ctx.activeTurnId !== undefined &&
             row.message.turnId === ctx.activeTurnId;
           const assistantCopyState = resolveAssistantMessageCopyState({
-            text: row.message.text ?? null,
+            text: row.message.text ? cleanText : null,
             showCopyButton: row.showAssistantCopyButton,
             streaming: row.message.streaming || assistantTurnStillInProgress,
           });

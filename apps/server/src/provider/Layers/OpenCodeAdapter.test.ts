@@ -752,6 +752,13 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           "Paris",
         );
         assert.equal(visibleUnoAssistantTextFromRaw("<uno_final_answer>\na < b"), "a < b");
+        // Kimi K2.7 (0.0.82): the marker repeated inside the answer, or with odd spacing.
+        assert.equal(
+          visibleUnoAssistantTextFromRaw(
+            "thinking…<uno_final_answer>\n<uno_final_answer>\nParis\n< /uno_final_answer >",
+          ),
+          "Paris",
+        );
       }),
   );
 

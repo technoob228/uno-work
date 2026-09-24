@@ -107,6 +107,10 @@
     "./assistantChat": {
       "types": "./src/assistantChat.ts",
       "import": "./src/assistantChat.ts"
+    },
+    "./unoFinalAnswer": {
+      "types": "./src/unoFinalAnswer.ts",
+      "import": "./src/unoFinalAnswer.ts"
     }
   },
   "scripts": {

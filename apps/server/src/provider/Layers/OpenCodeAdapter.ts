@@ -19,6 +19,7 @@ import * as path from "node:path";
 import { Cause, Deferred, Effect, Exit, Option, Queue, Random, Ref, Scope, Stream } from "effect";
 import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
+import { cleanUnoFinalAnswerText } from "@t3tools/shared/unoFinalAnswer";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
@@ -466,8 +467,12 @@ function stripFinalAnswerClosingMarker(value: string): string {
 export function visibleUnoAssistantTextFromRaw(rawText: string): string {
   const markerIndex = rawText.toLowerCase().indexOf(UNO_FINAL_ANSWER_MARKER);
   if (markerIndex >= 0) {
-    return stripFinalAnswerClosingMarker(
-      rawText.slice(markerIndex + UNO_FINAL_ANSWER_MARKER.length).replace(/^[\s:：\-–—]+/u, ""),
+    // Any further opening / closing marker (models that echo it as a tag, or
+    // repeat it) is not part of the answer either.
+    return cleanUnoFinalAnswerText(
+      stripFinalAnswerClosingMarker(
+        rawText.slice(markerIndex + UNO_FINAL_ANSWER_MARKER.length).replace(/^[\s:：\-–—]+/u, ""),
+      ),
     );
   }
 
@@ -1308,6 +1313,9 @@ export function makeOpenCodeAdapter(
         !context.completedAssistantPartIds.has(part.id)
       ) {
         context.completedAssistantPartIds.add(part.id);
+        const completedText = isUnoLeakyReasoningModel(context.activeModel)
+          ? visibleUnoAssistantTextFromRaw(latestText)
+          : cleanUnoFinalAnswerText(latestText);
         yield* emit({
           ...(yield* buildEventBase({
             threadId: context.session.threadId,
@@ -1321,7 +1329,10 @@ export function makeOpenCodeAdapter(
             itemType: "assistant_message",
             status: "completed",
             title: "Assistant message",
-            ...(latestText.length > 0 ? { detail: latestText } : {}),
+            // The completed text is the fallback message body when no delta
+            // made it through: for a leaky reasoning model that must be the
+            // visible answer, never the raw thinking with the marker.
+            ...(completedText.length > 0 ? { detail: completedText } : {}),
           },
         });
       }
