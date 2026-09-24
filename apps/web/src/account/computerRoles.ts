@@ -9,7 +9,7 @@
  * `comment` as a tag — `[production] anything else the person wrote` — and a
  * console that hasn't got the field yet still works that way, so the tag stays
  * the fallback for reading and the way to write there. An Uno Work computer is
- * always "Workspace": that is what it is, not a label.
+ * always the workspace (shown as "Uno Work"): that is what it is, not a label.
  *
  * Kept free of React so the parsing is unit-tested.
  */
@@ -28,7 +28,7 @@ export const ASSIGNABLE_ROLES: ReadonlyArray<Exclude<ComputerRole, "workspace">>
 export const ALL_ROLES: ReadonlyArray<ComputerRole> = ["workspace", ...ASSIGNABLE_ROLES];
 
 export const ROLE_LABEL: Record<ComputerRole, string> = {
-  workspace: "Workspace",
+  workspace: "Uno Work",
   server: "Server",
   production: "Production",
   staging: "Staging",
