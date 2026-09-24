@@ -12,7 +12,7 @@ import {
   WorkspaceMachineScope,
   WorkspaceState,
 } from "./workspace.ts";
-import { AppAiOverview, AppAiUpdateInput } from "./appSdk.ts";
+import { AppAiOverview, AppAiUpdateInput, UnoAiSpend } from "./appSdk.ts";
 import { OpenError, OpenInEditorInput } from "./editor.ts";
 import {
   UnoComputerActivity,
@@ -392,6 +392,7 @@ export const WS_METHODS = {
   unoComputerAppAction: "uno.computer.appAction",
   appAiList: "uno.appAi.list",
   appAiUpdate: "uno.appAi.update",
+  appAiSpend: "uno.appAi.spend",
   unoComputerLocalMetrics: "uno.computer.localMetrics",
   unoComputerResizeOptions: "uno.computer.resizeOptions",
   unoComputerResize: "uno.computer.resize",
@@ -1552,6 +1553,13 @@ export const WsAppAiListRpc = Rpc.make(WS_METHODS.appAiList, {
   error: UnoCloudRpcError,
 });
 
+/** Home's "Uno AI spend": credits left and the running total over the last days. */
+export const WsAppAiSpendRpc = Rpc.make(WS_METHODS.appAiSpend, {
+  payload: Schema.Struct({}),
+  success: UnoAiSpend,
+  error: UnoCloudRpcError,
+});
+
 /** Limit / revoke / task autonomy of one app. */
 export const WsAppAiUpdateRpc = Rpc.make(WS_METHODS.appAiUpdate, {
   payload: AppAiUpdateInput,
@@ -1688,6 +1696,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoComputerEmbedCheckRpc,
   WsAppAiListRpc,
   WsAppAiUpdateRpc,
+  WsAppAiSpendRpc,
   WsUnoComputerLocalMetricsRpc,
   WsUnoComputerResizeOptionsRpc,
   WsUnoComputerResizeRpc,
