@@ -43,11 +43,13 @@ import { ProviderService, type ProviderServiceShape } from "../Services/Provider
 import {
   ProviderSessionDirectory,
   type ProviderRuntimeBinding,
+  type ProviderRuntimeBindingWithMetadata,
 } from "../Services/ProviderSessionDirectory.ts";
 import { type EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { redactSecretsDeep } from "../../secretRedaction.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
+import { type LiveHarnessSession, selectSessionsToEvict } from "../harnessBudget.ts";
 
 /**
  * Hook for tests that want to override the canonical event logger pulled
@@ -56,6 +58,12 @@ import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
  */
 export interface ProviderServiceLiveOptions {
   readonly canonicalEventLogger?: EventNdjsonLogger;
+  /**
+   * Cap on live harness processes (`harnessBudget.ts`). Starting a session
+   * over the cap first stops the least recently used idle ones; they resume
+   * on their thread's next message. `null`/absent — no cap.
+   */
+  readonly maxLiveProcesses?: number | null;
 }
 
 const ProviderRollbackConversationInput = Schema.Struct({
@@ -376,6 +384,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
 
+      yield* enforceLiveProcessCap({
+        threadId: input.binding.threadId,
+        instanceId: bindingInstanceId,
+        adapter,
+      });
       const resumed = yield* adapter.startSession({
         threadId: input.binding.threadId,
         provider: input.binding.provider,
@@ -494,6 +507,75 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   });
 
+  // Frees room for a new harness process when the machine's cap is reached:
+  // stops the least recently used idle per-thread sessions (never one with a
+  // turn in flight). The binding keeps its resume cursor, so the evicted
+  // thread continues its conversation on the next message.
+  const enforceLiveProcessCap = Effect.fn("enforceLiveProcessCap")(function* (incoming: {
+    readonly threadId: ThreadId;
+    readonly instanceId: ProviderInstanceId;
+    readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
+  }) {
+    const maxLive = options?.maxLiveProcesses;
+    if (maxLive === undefined || maxLive === null) return;
+    const bindings = yield* directory
+      .listBindings()
+      .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<ProviderRuntimeBindingWithMetadata>));
+    const lastSeenByThread = new Map(
+      bindings.map((binding) => [binding.threadId, Date.parse(binding.lastSeenAt)] as const),
+    );
+    const live: LiveHarnessSession[] = [];
+    for (const [instanceId, adapter] of yield* getAdapterEntries) {
+      const sessions = yield* adapter.listSessions();
+      for (const session of sessions) {
+        const lastSeen = lastSeenByThread.get(session.threadId);
+        const updated = Date.parse(session.updatedAt);
+        live.push({
+          threadId: session.threadId,
+          instanceId,
+          sharesProcess: adapter.capabilities.sharesProcessAcrossSessions === true,
+          busy:
+            session.status === "running" ||
+            session.status === "connecting" ||
+            session.activeTurnId !== undefined,
+          lastActivityMs:
+            lastSeen !== undefined && !Number.isNaN(lastSeen)
+              ? lastSeen
+              : Number.isNaN(updated)
+                ? 0
+                : updated,
+        });
+      }
+    }
+    const victims = selectSessionsToEvict({
+      live,
+      incoming: {
+        threadId: incoming.threadId,
+        instanceId: incoming.instanceId,
+        sharesProcess: incoming.adapter.capabilities.sharesProcessAcrossSessions === true,
+      },
+      maxLive,
+    });
+    for (const victim of victims) {
+      yield* stopSession({ threadId: ThreadId.make(victim) }).pipe(
+        Effect.tap(() =>
+          Effect.logInfo("provider.session.evicted", {
+            threadId: victim,
+            forThreadId: incoming.threadId,
+            maxLiveProcesses: maxLive,
+            reason: "live_process_cap",
+          }),
+        ),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("provider.session.evict-failed", {
+            threadId: victim,
+            cause: Cause.pretty(cause),
+          }),
+        ),
+      );
+    }
+  });
+
   const startSession: ProviderServiceShape["startSession"] = Effect.fn("startSession")(
     function* (threadId, rawInput) {
       const parsed = yield* decodeInputOrValidationError({
@@ -565,6 +647,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "provider.cwd.effective": effectiveCwd ?? "",
         });
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
+        yield* enforceLiveProcessCap({ threadId, instanceId: resolvedInstanceId, adapter });
         const session = yield* adapter.startSession({
           ...input,
           providerInstanceId: resolvedInstanceId,

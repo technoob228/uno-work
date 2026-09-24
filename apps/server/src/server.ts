@@ -57,7 +57,8 @@ import { CustomHarnessFilesLive } from "./provider/customHarness/CustomHarnessFi
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
 import { ProviderEventLoggersLive } from "./provider/Layers/ProviderEventLoggers.ts";
 import { CustomMcpServersLive } from "./mcp/customMcpServers.ts";
-import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
+import { makeProviderServiceLive } from "./provider/Layers/ProviderService.ts";
+import { currentHarnessBudget } from "./provider/harnessBudget.ts";
 import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper.ts";
 import { OpenCodeRuntimeLive } from "./provider/opencodeRuntime.ts";
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery.ts";
@@ -259,7 +260,14 @@ const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
 // `create()`; `ProviderEventLoggersLive` owns the shared native/canonical
 // NDJSON writers and is provided at the outer runtime layer so both
 // `ProviderService` and the per-instance drivers read the same logger pair.
-const ProviderLayerLive = ProviderServiceLive.pipe(
+// The live-harness cap follows the machine's RAM (`harnessBudget.ts`).
+const ProviderServiceBudgetedLive = Layer.unwrap(
+  Effect.sync(() =>
+    makeProviderServiceLive({ maxLiveProcesses: currentHarnessBudget().maxLiveProcesses }),
+  ),
+);
+
+const ProviderLayerLive = ProviderServiceBudgetedLive.pipe(
   Layer.provide(ProviderAdapterRegistryLive),
   Layer.provideMerge(ProviderSessionDirectoryLayerLive),
 );
