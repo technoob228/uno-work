@@ -2346,7 +2346,15 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             return;
           }
           set((state) => {
-            const existing = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
+            const current = state.draftsByThreadKey[threadKey];
+            // Writing the text that is already there changes nothing. Keep the
+            // same state so subscribers don't re-render: the editor echoes its
+            // text back on focus/sync, and a fresh draft object on every echo
+            // fed a render loop (React #185, "Maximum update depth exceeded").
+            if ((current?.prompt ?? "") === prompt) {
+              return state;
+            }
+            const existing = current ?? createEmptyThreadDraft();
             const nextDraft: ComposerThreadDraftState = {
               ...existing,
               prompt,
