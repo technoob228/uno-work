@@ -465,15 +465,6 @@ function AppRow({
       }
       control={
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {app.chat && app.status !== "revoked" ? (
-            <ProviderControl
-              app={app}
-              providers={providers}
-              environmentId={environmentId}
-              onUpdate={onUpdate}
-              pending={pending}
-            />
-          ) : null}
           {usesAi ? (
             <label
               className="flex items-center gap-1 text-xs text-muted-foreground"
@@ -591,7 +582,20 @@ function AppRow({
           )}
         </div>
       }
-    />
+    >
+      {app.chat && app.status !== "revoked" ? (
+        <div className="flex flex-wrap items-center gap-2 pt-3 pb-4">
+          <span className="text-xs text-muted-foreground">Answers from</span>
+          <ProviderControl
+            app={app}
+            providers={providers}
+            environmentId={environmentId}
+            onUpdate={onUpdate}
+            pending={pending}
+          />
+        </div>
+      ) : null}
+    </SettingsRow>
   );
 }
 
