@@ -276,6 +276,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     spawnedByThreadId: thread.spawnedByThreadId ?? null,
     controller: thread.controller ?? "human",
     controlChangedAt: thread.controlChangedAt ?? null,
+    assistantRole: thread.assistantRole ?? null,
   };
 }
 
@@ -307,6 +308,7 @@ function mapThreadShell(
     spawnedByThreadId: thread.spawnedByThreadId ?? null,
     controller: thread.controller ?? "human",
     controlChangedAt: thread.controlChangedAt ?? null,
+    assistantRole: thread.assistantRole ?? null,
   };
   const session = thread.session ? mapSession(thread.session) : null;
   const turnState: ThreadTurnState = {
@@ -342,6 +344,7 @@ function mapThreadShell(
     spawnedByThreadId: thread.spawnedByThreadId ?? null,
     controller: thread.controller ?? "human",
     controlChangedAt: thread.controlChangedAt ?? null,
+    assistantRole: thread.assistantRole ?? null,
   };
   return {
     shell,
@@ -371,6 +374,7 @@ function toThreadShell(thread: Thread): ThreadShell {
     spawnedByThreadId: thread.spawnedByThreadId ?? null,
     controller: thread.controller ?? "human",
     controlChangedAt: thread.controlChangedAt ?? null,
+    assistantRole: thread.assistantRole ?? null,
   };
 }
 
@@ -457,7 +461,8 @@ function sidebarThreadSummariesEqual(
     left.modelSelection?.model === right.modelSelection?.model &&
     (left.spawnedByThreadId ?? null) === (right.spawnedByThreadId ?? null) &&
     (left.controller ?? "human") === (right.controller ?? "human") &&
-    (left.controlChangedAt ?? null) === (right.controlChangedAt ?? null)
+    (left.controlChangedAt ?? null) === (right.controlChangedAt ?? null) &&
+    (left.assistantRole ?? null) === (right.assistantRole ?? null)
   );
 }
 
@@ -481,7 +486,8 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.worktreePath === right.worktreePath &&
     (left.spawnedByThreadId ?? null) === (right.spawnedByThreadId ?? null) &&
     (left.controller ?? "human") === (right.controller ?? "human") &&
-    (left.controlChangedAt ?? null) === (right.controlChangedAt ?? null)
+    (left.controlChangedAt ?? null) === (right.controlChangedAt ?? null) &&
+    (left.assistantRole ?? null) === (right.assistantRole ?? null)
   );
 }
 
@@ -1328,6 +1334,9 @@ function applyEnvironmentOrchestrationEvent(
           activities: [],
           checkpoints: [],
           session: null,
+          ...(event.payload.assistantRole !== undefined
+            ? { assistantRole: event.payload.assistantRole }
+            : {}),
           ...(event.payload.spawnedByThreadId !== undefined
             ? {
                 spawnedByThreadId: event.payload.spawnedByThreadId,
@@ -1368,6 +1377,9 @@ function applyEnvironmentOrchestrationEvent(
         ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
         ...(event.payload.worktreePath !== undefined
           ? { worktreePath: event.payload.worktreePath }
+          : {}),
+        ...(event.payload.assistantRole !== undefined
+          ? { assistantRole: event.payload.assistantRole }
           : {}),
         updatedAt: event.payload.updatedAt,
       }));

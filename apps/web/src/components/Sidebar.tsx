@@ -95,7 +95,7 @@ import {
 } from "../environments/threadSnoozeSupport";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useFeatureFlag } from "../hooks/useFeatureFlags";
-import { useFolderChats } from "../hooks/useFolderChats";
+import { useFolderChats, useHomeFolderPath } from "../hooks/useFolderChats";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useMinuteClock } from "../hooks/useMinuteClock";
@@ -124,6 +124,7 @@ import {
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import {
+  selectEnvironmentState,
   selectProjectsAcrossEnvironments,
   selectProjectsForEnvironment,
   selectSidebarThreadsAcrossEnvironments,
@@ -192,7 +193,15 @@ import { type SidebarMode, useNavStore } from "../navigation/navStore";
 import { useNavLayout } from "../navigation/useNavLayout";
 import { InboxNeedsYouList, InboxPanel } from "./inbox/InboxPanel";
 import { RailPanelHeader } from "./sidebar/NavRail";
-import { SidebarInboxRow } from "./sidebar/SidebarInboxRow";
+import { SidebarAssistantRow } from "./sidebar/SidebarAssistantRow";
+import { SidebarNewButton } from "./sidebar/SidebarNewButton";
+import {
+  ASSISTANT_CHAT_NAME,
+  isFromAssistant,
+  isOlderAssistantChat,
+  isRegularListChat,
+} from "../assistant/assistantChat.logic";
+import { useAssistantChat } from "../assistant/useAssistantChat";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import {
@@ -312,6 +321,27 @@ function resolveProviderDriverKind(
  * Bot mark on a chat another chat's agent created, naming that chat. Hidden
  * when the chat's machine does not advertise `agentThreads`.
  */
+/** "Uno" pill on a chat the assistant started (the "from Uno" label). */
+const SidebarFromUnoBadge = memo(function SidebarFromUnoBadge(props: { threadId: ThreadId }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            role="img"
+            aria-label="Started by Uno"
+            data-testid={`thread-from-uno-${props.threadId}`}
+            className="inline-flex shrink-0 items-center rounded-full bg-primary/12 px-1.5 text-[10px] leading-4 font-medium text-primary"
+          />
+        }
+      >
+        {ASSISTANT_CHAT_NAME}
+      </TooltipTrigger>
+      <TooltipPopup side="top">Started by Uno</TooltipPopup>
+    </Tooltip>
+  );
+});
+
 const SidebarSpawnedThreadBadge = memo(function SidebarSpawnedThreadBadge(props: {
   environmentId: EnvironmentId;
   threadId: ThreadId;
@@ -319,6 +349,14 @@ const SidebarSpawnedThreadBadge = memo(function SidebarSpawnedThreadBadge(props:
 }) {
   const supported = useEnvironmentSupportsAgentThreads(props.environmentId);
   const parentTitle = useThreadTitle(props.environmentId, props.spawnedByThreadId);
+  // A chat Uno's own agent spawned reads "from Uno", like the ones it starts.
+  const parentIsUno = useStore(
+    (state) =>
+      selectEnvironmentState(state, props.environmentId).sidebarThreadSummaryById[
+        props.spawnedByThreadId
+      ]?.assistantRole === "chat",
+  );
+  if (parentIsUno) return <SidebarFromUnoBadge threadId={props.threadId} />;
   if (!supported) return null;
   const label = describeSpawnedThreadOrigin(parentTitle);
   return (
@@ -705,7 +743,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     </span>
   );
 
-  const spawnedBadge = thread.spawnedByThreadId ? (
+  const spawnedBadge = isFromAssistant(thread, null) ? (
+    <SidebarFromUnoBadge threadId={thread.id} />
+  ) : thread.spawnedByThreadId ? (
     <SidebarSpawnedThreadBadge
       environmentId={thread.environmentId}
       threadId={thread.id}
@@ -1105,9 +1145,13 @@ export default function Sidebar() {
   // section at a time. Standard layout: "Home" lives in the main area, so a
   // "home" left over from the rail reads as Chats.
   const railLayout = useNavLayout() === "rail";
+  // Standard layout (0.0.83): "Home" lives in the main area and the Inbox is
+  // the bell's popover, so a "home" or "inbox" left over from the rail (or an
+  // older version) reads as Chats — the chat list never disappears behind the
+  // Inbox, and Home and Inbox are never highlighted together.
   const listMode: SidebarMode = railLayout
     ? sidebarMode
-    : sidebarMode === "home"
+    : sidebarMode === "home" || sidebarMode === "inbox"
       ? "chats"
       : sidebarMode;
   const pathname = useLocation({ select: (location) => location.pathname });
@@ -1202,9 +1246,15 @@ export default function Sidebar() {
       }).filter((group) => !isAssistantProjectId(group.id)),
     [orderedProjects, primaryEnvironmentId, projectGroupingSettings, resolveEnvironmentLabel],
   );
+  // The Uno chat (pinned on top) and the assistant's other chats, which the
+  // "Older Uno chats" scope lists when there are any.
+  const assistantChatId = useAssistantChat().chat?.id ?? null;
   const hasHelperProjects = useMemo(
-    () => projects.some((project) => isAssistantProjectId(project.id)),
-    [projects],
+    () =>
+      threads.some(
+        (thread) => thread.archivedAt === null && isOlderAssistantChat(thread, assistantChatId),
+      ),
+    [assistantChatId, threads],
   );
   const projectByKey = useMemo(
     () => new Map(projects.map((project) => [`${project.environmentId}:${project.id}`, project])),
@@ -1219,7 +1269,7 @@ export default function Sidebar() {
     }
     for (const project of projects) {
       if (isAssistantProjectId(project.id)) {
-        map.set(`${project.environmentId}:${project.id}`, "Helper");
+        map.set(`${project.environmentId}:${project.id}`, ASSISTANT_CHAT_NAME);
       }
     }
     return map;
@@ -1234,7 +1284,7 @@ export default function Sidebar() {
   const projectScopeItems = useMemo(
     () => [
       { value: ALL_SCOPE, label: "All projects" },
-      ...(hasHelperProjects ? [{ value: HELPER_SCOPE, label: "Helper" }] : []),
+      ...(hasHelperProjects ? [{ value: HELPER_SCOPE, label: "Older Uno chats" }] : []),
       ...projectGroups.map((group) => ({ value: group.projectKey, label: group.displayName })),
     ],
     [hasHelperProjects, projectGroups],
@@ -1310,10 +1360,15 @@ export default function Sidebar() {
   const { pinnedThreads, activeThreads, snoozedThreads, settledThreads } = useMemo(() => {
     const visible = threads.filter((thread) => {
       if (thread.archivedAt !== null) return false;
-      const isHelperThread = isAssistantProjectId(thread.projectId);
-      if (isHelperScope) return isHelperThread;
-      // Helper chats live behind the Helper scope; the open one stays visible.
-      if (isHelperThread) return threadKeyOf(thread) === routeThreadKey;
+      // The Uno chat is pinned on top of the sidebar, never in the list.
+      if (assistantChatId !== null && thread.id === assistantChatId) return false;
+      const isOlderUnoChat = isOlderAssistantChat(thread, assistantChatId);
+      if (isHelperScope) return isOlderUnoChat;
+      // The assistant's other chats (older ones, Telegram / Slack chats) live
+      // behind the "Older Uno chats" scope; the open one stays visible.
+      if (!isRegularListChat(thread, assistantChatId)) {
+        return threadKeyOf(thread) === routeThreadKey;
+      }
       return scopedProjectKeys === null || scopedProjectKeys.has(projectKeyOf(thread));
     });
     const sections = partitionSidebarThreads(visible, { now, sortOrder: sidebarThreadSortOrder });
@@ -1323,7 +1378,15 @@ export default function Sidebar() {
       snoozedThreads: sections.snoozed,
       settledThreads: sections.settled,
     };
-  }, [isHelperScope, now, routeThreadKey, scopedProjectKeys, sidebarThreadSortOrder, threads]);
+  }, [
+    assistantChatId,
+    isHelperScope,
+    now,
+    routeThreadKey,
+    scopedProjectKeys,
+    sidebarThreadSortOrder,
+    threads,
+  ]);
 
   const [settledVisibleCount, setSettledVisibleCount] = useState(SETTLED_TAIL_INITIAL_COUNT);
   const settledResetKey = projectScopeKey ?? ALL_SCOPE;
@@ -2145,6 +2208,41 @@ export default function Sidebar() {
     handledNewChatRequest.current = newChatRequest;
     handleNewThreadClick();
   }, [handleNewThreadClick, newChatRequest]);
+  // "New ▾ → New chat in a project": the projects used last on this computer.
+  const homeFolderPath = useHomeFolderPath(newThreadContext.activeEnvironmentId);
+  const newMenuProjects = useMemo(() => {
+    const home = homeFolderPath?.replace(/\/+$/, "") ?? null;
+    return projects
+      .filter(
+        (project) =>
+          !isAssistantProjectId(project.id) &&
+          project.environmentId === newThreadContext.activeEnvironmentId &&
+          project.cwd.replace(/\/+$/, "") !== home,
+      )
+      .toSorted((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
+      .slice(0, 5)
+      .map((project) => ({
+        key: `${project.environmentId}:${project.id}`,
+        name: projectDisplayNameByKey.get(`${project.environmentId}:${project.id}`) ?? project.name,
+        onSelect: () => {
+          if (isMobile) setOpenMobile(false);
+          void newThreadContext.handleNewThread(
+            scopeProjectRef(project.environmentId, project.id),
+            {
+              envMode: resolveSidebarNewThreadEnvMode({ defaultEnvMode: defaultThreadEnvMode }),
+            },
+          );
+        },
+      }));
+  }, [
+    defaultThreadEnvMode,
+    homeFolderPath,
+    isMobile,
+    newThreadContext,
+    projectDisplayNameByKey,
+    projects,
+    setOpenMobile,
+  ]);
   const newThreadShortcutLabel = shortcutLabelForCommand(keybindings, "chat.new", platform);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(
     keybindings,
@@ -2223,7 +2321,7 @@ export default function Sidebar() {
               scopedProjectGroup
                 ? `Filter chats by project: ${scopedProjectGroup.displayName}`
                 : isHelperScope
-                  ? "Filter chats by project: Helper"
+                  ? "Filter chats by project: Older Uno chats"
                   : "Filter chats by project"
             }
           />
@@ -2314,7 +2412,7 @@ export default function Sidebar() {
       {railLayout ? (
         <RailPanelHeader mode={listMode} isElectron={isElectron} />
       ) : (
-        <SidebarChromeHeader isElectron={isElectron} />
+        <SidebarChromeHeader isElectron={isElectron} showBell />
       )}
       {railLayout ? (
         listMode === "home" ? (
@@ -2326,8 +2424,8 @@ export default function Sidebar() {
       ) : (
         <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-0">
           <SidebarEnvSwitcher variant="header" />
+          <SidebarAssistantRow />
           <SidebarComputerRow />
-          <SidebarInboxRow />
           <SidebarMyUnoRow />
           <div className="pt-1.5 pb-1">
             <SidebarModeSwitch />
@@ -2371,14 +2469,15 @@ export default function Sidebar() {
               searchFieldRef={headerSearchRef}
               hasProjects={projects.length > 0}
               projectScope={projectScopePicker}
-              onNewProject={openAddProject}
-              onNewThread={handleNewThreadClick}
-              newThreadDisabled={
-                projects.length === 0 && newThreadContext.activeEnvironmentId === null
+              newButton={
+                <SidebarNewButton
+                  onNewChat={handleNewThreadClick}
+                  disabled={projects.length === 0 && newThreadContext.activeEnvironmentId === null}
+                  shortcutLabel={newThreadShortcutLabel}
+                  inProjectShortcutLabel={newThreadInProjectShortcutLabel}
+                  recentProjects={newMenuProjects}
+                />
               }
-              newThreadShortcutLabel={newThreadShortcutLabel}
-              newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
-              showNewThreadInProjectHint={projects.length > 0 && scopedProjectGroup === null}
               searchInputRef={threadSearchInputRef}
               searchQuery={threadSearchQuery}
               onSearchQueryChange={(value) => {
@@ -2493,7 +2592,7 @@ export default function Sidebar() {
                   ) : scopedProjectGroup ? (
                     `No chats in ${scopedProjectGroup.displayName} yet`
                   ) : isHelperScope ? (
-                    "No Helper chats yet"
+                    "No older Uno chats"
                   ) : (
                     "No chats yet"
                   )}
@@ -2508,7 +2607,7 @@ export default function Sidebar() {
           <SidebarUpdatePill />
         </SidebarFooter>
       ) : (
-        <SidebarChromeFooter showHelper={hasHelperProjects} />
+        <SidebarChromeFooter />
       )}
 
       <ContinueOnMachineDialog

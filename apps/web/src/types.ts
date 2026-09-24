@@ -17,6 +17,7 @@ import type {
   CheckpointRef,
   ProviderInteractionMode,
   RuntimeMode,
+  ThreadAssistantRole,
   ThreadController,
 } from "@t3tools/contracts";
 
@@ -139,6 +140,8 @@ export interface Thread {
   /** Who drives the thread; absent means "human". */
   controller?: ThreadController | undefined;
   controlChangedAt?: string | null | undefined;
+  /** "chat": THE assistant chat (Uno); "spawned": a chat Uno started. */
+  assistantRole?: ThreadAssistantRole | null | undefined;
 }
 
 export interface ThreadShell {
@@ -162,6 +165,8 @@ export interface ThreadShell {
   /** Who drives the thread; absent means "human". */
   controller?: ThreadController | undefined;
   controlChangedAt?: string | null | undefined;
+  /** "chat": THE assistant chat (Uno); "spawned": a chat Uno started. */
+  assistantRole?: ThreadAssistantRole | null | undefined;
 }
 
 export interface ThreadTurnState {
@@ -200,6 +205,8 @@ export interface SidebarThreadSummary {
   /** Who drives the thread; absent means "human". */
   controller?: ThreadController | undefined;
   controlChangedAt?: string | null | undefined;
+  /** "chat": THE assistant chat (Uno); "spawned": a chat Uno started. */
+  assistantRole?: ThreadAssistantRole | null | undefined;
 }
 
 export interface ThreadSession {

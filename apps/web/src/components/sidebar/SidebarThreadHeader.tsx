@@ -1,5 +1,6 @@
 /**
- * The sidebar header: one row holding search, project scope and new thread.
+ * The sidebar header: one row holding search, project scope and "New ▾"
+ * (0.0.83: one button instead of the new-chat / new-project icon pair).
  * Ported from upstream T3 Code (#11315); the icon button is a plain button
  * here because this fork's SidebarMenuButton has no icon size.
  *
@@ -12,11 +13,10 @@
  * of the sidebar's scope logic. `searchFieldRef` lands on the search field so
  * the picker's popup can anchor to that width rather than to its 28px trigger.
  */
-import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
+import { SearchIcon, XIcon } from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -33,14 +33,8 @@ export interface SidebarThreadHeaderProps {
   hasProjects: boolean;
   /** The project scope combobox, rendered as the first icon of the group. */
   projectScope: ReactNode;
-  onNewProject: () => void;
-  /** Receives the click so Shift+click can skip the project picker. */
-  onNewThread: (event: ReactMouseEvent) => void;
-  newThreadDisabled: boolean;
-  newThreadShortcutLabel: string | null | undefined;
-  newThreadInProjectShortcutLabel: string | null | undefined;
-  /** Shift+click only matters once there is more than one project to pick. */
-  showNewThreadInProjectHint: boolean;
+  /** "New ▾": new chat in the home folder; the arrow opens projects. */
+  newButton: ReactNode;
   searchInputRef: RefObject<HTMLInputElement | null>;
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
@@ -55,12 +49,7 @@ export function SidebarThreadHeader({
   searchFieldRef,
   hasProjects,
   projectScope,
-  onNewProject,
-  onNewThread,
-  newThreadDisabled,
-  newThreadShortcutLabel,
-  newThreadInProjectShortcutLabel,
-  showNewThreadInProjectHint,
+  newButton,
   searchInputRef,
   searchQuery,
   onSearchQueryChange,
@@ -75,9 +64,6 @@ export function SidebarThreadHeader({
   // list; pointing aria-activedescendant at a removed option strands the
   // screen reader on nothing.
   const activeResultExists = resultsVisible && activeSearchResultIndex < searchResultCount;
-  const newThreadLabel = newThreadShortcutLabel
-    ? `New chat in your home folder (${newThreadShortcutLabel})`
-    : "New chat in your home folder";
 
   return (
     <div className="flex items-center gap-1">
@@ -123,38 +109,12 @@ export function SidebarThreadHeader({
           </Button>
         ) : null}
       </div>
-      {/* Segmented well: the icons read as one control instead of three loose
-          buttons competing with the search field beside them. */}
-      <div className="flex shrink-0 items-center rounded-md bg-sidebar-control-surface/60 p-px">
-        {hasProjects ? (
-          <>
-            {projectScope}
-            <SidebarHeaderIconButton label="New project" onClick={onNewProject}>
-              <FolderPlusIcon />
-            </SidebarHeaderIconButton>
-          </>
-        ) : null}
-        <SidebarHeaderIconButton
-          label="New chat"
-          tooltip={
-            showNewThreadInProjectHint ? (
-              <span className="flex flex-col gap-0.5">
-                <span>{newThreadLabel}</span>
-                <span className="text-muted-foreground">
-                  New chat in current project: Shift+click
-                  {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
-                </span>
-              </span>
-            ) : (
-              newThreadLabel
-            )
-          }
-          disabled={newThreadDisabled}
-          onClick={onNewThread}
-        >
-          <SquarePenIcon />
-        </SidebarHeaderIconButton>
-      </div>
+      {hasProjects ? (
+        <div className="flex shrink-0 items-center rounded-md bg-sidebar-control-surface/60 p-px">
+          {projectScope}
+        </div>
+      ) : null}
+      {newButton}
     </div>
   );
 }

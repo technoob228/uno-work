@@ -13,7 +13,7 @@ export const helperCopy = {
 
   connect: {
     title: "Connect Telegram",
-    description: "Your Helper answers in Telegram through a bot that belongs to you.",
+    description: "Uno answers in Telegram through a bot that belongs to you.",
     tokenLabel: "Bot token",
     tokenPlaceholder: "123456:ABC-…",
     tokenKeepHint: "Leave empty to keep the current token.",
@@ -54,7 +54,7 @@ export const helperCopy = {
     title: "What each chat talks to",
     description: "Pick where messages from each chat go.",
     alwaysSent: "Errors and permission requests are always sent.",
-    optionHelper: "Helper (decides where the work goes)",
+    optionHelper: "Uno (decides where the work goes)",
     optionProject: "Project",
     optionThread: "A specific chat",
     pickProject: "Choose a project",
@@ -67,12 +67,12 @@ export const helperCopy = {
   },
 
   brain: {
-    title: "Helper's brain",
+    title: "Uno's brain",
     modelTitle: "Model",
     modelDescription: "Which model answers you in Telegram.",
     saveModel: "Save",
-    instructionsTitle: "What the Helper should know about you and your projects",
-    instructionsDescription: "Written in plain text. The Helper reads it before every answer.",
+    instructionsTitle: "What Uno should know about you and your projects",
+    instructionsDescription: "Written in plain text. Uno reads it before every answer.",
   },
 
   advanced: {

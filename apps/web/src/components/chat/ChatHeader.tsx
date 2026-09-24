@@ -31,6 +31,9 @@ import { toggleDevMode, useDevMode } from "../../devMode";
 import { CONTINUE_ON_MACHINE_COPY } from "../../continueOnMachineCopy";
 import { ContinueOnMachineDialog } from "../ContinueOnMachineDialog";
 import { DraftFolderChip } from "./DraftFolderChip";
+import { AssistantChatHeaderActions } from "./AssistantChatHeaderActions";
+import { useAssistantChat } from "../../assistant/useAssistantChat";
+import { ASSISTANT_CHAT_NAME } from "../../assistant/assistantChat.logic";
 
 const HEADER_ICON_BUTTON_CLASS =
   "inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-md border border-input px-[calc(--spacing(1)-1px)] text-muted-foreground shadow-xs/5 hover:bg-accent hover:text-foreground sm:h-6 sm:min-w-6";
@@ -118,6 +121,15 @@ export const ChatHeader = memo(function ChatHeader({
     activeThreadEnvironmentId,
     primaryEnvironmentId,
   });
+  // THE assistant chat: named "Uno" whatever its stored title, no project
+  // badge (the assistant is the chat, not a project), Connect ▾ + settings.
+  const assistantChat = useAssistantChat().chat;
+  const isAssistantChat =
+    !draftId &&
+    assistantChat !== null &&
+    assistantChat.id === activeThreadId &&
+    assistantChat.environmentId === activeThreadEnvironmentId;
+  const title = isAssistantChat ? ASSISTANT_CHAT_NAME : activeThreadTitle;
   const [continueDialogOpen, setContinueDialogOpen] = useState(false);
   // A draft has nothing to carry yet: no files were touched, no history exists.
   const canContinueOnMachine = Boolean(activeProjectName) && !draftId;
@@ -133,13 +145,18 @@ export const ChatHeader = memo(function ChatHeader({
             </Tooltip>
           </TooltipProvider>
         )}
-        <h2
-          className="min-w-0 shrink truncate text-sm font-medium text-foreground"
-          title={activeThreadTitle}
-        >
-          {activeThreadTitle}
+        <h2 className="min-w-0 shrink truncate text-sm font-medium text-foreground" title={title}>
+          {title}
         </h2>
-        {draftId && activeProjectName && activeProjectCwd ? (
+        {isAssistantChat ? (
+          <Badge
+            variant="outline"
+            className="shrink-0 border-primary/30 text-primary"
+            data-testid="uno-always-on"
+          >
+            Always on
+          </Badge>
+        ) : draftId && activeProjectName && activeProjectCwd ? (
           <DraftFolderChip
             environmentId={activeThreadEnvironmentId}
             draftId={draftId}
@@ -172,6 +189,9 @@ export const ChatHeader = memo(function ChatHeader({
         </TooltipProvider>
       </div>
       <div className="flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3">
+        {isAssistantChat ? (
+          <AssistantChatHeaderActions environmentId={activeThreadEnvironmentId} />
+        ) : null}
         {devMode && activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}

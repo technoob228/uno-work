@@ -124,6 +124,19 @@ export function createAssistant(
   });
 }
 
+/** THE assistant chat ("Uno"): found, or set up now by the daemon. */
+export function ensureAssistantChat(input: EnvironmentScoped): Promise<{
+  readonly threadId: ThreadId;
+  readonly outcome: "existing" | "migrated" | "created";
+}> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/chat",
+    method: "POST",
+    body: {},
+  });
+}
+
 export function getAssistant(
   input: EnvironmentScoped & { readonly projectId: string },
 ): Promise<ManagerAssistantSummary> {

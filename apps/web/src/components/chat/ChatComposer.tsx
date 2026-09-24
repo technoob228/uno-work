@@ -3159,9 +3159,11 @@ export const ChatComposer = memo(
                                     ? "reconnecting"
                                     : "disconnected"
                               }`
-                            : phase === "disconnected"
-                              ? "Ask for follow-up changes or attach files"
-                              : "Ask anything, attach files, @tag files/folders, or use / to show available commands"
+                            : activeThread?.assistantRole === "chat"
+                              ? "Ask Uno anything — it can start chats for you…"
+                              : phase === "disconnected"
+                                ? "Ask for follow-up changes or attach files"
+                                : "Ask anything, attach files, @tag files/folders, or use / to show available commands"
                   }
                   disabled={
                     isConnecting ||
