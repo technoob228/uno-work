@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   BrowserLiveFrame,
   BrowserLiveInputEvent,
+  BrowserLiveLocation,
   BrowserLivePage,
   CredentialMetadata,
   EnvironmentId,
@@ -86,15 +87,8 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Toolbar environmentId={environmentId} page={page} human={human} tabId={file.id} />
-      <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 text-[11px] text-muted-foreground">
-        <MonitorIcon className="size-3 shrink-0" />
-        <span className="truncate">
-          Runs on {state.location.machine}
-          {state.location.publicIp ? ` · IP ${state.location.publicIp}` : ""} · keeps working when
-          you close Uno Work
-        </span>
-      </div>
+      <Toolbar environmentId={environmentId} page={page} human={human} />
+      <LocationStrip environmentId={environmentId} location={state.location} />
       {page.help ? (
         <div className="flex flex-wrap items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
           <HandIcon className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -154,6 +148,132 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
   );
 }
 
+function hostOf(server: string): string {
+  try {
+    return new URL(server).host;
+  } catch {
+    return server;
+  }
+}
+
+/**
+ * Где работает браузер: машина, адрес и страна, которые видят сайты, и прокси.
+ * Прокси меняется здесь же — браузер перезапускается, логины остаются.
+ */
+function LocationStrip({
+  environmentId,
+  location,
+}: {
+  environmentId: EnvironmentId;
+  location: BrowserLiveLocation;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [server, setServer] = useState(location.proxy?.server ?? "");
+  const [username, setUsername] = useState(location.proxy?.username ?? "");
+  const [password, setPassword] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const save = async (next: { server: string; username?: string; password?: string }) => {
+    const api = readEnvironmentApi(environmentId);
+    if (!api) return;
+    setSaving(true);
+    try {
+      await api.browserLive.setProxy(next);
+      setEditing(false);
+      setPassword("");
+      toastManager.add({
+        type: "success",
+        title: next.server ? "Proxy saved" : "Proxy removed",
+        description: "The browser restarted. Saved logins stay.",
+      });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Couldn't save the proxy",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const address = location.publicIp
+    ? `IP ${location.publicIp}${location.country ? ` (${location.country})` : ""}`
+    : null;
+  return (
+    <div className="border-b border-border px-2 py-1 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-1.5">
+        <MonitorIcon className="size-3 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">
+          Runs on {location.machine}
+          {address ? ` · ${address}` : ""}
+          {location.proxy ? ` · via ${hostOf(location.proxy.server)}` : ""} · keeps working when you
+          close Uno Work
+        </span>
+        <button
+          type="button"
+          className="shrink-0 rounded px-1 hover:bg-accent hover:text-foreground"
+          onClick={() => setEditing((value) => !value)}
+        >
+          {location.proxy ? "Proxy" : "Add proxy"}
+        </button>
+      </div>
+      {editing ? (
+        <form
+          className="mt-1.5 flex flex-wrap items-center gap-1.5 pb-1"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void save({
+              server: server.trim(),
+              ...(username.trim() ? { username: username.trim() } : {}),
+              ...(password ? { password } : {}),
+            });
+          }}
+        >
+          <input
+            value={server}
+            onChange={(event) => setServer(event.target.value)}
+            placeholder="http://host:port"
+            className="h-6 min-w-40 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none"
+          />
+          <input
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            placeholder="Login"
+            autoComplete="off"
+            className="h-6 w-24 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none"
+          />
+          <input
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder={location.proxy ? "Password (kept)" : "Password"}
+            type="password"
+            autoComplete="new-password"
+            className="h-6 w-28 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none"
+          />
+          <Button size="xs" type="submit" disabled={saving || server.trim() === ""}>
+            Save
+          </Button>
+          {location.proxy ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              type="button"
+              disabled={saving}
+              onClick={() => void save({ server: "" })}
+            >
+              Remove
+            </Button>
+          ) : null}
+          <span className="basis-full text-[11px]">
+            Sites will see the proxy's address. Use the proxy of the country your accounts live in.
+          </span>
+        </form>
+      ) : null}
+    </div>
+  );
+}
+
 function Placeholder({ text }: { text: string }) {
   return (
     <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
@@ -166,12 +286,10 @@ function Toolbar({
   environmentId,
   page,
   human,
-  tabId,
 }: {
   environmentId: EnvironmentId;
   page: BrowserLivePage;
   human: boolean;
-  tabId: string;
 }) {
   const api = useMemo(() => readEnvironmentApi(environmentId), [environmentId]);
   const [draft, setDraft] = useState(page.url);
@@ -222,7 +340,8 @@ function Toolbar({
       try {
         const result = await api.browserLive.fillLogin({
           id: credential.id,
-          tabId,
+          // Адрес — сама страница машины (в т.ч. попап входа), не вкладка панели.
+          tabId: page.pageId,
           ...(page.context?.threadId ? { threadId: page.context.threadId } : {}),
           ...(page.context?.cwd ? { cwd: page.context.cwd } : {}),
         });
@@ -241,7 +360,7 @@ function Toolbar({
         });
       }
     },
-    [api, page.context?.cwd, page.context?.threadId, tabId],
+    [api, page.context?.cwd, page.context?.threadId, page.pageId],
   );
 
   const onKeyClick = useCallback(
@@ -403,6 +522,41 @@ function Screen({
     setHint(false);
   }, [human]);
 
+  // Пока рулит человек, страница под размер панели — 1:1, без мелкой картинки.
+  // Вернул агенту — сервер сам возвращает агентский размер.
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!human || !surface) return;
+    const api = readEnvironmentApi(environmentId);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const fit = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const { width, height } = surface.getBoundingClientRect();
+        if (width < 50 || height < 50) return;
+        void api?.browserLive
+          .resize({ pageId, width: Math.round(width), height: Math.round(height) })
+          .catch(() => undefined);
+      }, 250);
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(surface);
+    return () => {
+      clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [environmentId, human, pageId]);
+
+  // Выделенное на странице — в буфер этого устройства (Cmd/Ctrl+C и +X).
+  const copyToClipboard = useCallback(async () => {
+    const api = readEnvironmentApi(environmentId);
+    const result = await api?.browserLive.copySelection({ pageId }).catch(() => null);
+    if (result?.text) await navigator.clipboard?.writeText(result.text).catch(() => undefined);
+  }, [environmentId, pageId]);
+  // Клавиша, чьё отпускание уже отправлено вручную (вырезание).
+  const swallowKeyUpRef = useRef<string | null>(null);
+
   const keyFor = (event: React.KeyboardEvent) =>
     // На Маке Cmd — это Ctrl страницы на Linux: Cmd+A/C/X/Z работают как ждёшь.
     IS_MAC && event.key === "Meta" ? "Control" : event.key;
@@ -470,12 +624,29 @@ function Screen({
         // Вставку отдаёт событие paste — там текст из буфера этого устройства.
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v") return;
         event.preventDefault();
+        const shortcut = (event.metaKey || event.ctrlKey) && !event.altKey;
+        const letter = event.key.toLowerCase();
+        if (shortcut && letter === "x") {
+          // Вырезание убирает выделение — сначала забираем текст, потом жмём.
+          const key = keyFor(event);
+          swallowKeyUpRef.current = key;
+          void copyToClipboard().finally(() => {
+            send({ type: "key", action: "down", key, code: event.code });
+            send({ type: "key", action: "up", key, code: event.code });
+          });
+          return;
+        }
         send({ type: "key", action: "down", key: keyFor(event), code: event.code });
+        if (shortcut && letter === "c") void copyToClipboard();
       }}
       onKeyUp={(event) => {
         if (!human) return;
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v") return;
         event.preventDefault();
+        if (swallowKeyUpRef.current === keyFor(event)) {
+          swallowKeyUpRef.current = null;
+          return;
+        }
         send({ type: "key", action: "up", key: keyFor(event), code: event.code });
       }}
       onPaste={(event) => {

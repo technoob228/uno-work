@@ -1,8 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 
 import type {
   BrowserAutomationCommandInput,
@@ -15,6 +16,7 @@ import type {
   BrowserLiveLocation,
   BrowserLiveNavigateInput,
   BrowserLivePage,
+  BrowserLiveSetProxyInput,
   BrowserLiveState,
 } from "@t3tools/contracts";
 import { BrowserLiveError } from "@t3tools/contracts";
@@ -81,6 +83,15 @@ export interface ServerBrowserLiveShape {
     url: string,
   ) => Effect.Effect<{ readonly pageId: string }, BrowserLiveError>;
   readonly close: (pageId: string) => Effect.Effect<void, BrowserLiveError>;
+  readonly resize: (
+    pageId: string,
+    width: number,
+    height: number,
+  ) => Effect.Effect<void, BrowserLiveError>;
+  readonly copySelection: (pageId: string) => Effect.Effect<string, BrowserLiveError>;
+  readonly setProxy: (
+    input: BrowserLiveSetProxyInput,
+  ) => Effect.Effect<BrowserLiveState, BrowserLiveError>;
 }
 
 export interface ServerBrowserShape {
@@ -102,6 +113,18 @@ export const SERVER_BROWSER_EXECUTABLE_ENV = "UNO_WORK_BROWSER_EXECUTABLE";
 export const SERVER_BROWSER_HEADLESS_ENV = "UNO_WORK_BROWSER_HEADLESS";
 
 const VIEWPORT = { width: 1280, height: 800 } as const;
+const MIN_VIEWPORT = { width: 360, height: 400 } as const;
+const MAX_VIEWPORT = { width: 1920, height: 1200 } as const;
+
+/** Выделенный на странице текст: в поле ввода — его выделение, иначе — документа. */
+const SELECTION_SCRIPT = `(() => {
+  const el = document.activeElement;
+  if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA") && typeof el.selectionStart === "number") {
+    if (el.type === "password") return "";
+    return el.value.slice(el.selectionStart, el.selectionEnd ?? el.selectionStart);
+  }
+  return String(window.getSelection() ?? "");
+})()`;
 
 const CHROMIUM_MISSING_ERROR =
   "Server-side browser unavailable: Chromium executable not found. " +
@@ -157,6 +180,8 @@ interface PageEntry {
    */
   readonly inputSemaphore: Semaphore.Semaphore;
   readonly context: BrowserBridgeRequestContext | undefined;
+  /** Размер страницы: агентский VIEWPORT или размер панели, пока рулит человек. */
+  viewport: { width: number; height: number };
   title: string;
   control: BrowserLiveControl;
   help: BrowserLiveHelpRequest | null;
@@ -329,21 +354,52 @@ async function startVirtualDisplay(): Promise<{ display: string; process: ChildP
   });
 }
 
+const TRACE_URL = "https://1.1.1.1/cdn-cgi/trace";
+
+/** Адрес и страна выхода из ответа Cloudflare trace (`ip=…`, `loc=…`). */
+export function parseTrace(body: string): { ip: string | null; country: string | null } {
+  const ip = /^ip=(.+)$/m.exec(body)?.[1]?.trim() || null;
+  const loc = /^loc=([A-Z]{2})$/m.exec(body)?.[1] ?? null;
+  return { ip, country: loc && loc !== "XX" ? loc : null };
+}
+
 /**
  * Адрес, который видят сайты. Спрашиваем Cloudflare trace: без ключа, без
- * третьих сервисов, одна строка `ip=`. null — не узнали (нет сети/таймаут).
+ * третьих сервисов. С прокси — через сам браузер (его сеть идёт через прокси),
+ * без прокси — из демона. null — не узнали (нет сети/таймаут).
  */
-async function lookupPublicIp(): Promise<string | null> {
+async function lookupExit(
+  browserContext: BrowserContext | null,
+): Promise<{ ip: string | null; country: string | null }> {
   try {
-    const response = await fetch("https://1.1.1.1/cdn-cgi/trace", {
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (!response.ok) return null;
-    const match = /^ip=(.+)$/m.exec(await response.text());
-    return match?.[1]?.trim() || null;
+    if (browserContext) {
+      const response = await browserContext.request.get(TRACE_URL, { timeout: 8_000 });
+      return response.ok() ? parseTrace(await response.text()) : { ip: null, country: null };
+    }
+    const response = await fetch(TRACE_URL, { signal: AbortSignal.timeout(5_000) });
+    return response.ok ? parseTrace(await response.text()) : { ip: null, country: null };
   } catch {
-    return null;
+    return { ip: null, country: null };
   }
+}
+
+interface BrowserProxyConfig {
+  readonly server: string;
+  readonly username?: string;
+  readonly password?: string;
+}
+
+const PROXY_SERVER_RE = /^(https?|socks5):\/\/[^\s/:]+(:\d{1,5})?\/?$/i;
+
+/** Проверка адреса прокси; текст ошибки — для человека. null — всё в порядке. */
+export function proxyConfigProblem(config: BrowserProxyConfig): string | null {
+  if (!PROXY_SERVER_RE.test(config.server)) {
+    return "Proxy address should look like http://host:port or socks5://host:port.";
+  }
+  if (/^socks5:/i.test(config.server) && (config.username || config.password)) {
+    return "Chrome can't use a SOCKS5 proxy with a password. Use the proxy's HTTP address.";
+  }
+  return null;
 }
 
 const PUBLIC_IP_TTL_MS = 10 * 60_000;
@@ -382,7 +438,28 @@ export const makeServerBrowser = Effect.gen(function* () {
   const pagesById = new Map<string, PageEntry>();
   let display: { display: string; process: ChildProcess } | null = null;
   let displayMode: BrowserLiveLocation["display"] = "headless";
-  let publicIp: { value: string | null; at: number } | null = null;
+  let exit: { ip: string | null; country: string | null; at: number } | null = null;
+  // Прокси браузера: адрес и логин в состоянии, пароль — только в файле 0600
+  // рядом с остальными секретами демона (prepare-image.sh стирает userdata).
+  const proxyPath = join(config.stateDir, "secrets", "browser-proxy.json");
+  const readProxy = async (): Promise<BrowserProxyConfig | null> => {
+    try {
+      const parsed = JSON.parse(await readFile(proxyPath, "utf8")) as Partial<BrowserProxyConfig>;
+      if (typeof parsed.server !== "string" || parsed.server.length === 0) return null;
+      return {
+        server: parsed.server,
+        ...(typeof parsed.username === "string" && parsed.username
+          ? { username: parsed.username }
+          : {}),
+        ...(typeof parsed.password === "string" && parsed.password
+          ? { password: parsed.password }
+          : {}),
+      };
+    } catch {
+      return null;
+    }
+  };
+  let proxy: BrowserProxyConfig | null = yield* Effect.promise(readProxy);
   const stateListeners = new Set<(state: BrowserLiveState) => void>();
 
   const pageSnapshot = (entry: PageEntry): BrowserLivePage => ({
@@ -394,8 +471,8 @@ export const makeServerBrowser = Effect.gen(function* () {
     help: entry.help,
     attention: entry.attention,
     agentWaiting: entry.agentWaiting > 0,
-    width: VIEWPORT.width,
-    height: VIEWPORT.height,
+    width: entry.viewport.width,
+    height: entry.viewport.height,
   });
 
   // Демон, который сам раздаёт веб-клиент, — машина в облаке: браузер
@@ -406,9 +483,11 @@ export const makeServerBrowser = Effect.gen(function* () {
     agentsBrowseHere,
     location: {
       machine,
-      publicIp: publicIp?.value ?? null,
+      publicIp: exit?.ip ?? null,
       display: displayMode,
       running: pagesById.size > 0,
+      country: exit?.country ?? null,
+      proxy: proxy ? { server: proxy.server, username: proxy.username ?? null } : null,
     },
     pages: [...pagesById.values()].map(pageSnapshot),
   });
@@ -419,12 +498,20 @@ export const makeServerBrowser = Effect.gen(function* () {
     for (const listener of stateListeners) listener(state);
   };
 
-  const refreshPublicIp = () => {
-    if (publicIp && Date.now() - publicIp.at < PUBLIC_IP_TTL_MS) return;
+  const refreshPublicIp = (force = false) => {
+    if (!force && exit && Date.now() - exit.at < PUBLIC_IP_TTL_MS) return;
+    const running = Effect.runSync(Ref.get(contextRef));
+    // С прокси адрес машины — не тот, что видят сайты: пока браузер не
+    // запущен, честнее не показывать ничего.
+    if (proxy && !running) {
+      exit = null;
+      emitState();
+      return;
+    }
     // Метка ставится до ответа — параллельные подписки не спрашивают дважды.
-    publicIp = { value: publicIp?.value ?? null, at: Date.now() };
-    void lookupPublicIp().then((value) => {
-      publicIp = { value, at: Date.now() };
+    exit = { ip: exit?.ip ?? null, country: exit?.country ?? null, at: Date.now() };
+    void lookupExit(proxy ? running : null).then((value) => {
+      exit = { ...value, at: Date.now() };
       emitState();
     });
   };
@@ -493,6 +580,7 @@ export const makeServerBrowser = Effect.gen(function* () {
       semaphore,
       inputSemaphore: Semaphore.makeUnsafe(1),
       context,
+      viewport: { ...VIEWPORT },
       title: "",
       control: "agent",
       help: null,
@@ -556,6 +644,7 @@ export const makeServerBrowser = Effect.gen(function* () {
       displayVar = display?.display;
     }
     const headless = displayVar === undefined;
+    proxy = yield* Effect.promise(readProxy);
     const launchWith = (channel: "chromium" | undefined) =>
       playwright.chromium.launchPersistentContext(profileDir, {
         headless,
@@ -563,6 +652,15 @@ export const makeServerBrowser = Effect.gen(function* () {
         ...(executablePath ? { executablePath } : {}),
         ...(channel ? { channel } : {}),
         ...(headless ? {} : { env: { ...process.env, DISPLAY: displayVar } }),
+        ...(proxy
+          ? {
+              proxy: {
+                server: proxy.server,
+                ...(proxy.username ? { username: proxy.username } : {}),
+                ...(proxy.password ? { password: proxy.password } : {}),
+              },
+            }
+          : {}),
         args: [
           `--window-size=${VIEWPORT.width},${VIEWPORT.height}`,
           // Невидимая вкладка не должна замирать: её смотрят через screencast.
@@ -607,7 +705,7 @@ export const makeServerBrowser = Effect.gen(function* () {
       pagesById.clear();
       const launched = yield* launch;
       yield* Ref.set(contextRef, launched);
-      refreshPublicIp();
+      refreshPublicIp(true);
       return launched;
     }),
   );
@@ -633,20 +731,32 @@ export const makeServerBrowser = Effect.gen(function* () {
     });
 
   /** Ждать, пока человек вернёт браузер. false — не дождались за timeoutMs. */
+  /** Ждать сигнала «браузер вернули агенту» не дольше timeoutMs. */
+  const awaitHandBack = (entry: PageEntry, timeoutMs: number) =>
+    Effect.callback<void>((resume) => {
+      const wake = () => resume(Effect.void);
+      entry.controlWaiters.add(wake);
+      return Effect.sync(() => {
+        entry.controlWaiters.delete(wake);
+      });
+    }).pipe(Effect.timeoutOption(Duration.millis(timeoutMs)));
+
+  /** Ждать, пока человек вернёт браузер. false — не дождались за timeoutMs. */
   const waitForAgentControl = (entry: PageEntry, timeoutMs: number) =>
     Effect.gen(function* () {
       if (entry.control === "agent") return true;
       entry.agentWaiting += 1;
       emitState();
-      const released = yield* Effect.callback<void>((resume) => {
-        const wake = () => resume(Effect.void);
-        entry.controlWaiters.add(wake);
-        return Effect.sync(() => {
-          entry.controlWaiters.delete(wake);
-        });
-      }).pipe(Effect.timeoutOption(Duration.millis(timeoutMs)));
-      entry.agentWaiting = Math.max(0, entry.agentWaiting - 1);
-      emitState();
+      // ensuring: агент мог бросить ожидание (оборвался запрос) — флаг
+      // «агент ждёт» не должен зависнуть в интерфейсе.
+      const released = yield* awaitHandBack(entry, timeoutMs).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            entry.agentWaiting = Math.max(0, entry.agentWaiting - 1);
+            emitState();
+          }),
+        ),
+      );
       return Option.isSome(released);
     });
 
@@ -664,16 +774,16 @@ export const makeServerBrowser = Effect.gen(function* () {
       entry.attention += 1;
       emitState();
       // Помощь закончена, когда управление вернулось агенту: человек взял
-      // браузер и отдал, либо нажал «Готово», не беря.
-      const handedBack = yield* Effect.callback<void>((resume) => {
-        const wake = () => resume(Effect.void);
-        entry.controlWaiters.add(wake);
-        return Effect.sync(() => {
-          entry.controlWaiters.delete(wake);
-        });
-      }).pipe(Effect.timeoutOption(Duration.millis(timeoutMs)));
-      entry.help = null;
-      emitState();
+      // браузер и отдал, либо нажал «Готово», не беря. Агент бросил ожидание —
+      // плашка тоже уходит.
+      const handedBack = yield* awaitHandBack(entry, timeoutMs).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            entry.help = null;
+            emitState();
+          }),
+        ),
+      );
       if (Option.isNone(handedBack)) {
         return yield* new ServerBrowserCommandError({
           message: `Nobody answered within ${Math.round(timeoutMs / 60_000)} min. Tell the person in chat what you need and continue with something else.`,
@@ -697,7 +807,12 @@ export const makeServerBrowser = Effect.gen(function* () {
     timeoutMs: number,
   ): Effect.Effect<unknown, ServerBrowserCommandError> =>
     Effect.gen(function* () {
-      const entry = yield* getPageEntry(context);
+      // Автозаполнение из вкладки live view адресовано конкретной странице
+      // (например, попапу входа), а не основной странице чата.
+      const addressed =
+        input.command === "fillCredential" && input.tabId ? pagesById.get(input.tabId) : undefined;
+      const entry =
+        addressed && !addressed.page.isClosed() ? addressed : yield* getPageEntry(context);
       if (!OBSERVE_COMMANDS.has(input.command)) {
         const mayProceed = yield* waitForAgentControl(entry, timeoutMs);
         if (!mayProceed) {
@@ -751,6 +866,15 @@ export const makeServerBrowser = Effect.gen(function* () {
       );
       return outcome;
     });
+
+  const shutdownBrowser = Effect.gen(function* () {
+    const existing = yield* Ref.get(contextRef);
+    if (!existing) return;
+    yield* Ref.set(contextRef, null);
+    for (const entry of pagesById.values()) removeEntry(entry);
+    pagesByContextKey.clear();
+    yield* Effect.promise(() => existing.close().catch(() => undefined));
+  });
 
   const liveError = (detail: string) => new BrowserLiveError({ detail });
 
@@ -863,6 +987,16 @@ export const makeServerBrowser = Effect.gen(function* () {
         const entry = yield* requirePage(pageId);
         entry.control = control;
         if (control === "agent") {
+          // Агент работает в своём размере: координаты и скриншоты не прыгают.
+          if (
+            entry.viewport.width !== VIEWPORT.width ||
+            entry.viewport.height !== VIEWPORT.height
+          ) {
+            entry.viewport = { ...VIEWPORT };
+            yield* Effect.promise(() =>
+              entry.page.setViewportSize(VIEWPORT).catch(() => undefined),
+            );
+          }
           for (const wake of entry.controlWaiters) wake();
         }
         emitState();
@@ -916,16 +1050,65 @@ export const makeServerBrowser = Effect.gen(function* () {
         const entry = yield* requirePage(pageId);
         yield* livePromise(() => entry.page.close());
       }),
+    resize: (pageId, width, height) =>
+      Effect.gen(function* () {
+        const entry = yield* requirePage(pageId);
+        yield* requireHuman(entry);
+        const size = {
+          width: Math.min(MAX_VIEWPORT.width, Math.max(MIN_VIEWPORT.width, Math.round(width))),
+          height: Math.min(MAX_VIEWPORT.height, Math.max(MIN_VIEWPORT.height, Math.round(height))),
+        };
+        if (size.width === entry.viewport.width && size.height === entry.viewport.height) return;
+        entry.viewport = size;
+        yield* livePromise(() => entry.page.setViewportSize(size));
+        emitState();
+      }),
+    copySelection: (pageId) =>
+      Effect.gen(function* () {
+        const entry = yield* requirePage(pageId);
+        const text = yield* livePromise(() => entry.page.evaluate(SELECTION_SCRIPT));
+        return typeof text === "string" ? text : "";
+      }),
+    setProxy: (input) =>
+      Effect.gen(function* () {
+        const server = input.server.trim();
+        const next: BrowserProxyConfig | null =
+          server === ""
+            ? null
+            : {
+                server,
+                ...(input.username?.trim() ? { username: input.username.trim() } : {}),
+                // Пустой пароль при правке того же прокси не затирает сохранённый.
+                ...(input.password
+                  ? { password: input.password }
+                  : proxy?.password &&
+                      proxy.server === server &&
+                      (proxy.username ?? "") === (input.username?.trim() ?? "")
+                    ? { password: proxy.password }
+                    : {}),
+              };
+        if (next) {
+          const problem = proxyConfigProblem(next);
+          if (problem) return yield* liveError(problem);
+        }
+        yield* livePromise(async () => {
+          await mkdir(dirname(proxyPath), { recursive: true, mode: 0o700 });
+          const temp = `${proxyPath}.${randomBytes(6).toString("hex")}.tmp`;
+          await writeFile(temp, JSON.stringify(next ?? {}), { mode: 0o600 });
+          await rename(temp, proxyPath);
+        });
+        proxy = next;
+        exit = null;
+        // Прокси задаётся при запуске браузера: перезапускаем, логины профиля
+        // остаются (он на диске). Следующая команда поднимет браузер заново.
+        yield* shutdownBrowser;
+        emitState();
+        return snapshot();
+      }),
   };
 
   const shutdown = Effect.gen(function* () {
-    const existing = yield* Ref.get(contextRef);
-    if (existing) {
-      yield* Ref.set(contextRef, null);
-      for (const entry of pagesById.values()) removeEntry(entry);
-      pagesByContextKey.clear();
-      yield* Effect.promise(() => existing.close().catch(() => undefined));
-    }
+    yield* shutdownBrowser;
     if (display) {
       display.process.kill("SIGTERM");
       display = null;
@@ -943,7 +1126,14 @@ export const ServerBrowserLive = Layer.effect(ServerBrowser, makeServerBrowser);
 export const unavailableServerBrowserLive: ServerBrowserLiveShape = {
   state: Effect.succeed({
     agentsBrowseHere: false,
-    location: { machine: "test", publicIp: null, display: "headless", running: false },
+    location: {
+      machine: "test",
+      publicIp: null,
+      display: "headless",
+      running: false,
+      country: null,
+      proxy: null,
+    },
     pages: [],
   }),
   changes: Stream.empty,
@@ -953,6 +1143,9 @@ export const unavailableServerBrowserLive: ServerBrowserLiveShape = {
   navigate: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
   open: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
   close: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
+  resize: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
+  copySelection: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
+  setProxy: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
 };
 
 /** Стаб для тестов: серверного браузера нет, любая команда — ошибка. */

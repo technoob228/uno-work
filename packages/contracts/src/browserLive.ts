@@ -27,6 +27,15 @@ export const BrowserLiveLocation = Schema.Struct({
   display: Schema.Literals(["headful", "headless"]),
   /** Browser process is up right now. */
   running: Schema.Boolean,
+  /** Two-letter country sites place this address in; null when unknown. */
+  country: Schema.NullOr(Schema.String),
+  /** The proxy the browser goes out through (never the password); null = the machine's own address. */
+  proxy: Schema.NullOr(
+    Schema.Struct({
+      server: Schema.String,
+      username: Schema.NullOr(Schema.String),
+    }),
+  ),
 });
 export type BrowserLiveLocation = typeof BrowserLiveLocation.Type;
 
@@ -156,6 +165,32 @@ export type BrowserLiveOpenResult = typeof BrowserLiveOpenResult.Type;
 
 export const BrowserLiveCloseInput = Schema.Struct({ pageId: Schema.String });
 export type BrowserLiveCloseInput = typeof BrowserLiveCloseInput.Type;
+
+/** Fit the page to the panel while the person drives; handing back restores the agent's size. */
+export const BrowserLiveResizeInput = Schema.Struct({
+  pageId: Schema.String,
+  width: NonNegativeInt,
+  height: NonNegativeInt,
+});
+export type BrowserLiveResizeInput = typeof BrowserLiveResizeInput.Type;
+
+/** Text selected on the page, for copying to this device's clipboard. */
+export const BrowserLiveCopyInput = Schema.Struct({ pageId: Schema.String });
+export type BrowserLiveCopyInput = typeof BrowserLiveCopyInput.Type;
+export const BrowserLiveCopyResult = Schema.Struct({ text: Schema.String });
+export type BrowserLiveCopyResult = typeof BrowserLiveCopyResult.Type;
+
+/**
+ * Proxy for the machine's browser: `server` like `http://host:port` or
+ * `socks5://host:port`; empty `server` = go out directly. An omitted
+ * `password` keeps the saved one. The browser restarts to apply it.
+ */
+export const BrowserLiveSetProxyInput = Schema.Struct({
+  server: Schema.String,
+  username: Schema.optional(Schema.String),
+  password: Schema.optional(Schema.String),
+});
+export type BrowserLiveSetProxyInput = typeof BrowserLiveSetProxyInput.Type;
 
 export class BrowserLiveError extends Schema.TaggedErrorClass<BrowserLiveError>()(
   "BrowserLiveError",

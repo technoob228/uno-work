@@ -67,6 +67,10 @@ import type {
 } from "./server.ts";
 import type {
   BrowserLiveCloseInput,
+  BrowserLiveCopyInput,
+  BrowserLiveCopyResult,
+  BrowserLiveResizeInput,
+  BrowserLiveSetProxyInput,
   BrowserLiveFrame,
   BrowserLiveFramesInput,
   BrowserLiveInputPayload,
@@ -809,6 +813,9 @@ export interface EnvironmentApi {
     navigate: (input: BrowserLiveNavigateInput) => Promise<void>;
     open: (input: BrowserLiveOpenInput) => Promise<BrowserLiveOpenResult>;
     close: (input: BrowserLiveCloseInput) => Promise<void>;
+    resize: (input: BrowserLiveResizeInput) => Promise<void>;
+    copySelection: (input: BrowserLiveCopyInput) => Promise<BrowserLiveCopyResult>;
+    setProxy: (input: BrowserLiveSetProxyInput) => Promise<BrowserLiveState>;
     listLogins: () => Promise<readonly CredentialMetadata[]>;
     fillLogin: (payload: CredentialFillPayload) => Promise<CredentialFillResult>;
   };

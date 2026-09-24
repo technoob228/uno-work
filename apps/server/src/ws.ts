@@ -2267,6 +2267,22 @@ const makeWsRpcLayer = (
             serverBrowser.live.open(input.context, input.url),
             { "rpc.aggregate": "browser" },
           ),
+        [WS_METHODS.browserLiveResize]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.browserLiveResize,
+            serverBrowser.live.resize(input.pageId, input.width, input.height),
+            { "rpc.aggregate": "browser" },
+          ),
+        [WS_METHODS.browserLiveCopySelection]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.browserLiveCopySelection,
+            serverBrowser.live.copySelection(input.pageId).pipe(Effect.map((text) => ({ text }))),
+            { "rpc.aggregate": "browser" },
+          ),
+        [WS_METHODS.browserLiveSetProxy]: (input) =>
+          observeRpcEffect(WS_METHODS.browserLiveSetProxy, serverBrowser.live.setProxy(input), {
+            "rpc.aggregate": "browser",
+          }),
         [WS_METHODS.browserLiveClose]: (input) =>
           observeRpcEffect(WS_METHODS.browserLiveClose, serverBrowser.live.close(input.pageId), {
             "rpc.aggregate": "browser",

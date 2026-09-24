@@ -10,6 +10,8 @@ import { chromium } from "playwright-core";
 import type { ServerConfigShape } from "./config.ts";
 import { ServerConfig } from "./config.ts";
 import {
+  parseTrace,
+  proxyConfigProblem,
   SERVER_BROWSER_EXECUTABLE_ENV,
   ServerBrowser,
   ServerBrowserLive,
@@ -191,6 +193,113 @@ it.live.skipIf(!hasChromium)(
         context,
       );
       assert.isTrue(clicked.ok, clicked.error);
+
+      yield* serverBrowser.shutdown;
+    }).pipe(Effect.provide(testLayer)),
+  120_000,
+);
+
+it("reads the exit address and country from Cloudflare trace", () => {
+  assert.deepEqual(parseTrace("fl=1\nip=203.0.113.7\nloc=NL\n"), {
+    ip: "203.0.113.7",
+    country: "NL",
+  });
+  assert.deepEqual(parseTrace("ip=203.0.113.7\nloc=XX\n"), { ip: "203.0.113.7", country: null });
+  assert.deepEqual(parseTrace("nothing"), { ip: null, country: null });
+});
+
+it("checks the proxy address before the browser restarts", () => {
+  assert.isNull(proxyConfigProblem({ server: "http://proxy.example.com:8080" }));
+  assert.isNull(proxyConfigProblem({ server: "socks5://10.0.0.1:1080" }));
+  assert.include(proxyConfigProblem({ server: "proxy.example.com" }) ?? "", "http://host:port");
+  assert.include(
+    proxyConfigProblem({ server: "socks5://10.0.0.1:1080", username: "u", password: "p" }) ?? "",
+    "SOCKS5",
+  );
+});
+
+it.live.skipIf(!hasChromium)(
+  "live view: fits the page to the panel for the person, copies the selection, keeps the proxy password server-side",
+  () =>
+    Effect.gen(function* () {
+      const serverBrowser = yield* ServerBrowser;
+      const context = { threadId: "live-extras" };
+      const html = `<title>extras</title><p id="t">copy me please</p><input id="q" value="abcdef">`;
+      yield* serverBrowser.execute(
+        { command: "navigate", url: `data:text/html,${encodeURIComponent(html)}` },
+        context,
+      );
+      const page = (yield* serverBrowser.live.state).pages.find(
+        (candidate) => candidate.context?.threadId === "live-extras",
+      )!;
+
+      // Размер меняет только человек; вернул агенту — размер агента.
+      const refused = yield* serverBrowser.live.resize(page.pageId, 500, 700).pipe(Effect.flip);
+      assert.include(refused.detail, "Take control");
+      yield* serverBrowser.live.setControl(page.pageId, "human");
+      yield* serverBrowser.live.resize(page.pageId, 500, 700);
+      const inner = yield* serverBrowser
+        .execute(
+          { command: "evaluate", script: "[window.innerWidth, window.innerHeight]" },
+          context,
+        )
+        .pipe(Effect.timeoutOption("50 millis"));
+      // evaluate не из «смотреть можно» — агент ждёт; брошенное ожидание не
+      // оставляет флаг «агент ждёт» висеть.
+      assert.isTrue(inner._tag === "None");
+      const afterAbandon = (yield* serverBrowser.live.state).pages.find(
+        (candidate) => candidate.pageId === page.pageId,
+      )!;
+      assert.isFalse(afterAbandon.agentWaiting);
+      const resized = (yield* serverBrowser.live.state).pages.find(
+        (candidate) => candidate.pageId === page.pageId,
+      )!;
+      assert.equal(resized.width, 500);
+      assert.equal(resized.height, 700);
+
+      // Выделение в поле ввода и на странице.
+      yield* serverBrowser.live.input(page.pageId, { type: "mouse", action: "down", x: 1, y: 1 });
+      yield* serverBrowser.live.input(page.pageId, { type: "mouse", action: "up", x: 1, y: 1 });
+      yield* serverBrowser.live.setControl(page.pageId, "agent");
+      yield* serverBrowser.execute(
+        {
+          command: "evaluate",
+          script:
+            "(() => { const q = document.querySelector('#q'); q.focus(); q.setSelectionRange(1, 4); return true })()",
+        },
+        context,
+      );
+      assert.equal(yield* serverBrowser.live.copySelection(page.pageId), "bcd");
+      yield* serverBrowser.execute(
+        {
+          command: "evaluate",
+          script:
+            "(() => { document.activeElement.blur(); const r = document.createRange(); r.selectNodeContents(document.querySelector('#t')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); return true })()",
+        },
+        context,
+      );
+      assert.equal(yield* serverBrowser.live.copySelection(page.pageId), "copy me please");
+      const back = (yield* serverBrowser.live.state).pages.find(
+        (candidate) => candidate.pageId === page.pageId,
+      )!;
+      assert.equal(back.width, 1280);
+
+      // Прокси: плохой адрес — отказ; хороший — в состоянии без пароля.
+      const bad = yield* serverBrowser.live.setProxy({ server: "nope" }).pipe(Effect.flip);
+      assert.include(bad.detail, "http://host:port");
+      const withProxy = yield* serverBrowser.live.setProxy({
+        server: "http://127.0.0.1:9",
+        username: "user1",
+        password: "s3cret-pass",
+      });
+      assert.deepEqual(withProxy.location.proxy, {
+        server: "http://127.0.0.1:9",
+        username: "user1",
+      });
+      assert.notInclude(JSON.stringify(withProxy), "s3cret-pass");
+      assert.equal(withProxy.pages.length, 0);
+      const cleared = yield* serverBrowser.live.setProxy({ server: "" });
+      assert.isNull(cleared.location.proxy);
 
       yield* serverBrowser.shutdown;
     }).pipe(Effect.provide(testLayer)),

@@ -1186,91 +1186,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  // it.live: ручка ждёт настоящие полсекунды, прежде чем звать человека.
-  it.live("requestHelp calls the person through the Inbox and the messenger while it waits", () =>
-    Effect.gen(function* () {
-      const posts: Array<{ title: string; body?: string | null; kind: string }> = [];
-      const notices: string[] = [];
-      yield* buildAppUnderTest({
-        layers: {
-          // Машина ждёт человека: ответ приходит не сразу.
-          serverBrowser: {
-            execute: (input) =>
-              Effect.sleep("900 millis").pipe(
-                Effect.as({ ok: true, commandId: "help", data: { handedBack: true, input } }),
-              ),
-          },
-          inbox: {
-            post: (post) =>
-              Effect.sync(() => {
-                posts.push({ title: post.title, body: post.body ?? null, kind: post.kind });
-                return {} as never;
-              }),
-          },
-          connectorNotify: {
-            notify: (input) =>
-              Effect.sync(() => {
-                notices.push(input.text);
-                return { delivered: 1, chats: [] };
-              }),
-          },
-        },
-      });
-
-      const response = yield* HttpClient.post("/api/browser/command", {
-        headers: { authorization: `Bearer ${threadBridgeToken()}` },
-        body: HttpBody.text(
-          JSON.stringify({ command: "requestHelp", text: "Solve the captcha" }),
-          "application/json",
-        ),
-      });
-      assert.equal(response.status, 200);
-      const result = (yield* response.json) as { ok: boolean; data?: { handedBack?: boolean } };
-      assert.isTrue(result.ok);
-      assert.isTrue(result.data?.handedBack);
-      assert.equal(posts.length, 1);
-      assert.equal(posts[0]?.kind, "agent.input");
-      assert.include(posts[0]?.body ?? "", "Solve the captcha");
-      assert.equal(notices.length, 1);
-      assert.include(notices[0] ?? "", "Solve the captcha");
-
-      // Без причины запрос не принимается.
-      const noReason = yield* HttpClient.post("/api/browser/command", {
-        headers: { authorization: `Bearer ${threadBridgeToken()}` },
-        body: HttpBody.text(JSON.stringify({ command: "requestHelp" }), "application/json"),
-      });
-      assert.equal(noReason.status, 400);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.live("requestHelp that is refused at once calls nobody", () =>
-    Effect.gen(function* () {
-      const posts: string[] = [];
-      yield* buildAppUnderTest({
-        layers: {
-          inbox: {
-            post: (post) =>
-              Effect.sync(() => {
-                posts.push(post.title);
-                return {} as never;
-              }),
-          },
-        },
-      });
-      // Стаб ServerBrowserTest отвечает ошибкой сразу — звать некого.
-      const response = yield* HttpClient.post("/api/browser/command", {
-        headers: { authorization: `Bearer ${threadBridgeToken()}` },
-        body: HttpBody.text(
-          JSON.stringify({ command: "requestHelp", text: "Log in" }),
-          "application/json",
-        ),
-      });
-      assert.equal(response.status, 502);
-      yield* Effect.sleep("100 millis");
-      assert.equal(posts.length, 0);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
   it.effect("rejects manager routes without proper credentials", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
@@ -4899,3 +4814,89 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 });
+
+// it.live вне слоя: ручка ждёт настоящие полсекунды, прежде чем звать человека,
+// а it.effect из it.layer идёт на тестовых часах.
+it.live("requestHelp calls the person through the Inbox and the messenger while it waits", () =>
+  Effect.gen(function* () {
+    const posts: Array<{ title: string; body?: string | null; kind: string }> = [];
+    const notices: string[] = [];
+    yield* buildAppUnderTest({
+      layers: {
+        // Машина ждёт человека: ответ приходит не сразу.
+        serverBrowser: {
+          execute: (input) =>
+            Effect.sleep("900 millis").pipe(
+              Effect.as({ ok: true, commandId: "help", data: { handedBack: true, input } }),
+            ),
+        },
+        inbox: {
+          post: (post) =>
+            Effect.sync(() => {
+              posts.push({ title: post.title, body: post.body ?? null, kind: post.kind });
+              return {} as never;
+            }),
+        },
+        connectorNotify: {
+          notify: (input) =>
+            Effect.sync(() => {
+              notices.push(input.text);
+              return { delivered: 1, chats: [] };
+            }),
+        },
+      },
+    });
+
+    const response = yield* HttpClient.post("/api/browser/command", {
+      headers: { authorization: `Bearer ${threadBridgeToken()}` },
+      body: HttpBody.text(
+        JSON.stringify({ command: "requestHelp", text: "Solve the captcha" }),
+        "application/json",
+      ),
+    });
+    assert.equal(response.status, 200);
+    const result = (yield* response.json) as { ok: boolean; data?: { handedBack?: boolean } };
+    assert.isTrue(result.ok);
+    assert.isTrue(result.data?.handedBack);
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0]?.kind, "agent.input");
+    assert.include(posts[0]?.body ?? "", "Solve the captcha");
+    assert.equal(notices.length, 1);
+    assert.include(notices[0] ?? "", "Solve the captcha");
+
+    // Без причины запрос не принимается.
+    const noReason = yield* HttpClient.post("/api/browser/command", {
+      headers: { authorization: `Bearer ${threadBridgeToken()}` },
+      body: HttpBody.text(JSON.stringify({ command: "requestHelp" }), "application/json"),
+    });
+    assert.equal(noReason.status, 400);
+  }).pipe(Effect.provide(NodeHttpServer.layerTest.pipe(Layer.provideMerge(NodeServices.layer)))),
+);
+
+it.live("requestHelp that is refused at once calls nobody", () =>
+  Effect.gen(function* () {
+    const posts: string[] = [];
+    yield* buildAppUnderTest({
+      layers: {
+        inbox: {
+          post: (post) =>
+            Effect.sync(() => {
+              posts.push(post.title);
+              return {} as never;
+            }),
+        },
+      },
+    });
+    // Стаб ServerBrowserTest отвечает ошибкой сразу — звать некого.
+    const response = yield* HttpClient.post("/api/browser/command", {
+      headers: { authorization: `Bearer ${threadBridgeToken()}` },
+      body: HttpBody.text(
+        JSON.stringify({ command: "requestHelp", text: "Log in" }),
+        "application/json",
+      ),
+    });
+    assert.equal(response.status, 502);
+    yield* Effect.sleep("100 millis");
+    assert.equal(posts.length, 0);
+  }).pipe(Effect.provide(NodeHttpServer.layerTest.pipe(Layer.provideMerge(NodeServices.layer)))),
+);

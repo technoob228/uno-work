@@ -239,6 +239,8 @@ import {
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   BrowserLiveCloseInput,
+  BrowserLiveCopyInput,
+  BrowserLiveCopyResult,
   BrowserLiveError,
   BrowserLiveFrame,
   BrowserLiveFramesInput,
@@ -246,7 +248,9 @@ import {
   BrowserLiveNavigateInput,
   BrowserLiveOpenInput,
   BrowserLiveOpenResult,
+  BrowserLiveResizeInput,
   BrowserLiveSetControlInput,
+  BrowserLiveSetProxyInput,
   BrowserLiveState,
 } from "./browserLive.ts";
 import {
@@ -494,6 +498,9 @@ export const WS_METHODS = {
   browserLiveNavigate: "browserLive.navigate",
   browserLiveOpen: "browserLive.open",
   browserLiveClose: "browserLive.close",
+  browserLiveResize: "browserLive.resize",
+  browserLiveCopySelection: "browserLive.copySelection",
+  browserLiveSetProxy: "browserLive.setProxy",
   subscribePlugins: "subscribePlugins",
   subscribeInbox: "subscribeInbox",
 
@@ -1133,6 +1140,23 @@ export const WsBrowserLiveOpenRpc = Rpc.make(WS_METHODS.browserLiveOpen, {
 
 export const WsBrowserLiveCloseRpc = Rpc.make(WS_METHODS.browserLiveClose, {
   payload: BrowserLiveCloseInput,
+  error: BrowserLiveError,
+});
+
+export const WsBrowserLiveResizeRpc = Rpc.make(WS_METHODS.browserLiveResize, {
+  payload: BrowserLiveResizeInput,
+  error: BrowserLiveError,
+});
+
+export const WsBrowserLiveCopySelectionRpc = Rpc.make(WS_METHODS.browserLiveCopySelection, {
+  payload: BrowserLiveCopyInput,
+  success: BrowserLiveCopyResult,
+  error: BrowserLiveError,
+});
+
+export const WsBrowserLiveSetProxyRpc = Rpc.make(WS_METHODS.browserLiveSetProxy, {
+  payload: BrowserLiveSetProxyInput,
+  success: BrowserLiveState,
   error: BrowserLiveError,
 });
 
@@ -1946,6 +1970,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsBrowserLiveNavigateRpc,
   WsBrowserLiveOpenRpc,
   WsBrowserLiveCloseRpc,
+  WsBrowserLiveResizeRpc,
+  WsBrowserLiveCopySelectionRpc,
+  WsBrowserLiveSetProxyRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
