@@ -72,7 +72,11 @@ export function useFolderChats(environmentId: EnvironmentId | null) {
 
   /** The project for `folder` on this machine, created when it isn't one yet. */
   const ensureFolderProject = useCallback(
-    async (folder: string, title?: string): Promise<ScopedProjectRef> => {
+    async (
+      folder: string,
+      title?: string,
+      options?: { readonly createFolder?: boolean },
+    ): Promise<ScopedProjectRef> => {
       if (environmentId === null) throw new Error("No connection to this computer.");
       const existing = findProjectByPath(
         selectProjectsAcrossEnvironments(useStore.getState()).filter(
@@ -89,7 +93,9 @@ export function useFolderChats(environmentId: EnvironmentId | null) {
         projectId,
         title: title ?? inferProjectTitleFromPath(folder),
         workspaceRoot: folder,
-        createWorkspaceRootIfMissing: false,
+        // "Empty project" makes the folder; every other path points at one
+        // that is already there.
+        createWorkspaceRootIfMissing: options?.createFolder === true,
         defaultModelSelection: selection ?? {
           instanceId: ProviderInstanceId.make("codex"),
           model: DEFAULT_MODEL,
@@ -103,8 +109,12 @@ export function useFolderChats(environmentId: EnvironmentId | null) {
 
   /** A new chat in `folder` (a project already, or made one). */
   const chatInFolder = useCallback(
-    async (folder: string, title?: string): Promise<ScopedProjectRef> => {
-      const projectRef = await ensureFolderProject(folder, title);
+    async (
+      folder: string,
+      title?: string,
+      options?: { readonly createFolder?: boolean },
+    ): Promise<ScopedProjectRef> => {
+      const projectRef = await ensureFolderProject(folder, title, options);
       await handleNewThread(projectRef, { envMode: "local" });
       return projectRef;
     },

@@ -3549,7 +3549,9 @@ export default function LegacySidebar() {
   });
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
   const keybindings = useServerKeybindings();
-  const openAddProjectCommandPalette = useCommandPaletteStore((store) => store.openAddProject);
+  const openAddProjectCommandPalette = useCommandPaletteStore(
+    (store) => store.openLegacyAddProject,
+  );
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<string>
   >(() => new Set());

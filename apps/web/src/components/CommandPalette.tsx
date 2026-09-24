@@ -131,6 +131,7 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { ComposerHandleContext, useComposerHandleContext } from "../composerHandleContext";
 import type { ChatComposerHandle } from "./chat/ChatComposer";
+import { openNewProject } from "../navigation/newProjectStore";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 const BROWSE_STALE_TIME_MS = 30_000;
@@ -1138,7 +1139,7 @@ function OpenCommandPaletteDialog() {
             handleNewThread,
             activeEnvironmentId,
             createStarterProject,
-            onMissingProject: openAddProjectFlow,
+            onMissingProject: () => openNewProject(),
           });
         },
       });
@@ -1162,7 +1163,7 @@ function OpenCommandPaletteDialog() {
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "chat.new",
       run: async () => {
-        openAddProjectFlow();
+        openNewProject();
       },
     });
   }
@@ -1188,11 +1189,10 @@ function OpenCommandPaletteDialog() {
       "url",
       "environment",
     ],
-    title: "Add project",
+    title: "New project…",
     icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
-    keepOpen: true,
     run: async () => {
-      openAddProjectFlow();
+      openNewProject();
     },
   });
 
