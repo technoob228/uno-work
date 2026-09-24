@@ -1,11 +1,23 @@
+import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { hostname } from "node:os";
+import { delimiter, join } from "node:path";
 
 import type {
   BrowserAutomationCommandInput,
   BrowserAutomationCommandResult,
   BrowserBridgeRequestContext,
+  BrowserLiveControl,
+  BrowserLiveFrame,
+  BrowserLiveHelpRequest,
+  BrowserLiveInputEvent,
+  BrowserLiveLocation,
+  BrowserLiveNavigateInput,
+  BrowserLivePage,
+  BrowserLiveState,
 } from "@t3tools/contracts";
+import { BrowserLiveError } from "@t3tools/contracts";
 import {
   buildClickSelectorScript,
   buildClickTextScript,
@@ -19,9 +31,9 @@ import {
   screenshotBytes,
   type ScreenshotResultData,
 } from "@t3tools/shared/browserScreenshot";
-import { Context, Data, Duration, Effect, Layer, Option, Ref } from "effect";
+import { Context, Data, Duration, Effect, Layer, Option, Queue, Ref, Stream } from "effect";
 import * as Semaphore from "effect/Semaphore";
-import type { BrowserContext, Page } from "playwright-core";
+import type { BrowserContext, CDPSession, Page } from "playwright-core";
 
 import {
   bridgeContextKey,
@@ -31,16 +43,45 @@ import {
 import { ServerConfig } from "./config.ts";
 
 /**
- * Серверный исполнитель bridge-команд: headless Chromium (playwright-core).
+ * Серверный исполнитель bridge-команд: Chromium самой машины (playwright-core).
  * Второй исполнитель рядом с Electron-webview клиента — используется, когда
- * ни один web-клиент не подписан на bridge (headless-сервер, Telegram) или
- * когда настройка `browser.executor` требует серверного исполнения.
+ * демон работает на сервере (Work в облаке: браузер живёт там же, где агент),
+ * когда ни один клиент не подписан на bridge (Telegram) или когда настройка
+ * `browser.executor` требует серверного исполнения.
  *
  * Браузер запускается лениво при первой команде; профиль персистентный
- * (`<stateDir>/browser-profile`), поэтому логины переживают рестарты.
- * Страница на каждый bridge-контекст (threadId/cwd) — тот же ключ, что у
- * scoped-токенов. Команды на одной странице сериализуются.
+ * (`<stateDir>/browser-profile`), поэтому логины переживают рестарты. На
+ * Linux с Xvfb это настоящее окно на виртуальном экране (headful): сайты
+ * режут headless заметно чаще. Страница на каждый bridge-контекст
+ * (threadId/cwd) — тот же ключ, что у scoped-токенов. Команды на одной
+ * странице сериализуются.
+ *
+ * Live view (`live`): приложение видит страницы кадрами CDP screencast и
+ * может взять управление. Пока управление у человека, команды агента,
+ * меняющие страницу, ждут; `requestHelp` зовёт человека и ждёт, пока браузер
+ * вернут.
  */
+
+export interface ServerBrowserLiveShape {
+  readonly state: Effect.Effect<BrowserLiveState>;
+  /** Текущее состояние, затем каждое изменение. */
+  readonly changes: Stream.Stream<BrowserLiveState>;
+  readonly frames: (pageId: string) => Stream.Stream<BrowserLiveFrame, BrowserLiveError>;
+  readonly input: (
+    pageId: string,
+    event: BrowserLiveInputEvent,
+  ) => Effect.Effect<void, BrowserLiveError>;
+  readonly setControl: (
+    pageId: string,
+    control: BrowserLiveControl,
+  ) => Effect.Effect<BrowserLiveState, BrowserLiveError>;
+  readonly navigate: (input: BrowserLiveNavigateInput) => Effect.Effect<void, BrowserLiveError>;
+  readonly open: (
+    context: BrowserBridgeRequestContext,
+    url: string,
+  ) => Effect.Effect<{ readonly pageId: string }, BrowserLiveError>;
+  readonly close: (pageId: string) => Effect.Effect<void, BrowserLiveError>;
+}
 
 export interface ServerBrowserShape {
   /** Никогда не фейлится: любая ошибка сворачивается в `result.error`. */
@@ -48,6 +89,7 @@ export interface ServerBrowserShape {
     input: BrowserAutomationCommandInput,
     context?: BrowserBridgeRequestContext,
   ) => Effect.Effect<BrowserAutomationCommandResult>;
+  readonly live: ServerBrowserLiveShape;
   readonly shutdown: Effect.Effect<void>;
 }
 
@@ -56,11 +98,28 @@ export class ServerBrowser extends Context.Service<ServerBrowser, ServerBrowserS
 ) {}
 
 export const SERVER_BROWSER_EXECUTABLE_ENV = "UNO_WORK_BROWSER_EXECUTABLE";
+/** `1` — всегда headless, даже когда есть Xvfb (тесты, слабые машины). */
+export const SERVER_BROWSER_HEADLESS_ENV = "UNO_WORK_BROWSER_HEADLESS";
+
+const VIEWPORT = { width: 1280, height: 800 } as const;
 
 const CHROMIUM_MISSING_ERROR =
   "Server-side browser unavailable: Chromium executable not found. " +
   'Run "npx playwright install chromium" on the server host, or set ' +
   `${SERVER_BROWSER_EXECUTABLE_ENV} to a Chromium/Chrome binary path.`;
+
+/** Команды, которые не меняют страницу: агенту можно смотреть, пока рулит человек. */
+const OBSERVE_COMMANDS = new Set<BrowserAutomationCommandInput["command"]>([
+  "state",
+  "screenshot",
+  // Подставляет сервер по нажатию человека (vault.fill), не агент.
+  "fillCredential",
+]);
+
+const HUMAN_IN_CONTROL_ERROR =
+  "The person has taken control of this browser and is using it right now. " +
+  "Do not retry in a loop: tell them in chat what you are waiting for, or call " +
+  '{"command":"requestHelp","text":"<what you need>"} — it returns when they hand the browser back.';
 
 function launchErrorMessage(cause: unknown): string {
   const detail = cause instanceof Error ? cause.message : String(cause);
@@ -88,8 +147,28 @@ function isClosedPageError(cause: unknown): boolean {
 }
 
 interface PageEntry {
+  readonly pageId: string;
+  readonly key: string;
   readonly page: Page;
   readonly semaphore: Semaphore.Semaphore;
+  /**
+   * Ввод человека по порядку: клиент шлёт события не дожидаясь ответа
+   * (иначе печать упиралась бы в круг до машины на каждую клавишу).
+   */
+  readonly inputSemaphore: Semaphore.Semaphore;
+  readonly context: BrowserBridgeRequestContext | undefined;
+  title: string;
+  control: BrowserLiveControl;
+  help: BrowserLiveHelpRequest | null;
+  attention: number;
+  /** Команды агента, ждущие возврата управления. */
+  agentWaiting: number;
+  /** Ждут `control → agent` (возврат браузера человеком). */
+  readonly controlWaiters: Set<() => void>;
+  readonly frameListeners: Set<(frame: BrowserLiveFrame) => void>;
+  lastFrame: BrowserLiveFrame | null;
+  cdp: CDPSession | null;
+  screencasting: boolean;
 }
 
 async function runCommand(page: Page, input: BrowserAutomationCommandInput): Promise<unknown> {
@@ -191,12 +270,107 @@ async function runCommand(page: Page, input: BrowserAutomationCommandInput): Pro
       }
       return { filled: true };
     }
+    case "requestHelp":
+      // Обрабатывается в execute: ждёт человека, а не страницу.
+      throw new ServerBrowserCommandError({ message: "requestHelp is handled by execute." });
   }
 }
+
+/** Путь к бинарю в PATH или null. */
+function findOnPath(binary: string): string | null {
+  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+    if (!dir) continue;
+    const candidate = join(dir, binary);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Виртуальный экран для headful-браузера. Xvfb сам выбирает свободный номер
+ * дисплея (`-displayfd`) — демон работает с PrivateTmp, чужие X-локи ему не
+ * видны. null — Xvfb нет или он не поднялся: браузер пойдёт headless.
+ */
+async function startVirtualDisplay(): Promise<{ display: string; process: ChildProcess } | null> {
+  const xvfb = findOnPath("Xvfb");
+  if (!xvfb) return null;
+  return new Promise((resolve) => {
+    let settled = false;
+    const child = spawn(
+      xvfb,
+      [
+        "-displayfd",
+        "3",
+        "-screen",
+        "0",
+        `${VIEWPORT.width}x${VIEWPORT.height}x24`,
+        "-nolisten",
+        "tcp",
+      ],
+      { stdio: ["ignore", "ignore", "ignore", "pipe"] },
+    );
+    const finish = (value: { display: string; process: ChildProcess } | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (value === null) child.kill("SIGKILL");
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(null), 5_000);
+    let buffered = "";
+    const fd = child.stdio[3];
+    fd?.on("data", (chunk: Buffer) => {
+      buffered += chunk.toString("utf8");
+      const match = /(\d+)\s/.exec(buffered);
+      if (match) finish({ display: `:${match[1]}`, process: child });
+    });
+    child.once("error", () => finish(null));
+    child.once("exit", () => finish(null));
+  });
+}
+
+/**
+ * Адрес, который видят сайты. Спрашиваем Cloudflare trace: без ключа, без
+ * третьих сервисов, одна строка `ip=`. null — не узнали (нет сети/таймаут).
+ */
+async function lookupPublicIp(): Promise<string | null> {
+  try {
+    const response = await fetch("https://1.1.1.1/cdn-cgi/trace", {
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) return null;
+    const match = /^ip=(.+)$/m.exec(await response.text());
+    return match?.[1]?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+const PUBLIC_IP_TTL_MS = 10 * 60_000;
+
+function stopScreencast(entry: PageEntry) {
+  if (!entry.screencasting || !entry.cdp) return;
+  entry.screencasting = false;
+  void entry.cdp.send("Page.stopScreencast").catch(() => undefined);
+}
+
+/**
+ * Одна страница на чат: агент может звать мост из worktree или подпапки (другой
+ * cwd), а человек открывает страницу чата из панели — всё это одна вкладка.
+ * Без треда (легаси-токены) — прежний ключ по cwd.
+ */
+function pageKeyFor(context: BrowserBridgeRequestContext | undefined): string {
+  if (context?.threadId) return `thread:${context.threadId}`;
+  return bridgeContextKey(context ?? {});
+}
+
+/** Клавиши, которых playwright не знает (IME, мёртвые) — молча пропускаем. */
+const IGNORED_KEYS = new Set(["Unidentified", "Dead", "Process", "Compose"]);
 
 export const makeServerBrowser = Effect.gen(function* () {
   const config = yield* ServerConfig;
   const profileDir = join(config.stateDir, "browser-profile");
+  const machine = hostname();
 
   // Ленивый запуск под мьютексом. Не Effect.cached: он навсегда мемоизировал
   // бы неудачный запуск, а нужен ретрай на следующей команде.
@@ -205,6 +379,162 @@ export const makeServerBrowser = Effect.gen(function* () {
   // Страницы конечны, как и треды — рост карты ограничен (см. scoped-токены
   // в browserBridge.ts).
   const pagesByContextKey = new Map<string, PageEntry>();
+  const pagesById = new Map<string, PageEntry>();
+  let display: { display: string; process: ChildProcess } | null = null;
+  let displayMode: BrowserLiveLocation["display"] = "headless";
+  let publicIp: { value: string | null; at: number } | null = null;
+  const stateListeners = new Set<(state: BrowserLiveState) => void>();
+
+  const pageSnapshot = (entry: PageEntry): BrowserLivePage => ({
+    pageId: entry.pageId,
+    url: entry.page.isClosed() ? "" : entry.page.url(),
+    title: entry.title,
+    ...(entry.context ? { context: entry.context } : {}),
+    control: entry.control,
+    help: entry.help,
+    attention: entry.attention,
+    agentWaiting: entry.agentWaiting > 0,
+    width: VIEWPORT.width,
+    height: VIEWPORT.height,
+  });
+
+  // Демон, который сам раздаёт веб-клиент, — машина в облаке: браузер
+  // агентов здесь (то же правило, что в browserCommandRouter).
+  const agentsBrowseHere = config.mode === "web";
+
+  const snapshot = (): BrowserLiveState => ({
+    agentsBrowseHere,
+    location: {
+      machine,
+      publicIp: publicIp?.value ?? null,
+      display: displayMode,
+      running: pagesById.size > 0,
+    },
+    pages: [...pagesById.values()].map(pageSnapshot),
+  });
+
+  const emitState = () => {
+    if (stateListeners.size === 0) return;
+    const state = snapshot();
+    for (const listener of stateListeners) listener(state);
+  };
+
+  const refreshPublicIp = () => {
+    if (publicIp && Date.now() - publicIp.at < PUBLIC_IP_TTL_MS) return;
+    // Метка ставится до ответа — параллельные подписки не спрашивают дважды.
+    publicIp = { value: publicIp?.value ?? null, at: Date.now() };
+    void lookupPublicIp().then((value) => {
+      publicIp = { value, at: Date.now() };
+      emitState();
+    });
+  };
+
+  const removeEntry = (entry: PageEntry) => {
+    if (pagesById.get(entry.pageId) !== entry) return;
+    pagesById.delete(entry.pageId);
+    if (pagesByContextKey.get(entry.key) === entry) pagesByContextKey.delete(entry.key);
+    // Закрытая страница больше не держит ни агента, ни зрителей.
+    for (const wake of entry.controlWaiters) wake();
+    entry.controlWaiters.clear();
+    entry.frameListeners.clear();
+    emitState();
+  };
+
+  const ensureCdp = async (entry: PageEntry): Promise<CDPSession> => {
+    if (entry.cdp) return entry.cdp;
+    const cdp = await entry.page.context().newCDPSession(entry.page);
+    // Страница всегда «в фокусе»: каретка и клавиатура работают, даже когда
+    // окно на виртуальном экране не активное (или браузер headless).
+    await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => undefined);
+    cdp.on("Page.screencastFrame", (payload) => {
+      void cdp
+        .send("Page.screencastFrameAck", { sessionId: payload.sessionId })
+        .catch(() => undefined);
+      const frame: BrowserLiveFrame = {
+        pageId: entry.pageId,
+        data: payload.data,
+        width: Math.max(1, Math.round(payload.metadata.deviceWidth)),
+        height: Math.max(1, Math.round(payload.metadata.deviceHeight)),
+      };
+      entry.lastFrame = frame;
+      for (const listener of entry.frameListeners) listener(frame);
+    });
+    entry.cdp = cdp;
+    return cdp;
+  };
+
+  const startScreencast = async (entry: PageEntry) => {
+    if (entry.screencasting || entry.page.isClosed()) return;
+    entry.screencasting = true;
+    try {
+      const cdp = await ensureCdp(entry);
+      await cdp.send("Page.startScreencast", {
+        format: "jpeg",
+        quality: 70,
+        maxWidth: VIEWPORT.width * 2,
+        maxHeight: VIEWPORT.height * 2,
+        everyNthFrame: 1,
+      });
+    } catch {
+      entry.screencasting = false;
+    }
+  };
+
+  const registerPage = (
+    page: Page,
+    key: string,
+    context: BrowserBridgeRequestContext | undefined,
+    semaphore: Semaphore.Semaphore,
+  ): PageEntry => {
+    const entry: PageEntry = {
+      pageId: `pg_${randomBytes(9).toString("base64url")}`,
+      key,
+      page,
+      semaphore,
+      inputSemaphore: Semaphore.makeUnsafe(1),
+      context,
+      title: "",
+      control: "agent",
+      help: null,
+      attention: 0,
+      agentWaiting: 0,
+      controlWaiters: new Set(),
+      frameListeners: new Set(),
+      lastFrame: null,
+      cdp: null,
+      screencasting: false,
+    };
+    pagesById.set(entry.pageId, entry);
+    const refreshTitle = () => {
+      void page
+        .title()
+        .then((title) => {
+          entry.title = title;
+          emitState();
+        })
+        .catch(() => undefined);
+    };
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) emitState();
+    });
+    page.on("load", refreshTitle);
+    page.on("domcontentloaded", refreshTitle);
+    page.on("close", () => removeEntry(entry));
+    // Окна, которые открывает сайт (OAuth-попапы, target=_blank), — отдельные
+    // вкладки того же чата: закрыть их за сайт нельзя, иначе логин через
+    // попап сломается. Агент их не адресует, а человек видит и может рулить.
+    page.on("popup", (popup) => {
+      const popupEntry = registerPage(
+        popup,
+        `${key}\u0000popup:${randomBytes(6).toString("hex")}`,
+        context,
+        Semaphore.makeUnsafe(1),
+      );
+      popupEntry.attention = 1;
+      emitState();
+    });
+    return entry;
+  };
 
   const launch = Effect.gen(function* () {
     if (process.versions.bun !== undefined) {
@@ -217,15 +547,54 @@ export const makeServerBrowser = Effect.gen(function* () {
       catch: (cause) => new ServerBrowserCommandError({ message: launchErrorMessage(cause) }),
     });
     const executablePath = process.env[SERVER_BROWSER_EXECUTABLE_ENV]?.trim() || undefined;
-    return yield* Effect.tryPromise({
+    const forceHeadless = process.env[SERVER_BROWSER_HEADLESS_ENV] === "1";
+    let displayVar = forceHeadless ? undefined : process.env.DISPLAY?.trim() || undefined;
+    if (!forceHeadless && !displayVar && process.platform === "linux") {
+      if (!display || display.process.exitCode !== null) {
+        display = yield* Effect.promise(() => startVirtualDisplay());
+      }
+      displayVar = display?.display;
+    }
+    const headless = displayVar === undefined;
+    const launchWith = (channel: "chromium" | undefined) =>
+      playwright.chromium.launchPersistentContext(profileDir, {
+        headless,
+        viewport: VIEWPORT,
+        ...(executablePath ? { executablePath } : {}),
+        ...(channel ? { channel } : {}),
+        ...(headless ? {} : { env: { ...process.env, DISPLAY: displayVar } }),
+        args: [
+          `--window-size=${VIEWPORT.width},${VIEWPORT.height}`,
+          // Невидимая вкладка не должна замирать: её смотрят через screencast.
+          "--disable-backgrounding-occluded-windows",
+          "--disable-renderer-backgrounding",
+          "--disable-background-timer-throttling",
+        ],
+      });
+    const launched = yield* Effect.tryPromise({
+      // Headless — полный Chromium в новом headless-режиме (channel
+      // "chromium"): install.sh ставит его без отдельной headless-оболочки, и
+      // сайтам его сложнее отличить. Нет полного — пробуем оболочку.
       try: () =>
-        playwright.chromium.launchPersistentContext(profileDir, {
-          headless: true,
-          viewport: { width: 1280, height: 800 },
-          ...(executablePath ? { executablePath } : {}),
-        }),
+        headless && !executablePath
+          ? launchWith("chromium").catch((cause: unknown) =>
+              /executable doesn't exist/i.test(String(cause))
+                ? launchWith(undefined)
+                : Promise.reject(cause),
+            )
+          : launchWith(undefined),
       catch: (cause) => new ServerBrowserCommandError({ message: launchErrorMessage(cause) }),
     });
+    displayMode = headless ? "headless" : "headful";
+    // Headful persistent context открывает стартовую вкладку about:blank —
+    // она ничья, уберём, чтобы не висела в окне.
+    for (const stray of launched.pages()) {
+      void stray.close().catch(() => undefined);
+    }
+    launched.on("close", () => {
+      for (const entry of pagesById.values()) removeEntry(entry);
+    });
+    return launched;
   });
 
   const getBrowserContext = launchSemaphore.withPermits(1)(
@@ -235,8 +604,10 @@ export const makeServerBrowser = Effect.gen(function* () {
         return existing;
       }
       pagesByContextKey.clear();
+      pagesById.clear();
       const launched = yield* launch;
       yield* Ref.set(contextRef, launched);
+      refreshPublicIp();
       return launched;
     }),
   );
@@ -244,9 +615,8 @@ export const makeServerBrowser = Effect.gen(function* () {
   const getPageEntry = (context: BrowserBridgeRequestContext | undefined) =>
     Effect.gen(function* () {
       const browserContext = yield* getBrowserContext;
-      const key = bridgeContextKey(
-        (context ? normalizeBridgeRequestContext(context) : undefined) ?? {},
-      );
+      const normalized = context ? normalizeBridgeRequestContext(context) : undefined;
+      const key = pageKeyFor(normalized);
       const existing = pagesByContextKey.get(key);
       if (existing && !existing.page.isClosed()) {
         return existing;
@@ -256,17 +626,89 @@ export const makeServerBrowser = Effect.gen(function* () {
         catch: (cause) => new ServerBrowserCommandError({ message: commandErrorMessage(cause) }),
       });
       const semaphore = existing?.semaphore ?? (yield* Semaphore.make(1));
-      const entry: PageEntry = { page, semaphore };
+      const entry = registerPage(page, key, normalized, semaphore);
       pagesByContextKey.set(key, entry);
+      emitState();
       return entry;
+    });
+
+  /** Ждать, пока человек вернёт браузер. false — не дождались за timeoutMs. */
+  const waitForAgentControl = (entry: PageEntry, timeoutMs: number) =>
+    Effect.gen(function* () {
+      if (entry.control === "agent") return true;
+      entry.agentWaiting += 1;
+      emitState();
+      const released = yield* Effect.callback<void>((resume) => {
+        const wake = () => resume(Effect.void);
+        entry.controlWaiters.add(wake);
+        return Effect.sync(() => {
+          entry.controlWaiters.delete(wake);
+        });
+      }).pipe(Effect.timeoutOption(Duration.millis(timeoutMs)));
+      entry.agentWaiting = Math.max(0, entry.agentWaiting - 1);
+      emitState();
+      return Option.isSome(released);
+    });
+
+  const requestHelp = (
+    input: BrowserAutomationCommandInput,
+    context: BrowserBridgeRequestContext | undefined,
+    timeoutMs: number,
+  ) =>
+    Effect.gen(function* () {
+      const entry = yield* getPageEntry(context);
+      entry.help = {
+        reason: (input.text ?? "").trim(),
+        requestedAt: new Date().toISOString(),
+      };
+      entry.attention += 1;
+      emitState();
+      // Помощь закончена, когда управление вернулось агенту: человек взял
+      // браузер и отдал, либо нажал «Готово», не беря.
+      const handedBack = yield* Effect.callback<void>((resume) => {
+        const wake = () => resume(Effect.void);
+        entry.controlWaiters.add(wake);
+        return Effect.sync(() => {
+          entry.controlWaiters.delete(wake);
+        });
+      }).pipe(Effect.timeoutOption(Duration.millis(timeoutMs)));
+      entry.help = null;
+      emitState();
+      if (Option.isNone(handedBack)) {
+        return yield* new ServerBrowserCommandError({
+          message: `Nobody answered within ${Math.round(timeoutMs / 60_000)} min. Tell the person in chat what you need and continue with something else.`,
+        });
+      }
+      if (entry.page.isClosed()) {
+        return yield* new ServerBrowserCommandError({
+          message: "The person closed this page.",
+        });
+      }
+      return {
+        handedBack: true,
+        url: entry.page.url(),
+        title: yield* Effect.promise(() => entry.page.title().catch(() => "")),
+      };
     });
 
   const dispatch = (
     input: BrowserAutomationCommandInput,
     context: BrowserBridgeRequestContext | undefined,
+    timeoutMs: number,
   ): Effect.Effect<unknown, ServerBrowserCommandError> =>
     Effect.gen(function* () {
       const entry = yield* getPageEntry(context);
+      if (!OBSERVE_COMMANDS.has(input.command)) {
+        const mayProceed = yield* waitForAgentControl(entry, timeoutMs);
+        if (!mayProceed) {
+          return yield* new ServerBrowserCommandError({ message: HUMAN_IN_CONTROL_ERROR });
+        }
+      }
+      if (input.command === "openUrl" || input.command === "navigate") {
+        // Агент открыл страницу — вкладка выходит на передний план в приложении.
+        entry.attention += 1;
+        emitState();
+      }
       return yield* entry.semaphore.withPermits(1)(
         Effect.tryPromise({
           try: () => runCommand(entry.page, input),
@@ -279,15 +721,20 @@ export const makeServerBrowser = Effect.gen(function* () {
     Effect.gen(function* () {
       const commandId = `server-${randomBytes(12).toString("hex")}`;
       const timeoutMs = commandTimeoutMs(input);
-      const attempt = dispatch(input, context).pipe(
-        // Умершая страница/браузер: одно пересоздание (getPageEntry заметит
-        // isClosed/disconnected) и повтор.
-        Effect.catch((error) =>
-          isClosedPageError(error) ? dispatch(input, context) : Effect.fail(error),
-        ),
-      );
+      const attempt: Effect.Effect<unknown, ServerBrowserCommandError> =
+        input.command === "requestHelp"
+          ? requestHelp(input, context, timeoutMs)
+          : dispatch(input, context, timeoutMs).pipe(
+              // Умершая страница/браузер: одно пересоздание (getPageEntry заметит
+              // isClosed/disconnected) и повтор.
+              Effect.catch((error) =>
+                isClosedPageError(error) ? dispatch(input, context, timeoutMs) : Effect.fail(error),
+              ),
+            );
+      // Внешний потолок чуть выше внутренних ожиданий: сообщение «человек
+      // рулит»/«никто не ответил» должно успеть дойти вместо голого таймаута.
       const outcome: BrowserAutomationCommandResult = yield* attempt.pipe(
-        Effect.timeoutOption(Duration.millis(timeoutMs)),
+        Effect.timeoutOption(Duration.millis(timeoutMs + 2_000)),
         Effect.map(
           Option.match({
             onSome: (data) => ({ ok: true, commandId, data }),
@@ -305,20 +752,208 @@ export const makeServerBrowser = Effect.gen(function* () {
       return outcome;
     });
 
+  const liveError = (detail: string) => new BrowserLiveError({ detail });
+
+  const requirePage = (pageId: string) =>
+    Effect.suspend(() => {
+      const entry = pagesById.get(pageId);
+      return entry && !entry.page.isClosed()
+        ? Effect.succeed(entry)
+        : Effect.fail(liveError("This page is closed."));
+    });
+
+  const requireHuman = (entry: PageEntry) =>
+    entry.control === "human"
+      ? Effect.void
+      : Effect.fail(liveError("Take control of the browser first."));
+
+  const livePromise = <A>(run: () => Promise<A>) =>
+    Effect.tryPromise({
+      try: run,
+      catch: (cause) => liveError(cause instanceof Error ? cause.message : String(cause)),
+    });
+
+  const live: ServerBrowserLiveShape = {
+    state: Effect.sync(snapshot),
+    changes: Stream.callback<BrowserLiveState>((queue) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          const listener = (state: BrowserLiveState) => {
+            Queue.offerUnsafe(queue, state);
+          };
+          stateListeners.add(listener);
+          refreshPublicIp();
+          Queue.offerUnsafe(queue, snapshot());
+          return listener;
+        }),
+        (listener) => Effect.sync(() => stateListeners.delete(listener)),
+      ),
+    ),
+    frames: (pageId) =>
+      Stream.unwrap(
+        Effect.map(requirePage(pageId), (entry) =>
+          Stream.callback<BrowserLiveFrame>((queue) =>
+            Effect.acquireRelease(
+              Effect.sync(() => {
+                // Зрителю важен только последний кадр: медленный канал не
+                // должен копить очередь из устаревших картинок.
+                const listener = (frame: BrowserLiveFrame) => {
+                  Queue.offerUnsafe(queue, frame);
+                };
+                entry.frameListeners.add(listener);
+                if (entry.lastFrame) Queue.offerUnsafe(queue, entry.lastFrame);
+                void startScreencast(entry);
+                return listener;
+              }),
+              (listener) =>
+                Effect.sync(() => {
+                  entry.frameListeners.delete(listener);
+                  if (entry.frameListeners.size === 0) stopScreencast(entry);
+                }),
+            ),
+          ).pipe(Stream.buffer({ capacity: 2, strategy: "sliding" })),
+        ),
+      ),
+    input: (pageId, event) =>
+      Effect.gen(function* () {
+        const entry = yield* requirePage(pageId);
+        yield* requireHuman(entry);
+        const { page } = entry;
+        const apply = livePromise(async () => {
+          switch (event.type) {
+            case "mouse": {
+              await page.mouse.move(event.x, event.y);
+              if (event.action === "down") {
+                await page.mouse.down({
+                  button: event.button ?? "left",
+                  clickCount: event.clickCount ?? 1,
+                });
+              } else if (event.action === "up") {
+                await page.mouse.up({
+                  button: event.button ?? "left",
+                  clickCount: event.clickCount ?? 1,
+                });
+              }
+              return;
+            }
+            case "wheel":
+              await page.mouse.move(event.x, event.y);
+              await page.mouse.wheel(event.deltaX, event.deltaY);
+              return;
+            case "key": {
+              if (IGNORED_KEYS.has(event.key)) return;
+              try {
+                if (event.action === "down") await page.keyboard.down(event.key);
+                else await page.keyboard.up(event.key);
+              } catch (cause) {
+                // Незнакомая playwright клавиша — не повод рвать ввод.
+                if (!/Unknown key/i.test(String(cause))) throw cause;
+              }
+              return;
+            }
+            case "text":
+              await page.keyboard.insertText(event.text);
+              return;
+          }
+        });
+        yield* entry.inputSemaphore.withPermits(1)(apply);
+      }),
+    setControl: (pageId, control) =>
+      Effect.gen(function* () {
+        const entry = yield* requirePage(pageId);
+        entry.control = control;
+        if (control === "agent") {
+          for (const wake of entry.controlWaiters) wake();
+        }
+        emitState();
+        return snapshot();
+      }),
+    navigate: (input) =>
+      Effect.gen(function* () {
+        const entry = yield* requirePage(input.pageId);
+        yield* requireHuman(entry);
+        const { page } = entry;
+        yield* livePromise(async () => {
+          switch (input.action) {
+            case "goto": {
+              const url = input.url?.trim() ?? "";
+              if (!/^https?:\/\//i.test(url)) throw new Error("Only http(s) addresses open here.");
+              await page.goto(url, { waitUntil: "domcontentloaded" });
+              return;
+            }
+            case "back":
+              await page.goBack();
+              return;
+            case "forward":
+              await page.goForward();
+              return;
+            case "reload":
+              await page.reload();
+              return;
+          }
+        });
+      }),
+    open: (context, url) =>
+      Effect.gen(function* () {
+        const target = url.trim();
+        if (target !== "" && !/^https?:\/\//i.test(target)) {
+          return yield* liveError("Only http(s) addresses open here.");
+        }
+        const entry = yield* getPageEntry(context).pipe(
+          Effect.mapError((error) => liveError(error.message)),
+        );
+        // Страницу открыл человек — он и рулит, пока не отдаст агенту.
+        entry.control = "human";
+        entry.attention += 1;
+        emitState();
+        if (target !== "") {
+          yield* livePromise(() => entry.page.goto(target, { waitUntil: "domcontentloaded" }));
+        }
+        return { pageId: entry.pageId };
+      }),
+    close: (pageId) =>
+      Effect.gen(function* () {
+        const entry = yield* requirePage(pageId);
+        yield* livePromise(() => entry.page.close());
+      }),
+  };
+
   const shutdown = Effect.gen(function* () {
     const existing = yield* Ref.get(contextRef);
-    if (!existing) return;
-    yield* Ref.set(contextRef, null);
-    pagesByContextKey.clear();
-    yield* Effect.promise(() => existing.close().catch(() => undefined));
+    if (existing) {
+      yield* Ref.set(contextRef, null);
+      for (const entry of pagesById.values()) removeEntry(entry);
+      pagesByContextKey.clear();
+      yield* Effect.promise(() => existing.close().catch(() => undefined));
+    }
+    if (display) {
+      display.process.kill("SIGTERM");
+      display = null;
+    }
   });
 
   yield* Effect.addFinalizer(() => shutdown.pipe(Effect.timeout("5 seconds"), Effect.ignore));
 
-  return { execute, shutdown } satisfies ServerBrowserShape;
+  return { execute, live, shutdown } satisfies ServerBrowserShape;
 });
 
 export const ServerBrowserLive = Layer.effect(ServerBrowser, makeServerBrowser);
+
+/** Live view без браузера — для тестов и стабов. */
+export const unavailableServerBrowserLive: ServerBrowserLiveShape = {
+  state: Effect.succeed({
+    agentsBrowseHere: false,
+    location: { machine: "test", publicIp: null, display: "headless", running: false },
+    pages: [],
+  }),
+  changes: Stream.empty,
+  frames: () => Stream.fail(new BrowserLiveError({ detail: "No browser in tests." })),
+  input: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
+  setControl: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
+  navigate: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
+  open: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
+  close: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
+};
 
 /** Стаб для тестов: серверного браузера нет, любая команда — ошибка. */
 export const ServerBrowserTest = Layer.succeed(ServerBrowser, {
@@ -328,5 +963,6 @@ export const ServerBrowserTest = Layer.succeed(ServerBrowser, {
       commandId: "test",
       error: "Server-side browser is unavailable in tests.",
     }),
+  live: unavailableServerBrowserLive,
   shutdown: Effect.void,
 });

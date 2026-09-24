@@ -26,6 +26,7 @@ import { SidebarTrigger, useSidebar } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { usePreviewPane } from "../preview/PreviewPaneContext";
+import { useChatBrowser } from "../preview/useChatBrowser";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { toggleDevMode, useDevMode } from "../../devMode";
 import { CONTINUE_ON_MACHINE_COPY } from "../../continueOnMachineCopy";
@@ -114,8 +115,9 @@ export const ChatHeader = memo(function ChatHeader({
     files: previewFiles,
     toggleOpen: togglePreview,
     openBrowser,
-    openUrl,
   } = usePreviewPane();
+  // Work в облаке: браузер агента на машине — кнопка открывает его.
+  const { browsesOnMachine, openChatBrowser } = useChatBrowser();
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
     activeThreadEnvironmentId,
@@ -295,13 +297,13 @@ export const ChatHeader = memo(function ChatHeader({
           />
           <TooltipPopup side="bottom">Открыть файловый браузер</TooltipPopup>
         </Tooltip>
-        {browserCompanionEnabled && (
+        {(browserCompanionEnabled || browsesOnMachine) && (
           <Tooltip>
             <TooltipTrigger
               render={
                 <button
                   type="button"
-                  onClick={() => openUrl()}
+                  onClick={openChatBrowser}
                   aria-label="Открыть браузер"
                   className={HEADER_ICON_BUTTON_CLASS}
                 >

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Fiber, Layer, Option, Stream } from "effect";
 import { chromium } from "playwright-core";
 
 import type { ServerConfigShape } from "./config.ts";
@@ -116,6 +116,81 @@ it.live.skipIf(!hasChromium)(
       const fullPageHeight = pngHeight((fullPageShot.data as { dataUrl: string }).dataUrl);
       assert.equal(viewportHeight, 800);
       assert.isAbove(fullPageHeight, 2000);
+
+      yield* serverBrowser.shutdown;
+    }).pipe(Effect.provide(testLayer)),
+  120_000,
+);
+
+it.live.skipIf(!hasChromium)(
+  "live view: frames, the person takes control, the agent waits and asks for help",
+  () =>
+    Effect.gen(function* () {
+      const serverBrowser = yield* ServerBrowser;
+      const context = { threadId: "live-thread", cwd: "/tmp/server-browser-live" };
+
+      yield* serverBrowser.execute({ command: "navigate", url: PAGE_URL }, context);
+      const state = yield* serverBrowser.live.state;
+      const page = state.pages.find((candidate) => candidate.context?.threadId === "live-thread");
+      assert.isDefined(page);
+      const pageId = page!.pageId;
+      assert.equal(page!.control, "agent");
+      assert.isAbove(page!.attention, 0);
+
+      // Кадр приходит, пока кто-то смотрит.
+      const frame = yield* serverBrowser.live.frames(pageId).pipe(Stream.runHead);
+      assert.isTrue(Option.isSome(frame));
+      const firstFrame = Option.getOrThrow(frame);
+      assert.isAbove(firstFrame.data.length, 100);
+      assert.equal(firstFrame.width, 1280);
+
+      // Ввод без взятия управления — отказ.
+      const refused = yield* serverBrowser.live
+        .input(pageId, { type: "text", text: "x" })
+        .pipe(Effect.flip);
+      assert.include(refused.detail, "Take control");
+
+      // Человек взял управление: печатает в поле, агент ждёт и получает отказ.
+      yield* serverBrowser.live.setControl(pageId, "human");
+      const blocked = yield* serverBrowser.execute(
+        { command: "clickText", text: "Press me", timeoutMs: 300 },
+        context,
+      );
+      assert.isFalse(blocked.ok);
+      assert.include(blocked.error ?? "", "taken control");
+      // Смотреть агенту можно и сейчас.
+      const observed = yield* serverBrowser.execute({ command: "state" }, context);
+      assert.isTrue(observed.ok, observed.error);
+
+      yield* serverBrowser.live.input(pageId, { type: "mouse", action: "down", x: 5, y: 5 });
+      yield* serverBrowser.live.input(pageId, { type: "mouse", action: "up", x: 5, y: 5 });
+
+      // Агент просит помощи и ждёт; человек отдаёт браузер — запрос завершается.
+      const help = yield* serverBrowser
+        .execute({ command: "requestHelp", text: "Solve the captcha", timeoutMs: 20_000 }, context)
+        .pipe(Effect.forkChild);
+      let asked = false;
+      for (let i = 0; i < 200 && !asked; i++) {
+        const current = yield* serverBrowser.live.state;
+        asked =
+          current.pages.find((candidate) => candidate.pageId === pageId)?.help?.reason ===
+          "Solve the captcha";
+        if (!asked) yield* Effect.sleep("20 millis");
+      }
+      assert.isTrue(asked);
+      yield* serverBrowser.live.setControl(pageId, "agent");
+      const helpResult = yield* Fiber.join(help);
+      assert.isTrue(helpResult.ok, helpResult.error);
+      assert.deepInclude(helpResult.data as object, { handedBack: true });
+      const after = yield* serverBrowser.live.state;
+      assert.isNull(after.pages.find((candidate) => candidate.pageId === pageId)?.help);
+
+      // Управление снова у агента — команда проходит.
+      const clicked = yield* serverBrowser.execute(
+        { command: "clickText", text: "Press me" },
+        context,
+      );
+      assert.isTrue(clicked.ok, clicked.error);
 
       yield* serverBrowser.shutdown;
     }).pipe(Effect.provide(testLayer)),

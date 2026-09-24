@@ -67,6 +67,7 @@ import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import { staleProviderInstanceIds } from "./provider/staleProviders.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { BrowserBridge } from "./browserBridge.ts";
+import { ServerBrowser } from "./serverBrowser.ts";
 import { fillCredentialInBrowser } from "./credentialsFill.ts";
 import {
   pullVaultFromAccount,
@@ -246,6 +247,7 @@ const makeWsRpcLayer = (
       const config = yield* ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents;
       const browserBridge = yield* BrowserBridge;
+      const serverBrowser = yield* ServerBrowser;
       const serverSettings = yield* ServerSettingsService;
       const credentialsVault = yield* CredentialsVaultService;
       const startup = yield* ServerRuntimeStartup;
@@ -2233,6 +2235,42 @@ const makeWsRpcLayer = (
             Effect.succeed(browserBridge.stream),
             { "rpc.aggregate": "browser" },
           ),
+        [WS_METHODS.subscribeBrowserLive]: (_input) =>
+          observeRpcStream(WS_METHODS.subscribeBrowserLive, serverBrowser.live.changes, {
+            "rpc.aggregate": "browser",
+          }),
+        [WS_METHODS.subscribeBrowserLiveFrames]: (input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeBrowserLiveFrames,
+            serverBrowser.live.frames(input.pageId),
+            { "rpc.aggregate": "browser" },
+          ),
+        [WS_METHODS.browserLiveInput]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.browserLiveInput,
+            serverBrowser.live.input(input.pageId, input.event),
+            { "rpc.aggregate": "browser" },
+          ),
+        [WS_METHODS.browserLiveSetControl]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.browserLiveSetControl,
+            serverBrowser.live.setControl(input.pageId, input.control),
+            { "rpc.aggregate": "browser" },
+          ),
+        [WS_METHODS.browserLiveNavigate]: (input) =>
+          observeRpcEffect(WS_METHODS.browserLiveNavigate, serverBrowser.live.navigate(input), {
+            "rpc.aggregate": "browser",
+          }),
+        [WS_METHODS.browserLiveOpen]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.browserLiveOpen,
+            serverBrowser.live.open(input.context, input.url),
+            { "rpc.aggregate": "browser" },
+          ),
+        [WS_METHODS.browserLiveClose]: (input) =>
+          observeRpcEffect(WS_METHODS.browserLiveClose, serverBrowser.live.close(input.pageId), {
+            "rpc.aggregate": "browser",
+          }),
         [WS_METHODS.subscribeInbox]: (_input) =>
           observeRpcStreamEffect(
             WS_METHODS.subscribeInbox,

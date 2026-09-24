@@ -73,6 +73,17 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
     browser: {
       subscribeBridge: (callback) => rpcClient.browser.subscribeBridge(callback),
     },
+    browserLive: {
+      subscribe: (callback) => rpcClient.browserLive.subscribe(callback),
+      subscribeFrames: (input, callback) => rpcClient.browserLive.subscribeFrames(input, callback),
+      input: (input) => rpcClient.browserLive.input(input),
+      setControl: (input) => rpcClient.browserLive.setControl(input),
+      navigate: (input) => rpcClient.browserLive.navigate(input),
+      open: (input) => rpcClient.browserLive.open(input),
+      close: (input) => rpcClient.browserLive.close(input),
+      listLogins: () => rpcClient.vault.list(),
+      fillLogin: (payload) => rpcClient.vault.fill(payload),
+    },
     workspace: {
       getState: () => rpcClient.workspace.getState(),
       rename: rpcClient.workspace.rename,

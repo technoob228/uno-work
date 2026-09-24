@@ -17,7 +17,8 @@ import {
   executeBridgeCommand,
   executeBridgeOpenUrl,
 } from "./browserCommandRouter.ts";
-import { ServerBrowser } from "./serverBrowser.ts";
+import { ServerConfig, type ServerConfigShape } from "./config.ts";
+import { ServerBrowser, unavailableServerBrowserLive } from "./serverBrowser.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 
 it("decides the executor target from settings and subscriber presence", () => {
@@ -30,6 +31,23 @@ it("decides the executor target from settings and subscriber presence", () => {
   assert.equal(decideBrowserExecutorTarget({ executor: "local", hasSubscribers: false }), "client");
   assert.equal(decideBrowserExecutorTarget({ executor: "auto", hasSubscribers: true }), "client");
   assert.equal(decideBrowserExecutorTarget({ executor: "auto", hasSubscribers: false }), "server");
+});
+
+it("keeps the browser where the agent is on a machine in the cloud", () => {
+  // Облачная машина: подписанный клиент (ноутбук) не забирает браузер себе.
+  assert.equal(
+    decideBrowserExecutorTarget({ executor: "auto", hasSubscribers: true, hostedMachine: true }),
+    "server",
+  );
+  assert.equal(
+    decideBrowserExecutorTarget({ executor: "auto", hasSubscribers: false, hostedMachine: true }),
+    "server",
+  );
+  // Явный выбор в настройках сильнее правила.
+  assert.equal(
+    decideBrowserExecutorTarget({ executor: "local", hasSubscribers: true, hostedMachine: true }),
+    "client",
+  );
 });
 
 /** Фейковый серверный исполнитель: записывает команды, отвечает маркером. */
@@ -47,6 +65,7 @@ function makeFakeServerBrowser(
         calls.push(input);
         return reply(input);
       }),
+    live: unavailableServerBrowserLive,
     shutdown: Effect.void,
   });
   return { calls, layer };
@@ -55,11 +74,14 @@ function makeFakeServerBrowser(
 function routerLayers(input: {
   browser: Partial<ServerBrowserSettings>;
   serverBrowser: Layer.Layer<ServerBrowser>;
+  mode?: ServerConfigShape["mode"];
 }) {
   return Layer.mergeAll(
     BrowserBridgeTest,
     input.serverBrowser,
     ServerSettingsService.layerTest({ browser: input.browser }),
+    // Роутер читает из конфига только режим: web = машина в облаке.
+    Layer.succeed(ServerConfig, { mode: input.mode ?? "desktop" } as ServerConfigShape),
   );
 }
 
@@ -318,5 +340,53 @@ it.effect("opens URLs on the server executor when nobody is subscribed", () =>
     assert.isTrue(result.ok);
     assert.equal(fake.calls.length, 1);
     assert.deepEqual(fake.calls[0], { command: "openUrl", url: "https://example.com/" });
+  }),
+);
+
+it.effect("on a machine in the cloud a connected laptop never takes the agent's browser", () =>
+  Effect.gen(function* () {
+    const fake = makeFakeServerBrowser();
+    const layers = routerLayers({
+      browser: { executor: "auto" },
+      serverBrowser: fake.layer,
+      mode: "web",
+    });
+
+    const { command, openUrl, received } = yield* withConnectedClient(
+      () => ({ ok: true, data: { via: "client" } }),
+      (received) =>
+        Effect.all({
+          command: executeBridgeCommand({ command: "state" }, { threadId: "t-1" }),
+          openUrl: executeBridgeOpenUrl("https://example.com", { threadId: "t-1" }),
+        }).pipe(Effect.map((results) => ({ ...results, received }))),
+    ).pipe(Effect.provide(layers));
+
+    assert.deepEqual(command.data, { via: "server" });
+    assert.isTrue(openUrl.ok);
+    assert.deepEqual(
+      fake.calls.map((call) => call.command),
+      ["state", "openUrl"],
+    );
+    assert.equal(received.length, 0);
+  }),
+);
+
+it.effect("requestHelp on the app's own panel answers with a clear refusal", () =>
+  Effect.gen(function* () {
+    const fake = makeFakeServerBrowser();
+    const layers = routerLayers({ browser: { executor: "local" }, serverBrowser: fake.layer });
+
+    const { result, received } = yield* withConnectedClient(
+      () => ({ ok: true }),
+      (received) =>
+        executeBridgeCommand({ command: "requestHelp", text: "Log in, please" }, undefined).pipe(
+          Effect.map((result) => ({ result, received })),
+        ),
+    ).pipe(Effect.provide(layers));
+
+    assert.isFalse(result.ok);
+    assert.include(result.error ?? "", "ask them in chat");
+    assert.equal(received.length, 0);
+    assert.equal(fake.calls.length, 0);
   }),
 );

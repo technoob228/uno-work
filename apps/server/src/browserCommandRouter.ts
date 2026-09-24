@@ -15,23 +15,42 @@ import {
 import { Effect } from "effect";
 
 import { BrowserBridge, type BrowserBridgeShape } from "./browserBridge.ts";
+import { ServerConfig } from "./config.ts";
 import { ServerBrowser } from "./serverBrowser.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 
 /**
  * Роутинг bridge-команд между двумя исполнителями: подключённым web-клиентом
- * (Electron webview, через PubSub + /api/browser/command/result) и серверным
- * headless Chromium ({@link ServerBrowser}). `auto` предпочитает клиента и
- * падает на сервер, когда никто не подписан — headless/Telegram-сценарий.
+ * (Electron webview, через PubSub + /api/browser/command/result) и браузером
+ * самой машины ({@link ServerBrowser}).
+ *
+ * Правило: браузер живёт там же, где агент. Демон в web-режиме — это машина в
+ * облаке (Work-бокс): `auto` всегда уходит в её браузер. Иначе агент с сервера
+ * рулил бы вкладкой на ноутбуке, пока тот открыт (чужой IP и куки), а после
+ * закрытия крышки молча переезжал бы в другой браузер с другим профилем.
+ * Локальный демон (десктоп) по-прежнему предпочитает панель приложения и
+ * падает на свой браузер, когда никто не подписан — Telegram-сценарий.
  */
 export function decideBrowserExecutorTarget(input: {
   readonly executor: BrowserExecutor;
   readonly hasSubscribers: boolean;
+  readonly hostedMachine?: boolean;
 }): "client" | "server" {
   if (input.executor === "server") return "server";
   if (input.executor === "local") return "client";
+  if (input.hostedMachine === true) return "server";
   return input.hasSubscribers ? "client" : "server";
 }
+
+/** Демон отдаёт веб-клиент сам — значит, это машина в облаке, а не десктоп. */
+const readHostedMachine: Effect.Effect<boolean, never, ServerConfig> = Effect.gen(function* () {
+  const config = yield* ServerConfig;
+  return config.mode === "web";
+});
+
+const HELP_ON_CLIENT_ERROR =
+  "requestHelp works with the machine's own browser. This browser is in the app on the person's " +
+  "screen: ask them in chat instead.";
 
 function blockedResult(error: string): BrowserAutomationCommandResult {
   return { ok: false, commandId: "blocked", error };
@@ -105,22 +124,25 @@ export const executeBridgeCommand = (
 ): Effect.Effect<
   BrowserAutomationCommandResult,
   never,
-  BrowserBridge | ServerBrowser | ServerSettingsService
+  BrowserBridge | ServerBrowser | ServerSettingsService | ServerConfig
 > =>
   Effect.gen(function* () {
     const browserBridge = yield* BrowserBridge;
     const browserSettings = yield* readBrowserSettings;
     const serverAvailable = browserSettings.serverAutomationLevel !== "off";
     const hasSubscribers = yield* browserBridge.hasSubscribers;
+    const hostedMachine = yield* readHostedMachine;
     const target =
       requiresServerExecutor(input) && serverAvailable
         ? "server"
         : decideBrowserExecutorTarget({
             executor: browserSettings.executor,
             hasSubscribers,
+            hostedMachine,
           });
 
     if (target === "client") {
+      if (input.command === "requestHelp") return blockedResult(HELP_ON_CLIENT_ERROR);
       if (!hasSubscribers) {
         // Достижимо только при executor="local": быстрый fail вместо
         // 30-секундного таймаута публикации в пустой PubSub.
@@ -186,7 +208,7 @@ export const executeBridgeOpenUrl = (
 ): Effect.Effect<
   BrowserAutomationCommandResult,
   never,
-  BrowserBridge | ServerBrowser | ServerSettingsService
+  BrowserBridge | ServerBrowser | ServerSettingsService | ServerConfig
 > =>
   Effect.gen(function* () {
     const browserBridge = yield* BrowserBridge;
@@ -195,6 +217,7 @@ export const executeBridgeOpenUrl = (
     const target = decideBrowserExecutorTarget({
       executor: browserSettings.executor,
       hasSubscribers,
+      hostedMachine: yield* readHostedMachine,
     });
 
     if (target === "client") {

@@ -182,6 +182,15 @@ export interface WsRpcClient {
   readonly browser: {
     readonly subscribeBridge: RpcStreamMethod<typeof WS_METHODS.subscribeBrowserBridge>;
   };
+  readonly browserLive: {
+    readonly subscribe: RpcStreamMethod<typeof WS_METHODS.subscribeBrowserLive>;
+    readonly subscribeFrames: RpcInputStreamMethod<typeof WS_METHODS.subscribeBrowserLiveFrames>;
+    readonly input: RpcUnaryMethod<typeof WS_METHODS.browserLiveInput>;
+    readonly setControl: RpcUnaryMethod<typeof WS_METHODS.browserLiveSetControl>;
+    readonly navigate: RpcUnaryMethod<typeof WS_METHODS.browserLiveNavigate>;
+    readonly open: RpcUnaryMethod<typeof WS_METHODS.browserLiveOpen>;
+    readonly close: RpcUnaryMethod<typeof WS_METHODS.browserLiveClose>;
+  };
   /** What wants the person on this computer (agents, apps) — kept by the daemon. */
   readonly inbox: {
     readonly subscribe: RpcStreamMethod<typeof WS_METHODS.subscribeInbox>;
@@ -523,6 +532,26 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
           ...options,
           tag: WS_METHODS.subscribeBrowserBridge,
         }),
+    },
+    browserLive: {
+      subscribe: (listener, options) =>
+        transport.subscribe((client) => client[WS_METHODS.subscribeBrowserLive]({}), listener, {
+          ...options,
+          tag: WS_METHODS.subscribeBrowserLive,
+        }),
+      subscribeFrames: (input, listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.subscribeBrowserLiveFrames](input),
+          listener,
+          { ...options, tag: WS_METHODS.subscribeBrowserLiveFrames },
+        ),
+      input: (input) => transport.request((client) => client[WS_METHODS.browserLiveInput](input)),
+      setControl: (input) =>
+        transport.request((client) => client[WS_METHODS.browserLiveSetControl](input)),
+      navigate: (input) =>
+        transport.request((client) => client[WS_METHODS.browserLiveNavigate](input)),
+      open: (input) => transport.request((client) => client[WS_METHODS.browserLiveOpen](input)),
+      close: (input) => transport.request((client) => client[WS_METHODS.browserLiveClose](input)),
     },
     inbox: {
       subscribe: (listener, options) =>

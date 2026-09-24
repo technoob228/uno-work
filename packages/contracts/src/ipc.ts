@@ -66,6 +66,17 @@ import type {
   ServerUpsertKeybindingResult,
 } from "./server.ts";
 import type {
+  BrowserLiveCloseInput,
+  BrowserLiveFrame,
+  BrowserLiveFramesInput,
+  BrowserLiveInputPayload,
+  BrowserLiveNavigateInput,
+  BrowserLiveOpenInput,
+  BrowserLiveOpenResult,
+  BrowserLiveSetControlInput,
+  BrowserLiveState,
+} from "./browserLive.ts";
+import type {
   TerminalClearInput,
   TerminalCloseInput,
   TerminalEvent,
@@ -782,6 +793,24 @@ export interface EnvironmentApi {
   browser: {
     /** Live "open this URL in the built-in browser pane" pushes from harnesses. */
     subscribeBridge: (callback: (event: BrowserBridgeStreamEvent) => void) => () => void;
+  };
+  /**
+   * The machine's own browser, shown live (browserLive.ts). Logins fill from the
+   * vault of the same machine: the browser runs there, not on this device.
+   */
+  browserLive: {
+    subscribe: (callback: (state: BrowserLiveState) => void) => () => void;
+    subscribeFrames: (
+      input: BrowserLiveFramesInput,
+      callback: (frame: BrowserLiveFrame) => void,
+    ) => () => void;
+    input: (input: BrowserLiveInputPayload) => Promise<void>;
+    setControl: (input: BrowserLiveSetControlInput) => Promise<BrowserLiveState>;
+    navigate: (input: BrowserLiveNavigateInput) => Promise<void>;
+    open: (input: BrowserLiveOpenInput) => Promise<BrowserLiveOpenResult>;
+    close: (input: BrowserLiveCloseInput) => Promise<void>;
+    listLogins: () => Promise<readonly CredentialMetadata[]>;
+    fillLogin: (payload: CredentialFillPayload) => Promise<CredentialFillResult>;
   };
   /**
    * Workspace registry, served by whichever daemon holds it. Reachable through

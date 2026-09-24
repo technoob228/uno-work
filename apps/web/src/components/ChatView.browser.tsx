@@ -231,6 +231,7 @@ function createMockEnvironmentApi(input: {
     browser: {
       subscribeBridge: (() => () => undefined) as EnvironmentApi["browser"]["subscribeBridge"],
     },
+    browserLive: {} as EnvironmentApi["browserLive"],
     workspace: {} as EnvironmentApi["workspace"],
     unoCloud: {} as EnvironmentApi["unoCloud"],
     unoComputer: {} as EnvironmentApi["unoComputer"],

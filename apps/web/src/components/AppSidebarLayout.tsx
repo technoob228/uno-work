@@ -10,6 +10,7 @@ import { useNavLayout } from "../navigation/useNavLayout";
 import { DesktopTabs } from "./DesktopTabs";
 import { NavRail, RAIL_WIDTH } from "./sidebar/NavRail";
 import { BrowserBridgeListener } from "./preview/BrowserBridgeListener";
+import { BrowserLiveListener } from "./preview/BrowserLiveListener";
 import { FileBrowser } from "./preview/FileBrowser";
 import { PreviewPane } from "./preview/PreviewPane";
 import { cn } from "../lib/utils";
@@ -117,6 +118,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       </SidebarProvider>
       <FileBrowser />
       <BrowserBridgeListener />
+      <BrowserLiveListener />
     </>
   );
 }

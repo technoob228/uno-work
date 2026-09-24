@@ -7,8 +7,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import type { BrowserLivePage, EnvironmentId, ProjectId } from "@t3tools/contracts";
 
+import { liveBrowserTabId, liveBrowserTabName } from "./browserLiveStore";
 import { browserTabNameForUrl } from "./browserUrl";
 import { forgetScrollPosition } from "./previewScrollMemory";
 import {
@@ -44,6 +45,7 @@ export type PreviewFileKind =
   | "svg"
   | "text"
   | "browser"
+  | "live-browser"
   | "plugin-panel"
   | "app"
   | "unknown";
@@ -65,10 +67,37 @@ export interface PreviewFile {
   environmentId?: EnvironmentId;
   /** Текущий URL для вкладок `kind === "browser"`. Пустая строка = новая вкладка. */
   url?: string;
+  /** Страница браузера машины для вкладок `kind === "live-browser"` (browserLive). */
+  livePageId?: string;
 }
 
 export function isBrowserTab(file: Pick<PreviewFile, "kind">): boolean {
   return file.kind === "browser";
+}
+
+/**
+ * Вкладка браузера самой машины (Work в облаке): картинка страницы с машины и
+ * управление по кнопке, а не webview этого устройства — см. LiveBrowserView.
+ */
+export function isLiveBrowserTab(file: Pick<PreviewFile, "kind">): boolean {
+  return file.kind === "live-browser";
+}
+
+export function makeLiveBrowserFile(input: {
+  environmentId: EnvironmentId;
+  page: BrowserLivePage;
+  projectKey?: string;
+}): PreviewFile {
+  return {
+    id: liveBrowserTabId(input.environmentId, input.page.pageId),
+    name: liveBrowserTabName(input.page),
+    kind: "live-browser",
+    content: "",
+    url: input.page.url,
+    livePageId: input.page.pageId,
+    environmentId: input.environmentId,
+    ...(input.projectKey ? { projectKey: input.projectKey } : {}),
+  };
 }
 
 export function isPluginPanelTab(file: Pick<PreviewFile, "kind">): boolean {
@@ -492,7 +521,9 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
   const updateBrowserTab = useCallback(
     (scopeKey: string, id: string, patch: { url?: string; name?: string }) => {
       updateBucket(scopeKey, (current) => {
-        const idx = current.files.findIndex((f) => f.id === id && isBrowserTab(f));
+        const idx = current.files.findIndex(
+          (f) => f.id === id && (isBrowserTab(f) || isLiveBrowserTab(f)),
+        );
         if (idx === -1) return current;
         const existing = current.files[idx]!;
         const updated: PreviewFile = {

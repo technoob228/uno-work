@@ -13,6 +13,7 @@
 #   UNO_WORK_HERMES_VERSION  pin the Hermes Agent release (recommended for images)
 #   UNO_WORK_SKIP_HARNESSES=1  install only the daemon
 #   UNO_WORK_INSTALL_OFFICE=1  also install the Office engine (~680 MB; golden images)
+#   UNO_WORK_SKIP_BROWSER=1    skip the machine's browser (Chromium + Xvfb, ~350 MB)
 #
 set -euo pipefail
 
@@ -25,6 +26,7 @@ INSTALL_DIR="/opt/uno-work"
 STATE_DIR="/var/lib/uno-work"
 CONFIG_DIR="/etc/uno-work"
 WORKSPACE_DIR="/home/${SERVICE_USER}/projects"
+BROWSERS_DIR="${INSTALL_DIR}/browsers"
 NODE_MAJOR=22
 
 log() { printf '\033[1;35m[uno-work]\033[0m %s\n' "$*"; }
@@ -70,6 +72,30 @@ cp -R "${bundle_root}/." "${INSTALL_DIR}/app/"
 if [ -f "${INSTALL_DIR}/app/package.json" ]; then
   log "Installing runtime dependencies"
   (cd "${INSTALL_DIR}/app" && npm install --omit=dev --no-audit --no-fund --loglevel=error >/dev/null)
+fi
+
+# --- The machine's browser ----------------------------------------------------
+# On a machine in the cloud the agent's browser lives here, not on the person's
+# laptop: it keeps working with the app closed, and the app shows it live. The
+# Chromium build must match the bundled playwright-core, so it comes from the
+# bundle's own CLI (with the system libraries it needs). Xvfb gives it a real
+# window on a virtual display — sites block headless browsers far more often.
+if [ "${UNO_WORK_SKIP_BROWSER:-0}" != "1" ]; then
+  log "Installing the machine's browser (Chromium + virtual display)"
+  apt-get install -y -qq xvfb >/dev/null || log "WARNING: Xvfb install failed; the browser will run headless"
+  pw_cli="${INSTALL_DIR}/app/node_modules/playwright-core/cli.js"
+  if [ -f "${pw_cli}" ]; then
+    install -d -m 0755 "${BROWSERS_DIR}"
+    # --no-shell: the full Chromium runs both headful and in the new headless
+    # mode; the separate headless shell would only add ~100 MB.
+    if PLAYWRIGHT_BROWSERS_PATH="${BROWSERS_DIR}" node "${pw_cli}" install --with-deps --no-shell chromium >/dev/null 2>&1; then
+      chmod -R a+rX "${BROWSERS_DIR}"
+    else
+      log "WARNING: Chromium install failed; the agent's browser is unavailable until it is installed"
+    fi
+  else
+    log "WARNING: bundle has no playwright-core; skipping the browser"
+  fi
 fi
 
 cat > "${INSTALL_DIR}/bin/uno-work" <<'LAUNCHER'
@@ -320,6 +346,13 @@ After=user@${service_uid}.service
 
 [Service]
 Environment=XDG_RUNTIME_DIR=/run/user/${service_uid}
+DROPIN
+
+# Where the daemon finds the Chromium installed above (playwright's registry).
+cat > /etc/systemd/system/uno-work.service.d/browser.conf <<DROPIN
+# Written by install.sh — the machine's browser (Chromium from the bundle's playwright-core).
+[Service]
+Environment=PLAYWRIGHT_BROWSERS_PATH=${BROWSERS_DIR}
 DROPIN
 
 # --- Docker without sudo ------------------------------------------------------

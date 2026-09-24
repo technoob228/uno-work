@@ -39,6 +39,11 @@ export const BROWSER_BRIDGE_COMMAND_RESULT_PATH = "/api/browser/command/result";
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 const MAX_COMMAND_TIMEOUT_MS = 120_000;
 
+// «Позови человека» ждёт человека, а не страницу: минуты, как у секретов.
+const DEFAULT_HELP_TIMEOUT_MS = 600_000;
+const MAX_HELP_TIMEOUT_MS = 1_800_000;
+const MAX_HELP_REASON_LENGTH = 500;
+
 // Запрос секрета ждёт человека, а не браузер — таймауты в минутах.
 const DEFAULT_SECRET_TIMEOUT_MS = 900_000;
 const MAX_SECRET_TIMEOUT_MS = 3_600_000;
@@ -59,6 +64,7 @@ const ALLOWED_COMMANDS = new Set<BrowserAutomationCommandInput["command"]>([
   "back",
   "forward",
   "evaluate",
+  "requestHelp",
 ]);
 
 export function isAllowedBridgeUrl(rawUrl: unknown): rawUrl is string {
@@ -112,13 +118,10 @@ function isOptionalFiniteNumber(value: unknown): value is number | undefined {
   return value === undefined || (typeof value === "number" && Number.isFinite(value));
 }
 
-function isOptionalTimeout(value: unknown): value is number | undefined {
+function isOptionalTimeout(value: unknown, max: number): value is number | undefined {
   return (
     value === undefined ||
-    (typeof value === "number" &&
-      Number.isInteger(value) &&
-      value >= 0 &&
-      value <= MAX_COMMAND_TIMEOUT_MS)
+    (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= max)
   );
 }
 
@@ -139,7 +142,18 @@ export function isAllowedBridgeCommand(
   if (!isOptionalString(input.script, MAX_SCRIPT_LENGTH)) return false;
   if (!isOptionalFiniteNumber(input.x) || !isOptionalFiniteNumber(input.y)) return false;
   if (input.fullPage !== undefined && typeof input.fullPage !== "boolean") return false;
-  if (!isOptionalTimeout(input.timeoutMs)) return false;
+  const isHelp = input.command === "requestHelp";
+  if (!isOptionalTimeout(input.timeoutMs, isHelp ? MAX_HELP_TIMEOUT_MS : MAX_COMMAND_TIMEOUT_MS)) {
+    return false;
+  }
+  if (
+    isHelp &&
+    (typeof input.text !== "string" ||
+      input.text.trim().length === 0 ||
+      input.text.length > MAX_HELP_REASON_LENGTH)
+  ) {
+    return false;
+  }
 
   if (
     (input.command === "openUrl" || input.command === "navigate") &&
@@ -154,6 +168,12 @@ export function isAllowedBridgeCommand(
 }
 
 export function commandTimeoutMs(input: BrowserAutomationCommandInput): number {
+  if (input.command === "requestHelp") {
+    return Math.min(
+      MAX_HELP_TIMEOUT_MS,
+      Math.max(1_000, input.timeoutMs ?? DEFAULT_HELP_TIMEOUT_MS),
+    );
+  }
   return Math.min(
     MAX_COMMAND_TIMEOUT_MS,
     Math.max(1, input.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS),

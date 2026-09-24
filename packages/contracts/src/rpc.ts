@@ -238,6 +238,18 @@ import {
 } from "./server.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
+  BrowserLiveCloseInput,
+  BrowserLiveError,
+  BrowserLiveFrame,
+  BrowserLiveFramesInput,
+  BrowserLiveInputPayload,
+  BrowserLiveNavigateInput,
+  BrowserLiveOpenInput,
+  BrowserLiveOpenResult,
+  BrowserLiveSetControlInput,
+  BrowserLiveState,
+} from "./browserLive.ts";
+import {
   CredentialDeletePayload,
   CredentialFillPayload,
   CredentialFillResult,
@@ -474,6 +486,14 @@ export const WS_METHODS = {
   subscribeAuthAccess: "subscribeAuthAccess",
   subscribeAuthLinkRequests: "subscribeAuthLinkRequests",
   subscribeBrowserBridge: "subscribeBrowserBridge",
+  // Live view of the machine's own browser (browserLive.ts).
+  subscribeBrowserLive: "subscribeBrowserLive",
+  subscribeBrowserLiveFrames: "subscribeBrowserLiveFrames",
+  browserLiveInput: "browserLive.input",
+  browserLiveSetControl: "browserLive.setControl",
+  browserLiveNavigate: "browserLive.navigate",
+  browserLiveOpen: "browserLive.open",
+  browserLiveClose: "browserLive.close",
   subscribePlugins: "subscribePlugins",
   subscribeInbox: "subscribeInbox",
 
@@ -1074,6 +1094,46 @@ export const WsSubscribeBrowserBridgeRpc = Rpc.make(WS_METHODS.subscribeBrowserB
   payload: Schema.Struct({}),
   success: BrowserBridgeStreamEvent,
   stream: true,
+});
+
+export const WsSubscribeBrowserLiveRpc = Rpc.make(WS_METHODS.subscribeBrowserLive, {
+  payload: Schema.Struct({}),
+  success: BrowserLiveState,
+  stream: true,
+});
+
+export const WsSubscribeBrowserLiveFramesRpc = Rpc.make(WS_METHODS.subscribeBrowserLiveFrames, {
+  payload: BrowserLiveFramesInput,
+  success: BrowserLiveFrame,
+  error: BrowserLiveError,
+  stream: true,
+});
+
+export const WsBrowserLiveInputRpc = Rpc.make(WS_METHODS.browserLiveInput, {
+  payload: BrowserLiveInputPayload,
+  error: BrowserLiveError,
+});
+
+export const WsBrowserLiveSetControlRpc = Rpc.make(WS_METHODS.browserLiveSetControl, {
+  payload: BrowserLiveSetControlInput,
+  success: BrowserLiveState,
+  error: BrowserLiveError,
+});
+
+export const WsBrowserLiveNavigateRpc = Rpc.make(WS_METHODS.browserLiveNavigate, {
+  payload: BrowserLiveNavigateInput,
+  error: BrowserLiveError,
+});
+
+export const WsBrowserLiveOpenRpc = Rpc.make(WS_METHODS.browserLiveOpen, {
+  payload: BrowserLiveOpenInput,
+  success: BrowserLiveOpenResult,
+  error: BrowserLiveError,
+});
+
+export const WsBrowserLiveCloseRpc = Rpc.make(WS_METHODS.browserLiveClose, {
+  payload: BrowserLiveCloseInput,
+  error: BrowserLiveError,
 });
 
 export const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess, {
@@ -1879,6 +1939,13 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeAuthAccessRpc,
   WsSubscribeAuthLinkRequestsRpc,
   WsSubscribeBrowserBridgeRpc,
+  WsSubscribeBrowserLiveRpc,
+  WsSubscribeBrowserLiveFramesRpc,
+  WsBrowserLiveInputRpc,
+  WsBrowserLiveSetControlRpc,
+  WsBrowserLiveNavigateRpc,
+  WsBrowserLiveOpenRpc,
+  WsBrowserLiveCloseRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,

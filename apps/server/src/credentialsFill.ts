@@ -20,6 +20,7 @@ import { BrowserBridge } from "./browserBridge.ts";
 import { executeBridgeCommand } from "./browserCommandRouter.ts";
 import { CredentialsVaultService } from "./credentialsVault.ts";
 import { ServerBrowser } from "./serverBrowser.ts";
+import { ServerConfig } from "./config.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 
 export const fillCredentialInBrowser = (
@@ -27,7 +28,7 @@ export const fillCredentialInBrowser = (
 ): Effect.Effect<
   CredentialFillResult,
   never,
-  CredentialsVaultService | BrowserBridge | ServerBrowser | ServerSettingsService
+  CredentialsVaultService | BrowserBridge | ServerBrowser | ServerSettingsService | ServerConfig
 > =>
   Effect.gen(function* () {
     const vault = yield* CredentialsVaultService;
