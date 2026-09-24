@@ -206,6 +206,7 @@ import {
 } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
+import { pendingSendDecision, usePendingSendStore } from "./computer/pendingSendStore";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { Button } from "./ui/button";
 import { useSidebar } from "./ui/sidebar";
@@ -3108,6 +3109,35 @@ export default function ChatView(props: ChatViewProps) {
       resetLocalDispatch();
     }
   };
+
+  // Home's composer opened this chat with a task typed in and asked it to send
+  // it: do exactly what Enter would, once the chat is ready (see pendingSendStore).
+  const onSendRef = useRef(onSend);
+  onSendRef.current = onSend;
+  const pendingSend = usePendingSendStore((store) => store.pending);
+  const [, setPendingSendTick] = useState(0);
+  useEffect(() => {
+    const decision = pendingSendDecision(pendingSend, {
+      draftId,
+      composerPrompt: promptRef.current,
+      ready:
+        activeThread != null &&
+        activeProject != null &&
+        !isSendBusy &&
+        !isConnecting &&
+        !activeEnvironmentUnavailable &&
+        !sendInFlightRef.current &&
+        composerRef.current?.getSendContext() != null,
+      now: Date.now(),
+    });
+    if (decision === "ignore") return;
+    if (decision === "wait") {
+      const timer = setTimeout(() => setPendingSendTick((tick) => tick + 1), 250);
+      return () => clearTimeout(timer);
+    }
+    usePendingSendStore.getState().clear();
+    if (decision === "send") void onSendRef.current();
+  });
 
   const onInterrupt = async () => {
     const api = readEnvironmentApi(environmentId);

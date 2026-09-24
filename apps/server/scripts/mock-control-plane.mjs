@@ -66,6 +66,7 @@ import { fileURLToPath } from "node:url";
 
 const PORT = Number(process.env.PORT || 8091);
 const SCENARIO = process.env.MOCK_SCENARIO || process.argv[2] || "happy";
+const MOCK_STARTED_AT = Date.now();
 const BOX_ID = Number(process.env.MOCK_BOX_ID || 123);
 
 const iso = (d) => d.toISOString();
@@ -1161,10 +1162,29 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, {
       id: 85,
       username: "demo",
+      // Telegram's first name (oauth_connections.provider_first_name): Home
+      // greets by it ("Good morning, Mikhail").
+      first_name: "Mikhail",
+      telegram_username: "demo_tg",
       email: "demo@uno4.dev",
       balance: 42.5,
       llm_balance: 3,
       role: "user",
+    });
+  }
+  // The daemon mints its narrow Uno AI key from the account key it was given.
+  if (path === "/llm/keys" && req.method === "POST") {
+    return send(res, 200, { id: 1, key: "unollm_mock_machine_key", label: "mock" });
+  }
+  // The Uno AI gateway's balance for the machine key (Home's "Uno AI spend"):
+  // point the daemon here with UNO_WORK_APP_GATEWAY_URL=http://127.0.0.1:8091/v1.
+  // The running total grows a cent a minute so the widget has something to count.
+  if (path === "/v1/credits") {
+    const minutes = (Date.now() - MOCK_STARTED_AT) / 60_000;
+    return send(res, 200, {
+      llm_balance: Math.max(0, 119.37 - minutes * 0.01),
+      total_spent: Number(process.env.MOCK_AI_TOTAL_SPENT || 48.2) + minutes * 0.01,
+      total_requests: 1200,
     });
   }
   if (path === "/api/v1/boxes") return send(res, 200, { boxes: [box()] });

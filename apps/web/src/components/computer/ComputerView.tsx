@@ -1,14 +1,17 @@
 /**
- * "This computer" — the home screen of the user's computer in Uno Work.
+ * Home (`/computer`) — the start screen of the user's computer in Uno Work.
  *
- * Desktop-like rather than admin-like: at the top, which computer this is,
- * whether it's on and how hard it's working (live CPU / memory / disk, read by
- * the daemon from its own OS). Below, the programs: Uno (a new chat, or a chat
- * in a folder), Files, Terminal, the App Store, then everything on the
+ * Start work first: a greeting, the composer (a task typed here starts a chat
+ * that sends it), what needs the person, "Continue", and widgets they arrange
+ * (files, apps, recent chats…; see `home/`). The computer itself is one pill in
+ * the header — on or asleep, how busy, Boost, Memory / cores, Sleep — and
+ * "What's using my computer" (`?look=`) holds the live drill-down, what the
+ * computer's apps wrote lately and the "For engineers" door.
+ *
+ * The apps: Uno, Files, Terminal, the App Store, then everything on the
  * computer — apps installed from the store, apps the person or Uno made
  * (registered in `~/.uno/apps`), and whatever the daemon found running: a VPN
- * in docker, a service, a web page on a port. Then what it's doing, and the
- * closed "For engineers" door.
+ * in docker, a service, a web page on a port.
  *
  * Everything goes through this environment's daemon (`uno.computer.*`); the
  * browser never holds the account key. Discovery and the launchers work even
@@ -21,7 +24,7 @@
 import type { UnoMachineAppAction } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, getRouteApi, useNavigate, useRouter } from "@tanstack/react-router";
-import { LayoutGridIcon, MonitorIcon, RefreshCwIcon } from "lucide-react";
+import { HouseIcon, LayoutGridIcon, MonitorIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { accountTransport } from "../../account/unoAccount";
@@ -38,7 +41,7 @@ import { ChatInFolderDialog } from "./ChatInFolderDialog";
 import { ComputerActivityCard } from "./ComputerActivityCard";
 import { ComputerEngineersDoor } from "./ComputerEngineersDoor";
 import { ComputerCloudStorageRow } from "./ComputerCloudStorageRow";
-import { ComputerHero, type ComputerLoad } from "./ComputerHero";
+import { ComputerHero, PowerConfirmDialog, type ComputerLoad } from "./ComputerHero";
 import { ComputerPrograms, type BuiltInPrograms } from "./ComputerPrograms";
 import { awakeLine, computerPowerState, humanDuration, sizeLine } from "./computerFormat";
 import {
@@ -60,6 +63,8 @@ import {
 } from "./computerQueries";
 import { ProgramDialog, type ProgramRemoveControls } from "./ProgramDialog";
 import { openAppSignedIn } from "./openSignedIn";
+import { ComputerPill, type HomeComputer } from "./home/ComputerPill";
+import { HomeHeaderActions, HomeStart, useHomeLayout } from "./home/HomeStart";
 import { ResizeDialog } from "./ResizeDialog";
 import { ResourcesView } from "./resources/ResourcesView";
 import type { ResourceLook } from "./resources/resourceModel";
@@ -139,6 +144,8 @@ export function ComputerView() {
   const [folderOpen, setFolderOpen] = useState(false);
   const [detailsKey, setDetailsKey] = useState<string | null>(null);
   const [resizeOpen, setResizeOpen] = useState(false);
+  const [powerConfirm, setPowerConfirm] = useState<"sleep" | "stop" | null>(null);
+  const layout = useHomeLayout();
 
   const browserOnMachine =
     thisMachine && typeof window !== "undefined" && isBrowserOnMachine(window.location.hostname);
@@ -351,146 +358,220 @@ export function ComputerView() {
     void queryClient.invalidateQueries({ queryKey: computerQueryKeys.all });
   };
 
+  const powerControls = box
+    ? {
+        pendingAction: powerMutation.isPending ? (powerMutation.variables?.action ?? null) : null,
+        error: powerMutation.error instanceof Error ? powerMutation.error.message : null,
+      }
+    : null;
+  // Home's header pill (and the "This computer" widget): the hero, folded.
+  const homeComputer: HomeComputer | null =
+    stateQuery.isPending || stateQuery.isError
+      ? null
+      : {
+          name: heroName,
+          subtitle: heroSubtitle,
+          status: box?.status ?? null,
+          address: box?.address ?? null,
+          load,
+          boosted: boosting,
+          boost: boostControls ? <BoostControl controls={boostControls} size="xs" /> : null,
+          onResize: canResize ? () => setResizeOpen(true) : undefined,
+          power: powerControls
+            ? {
+                ...powerControls,
+                onPower: (action) =>
+                  action === "sleep" || action === "stop"
+                    ? setPowerConfirm(action)
+                    : powerMutation.mutate({ action }),
+              }
+            : null,
+          onOpenLook: thisMachine ? (next) => openLook(next) : undefined,
+          onAllComputers:
+            accountTransport() !== "none" ? () => void navigate({ to: "/my-uno" }) : undefined,
+          lowResource: box ? lowResource : null,
+        };
+  const homeMode = thisMachine && !look;
+  const pill = <ComputerPill computer={homeComputer} loading={stateQuery.isPending} />;
+
+  const notices = (
+    <>
+      {stateQuery.isError ? (
+        <Notice title="This screen can't reach your computer right now">
+          {stateQuery.error instanceof Error ? stateQuery.error.message : null} It will try again by
+          itself.
+        </Notice>
+      ) : null}
+      {stateQuery.isSuccess && !computer?.linked ? <UnlinkedNote /> : null}
+      {stateQuery.isSuccess && box === null && (computer?.candidates.length ?? 0) > 0 ? (
+        <CloudComputers
+          candidates={computer?.candidates ?? []}
+          onPick={(id) => setPickedBoxId(id)}
+        />
+      ) : null}
+    </>
+  );
+
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
         <header className="border-b border-border px-3 py-2 sm:px-5 sm:py-3">
-          <div className="flex items-center gap-2">
+          <div className="flex min-h-8 items-center gap-2">
             <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-            <MonitorIcon className="size-4 text-muted-foreground" />
-            <span className="text-sm font-medium text-foreground">This computer</span>
-            {pickedBoxId !== null ? (
-              <Button size="xs" variant="ghost" onClick={() => setPickedBoxId(null)}>
-                Back to this machine
-              </Button>
-            ) : null}
-            <div className="ml-auto flex items-center gap-1">
-              {accountTransport() !== "none" ? (
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  render={<Link to="/my-uno" />}
-                  data-testid="home-my-uno"
-                >
-                  <LayoutGridIcon className="size-3.5" />
-                  All my computers
+            {thisMachine ? (
+              <>
+                <HouseIcon className="size-4 text-muted-foreground" />
+                <span className="text-sm font-medium text-foreground">Home</span>
+                <div className="ml-auto flex min-w-0 items-center gap-1.5">
+                  {homeMode ? <HomeHeaderActions layout={layout} pill={pill} /> : pill}
+                </div>
+              </>
+            ) : (
+              <>
+                <MonitorIcon className="size-4 text-muted-foreground" />
+                <span className="text-sm font-medium text-foreground">This computer</span>
+                <Button size="xs" variant="ghost" onClick={() => setPickedBoxId(null)}>
+                  Back to this machine
                 </Button>
-              ) : null}
-              <Button size="xs" variant="ghost" onClick={refresh} aria-label="Refresh">
-                <RefreshCwIcon className="size-3.5" />
-              </Button>
-            </div>
+                <div className="ml-auto flex items-center gap-1">
+                  {accountTransport() !== "none" ? (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      render={<Link to="/my-uno" />}
+                      data-testid="home-my-uno"
+                    >
+                      <LayoutGridIcon className="size-3.5" />
+                      All my computers
+                    </Button>
+                  ) : null}
+                  <Button size="xs" variant="ghost" onClick={refresh} aria-label="Refresh">
+                    <RefreshCwIcon className="size-3.5" />
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-          <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-            {look ? (
-              <ResourcesView
-                environmentId={environmentId}
-                look={look}
-                onLookChange={(next) => openLook(next, true)}
-                onBack={() => void navigate({ to: "/computer", search: {} })}
-                onResize={canResize ? () => setResizeOpen(true) : undefined}
-                onAskUno={launchers.askUno}
-                boost={boostNode}
-              />
-            ) : stateQuery.isPending ? (
-              <>
-                <Skeleton className="h-36 w-full rounded-3xl" />
-                <Skeleton className="h-56 w-full rounded-2xl" />
-              </>
-            ) : stateQuery.isError ? (
-              <Notice title="This screen can't reach your computer right now">
-                {stateQuery.error instanceof Error ? stateQuery.error.message : null} It will try
-                again by itself.
-              </Notice>
-            ) : (
-              <>
-                <ComputerHero
-                  name={heroName}
-                  subtitle={heroSubtitle}
-                  status={box?.status ?? null}
-                  address={box?.address ?? null}
-                  own={computer?.own ?? false}
-                  load={load}
-                  loadLive={thisMachine ? localMetricsQuery.isSuccess : cloudMetricsQuery.isSuccess}
-                  power={
-                    box
-                      ? {
-                          pendingAction: powerMutation.isPending
-                            ? (powerMutation.variables?.action ?? null)
-                            : null,
-                          error:
-                            powerMutation.error instanceof Error
-                              ? powerMutation.error.message
-                              : null,
-                          onPower: (action) => powerMutation.mutate({ action }),
-                        }
-                      : null
-                  }
-                  onResize={canResize ? () => setResizeOpen(true) : undefined}
-                  lowResource={box ? lowResource : null}
-                  boost={boostNode}
-                  onOpenLook={thisMachine ? (next) => openLook(next) : undefined}
-                />
-
-                {!computer?.linked && thisMachine ? (
-                  <p className="-mt-3 text-xs text-muted-foreground">
-                    This computer has no access to your Uno account right now, so it can't turn
-                    itself on and off or add apps. Give it access in{" "}
-                    <Link
-                      to="/settings/computer-access"
-                      className="text-primary underline-offset-4 hover:underline"
-                    >
-                      Settings → Computer access
-                    </Link>
-                    .
-                  </p>
-                ) : null}
-
-                {thisMachine && box === null && (computer?.candidates.length ?? 0) > 0 ? (
-                  <CloudComputers
-                    candidates={computer?.candidates ?? []}
-                    onPick={(id) => setPickedBoxId(id)}
-                  />
-                ) : null}
-
-                <ComputerPrograms
-                  builtIns={builtIns}
-                  showBuiltIns={thisMachine}
-                  tiles={tiles}
-                  machineApps={thisMachine ? machineAppsQuery.data : undefined}
-                  loading={thisMachine && machineAppsQuery.isPending}
-                  onOpenTile={openTile}
-                  onTileDetails={(tile) => {
-                    resetTileMutations();
-                    setDetailsKey(tile.key);
-                  }}
-                  hidden={thisMachine ? hiddenMachineApps(machineAppsQuery.data?.apps ?? []) : []}
-                  unhidingId={
-                    appAction.isPending && appAction.variables?.action === "unhide"
-                      ? appAction.variables.appId
-                      : null
-                  }
-                  onUnhide={(appId) => appAction.mutate({ appId, action: "unhide" })}
-                />
-
-                {box ? (
+          {look ? (
+            <ResourcesView
+              environmentId={environmentId}
+              look={look}
+              onLookChange={(next) => openLook(next, true)}
+              onBack={() => void navigate({ to: "/computer", search: {} })}
+              onResize={canResize ? () => setResizeOpen(true) : undefined}
+              onAskUno={launchers.askUno}
+              boost={boostNode}
+              footer={
+                box ? (
                   <>
-                    <ComputerCloudStorageRow environmentId={environmentId} />
                     <ComputerActivityCard
                       activity={activityQuery.data}
                       loading={activityQuery.isPending}
                     />
                     <ComputerEngineersDoor box={box} />
                   </>
-                ) : null}
-              </>
-            )}
-          </div>
+                ) : null
+              }
+            />
+          ) : thisMachine ? (
+            <HomeStart
+              environmentId={environmentId}
+              layout={layout}
+              computer={homeComputer}
+              notices={notices}
+              builtIns={builtIns}
+              tiles={tiles}
+              appsLoading={machineAppsQuery.isPending}
+              onOpenTile={openTile}
+              onTileDetails={(tile) => {
+                resetTileMutations();
+                setDetailsKey(tile.key);
+              }}
+              hiddenApps={hiddenMachineApps(machineAppsQuery.data?.apps ?? [])}
+              unhidingId={
+                appAction.isPending && appAction.variables?.action === "unhide"
+                  ? appAction.variables.appId
+                  : null
+              }
+              onUnhide={(appId) => appAction.mutate({ appId, action: "unhide" })}
+              onStartTask={launchers.startTask}
+            />
+          ) : (
+            <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+              {stateQuery.isPending ? (
+                <>
+                  <Skeleton className="h-36 w-full rounded-3xl" />
+                  <Skeleton className="h-56 w-full rounded-2xl" />
+                </>
+              ) : stateQuery.isError ? (
+                <Notice title="This screen can't reach your computer right now">
+                  {stateQuery.error instanceof Error ? stateQuery.error.message : null} It will try
+                  again by itself.
+                </Notice>
+              ) : (
+                <>
+                  {/* Another cloud computer, picked from a laptop: its full view. */}
+                  <ComputerHero
+                    name={heroName}
+                    subtitle={heroSubtitle}
+                    status={box?.status ?? null}
+                    address={box?.address ?? null}
+                    own={computer?.own ?? false}
+                    load={load}
+                    loadLive={cloudMetricsQuery.isSuccess}
+                    power={
+                      powerControls
+                        ? {
+                            ...powerControls,
+                            onPower: (action) => powerMutation.mutate({ action }),
+                          }
+                        : null
+                    }
+                    onResize={canResize ? () => setResizeOpen(true) : undefined}
+                    lowResource={box ? lowResource : null}
+                    boost={boostNode}
+                  />
+                  <ComputerPrograms
+                    builtIns={builtIns}
+                    showBuiltIns={false}
+                    tiles={tiles}
+                    machineApps={undefined}
+                    loading={false}
+                    onOpenTile={openTile}
+                    onTileDetails={(tile) => {
+                      resetTileMutations();
+                      setDetailsKey(tile.key);
+                    }}
+                  />
+                  {box ? (
+                    <>
+                      <ComputerCloudStorageRow environmentId={environmentId} />
+                      <ComputerActivityCard
+                        activity={activityQuery.data}
+                        loading={activityQuery.isPending}
+                      />
+                      <ComputerEngineersDoor box={box} />
+                    </>
+                  ) : null}
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
+
+      <PowerConfirmDialog
+        confirm={powerConfirm}
+        own={computer?.own ?? false}
+        onCancel={() => setPowerConfirm(null)}
+        onConfirm={(action) => {
+          powerMutation.mutate({ action });
+          setPowerConfirm(null);
+        }}
+      />
 
       <ProgramDialog
         tile={detailsTile}
@@ -615,6 +696,22 @@ function useLowResource(load: ComputerLoad | null): "memory" | "disk" | null {
     );
   }, [memPct, diskPct]);
   return low;
+}
+
+function UnlinkedNote() {
+  return (
+    <p className="text-xs text-muted-foreground">
+      This computer has no access to your Uno account right now, so it can't turn itself on and off
+      or add apps. Give it access in{" "}
+      <Link
+        to="/settings/computer-access"
+        className="text-primary underline-offset-4 hover:underline"
+      >
+        Settings → Computer access
+      </Link>
+      .
+    </p>
+  );
 }
 
 function Notice({ title, children }: { title: string; children: React.ReactNode }) {

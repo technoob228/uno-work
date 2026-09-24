@@ -154,7 +154,7 @@ import type {
   UnoMachineAppActionInput,
   UnoMachineApps,
 } from "./unoComputer.ts";
-import type { AppAiOverview, AppAiUpdateInput } from "./appSdk.ts";
+import type { AppAiOverview, AppAiUpdateInput, UnoAiSpend } from "./appSdk.ts";
 import type {
   UnoComputerResources,
   UnoDiskCleanInput,
@@ -811,6 +811,8 @@ export interface EnvironmentApi {
     /** Apps that use this machine's AI through the App SDK (Settings → Apps). */
     appAiList: () => Promise<AppAiOverview>;
     appAiUpdate: (input: AppAiUpdateInput) => Promise<AppAiOverview>;
+    /** Home's "Uno AI spend": credits left and the running total over the last days. */
+    appAiSpend: () => Promise<UnoAiSpend>;
     localMetrics: () => Promise<UnoComputerLocalMetrics>;
     resizeOptions: (input?: UnoComputerTargetInput) => Promise<UnoComputerResizeOptions>;
     resize: (input: UnoComputerResizeInput) => Promise<UnoComputerResizeResult>;

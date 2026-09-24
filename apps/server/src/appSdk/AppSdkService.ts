@@ -22,6 +22,7 @@ import {
   type AppAiUpdateInput,
   type AppStorageInfo,
   type ModelSelection,
+  type UnoAiSpend,
   type ServerProvider,
   UNO_GATEWAY_BASE_URL,
 } from "@t3tools/contracts";
@@ -65,9 +66,11 @@ import {
 } from "./appStorage.ts";
 import { type ModelPrice, parseModelPrices } from "./pricing.ts";
 import { installSdkFiles } from "./sdkFiles.ts";
+import { openAiSpendLedger } from "./aiSpendLedger.ts";
 
 export const APP_API_GATEWAY_ENV = "UNO_WORK_APP_GATEWAY_URL";
 const SYNC_EVERY = Duration.seconds(5);
+const AI_SPEND_SAMPLE_EVERY = Duration.minutes(20);
 const BRIDGE_CHECK_EVERY = Duration.seconds(30);
 const PRICES_TTL_MS = 60 * 60_000;
 export const PERSON_MAX_LIMIT_USD = 1000;
@@ -75,6 +78,8 @@ export const PERSON_MAX_STORAGE_GB = 10_000;
 
 export interface AppSdkServiceShape {
   readonly overview: Effect.Effect<AppAiOverview>;
+  /** Home's "Uno AI spend" (aiSpendLedger.ts). */
+  readonly spend: Effect.Effect<UnoAiSpend>;
   readonly update: (input: AppAiUpdateInput) => Effect.Effect<AppAiOverview, AppSdkUpdateError>;
 }
 
@@ -337,6 +342,19 @@ export const makeAppSdkService = (
       const key = await runPromise(gatewayKey.harnessKey());
       return key.length > 0 ? { baseUrl: gatewayBaseUrl, key } : null;
     };
+
+    // Home's "Uno AI spend": the account's running total, read now and then.
+    const spendLedger = yield* Effect.promise(() =>
+      openAiSpendLedger({
+        filePath: path.join(config.stateDir, "ai-spend.json"),
+        gateway: machineGateway,
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+      }),
+    );
+    const spend: AppSdkServiceShape["spend"] = Effect.promise(async () => {
+      await spendLedger.refresh();
+      return spendLedger.snapshot();
+    });
 
     // What tasks spent comes from the gateway, by app label (appTaskMeter.ts).
     const taskMeter = makeTaskMeter({
@@ -648,6 +666,12 @@ export const makeAppSdkService = (
       yield* Effect.forkScoped(
         Effect.promise(() => sync()).pipe(Effect.repeat(Schedule.spaced(SYNC_EVERY))),
       );
+      // Days the person doesn't open Home still get their samples.
+      yield* Effect.forkScoped(
+        Effect.promise(() => spendLedger.refresh(0)).pipe(
+          Effect.repeat(Schedule.spaced(AI_SPEND_SAMPLE_EVERY)),
+        ),
+      );
 
       if (port !== null) {
         const handler = makeAppApiHandler(core);
@@ -689,7 +713,7 @@ export const makeAppSdkService = (
       }
     }
 
-    return { overview, update, core, sync, taskMeter } satisfies AppSdkServiceShape & {
+    return { overview, spend, update, core, sync, taskMeter } satisfies AppSdkServiceShape & {
       readonly core: AppApiCore;
       readonly sync: () => Promise<void>;
       readonly taskMeter: typeof taskMeter;

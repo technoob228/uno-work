@@ -165,3 +165,24 @@ export const AppAiUpdateInput = Schema.Struct({
   deleteCloudFiles: Schema.optionalKey(Schema.Boolean),
 });
 export type AppAiUpdateInput = typeof AppAiUpdateInput.Type;
+
+/** One reading of the account's running Uno AI total (it only grows). */
+export const UnoAiSpendSample = Schema.Struct({
+  at: Schema.String,
+  totalUsd: Schema.Number,
+});
+export type UnoAiSpendSample = typeof UnoAiSpendSample.Type;
+
+/**
+ * Home's "Uno AI spend": credits left and the running total as this computer
+ * has read it over the last days (a day's spend = how much it grew that day).
+ * "no-key" — no Uno AI on this machine; "unavailable" — the gateway doesn't
+ * say; "unknown" — not read yet / offline.
+ */
+export const UnoAiSpend = Schema.Struct({
+  status: Schema.Literals(["ok", "no-key", "unavailable", "unknown"]),
+  creditsUsd: Schema.NullOr(Schema.Number),
+  samples: Schema.Array(UnoAiSpendSample),
+  checkedAt: Schema.NullOr(Schema.String),
+});
+export type UnoAiSpend = typeof UnoAiSpend.Type;
