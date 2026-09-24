@@ -12,6 +12,7 @@ import type {
   AssistantEditableFileName,
   ManagerAssistantSummary,
   ProjectId,
+  ThreadId,
 } from "@t3tools/contracts";
 import { Context, Schema } from "effect";
 import type { Effect } from "effect";
@@ -48,6 +49,20 @@ export interface ManagerAssistantServiceShape {
   readonly createAssistant: (input: {
     readonly name: string;
   }) => Effect.Effect<{ readonly projectId: ProjectId }, ManagerAssistantError>;
+  /**
+   * Make sure THE assistant chat ("Uno", `assistantRole: "chat"`) exists and
+   * is not archived. The first run on a computer with assistant history is
+   * the migration: the assistant chat the person used last keeps its
+   * history and becomes the pinned one (other assistant chats stay as they
+   * are). With no history a fresh chat is created. Idempotent.
+   */
+  readonly ensureAssistantChat: () => Effect.Effect<
+    {
+      readonly threadId: ThreadId;
+      readonly outcome: "existing" | "migrated" | "created";
+    },
+    ManagerAssistantError
+  >;
   readonly listAssistants: () => Effect.Effect<
     ReadonlyArray<ManagerAssistantSummary>,
     ManagerAssistantError

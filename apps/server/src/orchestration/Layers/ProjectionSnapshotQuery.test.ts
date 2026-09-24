@@ -314,6 +314,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           spawnedByThreadId: null,
           controller: "human",
           controlChangedAt: null,
+          assistantRole: null,
           deletedAt: null,
           messages: [
             {
@@ -433,6 +434,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           spawnedByThreadId: null,
           controller: "human",
           controlChangedAt: null,
+          assistantRole: null,
           session: {
             threadId: ThreadId.make("thread-1"),
             status: "running",

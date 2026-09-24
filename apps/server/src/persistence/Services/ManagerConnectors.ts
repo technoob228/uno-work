@@ -93,6 +93,8 @@ export interface ManagerConnectorRepositoryShape {
   readonly getThreadForChat: (
     input: ManagerConnectorKey & { readonly chatId: string },
   ) => Effect.Effect<Option.Option<ThreadId>, ManagerRepositoryError>;
+  /** Every thread a connector chat talks through (any assistant, any kind). */
+  readonly listChatThreadIds: () => Effect.Effect<ReadonlyArray<ThreadId>, ManagerRepositoryError>;
   readonly setThreadForChat: (
     input: ManagerConnectorKey & {
       readonly chatId: string;

@@ -242,6 +242,23 @@ export const managerAssistantsCreateRouteLayer = HttpRouter.add(
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
+/**
+ * THE assistant chat ("Uno"): found, or set up now (the same migration the
+ * daemon runs on start). Clients call it when the pinned chat is missing.
+ */
+export const managerAssistantChatRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/chat",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const assistants = yield* ManagerAssistantService;
+    return yield* assistants.ensureAssistantChat().pipe(
+      Effect.map((result) => HttpServerResponse.jsonUnsafe(result, { status: 200 })),
+      Effect.catch(respondServerError("assistants:chat")),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
 const assistantProjectIdFromQuery = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const url = HttpServerRequest.toURL(request);

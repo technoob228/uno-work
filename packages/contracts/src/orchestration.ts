@@ -253,6 +253,19 @@ export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
 export const ThreadController = Schema.Literals(["human", "agent"]);
 export type ThreadController = typeof ThreadController.Type;
 
+/**
+ * How a chat relates to the assistant ("Uno"):
+ * - `chat`    — THE assistant chat: one per computer, pinned on top of the
+ *               sidebar. Its workspace is the assistant's (instructions,
+ *               notes, tools); the assistant is a property of the chat, not
+ *               a project the person has to know about.
+ * - `spawned` — a chat the assistant started (manager `create_thread`),
+ *               labelled "from Uno".
+ * Absent / null: a regular chat.
+ */
+export const ThreadAssistantRole = Schema.Literals(["chat", "spawned"]);
+export type ThreadAssistantRole = typeof ThreadAssistantRole.Type;
+
 export const OrchestrationMessage = Schema.Struct({
   id: MessageId,
   role: OrchestrationMessageRole,
@@ -423,6 +436,8 @@ export const OrchestrationThread = Schema.Struct({
   // See ThreadController. Absent means "human".
   controller: Schema.optional(ThreadController),
   controlChangedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // See ThreadAssistantRole. Optional so pre-assistant-chat servers decode.
+  assistantRole: Schema.optional(Schema.NullOr(ThreadAssistantRole)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -482,6 +497,8 @@ export const OrchestrationThreadShell = Schema.Struct({
   spawnedByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   controller: Schema.optional(ThreadController),
   controlChangedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // See ThreadAssistantRole.
+  assistantRole: Schema.optional(Schema.NullOr(ThreadAssistantRole)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
@@ -586,6 +603,10 @@ const ThreadCreateCommand = Schema.Struct({
   // Only honored with an `agent` origin whose threadId matches; the decider
   // rejects a mismatch so a client cannot fake agent parentage.
   spawnedByThreadId: Schema.optional(ThreadId),
+  // See ThreadAssistantRole. Only the daemon itself may set it (the decider
+  // rejects it from a person's command): `spawned` needs a manager origin,
+  // `chat` needs an assistant / system origin and no other assistant chat.
+  assistantRole: Schema.optional(ThreadAssistantRole),
   createdAt: IsoDateTime,
 });
 
@@ -618,6 +639,9 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   // Set to an ISO timestamp to pin, or null to unpin. Omitted leaves the pin
   // state unchanged.
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // Daemon-only (see ThreadCreateCommand.assistantRole): makes a chat THE
+  // assistant chat (the assistant-chat migration) or clears the role.
+  assistantRole: Schema.optional(Schema.NullOr(ThreadAssistantRole)),
 });
 
 // Wire-compatible with upstream T3 Code's thread.snooze / thread.unsnooze.
@@ -1012,6 +1036,8 @@ export const ThreadCreatedPayload = Schema.Struct({
   // Present only for agent-spawned threads; such threads start with
   // controller "agent".
   spawnedByThreadId: Schema.optional(ThreadId),
+  // See ThreadAssistantRole; absent for regular chats.
+  assistantRole: Schema.optional(ThreadAssistantRole),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1039,6 +1065,7 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  assistantRole: Schema.optional(Schema.NullOr(ThreadAssistantRole)),
   updatedAt: IsoDateTime,
 });
 

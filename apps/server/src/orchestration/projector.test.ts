@@ -98,6 +98,7 @@ describe("orchestration projector", () => {
         spawnedByThreadId: null,
         controller: "human",
         controlChangedAt: null,
+        assistantRole: null,
         messages: [],
         proposedPlans: [],
         activities: [],

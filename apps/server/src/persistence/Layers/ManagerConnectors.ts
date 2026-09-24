@@ -131,6 +131,16 @@ const makeManagerConnectorRepository = Effect.gen(function* () {
       `,
   });
 
+  const listChatThreadRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: Schema.Struct({ threadId: ThreadId }),
+    execute: () =>
+      sql`
+        SELECT DISTINCT thread_id AS "threadId"
+        FROM manager_assistant_connector_threads
+      `,
+  });
+
   const setThreadRow = SqlSchema.void({
     Request: Schema.Struct({
       projectId: ProjectId,
@@ -358,6 +368,12 @@ const makeManagerConnectorRepository = Effect.gen(function* () {
       Effect.map(Option.map((row) => row.threadId)),
     );
 
+  const listChatThreadIds: ManagerConnectorRepositoryShape["listChatThreadIds"] = () =>
+    listChatThreadRows(undefined).pipe(
+      withRepositoryError("listChatThreadIds"),
+      Effect.map((rows) => rows.map((row) => row.threadId)),
+    );
+
   const setThreadForChat: ManagerConnectorRepositoryShape["setThreadForChat"] = (input) =>
     setThreadRow(input).pipe(withRepositoryError("setThreadForChat"));
 
@@ -421,6 +437,7 @@ const makeManagerConnectorRepository = Effect.gen(function* () {
     listByKind,
     upsert,
     getThreadForChat,
+    listChatThreadIds,
     setThreadForChat,
     getState,
     resetState,

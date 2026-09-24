@@ -36,6 +36,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       them to origin. Clients refuse to continue to or from a machine without
       it and ask to update that machine. */
   threadContinueDirect: Schema.optionalKey(Schema.Boolean),
+  /** Server marks THE assistant chat (thread.assistantRole = "chat") and the
+      chats the assistant starts ("spawned"). Absent on older servers: clients
+      fall back to the newest chat of the default assistant project. */
+  assistantChat: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

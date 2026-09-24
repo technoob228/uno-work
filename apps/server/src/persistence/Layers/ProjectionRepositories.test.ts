@@ -213,6 +213,48 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
     }),
   );
 
+  it.effect("round-trips the assistant role column (migration 048)", () =>
+    Effect.gen(function* () {
+      const threads = yield* ProjectionThreadRepository;
+      const threadId = ThreadId.make("thread-assistant-chat");
+      const row = {
+        threadId,
+        projectId: ProjectId.make("assistant-home"),
+        title: "Assistant chat",
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        branch: null,
+        worktreePath: null,
+        latestTurnId: null,
+        createdAt: "2026-09-24T00:00:00.000Z",
+        updatedAt: "2026-09-24T00:00:00.000Z",
+        archivedAt: null,
+        pinnedAt: null,
+        latestUserMessageAt: null,
+        pendingApprovalCount: 0,
+        pendingUserInputCount: 0,
+        hasActionableProposedPlan: 0,
+        deletedAt: null,
+      };
+
+      // Rows written before the role existed read back as a regular chat.
+      yield* threads.upsert(row);
+      assert.strictEqual(
+        Option.getOrNull(yield* threads.getById({ threadId }))?.assistantRole,
+        null,
+      );
+
+      yield* threads.upsert({ ...row, assistantRole: "chat" });
+      assert.strictEqual(
+        Option.getOrNull(yield* threads.getById({ threadId }))?.assistantRole,
+        "chat",
+      );
+      const listed = yield* threads.listByProjectId({ projectId: row.projectId });
+      assert.strictEqual(listed[0]?.assistantRole, "chat");
+    }),
+  );
+
   it.effect("round-trips agent-spawned thread and message columns (migration 044)", () =>
     Effect.gen(function* () {
       const threads = yield* ProjectionThreadRepository;

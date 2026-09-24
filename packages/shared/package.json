@@ -103,6 +103,10 @@
     "./unoBoxProvision": {
       "types": "./src/unoBoxProvision.ts",
       "import": "./src/unoBoxProvision.ts"
+    },
+    "./assistantChat": {
+      "types": "./src/assistantChat.ts",
+      "import": "./src/assistantChat.ts"
     }
   },
   "scripts": {

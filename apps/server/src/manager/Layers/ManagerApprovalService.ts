@@ -4,13 +4,14 @@ import type {
   ModelSelection,
   OrchestrationCommandOrigin,
 } from "@t3tools/contracts";
-import { CommandId, MessageId, ThreadId } from "@t3tools/contracts";
+import { assistantTokenLabel, CommandId, MessageId, ThreadId } from "@t3tools/contracts";
 import { Duration, Effect, Layer, Option, Schedule, Schema } from "effect";
 import * as crypto from "node:crypto";
 
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerActionProposalRepository } from "../../persistence/Services/ManagerActionProposals.ts";
+import { ManagerCapabilityTokenRepository } from "../../persistence/Services/ManagerCapabilityTokens.ts";
 import {
   ManagerExecutionError,
   ManagerNotFoundError,
@@ -27,6 +28,22 @@ const makeManagerApprovalService = Effect.gen(function* () {
   const proposalRepository = yield* ManagerActionProposalRepository;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const tokenRepository = yield* ManagerCapabilityTokenRepository;
+
+  /**
+   * Chats an assistant's token starts are "from Uno" (assistantRole
+   * `spawned`); an external manager brain's are not. Best-effort: a failed
+   * lookup only loses the label.
+   */
+  const isAssistantToken = (tokenId: string) =>
+    tokenRepository.list().pipe(
+      Effect.map((tokens) =>
+        tokens.some(
+          (token) => token.tokenId === tokenId && token.label.startsWith(assistantTokenLabel("")),
+        ),
+      ),
+      Effect.orElseSucceed(() => false),
+    );
 
   const makeCommandId = () => CommandId.make(`manager:${crypto.randomUUID()}`);
 
@@ -66,6 +83,7 @@ const makeManagerApprovalService = Effect.gen(function* () {
           const createCommandId = makeCommandId();
           const turnCommandId = makeCommandId();
           const threadId = ThreadId.make(crypto.randomUUID());
+          const fromAssistant = yield* isAssistantToken(proposal.tokenId);
           yield* orchestrationEngine.dispatch(
             {
               type: "thread.create",
@@ -78,6 +96,7 @@ const makeManagerApprovalService = Effect.gen(function* () {
               interactionMode: "default",
               branch: null,
               worktreePath: null,
+              ...(fromAssistant ? { assistantRole: "spawned" as const } : {}),
               createdAt,
             },
             { origin },

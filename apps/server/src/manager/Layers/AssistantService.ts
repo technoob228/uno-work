@@ -12,7 +12,9 @@ import {
   type ManagerConnectorHealth,
   type ManagerTelegramConnectorStatus,
   ProjectId,
+  ThreadId,
 } from "@t3tools/contracts";
+import { findMarkedAssistantChat, pickAssistantChatToMigrate } from "@t3tools/shared/assistantChat";
 import { Effect, Layer, Option, Path, FileSystem, Schema } from "effect";
 import * as Semaphore from "effect/Semaphore";
 import * as crypto from "node:crypto";
@@ -39,6 +41,10 @@ import {
 import { ManagerTokenAuthService } from "../Services/ManagerTokenAuth.ts";
 import { ManagerTelegramService } from "./TelegramConnector.ts";
 import { ManagerSlackService } from "./SlackConnector.ts";
+import { ASSISTANT_THREAD_RUNTIME_MODE } from "../connectorBindings.ts";
+
+/** Title of a fresh assistant chat; clients show "Uno" whatever the title. */
+export const ASSISTANT_CHAT_TITLE = "Uno";
 
 const ASSISTANT_INSTRUCTIONS_TEMPLATE = `# Uno Assistant (dispatcher)
 
@@ -622,8 +628,102 @@ const makeManagerAssistantService = Effect.gen(function* () {
         .pipe(Effect.mapError(toAssistantError(`Failed to write ${name}.`)));
     });
 
+  const chatSemaphore = yield* Semaphore.make(1);
+
+  const ensureAssistantChat: ManagerAssistantServiceShape["ensureAssistantChat"] = () =>
+    chatSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const origin = assistantCommandOrigin({ assistantKey: ASSISTANT_PROJECT_ID });
+        const snapshot = yield* projectionSnapshotQuery
+          .getShellSnapshot()
+          .pipe(Effect.mapError(toAssistantError("Failed to load chats.")));
+        const unarchive = (threadId: ThreadId) =>
+          orchestrationEngine.dispatch(
+            {
+              type: "thread.unarchive",
+              commandId: CommandId.make(`assistant-chat-unarchive:${crypto.randomUUID()}`),
+              threadId,
+            },
+            { origin },
+          );
+
+        const marked = findMarkedAssistantChat(snapshot.threads);
+        if (marked !== null) {
+          // The pinned chat is always there: an archived one comes back.
+          if (marked.archivedAt !== null) yield* unarchive(marked.id);
+          return { threadId: marked.id, outcome: "existing" as const };
+        }
+
+        // A Telegram / Slack chat's own thread (possibly a group) never
+        // becomes the person's private assistant chat.
+        const connectorThreadIds = yield* connectorRepository
+          .listChatThreadIds()
+          .pipe(Effect.mapError(toAssistantError("Failed to read connector chats.")));
+        const picked = pickAssistantChatToMigrate(snapshot.threads, {
+          assistantProjectId: ASSISTANT_PROJECT_ID,
+          excludedThreadIds: new Set(connectorThreadIds),
+        });
+        if (picked !== null) {
+          yield* orchestrationEngine.dispatch(
+            {
+              type: "thread.meta.update",
+              commandId: CommandId.make(`assistant-chat-migrate:${crypto.randomUUID()}`),
+              threadId: picked.id,
+              assistantRole: "chat",
+            },
+            { origin },
+          );
+          if (picked.archivedAt !== null) yield* unarchive(picked.id);
+          yield* Effect.logInfo("assistant chat migrated").pipe(
+            Effect.annotateLogs({ threadId: picked.id, title: picked.title }),
+          );
+          return { threadId: picked.id, outcome: "migrated" as const };
+        }
+
+        const project = snapshot.projects.find((entry) => entry.id === ASSISTANT_PROJECT_ID);
+        if (project === undefined) {
+          return yield* new ManagerAssistantError({
+            detail: "The assistant is not set up on this computer yet.",
+          });
+        }
+        const providers = yield* providerRegistry.getProviders;
+        const modelSelection =
+          project.defaultModelSelection ??
+          selectAutoBootstrapModelSelection(providers) ??
+          FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION;
+        const threadId = ThreadId.make(crypto.randomUUID());
+        const createdAt = new Date().toISOString();
+        yield* orchestrationEngine.dispatch(
+          {
+            type: "thread.create",
+            commandId: CommandId.make(`assistant-chat-create:${crypto.randomUUID()}`),
+            threadId,
+            projectId: ASSISTANT_PROJECT_ID,
+            title: ASSISTANT_CHAT_TITLE,
+            modelSelection,
+            runtimeMode: ASSISTANT_THREAD_RUNTIME_MODE,
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            assistantRole: "chat",
+            createdAt,
+          },
+          { origin },
+        );
+        yield* Effect.logInfo("assistant chat created").pipe(Effect.annotateLogs({ threadId }));
+        return { threadId, outcome: "created" as const };
+      }).pipe(
+        Effect.catch((cause) =>
+          Schema.is(ManagerAssistantError)(cause)
+            ? Effect.fail(cause)
+            : Effect.fail(toAssistantError("Failed to set up the assistant chat.")(cause)),
+        ),
+      ),
+    );
+
   return {
     ensureAssistant,
+    ensureAssistantChat,
     createAssistant,
     scanWorkspaceFolders,
     listAssistants,
@@ -647,6 +747,15 @@ export const AssistantBootstrapLive = Layer.effectDiscard(
     yield* awaitUsableBootDefault();
     const assistants = yield* ManagerAssistantService;
     yield* assistants.ensureAssistant({ projectId: ASSISTANT_PROJECT_ID, title: "Assistant" });
+    // The assistant is one pinned chat ("Uno"); the first start after the
+    // update migrates the assistant chat the person used last.
+    yield* assistants
+      .ensureAssistantChat()
+      .pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("assistant chat setup failed").pipe(Effect.annotateLogs({ cause })),
+        ),
+      );
     yield* assistants.scanWorkspaceFolders();
     // Legacy single-assistant token label from before per-assistant scoping.
     const tokenRepository = yield* ManagerCapabilityTokenRepository;

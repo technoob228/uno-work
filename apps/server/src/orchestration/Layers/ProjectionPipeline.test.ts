@@ -28,6 +28,7 @@ import {
   OrchestrationProjectionPipelineLive,
 } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
+import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
 import { ServerConfig } from "../../config.ts";
@@ -2167,7 +2168,7 @@ it.effect("restores pending turn-start metadata across projection pipeline resta
 
 const engineLayer = it.layer(
   OrchestrationEngineLive.pipe(
-    Layer.provide(OrchestrationProjectionSnapshotQueryLive),
+    Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
@@ -2276,6 +2277,71 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
           defaultModelSelection: '{"instanceId":"codex","model":"gpt-5"}',
         },
       ]);
+    }),
+  );
+
+  it.effect("projects the assistant chat migration and assistant-started chats", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const snapshots = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      const createdAt = new Date().toISOString();
+      const projectId = ProjectId.make("assistant-home");
+      const legacyId = ThreadId.make("thread-assistant-legacy");
+      const spawnedId = ThreadId.make("thread-assistant-spawned");
+      const threadCreate = (threadId: ThreadId) => ({
+        type: "thread.create" as const,
+        commandId: CommandId.make(`cmd-assistant-create-${threadId}`),
+        threadId,
+        projectId,
+        title: `Thread ${threadId}`,
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      });
+
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-assistant-project"),
+        projectId,
+        title: "Assistant",
+        workspaceRoot: "/tmp/assistant-home",
+        defaultModelSelection: null,
+        createdAt,
+      });
+      yield* engine.dispatch(threadCreate(legacyId));
+      yield* engine.dispatch(
+        {
+          type: "thread.meta.update",
+          commandId: CommandId.make("cmd-assistant-mark"),
+          threadId: legacyId,
+          assistantRole: "chat",
+        },
+        { origin: { kind: "assistant", assistantKey: "assistant-home" } },
+      );
+      yield* engine.dispatch(
+        { ...threadCreate(spawnedId), assistantRole: "spawned" as const },
+        { origin: { kind: "manager", tokenId: "tok-assistant" } },
+      );
+
+      const rows = yield* sql<{ readonly threadId: string; readonly assistantRole: string | null }>`
+        SELECT thread_id AS "threadId", assistant_role AS "assistantRole"
+        FROM projection_threads
+        ORDER BY thread_id ASC
+      `;
+      assert.deepEqual(rows, [
+        { threadId: legacyId, assistantRole: "chat" },
+        { threadId: spawnedId, assistantRole: "spawned" },
+      ]);
+      // Clients read it from the shell snapshot.
+      const shell = yield* snapshots.getShellSnapshot();
+      assert.strictEqual(
+        shell.threads.find((thread) => thread.id === legacyId)?.assistantRole,
+        "chat",
+      );
     }),
   );
 

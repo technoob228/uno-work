@@ -276,6 +276,7 @@ export function projectEvent(
             spawnedByThreadId: payload.spawnedByThreadId ?? null,
             controller: payload.spawnedByThreadId !== undefined ? "agent" : "human",
             controlChangedAt: null,
+            assistantRole: payload.assistantRole ?? null,
             deletedAt: null,
             messages: [],
             activities: [],
@@ -339,6 +340,9 @@ export function projectEvent(
             ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
             ...(payload.pinnedAt !== undefined ? { pinnedAt: payload.pinnedAt } : {}),
+            ...(payload.assistantRole !== undefined
+              ? { assistantRole: payload.assistantRole }
+              : {}),
             updatedAt: payload.updatedAt,
           }),
         })),

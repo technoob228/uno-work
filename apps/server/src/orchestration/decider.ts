@@ -52,6 +52,44 @@ function withEventBase(
 
 type PlannedOrchestrationEvent = Omit<OrchestrationEvent, "sequence">;
 
+/**
+ * Who may give a chat an assistant role (see ThreadAssistantRole). Never a
+ * person's command: the role is set by the daemon — the assistant-chat
+ * migration (assistant / system origin) and the manager's `create_thread`
+ * (manager origin, `spawned`). There is at most one live assistant chat.
+ */
+function assistantRoleViolation(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly threadId: string;
+  readonly role: "chat" | "spawned" | null;
+  readonly origin: OrchestrationCommandOrigin | undefined;
+}): string | null {
+  const { origin, role } = input;
+  if (origin === undefined || origin.kind === "connector" || origin.kind === "agent") {
+    return `assistant_role_forbidden: Thread '${input.threadId}' assistant role is set by the daemon only.`;
+  }
+  if (role === "spawned") {
+    return origin.kind === "manager" || origin.kind === "assistant" || origin.kind === "system"
+      ? null
+      : `assistant_role_forbidden: Only the assistant marks the chats it starts.`;
+  }
+  if (role === "chat") {
+    if (origin.kind !== "assistant" && origin.kind !== "system") {
+      return `assistant_role_forbidden: Only the daemon picks the assistant chat.`;
+    }
+    const other = input.readModel.threads.find(
+      (thread) =>
+        thread.id !== input.threadId &&
+        thread.deletedAt === null &&
+        thread.assistantRole === "chat",
+    );
+    if (other !== undefined) {
+      return `assistant_chat_exists: Thread '${other.id}' is already the assistant chat.`;
+    }
+  }
+  return null;
+}
+
 /** A user message no turn has picked up within this window is a failed start
     (or stale data), not pending work. Mirrors upstream's grace window. */
 const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000;
@@ -373,6 +411,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           });
         }
       }
+      if (command.assistantRole !== undefined) {
+        const violation = assistantRoleViolation({
+          readModel,
+          threadId: command.threadId,
+          role: command.assistantRole,
+          origin,
+        });
+        if (violation !== null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: violation,
+          });
+        }
+      }
       return {
         ...withEventBase({
           aggregateKind: "thread",
@@ -391,6 +443,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           branch: command.branch,
           worktreePath: command.worktreePath,
           ...(spawnedByThreadId !== undefined ? { spawnedByThreadId } : {}),
+          ...(command.assistantRole !== undefined ? { assistantRole: command.assistantRole } : {}),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -480,6 +533,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      if (command.assistantRole !== undefined) {
+        const violation = assistantRoleViolation({
+          readModel,
+          threadId: command.threadId,
+          role: command.assistantRole,
+          origin,
+        });
+        if (violation !== null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: violation,
+          });
+        }
+      }
       const occurredAt = nowIso();
       return {
         ...withEventBase({
@@ -498,6 +565,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.branch !== undefined ? { branch: command.branch } : {}),
           ...(command.worktreePath !== undefined ? { worktreePath: command.worktreePath } : {}),
           ...(command.pinnedAt !== undefined ? { pinnedAt: command.pinnedAt } : {}),
+          ...(command.assistantRole !== undefined ? { assistantRole: command.assistantRole } : {}),
           updatedAt: occurredAt,
         },
       };
