@@ -33,6 +33,7 @@ import {
 } from "./HomeWidgetBodies";
 import { AddWidgetDialog, HomeWidgetGrid } from "./HomeWidgets";
 import { usePersonFirstName } from "./useHomeInfo";
+import { useHomeStarters } from "./useHomeStarters";
 import {
   DEFAULT_HOME_WIDGETS,
   HOME_WIDGET_IDS,
@@ -138,6 +139,7 @@ export function HomeStart({
 }) {
   const { threads, now } = useHomeThreads();
   const firstName = usePersonFirstName(environmentId);
+  const starters = useHomeStarters({ environmentId, threads, now, tiles });
   const available = useMemo(
     () =>
       HOME_WIDGET_IDS.filter(
@@ -193,7 +195,7 @@ export function HomeStart({
           {greeting(new Date(now).getHours())}
           {firstName ? `, ${firstName}` : null}
         </h1>
-        <HomeComposer environmentId={environmentId} onStart={onStartTask} />
+        <HomeComposer environmentId={environmentId} starters={starters} onStart={onStartTask} />
         <NeedsYouPill threads={threads} now={now} />
       </div>
 

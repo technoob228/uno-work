@@ -7,25 +7,13 @@
  */
 import {
   DEFAULT_RUNTIME_MODE,
-  isAssistantProjectId,
   type EnvironmentId,
   type ModelSelection,
   type ProviderInstanceId,
   type RuntimeMode,
 } from "@t3tools/contracts";
-import {
-  ArrowUpIcon,
-  ChevronDownIcon,
-  FolderIcon,
-  FolderOpenIcon,
-  HouseIcon,
-  LockIcon,
-  LockOpenIcon,
-  PenLineIcon,
-  type LucideIcon,
-} from "lucide-react";
+import { ArrowUpIcon, LockIcon, LockOpenIcon, PenLineIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
 
 import { cn } from "~/lib/utils";
 import { useComposerDraftStore } from "../../../composerDraftStore";
@@ -40,32 +28,13 @@ import {
   deriveProviderInstanceEntries,
   sortProviderInstanceEntries,
 } from "../../../providerInstances";
-import { selectProjectsAcrossEnvironments, useStore } from "../../../store";
 import { ProviderModelPicker } from "../../chat/ProviderModelPicker";
-import { Button } from "../../ui/button";
-import {
-  Menu,
-  MenuGroup,
-  MenuGroupLabel,
-  MenuItem,
-  MenuPopup,
-  MenuSeparator,
-  MenuTrigger,
-} from "../../ui/menu";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../ui/select";
 import { Spinner } from "../../ui/spinner";
 import { toastManager } from "../../ui/toast";
-import { ChatInFolderDialog } from "../ChatInFolderDialog";
+import { FolderChipMenu, type PickedFolder } from "../FolderChipMenu";
 import { homeStartModelSelection } from "./homeStartModel";
-
-const SUGGESTIONS = [
-  "Make me an app that…",
-  "Publish a site from a folder",
-  "Clean up my Downloads folder",
-  "Explain what's running on this computer",
-];
-
-const MAX_FOLDERS = 8;
+import type { HomeStarter } from "./homeStarters";
 
 const RUNTIME_MODE_ICON: Record<RuntimeMode, LucideIcon> = {
   "approval-required": LockIcon,
@@ -125,31 +94,22 @@ function useHomeModelPicker(environmentId: EnvironmentId | null) {
 
 export function HomeComposer({
   environmentId,
+  starters,
   onStart,
 }: {
   environmentId: EnvironmentId | null;
+  /** Chips under the composer (see homeStarters.ts); a click only pre-fills. */
+  starters: ReadonlyArray<HomeStarter>;
   /** Starts a chat on `options` and sends `prompt`. */
   onStart: (prompt: string, options: HomeStartOptions) => Promise<void>;
 }) {
   const [text, setText] = useState("");
-  const [pickingFolder, setPickingFolder] = useState(false);
-  const [folder, setFolder] = useState<{ cwd: string; name: string } | null>(null);
+  const [folder, setFolder] = useState<PickedFolder | null>(null);
   const [starting, setStarting] = useState(false);
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(DEFAULT_RUNTIME_MODE);
   const [pickerOpen, setPickerOpen] = useState(false);
   const picker = useHomeModelPicker(environmentId);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
-  const folders = useMemo(
-    () =>
-      projects
-        .filter(
-          (project) => project.environmentId === environmentId && !isAssistantProjectId(project.id),
-        )
-        .toSorted((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
-        .slice(0, MAX_FOLDERS),
-    [environmentId, projects],
-  );
 
   useEffect(() => {
     ref.current?.focus();
@@ -200,40 +160,15 @@ export function HomeComposer({
           className="block min-h-[64px] w-full resize-none bg-transparent px-4 pt-3.5 text-[15px] text-foreground outline-none placeholder:text-muted-foreground/70"
         />
         <div className="flex items-center gap-1 px-2.5 pt-1 pb-2.5">
-          <Menu>
-            <MenuTrigger
-              render={
-                <Button size="xs" variant="ghost" className="text-muted-foreground">
-                  {folder ? <FolderIcon /> : <HouseIcon />}
-                  <span className="max-w-48 truncate">{folder ? folder.name : "Home folder"}</span>
-                  <ChevronDownIcon className="opacity-60" />
-                </Button>
-              }
-            />
-            <MenuPopup align="start">
-              <MenuGroup>
-                <MenuGroupLabel>Work in</MenuGroupLabel>
-                <MenuItem onClick={() => setFolder(null)}>
-                  <HouseIcon />
-                  Home folder
-                </MenuItem>
-                {folders.map((project) => (
-                  <MenuItem
-                    key={project.id}
-                    onClick={() => setFolder({ cwd: project.cwd, name: project.name })}
-                  >
-                    <FolderIcon />
-                    <span className="max-w-64 truncate">{project.name}</span>
-                  </MenuItem>
-                ))}
-              </MenuGroup>
-              <MenuSeparator />
-              <MenuItem onClick={() => setPickingFolder(true)}>
-                <FolderOpenIcon />
-                Another folder…
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
+          <FolderChipMenu
+            environmentId={environmentId}
+            folder={folder}
+            onPick={(next) => {
+              setFolder(next);
+              ref.current?.focus();
+            }}
+            testId="home-folder-chip"
+          />
           {picker.selection ? (
             <ProviderModelPicker
               compact
@@ -303,34 +238,32 @@ export function HomeComposer({
           </button>
         </div>
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        {SUGGESTIONS.map((suggestion) => (
-          <button
-            key={suggestion}
-            type="button"
-            onClick={() => {
-              setText(suggestion);
-              ref.current?.focus();
-            }}
-            className="rounded-full border border-border/70 bg-card/40 px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            {suggestion}
-          </button>
-        ))}
-      </div>
-      <ChatInFolderDialog
-        environmentId={environmentId}
-        open={pickingFolder}
-        onOpenChange={setPickingFolder}
-        title="Work in a folder"
-        description="Uno works with the files in the folder you pick."
-        actionLabel={(name) => `Work in ${name}`}
-        actionIcon={<FolderIcon />}
-        onStart={async (cwd) => {
-          setFolder({ cwd, name: cwd.replace(/\/+$/, "").split("/").pop() || cwd });
-          ref.current?.focus();
-        }}
-      />
+      {starters.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5" data-testid="home-starters">
+          {starters.map((starter) => (
+            <button
+              key={starter.id}
+              type="button"
+              title={starter.prompt}
+              onClick={() => {
+                setText(starter.prompt);
+                if (starter.folder) setFolder(starter.folder);
+                const input = ref.current;
+                if (input) {
+                  input.focus();
+                  // Caret at the end, so "Make me an app that " continues naturally.
+                  requestAnimationFrame(() =>
+                    input.setSelectionRange(input.value.length, input.value.length),
+                  );
+                }
+              }}
+              className="max-w-full truncate rounded-full border border-border/70 bg-card/40 px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              {starter.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
