@@ -97,7 +97,6 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const eventLoggers = yield* ProviderEventLoggers;
       const browserBridge = yield* BrowserBridge;
-      const serverConfig = yield* ServerConfig;
       const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
       const processEnv = {
         ...unoAgentEnv,

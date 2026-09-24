@@ -83,7 +83,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const path = yield* Path.Path;
       const eventLoggers = yield* ProviderEventLoggers;
       const browserBridge = yield* BrowserBridge;
-      const serverConfig = yield* ServerConfig;
       const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
       const processEnv = {
         ...unoAgentEnv,

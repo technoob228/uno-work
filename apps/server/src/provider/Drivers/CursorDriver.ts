@@ -86,7 +86,6 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const path = yield* Path.Path;
       const eventLoggers = yield* ProviderEventLoggers;
       const browserBridge = yield* BrowserBridge;
-      const serverConfig = yield* ServerConfig;
       const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
       // One brief for every harness (agentContext/unoWorkBrief.md); the long
       // contracts are served on demand by the uno-work MCP server.
