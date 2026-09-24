@@ -1,7 +1,7 @@
 /**
  * The pure parts of Home: which chats to put under "Continue", which ones wait
- * for the person, the greeting, and the widget layout (what's on Home, in
- * which order) with the reducer the Customize mode drives.
+ * for the person, the greeting, and the built-in widget ids (the layout itself
+ * is homeLayout.ts).
  */
 import { isAssistantProjectId } from "@t3tools/contracts";
 
@@ -286,7 +286,8 @@ export function isHomeWidgetId(value: unknown): value is HomeWidgetId {
 }
 
 /**
- * A stored layout, cleaned: known ids only, each once. Anything unreadable
+ * The 0.0.81 widget list (read once to migrate to homeLayout.ts), cleaned:
+ * known ids only, each once. Anything unreadable
  * gives the default layout, so a bad value in storage never blanks Home.
  */
 export function normalizeHomeWidgets(raw: unknown): HomeWidgetId[] {
@@ -296,43 +297,6 @@ export function normalizeHomeWidgets(raw: unknown): HomeWidgetId[] {
     if (isHomeWidgetId(item)) seen.add(item);
   }
   return [...seen];
-}
-
-export type HomeWidgetsAction =
-  | { readonly type: "add"; readonly id: HomeWidgetId }
-  | { readonly type: "remove"; readonly id: HomeWidgetId }
-  | { readonly type: "move"; readonly from: HomeWidgetId; readonly to: HomeWidgetId }
-  | { readonly type: "reset" };
-
-export function homeWidgetsReducer(
-  state: ReadonlyArray<HomeWidgetId>,
-  action: HomeWidgetsAction,
-): HomeWidgetId[] {
-  switch (action.type) {
-    case "add":
-      return state.includes(action.id) ? [...state] : [...state, action.id];
-    case "remove":
-      return state.filter((id) => id !== action.id);
-    case "move": {
-      const from = state.indexOf(action.from);
-      const to = state.indexOf(action.to);
-      if (from === -1 || to === -1 || from === to) return [...state];
-      const next = [...state];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved!);
-      return next;
-    }
-    case "reset":
-      return [...DEFAULT_HOME_WIDGETS];
-  }
-}
-
-/** Widgets that can still be added: not on Home yet and available here. */
-export function addableWidgets(
-  state: ReadonlyArray<HomeWidgetId>,
-  available: ReadonlyArray<HomeWidgetId>,
-): HomeWidgetId[] {
-  return available.filter((id) => !state.includes(id));
 }
 
 // ------------------------------------------------------------------ files --

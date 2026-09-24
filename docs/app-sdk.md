@@ -56,6 +56,12 @@ An app asks for AI in its manifest `~/.uno/apps/<id>.json`:
   may ask for at most 20 GB; the person can give more in Settings → Apps.
 - `"notify": true` — the app may put notifications into the person's Inbox
   (`POST /v1/notify`, below).
+- `"widget": {"path": "/widget", "size": "small"|"medium"|"wide", "title": "…"}` — a
+  Home widget (0.0.82): Home shows the app's page at `path` in a sandboxed frame
+  (scripts and the app's own origin; never Uno Work's origin, no top navigation),
+  reloaded when the window gets focus. `path` must start with `/` (no scheme, no
+  `//host`) or the manifest is skipped. The page must work at ~300×200 px. Needs
+  no token; the person adds it in Home → Add widget.
 - None of `ai`, `storage`, `notify` → no token, every call is 401.
 
 When the daemon sees a manifest with `ai`, `storage` or `notify` it issues the app its own token

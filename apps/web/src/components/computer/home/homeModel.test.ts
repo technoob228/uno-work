@@ -2,12 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_HOME_WIDGETS,
-  addableWidgets,
   approvalQuestion,
   attentionThreads,
   greeting,
   homeThreadStatus,
-  homeWidgetsReducer,
   normalizeHomeWidgets,
   pickContinueItems,
   pickContinueThreads,
@@ -240,33 +238,12 @@ describe("words", () => {
   });
 });
 
-describe("widget layout", () => {
+describe("0.0.81 widget list (read for the migration)", () => {
   it("cleans a stored layout", () => {
     expect(normalizeHomeWidgets(["apps", "nope", "apps", "cloud", 3])).toEqual(["apps", "cloud"]);
     expect(normalizeHomeWidgets([])).toEqual([]);
     expect(normalizeHomeWidgets("garbage")).toEqual([...DEFAULT_HOME_WIDGETS]);
     expect(normalizeHomeWidgets(null)).toEqual([...DEFAULT_HOME_WIDGETS]);
-  });
-
-  it("adds, removes, moves and resets", () => {
-    let state = homeWidgetsReducer(DEFAULT_HOME_WIDGETS, { type: "add", id: "cloud" });
-    expect(state).toEqual(["files", "apps", "cloud"]);
-    expect(homeWidgetsReducer(state, { type: "add", id: "cloud" })).toEqual(state);
-    state = homeWidgetsReducer(state, { type: "move", from: "cloud", to: "files" });
-    expect(state).toEqual(["cloud", "files", "apps"]);
-    state = homeWidgetsReducer(state, { type: "move", from: "cloud", to: "apps" });
-    expect(state).toEqual(["files", "apps", "cloud"]);
-    expect(homeWidgetsReducer(state, { type: "move", from: "sites", to: "apps" })).toEqual(state);
-    state = homeWidgetsReducer(state, { type: "remove", id: "files" });
-    expect(state).toEqual(["apps", "cloud"]);
-    expect(homeWidgetsReducer(state, { type: "reset" })).toEqual([...DEFAULT_HOME_WIDGETS]);
-  });
-
-  it("offers only what isn't on Home and is available here", () => {
-    expect(addableWidgets(["files", "apps"], ["files", "apps", "cloud", "computer"])).toEqual([
-      "cloud",
-      "computer",
-    ]);
   });
 });
 

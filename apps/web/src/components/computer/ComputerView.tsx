@@ -64,7 +64,7 @@ import {
 import { ProgramDialog, type ProgramRemoveControls } from "./ProgramDialog";
 import { openAppSignedIn } from "./openSignedIn";
 import { ComputerPill, type HomeComputer } from "./home/ComputerPill";
-import { HomeHeaderActions, HomeStart, useHomeLayout } from "./home/HomeStart";
+import { HomeStart, useHomeLayout } from "./home/HomeStart";
 import { ResizeDialog } from "./ResizeDialog";
 import { ResourcesView } from "./resources/ResourcesView";
 import type { ResourceLook } from "./resources/resourceModel";
@@ -391,7 +391,6 @@ export function ComputerView() {
             accountTransport() !== "none" ? () => void navigate({ to: "/my-uno" }) : undefined,
           lowResource: box ? lowResource : null,
         };
-  const homeMode = thisMachine && !look;
   const pill = <ComputerPill computer={homeComputer} loading={stateQuery.isPending} />;
 
   const notices = (
@@ -422,9 +421,7 @@ export function ComputerView() {
               <>
                 <HouseIcon className="size-4 text-muted-foreground" />
                 <span className="text-sm font-medium text-foreground">Home</span>
-                <div className="ml-auto flex min-w-0 items-center gap-1.5">
-                  {homeMode ? <HomeHeaderActions layout={layout} pill={pill} /> : pill}
-                </div>
+                <div className="ml-auto flex min-w-0 items-center gap-1.5">{pill}</div>
               </>
             ) : (
               <>
@@ -484,6 +481,7 @@ export function ComputerView() {
               notices={notices}
               builtIns={builtIns}
               tiles={tiles}
+              machineApps={machineAppsQuery.data?.apps ?? []}
               appsLoading={machineAppsQuery.isPending}
               onOpenTile={openTile}
               onTileDetails={(tile) => {
@@ -498,6 +496,7 @@ export function ComputerView() {
               }
               onUnhide={(appId) => appAction.mutate({ appId, action: "unhide" })}
               onStartTask={launchers.startTask}
+              onAskUno={launchers.askUno}
             />
           ) : (
             <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
