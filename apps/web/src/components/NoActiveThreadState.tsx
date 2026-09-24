@@ -31,6 +31,7 @@ import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
+import { useFolderChats } from "../hooks/useFolderChats";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useMachineLabels } from "../hooks/useMachineRows";
 import { useReconnectEnvironment } from "../hooks/useReconnectEnvironment";
@@ -157,6 +158,20 @@ export function NoActiveThreadState() {
     }
   };
 
+  const folderChats = useFolderChats(selectedEnvId ?? null);
+  /** No project yet: a chat in the home folder; Add project only if that can't be reached. */
+  const startHomeFolderChat = async () => {
+    if (isStartingChat) return;
+    setIsStartingChat(true);
+    try {
+      if (!(await folderChats.chatInHomeFolder())) openAddProject();
+    } catch {
+      openAddProject();
+    } finally {
+      setIsStartingChat(false);
+    }
+  };
+
   const renderThreadItem = (thread: SidebarThreadSummary) => (
     <MenuItem key={thread.id} onClick={() => openThread(thread)}>
       <MessageSquareIcon className="size-3.5 text-muted-foreground" />
@@ -236,17 +251,26 @@ export function NoActiveThreadState() {
               <>
                 <EmptyHeader className="max-w-none">
                   <EmptyTitle className="inline-flex items-center gap-2 text-foreground text-xl">
-                    No projects yet
-                    <Explain term="project" />
+                    Start your first chat
+                    <Explain term="chat" technical />
                   </EmptyTitle>
                   <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-                    A project is {asClause(plainExplanation("project"))}. Add one on{" "}
-                    <span className="font-medium text-foreground">&ldquo;{envName}&rdquo;</span> to
-                    start your first chat.
+                    Uno works in your home folder on{" "}
+                    <span className="font-medium text-foreground">&ldquo;{envName}&rdquo;</span>.
+                    You can pick another folder on the chat any time.
                   </EmptyDescription>
                 </EmptyHeader>
-                <EmptyContent className="mt-6">
-                  <Button onClick={openAddProject} size="sm">
+                <EmptyContent className="mt-6 flex-row justify-center gap-2">
+                  <Button
+                    onClick={() => void startHomeFolderChat()}
+                    size="sm"
+                    disabled={isStartingChat}
+                    data-testid="empty-new-chat"
+                  >
+                    <MessageSquarePlusIcon className="size-4" />
+                    New chat
+                  </Button>
+                  <Button onClick={openAddProject} size="sm" variant="outline">
                     <FolderPlusIcon className="size-4" />
                     Add project
                   </Button>

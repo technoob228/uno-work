@@ -22,13 +22,14 @@ import { useCallback } from "react";
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { ensureEnvironmentApi } from "../environmentApi";
 import { useEnvironmentProviders } from "../environments/settings/serverSettings";
+import { HOME_FOLDER_TITLE } from "../lib/homeFolder";
 import { findProjectByPath, inferProjectTitleFromPath } from "../lib/projectPaths";
 import { newCommandId, newProjectId } from "../lib/utils";
 import { pickUsableDefaultModelSelection } from "../providerModels";
 import { selectProjectsAcrossEnvironments, useStore } from "../store";
 import { useNewThreadHandler } from "./useHandleNewThread";
 
-export const HOME_FOLDER_TITLE = "Home folder";
+export { HOME_FOLDER_TITLE };
 
 const homeFolderByEnvironment = new Map<EnvironmentId, string>();
 

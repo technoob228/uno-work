@@ -2,6 +2,7 @@ import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import { useCommandPaletteStore } from "../commandPaletteStore";
+import { useFolderChats } from "../hooks/useFolderChats";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import {
   startNewLocalThreadFromContext,
@@ -34,6 +35,7 @@ function ChatRouteGlobalShortcuts() {
       : false,
   );
   const appSettings = useSettings();
+  const folderChats = useFolderChats(activeEnvironmentId);
 
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
@@ -76,17 +78,22 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
-        void startNewThreadFromContext({
-          activeDraftThread,
-          activeThread,
-          defaultProjectRef,
-          defaultThreadEnvMode: resolveSidebarNewThreadEnvMode({
-            defaultEnvMode: appSettings.defaultThreadEnvMode,
-          }),
-          handleNewThread,
-          activeEnvironmentId,
-          createStarterProject,
-          onMissingProject: () => useCommandPaletteStore.getState().openAddProject(),
+        // Same as the sidebar's New chat: the home folder, with the folder
+        // chip on the chat to pick another. chat.newLocal stays "this project".
+        void folderChats.chatInHomeFolder().then((started) => {
+          if (started) return;
+          void startNewThreadFromContext({
+            activeDraftThread,
+            activeThread,
+            defaultProjectRef,
+            defaultThreadEnvMode: resolveSidebarNewThreadEnvMode({
+              defaultEnvMode: appSettings.defaultThreadEnvMode,
+            }),
+            handleNewThread,
+            activeEnvironmentId,
+            createStarterProject,
+            onMissingProject: () => useCommandPaletteStore.getState().openAddProject(),
+          });
         });
       }
     };
@@ -101,6 +108,7 @@ function ChatRouteGlobalShortcuts() {
     activeEnvironmentId,
     createStarterProject,
     clearSelection,
+    folderChats,
     handleNewThread,
     keybindings,
     defaultProjectRef,

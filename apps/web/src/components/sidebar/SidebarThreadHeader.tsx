@@ -76,8 +76,8 @@ export function SidebarThreadHeader({
   // screen reader on nothing.
   const activeResultExists = resultsVisible && activeSearchResultIndex < searchResultCount;
   const newThreadLabel = newThreadShortcutLabel
-    ? `New chat (${newThreadShortcutLabel})`
-    : "New chat";
+    ? `New chat in your home folder (${newThreadShortcutLabel})`
+    : "New chat in your home folder";
 
   return (
     <div className="flex items-center gap-1">

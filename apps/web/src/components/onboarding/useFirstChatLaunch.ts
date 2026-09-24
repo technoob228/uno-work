@@ -20,8 +20,9 @@ export interface FirstChatLaunch {
    * Ends onboarding in a draft chat on the connected machine. Reuses the first
    * real project when one exists, otherwise creates a starter project; with a
    * `prompt` the composer opens pre-filled so the first send is one keystroke.
+   * Resolves false when the chat couldn't be opened (`error` says why).
    */
-  readonly launch: (prompt: string | null) => Promise<void>;
+  readonly launch: (prompt: string | null) => Promise<boolean>;
 }
 
 export function useFirstChatLaunch(options: {
@@ -38,8 +39,8 @@ export function useFirstChatLaunch(options: {
   const { onBeforeNavigate } = options;
 
   const launch = useCallback(
-    async (prompt: string | null) => {
-      if (pending) return;
+    async (prompt: string | null): Promise<boolean> => {
+      if (pending) return false;
       setPending(true);
       setError(null);
       try {
@@ -72,12 +73,14 @@ export function useFirstChatLaunch(options: {
           const draft = draftStore.getDraftSessionByProjectRef(projectRef);
           if (draft) draftStore.setPrompt(draft.draftId, prompt);
         }
+        return true;
       } catch (cause) {
         setError(
           cause instanceof Error
             ? cause.message
             : "Could not reach your computer. Give it a moment and try again.",
         );
+        return false;
       } finally {
         setPending(false);
       }
