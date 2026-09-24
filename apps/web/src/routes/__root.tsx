@@ -65,11 +65,23 @@ import {
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
+import { isWebLite } from "../lite/flag";
+import { LiteRoot } from "../lite/LiteShell";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
   beforeLoad: async ({ location }) => {
+    // Web lite: the account is the whole app — no machine to wait for, no
+    // server auth, no saved environments (see lite/webLite.ts).
+    if (isWebLite) {
+      return {
+        authGateState: {
+          status: "account-only",
+        } as const,
+      };
+    }
+
     if (location.pathname === "/pair" && hasHostedPairingRequest(new URL(window.location.href))) {
       return {
         authGateState: {
@@ -138,6 +150,10 @@ function RootRouteView() {
       window.cancelAnimationFrame(frame);
     };
   }, [pathname]);
+
+  if (authGateState.status === "account-only") {
+    return <LiteRoot />;
+  }
 
   if (needsOnboarding && pathname !== "/onboarding" && pathname !== "/pair") {
     return <Navigate to="/onboarding" replace />;

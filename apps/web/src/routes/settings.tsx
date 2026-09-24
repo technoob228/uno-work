@@ -23,6 +23,7 @@ import { isElectron } from "../env";
 import { readPrimaryEnvironmentDescriptor } from "../environments/primary";
 import { useSavedEnvironmentRegistryStore } from "../environments/runtime";
 import { useUiStateStore } from "../uiStateStore";
+import { LITE_HOME_PATH } from "../lite/webLite";
 
 function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
@@ -157,6 +158,10 @@ function SettingsRouteLayout() {
 
 export const Route = createFileRoute("/settings")({
   beforeLoad: async ({ context, location }) => {
+    // Web lite: settings belong to a machine; the account lives in My Uno.
+    if (context.authGateState.status === "account-only") {
+      throw redirect({ to: LITE_HOME_PATH, replace: true });
+    }
     if (
       context.authGateState.status !== "authenticated" &&
       context.authGateState.status !== "hosted-static"

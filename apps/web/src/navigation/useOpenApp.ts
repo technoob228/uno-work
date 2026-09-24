@@ -19,6 +19,7 @@ import { readLocalApi } from "../localApi";
 import { selectSidebarThreadsForEnvironment, useStore } from "../store";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
+import { isWebLite } from "../lite/flag";
 import { useNavStore } from "./navStore";
 
 export interface AppTarget {
@@ -38,7 +39,19 @@ export function openInNewTab(url: string): void {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
-export function useOpenApp() {
+/**
+ * Web lite has no main area, side panel or computer to open an app beside:
+ * every app and site opens in a browser tab. Picked once per build (the flag
+ * is a build-time constant), so the hook order never changes.
+ */
+function useOpenAppInTabs() {
+  const open = useCallback((app: AppTarget) => openInNewTab(app.url), []);
+  return { openHere: open, openBeside: open, openInNewTab };
+}
+
+export const useOpenApp: typeof useOpenAppInApp = isWebLite ? useOpenAppInTabs : useOpenAppInApp;
+
+function useOpenAppInApp() {
   const navigate = useNavigate();
   const preview = usePreviewPane();
   const machine = useActiveMachine();

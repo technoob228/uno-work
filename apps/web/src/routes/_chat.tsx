@@ -14,6 +14,7 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveSidebarNewThreadEnvMode } from "~/components/Sidebar.logic";
 import { useSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "~/rpc/serverState";
+import { liteRedirectPath } from "~/lite/webLite";
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
@@ -113,6 +114,9 @@ function ChatRouteGlobalShortcuts() {
 }
 
 function ChatRouteLayout() {
+  const { authGateState } = Route.useRouteContext();
+  // Web lite has no chats and no machine: nothing for the shortcuts to act on.
+  if (authGateState.status === "account-only") return <Outlet />;
   return (
     <>
       <ChatRouteGlobalShortcuts />
@@ -122,7 +126,12 @@ function ChatRouteLayout() {
 }
 
 export const Route = createFileRoute("/_chat")({
-  beforeLoad: async ({ context }) => {
+  beforeLoad: async ({ context, location }) => {
+    if (context.authGateState.status === "account-only") {
+      const to = liteRedirectPath(location.pathname);
+      if (to) throw redirect({ to, replace: true });
+      return;
+    }
     if (
       context.authGateState.status !== "authenticated" &&
       context.authGateState.status !== "hosted-static"

@@ -5,10 +5,14 @@ import {
   PairingPendingSurface,
   PairingRouteSurface,
 } from "../components/auth/PairingRouteSurface";
+import { LITE_HOME_PATH } from "../lite/webLite";
 
 export const Route = createFileRoute("/pair")({
   beforeLoad: async ({ context }) => {
     const { authGateState } = context;
+    if (authGateState.status === "account-only") {
+      throw redirect({ to: LITE_HOME_PATH, replace: true });
+    }
     if (authGateState.status === "hosted-pairing") {
       return {
         authGateState,
