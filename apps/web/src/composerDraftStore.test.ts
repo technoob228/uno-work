@@ -575,6 +575,32 @@ describe("composerDraftStore project draft thread mapping", () => {
     });
   });
 
+  it("does not notify subscribers when the prompt is set to the text it already has", () => {
+    // The editor echoes its text back (focus, controlled sync). A new state on
+    // every echo re-rendered every draft subscriber and fed React #185.
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+    store.setPrompt(draftId, "hello");
+    const before = useComposerDraftStore.getState();
+    const listener = vi.fn();
+    const unsubscribe = useComposerDraftStore.subscribe(listener);
+    try {
+      store.setPrompt(draftId, "hello");
+      store.setPrompt(draftId, "hello");
+      expect(listener).not.toHaveBeenCalled();
+      expect(useComposerDraftStore.getState()).toBe(before);
+
+      store.setPrompt(otherDraftId, "");
+      expect(listener).not.toHaveBeenCalled();
+
+      store.setPrompt(draftId, "hello!");
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(draftByKey(draftId)?.prompt).toBe("hello!");
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it("clears only matching project draft mapping entries", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, { threadId });
