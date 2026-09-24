@@ -36,9 +36,13 @@ import {
   type ModelCapabilitiesMetadata,
   type PersonalAiModel,
   type ServerProvider,
-  type UnoMcpServer,
 } from "@t3tools/contracts";
-import { customMcpServersGetter, withOpenCodeMcpServers } from "../../mcp/customMcpServers.ts";
+import {
+  customMcpServersGetter,
+  sessionMcpServers,
+  withOpenCodeMcpServers,
+  type McpServerEntry,
+} from "../../mcp/customMcpServers.ts";
 import { Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
@@ -52,9 +56,7 @@ import {
   UNO_PERSONAL_WARMUP_HEADERS,
   fetchPersonalAiModels,
 } from "../../unoPersonalAi.ts";
-import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
-import { buildMachineAppsInstructions } from "../../machineApps/machineAppsInstructions.ts";
-import { writeBrowserInstructionsFile } from "../browserInstructions.ts";
+import { writeUnoWorkBriefFile } from "../../agentContext/unoWorkBrief.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderDriverError } from "../Errors.ts";
@@ -647,8 +649,8 @@ export function unoSessionEnvironment(input: {
   readonly bridge: Record<string, string>;
   readonly configContent: string | undefined;
   readonly appId: string | null;
-  /** Remote MCP servers the owner added (settings.mcpServers). */
-  readonly mcpServers?: ReadonlyArray<UnoMcpServer>;
+  /** This chat's MCP servers (built-in uno-work + settings.mcpServers). */
+  readonly mcpServers?: ReadonlyArray<McpServerEntry>;
 }): Record<string, string> {
   const withMcp = withOpenCodeMcpServers(input.configContent, input.mcpServers ?? []);
   const labelled =
@@ -883,14 +885,9 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
       );
       const personalCatalog = personalCatalogBySlug(personalModels);
       const browserBridge = yield* BrowserBridge;
-      const instructionsFilePath = writeBrowserInstructionsFile({
-        stateDir: serverConfig.stateDir,
-        baseUrl: browserBridge.baseUrl,
-        extraSections: [
-          buildPluginInstructions(serverConfig.pluginsDir),
-          buildMachineAppsInstructions(),
-        ],
-      });
+      // One brief for every harness (agentContext/unoWorkBrief.md); the long
+      // contracts are served on demand by the uno-work MCP server.
+      const instructionsFilePath = writeUnoWorkBriefFile(serverConfig.stateDir);
       const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
       const baseProcessEnv = browserBridge.applyEnvironment(
         mergeProviderInstanceEnvironment(environment),
@@ -941,13 +938,19 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
       const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
         instanceId,
         environment: processEnv,
-        bridgeEnvironment: (context) =>
-          unoSessionEnvironment({
-            bridge: browserBridge.scopedEnvironment(context),
+        bridgeEnvironment: (context) => {
+          const bridge = browserBridge.scopedEnvironment(context);
+          return unoSessionEnvironment({
+            bridge,
             configContent: processEnv.OPENCODE_CONFIG_CONTENT,
             appId: gatewayKey.appOfThread(context.threadId),
-            mcpServers: customMcpServers(),
-          }),
+            // Built-in uno-work (per-thread token) + the owner's own servers.
+            mcpServers: sessionMcpServers({
+              bridgeEnvironment: bridge,
+              custom: customMcpServers(),
+            }),
+          });
+        },
         // uno-code's per-directory `/event` stream is silent (only
         // `server.connected`); session events only reach `/global/event`.
         // Without this the turn finishes on the server and the UI shows

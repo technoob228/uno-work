@@ -28,6 +28,7 @@ import { SelfWatchdogLive } from "./selfWatchdog.ts";
 import { ServerBrowserLive } from "./serverBrowser.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
+import { unoWorkRouteLayers } from "./unoWork/http.ts";
 import {
   filesOfficeVersionsRouteLayer,
   filesRawRouteLayer,
@@ -582,6 +583,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   previewSiteIssueRouteLayer,
   previewSiteFileRouteLayer,
   ...filesShareRouteLayers,
+  ...unoWorkRouteLayers,
 ).pipe(Layer.provide(browserApiCorsLayer));
 
 export const makeServerLayer = Layer.unwrap(

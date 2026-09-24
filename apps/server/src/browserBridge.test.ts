@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import { Effect, Fiber, Option, Stream } from "effect";
+import { TestClock } from "effect/testing";
 
 import {
   BROWSER_BRIDGE_TOKEN_ENV,
@@ -393,5 +394,83 @@ it.effect("supersedes a pending secret request for the same name and cwd", () =>
     assert.isTrue(completed);
     const secondOutcome = yield* Fiber.join(secondFiber);
     assert.deepEqual(secondOutcome, { ok: true, name: "API_KEY", file: ".env" });
+  }).pipe(Effect.provide(BrowserBridgeTest)),
+);
+
+const waitForSubscribers = (expected: number) =>
+  Effect.gen(function* () {
+    const browserBridge = yield* BrowserBridge;
+    for (let attempt = 0; attempt < 10_000; attempt += 1) {
+      if ((yield* browserBridge.subscriberCount) === expected) return;
+      yield* Effect.yieldNow;
+    }
+    throw new Error(`Subscriber count did not reach ${expected}.`);
+  });
+
+it.effect("refuses a tool approval when no app window can ask the person", () =>
+  Effect.gen(function* () {
+    const browserBridge = yield* BrowserBridge;
+    const outcome = yield* browserBridge.requestToolApproval({
+      tool: "site_publish",
+      title: "Publish a site",
+      sensitive: true,
+    });
+    assert.equal(outcome, "no_client");
+  }).pipe(Effect.provide(BrowserBridgeTest)),
+);
+
+it.effect("asks the person for a tool approval and returns their answer", () =>
+  Effect.gen(function* () {
+    const browserBridge = yield* BrowserBridge;
+    const eventFiber = yield* browserBridge.stream.pipe(
+      Stream.runHead,
+      Effect.map((option) => Option.getOrThrow(option)),
+      Effect.forkScoped,
+    );
+    yield* waitForSubscribers(1);
+    const approvalFiber = yield* browserBridge
+      .requestToolApproval(
+        { tool: "app_show_on_internet", title: "Show Notes on the internet", sensitive: true },
+        { threadId: "thread-1" },
+      )
+      .pipe(Effect.forkScoped);
+    const event = yield* Fiber.join(eventFiber);
+    assert.equal(event.type, "toolApprovalRequest");
+    if (event.type !== "toolApprovalRequest") throw new Error("Expected an approval event.");
+    assert.equal(event.title, "Show Notes on the internet");
+    assert.equal(event.context?.threadId, "thread-1");
+
+    const forged = yield* browserBridge.completeToolApproval({
+      requestId: event.requestId,
+      responseToken: "wrong",
+      approved: true,
+    });
+    assert.isFalse(forged);
+    const accepted = yield* browserBridge.completeToolApproval({
+      requestId: event.requestId,
+      responseToken: event.responseToken,
+      approved: false,
+    });
+    assert.isTrue(accepted);
+    assert.equal(yield* Fiber.join(approvalFiber), "denied");
+  }).pipe(Effect.provide(BrowserBridgeTest)),
+);
+
+it.effect("times out a tool approval nobody answers", () =>
+  Effect.gen(function* () {
+    const browserBridge = yield* BrowserBridge;
+    yield* browserBridge.stream.pipe(Stream.runDrain, Effect.forkScoped);
+    yield* waitForSubscribers(1);
+    const approvalFiber = yield* browserBridge
+      .requestToolApproval({
+        tool: "app_remove",
+        title: "Remove Notes",
+        sensitive: true,
+        timeoutMs: 1_000,
+      })
+      .pipe(Effect.forkScoped);
+    yield* Effect.yieldNow;
+    yield* TestClock.adjust("2 seconds");
+    assert.equal(yield* Fiber.join(approvalFiber), "timeout");
   }).pipe(Effect.provide(BrowserBridgeTest)),
 );

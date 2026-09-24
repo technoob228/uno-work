@@ -11,6 +11,7 @@
     "**/routeTree.gen.ts",
     "**/sdkBundle.generated.ts",
     "**/harnessGuide.generated.ts",
+    "**/unoWorkBrief.generated.ts",
     "apps/web/public/mockServiceWorker.js",
     "apps/web/public/skills",
     "apps/web/src/lib/vendor/qrcodegen.ts",

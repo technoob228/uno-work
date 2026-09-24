@@ -1,23 +1,62 @@
 /**
- * Remote MCP servers the owner added by address (setup → "Your own tool",
- * `settings.mcpServers`). One list, handed to every agent in the shape it
- * understands, so a tool added once shows up in Claude, Codex, OpenCode and
- * Uno alike:
+ * MCP servers of an agent session, and how each harness is handed them — the
+ * one place for it.
  *
+ * One list per session:
+ * - the built-in `uno-work` server (Uno Work environment tools, `../unoWork/`),
+ *   authenticated with the chat's per-thread bridge token;
+ * - the remote servers the owner added by address (setup → "Your own tool",
+ *   `settings.mcpServers`), kept current by `CustomMcpServers` below and read
+ *   per session, so a tool added during setup is in the very next chat
+ *   without rebuilding (and interrupting) running agents.
+ *
+ * One set of per-harness shapes, so a server shows up in every agent alike:
  * - Claude: the SDK's `mcpServers` query option (`type: "http"`);
- * - Codex: `-c mcp_servers.<name>.url=…` overrides on `codex app-server`;
- * - OpenCode / Uno: the `mcp` key of `OPENCODE_CONFIG_CONTENT` (`type: "remote"`).
+ * - Codex: `-c mcp_servers.<name>.*` overrides on `codex app-server` (a token
+ *   is read from the session env via `bearer_token_env_var`, never put on the
+ *   command line);
+ * - OpenCode / Uno: the `mcp` key of `OPENCODE_CONFIG_CONTENT` (`type: "remote"`);
+ * - Hermes, Cursor and custom ACP harnesses: `session/new` `mcpServers`
+ *   (`type: "http"`), next to the workspace's own `.mcp.json` servers.
  *
- * Read per session, not per driver instance: the list lives in a small cache
- * kept current from the settings stream, so a tool added during setup is in
- * the very next chat without rebuilding (and interrupting) running agents.
- * - Hermes / ACP harnesses: ACP `mcpServers` entries (`type: "http"`), next
- *   to the workspace's own `.mcp.json` servers.
+ * `preApproved` servers gate approvals in the daemon (the uno-work server asks
+ * the person itself), so harness-native prompts for them are switched off —
+ * otherwise the person would be asked twice.
  */
 import type { UnoMcpServer } from "@t3tools/contracts";
 import { Context, Effect, Layer, Option, Stream } from "effect";
 
 import { ServerSettingsService } from "../serverSettings.ts";
+import { BROWSER_BRIDGE_TOKEN_ENV, BROWSER_BRIDGE_URL_ENV } from "../browserBridge.ts";
+import { UNO_WORK_MCP_PATH, UNO_WORK_MCP_SERVER_NAME } from "../unoWork/constants.ts";
+
+/** One MCP server in harness-neutral form. `UnoMcpServer` from settings fits it. */
+export interface McpServerEntry {
+  readonly name: string;
+  readonly url: string;
+  readonly enabled?: boolean;
+  /** Static request headers (the uno-work per-thread token). */
+  readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * Env var holding the bearer token. Codex reads the header from it, so the
+   * token stays out of the process's command line.
+   */
+  readonly bearerTokenEnvVar?: string;
+  /** The server asks the person itself: harnesses must not prompt for its tools. */
+  readonly preApproved?: boolean;
+  /** How long one tool call may take (approvals wait for a person). */
+  readonly toolTimeoutSec?: number;
+}
+
+export function enabledMcpServers<T extends McpServerEntry>(
+  servers: ReadonlyArray<T> | undefined,
+): ReadonlyArray<T> {
+  return (servers ?? []).filter(
+    (server) => server.enabled !== false && /^https?:\/\//i.test(server.url.trim()),
+  );
+}
+
+// ── The owner's servers (settings.mcpServers) ──────────────────────────
 
 export interface CustomMcpServersShape {
   /** Enabled servers, as of the latest settings. Cheap and synchronous. */
@@ -27,14 +66,6 @@ export interface CustomMcpServersShape {
 export class CustomMcpServers extends Context.Service<CustomMcpServers, CustomMcpServersShape>()(
   "t3/mcp/CustomMcpServers",
 ) {}
-
-export function enabledMcpServers(
-  servers: ReadonlyArray<UnoMcpServer> | undefined,
-): ReadonlyArray<UnoMcpServer> {
-  return (servers ?? []).filter(
-    (server) => server.enabled && /^https?:\/\//i.test(server.url.trim()),
-  );
-}
 
 export const CustomMcpServersLive = Layer.effect(
   CustomMcpServers,
@@ -66,69 +97,137 @@ export const customMcpServersGetter = Effect.gen(function* () {
   return Option.isSome(service) ? service.value.current : (): ReadonlyArray<UnoMcpServer> => [];
 });
 
-// ── Per-harness shapes ──────────────────────────────────────────────
+// ── The built-in uno-work server ───────────────────────────────────────
+
+/** Seconds a harness may wait on one uno-work tool call (approvals wait for a person). */
+export const UNO_WORK_MCP_TOOL_TIMEOUT_SEC = 900;
+
+/** The session's uno-work server, from its bridge env; null without a thread token. */
+export function unoWorkMcpServer(
+  bridgeEnvironment: Readonly<Record<string, string | undefined>> | undefined,
+): McpServerEntry | null {
+  const baseUrl = bridgeEnvironment?.[BROWSER_BRIDGE_URL_ENV];
+  const token = bridgeEnvironment?.[BROWSER_BRIDGE_TOKEN_ENV];
+  if (!baseUrl || !token) return null;
+  return {
+    name: UNO_WORK_MCP_SERVER_NAME,
+    url: `${baseUrl.replace(/\/+$/, "")}${UNO_WORK_MCP_PATH}`,
+    headers: { Authorization: `Bearer ${token}` },
+    bearerTokenEnvVar: BROWSER_BRIDGE_TOKEN_ENV,
+    preApproved: true,
+    toolTimeoutSec: UNO_WORK_MCP_TOOL_TIMEOUT_SEC,
+  };
+}
+
+/**
+ * Everything a session gets: uno-work (when the session has a thread token)
+ * plus the owner's enabled servers. An owner's server can't take the
+ * built-in's name.
+ */
+export function sessionMcpServers(input: {
+  readonly bridgeEnvironment: Readonly<Record<string, string | undefined>> | undefined;
+  readonly custom: ReadonlyArray<McpServerEntry> | undefined;
+}): ReadonlyArray<McpServerEntry> {
+  const builtIn = unoWorkMcpServer(input.bridgeEnvironment);
+  const custom = enabledMcpServers(input.custom).filter(
+    (server) => server.name !== UNO_WORK_MCP_SERVER_NAME,
+  );
+  return builtIn ? [builtIn, ...custom] : custom;
+}
+
+// ── Claude Agent SDK ───────────────────────────────────────────────────
 
 /** Claude Agent SDK `mcpServers` entries. */
-export function claudeMcpServers(
-  servers: ReadonlyArray<UnoMcpServer>,
-): Record<string, { readonly type: "http"; readonly url: string }> {
+export function claudeMcpServers(servers: ReadonlyArray<McpServerEntry>): Record<
+  string,
+  {
+    readonly type: "http";
+    readonly url: string;
+    readonly headers?: Readonly<Record<string, string>>;
+  }
+> {
   return Object.fromEntries(
     enabledMcpServers(servers).map((server) => [
       server.name,
-      { type: "http" as const, url: server.url.trim() },
+      {
+        type: "http" as const,
+        url: server.url.trim(),
+        ...(server.headers ? { headers: server.headers } : {}),
+      },
     ]),
   );
 }
 
-/** ACP `session/new` `mcpServers` entries (Hermes, custom ACP harnesses). */
-export function acpMcpServers(servers: ReadonlyArray<UnoMcpServer>): ReadonlyArray<{
-  readonly type: "http";
-  readonly name: string;
-  readonly url: string;
-  readonly headers: ReadonlyArray<{ readonly name: string; readonly value: string }>;
-}> {
-  return enabledMcpServers(servers).map((server) => ({
-    type: "http" as const,
-    name: server.name,
-    url: server.url.trim(),
-    headers: [],
-  }));
+/** Claude permission rules (`mcp__<server>`) for servers that ask the person themselves. */
+export function claudePreApprovedTools(servers: ReadonlyArray<McpServerEntry>): Array<string> {
+  return enabledMcpServers(servers)
+    .filter((server) => server.preApproved)
+    .map((server) => `mcp__${server.name}`);
 }
+
+// ── Codex ──────────────────────────────────────────────────────────────
 
 /** TOML basic string: quotes and backslashes escaped, no newlines. */
 function tomlString(value: string): string {
   return `"${value.replace(/[\\"]/g, (char) => `\\${char}`).replace(/[\r\n]/g, "")}"`;
 }
 
-/** `codex app-server` arguments: one `-c` override per server. */
-export function codexMcpConfigArgs(servers: ReadonlyArray<UnoMcpServer>): ReadonlyArray<string> {
-  return enabledMcpServers(servers).flatMap((server) => [
-    "-c",
-    `mcp_servers.${server.name}.url=${tomlString(server.url.trim())}`,
-  ]);
+/** `codex app-server` arguments: `-c` overrides per server. */
+export function codexMcpConfigArgs(servers: ReadonlyArray<McpServerEntry>): ReadonlyArray<string> {
+  return enabledMcpServers(servers).flatMap((server) => {
+    const key = `mcp_servers.${server.name}`;
+    return [
+      "-c",
+      `${key}.url=${tomlString(server.url.trim())}`,
+      ...(server.bearerTokenEnvVar
+        ? ["-c", `${key}.bearer_token_env_var=${tomlString(server.bearerTokenEnvVar)}`]
+        : []),
+      ...(server.toolTimeoutSec ? ["-c", `${key}.tool_timeout_sec=${server.toolTimeoutSec}`] : []),
+      // "approve" = run without asking; codex rejects unknown values at start.
+      ...(server.preApproved ? ["-c", `${key}.default_tools_approval_mode="approve"`] : []),
+    ];
+  });
 }
 
+// ── OpenCode / built-in Uno ────────────────────────────────────────────
+
 /** OpenCode / Uno `mcp` config entries. */
-export function openCodeMcpConfig(
-  servers: ReadonlyArray<UnoMcpServer>,
-): Record<string, { readonly type: "remote"; readonly url: string; readonly enabled: true }> {
+export function openCodeMcpConfig(servers: ReadonlyArray<McpServerEntry>): Record<
+  string,
+  {
+    readonly type: "remote";
+    readonly url: string;
+    readonly enabled: true;
+    readonly headers?: Readonly<Record<string, string>>;
+    readonly timeout?: number;
+  }
+> {
   return Object.fromEntries(
     enabledMcpServers(servers).map((server) => [
       server.name,
-      { type: "remote" as const, url: server.url.trim(), enabled: true as const },
+      {
+        type: "remote" as const,
+        url: server.url.trim(),
+        enabled: true as const,
+        ...(server.headers ? { headers: server.headers } : {}),
+        // opencode's MCP request timeout, in ms.
+        ...(server.toolTimeoutSec ? { timeout: server.toolTimeoutSec * 1000 } : {}),
+      },
     ]),
   );
 }
 
 /**
  * Adds the servers to an `OPENCODE_CONFIG_CONTENT` JSON string, keeping what
- * is already there (instructions, providers, the bundled `uno-search`). A
- * built-in entry wins over a user one with the same name. Returns the input
- * unchanged when there is nothing to add or it is not a JSON object.
+ * is already there (instructions, providers, the bundled `uno-search`). An
+ * entry already in the config wins over an owner's server with the same name;
+ * the built-in uno-work entry always replaces a stale one (its token is per
+ * chat). Returns the input unchanged when there is nothing to add or it is
+ * not a JSON object.
  */
 export function withOpenCodeMcpServers(
   configContent: string | undefined,
-  servers: ReadonlyArray<UnoMcpServer>,
+  servers: ReadonlyArray<McpServerEntry>,
 ): string | undefined {
   const extra = openCodeMcpConfig(servers);
   if (Object.keys(extra).length === 0) return configContent;
@@ -150,5 +249,33 @@ export function withOpenCodeMcpServers(
     base.mcp !== null && typeof base.mcp === "object" && !Array.isArray(base.mcp)
       ? (base.mcp as Record<string, unknown>)
       : {};
-  return JSON.stringify({ ...base, mcp: { ...extra, ...existing } });
+  const { [UNO_WORK_MCP_SERVER_NAME]: builtIn, ...owners } = extra;
+  return JSON.stringify({
+    ...base,
+    mcp: { ...owners, ...existing, ...(builtIn ? { [UNO_WORK_MCP_SERVER_NAME]: builtIn } : {}) },
+  });
+}
+
+/** OpenCode permission key of the uno-work tools (`<server>_<tool>`). */
+export const OPENCODE_UNO_WORK_PERMISSION = `${UNO_WORK_MCP_SERVER_NAME}_*`;
+
+// ── ACP agents (Hermes, Cursor, custom harnesses) ──────────────────────
+
+/**
+ * ACP `session/new` `mcpServers` entries (`type: "http"`): Hermes, Cursor
+ * (advertises `mcpCapabilities.http`) and custom ACP harnesses, next to the
+ * workspace's own `.mcp.json` servers.
+ */
+export function acpMcpServers(servers: ReadonlyArray<McpServerEntry>): ReadonlyArray<{
+  readonly type: "http";
+  readonly name: string;
+  readonly url: string;
+  readonly headers: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+}> {
+  return enabledMcpServers(servers).map((server) => ({
+    type: "http" as const,
+    name: server.name,
+    url: server.url.trim(),
+    headers: Object.entries(server.headers ?? {}).map(([name, value]) => ({ name, value })),
+  }));
 }

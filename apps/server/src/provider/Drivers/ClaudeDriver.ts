@@ -19,9 +19,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { makeClaudeTextGeneration } from "../../textGeneration/ClaudeTextGeneration.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
-import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
-import { buildMachineAppsInstructions } from "../../machineApps/machineAppsInstructions.ts";
-import { buildBrowserInstructions } from "../browserInstructions.ts";
+import { buildUnoWorkBrief } from "../../agentContext/unoWorkBrief.ts";
 import { ServerConfig } from "../../config.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { customMcpServersGetter } from "../../mcp/customMcpServers.ts";
@@ -91,13 +89,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         ...unoAgentEnv,
         ...browserBridge.applyEnvironment(mergeProviderInstanceEnvironment(environment)),
       };
-      const harnessInstructionBlocks = [
-        buildBrowserInstructions(browserBridge.baseUrl),
-        buildPluginInstructions(serverConfig.pluginsDir),
-        buildMachineAppsInstructions(),
-      ].filter((block): block is string => block !== undefined);
-      const harnessInstructions =
-        harnessInstructionBlocks.length > 0 ? harnessInstructionBlocks.join("\n\n") : undefined;
+      // One brief for every harness (agentContext/unoWorkBrief.md); the long
+      // contracts are served on demand by the uno-work MCP server.
+      const harnessInstructions = buildUnoWorkBrief();
       const fallbackContinuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,

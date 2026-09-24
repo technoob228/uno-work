@@ -35,16 +35,18 @@ import { Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { BrowserBridge } from "../../browserBridge.ts";
-import { acpMcpServers, customMcpServersGetter } from "../../mcp/customMcpServers.ts";
+import {
+  acpMcpServers,
+  customMcpServersGetter,
+  sessionMcpServers,
+} from "../../mcp/customMcpServers.ts";
+import { buildUnoWorkBrief } from "../../agentContext/unoWorkBrief.ts";
 import { ServerConfig } from "../../config.ts";
-import { buildMachineAppsInstructions } from "../../machineApps/machineAppsInstructions.ts";
-import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import type { TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
 import { harnessPath } from "../acp/CustomAcpSupport.ts";
-import { buildBrowserInstructions } from "../browserInstructions.ts";
 import { resolveHarnessGuidePath } from "../customHarness/harnessGuide.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCustomHarnessAdapter } from "../Layers/CustomHarnessAdapter.ts";
@@ -123,13 +125,8 @@ export const CustomHarnessDriver: ProviderDriver<CustomHarnessSettings, CustomHa
       const name = displayName?.trim() || config.command || String(instanceId);
       const effectiveConfig = { ...config, enabled } satisfies CustomHarnessSettings;
 
-      const brief = [
-        buildBrowserInstructions(browserBridge.baseUrl),
-        buildPluginInstructions(serverConfig.pluginsDir),
-        buildMachineAppsInstructions(),
-      ]
-        .filter((block): block is string => block !== undefined && block.length > 0)
-        .join("\n\n");
+      // The same environment brief every harness gets (agentContext/unoWorkBrief.md).
+      const brief = buildUnoWorkBrief();
       const briefFile = yield* Effect.promise(() =>
         writeBriefFile(serverConfig.stateDir, brief),
       ).pipe(Effect.orElseSucceed(() => undefined));
@@ -176,9 +173,16 @@ export const CustomHarnessDriver: ProviderDriver<CustomHarnessSettings, CustomHa
         displayName: name,
         environment: processEnv,
         bridgeEnvironment: (context) => browserBridge.scopedEnvironment(context),
-        // The owner's MCP servers (settings.mcpServers, setup → "Your own
-        // tool") reach custom harnesses like every other agent.
-        extraMcpServers: () => acpMcpServers(customMcpServers()),
+        harnessInstructions: brief,
+        // This chat's MCP servers, like every other agent: built-in uno-work
+        // (its own bridge token) + the owner's settings.mcpServers.
+        extraMcpServers: (context) =>
+          acpMcpServers(
+            sessionMcpServers({
+              bridgeEnvironment: browserBridge.scopedEnvironment(context),
+              custom: customMcpServers(),
+            }),
+          ),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         onModelsDiscovered: (discovered) => {
           if (JSON.stringify(discovered.models) === JSON.stringify(discoveredModels)) return;

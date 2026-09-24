@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 
 import type {
   BridgeSecretRequestEvent,
+  BridgeToolApprovalRequestEvent,
   BrowserAutomationCommandInput,
   BrowserAutomationCommandResult,
   BrowserBridgeRequestContext,
@@ -187,6 +188,25 @@ interface PendingSecretRequest extends PendingSecretRequestMeta {
   readonly event: BridgeSecretRequestEvent;
 }
 
+/** How long an agent waits for Allow / Deny on a `uno-work` tool. */
+const DEFAULT_APPROVAL_TIMEOUT_MS = 300_000;
+const MAX_APPROVAL_TIMEOUT_MS = 3_600_000;
+
+export type ToolApprovalOutcome = "approved" | "denied" | "timeout" | "no_client";
+
+interface PendingToolApproval {
+  readonly responseToken: string;
+  readonly deferred: Deferred.Deferred<"approved" | "denied">;
+  readonly event: BridgeToolApprovalRequestEvent;
+}
+
+export function approvalTimeoutMs(timeoutMs: number | undefined): number {
+  return Math.min(
+    MAX_APPROVAL_TIMEOUT_MS,
+    Math.max(1_000, timeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS),
+  );
+}
+
 export function secretRequestTimeoutMs(timeoutMs: number | undefined): number {
   return Math.min(MAX_SECRET_TIMEOUT_MS, Math.max(1_000, timeoutMs ?? DEFAULT_SECRET_TIMEOUT_MS));
 }
@@ -334,6 +354,32 @@ export interface BrowserBridgeShape {
     readonly responseToken: string;
     readonly outcome: SecretRequestOutcome;
   }) => Effect.Effect<boolean>;
+  /**
+   * Ask the person to allow one `uno-work` tool call: pushes a
+   * `toolApprovalRequest` card to web clients and waits for Allow / Deny.
+   * `no_client` — nobody is connected to ask (the call is refused).
+   */
+  readonly requestToolApproval: (
+    input: {
+      readonly tool: string;
+      readonly title: string;
+      readonly detail?: string;
+      readonly sensitive: boolean;
+      readonly timeoutMs?: number;
+    },
+    context?: BrowserBridgeRequestContext,
+  ) => Effect.Effect<ToolApprovalOutcome>;
+  /** The person's answer from the card; false — unknown id or token. */
+  readonly completeToolApproval: (input: {
+    readonly requestId: string;
+    readonly responseToken: string;
+    readonly approved: boolean;
+  }) => Effect.Effect<boolean>;
+  /** Show a file in the app's Office / Files view (see `BridgeOpenInAppEvent`). */
+  readonly publishOpenInApp: (
+    input: { readonly view: "office" | "files"; readonly path: string },
+    context?: BrowserBridgeRequestContext,
+  ) => Effect.Effect<BrowserBridgeStreamEvent>;
   readonly stream: Stream.Stream<BrowserBridgeStreamEvent>;
   /**
    * Есть ли живые подписчики стрима (подключённые web-клиенты). Счётчик
@@ -347,6 +393,10 @@ export interface BrowserBridgeShape {
 export class BrowserBridge extends Context.Service<BrowserBridge, BrowserBridgeShape>()(
   "t3/browserBridge",
 ) {}
+
+function tokensEqual(a: string, b: string): boolean {
+  return a.length === b.length && timingSafeEqual(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+}
 
 export function bridgeContextKey(context: BrowserBridgeRequestContext): string {
   return `${context.threadId ?? ""}\u0000${context.cwd ?? ""}`;
@@ -364,6 +414,7 @@ export const makeBrowserBridge = (input: {
     const subscriberCountRef = yield* Ref.make(0);
     const pendingCommands = new Map<string, PendingCommandResult>();
     const pendingSecretRequests = new Map<string, PendingSecretRequest>();
+    const pendingToolApprovals = new Map<string, PendingToolApproval>();
     // Scoped-токены: один на контекст (тред/проект), переживают рестарты
     // харнесса в рамках жизни сервера. Треды конечны — рост карт ограничен.
     const scopedTokenByContextKey = new Map<string, string>();
@@ -599,6 +650,75 @@ export const makeBrowserBridge = (input: {
           } satisfies BrowserBridgeStreamEvent);
           return true;
         }),
+      requestToolApproval: (input, context?) =>
+        Effect.gen(function* () {
+          const subscribers = yield* Ref.get(subscriberCountRef);
+          if (subscribers === 0) return "no_client" as const;
+          const requestId = randomBytes(12).toString("hex");
+          const responseToken = randomBytes(24).toString("hex");
+          const deferred = yield* Deferred.make<"approved" | "denied">();
+          const sequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
+          const event = {
+            version: 1,
+            type: "toolApprovalRequest",
+            sequence,
+            requestId,
+            responseToken,
+            tool: input.tool,
+            title: input.title,
+            ...(input.detail !== undefined ? { detail: input.detail } : {}),
+            sensitive: input.sensitive,
+            ...(context ? { context } : {}),
+          } satisfies BridgeToolApprovalRequestEvent;
+          pendingToolApprovals.set(requestId, { responseToken, deferred, event });
+          yield* PubSub.publish(pubsub, event);
+
+          const maybeOutcome = yield* Deferred.await(deferred).pipe(
+            Effect.timeoutOption(Duration.millis(approvalTimeoutMs(input.timeoutMs))),
+            Effect.ensuring(Effect.sync(() => pendingToolApprovals.delete(requestId))),
+          );
+          if (Option.isSome(maybeOutcome)) return maybeOutcome.value;
+          const settledSequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
+          yield* PubSub.publish(pubsub, {
+            version: 1,
+            type: "toolApprovalSettled",
+            sequence: settledSequence,
+            requestId,
+          } satisfies BrowserBridgeStreamEvent);
+          return "timeout" as const;
+        }),
+      completeToolApproval: (input) =>
+        Effect.gen(function* () {
+          const pending = pendingToolApprovals.get(input.requestId);
+          if (!pending || !tokensEqual(pending.responseToken, input.responseToken)) {
+            return false;
+          }
+          pendingToolApprovals.delete(input.requestId);
+          yield* Deferred.succeed(pending.deferred, input.approved ? "approved" : "denied");
+          const sequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
+          yield* PubSub.publish(pubsub, {
+            version: 1,
+            type: "toolApprovalSettled",
+            sequence,
+            requestId: input.requestId,
+          } satisfies BrowserBridgeStreamEvent);
+          return true;
+        }),
+      publishOpenInApp: (input, context?) =>
+        Ref.updateAndGet(sequenceRef, (sequence) => sequence + 1).pipe(
+          Effect.map(
+            (sequence) =>
+              ({
+                version: 1,
+                type: "openInApp",
+                sequence,
+                view: input.view,
+                path: input.path,
+                ...(context ? { context } : {}),
+              }) satisfies BrowserBridgeStreamEvent,
+          ),
+          Effect.tap((event) => PubSub.publish(pubsub, event)),
+        ),
       get stream() {
         return Stream.unwrap(
           Effect.gen(function* () {
@@ -609,9 +729,14 @@ export const makeBrowserBridge = (input: {
             // а агент ждёт до таймаута. Снимок берётся после подписки: дубль
             // клиент дедуплицирует по requestId, а settled-событие, успевшее
             // между подпиской и снимком, придёт следом и снимет плашку.
-            const pendingReplay = [...pendingSecretRequests.values()].map(
-              (pending) => pending.event as BrowserBridgeStreamEvent,
-            );
+            const pendingReplay = [
+              ...[...pendingSecretRequests.values()].map(
+                (pending) => pending.event as BrowserBridgeStreamEvent,
+              ),
+              ...[...pendingToolApprovals.values()].map(
+                (pending) => pending.event as BrowserBridgeStreamEvent,
+              ),
+            ];
             return Stream.fromIterable(pendingReplay).pipe(
               Stream.concat(Stream.fromSubscription(subscription)),
               Stream.ensuring(Ref.update(subscriberCountRef, (count) => count - 1)),

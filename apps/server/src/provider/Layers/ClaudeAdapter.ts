@@ -45,7 +45,11 @@ import {
   type UnoMcpServer,
   type UserInputQuestion,
 } from "@t3tools/contracts";
-import { claudeMcpServers } from "../../mcp/customMcpServers.ts";
+import {
+  claudeMcpServers,
+  claudePreApprovedTools,
+  sessionMcpServers,
+} from "../../mcp/customMcpServers.ts";
 import {
   applyClaudePromptEffortPrefix,
   getModelSelectionBooleanOptionValue,
@@ -2906,10 +2910,24 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(fastMode ? { fastMode: true } : {}),
         ...(ultracode ? { ultracode: true } : {}),
       };
-      const customMcp = claudeMcpServers(options?.customMcpServers?.() ?? []);
-      const customMcpServerEntries = Object.keys(customMcp).length > 0 ? customMcp : null;
+      const sessionBridgeEnvironment =
+        options?.bridgeEnvironment?.({
+          ...(threadId ? { threadId } : {}),
+          ...(input.cwd ? { cwd: input.cwd } : {}),
+        }) ?? {};
+      // This chat's MCP servers: the built-in uno-work server (per-thread
+      // token) and the owner's own (settings.mcpServers), read per query.
+      // uno-work asks the person itself, so Claude doesn't prompt for it.
+      const sessionMcp = sessionMcpServers({
+        bridgeEnvironment: sessionBridgeEnvironment,
+        custom: options?.customMcpServers?.(),
+      });
+      const mcpServerEntries = claudeMcpServers(sessionMcp);
+      const preApprovedMcpTools = claudePreApprovedTools(sessionMcp);
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
+        ...(Object.keys(mcpServerEntries).length > 0 ? { mcpServers: mcpServerEntries } : {}),
+        ...(preApprovedMcpTools.length > 0 ? { allowedTools: preApprovedMcpTools } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
         pathToClaudeCodeExecutable: claudeBinaryPath,
         systemPrompt: {
@@ -2932,15 +2950,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(Object.keys(settings).length > 0 ? { settings } : {}),
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
         ...(newSessionId ? { sessionId: newSessionId } : {}),
-        ...(customMcpServerEntries ? { mcpServers: customMcpServerEntries } : {}),
         includePartialMessages: true,
         canUseTool,
         env: {
           ...claudeEnvironment,
-          ...(options?.bridgeEnvironment?.({
-            ...(threadId ? { threadId } : {}),
-            ...(input.cwd ? { cwd: input.cwd } : {}),
-          }) ?? {}),
+          ...sessionBridgeEnvironment,
         },
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),

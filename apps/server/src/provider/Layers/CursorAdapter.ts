@@ -85,6 +85,11 @@ const ACP_APPROVAL_MODE_ALIASES = ["ask"];
 
 export interface CursorAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
+  /** This chat's MCP servers: built-in uno-work + settings.mcpServers, read per session. */
+  readonly extraMcpServers?: (context: {
+    readonly threadId: string;
+    readonly cwd: string;
+  }) => ReadonlyArray<EffectAcpSchema.McpServer>;
   /**
    * Env-оверлей, вычисляемый per-session по контексту треда (threadId + cwd) —
    * browser bridge выдаёт scoped-токен, привязывающий запросы харнесса
@@ -518,11 +523,16 @@ export function makeCursorAdapter(
             ...(options?.environment ?? {}),
             ...(options?.bridgeEnvironment?.({ threadId: input.threadId, cwd }) ?? {}),
           };
+          // This chat's MCP servers (built-in uno-work + the owner's own);
+          // cursor-agent advertises mcpCapabilities.http.
+          const sessionServers =
+            options?.extraMcpServers?.({ threadId: input.threadId, cwd }) ?? [];
           const acp = yield* makeCursorAcpRuntime({
             cursorSettings: effectiveCursorSettings,
             ...(Object.keys(sessionEnvironment).length > 0
               ? { environment: sessionEnvironment }
               : {}),
+            ...(sessionServers.length > 0 ? { mcpServers: sessionServers } : {}),
             childProcessSpawner,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),

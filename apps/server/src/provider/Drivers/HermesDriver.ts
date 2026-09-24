@@ -26,15 +26,17 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as os from "node:os";
 
 import { ServerConfig } from "../../config.ts";
-import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
-import { buildMachineAppsInstructions } from "../../machineApps/machineAppsInstructions.ts";
-import { buildBrowserInstructions } from "../browserInstructions.ts";
+import { buildUnoWorkBrief } from "../../agentContext/unoWorkBrief.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
 import { AiProviderKeys } from "../../aiProviders/AiProviderKeys.ts";
-import { acpMcpServers, customMcpServersGetter } from "../../mcp/customMcpServers.ts";
+import {
+  acpMcpServers,
+  customMcpServersGetter,
+  sessionMcpServers,
+} from "../../mcp/customMcpServers.ts";
 import { gatewayBaseUrlForApp, isAppLabel } from "../../appSdk/appTaskLabel.ts";
 import type { TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
@@ -165,13 +167,9 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
         hermesHome: path.join(serverConfig.stateDir, `hermes-home-${instanceId}`),
       });
       const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
-      const harnessInstructions = [
-        buildBrowserInstructions(browserBridge.baseUrl),
-        buildPluginInstructions(serverConfig.pluginsDir),
-        buildMachineAppsInstructions(),
-      ]
-        .filter((block): block is string => block !== undefined && block.length > 0)
-        .join("\n\n");
+      // One brief for every harness (agentContext/unoWorkBrief.md); the long
+      // contracts are served on demand by the uno-work MCP server.
+      const harnessInstructions = buildUnoWorkBrief();
       const processEnv = {
         ...unoAgentEnv,
         // `uv tool install` puts hermes into ~/.local/bin, which a desktop
@@ -231,7 +229,15 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
           ...hermesAppLabelEnvironment(gatewayKey.appOfThread(context.threadId)),
         }),
         resolveLlmRoute,
-        extraMcpServers: () => acpMcpServers(customMcpServers()),
+        // This chat's MCP servers: built-in uno-work (its own bridge token)
+        // + the owner's settings.mcpServers.
+        extraMcpServers: (context) =>
+          acpMcpServers(
+            sessionMcpServers({
+              bridgeEnvironment: browserBridge.scopedEnvironment(context),
+              custom: customMcpServers(),
+            }),
+          ),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
       });

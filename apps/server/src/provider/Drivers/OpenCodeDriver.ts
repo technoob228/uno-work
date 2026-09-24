@@ -20,12 +20,14 @@ import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGen
 import { ServerConfig } from "../../config.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
-import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
-import { buildMachineAppsInstructions } from "../../machineApps/machineAppsInstructions.ts";
-import { writeBrowserInstructionsFile } from "../browserInstructions.ts";
+import { writeUnoWorkBriefFile } from "../../agentContext/unoWorkBrief.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeOpenCodeAdapter } from "../Layers/OpenCodeAdapter.ts";
-import { customMcpServersGetter, withOpenCodeMcpServers } from "../../mcp/customMcpServers.ts";
+import {
+  customMcpServersGetter,
+  sessionMcpServers,
+  withOpenCodeMcpServers,
+} from "../../mcp/customMcpServers.ts";
 import {
   checkOpenCodeProviderStatus,
   makePendingOpenCodeProvider,
@@ -91,14 +93,9 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       const serverConfig = yield* ServerConfig;
       const eventLoggers = yield* ProviderEventLoggers;
       const browserBridge = yield* BrowserBridge;
-      const instructionsFilePath = writeBrowserInstructionsFile({
-        stateDir: serverConfig.stateDir,
-        baseUrl: browserBridge.baseUrl,
-        extraSections: [
-          buildPluginInstructions(serverConfig.pluginsDir),
-          buildMachineAppsInstructions(),
-        ],
-      });
+      // One brief for every harness (agentContext/unoWorkBrief.md); the long
+      // contracts are served on demand by the uno-work MCP server.
+      const instructionsFilePath = writeUnoWorkBriefFile(serverConfig.stateDir);
       const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
       const processEnv: NodeJS.ProcessEnv = {
         ...unoAgentEnv,
@@ -131,9 +128,11 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         environment: processEnv,
         bridgeEnvironment: (context) => {
           const bridge = browserBridge.scopedEnvironment(context);
+          // This chat's MCP servers: built-in uno-work (per-thread token)
+          // plus the owner's own. Per-thread opencode server, per-chat config.
           const configContent = withOpenCodeMcpServers(
             processEnv.OPENCODE_CONFIG_CONTENT,
-            customMcpServers(),
+            sessionMcpServers({ bridgeEnvironment: bridge, custom: customMcpServers() }),
           );
           return configContent === undefined || configContent === processEnv.OPENCODE_CONFIG_CONTENT
             ? bridge

@@ -111,6 +111,12 @@ export interface CustomHarnessAdapterOptions {
     readonly cwd: string;
   }) => ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  /**
+   * The Uno Work environment brief. ACP has no system-prompt slot, so it
+   * rides as a leading text block on the first prompt of a fresh session
+   * (like Cursor); a resumed session already has it in its history.
+   */
+  readonly harnessInstructions?: string;
   /** Called with every session's discovered models (the picker learns them). */
   readonly onModelsDiscovered?: (discovered: DiscoveredModels) => void;
   readonly clientVersion?: string;
@@ -133,6 +139,8 @@ interface SessionContext {
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
   lastPlanFingerprint: string | undefined;
+  /** The brief still owed to this ACP session (see harnessInstructions). */
+  pendingHarnessInstructions: string | undefined;
   currentModel: string | undefined;
   activeTurnId: TurnId | undefined;
   stopped: boolean;
@@ -481,6 +489,10 @@ export function makeCustomHarnessAdapter(
             currentModel: discovered.current,
             activeTurnId: undefined,
             stopped: false,
+            pendingHarnessInstructions:
+              resumeSessionId !== undefined && started.sessionId === resumeSessionId
+                ? undefined
+                : options.harnessInstructions,
           };
 
           yield* applyModel(ctx, modelSelection?.model);
@@ -668,24 +680,38 @@ export function makeCustomHarnessAdapter(
               updatedAt: yield* nowIso,
             };
 
-            const result = yield* liveCtx.acp.prompt({ prompt: promptParts }).pipe(
-              Effect.mapError((error) => {
-                const mapped = mapAcpToAdapterError(
-                  PROVIDER,
-                  input.threadId,
-                  "session/prompt",
-                  error,
-                );
-                return mapped._tag === "ProviderAdapterRequestError"
-                  ? new ProviderAdapterRequestError({
-                      provider: PROVIDER,
-                      method: "session/prompt",
-                      detail: withStderr(mapped.detail, liveCtx.stderr.get()),
-                      cause: error,
-                    })
-                  : mapped;
-              }),
-            );
+            const pendingInstructions = liveCtx.pendingHarnessInstructions;
+            liveCtx.pendingHarnessInstructions = undefined;
+            const result = yield* liveCtx.acp
+              .prompt({
+                prompt: pendingInstructions
+                  ? [
+                      {
+                        type: "text",
+                        text: `<uno-work-instructions>\n${pendingInstructions}\n</uno-work-instructions>`,
+                      },
+                      ...promptParts,
+                    ]
+                  : promptParts,
+              })
+              .pipe(
+                Effect.mapError((error) => {
+                  const mapped = mapAcpToAdapterError(
+                    PROVIDER,
+                    input.threadId,
+                    "session/prompt",
+                    error,
+                  );
+                  return mapped._tag === "ProviderAdapterRequestError"
+                    ? new ProviderAdapterRequestError({
+                        provider: PROVIDER,
+                        method: "session/prompt",
+                        detail: withStderr(mapped.detail, liveCtx.stderr.get()),
+                        cause: error,
+                      })
+                    : mapped;
+                }),
+              );
 
             liveCtx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });
             liveCtx.session = {

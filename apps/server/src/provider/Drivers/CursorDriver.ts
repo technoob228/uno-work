@@ -17,9 +17,12 @@ import { Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { ServerConfig } from "../../config.ts";
-import { buildPluginInstructions } from "../../plugins/pluginInstructions.ts";
-import { buildMachineAppsInstructions } from "../../machineApps/machineAppsInstructions.ts";
-import { buildBrowserInstructions } from "../browserInstructions.ts";
+import { buildUnoWorkBrief } from "../../agentContext/unoWorkBrief.ts";
+import {
+  acpMcpServers,
+  customMcpServersGetter,
+  sessionMcpServers,
+} from "../../mcp/customMcpServers.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { makeCursorTextGeneration } from "../../textGeneration/CursorTextGeneration.ts";
@@ -85,13 +88,10 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const browserBridge = yield* BrowserBridge;
       const serverConfig = yield* ServerConfig;
       const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
-      const harnessInstructions = [
-        buildBrowserInstructions(browserBridge.baseUrl),
-        buildPluginInstructions(serverConfig.pluginsDir),
-        buildMachineAppsInstructions(),
-      ]
-        .filter((block): block is string => block !== undefined && block.length > 0)
-        .join("\n\n");
+      // One brief for every harness (agentContext/unoWorkBrief.md); the long
+      // contracts are served on demand by the uno-work MCP server.
+      const harnessInstructions = buildUnoWorkBrief();
+      const customMcpServers = yield* customMcpServersGetter;
       const processEnv = {
         ...unoAgentEnv,
         ...browserBridge.applyEnvironment(mergeProviderInstanceEnvironment(environment)),
@@ -111,6 +111,15 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const adapter = yield* makeCursorAdapter(effectiveConfig, {
         environment: processEnv,
         bridgeEnvironment: (context) => browserBridge.scopedEnvironment(context),
+        // This chat's MCP servers: built-in uno-work (its own bridge token)
+        // + the owner's settings.mcpServers.
+        extraMcpServers: (context) =>
+          acpMcpServers(
+            sessionMcpServers({
+              bridgeEnvironment: browserBridge.scopedEnvironment(context),
+              custom: customMcpServers(),
+            }),
+          ),
         ...(harnessInstructions.length > 0 ? { harnessInstructions } : {}),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,

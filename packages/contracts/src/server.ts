@@ -445,12 +445,63 @@ export const BridgeSecretSettledEvent = Schema.Struct({
 });
 export type BridgeSecretSettledEvent = typeof BridgeSecretSettledEvent.Type;
 
+/**
+ * An agent asks the person to allow one action of the `uno-work` MCP server
+ * (show an app on the internet, publish a site, remove an app…). The app
+ * shows Allow / Deny above the chat's composer; the answer goes to
+ * `/api/uno-work/approval/result` with `responseToken`.
+ */
+export const BridgeToolApprovalRequestEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("toolApprovalRequest"),
+  sequence: NonNegativeInt,
+  requestId: Schema.String,
+  responseToken: Schema.String,
+  /** MCP tool name, e.g. `app_show_on_internet`. */
+  tool: Schema.String,
+  /** One line in plain words: "Show “Notes” on the internet". */
+  title: Schema.String,
+  /** Optional detail: what exactly happens. */
+  detail: Schema.optional(Schema.String),
+  /** Always asks (exposes, deletes or costs something) — not only in Ask mode. */
+  sensitive: Schema.Boolean,
+  context: Schema.optional(BrowserBridgeRequestContext),
+});
+export type BridgeToolApprovalRequestEvent = typeof BridgeToolApprovalRequestEvent.Type;
+
+/** The approval was answered, timed out or withdrawn — clients drop the card. */
+export const BridgeToolApprovalSettledEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("toolApprovalSettled"),
+  sequence: NonNegativeInt,
+  requestId: Schema.String,
+});
+export type BridgeToolApprovalSettledEvent = typeof BridgeToolApprovalSettledEvent.Type;
+
+/**
+ * An agent asks to show a file in the app's own Office or Files view (not in
+ * the right panel). Clients switch views only when the person is looking at
+ * the chat the event came from; otherwise they offer it as a notice.
+ */
+export const BridgeOpenInAppEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("openInApp"),
+  sequence: NonNegativeInt,
+  view: Schema.Literals(["office", "files"]),
+  path: Schema.String,
+  context: Schema.optional(BrowserBridgeRequestContext),
+});
+export type BridgeOpenInAppEvent = typeof BridgeOpenInAppEvent.Type;
+
 export const BrowserBridgeStreamEvent = Schema.Union([
   BrowserBridgeOpenUrlEvent,
   BrowserBridgeOpenFileEvent,
   BrowserBridgeCommandEvent,
   BridgeSecretRequestEvent,
   BridgeSecretSettledEvent,
+  BridgeToolApprovalRequestEvent,
+  BridgeToolApprovalSettledEvent,
+  BridgeOpenInAppEvent,
 ]);
 export type BrowserBridgeStreamEvent = typeof BrowserBridgeStreamEvent.Type;
 

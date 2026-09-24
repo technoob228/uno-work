@@ -122,8 +122,11 @@ export interface HermesAdapterLiveOptions {
    * The failure is a sentence for the person ("No xAI key on this computer…").
    * Absent (tests): the static environment decides.
    */
-  /** Owner-added MCP servers (settings.mcpServers), read per session. */
-  readonly extraMcpServers?: () => ReadonlyArray<EffectAcpSchema.McpServer>;
+  /** This chat's MCP servers: built-in uno-work + settings.mcpServers, read per session. */
+  readonly extraMcpServers?: (context: {
+    readonly threadId: string;
+    readonly cwd: string;
+  }) => ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly resolveLlmRoute?: (input: {
     readonly threadId: ThreadId;
     readonly provider: AssistantLlmProvider;
@@ -458,7 +461,7 @@ export function makeHermesAdapter(
           const workspaceMcpNames = new Set(workspaceMcpServers.map((server) => server.name));
           const mcpServers = [
             ...workspaceMcpServers,
-            ...(options?.extraMcpServers?.() ?? []).filter(
+            ...(options?.extraMcpServers?.({ threadId: input.threadId, cwd }) ?? []).filter(
               (server) => !workspaceMcpNames.has(server.name),
             ),
           ];

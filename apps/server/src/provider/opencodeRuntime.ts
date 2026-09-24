@@ -34,6 +34,8 @@ import { withBunScratchDir } from "./bunScratchDir.ts";
 import { collectStreamAsString } from "./providerSnapshot.ts";
 import { NetService } from "@t3tools/shared/Net";
 
+import { OPENCODE_UNO_WORK_PERMISSION } from "../mcp/customMcpServers.ts";
+
 const OPENCODE_SERVER_READY_PREFIX = "opencode server listening";
 // A ceiling, not a delay: the wait ends as soon as the server says it is up.
 // 5 s was too tight for the first start on a fresh 1-vCPU Work box (cold
@@ -253,6 +255,9 @@ export function buildOpenCodePermissionRules(runtimeMode: RuntimeMode): Permissi
     { permission: "external_directory", pattern: "*", action: "ask" },
     { permission: "doom_loop", pattern: "*", action: "ask" },
     { permission: "question", pattern: "*", action: "allow" },
+    // The uno-work MCP tools: the daemon asks the person itself (per tool
+    // level and this mode), so opencode must not ask a second time.
+    { permission: OPENCODE_UNO_WORK_PERMISSION, pattern: "*", action: "allow" },
   ];
 }
 

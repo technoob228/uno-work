@@ -1,13 +1,8 @@
 /**
- * Stateless MCP (Model Context Protocol) server for the manager tool layer.
- *
- * Implements the Streamable HTTP transport in its simplest legal form: every
- * client POST carries one JSON-RPC message and gets a plain
- * `application/json` response (no SSE stream, no server-side session state).
- * That keeps the endpoint a pure function of (capability token, request) and
- * avoids pulling the official SDK's Express-style transport into the Effect
- * HTTP router. Verified against MCP protocol revisions 2024-11-05 through
- * 2025-06-18 for the initialize / tools/list / tools/call / ping subset.
+ * Stateless MCP server for the manager tool layer (`uno-manager`, given to
+ * assistants through `.mcp.json`). The JSON-RPC/Streamable-HTTP plumbing
+ * lives in `../mcp/mcpJsonRpc.ts` and is shared with the `uno-work` server
+ * every chat gets (`../unoWork/`).
  */
 import {
   ManagerCancelReminderInput,
@@ -26,11 +21,13 @@ import {
 } from "@t3tools/contracts";
 import { Effect, Schema } from "effect";
 
+import {
+  handleMcpMessage,
+  type McpHandleOutcome,
+  type McpServerDefinition,
+} from "../mcp/mcpJsonRpc.ts";
 import type { ManagerToolError } from "./Errors.ts";
 import type { ManagerCaller, ManagerToolServiceShape } from "./Services/ManagerToolService.ts";
-
-const LATEST_PROTOCOL_VERSION = "2025-06-18";
-const SUPPORTED_PROTOCOL_VERSIONS = new Set(["2024-11-05", "2025-03-26", LATEST_PROTOCOL_VERSION]);
 
 export const MANAGER_MCP_SERVER_INFO = {
   name: "uno-manager",
@@ -303,38 +300,6 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   },
 ];
 
-// ===============================
-// JSON-RPC plumbing
-// ===============================
-
-interface JsonRpcRequest {
-  readonly jsonrpc: "2.0";
-  readonly id?: string | number | null;
-  readonly method: string;
-  readonly params?: unknown;
-}
-
-type McpHandleOutcome =
-  | { readonly kind: "response"; readonly body: unknown }
-  | { readonly kind: "accepted" };
-
-function jsonRpcResult(id: string | number | null, result: unknown) {
-  return { jsonrpc: "2.0", id, result };
-}
-
-function jsonRpcError(id: string | number | null, code: number, message: string) {
-  return { jsonrpc: "2.0", id, error: { code, message } };
-}
-
-function isJsonRpcRequest(message: unknown): message is JsonRpcRequest {
-  return (
-    typeof message === "object" &&
-    message !== null &&
-    (message as { jsonrpc?: unknown }).jsonrpc === "2.0" &&
-    typeof (message as { method?: unknown }).method === "string"
-  );
-}
-
 function toolErrorText(error: ManagerToolError | Schema.SchemaError): string {
   if (Schema.isSchemaError(error)) {
     return `Invalid tool arguments: ${error.message}`;
@@ -342,102 +307,34 @@ function toolErrorText(error: ManagerToolError | Schema.SchemaError): string {
   return error.message;
 }
 
+interface ManagerMcpContext {
+  readonly tools: ManagerToolServiceShape;
+  readonly caller: ManagerCaller;
+}
+
+const MANAGER_MCP_SERVER: McpServerDefinition<
+  ManagerMcpContext,
+  ManagerToolError | Schema.SchemaError
+> = {
+  serverInfo: MANAGER_MCP_SERVER_INFO,
+  tools: MANAGER_MCP_TOOLS.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+    run: (ctx: ManagerMcpContext, args: unknown) => tool.run(ctx.tools, ctx.caller, args),
+  })),
+  errorText: toolErrorText,
+};
+
 /**
  * Handle one decoded JSON-RPC message on behalf of an authenticated caller.
- * Returns `accepted` for notifications (HTTP 202, no body).
+ * Returns `accepted` for notifications (HTTP 202, no body). The protocol
+ * plumbing is shared with the `uno-work` server (`../mcp/mcpJsonRpc.ts`).
  */
 export function handleManagerMcpMessage(
   tools: ManagerToolServiceShape,
   caller: ManagerCaller,
   message: unknown,
 ): Effect.Effect<McpHandleOutcome> {
-  return Effect.gen(function* () {
-    if (Array.isArray(message)) {
-      return {
-        kind: "response",
-        body: jsonRpcError(null, -32600, "Batch requests are not supported."),
-      } as const;
-    }
-    if (!isJsonRpcRequest(message)) {
-      return {
-        kind: "response",
-        body: jsonRpcError(null, -32600, "Expected a JSON-RPC 2.0 request."),
-      } as const;
-    }
-
-    // Notifications (no id) get acknowledged without a body.
-    if (message.id === undefined || message.id === null) {
-      return { kind: "accepted" } as const;
-    }
-    const id = message.id;
-
-    switch (message.method) {
-      case "initialize": {
-        const requested =
-          typeof message.params === "object" &&
-          message.params !== null &&
-          typeof (message.params as { protocolVersion?: unknown }).protocolVersion === "string"
-            ? ((message.params as { protocolVersion: string }).protocolVersion satisfies string)
-            : LATEST_PROTOCOL_VERSION;
-        const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.has(requested)
-          ? requested
-          : LATEST_PROTOCOL_VERSION;
-        return {
-          kind: "response",
-          body: jsonRpcResult(id, {
-            protocolVersion,
-            capabilities: { tools: {} },
-            serverInfo: MANAGER_MCP_SERVER_INFO,
-          }),
-        } as const;
-      }
-      case "ping": {
-        return { kind: "response", body: jsonRpcResult(id, {}) } as const;
-      }
-      case "tools/list": {
-        return {
-          kind: "response",
-          body: jsonRpcResult(id, {
-            tools: MANAGER_MCP_TOOLS.map((tool) => ({
-              name: tool.name,
-              description: tool.description,
-              inputSchema: tool.inputSchema,
-            })),
-          }),
-        } as const;
-      }
-      case "tools/call": {
-        const params = (message.params ?? {}) as {
-          readonly name?: unknown;
-          readonly arguments?: unknown;
-        };
-        const tool = MANAGER_MCP_TOOLS.find((candidate) => candidate.name === params.name);
-        if (tool === undefined) {
-          return {
-            kind: "response",
-            body: jsonRpcError(id, -32602, `Unknown tool: ${String(params.name)}`),
-          } as const;
-        }
-        const outcome = yield* tool.run(tools, caller, params.arguments).pipe(
-          Effect.map((result) => ({
-            content: [{ type: "text", text: JSON.stringify(result) }],
-            isError: false,
-          })),
-          Effect.catch((error: ManagerToolError | Schema.SchemaError) =>
-            Effect.succeed({
-              content: [{ type: "text", text: toolErrorText(error) }],
-              isError: true,
-            }),
-          ),
-        );
-        return { kind: "response", body: jsonRpcResult(id, outcome) } as const;
-      }
-      default: {
-        return {
-          kind: "response",
-          body: jsonRpcError(id, -32601, `Method not found: ${message.method}`),
-        } as const;
-      }
-    }
-  });
+  return handleMcpMessage(MANAGER_MCP_SERVER, { tools, caller }, message);
 }
