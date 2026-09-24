@@ -78,14 +78,21 @@ export function InboxListener() {
     if (!environmentId || !threadId) return;
     const snapshot = byEnvironment[environmentId];
     if (!snapshot) return;
-    const unread = snapshot.items.some(
-      (item) =>
-        item.readAt === null && item.open?.kind === "thread" && item.open.threadId === threadId,
-    );
-    if (!unread) return;
+    // "Finished" and "failed" are news you have now seen. An approval or a
+    // question stays in "Needs you" until it is answered (the daemon reads it then).
+    const seen = snapshot.items
+      .filter(
+        (item) =>
+          item.readAt === null &&
+          (item.kind === "agent.done" || item.kind === "agent.error") &&
+          item.open?.kind === "thread" &&
+          item.open.threadId === threadId,
+      )
+      .map((item) => item.id);
+    if (seen.length === 0) return;
     const markRead = () => {
       if (!windowIsInFront()) return;
-      void updateInbox(environmentId as EnvironmentId, { action: "read", threadId }).catch(
+      void updateInbox(environmentId as EnvironmentId, { action: "read", ids: seen }).catch(
         () => undefined,
       );
     };

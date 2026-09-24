@@ -88,11 +88,21 @@ export function useOpenInboxItem() {
         ? machineAppOpenUrl(app, isBrowserOnMachine(window.location.hostname))
         : null;
       if (!app || !base) {
+        // Not there, stopped, or running but not reachable from this browser
+        // (a cloud computer's app that isn't shown on the internet): Home has
+        // the Start / "Show on the internet" buttons for it.
         toastManager.add({
           type: "info",
-          title: `${item.source.name} isn't running`,
-          description: "Start it on Home, then open the notification again.",
+          title:
+            app?.status === "running"
+              ? `${item.source.name} can't be opened from here yet`
+              : `${item.source.name} isn't running`,
+          description:
+            app?.status === "running"
+              ? "Open it on Home and turn on “Show on the internet”, then open the notification again."
+              : "Start it on Home, then open the notification again.",
         });
+        void navigate({ to: "/computer" });
         return;
       }
       openHere({
