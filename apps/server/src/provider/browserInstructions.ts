@@ -1,14 +1,11 @@
 /**
- * Инструкции для всех харнессов про встроенный браузер Uno Work.
- *
- * Каждый харнесс (Claude / Codex / OpenCode / Uno) получает один и тот же текст
- * через свой механизм системного промпта. Текст рассказывает, как открыть
- * страницу в правой панели приложения через bridge-endpoint, и упоминает
- * `getuno.xyz/llms.txt` для задач, связанных с инфраструктурой.
+ * The raw bridge HTTP API (right panel, browser commands, secrets, messenger
+ * notify, other chats, the Uno account). No longer put into every session:
+ * harnesses get the short brief (`agentContext/unoWorkBrief.md`) and the
+ * `uno-work` MCP tools; this text is served on demand as the HTTP fallback in
+ * `uno_guide("browser" | "chats" | "secrets" | "account")`.
  */
 import { CHANNEL_NOTIFY_MAX_TEXT_CHARS, CHANNEL_NOTIFY_PATH } from "@t3tools/contracts";
-import * as FS from "node:fs";
-import * as Path from "node:path";
 
 import {
   BROWSER_BRIDGE_COMMAND_PATH,
@@ -194,31 +191,4 @@ curl -sS "${url}?scope=all" ${auth}
 Как отвечать: если тебе написал **родительский чат**, просто ответь в своём чате — родитель прочитает сам. Если написал **любой другой агент**, он твой чат не видит: ответь ему через \`POST ${url}/<его threadId>/messages\`. Отправив сообщение другому агенту, заканчивай ход, а не жди в цикле: его ответ придёт тебе новым сообщением. **Не отвечай на ответ, если добавить нечего** — иначе два агента будут бесконечно благодарить друг друга. Пиши самодостаточно: у получателя нет контекста твоего чата.
 
 Ответ 403 \`thread_context_required\` значит, что твой харнесс не привязан к конкретному треду и вести треды отсюда нельзя — скажи об этом пользователю, не повторяй попытки. Не добавляй \`-f\` к curl: причина отказа приходит в теле ответа (\`{"ok":false,"error":"…","message":"…"}\`). Не плоди треды без нужды: один тред — одна самостоятельная подзадача.`;
-}
-
-/**
- * Записывает инструкции в файл и возвращает его путь — для харнессов
- * (OpenCode/Uno), у которых системные инструкции задаются путём к файлу, а не
- * инлайн-текстом. `extraSections` — дополнительные блоки (например, инструкции
- * про плагины), которые пишутся даже если bridge выключен. Возвращает
- * undefined, если писать нечего. Идемпотентно перезаписывает файл при каждом
- * старте инстанса.
- */
-export function writeBrowserInstructionsFile(input: {
-  readonly stateDir: string;
-  readonly baseUrl: string | undefined;
-  readonly extraSections?: ReadonlyArray<string>;
-}): string | undefined {
-  const sections = [buildBrowserInstructions(input.baseUrl), ...(input.extraSections ?? [])].filter(
-    (section): section is string => section !== undefined && section.length > 0,
-  );
-  if (sections.length === 0) return undefined;
-  const filePath = Path.join(input.stateDir, "uno-browser-instructions.md");
-  try {
-    FS.mkdirSync(input.stateDir, { recursive: true });
-    FS.writeFileSync(filePath, `${sections.join("\n\n")}\n`, "utf8");
-    return filePath;
-  } catch {
-    return undefined;
-  }
 }
