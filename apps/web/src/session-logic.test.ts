@@ -88,6 +88,48 @@ describe("derivePendingApprovals", () => {
     ]);
   });
 
+  it("keeps approvals of an unknown kind so the Approve/Decline buttons show", () => {
+    // OpenCode (the built-in Uno agent) asks "external_directory" before touching a
+    // path outside the project. The server sends requestType "unknown"; dropping it
+    // left the chat with no buttons and the agent waiting forever.
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "approval-external",
+        createdAt: "2026-09-24T00:00:01.000Z",
+        kind: "approval.requested",
+        summary: "Approval requested",
+        tone: "approval",
+        payload: {
+          requestId: "req-ext",
+          requestType: "unknown",
+          detail: "Outside the project folder: /home/unowork/bakery/*",
+        },
+      }),
+    ];
+
+    expect(derivePendingApprovals(activities)).toEqual([
+      {
+        requestId: "req-ext",
+        requestKind: "other",
+        createdAt: "2026-09-24T00:00:01.000Z",
+        detail: "Outside the project folder: /home/unowork/bakery/*",
+      },
+    ]);
+
+    const resolved = [
+      ...activities,
+      makeActivity({
+        id: "approval-external-resolved",
+        createdAt: "2026-09-24T00:00:02.000Z",
+        kind: "approval.resolved",
+        summary: "Approval resolved",
+        tone: "info",
+        payload: { requestId: "req-ext", requestType: "unknown" },
+      }),
+    ];
+    expect(derivePendingApprovals(resolved)).toEqual([]);
+  });
+
   it("maps canonical requestType payloads into pending approvals", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

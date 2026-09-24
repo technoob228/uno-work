@@ -232,19 +232,52 @@ function toToolLifecycleItemType(toolName: string): ToolLifecycleItemType {
   return "dynamic_tool_call";
 }
 
-function mapPermissionToRequestType(
+export function mapPermissionToRequestType(
   permission: string,
 ): "command_execution_approval" | "file_read_approval" | "file_change_approval" | "unknown" {
   switch (permission) {
     case "bash":
       return "command_execution_approval";
     case "read":
+    case "glob":
+    case "grep":
+    case "list":
+    case "lsp":
       return "file_read_approval";
     case "edit":
+    case "write":
+    case "patch":
+    case "multiedit":
       return "file_change_approval";
     default:
+      // external_directory, webfetch, websearch, doom_loop, … — the client still
+      // shows Approve/Decline for these; describeOpenCodePermission names them.
       return "unknown";
   }
+}
+
+const OPENCODE_PERMISSION_LABELS: Record<string, string> = {
+  external_directory: "Outside the project folder",
+  webfetch: "Open a web page",
+  websearch: "Search the web",
+  codesearch: "Search code on the web",
+  doom_loop: "Repeat the same tool call again",
+  task: "Start a sub-agent",
+  skill: "Use a skill",
+};
+
+/** Human text for an OpenCode permission request (shown under the Approve buttons). */
+export function describeOpenCodePermission(
+  permission: string,
+  patterns: ReadonlyArray<string>,
+): string {
+  const target = patterns.filter((pattern) => pattern.length > 0 && pattern !== "*").join("\n");
+  const label =
+    mapPermissionToRequestType(permission) === "unknown"
+      ? (OPENCODE_PERMISSION_LABELS[permission] ?? permission)
+      : undefined;
+  if (label && target) return `${label}: ${target}`;
+  return label ?? (target || permission);
 }
 
 function mapPermissionDecision(reply: "once" | "always" | "reject"): string {
@@ -1465,10 +1498,10 @@ export function makeOpenCodeAdapter(
             type: "request.opened",
             payload: {
               requestType: mapPermissionToRequestType(event.properties.permission),
-              detail:
-                event.properties.patterns.length > 0
-                  ? event.properties.patterns.join("\n")
-                  : event.properties.permission,
+              detail: describeOpenCodePermission(
+                event.properties.permission,
+                event.properties.patterns,
+              ),
               args: event.properties.metadata,
             },
           });

@@ -81,7 +81,10 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
 
 export interface PendingApproval {
   requestId: ApprovalRequestId;
-  requestKind: "command" | "file-read" | "file-change";
+  // "other": the agent asked about something we have no special label for
+  // (OpenCode's external_directory / webfetch / doom_loop, …). It still needs
+  // Approve/Decline buttons — dropping it leaves the agent waiting forever.
+  requestKind: "command" | "file-read" | "file-change" | "other";
   createdAt: string;
   detail?: string;
 }
@@ -243,10 +246,10 @@ export function derivePendingApprovals(
           : null;
     const detail = payload && typeof payload.detail === "string" ? payload.detail : undefined;
 
-    if (activity.kind === "approval.requested" && requestId && requestKind) {
+    if (activity.kind === "approval.requested" && requestId) {
       openByRequestId.set(requestId, {
         requestId,
-        requestKind,
+        requestKind: requestKind ?? "other",
         createdAt: activity.createdAt,
         ...(detail ? { detail } : {}),
       });
