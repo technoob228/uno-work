@@ -42,8 +42,14 @@ export function crc32(data: Uint8Array): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-/** Entries in archive order. Throws `ZipFormatError` for anything unusual. */
-export function readZip(bytes: Uint8Array): ZipEntry[] {
+/**
+ * Entries in archive order. Throws `ZipFormatError` for anything unusual.
+ * `include` picks entries by name; the others are never inflated.
+ */
+export function readZip(
+  bytes: Uint8Array,
+  options?: { readonly include?: (name: string) => boolean },
+): ZipEntry[] {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   // End of central directory: last 22 bytes + up to 64 KB of comment.
   let eocd = -1;
@@ -81,6 +87,7 @@ export function readZip(bytes: Uint8Array): ZipEntry[] {
     if (seen.has(name)) throw new ZipFormatError("duplicate entry");
     seen.add(name);
     if (name.endsWith("/")) continue; // folder entries carry nothing
+    if (options?.include && !options.include(name)) continue;
     total += size;
     if (total > ZIP_MAX_TOTAL_BYTES) throw new ZipFormatError("package too large when unpacked");
     if (localOffset + 30 > bytes.length || view.getUint32(localOffset, true) !== 0x04034b50) {
