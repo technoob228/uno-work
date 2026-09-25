@@ -107,6 +107,7 @@ export function AppView() {
                 name={name}
                 icon={icon}
                 iconImage={tile?.iconImage ?? null}
+                templateId={tile?.templateId ?? null}
                 className="size-5 rounded-md text-xs shadow-none ring-0"
               />
               <span className="max-w-[10rem] truncate">{name}</span>
@@ -143,6 +144,7 @@ export function AppView() {
             name={name}
             icon={icon}
             iconImage={tile?.iconImage ?? null}
+            templateId={tile?.templateId ?? null}
             className="size-7 rounded-lg text-base shadow-none"
           />
           <div className="min-w-0 flex-1 leading-tight">

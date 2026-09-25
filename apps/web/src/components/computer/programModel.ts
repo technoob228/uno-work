@@ -29,6 +29,8 @@ export interface ProgramTile {
   readonly name: string;
   readonly icon: string | null;
   readonly iconImage: string | null;
+  /** The App Store catalog id, for the console logo fallback; null/absent = not a store app. */
+  readonly templateId?: string | null;
   readonly status: ProgramStatus;
   /** Short line under the name. */
   readonly caption: string;
@@ -308,6 +310,7 @@ export function buildProgramTiles(input: {
       name: install.name,
       icon: install.icon,
       iconImage: install.iconUrl ?? null,
+      templateId: install.templateId,
       status: running ? (input.computerOn ? "running" : "asleep") : install.state,
       caption:
         install.state === "installing"
@@ -334,6 +337,7 @@ export function buildProgramTiles(input: {
       name: app.name,
       icon: app.icon,
       iconImage: app.iconUrl ?? null,
+      templateId: app.templateId,
       status,
       caption:
         status === "asleep" ? "Asleep" : status === "installing" ? "Installing…" : "App Store",

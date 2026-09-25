@@ -536,7 +536,12 @@ export function ProgramDialog({
           <>
             <DialogHeader>
               <div className="flex items-center gap-4">
-                <ProgramIcon name={tile.name} icon={tile.icon} iconImage={tile.iconImage} />
+                <ProgramIcon
+                  name={tile.name}
+                  icon={tile.icon}
+                  iconImage={tile.iconImage}
+                  templateId={tile.templateId}
+                />
                 <div className="min-w-0">
                   <DialogTitle className="truncate">{tile.name}</DialogTitle>
                   <DialogDescription className="flex items-center gap-1.5">

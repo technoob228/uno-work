@@ -303,6 +303,7 @@ export function AppsWidget({
                 name={tile.name}
                 icon={tile.icon}
                 iconImage={tile.iconImage}
+                templateId={tile.templateId}
                 className="size-11 rounded-[14px] text-lg"
               />
             }

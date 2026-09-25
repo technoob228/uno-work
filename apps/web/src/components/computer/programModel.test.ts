@@ -185,6 +185,11 @@ describe("App Store apps show up once (0.0.72)", () => {
       computerOn: true,
     });
 
+  it("carries the catalog id so Home tiles can fall back to the console logo", () => {
+    const [tile] = build([]);
+    expect(tile).toMatchObject({ name: "Memos", templateId: "memos", iconImage: null });
+  });
+
   it("hides the app's containers, its web port and the ports its containers publish", () => {
     const tiles = build([
       app({

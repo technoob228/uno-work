@@ -146,6 +146,7 @@ function AppRow({ tile, onNavigate }: { tile: ProgramTile; onNavigate: () => voi
             name={tile.name}
             icon={tile.icon}
             iconImage={tile.iconImage}
+            templateId={tile.templateId}
             className="size-6 rounded-md text-sm shadow-none"
           />
           {dot ? (

@@ -26,12 +26,13 @@ import {
   TriangleAlertIcon,
   WandSparklesIcon,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import { Spinner } from "../ui/spinner";
+import { logoSources } from "./appStoreModel";
 import type { ProgramStatus, ProgramTile } from "./programModel";
 
 /**
@@ -70,27 +71,46 @@ export function ProgramIcon({
   name,
   icon,
   iconImage,
+  templateId = null,
   className,
 }: {
   name: string;
   icon: string | null;
   iconImage: string | null;
+  /**
+   * The App Store catalog id: when the address the computer passed on is
+   * missing or doesn't load, try the console's logo by id (svg, png) — as in
+   * the App Store — before the emoji.
+   */
+  templateId?: string | null | undefined;
   className?: string;
 }) {
+  const sources = templateId
+    ? logoSources({ id: templateId, iconUrl: iconImage })
+    : iconImage
+      ? [iconImage]
+      : [];
+  const key = sources.join(" ");
+  // Which source failed last, per source list: a new list starts over.
+  const [failed, setFailed] = useState<{ key: string; count: number }>({ key, count: 0 });
+  const attempt = failed.key === key ? failed.count : 0;
+  const src = sources[attempt];
   // The caller's className goes last so a small icon (sidebar rows, the app
   // bar) can shrink the glyph too, not only the box.
   const base =
     "flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl shadow-sm ring-1 ring-black/5 dark:ring-white/10";
-  if (iconImage) {
+  if (src) {
     // App Store logos (served by Uno) are brand marks: whole, on white, with air.
-    const logo = iconImage.includes("/api/v1/apps/icons/");
+    const logo = src.includes("/api/v1/apps/icons/");
     return (
       <span className={cn(base, logo ? "bg-white p-[18%]" : "bg-card", className)}>
         <img
-          src={iconImage}
+          key={src}
+          src={src}
           alt=""
           className={cn("size-full", logo ? "object-contain" : "object-cover")}
           draggable={false}
+          onError={() => setFailed({ key, count: attempt + 1 })}
         />
       </span>
     );
@@ -383,7 +403,14 @@ export function ComputerPrograms({
             title={tile.openUrl ? `Open ${tile.name}` : `${tile.name} — details`}
             aiNote={tile.aiNote ?? null}
             aiWarning={tile.aiWarning ?? null}
-            icon={<ProgramIcon name={tile.name} icon={tile.icon} iconImage={tile.iconImage} />}
+            icon={
+              <ProgramIcon
+                name={tile.name}
+                icon={tile.icon}
+                iconImage={tile.iconImage}
+                templateId={tile.templateId}
+              />
+            }
             onClick={() => onOpenTile(tile)}
             onDetails={() => onTileDetails(tile)}
           />
