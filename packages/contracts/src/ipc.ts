@@ -235,6 +235,19 @@ import type {
   FilesCloudOfficeSaveInput,
   FilesCloudOfficeSaveResult,
   FilesOfficeVersionList,
+  FilesDriveBot,
+  FilesDriveBotConnectInput,
+  FilesDriveFileList,
+  FilesDriveIdInput,
+  FilesDriveOk,
+  FilesDriveRecentInput,
+  FilesDriveSearchInput,
+  FilesDriveShare,
+  FilesDriveShareCreateInput,
+  FilesDriveShareList,
+  FilesDriveState,
+  FilesDriveTelegramLink,
+  FilesDriveTelegramLinkInput,
   FilesCloudTransferResult,
 } from "./files.ts";
 import type {
@@ -919,6 +932,16 @@ export interface EnvironmentApi {
     cloudOfficeOpen: (input: FilesCloudOfficeOpenInput) => Promise<FilesCloudOfficeOpened>;
     cloudOfficeSave: (input: FilesCloudOfficeSaveInput) => Promise<FilesCloudOfficeSaveResult>;
     cloudOfficeVersions: (input: FilesCloudOfficeOpenInput) => Promise<FilesOfficeVersionList>;
+    driveState: () => Promise<FilesDriveState>;
+    driveSearch: (input: FilesDriveSearchInput) => Promise<FilesDriveFileList>;
+    driveRecent: (input: FilesDriveRecentInput) => Promise<FilesDriveFileList>;
+    driveShareCreate: (input: FilesDriveShareCreateInput) => Promise<FilesDriveShare>;
+    driveShareList: () => Promise<FilesDriveShareList>;
+    driveShareRevoke: (input: FilesDriveIdInput) => Promise<FilesDriveOk>;
+    driveTelegramLink: (input: FilesDriveTelegramLinkInput) => Promise<FilesDriveTelegramLink>;
+    driveTelegramUnlink: (input: FilesDriveIdInput) => Promise<FilesDriveOk>;
+    driveBotConnect: (input: FilesDriveBotConnectInput) => Promise<FilesDriveBot>;
+    driveBotDisconnect: () => Promise<FilesDriveOk>;
   };
   /** Install a harness CLI or sign it in on this environment's machine. */
   providerSetup: {

@@ -12,6 +12,7 @@ import { isWebLite } from "../../lite/flag";
 import { Meter } from "../computer/computerUi";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
+import { DriveAccountCard } from "./DriveAccountCard";
 import { GroupTitle, RowList } from "./rowsUi";
 
 export function cloudQuotaBytes(
@@ -56,32 +57,40 @@ export function CloudTab({
           <span className="min-w-0 flex-1 text-sm">
             {error && !cloud ? (
               <span className="text-muted-foreground">
-                Couldn't read the cloud just now. Your files are fine.
+                Couldn't read Cloud storage just now. Your files are fine.
               </span>
             ) : (
               <>
                 <span className="font-semibold tabular-nums">{formatBytes(used)}</span>
                 <span className="text-muted-foreground">
-                  {quota > 0 ? ` of ${formatBytes(quota)}` : ""} in the cloud — every computer and
-                  app sees it
+                  {quota > 0 ? ` of ${formatBytes(quota)}` : ""} in Cloud storage — every computer
+                  and app sees it
                 </span>
               </>
             )}
           </span>
           {cloudPct !== null ? <Meter value={cloudPct} className="w-28" /> : null}
-          {/* Web lite has no Files: it browses a computer's disk. */}
+          {/* Web lite has no Files or Drive app: they need a computer. */}
           {isWebLite ? null : (
-            <Button
-              size="sm"
-              variant="outline"
-              render={<Link to="/files" search={{ cloud: "1" }} />}
-            >
-              <FolderOpenIcon />
-              Open Files
-            </Button>
+            <>
+              <Button size="sm" variant="outline" render={<Link to="/drive" />}>
+                <HardDriveIcon />
+                Open Uno Drive
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                render={<Link to="/files" search={{ cloud: "1" }} />}
+              >
+                <FolderOpenIcon />
+                All buckets
+              </Button>
+            </>
           )}
         </div>
       )}
+
+      {isWebLite ? <DriveAccountCard /> : null}
 
       {cloud && cloud.bucketList.length > 0 ? (
         <>

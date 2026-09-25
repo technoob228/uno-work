@@ -24,7 +24,7 @@
 import type { UnoMachineAppAction } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, getRouteApi, useNavigate, useRouter } from "@tanstack/react-router";
-import { HouseIcon, LayoutGridIcon, MonitorIcon, RefreshCwIcon } from "lucide-react";
+import { HardDriveIcon, HouseIcon, LayoutGridIcon, MonitorIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { accountTransport } from "../../account/unoAccount";
@@ -208,10 +208,16 @@ export function ComputerView() {
 
   const catalog = appsQuery.data?.catalog;
   const hasFilesApp = "/files" in (router.routesByPath as unknown as Record<string, unknown>);
+  const hasDriveApp = "/drive" in (router.routesByPath as unknown as Record<string, unknown>);
   const builtIns: BuiltInPrograms = {
     onNewChat: () => void launchers.newChat(),
     onChatInFolder: () => setFolderOpen(true),
     onFiles: hasFilesApp ? () => router.history.push("/files") : null,
+    onDrive: hasDriveApp
+      ? computer?.linked
+        ? () => router.history.push("/drive")
+        : null
+      : undefined,
     onTerminal: () => void launchers.openTerminal(),
     onAppStore:
       hasBox && catalog?.availability === "ok" && catalog.templates.length > 0
@@ -675,6 +681,24 @@ export function ComputerView() {
               a.templateId && a.url ? [[a.templateId, a.url] as const] : [],
             ),
           )
+        }
+        builtInApps={
+          builtIns.onDrive
+            ? [
+                {
+                  id: "uno-drive",
+                  name: "Uno Drive",
+                  tagline:
+                    "Your Cloud storage: find, share and open files from any computer. Send files to the Uno bot in Telegram — they land here, even while your computer sleeps.",
+                  icon: (
+                    <span className="flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-400 to-indigo-600 text-white">
+                      <HardDriveIcon className="size-6" />
+                    </span>
+                  ),
+                  onOpen: builtIns.onDrive,
+                },
+              ]
+            : []
         }
       />
     </SidebarInset>

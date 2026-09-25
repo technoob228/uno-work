@@ -1427,6 +1427,46 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.filesCloudOfficeSave, files.cloudOfficeSave(input), {
             "rpc.aggregate": "files",
           }),
+        [WS_METHODS.filesDriveState]: () =>
+          observeRpcEffect(WS_METHODS.filesDriveState, files.driveState, {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesDriveSearch]: (input) =>
+          observeRpcEffect(WS_METHODS.filesDriveSearch, files.driveSearch(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesDriveRecent]: (input) =>
+          observeRpcEffect(WS_METHODS.filesDriveRecent, files.driveRecent(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesDriveShareCreate]: (input) =>
+          observeRpcEffect(WS_METHODS.filesDriveShareCreate, files.driveShareCreate(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesDriveShareList]: () =>
+          observeRpcEffect(WS_METHODS.filesDriveShareList, files.driveShareList, {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesDriveShareRevoke]: (input) =>
+          observeRpcEffect(WS_METHODS.filesDriveShareRevoke, files.driveShareRevoke(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesDriveTelegramLink]: (input) =>
+          observeRpcEffect(WS_METHODS.filesDriveTelegramLink, files.driveTelegramLink(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesDriveTelegramUnlink]: (input) =>
+          observeRpcEffect(WS_METHODS.filesDriveTelegramUnlink, files.driveTelegramUnlink(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesDriveBotConnect]: (input) =>
+          observeRpcEffect(WS_METHODS.filesDriveBotConnect, files.driveBotConnect(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesDriveBotDisconnect]: () =>
+          observeRpcEffect(WS_METHODS.filesDriveBotDisconnect, files.driveBotDisconnect, {
+            "rpc.aggregate": "files",
+          }),
         [WS_METHODS.filesPublishSite]: (input) =>
           observeRpcEffect(WS_METHODS.filesPublishSite, files.publishSite(input), {
             "rpc.aggregate": "files",

@@ -8,7 +8,7 @@ Use these tools instead of guessing, shell tricks or raw HTTP. When the person a
 
 - This computer: `computer_status`, `apps_list`, `app_start`, `app_stop`, `app_logs`, `app_show_on_internet`, `app_hide_from_internet`, `app_remove`
 - Apps and widgets: `app_register`, `app_add_widget`
-- Files and cloud: `files_list`, `cloud_list`, `file_open` (right panel, Office or Files), `file_share_link`
+- Files and cloud: `files_list`, `cloud_list`, `file_open` (right panel, Office or Files), `file_share_link`; Uno Drive (the person's cloud storage, also fed by their Telegram): `drive_find`, `drive_save`, `drive_share_link`
 - Chats: `chats_list`, `chat_create` (any folder), `chat_message`, `chat_status`
 - The person: `notify` (Inbox), `open_in_panel` (URL or file in the right panel), `browser_command`, `request_secret`
 - Web: `site_publish` (a static folder or HTML file becomes a public site)

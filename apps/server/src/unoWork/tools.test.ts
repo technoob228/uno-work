@@ -269,6 +269,9 @@ describe("uno-work tool catalogue", () => {
       "file_share_link",
       "file_open",
       "cloud_list",
+      "drive_find",
+      "drive_save",
+      "drive_share_link",
       "chats_list",
       "chat_create",
       "chat_message",
@@ -289,6 +292,7 @@ describe("uno-work tool catalogue", () => {
       "app_show_on_internet",
       "app_remove",
       "file_share_link",
+      "drive_share_link",
       "site_publish",
       "computer_create",
     ]) {
