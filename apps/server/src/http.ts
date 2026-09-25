@@ -1,3 +1,5 @@
+import nodePath from "node:path";
+
 import Mime from "@effect/platform-node/Mime";
 import { Data, Effect, FileSystem, Option, Path } from "effect";
 import { cast } from "effect/Function";
@@ -47,7 +49,26 @@ import { executeBridgeCommand, executeBridgeOpenUrl } from "./browserCommandRout
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { OFFICE_ENGINE_ROUTE_PREFIX, resolveOfficeEngineFilePath } from "./officeEngine.ts";
+import {
+  compressedOfficeAsset,
+  isOfficeAssetCompressible,
+  negotiateOfficeEncoding,
+  OFFICE_ENGINE_IMMUTABLE_CACHE,
+  OFFICE_ENGINE_LEGACY_CACHE,
+  OFFICE_ENGINE_SERVICE_WORKER,
+  OFFICE_ENGINE_VERSION_HEADER,
+  officeEngineServiceWorkerSource,
+  officeEngineVersion,
+  splitOfficeEngineVersion,
+} from "./officeEngineAssets.ts";
 import { getOfficeEngineStatus, startOfficeEngineInstall } from "./officeEngineInstall.ts";
+import {
+  compressStaticBody,
+  isHashedStaticAsset,
+  isStaticCompressible,
+  STATIC_IMMUTABLE_CACHE,
+  STATIC_REVALIDATE_CACHE,
+} from "./staticCompression.ts";
 import { isAllowedCorsOrigin, isLoopbackHostname } from "./corsOrigins.ts";
 import { HealthCheck } from "./health.ts";
 import { decodeOtlpTraceRecords } from "./observability/TraceRecord.ts";
@@ -691,9 +712,13 @@ export const officeEngineRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Bad Request", { status: 400 });
     }
     const config = yield* ServerConfig;
+    const engineDir = config.officeEngineDir;
+    // `/office-engine/v/<version>/…` is the same file as `/office-engine/…`,
+    // cached for a year: the version changes with the installed package.
+    const requested = splitOfficeEngineVersion(url.value.pathname);
     const filePath = resolveOfficeEngineFilePath({
-      engineDir: config.officeEngineDir,
-      requestPathname: url.value.pathname,
+      engineDir,
+      requestPathname: requested.pathname,
     });
     if (!filePath) {
       return HttpServerResponse.text("Invalid office engine path", { status: 400 });
@@ -705,17 +730,59 @@ export const officeEngineRouteLayer = HttpRouter.add(
     if (!fileInfo || fileInfo.type !== "File") {
       return HttpServerResponse.text("Not Found", { status: 404 });
     }
-    return yield* HttpServerResponse.file(filePath, {
+    const version = yield* Effect.promise(() => officeEngineVersion(engineDir));
+    // A page loaded before a reinstall may still ask for the old version:
+    // answer with the current file, but don't let it be cached under that URL.
+    const cacheControl =
+      requested.version === null
+        ? OFFICE_ENGINE_LEGACY_CACHE
+        : requested.version === version
+          ? OFFICE_ENGINE_IMMUTABLE_CACHE
+          : "no-cache";
+    const baseHeaders: Record<string, string> = {
+      "Cache-Control": cacheControl,
+      ...(version ? { [OFFICE_ENGINE_VERSION_HEADER]: version } : {}),
+    };
+    const relative = nodePath.relative(nodePath.resolve(engineDir), filePath).replaceAll("\\", "/");
+    if (requested.version !== null && version && relative === OFFICE_ENGINE_SERVICE_WORKER) {
+      return HttpServerResponse.text(officeEngineServiceWorkerSource(version), {
+        contentType: "text/javascript",
+        headers: { ...baseHeaders, "Cache-Control": "no-cache" },
+      });
+    }
+    const contentType = Mime.getType(filePath) ?? "application/octet-stream";
+    const size = Number(fileInfo.size);
+    const mtimeMs = Option.getOrElse(fileInfo.mtime, () => new Date(0)).getTime();
+    const encoding =
+      version && isOfficeAssetCompressible(filePath, size)
+        ? negotiateOfficeEncoding(request.headers["accept-encoding"])
+        : null;
+    const compressed =
+      encoding && version
+        ? yield* Effect.promise(() =>
+            compressedOfficeAsset({ engineDir, version, filePath, size, mtimeMs, encoding }),
+          )
+        : null;
+    const response = yield* HttpServerResponse.file(compressed ?? filePath, {
       status: 200,
-      contentType: Mime.getType(filePath) ?? "application/octet-stream",
       headers: {
-        "Cache-Control": "public, max-age=86400",
+        // The platform takes the type from this header, else from the path —
+        // which for a compressed copy would be `.br`/`.gz`.
+        "content-type": contentType,
+        ...baseHeaders,
+        ...(encoding ? { Vary: "Accept-Encoding" } : {}),
+        ...(compressed && encoding ? { "Content-Encoding": encoding } : {}),
       },
-    }).pipe(
-      Effect.catch(() =>
-        Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
-      ),
-    );
+    }).pipe(Effect.catch(() => Effect.succeed(null)));
+    if (!response) {
+      return HttpServerResponse.text("Internal Server Error", { status: 500 });
+    }
+    const etag = response.headers["etag"];
+    const ifNoneMatch = request.headers["if-none-match"];
+    if (etag && ifNoneMatch && ifNoneMatch.split(",").some((tag) => tag.trim() === etag)) {
+      return HttpServerResponse.empty({ status: 304, headers: response.headers });
+    }
+    return response;
   }),
 );
 
@@ -837,9 +904,42 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Internal Server Error", { status: 500 });
     }
 
+    // Hashed build output is cached for a year; everything else revalidates
+    // (staticCompression.ts). Text files go compressed when the browser can.
+    const cacheControl = isHashedStaticAsset(url.value.pathname)
+      ? STATIC_IMMUTABLE_CACHE
+      : STATIC_REVALIDATE_CACHE;
+    const encoding = isStaticCompressible(contentType, data.length)
+      ? negotiateOfficeEncoding(request.headers["accept-encoding"])
+      : null;
+    const compressed = encoding
+      ? yield* Effect.promise(() =>
+          compressStaticBody({
+            filePath,
+            mtimeMs: Option.getOrElse(fileInfo.mtime, () => new Date(0)).getTime(),
+            data,
+            encoding,
+          }),
+        )
+      : null;
+    if (compressed && encoding) {
+      return HttpServerResponse.uint8Array(compressed, {
+        status: 200,
+        contentType,
+        headers: {
+          "Cache-Control": cacheControl,
+          "Content-Encoding": encoding,
+          Vary: "Accept-Encoding",
+        },
+      });
+    }
     return HttpServerResponse.uint8Array(data, {
       status: 200,
       contentType,
+      headers: {
+        "Cache-Control": cacheControl,
+        ...(encoding ? { Vary: "Accept-Encoding" } : {}),
+      },
     });
   }),
 );

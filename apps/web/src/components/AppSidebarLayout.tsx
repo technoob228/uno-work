@@ -13,6 +13,8 @@ import { BrowserBridgeListener } from "./preview/BrowserBridgeListener";
 import { FileBrowser } from "./preview/FileBrowser";
 import { PreviewPane } from "./preview/PreviewPane";
 import { cn } from "../lib/utils";
+import { isOfficeStandaloneLocation } from "./office/officeLinks";
+import { scheduleIdleOfficePrewarm } from "./office/officePrewarm";
 import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
 import {
   clearShortcutModifierState,
@@ -35,6 +37,16 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const inSettings = useLocation({
     select: (location) => location.pathname.startsWith("/settings"),
   });
+  // "Open in a new tab" from Office: the editor alone, no app around it.
+  const officeStandalone = useLocation({
+    select: (location) => isOfficeStandaloneLocation(location.pathname, location.search),
+  });
+
+  // Get the office engine into this browser's cache while nobody waits for it
+  // (only for people who have opened documents here before).
+  useEffect(() => {
+    scheduleIdleOfficePrewarm();
+  }, []);
 
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
@@ -74,6 +86,14 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       unsubscribe?.();
     };
   }, [navigate]);
+
+  if (officeStandalone) {
+    return (
+      <SidebarProvider className="h-dvh! min-h-0!" defaultOpen={false}>
+        {children}
+      </SidebarProvider>
+    );
+  }
 
   // PreviewPaneProvider живёт выше, в __root: контекст нужен и командной
   // палитре (она рендерится вне этого layout-а).

@@ -20,7 +20,12 @@ import {
   type DocsShell,
 } from "./officeDocsShell";
 
+/** Root of every engine URL (versioned or not). */
 export const OFFICE_ENGINE_BASE = "/office-engine/";
+
+/** Response header with the installed engine version (daemon, officeEngineAssets.ts). */
+export const OFFICE_ENGINE_VERSION_HEADER = "x-uno-office-engine-version";
+const VERSION_PATTERN = /^[a-f0-9]{12}$/;
 
 export type OfficeAccess = "view" | "comment" | "edit";
 
@@ -72,42 +77,92 @@ declare global {
 }
 
 let apiPromise: Promise<DocsApi> | null = null;
+let engineVersion: string | null = null;
+let probePromise: Promise<OfficeEngineProbe> | null = null;
 
-export function officeEngineApiUrl(): string {
-  return `${OFFICE_ENGINE_BASE}${OFFICE_ENGINE_API_PATH}`;
+/**
+ * Where the engine is served from: `/office-engine/v/<version>/` once the
+ * daemon told us the installed version (those URLs are cached for a year and
+ * by the engine's service worker), otherwise the old unversioned path.
+ */
+export function officeEngineBase(version: string | null = engineVersion): string {
+  return version ? `${OFFICE_ENGINE_BASE}v/${version}/` : OFFICE_ENGINE_BASE;
+}
+
+export function officeEngineApiUrl(version: string | null = engineVersion): string {
+  return `${officeEngineBase(version)}${OFFICE_ENGINE_API_PATH}`;
+}
+
+export interface OfficeEngineProbe {
+  readonly installed: boolean;
+  /** Null from an older daemon (no versioned URLs, no compression). */
+  readonly version: string | null;
+}
+
+/**
+ * Is the engine installed on this machine (the daemon serves api.js), and
+ * which version. Remembers the version for every engine URL built after it.
+ */
+export async function probeOfficeEngine(
+  fetchImpl: typeof fetch = fetch,
+): Promise<OfficeEngineProbe> {
+  try {
+    const response = await fetchImpl(officeEngineApiUrl(null), {
+      method: "HEAD",
+      cache: "no-store",
+    });
+    // An SPA fallback (desktop t3:// protocol, dev server) answers 200 with
+    // index.html for any path — only a real script counts.
+    const type = response.headers.get("content-type") ?? "";
+    const installed = response.ok && type.includes("javascript");
+    const header = response.headers.get(OFFICE_ENGINE_VERSION_HEADER);
+    const version = installed && header && VERSION_PATTERN.test(header) ? header : null;
+    if (installed) engineVersion = version;
+    return { installed, version };
+  } catch {
+    return { installed: false, version: null };
+  }
 }
 
 /** Установлен ли пакет движка на этой машине (демон отдаёт api.js). */
 export async function isOfficeEngineInstalled(fetchImpl: typeof fetch = fetch): Promise<boolean> {
-  try {
-    const response = await fetchImpl(officeEngineApiUrl(), { method: "HEAD", cache: "no-store" });
-    // An SPA fallback (desktop t3:// protocol, dev server) answers 200 with
-    // index.html for any path — only a real script counts.
-    const type = response.headers.get("content-type") ?? "";
-    return response.ok && type.includes("javascript");
-  } catch {
-    return false;
-  }
+  return (await probeOfficeEngine(fetchImpl)).installed;
 }
 
+/** The version known on this page, probing the daemon once if needed. */
+function ensureEngineVersion(): Promise<OfficeEngineProbe> {
+  if (engineVersion) return Promise.resolve({ installed: true, version: engineVersion });
+  probePromise ??= probeOfficeEngine().finally(() => {
+    probePromise = null;
+  });
+  return probePromise;
+}
+
+/**
+ * Loads the engine's api.js. Safe to call early (e.g. while the document is
+ * still being read) — the editor then starts without waiting for it.
+ */
 export function loadDocsApi(): Promise<DocsApi> {
   if (window.DocsAPI) return Promise.resolve(window.DocsAPI);
   if (apiPromise) return apiPromise;
-  apiPromise = new Promise<DocsApi>((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = officeEngineApiUrl();
-    script.async = true;
-    script.addEventListener("load", () => {
-      if (window.DocsAPI) resolve(window.DocsAPI);
-      else reject(new Error("Офисный движок загрузился, но не отдал DocsAPI"));
-    });
-    script.addEventListener("error", () => {
-      apiPromise = null;
-      script.remove();
-      reject(new Error("Не удалось загрузить офисный движок"));
-    });
-    document.head.appendChild(script);
-  });
+  apiPromise = ensureEngineVersion().then(
+    () =>
+      new Promise<DocsApi>((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = officeEngineApiUrl();
+        script.async = true;
+        script.addEventListener("load", () => {
+          if (window.DocsAPI) resolve(window.DocsAPI);
+          else reject(new Error("Офисный движок загрузился, но не отдал DocsAPI"));
+        });
+        script.addEventListener("error", () => {
+          apiPromise = null;
+          script.remove();
+          reject(new Error("Не удалось загрузить офисный движок"));
+        });
+        document.head.appendChild(script);
+      }),
+  );
   return apiPromise;
 }
 
@@ -129,6 +184,8 @@ export interface OfficeEditorOptions {
    */
   access?: OfficeAccess;
   onReady?: () => void;
+  /** The document itself is open and drawn (after `onReady`). */
+  onDocumentReady?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   onError?: (message: string) => void;
   /** Пользователь нажал Ctrl/Cmd+S или «Сохранить» внутри редактора. */
@@ -290,6 +347,7 @@ export async function createOfficeEditor(
       onDocumentReady: () => {
         hookFrame();
         attachShell();
+        options.onDocumentReady?.();
       },
       onDocumentStateChange: (event: { data?: boolean }) =>
         options.onDirtyChange?.(Boolean(event?.data)),

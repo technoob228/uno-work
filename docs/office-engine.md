@@ -15,7 +15,8 @@ WebAssembly, so no ONLYOFFICE Document Server is needed. The daemon only:
   `projects.writeFile` (base64, chunked with `mode: "append"` above 3 MB).
 
 The machine spends no RAM on the engine. The engine costs about 680 MB of disk
-and a one-time download of about 300 MB per browser, which is then cached.
+(+~28 MB of compressed copies, more as other files get requested; below). A browser downloads about 18 MB of it
+compressed the first time (110 MB before 0.0.85) and then keeps it.
 
 ## Files
 
@@ -36,6 +37,85 @@ import { isOfficeFile } from "~/components/office/officeFormats";
 // in the file-opener registry:
 if (isOfficeFile(path)) navigate({ to: "/office", search: { path } });
 ```
+
+## Speed: how a document opens fast (0.0.85)
+
+Measured on a 1-vCPU Work machine (box 2020 from image 169), Chrome in Buenos
+Aires, ~240 ms to the machine, a 37 KB docx with tables (2026-09-25; scripts
+and raw numbers in `tmp/office-speed/`). "docReady" = the document is drawn.
+
+| Open                                                       | Before          | After                    |
+| ---------------------------------------------------------- | --------------- | ------------------------ |
+| First ever in this browser, straight to the document's URL | 21–37 s, 110 MB | 7.8 s, 18 MB             |
+| First, from Files (engine warmed while the list was open)  | same            | 3.3 s                    |
+| Again, same session                                        | 2.4–15.5 s      | 1.3–1.8 s                |
+| Again, browser restarted                                   | 1.0–20 s        | 1.6 s                    |
+| Reload / new tab (whole app + document)                    | 5.6–21 s        | 3.4–3.8 s                |
+| First xlsx / pptx after a docx; again                      | —               | 3.8 / 6.2 s; 1.2 / 1.7 s |
+
+"Before" swings so much because whether Chrome keeps the 61 MB x2t.wasm and
+the 28 MB sdk-all.js in its HTTP cache depends on its cache size (small on a
+Mac with little free disk): when it doesn't, every open downloads 90 MB again.
+
+What changed:
+
+- **Versioned engine URLs** — `/office-engine/v/<version>/…`, `version` = hash
+  of the installed package's key files (`officeEngineAssets.ts`,
+  `x-uno-office-engine-version` on every engine response). Cached for a year
+  (`immutable`); a reinstall changes the version. A stale version is answered
+  with the current file and `no-cache`. The old `/office-engine/…` still works
+  (a day of cache, ETag/304).
+- **Compressed copies** — brotli (q6) and gzip of each engine file, made once in
+  `<engineDir>-compressed/<version>/` on the libuv thread pool: the critical
+  files 20 s after the daemon starts (and after an install), the rest on their
+  first request (gzip copies only on request — browsers send `br` over HTTPS).
+  On the 1-vCPU box the critical brotli copies take ~5 s of CPU and ~28 MB of
+  disk. 110 MB → 18 MB on the wire, and each entry is small enough for the
+  HTTP cache. Other versions' copies are removed.
+- **Service worker** — the package's worker is an inert stub; for versioned
+  paths the daemon serves ours instead (`officeEngineServiceWorkerSource`):
+  scope = that version's `vendor/`, cache-first from Cache Storage
+  (`uno-office-engine-<version>`), navigations matched without the query.
+  Cache Storage has no per-entry limit and isn't evicted with the HTTP cache.
+- **Prewarm** (`officePrewarm.ts`) — registers the worker and fills its cache
+  (two files at a time, low priority): when Files opens (Word + kinds used
+  before), when Office opens (in parallel with reading the document), and
+  15 s after the app starts, on idle, for browsers that opened Office before.
+  Skipped on Save-Data/2G.
+- **Parallel start** — api.js loads while the document is still being read.
+- **Text preview** (`officePreviewModel.ts`, `OfficePreview.tsx`) — the
+  document's words (headings, paragraphs, lists, tables; first sheet; slide
+  text) show at once and give way to the editor on `onDocumentReady`.
+- **The app's own files** (`staticCompression.ts`) — hashed `/assets/*` are
+  now `immutable` and everything text is brotli/gzip (main bundle 5.2 → 1.4
+  MB); before, every reload downloaded 5 MB uncompressed.
+
+Not done, and why:
+
+- **Opening docx without x2t** — sdkjs can open OOXML natively
+  (`isOpenOOXInBrowser`), but only with the `ooxml` add-on, which this build
+  doesn't have (`Asc.Addons.ooxml` unset, no `OpenDocumentFromZip`). Needs our
+  own sdkjs build; x2t.wasm stays on the critical path of the first open.
+- **The rest of a new tab's 3.4 s** is the app booting (auth, WebSocket,
+  machine state) before Office starts — ~2.9 s at 240 ms RTT.
+
+## Open in a new tab (0.0.85)
+
+The Office header (and the Word File menu) has **Open in a new tab**:
+`/office?path=…&tab=1` or `/office?bucket=…&key=…&tab=1` (+ `env=<id>` when the
+file is on another computer than the page's own). Same origin, so it uses the
+same Work session; signed out, the tab goes to `/pair?return=<that URL>` and
+Sign in with Uno brings the person back to the document. The tab renders the
+editor without the sidebar (`AppSidebarLayout`), saves the same way (autosave,
+conflicts, versions) and its title is the file name.
+
+The document _moves_: unsaved edits are saved first (the tab is opened before
+the save, so pop-up blockers still see the click), then the original page goes
+back to Files — one editor per document. If the save fails, the tab is closed
+and the document stays where it was. Opening the same file in two tabs by
+hand still gives two independent editors (Cloud: the second save gets the
+conflict banner; computer files: last save wins) — no live co-editing yet.
+A legacy .doc/.xls/.ppt saved as a new .docx/… opens the original in the tab.
 
 ## Share links: view / comment / edit (0.0.72)
 
@@ -211,9 +291,13 @@ The ONLYOFFICE logo stays in the title bar (AGPL-3.0 §7(b)).
    Spreadsheet / Presentation (real blank files, chosen by the typed
    extension), and Office shows "This isn't a real presentation" with
    _Make it a blank presentation_ instead of spinning forever.
-7. **First open costs ~110 MB** of engine download per browser (measured in a
-   fresh Chrome profile over localhost, sum of content-length), then cached for
-   a day (`Cache-Control: max-age=86400`). A shared link's visitor pays it too.
+7. **First open costs ~18 MB** of engine download per browser since 0.0.85
+   (110 MB before; see "Speed"). A shared link's visitor pays it too.
+8. **x2t posts exported files to the top window.** The package's
+   `x2t_helper.js` `downloadFile` posts the bytes to `window.parent` and
+   `window.top` with target `*` on every "Download as". Our save path
+   intercepts before it (no post), the editor menu's own download does not.
+   Harmless while Work is the top window; fix in our own engine build.
 
 ## Licensing
 
@@ -226,5 +310,10 @@ The engine package is **AGPL-3.0** (ONLYOFFICE):
   commercial licence.
 - If we modify the engine, we must publish the modified source to users.
 
-Work's own code only talks to the engine through its public `DocsAPI` in the
-browser.
+Work doesn't only use the public `DocsAPI`: it patches the editor at runtime
+(save interception, the Docs shell, the co-editing prototype) and, since 0.0.85,
+replaces the package's service worker. All of it is published at
+<https://github.com/technoob228/onlyoffice-uno-patches> (local draft:
+`~/uno-project/onlyoffice-uno-patches/`, to be pushed by the coordinator).
+The app links there from Office (File menu in Word, "ONLYOFFICE · AGPL" in the
+header of the other editors) and from Settings → General → About.

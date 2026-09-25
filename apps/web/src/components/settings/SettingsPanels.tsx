@@ -48,6 +48,7 @@ import {
   SettingsSection,
 } from "./settingsLayout";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { OFFICE_SOURCE_LABEL, OFFICE_SOURCE_URL } from "../office/officeLinks";
 
 const THEME_OPTIONS = [
   {
@@ -783,6 +784,21 @@ export function GeneralSettingsPanel() {
           />
         )}
         {isElectron ? <UnoCodeInstallSection /> : null}
+        <SettingsRow
+          title="Office editor"
+          description="Word, Excel and PowerPoint files open in ONLYOFFICE, which is AGPL-3.0. Our changes to it are published."
+          control={
+            <a
+              href={OFFICE_SOURCE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-primary underline-offset-4 hover:underline"
+              data-testid="about-office-source"
+            >
+              {OFFICE_SOURCE_LABEL}
+            </a>
+          }
+        />
       </SettingsSection>
     </SettingsPageContainer>
   );

@@ -13,7 +13,7 @@
  */
 import JSZip from "jszip";
 
-import { OFFICE_ENGINE_BASE } from "./officeEngine";
+import { officeEngineBase } from "./officeEngine";
 
 export type BlankOfficeExtension = "docx" | "xlsx" | "pptx";
 
@@ -55,7 +55,7 @@ export async function blankXlsx(): Promise<Uint8Array> {
 }
 
 export async function blankPptx(fetchImpl: typeof fetch = fetch): Promise<Uint8Array> {
-  const response = await fetchImpl(`${OFFICE_ENGINE_BASE}${BLANK_PPTX_PATH}`);
+  const response = await fetchImpl(`${officeEngineBase()}${BLANK_PPTX_PATH}`);
   const bytes = response.ok ? new Uint8Array(await response.arrayBuffer()) : null;
   if (!bytes || !isZipArchive(bytes)) {
     throw new Error("Install Office on this computer first to make presentations.");

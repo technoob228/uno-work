@@ -14,6 +14,8 @@ import {
   ChevronDownIcon,
   CloudAlertIcon,
   CloudIcon,
+  CodeIcon,
+  ExternalLinkIcon,
   HistoryIcon,
   CheckIcon,
   EllipsisVerticalIcon,
@@ -87,7 +89,8 @@ import {
   stepFontSize,
   styleLabel,
 } from "./officeDocsShell";
-import { OFFICE_ENGINE_BASE } from "./officeEngine";
+import { officeEngineBase } from "./officeEngine";
+import { OFFICE_SOURCE_LABEL, OFFICE_SOURCE_URL } from "./officeLinks";
 
 export type DocsSaveStatus =
   | { kind: "idle" }
@@ -412,6 +415,10 @@ export interface OfficeDocsChromeProps {
   onVersions?: (() => void) | undefined;
   /** Set for a document opened from Cloud storage. */
   cloud?: { writable: boolean } | undefined;
+  /** "Open in a new tab" — the standalone editor (absent inside it). */
+  onOpenInNewTab?: (() => void) | undefined;
+  /** The editor alone in its tab: no app sidebar to toggle. */
+  standalone?: boolean | undefined;
 }
 
 export function OfficeDocsChrome(props: OfficeDocsChromeProps) {
@@ -436,7 +443,7 @@ export function OfficeDocsChrome(props: OfficeDocsChromeProps) {
       <header className="shrink-0 bg-background" data-testid="office-docs-chrome">
         {/* Title bar */}
         <div className="flex h-12 items-center gap-1.5 px-3">
-          <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+          {props.standalone ? null : <SidebarTrigger className="size-7 shrink-0 md:hidden" />}
           <Button size="icon-xs" variant="ghost" aria-label="Back to Files" onClick={props.onBack}>
             <ArrowLeftIcon />
           </Button>
@@ -458,7 +465,7 @@ export function OfficeDocsChrome(props: OfficeDocsChromeProps) {
           <div className="ms-auto flex shrink-0 items-center gap-1.5">
             {/* AGPL 7(b): the engine's logo stays visible even with its ribbon hidden. */}
             <img
-              src={`${OFFICE_ENGINE_BASE}vendor/web-apps/apps/common/main/resources/img/header/dark-logo_s.svg`}
+              src={`${officeEngineBase()}vendor/web-apps/apps/common/main/resources/img/header/dark-logo_s.svg`}
               alt="ONLYOFFICE"
               title="Editor by ONLYOFFICE (AGPL-3.0)"
               className="me-1 h-4 w-auto opacity-45 max-sm:hidden dark:invert"
@@ -499,6 +506,12 @@ export function OfficeDocsChrome(props: OfficeDocsChromeProps) {
                   <FolderOpenIcon />
                   Show in Files
                 </MenuItem>
+                {props.onOpenInNewTab ? (
+                  <MenuItem onClick={props.onOpenInNewTab} data-testid="office-menu-new-tab">
+                    <ExternalLinkIcon />
+                    Open in a new tab
+                  </MenuItem>
+                ) : null}
                 <MenuSeparator />
                 <MenuGroup>
                   <MenuGroupLabel>Download</MenuGroupLabel>
@@ -521,8 +534,35 @@ export function OfficeDocsChrome(props: OfficeDocsChromeProps) {
                   Print
                   <MenuShortcut>{MOD}P</MenuShortcut>
                 </MenuItem>
+                <MenuSeparator />
+                {/* AGPL-3.0 §13: where our changes to the editor are published. */}
+                <MenuItem
+                  onClick={() => window.open(OFFICE_SOURCE_URL, "_blank", "noopener,noreferrer")}
+                  data-testid="office-source-link"
+                >
+                  <CodeIcon />
+                  <span className="text-xs">{OFFICE_SOURCE_LABEL}</span>
+                </MenuItem>
               </MenuPopup>
             </Menu>
+            {props.onOpenInNewTab ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label="Open in a new tab"
+                      onClick={props.onOpenInNewTab}
+                      data-testid="office-open-new-tab"
+                    />
+                  }
+                >
+                  <ExternalLinkIcon />
+                </TooltipTrigger>
+                <TooltipPopup>Open in a new tab</TooltipPopup>
+              </Tooltip>
+            ) : null}
             {props.onShare ? (
               <Button size="sm" onClick={props.onShare} data-testid="office-share">
                 <Share2Icon />

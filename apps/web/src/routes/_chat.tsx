@@ -144,6 +144,14 @@ export const Route = createFileRoute("/_chat")({
       context.authGateState.status !== "authenticated" &&
       context.authGateState.status !== "hosted-static"
     ) {
+      // A standalone Office tab comes back to its document after signing in
+      // (the pair page validates the path, unoSignIn.ts safeReturnPath).
+      if (location.pathname === "/office") {
+        throw redirect({
+          href: `/pair?return=${encodeURIComponent(location.href)}`,
+          replace: true,
+        });
+      }
       throw redirect({ to: "/pair", replace: true });
     }
   },
