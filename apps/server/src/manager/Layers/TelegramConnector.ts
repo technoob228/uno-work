@@ -140,10 +140,19 @@ import {
   newTelegramPairing,
   parseTelegramStartPayload,
   shouldReplyToStranger,
+  TELEGRAM_PAIRING_TTL_MS,
   telegramLinkedReply,
   telegramStrangerReply,
   type TelegramPairing,
 } from "../telegramPairing.ts";
+import {
+  callTelegramBotMethod,
+  isRelayCredential,
+  redactConnectorSecrets,
+  RELAY_CREDENTIAL_PREFIX,
+  telegramApiUrl,
+  telegramFileUrl,
+} from "../channelRelay.ts";
 
 export interface ManagerTelegramRuntimeStatus {
   readonly botUsername: string | null;
@@ -167,13 +176,20 @@ export interface ManagerTelegramServiceShape {
   }) => Effect.Effect<boolean>;
   /**
    * Issue the one-time code the app shows as the bot's deep link
-   * (telegramPairing.ts). A new code replaces the previous one.
+   * (telegramPairing.ts). A new code replaces the previous one. On a relay
+   * connector (Uno's shared bot) the code is also registered with the
+   * console (`unoRegisterStartCode`) — the shared bot only routes
+   * `/start <code>` to this computer for a registered code — and a failed
+   * registration fails the call.
    */
-  readonly startPairing: (projectId: ProjectId) => Effect.Effect<{
-    readonly code: string;
-    readonly expiresAt: string;
-    readonly botUsername: string | null;
-  }>;
+  readonly startPairing: (projectId: ProjectId) => Effect.Effect<
+    {
+      readonly code: string;
+      readonly expiresAt: string;
+      readonly botUsername: string | null;
+    },
+    TelegramPairingError
+  >;
   /**
    * Send a test message to every linked chat; per chat whether Telegram
    * accepted it (and why not).
@@ -344,9 +360,9 @@ const INITIAL_BOT_RUNTIME: BotRuntime = {
   lastOkPersistedAtMs: 0,
 };
 
-function telegramApi(botToken: string, method: string): string {
-  return `https://api.telegram.org/bot${botToken}/${method}`;
-}
+// Own bot → api.telegram.org; `unorelay:<tgr>` → the console's Bot-API
+// mirror (channelRelay.ts). Every Bot-API URL of this connector goes here.
+const telegramApi = telegramApiUrl;
 
 /** Ошибка Telegram Bot API / файловой системы — только сообщение, поллер её логирует. */
 class TelegramConnectorError extends Data.TaggedError("TelegramConnectorError")<{
@@ -382,11 +398,28 @@ const fetchJson = (url: string, init?: RequestInit) =>
       return (await response.json()) as TelegramApiResponse;
     },
     catch: (cause) =>
-      new TelegramConnectorError({ message: `Telegram request failed: ${String(cause)}` }),
+      new TelegramConnectorError({
+        message: `Telegram request failed: ${redactConnectorSecrets(String(cause))}`,
+      }),
   });
 
-const credentialFingerprint = (botToken: string): string =>
-  crypto.createHash("sha256").update(botToken).digest("hex").slice(0, 16);
+/**
+ * Identity of the update stream the persisted offset belongs to. A relay
+ * token rotates (every "Connect with Uno's bot" mints a new one) while the
+ * relay queue — and its update ids — stays the same, so all relay tokens
+ * share one fingerprint: rotation must not replay or drop the queue.
+ */
+export const credentialFingerprint = (botToken: string): string =>
+  crypto
+    .createHash("sha256")
+    .update(isRelayCredential(botToken) ? RELAY_CREDENTIAL_PREFIX : botToken)
+    .digest("hex")
+    .slice(0, 16);
+
+/** Registering a relay link code with the console failed; the link would not work. */
+export class TelegramPairingError extends Data.TaggedError("TelegramPairingError")<{
+  readonly message: string;
+}> {}
 
 const makeTelegramConnector = Effect.gen(function* () {
   const connectorRepository = yield* ManagerConnectorRepository;
@@ -789,7 +822,7 @@ const makeTelegramConnector = Effect.gen(function* () {
       }
       return yield* Effect.tryPromise({
         try: async () => {
-          const response = await fetch(`https://api.telegram.org/file/bot${botToken}/${filePath}`);
+          const response = await fetch(telegramFileUrl(botToken, filePath));
           if (!response.ok) {
             throw new Error(`file download failed with status ${response.status}`);
           }
@@ -797,7 +830,7 @@ const makeTelegramConnector = Effect.gen(function* () {
         },
         catch: (cause) =>
           new TelegramConnectorError({
-            message: `Telegram file download failed: ${String(cause)}`,
+            message: `Telegram file download failed: ${redactConnectorSecrets(String(cause))}`,
           }),
       });
     });
@@ -1583,6 +1616,30 @@ const makeTelegramConnector = Effect.gen(function* () {
   const startPairing: ManagerTelegramServiceShape["startPairing"] = (projectId) =>
     Effect.gen(function* () {
       const pairing = newTelegramPairing(Date.now());
+      const record = yield* connectorRepository
+        .get({ projectId, kind: "telegram" })
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      const decoded = Option.isSome(record)
+        ? Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(record.value.config)
+        : null;
+      const botToken =
+        decoded !== null && decoded._tag === "Success" ? decoded.value.botToken : null;
+      if (botToken !== null && isRelayCredential(botToken)) {
+        const answer = yield* Effect.promise(() =>
+          callTelegramBotMethod(botToken, "unoRegisterStartCode", {
+            code: pairing.code,
+            expires_in: Math.floor(TELEGRAM_PAIRING_TTL_MS / 1000),
+          }),
+        );
+        if (!answer.ok) {
+          yield* Effect.logWarning("telegram relay start code registration failed").pipe(
+            Effect.annotateLogs({ projectId, description: answer.description }),
+          );
+          return yield* new TelegramPairingError({
+            message: answer.description ?? "The console did not accept the link code.",
+          });
+        }
+      }
       yield* Ref.update(pairingsRef, (map) => new Map(map).set(projectId, pairing));
       const runtime = yield* getRuntime(projectId);
       return {

@@ -41,6 +41,7 @@ const telegram = (
   health: null,
   defaultModelSelection: null,
   addressing: DEFAULT_CONNECTOR_ADDRESSING,
+  shared: false,
   ...overrides,
 });
 
