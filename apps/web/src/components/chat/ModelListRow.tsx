@@ -88,6 +88,9 @@ export const ModelListRow = memo(function ModelListRow(props: {
       ? `${props.providerDisplayName} · ${props.model.subProvider}`
       : props.providerDisplayName;
   const metadata = props.model.capabilities?.metadata;
+  // Uno AI hours: Smart / Fast and the premium models read short — the real
+  // model in small text, one line about it, no tier / price chips.
+  const curated = metadata?.unoGroup === "included" || metadata?.unoGroup === "premium";
   const tierLabel =
     metadata?.tier === "frontier"
       ? "Frontier"
@@ -168,6 +171,11 @@ export const ModelListRow = memo(function ModelListRow(props: {
                     props.preferShortName ? { preferShortName: true } : undefined,
                   )}
             </span>
+            {curated && metadata?.underlyingModel && !props.useTriggerLabel ? (
+              <span className="shrink-0 text-[11px] font-normal text-muted-foreground">
+                ({metadata.underlyingModel})
+              </span>
+            ) : null}
             {props.showNewBadge ? (
               <span
                 className="shrink-0 rounded border border-amber-500/35 bg-amber-500/15 px-0.5 py-px text-[10px] font-bold uppercase leading-none tracking-wide text-amber-800 dark:border-amber-400/30 dark:bg-amber-400/12 dark:text-amber-200"
@@ -198,7 +206,13 @@ export const ModelListRow = memo(function ModelListRow(props: {
             </span>
           </div>
         )}
-        {metadata ? (
+        {curated ? (
+          metadata?.description ? (
+            <div className="mt-0.5 truncate text-[11px] leading-snug text-muted-foreground/80">
+              {metadata.description}
+            </div>
+          ) : null
+        ) : metadata ? (
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1 text-[10px] leading-none text-muted-foreground/75">
             {tierLabel ? (
               <span className={cn("rounded border px-1 py-0.5", tierClassName)}>{tierLabel}</span>

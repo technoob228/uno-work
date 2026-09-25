@@ -45,7 +45,11 @@ export function getTriggerDisplayModelName(model: ModelEsque): string {
 }
 
 export function getTriggerDisplayModelLabel(model: ModelEsque): string {
-  const modelName = getTriggerDisplayModelName(model);
+  // Uno AI hours: "Smart (MiMo-V2.6-Pro)" — always the real model beside it.
+  const underlying = model.capabilities?.metadata?.underlyingModel;
+  const modelName = underlying
+    ? `${getTriggerDisplayModelName(model)} (${underlying})`
+    : getTriggerDisplayModelName(model);
   const subProvider = model.subProvider?.trim();
   if (!subProvider) return modelName;
 
