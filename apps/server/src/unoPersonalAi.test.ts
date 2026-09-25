@@ -37,6 +37,7 @@ describe("Personal AI client", () => {
     expect(normalizePersonalAiModel(QWEN)).toEqual({
       id: "qwen3.8-27b-fp8",
       name: "Qwen 3.8 27B",
+      catalog: true,
       size: "l",
       contextTokens: 120000,
       priceUsdPerHour: 6,

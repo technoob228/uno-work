@@ -84,6 +84,7 @@ export function normalizePersonalAiModel(raw: unknown): PersonalAiModel | undefi
   return {
     id,
     name: str(entry.name) ?? id,
+    ...(typeof entry.catalog === "boolean" ? { catalog: entry.catalog } : {}),
     size: str(entry.size) ?? "",
     priceUsdPerHour: num(entry.price_usd_per_hour) ?? 0,
     idleSleepS: num(entry.idle_sleep_s) ?? 60,

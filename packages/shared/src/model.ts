@@ -1,6 +1,7 @@
 import {
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
+  DEFAULT_MODEL_CANDIDATES_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
   type ModelCapabilities,
   type ModelSelection,
@@ -285,6 +286,24 @@ export function resolveSelectableModel(
 
   const resolved = options.find((option) => option.slug === normalized);
   return resolved ? resolved.slug : null;
+}
+
+/**
+ * The driver's canonical default that the instance actually lists, trying
+ * {@link DEFAULT_MODEL_CANDIDATES_BY_PROVIDER} in order (Uno: Smart, then the
+ * pre-AI-hours default on an older gateway). `undefined` when none is listed.
+ */
+export function listedDefaultModel(
+  provider: ProviderDriverKind,
+  models: ReadonlyArray<{ readonly slug: string }>,
+): string | undefined {
+  const candidates = DEFAULT_MODEL_CANDIDATES_BY_PROVIDER[provider] ?? [
+    DEFAULT_MODEL_BY_PROVIDER[provider],
+  ];
+  return candidates.find(
+    (candidate): candidate is string =>
+      candidate !== undefined && models.some((model) => model.slug === candidate),
+  );
 }
 
 function resolveModelSlug(model: string | null | undefined, provider: ProviderDriverKind): string {

@@ -77,6 +77,14 @@ import {
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { currentHarnessBudget } from "../harnessBudget.ts";
+import {
+  UNO_LEGACY_HARNESS_MODEL_IDS,
+  curatedModelRank,
+  formatUnderlyingModel,
+  parseUnoCatalogGroup,
+  resolveUnoDefaultSlug,
+  type UnoCatalogGroup,
+} from "./unoCuratedModels.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("uno");
 /**
@@ -157,6 +165,11 @@ export interface UnoCatalogModel {
   readonly inputModalities: ReadonlyArray<string> | undefined;
   readonly outputModalities: ReadonlyArray<string> | undefined;
   readonly pricingKnown: boolean | undefined;
+  /** AI hours: `included` / `premium`; undefined on a gateway without hours. */
+  readonly group?: UnoCatalogGroup | undefined;
+  /** Included models: the real model behind "Smart" / "Fast" (display form). */
+  readonly underlyingModel?: string | undefined;
+  readonly description?: string | undefined;
   readonly pricing: {
     readonly promptPer1MUsd: number | undefined;
     readonly completionPer1MUsd: number | undefined;
@@ -227,6 +240,9 @@ export interface UnoGatewayModelResponse {
   readonly modalities?: unknown;
   readonly pricing_known?: unknown;
   readonly pricing?: unknown;
+  readonly uno_group?: unknown;
+  readonly underlying_model?: unknown;
+  readonly description?: unknown;
 }
 
 function parsePricePer1M(value: unknown): number | undefined {
@@ -421,6 +437,7 @@ export function normalizeUnoCatalogEntry(
     inputModalities,
     outputModalities,
     pricingKnown: typeof entry.pricing_known === "boolean" ? entry.pricing_known : undefined,
+    ...parseCuratedFields(entry),
     pricing: {
       promptPer1MUsd,
       completionPer1MUsd,
@@ -428,6 +445,28 @@ export function normalizeUnoCatalogEntry(
       estimatedSeriousTaskUsd,
     },
   };
+}
+
+function parseCuratedFields(
+  entry: UnoGatewayModelResponse,
+): Pick<UnoCatalogModel, "group" | "underlyingModel" | "description"> {
+  const group = parseUnoCatalogGroup(entry.uno_group);
+  if (!group) return {};
+  const underlyingModel = formatUnderlyingModel(entry.underlying_model);
+  const description =
+    typeof entry.description === "string" && entry.description.trim().length > 0
+      ? entry.description.trim()
+      : undefined;
+  return {
+    group,
+    ...(underlyingModel ? { underlyingModel } : {}),
+    ...(description ? { description } : {}),
+  };
+}
+
+/** The gateway has AI hours: it marks its short model list with `uno_group`. */
+export function isCuratedUnoCatalog(catalog: UnoCatalog): boolean {
+  return Object.values(catalog).some((model) => model.group !== undefined);
 }
 
 function catalogKey(route: UnoModelRoute, modelId: string): string {
@@ -559,6 +598,14 @@ function buildUnoConfigContent(
       ...(options ? { options } : {}),
     };
   }
+  // AI hours hide the old defaults from `/v1/models`, but chats saved on them
+  // must keep running (the gateway remaps them to Smart / Fast). Kept in the
+  // harness config only — the picker never lists them.
+  if (isCuratedUnoCatalog(models)) {
+    for (const legacy of UNO_LEGACY_HARNESS_MODEL_IDS) {
+      opencodeModelsByProvider[UNO_PROVIDER_ID][legacy.id] ??= { name: legacy.name };
+    }
+  }
   const config: Record<string, unknown> = {
     $schema: "https://opencode.ai/config.json",
     agent: {
@@ -686,6 +733,8 @@ function personalCatalogBySlug(models: ReadonlyArray<PersonalAiModel>): Personal
 
 export function metadataForPersonalModel(model: PersonalAiModel): ModelCapabilitiesMetadata {
   return {
+    // The person's own upload is a "Custom model"; the rest is Uno's GPU catalog.
+    unoGroup: model.catalog === false ? "custom" : "personal",
     ...(model.contextTokens !== undefined ? { contextLength: model.contextTokens } : {}),
     supports: { streaming: true, tools: true },
     pricing: { perHourUsd: model.priceUsdPerHour },
@@ -731,6 +780,9 @@ export function metadataForCatalogModel(model: UnoCatalogModel): ModelCapabiliti
       input: inputModalities,
       output: outputModalities,
     },
+    ...(model.group ? { unoGroup: model.group } : {}),
+    ...(model.underlyingModel ? { underlyingModel: model.underlyingModel } : {}),
+    ...(model.description ? { description: model.description } : {}),
   };
 }
 
@@ -738,6 +790,24 @@ const filterUnoModels = (snapshot: ServerProviderDraft): ServerProviderDraft => 
   ...snapshot,
   models: snapshot.models.filter((model) => isUnoModelSlug(model.slug)),
 });
+
+/**
+ * AI hours: only the gateway's marked models (and the private GPU) reach the
+ * picker; the harness-only legacy ids and anything unmarked stay hidden.
+ */
+const filterCuratedUnoModels =
+  (catalog: UnoCatalog) =>
+  (snapshot: ServerProviderDraft): ServerProviderDraft =>
+    isCuratedUnoCatalog(catalog)
+      ? {
+          ...snapshot,
+          models: snapshot.models.filter(
+            (model) =>
+              model.slug.startsWith(`${UNO_PERSONAL_PROVIDER_ID}/`) ||
+              catalog[model.slug]?.group !== undefined,
+          ),
+        }
+      : snapshot;
 
 const stripUnoPrefix = (slug: string): string => {
   if (slug.startsWith(`${UNO_RUSSIA_PROVIDER_ID}/`)) {
@@ -770,7 +840,11 @@ const withCatalogMetadata =
       return {
         ...model,
         name: catalogModel?.name ?? model.name,
-        ...(catalogModel?.provider ? { subProvider: catalogModel.provider } : {}),
+        // Curated models read as "Smart" / "Claude Opus 5.5" on their own;
+        // a vendor prefix ("uno · Smart") would only add noise.
+        ...(catalogModel?.provider && catalogModel.group === undefined
+          ? { subProvider: catalogModel.provider }
+          : {}),
         capabilities: {
           ...model.capabilities,
           ...(metadata ? { metadata } : {}),
@@ -794,6 +868,17 @@ const sortUnoModels =
       const aId = stripUnoPrefix(a.slug);
       const bId = stripUnoPrefix(b.slug);
 
+      // AI hours: Smart, Fast, then premium in the gateway's fixed order.
+      const aGroup = catalog[a.slug]?.group;
+      const bGroup = catalog[b.slug]?.group;
+      if (aGroup !== undefined || bGroup !== undefined) {
+        if (aGroup === undefined) return 1;
+        if (bGroup === undefined) return -1;
+        const rankDiff = curatedModelRank(aId, aGroup) - curatedModelRank(bId, bGroup);
+        if (rankDiff !== 0) return rankDiff;
+        return aId.localeCompare(bId);
+      }
+
       const aPinned = PINNED_RANK.get(aId);
       const bPinned = PINNED_RANK.get(bId);
       if (aPinned !== undefined && bPinned !== undefined) return aPinned - bPinned;
@@ -815,6 +900,7 @@ const sortUnoModels =
 
 export const __unoDriverTest = {
   buildUnoConfigContent,
+  filterCuratedUnoModels,
   catalogKey,
   fetchUnoModelsCatalog,
   metadataForCatalogModel,
@@ -963,7 +1049,14 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         sharedMcpToken: browserBridge.sharedMcpToken,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
-      const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, processEnv);
+      // Titles use "Fast"; a gateway without AI hours does not list it yet.
+      const listedSlugs = new Set(Object.keys(unoCatalog));
+      const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, processEnv, {
+        resolveModelSlug: (slug) =>
+          listedSlugs.size === 0
+            ? slug
+            : resolveUnoDefaultSlug(slug, (candidate) => listedSlugs.has(candidate)),
+      });
 
       const sortByCatalog = sortUnoModels(unoCatalog);
 
@@ -974,6 +1067,7 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         UNO_PRESENTATION,
       ).pipe(
         Effect.map(filterUnoModels),
+        Effect.map(filterCuratedUnoModels(unoCatalog)),
         Effect.map(withCatalogMetadata(unoCatalog, personalCatalog)),
         Effect.map(sortByCatalog),
         Effect.map(stampIdentity),
@@ -990,7 +1084,11 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
               withCatalogMetadata(
                 unoCatalog,
                 personalCatalog,
-              )(filterUnoModels(makePendingOpenCodeProvider(settings, UNO_PRESENTATION))),
+              )(
+                filterCuratedUnoModels(unoCatalog)(
+                  filterUnoModels(makePendingOpenCodeProvider(settings, UNO_PRESENTATION)),
+                ),
+              ),
             ),
           ),
         checkProvider,

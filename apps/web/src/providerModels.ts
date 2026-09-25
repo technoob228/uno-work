@@ -9,7 +9,11 @@ import {
   type ServerProvider,
   type ServerProviderModel,
 } from "@t3tools/contracts";
-import { createModelCapabilities, normalizeModelSlug } from "@t3tools/shared/model";
+import {
+  createModelCapabilities,
+  listedDefaultModel,
+  normalizeModelSlug,
+} from "@t3tools/shared/model";
 
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
@@ -126,10 +130,9 @@ export function getDefaultServerModel(
   // Falling back to the first advertised model is wrong for Uno, whose
   // snapshot pins headline models first regardless of whether the gateway
   // can currently serve them (e.g. Anthropic/OpenAI 403'd upstream).
+  const listed = listedDefaultModel(provider, models);
+  if (listed !== undefined) return listed;
   const preferred = DEFAULT_MODEL_BY_PROVIDER[provider];
-  if (preferred !== undefined && models.some((model) => model.slug === preferred)) {
-    return preferred;
-  }
   return (
     models.find((model) => !model.isCustom)?.slug ?? models[0]?.slug ?? preferred ?? DEFAULT_MODEL
   );
@@ -219,11 +222,8 @@ export function pickUsableDefaultModelSelection(
       (a, b) => defaultThreadPreferenceRank(a.driver) - defaultThreadPreferenceRank(b.driver),
     )[0];
   if (!winner) return null;
-  const preferred = DEFAULT_MODEL_BY_PROVIDER[winner.driver];
   const model =
-    (preferred !== undefined && winner.models.some((entry) => entry.slug === preferred)
-      ? preferred
-      : undefined) ??
+    listedDefaultModel(winner.driver, winner.models) ??
     winner.models.find((entry) => !entry.isCustom)?.slug ??
     winner.models[0]?.slug;
   return model ? { instanceId: winner.instanceId, model } : null;

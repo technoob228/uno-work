@@ -133,7 +133,7 @@ describe("deriveAssistantHarnessStatus", () => {
 });
 
 describe("orderAssistantModels", () => {
-  it("puts the latest-Grok alias first, then Grok releases newest first, then the rest", () => {
+  it("puts Smart first, then Grok releases newest first, then the rest", () => {
     const ordered = orderAssistantModels(
       [
         { id: "openai/gpt-5", name: "GPT-5" },
@@ -144,7 +144,7 @@ describe("orderAssistantModels", () => {
       { ensureGatewayAlias: true },
     ).map((model) => model.id);
     expect(ordered).toEqual([
-      "~x-ai/grok-latest",
+      "uno/smart",
       "x-ai/grok-4.7",
       "x-ai/grok-4.20",
       "anthropic/claude-haiku-4.5",

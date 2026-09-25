@@ -11,7 +11,7 @@ import {
   type ProviderInstallJobStatus,
   type ServerProvider,
 } from "@t3tools/contracts";
-import { grokReleaseVersion } from "@t3tools/shared/assistantLlm";
+import { assistantModelLabel, grokReleaseVersion } from "@t3tools/shared/assistantLlm";
 
 /** The initial Hermes snapshot says this until the first probe lands (HermesProvider.ts). */
 const CHECKING_MESSAGE_PREFIX = "Checking Hermes";
@@ -102,15 +102,20 @@ export function deriveAssistantHarnessStatus(input: {
   };
 }
 
+const GROK_RELEASES_RANK = 3;
+
 function grokRank(id: string): number {
-  if (id === ASSISTANT_DEFAULT_GATEWAY_MODEL || /(^|\/)grok-latest$/.test(id)) return 0;
-  return /(^|\/)grok-/i.test(id) ? 1 : 2;
+  // Uno AI hours: Smart (the default), then Fast — the included models.
+  if (id === ASSISTANT_DEFAULT_GATEWAY_MODEL) return 0;
+  if (id.startsWith("uno/")) return 1;
+  if (/(^|\/)grok-latest$/.test(id)) return 2;
+  return /(^|\/)grok-/i.test(id) ? GROK_RELEASES_RANK : 4;
 }
 
 /**
- * Picker order: the latest-Grok alias, then Grok releases newest first, then
- * everything else by name. The gateway alias is always offered on the gateway
- * even when the catalog hides it.
+ * Picker order: Smart and Fast (Uno AI hours), the latest-Grok alias, then
+ * Grok releases newest first, then everything else by name. The default
+ * (Smart) is always offered on the gateway even when the catalog hides it.
  */
 export function orderAssistantModels(
   models: ReadonlyArray<AssistantLlmModel>,
@@ -121,12 +126,15 @@ export function orderAssistantModels(
     options?.ensureGatewayAlias &&
     !list.some((model) => model.id === ASSISTANT_DEFAULT_GATEWAY_MODEL)
   ) {
-    list.push({ id: ASSISTANT_DEFAULT_GATEWAY_MODEL, name: "Grok (latest)" });
+    list.push({
+      id: ASSISTANT_DEFAULT_GATEWAY_MODEL,
+      name: assistantModelLabel(ASSISTANT_DEFAULT_GATEWAY_MODEL),
+    });
   }
   return list.toSorted((a, b) => {
     const rank = grokRank(a.id) - grokRank(b.id);
     if (rank !== 0) return rank;
-    if (grokRank(a.id) === 1) {
+    if (grokRank(a.id) === GROK_RELEASES_RANK) {
       // Releases newest first (4.7 before 4.20 — xAI numbers them as
       // decimals); variants after their release.
       const release = (grokReleaseVersion(b.id) ?? -1) - (grokReleaseVersion(a.id) ?? -1);
