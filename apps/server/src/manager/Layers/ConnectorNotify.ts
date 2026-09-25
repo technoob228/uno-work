@@ -4,6 +4,7 @@ import {
   type ChannelNotifyResult,
   type ProjectId,
 } from "@t3tools/contracts";
+import { findMarkedAssistantChat } from "@t3tools/shared/assistantChat";
 import { Effect, Layer, Option, Schema } from "effect";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -55,12 +56,21 @@ const makeConnectorNotifyService = Effect.gen(function* () {
           connector.allowedChatIds.map((chatId) => `${connector.kind}:${chatId}`),
         ),
       );
+      // Personal chats are bound to the main conversation (0.0.86); the
+      // fallback still counts them as the human's own chats.
+      const mainConversationThreadId = input.includeAssistantFallback
+        ? yield* projectionSnapshotQuery.getShellSnapshot().pipe(
+            Effect.map((snapshot) => findMarkedAssistantChat(snapshot.threads)?.id ?? null),
+            Effect.orElseSucceed(() => null),
+          )
+        : null;
       return resolveNotifyChats({
         bindings: bindings.filter((binding) => allowed.has(`${binding.kind}:${binding.chatId}`)),
         connectors,
         threadId: input.threadId,
         projectId: input.projectId,
         includeAssistantFallback: input.includeAssistantFallback,
+        mainConversationThreadId,
       });
     });
 

@@ -14,6 +14,7 @@
  * with what they read and act on the result.
  */
 import {
+  ASSISTANT_PROJECT_ID,
   isAssistantProjectId,
   type ManagerConnectorBinding,
   type ManagerConnectorBindingKind,
@@ -61,6 +62,117 @@ export const bindingTargetLabel = (
   target.kind === "thread"
     ? (labels.threadTitleById.get(target.threadId) ?? null)
     : (labels.projectTitleById.get(target.projectId) ?? null);
+
+// ---------------------------------------------------------------------------
+// Personal Telegram chats talk to the main conversation
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a Telegram chat id is a private (1:1) chat. Telegram gives private
+ * chats the user's id (positive); groups, supergroups and channels have
+ * negative ids. Used where only the id is known (the startup migration).
+ */
+export const isPrivateTelegramChatId = (chatId: string): boolean =>
+  /^[1-9]\d*$/.test(chatId.trim());
+
+/**
+ * Whether an incoming Telegram chat is private: its `type` when Telegram sent
+ * one, else the sign of its id.
+ */
+export const isPrivateTelegramChat = (
+  chat: { readonly id?: number | string; readonly type?: string } | null | undefined,
+): boolean => {
+  if (chat === null || chat === undefined) return false;
+  if (chat.type !== undefined) return chat.type === "private";
+  return chat.id !== undefined && isPrivateTelegramChatId(String(chat.id));
+};
+
+/**
+ * Whether a chat's messages go to the default assistant's main conversation
+ * (the pinned "Uno" chat) instead of a thread of its own: a private chat of
+ * the default assistant's bot that is not bound to anything else — no
+ * binding, or a plain "the assistant" binding. A group keeps its own thread;
+ * an explicit `/use <project>` or `/thread <id>` choice is kept.
+ */
+export const routesToMainConversation = (input: {
+  readonly connectorProjectId: ProjectId;
+  readonly binding: ManagerConnectorBinding | null | undefined;
+  readonly isPrivateChat: boolean;
+}): boolean => {
+  if (!input.isPrivateChat || input.connectorProjectId !== ASSISTANT_PROJECT_ID) return false;
+  const target = input.binding?.target;
+  return (
+    target === undefined ||
+    (target.kind === "assistant" && target.projectId === ASSISTANT_PROJECT_ID)
+  );
+};
+
+/**
+ * What an inbound message talks to: {@link effectiveBindingTarget}, except
+ * that a personal chat of the default assistant goes to its main
+ * conversation (when there is one yet — else the assistant as before).
+ */
+export const resolveChatTarget = (input: {
+  readonly connectorProjectId: ProjectId;
+  readonly binding: ManagerConnectorBinding | null | undefined;
+  readonly isPrivateChat: boolean;
+  readonly mainThreadId: ThreadId | null;
+}): ManagerConnectorBindingTarget =>
+  input.mainThreadId !== null && routesToMainConversation(input)
+    ? { kind: "thread", threadId: input.mainThreadId }
+    : effectiveBindingTarget(input.binding, input.connectorProjectId);
+
+export interface PrivateChatMigrationStep {
+  readonly chatId: string;
+  /** Where the chat pointed before; null = no binding (the assistant's own per-chat thread). */
+  readonly previousTarget: ManagerConnectorBindingTarget | null;
+  /** Carried over from the old binding row. */
+  readonly notifyOnComplete: boolean;
+}
+
+/**
+ * The one-time re-pointing of already linked personal chats (0.0.86): every
+ * allowlisted private chat of the default assistant's bot that still talks to
+ * a thread of its own is bound to the main conversation. Groups and chats the
+ * owner bound elsewhere are left alone; the old threads keep their history,
+ * only routing moves. Naturally idempotent — a chat already bound to the
+ * main conversation is not in the plan.
+ */
+export const planPrivateChatMigration = (input: {
+  readonly connectorProjectId: ProjectId;
+  readonly allowedChatIds: ReadonlyArray<string>;
+  readonly bindings: ReadonlyArray<ManagerConnectorBinding>;
+  readonly mainThreadId: ThreadId;
+}): ReadonlyArray<PrivateChatMigrationStep> => {
+  if (input.connectorProjectId !== ASSISTANT_PROJECT_ID) return [];
+  const byChat = new Map(
+    input.bindings
+      .filter((binding) => binding.kind === "telegram")
+      .map((binding) => [binding.chatId, binding] as const),
+  );
+  const steps: Array<PrivateChatMigrationStep> = [];
+  const seen = new Set<string>();
+  for (const chatId of input.allowedChatIds) {
+    if (seen.has(chatId)) continue;
+    seen.add(chatId);
+    const binding = byChat.get(chatId) ?? null;
+    if (
+      !routesToMainConversation({
+        connectorProjectId: input.connectorProjectId,
+        binding,
+        isPrivateChat: isPrivateTelegramChatId(chatId),
+      })
+    ) {
+      continue;
+    }
+    steps.push({
+      chatId,
+      previousTarget: binding?.target ?? null,
+      notifyOnComplete: binding?.notifyOnComplete ?? false,
+    });
+  }
+  return steps;
+};
 
 // ---------------------------------------------------------------------------
 // Thread routing per target kind
@@ -295,6 +407,12 @@ export interface ResolveNotifyChatsInput {
    * off — it only pushes to chats that asked for a target.
    */
   readonly includeAssistantFallback: boolean;
+  /**
+   * The default assistant's main conversation. A chat bound to it (a personal
+   * chat, 0.0.86) is one of the human's own chats: it stays in the assistant
+   * fallback like an unbound one.
+   */
+  readonly mainConversationThreadId?: ThreadId | null;
 }
 
 const chatKey = (kind: ManagerConnectorBindingKind, chatId: string): string => `${kind}:${chatId}`;
@@ -347,11 +465,16 @@ export const resolveNotifyChats = (
   const assistantScope =
     input.projectId !== null && isAssistantProjectId(input.projectId) ? input.projectId : null;
   const bound = new Set(input.bindings.map((binding) => chatKey(binding.kind, binding.chatId)));
+  const mainThreadId = input.mainConversationThreadId ?? null;
   for (const binding of input.bindings) {
-    if (
-      binding.target.kind === "assistant" &&
-      (assistantScope === null || binding.target.projectId === assistantScope)
-    ) {
+    const talksToAssistant =
+      binding.target.kind === "assistant"
+        ? assistantScope === null || binding.target.projectId === assistantScope
+        : binding.target.kind === "thread" &&
+          mainThreadId !== null &&
+          binding.target.threadId === mainThreadId &&
+          (assistantScope === null || assistantScope === ASSISTANT_PROJECT_ID);
+    if (talksToAssistant) {
       push(chatFromBinding(binding, "assistant"));
     }
   }

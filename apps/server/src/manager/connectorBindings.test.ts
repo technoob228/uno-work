@@ -10,7 +10,11 @@ import {
   ASSISTANT_THREAD_RUNTIME_MODE,
   decideThreadRouting,
   effectiveBindingTarget,
+  isPrivateTelegramChat,
+  isPrivateTelegramChatId,
   matchByTitleOrId,
+  planPrivateChatMigration,
+  resolveChatTarget,
   resolveNotifyChats,
   type RoutingThreadShell,
 } from "./connectorBindings.ts";
@@ -381,5 +385,131 @@ describe("decideThreadRouting: the assistant's chats run on the Uno chat's engin
         assistantModelSelection: hermes("xai"),
       }).kind,
     ).toBe("create");
+  });
+});
+
+describe("personal Telegram chats talk to the main conversation (0.0.86)", () => {
+  const mainThreadId = ThreadId.make("thread-main");
+  const otherAssistant = ProjectId.make("assistant-work");
+
+  it("detects private chats by type, falling back to a positive id", () => {
+    expect(isPrivateTelegramChat({ id: 42, type: "private" })).toBe(true);
+    expect(isPrivateTelegramChat({ id: -100123, type: "supergroup" })).toBe(false);
+    expect(isPrivateTelegramChat({ id: -42, type: "group" })).toBe(false);
+    expect(isPrivateTelegramChat({ id: 42 })).toBe(true);
+    expect(isPrivateTelegramChat({ id: -42 })).toBe(false);
+    expect(isPrivateTelegramChat(undefined)).toBe(false);
+    expect(isPrivateTelegramChatId("123456")).toBe(true);
+    expect(isPrivateTelegramChatId("-1001234")).toBe(false);
+    expect(isPrivateTelegramChatId("0")).toBe(false);
+    expect(isPrivateTelegramChatId("abc")).toBe(false);
+  });
+
+  it("routes an unbound or assistant-bound private chat to the main conversation", () => {
+    for (const current of [
+      null,
+      binding({ target: { kind: "assistant", projectId: assistantId } }),
+    ]) {
+      expect(
+        resolveChatTarget({
+          connectorProjectId: assistantId,
+          binding: current,
+          isPrivateChat: true,
+          mainThreadId,
+        }),
+      ).toEqual({ kind: "thread", threadId: mainThreadId });
+    }
+  });
+
+  it("keeps a group on its own thread (the assistant target)", () => {
+    expect(
+      resolveChatTarget({
+        connectorProjectId: assistantId,
+        binding: null,
+        isPrivateChat: false,
+        mainThreadId,
+      }),
+    ).toEqual({ kind: "assistant", projectId: assistantId });
+  });
+
+  it("keeps explicit /use and /thread choices, other assistants' bots, and works without a main conversation", () => {
+    const toProject = binding({ target: { kind: "project", projectId } });
+    const toThread = binding({ target: { kind: "thread", threadId } });
+    for (const current of [toProject, toThread]) {
+      expect(
+        resolveChatTarget({
+          connectorProjectId: assistantId,
+          binding: current,
+          isPrivateChat: true,
+          mainThreadId,
+        }),
+      ).toEqual(current.target);
+    }
+    expect(
+      resolveChatTarget({
+        connectorProjectId: otherAssistant,
+        binding: null,
+        isPrivateChat: true,
+        mainThreadId,
+      }),
+    ).toEqual({ kind: "assistant", projectId: otherAssistant });
+    expect(
+      resolveChatTarget({
+        connectorProjectId: assistantId,
+        binding: null,
+        isPrivateChat: true,
+        mainThreadId: null,
+      }),
+    ).toEqual({ kind: "assistant", projectId: assistantId });
+  });
+
+  it("plans the migration for private chats only, keeping notify flags and explicit bindings", () => {
+    const plan = planPrivateChatMigration({
+      connectorProjectId: assistantId,
+      allowedChatIds: ["111", "-100222", "333", "444", "555", "111"],
+      bindings: [
+        binding({
+          chatId: "333",
+          target: { kind: "assistant", projectId: assistantId },
+          notifyOnComplete: true,
+        }),
+        binding({ chatId: "444", target: { kind: "project", projectId } }),
+        binding({ chatId: "555", target: { kind: "thread", threadId: mainThreadId } }),
+      ],
+      mainThreadId,
+    });
+    expect(plan).toEqual([
+      { chatId: "111", previousTarget: null, notifyOnComplete: false },
+      {
+        chatId: "333",
+        previousTarget: { kind: "assistant", projectId: assistantId },
+        notifyOnComplete: true,
+      },
+    ]);
+    expect(
+      planPrivateChatMigration({
+        connectorProjectId: otherAssistant,
+        allowedChatIds: ["111"],
+        bindings: [],
+        mainThreadId,
+      }),
+    ).toEqual([]);
+  });
+
+  it("keeps a chat bound to the main conversation in the assistant notify fallback", () => {
+    const chats = resolveNotifyChats({
+      bindings: [binding({ chatId: "111", target: { kind: "thread", threadId: mainThreadId } })],
+      connectors: [
+        { kind: "telegram", projectId: assistantId, allowedChatIds: ["111", "-100222"] },
+      ],
+      threadId: null,
+      projectId: null,
+      includeAssistantFallback: true,
+      mainConversationThreadId: mainThreadId,
+    });
+    expect(chats.map((chat) => [chat.chatId, chat.via])).toEqual([
+      ["111", "assistant"],
+      ["-100222", "assistant"],
+    ]);
   });
 });

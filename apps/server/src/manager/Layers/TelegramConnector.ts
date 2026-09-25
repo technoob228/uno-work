@@ -108,9 +108,12 @@ import {
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
 import {
   decideThreadRouting,
-  effectiveBindingTarget,
+  isPrivateTelegramChat,
+  resolveChatTarget,
+  routesToMainConversation,
   type RoutingThreadShell,
 } from "../connectorBindings.ts";
+import { migratePersonalTelegramChats } from "../telegramPersonalChats.ts";
 import { executeConnectorCommand } from "../connectorCommandHandler.ts";
 import { currentAssistantModelSelection } from "../assistantEngineSelection.ts";
 import { parseConnectorCommand } from "../connectorCommands.ts";
@@ -588,6 +591,15 @@ const makeTelegramConnector = Effect.gen(function* () {
       ...TELEGRAM_HANDOFF_OPTIONS,
       sanitize: (text) => text.replace(TELEGRAM_SEND_FILE_HINT, ""),
     });
+
+  // The main conversation ("Uno"), when it exists and is not archived.
+  const findLiveMainConversationId = projectionSnapshotQuery.getShellSnapshot().pipe(
+    Effect.map((snapshot) => {
+      const main = findMarkedAssistantChat(snapshot.threads);
+      return main !== null && main.archivedAt === null ? main.id : null;
+    }),
+    Effect.orElseSucceed(() => null),
+  );
 
   const routingShell = (shell: Option.Option<RoutingThreadShell>): RoutingThreadShell | null =>
     Option.isSome(shell) ? shell.value : null;
@@ -1138,7 +1150,7 @@ const makeTelegramConnector = Effect.gen(function* () {
         });
       }
       let toMainConversation = false;
-      if (projectId === ASSISTANT_PROJECT_ID && message.chat?.type === "private") {
+      if (projectId === ASSISTANT_PROJECT_ID && isPrivateTelegramChat(message.chat)) {
         const snapshot = yield* projectionSnapshotQuery.getShellSnapshot();
         const main = findMarkedAssistantChat(snapshot.threads);
         if (main !== null) {
@@ -1305,11 +1317,28 @@ const makeTelegramConnector = Effect.gen(function* () {
 
       const chatLabel = message.chat?.title ?? message.chat?.username ?? chatId;
       // Where this chat's messages go: its binding, or the assistant that
-      // owns the bot when it has none.
-      const binding = yield* bindingRepository
-        .get({ kind: "telegram", chatId })
-        .pipe(Effect.orElseSucceed(() => Option.none()));
-      const target = effectiveBindingTarget(Option.getOrNull(binding), projectId);
+      // owns the bot when it has none — except that a personal (private)
+      // chat of the default assistant talks to its main conversation, the
+      // pinned "Uno" chat (0.0.86). Groups keep a thread of their own.
+      const binding = Option.getOrNull(
+        yield* bindingRepository
+          .get({ kind: "telegram", chatId })
+          .pipe(Effect.orElseSucceed(() => Option.none())),
+      );
+      const isPrivateChat = isPrivateTelegramChat(message.chat);
+      const mainThreadId = routesToMainConversation({
+        connectorProjectId: projectId,
+        binding,
+        isPrivateChat,
+      })
+        ? yield* findLiveMainConversationId
+        : null;
+      const target = resolveChatTarget({
+        connectorProjectId: projectId,
+        binding,
+        isPrivateChat,
+        mainThreadId,
+      });
       const { threadId, handoffContext, runtimeMode, interactionMode } = yield* ensureThreadForChat(
         {
           target,
@@ -1541,7 +1570,51 @@ const makeTelegramConnector = Effect.gen(function* () {
       );
   });
 
+  // One-time (per daemon start) re-pointing of personal chats linked before
+  // 0.0.86 to the main conversation — see `telegramPersonalChats.ts`.
+  // Retried every cycle until the main conversation exists (the assistant
+  // bootstrap creates it in the background); a failure is logged once and
+  // not retried — routing sends personal chats to the main conversation
+  // anyway, the migration only makes it stick in the bindings.
+  const personalChatsMigratedRef = yield* Ref.make(false);
+  const migratePersonalChatsOnce = Effect.gen(function* () {
+    if (yield* Ref.get(personalChatsMigratedRef)) return;
+    const result = yield* migratePersonalTelegramChats({
+      connectors: connectorRepository,
+      bindings: bindingRepository,
+      // Archived still counts: the assistant bootstrap brings it back.
+      findMainThreadId: projectionSnapshotQuery
+        .getShellSnapshot()
+        .pipe(Effect.map((snapshot) => findMarkedAssistantChat(snapshot.threads)?.id ?? null)),
+      nowIso: new Date().toISOString(),
+    });
+    if (result.status === "no-main-conversation") return;
+    yield* Ref.set(personalChatsMigratedRef, true);
+    if (result.status === "done" && result.migrated.length > 0) {
+      yield* Effect.logInfo("telegram personal chats moved to the main conversation").pipe(
+        Effect.annotateLogs({
+          mainThreadId: result.mainThreadId,
+          chats: result.migrated.map((step) => ({
+            chatId: step.chatId,
+            previousTarget: step.previousTarget ?? "assistant (unbound)",
+          })),
+        }),
+      );
+    }
+  }).pipe(
+    Effect.catch((cause) =>
+      Ref.set(personalChatsMigratedRef, true).pipe(
+        Effect.andThen(
+          Effect.logWarning("telegram personal chat migration failed").pipe(
+            Effect.annotateLogs({ cause }),
+          ),
+        ),
+      ),
+    ),
+  );
+
   const pollCycle = Effect.gen(function* () {
+    yield* migratePersonalChatsOnce;
     const records = yield* connectorRepository
       .listByKind("telegram")
       .pipe(Effect.orElseSucceed(() => []));
