@@ -42,7 +42,7 @@ describe("own tools", () => {
     id: 7,
     name: "Claude Code on misha-work",
     key: "uno_agt_abc",
-    mcp_url: "https://console.uno4.dev/mcp",
+    mcp_url: "https://console.uno4.dev/api/v1/mcp",
     commands: {} as Record<string, string>,
   };
 
@@ -51,7 +51,7 @@ describe("own tools", () => {
       agentCommand("claude-code", { ...key, commands: { "claude-code": "from console" } }),
     ).toBe("from console");
     expect(agentCommand("claude-code", key)).toBe(
-      'claude mcp add --transport http uno https://console.uno4.dev/mcp --header "Authorization: Bearer uno_agt_abc"',
+      'claude mcp add --transport http uno https://console.uno4.dev/api/v1/mcp --header "Authorization: Bearer uno_agt_abc"',
     );
     expect(agentCommand("codex", key)).toContain(
       'http_headers = { "Authorization" = "Bearer uno_agt_abc" }',
@@ -59,7 +59,7 @@ describe("own tools", () => {
     expect(JSON.parse(agentCommand("cursor", key))).toEqual({
       mcpServers: {
         uno: {
-          url: "https://console.uno4.dev/mcp",
+          url: "https://console.uno4.dev/api/v1/mcp",
           headers: { Authorization: "Bearer uno_agt_abc" },
         },
       },

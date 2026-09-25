@@ -5,7 +5,9 @@
  *   `POST /api/v1/boxes/{id}/work/agent-keys`), and one line to paste where
  *   the agent lives — Claude Code, Codex, Cursor. Claude.ai and ChatGPT add
  *   Uno as a custom connector by its address alone and sign in with Uno
- *   (OAuth on the console's remote MCP server, https://console.uno4.dev/mcp).
+ *   (OAuth on the console's remote MCP server, https://console.uno4.dev/api/v1/mcp —
+ *   the same server and consent screen as the console's "Connect ChatGPT / Claude";
+ *   "Which computers" there pins the connection to this one).
  * - SSH: the ready-to-run command and "Add your SSH key" — the key lands on
  *   this computer at once (`/work/ssh`, `/work/ssh-keys`).
  *
@@ -49,8 +51,11 @@ export type OwnToolsTab = "agent" | "ssh";
 export const CONSOLE_API_KEYS_URL = "https://console.uno4.dev/secrets?tab=tokens";
 export const CONSOLE_SSH_KEYS_URL = "https://console.uno4.dev/secrets?tab=sshkeys";
 export const CONSOLE_START_SSH_URL = "https://console.uno4.dev/start?path=ssh";
-/** The console's remote MCP server (OAuth for connectors, bearer key for CLIs). */
-export const UNO_MCP_URL = "https://console.uno4.dev/mcp";
+/**
+ * The console's remote MCP server (OAuth for connectors, bearer key for CLIs).
+ * Under /api/v1: console.uno4.dev/mcp is the old @uno4/mcp node server.
+ */
+export const UNO_MCP_URL = "https://console.uno4.dev/api/v1/mcp";
 
 export type AgentTarget = "claude-code" | "codex" | "cursor" | "web";
 
@@ -203,8 +208,8 @@ function AgentTab() {
             label="Connector"
           />
           <p className="text-xs text-muted-foreground">
-            No key to copy: Claude or ChatGPT opens “Sign in with Uno”, and you pick which computer
-            it gets.
+            No key to copy: Claude or ChatGPT opens “Sign in with Uno”. Under “Which computers” pick{" "}
+            {boxName} to give it only this one.
           </p>
         </div>
       ) : loading ? (
