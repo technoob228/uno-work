@@ -18,7 +18,10 @@ import {
   APP_SDK_DEFAULT_CHAT_MODEL,
   APP_SDK_DEFAULT_PORT,
   type AppAiApp,
+  type AppAiModels,
+  type AppAiModelsInput,
   type AppAiOverview,
+  type AppAiProviders,
   type AppAiUpdateInput,
   type AppStorageInfo,
   type ModelSelection,
@@ -26,9 +29,10 @@ import {
   type ServerProvider,
   UNO_GATEWAY_BASE_URL,
 } from "@t3tools/contracts";
-import { Context, Duration, Effect, Layer, Schedule } from "effect";
+import { Context, Duration, Effect, Layer, Option, Schedule } from "effect";
 import { execFile } from "node:child_process";
 import { watch } from "node:fs";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -43,6 +47,17 @@ import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { InboxService } from "../inbox/InboxService.ts";
 import { UnoGatewayKey } from "../unoGatewayKey.ts";
+import { AiProviderKeys } from "../aiProviders/AiProviderKeys.ts";
+import { fetchPersonalAiModels } from "../unoPersonalAi.ts";
+import {
+  describeChoice,
+  detectLocalAi,
+  normalizeLocalBaseUrl,
+  normalizeProviderChoice,
+  probeOpenAiEndpoint,
+  renderProvidersBrief,
+  resolveAppAiRoute,
+} from "./appAiProviders.ts";
 import { type StoredApp, hashAppToken, newAppToken, openAppAiStore } from "./appAiStore.ts";
 import { type AppApiCaller, type AppApiCore, makeAppApiHandler } from "./appApiHttp.ts";
 import {
@@ -73,6 +88,9 @@ const SYNC_EVERY = Duration.seconds(5);
 const AI_SPEND_SAMPLE_EVERY = Duration.minutes(20);
 const BRIDGE_CHECK_EVERY = Duration.seconds(30);
 const PRICES_TTL_MS = 60 * 60_000;
+/** How fresh the list of AI servers on this computer must be for Settings. */
+const PROVIDERS_TTL_MS = 30_000;
+const PROVIDERS_REFRESH_EVERY = Duration.seconds(60);
 export const PERSON_MAX_LIMIT_USD = 1000;
 export const PERSON_MAX_STORAGE_GB = 10_000;
 
@@ -81,6 +99,8 @@ export interface AppSdkServiceShape {
   /** Home's "Uno AI spend" (aiSpendLedger.ts). */
   readonly spend: Effect.Effect<UnoAiSpend>;
   readonly update: (input: AppAiUpdateInput) => Effect.Effect<AppAiOverview, AppSdkUpdateError>;
+  /** Models of one provider, for the model field in Settings → Apps. */
+  readonly models: (input: AppAiModelsInput) => Effect.Effect<AppAiModels>;
 }
 
 /**
@@ -100,6 +120,8 @@ export function cloudFoldersToDelete(
     ]),
   ];
 }
+
+const asModels = (ids: ReadonlyArray<string>) => ids.map((id) => ({ id, name: id }));
 
 export class AppSdkUpdateError extends Error {
   readonly _tag = "AppSdkUpdateError";
@@ -185,6 +207,12 @@ export const makeAppSdkService = (
     readonly background?: boolean;
     /** Tests: the gateway's per-app spend (`/usage/apps`). */
     readonly fetch?: typeof fetch;
+    /** Tests: the clock of the monthly limit. */
+    readonly now?: () => Date;
+    /** Tests: what "AI on this computer" finds (skips probing ports). */
+    readonly detectLocal?: (
+      extraBaseUrls: ReadonlyArray<string>,
+    ) => Promise<AppAiProviders["local"]>;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -195,6 +223,9 @@ export const makeAppSdkService = (
     const projections = yield* ProjectionSnapshotQuery;
     const providerRegistry = yield* ProviderRegistry;
     const inbox = yield* InboxService;
+    // Keys the person brought (Settings → Agents) — optional so embedders and
+    // tests without the secret store still run (then "Your own key" has none).
+    const aiKeys = Option.getOrNull(yield* Effect.serviceOption(AiProviderKeys));
     const context = yield* Effect.context<never>();
     const runPromise = Effect.runPromiseWith(context);
 
@@ -208,7 +239,10 @@ export const makeAppSdkService = (
       UNO_GATEWAY_BASE_URL
     ).replace(/\/+$/, "");
     const store = yield* Effect.promise(() =>
-      openAppAiStore(options.storePath ?? path.join(config.stateDir, "app-ai.json")),
+      openAppAiStore(
+        options.storePath ?? path.join(config.stateDir, "app-ai.json"),
+        options.now ? { now: options.now } : {},
+      ),
     );
     // Threads of app tasks keep their app label across restarts: a session
     // restarted tomorrow is still that app's (appTaskLabel.ts).
@@ -299,6 +333,8 @@ export const makeAppSdkService = (
         limitUsd: effectiveLimitUsd(stored, manifest),
         spentUsd: totalSpentUsd(stored),
         tasksSpentUsd: stored.taskSpentUsd,
+        period: stored.period,
+        lifetimeSpentUsd: Math.round((stored.lifetimeUsd + totalSpentUsd(stored)) * 1e6) / 1e6,
         manifestCwd: manifest.cwd,
         taskToolsCap: stored.taskToolsCap,
         storage: manifest.storage
@@ -341,6 +377,96 @@ export const makeAppSdkService = (
     const machineGateway = async () => {
       const key = await runPromise(gatewayKey.harnessKey());
       return key.length > 0 ? { baseUrl: gatewayBaseUrl, key } : null;
+    };
+
+    const gatewayChatModel = async () => {
+      const current = await runPromise(readSettings);
+      return current?.appsAi.chatModel && current.appsAi.chatModel.length > 0
+        ? current.appsAi.chatModel
+        : APP_SDK_DEFAULT_CHAT_MODEL;
+    };
+    const byokKey = (provider: Parameters<NonNullable<typeof aiKeys>["resolve"]>[0]) =>
+      aiKeys ? runPromise(aiKeys.resolve(provider)) : Promise.resolve(null);
+
+    // What apps could use for answers right now: probed now and then, never
+    // on the request path of an app.
+    let providersCache: { at: number; value: AppAiProviders } | null = null;
+    let providersRefresh: Promise<AppAiProviders> | null = null;
+    const briefPath = path.join(home, ".uno", "ai-providers.md");
+    const writeBrief = async (value: AppAiProviders) => {
+      const chatModel = await gatewayChatModel();
+      const apps = store
+        .all()
+        .filter((stored) => manifests.get(stored.id)?.ai && !stored.revoked)
+        .map((stored) => ({
+          id: stored.id,
+          name: manifests.get(stored.id)?.name ?? stored.id,
+          label: describeChoice(stored.provider, value, chatModel),
+        }));
+      const body = renderProvidersBrief({ providers: value, apps, apiUrl: listening });
+      await mkdir(path.dirname(briefPath), { recursive: true });
+      const tmp = `${briefPath}.${process.pid}.tmp`;
+      await writeFile(tmp, body, { mode: 0o644 });
+      await rename(tmp, briefPath);
+    };
+    const refreshProviders = (): Promise<AppAiProviders> => {
+      if (providersRefresh) return providersRefresh;
+      providersRefresh = (async () => {
+        const extra = store
+          .all()
+          .flatMap((stored) =>
+            stored.provider?.kind === "local" && stored.provider.baseUrl
+              ? [stored.provider.baseUrl]
+              : [],
+          );
+        const gateway = await machineGateway();
+        // Tests (no background) never probe ports or the GPU service.
+        const probe = options.background !== false;
+        const [local, personal, keys] = await Promise.all([
+          (options.detectLocal
+            ? options.detectLocal(extra)
+            : probe
+              ? detectLocalAi({
+                  extraBaseUrls: extra,
+                  skipPorts: [port ?? APP_SDK_DEFAULT_PORT],
+                })
+              : Promise.resolve([])
+          ).catch(() => []),
+          gateway && probe
+            ? fetchPersonalAiModels(gateway.key)
+                .then((result) =>
+                  result.models.map((m) => ({
+                    id: m.id,
+                    name: m.name,
+                    priceUsdPerHour: m.priceUsdPerHour,
+                  })),
+                )
+                .catch(() => [])
+            : Promise.resolve([]),
+          aiKeys
+            ? runPromise(aiKeys.list()).then((all) => all.filter((k) => k.configured))
+            : Promise.resolve([]),
+        ]);
+        const value: AppAiProviders = {
+          unoConnected: gateway !== null,
+          local,
+          personal,
+          keys,
+          checkedAt: new Date().toISOString(),
+        };
+        providersCache = { at: Date.now(), value };
+        await writeBrief(value).catch(() => undefined);
+        return value;
+      })().finally(() => {
+        providersRefresh = null;
+      });
+      return providersRefresh;
+    };
+    /** Cached; a stale list is refreshed in the background (the first read waits). */
+    const currentProviders = async (): Promise<AppAiProviders> => {
+      if (!providersCache) return refreshProviders();
+      if (Date.now() - providersCache.at > PROVIDERS_TTL_MS) void refreshProviders();
+      return providersCache.value;
     };
 
     // Home's "Uno AI spend": the account's running total, read now and then.
@@ -402,6 +528,28 @@ export const makeAppSdkService = (
         return prices;
       },
       charge: (appId, usd) => store.addSpend(appId, usd),
+      noteChatWidget: (appId, guarded) => {
+        const stored = store.get(appId);
+        if (!stored) return;
+        const last = stored.chatWidget;
+        // Written when it changes, else at most hourly (it's shown, not metered).
+        if (
+          last &&
+          last.guarded === guarded &&
+          Date.now() - Date.parse(last.seenAt) < 60 * 60_000
+        ) {
+          return;
+        }
+        void store.update(appId, (app) => {
+          app.chatWidget = { guarded, seenAt: new Date().toISOString() };
+        });
+      },
+      route: (caller) =>
+        resolveAppAiRoute(store.get(caller.appId)?.provider ?? null, {
+          gateway: machineGateway,
+          gatewayChatModel,
+          byokKey,
+        }),
       createTask: async (caller, body) => {
         const outcome = await runPromise(tasks.createTask(caller, body));
         if (outcome.task) await store.addTask(caller.appId, outcome.task);
@@ -478,9 +626,19 @@ export const makeAppSdkService = (
       });
     };
 
-    const toApp = (stored: StoredApp, manifest: AppManifest | undefined, key: string): AppAiApp => {
+    const toApp = (
+      stored: StoredApp,
+      manifest: AppManifest | undefined,
+      key: string,
+      providers: AppAiProviders | null = null,
+      chatModel: string = APP_SDK_DEFAULT_CHAT_MODEL,
+    ): AppAiApp => {
       const limitUsd = effectiveLimitUsd(stored, manifest);
       return {
+        provider: stored.provider ?? { kind: "uno" },
+        chatWidget: stored.chatWidget,
+        providerLabel: describeChoice(stored.provider, providers, chatModel),
+        metered: (stored.provider?.kind ?? "uno") === "uno",
         id: stored.id,
         name: manifest?.name ?? stored.id,
         icon: manifest?.icon ?? null,
@@ -497,6 +655,8 @@ export const makeAppSdkService = (
         spentUsd: totalSpentUsd(stored),
         chatSpentUsd: Math.round(stored.spentUsd * 1e6) / 1e6,
         tasksSpentUsd: Math.round(stored.taskSpentUsd * 1e6) / 1e6,
+        period: stored.period,
+        lifetimeSpentUsd: Math.round((stored.lifetimeUsd + totalSpentUsd(stored)) * 1e6) / 1e6,
         requests: stored.requests,
         tasksStarted: stored.tasksStarted,
         taskToolsCap: stored.taskToolsCap,
@@ -522,8 +682,12 @@ export const makeAppSdkService = (
           .filter((stored) => manifests.get(stored.id)?.storage)
           .map((stored) => folderOf(stored, thisComputer)),
       );
+      const aiProviders = yield* Effect.promise(currentProviders);
+      const chatModel = yield* Effect.promise(gatewayChatModel);
       const apps = listed
-        .map((stored) => toApp(stored, manifests.get(stored.id), thisComputer))
+        .map((stored) =>
+          toApp(stored, manifests.get(stored.id), thisComputer, aiProviders, chatModel),
+        )
         .toSorted((a, b) => a.name.localeCompare(b.name));
       return {
         apps,
@@ -541,6 +705,7 @@ export const makeAppSdkService = (
           current?.appsAi.taskModelSelection ?? selectAutoBootstrapModelSelection(providers),
           providers,
         ),
+        providers: aiProviders,
       } satisfies AppAiOverview;
     });
 
@@ -612,8 +777,31 @@ export const makeAppSdkService = (
             ),
           );
         }
+        let provider: StoredApp["provider"] | undefined;
+        if (input.provider !== undefined) {
+          const choice = input.provider;
+          if (choice.kind === "local" && normalizeLocalBaseUrl(choice.baseUrl ?? "") === null) {
+            return yield* Effect.fail(
+              new AppSdkUpdateError(
+                "Give the AI server's address, e.g. http://127.0.0.1:11434/v1 (Ollama).",
+              ),
+            );
+          }
+          if (choice.kind === "byok") {
+            const key = yield* Effect.promise(() => byokKey(choice.keyProvider ?? "custom"));
+            if (!key) {
+              return yield* Effect.fail(
+                new AppSdkUpdateError(
+                  "No key is stored for that provider. Add it in Settings → Agents → AI provider keys first.",
+                ),
+              );
+            }
+          }
+          provider = normalizeProviderChoice(choice);
+        }
         yield* Effect.promise(() =>
           store.update(input.appId, (app) => {
+            if (provider !== undefined) app.provider = provider;
             if (input.limitUsd !== undefined) {
               app.limitOverrideUsd =
                 input.limitUsd === null ? null : Math.round(input.limitUsd * 100) / 100;
@@ -626,6 +814,8 @@ export const makeAppSdkService = (
             if (input.storageScope !== undefined) app.storageScope = input.storageScope;
             if (input.resetSpent === true) {
               // The gateway's total stays; only its growth from now on counts.
+              app.lifetimeUsd =
+                Math.round((app.lifetimeUsd + app.spentUsd + app.taskSpentUsd) * 1e6) / 1e6;
               app.spentUsd = 0;
               app.taskSpentUsd = 0;
             }
@@ -641,7 +831,49 @@ export const makeAppSdkService = (
           yield* Effect.promise(() => removeAppKey(keysDir, input.appId));
         }
         yield* Effect.logInfo("app sdk: app updated by the person", { ...input });
+        if (provider !== undefined) {
+          // A new local address joins the probe list; the brief shows the switch.
+          providersCache = null;
+        }
         return yield* overview;
+      });
+
+    const models: AppSdkServiceShape["models"] = (input) =>
+      Effect.promise(async (): Promise<AppAiModels> => {
+        if (input.kind === "local") {
+          const baseUrl = normalizeLocalBaseUrl(input.baseUrl ?? "");
+          if (!baseUrl) return { models: [], error: "Not a usable address." };
+          const found = await probeOpenAiEndpoint(baseUrl, {
+            timeoutMs: 3_000,
+            ...(options.fetch ? { fetch: options.fetch } : {}),
+          });
+          return found
+            ? { models: asModels(found.ids), error: null }
+            : { models: [], error: `Nothing answers at ${baseUrl}/models.` };
+        }
+        if (input.kind === "byok") {
+          if (!aiKeys) return { models: [], error: "No keys on this computer." };
+          const result = await runPromise(aiKeys.listModels(input.keyProvider ?? "custom"));
+          return result.ok
+            ? { models: [...result.models], error: null }
+            : { models: [], error: result.error };
+        }
+        const gateway = await machineGateway();
+        if (!gateway) return { models: [], error: "No Uno AI on this computer." };
+        if (input.kind === "personal") {
+          const listed = await fetchPersonalAiModels(gateway.key).catch(() => null);
+          return listed
+            ? { models: listed.models.map((m) => ({ id: m.id, name: m.name })), error: null }
+            : { models: [], error: "Personal AI didn't answer." };
+        }
+        const found = await probeOpenAiEndpoint(gateway.baseUrl, {
+          timeoutMs: 10_000,
+          apiKey: gateway.key,
+          ...(options.fetch ? { fetch: options.fetch } : {}),
+        });
+        return found
+          ? { models: asModels(found.ids), error: null }
+          : { models: [], error: "The Uno AI gateway didn't answer." };
       });
 
     if (options.background !== false) {
@@ -665,6 +897,12 @@ export const makeAppSdkService = (
       );
       yield* Effect.forkScoped(
         Effect.promise(() => sync()).pipe(Effect.repeat(Schedule.spaced(SYNC_EVERY))),
+      );
+      // The agents' brief (~/.uno/ai-providers.md) follows servers coming and going.
+      yield* Effect.forkScoped(
+        Effect.promise(() => refreshProviders().catch(() => undefined)).pipe(
+          Effect.repeat(Schedule.spaced(PROVIDERS_REFRESH_EVERY)),
+        ),
       );
       // Days the person doesn't open Home still get their samples.
       yield* Effect.forkScoped(
@@ -713,7 +951,15 @@ export const makeAppSdkService = (
       }
     }
 
-    return { overview, spend, update, core, sync, taskMeter } satisfies AppSdkServiceShape & {
+    return {
+      overview,
+      spend,
+      update,
+      models,
+      core,
+      sync,
+      taskMeter,
+    } satisfies AppSdkServiceShape & {
       readonly core: AppApiCore;
       readonly sync: () => Promise<void>;
       readonly taskMeter: typeof taskMeter;

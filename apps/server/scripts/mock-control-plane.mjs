@@ -349,6 +349,22 @@ function applogs(tail) {
 
 const TEMPLATES = [
   {
+    id: "notetaker",
+    name: "Notetaker",
+    icon: "🎙️",
+    category: "ai",
+    made_by_uno: true,
+    featured: true,
+    rank: 1,
+    tagline_en: "Meeting notes and summaries, written by AI",
+    description_en:
+      "Meeting notes: record a call in the browser or upload a recording — get a transcript with speakers, a summary, decisions and action items.",
+    min_ram_mb: 2048,
+    min_disk_gb: 3,
+    // The app's manifest "ai" — shown in the store and before install.
+    ai: { chat: true, tasks: false, limit_usd: 10 },
+  },
+  {
     id: "hello-uno",
     name: "hello-uno",
     icon: "👋",

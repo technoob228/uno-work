@@ -1590,6 +1590,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.appAiList, appSdk.overview, {
             "rpc.aggregate": "app-sdk",
           }),
+        [WS_METHODS.appAiModels]: (input) =>
+          observeRpcEffect(WS_METHODS.appAiModels, appSdk.models(input), {
+            "rpc.aggregate": "app-sdk",
+          }),
         [WS_METHODS.appAiSpend]: (_input) =>
           observeRpcEffect(WS_METHODS.appAiSpend, appSdk.spend, {
             "rpc.aggregate": "app-sdk",

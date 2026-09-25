@@ -14,6 +14,8 @@ import {
   APP_SDK_DEFAULT_CHAT_MODEL,
   type AppAiApp,
   type AppAiOverview,
+  type AppAiProviderChoice,
+  type AppAiProviders,
   type AppAiUpdateInput,
   type AppStorageScope,
   type AppTaskTools,
@@ -21,8 +23,8 @@ import {
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
-import { CloudIcon, SparklesIcon } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { CloudIcon, SparklesIcon, TriangleAlertIcon, WandSparklesIcon } from "lucide-react";
+import { useCallback, useId, useMemo, useState } from "react";
 
 import {
   useEnvironmentProviders,
@@ -34,7 +36,33 @@ import { getCustomModelOptionsByInstance } from "~/modelSelection";
 import { deriveProviderInstanceEntries, sortProviderInstanceEntries } from "~/providerInstances";
 
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { appAiQueryKey, appAiQueryOptions, appAiUpdate } from "../computer/computerQueries";
+import {
+  appAiModelsQueryOptions,
+  appAiQueryKey,
+  appAiQueryOptions,
+  appAiUpdate,
+  machineAppsQueryOptions,
+} from "../computer/computerQueries";
+import { useHomeLaunchers } from "../computer/useHomeLaunchers";
+import {
+  Dialog,
+  DialogDescription,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "../ui/dialog";
+import {
+  type AddAiTarget,
+  MANUAL_LOCAL_VALUE,
+  addAiPrompt,
+  choiceFromValue,
+  choiceValue,
+  providerOptions,
+  providersSummary,
+  publicChatWarning,
+  signInPrompt,
+} from "./appAiProviderModel";
 import { formatFileSize } from "../files/fileTypes";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -73,9 +101,18 @@ export function formatUsd(value: number): string {
   return `$${value.toFixed(2).replace(/\.00$/, "")}`;
 }
 
-/** "Notetaker used $0.40 of $10" — the line a person reads at a glance. */
-export function appUsageLine(app: Pick<AppAiApp, "name" | "spentUsd" | "limitUsd">): string {
-  return `${app.name} used ${formatUsd(app.spentUsd)} of ${formatUsd(app.limitUsd)}`;
+/**
+ * "Notetaker used $0.40 of $10 this month ($3.20 in all)" — the line a person
+ * reads at a glance. The limit is monthly; it starts over on the 1st (UTC).
+ */
+export function appUsageLine(
+  app: Pick<AppAiApp, "name" | "spentUsd" | "limitUsd" | "lifetimeSpentUsd">,
+): string {
+  const lifetime =
+    app.lifetimeSpentUsd !== undefined && app.lifetimeSpentUsd > app.spentUsd + 0.005
+      ? ` (${formatUsd(app.lifetimeSpentUsd)} in all)`
+      : "";
+  return `${app.name} used ${formatUsd(app.spentUsd)} of ${formatUsd(app.limitUsd)} this month${lifetime}`;
 }
 
 /**
@@ -126,15 +163,225 @@ function relativeTime(iso: string | null): string | null {
   return `${Math.round(seconds / 86_400)} d ago`;
 }
 
-function AppRow({
+/**
+ * "Answers from": where one app's answers go — Uno AI, a server on this
+ * computer, Personal AI or the person's own key — and which model.
+ */
+function ProviderControl({
   app,
+  providers,
+  environmentId,
   onUpdate,
   pending,
 }: {
   readonly app: AppAiApp;
+  readonly providers: AppAiProviders | undefined;
+  readonly environmentId: EnvironmentId;
   readonly onUpdate: (input: AppAiUpdateInput) => void;
   readonly pending: boolean;
 }) {
+  const current = app.provider;
+  const options = providerOptions(providers, current);
+  const [manual, setManual] = useState(false);
+  const [wantModels, setWantModels] = useState(false);
+  const listId = useId();
+  const localModels =
+    current?.kind === "local"
+      ? (providers?.local.find((e) => e.baseUrl === current.baseUrl)?.models ?? null)
+      : null;
+  const remote = useQuery(
+    appAiModelsQueryOptions(
+      environmentId,
+      wantModels && current && current.kind !== "local"
+        ? {
+            kind: current.kind,
+            ...(current.keyProvider ? { keyProvider: current.keyProvider } : {}),
+          }
+        : null,
+    ),
+  );
+  const models = localModels ?? remote.data?.models.map((m) => m.id) ?? [];
+  const choose = (choice: AppAiProviderChoice) => onUpdate({ appId: app.id, provider: choice });
+  const value = manual ? MANUAL_LOCAL_VALUE : choiceValue(current);
+  const selected = options.find((o) => o.value === value);
+  return (
+    <div
+      className="flex flex-wrap items-center justify-end gap-2"
+      data-testid={`app-ai-provider-${app.id}`}
+    >
+      <Select
+        value={value}
+        onValueChange={(next) => {
+          if (next === MANUAL_LOCAL_VALUE) {
+            setManual(true);
+            return;
+          }
+          setManual(false);
+          const choice = choiceFromValue(String(next), current);
+          if (choice && String(next) !== choiceValue(current)) choose(choice);
+        }}
+      >
+        <SelectTrigger
+          size="sm"
+          className="w-60"
+          aria-label={`Where ${app.name}'s answers come from`}
+          title={selected?.hint}
+          disabled={pending}
+        >
+          <SelectValue>{selected?.label ?? "Uno AI"}</SelectValue>
+        </SelectTrigger>
+        <SelectPopup>
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
+              <span className="flex flex-col">
+                <span>{option.label}</span>
+                <span className="text-[11px] text-muted-foreground">{option.hint}</span>
+              </span>
+            </SelectItem>
+          ))}
+        </SelectPopup>
+      </Select>
+      {manual ? (
+        <DraftInput
+          className="w-60"
+          value=""
+          autoFocus
+          placeholder="http://127.0.0.1:11434/v1"
+          spellCheck={false}
+          aria-label={`AI server address for ${app.name}`}
+          onCommit={(next) => {
+            if (next.trim()) {
+              setManual(false);
+              choose({ kind: "local", baseUrl: next.trim(), model: null });
+            }
+          }}
+        />
+      ) : (
+        <>
+          <DraftInput
+            className="w-48"
+            value={current?.model ?? ""}
+            list={listId}
+            placeholder={
+              current?.kind === "local"
+                ? (localModels?.[0] ?? "model")
+                : current?.kind === "uno" || !current
+                  ? "Model for answers"
+                  : "Provider's first model"
+            }
+            spellCheck={false}
+            aria-label={`Model ${app.name} gets`}
+            onFocus={() => setWantModels(true)}
+            onCommit={(next) => {
+              const model = next.trim() || null;
+              if (model !== (current?.model ?? null)) {
+                choose({ ...(current ?? { kind: "uno" }), model });
+              }
+            }}
+          />
+          <datalist id={listId}>
+            {models.slice(0, 200).map((id) => (
+              <option key={id} value={id} />
+            ))}
+          </datalist>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** "Add AI to an app": pick an app you made here → a new chat with the task typed in. */
+function AddAiToAppButton({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const [open, setOpen] = useState(false);
+  const machineApps = useQuery(machineAppsQueryOptions(environmentId, open));
+  const overview = useQuery(appAiQueryOptions(environmentId, open));
+  const launchers = useHomeLaunchers(environmentId);
+  const withAi = new Set(
+    (overview.data?.apps ?? []).filter((a) => a.chat || a.tasks).map((a) => a.id),
+  );
+  const targets: AddAiTarget[] = (machineApps.data?.apps ?? [])
+    .filter((app) => app.source === "manifest")
+    .map((app) => {
+      const id = app.id.replace(/^manifest:/, "");
+      return { id, name: app.name, codeDir: app.codeDir ?? null, hasAi: withAi.has(id) };
+    })
+    .toSorted((a, b) => Number(a.hasAi) - Number(b.hasAi) || a.name.localeCompare(b.name));
+  return (
+    <>
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)} data-testid="add-ai-to-app">
+        <WandSparklesIcon className="size-3.5" /> Add AI to an app
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogPopup className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add AI to an app</DialogTitle>
+            <DialogDescription>
+              Pick an app you or Uno made on this computer. A new chat opens with the task typed in
+              — read it, change it, then send.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            {machineApps.isPending ? (
+              <p className="text-sm text-muted-foreground">Looking at this computer's apps…</p>
+            ) : targets.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No apps made on this computer yet. Ask Uno to build one first — e.g. "a notes app
+                with an AI assistant".
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-1" aria-label="Apps">
+                {targets.map((target) => (
+                  <li key={target.id}>
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-muted/60"
+                      onClick={() => {
+                        setOpen(false);
+                        void launchers.askUno(addAiPrompt(target));
+                      }}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{target.name}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {target.codeDir ?? `~/.uno/apps/${target.id}.json`}
+                        </span>
+                      </span>
+                      {target.hasAi ? (
+                        <Badge variant="outline" size="sm">
+                          Uses AI
+                        </Badge>
+                      ) : null}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </DialogPanel>
+        </DialogPopup>
+      </Dialog>
+    </>
+  );
+}
+
+function AppRow({
+  app,
+  onUpdate,
+  pending,
+  providers,
+  environmentId,
+  published = false,
+  onAddSignIn,
+}: {
+  readonly app: AppAiApp;
+  readonly onUpdate: (input: AppAiUpdateInput) => void;
+  readonly pending: boolean;
+  readonly providers: AppAiProviders | undefined;
+  readonly environmentId: EnvironmentId;
+  /** Shown on the internet ("Show on the internet"). */
+  readonly published?: boolean;
+  readonly onAddSignIn?: () => void;
+}) {
+  const warning = publicChatWarning(app, published);
   const usesAi = app.chat || app.tasks;
   const uses = [app.chat ? "answers" : null, app.tasks ? "jobs" : null]
     .filter(Boolean)
@@ -165,6 +412,12 @@ function AppRow({
       }
       description={
         <>
+          {app.chat && app.status !== "revoked" ? (
+            <span className="block" data-testid={`app-ai-via-${app.id}`}>
+              Answers from {app.providerLabel ?? "Uno AI"}
+              {app.metered === false ? " · no Uno AI limit applies" : ""}
+            </span>
+          ) : null}
           {usesAi ? (
             <span className="block">
               {appUsageLine(app)}
@@ -230,8 +483,11 @@ function AppRow({
       control={
         <div className="flex flex-wrap items-center justify-end gap-2">
           {usesAi ? (
-            <label className="flex items-center gap-1 text-xs text-muted-foreground">
-              Limit $
+            <label
+              className="flex items-center gap-1 text-xs text-muted-foreground"
+              title="What the app may spend on Uno AI a month; it starts over on the 1st (UTC). AI on this computer and your own key don't count."
+            >
+              Limit / month $
               <DraftInput
                 className="w-20"
                 inputMode="decimal"
@@ -343,7 +599,35 @@ function AppRow({
           )}
         </div>
       }
-    />
+    >
+      {warning ? (
+        <div
+          className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300"
+          role="alert"
+          data-testid={`app-ai-public-warning-${app.id}`}
+        >
+          <TriangleAlertIcon className="size-3.5 shrink-0" />
+          <span className="min-w-0 flex-1">{warning}</span>
+          {onAddSignIn ? (
+            <Button size="xs" variant="outline" onClick={onAddSignIn}>
+              Ask Uno to add sign-in
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {app.chat && app.status !== "revoked" ? (
+        <div className="flex flex-wrap items-center gap-2 pt-3 pb-4">
+          <span className="text-xs text-muted-foreground">Answers from</span>
+          <ProviderControl
+            app={app}
+            providers={providers}
+            environmentId={environmentId}
+            onUpdate={onUpdate}
+            pending={pending}
+          />
+        </div>
+      ) : null}
+    </SettingsRow>
   );
 }
 
@@ -356,6 +640,14 @@ export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId:
   const settings = serverSettings ?? DEFAULT_UNIFIED_SETTINGS;
 
   const overview = useQuery(appAiQueryOptions(environmentId));
+  // Which registered apps are on the internet (their chat without sign-in is a warning).
+  const machineApps = useQuery(machineAppsQueryOptions(environmentId));
+  const launchers = useHomeLaunchers(environmentId);
+  const registered = new Map(
+    (machineApps.data?.apps ?? [])
+      .filter((m) => m.source === "manifest")
+      .map((m) => [m.id.replace(/^manifest:/, ""), m] as const),
+  );
   const update = useMutation({
     mutationFn: (input: AppAiUpdateInput) => appAiUpdate(environmentId, input),
     onSuccess: (data: AppAiOverview) =>
@@ -411,20 +703,21 @@ export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId:
       <SettingsSection title="AI for apps" icon={<SparklesIcon className="size-3" />}>
         <SettingsRow
           title="Apps on this computer can use its AI"
-          description="An app you or Uno build here asks this computer's AI for answers or gives it jobs — no API key of its own. You see what each app spends and can stop it any time."
+          description="An app you or Uno build here asks this computer's AI for answers or gives it jobs — no API key of its own. Each app gets its answers from Uno AI, from AI running on this computer, or from your own key — you choose per app below. You see what each app spends and can stop it any time."
           status={
             data
               ? data.gatewayConnected
                 ? data.apiUrl
-                  ? "On"
+                  ? (providersSummary(data.providers) ?? "On")
                   : "The App API couldn't start on this computer (its port is busy)."
                 : "Sign in to Uno on this computer to turn it on."
               : null
           }
+          control={<AddAiToAppButton environmentId={environmentId} />}
         />
         <SettingsRow
           title="Model for answers"
-          description="What apps get when they don't pick a model themselves. Any model of the Uno AI gateway."
+          description="What apps on Uno AI get when they don't pick a model themselves. Any model of the Uno AI gateway."
           resetAction={
             chatModel.length > 0 ? (
               <SettingResetButton
@@ -506,6 +799,18 @@ export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId:
             <AppRow
               key={app.id}
               app={app}
+              providers={data.providers}
+              environmentId={environmentId}
+              published={registered.get(app.id)?.publication != null}
+              onAddSignIn={() =>
+                void launchers.askUno(
+                  signInPrompt({
+                    id: app.id,
+                    name: app.name,
+                    codeDir: registered.get(app.id)?.codeDir ?? null,
+                  }),
+                )
+              }
               pending={update.isPending}
               onUpdate={(input) => update.mutate(input)}
             />
