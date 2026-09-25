@@ -6,9 +6,13 @@ import {
   applyStoreView,
   featuredTemplates,
   INSTALLED_TAB,
+  hasFilters,
+  logoSources,
   NO_FILTERS,
+  phonePlatforms,
   shelves,
   sortByRank,
+  storeHighlights,
 } from "./appStoreModel";
 
 function app(id: string, extra: Partial<UnoComputerAppTemplate> = {}): UnoComputerAppTemplate {
@@ -90,9 +94,94 @@ describe("App Store storefront", () => {
     expect(view({ tab: INSTALLED_TAB, installed: new Set(["pingvin-share"]) })).toEqual([
       "pingvin-share",
     ]);
-    expect(view({ filters: { signInWithUno: true, fitsComputer: false } })).toEqual(["nextcloud"]);
+    expect(view({ filters: { ...NO_FILTERS, signInWithUno: true } })).toEqual(["nextcloud"]);
     expect(
-      view({ filters: { signInWithUno: false, fitsComputer: true }, memTotalMb: 1024 }),
+      view({ filters: { ...NO_FILTERS, fitsComputer: true }, memTotalMb: 1024 }),
     ).not.toContain("nextcloud");
+  });
+});
+
+const mb = (n: number) => `${n / 1024} GB`;
+
+describe("App Store v3", () => {
+  const notetaker = app("notetaker", {
+    category: "ai",
+    rank: 70,
+    madeByUno: true,
+    ai: { chat: true, tasks: false, limitUsd: 10 },
+    minRamMb: 2048,
+  });
+  const immich = app("immich", {
+    rank: 60,
+    minRamMb: 4096,
+    mobile: {
+      ios: "https://apps.apple.com/us/app/immich/id1613945652",
+      android: "https://play.google.com/store/apps/details?id=app.alextran.immich",
+      appName: null,
+      note: "Enter your address.",
+    },
+  });
+  const all = [...catalog, immich, notetaker];
+
+  it("puts apps made by Uno first, everywhere", () => {
+    expect(sortByRank(all)[0]?.id).toBe("notetaker");
+    expect(featuredTemplates(all, categories).map((t) => t.id)).toEqual([
+      "notetaker",
+      "nextcloud",
+      "open-webui",
+    ]);
+    // Recommended takes a Made by Uno app even when the console didn't feature it.
+    const unfeatured = { ...notetaker, featured: false };
+    expect(featuredTemplates([unfeatured], categories).map((t) => t.id)).toEqual(["notetaker"]);
+  });
+
+  it("filters apps with phone apps", () => {
+    const filters = { ...NO_FILTERS, phoneApps: true };
+    expect(hasFilters(filters)).toBe(true);
+    expect(hasFilters(NO_FILTERS)).toBe(false);
+    expect(
+      applyStoreView({
+        templates: all,
+        tab: ALL_TAB,
+        query: "",
+        filters,
+        installed: new Set(),
+        memTotalMb: null,
+      }).map((t) => t.id),
+    ).toEqual(["immich"]);
+  });
+
+  it("highlights what an app is like, Made by Uno first", () => {
+    expect(storeHighlights(notetaker, true, mb).map((h) => h.label)).toEqual([
+      "Made by Uno",
+      "Uses AI",
+      "2 GB+",
+    ]);
+    expect(storeHighlights(immich, false, mb)).toEqual([
+      { kind: "phone", label: "Phone apps", ios: true, android: true },
+      { kind: "memory", label: "Needs 4 GB", tight: true },
+    ]);
+    expect(storeHighlights(app("tiny", { minRamMb: 0 }), null, mb)).toEqual([]);
+    expect(phonePlatforms(immich.mobile!)).toBe("iOS and Android");
+    expect(phonePlatforms({ ...immich.mobile!, ios: null })).toBe("Android");
+  });
+
+  it("falls back to the console's logo by id when the computer passes none or it fails", () => {
+    expect(
+      logoSources({ id: "memos", iconUrl: "https://x/api/v1/apps/icons/memos.png" }, "https://c"),
+    ).toEqual([
+      "https://x/api/v1/apps/icons/memos.png",
+      "https://c/api/v1/apps/icons/memos.svg",
+      "https://c/api/v1/apps/icons/memos.png",
+    ]);
+    // The console's own address is not tried twice.
+    expect(
+      logoSources({ id: "memos", iconUrl: "https://c/api/v1/apps/icons/memos.png" }, "https://c"),
+    ).toEqual(["https://c/api/v1/apps/icons/memos.png", "https://c/api/v1/apps/icons/memos.svg"]);
+    expect(logoSources({ id: "memos", iconUrl: null }, "https://c")).toEqual([
+      "https://c/api/v1/apps/icons/memos.svg",
+      "https://c/api/v1/apps/icons/memos.png",
+    ]);
+    expect(logoSources({ id: "../x", iconUrl: undefined })).toEqual([]);
   });
 });

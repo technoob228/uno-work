@@ -193,6 +193,17 @@ export type UnoComputerAppSetting = typeof UnoComputerAppSetting.Type;
  * Uno AI (`limitUsd`; null = the default $10). Shown before install and on
  * its tile.
  */
+/** An app's official phone apps (App Store / Google Play) and how to connect them. */
+export const UnoAppMobile = Schema.Struct({
+  ios: Schema.NullOr(Schema.String),
+  android: Schema.NullOr(Schema.String),
+  /** The store name when it differs from the app (Bitwarden for Vaultwarden). */
+  appName: Schema.NullOr(Schema.String),
+  /** How to connect after install ("choose Self-hosted, enter your address"). */
+  note: Schema.NullOr(Schema.String),
+});
+export type UnoAppMobile = typeof UnoAppMobile.Type;
+
 export const UnoAppAiUse = Schema.Struct({
   chat: Schema.Boolean,
   tasks: Schema.Boolean,
@@ -228,6 +239,10 @@ export const UnoComputerAppTemplate = Schema.Struct({
   sso: Schema.optional(Schema.NullOr(Schema.Literals(["oidc", "edge"]))),
   /** Uses this computer's AI (catalog `ai`); null/absent = no AI. */
   ai: Schema.optional(Schema.NullOr(UnoAppAiUse)),
+  /** Who makes it: "uno" (Made by Uno — first in the store) or "community". */
+  publisher: Schema.optional(Schema.NullOr(Schema.Literals(["uno", "community"]))),
+  /** Official phone apps that connect to this app's address; null — none. */
+  mobile: Schema.optional(Schema.NullOr(UnoAppMobile)),
 });
 export type UnoComputerAppTemplate = typeof UnoComputerAppTemplate.Type;
 

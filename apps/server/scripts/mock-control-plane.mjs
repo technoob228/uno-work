@@ -61,6 +61,7 @@
  * boosted, 43 minutes left.
  */
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import path from "node:path";
@@ -448,6 +449,18 @@ const TEMPLATES = [
   },
 ];
 
+/*
+ * MOCK_CATALOG_FILE — a real catalog ({categories, templates}, e.g. dumped from
+ * fishcode's apps.Listed()) instead of the 6-app one above; MOCK_ICONS_DIR —
+ * fishcode's back/internal/apps/icons, served at /api/v1/apps/icons/<file>
+ * like the console does. With a catalog file, Immich comes preinstalled too
+ * (for "Use it on your phone" with an address).
+ */
+const CATALOG_FILE = process.env.MOCK_CATALOG_FILE
+  ? JSON.parse(readFileSync(process.env.MOCK_CATALOG_FILE, "utf8"))
+  : null;
+const ICONS_DIR = process.env.MOCK_ICONS_DIR || null;
+
 /** Rows of GET /boxes/{id}/apps, by deployment id. */
 const APP_CARDS = new Map([
   [
@@ -493,6 +506,34 @@ const APP_CARDS = new Map([
     },
   ],
 ]);
+
+if (CATALOG_FILE) {
+  SERVICES.push({
+    id: -79,
+    repo_full_name: "immich",
+    branch: "main",
+    box_id: BOX_ID,
+    last_deployment_id: 79,
+    last_status: "success",
+    url: "https://immich-my-computer.app.uno4.dev",
+  });
+  APP_CARDS.set(79, {
+    deployment_id: 79,
+    template_id: "immich",
+    name: "Immich",
+    icon: "📷",
+    status: "running",
+    url: "https://immich-my-computer.app.uno4.dev",
+    created_at: iso(minsAgo(60 * 3)),
+    credentials: [{ label_en: "Login (email)", value: "demo@uno4.dev" }],
+    notes_en: null,
+    removable: true,
+    web_port: 2283,
+    compose_project: "uno-immich",
+    ai_key: null,
+    sso: "oidc",
+  });
+}
 
 const DEPLOYMENTS = new Map();
 let nextDeploymentId = 500;
@@ -1201,6 +1242,21 @@ const server = http.createServer(async (req, res) => {
   const path = url.pathname;
   console.log(`${req.method} ${url.pathname}${url.search}`);
 
+  // Logos are public (an <img> sends no Bearer), like the console's.
+  const icon = path.match(/^\/api\/v1\/apps\/icons\/([a-z0-9-]+\.(svg|png))$/);
+  if (icon && ICONS_DIR) {
+    try {
+      const body = readFileSync(`${ICONS_DIR}/${icon[1]}`);
+      res.writeHead(200, {
+        "content-type": icon[2] === "svg" ? "image/svg+xml" : "image/png",
+        "access-control-allow-origin": "*",
+      });
+      return res.end(body);
+    } catch {
+      return send(res, 404, { error: "not found" });
+    }
+  }
+
   // "Sign in with Uno" for the desktop app: the console page bounces straight
   // back to the app's loopback with a code; the code is exchanged for a token.
   if (path === "/work/desktop") {
@@ -1254,7 +1310,9 @@ const server = http.createServer(async (req, res) => {
     });
   }
   if (path === "/api/v1/boxes") return send(res, 200, { boxes: [box()] });
-  if (path === "/api/v1/apps/templates") return send(res, 200, { templates: TEMPLATES });
+  if (path === "/api/v1/apps/templates") {
+    return send(res, 200, CATALOG_FILE ?? { templates: TEMPLATES });
+  }
   if (path === "/api/v1/box-subscription") return send(res, 200, subscription());
   if (path === "/api/v1/git/services") return send(res, 200, { services: SERVICES });
 

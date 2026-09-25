@@ -9,6 +9,7 @@ import {
   parseAppCategories,
   parseAppTemplates,
   parseTemplateAi,
+  parseTemplateMobile,
   parseInstalledApps,
   readComputerActivity,
   readComputerApps,
@@ -1117,5 +1118,60 @@ describe("parseTemplateAi", () => {
     expect(parseTemplateAi(undefined)).toBeNull();
     const [t] = parseAppTemplates({ templates: [{ id: "notetaker", ai: { chat: true } }] });
     expect(t?.ai).toEqual({ chat: true, tasks: false, limitUsd: null });
+  });
+});
+
+describe("App Store v3: publisher and phone apps", () => {
+  it("reads publisher; made_by_uno and publisher uno both mean Made by Uno", () => {
+    const [a, b, c, d] = parseAppTemplates({
+      templates: [
+        { id: "notetaker", made_by_uno: true, publisher: "uno" },
+        { id: "future", publisher: "uno" },
+        { id: "nextcloud", publisher: "community" },
+        { id: "old" },
+      ],
+    });
+    expect([a?.madeByUno, a?.publisher]).toEqual([true, "uno"]);
+    expect([b?.madeByUno, b?.publisher]).toEqual([true, "uno"]);
+    expect([c?.madeByUno, c?.publisher]).toEqual([false, "community"]);
+    expect([d?.madeByUno, d?.publisher]).toEqual([false, null]);
+  });
+
+  it("keeps only App Store / Google Play links", () => {
+    const [t] = parseAppTemplates({
+      templates: [
+        {
+          id: "vaultwarden",
+          mobile: {
+            app_name: "Bitwarden",
+            ios: "https://apps.apple.com/app/bitwarden-password-manager/id1137397744",
+            android: "https://play.google.com/store/apps/details?id=com.x8bit.bitwarden",
+            note_en: "Choose Self-hosted and enter your address.",
+            note_ru: "Выберите Self-hosted.",
+          },
+        },
+      ],
+    });
+    expect(t?.mobile).toEqual({
+      ios: "https://apps.apple.com/app/bitwarden-password-manager/id1137397744",
+      android: "https://play.google.com/store/apps/details?id=com.x8bit.bitwarden",
+      appName: "Bitwarden",
+      note: "Choose Self-hosted and enter your address.",
+    });
+    expect(
+      parseTemplateMobile({
+        ios: "https://evil.example/id1",
+        android: "https://play.google.com/store/apps/details?id=a.b",
+      }),
+    ).toEqual({
+      ios: null,
+      android: "https://play.google.com/store/apps/details?id=a.b",
+      appName: null,
+      note: null,
+    });
+    expect(parseTemplateMobile({ ios: "javascript:alert(1)" })).toBeNull();
+    expect(parseTemplateMobile(null)).toBeNull();
+    const [none] = parseAppTemplates({ templates: [{ id: "memos" }] });
+    expect(none?.mobile).toBeNull();
   });
 });

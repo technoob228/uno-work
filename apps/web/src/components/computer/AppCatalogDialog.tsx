@@ -13,16 +13,19 @@ import type {
 import {
   ArrowLeftIcon,
   CheckIcon,
+  CopyIcon,
   CpuIcon,
   HardDriveIcon,
   KeyRoundIcon,
   LayoutGridIcon,
+  MemoryStickIcon,
   SearchIcon,
+  SmartphoneIcon,
   SparklesIcon,
   WandSparklesIcon,
   XIcon,
 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode, type SVGProps } from "react";
 
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -42,27 +45,44 @@ import {
   applyStoreView,
   featuredTemplates,
   fitsMemory,
+  hasFilters,
   INSTALLED_TAB,
+  logoSources,
   NO_FILTERS,
+  phonePlatforms,
   shelves,
   signInLabel,
+  storeHighlights,
   type StoreFilters,
+  type StoreHighlight,
 } from "./appStoreModel";
 import { formatMemory } from "./computerFormat";
 import { installAiLines, storeAiLine } from "../settings/appAiProviderModel";
 
-/** The app's logo: the brand mark Uno serves, the catalog emoji if there is none (or it fails). */
+/**
+ * The app's logo: the brand mark Uno serves. A computer on an older Uno Work
+ * doesn't pass the logo address on — then the console's logo by app id (svg,
+ * then png); the catalog emoji if none loads.
+ */
 export function AppIcon({
   icon,
   iconUrl = null,
+  templateId = null,
   className,
 }: {
   icon: string | null;
   iconUrl?: string | null | undefined;
+  /** The catalog id, for the logo fallback. */
+  templateId?: string | null;
   className?: string;
 }) {
-  const [broken, setBroken] = useState(false);
-  if (iconUrl && !broken) {
+  const sources = templateId ? logoSources({ id: templateId, iconUrl }) : iconUrl ? [iconUrl] : [];
+  const key = sources.join(" ");
+  // Which source failed last, per source list: a new list starts over.
+  const [failed, setFailed] = useState<{ key: string; count: number }>({ key, count: 0 });
+  const attempt = failed.key === key ? failed.count : 0;
+  const src = sources[attempt];
+  if (src) {
     return (
       <span
         className={cn(
@@ -72,12 +92,13 @@ export function AppIcon({
         aria-hidden
       >
         <img
-          src={iconUrl}
+          key={src}
+          src={src}
           alt=""
           className="size-full object-contain"
           draggable={false}
           loading="lazy"
-          onError={() => setBroken(true)}
+          onError={() => setFailed({ key, count: attempt + 1 })}
         />
       </span>
     );
@@ -92,6 +113,23 @@ export function AppIcon({
     >
       {icon || <LayoutGridIcon className="size-4 text-muted-foreground" />}
     </span>
+  );
+}
+
+/** Apple and Android marks (simple-icons paths, CC0) for "Phone apps". */
+function AppleMark(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>
+      <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701" />
+    </svg>
+  );
+}
+
+function AndroidMark(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>
+      <path d="M18.4395 5.5586c-.675 1.1664-1.352 2.3318-2.0274 3.498-.0366-.0155-.0742-.0286-.1113-.043-1.8249-.6957-3.484-.8-4.42-.787-1.8551.0185-3.3544.4643-4.2597.8203-.084-.1494-1.7526-3.021-2.0215-3.4864a1.1451 1.1451 0 0 0-.1406-.1914c-.3312-.364-.9054-.4859-1.379-.203-.475.282-.7136.9361-.3886 1.5019 1.9466 3.3696-.0966-.2158 1.9473 3.3593.0172.031-.4946.2642-1.3926 1.0177C2.8987 12.176.452 14.772 0 18.9902h24c-.119-1.1108-.3686-2.099-.7461-3.0683-.7438-1.9118-1.8435-3.2928-2.7402-4.1836a12.1048 12.1048 0 0 0-2.1309-1.6875c.6594-1.122 1.312-2.2559 1.9649-3.3848.2077-.3615.1886-.7956-.0079-1.1191a1.1001 1.1001 0 0 0-.8515-.5332c-.5225-.0536-.9392.3128-1.0488.5449zm-.0391 8.461c.3944.5926.324 1.3306-.1563 1.6503-.4799.3197-1.188.0985-1.582-.4941-.3944-.5927-.324-1.3307.1563-1.6504.4727-.315 1.1812-.1086 1.582.4941zM7.207 13.5273c.4803.3197.5506 1.0577.1563 1.6504-.394.5926-1.1038.8138-1.584.4941-.48-.3197-.5503-1.0577-.1563-1.6504.4008-.6021 1.1087-.8106 1.584-.4941z" />
+    </svg>
   );
 }
 
@@ -117,6 +155,65 @@ function Tag({
   );
 }
 
+function highlightTag(h: StoreHighlight, template: UnoComputerAppTemplate) {
+  switch (h.kind) {
+    case "uno":
+      return (
+        <Tag key={h.kind} tone="uno">
+          <SparklesIcon className="size-3" /> {h.label}
+        </Tag>
+      );
+    case "sso":
+      return (
+        <Tag key={h.kind} tone="uno">
+          <KeyRoundIcon className="size-3" /> {h.label}
+        </Tag>
+      );
+    case "ai":
+      return (
+        <span
+          key={h.kind}
+          title={template.ai ? storeAiLine(template.ai) : undefined}
+          data-testid={`store-ai-${template.id}`}
+        >
+          <Tag tone="uno">
+            <WandSparklesIcon className="size-3" /> {h.label}
+          </Tag>
+        </span>
+      );
+    case "phone":
+      return (
+        <span
+          key={h.kind}
+          title={
+            template.mobile
+              ? `${template.mobile.appName ?? template.name} for ${phonePlatforms(template.mobile)} connects to it`
+              : undefined
+          }
+          data-testid={`store-phone-${template.id}`}
+        >
+          <Tag>
+            <SmartphoneIcon className="size-3" /> {h.label}
+            {h.ios ? <AppleMark className="size-2.5" /> : null}
+            {h.android ? <AndroidMark className="size-2.5" /> : null}
+          </Tag>
+        </span>
+      );
+    case "memory":
+      return (
+        <span
+          key={h.kind}
+          title={`Needs ${formatMemory(template.minRamMb)} of memory`}
+          data-testid={`store-memory-${template.id}`}
+        >
+          <Tag tone={h.tight ? "warn" : "muted"}>
+            <MemoryStickIcon className="size-3" /> {h.label}
+          </Tag>
+        </span>
+      );
+  }
+}
+
 function AppTags({
   template,
   installed,
@@ -134,31 +231,116 @@ function AppTags({
           <CheckIcon className="size-3" /> Installed
         </Tag>
       ) : null}
-      {template.madeByUno ? (
-        <Tag tone="uno">
-          <SparklesIcon className="size-3" /> Made by Uno
-        </Tag>
-      ) : null}
-      {template.sso === "oidc" ? (
-        <Tag tone="uno">
-          <KeyRoundIcon className="size-3" /> Sign in with Uno
-        </Tag>
-      ) : null}
-      {template.ai ? (
-        <span title={storeAiLine(template.ai)} data-testid={`store-ai-${template.id}`}>
-          <Tag tone="uno">
-            <WandSparklesIcon className="size-3" /> Uses AI
-          </Tag>
-        </span>
-      ) : null}
-      {template.minRamMb > 0 ? (
-        fits === false ? (
-          <Tag tone="warn">Needs {formatMemory(template.minRamMb)} memory</Tag>
-        ) : (
-          <Tag>{formatMemory(template.minRamMb)} memory</Tag>
-        )
-      ) : null}
+      {storeHighlights(template, fits, formatMemory).map((h) => highlightTag(h, template))}
     </div>
+  );
+}
+
+/** Small icons only (a row in a shelf): what the app is like, with the words on hover. */
+function RowHighlights({ template }: { template: UnoComputerAppTemplate }) {
+  const icons = storeHighlights(template, null, formatMemory).filter((h) => h.kind !== "memory");
+  if (icons.length === 0) return null;
+  return (
+    <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+      {icons.map((h) => {
+        const cls = cn("size-3.5", h.kind !== "phone" && "text-primary");
+        const icon =
+          h.kind === "uno" ? (
+            <SparklesIcon className={cls} />
+          ) : h.kind === "sso" ? (
+            <KeyRoundIcon className={cls} />
+          ) : h.kind === "ai" ? (
+            <WandSparklesIcon className={cls} />
+          ) : (
+            <SmartphoneIcon className={cls} />
+          );
+        return (
+          <span key={h.kind} title={h.label} aria-label={h.label} role="img">
+            {icon}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function StoreButton({ href, label, mark }: { href: string; label: string; mark: ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-background px-2.5 py-1.5 text-xs font-medium hover:bg-muted/60"
+    >
+      {mark}
+      {label}
+    </a>
+  );
+}
+
+function PhoneBlock({
+  template,
+  address,
+}: {
+  template: UnoComputerAppTemplate;
+  /** The installed app's address; null — not installed yet. */
+  address: string | null;
+}) {
+  const [copied, setCopied] = useState(false);
+  const mobile = template.mobile;
+  if (!mobile) return null;
+  const appName = mobile.appName ?? template.name;
+  return (
+    <section
+      className="flex flex-col gap-2.5 rounded-xl border border-border/60 p-3"
+      data-testid="store-detail-phone"
+    >
+      <div className="flex items-center gap-2 text-sm font-semibold">
+        <SmartphoneIcon className="size-4 text-muted-foreground" /> Use it on your phone
+      </div>
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        Download {appName} for {phonePlatforms(mobile)}.{" "}
+        {mobile.note ?? "Then sign in with your address."}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {mobile.ios ? (
+          <StoreButton
+            href={mobile.ios}
+            label="App Store"
+            mark={<AppleMark className="size-3.5" />}
+          />
+        ) : null}
+        {mobile.android ? (
+          <StoreButton
+            href={mobile.android}
+            label="Google Play"
+            mark={<AndroidMark className="size-3.5" />}
+          />
+        ) : null}
+      </div>
+      {address ? (
+        <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-2.5 py-1.5">
+          <span className="text-xs text-muted-foreground">Your address</span>
+          <code className="min-w-0 flex-1 truncate text-xs" data-testid="store-phone-address">
+            {address}
+          </code>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Copy address"
+            onClick={() => {
+              void navigator.clipboard?.writeText(address).then(() => setCopied(true));
+            }}
+          >
+            {copied ? <CheckIcon /> : <CopyIcon />}
+          </Button>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Your address appears here and on the app card once it is installed.
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -201,6 +383,7 @@ export function AppCatalogDialog({
   onInstall,
   confirm = null,
   onCancelConfirm,
+  appAddresses = new Map(),
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -221,6 +404,8 @@ export function AppCatalogDialog({
   /** Uno asked to confirm before installing (the app wants more memory). */
   confirm?: { templateId: string; message: string } | null;
   onCancelConfirm?: () => void;
+  /** Installed apps' addresses by catalog id, for "Use it on your phone". */
+  appAddresses?: ReadonlyMap<string, string>;
 }) {
   const [configuring, setConfiguring] = useState<UnoComputerAppTemplate | null>(null);
   const [viewing, setViewing] = useState<UnoComputerAppTemplate | null>(null);
@@ -253,8 +438,8 @@ export function AppCatalogDialog({
 
   const installedCount = templates.filter((t) => installedTemplateIds.has(t.id)).length;
   const hasSso = templates.some((t) => t.sso);
-  const browsing =
-    tab === ALL_TAB && query.trim().length === 0 && !filters.signInWithUno && !filters.fitsComputer;
+  const hasPhoneApps = templates.some((t) => t.mobile);
+  const browsing = tab === ALL_TAB && query.trim().length === 0 && !hasFilters(filters);
   const results = useMemo(
     () =>
       applyStoreView({
@@ -308,6 +493,7 @@ export function AppCatalogDialog({
           <AppIcon
             icon={template.icon}
             iconUrl={template.iconUrl}
+            templateId={template.id}
             className="size-12 rounded-2xl text-2xl"
           />
           <div className="min-w-0 flex-1">
@@ -340,16 +526,19 @@ export function AppCatalogDialog({
         }}
         className="flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-muted/40"
       >
-        <AppIcon icon={template.icon} iconUrl={template.iconUrl} className="size-10 text-xl" />
+        <AppIcon
+          icon={template.icon}
+          iconUrl={template.iconUrl}
+          templateId={template.id}
+          className="size-10 text-xl"
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="truncate text-sm font-medium">{template.name}</span>
             {installedTemplateIds.has(template.id) ? (
               <CheckIcon className="size-3.5 shrink-0 text-success" aria-label="Installed" />
             ) : null}
-            {template.madeByUno ? (
-              <SparklesIcon className="size-3.5 shrink-0 text-primary" aria-label="Made by Uno" />
-            ) : null}
+            <RowHighlights template={template} />
           </div>
           <p className="truncate text-xs text-muted-foreground">
             {template.tagline || template.description}
@@ -374,6 +563,7 @@ export function AppCatalogDialog({
         <AppIcon
           icon={viewing.icon}
           iconUrl={viewing.iconUrl}
+          templateId={viewing.id}
           className="size-16 rounded-2xl p-2 text-3xl"
         />
         <div className="min-w-0 flex-1">
@@ -435,6 +625,7 @@ export function AppCatalogDialog({
           </span>
         </li>
       </ul>
+      <PhoneBlock template={viewing} address={appAddresses.get(viewing.id) ?? null} />
       {viewing.notes ? (
         <p className="text-xs leading-relaxed text-muted-foreground">{viewing.notes}</p>
       ) : null}
@@ -481,7 +672,7 @@ export function AppCatalogDialog({
             </Chip>
           ) : null}
         </div>
-        {hasSso || memTotalMb !== null ? (
+        {hasSso || hasPhoneApps || memTotalMb !== null ? (
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
             <span className="me-0.5">Show only:</span>
             {hasSso ? (
@@ -498,6 +689,14 @@ export function AppCatalogDialog({
                 onClick={() => setFilters((f) => ({ ...f, fitsComputer: !f.fitsComputer }))}
               >
                 <CpuIcon className="size-3" /> Fits this computer ({formatMemory(memTotalMb)})
+              </Chip>
+            ) : null}
+            {hasPhoneApps ? (
+              <Chip
+                active={filters.phoneApps}
+                onClick={() => setFilters((f) => ({ ...f, phoneApps: !f.phoneApps }))}
+              >
+                <SmartphoneIcon className="size-3" /> Phone apps
               </Chip>
             ) : null}
           </div>
