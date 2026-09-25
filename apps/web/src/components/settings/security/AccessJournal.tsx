@@ -20,6 +20,7 @@ import {
   ShieldCheckIcon,
   TerminalIcon,
   UserIcon,
+  WrenchIcon,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
@@ -30,15 +31,20 @@ import { Button } from "../../ui/button";
 import { SettingsRow, SettingsSection, useRelativeTimeTick } from "../settingsLayout";
 import {
   ACCESS_FILTERS,
+  type AccessBurst,
   type AccessEntry,
   type AccessFilter,
   type AccessLogResponse,
   accessLogPath,
   automaticLabel,
+  burstLabel,
   channelLabel,
+  collapseBursts,
+  entryText,
   failedAttemptsLine,
   formatClock,
   groupByDay,
+  isMaintenance,
   isUnexplained,
   lastAccessLine,
   matchesFilter,
@@ -47,7 +53,22 @@ import {
   type SecuritySummaryResponse,
   securitySummaryPath,
   verdictFor,
+  type Verdict,
 } from "./accessJournal.logic";
+
+const BADGE_VARIANT = { good: "success", notice: "warning", bad: "error" } as const;
+
+function VerdictIcon({
+  tone,
+  className,
+}: {
+  readonly tone: Verdict["tone"];
+  readonly className?: string;
+}) {
+  if (tone === "good") return <ShieldCheckIcon className={cn(className, "text-success")} />;
+  if (tone === "notice") return <WrenchIcon className={cn(className, "text-warning")} />;
+  return <ShieldAlertIcon className={cn(className, "text-destructive")} />;
+}
 
 const summaryKey = ["account", "security", "summary"] as const;
 const accessLogKey = (boxId: number) => ["account", "security", "accessLog", boxId] as const;
@@ -102,9 +123,11 @@ export function SecurityOverview({
               </div>
             </div>
             {badge ? (
-              <Badge variant={badge.tone === "good" ? "success" : "error"} size="sm">
+              <Badge variant={BADGE_VARIANT[badge.tone]} size="sm">
                 {badge.tone === "good" ? (
                   <ShieldCheckIcon className="size-3" />
+                ) : badge.tone === "notice" ? (
+                  <WrenchIcon className="size-3" />
                 ) : (
                   <ShieldAlertIcon className="size-3" />
                 )}
@@ -121,6 +144,7 @@ export function SecurityOverview({
 function ChannelIcon({ entry }: { readonly entry: AccessEntry }) {
   const cls = "size-4 shrink-0";
   if (isUnexplained(entry)) return <ShieldAlertIcon className={cn(cls, "text-destructive")} />;
+  if (isMaintenance(entry)) return <WrenchIcon className={cn(cls, "text-warning")} />;
   switch (entry.channel) {
     case "work":
       return <MonitorIcon className={cls} />;
@@ -147,12 +171,15 @@ function ChannelIcon({ entry }: { readonly entry: AccessEntry }) {
 
 function EntryRow({ entry }: { readonly entry: AccessEntry }) {
   const bad = isUnexplained(entry);
+  const amber = isMaintenance(entry);
   const how = channelLabel(entry);
+  const text = entryText(entry);
   return (
     <li
       className={cn(
         "flex items-start gap-3 px-4 py-2 text-xs sm:px-5",
         bad && "bg-destructive/6 text-destructive-foreground",
+        amber && "bg-warning/6",
       )}
     >
       <span className="w-10 shrink-0 pt-0.5 tabular-nums text-muted-foreground">
@@ -163,14 +190,73 @@ function EntryRow({ entry }: { readonly entry: AccessEntry }) {
       </span>
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="text-[13px]">
-          <span className={cn("font-medium", bad && "text-destructive")}>{entry.who}</span>
+          <span
+            className={cn(
+              "font-medium",
+              bad && "text-destructive",
+              amber && "text-warning-foreground",
+            )}
+          >
+            {text.title}
+          </span>
           <span className="text-muted-foreground"> · {how}</span>
           {entry.from_ip ? (
             <span className="text-muted-foreground"> · from {entry.from_ip}</span>
           ) : null}
         </div>
-        {entry.detail ? <div className="text-muted-foreground">{entry.detail}</div> : null}
+        {text.note ? <div className="text-muted-foreground">{text.note}</div> : null}
       </div>
+    </li>
+  );
+}
+
+/** One maintenance run (or one unexplained burst) as a single expandable line. */
+function BurstRow({ burst }: { readonly burst: AccessBurst }) {
+  const [open, setOpen] = useState(false);
+  const first = burst.entries[0]!;
+  const bad = isUnexplained(first);
+  const text = entryText(first);
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className={cn(
+          "flex w-full cursor-pointer items-start gap-3 px-4 py-2 text-left text-xs sm:px-5",
+          bad ? "bg-destructive/6" : "bg-warning/6",
+        )}
+      >
+        <span className="w-10 shrink-0 pt-0.5 tabular-nums text-muted-foreground">
+          {formatClock(burst.entries[burst.entries.length - 1]!.at)}
+        </span>
+        <span className="pt-0.5 text-muted-foreground">
+          <ChannelIcon entry={first} />
+        </span>
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <div className="text-[13px]">
+            <span
+              className={cn("font-medium", bad ? "text-destructive" : "text-warning-foreground")}
+            >
+              {text.title}
+            </span>
+            <span className="text-muted-foreground"> · {burstLabel(burst)}</span>
+          </div>
+          {text.note ? <div className="text-muted-foreground">{text.note}</div> : null}
+        </div>
+        {open ? (
+          <ChevronDownIcon className="mt-0.5 size-3.5 text-muted-foreground" />
+        ) : (
+          <ChevronRightIcon className="mt-0.5 size-3.5 text-muted-foreground" />
+        )}
+      </button>
+      {open ? (
+        <ul className="pb-1">
+          {burst.entries.map((e) => (
+            <EntryRow key={e.id} entry={e} />
+          ))}
+        </ul>
+      ) : null}
     </li>
   );
 }
@@ -235,10 +321,11 @@ function HowChecked() {
             agents inside Uno Work run within your Uno Work sessions, which are listed here.
             <br />
             <br />
-            What this can't show yet: Uno's automation keeps one connection to the computer open for
-            a few minutes and sends several operations through it, so the computer's journal records
-            the connection, not each operation. The operations themselves are the Uno records in
-            this list. A record written by the computer itself for every operation is the next step.
+            Uno's servers also record every command Uno runs inside the computer and match it to our
+            records. Uno can do maintenance without asking first, and always tells you right away —
+            the reason is on the entry. If Uno's key was used and we have no record, it shows here
+            in red and we explain it within 24 hours. Entries are never edited: an explanation is
+            added as a new entry.
           </>
         ) : (
           "Where this list comes from, and how you can check it yourself."
@@ -287,14 +374,14 @@ export function AccessJournal({ box }: { readonly box: UnoBox }) {
           <div
             className={cn(
               "flex items-start gap-3 px-4 py-4 sm:px-5",
-              verdict.tone === "good" ? "bg-success/6" : "bg-destructive/8",
+              verdict.tone === "good"
+                ? "bg-success/6"
+                : verdict.tone === "notice"
+                  ? "bg-warning/8"
+                  : "bg-destructive/8",
             )}
           >
-            {verdict.tone === "good" ? (
-              <ShieldCheckIcon className="mt-0.5 size-5 shrink-0 text-success" />
-            ) : (
-              <ShieldAlertIcon className="mt-0.5 size-5 shrink-0 text-destructive" />
-            )}
+            <VerdictIcon tone={verdict.tone} className="mt-0.5 size-5 shrink-0" />
             <div className="space-y-1">
               <div
                 className={cn(
@@ -338,9 +425,13 @@ export function AccessJournal({ box }: { readonly box: UnoBox }) {
                 {day.label}
               </div>
               <ul>
-                {day.visible.map((e) => (
-                  <EntryRow key={e.id} entry={e} />
-                ))}
+                {collapseBursts(day.visible).map((item) =>
+                  item.kind === "burst" ? (
+                    <BurstRow key={item.key} burst={item} />
+                  ) : (
+                    <EntryRow key={item.entry.id} entry={item.entry} />
+                  ),
+                )}
                 <AutomaticGroup entries={day.automatic} />
               </ul>
             </div>
