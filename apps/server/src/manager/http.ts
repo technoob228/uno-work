@@ -8,6 +8,9 @@
  *   management: list/resolve proposals, issue/list/revoke tokens.
  * - `/api/manager/connector-bindings*` — owner-session-only: which chat of
  *   an assistant's connector talks to which target (ADR 2026-09-11).
+ * - `/api/manager/assistant/telegram/shared`, `/api/manager/assistant/slack/install`
+ *   — owner-session-only: Uno's shared Telegram bot / Slack app on a cloud
+ *   computer (onboarding v3, `channelSetup.ts`).
  * - `POST /api/channels/notify` — outbound message to the chats bound to a
  *   thread / project. Authenticated with the browser-bridge token every
  *   harness process holds (a thread-scoped token implies the thread).
@@ -49,6 +52,17 @@ import { resolveNotifyThreadId } from "./connectorNotify.ts";
 import { ManagerAssistantError, ManagerAssistantService } from "./Services/AssistantService.ts";
 import { ManagerTelegramService } from "./Layers/TelegramConnector.ts";
 import { telegramPairingLink } from "./telegramPairing.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
+import { isRelayCredential } from "./channelRelay.ts";
+import {
+  afterTelegramConfigSaved,
+  connectSharedTelegram,
+  readSlackInstall,
+  startSlackInstall,
+  uninstallSlack,
+  type ChannelSetupOutcome,
+} from "./channelSetup.ts";
+import { readWorkMachineIdentity } from "./workConsole.ts";
 import { ConnectorNotifyService } from "./Services/ConnectorNotify.ts";
 import { handleManagerMcpMessage } from "./mcp.ts";
 import { ManagerApprovalService } from "./Services/ManagerApprovalService.ts";
@@ -310,10 +324,127 @@ export const managerAssistantTelegramPairRouteLayer = HttpRouter.add(
         { status: 400 },
       );
     }
-    const pairing = yield* telegram.startPairing(input.projectId);
-    return HttpServerResponse.jsonUnsafe(
-      { ...pairing, link: telegramPairingLink(pairing.botUsername, pairing.code) },
-      { status: 200 },
+    return yield* telegram.startPairing(input.projectId).pipe(
+      Effect.map((pairing) =>
+        HttpServerResponse.jsonUnsafe(
+          { ...pairing, link: telegramPairingLink(pairing.botUsername, pairing.code) },
+          { status: 200 },
+        ),
+      ),
+      // Shared-bot connector whose code the console did not take.
+      Effect.catchTag("TelegramPairingError", (error) =>
+        Effect.succeed(
+          HttpServerResponse.jsonUnsafe(
+            { error: "console_error", message: error.message },
+            { status: 502 },
+          ),
+        ),
+      ),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/** This machine's console identity (machine token + box id), or null off a cloud computer. */
+const currentWorkMachineIdentity = Effect.gen(function* () {
+  const settings = yield* ServerSettingsService;
+  const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
+  return readWorkMachineIdentity(current?.uno);
+});
+
+const respondChannelSetup = <A>(outcome: ChannelSetupOutcome<A>) =>
+  outcome.ok
+    ? HttpServerResponse.jsonUnsafe(outcome.value, { status: 200 })
+    : HttpServerResponse.jsonUnsafe(
+        { error: outcome.failure.error, message: outcome.failure.message },
+        { status: outcome.failure.status },
+      );
+
+const requireAssistantProject = (projectId: ProjectId) =>
+  isAssistantProjectId(projectId)
+    ? Effect.void
+    : Effect.fail(
+        new AuthError({ message: "projectId must be an assistant project.", status: 400 }),
+      );
+
+/**
+ * `POST /api/manager/assistant/telegram/shared` {projectId} → {code,
+ * expiresAt, botUsername, link}: switch the assistant's Telegram to Uno's
+ * shared bot (a console relay) and issue a link code. 409
+ * `not_cloud_computer` without a machine token, 503
+ * `shared_bot_unavailable`, 502 when the console fails.
+ */
+export const managerAssistantTelegramSharedRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/telegram/shared",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(TelegramProjectPayload).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid payload.", status: 400 })),
+    );
+    yield* requireAssistantProject(input.projectId);
+    const identity = yield* currentWorkMachineIdentity;
+    return yield* connectSharedTelegram({ projectId: input.projectId, identity }).pipe(
+      Effect.map(respondChannelSetup),
+      Effect.catch(respondServerError("assistant:telegram-shared")),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+const SlackInstallPayload = Schema.Struct({ projectId: ProjectId });
+
+/**
+ * `POST /api/manager/assistant/slack/install` {projectId} → {available,
+ * authorizeUrl}: where to send the person to add Uno's Slack app.
+ */
+export const managerAssistantSlackInstallStartRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/slack/install",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(SlackInstallPayload).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid payload.", status: 400 })),
+    );
+    yield* requireAssistantProject(input.projectId);
+    const identity = yield* currentWorkMachineIdentity;
+    return respondChannelSetup(yield* startSlackInstall({ identity }));
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * `GET /api/manager/assistant/slack/install?projectId=` → {available,
+ * installed, teamName, botUserName, connected}. Once installed, switches the
+ * assistant's Slack connector to the console relay.
+ */
+export const managerAssistantSlackInstallStatusRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/assistant/slack/install",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const projectId = yield* assistantProjectIdFromQuery;
+    yield* requireAssistantProject(projectId);
+    const identity = yield* currentWorkMachineIdentity;
+    return yield* readSlackInstall({ projectId, identity }).pipe(
+      Effect.map(respondChannelSetup),
+      Effect.catch(respondServerError("assistant:slack-install")),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * `DELETE /api/manager/assistant/slack/install?projectId=` → {ok: true}:
+ * remove Uno's app from the workspace and forget the relay-mode row.
+ */
+export const managerAssistantSlackInstallDeleteRouteLayer = HttpRouter.add(
+  "DELETE",
+  "/api/manager/assistant/slack/install",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const projectId = yield* assistantProjectIdFromQuery;
+    yield* requireAssistantProject(projectId);
+    const identity = yield* currentWorkMachineIdentity;
+    return yield* uninstallSlack({ projectId, identity }).pipe(
+      Effect.map(respondChannelSetup),
+      Effect.catch(respondServerError("assistant:slack-uninstall")),
     );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
@@ -444,6 +575,13 @@ export const managerAssistantTelegramRouteLayer = HttpRouter.add(
         existingConfig !== null && existingConfig._tag === "Success"
           ? existingConfig.value.botToken
           : undefined;
+      // Relay credentials are minted by `/telegram/shared`, never typed in.
+      if (input.botToken !== undefined && isRelayCredential(input.botToken.trim())) {
+        return HttpServerResponse.jsonUnsafe(
+          { error: "Paste the token @BotFather gave you." },
+          { status: 400 },
+        );
+      }
       const botToken = input.botToken?.trim() || previousToken;
       if (botToken === undefined || botToken.length === 0) {
         return HttpServerResponse.jsonUnsafe(
@@ -479,6 +617,16 @@ export const managerAssistantTelegramRouteLayer = HttpRouter.add(
         kind: "telegram",
         config,
         updatedAt: new Date().toISOString(),
+      });
+      // Shared bot: unlink removed chats at the console / drop the relay
+      // when the owner switched to an own bot.
+      yield* afterTelegramConfigSaved({
+        previous:
+          existingConfig !== null && existingConfig._tag === "Success"
+            ? existingConfig.value
+            : null,
+        next: config,
+        identity: yield* currentWorkMachineIdentity,
       });
       const assistant = yield* assistants.getAssistant(input.projectId);
       return HttpServerResponse.jsonUnsafe({ telegram: assistant.telegram }, { status: 200 });
@@ -518,9 +666,27 @@ export const managerAssistantSlackRouteLayer = HttpRouter.add(
         existingDecoded !== null && existingDecoded._tag === "Success"
           ? existingDecoded.value
           : null;
-      // Both tokens are optional on update (keep the stored ones), required first time.
-      const botToken = input.botToken?.trim() || existingConfig?.botToken;
-      const appToken = input.appToken?.trim() || existingConfig?.appToken;
+      // Relay credentials come from "Add to Slack", never typed in.
+      if (
+        (input.botToken !== undefined && isRelayCredential(input.botToken.trim())) ||
+        input.appToken?.trim() === "unorelay"
+      ) {
+        return HttpServerResponse.jsonUnsafe(
+          { error: "Paste the bot token (xoxb-…) and app token (xapp-…) of your Slack app." },
+          { status: 400 },
+        );
+      }
+      // Both tokens are optional on update (keep the stored ones), required
+      // first time — and when leaving Uno's Slack app for an own app: a relay
+      // row's stored tokens never mix with typed ones.
+      const suppliesToken =
+        (input.botToken?.trim() ?? "").length > 0 || (input.appToken?.trim() ?? "").length > 0;
+      const reusable =
+        existingConfig !== null && isRelayCredential(existingConfig.botToken) && suppliesToken
+          ? null
+          : existingConfig;
+      const botToken = input.botToken?.trim() || reusable?.botToken;
+      const appToken = input.appToken?.trim() || reusable?.appToken;
       if (
         botToken === undefined ||
         botToken.length === 0 ||

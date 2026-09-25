@@ -90,6 +90,12 @@ export interface ManagerConnectorRepositoryShape {
       readonly updatedAt: string;
     },
   ) => Effect.Effect<void, ManagerRepositoryError>;
+  /**
+   * Forget a connector's config row (e.g. Uno's Slack app was uninstalled).
+   * Chat→thread mappings and the poll state stay: a later setup of the same
+   * kind reuses the threads, and a new credential resets the state anyway.
+   */
+  readonly remove: (input: ManagerConnectorKey) => Effect.Effect<void, ManagerRepositoryError>;
   readonly getThreadForChat: (
     input: ManagerConnectorKey & { readonly chatId: string },
   ) => Effect.Effect<Option.Option<ThreadId>, ManagerRepositoryError>;
