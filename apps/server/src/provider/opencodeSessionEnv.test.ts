@@ -148,6 +148,19 @@ describe("uno-work tool calls on a shared server", () => {
     );
     expect(other).toEqual({ command: "ls" });
 
+    const forged: Record<string, unknown> = { __uno_work_session: "ses_b" };
+    await hooks["tool.execute.before"](
+      { tool: "uno-work_app_list", sessionID: "ses_a", callID: "c4" },
+      { args: forged },
+    );
+    expect(forged).toEqual({ __uno_work_session: "ses_a" });
+    const forgedUnknown: Record<string, unknown> = { __uno_work_session: "ses_a" };
+    await hooks["tool.execute.before"](
+      { tool: "uno-work_app_list", sessionID: "ses_nobody", callID: "c5" },
+      { args: forgedUnknown },
+    );
+    expect(forgedUnknown).toEqual({});
+
     const unknown: Record<string, unknown> = {};
     await hooks["tool.execute.before"](
       { tool: "uno-work_app_list", sessionID: "ses_zz", callID: "c3" },

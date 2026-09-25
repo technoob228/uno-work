@@ -105,13 +105,16 @@ export const UnoWorkSessionEnv = async (input) => {
     "tool.execute.before": async (hookInput, output) => {
       const tool = hookInput && typeof hookInput.tool === "string" ? hookInput.tool : "";
       if (!tool.startsWith(${JSON.stringify(UNO_WORK_TOOL_PREFIX)})) return;
+      if (!output || !output.args || typeof output.args !== "object") return;
+      // Never trust a tag the model wrote itself (it can see earlier calls' input).
+      delete output.args[${JSON.stringify(UNO_WORK_MCP_SESSION_ARG)}];
       const dir = process.env.${OPENCODE_SESSION_ENV_DIR_ENV};
       const sessionID = typeof hookInput.sessionID === "string" ? hookInput.sessionID : "";
-      if (!dir || !sessionID || !output || !output.args || typeof output.args !== "object") return;
+      if (!dir || !sessionID) return;
       const found = await resolveSession(dir, sessionID, undefined);
       if (found) output.args[${JSON.stringify(UNO_WORK_MCP_SESSION_ARG)}] = found.id;
     },
-    // The same args object is kept as the call's input: don't leave the tag in history.
+    // Best effort: the stored call input may already carry the tag (a session id, not a secret).
     "tool.execute.after": async (hookInput) => {
       const args = hookInput && hookInput.args;
       if (args && typeof args === "object") delete args[${JSON.stringify(UNO_WORK_MCP_SESSION_ARG)}];
