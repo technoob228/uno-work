@@ -9,17 +9,18 @@
  *   - `driverKind = "uno"` and `displayName = "Uno"` so the provider shows up
  *     as a separate entry in the picker alongside Codex / Claude / Cursor /
  *     OpenCode;
- *   - the binary path defaults to the silently-installed
- *     `~/.unowork/uno-code/bin/uno-code` (or `.exe` on Windows) when the
- *     instance config leaves `binaryPath` blank. A user can still point at a
- *     custom binary via Settings — important for the bring-your-own-binary
- *     fallback when the GitHub release for the current version is missing;
+ *   - the binary path defaults to the bundled stock opencode
+ *     `~/.unowork/opencode/bin/opencode` when it is installed, else to the
+ *     legacy fork `~/.unowork/uno-code/bin/uno-code` (`.exe` on Windows),
+ *     when the instance config leaves `binaryPath` blank. A user can still
+ *     point at a custom binary via Settings. Stock opencode runs with its XDG
+ *     directories under `~/.unowork/opencode-home/` (`unoHarnessIsolation.ts`);
  *   - the Uno LLM Gateway provider (`provider.uno` pointing at
  *     `UNO_GATEWAY_BASE_URL` with `apiKey={env:UNO_API_KEY}`) is injected via
  *     `OPENCODE_CONFIG_CONTENT`, and `UNO_API_KEY` is set from the stored
- *     `uno.apiKey` server setting. Because our fork resolves XDG to
- *     `~/.config/uno-code/` (not `~/.config/opencode/`), this config does NOT
- *     merge with the user's personal opencode config.
+ *     `uno.apiKey` server setting. The fork resolves XDG to
+ *     `~/.config/uno-code/`, stock opencode gets private XDG directories, so
+ *     this config does NOT merge with the user's personal opencode config.
  *
  * @module provider/Drivers/UnoDriver
  */
@@ -76,6 +77,12 @@ import {
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import { withOpenCodeSessionEnvPlugin } from "../opencodeSessionEnv.ts";
+import {
+  ensureUnoShellEnvRestorePlugin,
+  resolveUnoHarnessBinary,
+  unoUpstreamIsolationEnvironment,
+} from "../unoHarnessIsolation.ts";
 import { currentHarnessBudget } from "../harnessBudget.ts";
 import {
   UNO_LEGACY_HARNESS_MODEL_IDS,
@@ -120,13 +127,25 @@ const UNO_RUSSIA_PROVIDER_ID = "uno-russia";
 const UNO_RUSSIA_GATEWAY_BASE_URL = `${UNO_GATEWAY_BASE_URL}/russia`;
 const UNO_IMAGE_GENERATION_AGENT_ID = "uno-image-generation";
 
+const executableName = (name: string) => (process.platform === "win32" ? `${name}.exe` : name);
+// Legacy fork (technoob228/uno-code), installed by the desktop shell.
 const UNO_BINARY_PATH = nodePath.join(
   homedir(),
   ".unowork",
   "uno-code",
   "bin",
-  process.platform === "win32" ? "uno-code.exe" : "uno-code",
+  executableName("uno-code"),
 );
+// Stock opencode (npm `opencode-ai`), preferred when installed; isolated from
+// the user's own opencode by `unoHarnessIsolation.ts`.
+const UNO_UPSTREAM_BINARY_PATH = nodePath.join(
+  homedir(),
+  ".unowork",
+  "opencode",
+  "bin",
+  executableName("opencode"),
+);
+const UNO_UPSTREAM_HOME = nodePath.join(homedir(), ".unowork", "opencode-home");
 
 export type UnoModelTier = "frontier" | "strong" | "cheap";
 export type UnoModelRoute = "default" | "russia";
@@ -180,44 +199,21 @@ export interface UnoCatalogModel {
 
 type UnoCatalog = Record<string, UnoCatalogModel>;
 
-const UNO_DEFAULT_MODEL_OPTIONS = {
-  // The Uno Gateway can expose upstream reasoning by default for some models.
-  // Keep chat output answer-only unless the user explicitly selects a reasoning
-  // variant that overrides this option.
-  reasoningEffort: "none",
-} as const;
-
+// No per-model `options` on purpose. Until 0.0.88 every model outside a
+// hand-kept list got `reasoningEffort: "none"`, and that broke two ways
+// (checked on real gateway requests, 25.09.2026, opencode 1.14.48 and 1.18.32):
+//   - reasoning-mandatory models (Grok 4.7, GLM-5.3, MiniMax M2.x, Step 3.5,
+//     Qwen3 thinking) answer HTTP 400 "Reasoning is mandatory for this endpoint
+//     and cannot be disabled" — the list never caught up with new models;
+//   - with reasoning switched off, Fast (DeepSeek V4.1 Flash) narrates its
+//     plan in English in the visible answer ("I'll look at the files first.")
+//     — the "reasoning leaks into the chat" complaint.
+// With the provider default the gateway streams reasoning in `delta.reasoning`
+// and opencode's @ai-sdk/openai-compatible (2.0.41) turns it into a separate
+// reasoning part, so nothing leaks into the answer text.
 type UnoOpenCodeModelConfig = {
   readonly name: string;
-  readonly options?: typeof UNO_DEFAULT_MODEL_OPTIONS;
 };
-
-function shouldOmitDefaultReasoningDisable(model: UnoCatalogModel): boolean {
-  const modelId = model.modelId.toLowerCase();
-  const name = model.name.toLowerCase();
-  const provider = model.provider.toLowerCase();
-  const searchable = `${provider}/${modelId} ${name}`;
-
-  return (
-    provider === "moonshotai" ||
-    searchable.includes("kimi") ||
-    searchable.includes("thinking") ||
-    searchable.includes("reasoning") ||
-    searchable.includes("minimax-m2") ||
-    searchable.includes("step-3.5") ||
-    // Fable 5 is reasoning-mandatory: the upstream rejects `reasoning: none`
-    // with a "reasoning required" error, so never force the default disable.
-    searchable.includes("fable") ||
-    /qwen3.*thinking/u.test(searchable) ||
-    /gemini-3(?:[._/ -]|$)/u.test(searchable)
-  );
-}
-
-function defaultModelOptionsForUnoModel(
-  model: UnoCatalogModel,
-): typeof UNO_DEFAULT_MODEL_OPTIONS | undefined {
-  return shouldOmitDefaultReasoningDisable(model) ? undefined : UNO_DEFAULT_MODEL_OPTIONS;
-}
 
 export interface UnoGatewayModelResponse {
   readonly id?: unknown;
@@ -592,11 +588,7 @@ function buildUnoConfigContent(
   };
   for (const model of Object.values(models)) {
     const providerId = model.route === "russia" ? UNO_RUSSIA_PROVIDER_ID : UNO_PROVIDER_ID;
-    const options = defaultModelOptionsForUnoModel(model);
-    opencodeModelsByProvider[providerId][model.modelId] = {
-      name: model.name,
-      ...(options ? { options } : {}),
-    };
+    opencodeModelsByProvider[providerId][model.modelId] = { name: model.name };
   }
   // AI hours hide the old defaults from `/v1/models`, but chats saved on them
   // must keep running (the gateway remaps them to Smart / Fast). Kept in the
@@ -608,6 +600,15 @@ function buildUnoConfigContent(
   }
   const config: Record<string, unknown> = {
     $schema: "https://opencode.ai/config.json",
+    // Only the Uno providers: no models.dev catalog (OpenCode Zen and ~100
+    // others) in provider.list, no personal opencode provider sneaking in.
+    enabled_providers: [
+      UNO_PROVIDER_ID,
+      UNO_RUSSIA_PROVIDER_ID,
+      ...(personalModels.length > 0 ? [UNO_PERSONAL_PROVIDER_ID] : []),
+    ],
+    autoupdate: false,
+    share: "disabled",
     agent: {
       [UNO_IMAGE_GENERATION_AGENT_ID]: {
         description: "Generate images without exposing coding tools to image-generation models.",
@@ -979,15 +980,31 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
       const baseProcessEnv = browserBridge.applyEnvironment(
         mergeProviderInstanceEnvironment(environment),
       );
+      const harness = resolveUnoHarnessBinary({
+        configured: config.binaryPath,
+        forkPath: UNO_BINARY_PATH,
+        upstreamPath: UNO_UPSTREAM_BINARY_PATH,
+        exists: existsSync,
+      });
+      const unoConfigContent = buildUnoConfigContent(
+        unoApiKey,
+        unoCatalog,
+        instructionsFilePath,
+        personalModels,
+      );
       const processEnv: NodeJS.ProcessEnv = {
         ...unoAgentEnv,
         ...baseProcessEnv,
-        OPENCODE_CONFIG_CONTENT: buildUnoConfigContent(
-          unoApiKey,
-          unoCatalog,
-          instructionsFilePath,
-          personalModels,
-        ),
+        ...(harness.kind === "upstream"
+          ? unoUpstreamIsolationEnvironment(UNO_UPSTREAM_HOME, baseProcessEnv)
+          : {}),
+        OPENCODE_CONFIG_CONTENT:
+          harness.kind === "upstream"
+            ? (withOpenCodeSessionEnvPlugin(
+                unoConfigContent,
+                ensureUnoShellEnvRestorePlugin(serverConfig.stateDir),
+              ) ?? unoConfigContent)
+            : unoConfigContent,
         ...(unoApiKey.length > 0 ? { UNO_API_KEY: unoApiKey } : {}),
       };
       const continuationIdentity = defaultProviderContinuationIdentity({
@@ -1000,21 +1017,9 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
-      const configuredBinary = config.binaryPath?.trim();
-      // `makeBinaryPathSetting` (settings.ts:94) substitutes an empty/missing
-      // `binaryPath` with the schema's fallback string — "opencode" for
-      // `OpenCodeSettings` and "uno-code" for `UnoProviderSettings`. For the
-      // Uno driver we never want either of those resolved via PATH: spawning
-      // `opencode` picks up the user's homebrew install (v1.14.x, too old for
-      // the Uno gateway), and `uno-code` is not a global command. Treat the
-      // fallback markers as "not configured" so we use the bundled binary.
-      const isSchemaFallback = configuredBinary === "opencode" || configuredBinary === "uno-code";
-      const isStaleAbsolutePath =
-        configuredBinary && nodePath.isAbsolute(configuredBinary) && !existsSync(configuredBinary);
-      const effectiveBinary =
-        !configuredBinary || isSchemaFallback || isStaleAbsolutePath
-          ? UNO_BINARY_PATH
-          : configuredBinary;
+      // Blank / schema-fallback / stale `binaryPath` → the bundled binary;
+      // see `resolveUnoHarnessBinary`.
+      const effectiveBinary = harness.binaryPath;
       const effectiveConfig = {
         ...config,
         binaryPath: effectiveBinary,

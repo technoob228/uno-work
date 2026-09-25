@@ -246,7 +246,7 @@ UNIT
 # provider key. The key itself is written to the daemon's settings, not here.
 if [ "${UNO_WORK_SKIP_HARNESSES:-0}" != "1" ]; then
   log "Installing bundled harnesses (uno-code, opencode, hermes)"
-  sudo -u "${SERVICE_USER}" env HOME="/home/${SERVICE_USER}" UNO_WORK_HERMES_INSTALL_CMD="${UNO_WORK_HERMES_INSTALL_CMD:-}" UNO_WORK_HERMES_VERSION="${UNO_WORK_HERMES_VERSION:-}" bash -s <<'HARNESS' || log "WARNING: harness install had failures; the daemon still works"
+  sudo -u "${SERVICE_USER}" env HOME="/home/${SERVICE_USER}" UNO_WORK_OPENCODE_VERSION="${UNO_WORK_OPENCODE_VERSION:-}" UNO_WORK_HERMES_INSTALL_CMD="${UNO_WORK_HERMES_INSTALL_CMD:-}" UNO_WORK_HERMES_VERSION="${UNO_WORK_HERMES_VERSION:-}" bash -s <<'HARNESS' || log "WARNING: harness install had failures; the daemon still works"
 set -uo pipefail
 npm_prefix="$HOME/.local"
 mkdir -p "$npm_prefix"
@@ -263,7 +263,16 @@ if [ -x "$uno_code_bin" ]; then
   mkdir -p "$HOME/.unowork/uno-code/bin"
   ln -sf "$uno_code_bin" "$HOME/.unowork/uno-code/bin/uno-code"
 fi
-npm install -g opencode-ai --loglevel=error || echo "opencode install failed"
+# Stock opencode: the OpenCode harness, and the Uno harness too — UnoDriver
+# prefers ~/.unowork/opencode/bin/opencode over the uno-code fork and runs it
+# with private XDG dirs (apps/server/src/provider/unoHarnessIsolation.ts).
+# Pinned: a new opencode reaches boxes only after it passed our checks.
+npm install -g "opencode-ai@${UNO_WORK_OPENCODE_VERSION:-1.18.32}" --loglevel=error || echo "opencode install failed"
+opencode_bin="$(command -v opencode || echo "$HOME/.local/bin/opencode")"
+if [ -x "$opencode_bin" ]; then
+  mkdir -p "$HOME/.unowork/opencode/bin"
+  ln -sf "$opencode_bin" "$HOME/.unowork/opencode/bin/opencode"
+fi
 
 # Hermes Agent (NousResearch/hermes-agent) ships through PyPI, not npm, and the
 # driver spawns `hermes acp` — so the acp extra is mandatory. Pin the version in

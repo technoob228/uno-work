@@ -489,7 +489,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }).pipe(Effect.provide(adapterLayer));
   });
 
-  it.effect("adds a final-answer marker instruction for Uno Kimi turns", () => {
+  it.effect("sends Uno Kimi turns without the final-answer marker instruction", () => {
     const unoInstanceId = ProviderInstanceId.make("uno");
     const adapterLayer = Layer.effect(
       OpenCodeAdapter,
@@ -526,6 +526,54 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         model: {
           providerID: "uno",
           modelID: "moonshotai/kimi-k2.6",
+        },
+        parts: [
+          {
+            type: "text",
+            text: "Проверь статус",
+          },
+        ],
+      });
+    }).pipe(Effect.provide(adapterLayer));
+  });
+
+  it.effect("keeps the final-answer marker instruction for Uno Gemini 3 turns", () => {
+    const unoInstanceId = ProviderInstanceId.make("uno");
+    const adapterLayer = Layer.effect(
+      OpenCodeAdapter,
+      Effect.gen(function* () {
+        return yield* makeOpenCodeAdapter(openCodeAdapterTestSettings, {
+          instanceId: unoInstanceId,
+        });
+      }),
+    ).pipe(
+      Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(providerSessionDirectoryTestLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    return Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-uno-gemini-marker");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId,
+        input: "Проверь статус",
+        modelSelection: createModelSelection(unoInstanceId, "uno/google/gemini-3.1-pro-preview"),
+      });
+
+      assert.deepEqual(runtimeMock.state.promptCalls.at(-1), {
+        sessionID: "http://127.0.0.1:9999/session",
+        model: {
+          providerID: "uno",
+          modelID: "google/gemini-3.1-pro-preview",
         },
         parts: [
           {

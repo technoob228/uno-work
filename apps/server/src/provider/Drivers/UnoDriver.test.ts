@@ -104,53 +104,42 @@ describe("UnoDriver catalog normalization", () => {
     });
   });
 
-  it("does not disable reasoning by default for mandatory-reasoning model families", () => {
-    const openai = __unoDriverTest.normalizeUnoCatalogEntry("default", {
-      id: "openai/gpt-5.5",
-      display_name: "GPT-5.5",
-    });
-    const kimi = __unoDriverTest.normalizeUnoCatalogEntry("default", {
-      id: "moonshotai/kimi-k2.6",
-      display_name: "Kimi K2.6",
-    });
-    const thinking = __unoDriverTest.normalizeUnoCatalogEntry("default", {
-      id: "qwen/qwen3-vl-235b-a22b-thinking",
-      display_name: "Qwen3 VL Thinking",
-    });
-    const fable = __unoDriverTest.normalizeUnoCatalogEntry("default", {
-      id: "anthropic/claude-fable-5",
-      display_name: "Claude Fable 5",
-    });
-
-    expect(openai).not.toBeNull();
-    expect(kimi).not.toBeNull();
-    expect(thinking).not.toBeNull();
-    expect(fable).not.toBeNull();
-
-    const config = JSON.parse(
-      __unoDriverTest.buildUnoConfigContent("uno-key", {
-        "uno/openai/gpt-5.5": openai!,
-        "uno/moonshotai/kimi-k2.6": kimi!,
-        "uno/qwen/qwen3-vl-235b-a22b-thinking": thinking!,
-        "uno/anthropic/claude-fable-5": fable!,
+  it("never forces a reasoning effort on gateway models", () => {
+    // `reasoningEffort: "none"` made Grok 4.7 / GLM-5.3 fail with HTTP 400
+    // "Reasoning is mandatory" and made Fast narrate its plan in the answer.
+    const ids = [
+      ["openai/gpt-5.5", "GPT-5.5"],
+      ["moonshotai/kimi-k2.6", "Kimi K2.6"],
+      ["x-ai/grok-4.7", "Grok 4.7"],
+      ["z-ai/glm-5.3", "GLM-5.3"],
+      ["uno/fast", "Fast"],
+      ["anthropic/claude-fable-5", "Claude Fable 5"],
+    ] as const;
+    const catalog = Object.fromEntries(
+      ids.map(([id, name]) => {
+        const entry = __unoDriverTest.normalizeUnoCatalogEntry("default", {
+          id,
+          display_name: name,
+        });
+        expect(entry).not.toBeNull();
+        return [`uno/${id}`, entry!];
       }),
-    ) as {
+    );
+
+    const config = JSON.parse(__unoDriverTest.buildUnoConfigContent("uno-key", catalog)) as {
+      readonly enabled_providers?: ReadonlyArray<string>;
       readonly provider?: {
-        readonly uno?: {
-          readonly models?: Record<
-            string,
-            { readonly options?: { readonly reasoningEffort?: string } }
-          >;
-        };
+        readonly uno?: { readonly models?: Record<string, Record<string, unknown>> };
       };
     };
 
     const models = config.provider?.uno?.models ?? {};
-    expect(models["openai/gpt-5.5"]?.options).toEqual({ reasoningEffort: "none" });
-    expect(models["moonshotai/kimi-k2.6"]?.options).toBeUndefined();
-    expect(models["qwen/qwen3-vl-235b-a22b-thinking"]?.options).toBeUndefined();
-    // Fable 5 is reasoning-mandatory — never force `reasoning: none`.
-    expect(models["anthropic/claude-fable-5"]?.options).toBeUndefined();
+    expect(Object.keys(models).toSorted()).toEqual(ids.map(([id]) => id).toSorted());
+    for (const [id, name] of ids) {
+      expect(models[id]).toEqual({ name });
+    }
+    // Only the Uno providers reach the harness (no OpenCode Zen / models.dev).
+    expect(config.enabled_providers).toEqual(["uno", "uno-russia"]);
   });
 
   it("uses conservative fallbacks for known vision and image-generation model families", () => {
