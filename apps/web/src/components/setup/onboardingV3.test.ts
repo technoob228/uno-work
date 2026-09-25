@@ -6,7 +6,7 @@ import {
 } from "./setupModel";
 import { describe, expect, it } from "vitest";
 
-import { agentCommand, sshKeyProblem } from "./OwnToolsDialog";
+import { agentCommand, connectorUrl, sshKeyProblem } from "./OwnToolsDialog";
 import { mcpProbeProblem } from "./steps/ConnectorsStep";
 import { isSharedTelegram, sharedTelegramProblem, telegramConnected } from "./steps/ChannelsStep";
 import { materialIcon, readCountLine } from "./steps/MaterialsStep";
@@ -64,6 +64,12 @@ describe("own tools", () => {
         },
       },
     });
+  });
+
+  it("gives Claude / ChatGPT this computer's address, so consent preselects it", () => {
+    expect(connectorUrl(42)).toBe("https://console.uno4.dev/api/v1/mcp/computer/42");
+    expect(connectorUrl(null)).toBe("https://console.uno4.dev/api/v1/mcp");
+    expect(connectorUrl(undefined)).toBe("https://console.uno4.dev/api/v1/mcp");
   });
 
   it("checks a public SSH key before sending it", () => {

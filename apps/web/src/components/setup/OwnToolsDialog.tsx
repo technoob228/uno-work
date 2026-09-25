@@ -57,6 +57,17 @@ export const CONSOLE_START_SSH_URL = "https://console.uno4.dev/start?path=ssh";
  */
 export const UNO_MCP_URL = "https://console.uno4.dev/api/v1/mcp";
 
+/**
+ * The address to add in Claude / ChatGPT. With this computer's id the
+ * console's consent screen preselects "Only “<this computer>”" (the same
+ * server, just `/computer/<id>`); without it the default is all computers.
+ */
+export function connectorUrl(boxId: number | null | undefined): string {
+  return typeof boxId === "number" && Number.isInteger(boxId) && boxId > 0
+    ? `${UNO_MCP_URL}/computer/${boxId}`
+    : UNO_MCP_URL;
+}
+
 export type AgentTarget = "claude-code" | "codex" | "cursor" | "web";
 
 const AGENT_TARGETS: ReadonlyArray<{ id: AgentTarget; label: string }> = [
@@ -204,12 +215,13 @@ function AgentTab() {
       {target === "web" ? (
         <div className="flex flex-col gap-2">
           <Code
-            value={`Settings → Connectors → Add custom connector\nURL: ${UNO_MCP_URL}`}
+            value={`Settings → Connectors → Add custom connector\nURL: ${connectorUrl(box?.id)}`}
             label="Connector"
           />
           <p className="text-xs text-muted-foreground">
-            No key to copy: Claude or ChatGPT opens “Sign in with Uno”. Under “Which computers” pick{" "}
-            {boxName} to give it only this one.
+            {box
+              ? `No key to copy: Claude or ChatGPT opens “Sign in with Uno”, with “Only ${boxName}” already chosen under “Which computers”.`
+              : "No key to copy: Claude or ChatGPT opens “Sign in with Uno”, and you pick which computers it gets."}
           </p>
         </div>
       ) : loading ? (
