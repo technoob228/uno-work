@@ -19,7 +19,6 @@ import { useSettings } from "../../../hooks/useSettings";
 import { getAssistant } from "../../../lib/managerApi";
 import { cn } from "../../../lib/utils";
 import { useServerProviders } from "../../../rpc/serverState";
-import { useHomeLaunchers } from "../../computer/useHomeLaunchers";
 import { getDriverOption } from "../../settings/providerDriverMeta";
 import { Button } from "../../ui/button";
 import { OwnToolsRow } from "../OwnToolsDialog";
@@ -36,6 +35,7 @@ import { useSkillsStatus } from "./SkillsStep";
 import { SetupHeading, SetupShell } from "../SetupShell";
 import { useSetupNavigation } from "../useSetupNavigation";
 import { useSetupProgress, useUpdateSetupProgress } from "../useSetupProgress";
+import { useSetupHandoff } from "../useSetupHome";
 
 function SummaryRow({
   step,
@@ -104,7 +104,6 @@ export function DoneStep() {
   const settings = useSettings();
   const providers = useServerProviders();
   const { goHome } = useSetupNavigation();
-  const launchers = useHomeLaunchers(environmentId);
   const stickyActive = useComposerDraftStore((store) => store.stickyActiveProvider);
   const [pending, setPending] = useState<string | null>(null);
   const project = progress.project;
@@ -148,16 +147,18 @@ export function DoneStep() {
   ].filter((entry): entry is string => entry !== null);
   const answered = SETUP_QUESTIONS.filter((question) => progress.answers[question.id]).length;
   const tools = settings.mcpServers.map((server) => server.name);
-  const folder = project?.path ?? home;
 
   const finish = () => update((current) => markCompleted(current, "done"));
 
+  // A first task goes to Home's composer, typed in and pointed at the
+  // project, on the AI picked in step 1 — one press of Send starts it.
+  const handOff = useSetupHandoff((state) => state.handOff);
   const startTask = async (task: string) => {
-    if (!folder) return;
     setPending(task);
     try {
       await finish();
-      await launchers.askInFolder(task, folder);
+      handOff(task, project ? { cwd: project.path, name: project.name } : null);
+      goHome();
     } finally {
       setPending(null);
     }
@@ -246,7 +247,7 @@ export function DoneStep() {
           <button
             key={task}
             type="button"
-            disabled={pending !== null || !folder}
+            disabled={pending !== null}
             onClick={() => void startTask(task)}
             className="group flex items-center gap-3 rounded-xl border border-border px-4 py-3 text-left text-sm transition-colors hover:border-primary/50 hover:bg-primary/[0.03] disabled:opacity-60"
           >

@@ -16,6 +16,7 @@ import { MaterialsStep } from "./steps/MaterialsStep";
 import { ProjectStep } from "./steps/ProjectStep";
 import { SkillsStep } from "./steps/SkillsStep";
 import { TourDoneStep } from "./steps/TourDoneStep";
+import { WelcomeStep } from "./steps/WelcomeStep";
 import { useUpdateSetupProgress } from "./useSetupProgress";
 
 const STEP_VIEW: Readonly<Record<SetupStepId, ComponentType>> = {
@@ -34,10 +35,11 @@ export function SetupView() {
   const update = useUpdateSetupProgress();
 
   useEffect(() => {
-    if (step === "tour-done") return;
+    if (step === "tour-done" || step === "welcome") return;
     void update((current) => markVisited({ ...current, mode: current.mode ?? "ai" }, step));
   }, [step, update]);
 
+  if (step === "welcome") return <WelcomeStep />;
   if (step === "tour-done") return <TourDoneStep />;
   const View = STEP_VIEW[step];
   return <View key={step} />;

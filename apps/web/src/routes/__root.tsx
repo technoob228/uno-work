@@ -68,6 +68,7 @@ import {
 } from "../environments/primary";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
 import { isWebLite } from "../lite/flag";
+import { isWebApp } from "../webMode";
 import { LiteRoot } from "../lite/LiteShell";
 
 export const Route = createRootRouteWithContext<{
@@ -157,8 +158,17 @@ function RootRouteView() {
     return <LiteRoot />;
   }
 
+  // In the browser the welcome screen is a step of the in-app setup (the
+  // sidebar with "Set up 0/8" stays on the left); the desktop app keeps its
+  // own first-run flow at /onboarding.
   if (needsOnboarding && pathname !== "/onboarding" && pathname !== "/pair") {
-    return <Navigate to="/onboarding" replace />;
+    if (isWebApp) {
+      if (pathname !== "/setup") {
+        return <Navigate to="/setup" search={{ step: "welcome" }} replace />;
+      }
+    } else {
+      return <Navigate to="/onboarding" replace />;
+    }
   }
 
   // Pairing and onboarding render without the app shell, but they still need

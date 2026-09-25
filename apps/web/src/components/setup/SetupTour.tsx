@@ -41,7 +41,8 @@ function useTourNavigate() {
   const navigate = useNavigate();
   return (step: TourStepId) => {
     if (step === "home") void navigate({ to: "/computer" });
-    else if (step === "files") void navigate({ to: "/files" });
+    // Files opens on Cloud storage: that's the half the coach talks about.
+    else if (step === "files") void navigate({ to: "/files", search: { cloud: "1" } });
     else void navigate({ to: "/computer", search: { store: "1" } });
   };
 }
@@ -62,6 +63,23 @@ interface Anchor {
   readonly height: number;
 }
 
+/** The strip under the screen's header where the tour's progress bar sits. */
+interface BarPlace {
+  readonly top: number;
+  readonly left: number;
+  readonly width: number;
+}
+
+function readBarPlace(): BarPlace | null {
+  if (typeof document === "undefined") return null;
+  const inset = document.querySelector<HTMLElement>('[data-slot="sidebar-inset"]');
+  if (!inset) return null;
+  const rect = inset.getBoundingClientRect();
+  const header = inset.querySelector<HTMLElement>("header");
+  const top = header ? header.getBoundingClientRect().bottom : rect.top;
+  return { top, left: rect.left, width: rect.width };
+}
+
 function readAnchor(step: TourStepId): Anchor | null {
   if (typeof window === "undefined" || window.innerWidth < 900) return null;
   const element = document.querySelector<HTMLElement>(`[data-tour="${step}"]`);
@@ -78,6 +96,7 @@ export function SetupTourCoach() {
   const go = useTourNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
   const [anchor, setAnchor] = useState<Anchor | null>(null);
+  const [bar, setBar] = useState<BarPlace | null>(null);
 
   // Follow the target while the screen settles (the sidebar animates, the
   // App Store opens) and on resize.
@@ -87,6 +106,7 @@ export function SetupTourCoach() {
     let until = performance.now() + 1500;
     const tick = () => {
       setAnchor(readAnchor(step));
+      setBar(readBarPlace());
       if (performance.now() < until) frame = window.requestAnimationFrame(tick);
     };
     tick();
@@ -133,13 +153,25 @@ export function SetupTourCoach() {
 
   const cardStyle = anchor
     ? {
-        left: Math.min(anchor.left + anchor.width + 16, window.innerWidth - 336),
-        top: Math.max(64, anchor.top + anchor.height / 2 - 40),
+        left: Math.min(anchor.left + anchor.width + 16, window.innerWidth - 316),
+        top: Math.max(64, anchor.top + anchor.height / 2 - 30),
       }
     : undefined;
 
   return (
     <>
+      {bar ? (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed z-[199] h-[3px] bg-muted"
+          style={{ top: bar.top, left: bar.left, width: bar.width }}
+        >
+          <div
+            className="h-full bg-primary transition-[width] duration-300 ease-out"
+            style={{ width: `${Math.round(((index + 1) / TOUR_STEPS.length) * 100)}%` }}
+          />
+        </div>
+      ) : null}
       {anchor ? (
         <div
           aria-hidden
@@ -158,27 +190,40 @@ export function SetupTourCoach() {
         data-testid="setup-tour-coach"
         className={
           anchor
-            ? "fixed z-[201] w-80 rounded-2xl border border-border bg-popover p-4 text-popover-foreground shadow-xl"
-            : "fixed inset-x-3 bottom-3 z-[201] rounded-2xl border border-border bg-popover p-4 text-popover-foreground shadow-xl sm:left-auto sm:w-80"
+            ? "fixed z-[201] w-[300px] rounded-2xl bg-[#18181b] p-4 text-white shadow-2xl"
+            : "fixed inset-x-3 bottom-3 z-[201] rounded-2xl bg-[#18181b] p-4 text-white shadow-2xl sm:left-auto sm:w-[300px]"
         }
         style={cardStyle}
       >
-        <div className="text-xs text-muted-foreground">
+        {anchor ? (
+          <span
+            aria-hidden
+            className="absolute top-6 -left-1.5 size-3 rotate-45 rounded-[2px] bg-[#18181b]"
+          />
+        ) : null}
+        <div className="text-xs text-white/55">
           {index + 1} of {TOUR_STEPS.length}
         </div>
         <h4 className="mt-1 font-semibold">{copy.title}</h4>
-        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{copy.body}</p>
-        <div className="mt-3 flex items-center gap-1">
-          {index > 0 ? (
-            <Button size="xs" variant="ghost" onClick={back}>
-              Back
-            </Button>
-          ) : null}
-          <span className="flex-1" />
-          <Button size="xs" variant="ghost" onClick={finish}>
+        <p className="mt-1 text-sm leading-relaxed text-white/75">{copy.body}</p>
+        <div className="mt-4 flex items-center justify-end gap-1.5">
+          <button
+            type="button"
+            onClick={
+              index > 0 ? back : () => void navigate({ to: "/setup", search: { step: "welcome" } })
+            }
+            className="h-8 rounded-lg px-3 text-sm text-white/85 transition-colors hover:bg-white/10"
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            onClick={finish}
+            className="h-8 rounded-lg bg-white/10 px-3 text-sm text-white transition-colors hover:bg-white/15"
+          >
             Skip tour
-          </Button>
-          <Button size="xs" onClick={next}>
+          </button>
+          <Button size="sm" onClick={next} data-testid="setup-tour-next">
             {index < TOUR_STEPS.length - 1 ? "Next" : "Done"}
           </Button>
         </div>

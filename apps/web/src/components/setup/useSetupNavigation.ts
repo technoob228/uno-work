@@ -5,7 +5,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 
-import { useActiveMachine } from "../../hooks/useActiveMachine";
 import {
   markCompleted,
   markSkipped,
@@ -19,7 +18,6 @@ import { useUpdateSetupProgress } from "./useSetupProgress";
 export function useSetupNavigation() {
   const navigate = useNavigate();
   const update = useUpdateSetupProgress();
-  const machine = useActiveMachine();
 
   const goToStep = useCallback(
     (step: SetupRouteStep) => {
@@ -28,10 +26,10 @@ export function useSetupNavigation() {
     [navigate],
   );
 
-  /** Home: the computer's desktop on a cloud machine, the last chat elsewhere. */
+  /** Home (the computer's desktop), on every machine — the sidebar's Home row. */
   const goHome = useCallback(() => {
-    void navigate({ to: machine.isCloud ? "/computer" : "/" });
-  }, [machine.isCloud, navigate]);
+    void navigate({ to: "/computer" });
+  }, [navigate]);
 
   const completeStep = useCallback(
     async (step: SetupStepId) => {

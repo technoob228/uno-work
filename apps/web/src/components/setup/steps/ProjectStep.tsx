@@ -6,8 +6,18 @@
  */
 import type { EnvironmentId, ModelSelection } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDownIcon, FolderIcon, FolderPlusIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import {
+  BarChart3Icon,
+  BotIcon,
+  ChevronDownIcon,
+  FileTextIcon,
+  FolderIcon,
+  FolderPlusIcon,
+  GlobeIcon,
+  SparklesIcon,
+  type LucideIcon,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useComposerDraftStore } from "../../../composerDraftStore";
 import { ensureEnvironmentApi } from "../../../environmentApi";
@@ -16,6 +26,8 @@ import { useFolderChats, useHomeFolderPath } from "../../../hooks/useFolderChats
 import { cn } from "../../../lib/utils";
 import { checkNewFolderName } from "../../newProject/newProject.logic";
 import { Input } from "../../ui/input";
+import { useSetupProjectPreview } from "../../sidebar/SidebarEmptyProjects";
+import { SetupSpotlight } from "../SetupSpotlight";
 import {
   WORK_KINDS,
   joinFolder,
@@ -27,6 +39,14 @@ import {
 import { SetupHeading, SetupShell } from "../SetupShell";
 import { useSetupNavigation } from "../useSetupNavigation";
 import { useSetupProgress, useUpdateSetupProgress } from "../useSetupProgress";
+
+const KIND_ICON: Readonly<Record<WorkKind, LucideIcon>> = {
+  site: GlobeIcon,
+  bot: BotIcon,
+  data: BarChart3Icon,
+  docs: FileTextIcon,
+  other: SparklesIcon,
+};
 
 function useDefaultModelSelection(): ModelSelection | null {
   const active = useComposerDraftStore((store) => store.stickyActiveProvider);
@@ -80,6 +100,13 @@ export function ProjectStep() {
   );
   const displayName = name.trim() || "my-project";
 
+  // The sidebar shows the project where it will live while it's being named.
+  const setPreview = useSetupProjectPreview((state) => state.setName);
+  useEffect(() => {
+    setPreview(existing ? null : name);
+  }, [existing, name, setPreview]);
+  useEffect(() => () => setPreview(null), [setPreview]);
+
   const create = async () => {
     if (existing) {
       await update((current) =>
@@ -125,11 +152,12 @@ export function ProjectStep() {
         pending,
       }}
     >
+      <SetupSpotlight selector='[data-testid="sidebar-new"]' />
       <SetupHeading
         title="Start your first project"
         lead="A project is a folder for one piece of work. Your AI sees only what’s inside it."
       />
-      <div className="grid gap-8 md:grid-cols-[1fr_260px]">
+      <div className="grid gap-8 md:grid-cols-[1fr_280px]">
         <div className="flex flex-col gap-5">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="setup-project-name" className="text-sm font-medium">
@@ -184,43 +212,51 @@ export function ProjectStep() {
           <div className="flex flex-col gap-2">
             <span className="text-sm font-medium">What kind of work?</span>
             <div role="radiogroup" aria-label="What kind of work" className="flex flex-wrap gap-2">
-              {WORK_KINDS.map((entry) => (
-                <button
-                  key={entry.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={kind === entry.id}
-                  onClick={() => setKind(entry.id)}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-sm transition-colors",
-                    kind === entry.id
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border hover:bg-muted/60",
-                  )}
-                >
-                  {entry.label}
-                </button>
-              ))}
+              {WORK_KINDS.map((entry) => {
+                const Icon = KIND_ICON[entry.id];
+                return (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={kind === entry.id}
+                    onClick={() => setKind(entry.id)}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors",
+                      kind === entry.id
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border hover:bg-muted/60",
+                    )}
+                  >
+                    <Icon className="size-3.5" aria-hidden />
+                    {entry.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
           {error ? <p className="text-sm text-destructive-foreground">{error}</p> : null}
         </div>
-        <aside className="flex flex-col gap-3 rounded-2xl border border-border bg-muted/20 p-4 text-sm">
-          <b className="font-medium">Where it lives</b>
-          <p className="text-muted-foreground">
-            In the sidebar, under Chats. Every chat you start here stays in this project.
-          </p>
-          <div className="rounded-xl border border-border bg-background p-2.5">
-            <div className="flex items-center gap-2 text-sm">
-              <ChevronDownIcon className="size-3.5 text-muted-foreground" />
-              <span className="flex size-5 items-center justify-center rounded bg-muted text-[10px] font-semibold uppercase">
-                {displayName[0]}
-              </span>
-              <span className="truncate font-medium">{displayName}</span>
-            </div>
-            <div className="mt-1.5 pl-6 text-xs text-muted-foreground">No chats yet</div>
+        <aside className="flex flex-col gap-3 self-start rounded-2xl border border-dashed border-border p-4 text-sm">
+          <div>
+            <b className="font-medium">Where it lives</b>
+            <p className="mt-0.5 text-muted-foreground">
+              In the sidebar, under Chats. Every chat you start here stays in this project.
+            </p>
           </div>
-          <p className="flex items-start gap-2 text-xs text-muted-foreground">
+          <div className="rounded-xl border border-border bg-background p-1.5">
+            <div className="rounded-lg bg-primary/[0.07] px-2 py-1.5">
+              <div className="flex items-center gap-2 text-sm">
+                <ChevronDownIcon className="size-3.5 text-muted-foreground" />
+                <span className="flex size-5 items-center justify-center rounded bg-primary text-[10px] font-semibold text-primary-foreground uppercase">
+                  {displayName[0]}
+                </span>
+                <span className="truncate font-medium">{displayName}</span>
+              </div>
+              <div className="mt-1 pl-[46px] text-xs text-muted-foreground">No chats yet</div>
+            </div>
+          </div>
+          <p className="flex items-start gap-2 text-muted-foreground">
             <FolderPlusIcon className="mt-0.5 size-3.5 shrink-0" />
             Make another one any time with New → New project.
           </p>
