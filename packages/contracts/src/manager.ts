@@ -328,6 +328,11 @@ export const ManagerSlackInstallStatus = Schema.Struct({
   botUserName: Schema.NullOr(Schema.String),
   /** The connector runs in relay mode and its event poller reached the console. */
   connected: Schema.Boolean,
+  /**
+   * The DM between the bot and the person who added the app is open and
+   * allowlisted — they can message the computer right away.
+   */
+  installerDmReady: Schema.Boolean,
 });
 export type ManagerSlackInstallStatus = typeof ManagerSlackInstallStatus.Type;
 

@@ -33,8 +33,10 @@ import { ManagerConnectorRepository } from "../persistence/Services/ManagerConne
 import {
   callTelegramBotMethod,
   isRelayCredential,
+  parseRelayCredential,
   relayCredential,
   SLACK_RELAY_APP_TOKEN,
+  slackRelayApiBase,
 } from "./channelRelay.ts";
 import { ManagerSlackService } from "./Layers/SlackConnector.ts";
 import { ManagerTelegramService } from "./Layers/TelegramConnector.ts";
@@ -232,6 +234,35 @@ export const afterTelegramConfigSaved = (input: {
 // Slack: Uno's Slack app ("Add to Slack")
 // ---------------------------------------------------------------------------
 
+/**
+ * `conversations.open {users}` through the relay Web API: the DM channel id
+ * with that user, or null on any failure.
+ */
+async function openSlackDm(
+  botToken: string,
+  userId: string,
+  fetchImpl: FetchLike = globalThis.fetch,
+): Promise<string | null> {
+  const relay = parseRelayCredential(botToken);
+  if (relay === null) return null;
+  try {
+    const response = await fetchImpl(`${slackRelayApiBase(relay)}conversations.open`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ users: userId }).toString(),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const body = (await response.json().catch(() => null)) as {
+      readonly ok?: boolean;
+      readonly channel?: { readonly id?: unknown };
+    } | null;
+    const channelId = body?.ok === true ? body.channel?.id : undefined;
+    return typeof channelId === "string" && channelId.length > 0 ? channelId : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Where to send the person to add Uno's app to their workspace. */
 export const startSlackInstall = (input: {
   readonly identity: WorkMachineIdentity | null;
@@ -338,6 +369,46 @@ export const readSlackInstall = (input: {
       );
     }
 
+    // The person who added the app can DM it right away: open that DM
+    // through the relay and allowlist it (channels stay opt-in).
+    const installerUserId = consoleString(response.body, "installer_user_id");
+    let installerDmReady = false;
+    if (installed && relayRow !== null && installerUserId !== null) {
+      const relayBotToken = relayRow.botToken;
+      const dmChannelId = yield* Effect.promise(() =>
+        openSlackDm(relayBotToken, installerUserId, input.fetchImpl),
+      );
+      if (dmChannelId === null) {
+        yield* Effect.logWarning("slack installer DM could not be opened").pipe(
+          Effect.annotateLogs({ projectId: input.projectId }),
+        );
+      } else {
+        if (!relayRow.allowedChannelIds.includes(dmChannelId)) {
+          // Re-read so a concurrent settings save is not overwritten.
+          const latest = yield* repository.get({ projectId: input.projectId, kind: "slack" });
+          const base =
+            (Option.isSome(latest) ? decodeSlackRow(latest.value.config) : null) ?? relayRow;
+          const config = {
+            ...base,
+            allowedChannelIds: base.allowedChannelIds.includes(dmChannelId)
+              ? base.allowedChannelIds
+              : [...base.allowedChannelIds, dmChannelId],
+          } satisfies ManagerSlackConnectorConfig;
+          yield* repository.upsert({
+            projectId: input.projectId,
+            kind: "slack",
+            config,
+            updatedAt: new Date().toISOString(),
+          });
+          relayRow = config;
+          yield* Effect.logInfo("slack installer DM allowlisted").pipe(
+            Effect.annotateLogs({ projectId: input.projectId, channelId: dmChannelId }),
+          );
+        }
+        installerDmReady = true;
+      }
+    }
+
     const runtime = yield* slack.getRuntimeStatus(input.projectId);
     return succeed({
       available,
@@ -345,6 +416,7 @@ export const readSlackInstall = (input: {
       teamName,
       botUserName: botUserName ?? runtime.botUserName,
       connected: installed && relayRow !== null && relayRow.enabled && runtime.connected,
+      installerDmReady,
     });
   });
 
