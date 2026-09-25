@@ -38,6 +38,14 @@ import {
   planTitle,
   usageLines,
 } from "../../account/billingModel";
+import {
+  AI_HOURS_TIME_NOTE,
+  aiHoursHeadline,
+  aiHoursSummary,
+  aiHoursTodayLine,
+  planAiHoursLine,
+  planHasUnoAi,
+} from "../../account/aiHours";
 import { cn } from "../../lib/utils";
 import { openInNewTab } from "../../navigation/useOpenApp";
 import { formatElapsedAgoLabel } from "../../timestampFormat";
@@ -151,7 +159,10 @@ function CurrentPlanCard({
           <li className="rounded-xl bg-muted/40 px-3 py-2">
             <div className="text-muted-foreground">Uno AI</div>
             <div className="font-medium">
-              {plan.aiCreditsUsd > 0 ? `${formatUsd(plan.aiCreditsUsd)} a month` : "Bring your own"}
+              {planAiHoursLine(plan) ??
+                (plan.aiCreditsUsd > 0
+                  ? `${formatUsd(plan.aiCreditsUsd)} a month`
+                  : "Bring your own")}
             </div>
           </li>
         </ul>
@@ -178,11 +189,15 @@ function CurrentPlanCard({
 function MoneyCard({
   balance,
   subscription,
+  usedTodayMinutes,
 }: {
   balance: AccountBalance | undefined;
   subscription: AccountSubscription | null;
+  usedTodayMinutes?: number | null | undefined;
 }) {
   const ai = subscription?.aiCredits;
+  const hours = aiHoursSummary({ subscription, balance, usedTodayMinutes });
+  const today = hours ? aiHoursTodayLine(hours) : null;
   return (
     <SectionCard title="Balance and Uno AI" icon={<WalletIcon />}>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -199,17 +214,49 @@ function MoneyCard({
             </Button>
           </div>
         </div>
-        <div className="flex flex-col gap-1 rounded-xl bg-muted/40 px-3.5 py-3">
-          <span className="text-xs text-muted-foreground">Uno AI credits</span>
-          <span className="text-2xl font-semibold tabular-nums" data-testid="my-uno-ai-balance">
-            {balance ? formatUsd(balance.aiBalanceUsd) : "…"}
-          </span>
-          <span className="text-[11px] text-muted-foreground">
-            {ai && ai.monthlyUsd > 0
-              ? `Your plan adds ${formatUsd(ai.monthlyUsd)} every month${ai.carryUsd > 0 ? `; ${formatUsd(ai.carryUsd)} carried over from last month` : ""}.`
-              : "Chats, dictation, the notetaker and apps that use AI spend these."}
-          </span>
-        </div>
+        {hours ? (
+          <div
+            className="flex flex-col gap-1 rounded-xl bg-muted/40 px-3.5 py-3"
+            data-testid="my-uno-ai-hours"
+          >
+            <span className="text-xs text-muted-foreground">
+              {hours.unlimited ? "Uno AI" : "AI hours · never expire"}
+            </span>
+            <span className="text-2xl font-semibold tabular-nums">{aiHoursHeadline(hours)}</span>
+            <span className="text-[11px] text-muted-foreground">
+              {[
+                today,
+                hours.unlimited
+                  ? "Full speed for the month's hours, then standard speed."
+                  : hours.monthlyHours > 0
+                    ? `Your plan adds ${hours.monthlyHours} h every month; unused hours roll over.`
+                    : "Unused hours roll over.",
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+            <span className="text-[11px] text-muted-foreground">{AI_HOURS_TIME_NOTE}</span>
+            <span className="text-[11px] text-muted-foreground">
+              Premium models (Claude, GPT, Gemini):{" "}
+              <span className="font-medium text-foreground tabular-nums">
+                {formatUsd(hours.premiumUsd)}
+              </span>{" "}
+              premium credit, per token.
+            </span>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1 rounded-xl bg-muted/40 px-3.5 py-3">
+            <span className="text-xs text-muted-foreground">Uno AI credits</span>
+            <span className="text-2xl font-semibold tabular-nums" data-testid="my-uno-ai-balance">
+              {balance ? formatUsd(balance.aiBalanceUsd) : "…"}
+            </span>
+            <span className="text-[11px] text-muted-foreground">
+              {ai && ai.monthlyUsd > 0
+                ? `Your plan adds ${formatUsd(ai.monthlyUsd)} every month${ai.carryUsd > 0 ? `; ${formatUsd(ai.carryUsd)} carried over from last month` : ""}.`
+                : "Chats, dictation, the notetaker and apps that use AI spend these."}
+            </span>
+          </div>
+        )}
       </div>
       <p className="text-[11px] text-muted-foreground">
         Adding money and switching plans happen in the Uno console in your browser — you're already
@@ -262,7 +309,17 @@ function PlanCard({
         <li>{plan.diskGb} GB working disk</li>
         {plan.cloudGb > 0 ? <li>{plan.cloudGb} GB cloud</li> : null}
         {plan.boostHours > 0 ? <li>{plan.boostHours} boost hours a month</li> : null}
-        {plan.aiCreditsUsd > 0 ? (
+        {planHasUnoAi(plan) && planAiHoursLine(plan) !== null ? (
+          <>
+            <li className="text-foreground">
+              <SparklesIcon className="mr-1 inline size-3 text-primary" />
+              {planAiHoursLine(plan)}
+            </li>
+            {(plan.aiPremiumUsd ?? plan.aiCreditsUsd) > 0 ? (
+              <li>{formatUsd(plan.aiPremiumUsd ?? plan.aiCreditsUsd)} premium credit a month</li>
+            ) : null}
+          </>
+        ) : plan.aiCreditsUsd > 0 ? (
           <li className="text-foreground">
             <SparklesIcon className="mr-1 inline size-3 text-primary" />
             {formatUsd(plan.aiCreditsUsd)} of Uno AI a month
@@ -301,7 +358,8 @@ function PlansCard({
 }) {
   const rungs = useMemo(() => (catalog ? planLadder(catalog) : []), [catalog]);
   const hasAiOption = rungs.some((rung) => rung.withAi !== null && rung.plain !== null);
-  const currentHasAi = (subscription?.limits?.aiCreditsUsd ?? 0) > 0;
+  const currentHasAi = subscription?.limits ? planHasUnoAi(subscription.limits) : false;
+  const hoursCatalog = rungs.some((rung) => rung.withAi?.aiHoursMonthly != null);
   const [withAi, setWithAi] = useState(currentHasAi);
 
   return (
@@ -321,7 +379,9 @@ function PlansCard({
         A plan is your computer in the cloud: split it into a workspace and a couple of servers if
         you like.
         {hasAiOption
-          ? " With Uno AI, the plan also tops up AI credits every month — or bring your own Claude or ChatGPT subscription."
+          ? hoursCatalog
+            ? " With Uno AI, the plan adds AI hours every month, unlimited inside them — or bring your own Claude or ChatGPT subscription."
+            : " With Uno AI, the plan also tops up AI credits every month — or bring your own Claude or ChatGPT subscription."
           : ""}
       </p>
       {loading ? (
@@ -413,6 +473,8 @@ export function BillingView(props: {
   cloud: CloudUsage | undefined;
   sites: SitesState | undefined;
   computers: number;
+  /** Today's AI hours use from `/v1/ai/status`, when the machine has read it. */
+  aiUsedTodayMinutes?: number | null;
 }) {
   return (
     <div className="flex flex-col gap-6">
@@ -429,7 +491,11 @@ export function BillingView(props: {
           onSeePlans={scrollToPlans}
         />
       )}
-      <MoneyCard balance={props.balance} subscription={props.subscription} />
+      <MoneyCard
+        balance={props.balance}
+        subscription={props.subscription}
+        usedTodayMinutes={props.aiUsedTodayMinutes}
+      />
       <PlansCard
         catalog={props.catalog}
         loading={props.catalogLoading}

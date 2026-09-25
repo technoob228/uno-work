@@ -63,6 +63,7 @@ import {
   publicChatWarning,
   signInPrompt,
 } from "./appAiProviderModel";
+import { useAiStatus } from "../../lib/aiStatusReactQuery";
 import { formatFileSize } from "../files/fileTypes";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -640,6 +641,8 @@ export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId:
   const settings = serverSettings ?? DEFAULT_UNIFIED_SETTINGS;
 
   const overview = useQuery(appAiQueryOptions(environmentId));
+  // Uno AI hours: included models don't spend an app's $ limit.
+  const aiHours = useAiStatus(environmentId) !== null;
   // Which registered apps are on the internet (their chat without sign-in is a warning).
   const machineApps = useQuery(machineAppsQueryOptions(environmentId));
   const launchers = useHomeLaunchers(environmentId);
@@ -778,6 +781,15 @@ export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId:
       </SettingsSection>
 
       <SettingsSection title="Apps using AI or cloud storage">
+        {aiHours ? (
+          <p
+            className="px-4 pt-3 text-xs text-muted-foreground sm:px-5"
+            data-testid="apps-ai-hours-note"
+          >
+            Included models (Smart, Fast) run on your AI hours. The limits below are for premium
+            models, paid per token.
+          </p>
+        ) : null}
         {overview.isError ? (
           <SettingsRow
             title="Couldn't read the apps"

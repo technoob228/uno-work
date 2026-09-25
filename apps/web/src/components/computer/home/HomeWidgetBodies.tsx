@@ -34,7 +34,13 @@ import type { ProgramTile } from "../programModel";
 import { useMinuteClock } from "../../../hooks/useMinuteClock";
 import { aiSpendDays, formatUsdShort, type SpendDay } from "./homeInfo";
 import { recentHomeEntries } from "./homeModel";
-import { useAiSpend } from "./useHomeInfo";
+import { useAiHours, useAiSpend } from "./useHomeInfo";
+import {
+  AI_HOURS_TIME_NOTE,
+  aiHoursHeadline,
+  aiHoursTodayLine,
+  type AiHoursSummary,
+} from "../../../account/aiHours";
 
 /** Tiles the Apps widget shows before "+N more". */
 const APPS_WIDGET_TILES = 15;
@@ -400,9 +406,55 @@ function SpendBars({ days }: { days: ReadonlyArray<SpendDay> }) {
  * per-day history for a machine, so the days come from this computer's own
  * readings of the account's running total (see the daemon's aiSpendLedger).
  */
+/**
+ * Uno AI hours: hours left (never expire), today's use and — when there is
+ * any — premium credit and what premium models cost lately.
+ */
+export function AiHoursBody({
+  hours,
+  creditsUsd,
+  days,
+}: {
+  hours: AiHoursSummary;
+  creditsUsd: number | null;
+  days: ReadonlyArray<SpendDay>;
+}) {
+  const today = aiHoursTodayLine(hours);
+  const premiumUsd = creditsUsd ?? hours.premiumUsd;
+  const spentLately = days.some((day) => (day.usd ?? 0) > 0);
+  return (
+    <div className="flex flex-col gap-2" data-testid="home-ai-hours">
+      <div className="text-2xl font-semibold tabular-nums" title={AI_HOURS_TIME_NOTE}>
+        {aiHoursHeadline(hours)}{" "}
+        <span className="text-sm font-normal text-muted-foreground">
+          {hours.unlimited ? "full speed, then standard" : "AI hours · never expire"}
+        </span>
+      </div>
+      {today ? <div className="text-xs font-medium">{today}</div> : null}
+      {spentLately && days.filter((day) => day.usd !== null).length > 1 ? (
+        <SpendBars days={days} />
+      ) : null}
+      <div className="text-xs text-muted-foreground">
+        {premiumUsd > 0 ? (
+          <span className="block">{formatUsdShort(premiumUsd)} premium credit</span>
+        ) : null}
+        <span className="block">{AI_HOURS_TIME_NOTE}</span>
+      </div>
+    </div>
+  );
+}
+
 export function AiSpendWidget({ environmentId }: { environmentId: EnvironmentId | null }) {
   const { spend, creditsUsd } = useAiSpend(environmentId);
+  const hours = useAiHours(environmentId);
   const clock = useMinuteClock();
+  if (hours) {
+    const hoursDays = aiSpendDays(
+      spend.data?.samples ?? [],
+      Math.max(Date.parse(clock), Date.now()),
+    );
+    return <AiHoursBody hours={hours} creditsUsd={creditsUsd} days={hoursDays} />;
+  }
   if (spend.isPending) return <Skeleton className="h-24 rounded-xl" />;
   const status = spend.data?.status ?? "unknown";
   if (status === "no-key") {

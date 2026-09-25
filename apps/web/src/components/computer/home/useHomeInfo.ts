@@ -9,7 +9,9 @@ import { queryOptions, useQuery } from "@tanstack/react-query";
 import { isElectron } from "../../../env";
 import { ensureEnvironmentApi } from "../../../environmentApi";
 import { unoCloudStateQueryOptions } from "../../../lib/workspaceReactQuery";
-import { accountReachable, balanceQuery } from "../../myuno/myUnoQueries";
+import { aiHoursSummary, type AiHoursSummary } from "../../../account/aiHours";
+import { useAiStatus } from "../../../lib/aiStatusReactQuery";
+import { accountReachable, balanceQuery, subscriptionQuery } from "../../myuno/myUnoQueries";
 import { homeFolderUser, personFirstName } from "./homeInfo";
 
 /**
@@ -61,4 +63,43 @@ export function useAiSpend(environmentId: EnvironmentId | null) {
   const account = useQuery({ ...balanceQuery(), enabled: accountReachable() });
   const creditsUsd = spend.data?.creditsUsd ?? account.data?.aiBalanceUsd ?? null;
   return { spend, creditsUsd };
+}
+
+/**
+ * Uno AI hours for Home: the account's subscription and balance, with today's
+ * use from the machine's `/v1/ai/status` when the subscription doesn't say.
+ * Null when the account has no AI hours (the widget then shows credits).
+ */
+export function useAiHours(environmentId: EnvironmentId | null): AiHoursSummary | null {
+  const reachable = accountReachable();
+  const subscription = useQuery({ ...subscriptionQuery(), enabled: reachable }).data ?? null;
+  const balance = useQuery({ ...balanceQuery(), enabled: reachable }).data ?? null;
+  const status = useAiStatus(environmentId);
+  const summary = aiHoursSummary({
+    subscription,
+    balance,
+    usedTodayMinutes: status?.usedTodayMinutes ?? null,
+  });
+  if (summary || !status) return summary;
+  // No account reachable (desktop without sign-in): the machine's own reading.
+  if (status.unlimited) {
+    return {
+      unlimited: true,
+      leftMinutes: null,
+      monthlyHours: 0,
+      usedTodayMinutes: status.usedTodayMinutes,
+      premiumUsd: 0,
+      power: status.power,
+    };
+  }
+  return status.hoursLeftMinutes !== null
+    ? {
+        unlimited: false,
+        leftMinutes: status.hoursLeftMinutes,
+        monthlyHours: 0,
+        usedTodayMinutes: status.usedTodayMinutes,
+        premiumUsd: 0,
+        power: status.power,
+      }
+    : null;
 }

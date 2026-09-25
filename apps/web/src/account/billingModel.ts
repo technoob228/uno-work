@@ -10,6 +10,7 @@ import type {
   AccountSubscription,
   PlanCatalog,
 } from "./accountOverview";
+import { planHasUnoAi } from "./aiHours";
 
 export function formatUsd(amount: number): string {
   const rounded = Math.round(amount * 100) / 100;
@@ -61,7 +62,7 @@ export function planLadder(catalog: PlanCatalog): ReadonlyArray<PlanRung> {
   for (const plan of onSale) {
     const key = catalog.plansV2 ? plan.baseSlug : plan.slug;
     const rung = byKey.get(key) ?? { name: plan.name, plain: null, withAi: null };
-    if (plan.aiCreditsUsd > 0) rung.withAi = plan;
+    if (planHasUnoAi(plan)) rung.withAi = plan;
     else rung.plain = plan;
     byKey.set(key, rung);
   }
@@ -81,7 +82,10 @@ export function findPlan(catalog: PlanCatalog | undefined, slug: string | null |
 }
 
 /** The plan's name as a person reads it: "Plus + Uno AI", "Builder". */
-export function planTitle(plan: Pick<AccountPlan, "name" | "aiCreditsUsd"> | null, slug?: string) {
+export function planTitle(
+  plan: Pick<AccountPlan, "name" | "slug" | "baseSlug" | "aiCreditsUsd" | "aiHoursMonthly"> | null,
+  slug?: string,
+) {
   if (!plan) {
     if (slug === "trial") return "Free course";
     return slug
@@ -91,7 +95,7 @@ export function planTitle(plan: Pick<AccountPlan, "name" | "aiCreditsUsd"> | nul
         )
       : "No plan";
   }
-  return plan.aiCreditsUsd > 0 ? `${plan.name} + Uno AI` : plan.name;
+  return planHasUnoAi(plan) ? `${plan.name} + Uno AI` : plan.name;
 }
 
 export interface UsageLine {

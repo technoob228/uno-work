@@ -14,6 +14,7 @@
  */
 import type { AccountPlan, AccountSubscription, PlanCatalog } from "../account/accountOverview";
 import { CONSOLE_URL } from "../account/accountOverview";
+import { planHasUnoAi } from "../account/aiHours";
 
 /** True in the lite build only (VITE_UNO_WORK_LITE=1 / `vite build --mode lite`). */
 export { isWebLite } from "./flag";
@@ -68,7 +69,7 @@ export function liteStanding(subscription: AccountSubscription | null): LiteStan
 /** The cheapest plan that runs Uno Work in the cloud, without Uno AI. */
 export function cheapestCloudPlan(catalog: PlanCatalog | undefined): AccountPlan | null {
   const candidates = (catalog?.plans ?? []).filter(
-    (plan) => plan.cloudWork && !plan.legacy && plan.aiCreditsUsd === 0,
+    (plan) => plan.cloudWork && !plan.legacy && !planHasUnoAi(plan),
   );
   return candidates.toSorted((a, b) => a.priceUsd - b.priceUsd)[0] ?? null;
 }
@@ -102,7 +103,7 @@ export function liteLadder(
   catalog: PlanCatalog | undefined,
   standing: LiteStanding | null,
 ): ReadonlyArray<LiteRung> {
-  const plans = (catalog?.plans ?? []).filter((plan) => !plan.legacy && plan.aiCreditsUsd === 0);
+  const plans = (catalog?.plans ?? []).filter((plan) => !plan.legacy && !planHasUnoAi(plan));
   const small = plans.find((plan) => plan.baseSlug === "small" || plan.slug === "small") ?? null;
   const cloud = plans.filter((plan) => plan.cloudWork).toSorted((a, b) => a.priceUsd - b.priceUsd);
   const cloudFrom = cloud[0] ?? null;

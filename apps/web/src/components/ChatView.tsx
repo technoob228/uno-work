@@ -173,6 +173,7 @@ import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./Branch
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { UnoBillingTopUpBanner } from "./chat/UnoBillingTopUpBanner";
+import { AiBusyNotice } from "./chat/AiBusyNotice";
 import { HarnessReauthCard } from "./chat/HarnessReauthCard";
 import { resolveThreadHarnessAuthLoss, shouldReprobeProvider } from "./harness/harnessAuthLoss";
 import { refreshEnvironmentProviders } from "~/environments/settings/serverSettings";
@@ -3983,6 +3984,7 @@ export default function ChatView(props: ChatViewProps) {
           <UnoBillingTopUpBanner
             active={activeThread.session?.lastErrorClass === "billing_error"}
             sessionUpdatedAt={activeThread.session?.updatedAt ?? null}
+            sessionError={activeThread.session?.lastError ?? activeThread.error ?? null}
           />
           <ThreadErrorBanner
             error={
@@ -4191,6 +4193,12 @@ export default function ChatView(props: ChatViewProps) {
                     onDismiss={() => setThreadError(activeThread.id, null)}
                   />
                 ) : null}
+                <AiBusyNotice
+                  environmentId={activeThread?.environmentId ?? null}
+                  active={
+                    isWorking && (selectedProvider === "uno" || selectedProvider === "hermes")
+                  }
+                />
                 <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                 <div className="relative z-10">
                   <ChatComposer
