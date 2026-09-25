@@ -237,7 +237,7 @@ function MoneyCard({
             </span>
             <span className="text-[11px] text-muted-foreground">{AI_HOURS_TIME_NOTE}</span>
             <span className="text-[11px] text-muted-foreground">
-              Premium models (Claude, GPT, Gemini):{" "}
+              Premium models ((Grok, GLM-5.3, Kimi K3)):{" "}
               <span className="font-medium text-foreground tabular-nums">
                 {formatUsd(hours.premiumUsd)}
               </span>{" "}

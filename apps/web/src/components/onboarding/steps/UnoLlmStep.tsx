@@ -92,7 +92,7 @@ export function UnoLlmStep() {
             No separate signups, no juggling API keys.
           </FeatureBullet>
           <FeatureBullet icon={<Globe2 className="size-3.5" />}>
-            Claude, GPT and Gemini too, paid per token from premium credit.
+            Grok, GLM-5.3 and Kimi K3 too, paid per token from premium credit.
           </FeatureBullet>
           <FeatureBullet icon={<CreditCard className="size-3.5" />}>
             One bill instead of five subscriptions.
