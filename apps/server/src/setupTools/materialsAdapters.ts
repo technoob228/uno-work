@@ -64,8 +64,25 @@ export interface GatewayModelOptions {
   readonly timeoutMs?: number;
 }
 
+/** Tried when the picked model answers with nothing usable (rate limits, empty text). */
+export const MATERIALS_FALLBACK_MODEL = "moonshotai/kimi-k2.6";
+
 async function complete(
   options: GatewayModelOptions,
+  messages: ReadonlyArray<{ role: "system" | "user"; content: string }>,
+  maxTokens: number,
+): Promise<string> {
+  try {
+    return await completeWith(options, options.model, messages, maxTokens);
+  } catch (error) {
+    if (options.model === MATERIALS_FALLBACK_MODEL) throw error;
+    return await completeWith(options, MATERIALS_FALLBACK_MODEL, messages, maxTokens);
+  }
+}
+
+async function completeWith(
+  options: GatewayModelOptions,
+  model: string,
   messages: ReadonlyArray<{ role: "system" | "user"; content: string }>,
   maxTokens: number,
 ): Promise<string> {
@@ -78,11 +95,16 @@ async function complete(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: options.model,
+        model,
         messages,
-        max_tokens: maxTokens,
+        // Room for models that think before they answer; the answer itself
+        // is kept short by the prompt.
+        max_tokens: Math.max(maxTokens, 400),
         temperature: 0.2,
         stream: false,
+        // A short summary needs no reasoning: with it on, the default model
+        // spent the whole budget thinking and answered `content: null`.
+        reasoning: { enabled: false },
       }),
       signal: AbortSignal.timeout(options.timeoutMs ?? 60_000),
     },
@@ -93,7 +115,9 @@ async function complete(
     choices?: Array<{ message?: { content?: unknown } }>;
   };
   const content = parsed.choices?.[0]?.message?.content;
-  if (typeof content !== "string") throw new Error("Uno AI returned no text");
+  if (typeof content !== "string" || content.trim().length === 0) {
+    throw new Error("Uno AI returned no text");
+  }
   return content;
 }
 

@@ -478,9 +478,35 @@ describe("gateway model", () => {
     expect(requests[0]).toMatchObject({
       url: "https://gateway.test/v1/chat/completions",
       auth: "Bearer unollm_key",
-      body: { model: "~deepseek/deepseek-v4-flash-latest", max_tokens: 80 },
+      body: {
+        model: "~deepseek/deepseek-v4-flash-latest",
+        max_tokens: 400,
+        reasoning: { enabled: false },
+      },
     });
     expect(JSON.stringify(requests[0]!.body)).toContain("untrusted_thread_output");
+  });
+
+  it("falls back to a second model when the first answers with no text", async () => {
+    const models: string[] = [];
+    const model = makeGatewayMaterialsModel({
+      baseUrl: "https://gateway.test/v1",
+      apiKey: "unollm_key",
+      model: "~deepseek/deepseek-v4-flash-latest",
+      fetch: (async (_url: string | URL | Request, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { model: string };
+        models.push(body.model);
+        const content =
+          body.model === "~deepseek/deepseek-v4-flash-latest" ? null : "A price list.";
+        return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+          status: 200,
+        });
+      }) as typeof fetch,
+    });
+    expect(await model.summarizeItem({ name: "p.csv", kind: "file", text: "a,b" })).toBe(
+      "A price list.",
+    );
+    expect(models).toEqual(["~deepseek/deepseek-v4-flash-latest", "moonshotai/kimi-k2.6"]);
   });
 
   it("picks the gateway model id out of the text-generation setting", () => {
