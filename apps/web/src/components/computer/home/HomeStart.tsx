@@ -210,6 +210,10 @@ export function HomeStart({
         span: appWidgetSpan(app?.widget?.size ?? "medium"),
       };
     }
+    // A project just set up names the Files widget (its material is inside).
+    if (id === "files" && setupHome.fresh && setupHome.project) {
+      return { ...HOME_WIDGETS.files, title: setupHome.project.name };
+    }
     return HOME_WIDGETS[id];
   };
 
@@ -217,7 +221,12 @@ export function HomeStart({
     switch (id) {
       case "files":
         return {
-          body: <FilesWidget environmentId={environmentId} />,
+          body: (
+            <FilesWidget
+              environmentId={environmentId}
+              folder={setupHome.fresh ? setupHome.project : null}
+            />
+          ),
           action: <CloudUsageLink environmentId={environmentId} />,
         };
       case "apps":

@@ -50,6 +50,8 @@ export interface SetupHome {
   readonly skippedCount: number;
   /** The project's first tasks, while it has no chats; empty otherwise. */
   readonly starters: ReadonlyArray<HomeStarter>;
+  /** The project has no chats yet: Home leads with it. */
+  readonly fresh: boolean;
 }
 
 export function useSetupHome(input: {
@@ -80,5 +82,6 @@ export function useSetupHome(input: {
     closeBanner: () => setClosed(true),
     skippedCount,
     starters,
+    fresh: project !== null && !hasChats,
   };
 }

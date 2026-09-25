@@ -17,6 +17,8 @@ import { usePrimaryEnvironmentId } from "../../../environments/primary";
 import { useHomeFolderPath } from "../../../hooks/useFolderChats";
 import { useSettings } from "../../../hooks/useSettings";
 import { getAssistant } from "../../../lib/managerApi";
+import { listConnectors } from "../../../lib/setupApi";
+import { readFileText } from "../../files/filesApi";
 import { cn } from "../../../lib/utils";
 import { useServerProviders } from "../../../rpc/serverState";
 import { getDriverOption } from "../../settings/providerDriverMeta";
@@ -36,6 +38,22 @@ import { SetupHeading, SetupShell } from "../SetupShell";
 import { useSetupNavigation } from "../useSetupNavigation";
 import { useSetupProgress, useUpdateSetupProgress } from "../useSetupProgress";
 import { useSetupHandoff } from "../useSetupHome";
+
+/** The setup's own notes in materials/, not the person's material. */
+const MATERIAL_NOTES = new Set(["links.md", "README.md", "UNO-SUMMARY.md"]);
+
+/** Lines of `materials/links.md` ("- https://…"). */
+export function countListedLinks(text: string): number {
+  return text.split("\n").filter((line) => /^- https?:\/\//.test(line.trim())).length;
+}
+
+/** "3 files, 1 link". */
+export function materialLine(files: number, links: number): string {
+  const parts = [];
+  if (files > 0) parts.push(`${files} file${files === 1 ? "" : "s"}`);
+  if (links > 0) parts.push(`${links} link${links === 1 ? "" : "s"}`);
+  return parts.join(", ");
+}
 
 function SummaryRow({
   step,
@@ -129,13 +147,32 @@ export function DoneStep() {
   const materials = useQuery({
     queryKey: ["uno-setup", "done-materials", environmentId, materialsRoot],
     queryFn: async () => {
+      const api = ensureEnvironmentApi(environmentId!);
       // files.list, not filesystem.browse: browse lists folders only.
-      const listing = await ensureEnvironmentApi(environmentId!).files.list({
-        path: `${materialsRoot}/materials`,
-      });
-      return listing.entries.filter((entry) => !entry.name.startsWith(".")).length;
+      const listing = await api.files.list({ path: `${materialsRoot}/materials` });
+      const names = listing.entries
+        .map((entry) => entry.name)
+        .filter((name) => !name.startsWith("."));
+      const links = names.includes("links.md")
+        ? countListedLinks(
+            await readFileText(environmentId!, `${materialsRoot}/materials/links.md`).catch(
+              () => "",
+            ),
+          )
+        : 0;
+      return {
+        files: names.filter((name) => !MATERIAL_NOTES.has(name)).length,
+        links,
+        read: names.includes("UNO-SUMMARY.md") || names.includes("README.md"),
+      };
     },
     enabled: environmentId !== null && materialsRoot !== null,
+    retry: false,
+  });
+  const connectors = useQuery({
+    queryKey: ["uno-setup", "connectors", environmentId, "done"],
+    queryFn: () => listConnectors({ environmentId: environmentId! }).catch(() => null),
+    enabled: environmentId !== null,
     retry: false,
   });
 
@@ -146,7 +183,14 @@ export function DoneStep() {
     assistant.data && slackChannelState(assistant.data.slack) === "on" ? "Slack" : null,
   ].filter((entry): entry is string => entry !== null);
   const answered = SETUP_QUESTIONS.filter((question) => progress.answers[question.id]).length;
-  const tools = settings.mcpServers.map((server) => server.name);
+  const tools = [
+    ...(connectors.data?.connectors ?? [])
+      .filter((connector) => connector.connected)
+      .map((connector) => connector.name),
+    ...settings.mcpServers.map((server) =>
+      settings.mcpServers.length > 1 ? `MCP server ${server.name}` : "MCP server",
+    ),
+  ];
 
   const finish = () => update((current) => markCompleted(current, "done"));
 
@@ -183,7 +227,7 @@ export function DoneStep() {
           first
           step="ai"
           label="AI"
-          value={aiName}
+          value={aiId === "uno" ? `${aiName} · 280+ models` : aiName}
           sub="Default for new chats"
           empty={false}
           skipped={skipped("ai")}
@@ -235,9 +279,9 @@ export function DoneStep() {
           first={false}
           step="materials"
           label="Material"
-          value={`${materials.data ?? 0} in materials/`}
-          sub="Your AI reads them when a task needs them"
-          empty={(materials.data ?? 0) === 0}
+          value={materialLine(materials.data?.files ?? 0, materials.data?.links ?? 0)}
+          sub={materials.data?.read ? "Read by your AI" : "Not read yet"}
+          empty={(materials.data?.files ?? 0) + (materials.data?.links ?? 0) === 0}
           skipped={skipped("materials")}
         />
       </div>

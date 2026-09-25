@@ -142,9 +142,16 @@ function viewOf(job: JobRecord): MaterialsJobView {
   };
 }
 
+/**
+ * The setup's own notes in `materials/`: the summary it writes, and
+ * `links.md` (the links the person added — read as links, not as a file).
+ */
+export const MATERIALS_LINKS_FILE = "links.md";
+
 const isSummaryName = (name: string) =>
   name.toLowerCase() === MATERIALS_SUMMARY_FILE.toLowerCase() ||
-  name.toLowerCase() === MATERIALS_SUMMARY_FALLBACK_FILE.toLowerCase();
+  name.toLowerCase() === MATERIALS_SUMMARY_FALLBACK_FILE.toLowerCase() ||
+  name.toLowerCase() === MATERIALS_LINKS_FILE;
 
 /** Files of `materials/`: non-hidden, top level and one folder down, no symlinks. */
 export async function listMaterialFiles(

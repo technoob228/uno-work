@@ -162,8 +162,12 @@ export function SetupShell({
               Back
             </Button>
           ) : step === "ai" ? (
-            <Button size="sm" variant="ghost" onClick={() => void navigate({ to: "/" })}>
-              Later
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void navigate({ to: "/setup", search: { step: "welcome" } })}
+            >
+              Back
             </Button>
           ) : null}
           <span className="flex-1" />

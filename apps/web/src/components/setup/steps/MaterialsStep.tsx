@@ -51,7 +51,10 @@ interface MaterialRow {
 }
 
 /** Icon by file type: sheets, pictures, everything else a document. */
-export function materialIcon(row: { readonly name: string; readonly kind: "file" | "link" }): LucideIcon {
+export function materialIcon(row: {
+  readonly name: string;
+  readonly kind: "file" | "link";
+}): LucideIcon {
   if (row.kind === "link") return LinkIcon;
   const ext = row.name.split(".").pop()?.toLowerCase() ?? "";
   if (/^(xlsx?|csv|tsv|ods|numbers)$/.test(ext)) return SheetIcon;
@@ -67,10 +70,7 @@ export function readCountLine(files: number, links: number): string {
   return files === 0 ? l : `${f} and ${l}`;
 }
 
-function jobItemFor(
-  job: MaterialReadJob | null,
-  row: MaterialRow,
-): MaterialReadItem | undefined {
+function jobItemFor(job: MaterialReadJob | null, row: MaterialRow): MaterialReadItem | undefined {
   return job?.items.find((item) => item.kind === row.kind && item.name === row.name);
 }
 
@@ -222,8 +222,10 @@ export function MaterialsStep() {
     };
   }, [environmentId, jobId]);
 
-  const readFiles = job?.items.filter((item) => item.kind === "file" && item.state === "read") ?? [];
-  const readLinks = job?.items.filter((item) => item.kind === "link" && item.state === "read") ?? [];
+  const readFiles =
+    job?.items.filter((item) => item.kind === "file" && item.state === "read") ?? [];
+  const readLinks =
+    job?.items.filter((item) => item.kind === "link" && item.state === "read") ?? [];
 
   return (
     <SetupShell

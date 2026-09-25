@@ -36,7 +36,10 @@ export function SetupView() {
 
   useEffect(() => {
     if (step === "tour-done" || step === "welcome") return;
-    void update((current) => markVisited({ ...current, mode: current.mode ?? "ai" }, step));
+    // Any of the eight steps is the AI path, even after the tour.
+    void update((current) =>
+      markVisited(current.mode === "ai" ? current : { ...current, mode: "ai" }, step),
+    );
   }, [step, update]);
 
   if (step === "welcome") return <WelcomeStep />;

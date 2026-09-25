@@ -26,6 +26,7 @@ import { usePrimaryEnvironmentId } from "../../../environments/primary";
 import { cn } from "../../../lib/utils";
 import { openInstallDocs } from "../../onboarding/harnessInstallLinks";
 import { Button } from "../../ui/button";
+import { toastManager } from "../../ui/toast";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../../ui/collapsible";
 import { SetupHeading, SetupShell } from "../SetupShell";
 import {
@@ -88,6 +89,7 @@ function SkillRow({
       if (added) await removeSkill(environmentId, skill.id);
       else await installSkill(environmentId, skill.id);
       await queryClient.invalidateQueries({ queryKey: SKILLS_STATUS_QUERY_KEY });
+      if (!added) toastManager.add({ type: "success", title: `${skill.name} added` });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Couldn't change the skill.");
     } finally {
@@ -129,7 +131,11 @@ function SkillRow({
       </div>
       <Button
         size="sm"
-        variant={added ? "secondary" : "outline"}
+        variant="outline"
+        className={cn(
+          added &&
+            "border-success/40 bg-success/[0.06] text-success-foreground hover:bg-success/10",
+        )}
         onClick={() => void toggle()}
         disabled={pending || status.isPending || !available}
         title={available ? undefined : "Update Uno Work on this computer to add it"}

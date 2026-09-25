@@ -79,6 +79,13 @@ const ALLOWED: ReadonlyArray<{ method: string; pattern: RegExp; query?: RegExp }
   { method: "GET", pattern: /^\/pay\/(history|spending)$/ },
   { method: "PATCH", pattern: /^\/api\/v1\/boxes\/\d+$/ },
   { method: "GET", pattern: /^\/api\/v1\/boxes\/\d+\/(metrics|apps)$/ },
+  // "Use your own tools" (onboarding v3): a key for an agent pinned to this
+  // computer, and SSH (the command, adding a public key).
+  { method: "GET", pattern: /^\/api\/v1\/boxes\/\d+\/work\/agent-keys$/ },
+  { method: "POST", pattern: /^\/api\/v1\/boxes\/\d+\/work\/agent-keys$/ },
+  { method: "DELETE", pattern: /^\/api\/v1\/boxes\/\d+\/work\/agent-keys\/\d+$/ },
+  { method: "GET", pattern: /^\/api\/v1\/boxes\/\d+\/work\/ssh$/ },
+  { method: "POST", pattern: /^\/api\/v1\/boxes\/\d+\/work\/ssh-keys$/ },
   {
     method: "GET",
     pattern: /^\/api\/v1\/boxes\/\d+\/applogs$/,

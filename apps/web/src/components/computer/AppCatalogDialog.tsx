@@ -58,6 +58,8 @@ import {
 } from "./appStoreModel";
 import { formatMemory } from "./computerFormat";
 import { installAiLines, storeAiLine } from "../settings/appAiProviderModel";
+import { OwnToolsRow } from "../setup/OwnToolsDialog";
+import { useSetupTourStore } from "../setup/SetupTour";
 
 /**
  * The app's logo: the brand mark Uno serves. A computer on an older Uno Work
@@ -419,6 +421,7 @@ export function AppCatalogDialog({
   /** Installed apps' addresses by catalog id, for "Use it on your phone". */
   appAddresses?: ReadonlyMap<string, string>;
 }) {
+  const touringStore = useSetupTourStore((state) => state.step === "apps");
   const [configuring, setConfiguring] = useState<UnoComputerAppTemplate | null>(null);
   const [viewing, setViewing] = useState<UnoComputerAppTemplate | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -804,6 +807,9 @@ export function AppCatalogDialog({
   return (
     <Dialog
       open={open}
+      // The setup tour points at the App Store with its own card: the card
+      // must stay clickable, so the store isn't modal while the tour is on it.
+      modal={touringStore ? false : true}
       onOpenChange={(next) => {
         if (!next) {
           setConfiguring(null);
@@ -941,7 +947,10 @@ export function AppCatalogDialog({
           ) : viewing ? (
             detail
           ) : (
-            browse
+            <>
+              {browse}
+              <OwnToolsRow title="Don’t want to install an app, or yours isn’t here?" />
+            </>
           )}
           {!computerOn ? (
             <p className="mt-4 text-xs text-muted-foreground">
