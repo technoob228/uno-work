@@ -25,6 +25,7 @@ import { UnoGatewayKeyLive } from "./unoGatewayKey.ts";
 import { UnoBoxIdentityLive } from "./unoBoxIdentity.ts";
 import { HealthCheck } from "./health.ts";
 import { SelfWatchdogLive } from "./selfWatchdog.ts";
+import { EconomyPresenceLive } from "./economy/EconomyPresence.ts";
 import { ServerBrowserLive } from "./serverBrowser.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
@@ -407,6 +408,10 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       ManagerAssistantBootstrapLive,
       ReminderSchedulerLive,
       SelfWatchdogLive,
+      // Economy mode: tells the console what is going on inside (clients,
+      // agent turns, always-on apps, next reminder); needs auth sessions,
+      // providers and settings provided further down this pipe.
+      EconomyPresenceLive,
       // Plugin runtime consumes the registry plus the orchestration engine
       // provided further down this pipe (same positioning as the manager).
       PluginRuntimeLive,

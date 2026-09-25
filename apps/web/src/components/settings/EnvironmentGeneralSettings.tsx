@@ -51,6 +51,7 @@ import {
   SettingsSection,
 } from "./settingsLayout";
 import { UnoGatewayBalance, useGatewayAiHours } from "./SettingsPanels";
+import { EconomyCard, useComputerEconomy } from "../computer/EconomyControl";
 
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 
@@ -75,6 +76,8 @@ export function EnvironmentGeneralSettings({
   const clientSettings = useSettings();
   const availableEditors = useServerAvailableEditors();
 
+  // Economy mode of the computer this environment runs on (absent: not offered).
+  const { economy } = useComputerEconomy(environmentId, null);
   const [openError, setOpenError] = useState<string | null>(null);
   const [isOpening, setIsOpening] = useState(false);
 
@@ -157,6 +160,16 @@ export function EnvironmentGeneralSettings({
         <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-xs text-amber-700 dark:text-amber-400">
           {mutationBlockedReason}
         </p>
+      ) : null}
+
+      {economy ? (
+        <SettingsSection title="Computer">
+          <EconomyCard
+            environmentId={environmentId}
+            boxId={null}
+            className="border-0 bg-transparent"
+          />
+        </SettingsSection>
       ) : null}
 
       <SettingsSection title="Uno account">

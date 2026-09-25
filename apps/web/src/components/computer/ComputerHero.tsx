@@ -42,6 +42,8 @@ import {
   percent,
 } from "./computerFormat";
 import { CopyButton, Meter } from "./computerUi";
+import { EconomyChip } from "./EconomyControl";
+import type { UnoComputerEconomy } from "@t3tools/contracts";
 import type { ResourceLook } from "./resources/resourceModel";
 
 export type PowerAction = "sleep" | "wake" | "stop" | "start";
@@ -100,6 +102,7 @@ export function ComputerHero({
   lowResource,
   onOpenLook,
   boost,
+  economy,
 }: {
   name: string;
   subtitle: string | null;
@@ -122,6 +125,8 @@ export function ComputerHero({
   onOpenLook?: ((look: ResourceLook) => void) | undefined;
   /** "Boost ×2 for 1 hour" (or the boosted pill); absent when boost isn't offered. */
   boost?: React.ReactNode;
+  /** Economy mode: a small "Economy · awake" chip next to the power state. */
+  economy?: UnoComputerEconomy | undefined;
 }) {
   const state: PowerState = status === null ? "on" : computerPowerState(status);
   const [confirm, setConfirm] = useState<"sleep" | "stop" | null>(null);
@@ -159,6 +164,7 @@ export function ComputerHero({
               <span className={cn("size-1.5 rounded-full", POWER_DOT[state])} aria-hidden />
               {POWER_STATE_LABEL[state]}
             </span>
+            <EconomyChip economy={economy} />
           </div>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {subtitle ? <span>{subtitle}</span> : null}

@@ -267,6 +267,8 @@ export interface WsRpcClient {
     readonly shareApp: RpcUnaryMethod<typeof WS_METHODS.unoComputerShareApp>;
     readonly unshareApp: RpcUnaryMethod<typeof WS_METHODS.unoComputerUnshareApp>;
     readonly power: RpcUnaryMethod<typeof WS_METHODS.unoComputerPower>;
+    readonly setEconomy: RpcUnaryMethod<typeof WS_METHODS.unoComputerSetEconomy>;
+    readonly economyPresence: RpcUnaryMethod<typeof WS_METHODS.unoEconomyPresence>;
     readonly machineApps: () => ReturnType<
       RpcUnaryMethod<typeof WS_METHODS.unoComputerMachineApps>
     >;
@@ -671,6 +673,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       unshareApp: (input) =>
         transport.request((client) => client[WS_METHODS.unoComputerUnshareApp](input)),
       power: (input) => transport.request((client) => client[WS_METHODS.unoComputerPower](input)),
+      setEconomy: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerSetEconomy](input)),
+      economyPresence: (input) =>
+        transport.request((client) => client[WS_METHODS.unoEconomyPresence](input)),
       machineApps: () =>
         transport.request((client) => client[WS_METHODS.unoComputerMachineApps]({})),
       appAction: (input) =>

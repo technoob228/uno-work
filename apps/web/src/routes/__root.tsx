@@ -70,6 +70,7 @@ import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
 import { isWebLite } from "../lite/flag";
 import { isWebApp } from "../webMode";
 import { LiteRoot } from "../lite/LiteShell";
+import { EconomyPresenceBootstrap } from "../components/economy/EconomyPresence";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -221,6 +222,7 @@ function RootRouteView() {
         <HostedStaticEnvironmentBootstrap />
         {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
         {primaryEnvironmentAuthenticated ? <WebSocketConnectionCoordinator /> : null}
+        {primaryEnvironmentAuthenticated ? <EconomyPresenceBootstrap /> : null}
         {primaryEnvironmentAuthenticated ? <SlowRpcAckToastCoordinator /> : null}
         {primaryEnvironmentAuthenticated ? (
           <WebSocketConnectionSurface>{appShell}</WebSocketConnectionSurface>

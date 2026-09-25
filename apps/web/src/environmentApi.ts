@@ -130,6 +130,8 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       shareApp: rpcClient.unoComputer.shareApp,
       unshareApp: rpcClient.unoComputer.unshareApp,
       power: rpcClient.unoComputer.power,
+      setEconomy: rpcClient.unoComputer.setEconomy,
+      economyPresence: rpcClient.unoComputer.economyPresence,
       machineApps: () => rpcClient.unoComputer.machineApps(),
       appAction: rpcClient.unoComputer.appAction,
       appAiList: () => rpcClient.unoComputer.appAiList(),

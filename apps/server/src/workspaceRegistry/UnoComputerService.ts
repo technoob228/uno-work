@@ -37,6 +37,7 @@ import type {
   UnoComputerBoostInput,
   UnoComputerBoostResult,
   UnoComputerState,
+  UnoComputerSetEconomyInput,
   UnoComputerTargetInput,
 } from "@t3tools/contracts";
 import { Context, Effect, Layer } from "effect";
@@ -61,6 +62,7 @@ import {
 } from "./unoComputer.ts";
 import { readResizeOptions, resizeComputer } from "./unoComputerResize.ts";
 import { endBoost as endComputerBoost, startBoost } from "./unoComputerBoost.ts";
+import { setComputerEconomy } from "./unoComputerEconomy.ts";
 
 const DEFAULT_ACTIVITY_TAIL = 40;
 /** Installs the daemon remembers, so a reload can re-attach to a running one. */
@@ -120,6 +122,10 @@ export interface UnoComputerServiceShape {
     boxId: number,
     action: string,
   ) => Effect.Effect<boolean, UnoCloudFetchError>;
+  /** Economy mode on/off and its idle timer; answers with the fresh computer. */
+  readonly setEconomy: (
+    input: UnoComputerSetEconomyInput,
+  ) => Effect.Effect<UnoComputerState, UnoCloudFetchError>;
 }
 
 export class UnoComputerService extends Context.Service<
@@ -383,7 +389,25 @@ export const makeUnoComputerService = (
         return true;
       });
 
+    const setEconomy: UnoComputerServiceShape["setEconomy"] = (input) =>
+      Effect.gen(function* () {
+        const boxId = yield* resolveBoxId(input);
+        const ctx = yield* context(boxId);
+        yield* Effect.tryPromise({
+          try: () =>
+            setComputerEconomy({
+              ...ctx,
+              boxId,
+              enabled: input.enabled,
+              idleTimeoutS: input.idleTimeoutS,
+            }),
+          catch: toFetchError,
+        });
+        return yield* getState(input.boxId === undefined ? undefined : { boxId: input.boxId });
+      });
+
     return {
+      setEconomy,
       resizeOptions,
       resize,
       boost,

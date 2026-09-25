@@ -76,6 +76,7 @@ import type { WsProtocolCloseContext } from "../../rpc/protocol";
 import { getServerConfig } from "../../rpc/serverState";
 import { recordWsConnectionOpened } from "../../rpc/wsConnectionState";
 import { WsTransport } from "../../rpc/wsTransport";
+import { PRIMARY_GATE_KEY, waitEconomyGate } from "../../rpc/economyGate";
 import { createWsRpcClient, type WsRpcClient } from "../../rpc/wsRpcClient";
 import { appendVersionMismatchHint, resolveServerConfigVersionMismatch } from "../../versionSkew";
 import {
@@ -1202,14 +1203,22 @@ function createPrimaryEnvironmentClient(
   const connectionLabel = knownEnvironment?.label ?? null;
 
   return createWsRpcClient(
-    new WsTransport(wsBaseUrl, {
-      getConnectionLabel: () => connectionLabel,
-      getVersionMismatchHint: () =>
-        resolveServerConfigVersionMismatch(getServerConfig())?.hint ?? null,
-      // The raw socket can be open while shell/thread subscriptions are still
-      // stale. The environment connection marks it connected after snapshot.
-      markConnectedOnOpen: false,
-    }),
+    new WsTransport(
+      // Economy mode: while the computer sleeps and the person is away, wait
+      // here instead of dialing — a reconnect would wake it (economyGate.ts).
+      async () => {
+        await waitEconomyGate(PRIMARY_GATE_KEY);
+        return wsBaseUrl;
+      },
+      {
+        getConnectionLabel: () => connectionLabel,
+        getVersionMismatchHint: () =>
+          resolveServerConfigVersionMismatch(getServerConfig())?.hint ?? null,
+        // The raw socket can be open while shell/thread subscriptions are still
+        // stale. The environment connection marks it connected after snapshot.
+        markConnectedOnOpen: false,
+      },
+    ),
   );
 }
 
@@ -1222,6 +1231,7 @@ function createSavedEnvironmentClient(
   return createWsRpcClient(
     new WsTransport(
       async () => {
+        await waitEconomyGate(environmentId);
         const record = getSavedEnvironmentRecord(environmentId);
         if (!record) {
           throw new Error(`Saved environment ${environmentId} not found.`);

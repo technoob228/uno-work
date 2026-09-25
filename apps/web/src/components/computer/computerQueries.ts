@@ -155,6 +155,29 @@ export function computerPowerMutationOptions(
   });
 }
 
+/** Economy mode: on/off and the idle timer; answers with the fresh computer. */
+export function computerEconomyMutationOptions(
+  environmentId: EnvironmentId | null,
+  boxId: number | null,
+  queryClient: QueryClient,
+) {
+  return mutationOptions({
+    mutationKey: ["uno-computer", "economy", environmentId, boxId] as const,
+    mutationFn: (input: {
+      readonly enabled?: boolean;
+      readonly idleTimeoutS?: number;
+    }): Promise<UnoComputerState> =>
+      api(environmentId).setEconomy({
+        ...target(boxId),
+        ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+        ...(input.idleTimeoutS !== undefined ? { idleTimeoutS: input.idleTimeoutS } : {}),
+      }),
+    onSuccess: (state) => {
+      queryClient.setQueryData(computerQueryKeys.state(environmentId, boxId), state);
+    },
+  });
+}
+
 /** Programs found on the machine behind this environment (not another picked box). */
 export function machineAppsQueryOptions(environmentId: EnvironmentId | null, enabled = true) {
   return queryOptions({

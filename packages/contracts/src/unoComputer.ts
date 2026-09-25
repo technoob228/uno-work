@@ -76,6 +76,33 @@ export const UnoComputerBoost = Schema.Struct({
 });
 export type UnoComputerBoost = typeof UnoComputerBoost.Type;
 
+/**
+ * Economy mode ("runs only when needed"): the computer sleeps when nobody uses
+ * it and wakes in about a second when something needs it — Uno Work opening, a
+ * Telegram/Slack message through Uno, a visit to one of its apps. Absent on the
+ * box when the console does not offer it to this account yet.
+ */
+export const UnoComputerEconomy = Schema.Struct({
+  enabled: Schema.Boolean,
+  /** Cannot be turned off on this plan (the free trial computer). */
+  locked: Schema.Boolean,
+  /** "plan" — the plan's default, "owner" — the person chose. */
+  source: Schema.String,
+  idleTimeoutS: Schema.Number,
+  defaultIdleTimeoutS: Schema.Number,
+  /** off | awake | sleeping | waking | stopped */
+  state: Schema.String,
+  /** When an awake computer will sleep if nothing happens; null while busy. */
+  sleepAfter: Schema.NullOr(Schema.String),
+  /** What keeps it awake right now: agent:1, clients:2, terminal:1, run, app:… */
+  busy: Schema.Array(Schema.String),
+  lastSleepAt: Schema.NullOr(Schema.String),
+  lastWakeAt: Schema.NullOr(Schema.String),
+  /** work | telegram | slack | http | schedule | run | api */
+  lastWakeSource: Schema.NullOr(Schema.String),
+});
+export type UnoComputerEconomy = typeof UnoComputerEconomy.Type;
+
 export const UnoComputerBox = Schema.Struct({
   id: Schema.Number,
   name: Schema.String,
@@ -94,6 +121,8 @@ export const UnoComputerBox = Schema.Struct({
   ports: Schema.Array(UnoComputerPort),
   /** Boost ×2; absent when boost is not offered to this account. */
   boost: Schema.optional(UnoComputerBoost),
+  /** Economy mode; absent when the console does not offer it yet. */
+  economy: Schema.optional(UnoComputerEconomy),
 });
 export type UnoComputerBox = typeof UnoComputerBox.Type;
 
@@ -459,6 +488,37 @@ export const UnoComputerUnshareAppInput = Schema.Struct({
   userId: Schema.Number,
 });
 export type UnoComputerUnshareAppInput = typeof UnoComputerUnshareAppInput.Type;
+
+/** Turn economy mode on/off or change its idle timer (0 = default). */
+export const UnoComputerSetEconomyInput = Schema.Struct({
+  boxId: Schema.optional(Schema.Number),
+  enabled: Schema.optional(Schema.Boolean),
+  idleTimeoutS: Schema.optional(Schema.Number),
+});
+export type UnoComputerSetEconomyInput = typeof UnoComputerSetEconomyInput.Type;
+
+/**
+ * A client tells the daemon the person is here (`input: true` after a click or
+ * a key press, throttled) or just asks for the latest economy picture
+ * (`input: false`). The answer is what the client needs to behave well around
+ * sleep: when the computer will sleep, so an idle tab does not wake it back up.
+ */
+export const UnoEconomyPresenceInput = Schema.Struct({
+  input: Schema.Boolean,
+});
+export type UnoEconomyPresenceInput = typeof UnoEconomyPresenceInput.Type;
+
+export const UnoEconomyPresence = Schema.Struct({
+  /** This daemon runs on an Uno computer whose economy mode is on. */
+  enabled: Schema.Boolean,
+  state: Schema.String,
+  sleepAfter: Schema.NullOr(Schema.String),
+  idleTimeoutS: Schema.Number,
+  busy: Schema.Array(Schema.String),
+  /** When the daemon last heard back from the console; null — never. */
+  reportedAt: Schema.NullOr(Schema.String),
+});
+export type UnoEconomyPresence = typeof UnoEconomyPresence.Type;
 
 export const UnoComputerPowerInput = Schema.Struct({
   boxId: Schema.optional(Schema.Number),
