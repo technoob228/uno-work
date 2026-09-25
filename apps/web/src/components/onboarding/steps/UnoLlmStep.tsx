@@ -81,18 +81,18 @@ export function UnoLlmStep() {
     <TwoColumn>
       <div>
         <StepEyebrow>Or use Uno LLM</StepEyebrow>
-        <StepTitle>One key. 300+ models. Anywhere.</StepTitle>
+        <StepTitle>AI hours every month. Unlimited inside them.</StepTitle>
         <StepLead>
-          Uno LLM gives you a single account with access to OpenAI, Anthropic, Google, Mistral,
-          Llama, and 300+ open and closed models. Works from any location — including regions where
-          original providers are blocked.
+          Uno AI: AI hours every month, unlimited inside them. Hours never expire. Work in as many
+          chats and agents at once as you like. Time counts only while AI is working. Reading,
+          thinking and typing don&apos;t use hours.
         </StepLead>
         <ul className="mt-6 grid gap-3">
           <FeatureBullet icon={<Zap className="size-3.5" />}>
             No separate signups, no juggling API keys.
           </FeatureBullet>
           <FeatureBullet icon={<Globe2 className="size-3.5" />}>
-            Single regional endpoint, low latency worldwide.
+            Claude, GPT and Gemini too, paid per token from premium credit.
           </FeatureBullet>
           <FeatureBullet icon={<CreditCard className="size-3.5" />}>
             One bill instead of five subscriptions.
