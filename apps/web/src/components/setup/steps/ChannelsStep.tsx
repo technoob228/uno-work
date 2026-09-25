@@ -126,7 +126,7 @@ function ChannelCard({
   return (
     <section
       className={cn(
-        "flex flex-col gap-4 rounded-2xl border p-4 sm:p-5",
+        "flex min-w-0 flex-col gap-4 rounded-2xl border p-4 sm:p-5",
         on ? "border-success/40 bg-success/[0.02]" : "border-border",
       )}
       data-testid={testId}
@@ -282,7 +282,8 @@ function TelegramCard({
   return (
     <div className="flex flex-col gap-3" data-testid="setup-telegram-shared">
       <div className="flex items-start gap-4">
-        <div className="flex size-[124px] shrink-0 items-center justify-center rounded-xl border border-border bg-white p-1.5">
+        {/* On a phone the link opens Telegram right there: no QR to scan. */}
+        <div className="hidden size-[124px] shrink-0 items-center justify-center rounded-xl border border-border bg-white p-1.5 sm:flex">
           {url ? (
             <QRCodeSvg value={url} size={110} title="Open Uno’s bot in Telegram" />
           ) : (
@@ -297,7 +298,8 @@ function TelegramCard({
             </span>
           ) : (
             <span className="text-sm text-muted-foreground">
-              Scan with your phone, or open the link:
+              <span className="hidden sm:inline">Scan with your phone, or open the link:</span>
+              <span className="sm:hidden">Open the link and press Start:</span>
             </span>
           )}
           {url ? (
@@ -549,7 +551,7 @@ export function ChannelsStep() {
           the Uno chat.
         </p>
       ) : (
-        <div className="grid items-start gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
           <ChannelCard
             logo={<TelegramMark className="size-5" />}
             name="Telegram"
