@@ -159,8 +159,8 @@ export function ComputersTab(props: ComputersTabProps) {
             </p>
           ) : null}
           <p className="px-1 pt-1 text-xs text-muted-foreground">
-            Click a computer to see its load, apps and logs, put it to sleep or change what it's
-            for.
+            Click a computer to see its load, apps and logs, restart it, put it to sleep or change
+            what it's for.
           </p>
         </>
       )}
@@ -184,11 +184,18 @@ function ComputerRow({
   const openingLabel = opening?.key === entry.key ? opening.label : null;
   const paused = entry.state !== "on";
 
+  const restarting = entry.box ? actions.restarting(entry.box.id) : false;
+
   const button =
     pending === "wake" || pending === "start" ? (
       <Button size="xs" variant="outline" disabled>
         <Loader2Icon className="animate-spin" />
         Waking…
+      </Button>
+    ) : restarting ? (
+      <Button size="xs" variant="outline" disabled>
+        <Loader2Icon className="animate-spin" />
+        Restarting…
       </Button>
     ) : openingLabel ? (
       <Button size="xs" variant="outline" disabled>

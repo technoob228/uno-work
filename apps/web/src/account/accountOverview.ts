@@ -67,6 +67,8 @@ export interface AccountComputer {
   readonly startedAt: string | null;
   readonly createdAt: string | null;
   readonly url: string | null;
+  /** The last Restart (for ~10 minutes after it); null = none lately. */
+  readonly restart: ComputerRestart | null;
 }
 
 export function parseAccountComputer(raw: unknown): AccountComputer | null {
@@ -96,6 +98,7 @@ export function parseAccountComputer(raw: unknown): AccountComputer | null {
     startedAt: strOrNull(r["started_at"]),
     createdAt: strOrNull(r["created_at"]),
     url: strOrNull(r["url"]),
+    restart: parseComputerRestart(r["restart"]),
   };
 }
 
@@ -104,6 +107,54 @@ export async function fetchAccountComputers(): Promise<ReadonlyArray<AccountComp
   return list(raw, "boxes")
     .map(parseAccountComputer)
     .filter((box): box is AccountComputer => box !== null);
+}
+
+// ---- restart ----
+
+/**
+ * A safe restart (`POST /api/v1/boxes/{id}/restart`): Uno flushes the disk,
+ * lets the computer shut down, then boots it again from its own disk. It is
+ * offline for about 15 seconds; the console reports how it went in the
+ * computer's `restart` field.
+ */
+export interface ComputerRestart {
+  readonly state: "restarting" | "done" | "failed";
+  readonly requestedAt: string | null;
+  readonly finishedAt: string | null;
+  readonly error: string | null;
+}
+
+export function parseComputerRestart(raw: unknown): ComputerRestart | null {
+  const r = rec(raw);
+  if (!r) return null;
+  const state = str(r["state"]);
+  if (state !== "restarting" && state !== "done" && state !== "failed") return null;
+  return {
+    state,
+    requestedAt: strOrNull(r["requested_at"]),
+    finishedAt: strOrNull(r["finished_at"]),
+    error: strOrNull(r["error"]),
+  };
+}
+
+export async function restartComputer(id: number): Promise<ComputerRestart | null> {
+  const raw = await accountRequest("POST", `/api/v1/boxes/${id}/restart`, {});
+  return parseComputerRestart(rec(raw)?.["restart"]);
+}
+
+/** The console's refusal in the person's words. */
+export function describeRestartError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const has = (code: string) => raw.includes(code);
+  if (has("RESTART_TOO_SOON")) {
+    return "It was restarted less than a minute ago. Try again in a moment.";
+  }
+  if (has("BOX_NOT_RUNNING")) return "Only a running computer can be restarted. Wake it up first.";
+  if (has("BOX_BUSY"))
+    return "It's busy right now (restarting or switching boost). Try again in a minute.";
+  if (/^403\b/.test(raw)) return "Only the account owner can restart it.";
+  const detail = raw.replace(/^\d{3}:\s*/, "").replace(/^\{"error":"(.*)"\}$/, "$1");
+  return `Uno couldn't restart it: ${detail.slice(0, 200)}`;
 }
 
 /**

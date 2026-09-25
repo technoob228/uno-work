@@ -1,6 +1,6 @@
 /**
  * The side panel of My Uno — one computer or one site in full, with
- * everything you can do to it. A computer: open / wake / sleep, what it's for,
+ * everything you can do to it. A computer: open / wake / sleep / restart, what it's for,
  * and its load, apps and logs (read from the console as the signed-in person,
  * so it works for any computer on the account, with or without Uno Work).
  * Resizing, deleting and SSH stay in the console, one click away.
@@ -15,6 +15,7 @@ import {
   LockIcon,
   MoonIcon,
   RefreshCwIcon,
+  RotateCwIcon,
   SquareArrowOutUpRightIcon,
   SunIcon,
   UploadIcon,
@@ -152,6 +153,7 @@ export function ComputerDetail({
 }) {
   const box = entry.box;
   const pending = box ? actions.pending(box.id) : null;
+  const restarting = box ? actions.restarting(box.id) : false;
   const awake = box ? awakeLine({ status: box.status, startedAt: box.startedAt }) : null;
   const share = entryShare(entry, subscription);
   const asleep = isAsleep(entry);
@@ -227,9 +229,9 @@ export function ComputerDetail({
                 <RoleBadge role={entry.role} />
               )}
               <span className="inline-flex items-center gap-1.5 text-xs">
-                <Dot tone={stateTone(entry)} />
-                {stateLabel(entry)}
-                {awake && entry.state === "on" ? (
+                <Dot tone={restarting ? "busy" : stateTone(entry)} />
+                {restarting ? "Restarting · back in about 15 s" : stateLabel(entry)}
+                {awake && entry.state === "on" && !restarting ? (
                   <span className="text-muted-foreground">· {awake}</span>
                 ) : null}
               </span>
@@ -286,6 +288,18 @@ export function ComputerDetail({
             >
               {pending === "sleep" ? <Loader2Icon className="animate-spin" /> : <MoonIcon />}
               Put to sleep
+            </Button>
+          ) : null}
+          {box && (restarting || (entry.state === "on" && !entry.broken)) ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending !== null || restarting}
+              onClick={() => actions.restart(box, entry.here)}
+              data-testid="myuno-restart"
+            >
+              {restarting ? <Loader2Icon className="animate-spin" /> : <RotateCwIcon />}
+              {restarting ? "Restarting…" : "Restart"}
             </Button>
           ) : null}
         </div>
