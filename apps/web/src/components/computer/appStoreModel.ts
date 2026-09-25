@@ -3,7 +3,12 @@
  * Pure, so the order ("files and passwords first, developer tools last") is
  * tested without rendering.
  */
-import type { UnoComputerAppCategory, UnoComputerAppTemplate } from "@t3tools/contracts";
+import {
+  UNO_CONTROL_PLANE_BASE_URL,
+  type UnoAppMobile,
+  type UnoComputerAppCategory,
+  type UnoComputerAppTemplate,
+} from "@t3tools/contracts";
 
 export const ALL_TAB = "all";
 export const INSTALLED_TAB = "installed";
@@ -13,19 +18,34 @@ export interface StoreFilters {
   readonly signInWithUno: boolean;
   /** Needs no more memory than this computer has. */
   readonly fitsComputer: boolean;
+  /** Has official phone apps that connect to it. */
+  readonly phoneApps: boolean;
 }
 
-export const NO_FILTERS: StoreFilters = { signInWithUno: false, fitsComputer: false };
+export const NO_FILTERS: StoreFilters = {
+  signInWithUno: false,
+  fitsComputer: false,
+  phoneApps: false,
+};
 
-/** Catalog order of the console, by rank when it sends one (older consoles don't). */
+export function hasFilters(filters: StoreFilters): boolean {
+  return filters.signInWithUno || filters.fitsComputer || filters.phoneApps;
+}
+
+/**
+ * Store order: apps made by Uno first, then the console's rank (older consoles
+ * send none — their order stays).
+ */
+const rankKey = (t: UnoComputerAppTemplate) =>
+  t.rank && t.rank > 0 ? t.rank : Number.MAX_SAFE_INTEGER;
+const unoFirst = (t: UnoComputerAppTemplate) => (t.madeByUno ? 0 : 1);
+
 export function sortByRank(
   templates: ReadonlyArray<UnoComputerAppTemplate>,
 ): UnoComputerAppTemplate[] {
-  const key = (t: UnoComputerAppTemplate) =>
-    t.rank && t.rank > 0 ? t.rank : Number.MAX_SAFE_INTEGER;
   return templates
     .map((t, i) => ({ t, i }))
-    .toSorted((a, b) => key(a.t) - key(b.t) || a.i - b.i)
+    .toSorted((a, b) => unoFirst(a.t) - unoFirst(b.t) || rankKey(a.t) - rankKey(b.t) || a.i - b.i)
     .map(({ t }) => t);
 }
 
@@ -70,17 +90,20 @@ export function applyStoreView(input: {
     }
     if (input.filters.signInWithUno && !t.sso) return false;
     if (input.filters.fitsComputer && !fitsMemory(t, input.memTotalMb)) return false;
+    if (input.filters.phoneApps && !t.mobile) return false;
     return matchesQuery(t, input.query);
   });
 }
 
-/** "Recommended" on the front page: featured, never a developer tool. */
+/** "Recommended" on the front page: made by Uno or featured, never a developer tool. */
 export function featuredTemplates(
   templates: ReadonlyArray<UnoComputerAppTemplate>,
   categories: ReadonlyArray<UnoComputerAppCategory>,
 ): UnoComputerAppTemplate[] {
   const technical = new Set(categories.filter((c) => c.technical).map((c) => c.id));
-  return sortByRank(templates).filter((t) => t.featured === true && !technical.has(t.category));
+  return sortByRank(templates).filter(
+    (t) => (t.featured === true || t.madeByUno === true) && !technical.has(t.category),
+  );
 }
 
 /**
@@ -114,4 +137,71 @@ export function signInLabel(template: UnoComputerAppTemplate): string | null {
   if (template.sso === "oidc") return "Opens with your Uno account — no extra password";
   if (template.sso === "edge") return "Only people you share it with can open it (Uno account)";
   return null;
+}
+
+/** A small icon + word on a store card: what the app is like at a glance. */
+export type StoreHighlight =
+  | { readonly kind: "uno"; readonly label: "Made by Uno" }
+  | { readonly kind: "sso"; readonly label: "Sign in with Uno" }
+  | { readonly kind: "ai"; readonly label: "Uses AI" }
+  | {
+      readonly kind: "phone";
+      readonly label: "Phone apps";
+      readonly ios: boolean;
+      readonly android: boolean;
+    }
+  | { readonly kind: "memory"; readonly label: string; readonly tight: boolean };
+
+/**
+ * The card's highlights, most telling first: made by Uno, signs in with Uno,
+ * uses AI, has phone apps, how much memory it wants (a warning when this
+ * computer has less).
+ */
+export function storeHighlights(
+  template: UnoComputerAppTemplate,
+  fits: boolean | null,
+  formatMemory: (mb: number) => string,
+): StoreHighlight[] {
+  const out: StoreHighlight[] = [];
+  if (template.madeByUno) out.push({ kind: "uno", label: "Made by Uno" });
+  if (template.sso === "oidc") out.push({ kind: "sso", label: "Sign in with Uno" });
+  if (template.ai) out.push({ kind: "ai", label: "Uses AI" });
+  if (template.mobile) {
+    out.push({
+      kind: "phone",
+      label: "Phone apps",
+      ios: template.mobile.ios !== null,
+      android: template.mobile.android !== null,
+    });
+  }
+  if (template.minRamMb > 0) {
+    const tight = fits === false;
+    const size = formatMemory(template.minRamMb);
+    out.push({ kind: "memory", label: tight ? `Needs ${size}` : `${size}+`, tight });
+  }
+  return out;
+}
+
+/** "iOS and Android", "iOS", "Android". */
+export function phonePlatforms(mobile: UnoAppMobile): string {
+  const names = [mobile.ios ? "iOS" : null, mobile.android ? "Android" : null].filter(Boolean);
+  return names.join(" and ");
+}
+
+/**
+ * Where the logo can come from, in order: the address the computer passes on
+ * (its control plane), then the console's own logo by app id — svg, then png.
+ * The fallback covers a computer on an older Uno Work that passes no address
+ * and an address the browser can't load. Empty — draw the emoji.
+ */
+export function logoSources(
+  template: Pick<UnoComputerAppTemplate, "id" | "iconUrl">,
+  base: string = UNO_CONTROL_PLANE_BASE_URL,
+): string[] {
+  const byId = /^[a-z0-9-]+$/.test(template.id)
+    ? [".svg", ".png"].map((ext) => `${base}/api/v1/apps/icons/${template.id}${ext}`)
+    : [];
+  const given = template.iconUrl ? [template.iconUrl] : [];
+  // The given address first; a by-id guess with the other extension goes after it.
+  return [...new Set([...given, ...byId])];
 }

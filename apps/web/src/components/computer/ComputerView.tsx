@@ -669,6 +669,13 @@ export function ComputerView() {
         }}
         confirm={installs.confirm}
         onCancelConfirm={installs.clearConfirm}
+        appAddresses={
+          new Map(
+            (appsQuery.data?.installed.apps ?? []).flatMap((a) =>
+              a.templateId && a.url ? [[a.templateId, a.url] as const] : [],
+            ),
+          )
+        }
       />
     </SidebarInset>
   );

@@ -25,6 +25,7 @@
  */
 import type {
   UnoAppAiUse,
+  UnoAppMobile,
   UnoComputerActivity,
   UnoComputerAppAccess,
   UnoComputerAppAiKey,
@@ -442,6 +443,28 @@ export function parseTemplateAi(raw: unknown): UnoAppAiUse | null {
   };
 }
 
+const IOS_STORE_URL = /^https:\/\/apps\.apple\.com\/[a-z0-9/._-]*id[0-9]+$/;
+const ANDROID_STORE_URL = /^https:\/\/play\.google\.com\/store\/apps\/details\?id=[A-Za-z0-9._]+$/;
+
+/**
+ * The catalog's `mobile`: official phone apps. Only App Store / Google Play
+ * links become buttons — the catalog can't point a person anywhere else.
+ * Null when neither link is usable.
+ */
+export function parseTemplateMobile(raw: unknown): UnoAppMobile | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const ios = asString(record["ios"]);
+  const android = asString(record["android"]);
+  const out: UnoAppMobile = {
+    ios: IOS_STORE_URL.test(ios) ? ios : null,
+    android: ANDROID_STORE_URL.test(android) ? android : null,
+    appName: asString(record["app_name"]) || null,
+    note: asString(record["note_en"]) || asString(record["note_ru"]) || null,
+  };
+  return out.ios || out.android ? out : null;
+}
+
 export function parseAppTemplates(raw: unknown): ReadonlyArray<UnoComputerAppTemplate> {
   const list = Array.isArray(raw) ? raw : (asRecord(raw)?.["templates"] ?? []);
   if (!Array.isArray(list)) return [];
@@ -480,7 +503,14 @@ export function parseAppTemplates(raw: unknown): ReadonlyArray<UnoComputerAppTem
       notes: asString(record["notes_en"]) || asString(record["notes_ru"]) || null,
       rank: asNumber(record["rank"]),
       featured: record["featured"] === true,
-      madeByUno: record["made_by_uno"] === true,
+      madeByUno: record["made_by_uno"] === true || record["publisher"] === "uno",
+      publisher:
+        record["made_by_uno"] === true || record["publisher"] === "uno"
+          ? "uno"
+          : record["publisher"] === "community"
+            ? "community"
+            : null,
+      mobile: parseTemplateMobile(record["mobile"]),
       tagline: asString(record["tagline_en"]) || asString(record["tagline_ru"]) || null,
       keywords: Array.isArray(record["keywords"])
         ? record["keywords"].filter((k): k is string => typeof k === "string" && k.length > 0)
