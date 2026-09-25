@@ -32,6 +32,7 @@ import {
   shouldReport,
   type EconomyProbe,
 } from "./economyReport.ts";
+import { signalMachineWoke } from "./wakeSignal.ts";
 
 export interface EconomyPresenceShape {
   /** `input: true` — the person just did something in a client. */
@@ -112,6 +113,9 @@ export const EconomyPresenceLive = Layer.effect(
       const now = Date.now();
       const woke = detectWake(state.lastTickAt, now);
       state.lastTickAt = now;
+      // Frozen long-polls (Telegram/Slack relay) are dead after a freeze: drop
+      // them now so the message that woke the computer is picked up at once.
+      if (woke) signalMachineWoke();
       const id = yield* identity;
       if (id === null) {
         state.presence = PRESENCE_OFF;

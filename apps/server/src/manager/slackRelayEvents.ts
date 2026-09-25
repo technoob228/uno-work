@@ -43,6 +43,7 @@ import {
   type ConnectorInboxHandler,
 } from "./connectorInbox.ts";
 import type { FetchLike } from "./workConsole.ts";
+import { longPollSignal } from "../economy/wakeSignal.ts";
 
 /** Long-poll window asked of the console (it allows 0..50). */
 export const SLACK_RELAY_WAIT_SECONDS = 25;
@@ -127,7 +128,8 @@ export const fetchSlackRelayEvents = (input: {
             input.after,
             input.waitSeconds ?? SLACK_RELAY_WAIT_SECONDS,
           ),
-          { signal: AbortSignal.timeout(SLACK_RELAY_REQUEST_TIMEOUT_MS) },
+          // A wake from economy sleep drops the stale poll at once (wakeSignal.ts).
+          { signal: longPollSignal(SLACK_RELAY_REQUEST_TIMEOUT_MS) },
         );
         const text = await answer.text().catch(() => "");
         let body: unknown = null;

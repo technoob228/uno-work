@@ -156,6 +156,7 @@ import {
   telegramApiUrl,
   telegramFileUrl,
 } from "../channelRelay.ts";
+import { longPollSignal } from "../../economy/wakeSignal.ts";
 
 export interface ManagerTelegramRuntimeStatus {
   readonly botUsername: string | null;
@@ -1497,6 +1498,9 @@ const makeTelegramConnector = Effect.gen(function* () {
       const response = yield* fetchJson(
         telegramApi(config.botToken, "getUpdates") +
           `?timeout=${POLL_TIMEOUT_SECONDS}&offset=${runtime.offset}&allowed_updates=%5B%22message%22%5D`,
+        // Bounded, and dropped at once when the computer wakes from economy
+        // sleep: the message that woke it is waiting in the relay queue.
+        { signal: longPollSignal((POLL_TIMEOUT_SECONDS + 15) * 1000) },
       );
       if (response.ok !== true) {
         yield* recordPollFailure(
