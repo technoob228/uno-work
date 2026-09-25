@@ -23,7 +23,7 @@ If the tools are missing, the same guides are at `GET $UNO_WORK_BRIDGE_URL/api/u
 - `~/.uno/apps/<id>.json` registers an app on Home; its output goes to `~/.uno/apps/<id>.log`. `~/.uno/sdk/` holds the Uno App SDK (JS and Python).
 - Cloud storage (Files, then Cloud storage) keeps what the person keeps: photos, documents, exports. The computer's disk is for running programs.
 - The right panel of this chat shows web pages and files (HTML, PDF, Markdown, images, CSV, XLSX).
-- On a cloud computer the browser runs on the machine; the person watches it live and can take control. It is set up on first use (~30–60 s): if `browser_command` says so, do something else and retry. When only the person can do a step (sign-in, captcha, 2FA, payment), use `browser_command` with `requestHelp`.
+- On a cloud computer the browser runs on the machine; the person watches it live and can take control. It is set up on first use (~30–60 s) and the first command waits for it; if `browser_command` still says it is being set up, do something else and retry. When only the person can do a step (sign-in, captcha, 2FA, payment), use `browser_command` with `requestHelp`.
 
 ## Making an app or a widget
 

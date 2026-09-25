@@ -151,6 +151,47 @@ describe("makeBrowserSetupController", () => {
     expect(setup.context).toBeUndefined();
   });
 
+  it("stays installing while the installer finishes, though Chromium is already on disk", async () => {
+    const { paths } = setupDirs();
+    const startedAt = new Date(Date.now() - 30_000).toISOString();
+    // INSTALLATION_COMPLETE is there, the installer still runs "Finishing"
+    // (makes the files readable for the daemon): launching now would fail.
+    writeStatus(paths.statusFile, {
+      state: "installing",
+      step: "Finishing",
+      startedAt,
+      updatedAt: new Date().toISOString(),
+    });
+    const controller = makeBrowserSetupController({
+      paths,
+      isInstalled: async () => true,
+      pollMs: 60_000,
+    });
+    controllers.push(controller);
+    expect(await controller.refresh()).toMatchObject({ status: "installing", step: "Finishing" });
+
+    writeStatus(paths.statusFile, {
+      state: "ready",
+      step: "Ready",
+      startedAt,
+      updatedAt: new Date().toISOString(),
+    });
+    expect((await controller.refresh()).status).toBe("ready");
+  });
+
+  it("is ready when the browser is there and the installer died long ago", async () => {
+    const { paths } = setupDirs();
+    writeStatus(paths.statusFile, {
+      state: "installing",
+      step: "Finishing",
+      startedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+      updatedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+    });
+    const controller = makeBrowserSetupController({ paths, isInstalled: async () => true });
+    controllers.push(controller);
+    expect((await controller.refresh()).status).toBe("ready");
+  });
+
   it("refuses with a clear message when the disk is short", async () => {
     const { paths } = setupDirs();
     const controller = makeBrowserSetupController({

@@ -408,6 +408,13 @@ function openTargetFrom(raw: unknown, deps: UnoWorkToolDeps): InboxOpenTarget {
   return fallback;
 }
 
+/**
+ * On first use the machine's browser is installed and started inside the
+ * command (serverBrowser.ts: SERVER_BROWSER_SETUP_WAIT_MS + READY_RETRY_MS):
+ * the bridge call must outlive that, or the agent sees a timeout instead.
+ */
+const BROWSER_FIRST_USE_MS = 45_000 + 20_000;
+
 /** Bridge replies: 2xx → body; anything else → the reason from the body. */
 const bridgeOk = (reply: BridgeReply): Effect.Effect<unknown, UnoWorkToolError> => {
   if (reply.status >= 200 && reply.status < 300) return Effect.succeed(reply.body);
@@ -1388,6 +1395,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
               ...(url !== undefined ? { url } : { file: resolveUserPath(file!, deps) }),
               ...(str(args, "scope") ? { scope: str(args, "scope") } : {}),
             },
+            ...(url !== undefined ? { timeoutMs: 30_000 + BROWSER_FIRST_USE_MS + 10_000 } : {}),
           })
           .pipe(Effect.flatMap(bridgeOk));
         return url !== undefined ? { ok: true, opened: url } : opened;
@@ -1450,6 +1458,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           body: args,
           timeoutMs:
             (num(args, "timeoutMs") ?? (args.command === "requestHelp" ? 600_000 : 30_000)) +
+            BROWSER_FIRST_USE_MS +
             10_000,
         })
         .pipe(

@@ -142,6 +142,18 @@ const CHROMIUM_MISSING_ERROR =
   'Run "npx playwright install chromium" on the server host, or set ' +
   `${SERVER_BROWSER_EXECUTABLE_ENV} to a Chromium/Chrome binary path.`;
 
+/**
+ * Сколько команда агента ждёт установку браузера при первом использовании
+ * (типично ~30–45 с на 1 vCPU), прежде чем ответить «повтори позже».
+ */
+export const SERVER_BROWSER_SETUP_WAIT_MS = 45_000;
+/**
+ * Только что поставленный браузер может не подняться с первого раза (CDP,
+ * первая вкладка): пробуем ещё столько, прежде чем отдать ошибку.
+ */
+export const SERVER_BROWSER_READY_RETRY_MS = 20_000;
+const SERVER_BROWSER_READY_RETRY_STEP_MS = 1_000;
+
 /** Команды, которые не меняют страницу: агенту можно смотреть, пока рулит человек. */
 const OBSERVE_COMMANDS = new Set<BrowserAutomationCommandInput["command"]>([
   "state",
@@ -745,7 +757,9 @@ export const makeServerBrowser = Effect.gen(function* () {
     }),
   );
 
-  const getPageEntry = (context: BrowserBridgeRequestContext | undefined) =>
+  const getPageEntry = (
+    context: BrowserBridgeRequestContext | undefined,
+  ): Effect.Effect<PageEntry, ServerBrowserCommandError> =>
     Effect.gen(function* () {
       const browserContext = yield* getBrowserContext;
       const normalized = context ? normalizeBridgeRequestContext(context) : undefined;
@@ -763,6 +777,65 @@ export const makeServerBrowser = Effect.gen(function* () {
       pagesByContextKey.set(key, entry);
       emitState();
       return entry;
+    });
+
+  /**
+   * Страница чата, когда браузер поднимется: запуск Chromium или первая
+   * вкладка сразу после установки иногда не выходят с первого раза — пробуем
+   * ещё раз в секунду, но не дольше SERVER_BROWSER_READY_RETRY_MS. Нет
+   * самого Chromium — ждать нечего.
+   */
+  const getPageEntryWhenReady = (
+    context: BrowserBridgeRequestContext | undefined,
+  ): Effect.Effect<PageEntry, ServerBrowserCommandError> => {
+    const deadline = Date.now() + SERVER_BROWSER_READY_RETRY_MS;
+    const attempt = (): Effect.Effect<PageEntry, ServerBrowserCommandError> =>
+      getPageEntry(context).pipe(
+        Effect.catch((error: ServerBrowserCommandError) =>
+          error.message === CHROMIUM_MISSING_ERROR ||
+          Date.now() + SERVER_BROWSER_READY_RETRY_STEP_MS > deadline
+            ? Effect.fail(error)
+            : Effect.logWarning("machine browser not ready yet, retrying", {
+                error: error.message,
+              }).pipe(
+                Effect.andThen(Effect.sleep(Duration.millis(SERVER_BROWSER_READY_RETRY_STEP_MS))),
+                Effect.andThen(Effect.suspend(attempt)),
+              ),
+        ),
+      );
+    return attempt();
+  };
+
+  /**
+   * Дождаться конца установки браузера (готов или не вышло), не дольше
+   * limitMs. Возвращает то, что есть к этому моменту.
+   */
+  const waitForSetup = (limitMs: number): Promise<BrowserLiveSetup> =>
+    new Promise((resolve) => {
+      if (!setup) {
+        resolve(READY_SETUP);
+        return;
+      }
+      const controller = setup;
+      let settled = false;
+      const cleanups: Array<() => void> = [];
+      const finish = (value: BrowserLiveSetup) => {
+        if (settled) return;
+        settled = true;
+        for (const cleanup of cleanups) cleanup();
+        resolve(value);
+      };
+      const check = (value: BrowserLiveSetup) => {
+        if (value.status === "ready" || value.status === "failed") finish(value);
+      };
+      cleanups.push(controller.onChange(check));
+      const poll = setInterval(() => {
+        void controller.refresh().then(check, () => undefined);
+      }, 1_000);
+      cleanups.push(() => clearInterval(poll));
+      const timer = setTimeout(() => finish(controller.current()), limitMs);
+      cleanups.push(() => clearTimeout(timer));
+      check(controller.current());
     });
 
   /** Ждать, пока человек вернёт браузер. false — не дождались за timeoutMs. */
@@ -870,10 +943,11 @@ export const makeServerBrowser = Effect.gen(function* () {
   const execute: ServerBrowserShape["execute"] = (input, context) =>
     Effect.gen(function* () {
       const commandId = `server-${randomBytes(12).toString("hex")}`;
-      // Браузер ещё не поставлен: запускаем установку и сразу отвечаем агенту,
-      // когда повторить, — а не держим команду минуту.
+      // Браузер ещё не поставлен: запускаем установку и ждём её (обычно
+      // ~30–45 с), чтобы первая же команда прошла. Затянулась — отвечаем
+      // агенту, когда повторить, а не держим команду бесконечно.
       if (setup && setup.current().status !== "ready") {
-        const current = yield* Effect.promise(() =>
+        const started = yield* Effect.promise(() =>
           setup.ensure({ context }).catch(
             (cause: unknown): BrowserLiveSetup => ({
               ...setup.current(),
@@ -882,9 +956,22 @@ export const makeServerBrowser = Effect.gen(function* () {
             }),
           ),
         );
+        const current =
+          started.status === "installing" || started.status === "missing"
+            ? yield* Effect.promise(() => waitForSetup(SERVER_BROWSER_SETUP_WAIT_MS))
+            : started;
         if (current.status !== "ready") {
           return { ok: false, commandId, error: setupMessageForAgent(current) };
         }
+      }
+      // Браузер ещё не запущен (или только что поставлен): поднять его и
+      // вкладку чата до отсчёта таймаута команды, с повторами.
+      if (input.command !== "requestHelp") {
+        const warm = yield* getPageEntryWhenReady(context).pipe(
+          Effect.map(() => null),
+          Effect.catch((error: ServerBrowserCommandError) => Effect.succeed(error.message)),
+        );
+        if (warm !== null) return { ok: false, commandId, error: warm };
       }
       const timeoutMs = commandTimeoutMs(input);
       const attempt: Effect.Effect<unknown, ServerBrowserCommandError> =
@@ -932,7 +1019,7 @@ export const makeServerBrowser = Effect.gen(function* () {
   /** Страница чата, которую открыл человек: рулит он, пока не отдаст агенту. */
   const openForPerson = (context: BrowserBridgeRequestContext, target: string) =>
     Effect.gen(function* () {
-      const entry = yield* getPageEntry(context).pipe(
+      const entry = yield* getPageEntryWhenReady(context).pipe(
         Effect.mapError((error) => liveError(error.message)),
       );
       entry.control = "human";

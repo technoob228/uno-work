@@ -268,12 +268,20 @@ export function makeBrowserSetupController(deps: BrowserSetupDeps): BrowserSetup
   };
 
   const compute = async (): Promise<BrowserLiveSetup> => {
-    if (await deps.isInstalled().catch(() => false)) {
+    const at = now();
+    const installer = await readInstaller();
+    // Chromium's INSTALLATION_COMPLETE appears before the installer is done
+    // ("Finishing" makes the files readable for the daemon's user): while it
+    // is still running the browser isn't usable yet — the first launch would
+    // fail once.
+    const installerStarted = installer?.startedAt ? Date.parse(installer.startedAt) : Number.NaN;
+    const installerBusy =
+      installer?.state === "installing" &&
+      !(Number.isFinite(installerStarted) && at - installerStarted > STALE_INSTALL_MS);
+    if (!installerBusy && (await deps.isInstalled().catch(() => false))) {
       localFailure = null;
       return READY_SETUP;
     }
-    const at = now();
-    const installer = await readInstaller();
     const requestedAt = await requestTime();
     const installerAt = installer?.updatedAt ? Date.parse(installer.updatedAt) : Number.NaN;
     const installing = (startedAt: string | null, step: string | null): BrowserLiveSetup => ({
