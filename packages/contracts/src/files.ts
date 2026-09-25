@@ -374,3 +374,110 @@ export const FilesOfficeVersionList = Schema.Struct({
   versions: Schema.Array(FilesOfficeVersion),
 });
 export type FilesOfficeVersionList = typeof FilesOfficeVersionList.Type;
+
+/* ------------------------------------------------------------------
+ * Uno Drive — the account's cloud storage as an app (bucket "drive"):
+ * search, share links, and a Telegram bot that saves files sent to it.
+ * The console does the work; the daemon calls it with this computer's
+ * token, so it all keeps working while the computer is asleep.
+ * ------------------------------------------------------------------ */
+
+export const FilesDriveFile = Schema.Struct({
+  key: Schema.String,
+  name: Schema.String,
+  size: NonNegativeInt,
+  modifiedAt: Schema.NullOr(Schema.String),
+});
+export type FilesDriveFile = typeof FilesDriveFile.Type;
+
+export const FilesDriveTelegramChat = Schema.Struct({
+  id: Schema.Number,
+  /** 0 = the shared Uno bot, otherwise the account's own bot. */
+  botId: Schema.Number,
+  username: Schema.String,
+  linkedAt: Schema.NullOr(Schema.String),
+});
+export type FilesDriveTelegramChat = typeof FilesDriveTelegramChat.Type;
+
+export const FilesDriveState = Schema.Struct({
+  /** False when this computer isn't connected to an Uno account or the console has no Drive. */
+  available: Schema.Boolean,
+  message: Schema.NullOr(Schema.String),
+  bucketId: Schema.NullOr(Schema.Number),
+  usedBytes: NonNegativeInt,
+  quotaBytes: NonNegativeInt,
+  telegram: Schema.Struct({
+    sharedBot: Schema.String,
+    sharedBotReady: Schema.Boolean,
+    ownBot: Schema.NullOr(Schema.Struct({ id: Schema.Number, username: Schema.String })),
+    ownBotsAvailable: Schema.Boolean,
+    chats: Schema.Array(FilesDriveTelegramChat),
+    downloadLimitBytes: NonNegativeInt,
+  }),
+});
+export type FilesDriveState = typeof FilesDriveState.Type;
+
+export const FilesDriveSearchInput = Schema.Struct({
+  query: Schema.String.check(Schema.isMaxLength(300)),
+  /** Ask a model when nothing matched by name (billed as AI usage). */
+  smart: Schema.optional(Schema.Boolean),
+});
+export type FilesDriveSearchInput = typeof FilesDriveSearchInput.Type;
+
+export const FilesDriveFileList = Schema.Struct({
+  files: Schema.Array(FilesDriveFile),
+  smart: Schema.Boolean,
+});
+export type FilesDriveFileList = typeof FilesDriveFileList.Type;
+
+export const FilesDriveRecentInput = Schema.Struct({
+  limit: Schema.optional(NonNegativeInt),
+});
+export type FilesDriveRecentInput = typeof FilesDriveRecentInput.Type;
+
+export const FilesDriveShare = Schema.Struct({
+  id: Schema.Number,
+  key: Schema.String,
+  /** Only right after creating: the console keeps a hash, never the link. */
+  url: Schema.NullOr(Schema.String),
+  expiresAt: Schema.NullOr(Schema.String),
+  downloads: NonNegativeInt,
+  createdVia: Schema.String,
+  createdAt: Schema.NullOr(Schema.String),
+});
+export type FilesDriveShare = typeof FilesDriveShare.Type;
+
+export const FilesDriveShareCreateInput = Schema.Struct({
+  key: CloudKey,
+  /** 0/absent = 7 days; at most 90 days. */
+  expiresInHours: Schema.optional(NonNegativeInt),
+});
+export type FilesDriveShareCreateInput = typeof FilesDriveShareCreateInput.Type;
+
+export const FilesDriveShareList = Schema.Struct({ shares: Schema.Array(FilesDriveShare) });
+export type FilesDriveShareList = typeof FilesDriveShareList.Type;
+
+export const FilesDriveIdInput = Schema.Struct({ id: Schema.Number });
+export type FilesDriveIdInput = typeof FilesDriveIdInput.Type;
+
+export const FilesDriveTelegramLinkInput = Schema.Struct({
+  ownBot: Schema.optional(Schema.Boolean),
+});
+export type FilesDriveTelegramLinkInput = typeof FilesDriveTelegramLinkInput.Type;
+
+export const FilesDriveTelegramLink = Schema.Struct({
+  url: Schema.String,
+  expiresAt: Schema.NullOr(Schema.String),
+});
+export type FilesDriveTelegramLink = typeof FilesDriveTelegramLink.Type;
+
+export const FilesDriveBotConnectInput = Schema.Struct({
+  token: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+});
+export type FilesDriveBotConnectInput = typeof FilesDriveBotConnectInput.Type;
+
+export const FilesDriveBot = Schema.Struct({ id: Schema.Number, username: Schema.String });
+export type FilesDriveBot = typeof FilesDriveBot.Type;
+
+export const FilesDriveOk = Schema.Struct({ ok: Schema.Boolean });
+export type FilesDriveOk = typeof FilesDriveOk.Type;

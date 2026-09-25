@@ -19,6 +19,10 @@ import { promises as fsp } from "node:fs";
 
 import type {
   FilesCloudListResult,
+  FilesCloudTransferResult,
+  FilesDriveFileList,
+  FilesDriveShare,
+  FilesDriveState,
   FilesCloudState,
   FilesEntry,
   FilesListResult,
@@ -139,6 +143,25 @@ export interface UnoWorkToolDeps {
       readonly bucketId: number;
       readonly prefix?: string;
     }) => Effect.Effect<FilesCloudListResult, { readonly message: string }>;
+    /** Uno Drive = the bucket "drive" (see files/drive.ts). Optional: older wiring. */
+    readonly driveState?: Effect.Effect<FilesDriveState, { readonly message: string }>;
+    readonly driveSearch?: (input: {
+      readonly query: string;
+      readonly smart?: boolean;
+    }) => Effect.Effect<FilesDriveFileList, { readonly message: string }>;
+    readonly driveRecent?: (input: {
+      readonly limit?: number;
+    }) => Effect.Effect<FilesDriveFileList, { readonly message: string }>;
+    readonly driveShareCreate?: (input: {
+      readonly key: string;
+      readonly expiresInHours?: number;
+      readonly via?: "app" | "agent";
+    }) => Effect.Effect<FilesDriveShare, { readonly message: string }>;
+    readonly cloudCopyToCloud?: (input: {
+      readonly paths: ReadonlyArray<string>;
+      readonly bucketId: number;
+      readonly prefix?: string;
+    }) => Effect.Effect<FilesCloudTransferResult, { readonly message: string }>;
   };
   readonly inboxPost: (post: InboxPost) => Effect.Effect<{ readonly id: string }>;
   readonly messengerNotify: (input: {
@@ -913,6 +936,126 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         }),
       );
     },
+  },
+  {
+    name: "drive_find",
+    group: "files",
+    description:
+      'The person\'s Uno Drive — their cloud storage (bucket "drive"); files they send to the Uno Telegram bot land in Telegram/YYYY-MM/. With query: files whose name or folder contains every word (smart: true asks a model when nothing matched, billed as AI usage). Without query: the newest files. Returns keys plus bucketId for cloud_list.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", maxLength: 300 },
+        smart: { type: "boolean" },
+        limit: { type: "integer", minimum: 1, maximum: 200 },
+      },
+      additionalProperties: false,
+    },
+    level: "safe",
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const drive = deps.files;
+        if (!drive.driveState || !drive.driveSearch || !drive.driveRecent) {
+          return yield* toolError("Uno Drive isn't available in this Uno Work version.");
+        }
+        const state = yield* asToolError(drive.driveState);
+        if (!state.available)
+          return yield* toolError(state.message ?? "Uno Drive isn't available.");
+        const query = str(args, "query")?.trim() ?? "";
+        const list = query
+          ? yield* asToolError(
+              drive.driveSearch({ query, ...(bool(args, "smart") ? { smart: true } : {}) }),
+            )
+          : yield* asToolError(drive.driveRecent({ limit: num(args, "limit") ?? 20 }));
+        return {
+          bucketId: state.bucketId,
+          usedBytes: state.usedBytes,
+          quotaBytes: state.quotaBytes,
+          telegramConnected: state.telegram.chats.length > 0,
+          smart: list.smart,
+          files: list.files.slice(0, num(args, "limit") ?? 50),
+        };
+      }),
+  },
+  {
+    name: "drive_save",
+    group: "files",
+    description:
+      'Copy files or folders from this computer into the person\'s Uno Drive (cloud storage), into folder (e.g. "Reports/"; default the Drive root). Files over 256 MB are skipped. The originals stay on the computer.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        paths: {
+          type: "array",
+          items: { type: "string", minLength: 1 },
+          minItems: 1,
+          maxItems: 100,
+        },
+        folder: { type: "string", maxLength: 1024 },
+      },
+      required: ["paths"],
+      additionalProperties: false,
+    },
+    level: "change",
+    approvalTitle: (args) =>
+      `Save ${Array.isArray(args["paths"]) ? args["paths"].length : 0} item(s) to Uno Drive`,
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const drive = deps.files;
+        if (!drive.driveState || !drive.cloudCopyToCloud) {
+          return yield* toolError("Uno Drive isn't available in this Uno Work version.");
+        }
+        const state = yield* asToolError(drive.driveState);
+        if (!state.available || state.bucketId === null) {
+          return yield* toolError(state.message ?? "Uno Drive isn't available.");
+        }
+        const raw = str(args, "folder")?.trim().replace(/^\/+/, "") ?? "";
+        const folder = raw && !raw.endsWith("/") ? `${raw}/` : raw;
+        const paths = (args["paths"] as string[]).map((item) => resolveUserPath(item, deps));
+        const result = yield* asToolError(
+          drive.cloudCopyToCloud({
+            paths,
+            bucketId: state.bucketId,
+            ...(folder ? { prefix: folder } : {}),
+          }),
+        );
+        return { ok: true, folder: folder || "/", ...result };
+      }),
+  },
+  {
+    name: "drive_share_link",
+    group: "files",
+    description:
+      "Make a link to one Uno Drive file (key from drive_find) that anyone can download, even while this computer sleeps. Expires after expiresInHours (default 7 days, max 90 days); the person can turn it off in Uno Drive → Shared links. The person always approves.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        key: { type: "string", minLength: 1, maxLength: 1024 },
+        expiresInHours: { type: "integer", minimum: 1, maximum: 24 * 90 },
+      },
+      required: ["key"],
+      additionalProperties: false,
+    },
+    level: "sensitive",
+    approvalTitle: (args) => `Create a download link to ${str(args, "key")} (Uno Drive)`,
+    approvalDetail: (args) =>
+      `Anyone with the link can download it for ${num(args, "expiresInHours") ?? 168} h.`,
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        if (!deps.files.driveShareCreate) {
+          return yield* toolError("Uno Drive isn't available in this Uno Work version.");
+        }
+        const share = yield* asToolError(
+          deps.files.driveShareCreate({
+            key: str(args, "key")!,
+            via: "agent",
+            ...(num(args, "expiresInHours")
+              ? { expiresInHours: num(args, "expiresInHours")! }
+              : {}),
+          }),
+        );
+        return { ok: true, url: share.url, key: share.key, expiresAt: share.expiresAt };
+      }),
   },
   {
     name: "file_open",

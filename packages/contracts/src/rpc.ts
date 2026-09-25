@@ -86,6 +86,19 @@ import {
   FilesShareRevokeInput,
   FilesStatInput,
   FilesCloudState,
+  FilesDriveBot,
+  FilesDriveBotConnectInput,
+  FilesDriveFileList,
+  FilesDriveIdInput,
+  FilesDriveOk,
+  FilesDriveRecentInput,
+  FilesDriveSearchInput,
+  FilesDriveShare,
+  FilesDriveShareCreateInput,
+  FilesDriveShareList,
+  FilesDriveState,
+  FilesDriveTelegramLink,
+  FilesDriveTelegramLinkInput,
   FilesCloudListInput,
   FilesCloudListResult,
   FilesCloudBucket,
@@ -450,6 +463,16 @@ export const WS_METHODS = {
   filesCloudOfficeOpen: "files.cloud.officeOpen",
   filesCloudOfficeSave: "files.cloud.officeSave",
   filesCloudOfficeVersions: "files.cloud.officeVersions",
+  filesDriveState: "files.drive.state",
+  filesDriveSearch: "files.drive.search",
+  filesDriveRecent: "files.drive.recent",
+  filesDriveShareCreate: "files.drive.shareCreate",
+  filesDriveShareList: "files.drive.shareList",
+  filesDriveShareRevoke: "files.drive.shareRevoke",
+  filesDriveTelegramLink: "files.drive.telegramLink",
+  filesDriveTelegramUnlink: "files.drive.telegramUnlink",
+  filesDriveBotConnect: "files.drive.botConnect",
+  filesDriveBotDisconnect: "files.drive.botDisconnect",
 
   // Provider setup: install a harness CLI / sign it in on this machine
   providerInstallStart: "provider.install.start",
@@ -1608,6 +1631,66 @@ export const WsFilesCloudOfficeVersionsRpc = Rpc.make(WS_METHODS.filesCloudOffic
   error: FilesError,
 });
 
+export const WsFilesDriveStateRpc = Rpc.make(WS_METHODS.filesDriveState, {
+  payload: Schema.Struct({}),
+  success: FilesDriveState,
+  error: FilesError,
+});
+
+export const WsFilesDriveSearchRpc = Rpc.make(WS_METHODS.filesDriveSearch, {
+  payload: FilesDriveSearchInput,
+  success: FilesDriveFileList,
+  error: FilesError,
+});
+
+export const WsFilesDriveRecentRpc = Rpc.make(WS_METHODS.filesDriveRecent, {
+  payload: FilesDriveRecentInput,
+  success: FilesDriveFileList,
+  error: FilesError,
+});
+
+export const WsFilesDriveShareCreateRpc = Rpc.make(WS_METHODS.filesDriveShareCreate, {
+  payload: FilesDriveShareCreateInput,
+  success: FilesDriveShare,
+  error: FilesError,
+});
+
+export const WsFilesDriveShareListRpc = Rpc.make(WS_METHODS.filesDriveShareList, {
+  payload: Schema.Struct({}),
+  success: FilesDriveShareList,
+  error: FilesError,
+});
+
+export const WsFilesDriveShareRevokeRpc = Rpc.make(WS_METHODS.filesDriveShareRevoke, {
+  payload: FilesDriveIdInput,
+  success: FilesDriveOk,
+  error: FilesError,
+});
+
+export const WsFilesDriveTelegramLinkRpc = Rpc.make(WS_METHODS.filesDriveTelegramLink, {
+  payload: FilesDriveTelegramLinkInput,
+  success: FilesDriveTelegramLink,
+  error: FilesError,
+});
+
+export const WsFilesDriveTelegramUnlinkRpc = Rpc.make(WS_METHODS.filesDriveTelegramUnlink, {
+  payload: FilesDriveIdInput,
+  success: FilesDriveOk,
+  error: FilesError,
+});
+
+export const WsFilesDriveBotConnectRpc = Rpc.make(WS_METHODS.filesDriveBotConnect, {
+  payload: FilesDriveBotConnectInput,
+  success: FilesDriveBot,
+  error: FilesError,
+});
+
+export const WsFilesDriveBotDisconnectRpc = Rpc.make(WS_METHODS.filesDriveBotDisconnect, {
+  payload: Schema.Struct({}),
+  success: FilesDriveOk,
+  error: FilesError,
+});
+
 /** Programs found on the machine this daemon runs on. Never fails: see `warnings`. */
 export const WsUnoComputerMachineAppsRpc = Rpc.make(WS_METHODS.unoComputerMachineApps, {
   payload: Schema.Struct({}),
@@ -1789,6 +1872,16 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesCloudOfficeOpenRpc,
   WsFilesCloudOfficeSaveRpc,
   WsFilesCloudOfficeVersionsRpc,
+  WsFilesDriveStateRpc,
+  WsFilesDriveSearchRpc,
+  WsFilesDriveRecentRpc,
+  WsFilesDriveShareCreateRpc,
+  WsFilesDriveShareListRpc,
+  WsFilesDriveShareRevokeRpc,
+  WsFilesDriveTelegramLinkRpc,
+  WsFilesDriveTelegramUnlinkRpc,
+  WsFilesDriveBotConnectRpc,
+  WsFilesDriveBotDisconnectRpc,
   WsUnoComputerMachineAppsRpc,
   WsUnoComputerAppActionRpc,
   WsUnoComputerEmbedCheckRpc,

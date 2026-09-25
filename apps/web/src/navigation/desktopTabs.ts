@@ -90,15 +90,34 @@ export function tabForLocation(location: LocationLike): DesktopTab | null {
       threadId: null,
     };
   }
+  if (location.pathname === "/drive") {
+    return {
+      key: "drive",
+      kind: "files",
+      href: location.href,
+      title: "Uno Drive",
+      icon: null,
+      environmentId: null,
+      threadId: null,
+    };
+  }
   // /<environmentId>/<threadId> — a chat.
   const [environmentId, threadId] = segments;
   if (
     segments.length === 2 &&
     environmentId &&
     threadId &&
-    !["settings", "assistant", "draft", "computer", "my-uno", "files", "office", "app"].includes(
-      environmentId,
-    )
+    ![
+      "settings",
+      "assistant",
+      "draft",
+      "computer",
+      "my-uno",
+      "files",
+      "drive",
+      "office",
+      "app",
+    ].includes(environmentId)
   ) {
     return {
       key: `thread:${environmentId}:${threadId}`,

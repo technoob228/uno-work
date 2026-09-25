@@ -100,6 +100,8 @@ export function CloudBrowser({
   uploads,
   onNavigate,
   onOpenComputer,
+  embedded,
+  onShare,
 }: {
   environmentId: EnvironmentId | null;
   bucketId: number | null;
@@ -107,6 +109,10 @@ export function CloudBrowser({
   uploads: ReturnType<typeof useFilesUploads>;
   onNavigate: (bucketId: number | null, prefix: string) => void;
   onOpenComputer: () => void;
+  /** Inside another app (Uno Drive): its own leading control, a name for the root. */
+  embedded?: { readonly rootLabel: string; readonly leading?: React.ReactNode };
+  /** Makes "Share link" work for files (Uno Drive's links). */
+  onShare?: (object: FilesCloudObject) => void;
 }) {
   const queryClient = useQueryClient();
   const state = useQuery(cloudStateQueryOptions(environmentId));
@@ -203,11 +209,15 @@ export function CloudBrowser({
     <header className="shrink-0 border-b border-border px-3 py-2 sm:px-5 sm:py-3">
       <div className="flex items-center gap-2">
         <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-        <FilesLocationSwitch
-          location="cloud"
-          onComputer={onOpenComputer}
-          onCloud={() => onNavigate(null, "")}
-        />
+        {embedded ? (
+          embedded.leading
+        ) : (
+          <FilesLocationSwitch
+            location="cloud"
+            onComputer={onOpenComputer}
+            onCloud={() => onNavigate(null, "")}
+          />
+        )}
         <nav
           className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden text-sm"
           aria-label="Folder"
@@ -223,7 +233,7 @@ export function CloudBrowser({
                   prefix ? "text-muted-foreground" : "font-medium",
                 )}
               >
-                {bucket?.name ?? "Bucket"}
+                {embedded?.rootLabel ?? bucket?.name ?? "Bucket"}
               </button>
               {prefix
                 .split("/")
@@ -480,10 +490,15 @@ export function CloudBrowser({
                             Download
                           </MenuItem>
                         ) : null}
-                        {object && isOfficeFile(row.name) ? (
+                        {object && onShare ? (
+                          <MenuItem onClick={() => onShare(object)}>
+                            <LinkIcon />
+                            Share link…
+                          </MenuItem>
+                        ) : object && isOfficeFile(row.name) ? (
                           <MenuItem disabled>
                             <LinkIcon />
-                            Share link — not yet for Cloud
+                            Share link — in Uno Drive
                           </MenuItem>
                         ) : null}
                         <MenuItem onClick={() => setCopyTarget(row)}>

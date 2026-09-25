@@ -9,6 +9,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import {
   ChevronRightIcon,
   FolderIcon,
+  HardDriveIcon,
   ShoppingBagIcon,
   SparklesIcon,
   SquareTerminalIcon,
@@ -215,8 +216,9 @@ export function AppsWidget({
   onUnhide?: (appId: string) => void;
 }) {
   const [all, setAll] = useState(false);
-  // Three rows of five: the four built-ins, then the apps; the rest on demand.
-  const room = APPS_WIDGET_TILES - 4;
+  // Three rows of five: the built-ins, then the apps; the rest on demand.
+  const builtInCount = builtIns.onDrive !== undefined ? 5 : 4;
+  const room = APPS_WIDGET_TILES - builtInCount;
   const overflow = all || tiles.length <= room ? 0 : tiles.length - (room - 1);
   const shownTiles = overflow > 0 ? tiles.slice(0, room - 1) : tiles;
   return (
@@ -246,6 +248,21 @@ export function AppsWidget({
           }
           onClick={() => builtIns.onFiles?.()}
         />
+        {builtIns.onDrive !== undefined ? (
+          <TileShell
+            small
+            label="Uno Drive"
+            caption={builtIns.onDrive ? "Cloud storage" : "Needs your Uno account"}
+            title="Uno Drive — your Cloud storage, also from Telegram. Made by Uno."
+            disabled={builtIns.onDrive === null}
+            icon={
+              <BuiltInIcon small className="bg-gradient-to-br from-sky-400 to-indigo-600">
+                <HardDriveIcon />
+              </BuiltInIcon>
+            }
+            onClick={() => builtIns.onDrive?.()}
+          />
+        ) : null}
         <TileShell
           small
           label="Terminal"

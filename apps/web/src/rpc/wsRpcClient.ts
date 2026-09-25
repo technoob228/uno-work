@@ -300,6 +300,20 @@ export interface WsRpcClient {
     readonly cloudOfficeOpen: RpcUnaryMethod<typeof WS_METHODS.filesCloudOfficeOpen>;
     readonly cloudOfficeSave: RpcUnaryMethod<typeof WS_METHODS.filesCloudOfficeSave>;
     readonly cloudOfficeVersions: RpcUnaryMethod<typeof WS_METHODS.filesCloudOfficeVersions>;
+    readonly driveState: () => ReturnType<RpcUnaryMethod<typeof WS_METHODS.filesDriveState>>;
+    readonly driveSearch: RpcUnaryMethod<typeof WS_METHODS.filesDriveSearch>;
+    readonly driveRecent: RpcUnaryMethod<typeof WS_METHODS.filesDriveRecent>;
+    readonly driveShareCreate: RpcUnaryMethod<typeof WS_METHODS.filesDriveShareCreate>;
+    readonly driveShareList: () => ReturnType<
+      RpcUnaryMethod<typeof WS_METHODS.filesDriveShareList>
+    >;
+    readonly driveShareRevoke: RpcUnaryMethod<typeof WS_METHODS.filesDriveShareRevoke>;
+    readonly driveTelegramLink: RpcUnaryMethod<typeof WS_METHODS.filesDriveTelegramLink>;
+    readonly driveTelegramUnlink: RpcUnaryMethod<typeof WS_METHODS.filesDriveTelegramUnlink>;
+    readonly driveBotConnect: RpcUnaryMethod<typeof WS_METHODS.filesDriveBotConnect>;
+    readonly driveBotDisconnect: () => ReturnType<
+      RpcUnaryMethod<typeof WS_METHODS.filesDriveBotDisconnect>
+    >;
   };
 }
 
@@ -676,6 +690,25 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.filesCloudOfficeSave](input)),
       cloudOfficeVersions: (input) =>
         transport.request((client) => client[WS_METHODS.filesCloudOfficeVersions](input)),
+      driveState: () => transport.request((client) => client[WS_METHODS.filesDriveState]({})),
+      driveSearch: (input) =>
+        transport.request((client) => client[WS_METHODS.filesDriveSearch](input)),
+      driveRecent: (input) =>
+        transport.request((client) => client[WS_METHODS.filesDriveRecent](input)),
+      driveShareCreate: (input) =>
+        transport.request((client) => client[WS_METHODS.filesDriveShareCreate](input)),
+      driveShareList: () =>
+        transport.request((client) => client[WS_METHODS.filesDriveShareList]({})),
+      driveShareRevoke: (input) =>
+        transport.request((client) => client[WS_METHODS.filesDriveShareRevoke](input)),
+      driveTelegramLink: (input) =>
+        transport.request((client) => client[WS_METHODS.filesDriveTelegramLink](input)),
+      driveTelegramUnlink: (input) =>
+        transport.request((client) => client[WS_METHODS.filesDriveTelegramUnlink](input)),
+      driveBotConnect: (input) =>
+        transport.request((client) => client[WS_METHODS.filesDriveBotConnect](input)),
+      driveBotDisconnect: () =>
+        transport.request((client) => client[WS_METHODS.filesDriveBotDisconnect]({})),
     },
   };
 }

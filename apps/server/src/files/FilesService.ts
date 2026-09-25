@@ -49,6 +49,19 @@ import {
   type FilesCloudOfficeSaveInput,
   type FilesCloudOfficeSaveResult,
   type FilesOfficeVersionList,
+  type FilesDriveBot,
+  type FilesDriveBotConnectInput,
+  type FilesDriveFileList,
+  type FilesDriveIdInput,
+  type FilesDriveOk,
+  type FilesDriveRecentInput,
+  type FilesDriveSearchInput,
+  type FilesDriveShare,
+  type FilesDriveShareCreateInput,
+  type FilesDriveShareList,
+  type FilesDriveState,
+  type FilesDriveTelegramLink,
+  type FilesDriveTelegramLinkInput,
   FILES_SHARE_ROUTE_PREFIX,
 } from "@t3tools/contracts";
 import { Context, Effect, Layer, Option } from "effect";
@@ -66,6 +79,19 @@ import {
   statResolved,
 } from "./fileManager.ts";
 import { FilesPathError, isHiddenPath, resolveFilesRoot, resolveInsideRoot } from "./filesPaths.ts";
+import {
+  driveBotConnect,
+  driveBotDisconnect,
+  driveRecent,
+  driveSearch,
+  driveShareCreate,
+  driveShareList,
+  driveShareRevoke,
+  driveState,
+  driveTelegramLink,
+  driveTelegramUnlink,
+  unavailableDriveState,
+} from "./drive.ts";
 import {
   cloudCreateBucket,
   cloudDelete,
@@ -140,6 +166,29 @@ export interface FilesServiceShape {
   readonly cloudOfficeVersions: (
     input: FilesCloudOfficeOpenInput,
   ) => Effect.Effect<FilesOfficeVersionList, FilesError>;
+  /** Uno Drive (bucket "drive" + share links + Telegram), see files/drive.ts. */
+  readonly driveState: Effect.Effect<FilesDriveState, FilesError>;
+  readonly driveSearch: (
+    input: FilesDriveSearchInput,
+  ) => Effect.Effect<FilesDriveFileList, FilesError>;
+  readonly driveRecent: (
+    input: FilesDriveRecentInput,
+  ) => Effect.Effect<FilesDriveFileList, FilesError>;
+  readonly driveShareCreate: (
+    input: FilesDriveShareCreateInput & { readonly via?: "app" | "agent" },
+  ) => Effect.Effect<FilesDriveShare, FilesError>;
+  readonly driveShareList: Effect.Effect<FilesDriveShareList, FilesError>;
+  readonly driveShareRevoke: (input: FilesDriveIdInput) => Effect.Effect<FilesDriveOk, FilesError>;
+  readonly driveTelegramLink: (
+    input: FilesDriveTelegramLinkInput,
+  ) => Effect.Effect<FilesDriveTelegramLink, FilesError>;
+  readonly driveTelegramUnlink: (
+    input: FilesDriveIdInput,
+  ) => Effect.Effect<FilesDriveOk, FilesError>;
+  readonly driveBotConnect: (
+    input: FilesDriveBotConnectInput,
+  ) => Effect.Effect<FilesDriveBot, FilesError>;
+  readonly driveBotDisconnect: Effect.Effect<FilesDriveOk, FilesError>;
   /** Ids of every link (live or not) ever made to this exact path. */
   readonly shareIdsForPath: (path: string) => Effect.Effect<ReadonlyArray<string>, FilesError>;
 }
@@ -543,7 +592,33 @@ export const makeFilesService = (
           : { kind: "conflict" as const, version: result.currentVersion };
       });
 
+    const driveStateEffect: FilesServiceShape["driveState"] = cloudDeps.pipe(
+      Effect.flatMap((deps) => attempt(() => driveState(deps), "Couldn't reach Uno Drive.")),
+      Effect.catch((error) => Effect.succeed(unavailableDriveState(error.message))),
+    );
+
     return {
+      driveState: driveStateEffect,
+      driveSearch: (input) =>
+        withCloud("Couldn't search Uno Drive.", (deps) => driveSearch(deps, input)),
+      driveRecent: (input) =>
+        withCloud("Couldn't read Uno Drive.", (deps) => driveRecent(deps, input)),
+      driveShareCreate: (input) =>
+        withCloud("Couldn't make a link.", (deps) => driveShareCreate(deps, input)).pipe(
+          Effect.tap((share) => Effect.logInfo("files.drive.share", { id: share.id })),
+        ),
+      driveShareList: withCloud("Couldn't list the links.", (deps) => driveShareList(deps)),
+      driveShareRevoke: (input) =>
+        withCloud("Couldn't turn the link off.", (deps) => driveShareRevoke(deps, input.id)),
+      driveTelegramLink: (input) =>
+        withCloud("Couldn't make a Telegram link.", (deps) => driveTelegramLink(deps, input)),
+      driveTelegramUnlink: (input) =>
+        withCloud("Couldn't disconnect the chat.", (deps) => driveTelegramUnlink(deps, input.id)),
+      driveBotConnect: (input) =>
+        withCloud("Couldn't connect the bot.", (deps) => driveBotConnect(deps, input.token)),
+      driveBotDisconnect: withCloud("Couldn't disconnect the bot.", (deps) =>
+        driveBotDisconnect(deps),
+      ),
       cloudOfficeVersions: (input) =>
         withCloud("Couldn't list the older versions.", async (deps) => ({
           versions: await listCloudOfficeVersions(deps, input),

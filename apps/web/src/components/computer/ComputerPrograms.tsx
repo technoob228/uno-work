@@ -17,6 +17,7 @@ import {
   FolderIcon,
   FolderOpenIcon,
   GlobeIcon,
+  HardDriveIcon,
   InfoIcon,
   LayoutGridIcon,
   ShoppingBagIcon,
@@ -234,6 +235,8 @@ export interface BuiltInPrograms {
   readonly onChatInFolder: () => void;
   /** Null until the Files app ships in this build. */
   readonly onFiles: (() => void) | null;
+  /** Uno Drive (Made by Uno); null when this computer isn't on an Uno account. */
+  readonly onDrive?: (() => void) | null | undefined;
   readonly onTerminal: () => void;
   readonly onAppStore: (() => void) | null;
   readonly appStoreHint: string | null;
@@ -305,6 +308,20 @@ export function ComputerPrograms({
               }
               onClick={() => builtIns.onFiles?.()}
             />
+            {builtIns.onDrive !== undefined ? (
+              <TileShell
+                label="Uno Drive"
+                caption={builtIns.onDrive ? "Cloud storage" : "Needs your Uno account"}
+                title="Uno Drive — your Cloud storage, also from Telegram. Made by Uno."
+                disabled={builtIns.onDrive === null}
+                icon={
+                  <BuiltInIcon className="bg-gradient-to-br from-sky-400 to-indigo-600">
+                    <HardDriveIcon />
+                  </BuiltInIcon>
+                }
+                onClick={() => builtIns.onDrive?.()}
+              />
+            ) : null}
             <TileShell
               label="Terminal"
               caption="Command line"

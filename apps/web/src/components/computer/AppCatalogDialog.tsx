@@ -179,6 +179,15 @@ function Chip({
   );
 }
 
+/** A Made by Uno app that ships inside Uno Work (opens a screen, no install). */
+export interface StoreBuiltInApp {
+  readonly id: string;
+  readonly name: string;
+  readonly tagline: string;
+  readonly icon: ReactNode;
+  readonly onOpen: () => void;
+}
+
 export function AppCatalogDialog({
   open,
   onOpenChange,
@@ -192,7 +201,10 @@ export function AppCatalogDialog({
   onInstall,
   confirm = null,
   onCancelConfirm,
+  builtInApps = [],
 }: {
+  /** Made by Uno apps built into Uno Work (nothing to install): shown first. */
+  builtInApps?: ReadonlyArray<StoreBuiltInApp>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   templates: ReadonlyArray<UnoComputerAppTemplate>;
@@ -437,11 +449,7 @@ export function AppCatalogDialog({
             </button>
           ) : null}
         </div>
-        <div
-          className="flex flex-wrap gap-1.5"
-          role="tablist"
-          aria-label="Sections"
-        >
+        <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Sections">
           <Chip active={tab === ALL_TAB} onClick={() => setTab(ALL_TAB)}>
             All
           </Chip>
@@ -483,6 +491,44 @@ export function AppCatalogDialog({
 
       {browsing ? (
         <>
+          {builtInApps.length > 0 ? (
+            <section className="flex flex-col gap-2.5">
+              <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+                <SparklesIcon className="size-3.5 text-primary" /> Made by Uno
+              </h3>
+              <ul className="grid gap-3 sm:grid-cols-2">
+                {builtInApps.map((app) => (
+                  <li key={app.id}>
+                    <div className="flex h-full flex-col gap-3 rounded-2xl border border-border/60 bg-card/60 p-4">
+                      <div className="flex items-start gap-3">
+                        <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl">
+                          {app.icon}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-semibold">{app.name}</div>
+                          <p className="mt-0.5 line-clamp-3 text-xs leading-relaxed text-muted-foreground">
+                            {app.tagline}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-auto flex items-end justify-between gap-2">
+                        <span className="text-xs text-muted-foreground">Built in · free</span>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            onOpenChange(false);
+                            app.onOpen();
+                          }}
+                        >
+                          Open
+                        </Button>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
           {featured.length > 0 ? (
             <section className="flex flex-col gap-2.5">
               <h3 className="text-sm font-semibold">Recommended</h3>
