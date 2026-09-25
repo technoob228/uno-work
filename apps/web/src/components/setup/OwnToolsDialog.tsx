@@ -61,6 +61,15 @@ const AGENT_TARGETS: ReadonlyArray<{ id: AgentTarget; label: string }> = [
   { id: "web", label: "Claude or ChatGPT" },
 ];
 
+/**
+ * The console doesn't have the route yet (an older console) or this
+ * interface may not call it: fall back to the console's own pages.
+ */
+export function consoleRouteMissing(error: unknown): boolean {
+  const status = (error as { readonly status?: unknown } | null)?.status;
+  return status === 404 || status === 405 || status === 403;
+}
+
 /** What the console answers when it makes a key (`/work/agent-keys`). */
 export interface AgentKeyResult {
   readonly id: number;
@@ -200,7 +209,7 @@ function AgentTab() {
         </div>
       ) : loading ? (
         <Skeleton className="h-16 w-full rounded-xl" />
-      ) : box && account ? (
+      ) : box && account && !consoleRouteMissing(mint.error) ? (
         key && !off[target] ? (
           <div className="flex flex-col gap-2">
             <Code value={agentCommand(target, key)} label="Command" />
@@ -348,6 +357,7 @@ function SshTab() {
     );
   }
   const command = info.data?.command || box.ssh;
+  const keysHere = account && !consoleRouteMissing(info.error);
   const lastAdded = add.data;
   return (
     <div className="flex flex-col gap-4 text-sm">
@@ -370,7 +380,7 @@ function SshTab() {
       </div>
       <div className="flex flex-col gap-2">
         <div className="font-medium">Add your SSH key</div>
-        {account ? (
+        {keysHere ? (
           <>
             {lastAdded ? (
               <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success-foreground">
