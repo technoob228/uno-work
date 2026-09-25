@@ -80,6 +80,10 @@ import { blankExtensionFor, blankOfficeFile } from "../office/officeBlank";
 import { CloudBrowser } from "./CloudBrowser";
 import { CopyToCloudDialog } from "./CopyToCloudDialog";
 import { FilesLocationSwitch } from "./FilesLocationSwitch";
+import { prewarmOfficeEngine, readUsedKinds } from "../office/officePrewarm";
+
+/** Let the listing load first. */
+const FILES_OFFICE_PREWARM_DELAY_MS = 2_000;
 
 registerBuiltInFileOpeners();
 
@@ -174,6 +178,16 @@ export function FilesView() {
   const uploads = useFilesUploads(environmentId);
   const [dialog, setDialog] = useState<DialogState>({ type: "none" });
   const closeDialog = useCallback(() => setDialog({ type: "none" }), []);
+
+  // Documents are opened from here: get the office engine into the browser's
+  // cache in the background so the first one opens fast (officePrewarm.ts).
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => void prewarmOfficeEngine(["word", ...readUsedKinds()]),
+      FILES_OFFICE_PREWARM_DELAY_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const openFolder = useCallback(
     (path: string | undefined) => void navigate({ search: path ? { path } : {} }),

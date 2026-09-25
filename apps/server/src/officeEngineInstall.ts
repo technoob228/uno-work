@@ -3,7 +3,8 @@
  * Uno's own host, with a pinned sha256. Runs in the background: the Office
  * screen starts it with one button and polls the status.
  *
- * The package is a re-hosted, unmodified ONLYOFFICE build (AGPL-3.0), repacked
+ * The package is a re-hosted third-party ONLYOFFICE build (se-office, already
+ * patched upstream for offline use; AGPL-3.0 — see docs/office-engine.md), repacked
  * as tar.gz with the layout the daemon serves (`vendor/`, `LICENSE.txt`), so
  * no `unzip` is needed on the machine.
  */
@@ -16,6 +17,7 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import { OFFICE_ENGINE_API_SCRIPT } from "./officeEngine.ts";
+import { warmOfficeEngineCompression } from "./officeEngineAssets.ts";
 
 export const OFFICE_ENGINE_PACKAGE = {
   url:
@@ -81,6 +83,7 @@ export function startOfficeEngineInstall(engineDir: string): void {
   running = installOfficeEngine(engineDir)
     .then(() => {
       status.state = "installed";
+      void warmOfficeEngineCompression(engineDir);
     })
     .catch((error: unknown) => {
       status.state = "error";

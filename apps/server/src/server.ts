@@ -186,7 +186,10 @@ import { PluginRuntimeLive } from "./plugins/PluginRuntime.ts";
 import { ReminderSchedulerLive } from "./reminders/Layers/ReminderScheduler.ts";
 import { NetService } from "@t3tools/shared/Net";
 import { installStartupGate } from "./startupGate.ts";
+import { warmOfficeEngineCompression } from "./officeEngineAssets.ts";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
+
+const OFFICE_ENGINE_WARM_DELAY_MS = 20_000;
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -611,6 +614,12 @@ export const makeServerLayer = Layer.unwrap(
         yield* HttpServer.HttpServer;
         const startup = yield* ServerRuntimeStartup;
         yield* startup.markHttpListening;
+        // Compressed copies of the office engine's big files, made in the
+        // background once the machine has settled (officeEngineAssets.ts).
+        setTimeout(
+          () => void warmOfficeEngineCompression(config.officeEngineDir),
+          OFFICE_ENGINE_WARM_DELAY_MS,
+        ).unref();
       }),
     );
     const runtimeStateLayer = Layer.effectDiscard(

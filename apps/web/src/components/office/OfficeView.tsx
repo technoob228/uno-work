@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   CloudIcon,
+  ExternalLinkIcon,
   FileSpreadsheetIcon,
   FileTextIcon,
   HistoryIcon,
@@ -11,7 +12,7 @@ import {
   SaveIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FILESYSTEM_READ_FILE_HARD_MAX_BYTES } from "@t3tools/contracts";
+import { FILESYSTEM_READ_FILE_HARD_MAX_BYTES, type EnvironmentId } from "@t3tools/contracts";
 
 import { isElectron } from "../../env";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
@@ -27,8 +28,13 @@ import { base64ToBytes } from "./officeBytes";
 import {
   createOfficeEditor,
   isOfficeEngineInstalled,
+  loadDocsApi,
   type OfficeEditorHandle,
 } from "./officeEngine";
+import { OFFICE_SOURCE_LABEL, OFFICE_SOURCE_URL, officeStandaloneHref } from "./officeLinks";
+import { OfficePreview } from "./OfficePreview";
+import { buildOfficePreview, type OfficePreviewModel } from "./officePreviewModel";
+import { prewarmOfficeEngine, rememberOfficeKind } from "./officePrewarm";
 import {
   officeDocumentType,
   officeExtension,
@@ -62,6 +68,12 @@ const DOCS_AUTOSAVE_MS = 3_000;
  * would push the useful older copies out within a minute of typing.
  */
 const DOCS_CLOUD_AUTOSAVE_MS = 30_000;
+
+/**
+ * The text preview gives way to the editor when the document is drawn; if the
+ * engine never says so, it still goes this long after the editor started.
+ */
+const PREVIEW_FALLBACK_MS = 45_000;
 
 /** OOXML/ODF formats are zip archives; anything else under that name is broken. */
 const ARCHIVE_FORMATS = new Set([
@@ -119,10 +131,25 @@ function downloadBytes(bytes: Uint8Array, name: string) {
  * `path` is a file on the computer — or, with `cloud`, the object key of a
  * document in Cloud storage (names and formats come from it the same way).
  */
-export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudRef }) {
+export function OfficeView({
+  path,
+  cloud,
+  standalone = false,
+  environmentOverride,
+}: {
+  path: string;
+  cloud?: OfficeCloudRef;
+  /** The editor alone in its own browser tab (`/office?…&tab=1`). */
+  standalone?: boolean;
+  /** The computer the file is on, from the standalone tab's URL. */
+  environmentOverride?: string | undefined;
+}) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
-  const environmentId = activeEnvironmentId ?? primaryEnvironmentId;
+  const environmentId =
+    (environmentOverride as EnvironmentId | undefined) ??
+    activeEnvironmentId ??
+    primaryEnvironmentId;
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
@@ -180,6 +207,15 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
   }, [installStatus?.installed, queryClient]);
   const installing = installMutation.isPending || installStatus?.state === "installing";
 
+  // Start the engine while the document is still being read: api.js, the
+  // engine's cache worker and the files this kind of document needs.
+  useEffect(() => {
+    if (engineQuery.data !== true || !documentType) return;
+    rememberOfficeKind(documentType);
+    void loadDocsApi().catch(() => undefined);
+    void prewarmOfficeEngine([documentType], { force: true });
+  }, [documentType, engineQuery.data]);
+
   const fileQuery = useQuery({
     queryKey: ["officeFile", environmentId, path],
     enabled: Boolean(documentType && environmentId),
@@ -221,6 +257,8 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<OfficeEditorHandle | null>(null);
   const [editorReady, setEditorReady] = useState(false);
+  /** The document is drawn in the editor (not just the editor's frame). */
+  const [documentReady, setDocumentReady] = useState(false);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   /** Bumped on every "the document changed", so a save knows if it missed edits. */
@@ -230,14 +268,15 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
   /** Edit count when the last save failed: autosave waits for a new edit. */
   const failedAtEditsRef = useRef<number | null>(null);
   const [editCount, setEditCount] = useState(0);
-  const saveRef = useRef<() => Promise<void>>(async () => {});
+  /** Resolves true when the document was saved. */
+  const saveRef = useRef<() => Promise<boolean>>(async () => false);
 
   const savingRef = useRef(false);
   const save = useCallback(
-    async (options: { force?: boolean; bytes?: Uint8Array } = {}) => {
+    async (options: { force?: boolean; bytes?: Uint8Array } = {}): Promise<boolean> => {
       const editor = editorRef.current;
       const api = environmentId ? readEnvironmentApi(environmentId) : undefined;
-      if (!editor || !api || !saveTarget || savingRef.current) return;
+      if (!editor || !api || !saveTarget || savingRef.current) return false;
       savingRef.current = true;
       setSaveState({ kind: "saving" });
       // In the Docs shell, mark the document clean before taking the snapshot:
@@ -266,13 +305,13 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
           if (result.kind === "conflict") {
             if (docsShell) setDirty(true);
             setSaveState({ kind: "conflict", mine: bytes });
-            return;
+            return false;
           }
           session.version = result.version;
           if (!docsShell) editor.markSaved();
           markSavedAfter();
           void queryClient.invalidateQueries({ queryKey: ["files", "cloud"] });
-          return;
+          return true;
         }
         await writeOfficeBytes((input) => api.projects.writeFile(input), saveTarget.path, bytes);
         markSavedAfter();
@@ -284,12 +323,14 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
           });
         }
         void queryClient.invalidateQueries({ queryKey: ["previewReadFile"] });
+        return true;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (docsShell) setDirty(true);
         failedAtEditsRef.current = editsRef.current;
         setSaveState({ kind: "error", message });
         toastManager.add({ type: "error", title: "Couldn't save", description: message });
+        return false;
       } finally {
         savingRef.current = false;
       }
@@ -307,6 +348,37 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
     !isZipArchive(loadedBytes);
   const bytes = notADocument ? undefined : loadedBytes;
   const blankKind = blankExtensionFor(path);
+
+  // The document's text right away, while the editor starts (officePreviewModel.ts).
+  const [preview, setPreview] = useState<OfficePreviewModel | null>(null);
+  useEffect(() => {
+    if (!bytes) {
+      setPreview(null);
+      return;
+    }
+    let cancelled = false;
+    void buildOfficePreview(bytes, officeExtension(path)).then((model) => {
+      if (!cancelled) setPreview(model && model.blocks.length > 0 ? model : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [bytes, path]);
+  const [previewExpired, setPreviewExpired] = useState(false);
+  useEffect(() => {
+    if (!editorReady) return;
+    const timer = window.setTimeout(() => setPreviewExpired(true), PREVIEW_FALLBACK_MS);
+    return () => window.clearTimeout(timer);
+  }, [editorReady]);
+
+  useEffect(() => {
+    if (!standalone) return;
+    const previous = document.title;
+    document.title = fileName;
+    return () => {
+      document.title = previous;
+    };
+  }, [fileName, standalone]);
   const replaceWithBlank = useMutation({
     mutationFn: async () => {
       const api = environmentId ? readEnvironmentApi(environmentId) : undefined;
@@ -328,6 +400,7 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
     if (!container || !bytes || !documentType || engineQuery.data !== true) return;
     let cancelled = false;
     setEditorReady(false);
+    setDocumentReady(false);
     setEditorError(null);
     setDirty(false);
     setShell(null);
@@ -340,6 +413,9 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
       readOnly,
       onReady: () => {
         if (!cancelled) setEditorReady(true);
+      },
+      onDocumentReady: () => {
+        if (!cancelled) setDocumentReady(true);
       },
       onDirtyChange: (value) => {
         if (cancelled) return;
@@ -418,6 +494,42 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
     },
     [cloud, navigate],
   );
+
+  /**
+   * The document moves to its own tab: unsaved edits are saved first (the new
+   * tab reads the file), then this page goes back to Files so there is one
+   * editor per document. The tab is opened before the save so the browser
+   * still counts it as the click's pop-up.
+   */
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const openInNewTab = useCallback(() => {
+    const href = officeStandaloneHref({ path, cloud, environmentId, primaryEnvironmentId });
+    const tab = window.open("", "_blank");
+    if (!tab) {
+      toastManager.add({
+        type: "error",
+        title: "Couldn't open a new tab",
+        description: "Allow pop-ups for this site and try again.",
+      });
+      return;
+    }
+    tab.opener = null;
+    void (async () => {
+      const saved = dirtyRef.current && saveTarget ? await saveRef.current() : true;
+      if (!saved) {
+        tab.close();
+        toastManager.add({
+          type: "error",
+          title: "Save your changes first",
+          description: "They couldn't be saved, so the document stays open here.",
+        });
+        return;
+      }
+      tab.location.href = href;
+      goToFiles(path);
+    })();
+  }, [cloud, environmentId, goToFiles, path, primaryEnvironmentId, saveTarget]);
   const rename = useCallback(
     async (newName: string) => {
       if (!environmentId) return;
@@ -513,6 +625,8 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
             : null;
 
   const loading = !blocking && (engineQuery.isPending || fileQuery.isPending || !editorReady);
+  const showPreview =
+    !blocking && preview !== null && documentType !== null && !documentReady && !previewExpired;
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -531,11 +645,13 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
             cloud={cloud ? { writable: cloudWritable } : undefined}
             onShare={environmentId && !cloud ? () => setShareOpen(true) : undefined}
             onRename={autosave && environmentId && !cloud ? rename : undefined}
+            onOpenInNewTab={standalone || isElectron ? undefined : openInNewTab}
+            standalone={standalone}
           />
         ) : (
           <header className="border-b border-border px-3 py-2">
             <div className="flex items-center gap-2">
-              <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+              {standalone ? null : <SidebarTrigger className="size-7 shrink-0 md:hidden" />}
               <Button
                 size="icon-xs"
                 variant="ghost"
@@ -584,6 +700,29 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
                         : null}
               </span>
               <div className="ml-auto flex items-center gap-1">
+                {/* AGPL-3.0 §13: where our changes to the editor are published. */}
+                <a
+                  href={OFFICE_SOURCE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={OFFICE_SOURCE_LABEL}
+                  className="me-1 text-[11px] text-muted-foreground/70 hover:text-foreground max-sm:hidden"
+                  data-testid="office-source-link"
+                >
+                  ONLYOFFICE · AGPL
+                </a>
+                {standalone || isElectron ? null : (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={openInNewTab}
+                    title="Open this document in a separate browser tab"
+                    data-testid="office-open-new-tab"
+                  >
+                    <ExternalLinkIcon className="size-3.5" />
+                    <span className="max-sm:hidden">New tab</span>
+                  </Button>
+                )}
                 <Button
                   size="xs"
                   variant="ghost"
@@ -697,6 +836,12 @@ export function OfficeView({ path, cloud }: { path: string; cloud?: OfficeCloudR
                 ) : null}
               </div>
             </div>
+          ) : showPreview && preview && documentType ? (
+            <OfficePreview
+              model={preview}
+              documentKind={documentType}
+              label={editorReady ? "Opening the document…" : "Starting the editor…"}
+            />
           ) : loading ? (
             <div className="absolute inset-0 flex items-center justify-center bg-background/80">
               <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
