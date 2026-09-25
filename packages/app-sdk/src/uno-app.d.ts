@@ -48,6 +48,8 @@ export interface AskOptions {
   temperature?: number;
   maxTokens?: number;
   signal?: AbortSignal;
+  /** Extra request headers to the App API. */
+  headers?: Record<string, string>;
 }
 
 export interface TranscribeOptions {
@@ -122,9 +124,14 @@ export interface WhoAmI {
   ai: {
     chat: boolean;
     tasks: boolean;
+    /** Uno AI spend cap per month (UTC; it starts over on the 1st). */
     limitUsd: number;
-    /** Everything counted against the limit: answers + jobs. */
+    /** This month's spending counted against the limit: answers + jobs. */
     spentUsd: number;
+    /** The month `spentUsd` belongs to, "2026-09". */
+    period?: string | null;
+    /** Everything the app ever spent on Uno AI. */
+    lifetimeSpentUsd?: number | null;
     /** Answers and transcription. */
     chatSpentUsd?: number;
     /** Agent tasks on the Uno AI gateway (not on the person's own subscription). */
@@ -132,6 +139,18 @@ export interface WhoAmI {
     remainingUsd: number;
   };
   storage: { enabled: boolean; limitBytes?: number; usedBytes?: number | null };
+  /**
+   * Where this app's answers go — the person picks it in Settings → Apps:
+   * "uno" (Uno AI, counts against the limit), "local" (a server on this
+   * computer), "personal" (the account's GPU) or "byok" (the person's key).
+   */
+  provider?: {
+    kind: "uno" | "local" | "personal" | "byok" | null;
+    label: string | null;
+    model: string | null;
+    metered: boolean;
+    error?: string;
+  };
   defaults: { chatModel: string; taskHarness: string };
   home: string;
   [key: string]: unknown;
@@ -221,6 +240,27 @@ export interface NotifyInput {
   group?: string;
 }
 
+export interface ChatHandlerOptions {
+  /** The system prompt — the server's; the page can't set or see it. */
+  system?: string;
+  /** Default: "default" (the model the person picked for this app). */
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  /** Turns kept from the page (default 20); each cut to `maxChars` (default 8000). */
+  maxMessages?: number;
+  maxChars?: number;
+  /**
+   * Your own check (a session, a password): false → 403. Always set it when
+   * the app is on the internet — without it Uno Work warns the person that
+   * anyone with the link can use the app's AI.
+   */
+  allow?: (req: any) => boolean | Promise<boolean>;
+}
+
+/** A `node:http` handler / Express middleware: GET …/uno-chat.js, POST → SSE answer. */
+export type ChatRequestHandler = (req: any, res: any, next?: (err?: any) => void) => Promise<void>;
+
 export interface UnoAppClient {
   /** One answer as text. */
   ask(input: PromptInput, opts?: AskOptions): Promise<string>;
@@ -228,6 +268,8 @@ export interface UnoAppClient {
   stream(input: PromptInput, opts?: AskOptions): AsyncGenerator<string>;
   /** Raw OpenAI-compatible POST /v1/chat/completions; returns the parsed JSON. */
   chat(body: Record<string, unknown>, opts?: { signal?: AbortSignal }): Promise<any>;
+  /** Backend for the `<uno-chat>` web component (the browser never gets the token). */
+  chatHandler(opts?: ChatHandlerOptions): ChatRequestHandler;
   /** Speech to text. A string is a file path (Node/Bun). */
   transcribe(file: AudioInput, opts?: TranscribeOptions): Promise<string>;
   /** Same, returns the whole JSON (for response_format "verbose_json" segments). */
@@ -263,6 +305,14 @@ export declare function parseSSE(
 export declare const ask: UnoAppClient["ask"];
 export declare const stream: UnoAppClient["stream"];
 export declare const chat: UnoAppClient["chat"];
+export declare const chatHandler: UnoAppClient["chatHandler"];
+/** Only user/assistant text turns, the last `maxMessages`, each cut to `maxChars`. */
+export declare function cleanChatMessages(
+  input: unknown,
+  limits?: { maxMessages?: number; maxChars?: number },
+): Array<{ role: "user" | "assistant"; content: string }>;
+/** uno-chat.js as text (next to uno-app.mjs, else ~/.uno/sdk/js/); null if missing. */
+export declare function chatComponentSource(): Promise<string | null>;
 export declare const transcribe: UnoAppClient["transcribe"];
 export declare const transcribeJson: UnoAppClient["transcribeJson"];
 export declare const task: UnoAppClient["task"];

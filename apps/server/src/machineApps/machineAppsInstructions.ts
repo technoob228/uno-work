@@ -45,16 +45,39 @@ When you create or run an app or long-running service on this machine, write \`$
 
 This computer has its own AI. An app you build for the person (translator, summariser, bot, notes with AI, a scheduled report…) must use it through the **Uno App SDK**, not an OpenAI/Anthropic key, not \`UNO_API_KEY\`, and never by asking the person for a key. The person picks the model/agent and each app's spending limit in Uno Work → Settings → Apps; the app doesn't need to know which.
 
-1. Ask for AI in the manifest: \`"ai": {"chat": true}\` (answers, translation, summaries, transcription) and/or \`"tasks": true\` (hand a job to an agent that works on files in a folder). Optional \`"limitUsd"\` ≤ 10. Without the \`ai\` block the app gets no AI.
+1. Ask for AI in the manifest: \`"ai": {"chat": true}\` (answers, translation, summaries, transcription) and/or \`"tasks": true\` (hand a job to an agent that works on files in a folder). Optional \`"limitUsd"\` ≤ 10 — the app's Uno AI budget per month (it starts over on the 1st). Without the \`ai\` block the app gets no AI.
 2. Within a few seconds the app's token appears in \`~/.uno/app-keys/<id>/\`; an app started by its manifest \`command\` also gets \`UNO_APP_ID\`, \`UNO_APP_API_URL\`, \`UNO_APP_TOKEN\` in its environment. The SDK finds all of this by itself — give it the app id if you start the app some other way.
 3. Use the SDK that is already on this machine (zero dependencies):
    - JavaScript/TypeScript (Node ≥ 18): \`import { createClient } from "${sdkJs}";\` → \`const ai = createClient({ appId: "<id>" });\` → \`await ai.ask("Translate to English: …")\`, \`for await (const t of ai.stream(prompt)) …\`, \`await ai.transcribe(audioBuffer)\`, \`const t = await ai.task({ prompt, cwd: "~/Inbox", tools: "edit" }); const done = await t.wait();\`, \`await ai.whoami()\`. Or copy the file into the project, or \`npm i ${sdkDir}/js\` (package \`@uno4/app\`).
    - Python ≥ 3.9: \`sys.path.insert(0, os.path.expanduser("~/.uno/sdk/python")); import uno_app\` → \`ai = uno_app.Client(app_id="<id>")\` → \`ai.ask(...)\`, \`ai.stream(...)\`, \`ai.transcribe(path)\`, \`ai.task(prompt, cwd="~/Inbox", tools="edit").wait()\`.
    - Any other language: it is plain OpenAI-compatible HTTP — \`POST $UNO_APP_API_URL/v1/chat/completions\` with \`Authorization: Bearer <token from ~/.uno/app-keys/<id>/token>\` and \`"model": "default"\`; tasks: \`POST /v1/tasks {"prompt","cwd","tools"}\`, \`GET /v1/tasks/<id>?waitMs=30000\`.
 4. Tasks run as a Work chat titled "[App name] …" the person can see; \`tools\`: "read" (only looks), "ask" (every change waits for the person), "edit" (edits files itself, commands wait). The app gets at most what the person allowed. A task's \`cwd\` must be inside the home folder and must exist.
-5. Handle errors in the UI in plain words: 402 \`app_limit_reached\` → "This app used its AI limit — raise it in Uno Work → Settings → Apps"; 503 \`ai_not_connected\` → "Sign in to Uno in Uno Work".
+5. Handle errors in the UI in plain words: 402 \`app_limit_reached\` → "This app used its AI limit for this month — raise it in Uno Work → Settings → Apps"; 503 \`ai_not_connected\` → "Sign in to Uno in Uno Work"; 502 \`provider_unreachable\` / 503 \`no_model\` / \`provider_not_configured\` → show the message as is (the local server is off, or the chosen key is gone).
 6. Something that must run on a schedule (e.g. once a day) belongs inside the app (a timer in the server process) or in a user systemd timer (unit files in \`~/.config/systemd/user/\`, then \`systemctl --user daemon-reload\` and \`systemctl --user enable --now <name>.timer\` so it survives a reboot) — not a cron job the person can't see. Show the last result in the app's page.
 7. In docker (only if the person's machine allows it): mount only \`~/.uno/app-keys/<id>:/run/uno-app:ro\` (never all of \`~/.uno\`) and add \`extra_hosts: ["host.docker.internal:host-gateway"]\`.
+
+## Where an app's AI comes from — providers, and a chat UI in one tag
+
+The person picks, per app, where its answers come from (Uno Work → Settings → Apps → "Answers from"): **Uno AI** (default; the only one that counts against the app's limit), **AI on this computer** (an OpenAI-compatible server here — Ollama, LM Studio, vLLM, llama.cpp — found by itself), **Personal AI** (a model on the account's own GPU, if the account has one) or **the person's own key** (xAI, OpenRouter, OpenAI or a custom OpenAI-compatible URL from Settings → Agents). The App API proxies to the choice, so:
+
+- Write the app once against the SDK with \`"model": "default"\` (or no model). Never hard-code a provider URL or key, never call Ollama/OpenAI directly from the app, never ask the person for a key.
+- What is on THIS computer right now: \`cat ~/.uno/ai-providers.md\` (Uno Work rewrites it every minute: running local servers and their models, whether Personal AI and own keys exist, which provider each app uses). Use it to answer "can my app run on the local model?" — then tell the person to switch it in Settings → Apps; you can't switch it yourself.
+- An app can see its own provider: \`(await ai.whoami()).provider\` → \`{kind, label, model, metered}\`.
+- Speech-to-text follows an own key; with a local server or Personal AI it stays on Uno AI. Jobs (\`/v1/tasks\`) always run on the agent chosen for jobs.
+- Always add the \`"ai"\` block to the manifest even when the person will use a local model: it's what makes the app show "Uses AI" to the person and gets it a token.
+
+**A chat inside the app's page — \`<uno-chat>\`** (streaming, light markdown, no framework). The browser never gets the app token: the page talks to the app's own backend, which the SDK turns into a chat endpoint.
+
+\`\`\`js
+// Node (Express or plain node:http)
+import { createClient } from "${sdkJs}";
+const ai = createClient({ appId: "<id>" });
+app.use("/uno/chat", ai.chatHandler({ system: "You help with this person's notes. Be brief." }));
+// page: <script type="module" src="/uno/chat/uno-chat.js"></script>
+//       <uno-chat endpoint="/uno/chat" heading="Assistant" greeting="Ask about your notes"></uno-chat>
+\`\`\`
+
+Python: FastAPI \`@app.post("/uno/chat")\` → \`StreamingResponse(ai.chat_sse(await request.json(), system="…"), media_type="text/event-stream")\` and serve \`uno_app.chat_component_js()\` at \`/uno/chat/uno-chat.js\`; plain \`http.server\`: \`uno_app.handle_chat_request(self, system="…")\` in do_GET/do_POST of that path. \`UnoChat.mount(element, {endpoint})\` instead of the tag also works. Put what the app knows (the note, the order) into \`system\` on the server — never trust a system prompt from the page. **Always set \`allow\` when the app is (or may be) on the internet** — \`allow: (req) => …\` checking the app's sign-in (Python: guard the route and pass \`guarded=True\` / \`allow=\`). Without it anyone with the link spends the app's AI, and Uno Work shows the person a warning on the app ("Anyone with the link can use this app's AI — add sign-in"). If the app has no sign-in yet, add one (a password the person chooses) before or together with the chat.
 
 ## Apps that tell the person something — notifications into the Inbox
 

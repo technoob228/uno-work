@@ -200,6 +200,28 @@ class UnoAppTest(unittest.TestCase):
         self.assertEqual(list(self.c.stream("tell")), ["Привет", ", мир"])
         self.assertTrue(json.loads(SEEN[-1]["body"])["stream"])
 
+    def test_chat_sse(self):
+        out = b"".join(self.c.chat_sse({"messages": [
+            {"role": "system", "content": "evil"},
+            {"role": "user", "content": "tell"},
+        ]}, system="You help."))
+        self.assertIn('data: {"delta": "Привет"}'.encode(), out)
+        self.assertTrue(out.strip().endswith(b"data: [DONE]"))
+        self.assertNotIn(TOKEN.encode(), out)
+        sent = json.loads(SEEN[-1]["body"])
+        self.assertEqual(sent["messages"], [{"role": "system", "content": "You help."},
+                                            {"role": "user", "content": "tell"}])
+        limit = b"".join(self.c.chat_sse({"messages": [{"role": "user", "content": "over"}]}))
+        self.assertIn("Settings → Apps".encode(), limit)
+        bad = b"".join(self.c.chat_sse({"messages": [{"role": "assistant", "content": "x"}]}))
+        self.assertIn(b"invalid_request", bad)
+
+    def test_clean_chat_messages(self):
+        self.assertEqual(uno_app.clean_chat_messages([
+            {"role": "tool", "content": "x"}, {"role": "user", "content": "abcdef"},
+            {"role": "assistant", "content": 1}], max_chars=3), [{"role": "user", "content": "abc"}])
+        self.assertEqual(uno_app.clean_chat_messages(None), [])
+
     def test_error_402(self):
         with self.assertRaises(uno_app.UnoAppError) as cm:
             self.c.ask("over")

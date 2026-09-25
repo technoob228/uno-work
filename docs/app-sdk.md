@@ -8,7 +8,10 @@ may spend.
 
 ```
 app ──HTTP──▶ Work daemon (App API, 127.0.0.1:3779 + docker0)
-                 ├── /v1/chat/completions ─▶ Uno AI gateway (machine key, metered per app)
+                 ├── /v1/chat/completions ─▶ the app's provider (Settings → Apps):
+                 │                            Uno AI gateway (default, metered per app)
+                 │                            | AI on this computer (Ollama, LM Studio, vLLM…)
+                 │                            | Personal AI (the account's GPU) | the person's own key
                  ├── /v1/audio/transcriptions ─▶ Uno AI gateway
                  ├── /v1/tasks ─▶ a Work chat (thread) on the harness the person chose
                  ├── /v1/storage/* ─▶ the app's folder in the account's cloud (S3)
@@ -47,8 +50,10 @@ An app asks for AI in its manifest `~/.uno/apps/<id>.json`:
 
 - `ai.chat` — may call `/v1/chat/completions`, `/v1/audio/transcriptions`, `/v1/models`.
 - `ai.tasks` — may start agent tasks (`/v1/tasks`).
-- `ai.limitUsd` — spending cap for the app, **at most $10** from the manifest
-  (default $10). Only the person can raise it (Settings → Apps).
+- `ai.limitUsd` — the app's Uno AI spending cap **per month** (UTC; it starts
+  over on the 1st), **at most $10** from the manifest (default $10). Only the
+  person can raise it (Settings → Apps). What the app spent before stays in its
+  lifetime total (`whoami().ai.lifetimeSpentUsd`).
 - `"ai": true` is short for `{ "chat": true }`.
 - No `ai` in the manifest → no AI (403 `ai_not_allowed`).
 - `"storage": {"limitGb": 5}` (or `"storage": true`, 5 GB) — the app gets its
@@ -103,21 +108,21 @@ container `http://host.docker.internal:3779`). Every call:
 `Authorization: Bearer <token>`. Errors are OpenAI-shaped:
 `{"error":{"type","code","message"}}`.
 
-| Status | `code`                                 | Meaning                                                           |
-| ------ | -------------------------------------- | ----------------------------------------------------------------- |
-| 401    | `invalid_app_token`                    | unknown / revoked / rotated token                                 |
-| 403    | `ai_not_allowed`                       | the manifest does not ask for this (chat or tasks)                |
-| 402    | `app_limit_reached`                    | the app spent its limit — the person raises it in Settings → Apps |
-| 503    | `ai_not_connected`                     | this computer has no Uno AI key (not linked)                      |
-| 400    | `invalid_request` / `cwd_outside_home` | bad input                                                         |
-| 403    | `storage_not_allowed`                  | the manifest does not ask for `storage`                           |
-| 507    | `app_storage_full`                     | the app filled its cloud limit — the person raises it in Settings |
-| 402    | `cloud_full`                           | the whole account's cloud is full (plan quota)                    |
-| 404    | `file_not_found`                       | no such file in the app's folder                                  |
-| 400    | `invalid_key`                          | a key with `..`, a leading `/`, empty segments, > 512 chars       |
-| 503    | `storage_not_connected`                | this computer is not linked to an Uno account                     |
-| 403    | `notify_not_allowed`                   | the manifest does not ask for `"notify": true`                    |
-| 429    | `notify_rate_limited`                  | too many notifications; wait `Retry-After` seconds                |
+| Status | `code`                                 | Meaning                                                                                                        |
+| ------ | -------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| 401    | `invalid_app_token`                    | unknown / revoked / rotated token                                                                              |
+| 403    | `ai_not_allowed`                       | the manifest does not ask for this (chat or tasks)                                                             |
+| 402    | `app_limit_reached`                    | the app spent this month's limit — it starts over on the 1st (UTC), or the person raises it in Settings → Apps |
+| 503    | `ai_not_connected`                     | this computer has no Uno AI key (not linked)                                                                   |
+| 400    | `invalid_request` / `cwd_outside_home` | bad input                                                                                                      |
+| 403    | `storage_not_allowed`                  | the manifest does not ask for `storage`                                                                        |
+| 507    | `app_storage_full`                     | the app filled its cloud limit — the person raises it in Settings                                              |
+| 402    | `cloud_full`                           | the whole account's cloud is full (plan quota)                                                                 |
+| 404    | `file_not_found`                       | no such file in the app's folder                                                                               |
+| 400    | `invalid_key`                          | a key with `..`, a leading `/`, empty segments, > 512 chars                                                    |
+| 503    | `storage_not_connected`                | this computer is not linked to an Uno account                                                                  |
+| 403    | `notify_not_allowed`                   | the manifest does not ask for `"notify": true`                                                                 |
+| 429    | `notify_rate_limited`                  | too many notifications; wait `Retry-After` seconds                                                             |
 
 ### `GET /v1/whoami`
 
@@ -140,13 +145,45 @@ container `http://host.docker.internal:3779`). Every call:
 
 ### `POST /v1/chat/completions` (OpenAI-compatible, `stream: true` supported)
 
-`model` is optional: omitted or `"default"` → the model the person picked in
-Settings → Apps ("AI for apps"). Any gateway model id works too
-(`GET /v1/models`). Streaming is Server-Sent Events exactly like OpenAI.
+`model` is optional: omitted or `"default"` → the model the person picked for
+this app in Settings → Apps (for Uno AI: "Model for answers"; for a local
+server or an own key without a model: the first model it lists). Any model id
+of the app's provider works too (`GET /v1/models` lists them). Streaming is
+Server-Sent Events exactly like OpenAI.
+
+Where the call goes is the person's choice per app — see §2a. The app sends
+the same request whatever it is.
 
 ### `POST /v1/audio/transcriptions` (OpenAI-compatible multipart)
 
 Same as OpenAI: `file`, optional `model`, `language`, `response_format`.
+Goes to the person's own key when the app uses one; otherwise to Uno AI
+(metered) — local servers and Personal AI rarely do speech-to-text.
+
+## 2a. Providers: where an app's answers come from
+
+The person picks one per app in **Settings → Apps → "Answers from"** (the
+default is Uno AI). The app's code, token and SDK calls don't change.
+
+| Provider                | What it is                                                                                                                                                                                                                                           | Limit (`limitUsd`) | Who pays                     |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------- |
+| **Uno AI** (default)    | the Uno AI gateway with the machine's key                                                                                                                                                                                                            | yes                | the account's Uno AI credits |
+| **AI on this computer** | an OpenAI-compatible server here: found on :11434 Ollama, :1234 LM Studio, :8000 vLLM, :8080 llama.cpp, :1337 Jan, :5000 text-generation-webui, :30000 SGLang (loopback, answers `/v1/models` in the OpenAI shape) — or any address the person types | no                 | nobody (the computer's own)  |
+| **Personal AI**         | a model on the account's own GPU (`gpu.uno4.dev`, machine key), when the account has one                                                                                                                                                             | no                 | the GPU hour, while it's on  |
+| **Your own key**        | a key from Settings → Agents → AI provider keys: xAI, OpenRouter, OpenAI or a custom OpenAI-compatible base URL                                                                                                                                      | no                 | that provider                |
+
+- The limit is Uno AI's budget for the app; the other providers don't count
+  against it (answers still count as `requests` and `lastUsedAt`).
+- A key never leaves the daemon: the app has only its `uno_app_` token; an
+  error from a provider holding the person's key comes back as
+  `provider_error` with our own words, never its body.
+- `GET /v1/whoami` → `"provider": {"kind","label","model","metered"}`.
+- Errors: 502 `provider_unreachable` (the local server is off), 503 `no_model`
+  (it has no model loaded), 503 `provider_not_configured` (the chosen key was
+  removed / no address).
+- Tasks (`/v1/tasks`) are not affected: they run on the agent chosen for jobs.
+- What is on the computer right now is written for agents to
+  `~/.uno/ai-providers.md` (rewritten every minute; names keys, never shows them).
 
 ### `POST /v1/tasks` — give the AI a job
 
@@ -387,10 +424,55 @@ st.delete(f"photos/{pid}.jpg")
 Config comes from the environment (`UNO_APP_API_URL`, `UNO_APP_TOKEN`), then
 from `/run/uno-app/` (docker), then from `~/.uno/app-keys/<UNO_APP_ID or appId>/`.
 
+## 3a. `<uno-chat>` — a chat in the app's page in one tag
+
+A zero-dependency web component (streaming, light markdown, light/dark, Stop,
+Enter to send) that any app page can drop in. **The browser never gets the
+app token**: the component talks to the app's own backend, which the SDK
+turns into a chat endpoint; the backend calls the App API with the token.
+
+```js
+// server.mjs — Node ≥ 18, Express (plain node:http works the same way)
+import express from "express";
+import { createClient } from "/home/unowork/.uno/sdk/js/uno-app.mjs";
+const ai = createClient({ appId: "notes" });
+const app = express();
+app.use("/uno/chat", ai.chatHandler({ system: "You help with this person's notes." }));
+app.get("/", (_req, res) =>
+  res.send(`<script type="module" src="/uno/chat/uno-chat.js"></script>
+  <uno-chat endpoint="/uno/chat" heading="Notes assistant" greeting="Ask about your notes"></uno-chat>`),
+);
+app.listen(process.env.PORT ?? 8601, "0.0.0.0");
+```
+
+- `chatHandler(opts)` — `GET …/uno-chat.js` serves the component,
+  `POST …` takes `{"messages":[{role,content}]}` and answers SSE
+  (`data: {"delta":"…"}` …, `data: {"error":{"message"}}`, `data: [DONE]`).
+  Options: `system` (yours — a `system` turn from the page is dropped),
+  `model`, `temperature`, `maxTokens`, `maxMessages` (20), `maxChars` (8000),
+  `allow(req)` (your own login check; false → 403).
+- Without the tag: `UnoChat.mount(element, {endpoint, greeting, heading, placeholder})`.
+  Style it with CSS variables (`--uno-chat-accent`, `--uno-chat-bg`, …) or `::part(box)`.
+- Python: `ai.chat_sse(body, system=…)` yields the same SSE bytes (FastAPI:
+  `StreamingResponse(ai.chat_sse(await request.json(), system="…"), media_type="text/event-stream")`),
+  `uno_app.chat_component_js()` is the script to serve at `/uno/chat/uno-chat.js`,
+  `uno_app.handle_chat_request(self, system="…")` does both for `http.server`.
+- The endpoint is as public as the app: anyone who can open the page can
+  spend its AI (up to its monthly limit on Uno AI). **Always set `allow`**
+  (Python: guard the route, `chat_sse(..., guarded=True)` /
+  `handle_chat_request(..., allow=…)`) when the app is on the internet. The
+  SDK tells the daemon on each chat call whether the endpoint is guarded
+  (`X-Uno-Chat-Widget` / `X-Uno-Chat-Guarded`); an unguarded chat of an app
+  shown on the internet gets a warning on its tile and in Settings → Apps
+  ("Anyone with the link can use this app's AI — add sign-in") with "Ask Uno to
+  add sign-in".
+- On the machine the component is `~/.uno/sdk/js/uno-chat.js` (also next to
+  `uno_app.py`); in the package, `@uno4/app/chat`.
+
 ## 4. Routing: gateway vs. subscription
 
-- **Chat / transcription → always the Uno AI gateway**, with the machine's
-  AI key, metered per app. Routing an app's arbitrary traffic through a
+- **Chat / transcription → the provider the person chose for the app** (§2a;
+  Uno AI by default, metered per app). Routing an app's arbitrary traffic through a
   person's Claude/ChatGPT subscription (by driving the Claude Code / Codex
   CLI per request) is technically possible but wrong: subscriptions are
   licensed for the person's own interactive use, a background app would burn

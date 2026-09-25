@@ -19,6 +19,7 @@ import type {
   UnoMachineApp,
 } from "@t3tools/contracts";
 
+import { publicChatWarning, tileAiNote } from "../settings/appAiProviderModel";
 import type { AppInstall } from "./useAppInstalls";
 
 export type ProgramStatus = "running" | "stopped" | "installing" | "failed" | "asleep" | "unknown";
@@ -38,6 +39,33 @@ export interface ProgramTile {
   readonly machineApp: UnoMachineApp | null;
   readonly storeApp: UnoComputerInstalledApp | null;
   readonly install: AppInstall | null;
+  /** "Uses AI for answers · Uno AI · $0.40 of $10" for its tooltip; null = no AI. */
+  readonly aiNote?: string | null;
+  /** "Anyone with the link can use this app's AI — add sign-in"; null = fine. */
+  readonly aiWarning?: string | null;
+}
+
+/** The id an app has in Settings → Apps (`~/.uno/apps/<id>.json`, or its catalog id). */
+export function tileAppId(tile: ProgramTile): string | null {
+  if (tile.machineApp?.source === "manifest") return tile.machineApp.id.replace(/^manifest:/, "");
+  return tile.storeApp?.templateId ?? tile.install?.templateId ?? null;
+}
+
+/** Tiles with their "Uses AI" note from Settings → Apps. */
+export function withAiNotes(
+  tiles: ReadonlyArray<ProgramTile>,
+  apps: ReadonlyArray<AppAiApp> | undefined,
+): ProgramTile[] {
+  if (!apps || apps.length === 0) return [...tiles];
+  const byId = new Map(apps.map((app) => [app.id, app]));
+  return tiles.map((tile) => {
+    const id = tileAppId(tile);
+    const app = id ? byId.get(id) : undefined;
+    if (!app) return tile;
+    // Only a program on this computer reports its chat; "online" = shown on the internet.
+    const published = tile.machineApp !== null && tile.online;
+    return { ...tile, aiNote: tileAiNote(app), aiWarning: publicChatWarning(app, published) };
+  });
 }
 
 /**

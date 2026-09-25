@@ -71,6 +71,7 @@ import type { ResourceLook } from "./resources/resourceModel";
 import { LOW_DISK_PCT, LOW_MEMORY_PCT, isSustained } from "./resizeModel";
 import {
   buildProgramTiles,
+  withAiNotes,
   hiddenMachineApps,
   isBrowserOnMachine,
   removalCloudFiles,
@@ -152,14 +153,18 @@ export function ComputerView() {
 
   const tiles = useMemo(
     () =>
-      buildProgramTiles({
-        machineApps: thisMachine ? (machineAppsQuery.data?.apps ?? []) : [],
-        storeApps: appsQuery.data?.installed.apps ?? [],
-        installs: installs.installs,
-        browserOnMachine,
-        computerOn,
-      }),
+      withAiNotes(
+        buildProgramTiles({
+          machineApps: thisMachine ? (machineAppsQuery.data?.apps ?? []) : [],
+          storeApps: appsQuery.data?.installed.apps ?? [],
+          installs: installs.installs,
+          browserOnMachine,
+          computerOn,
+        }),
+        appAiQuery.data?.apps,
+      ),
     [
+      appAiQuery.data,
       appsQuery.data,
       browserOnMachine,
       computerOn,

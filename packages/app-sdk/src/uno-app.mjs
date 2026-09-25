@@ -382,6 +382,7 @@ export function createClient(options = {}) {
     const res = await request("POST", "/v1/chat/completions", {
       json: { ...chatBody(input, opts), stream: true },
       signal: opts.signal,
+      headers: opts.headers,
     });
     for await (const { data } of parseSSE(res.body)) {
       if (data.trim() === "[DONE]") return;
@@ -682,10 +683,98 @@ export function createClient(options = {}) {
     },
   };
 
+  /**
+   * A request handler for `<uno-chat>` (uno-chat.js): `GET …/uno-chat.js`
+   * serves the component, `POST …` streams an answer from this computer's AI.
+   * The browser never gets the app's token — only this server has it.
+   * Works as a plain `node:http` handler and as Express/Connect middleware:
+   *   app.use("/uno/chat", uno.chatHandler({ system: "You help with notes." }))
+   * @param {ChatHandlerOptions} [opts]
+   */
+  function chatHandler(opts = {}) {
+    const maxMessages = opts.maxMessages ?? 20;
+    const maxChars = opts.maxChars ?? 8000;
+    /** @param {any} req @param {any} res @param {(err?: any) => void} [next] */
+    return async function unoChat(req, res, next) {
+      const path = String(req.url || "/").split("?")[0] || "/";
+      if (req.method === "GET" || req.method === "HEAD") {
+        if (!path.endsWith("/uno-chat.js")) return next ? next() : endJson(res, 404, "Not found");
+        const source = await chatComponentSource();
+        if (source === null) {
+          return endJson(res, 404, "uno-chat.js is not next to uno-app.mjs");
+        }
+        res.writeHead(200, {
+          "content-type": "text/javascript; charset=utf-8",
+          "cache-control": "public, max-age=300",
+        });
+        return res.end(req.method === "HEAD" ? undefined : source);
+      }
+      if (req.method !== "POST") return next ? next() : endJson(res, 405, "Use POST");
+      try {
+        if (opts.allow && !(await opts.allow(req))) return endJson(res, 403, "Not allowed");
+      } catch {
+        return endJson(res, 403, "Not allowed");
+      }
+      let body = req.body;
+      if (body === undefined || body === null || typeof body !== "object") {
+        try {
+          body = JSON.parse((await readRequest(req, 512 * 1024)) || "{}");
+        } catch {
+          return endJson(res, 400, 'Send JSON: {"messages": [...]}');
+        }
+      }
+      const messages = cleanChatMessages(body?.messages, { maxMessages, maxChars });
+      if (messages.length === 0 || messages[messages.length - 1]?.role !== "user") {
+        return endJson(res, 400, "The last message must be the person's.");
+      }
+      res.writeHead(200, {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-store",
+        "x-accel-buffering": "no",
+      });
+      const controller = new AbortController();
+      const onClose = () => {
+        if (!res.writableFinished) controller.abort();
+      };
+      res.on?.("close", onClose);
+      const write = (/** @type {any} */ data) => {
+        if (!controller.signal.aborted) res.write(`data: ${JSON.stringify(data)}\n\n`);
+      };
+      try {
+        for await (const delta of stream(messages, {
+          system: opts.system,
+          model: opts.model,
+          temperature: opts.temperature,
+          maxTokens: opts.maxTokens,
+          signal: controller.signal,
+          // Uno Work warns the person when a chat without sign-in is on the
+          // internet ("Anyone with the link can use this app's AI").
+          headers: { "X-Uno-Chat-Widget": "1", "X-Uno-Chat-Guarded": opts.allow ? "1" : "0" },
+        })) {
+          write({ delta });
+        }
+      } catch (err) {
+        if (/** @type {any} */ (err)?.name !== "AbortError") {
+          write({
+            error: {
+              code: /** @type {any} */ (err)?.code ?? "error",
+              message: friendlyChatError(err),
+            },
+          });
+        }
+      } finally {
+        if (!controller.signal.aborted) res.write("data: [DONE]\n\n");
+        res.off?.("close", onClose);
+        res.end();
+      }
+    };
+  }
+
   return {
     ask,
     stream,
     chat,
+    chatHandler,
     transcribe,
     transcribeJson,
     task,
@@ -697,6 +786,122 @@ export function createClient(options = {}) {
     storage,
     config,
   };
+}
+
+// ---- <uno-chat> backend helpers ----------------------------------------------
+
+/**
+ * @typedef {{
+ *   system?: string, model?: string, temperature?: number, maxTokens?: number,
+ *   maxMessages?: number, maxChars?: number,
+ *   allow?: (req: any) => boolean | Promise<boolean>,
+ * }} ChatHandlerOptions
+ */
+
+/**
+ * What the browser may send: only "user" / "assistant" turns with text, the
+ * last `maxMessages`, each cut to `maxChars`. A "system" turn from the page is
+ * dropped — the system prompt is the server's (`opts.system`).
+ * @param {any} input
+ * @param {{maxMessages?: number, maxChars?: number}} [limits]
+ */
+export function cleanChatMessages(input, limits = {}) {
+  const maxMessages = limits.maxMessages ?? 20;
+  const maxChars = limits.maxChars ?? 8000;
+  if (!Array.isArray(input)) return [];
+  /** @type {Array<{role: "user" | "assistant", content: string}>} */
+  const out = [];
+  for (const m of input) {
+    if (!m || (m.role !== "user" && m.role !== "assistant")) continue;
+    if (typeof m.content !== "string" || !m.content.trim()) continue;
+    out.push({ role: m.role, content: m.content.slice(0, maxChars) });
+  }
+  return out.slice(-maxMessages);
+}
+
+/** Plain words for the chat bubble. @param {any} err */
+function friendlyChatError(err) {
+  const code = err?.code;
+  if (code === "app_limit_reached") {
+    return "This app used its AI limit for this month. Raise it in Uno Work → Settings → Apps.";
+  }
+  if (code === "ai_not_connected")
+    return "AI isn't connected on this computer — sign in to Uno in Uno Work.";
+  if (
+    code === "provider_unreachable" ||
+    code === "no_model" ||
+    code === "provider_not_configured"
+  ) {
+    return String(err.message);
+  }
+  if (code === "unreachable" || code === "no_token") {
+    return "This app can't reach the computer's AI right now.";
+  }
+  return String(err?.message || "The AI couldn't answer.");
+}
+
+/** @param {any} res @param {number} status @param {string} message */
+function endJson(res, status, message) {
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify({ error: { message } }));
+}
+
+/** @param {any} req @param {number} max @returns {Promise<string>} */
+function readRequest(req, max) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    /** @type {any[]} */
+    const chunks = [];
+    req.on("data", (/** @type {any} */ chunk) => {
+      size += chunk.length;
+      if (size > max) {
+        reject(new Error("too large"));
+        req.destroy?.();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", reject);
+  });
+}
+
+/** @type {Promise<string | null> | null} */
+let componentPromise = null;
+/**
+ * The browser component (uno-chat.js) as text: next to this file, else the
+ * copy the daemon keeps in ~/.uno/sdk/js/. Null when neither is there.
+ * @returns {Promise<string | null>}
+ */
+export function chatComponentSource() {
+  if (!componentPromise) {
+    componentPromise = (async () => {
+      const node = await nodeBuiltins();
+      if (!node) return null;
+      const candidates = [];
+      try {
+        const { fileURLToPath } = await import("node:url");
+        candidates.push(
+          node.path.join(node.path.dirname(fileURLToPath(import.meta.url)), "uno-chat.js"),
+        );
+      } catch {
+        // not a file: URL (bundled)
+      }
+      candidates.push(node.path.join(node.os.homedir(), ".uno", "sdk", "js", "uno-chat.js"));
+      for (const file of candidates) {
+        try {
+          return await node.fs.promises.readFile(file, "utf8");
+        } catch {
+          // next
+        }
+      }
+      return null;
+    })();
+    componentPromise.then((v) => {
+      if (v === null) componentPromise = null;
+    });
+  }
+  return componentPromise;
 }
 
 const DEFAULT_TYPE = "application/octet-stream";
@@ -751,6 +956,8 @@ export const ask = (input, opts) => client().ask(input, opts);
 export const stream = (input, opts) => client().stream(input, opts);
 /** @type {any} */
 export const chat = (body, opts) => client().chat(body, opts);
+/** A handler for `<uno-chat>` on the default client — see createClient().chatHandler. */
+export const chatHandler = (/** @type {ChatHandlerOptions} */ opts) => client().chatHandler(opts);
 /** @type {any} */
 export const transcribe = (file, opts) => client().transcribe(file, opts);
 /** @type {any} */

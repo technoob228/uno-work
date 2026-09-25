@@ -4,6 +4,7 @@
  * from disk, nothing to download.
  *
  *   ~/.uno/sdk/js/uno-app.mjs  (+ uno-app.d.ts, package.json → `npm i ~/.uno/sdk/js`)
+ *   ~/.uno/sdk/js/uno-chat.js  (the <uno-chat> web component; also next to uno_app.py)
  *   ~/.uno/sdk/python/uno_app.py
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -31,7 +32,10 @@ export function sdkFiles(): ReadonlyArray<readonly [string, string]> {
     // TypeScript looks for `.d.mts` next to an `.mjs` imported by path.
     ["js/uno-app.d.mts", APP_SDK_BUNDLE.jsTypes],
     ["js/package.json", SDK_JS_PACKAGE_JSON],
+    // <uno-chat>: served to the browser by an app's backend (chatHandler / chat_component_js).
+    ["js/uno-chat.js", APP_SDK_BUNDLE.chatComponent],
     ["python/uno_app.py", APP_SDK_BUNDLE.python],
+    ["python/uno-chat.js", APP_SDK_BUNDLE.chatComponent],
   ];
 }
 

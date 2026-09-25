@@ -8,6 +8,7 @@ import {
   catalogIconUrl,
   parseAppCategories,
   parseAppTemplates,
+  parseTemplateAi,
   parseInstalledApps,
   readComputerActivity,
   readComputerApps,
@@ -1096,5 +1097,25 @@ describe("App Store storefront fields", () => {
       { id: "developer", name: "For developers", technical: true },
     ]);
     expect(parseAppCategories({ templates: [] })).toEqual([]);
+  });
+});
+
+describe("parseTemplateAi", () => {
+  it("reads the catalog's ai: true, an object in either spelling, nothing otherwise", () => {
+    expect(parseTemplateAi(true)).toEqual({ chat: true, tasks: false, limitUsd: null });
+    expect(parseTemplateAi({ chat: true, tasks: true, limit_usd: 5 })).toEqual({
+      chat: true,
+      tasks: true,
+      limitUsd: 5,
+    });
+    expect(parseTemplateAi({ tasks: true, limitUsd: -1 })).toEqual({
+      chat: false,
+      tasks: true,
+      limitUsd: null,
+    });
+    expect(parseTemplateAi({ chat: false })).toBeNull();
+    expect(parseTemplateAi(undefined)).toBeNull();
+    const [t] = parseAppTemplates({ templates: [{ id: "notetaker", ai: { chat: true } }] });
+    expect(t?.ai).toEqual({ chat: true, tasks: false, limitUsd: null });
   });
 });

@@ -12,7 +12,10 @@ describe("Settings → Apps spending lines", () => {
       tasksSpentUsd: 0.4,
       limitUsd: 1,
     };
-    expect(appUsageLine(app)).toBe("Digest used $0.65 of $1");
+    expect(appUsageLine(app)).toBe("Digest used $0.65 of $1 this month");
+    expect(appUsageLine({ ...app, lifetimeSpentUsd: 4.2 })).toBe(
+      "Digest used $0.65 of $1 this month ($4.20 in all)",
+    );
     expect(appSpendBreakdown(app)).toBe("answers $0.25, jobs $0.40");
     expect(appSpendBreakdown({ tasks: false, chatSpentUsd: 0.1, tasksSpentUsd: 0 })).toBeNull();
   });
