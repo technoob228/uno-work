@@ -1,11 +1,12 @@
 /**
  * Apps mode of the sidebar: every app of the computer — from the App Store,
  * made by the person or by Uno, or found running — with a live status dot. A
- * click opens it inside Uno; hover offers "Beside a chat" and Pin. Terminal
- * and the App Store sit at the bottom, like fixed items of a dock.
+ * click opens it inside Uno; hover offers "Beside a chat" and Pin. Uno Drive,
+ * Terminal and the App Store sit at the bottom, like fixed items of a dock.
  */
 import { useNavigate } from "@tanstack/react-router";
 import {
+  HardDriveIcon,
   PanelRightIcon,
   PinIcon,
   PinOffIcon,
@@ -60,6 +61,14 @@ export const SidebarAppsList = memo(function SidebarAppsList() {
       )}
 
       <div className="mt-auto flex flex-col gap-px border-t border-border/60 pt-1">
+        <FixedRow
+          icon={<HardDriveIcon className="size-4 text-sky-500" />}
+          label="Uno Drive"
+          onClick={() => {
+            close();
+            void navigate({ to: "/drive" });
+          }}
+        />
         <FixedRow
           icon={<SquareTerminalIcon className="size-4" />}
           label="Terminal"

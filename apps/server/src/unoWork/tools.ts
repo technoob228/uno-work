@@ -988,8 +988,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         paths: {
           type: "array",
           items: { type: "string", minLength: 1 },
-          minItems: 1,
           maxItems: 100,
+          description: "Files or folders on this computer, e.g. ~/Documents/report.pdf.",
         },
         folder: { type: "string", maxLength: 1024 },
       },
@@ -1012,6 +1012,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         const raw = str(args, "folder")?.trim().replace(/^\/+/, "") ?? "";
         const folder = raw && !raw.endsWith("/") ? `${raw}/` : raw;
         const paths = (args["paths"] as string[]).map((item) => resolveUserPath(item, deps));
+        if (paths.length === 0) return yield* toolError("Name at least one file or folder.");
         const result = yield* asToolError(
           drive.cloudCopyToCloud({
             paths,

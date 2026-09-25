@@ -151,6 +151,42 @@ function recorded(p) {
   return JSON.parse(lines.join("\n"));
 }
 
+/**
+ * Uno Drive: with DRIVE_STAND_URL + DRIVE_STAND_KEY the /api/v1/drive* calls
+ * go to a real local fishcode (same account API as app.uno4.work's
+ * /_account); otherwise a small fixture.
+ */
+async function drive(req, res, p) {
+  const stand = process.env.DRIVE_STAND_URL;
+  if (stand) {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const upstream = await fetch(stand.replace(/\/+$/, "") + p, {
+      method: req.method,
+      headers: {
+        Authorization: `Bearer ${process.env.DRIVE_STAND_KEY ?? ""}`,
+        "Content-Type": "application/json",
+      },
+      ...(req.method === "GET" ? {} : { body: Buffer.concat(chunks) }),
+    });
+    res.writeHead(upstream.status, { "Content-Type": "application/json" });
+    return res.end(await upstream.text());
+  }
+  if (p === "/api/v1/drive") {
+    return send(res, 200, {
+      bucket_id: 9,
+      bucket_name: "drive",
+      used_bytes: 1024 ** 2,
+      quota_bytes: 25 * 1024 ** 3,
+      telegram: { shared_bot: "get_uno_bot", shared_bot_ready: true, own_bot: null, own_bots_available: true, links: [], download_limit_bytes: 20 << 20 },
+    });
+  }
+  if (p.startsWith("/api/v1/drive/recent")) {
+    return send(res, 200, { files: [{ key: "Telegram/2026-09/contract.pdf", name: "contract.pdf", size: 81234, last_modified: "2026-09-24T10:00:00Z" }] });
+  }
+  return send(res, 404, { error: "NOT_IN_MOCK", path: p });
+}
+
 function account(req, res, p) {
   if (req.headers["x-uno-account"] !== "1") return send(res, 403, { error: "CSRF" });
   const GET = req.method === "GET";
@@ -243,7 +279,11 @@ http
   .createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (url.pathname.startsWith("/_account/")) {
-      return account(req, res, url.pathname.slice("/_account".length));
+      const accountPath = url.pathname.slice("/_account".length);
+      if (accountPath.startsWith("/api/v1/drive") && req.headers["x-uno-account"] === "1") {
+        return void drive(req, res, accountPath + url.search);
+      }
+      return account(req, res, accountPath);
     }
     if (url.pathname === "/logout") {
       res.writeHead(302, { Location: "/" });

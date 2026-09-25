@@ -224,7 +224,9 @@ export function CloudBrowser({
         >
           {bucketId !== null ? (
             <>
-              <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
+              {embedded && !embedded.leading ? null : (
+                <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
+              )}
               <button
                 type="button"
                 onClick={() => onNavigate(bucketId, "")}

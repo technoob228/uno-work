@@ -153,11 +153,10 @@ export function DriveView() {
               : "Your Cloud storage"}
           </p>
         </div>
-        <div className="relative ml-auto w-full max-w-xs">
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+        <div className="ml-auto flex w-full max-w-xs items-center gap-1.5">
+          <SearchIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <Input
             type="search"
-            className="pl-7"
             placeholder="Search Uno Drive"
             aria-label="Search Uno Drive"
             value={query}
@@ -168,14 +167,14 @@ export function DriveView() {
             }}
           />
           {query ? (
-            <button
-              type="button"
+            <Button
+              size="icon-xs"
+              variant="ghost"
               aria-label="Clear search"
               onClick={() => setQuery("")}
-              className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             >
-              <XIcon className="size-4" />
-            </button>
+              <XIcon />
+            </Button>
           ) : null}
         </div>
       </div>
