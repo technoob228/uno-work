@@ -28,7 +28,7 @@ If the tools are missing, the same guides are at `GET $UNO_WORK_BRIDGE_URL/api/u
 
 1. Build it in `~/projects/<id>`, listening on `0.0.0.0:<port>`.
 2. Call `app_register` (name, emoji icon, port, command, cwd). Uno starts it within ~20 s and after every reboot; don't start a second copy.
-3. AI, cloud files or notifications inside the app go through the Uno App SDK (`"ai"`, `"storage"`, `"notify"` in the manifest), never an API key. Read `uno_guide("app-sdk")` first.
+3. AI, cloud files or notifications inside the app go through the Uno App SDK (`"ai"`, `"storage"`, `"notify"` in the manifest), never an API key. Read `uno_guide("app-sdk")` first. The person picks where an app's AI answers come from (Uno AI, AI on this computer, their own key) in Settings, Apps: write against the SDK with model `default`, never hard-code a provider. A chat inside the app is one `<uno-chat>` tag; guard it with the app's sign-in when the app is on the internet.
 4. Widget: serve a small page (about 300x200 px, no header) at `/widget`, then `app_add_widget`. Tell the person: Home, then Customize, then Add widget.
 5. Finish with `open_in_panel` (appId) and one `notify` when the work is done.
 

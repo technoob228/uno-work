@@ -81,7 +81,10 @@ export function buildUnoWorkGuide(
         section(apps, "Apps on this computer"),
       ].join("\n\n");
     case "app-sdk":
-      return section(apps, "Apps that use AI");
+      return [
+        section(apps, "Apps that use AI"),
+        section(apps, "Where an app's AI comes from"),
+      ].join("\n\n");
     case "widgets":
       return [
         "Add the widget with `app_add_widget` (it updates the manifest below).",
