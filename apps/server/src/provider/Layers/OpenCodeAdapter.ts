@@ -14,6 +14,7 @@ import {
   type UserInputQuestion,
   UNO_GATEWAY_BASE_URL,
 } from "@t3tools/contracts";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Cause, Deferred, Effect, Exit, Option, Queue, Random, Ref, Scope, Stream } from "effect";
@@ -47,9 +48,25 @@ import {
   toOpenCodeQuestionAnswers,
   type OpenCodeServerConnection,
 } from "../opencodeRuntime.ts";
+import {
+  ensureOpenCodeSessionEnvFiles,
+  OPENCODE_SESSION_ENV_DIR_ENV,
+  type OpenCodeSessionEnvPaths,
+  removeOpenCodeSessionEnv,
+  withOpenCodeSessionEnvPlugin,
+  writeOpenCodeSessionEnv,
+} from "../opencodeSessionEnv.ts";
+import { makeSessionEventHub, type SessionEventHub } from "../sessionEventHub.ts";
+import { makeSharedProcessPool } from "../sharedProcessPool.ts";
 
 const PROVIDER = ProviderDriverKind.make("opencode");
 const OPENCODE_STALE_TURN_WAIT = "2 seconds";
+/**
+ * How long a shared OpenCode server outlives its last session. Covers a
+ * thread restarting its session (runtime mode change, resume after an error)
+ * without a cold start; short, because an idle server is 200+ MB of RAM.
+ */
+const DEFAULT_SHARED_SERVER_LINGER_MS = 15_000;
 const UNO_RUSSIA_GATEWAY_BASE_URL = `${UNO_GATEWAY_BASE_URL}/russia`;
 const UNO_IMAGE_CONTEXT_MAX_CHARS = 24_000;
 const UNO_FINAL_ANSWER_MARKER = "<uno_final_answer>";
@@ -75,6 +92,8 @@ interface OpenCodeSessionContext {
   session: ProviderSession;
   readonly client: OpencodeClient;
   readonly server: OpenCodeServerConnection;
+  /** Event fan-out of the session's server (shared with other threads when pooled). */
+  readonly events: SessionEventHub<OpenCodeSubscribedEvent>;
   readonly directory: string;
   readonly openCodeSessionId: string;
   readonly pendingPermissions: Map<string, PermissionRequest>;
@@ -134,6 +153,66 @@ export interface OpenCodeAdapterLiveOptions {
    * global stream is safe to consume for one session.
    */
   readonly eventSource?: "instance" | "global";
+  /**
+   * Serve every thread of this instance from one `opencode serve` process
+   * (per distinct server environment) instead of one process per thread.
+   * Per-thread variables (the bridge's thread token) reach the agent's shells
+   * through the session-env plugin (`opencodeSessionEnv.ts`); a per-thread
+   * `OPENCODE_CONFIG_CONTENT` (an app task's gateway label) gets its own
+   * server. Ignored with an external `serverUrl`.
+   */
+  readonly shareServer?: boolean;
+  /** Linger of an unused shared server; default {@link DEFAULT_SHARED_SERVER_LINGER_MS}. */
+  readonly sharedServerLingerMs?: number;
+}
+
+/**
+ * What a thread needs to find its OpenCode session again after the session
+ * was stopped (idle reaper, crash, daemon restart): OpenCode keeps sessions on
+ * disk, so a new server can continue the same conversation.
+ */
+interface OpenCodeResumeCursor {
+  readonly openCodeSessionId: string;
+  readonly directory: string;
+}
+
+export function readOpenCodeResumeCursor(cursor: unknown): OpenCodeResumeCursor | undefined {
+  if (!cursor || typeof cursor !== "object") return undefined;
+  const { openCodeSessionId, directory } = cursor as Record<string, unknown>;
+  return typeof openCodeSessionId === "string" &&
+    openCodeSessionId.length > 0 &&
+    typeof directory === "string"
+    ? { openCodeSessionId, directory }
+    : undefined;
+}
+
+/** Identity of a shared server: same binary + same environment = same process. */
+export function openCodeServerPoolKey(binaryPath: string, env: NodeJS.ProcessEnv): string {
+  const entries = Object.entries(env)
+    .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+    .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return createHash("sha256")
+    .update(JSON.stringify([binaryPath, entries]))
+    .digest("hex");
+}
+
+/**
+ * Splits a thread's env overlay into what must live in the server's own
+ * environment (a different `OPENCODE_CONFIG_CONTENT`) and what the plugin can
+ * hand to that thread's shells.
+ */
+export function splitOpenCodeSessionOverlay(overlay: Readonly<Record<string, string>>): {
+  readonly configContent: string | undefined;
+  readonly shellEnv: Record<string, string>;
+} {
+  const { OPENCODE_CONFIG_CONTENT: configContent, ...shellEnv } = overlay;
+  return { configContent, shellEnv };
+}
+
+function openCodeEventSessionId(event: OpenCodeSubscribedEvent): string | undefined {
+  if (!event || typeof event !== "object" || !("properties" in event)) return undefined;
+  const sessionId = (event.properties as { sessionID?: unknown } | undefined)?.sessionID;
+  return typeof sessionId === "string" ? sessionId : undefined;
 }
 
 function nowIso(): string {
@@ -943,6 +1022,107 @@ export function makeOpenCodeAdapter(
       options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
     const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ThreadId, OpenCodeSessionContext>();
+    const adapterScope = yield* Scope.Scope;
+
+    const openEventStream = (input: {
+      readonly baseUrl: string;
+      readonly serverPassword?: string | undefined;
+      readonly streamKey: string;
+      readonly signal: AbortSignal;
+    }): Effect.Effect<
+      Stream.Stream<OpenCodeSubscribedEvent, OpenCodeRuntimeError>,
+      OpenCodeRuntimeError
+    > => {
+      const client = openCodeRuntime.createOpenCodeSdkClient({
+        baseUrl: input.baseUrl,
+        directory: input.streamKey.startsWith("dir:")
+          ? input.streamKey.slice("dir:".length)
+          : serverConfig.cwd,
+        ...(input.serverPassword ? { serverPassword: input.serverPassword } : {}),
+      });
+      const toError = (operation: string) => (cause: unknown) =>
+        new OpenCodeRuntimeError({
+          operation,
+          detail: openCodeRuntimeErrorDetail(cause),
+          cause,
+        });
+      return eventSource === "global"
+        ? runOpenCodeSdk("global.event", () => client.global.event({ signal: input.signal })).pipe(
+            Effect.map((subscription) =>
+              Stream.fromAsyncIterable(subscription.stream, toError("global.event")).pipe(
+                Stream.map((envelope) => envelope.payload as OpenCodeSubscribedEvent),
+              ),
+            ),
+          )
+        : runOpenCodeSdk("event.subscribe", () =>
+            client.event.subscribe(undefined, { signal: input.signal }),
+          ).pipe(
+            Effect.map((subscription) =>
+              Stream.fromAsyncIterable(subscription.stream, toError("event.subscribe")),
+            ),
+          );
+    };
+
+    const makeEventHub = (baseUrl: string, serverPassword?: string) =>
+      makeSessionEventHub<OpenCodeSubscribedEvent, OpenCodeRuntimeError>({
+        open: (streamKey, signal) =>
+          openEventStream({ baseUrl, serverPassword, streamKey, signal }),
+        sessionIdOf: openCodeEventSessionId,
+        describeError: openCodeRuntimeErrorDetail,
+        callbackScope: adapterScope,
+      });
+
+    // Shared servers: one `opencode serve` per distinct environment, for all
+    // threads of this instance. Falls back to a server per thread when the
+    // session-env plugin can't be written (the thread token would be lost).
+    const sessionEnvPaths: OpenCodeSessionEnvPaths | undefined =
+      options?.shareServer && !openCodeSettings.serverUrl?.trim()
+        ? yield* Effect.try({
+            try: () => ensureOpenCodeSessionEnvFiles(serverConfig.stateDir),
+            catch: (cause) =>
+              new OpenCodeRuntimeError({
+                operation: "sessionEnv.setup",
+                detail: openCodeRuntimeErrorDetail(cause),
+                cause,
+              }),
+          }).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("opencode.shared-server.disabled", {
+                reason: "session-env plugin could not be written",
+                detail: error.detail,
+              }).pipe(Effect.as(undefined)),
+            ),
+          )
+        : undefined;
+    interface SharedOpenCodeServer {
+      readonly url: string;
+      readonly exitCode: Effect.Effect<number, never>;
+      readonly events: SessionEventHub<OpenCodeSubscribedEvent>;
+    }
+    const serverPool =
+      sessionEnvPaths !== undefined
+        ? yield* makeSharedProcessPool<string, SharedOpenCodeServer, OpenCodeRuntimeError>({
+            lingerMs: options?.sharedServerLingerMs ?? DEFAULT_SHARED_SERVER_LINGER_MS,
+            awaitExit: (server) => server.exitCode,
+          })
+        : undefined;
+    const startSharedServer = (binaryPath: string, environment: NodeJS.ProcessEnv) =>
+      Effect.gen(function* () {
+        const server = yield* openCodeRuntime.startOpenCodeServerProcess({
+          binaryPath,
+          environment,
+        });
+        yield* Effect.logInfo("opencode.shared-server.started", {
+          instanceId: boundInstanceId,
+          url: server.url,
+        });
+        const events = yield* makeEventHub(server.url);
+        return {
+          url: server.url,
+          exitCode: server.exitCode,
+          events,
+        } satisfies SharedOpenCodeServer;
+      });
 
     // Layer-level finalizer: when the adapter layer shuts down, stop every
     // session. Each session's `Scope.close` tears down its spawned OpenCode
@@ -1221,21 +1401,27 @@ export function makeOpenCodeAdapter(
       yield* completePromptIdle(context);
       const turnId = context.activeTurnId;
       sessions.delete(context.session.threadId);
-      // Emit lifecycle events BEFORE tearing down the scope. Both call sites
-      // run this inside a fiber forked via `Effect.forkIn(context.sessionScope)`;
+      // Emit lifecycle events BEFORE tearing down the scope. The exit watcher
+      // runs this inside a fiber forked via `Effect.forkIn(context.sessionScope)`;
       // closing that scope triggers the fiber-interrupt finalizer, so any
       // subsequent yield point would unwind and silently drop these emits.
-      yield* emit({
-        ...(yield* buildEventBase({
-          threadId: context.session.threadId,
-          turnId,
-        })),
-        type: "runtime.error",
-        payload: {
-          message,
-          class: "transport_error",
-        },
-      }).pipe(Effect.ignore);
+      //
+      // An idle thread loses nothing when its server goes away: the next
+      // message resumes the same OpenCode session (resume cursor). Only a
+      // thread with a turn in flight is told about the failure.
+      if (turnId !== undefined) {
+        yield* emit({
+          ...(yield* buildEventBase({
+            threadId: context.session.threadId,
+            turnId,
+          })),
+          type: "runtime.error",
+          payload: {
+            message,
+            class: "transport_error",
+          },
+        }).pipe(Effect.ignore);
+      }
       yield* emit({
         ...(yield* buildEventBase({
           threadId: context.session.threadId,
@@ -1244,7 +1430,7 @@ export function makeOpenCodeAdapter(
         type: "session.exited",
         payload: {
           reason: message,
-          recoverable: false,
+          recoverable: turnId === undefined,
           exitKind: "error",
         },
       }).pipe(Effect.ignore);
@@ -1675,76 +1861,22 @@ export function makeOpenCodeAdapter(
     });
 
     const startEventPump = Effect.fn("startEventPump")(function* (context: OpenCodeSessionContext) {
-      // One AbortController per session scope. The finalizer fires when
-      // the scope closes (explicit stop, unexpected exit, or layer
-      // shutdown) and cancels the in-flight `event.subscribe` fetch so
-      // the async iterable unwinds cleanly.
-      const eventsAbortController = new AbortController();
-      yield* Scope.addFinalizer(
-        context.sessionScope,
-        Effect.sync(() => eventsAbortController.abort()),
-      );
-
-      // Fibers forked into `context.sessionScope` are interrupted
-      // automatically when the scope closes — no bookkeeping required.
-      const subscribeOperation = eventSource === "global" ? "global.event" : "event.subscribe";
-      const subscribedEvents: Effect.Effect<
-        Stream.Stream<OpenCodeSubscribedEvent, OpenCodeRuntimeError>,
-        OpenCodeRuntimeError
-      > = eventSource === "global"
-        ? runOpenCodeSdk(subscribeOperation, () =>
-            context.client.global.event({ signal: eventsAbortController.signal }),
-          ).pipe(
-            Effect.map((subscription) =>
-              Stream.fromAsyncIterable(
-                subscription.stream,
-                (cause) =>
-                  new OpenCodeRuntimeError({
-                    operation: subscribeOperation,
-                    detail: openCodeRuntimeErrorDetail(cause),
-                    cause,
-                  }),
-              ).pipe(Stream.map((envelope) => envelope.payload as OpenCodeSubscribedEvent)),
-            ),
-          )
-        : runOpenCodeSdk(subscribeOperation, () =>
-            context.client.event.subscribe(undefined, {
-              signal: eventsAbortController.signal,
+      // The hub owns the SSE subscription (one per server and stream, shared
+      // by every session on that server); unsubscribing on scope close is the
+      // only per-session bookkeeping.
+      const unsubscribe = yield* context.events.subscribe({
+        streamKey: eventSource === "global" ? "global" : `dir:${context.directory}`,
+        sessionId: context.openCodeSessionId,
+        subscriber: {
+          onEvent: (event) => handleSubscribedEvent(context, event),
+          onClosed: (detail) =>
+            Effect.gen(function* () {
+              if (yield* Ref.get(context.stopped)) return;
+              yield* emitUnexpectedExit(context, detail);
             }),
-          ).pipe(
-            Effect.map((subscription) =>
-              Stream.fromAsyncIterable(
-                subscription.stream,
-                (cause) =>
-                  new OpenCodeRuntimeError({
-                    operation: subscribeOperation,
-                    detail: openCodeRuntimeErrorDetail(cause),
-                    cause,
-                  }),
-              ),
-            ),
-          );
-      yield* Effect.flatMap(subscribedEvents, (events) =>
-        events.pipe(Stream.runForEach((event) => handleSubscribedEvent(context, event))),
-      ).pipe(
-        Effect.exit,
-        Effect.flatMap((exit) =>
-          Effect.gen(function* () {
-            // Expected paths: caller aborted the fetch or the session
-            // has already been marked stopped. Treat as a clean exit.
-            if (eventsAbortController.signal.aborted || (yield* Ref.get(context.stopped))) {
-              return;
-            }
-            if (Exit.isFailure(exit)) {
-              yield* emitUnexpectedExit(
-                context,
-                openCodeRuntimeErrorDetail(Cause.squash(exit.cause)),
-              );
-            }
-          }),
-        ),
-        Effect.forkIn(context.sessionScope),
-      );
+        },
+      });
+      yield* Scope.addFinalizer(context.sessionScope, unsubscribe);
 
       if (!context.server.external && context.server.exitCode !== null) {
         yield* context.server.exitCode.pipe(
@@ -1773,46 +1905,134 @@ export function makeOpenCodeAdapter(
           sessions.delete(input.threadId);
         }
 
+        const resumeFrom = readOpenCodeResumeCursor(input.resumeCursor);
         const started = yield* Effect.gen(function* () {
           const sessionScope = yield* Scope.make();
           const startedExit = yield* Effect.exit(
             Effect.gen(function* () {
-              // The runtime binds the server's lifetime to the Scope.Scope
-              // we provide below — closing `sessionScope` kills the child
-              // process automatically. No manual `server.close()` needed.
               const bridgeOverlay =
                 options?.bridgeEnvironment?.({ threadId: input.threadId, cwd: directory }) ?? {};
-              const sessionEnvironment =
-                options?.environment || Object.keys(bridgeOverlay).length > 0
-                  ? { ...(options?.environment ?? process.env), ...bridgeOverlay }
-                  : undefined;
-              const server = yield* openCodeRuntime.connectToOpenCodeServer({
-                binaryPath,
-                serverUrl,
-                ...(sessionEnvironment ? { environment: sessionEnvironment } : {}),
-              });
+              let server: OpenCodeServerConnection;
+              let events: SessionEventHub<OpenCodeSubscribedEvent>;
+              let sessionShellEnv: Record<string, string> | undefined;
+              if (serverPool !== undefined && sessionEnvPaths !== undefined && !serverUrl?.trim()) {
+                // Shared server: the thread-specific variables go to the
+                // session-env plugin, everything else keys the pool.
+                const { configContent, shellEnv } = splitOpenCodeSessionOverlay(bridgeOverlay);
+                const baseEnvironment = options?.environment ?? process.env;
+                const serverEnvironment: NodeJS.ProcessEnv = {
+                  ...baseEnvironment,
+                  [OPENCODE_SESSION_ENV_DIR_ENV]: sessionEnvPaths.envDir,
+                };
+                for (const name of Object.keys(shellEnv)) delete serverEnvironment[name];
+                const serverConfigContent = withOpenCodeSessionEnvPlugin(
+                  configContent ?? baseEnvironment.OPENCODE_CONFIG_CONTENT,
+                  sessionEnvPaths.pluginUrl,
+                );
+                if (serverConfigContent !== undefined) {
+                  serverEnvironment.OPENCODE_CONFIG_CONTENT = serverConfigContent;
+                }
+                const lease = yield* serverPool.acquire(
+                  openCodeServerPoolKey(binaryPath, serverEnvironment),
+                  startSharedServer(binaryPath, serverEnvironment),
+                );
+                yield* Scope.addFinalizer(sessionScope, lease.release);
+                server = { url: lease.value.url, exitCode: lease.value.exitCode, external: false };
+                events = lease.value.events;
+                sessionShellEnv = shellEnv;
+              } else {
+                // The runtime binds the server's lifetime to the Scope.Scope
+                // we provide below — closing `sessionScope` kills the child
+                // process automatically. No manual `server.close()` needed.
+                const sessionEnvironment =
+                  options?.environment || Object.keys(bridgeOverlay).length > 0
+                    ? { ...(options?.environment ?? process.env), ...bridgeOverlay }
+                    : undefined;
+                server = yield* openCodeRuntime.connectToOpenCodeServer({
+                  binaryPath,
+                  serverUrl,
+                  ...(sessionEnvironment ? { environment: sessionEnvironment } : {}),
+                });
+                events = yield* makeEventHub(
+                  server.url,
+                  server.external && serverPassword ? serverPassword : undefined,
+                );
+              }
               const client = openCodeRuntime.createOpenCodeSdkClient({
                 baseUrl: server.url,
                 directory,
                 ...(server.external && serverPassword ? { serverPassword } : {}),
               });
-              const openCodeSession = yield* runOpenCodeSdk("session.create", () =>
-                client.session.create({
-                  title: `T3 Code ${input.threadId}`,
-                  permission: buildOpenCodePermissionRules(input.runtimeMode),
-                }),
-              );
-              if (!openCodeSession.data) {
+              const permission = buildOpenCodePermissionRules(input.runtimeMode);
+              // Resume: the same OpenCode session, if it still exists and
+              // belongs to this directory. Any failure falls back to a new
+              // session — the thread keeps working, only without history.
+              const resumed =
+                resumeFrom !== undefined && resumeFrom.directory === directory
+                  ? yield* runOpenCodeSdk("session.get", () =>
+                      client.session.get({ sessionID: resumeFrom.openCodeSessionId }),
+                    ).pipe(
+                      Effect.map((result) => result.data),
+                      Effect.tap((existing) =>
+                        existing
+                          ? runOpenCodeSdk("session.update", () =>
+                              // `permission` is accepted by the server but not
+                              // typed in SDK 1.3.x: the runtime mode may have
+                              // changed while the thread was stopped.
+                              client.session.update({
+                                sessionID: existing.id,
+                                permission,
+                              } as Parameters<typeof client.session.update>[0]),
+                            ).pipe(Effect.ignore({ log: true }))
+                          : Effect.void,
+                      ),
+                      Effect.catch((cause) =>
+                        Effect.logInfo("opencode.session.resume-failed", {
+                          threadId: input.threadId,
+                          openCodeSessionId: resumeFrom.openCodeSessionId,
+                          detail: cause.detail,
+                        }).pipe(Effect.as(undefined)),
+                      ),
+                    )
+                  : undefined;
+              const openCodeSession =
+                resumed ??
+                (yield* runOpenCodeSdk("session.create", () =>
+                  client.session.create({
+                    title: `T3 Code ${input.threadId}`,
+                    permission,
+                  }),
+                ).pipe(Effect.map((result) => result.data)));
+              if (!openCodeSession) {
                 return yield* new OpenCodeRuntimeError({
                   operation: "session.create",
                   detail: "OpenCode session.create returned no session payload.",
                 });
               }
+              if (sessionShellEnv !== undefined && sessionEnvPaths !== undefined) {
+                const envDir = sessionEnvPaths.envDir;
+                const sessionId = openCodeSession.id;
+                yield* Effect.try({
+                  try: () => writeOpenCodeSessionEnv(envDir, sessionId, sessionShellEnv),
+                  catch: (cause) =>
+                    new OpenCodeRuntimeError({
+                      operation: "session.env",
+                      detail: `Failed to write the session environment: ${openCodeRuntimeErrorDetail(cause)}`,
+                      cause,
+                    }),
+                });
+                yield* Scope.addFinalizer(
+                  sessionScope,
+                  Effect.sync(() => removeOpenCodeSessionEnv(envDir, sessionId)),
+                );
+              }
               return {
                 sessionScope,
                 server,
+                events,
                 client,
-                openCodeSession: openCodeSession.data,
+                openCodeSession,
+                resumed: resumed !== undefined,
               };
             }).pipe(Effect.provideService(Scope.Scope, sessionScope)),
           );
@@ -1847,6 +2067,10 @@ export function makeOpenCodeAdapter(
           cwd: directory,
           ...(input.modelSelection ? { model: input.modelSelection.model } : {}),
           threadId: input.threadId,
+          resumeCursor: {
+            openCodeSessionId: started.openCodeSession.id,
+            directory,
+          } satisfies OpenCodeResumeCursor,
           createdAt,
           updatedAt: createdAt,
         };
@@ -1855,6 +2079,7 @@ export function makeOpenCodeAdapter(
           session,
           client: started.client,
           server: started.server,
+          events: started.events,
           directory,
           openCodeSessionId: started.openCodeSession.id,
           pendingPermissions: new Map(),
@@ -1880,7 +2105,8 @@ export function makeOpenCodeAdapter(
           ...(yield* buildEventBase({ threadId: input.threadId })),
           type: "session.started",
           payload: {
-            message: "OpenCode session started",
+            message: started.resumed ? "OpenCode session resumed" : "OpenCode session started",
+            ...(started.resumed ? { resume: input.resumeCursor } : {}),
           },
         });
         yield* emit({
@@ -2224,6 +2450,8 @@ export function makeOpenCodeAdapter(
       provider: PROVIDER,
       capabilities: {
         sessionModelSwitch: "in-session",
+        sharesProcessAcrossSessions:
+          serverPool !== undefined || Boolean(openCodeSettings.serverUrl?.trim()),
       },
       startSession,
       sendTurn,

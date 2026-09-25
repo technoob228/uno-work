@@ -76,6 +76,7 @@ import {
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import { currentHarnessBudget } from "../harnessBudget.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("uno");
 /**
@@ -956,6 +957,9 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         // Without this the turn finishes on the server and the UI shows
         // "Working…" forever. See OpenCodeAdapterLiveOptions.eventSource.
         eventSource: "global",
+        // One uno-code server for all threads (per distinct config): a Bun
+        // process is 200–400 MB, a server per chat ran 2 GB boxes out of RAM.
+        shareServer: currentHarnessBudget().shareOpenCodeServer,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
       const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, processEnv);

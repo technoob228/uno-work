@@ -42,6 +42,7 @@ import {
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import { currentHarnessBudget } from "../harnessBudget.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("opencode");
 /**
@@ -138,6 +139,8 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
             ? bridge
             : { ...bridge, OPENCODE_CONFIG_CONTENT: configContent };
         },
+        // One `opencode serve` for all threads (see OpenCodeAdapterLiveOptions).
+        shareServer: currentHarnessBudget().shareOpenCodeServer,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
       const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, processEnv);

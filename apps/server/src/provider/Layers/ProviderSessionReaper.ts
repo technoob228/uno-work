@@ -11,6 +11,7 @@ import {
   type ProviderSessionReaperShape,
 } from "../Services/ProviderSessionReaper.ts";
 import { ProviderService } from "../Services/ProviderService.ts";
+import { currentHarnessBudget } from "../harnessBudget.ts";
 
 const DEFAULT_INACTIVITY_THRESHOLD_MS = 30 * 60 * 1000;
 const DEFAULT_ACTIVE_TURN_THRESHOLD_MS = 2 * 60 * 60 * 1000;
@@ -214,4 +215,17 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
 export const makeProviderSessionReaperLive = (options?: ProviderSessionReaperLiveOptions) =>
   Layer.effect(ProviderSessionReaper, makeProviderSessionReaper(options));
 
-export const ProviderSessionReaperLive = makeProviderSessionReaperLive();
+/**
+ * The live reaper: idle threshold and sweep interval follow the machine's
+ * harness budget (5 min on ≤4 GB machines, 15 min otherwise; see
+ * `harnessBudget.ts`). A stopped session resumes on the thread's next message.
+ */
+export const ProviderSessionReaperLive = Layer.unwrap(
+  Effect.sync(() => {
+    const budget = currentHarnessBudget();
+    return makeProviderSessionReaperLive({
+      inactivityThresholdMs: budget.inactivityThresholdMs,
+      sweepIntervalMs: budget.sweepIntervalMs,
+    });
+  }),
+);

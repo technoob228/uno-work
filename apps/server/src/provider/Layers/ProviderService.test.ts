@@ -1828,3 +1828,74 @@ validation.layer("ProviderServiceLive validation", (it) => {
     }),
   );
 });
+
+it.effect("live-process cap stops the least recently used idle session, which resumes later", () =>
+  Effect.gen(function* () {
+    const codex = makeFakeCodexAdapter();
+    const claude = makeFakeCodexAdapter(CLAUDE_AGENT_DRIVER);
+    const registry = makeAdapterRegistryMock({
+      [CODEX_DRIVER]: codex.adapter,
+      [CLAUDE_AGENT_DRIVER]: claude.adapter,
+    });
+    const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+      Layer.provide(SqlitePersistenceMemory),
+    );
+    const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
+    const providerLayer = makeProviderServiceLive({ maxLiveProcesses: 2 }).pipe(
+      Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
+      Layer.provide(directoryLayer),
+      Layer.provide(defaultServerSettingsLayer),
+      Layer.provide(AnalyticsService.layerTest),
+      Layer.provide(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+    );
+
+    yield* Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const startCodex = (threadId: string, resumeCursor?: unknown) =>
+        provider.startSession(asThreadId(threadId), {
+          provider: CODEX_DRIVER,
+          providerInstanceId: codexInstanceId,
+          threadId: asThreadId(threadId),
+          cwd: "/tmp/project-cap",
+          runtimeMode: "full-access",
+          ...(resumeCursor !== undefined ? { resumeCursor } : {}),
+        });
+
+      const oldest = yield* startCodex("thread-cap-oldest");
+      yield* sleep(5);
+      yield* startCodex("thread-cap-busy");
+      // A running turn is never evicted, even though it is not the newest.
+      codex.updateSession(asThreadId("thread-cap-busy"), (session) => ({
+        ...session,
+        status: "running",
+        activeTurnId: asTurnId("turn-busy"),
+      }));
+      yield* sleep(5);
+
+      // Third process on a cap of 2: the idle oldest one goes.
+      yield* provider.startSession(asThreadId("thread-cap-claude"), {
+        provider: CLAUDE_AGENT_DRIVER,
+        providerInstanceId: claudeAgentInstanceId,
+        threadId: asThreadId("thread-cap-claude"),
+        cwd: "/tmp/project-cap",
+        runtimeMode: "full-access",
+      });
+      assert.equal(yield* codex.adapter.hasSession(asThreadId("thread-cap-oldest")), false);
+      assert.equal(yield* codex.adapter.hasSession(asThreadId("thread-cap-busy")), true);
+      assert.equal(yield* claude.adapter.hasSession(asThreadId("thread-cap-claude")), true);
+
+      // The evicted thread comes back on its own conversation.
+      codex.startSession.mockClear();
+      yield* provider.sendTurn({
+        threadId: asThreadId("thread-cap-oldest"),
+        input: "still there?",
+        attachments: [],
+      });
+      assert.equal(codex.startSession.mock.calls.length, 1);
+      assert.deepEqual(codex.startSession.mock.calls[0]?.[0]?.resumeCursor, oldest.resumeCursor);
+      // Recovery obeys the cap too: the idle Claude thread made room.
+      assert.equal(yield* claude.adapter.hasSession(asThreadId("thread-cap-claude")), false);
+      assert.equal(yield* codex.adapter.hasSession(asThreadId("thread-cap-busy")), true);
+    }).pipe(Effect.provide(providerLayer));
+  }).pipe(Effect.provide(NodeServices.layer)),
+);

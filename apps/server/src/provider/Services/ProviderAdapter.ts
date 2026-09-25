@@ -30,6 +30,12 @@ export interface ProviderAdapterCapabilities {
    * Declares whether changing the model on an existing session is supported.
    */
   readonly sessionModelSwitch: ProviderSessionModelSwitchMode;
+  /**
+   * Sessions of this adapter share one harness process (OpenCode shared
+   * server), so stopping one of them frees no memory. Default: a process per
+   * session. Read by the live-harness cap (`harnessBudget.ts`).
+   */
+  readonly sharesProcessAcrossSessions?: boolean;
 }
 
 export interface ProviderThreadTurnSnapshot {
