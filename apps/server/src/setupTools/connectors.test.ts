@@ -23,12 +23,12 @@ const CONSOLE_LIST = {
       connected_at: "2026-09-25T09:00:00Z",
       tools: [
         {
-          name: "drive_search",
+          name: "gdrive_search",
           description: "Search files.",
           input_schema: { type: "object", properties: { query: { type: "string" } } },
         },
         {
-          name: "drive_create",
+          name: "gdrive_create",
           description: "Create a file.",
           input_schema: { type: "object", properties: { name: { type: "string" } } },
         },
@@ -216,12 +216,12 @@ describe("connectors client", () => {
           : { status: 200, body: CONSOLE_LIST },
     });
     const tools = await connectors.tools();
-    expect(tools.map((tool) => tool.name)).toEqual(["drive_search", "drive_create"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["gdrive_search", "gdrive_create"]);
     expect(tools[0]).toMatchObject({ provider: "google-drive", providerName: "Google Drive" });
 
     const result = await connectors.call({
       provider: "google-drive",
-      tool: "drive_search",
+      tool: "gdrive_search",
       arguments: { query: "brand" },
     });
     expect(result).toEqual({
@@ -232,7 +232,7 @@ describe("connectors client", () => {
       method: "POST",
       url: "https://console.test/api/v1/boxes/42/work/connectors/google-drive/call",
       auth: "Bearer uno_agt_machine",
-      body: { tool: "drive_search", arguments: { query: "brand" } },
+      body: { tool: "gdrive_search", arguments: { query: "brand" } },
     });
   });
 
@@ -277,7 +277,7 @@ describe("connector tools in the uno-work MCP server", () => {
           ? {
               status: 200,
               body:
-                (call.body as { tool: string }).tool === "drive_create"
+                (call.body as { tool: string }).tool === "gdrive_create"
                   ? { content: [{ type: "text", text: "Created brief.md" }], is_error: false }
                   : { content: [{ type: "text", text: "quota exceeded" }], is_error: true },
             }
@@ -300,9 +300,9 @@ describe("connector tools in the uno-work MCP server", () => {
       .result.tools;
     const names = tools.map((tool) => tool.name);
     expect(names).toContain("computer_status");
-    expect(names).toContain("drive_search");
+    expect(names).toContain("gdrive_search");
     expect(names).not.toContain("notion_search");
-    expect(tools.find((tool) => tool.name === "drive_search")).toMatchObject({
+    expect(tools.find((tool) => tool.name === "gdrive_search")).toMatchObject({
       inputSchema: { type: "object", properties: { query: { type: "string" } } },
       annotations: { readOnlyHint: true },
     });
@@ -317,15 +317,15 @@ describe("connector tools in the uno-work MCP server", () => {
         jsonrpc: "2.0",
         id: 2,
         method: "tools/call",
-        params: { name: "drive_create", arguments: { name: "brief.md" } },
+        params: { name: "gdrive_create", arguments: { name: "brief.md" } },
       }),
     );
-    expect(approvals).toEqual(["Google Drive: drive_create"]);
+    expect(approvals).toEqual(["Google Drive: gdrive_create"]);
     expect((outcome as { body: { result: unknown } }).body.result).toEqual({
       content: [{ type: "text", text: "Created brief.md" }],
       isError: false,
     });
-    expect(calls.at(-1)?.body).toEqual({ tool: "drive_create", arguments: { name: "brief.md" } });
+    expect(calls.at(-1)?.body).toEqual({ tool: "gdrive_create", arguments: { name: "brief.md" } });
   });
 
   it("runs reads without asking and passes the console's is_error through", async () => {
@@ -336,7 +336,7 @@ describe("connector tools in the uno-work MCP server", () => {
         jsonrpc: "2.0",
         id: 3,
         method: "tools/call",
-        params: { name: "drive_search", arguments: { query: "x" } },
+        params: { name: "gdrive_search", arguments: { query: "x" } },
       }),
     );
     expect(approvals).toEqual([]);
@@ -355,7 +355,7 @@ describe("connector tools in the uno-work MCP server", () => {
         jsonrpc: "2.0",
         id: 4,
         method: "tools/call",
-        params: { name: "drive_create", arguments: { name: "x" } },
+        params: { name: "gdrive_create", arguments: { name: "x" } },
       }),
     );
     expect((outcome as { body: { result: { isError: boolean } } }).body.result.isError).toBe(true);
@@ -364,7 +364,7 @@ describe("connector tools in the uno-work MCP server", () => {
 
   it("classifies write tools as changes", () => {
     for (const name of [
-      "drive_create",
+      "gdrive_create",
       "gmail_create_draft",
       "notion_append",
       "notion_create_page",
@@ -373,7 +373,7 @@ describe("connector tools in the uno-work MCP server", () => {
     ]) {
       expect(connectorToolLevel(name), name).toBe("change");
     }
-    for (const name of ["drive_search", "drive_read", "gmail_search", "calendar_list_events"]) {
+    for (const name of ["gdrive_search", "gdrive_read", "gmail_search", "calendar_list_events"]) {
       expect(connectorToolLevel(name), name).toBe("safe");
     }
   });

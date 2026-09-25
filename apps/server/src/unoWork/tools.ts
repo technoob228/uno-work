@@ -1801,7 +1801,7 @@ function askPerson(
 
 /** Connector tools that change something in the person's account. */
 const CONNECTOR_WRITE_TOOLS: ReadonlySet<string> = new Set([
-  "drive_create",
+  "gdrive_create",
   "gmail_create_draft",
   "notion_append",
   "notion_create_page",
