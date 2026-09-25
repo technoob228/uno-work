@@ -116,6 +116,15 @@ const makeManagerConnectorRepository = Effect.gen(function* () {
       `,
   });
 
+  const deleteRow = SqlSchema.void({
+    Request: ConnectorKeyRequest,
+    execute: ({ projectId, kind }) =>
+      sql`
+        DELETE FROM manager_assistant_connectors
+        WHERE project_id = ${projectId} AND kind = ${kind}
+      `,
+  });
+
   const getThreadRow = SqlSchema.findOneOption({
     Request: Schema.Struct({
       projectId: ProjectId,
@@ -362,6 +371,9 @@ const makeManagerConnectorRepository = Effect.gen(function* () {
       withRepositoryError("upsert"),
     );
 
+  const remove: ManagerConnectorRepositoryShape["remove"] = (input) =>
+    deleteRow(input).pipe(withRepositoryError("remove"));
+
   const getThreadForChat: ManagerConnectorRepositoryShape["getThreadForChat"] = (input) =>
     getThreadRow(input).pipe(
       withRepositoryError("getThreadForChat"),
@@ -436,6 +448,7 @@ const makeManagerConnectorRepository = Effect.gen(function* () {
     get,
     listByKind,
     upsert,
+    remove,
     getThreadForChat,
     listChatThreadIds,
     setThreadForChat,
