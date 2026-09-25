@@ -142,7 +142,12 @@ function RootRouteView() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const context = Route.useRouteContext();
   const { authGateState } = context;
-  const needsOnboarding = "needsOnboarding" in context && context.needsOnboarding === true;
+  // The context is computed when the app loads; finishing the welcome screen
+  // flips the live setting, which wins (otherwise the first navigation after
+  // the welcome bounced back to it).
+  const onboardingCompleted = useSettings((settings) => settings.onboardingCompleted);
+  const needsOnboarding =
+    "needsOnboarding" in context && context.needsOnboarding === true && !onboardingCompleted;
   const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
 
   useEffect(() => {
