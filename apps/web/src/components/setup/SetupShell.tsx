@@ -24,12 +24,15 @@ export interface SetupPrimaryAction {
 
 export function SetupFrame({
   title,
+  icon = true,
   progress,
   headerAction,
   children,
   footer,
 }: {
   title: string;
+  /** The sparkle before the title (the steps have it, the welcome screen doesn't). */
+  icon?: boolean;
   /** 0..1, or null for no bar. */
   progress: number | null;
   headerAction?: ReactNode;
@@ -41,7 +44,7 @@ export function SetupFrame({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden">
         <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 sm:px-5">
           <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-          <SparklesIcon className="size-4 text-muted-foreground" aria-hidden />
+          {icon ? <SparklesIcon className="size-4 text-muted-foreground" aria-hidden /> : null}
           <span className="truncate text-sm font-medium">{title}</span>
           <div className="ml-auto flex items-center gap-1">{headerAction}</div>
         </header>
@@ -159,8 +162,12 @@ export function SetupShell({
               Back
             </Button>
           ) : step === "ai" ? (
-            <Button size="sm" variant="ghost" onClick={() => void navigate({ to: "/" })}>
-              Later
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void navigate({ to: "/setup", search: { step: "welcome" } })}
+            >
+              Back
             </Button>
           ) : null}
           <span className="flex-1" />

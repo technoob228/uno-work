@@ -1,22 +1,33 @@
 /**
- * Step 6 — message the computer from Telegram or Slack. The same connectors
- * as the Uno chat's Connect menu and its settings page (the assistant's own
- * Telegram bot and Slack app, `/api/manager/assistant/*`), walked through one
- * step at a time: make the bot → paste its token → say hi → check. Messages
- * from the owner's chat go to the setup project when there is one.
+ * Step 6 — message the computer from Telegram or Slack, through the Uno
+ * assistant's connectors (`/api/manager/assistant/*`).
+ *
+ * Telegram, the way the mockup has it: Uno's own bot (@get_uno_bot) — a QR
+ * code and a link; pressing Start in Telegram links the chat to this computer
+ * (the console relays that chat's messages to this computer only). No
+ * BotFather, no tokens. A bot of your own stays one click away ("Use your own
+ * bot instead"), and is what shows when the shared bot isn't available here
+ * (not a cloud computer, or an older console).
+ *
+ * Slack: "Add to Slack" — Uno's Slack app, installed with Slack's own consent
+ * screen; the console relays the workspace's events to this computer. Until
+ * that app is live, "Connect your own Slack app" (manifest + two tokens).
+ *
+ * New chats' messages go to the setup's project when there is one.
  */
 import {
   ASSISTANT_PROJECT_ID,
   type EnvironmentId,
   type ManagerAssistantSummary,
+  type ManagerTelegramConnectorStatus,
   type ProjectId,
 } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { CheckIcon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { CopyIcon, ExternalLinkIcon, Loader2Icon, RefreshCwIcon } from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
-import { telegramChannelState, slackChannelState } from "../../../assistant/assistantChat.logic";
+import { slackChannelState, telegramChannelState } from "../../../assistant/assistantChat.logic";
 import { usePrimaryEnvironmentId } from "../../../environments/primary";
 import {
   ensureHelper,
@@ -25,67 +36,31 @@ import {
   saveAssistantTelegram,
   upsertConnectorBinding,
 } from "../../../lib/managerApi";
+import {
+  connectSharedTelegram,
+  getSlackInstall,
+  openAuthWindow,
+  removeSlackInstall,
+  startSlackInstall,
+  type SharedTelegramLink,
+} from "../../../lib/setupApi";
 import { cn } from "../../../lib/utils";
-import { parseTelegramChatId, splitIdList } from "../../helper/telegramPageLogic";
+import { TelegramWizard } from "../../assistant/ConnectChannelDialog";
 import { openInstallDocs } from "../../onboarding/harnessInstallLinks";
 import { Button } from "../../ui/button";
-import { Input } from "../../ui/input";
 import { QRCodeSvg } from "../../ui/qr-code";
+import { toastManager } from "../../ui/toast";
 import { SlackBrandMark, TelegramMark } from "../brandMarks";
-import { ConnectedBadge, SetupHeading, SetupNote, SetupShell } from "../SetupShell";
+import { ConnectedBadge, SetupHeading, SetupNote, SetupShell, SoonBadge } from "../SetupShell";
+import { SlackGuide } from "../SlackGuide";
 import { useSetupNavigation } from "../useSetupNavigation";
 import { useSetupProgress } from "../useSetupProgress";
 
-/**
- * Slack's "create from manifest" link, prefilled. Mirrors
- * docs/slack-app-manifest.yaml (Socket Mode bot; keep the two in step).
- */
-const SLACK_MANIFEST = {
-  display_information: {
-    name: "Uno",
-    description: "Your Uno computer, in Slack.",
-    background_color: "#101014",
-  },
-  features: { bot_user: { display_name: "Uno", always_online: true } },
-  oauth_config: {
-    scopes: {
-      bot: [
-        "app_mentions:read",
-        "chat:write",
-        "im:history",
-        "im:read",
-        "im:write",
-        "mpim:history",
-        "channels:history",
-        "groups:history",
-        "users:read",
-        "files:read",
-      ],
-    },
-  },
-  settings: {
-    event_subscriptions: {
-      bot_events: [
-        "app_mention",
-        "message.im",
-        "message.mpim",
-        "message.channels",
-        "message.groups",
-      ],
-    },
-    interactivity: { is_enabled: false },
-    org_deploy_enabled: false,
-    socket_mode_enabled: true,
-    token_rotation_enabled: false,
-  },
-};
-export const SLACK_NEW_APP_URL = `https://api.slack.com/apps?new_app=1&manifest_json=${encodeURIComponent(
-  JSON.stringify(SLACK_MANIFEST),
-)}`;
+const SUMMARY_KEY = ["uno-setup", "assistant"] as const;
 
-function useAssistantSummary(environmentId: EnvironmentId | null) {
+function useAssistantSummary(environmentId: EnvironmentId | null, fast: boolean) {
   return useQuery({
-    queryKey: ["uno-setup", "assistant", environmentId],
+    queryKey: [...SUMMARY_KEY, environmentId],
     queryFn: async (): Promise<ManagerAssistantSummary> => {
       try {
         return await getAssistant({
@@ -97,385 +72,38 @@ function useAssistantSummary(environmentId: EnvironmentId | null) {
       }
     },
     enabled: environmentId !== null,
-    // While a bot is connecting, keep checking so "Connected as @…" shows up by itself.
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      if (!data) return false;
-      const connecting =
-        (data.telegram.configured && data.telegram.health === null && !data.telegram.lastError) ||
-        (data.slack.configured && data.slack.botUserName === null && !data.slack.lastError);
-      return connecting ? 3000 : false;
-    },
+    refetchInterval: fast ? 2500 : false,
   });
 }
 
-function GuideStep({
-  n,
-  title,
-  done,
-  active,
-  children,
-}: {
-  n: number;
-  title: string;
-  done: boolean;
-  active: boolean;
-  children?: ReactNode;
-}) {
-  return (
-    <li className={cn("flex gap-3", !active && !done && "opacity-50")}>
-      <span
-        className={cn(
-          "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
-          done ? "bg-primary text-primary-foreground" : "bg-primary/10 text-primary",
-        )}
-      >
-        {done ? <CheckIcon className="size-3" strokeWidth={3} /> : n}
-      </span>
-      <div className="min-w-0 flex-1 text-sm">
-        <div className="font-medium">{title}</div>
-        {active ? <div className="mt-1.5 flex flex-col gap-2">{children}</div> : null}
-      </div>
-    </li>
-  );
+/** The connector talks through Uno's shared bot (a relay token, not a BotFather token). */
+export function isSharedTelegram(telegram: ManagerTelegramConnectorStatus): boolean {
+  return (telegram as { readonly shared?: boolean }).shared === true;
 }
 
-function errorText(cause: unknown, fallback: string): string {
-  return cause instanceof Error ? cause.message : fallback;
+export function telegramConnected(telegram: ManagerTelegramConnectorStatus): boolean {
+  return telegramChannelState(telegram) === "on" && telegram.allowedChatIds.length > 0;
 }
 
-function TelegramGuide({
-  environmentId,
-  summary,
-  projectId,
-  projectName,
-  onChanged,
-}: {
-  environmentId: EnvironmentId;
-  summary: ManagerAssistantSummary;
-  projectId: ProjectId | null;
-  projectName: string | null;
-  onChanged: () => void;
-}) {
-  const telegram = summary.telegram;
-  const [token, setToken] = useState("");
-  const [chatId, setChatId] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const state = telegramChannelState(telegram);
-  const hasToken = telegram.configured;
-  const hasChat = telegram.allowedChatIds.length > 0;
-  const bot = telegram.botUsername;
-  const botLink = bot ? `https://t.me/${bot}` : null;
-
-  const save = async (input: { botToken?: string; allowedChatIds?: ReadonlyArray<string> }) => {
-    setPending(true);
-    setError(null);
-    try {
-      await saveAssistantTelegram({
-        environmentId,
-        projectId: summary.projectId,
-        ...(input.botToken ? { botToken: input.botToken } : {}),
-        allowedChatIds: input.allowedChatIds ?? telegram.allowedChatIds,
-        enabled: true,
-        defaultModelSelection: telegram.defaultModelSelection,
-        addressing: telegram.addressing,
-      });
-      onChanged();
-      return true;
-    } catch (cause) {
-      setError(errorText(cause, "Couldn't save Telegram."));
-      return false;
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const connectToken = async () => {
-    const value = token.trim();
-    if (!/^\d+:[\w-]{20,}$/.test(value)) {
-      setError("A bot token looks like 123456789:AAE… — copy the whole line from BotFather.");
-      return;
-    }
-    if (await save({ botToken: value })) setToken("");
-  };
-
-  const addChat = async () => {
-    const id = parseTelegramChatId(chatId);
-    if (id === null) {
-      setError("The chat id is the number your bot sent back, e.g. 128841517.");
-      return;
-    }
-    const ok = await save({ allowedChatIds: [...new Set([...telegram.allowedChatIds, id])] });
-    if (!ok) return;
-    setChatId("");
-    if (projectId) {
-      await upsertConnectorBinding({
-        environmentId,
-        kind: "telegram",
-        chatId: id,
-        connectorProjectId: summary.projectId,
-        target: { kind: "project", projectId },
-        notifyOnComplete: true,
-      }).catch(() => undefined);
-    }
-  };
-
-  if (hasToken && hasChat && state === "on") {
-    return (
-      <div className="flex flex-col gap-3">
-        <ConnectedBadge>Connected{bot ? ` as @${bot}` : ""}</ConnectedBadge>
-        <p className="text-sm text-muted-foreground">
-          Write to {bot ? `@${bot}` : "your bot"} like to a colleague.{" "}
-          {projectName ? `Messages go to ${projectName}.` : "Uno picks the project."}
-        </p>
-        {botLink ? (
-          <Button
-            size="sm"
-            variant="outline"
-            className="self-start"
-            onClick={() => openInstallDocs(botLink)}
-          >
-            <ExternalLinkIcon className="size-3.5" />
-            Open @{bot}
-          </Button>
-        ) : null}
-      </div>
-    );
+/** Why the shared bot can't be used here, in plain words; null = it can. */
+export function sharedTelegramProblem(cause: unknown): string {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  if (/not_cloud_computer/.test(message)) {
+    return "Uno’s bot talks to cloud computers. On this one, use a bot of your own:";
   }
-
-  return (
-    <div className="flex flex-col gap-3">
-      <ol className="flex flex-col gap-4">
-        <GuideStep n={1} title="Make a bot in Telegram" done={hasToken} active={!hasToken}>
-          <p className="text-muted-foreground">
-            Open @BotFather, send <code className="rounded bg-muted px-1">/newbot</code> and pick a
-            name. It gives you a token.
-          </p>
-          <Button
-            size="sm"
-            variant="outline"
-            className="self-start"
-            onClick={() => openInstallDocs("https://t.me/BotFather")}
-          >
-            <ExternalLinkIcon className="size-3.5" />
-            Open @BotFather
-          </Button>
-        </GuideStep>
-        <GuideStep n={2} title="Paste the token here" done={hasToken} active={!hasToken}>
-          <div className="flex flex-wrap gap-2">
-            <Input
-              className="min-w-[200px] flex-1 font-mono"
-              placeholder="123456789:AAE…"
-              value={token}
-              onChange={(event) => {
-                setToken(event.target.value);
-                setError(null);
-              }}
-              autoComplete="off"
-              spellCheck={false}
-              aria-label="Bot token"
-              data-testid="setup-telegram-token"
-            />
-            <Button
-              size="sm"
-              onClick={() => void connectToken()}
-              disabled={pending || !token.trim()}
-            >
-              {pending ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
-              Connect
-            </Button>
-          </div>
-          <span className="text-xs text-muted-foreground">
-            The bot is yours. The token stays on this computer.
-          </span>
-        </GuideStep>
-        <GuideStep n={3} title="Say hi to your bot" done={hasChat} active={hasToken && !hasChat}>
-          <div className="flex items-start gap-4">
-            {botLink ? (
-              <QRCodeSvg
-                value={botLink}
-                size={96}
-                className="hidden shrink-0 rounded-lg border border-border bg-white p-1 sm:block"
-                title="Open your bot in Telegram"
-              />
-            ) : null}
-            <div className="flex min-w-0 flex-col gap-2">
-              <p className="text-muted-foreground">
-                Open {bot ? `@${bot}` : "your bot"} and press <b>Start</b>. It replies with a number
-                — your chat id. Paste it here, so only you can talk to it.
-              </p>
-              {botLink ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="self-start"
-                  onClick={() => openInstallDocs(botLink)}
-                >
-                  <ExternalLinkIcon className="size-3.5" />
-                  Open @{bot}
-                </Button>
-              ) : null}
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Input
-              className="min-w-[160px] flex-1 font-mono"
-              placeholder="Chat id, e.g. 128841517"
-              value={chatId}
-              inputMode="numeric"
-              onChange={(event) => {
-                setChatId(event.target.value);
-                setError(null);
-              }}
-              aria-label="Chat id"
-            />
-            <Button size="sm" onClick={() => void addChat()} disabled={pending || !chatId.trim()}>
-              Add
-            </Button>
-          </div>
-        </GuideStep>
-        <GuideStep n={4} title="Check it works" done={false} active={hasToken && hasChat}>
-          <p className="text-muted-foreground">
-            {state === "problem"
-              ? `Telegram says: ${telegram.lastError ?? "the bot can't connect"}. Check the token.`
-              : "Connecting to Telegram…"}
-          </p>
-        </GuideStep>
-      </ol>
-      {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
-    </div>
-  );
+  return "Uno’s bot isn’t available right now. Use a bot of your own:";
 }
 
-export function SlackGuide({
-  environmentId,
-  summary,
-  onChanged,
-}: {
-  environmentId: EnvironmentId;
-  summary: ManagerAssistantSummary;
-  onChanged: () => void;
-}) {
-  const slack = summary.slack;
-  const [botToken, setBotToken] = useState("");
-  const [appToken, setAppToken] = useState("");
-  const [channels, setChannels] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const state = slackChannelState(slack);
-
-  if (slack.configured && state === "on") {
-    return (
-      <div className="flex flex-col gap-2">
-        <ConnectedBadge>
-          Connected{slack.botUserName ? ` as @${slack.botUserName}` : ""}
-        </ConnectedBadge>
-        <p className="text-sm text-muted-foreground">
-          Mention the bot in any channel you invite it to, or write to it directly.
-        </p>
-      </div>
-    );
-  }
-
-  const connect = async () => {
-    if (!botToken.trim().startsWith("xoxb-") || !appToken.trim().startsWith("xapp-")) {
-      setError("Paste both: the Bot token (xoxb-…) and the App token (xapp-…).");
-      return;
-    }
-    setPending(true);
-    setError(null);
-    try {
-      await saveAssistantSlack({
-        environmentId,
-        projectId: summary.projectId,
-        botToken: botToken.trim(),
-        appToken: appToken.trim(),
-        allowedChannelIds: splitIdList(channels),
-        enabled: true,
-        defaultModelSelection: slack.defaultModelSelection,
-        addressing: slack.addressing,
-      });
-      setBotToken("");
-      setAppToken("");
-      onChanged();
-    } catch (cause) {
-      setError(errorText(cause, "Couldn't save Slack."));
-    } finally {
-      setPending(false);
-    }
-  };
-
+function Preview({ lines, caption }: { lines: [string, string]; caption: string }) {
   return (
-    <div className="flex flex-col gap-3">
-      <ol className="flex flex-col gap-4">
-        <GuideStep n={1} title="Create the Uno app in Slack" done={false} active>
-          <p className="text-muted-foreground">
-            It opens with everything filled in. Pick your workspace, then Create and Install.
-          </p>
-          <Button
-            size="sm"
-            variant="outline"
-            className="self-start"
-            onClick={() => openInstallDocs(SLACK_NEW_APP_URL)}
-          >
-            <ExternalLinkIcon className="size-3.5" />
-            Create the app
-          </Button>
-        </GuideStep>
-        <GuideStep n={2} title="Copy two tokens" done={false} active>
-          <p className="text-muted-foreground">
-            OAuth &amp; Permissions → Bot token (xoxb-…). Basic Information → App-Level Tokens →
-            Generate, scope <code className="rounded bg-muted px-1">connections:write</code>{" "}
-            (xapp-…).
-          </p>
-          <Input
-            className="font-mono"
-            placeholder="xoxb-…"
-            value={botToken}
-            onChange={(event) => setBotToken(event.target.value)}
-            aria-label="Slack bot token"
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <Input
-            className="font-mono"
-            placeholder="xapp-…"
-            value={appToken}
-            onChange={(event) => setAppToken(event.target.value)}
-            aria-label="Slack app token"
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <Input
-            placeholder="Channel ids it may answer in (optional), e.g. C0123ABC"
-            value={channels}
-            onChange={(event) => setChannels(event.target.value)}
-            aria-label="Slack channel ids"
-          />
-          <Button
-            size="sm"
-            className="self-start"
-            onClick={() => void connect()}
-            disabled={pending}
-          >
-            {pending ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
-            Connect
-          </Button>
-        </GuideStep>
-        <GuideStep n={3} title="Invite it to a channel" done={false} active>
-          <p className="text-muted-foreground">
-            In the channel: <code className="rounded bg-muted px-1">/invite @Uno</code>, then
-            mention <b>@Uno</b> with a task.
-          </p>
-        </GuideStep>
-      </ol>
-      {slack.configured && state === "problem" ? (
-        <p className="text-xs text-destructive-foreground">
-          Slack says: {slack.lastError ?? "the app can't connect"}.
-        </p>
-      ) : null}
-      {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
+    <div className="flex flex-col gap-2 rounded-xl bg-muted/50 p-3" aria-hidden>
+      <div className="max-w-[85%] self-end rounded-2xl rounded-br-md bg-primary/10 px-3 py-2 text-sm">
+        {lines[0]}
+      </div>
+      <div className="max-w-[85%] self-start rounded-2xl rounded-bl-md bg-background px-3 py-2 text-sm shadow-xs">
+        {lines[1]}
+      </div>
+      <div className="text-center text-[11px] text-muted-foreground">{caption}</div>
     </div>
   );
 }
@@ -485,20 +113,23 @@ function ChannelCard({
   name,
   description,
   on,
+  testId,
   children,
 }: {
   logo: ReactNode;
   name: string;
   description: string;
   on: boolean;
+  testId: string;
   children: ReactNode;
 }) {
   return (
     <section
       className={cn(
-        "flex flex-col gap-4 rounded-2xl border p-4 sm:p-5",
-        on ? "border-primary/40 bg-primary/[0.03]" : "border-border",
+        "flex min-w-0 flex-col gap-4 rounded-2xl border p-4 sm:p-5",
+        on ? "border-success/40 bg-success/[0.02]" : "border-border",
       )}
+      data-testid={testId}
     >
       <div className="flex items-center gap-3">
         <span className="flex size-10 items-center justify-center rounded-xl border border-border bg-background">
@@ -514,17 +145,389 @@ function ChannelCard({
   );
 }
 
+// ── Telegram ───────────────────────────────────────────────────────────
+
+function TelegramCard({
+  environmentId,
+  summary,
+  projectId,
+  projectName,
+  onChanged,
+}: {
+  environmentId: EnvironmentId;
+  summary: ManagerAssistantSummary;
+  projectId: ProjectId | null;
+  projectName: string | null;
+  onChanged: () => void;
+}) {
+  const telegram = summary.telegram;
+  const connected = telegramConnected(telegram);
+  const shared = isSharedTelegram(telegram);
+  // Uno's bot is the default unless a bot of the person's own is set up.
+  const ownBotConfigured = telegram.configured && !shared;
+  const [mode, setMode] = useState<"shared" | "own">(ownBotConfigured ? "own" : "shared");
+  const [link, setLink] = useState<SharedTelegramLink | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const requested = useRef(false);
+
+  const requestLink = useCallback(async () => {
+    setProblem(null);
+    try {
+      const next = await connectSharedTelegram({ environmentId, projectId: ASSISTANT_PROJECT_ID });
+      setLink(next);
+      onChanged();
+    } catch (cause) {
+      setProblem(sharedTelegramProblem(cause));
+    }
+  }, [environmentId, onChanged]);
+
+  useEffect(() => {
+    if (mode !== "shared" || connected || requested.current) return;
+    requested.current = true;
+    void requestLink();
+  }, [connected, mode, requestLink]);
+
+  // A chat that just linked: its messages go to the setup's project.
+  const bound = useRef(new Set(telegram.allowedChatIds));
+  useEffect(() => {
+    const fresh = telegram.allowedChatIds.filter((id) => !bound.current.has(id));
+    if (fresh.length === 0) return;
+    for (const id of fresh) bound.current.add(id);
+    setWaiting(false);
+    toastManager.add({ type: "success", title: "Telegram connected" });
+    if (!projectId) return;
+    for (const chatId of fresh) {
+      void upsertConnectorBinding({
+        environmentId,
+        kind: "telegram",
+        chatId,
+        connectorProjectId: summary.projectId,
+        target: { kind: "project", projectId },
+        notifyOnComplete: true,
+      }).catch(() => undefined);
+    }
+  }, [environmentId, projectId, summary.projectId, telegram.allowedChatIds]);
+
+  const disconnect = async () => {
+    await saveAssistantTelegram({
+      environmentId,
+      projectId: summary.projectId,
+      allowedChatIds: [],
+      enabled: false,
+      defaultModelSelection: telegram.defaultModelSelection,
+      addressing: telegram.addressing,
+    }).catch(() => undefined);
+    bound.current = new Set();
+    requested.current = false;
+    setLink(null);
+    onChanged();
+  };
+
+  if (connected) {
+    return (
+      <div className="flex flex-col gap-3">
+        <ConnectedBadge>
+          Connected{telegram.botUsername ? ` · @${telegram.botUsername}` : ""}
+        </ConnectedBadge>
+        <Preview
+          lines={[
+            "What’s left on the landing page?",
+            "Two things: the price table and the contact form. Want me to do both?",
+          ]}
+          caption={`Telegram · goes to ${projectName ?? "Uno"}`}
+        />
+        <div className="flex flex-wrap gap-2">
+          {telegram.botUsername ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => openInstallDocs(`https://t.me/${telegram.botUsername}`)}
+            >
+              <ExternalLinkIcon className="size-3.5" />
+              Open Telegram
+            </Button>
+          ) : null}
+          <Button size="sm" variant="ghost" onClick={() => void disconnect()}>
+            Disconnect
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === "own" || problem) {
+    return (
+      <div className="flex flex-col gap-3">
+        {problem ? <p className="text-sm text-muted-foreground">{problem}</p> : null}
+        <TelegramWizard environmentId={environmentId} summary={summary} onChanged={onChanged} />
+        {!problem ? (
+          <button
+            type="button"
+            className="self-start text-xs text-primary hover:underline"
+            onClick={() => {
+              requested.current = false;
+              setMode("shared");
+            }}
+          >
+            Use Uno’s bot instead — no BotFather
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  const url = link?.link ?? null;
+  return (
+    <div className="flex flex-col gap-3" data-testid="setup-telegram-shared">
+      <div className="flex items-start gap-4">
+        {/* On a phone the link opens Telegram right there: no QR to scan. */}
+        <div className="hidden size-[124px] shrink-0 items-center justify-center rounded-xl border border-border bg-white p-1.5 sm:flex">
+          {url ? (
+            <QRCodeSvg value={url} size={110} title="Open Uno’s bot in Telegram" />
+          ) : (
+            <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+          )}
+        </div>
+        <div className="flex min-w-0 flex-col gap-2">
+          {waiting ? (
+            <span className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2Icon className="size-3.5 animate-spin" />
+              Waiting for you to press <b className="text-foreground">Start</b> in Telegram…
+            </span>
+          ) : (
+            <span className="text-sm text-muted-foreground">
+              <span className="hidden sm:inline">Scan with your phone, or open the link:</span>
+              <span className="sm:hidden">Open the link and press Start:</span>
+            </span>
+          )}
+          {url ? (
+            <span
+              className="truncate font-mono text-xs text-foreground"
+              data-testid="setup-telegram-link"
+            >
+              {url.replace(/^https:\/\//, "")}
+            </span>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            {waiting ? (
+              <Button size="sm" variant="outline" onClick={onChanged}>
+                I pressed Start
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                disabled={!url}
+                onClick={() => {
+                  if (!url) return;
+                  openInstallDocs(url);
+                  setWaiting(true);
+                }}
+                data-testid="setup-telegram-open"
+              >
+                <ExternalLinkIcon className="size-3.5" />
+                Open Telegram
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!url}
+              onClick={() => {
+                if (!url) return;
+                void navigator.clipboard?.writeText(url).then(() => {
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1500);
+                });
+              }}
+            >
+              <CopyIcon className="size-3.5" />
+              {copied ? "Copied" : "Copy link"}
+            </Button>
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+        {waiting ? (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              setWaiting(false);
+              void requestLink();
+            }}
+          >
+            <RefreshCwIcon className="size-3" /> New link
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="text-muted-foreground hover:text-foreground"
+          onClick={() => setMode("own")}
+          data-testid="setup-telegram-own"
+        >
+          Use your own bot instead
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Slack ──────────────────────────────────────────────────────────────
+
+function SlackCard({
+  environmentId,
+  summary,
+  onChanged,
+}: {
+  environmentId: EnvironmentId;
+  summary: ManagerAssistantSummary;
+  onChanged: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [installing, setInstalling] = useState(false);
+  const [ownApp, setOwnApp] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const install = useQuery({
+    queryKey: ["uno-setup", "slack-install", environmentId],
+    queryFn: async () => {
+      try {
+        return await getSlackInstall({ environmentId, projectId: ASSISTANT_PROJECT_ID });
+      } catch {
+        return null; // an older daemon: only your own Slack app
+      }
+    },
+    refetchInterval: installing ? 2000 : false,
+  });
+  const state = install.data;
+  const manualOn = summary.slack.configured && slackChannelState(summary.slack) === "on";
+  const connected = (state?.installed === true && state.connected) || manualOn;
+
+  useEffect(() => {
+    if (installing && state?.installed && state.connected) {
+      setInstalling(false);
+      toastManager.add({ type: "success", title: "Slack connected" });
+      onChanged();
+    }
+  }, [installing, onChanged, state]);
+
+  const addToSlack = async () => {
+    setError(null);
+    setInstalling(true);
+    try {
+      const started = await startSlackInstall({ environmentId, projectId: ASSISTANT_PROJECT_ID });
+      if (!started.available || !started.authorizeUrl) {
+        setInstalling(false);
+        setOwnApp(true);
+        return;
+      }
+      const result = await openAuthWindow(started.authorizeUrl, "uno-slack");
+      await queryClient.invalidateQueries({ queryKey: ["uno-setup", "slack-install"] });
+      if (!result.ok) window.setTimeout(() => setInstalling(false), 4000);
+    } catch (cause) {
+      setInstalling(false);
+      setError(cause instanceof Error ? cause.message : "Couldn't open Slack.");
+    }
+  };
+
+  const disconnect = async () => {
+    if (state?.installed) {
+      await removeSlackInstall({ environmentId, projectId: ASSISTANT_PROJECT_ID }).catch(
+        () => undefined,
+      );
+    } else {
+      await saveAssistantSlack({
+        environmentId,
+        projectId: summary.projectId,
+        allowedChannelIds: summary.slack.allowedChannelIds,
+        enabled: false,
+      }).catch(() => undefined);
+    }
+    await queryClient.invalidateQueries({ queryKey: ["uno-setup", "slack-install"] });
+    onChanged();
+  };
+
+  if (connected) {
+    const where = state?.installed ? state.teamName : summary.slack.botUserName;
+    return (
+      <div className="flex flex-col gap-3">
+        <ConnectedBadge>
+          Connected{where ? ` to ${where}` : ""}
+          {!state?.installed && summary.slack.botUserName
+            ? ` as @${summary.slack.botUserName}`
+            : ""}
+        </ConnectedBadge>
+        <Preview
+          lines={[
+            "@Uno summarize today’s notes-from-call.md",
+            "Three decisions, two open questions. Posted the summary in the thread.",
+          ]}
+          caption="Slack · mention @Uno in a channel"
+        />
+        <Button size="sm" variant="ghost" className="self-start" onClick={() => void disconnect()}>
+          Disconnect
+        </Button>
+      </div>
+    );
+  }
+
+  const available = state?.available === true;
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-sm text-muted-foreground">
+        Add Uno to your workspace, then mention <b className="text-foreground">@Uno</b> in any
+        channel you invite it to.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void addToSlack()}
+          disabled={!available || installing}
+          className="inline-flex h-10 items-center gap-2 self-start rounded-lg border border-border bg-background px-4 text-sm font-semibold text-foreground shadow-xs transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-60"
+          data-testid="setup-add-to-slack"
+        >
+          {installing ? (
+            <Loader2Icon className="size-4 animate-spin" />
+          ) : (
+            <SlackBrandMark className="size-[18px]" />
+          )}
+          {installing ? "Waiting for Slack…" : "Add to Slack"}
+        </button>
+        {install.isFetched && !available ? <SoonBadge /> : null}
+      </div>
+      {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
+      {ownApp || (install.isFetched && !available) ? (
+        ownApp ? (
+          <div className="rounded-xl border border-border p-3">
+            <SlackGuide environmentId={environmentId} summary={summary} onChanged={onChanged} />
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="self-start text-xs text-primary hover:underline"
+            onClick={() => setOwnApp(true)}
+          >
+            Connect your own Slack app now
+          </button>
+        )
+      ) : null}
+    </div>
+  );
+}
+
 export function ChannelsStep() {
   const environmentId = usePrimaryEnvironmentId();
   const progress = useSetupProgress();
   const { completeStep } = useSetupNavigation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const summary = useAssistantSummary(environmentId);
-  const refresh = () => {
-    void summary.refetch();
-    void queryClient.invalidateQueries({ queryKey: ["uno-assistant", "channels"] });
-  };
+  const [polling] = useState(true);
+  const summary = useAssistantSummary(environmentId, polling);
+  const refresh = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: SUMMARY_KEY });
+    void queryClient.invalidateQueries({ queryKey: ["uno-assistant"] });
+  }, [queryClient]);
   const data = summary.data;
   const project = progress.project;
 
@@ -548,17 +551,15 @@ export function ChannelsStep() {
           the Uno chat.
         </p>
       ) : (
-        <div className="grid items-start gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
           <ChannelCard
             logo={<TelegramMark className="size-5" />}
             name="Telegram"
             description="From your phone, on the go"
-            on={
-              telegramChannelState(data.telegram) === "on" &&
-              data.telegram.allowedChatIds.length > 0
-            }
+            on={telegramConnected(data.telegram)}
+            testId="setup-channel-telegram"
           >
-            <TelegramGuide
+            <TelegramCard
               environmentId={environmentId}
               summary={data}
               projectId={(project?.id as ProjectId | undefined) ?? null}
@@ -570,14 +571,16 @@ export function ChannelsStep() {
             logo={<SlackBrandMark className="size-5" />}
             name="Slack"
             description="With your team, in channels"
-            on={slackChannelState(data.slack) === "on"}
+            on={data.slack.configured && slackChannelState(data.slack) === "on"}
+            testId="setup-channel-slack"
           >
-            <SlackGuide environmentId={environmentId} summary={data} onChanged={refresh} />
+            <SlackCard environmentId={environmentId} summary={data} onChanged={refresh} />
           </ChannelCard>
         </div>
       )}
       <SetupNote>
-        Only the chats you add can talk to it. Change who and where in{" "}
+        Only you can talk to it until you add people.{" "}
+        {project ? `Messages go to ${project.name}; change` : "Change"} that in{" "}
         <button
           type="button"
           className="text-primary hover:underline"
@@ -590,7 +593,7 @@ export function ChannelsStep() {
             }
           }}
         >
-          Uno settings
+          Settings → Uno
         </button>
         .
       </SetupNote>

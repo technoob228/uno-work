@@ -38,11 +38,14 @@ export const SETUP_STEP_LABEL: Readonly<Record<SetupStepId, string>> = {
 export const TOUR_STEPS = ["home", "files", "apps"] as const;
 export type TourStepId = (typeof TOUR_STEPS)[number];
 
-/** `/setup?step=` values: the eight steps plus the tour's closing screen. */
-export type SetupRouteStep = SetupStepId | "tour-done";
+/**
+ * `/setup?step=` values: the welcome screen (two ways to use the computer),
+ * the eight steps, and the tour's closing screen.
+ */
+export type SetupRouteStep = SetupStepId | "welcome" | "tour-done";
 
 export function parseSetupRouteStep(value: unknown): SetupRouteStep | null {
-  if (value === "tour-done") return value;
+  if (value === "tour-done" || value === "welcome") return value;
   return typeof value === "string" && (SETUP_STEPS as ReadonlyArray<string>).includes(value)
     ? (value as SetupStepId)
     : null;
@@ -120,16 +123,40 @@ export interface SetupSidebarState {
   readonly hidden: boolean;
   /** "Set up" while in progress, "Finish setup" once only skipped steps remain. */
   readonly label: "Set up" | "Finish setup";
-  /** "3/8" or "2 left". */
+  /** "3/8", "2 left" or "Tour". */
   readonly meta: string;
   /** 0..1 for the ring. */
   readonly ratio: number;
   /** Where the row goes. */
-  readonly step: SetupStepId;
+  readonly step: SetupRouteStep;
 }
 
-export function setupSidebarState(progress: UnoSetupProgress): SetupSidebarState {
+/** Where the person is right now, for the sidebar row (not saved). */
+export interface SetupSidebarContext {
+  /** The welcome screen is open. */
+  readonly onWelcome?: boolean;
+  /** The "just a computer" tour is running: the stop, or "done" on its last screen. */
+  readonly tour?: TourStepId | "done" | null;
+}
+
+export function setupSidebarState(
+  progress: UnoSetupProgress,
+  context: SetupSidebarContext = {},
+): SetupSidebarState {
   const total = SETUP_STEPS.length;
+  if (context.tour) {
+    const index = context.tour === "done" ? TOUR_STEPS.length : TOUR_STEPS.indexOf(context.tour);
+    return {
+      hidden: false,
+      label: "Set up",
+      meta: "Tour",
+      ratio: Math.max(index, 0.5) / TOUR_STEPS.length,
+      step: "tour-done",
+    };
+  }
+  if (context.onWelcome && !progress.finished) {
+    return { hidden: false, label: "Set up", meta: `0/${total}`, ratio: 0, step: "welcome" };
+  }
   const skipped = SETUP_STEPS.filter((step) => progress.skipped.includes(step));
   const doneCount = SETUP_STEPS.filter(
     (step) => progress.visited.includes(step) && !progress.skipped.includes(step),

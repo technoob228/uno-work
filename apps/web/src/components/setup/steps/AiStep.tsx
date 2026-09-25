@@ -49,10 +49,8 @@ const AI_ROWS: ReadonlyArray<AiRow> = [
     id: "uno",
     name: "Uno AI",
     icon: UnoIcon,
-    description: (provider) => {
-      const count = provider?.models.length ?? 0;
-      return `Built in. ${count > 0 ? `${count} models, paid` : "Paid"} from the AI credits in your plan.`;
-    },
+    // The gateway's catalogue (280+), not the picker's short list.
+    description: () => "Built in. 280+ models, paid from the AI credits in your plan.",
   },
   {
     id: "claudeAgent",
@@ -360,7 +358,8 @@ export function AiStep() {
         </SetupNote>
       ) : null}
       <SetupNote>
-        AI inside apps runs on Uno AI. Change the default any time from the model picker in a chat.
+        Dictation and AI inside apps always run on Uno AI. Change the default any time from the
+        model picker in a chat.
       </SetupNote>
     </SetupShell>
   );

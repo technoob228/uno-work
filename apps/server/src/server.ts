@@ -29,6 +29,9 @@ import { ServerBrowserLive } from "./serverBrowser.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import { unoWorkRouteLayers } from "./unoWork/http.ts";
+import { setupToolsRouteLayers } from "./setupTools/http.ts";
+import { ConnectorsServiceLive } from "./setupTools/ConnectorsService.ts";
+import { MaterialsServiceLive } from "./setupTools/MaterialsService.ts";
 import {
   filesOfficeVersionsRouteLayer,
   filesRawRouteLayer,
@@ -151,6 +154,10 @@ import {
   managerAssistantChatRouteLayer,
   managerAssistantConversationCreateRouteLayer,
   managerAssistantTelegramPairRouteLayer,
+  managerAssistantTelegramSharedRouteLayer,
+  managerAssistantSlackInstallStartRouteLayer,
+  managerAssistantSlackInstallStatusRouteLayer,
+  managerAssistantSlackInstallDeleteRouteLayer,
   managerAssistantTelegramTestRouteLayer,
   managerAssistantsListRouteLayer,
   managerAssistantTelegramRouteLayer,
@@ -406,6 +413,10 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // App SDK: local App API for apps on this machine (docs/app-sdk.md) —
       // starts tasks through the same engine, forwards chat with the gateway key.
       AppSdkServiceLive,
+      // Onboarding "Connect your tools" (console connectors, machine token) and
+      // "Give it your material" (reading jobs, gateway key + Cloud storage).
+      ConnectorsServiceLive,
+      MaterialsServiceLive,
     ),
   ),
   // Manager tool layer (MCP surface for the manager brain). Sits above the
@@ -560,6 +571,10 @@ export const makeRoutesLayer = Layer.mergeAll(
   managerAssistantChatRouteLayer,
   managerAssistantConversationCreateRouteLayer,
   managerAssistantTelegramPairRouteLayer,
+  managerAssistantTelegramSharedRouteLayer,
+  managerAssistantSlackInstallStartRouteLayer,
+  managerAssistantSlackInstallStatusRouteLayer,
+  managerAssistantSlackInstallDeleteRouteLayer,
   managerAssistantTelegramTestRouteLayer,
   assistantLlmStatusRouteLayer,
   assistantLlmSetRouteLayer,
@@ -601,6 +616,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   previewSiteFileRouteLayer,
   ...filesShareRouteLayers,
   ...unoWorkRouteLayers,
+  ...setupToolsRouteLayers,
 ).pipe(Layer.provide(browserApiCorsLayer));
 
 export const makeServerLayer = Layer.unwrap(

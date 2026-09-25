@@ -123,7 +123,7 @@ export interface EnvironmentRequest {
   readonly environmentId: EnvironmentId;
   readonly pathname: string;
   readonly searchParams?: Record<string, string>;
-  readonly method?: "GET" | "POST";
+  readonly method?: "GET" | "POST" | "DELETE";
   readonly body?: unknown;
 }
 

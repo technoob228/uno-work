@@ -34,6 +34,7 @@ import { Spinner } from "../../ui/spinner";
 import { toastManager } from "../../ui/toast";
 import { FolderChipMenu, type PickedFolder } from "../FolderChipMenu";
 import { homeStartModelSelection } from "./homeStartModel";
+import { useSetupHandoff } from "../../setup/useSetupHome";
 import type { HomeStarter } from "./homeStarters";
 
 const RUNTIME_MODE_ICON: Record<RuntimeMode, LucideIcon> = {
@@ -95,16 +96,21 @@ function useHomeModelPicker(environmentId: EnvironmentId | null) {
 export function HomeComposer({
   environmentId,
   starters,
+  defaultFolder = null,
   onStart,
 }: {
   environmentId: EnvironmentId | null;
+  /** The folder the chip starts on (the setup's project); null = the home folder. */
+  defaultFolder?: PickedFolder | null;
   /** Chips under the composer (see homeStarters.ts); a click only pre-fills. */
   starters: ReadonlyArray<HomeStarter>;
   /** Starts a chat on `options` and sends `prompt`. */
   onStart: (prompt: string, options: HomeStartOptions) => Promise<void>;
 }) {
-  const [text, setText] = useState("");
-  const [folder, setFolder] = useState<PickedFolder | null>(null);
+  // A first task handed over by the setup's last step is typed in, once.
+  const [handoff] = useState(() => useSetupHandoff.getState().take());
+  const [text, setText] = useState(handoff?.text ?? "");
+  const [folder, setFolder] = useState<PickedFolder | null>(handoff?.folder ?? defaultFolder);
   const [starting, setStarting] = useState(false);
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(DEFAULT_RUNTIME_MODE);
   const [pickerOpen, setPickerOpen] = useState(false);

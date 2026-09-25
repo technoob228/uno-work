@@ -29,6 +29,8 @@ export const Route = createFileRoute("/onboarding")({
     if (context.authGateState.status !== "authenticated") {
       throw redirect({ to: "/", replace: true });
     }
+    // The browser's welcome is a step of the in-app setup.
+    if (isWebApp) throw redirect({ to: "/setup", search: { step: "welcome" }, replace: true });
     await ensureClientSettingsHydrated();
   },
   component: OnboardingRouteView,

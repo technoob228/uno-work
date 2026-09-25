@@ -184,6 +184,7 @@ import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarComputerRow } from "./sidebar/SidebarComputerRow";
 import { SidebarSetupRow } from "./sidebar/SidebarSetupRow";
+import { SidebarEmptyProjects } from "./sidebar/SidebarEmptyProjects";
 import { SidebarMyUnoRow } from "./sidebar/SidebarMyUnoRow";
 import { SidebarEnvSwitcher } from "./SidebarEnvSwitcher";
 import { SidebarAppsList } from "./sidebar/SidebarAppsList";
@@ -2586,7 +2587,35 @@ export default function Sidebar() {
                   </ul>
                 </TooltipProvider>
               )}
-              {!isSearchingThreads && totalThreadCount === 0 && pinnedThreads.length === 0 ? (
+              {!isSearchingThreads &&
+              totalThreadCount === 0 &&
+              pinnedThreads.length === 0 &&
+              !scopedProjectGroup &&
+              !isHelperScope ? (
+                <SidebarEmptyProjects
+                  projects={projectGroups.map((group) => ({
+                    key: group.projectKey,
+                    name: group.displayName,
+                  }))}
+                  onOpen={(key) => {
+                    const member = projectGroupByScopeKey.get(key)?.memberProjects[0];
+                    if (!member) return;
+                    if (isMobile) setOpenMobile(false);
+                    void newThreadContext.handleNewThread(
+                      scopeProjectRef(member.environmentId, member.id),
+                      {
+                        envMode: resolveSidebarNewThreadEnvMode({
+                          defaultEnvMode: defaultThreadEnvMode,
+                        }),
+                      },
+                    );
+                  }}
+                />
+              ) : null}
+              {!isSearchingThreads &&
+              totalThreadCount === 0 &&
+              pinnedThreads.length === 0 &&
+              (projects.length === 0 || scopedProjectGroup || isHelperScope) ? (
                 <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
                   {projects.length === 0 ? (
                     <>

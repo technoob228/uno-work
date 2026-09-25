@@ -17,6 +17,13 @@
  * The Slack SDK is imperative (an EventEmitter + a WebClient); events cross into
  * Effect via `runFork`, and the socket lifecycle lives in a plain map managed by
  * the reconcile loop.
+ *
+ * Relay mode ("Add to Slack" with Uno's app, onboarding v3): a row whose bot
+ * token is `unorelay:<slr_…>` never opens Socket Mode. Its WebClient talks to
+ * the console's Web-API relay, and its events are long-polled from the
+ * console queue (`slackRelayEvents.ts`, durable cursor) and fed into the very
+ * same handler. Private files and uploads go through the relay too
+ * (`channelRelay.ts` builds every such URL).
  */
 import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
@@ -33,7 +40,7 @@ import {
   type ChatImageAttachment,
   type ModelSelection,
 } from "@t3tools/contracts";
-import { Context, Data, Duration, Effect, Layer, Option, Ref, Schema } from "effect";
+import { Context, Data, Duration, Effect, Fiber, Layer, Option, Ref, Schema } from "effect";
 import * as crypto from "node:crypto";
 import * as fsPromises from "node:fs/promises";
 import * as nodePath from "node:path";
@@ -65,11 +72,21 @@ import { classifyWake } from "../wakeClassifier.ts";
 import { currentAssistantModelSelection } from "../assistantEngineSelection.ts";
 import { sameAssistantEngine } from "../connectorBindings.ts";
 import { resolveTurnReply } from "./TelegramConnector.ts";
+import {
+  parseRelayCredential,
+  redactConnectorSecrets,
+  slackFileRequest,
+  slackRelayApiBase,
+  slackUploadTarget,
+} from "../channelRelay.ts";
+import { runSlackRelayEventLoop, type SlackEventsApiPayload } from "../slackRelayEvents.ts";
 
 export interface ManagerSlackRuntimeStatus {
   readonly botUserId: string | null;
   readonly botUserName: string | null;
   readonly lastError: string | null;
+  /** A live event source: the Socket Mode socket, or a relay poller whose last poll succeeded. */
+  readonly connected: boolean;
 }
 
 export interface ManagerSlackServiceShape {
@@ -185,6 +202,26 @@ interface SlackRuntime {
   lastError: string | null;
   client: SocketModeClient | null;
   web: WebClient | null;
+  /** Relay mode: stops the event poller. Null for Socket Mode / a failed start. */
+  stopRelay: (() => void) | null;
+  /** Relay mode: whether the last poll reached the console. */
+  relayConnected: boolean;
+}
+
+/** Whether the runtime has a live (or retrying, for the relay) event source. */
+const hasEventSource = (runtime: SlackRuntime | undefined): boolean =>
+  runtime !== undefined && (runtime.client !== null || runtime.stopRelay !== null);
+
+/**
+ * A WebClient for a connector credential: Slack itself with the bot token,
+ * or — relay mode — the console's Web-API relay, which adds the
+ * installation's token on its side (so none is sent from here).
+ */
+export function makeSlackWebClient(botToken: string): WebClient {
+  const relay = parseRelayCredential(botToken);
+  return relay === null
+    ? new WebClient(botToken)
+    : new WebClient(undefined, { slackApiUrl: slackRelayApiBase(relay) });
 }
 
 /**
@@ -248,6 +285,43 @@ const fetchThreadBacklog = (input: {
     ),
   );
 
+/**
+ * Relay-mode upload: the same three steps `files.uploadV2` performs, with the
+ * byte transfer routed through the console (`/upload?url=`) — the WebClient's
+ * own upload goes straight to `upload_url`, which only Slack-token holders
+ * may do.
+ */
+async function uploadSlackFileViaRelay(input: {
+  readonly web: WebClient;
+  readonly botToken: string;
+  readonly channel: string;
+  readonly threadTs: string | undefined;
+  readonly filePath: string;
+  readonly fileName: string;
+  readonly size: number;
+}): Promise<void> {
+  const target = await input.web.files.getUploadURLExternal({
+    filename: input.fileName,
+    length: input.size,
+  });
+  if (typeof target.upload_url !== "string" || typeof target.file_id !== "string") {
+    throw new Error(target.error ?? "files.getUploadURLExternal returned no upload URL");
+  }
+  const bytes = await fsPromises.readFile(input.filePath);
+  const response = await fetch(slackUploadTarget(input.botToken, target.upload_url), {
+    method: "POST",
+    body: new Uint8Array(bytes),
+  });
+  if (!response.ok) {
+    throw new Error(`upload failed with status ${response.status}`);
+  }
+  await input.web.files.completeUploadExternal({
+    files: [{ id: target.file_id, title: input.fileName }],
+    channel_id: input.channel,
+    ...(input.threadTs !== undefined ? { thread_ts: input.threadTs } : {}),
+  });
+}
+
 const makeSlackConnector = Effect.gen(function* () {
   const connectorRepository = yield* ManagerConnectorRepository;
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -306,16 +380,17 @@ const makeSlackConnector = Effect.gen(function* () {
   const downloadSlackFile = (botToken: string, url: string) =>
     Effect.tryPromise({
       try: async () => {
-        const response = await fetch(url, {
-          headers: { authorization: `Bearer ${botToken}` },
-        });
+        const request = slackFileRequest(botToken, url);
+        const response = await fetch(request.url, { headers: request.headers });
         if (!response.ok) {
           throw new Error(`file download failed with status ${response.status}`);
         }
         return new Uint8Array(await response.arrayBuffer());
       },
       catch: (cause) =>
-        new SlackConnectorError({ message: `Slack file download failed: ${String(cause)}` }),
+        new SlackConnectorError({
+          message: `Slack file download failed: ${redactConnectorSecrets(String(cause))}`,
+        }),
     });
 
   // Mirror of the Telegram media pipeline: images become vision attachments,
@@ -439,6 +514,7 @@ const makeSlackConnector = Effect.gen(function* () {
   // are reported into the chat so the user isn't left waiting.
   const sendSlackFile = (input: {
     readonly web: WebClient;
+    readonly botToken: string;
     readonly channel: string;
     readonly threadTs: string | undefined;
     readonly filePath: string;
@@ -451,7 +527,17 @@ const makeSlackConnector = Effect.gen(function* () {
             throw new Error("not a regular file");
           }
           const fileName = nodePath.basename(input.filePath);
-          if (input.threadTs !== undefined) {
+          if (parseRelayCredential(input.botToken) !== null) {
+            await uploadSlackFileViaRelay({
+              web: input.web,
+              botToken: input.botToken,
+              channel: input.channel,
+              threadTs: input.threadTs,
+              filePath: input.filePath,
+              fileName,
+              size: stat.size,
+            });
+          } else if (input.threadTs !== undefined) {
             await input.web.files.uploadV2({
               channel_id: input.channel,
               thread_ts: input.threadTs,
@@ -545,6 +631,7 @@ const makeSlackConnector = Effect.gen(function* () {
 
   const watchAndReply = (input: {
     readonly web: WebClient;
+    readonly botToken: string;
     readonly channel: string;
     readonly threadTs: string | undefined;
     readonly threadId: ThreadId;
@@ -591,6 +678,7 @@ const makeSlackConnector = Effect.gen(function* () {
         for (const filePath of reply.files) {
           yield* sendSlackFile({
             web: input.web,
+            botToken: input.botToken,
             channel: input.channel,
             threadTs: input.threadTs,
             filePath,
@@ -732,6 +820,7 @@ const makeSlackConnector = Effect.gen(function* () {
       const replyThreadTs = isDM ? undefined : (threadTs ?? ts);
       yield* watchAndReply({
         web,
+        botToken: config.botToken,
         channel,
         threadTs: replyThreadTs,
         threadId,
@@ -771,12 +860,71 @@ const makeSlackConnector = Effect.gen(function* () {
     if (runtime?.client) {
       void runtime.client.disconnect().catch(() => undefined);
     }
+    runtime?.stopRelay?.();
     runtimes.delete(projectId);
+  };
+
+  // Relay mode: the console queue replaces the socket. Events reach the same
+  // `dispatchRawEvent` Socket Mode uses; only `event_callback` payloads of
+  // the two event types the socket subscribes to are routed.
+  const startRelayEvents = (input: {
+    readonly projectId: ProjectId;
+    readonly relayToken: string;
+    readonly config: ManagerSlackConnectorConfig;
+    readonly web: WebClient;
+    readonly botUserId: string;
+  }): (() => void) => {
+    const handle = (payload: SlackEventsApiPayload) =>
+      Effect.sync(() => {
+        const event = payload.event as SlackRawEvent | undefined;
+        if (
+          payload.type === "event_callback" &&
+          (event?.type === "message" || event?.type === "app_mention")
+        ) {
+          dispatchRawEvent(input.projectId, input.config, input.web, input.botUserId, event);
+        }
+      });
+    const fiber = runFork(
+      runSlackRelayEventLoop({
+        key: { projectId: input.projectId, kind: "slack" },
+        relayToken: input.relayToken,
+        handle,
+        onStatus: ({ connected, error }) => {
+          const runtime = runtimes.get(input.projectId);
+          if (runtime === undefined) return;
+          runtime.relayConnected = connected;
+          runtime.lastError = error;
+        },
+      }).pipe(
+        Effect.provideService(ManagerConnectorRepository, connectorRepository),
+        Effect.catch((cause) =>
+          Effect.logWarning("slack relay event loop stopped").pipe(
+            Effect.annotateLogs({ projectId: input.projectId, cause: String(cause) }),
+          ),
+        ),
+        Effect.andThen(
+          Effect.sync(() => {
+            // The loop only ends on a state failure: let reconcile restart it.
+            const runtime = runtimes.get(input.projectId);
+            if (runtime !== undefined && runtime.stopRelay === stop) {
+              runtime.stopRelay = null;
+              runtime.relayConnected = false;
+              runtime.lastError = "Slack relay stopped; retrying.";
+            }
+          }),
+        ),
+      ),
+    );
+    const stop = () => {
+      runFork(Fiber.interrupt(fiber));
+    };
+    return stop;
   };
 
   const startConnection = (projectId: ProjectId, config: ManagerSlackConnectorConfig) =>
     Effect.gen(function* () {
-      const web = new WebClient(config.botToken);
+      const relayToken = parseRelayCredential(config.botToken);
+      const web = makeSlackWebClient(config.botToken);
       const auth = yield* Effect.tryPromise({
         try: () => web.auth.test(),
         catch: (cause) => new SlackConnectorError({ message: String(cause) }),
@@ -788,14 +936,36 @@ const makeSlackConnector = Effect.gen(function* () {
           configJson: JSON.stringify(config),
           botUserId: null,
           botUserName: null,
-          lastError: "auth.test failed — check the bot token.",
+          lastError:
+            relayToken === null
+              ? "auth.test failed — check the bot token."
+              : "Could not reach Slack through Uno — the app may have been removed from the workspace.",
           client: null,
           web: null,
+          stopRelay: null,
+          relayConnected: false,
         });
         return;
       }
       const botUserId = auth.user_id;
       const botUserName = typeof auth.user === "string" ? auth.user : null;
+      if (relayToken !== null) {
+        const runtime: SlackRuntime = {
+          appToken: config.appToken,
+          botToken: config.botToken,
+          configJson: JSON.stringify(config),
+          botUserId,
+          botUserName,
+          lastError: null,
+          client: null,
+          web,
+          stopRelay: null,
+          relayConnected: false,
+        };
+        runtimes.set(projectId, runtime);
+        runtime.stopRelay = startRelayEvents({ projectId, relayToken, config, web, botUserId });
+        return;
+      }
       const client = new SocketModeClient({ appToken: config.appToken });
       const handler = (payload: { readonly event?: SlackRawEvent }): void =>
         dispatchRawEvent(projectId, config, web, botUserId, payload?.event);
@@ -818,6 +988,8 @@ const makeSlackConnector = Effect.gen(function* () {
         lastError: started ? null : "Socket Mode connection failed — check the app token.",
         client: started ? client : null,
         web,
+        stopRelay: null,
+        relayConnected: false,
       });
     });
 
@@ -844,7 +1016,7 @@ const makeSlackConnector = Effect.gen(function* () {
     // handshake is recorded as the runtime's `lastError` and surfaced in the
     // connector status, so there is nothing here to catch.
     for (const [projectId, config] of enabled) {
-      if (runtimes.get(projectId)?.client == null) {
+      if (!hasEventSource(runtimes.get(projectId))) {
         yield* startConnection(projectId, config);
       }
     }
@@ -852,6 +1024,13 @@ const makeSlackConnector = Effect.gen(function* () {
 
   yield* Effect.forkScoped(
     Effect.forever(reconcile.pipe(Effect.andThen(Effect.sleep(RECONCILE_INTERVAL)))),
+  );
+  // Sockets and relay pollers live outside the Effect scope; close them with it.
+  yield* Effect.addFinalizer(() =>
+    Effect.sync(() => {
+      // Deleting the current key while iterating a Map is safe.
+      for (const projectId of runtimes.keys()) stopConnection(projectId);
+    }),
   );
 
   const sendText: ManagerSlackServiceShape["sendText"] = (input) =>
@@ -877,6 +1056,9 @@ const makeSlackConnector = Effect.gen(function* () {
           botUserId: runtime?.botUserId ?? null,
           botUserName: runtime?.botUserName ?? null,
           lastError: runtime?.lastError ?? null,
+          connected:
+            runtime !== undefined &&
+            (runtime.client !== null || (runtime.stopRelay !== null && runtime.relayConnected)),
         };
       }),
     sendText,

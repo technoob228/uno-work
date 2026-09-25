@@ -86,7 +86,9 @@ export function WorkWelcomeStep({
   onModeChange,
   onConfirm,
   onOwnTools,
+  className,
 }: {
+  className?: string;
   mode: WelcomeMode;
   onModeChange: (mode: WelcomeMode) => void;
   onConfirm: (mode: WelcomeMode) => void;
@@ -98,7 +100,12 @@ export function WorkWelcomeStep({
   const isUnoBox = serverConfig?.environment.machineKind === "uno_box";
 
   return (
-    <div className="m-auto flex w-full max-w-xl flex-col items-center gap-6 text-center">
+    <div
+      className={cn(
+        "m-auto flex w-full max-w-xl flex-col items-center gap-6 text-center",
+        className,
+      )}
+    >
       <img
         src="/uno-mark.svg"
         alt="Uno Work"

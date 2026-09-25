@@ -9,6 +9,7 @@ import { memo } from "react";
 
 import { cn } from "../../lib/utils";
 import { setupSidebarState } from "../setup/setupModel";
+import { useSetupTourStore } from "../setup/SetupTour";
 import { useSetupProgress, useUpdateSetupProgress } from "../setup/useSetupProgress";
 import { useSidebar } from "../ui/sidebar";
 
@@ -36,11 +37,22 @@ function Ring({ ratio }: { ratio: number }) {
 
 export const SidebarSetupRow = memo(function SidebarSetupRow() {
   const pathname = useLocation({ select: (location) => location.pathname });
+  const routeStep = useLocation({
+    select: (location): string => {
+      if (location.pathname !== "/setup") return "";
+      const step = (location.search as { readonly step?: unknown }).step;
+      return typeof step === "string" ? step : "";
+    },
+  });
+  const tourStep = useSetupTourStore((store) => store.step);
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
   const progress = useSetupProgress();
   const update = useUpdateSetupProgress();
-  const state = setupSidebarState(progress);
+  const state = setupSidebarState(progress, {
+    onWelcome: routeStep === "welcome",
+    tour: tourStep ?? (routeStep === "tour-done" ? "done" : null),
+  });
   if (state.hidden) return null;
   const active = pathname === "/setup";
   return (

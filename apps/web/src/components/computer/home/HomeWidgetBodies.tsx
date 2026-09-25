@@ -70,10 +70,24 @@ export function CloudUsageLink({ environmentId }: { environmentId: EnvironmentId
 }
 
 /** The home folder's latest-changed files and folders, 2×2. */
-export function FilesWidget({ environmentId }: { environmentId: EnvironmentId | null }) {
+/** Files a fresh project's material shows on Home; its own notes are left out. */
+const PROJECT_MATERIAL_SKIP = new Set(["links.md", "README.md", "UNO-SUMMARY.md"]);
+
+export function FilesWidget({
+  environmentId,
+  folder = null,
+}: {
+  environmentId: EnvironmentId | null;
+  /** A project just set up: show its material instead of the home folder. */
+  folder?: { readonly cwd: string; readonly name: string } | null;
+}) {
   const navigate = useNavigate();
-  const list = useQuery(filesListQueryOptions(environmentId, null, false));
-  const entries = recentHomeEntries(list.data?.entries ?? [], 4);
+  const materials = folder ? `${folder.cwd.replace(/\/+$/, "")}/materials` : null;
+  const list = useQuery(filesListQueryOptions(environmentId, materials, false));
+  const entries = recentHomeEntries(
+    (list.data?.entries ?? []).filter((entry) => !folder || !PROJECT_MATERIAL_SKIP.has(entry.name)),
+    4,
+  );
   if (list.isPending) {
     return (
       <div className="grid grid-cols-2 gap-2">
@@ -122,14 +136,18 @@ export function FilesWidget({ environmentId }: { environmentId: EnvironmentId | 
               <span className="min-w-0">
                 <span className="block truncate text-sm">{entry.name}</span>
                 <span className="block truncate text-[11px] text-muted-foreground">
-                  {formatModified(entry.modifiedAt)}
+                  {folder ? "materials" : formatModified(entry.modifiedAt)}
                 </span>
               </span>
             </button>
           );
         })}
       </div>
-      <p className="text-[11px] text-muted-foreground">Changed lately in your home folder</p>
+      <p className="text-[11px] text-muted-foreground">
+        {folder
+          ? `What your AI works from in ${folder.name}`
+          : "Changed lately in your home folder"}
+      </p>
     </div>
   );
 }

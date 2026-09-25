@@ -6,7 +6,9 @@
  * next to "Add a widget"; the computer lives in the header pill.
  */
 import type { EnvironmentId, UnoMachineApp } from "@t3tools/contracts";
-import { CheckIcon, PencilIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import { CheckIcon, PencilIcon, PlusIcon, RotateCcwIcon, XIcon } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 import * as Schema from "effect/Schema";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 
@@ -61,6 +63,8 @@ import {
 import { HOME_WIDGET_IDS, greeting, type HomeWidgetId } from "./homeModel";
 import { usePersonFirstName } from "./useHomeInfo";
 import { useHomeStarters } from "./useHomeStarters";
+import { selectProjectsAcrossEnvironments, useStore } from "../../../store";
+import { useSetupHome, type SetupHome } from "../../setup/useSetupHome";
 
 const LAYOUT_SCHEMA = Schema.Array(Schema.String);
 
@@ -141,7 +145,17 @@ export function HomeStart({
 }) {
   const { threads, now } = useHomeThreads();
   const firstName = usePersonFirstName(environmentId);
-  const starters = useHomeStarters({ environmentId, threads, now, tiles });
+  const homeStarters = useHomeStarters({ environmentId, threads, now, tiles });
+  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const setupHome = useSetupHome({
+    projectHasChats: (cwd) => {
+      const ids = new Set(
+        projects.filter((project) => project.cwd === cwd).map((project) => project.id),
+      );
+      return threads.some((thread) => ids.has(thread.projectId));
+    },
+  });
+  const starters = setupHome.starters.length > 0 ? setupHome.starters : homeStarters;
 
   const widgetApps = useMemo(() => {
     const out = new Map<string, UnoMachineApp>();
@@ -196,6 +210,10 @@ export function HomeStart({
         span: appWidgetSpan(app?.widget?.size ?? "medium"),
       };
     }
+    // A project just set up names the Files widget (its material is inside).
+    if (id === "files" && setupHome.fresh && setupHome.project) {
+      return { ...HOME_WIDGETS.files, title: setupHome.project.name };
+    }
     return HOME_WIDGETS[id];
   };
 
@@ -203,7 +221,12 @@ export function HomeStart({
     switch (id) {
       case "files":
         return {
-          body: <FilesWidget environmentId={environmentId} />,
+          body: (
+            <FilesWidget
+              environmentId={environmentId}
+              folder={setupHome.fresh ? setupHome.project : null}
+            />
+          ),
           action: <CloudUsageLink environmentId={environmentId} />,
         };
       case "apps":
@@ -249,10 +272,23 @@ export function HomeStart({
       case "greeting":
         return {
           body: (
-            <h1 className="text-[28px] font-semibold tracking-tight" data-testid="home-greeting">
-              {greeting(new Date(now).getHours())}
-              {firstName ? `, ${firstName}` : null}
-            </h1>
+            <div>
+              <h1 className="text-[28px] font-semibold tracking-tight" data-testid="home-greeting">
+                {greeting(new Date(now).getHours())}
+                {firstName ? `, ${firstName}` : null}
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground" data-testid="home-subtitle">
+                {setupHome.project ? (
+                  <>
+                    Working on{" "}
+                    <b className="font-medium text-foreground">{setupHome.project.name}</b>. What
+                    should we do?
+                  </>
+                ) : (
+                  "What should we work on?"
+                )}
+              </p>
+            </div>
           ),
         };
       case "composer":
@@ -262,6 +298,7 @@ export function HomeStart({
               <HomeComposer
                 environmentId={environmentId}
                 starters={starters}
+                defaultFolder={setupHome.project}
                 onStart={onStartTask}
               />
               <NeedsYouPill threads={threads} now={now} />
@@ -279,6 +316,7 @@ export function HomeStart({
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 pt-6 pb-16 sm:pt-12">
       {notices}
+      {setupHome.banner ? <SetupDoneBanner setup={setupHome} /> : null}
 
       {layout.editing ? (
         <div
@@ -348,6 +386,41 @@ export function HomeStart({
         onAskForWidget={(prompt) => void onAskUno(prompt)}
         dispatch={layout.dispatch}
       />
+    </div>
+  );
+}
+
+/** "Setup done" on Home after the guided setup, until closed. */
+function SetupDoneBanner({ setup }: { setup: SetupHome }) {
+  const navigate = useNavigate();
+  return (
+    <div
+      className="flex items-center gap-3 rounded-xl border border-primary/25 bg-primary/[0.05] px-4 py-3 text-sm"
+      data-testid="home-setup-done"
+    >
+      <CheckIcon className="size-4 shrink-0 text-primary" aria-hidden />
+      <span className="min-w-0 flex-1">
+        Setup done.{" "}
+        {setup.skippedCount > 0 ? (
+          <button
+            type="button"
+            className="text-primary hover:underline"
+            onClick={() => void navigate({ to: "/setup", search: { step: "done" } })}
+          >
+            Finish {setup.skippedCount} skipped {setup.skippedCount === 1 ? "step" : "steps"}
+          </button>
+        ) : (
+          "Change anything in Settings."
+        )}
+      </span>
+      <button
+        type="button"
+        aria-label="Dismiss"
+        onClick={setup.closeBanner}
+        className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+      >
+        <XIcon className="size-3.5" />
+      </button>
     </div>
   );
 }

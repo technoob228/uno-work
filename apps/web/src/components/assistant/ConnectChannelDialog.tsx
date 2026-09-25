@@ -46,7 +46,7 @@ import {
 import { cn } from "../../lib/utils";
 import { describeTelegramStatus, parseTelegramChatId } from "../helper/telegramPageLogic";
 import { openInstallDocs } from "../onboarding/harnessInstallLinks";
-import { SlackGuide } from "../setup/steps/ChannelsStep";
+import { SlackGuide } from "../setup/SlackGuide";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -167,7 +167,7 @@ function StepHeading(props: { n: number; title: string; state: "done" | "active"
   );
 }
 
-function TelegramWizard(props: {
+export function TelegramWizard(props: {
   readonly environmentId: EnvironmentId;
   readonly summary: ManagerAssistantSummary;
   readonly onChanged: () => void;
@@ -336,9 +336,9 @@ function TelegramWizard(props: {
         {step === "bot" ? (
           <div className="flex flex-col gap-2 pl-7 text-sm">
             <p className="text-muted-foreground">
-              Uno talks to you through a bot that belongs to you, not a shared one. In Telegram open
-              @BotFather, send <code className="rounded bg-muted px-1">/newbot</code> and pick any
-              name. It replies with a token.
+              A bot that is entirely yours: in Telegram open @BotFather, send{" "}
+              <code className="rounded bg-muted px-1">/newbot</code> and pick any name. It replies
+              with a token.
             </p>
             <Button
               size="sm"
