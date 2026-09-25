@@ -1,5 +1,5 @@
 import Mime from "@effect/platform-node/Mime";
-import { Data, Effect, FileSystem, Option, Path } from "effect";
+import { Data, Effect, Fiber, FileSystem, Option, Path } from "effect";
 import { cast } from "effect/Function";
 import {
   HttpBody,
@@ -44,6 +44,7 @@ import {
 } from "./secretsEnv.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { executeBridgeCommand, executeBridgeOpenUrl } from "./browserCommandRouter.ts";
+import { announceBrowserHelp } from "./browserHelpNotify.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { OFFICE_ENGINE_ROUTE_PREFIX, resolveOfficeEngineFilePath } from "./officeEngine.ts";
@@ -348,10 +349,26 @@ export const browserBridgeCommandRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Invalid browser command payload.", { status: 400 });
     }
 
-    const result = yield* executeBridgeCommand(
+    const execution = executeBridgeCommand(
       rawInput,
       resolveBridgeRequestContext(thread.context, body),
     );
+    const result =
+      rawInput.command === "requestHelp"
+        ? yield* Effect.gen(function* () {
+            const running = yield* Effect.forkChild(execution);
+            // Отказ (браузер в панели на экране человека) приходит сразу —
+            // звать некого. Ждёт дольше — человек может быть не в приложении:
+            // зовём во «Входящие» и мессенджер.
+            const early = yield* Fiber.join(running).pipe(Effect.timeoutOption("500 millis"));
+            if (Option.isSome(early)) return early.value;
+            yield* announceBrowserHelp({
+              threadId: thread.threadId,
+              reason: rawInput.text ?? "",
+            }).pipe(Effect.forkDetach, Effect.asVoid);
+            return yield* Fiber.join(running);
+          })
+        : yield* execution;
     return HttpServerResponse.jsonUnsafe(result, { status: result.ok ? 200 : 502 });
   }),
 );

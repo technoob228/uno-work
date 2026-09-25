@@ -13,6 +13,9 @@
 #   UNO_WORK_HERMES_VERSION  pin the Hermes Agent release (recommended for images)
 #   UNO_WORK_SKIP_HARNESSES=1  install only the daemon
 #   UNO_WORK_INSTALL_OFFICE=1  also install the Office engine (~680 MB; golden images)
+#   UNO_WORK_SKIP_BROWSER=0    also install the machine's browser now (Chromium + Xvfb +
+#                              libs, ~0.7-1.1 GB). Default 1: the browser is NOT put in the
+#                              image; the machine sets it up on first use (~30-60 s).
 #
 set -euo pipefail
 
@@ -25,6 +28,7 @@ INSTALL_DIR="/opt/uno-work"
 STATE_DIR="/var/lib/uno-work"
 CONFIG_DIR="/etc/uno-work"
 WORKSPACE_DIR="/home/${SERVICE_USER}/projects"
+BROWSERS_DIR="${INSTALL_DIR}/browsers"
 NODE_MAJOR=22
 
 log() { printf '\033[1;35m[uno-work]\033[0m %s\n' "$*"; }
@@ -94,6 +98,148 @@ UNO_WORK_WORKSPACE=${WORKSPACE_DIR}
 ENVFILE
   chmod 0640 "${CONFIG_DIR}/uno-work.env"
 fi
+
+# --- The machine's browser (set up on first use) ------------------------------
+# On a machine in the cloud the agent's browser lives here, not on the person's
+# laptop: it keeps working with the app closed, and the app shows it live.
+#
+# It is NOT installed by default: Chromium with its system libraries adds
+# ~1.1 GB to every machine made from the Work image, and not everyone uses it.
+# The daemon sets it up the first time an agent or the person opens it. The
+# daemon runs unprivileged (NoNewPrivileges, no sudo), so it only drops a
+# request file; uno-work-browser-setup.path sees it and starts the root oneshot
+# uno-work-browser-setup, which installs Xvfb + Chromium (the build must match
+# the bundled playwright-core, so it comes from the bundle's own CLI) and
+# writes its progress to ${BROWSER_STATUS_DIR}/status.json for the daemon.
+# A separate unit keeps going across daemon restarts; a repeat request on a
+# machine that has the browser finishes in a second.
+BROWSER_REQUEST_DIR="${STATE_DIR}/browser-setup"
+BROWSER_STATUS_DIR="/var/lib/uno-work-browser"
+install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${BROWSER_REQUEST_DIR}"
+install -d -m 0755 "${BROWSER_STATUS_DIR}" "${BROWSERS_DIR}"
+
+cat > "${INSTALL_DIR}/bin/uno-work-browser-setup" <<'SETUP'
+#!/usr/bin/env bash
+# Written by install.sh — sets up the machine's browser (Xvfb + Chromium from the
+# bundle's playwright-core). Runs as root from uno-work-browser-setup.service.
+# Idempotent: exits at once when the browser is already there.
+set -uo pipefail
+export DEBIAN_FRONTEND=noninteractive
+INSTALL_DIR=/opt/uno-work
+BROWSERS_DIR="${INSTALL_DIR}/browsers"
+REQUEST_FILE=/var/lib/uno-work/browser-setup/request
+STATUS_DIR=/var/lib/uno-work-browser
+STATUS_FILE="${STATUS_DIR}/status.json"
+LOG_FILE="${STATUS_DIR}/setup.log"
+PW_DIR="${INSTALL_DIR}/app/node_modules/playwright-core"
+MIN_FREE_KB=$((2 * 1024 * 1024))
+STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+STEP=""
+
+# The request lives in the daemon's directory: never follow a link it planted.
+[ -L "$(dirname "${REQUEST_FILE}")" ] || rm -f -- "${REQUEST_FILE}"
+install -d -m 0755 "${STATUS_DIR}" "${BROWSERS_DIR}"
+
+write_status() { # state error
+  local tmp="${STATUS_FILE}.tmp.$$"
+  node -e 'const [state, step, error, startedAt] = process.argv.slice(1);
+process.stdout.write(JSON.stringify({ state, step: step || null, error: error || null,
+  startedAt: startedAt || null, updatedAt: new Date().toISOString() }) + "\n");' \
+    "$1" "${STEP}" "${2:-}" "${STARTED_AT}" >"${tmp}" && chmod 0644 "${tmp}" && mv -f "${tmp}" "${STATUS_FILE}"
+}
+fail() {
+  local detail
+  detail="$(grep -v '^\s*$' "${LOG_FILE}" 2>/dev/null | tail -n 1 | tr -cd '[:print:]' | cut -c1-200)"
+  write_status failed "$1${detail:+ (${detail})}"
+  echo "uno-work-browser-setup: failed at '${STEP}': $1" >&2
+  exit 1
+}
+trap 'fail "Setup was interrupted."' TERM INT
+step() { STEP="$1"; write_status installing; echo "uno-work-browser-setup: ${STEP}"; }
+
+browser_ready() {
+  [ -f "${PW_DIR}/cli.js" ] || return 1
+  command -v Xvfb >/dev/null 2>&1 || return 1
+  # Chromium is complete when playwright wrote INSTALLATION_COMPLETE next to it.
+  PLAYWRIGHT_BROWSERS_PATH="${BROWSERS_DIR}" node -e '
+const path = require("path"), fs = require("fs");
+const exe = require(process.argv[1]).chromium.executablePath();
+const dir = path.relative(process.argv[2], exe).split(path.sep)[0];
+process.exit(fs.existsSync(exe) && fs.existsSync(path.join(process.argv[2], dir, "INSTALLATION_COMPLETE")) ? 0 : 1);' \
+    "${PW_DIR}" "${BROWSERS_DIR}" 2>/dev/null
+}
+
+if browser_ready; then
+  STEP="Ready"; write_status ready
+  exit 0
+fi
+[ -f "${PW_DIR}/cli.js" ] || fail "This Uno Work build has no browser engine. Update Uno Work."
+
+free_kb="$(df -Pk "${BROWSERS_DIR}" | awk 'NR==2 {print $4}')"
+if [ -n "${free_kb}" ] && [ "${free_kb}" -lt "${MIN_FREE_KB}" ]; then
+  free_gb="$(awk -v k="${free_kb}" 'BEGIN {printf "%.1f", k / 1048576}')"
+  : >"${LOG_FILE}"
+  fail "Not enough disk space to set up the browser: ${free_gb} GB free, it needs 2.0 GB. Free up space on this computer or give it a bigger disk, then try again."
+fi
+
+: >"${LOG_FILE}"
+chmod 0644 "${LOG_FILE}"
+# apt may be busy (unattended upgrades): wait for the lock instead of failing.
+# playwright's install-deps runs apt-get itself, so the setting goes via APT_CONFIG.
+apt_conf="$(mktemp)"
+echo 'DPkg::Lock::Timeout "300";' >"${apt_conf}"
+export APT_CONFIG="${apt_conf}"
+trap 'rm -f "${apt_conf}"' EXIT
+
+step "Installing system libraries"
+PLAYWRIGHT_BROWSERS_PATH="${BROWSERS_DIR}" node "${PW_DIR}/cli.js" install-deps chromium >>"${LOG_FILE}" 2>&1 \
+  || fail "Couldn't install the browser's system libraries."
+step "Installing the virtual display"
+apt-get install -y -qq --no-install-recommends xvfb >>"${LOG_FILE}" 2>&1 \
+  || fail "Couldn't install the virtual display (Xvfb)."
+step "Downloading the browser"
+# --no-shell: the full Chromium runs both headful and in the new headless mode;
+# the separate headless shell would only add ~100 MB.
+PLAYWRIGHT_BROWSERS_PATH="${BROWSERS_DIR}" node "${PW_DIR}/cli.js" install --no-shell chromium >>"${LOG_FILE}" 2>&1 \
+  || fail "Couldn't download the browser."
+step "Finishing"
+chmod -R a+rX "${BROWSERS_DIR}"
+apt-get clean >/dev/null 2>&1 || true
+browser_ready || fail "The browser was installed but can't be found."
+STEP="Ready"; write_status ready
+echo "uno-work-browser-setup: ready"
+SETUP
+chmod 0755 "${INSTALL_DIR}/bin/uno-work-browser-setup"
+
+cat > /etc/systemd/system/uno-work-browser-setup.service <<'UNIT'
+[Unit]
+Description=Set up the Uno Work machine's browser (first use)
+Documentation=https://uno4.dev/docs/work
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/uno-work/bin/uno-work-browser-setup
+TimeoutStartSec=20min
+# The person keeps working while it installs: stay behind their processes.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UNIT
+
+cat > /etc/systemd/system/uno-work-browser-setup.path <<UNIT
+[Unit]
+Description=Watch for the Uno Work daemon asking to set up the browser
+Documentation=https://uno4.dev/docs/work
+
+[Path]
+PathExists=${BROWSER_REQUEST_DIR}/request
+Unit=uno-work-browser-setup.service
+
+[Install]
+WantedBy=paths.target
+UNIT
 
 # --- Bundled harnesses ------------------------------------------------------
 # All three authenticate through the Uno gateway, so the user never pastes a
@@ -331,6 +477,16 @@ After=user@${service_uid}.service
 Environment=XDG_RUNTIME_DIR=/run/user/${service_uid}
 DROPIN
 
+# Where the daemon finds the machine's browser (playwright's registry) and how it
+# asks for it to be set up on first use (see "The machine's browser" above).
+cat > /etc/systemd/system/uno-work.service.d/browser.conf <<DROPIN
+# Written by install.sh — the machine's browser (Chromium from the bundle's playwright-core).
+[Service]
+Environment=PLAYWRIGHT_BROWSERS_PATH=${BROWSERS_DIR}
+Environment=UNO_WORK_BROWSER_SETUP_REQUEST=${BROWSER_REQUEST_DIR}/request
+Environment=UNO_WORK_BROWSER_SETUP_STATUS=${BROWSER_STATUS_DIR}/status.json
+DROPIN
+
 # --- Docker without sudo ------------------------------------------------------
 # On a machine with docker (Work images, the docker template) the daemon lists,
 # starts and stops docker apps on Home with plain `docker` as ${SERVICE_USER},
@@ -349,6 +505,13 @@ if getent group docker >/dev/null 2>&1; then
 fi
 
 systemctl daemon-reload
+systemctl enable --now uno-work-browser-setup.path >/dev/null 2>&1 \
+  || log "  could not enable browser setup on first use; the agent's browser won't install itself"
+if [ "${UNO_WORK_SKIP_BROWSER:-1}" = "0" ]; then
+  log "Installing the machine's browser now (Chromium + virtual display, ~1.1 GB)"
+  "${INSTALL_DIR}/bin/uno-work-browser-setup" \
+    || log "WARNING: browser setup failed (${BROWSER_STATUS_DIR}/setup.log); it retries on first use"
+fi
 systemctl start "user@${service_uid}.service" >/dev/null 2>&1 || log "  could not start the user session; user timers start after a reboot"
 # `enable --now` only starts a stopped unit; an upgrade leaves the old process
 # running on the old bundle. Restart unconditionally so the new code takes over.

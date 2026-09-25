@@ -13,6 +13,7 @@ import {
   FolderIcon,
   GlobeIcon,
   ImageIcon,
+  MonitorIcon,
   Loader2Icon,
   Maximize2Icon,
   Minimize2Icon,
@@ -51,6 +52,7 @@ import {
   DUAL_VIEW_KINDS,
   isAppTab,
   isBrowserTab,
+  isLiveBrowserTab,
   isPluginPanelTab,
   makePluginPanelFile,
   pluginIdFromPanelFile,
@@ -72,6 +74,8 @@ import {
   type PluginPanelDescriptor,
 } from "./PluginPanelChat";
 import { AppFrame } from "../apps/AppFrame";
+import { LiveBrowserView } from "./LiveBrowserView";
+import { useChatBrowser } from "./useChatBrowser";
 import { BrowserViews } from "./BrowserPane";
 import { useSidebar } from "../ui/sidebar";
 import { CodeFileView } from "./CodeFileView";
@@ -92,6 +96,7 @@ const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   svg: ImageIcon,
   text: FileCode2Icon,
   browser: GlobeIcon,
+  "live-browser": MonitorIcon,
   "plugin-panel": PuzzleIcon,
   app: AppWindowIcon,
   unknown: FileIcon,
@@ -109,6 +114,7 @@ const KIND_LABEL: Record<PreviewFileKind, string> = {
   svg: "SVG",
   text: "Text",
   browser: "Браузер",
+  "live-browser": "Браузер компьютера",
   "plugin-panel": "Панель плагина",
   app: "Приложение",
   unknown: "File",
@@ -1331,6 +1337,9 @@ function Body({ file }: { file: PreviewFile }) {
   if (file.kind === "app" && file.url) {
     return <AppFrame url={file.url} name={file.name} icon={file.content || null} compact />;
   }
+  if (file.kind === "live-browser") {
+    return <LiveBrowserView file={file} />;
+  }
   const hasInlineContent = Boolean(file.content) || Boolean(file.blobUrl);
   const sourceView = DUAL_VIEW_KINDS.has(file.kind) && sourceViewFileIds.includes(file.id);
 
@@ -1616,7 +1625,6 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
     togglePreviewLayoutMode,
     openBrowser,
     openFile,
-    openUrl,
     currentChatProjectCwd,
     currentChatEnvironmentId,
     toggleSourceView,
@@ -1624,6 +1632,9 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
     setTabScope,
   } = usePreviewPane();
   const tabStripRef = useRef<HTMLDivElement | null>(null);
+  // Агенты этого чата работают в браузере машины (Work в облаке): «Открыть
+  // страницу» ведёт туда же, а не в браузер этого устройства.
+  const { browsesOnMachine: chatBrowsesOnMachine, openChatBrowser } = useChatBrowser();
   // Live-список панелей: агент может создать плагин прямо сейчас, и он должен
   // появиться в меню «+» без переоткрытия (хвост фазы B).
   const panels = usePluginPanels();
@@ -1868,7 +1879,9 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
               const choice = await readLocalApi()?.contextMenu.show(
                 [
                   { id: "file", label: "Открыть файл…" },
-                  ...(browserCompanionEnabled ? [{ id: "page", label: "Открыть страницу" }] : []),
+                  ...(browserCompanionEnabled || chatBrowsesOnMachine
+                    ? [{ id: "page", label: "Открыть страницу" }]
+                    : []),
                   ...(pluginsEnabled && panels.length > 0
                     ? [
                         {
@@ -1890,7 +1903,7 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
                   startPath: currentChatProjectCwd ?? null,
                 });
               } else if (choice === "page") {
-                openUrl();
+                openChatBrowser();
               } else if (choice?.startsWith(PANEL_MENU_ID_PREFIX)) {
                 const pluginId = choice.slice(PANEL_MENU_ID_PREFIX.length);
                 const panel = panels.find((candidate) => candidate.id === pluginId);
@@ -1928,7 +1941,8 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
       active &&
       !isBrowserTab(active) &&
       !isPluginPanelTab(active) &&
-      !isAppTab(active) ? (
+      !isAppTab(active) &&
+      !isLiveBrowserTab(active) ? (
         <PathBar file={active} onOpenAt={handleOpenAt} />
       ) : null}
       <div className={cn("relative min-h-0 flex-1", isFocusMode && "pb-36")}>
