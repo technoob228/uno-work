@@ -1,8 +1,8 @@
 /**
  * Invisible: keeps the Inbox of every connected computer in `inboxStore`,
- * shows new items as system notifications when the window is in the
- * background (if the person turned them on), and marks a chat's items read
- * while the person is looking at that chat.
+ * shows new items as system notifications (see systemNotifications.ts for
+ * which ones, and when), and marks a chat's items read while the person is
+ * looking at that chat.
  */
 import type { EnvironmentId, InboxSnapshot } from "@t3tools/contracts";
 import { useParams } from "@tanstack/react-router";
@@ -13,7 +13,11 @@ import {
   subscribeEnvironmentConnections,
 } from "../environments/runtime";
 import { type InboxEntry, updateInbox, useInboxStore } from "./inboxStore";
-import { showSystemNotification, windowIsInFront } from "./systemNotifications";
+import {
+  askForPermissionOnFirstGesture,
+  showSystemNotification,
+  windowIsInFront,
+} from "./systemNotifications";
 import { useOpenInboxItem } from "./useOpenInboxItem";
 
 /** Items that are new or changed since the last snapshot, still unread. */
@@ -34,6 +38,17 @@ export function InboxListener() {
   const openItemRef = useRef(openItem);
   openItemRef.current = openItem;
 
+  // The chat on screen: its own news doesn't need a pop-up while in front.
+  const params = useParams({ strict: false }) as {
+    environmentId?: string;
+    threadId?: string;
+  };
+  const viewingRef = useRef(params);
+  viewingRef.current = params;
+
+  // Notifications are on by default; a browser still has to be allowed once.
+  useEffect(() => askForPermissionOnFirstGesture(), []);
+
   const [connectionsVersion, setConnectionsVersion] = useState(0);
   useEffect(
     () => subscribeEnvironmentConnections(() => setConnectionsVersion((value) => value + 1)),
@@ -53,8 +68,14 @@ export function InboxListener() {
         useInboxStore.getState().setSnapshot(environmentId, snapshot);
         for (const item of freshItems(previous, snapshot)) {
           const entry: InboxEntry = { ...item, environmentId };
+          const viewing = viewingRef.current;
           showSystemNotification({
             tag: `${environmentId}:${item.id}`,
+            kind: item.kind,
+            viewingItsChat:
+              item.open?.kind === "thread" &&
+              viewing.environmentId === environmentId &&
+              viewing.threadId === item.open.threadId,
             title: item.title,
             body: item.body,
             onClick: () => void openItemRef.current(entry),
@@ -68,10 +89,6 @@ export function InboxListener() {
   }, [connectionsVersion]);
 
   // Looking at a chat reads its news.
-  const params = useParams({ strict: false }) as {
-    environmentId?: string;
-    threadId?: string;
-  };
   const byEnvironment = useInboxStore((state) => state.byEnvironment);
   useEffect(() => {
     const { environmentId, threadId } = params;
