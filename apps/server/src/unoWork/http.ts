@@ -50,6 +50,8 @@ import {
   type BridgeReply,
   type UnoWorkToolDeps,
 } from "./tools.ts";
+import { controlPlaneBaseUrl } from "../workspaceRegistry/unoCloudParse.ts";
+import { consoleRequest, consoleToken } from "./consoleClient.ts";
 import { UNO_WORK_MCP_SESSION_ARG } from "./constants.ts";
 
 const LOG_MAX_BYTES = 64 * 1024;
@@ -298,6 +300,24 @@ const makeDeps = (input: {
         createBoxStatus: (args) => unoCloud.createBoxStatus(args),
       },
       settings: serverSettings.getSettings,
+      console: {
+        request: (request) =>
+          Effect.gen(function* () {
+            const current = yield* serverSettings.getSettings.pipe(
+              Effect.orElseSucceed(() => null),
+            );
+            const token = current ? consoleToken(current) : "";
+            // No token: answer like the console would, the tool explains it.
+            if (token.length === 0) return { status: 401, body: null };
+            return yield* Effect.tryPromise({
+              try: () => consoleRequest({ ...request, baseUrl: controlPlaneBaseUrl(), token }),
+              catch: (cause) =>
+                new UnoWorkToolError({
+                  message: `The Uno console didn't answer: ${cause instanceof Error ? cause.message : String(cause)}`,
+                }),
+            });
+          }),
+      },
       readLogTail: ({ app, lines }) =>
         Effect.promise(() => readAppLogTail(app, lines, manifestDir)),
       ...(connectors

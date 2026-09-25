@@ -25,6 +25,8 @@ export const UNO_WORK_GUIDE_TOPICS = [
   "browser",
   "chats",
   "secrets",
+  "sites",
+  "databases",
   "account",
   "plugins",
 ] as const;
@@ -118,6 +120,21 @@ export function buildUnoWorkGuide(
         "Call `request_secret` with the variable name and where to get it. The person types it into a masked field; the value is written to the project's `.env` and never reaches you or the chat. Logins for websites: ask the person to save them in Settings, Credentials instead.",
         HTTP_FALLBACK_NOTE,
         section(bridge, "Безопасный запрос секретов"),
+      ].join("\n\n");
+    case "sites":
+      return [
+        "## Sites",
+        "`site_publish` puts a folder with index.html (or one HTML file) on a public https address, `<slug>.uno4.dev`; republishing the same slug updates it. `sites_list` shows the person's sites with their slugs.",
+        "Password: `site_set_password` protects a site (pass `password`, or omit it and a readable one is generated) or removes protection (`remove: true`). Tell the person the password from the result; visitors type it. Never ask them to set it themselves.",
+        'Forms work without a backend: the page posts to `/__forms` (`<form action="/__forms" method="POST">` with named inputs). `site_forms_set` chooses where answers go: `email` (the account\'s own address works at once; another address gets a confirmation link first), `telegram: true` (returns a link the person opens in Telegram and presses Start), `webhookUrl` (https, JSON). An empty string switches a channel off. `site_forms_get` shows the delivery and, with `submissions`, the latest answers.',
+        "Changing a password or where answers go always asks the person first. Deleting a site or connecting a custom domain is done in the Uno console.",
+      ].join("\n\n");
+    case "databases":
+      return [
+        "## Databases",
+        "`db_create` makes a managed Postgres database on its own small Uno computer (it counts against the plan; the person always approves). It starts in a minute or two; `db_list` shows its status.",
+        "`db_connection` writes the connection string, password included, into the project's `.env` as `DATABASE_URL` (or `envName`), file mode 0600, in this chat's folder or a folder inside it. You never see the password: the app reads the variable (`process.env.DATABASE_URL`, `os.environ[\"DATABASE_URL\"]`). Keep `.env` in `.gitignore` and never print it.",
+        "The database is reachable from the account's Uno computers on its internal address, not from the internet. Deleting a database is done in the Uno console.",
       ].join("\n\n");
     case "account":
       return [
