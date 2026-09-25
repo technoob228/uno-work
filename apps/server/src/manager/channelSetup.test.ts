@@ -442,6 +442,7 @@ it.layer(NodeServices.layer)("Slack via Uno's app", (it) => {
           teamName: "Acme",
           botUserName: "uno",
           connected: true,
+          installerDmReady: false,
         },
       });
       expect(yield* readSlackRow).toMatchObject({
@@ -469,6 +470,7 @@ it.layer(NodeServices.layer)("Slack via Uno's app", (it) => {
           teamName: null,
           botUserName: null,
           connected: false,
+          installerDmReady: false,
         },
       });
       expect(calls.some((call) => call.url.endsWith("/work/slack/relay"))).toBe(false);
@@ -513,6 +515,70 @@ it.layer(NodeServices.layer)("Slack via Uno's app", (it) => {
       });
       yield* uninstallSlack({ projectId, identity });
       expect((yield* readSlackRow)?.botToken).toBe("xoxb-own");
+    }).pipe(Effect.provide(slackLayer(false))),
+  );
+
+  it.effect("opens and allowlists the installer's DM through the relay, keeping other ids", () =>
+    Effect.gen(function* () {
+      const repository = yield* ManagerConnectorRepository;
+      yield* repository.upsert({
+        projectId,
+        kind: "slack",
+        config: {
+          botToken: `unorelay:${SLR}`,
+          appToken: "unorelay",
+          allowedChannelIds: ["C_EXISTING"],
+          enabled: true,
+        },
+        updatedAt: new Date().toISOString(),
+      });
+      const calls = installFetch([
+        route("GET", "/api/v1/boxes/4242/work/slack", () =>
+          json({ available: true, installed: true, team_name: "Acme", installer_user_id: "UINST" }),
+        ),
+        route("POST", `/api/v1/work-relay/slack/${SLR}/api/conversations.open`, () =>
+          json({ ok: true, channel: { id: "DINST" } }),
+        ),
+      ]);
+
+      const first = yield* readSlackInstall({ projectId, identity });
+      expect(first).toMatchObject({ ok: true, value: { installerDmReady: true } });
+      expect((yield* readSlackRow)?.allowedChannelIds).toEqual(["C_EXISTING", "DINST"]);
+      const open = calls.find((call) => call.url.endsWith("/conversations.open"));
+      expect(open?.body).toBe("users=UINST");
+      expect(open?.authorization).toBeNull();
+
+      // Later checks re-open (idempotent at Slack) without duplicating the id.
+      yield* readSlackInstall({ projectId, identity });
+      expect((yield* readSlackRow)?.allowedChannelIds).toEqual(["C_EXISTING", "DINST"]);
+    }).pipe(Effect.provide(slackLayer(true))),
+  );
+
+  it.effect("reports installerDmReady false when the DM cannot be opened", () =>
+    Effect.gen(function* () {
+      const repository = yield* ManagerConnectorRepository;
+      yield* repository.upsert({
+        projectId,
+        kind: "slack",
+        config: {
+          botToken: `unorelay:${SLR}`,
+          appToken: "unorelay",
+          allowedChannelIds: [],
+          enabled: true,
+        },
+        updatedAt: new Date().toISOString(),
+      });
+      installFetch([
+        route("GET", "/work/slack", () =>
+          json({ available: true, installed: true, installer_user_id: "UINST" }),
+        ),
+        route("POST", "/conversations.open", () => json({ ok: false, error: "missing_scope" })),
+      ]);
+      expect(yield* readSlackInstall({ projectId, identity })).toMatchObject({
+        ok: true,
+        value: { installerDmReady: false },
+      });
+      expect((yield* readSlackRow)?.allowedChannelIds).toEqual([]);
     }).pipe(Effect.provide(slackLayer(false))),
   );
 
