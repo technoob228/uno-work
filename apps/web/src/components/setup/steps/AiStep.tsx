@@ -49,8 +49,9 @@ const AI_ROWS: ReadonlyArray<AiRow> = [
     id: "uno",
     name: "Uno AI",
     icon: UnoIcon,
-    // The gateway's catalogue (280+), not the picker's short list.
-    description: () => "Built in. 280+ models, paid from the AI credits in your plan.",
+    // Uno AI hours (fishcode back/knowledge/ai-hours.md).
+    description: () =>
+      "Built in. AI hours every month, unlimited inside them. Hours never expire. Work in as many chats and agents at once as you like. Time counts only while AI is working. Reading, thinking and typing don't use hours.",
   },
   {
     id: "claudeAgent",

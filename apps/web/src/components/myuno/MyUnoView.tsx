@@ -78,6 +78,7 @@ import {
   subscriptionQuery,
 } from "./myUnoQueries";
 import { PlanLine, WorthALook } from "./OverviewTop";
+import { useAiStatus } from "../../lib/aiStatusReactQuery";
 import { SitesTab } from "./SitesTab";
 import { useComputerActions } from "./useComputerActions";
 import { useOpenAccountComputer } from "./useOpenAccountComputer";
@@ -151,6 +152,8 @@ export function MyUnoView() {
   const needsSignIn = !reachable || signedOut(computers.error) || signedOut(balance.error);
   const sub = subscription.data ?? null;
   const currentEnvironmentId = activeEnvironmentId ?? primary?.environmentId ?? null;
+  // Today's AI hours use, when this machine's gateway has AI hours.
+  const aiUsedTodayMinutes = useAiStatus(currentEnvironmentId)?.usedTodayMinutes ?? null;
   // The desktop app's own computer: yours, listed with the Uno Work ones, free.
   const localName =
     isElectron && primary
@@ -355,6 +358,7 @@ export function MyUnoView() {
                   cloud={cloud.data}
                   sites={sites.data}
                   computers={boxes.length}
+                  aiUsedTodayMinutes={aiUsedTodayMinutes}
                 />
               ) : (
                 <>
@@ -369,6 +373,7 @@ export function MyUnoView() {
                     subscription={sub}
                     subscriptionLoading={subscription.isPending}
                     balance={balance.data}
+                    usedTodayMinutes={aiUsedTodayMinutes}
                     onOpen={seePlans}
                   />
 

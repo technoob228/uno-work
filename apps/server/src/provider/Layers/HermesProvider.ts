@@ -18,7 +18,11 @@ import type {
   ServerProviderModel,
   ServerProviderState,
 } from "@t3tools/contracts";
-import { ProviderDriverKind, UNO_GATEWAY_BASE_URL } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  UNO_GATEWAY_BASE_URL,
+  UNO_SMART_GATEWAY_MODEL,
+} from "@t3tools/contracts";
 import { Effect, Option, Result } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { createModelCapabilities } from "@t3tools/shared/model";
@@ -66,6 +70,8 @@ const TIER_RANK: Record<UnoModelTier, number> = {
 // вендоры с tool-use-моделями. Полный каталог остаётся доступен через
 // customModels в настройках.
 const HERMES_MODEL_VENDOR_ALLOWLIST = new Set([
+  // Uno AI hours: `uno/smart`, `uno/fast` — the included models.
+  "uno",
   "anthropic",
   "openai",
   "google",
@@ -82,7 +88,7 @@ const HERMES_MODEL_VENDOR_ALLOWLIST = new Set([
 
 // Дефолтная модель драйвера всегда должна присутствовать в пикере, даже если
 // фетч каталога не удался.
-export const HERMES_FALLBACK_MODEL_IDS = ["anthropic/claude-haiku-4.5"] as const;
+export const HERMES_FALLBACK_MODEL_IDS = [UNO_SMART_GATEWAY_MODEL] as const;
 
 export function isHermesPickerModel(model: UnoCatalogModel): boolean {
   if (!HERMES_MODEL_VENDOR_ALLOWLIST.has(model.provider.toLowerCase())) {

@@ -97,6 +97,9 @@ export type UnoModelTier = typeof UnoModelTier.Type;
 export const UnoModelRoute = Schema.Literals(["default", "russia"]);
 export type UnoModelRoute = typeof UnoModelRoute.Type;
 
+export const UnoModelGroup = Schema.Literals(["included", "premium", "personal", "custom"]);
+export type UnoModelGroup = typeof UnoModelGroup.Type;
+
 export const ModelCapabilitiesMetadata = Schema.Struct({
   tier: Schema.optional(UnoModelTier),
   routes: Schema.optional(Schema.Array(UnoModelRoute)),
@@ -136,6 +139,18 @@ export const ModelCapabilitiesMetadata = Schema.Struct({
       output: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
     }),
   ),
+  /**
+   * Uno AI hours: which short group of the picker the model belongs to.
+   * `included` runs on the plan's AI hours (Smart / Fast), `premium` is paid
+   * per token from premium credit, `personal` / `custom` run on the
+   * account's private GPU (a catalog model / the person's own upload).
+   * Absent on an older gateway — the picker then shows the full catalog.
+   */
+  unoGroup: Schema.optional(UnoModelGroup),
+  /** Included models: the real model behind "Smart" / "Fast" (display form). */
+  underlyingModel: Schema.optional(TrimmedNonEmptyString),
+  /** One line about the model from the gateway. */
+  description: Schema.optional(TrimmedNonEmptyString),
 });
 export type ModelCapabilitiesMetadata = typeof ModelCapabilitiesMetadata.Type;
 
@@ -181,6 +196,20 @@ const HERMES_DRIVER_KIND = ProviderDriverKind.make("hermes");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 const UNO_DRIVER_KIND = ProviderDriverKind.make("uno");
 
+/** Gateway ids of the two models included in Uno AI hours. */
+export const UNO_SMART_GATEWAY_MODEL = "uno/smart";
+export const UNO_FAST_GATEWAY_MODEL = "uno/fast";
+/** The same models as Uno harness slugs (`uno/` + gateway id). */
+export const UNO_SMART_MODEL_SLUG = `uno/${UNO_SMART_GATEWAY_MODEL}`;
+export const UNO_FAST_MODEL_SLUG = `uno/${UNO_FAST_GATEWAY_MODEL}`;
+/**
+ * Defaults before AI hours. Chats saved on them keep working: the gateway
+ * remaps them to Smart / Fast for accounts with hours, and the harness still
+ * accepts the ids (UnoDriver keeps them in its config).
+ */
+export const UNO_LEGACY_DEFAULT_MODEL_SLUG = "uno/moonshotai/kimi-k2.7-code";
+export const UNO_LEGACY_TEXT_GENERATION_MODEL_SLUG = "uno/~deepseek/deepseek-v4-flash-latest";
+
 export const DEFAULT_MODEL = "gpt-5.4";
 export const DEFAULT_GIT_TEXT_GENERATION_MODEL = "gpt-5.4-mini";
 
@@ -188,16 +217,26 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [CODEX_DRIVER_KIND]: DEFAULT_MODEL,
   [CLAUDE_DRIVER_KIND]: "claude-sonnet-4-6",
   [CURSOR_DRIVER_KIND]: "auto",
-  // Дешёвый дефолт: Hermes — прежде всего оркестратор, тяжёлые модели
-  // выбираются явно (см. ROUTING.md в воркспейсе ассистента).
-  [HERMES_DRIVER_KIND]: "anthropic/claude-haiku-4.5",
+  // Hermes — прежде всего оркестратор: "Smart" из часов Uno AI (id шлюза,
+  // без префикса харнесса). Тяжёлые модели выбираются явно (ROUTING.md).
+  [HERMES_DRIVER_KIND]: UNO_SMART_GATEWAY_MODEL,
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
-  // Gateway catalog ids only (`uno/claude-sonnet-4-6` is not one and fails
-  // with ProviderModelNotFoundError). Anthropic/OpenAI/Google are 403'd at
-  // the OpenRouter account level (ToS block, 2026-08) — until that is
-  // resolved the out-of-the-box default must be a model that answers.
-  // Switch back to `uno/~anthropic/claude-sonnet-latest` once it does.
-  [UNO_DRIVER_KIND]: "uno/moonshotai/kimi-k2.7-code",
+  // `uno/` (the harness provider) + the gateway id `uno/smart` — "Smart",
+  // the included model of AI hours. A gateway without AI hours does not
+  // list it; callers then fall back through
+  // DEFAULT_MODEL_CANDIDATES_BY_PROVIDER.
+  [UNO_DRIVER_KIND]: UNO_SMART_MODEL_SLUG,
+};
+
+/**
+ * Defaults in preference order, for a machine-picked model: the first one
+ * the instance actually lists wins. Uno: Smart on a gateway with AI hours,
+ * the pre-hours default (Kimi) on an older one.
+ */
+export const DEFAULT_MODEL_CANDIDATES_BY_PROVIDER: Partial<
+  Record<ProviderDriverKind, ReadonlyArray<string>>
+> = {
+  [UNO_DRIVER_KIND]: [UNO_SMART_MODEL_SLUG, UNO_LEGACY_DEFAULT_MODEL_SLUG],
 };
 
 /** Per-provider text generation model defaults. */
@@ -208,9 +247,9 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Partial<
   [CLAUDE_DRIVER_KIND]: "claude-haiku-4-5",
   [CURSOR_DRIVER_KIND]: "composer-2",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
-  // Titles/branch names are short throwaway generations — cheapest model
-  // that answers (see the note on DEFAULT_MODEL_BY_PROVIDER above).
-  [UNO_DRIVER_KIND]: "uno/~deepseek/deepseek-v4-flash-latest",
+  // Titles/branch names are short throwaway generations — "Fast", the
+  // cheap included model of AI hours.
+  [UNO_DRIVER_KIND]: UNO_FAST_MODEL_SLUG,
 };
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<

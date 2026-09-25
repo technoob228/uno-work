@@ -33,6 +33,8 @@ import {
   useStore,
 } from "../../store";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
+import { formatAiMinutes } from "../../account/aiHours";
+import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -287,7 +289,35 @@ const UNO_CODE_PHASE_LABEL: Record<string, string> = {
   done: "Finishing…",
 };
 
+/**
+ * Uno AI hours of the key's account (`GET /v1/ai/status`); null when the
+ * gateway has none (404 on an older backend) — then only credits are shown.
+ */
+export function useGatewayAiHours(apiKey: string) {
+  return useQuery({
+    queryKey: ["uno-gateway-ai-status", apiKey],
+    queryFn: async () => {
+      const response = await fetch(`${UNO_GATEWAY_BASE_URL}/ai/status`, {
+        headers: { authorization: `Bearer ${apiKey}` },
+      });
+      if (!response.ok) return null;
+      const body = (await response.json().catch(() => null)) as {
+        readonly hours_left_minutes?: unknown;
+        readonly unlimited?: unknown;
+      } | null;
+      if (body?.unlimited === true) return { unlimited: true, leftMinutes: null };
+      return typeof body?.hours_left_minutes === "number"
+        ? { unlimited: false, leftMinutes: body.hours_left_minutes }
+        : null;
+    },
+    enabled: apiKey.length > 0,
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
 export function UnoGatewayBalance({ apiKey }: { readonly apiKey: string }) {
+  const hours = useGatewayAiHours(apiKey).data ?? null;
   const query = useQuery({
     queryKey: ["uno-gateway-credits", apiKey],
     queryFn: async () => {
@@ -317,14 +347,35 @@ export function UnoGatewayBalance({ apiKey }: { readonly apiKey: string }) {
   if (query.isPending) {
     return <span className="text-xs text-muted-foreground">Loading…</span>;
   }
+  const hoursLabel = hours
+    ? hours.unlimited || hours.leftMinutes === null
+      ? "Unlimited AI"
+      : `${formatAiMinutes(hours.leftMinutes)} left · never expire`
+    : null;
   if (query.isError || typeof query.data?.llm_balance !== "number") {
-    return topUpLink;
+    return hoursLabel ? (
+      <span className="flex items-center gap-2">
+        <span className="text-sm font-semibold tabular-nums">{hoursLabel}</span>
+        {topUpLink}
+      </span>
+    ) : (
+      topUpLink
+    );
   }
   return (
     <span className="flex items-center gap-2">
-      <span className="text-sm font-semibold tabular-nums">
-        ${query.data.llm_balance.toFixed(2)}
-      </span>
+      {hoursLabel ? <span className="text-sm font-semibold tabular-nums">{hoursLabel}</span> : null}
+      {!hoursLabel || query.data.llm_balance > 0 ? (
+        <span
+          className={cn(
+            "tabular-nums",
+            hoursLabel ? "text-xs text-muted-foreground" : "text-sm font-semibold",
+          )}
+        >
+          ${query.data.llm_balance.toFixed(2)}
+          {hoursLabel ? " premium credit" : ""}
+        </span>
+      ) : null}
       {topUpLink}
     </span>
   );

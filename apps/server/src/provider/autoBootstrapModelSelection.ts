@@ -23,6 +23,7 @@ import {
   type ServerProvider,
   isProviderAvailable,
 } from "@t3tools/contracts";
+import { listedDefaultModel } from "@t3tools/shared/model";
 
 /**
  * The pick when nothing on the machine is usable (or provider probes have not
@@ -75,10 +76,9 @@ export function isUsableForDefault(provider: ServerProvider): boolean {
  * bridge when an agent names a provider without a model.
  */
 export function resolveModel(provider: ServerProvider): string | null {
+  const listed = listedDefaultModel(provider.driver, provider.models);
+  if (listed !== undefined) return listed;
   const preferred = DEFAULT_MODEL_BY_PROVIDER[provider.driver];
-  if (preferred !== undefined && provider.models.some((model) => model.slug === preferred)) {
-    return preferred;
-  }
   const first = provider.models[0];
   if (first !== undefined) return first.slug;
   return preferred ?? null;

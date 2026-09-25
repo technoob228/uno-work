@@ -16,10 +16,10 @@ import {
 } from "./assistantLlm.ts";
 
 describe("assistant model selection", () => {
-  it("defaults to Hermes, the latest Grok and the Uno gateway", () => {
+  it("defaults to Hermes, Smart (Uno AI hours) and the Uno gateway", () => {
     expect(DEFAULT_ASSISTANT_MODEL_SELECTION).toEqual({
       instanceId: "hermes",
-      model: "~x-ai/grok-latest",
+      model: "uno/smart",
       options: [{ id: "llmProvider", value: "uno" }],
     });
   });
@@ -84,7 +84,7 @@ describe("latest Grok", () => {
   });
 
   it("chooses a default per provider", () => {
-    expect(defaultAssistantModelFor("uno", [])).toBe("~x-ai/grok-latest");
+    expect(defaultAssistantModelFor("uno", [])).toBe("uno/smart");
     expect(defaultAssistantModelFor("openrouter", ["~x-ai/grok-latest", "x-ai/grok-4.7"])).toBe(
       "~x-ai/grok-latest",
     );
@@ -97,6 +97,8 @@ describe("latest Grok", () => {
 describe("labels", () => {
   it("names models and providers for the header", () => {
     expect(assistantModelLabel("~x-ai/grok-latest")).toBe("Grok (latest)");
+    expect(assistantModelLabel("uno/smart")).toBe("Smart");
+    expect(assistantModelLabel("uno/fast")).toBe("Fast");
     expect(assistantModelLabel("x-ai/grok-4.7")).toBe("Grok 4.7");
     expect(assistantModelLabel("openai/gpt-5")).toBe("gpt-5");
     expect(assistantProviderLabel("uno")).toBe("Uno gateway");

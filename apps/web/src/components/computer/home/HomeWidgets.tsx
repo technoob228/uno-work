@@ -153,8 +153,8 @@ export const HOME_WIDGETS: Record<HomeWidgetId, WidgetMeta> = {
     span: 1,
   },
   "ai-spend": {
-    title: "Uno AI spend",
-    description: "Spent today, the last 7 days, credits left",
+    title: "Uno AI",
+    description: "AI hours left and today's use, or spend and credits left",
     icon: <WalletIcon />,
     span: 1,
   },

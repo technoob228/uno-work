@@ -26,6 +26,7 @@ import {
   type AppStorageInfo,
   type ModelSelection,
   type UnoAiSpend,
+  type UnoAiStatus,
   type ServerProvider,
   UNO_GATEWAY_BASE_URL,
 } from "@t3tools/contracts";
@@ -82,6 +83,7 @@ import {
 import { type ModelPrice, parseModelPrices } from "./pricing.ts";
 import { installSdkFiles } from "./sdkFiles.ts";
 import { openAiSpendLedger } from "./aiSpendLedger.ts";
+import { openAiStatusReader } from "./aiStatus.ts";
 
 export const APP_API_GATEWAY_ENV = "UNO_WORK_APP_GATEWAY_URL";
 const SYNC_EVERY = Duration.seconds(5);
@@ -98,6 +100,8 @@ export interface AppSdkServiceShape {
   readonly overview: Effect.Effect<AppAiOverview>;
   /** Home's "Uno AI spend" (aiSpendLedger.ts). */
   readonly spend: Effect.Effect<UnoAiSpend>;
+  /** Uno AI hours right now (aiStatus.ts) — the composer's busy notice. */
+  readonly aiStatus: Effect.Effect<UnoAiStatus>;
   readonly update: (input: AppAiUpdateInput) => Effect.Effect<AppAiOverview, AppSdkUpdateError>;
   /** Models of one provider, for the model field in Settings → Apps. */
   readonly models: (input: AppAiModelsInput) => Effect.Effect<AppAiModels>;
@@ -481,6 +485,12 @@ export const makeAppSdkService = (
       await spendLedger.refresh();
       return spendLedger.snapshot();
     });
+
+    const aiStatusReader = openAiStatusReader({
+      gateway: machineGateway,
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+    });
+    const aiStatus: AppSdkServiceShape["aiStatus"] = Effect.promise(() => aiStatusReader.read());
 
     // What tasks spent comes from the gateway, by app label (appTaskMeter.ts).
     const taskMeter = makeTaskMeter({
@@ -954,6 +964,7 @@ export const makeAppSdkService = (
     return {
       overview,
       spend,
+      aiStatus,
       update,
       models,
       core,

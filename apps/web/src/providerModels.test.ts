@@ -209,7 +209,20 @@ describe("getDefaultServerModel", () => {
   });
 
   it("keeps returning the canonical default when the snapshot has no models yet", () => {
-    expect(getDefaultServerModel([unoNotLinked], ProviderDriverKind.make("uno"))).toBe(UNO_DEFAULT);
+    expect(getDefaultServerModel([unoNotLinked], ProviderDriverKind.make("uno"))).toBe(
+      "uno/uno/smart",
+    );
+  });
+
+  it("prefers Smart on a gateway with AI hours, Kimi on an older one", () => {
+    const withHours = provider({
+      provider: "uno",
+      models: ["uno/uno/smart", "uno/uno/fast", UNO_DEFAULT],
+    });
+    expect(getDefaultServerModel([withHours], ProviderDriverKind.make("uno"))).toBe(
+      "uno/uno/smart",
+    );
+    expect(getDefaultServerModel([unoConnected], ProviderDriverKind.make("uno"))).toBe(UNO_DEFAULT);
   });
 });
 

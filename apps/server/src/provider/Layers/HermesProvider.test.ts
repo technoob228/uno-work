@@ -63,6 +63,8 @@ describe("parseHermesVersionOutput", () => {
 describe("isHermesPickerModel", () => {
   it("keeps agentic vendors and drops the rest of the 1000+ gateway catalog", () => {
     expect(isHermesPickerModel(catalogModel({ modelId: "anthropic/claude-haiku-4.5" }))).toBe(true);
+    // Uno AI hours: the included Smart / Fast are `uno/*`.
+    expect(isHermesPickerModel(catalogModel({ modelId: "uno/smart", provider: "uno" }))).toBe(true);
     expect(isHermesPickerModel(catalogModel({ modelId: "deepseek/deepseek-v4-flash" }))).toBe(true);
     expect(isHermesPickerModel(catalogModel({ modelId: "aion-labs/aion-1.0" }))).toBe(false);
     expect(isHermesPickerModel(catalogModel({ modelId: "anthracite-org/magnum-v4-72b" }))).toBe(
@@ -93,13 +95,11 @@ describe("buildHermesModels", () => {
       "openai/gpt-5.5",
       "deepseek/deepseek-v4-flash",
       // Дефолт драйвера дописывается в конец, когда его нет в каталоге.
-      "anthropic/claude-haiku-4.5",
+      "uno/smart",
     ]);
   });
 
   it("returns only the fallback default on an empty catalog", () => {
-    expect(buildHermesModels([]).map((model) => model.slug)).toEqual([
-      "anthropic/claude-haiku-4.5",
-    ]);
+    expect(buildHermesModels([]).map((model) => model.slug)).toEqual(["uno/smart"]);
   });
 });

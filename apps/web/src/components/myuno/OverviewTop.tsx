@@ -8,6 +8,12 @@ import { ChevronRightIcon, SparklesIcon, TriangleAlertIcon, XIcon } from "lucide
 import { useState } from "react";
 
 import type { AccountBalance, AccountSubscription } from "../../account/accountOverview";
+import {
+  AI_HOURS_TIME_NOTE,
+  aiHoursHeadline,
+  aiHoursSummary,
+  aiHoursTodayLine,
+} from "../../account/aiHours";
 import { formatRam, formatUsd, planTitle } from "../../account/billingModel";
 import { Meter } from "../computer/computerUi";
 import { Button } from "../ui/button";
@@ -18,14 +24,19 @@ export function PlanLine({
   subscription,
   subscriptionLoading,
   balance,
+  usedTodayMinutes,
   onOpen,
 }: {
   subscription: AccountSubscription | null;
   subscriptionLoading: boolean;
   balance: AccountBalance | undefined;
+  /** Today's AI hours use from `/v1/ai/status`, when the machine has read it. */
+  usedTodayMinutes?: number | null;
   onOpen: () => void;
 }) {
   const running = planRunning(subscription);
+  const hours = aiHoursSummary({ subscription, balance, usedTodayMinutes });
+  const today = hours ? aiHoursTodayLine(hours) : null;
   const name = subscriptionLoading
     ? "…"
     : subscription
@@ -65,12 +76,34 @@ export function PlanLine({
           {balance ? formatUsd(balance.balanceUsd) : "…"}
         </span>
       </span>
-      <span className="text-xs text-muted-foreground">
-        Uno AI credits{" "}
-        <span className="font-medium text-foreground tabular-nums">
-          {balance ? formatUsd(balance.aiBalanceUsd) : "…"}
+      {hours ? (
+        <span
+          className="text-xs text-muted-foreground"
+          title={AI_HOURS_TIME_NOTE}
+          data-testid="my-uno-ai-hours-strip"
+        >
+          {hours.unlimited ? "" : "AI hours "}
+          <span className="font-medium text-foreground tabular-nums">{aiHoursHeadline(hours)}</span>
+          {hours.unlimited ? "" : " · never expire"}
+          {today ? ` · ${today}` : ""}
+          {hours.premiumUsd > 0 ? (
+            <>
+              {" · "}
+              <span className="font-medium text-foreground tabular-nums">
+                {formatUsd(hours.premiumUsd)}
+              </span>{" "}
+              premium credit
+            </>
+          ) : null}
         </span>
-      </span>
+      ) : (
+        <span className="text-xs text-muted-foreground">
+          Uno AI credits{" "}
+          <span className="font-medium text-foreground tabular-nums">
+            {balance ? formatUsd(balance.aiBalanceUsd) : "…"}
+          </span>
+        </span>
+      )}
       <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
         Plan & billing
         <ChevronRightIcon className="size-3.5" />

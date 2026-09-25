@@ -14,6 +14,8 @@
 import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
 
+import { UNO_FAST_GATEWAY_MODEL } from "@t3tools/contracts";
+
 import {
   cloudCreateBucket,
   cloudPresign,
@@ -24,8 +26,12 @@ import {
 import { sanitizeUntrustedField, wrapUntrustedContent } from "../untrustedContent.ts";
 import type { MaterialsCloudUpload, MaterialsModel } from "./materialsJob.ts";
 
-/** Gateway id of the text-generation model when the setting names another harness. */
-export const MATERIALS_DEFAULT_MODEL = "~deepseek/deepseek-v4-flash-latest";
+/**
+ * Gateway id of the text-generation model when the setting names another
+ * harness: "Fast", the cheap included model of Uno AI hours. A gateway
+ * without hours refuses it and the call retries on MATERIALS_FALLBACK_MODEL.
+ */
+export const MATERIALS_DEFAULT_MODEL = UNO_FAST_GATEWAY_MODEL;
 
 /**
  * The gateway model id out of `textGenerationModelSelection`: only a selection

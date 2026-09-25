@@ -309,3 +309,27 @@ export const UnoAiSpend = Schema.Struct({
   checkedAt: Schema.NullOr(Schema.String),
 });
 export type UnoAiSpend = typeof UnoAiSpend.Type;
+
+/**
+ * Uno AI hours right now (`GET /v1/ai/status`, spec ai-hours.md): hours
+ * left, AI power, requests in flight and whether they run slower than full
+ * speed. "unavailable" — the gateway has no AI hours (older backend or the
+ * flag is off): the interface shows nothing then.
+ */
+export const UnoAiStatus = Schema.Struct({
+  status: Schema.Literals(["ok", "no-key", "unavailable", "unknown"]),
+  hoursLeftMinutes: Schema.NullOr(Schema.Number),
+  /** Max+AI: no hours limit; after the month's full-speed hours AI runs at standard speed. */
+  unlimited: Schema.Boolean,
+  fullSpeedHoursLeft: Schema.NullOr(Schema.Number),
+  usedTodayMinutes: Schema.NullOr(Schema.Number),
+  /** AI power multiplier: 1, 2, 4, 8. */
+  power: Schema.NullOr(Schema.Number),
+  inFlight: Schema.NullOr(Schema.Number),
+  throttled: Schema.Boolean,
+  speedPct: Schema.NullOr(Schema.Number),
+  renewsAt: Schema.NullOr(Schema.String),
+  plan: Schema.NullOr(Schema.String),
+  checkedAt: Schema.NullOr(Schema.String),
+});
+export type UnoAiStatus = typeof UnoAiStatus.Type;

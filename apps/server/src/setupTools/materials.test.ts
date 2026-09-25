@@ -515,8 +515,8 @@ describe("gateway model", () => {
     );
     expect(
       gatewayModelFromSelection({ instanceId: "codex", model: "gpt-5.4-mini" }, driverOf),
-    ).toBe("~deepseek/deepseek-v4-flash-latest");
-    expect(gatewayModelFromSelection(null, driverOf)).toBe("~deepseek/deepseek-v4-flash-latest");
+    ).toBe("uno/fast");
+    expect(gatewayModelFromSelection(null, driverOf)).toBe("uno/fast");
   });
 
   it("parses bullets from JSON or a plain list", () => {

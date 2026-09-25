@@ -6,13 +6,25 @@ import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 
 export const UNO_LLM_CREDITS_EMPTY_MESSAGE = "Uno LLM credits are empty.";
+/** The server's out-of-AI-hours message starts so (apps/server provider/unoBilling.ts). */
+const UNO_AI_HOURS_EMPTY_PREFIX = "Your AI hours are used up.";
+
+/** What the banner says: the AI hours message when that is the reason. */
+export function unoBillingBannerText(sessionError: string | null | undefined): string {
+  return sessionError?.startsWith(UNO_AI_HOURS_EMPTY_PREFIX)
+    ? sessionError
+    : UNO_LLM_CREDITS_EMPTY_MESSAGE;
+}
 
 export const UnoBillingTopUpBanner = memo(function UnoBillingTopUpBanner({
   active,
   sessionUpdatedAt,
+  sessionError,
 }: {
   active: boolean;
   sessionUpdatedAt: string | null;
+  /** The session's last error — tells used-up AI hours from empty credits. */
+  sessionError?: string | null;
 }) {
   const [isLoading, setIsLoading] = useState(false);
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
@@ -63,7 +75,7 @@ export const UnoBillingTopUpBanner = memo(function UnoBillingTopUpBanner({
     <div className="mx-auto max-w-3xl pt-3">
       <Alert variant="warning">
         <CreditCardIcon />
-        <AlertDescription>{UNO_LLM_CREDITS_EMPTY_MESSAGE}</AlertDescription>
+        <AlertDescription>{unoBillingBannerText(sessionError)}</AlertDescription>
         <AlertAction>
           <Button size="sm" type="button" onClick={() => void topUp()} disabled={isLoading}>
             {isLoading ? "Opening..." : "Top up"}

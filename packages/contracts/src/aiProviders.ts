@@ -64,8 +64,11 @@ export const AI_PROVIDER_LABELS: Readonly<Record<AssistantLlmProvider, string>> 
 export const ASSISTANT_HARNESS_INSTANCE_ID = "hermes";
 /** Model-selection option carrying {@link AssistantLlmProvider}. */
 export const ASSISTANT_LLM_PROVIDER_OPTION_ID = "llmProvider";
-/** Default model of the assistant on the Uno gateway: the latest Grok. */
-export const ASSISTANT_DEFAULT_GATEWAY_MODEL = "~x-ai/grok-latest";
+/**
+ * Default model of the assistant on the Uno gateway: "Smart", the included
+ * model of Uno AI hours (the gateway remaps the old default, Grok, to it).
+ */
+export const ASSISTANT_DEFAULT_GATEWAY_MODEL = "uno/smart";
 /**
  * Gateway label of the assistant's calls — the app-label mechanism
  * (`/v1/apps/<label>`, X-Uno-App). Prefixed so a machine app that happens to

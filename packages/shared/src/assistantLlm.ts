@@ -134,15 +134,23 @@ export function defaultAssistantModelFor(
   modelIds: ReadonlyArray<string>,
 ): string | null {
   if (provider === "uno") return ASSISTANT_DEFAULT_GATEWAY_MODEL;
-  if (provider === "openrouter" && modelIds.includes(ASSISTANT_DEFAULT_GATEWAY_MODEL)) {
-    return ASSISTANT_DEFAULT_GATEWAY_MODEL;
+  if (provider === "openrouter" && modelIds.includes(OPENROUTER_LATEST_GROK)) {
+    return OPENROUTER_LATEST_GROK;
   }
   if (provider === "xai" && modelIds.includes("grok-latest")) return "grok-latest";
   return pickLatestGrokModel(modelIds) ?? modelIds[0] ?? null;
 }
 
-/** "~x-ai/grok-latest" → "Grok (latest)", "x-ai/grok-4.7" → "Grok 4.7", "openai/gpt-5" → "gpt-5". */
+/** OpenRouter's alias that follows new Grok releases. */
+const OPENROUTER_LATEST_GROK = "~x-ai/grok-latest";
+
+/**
+ * "uno/smart" → "Smart", "~x-ai/grok-latest" → "Grok (latest)",
+ * "x-ai/grok-4.7" → "Grok 4.7", "openai/gpt-5" → "gpt-5".
+ */
 export function assistantModelLabel(model: string): string {
+  if (/^uno\/smart$/i.test(model)) return "Smart";
+  if (/^uno\/fast$/i.test(model)) return "Fast";
   const bare = model.slice(model.lastIndexOf("/") + 1);
   if (/^grok-latest$/i.test(bare)) return "Grok (latest)";
   const grok = /^grok-(.+)$/i.exec(bare);

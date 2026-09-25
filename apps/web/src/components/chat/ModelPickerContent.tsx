@@ -6,7 +6,16 @@ import {
 } from "@t3tools/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { resolveSelectableModel } from "@t3tools/shared/model";
-import { memo, useMemo, useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import {
+  memo,
+  type ReactNode,
+  useMemo,
+  useState,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+} from "react";
 import { SearchIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import { modelCannotRunCodingAgent, modelMatchesCapabilityFilter } from "./modelCapabilities";
@@ -86,6 +95,38 @@ type ModelPickerItem = {
 };
 
 const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>();
+/**
+ * Uno AI hours: the Uno list is short and grouped (the gateway marks models
+ * with `uno_group`); these are the group headings in order.
+ */
+const UNO_GROUP_ORDER = ["included", "premium", "personal", "custom"] as const;
+type UnoPickerGroup = (typeof UNO_GROUP_ORDER)[number];
+const UNO_GROUP_LABEL: Record<UnoPickerGroup, string> = {
+  included: "Included in your AI hours",
+  premium: "Premium · from premium credit",
+  personal: "Private GPU",
+  custom: "Custom models",
+};
+/** Console → GPU → My models: import / upload / deploy the person's own model. */
+export const UNO_UPLOAD_MODEL_URL = "https://console.uno4.dev/gpu/models";
+
+function unoPickerGroup(model: Pick<ModelPickerItem, "capabilities">): UnoPickerGroup | null {
+  const group = model.capabilities?.metadata?.unoGroup;
+  return group === "included" || group === "premium" || group === "personal" || group === "custom"
+    ? group
+    : null;
+}
+
+/** The gateway has AI hours: at least one Uno model is Smart/Fast or premium. */
+export function isCuratedUnoModelList(
+  models: ReadonlyArray<Pick<ModelPickerItem, "driverKind" | "capabilities">>,
+): boolean {
+  return models.some((model) => {
+    if (model.driverKind !== "uno") return false;
+    const group = unoPickerGroup(model);
+    return group === "included" || group === "premium";
+  });
+}
 const MODEL_PICKER_VIRTUALIZE_THRESHOLD = 80;
 const UNO_TIER_RANK: Record<Exclude<UnoTierFilter, "all">, number> = {
   frontier: 0,
@@ -519,9 +560,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       window.requestAnimationFrame(() => focusSearchInput());
     }
   }, [focusSearchInput, isSearching, selectedPaneKind]);
+  // AI hours: the gateway already keeps the Uno list short — no tier /
+  // capability / price filters, no sort, just the groups.
+  const unoCurated = useMemo(() => isCuratedUnoModelList(flatModels), [flatModels]);
+  const showUnoGroups =
+    unoCurated && !isSearching && selectedInstanceEntry?.driverKind === "uno" && !isLocked;
   const showUnoFilters =
-    selectedInstanceEntry?.driverKind === "uno" ||
-    (isSearching && flatModels.some((model) => model.driverKind === "uno"));
+    !unoCurated &&
+    (selectedInstanceEntry?.driverKind === "uno" ||
+      (isSearching && flatModels.some((model) => model.driverKind === "uno")));
   const unoProviderOptions = useMemo(
     () =>
       Array.from(
@@ -583,6 +630,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   const matchesUnoFilters = useCallback(
     (model: ModelPickerItem): boolean => {
+      // Filters saved before AI hours must not hide the short list.
+      if (unoCurated) return true;
       if (model.driverKind !== "uno") {
         return !showUnoFilters || !hasActiveUnoFilters;
       }
@@ -597,7 +646,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       }
       return true;
     },
-    [hasActiveUnoFilters, showUnoFilters, unoCapabilityFilters, unoProviderFilter, unoTierFilter],
+    [
+      hasActiveUnoFilters,
+      showUnoFilters,
+      unoCapabilityFilters,
+      unoCurated,
+      unoProviderFilter,
+      unoTierFilter,
+    ],
   );
 
   // Filter models based on search query and selected instance
@@ -677,6 +733,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       groupFavorites: selectedInstanceId !== "favorites",
       instanceOrder: selectedInstanceId === "favorites" ? instanceOrder : [],
     });
+    if (showUnoGroups) {
+      // Group order (stable inside a group: the server's Smart, Fast, …).
+      const rank = (model: ModelPickerItem) => {
+        const group = unoPickerGroup(model);
+        return group === null ? UNO_GROUP_ORDER.length : UNO_GROUP_ORDER.indexOf(group);
+      };
+      return sorted.toSorted((left, right) => rank(left) - rank(right));
+    }
     if (!showUnoFilters || unoSortMode === "recommended") {
       return sorted;
     }
@@ -696,6 +760,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     selectedInstanceId,
     matchesUnoFilters,
     showUnoFilters,
+    showUnoGroups,
     unoSortMode,
   ]);
 
@@ -843,7 +908,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       new Map(filteredModels.map((model) => [`${model.instanceId}:${model.slug}`, model] as const)),
     [filteredModels],
   );
-  const shouldVirtualizeModelList = filteredModelKeys.length > MODEL_PICKER_VIRTUALIZE_THRESHOLD;
+  const shouldVirtualizeModelList =
+    !showUnoGroups && filteredModelKeys.length > MODEL_PICKER_VIRTUALIZE_THRESHOLD;
   const modelJumpShortcutContext = useMemo(
     () =>
       ({
@@ -986,7 +1052,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           providerDisplayName={model.instanceDisplayName}
           providerAccentColor={model.instanceAccentColor}
           isFavorite={favoritesSet.has(modelKey)}
-          showProvider={!isLocked || showLockedInstanceSidebar}
+          showProvider={!showUnoGroups && (!isLocked || showLockedInstanceSidebar)}
           preferShortName={!isLocked}
           useTriggerLabel={isLocked && !showLockedInstanceSidebar}
           showNewBadge={isModelPickerNewModel(model.driverKind, model.slug)}
@@ -1006,9 +1072,42 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       paneStateByInstanceId,
       props.allowImageGenerationModels,
       showLockedInstanceSidebar,
+      showUnoGroups,
       toggleFavorite,
     ],
   );
+
+  // AI hours: headings between the groups, and "Upload your own model →"
+  // closing the list. Rows keep their combobox index (headings are not items).
+  const renderGroupedUnoRows = () => {
+    const rows: ReactNode[] = [];
+    let previous: UnoPickerGroup | null | undefined;
+    filteredModelKeys.forEach((modelKey, index) => {
+      const model = filteredModelByKey.get(modelKey);
+      const group = model ? unoPickerGroup(model) : null;
+      if (group !== previous && group !== null) {
+        rows.push(<UnoGroupHeading key={`group:${group}`} label={UNO_GROUP_LABEL[group]} />);
+      }
+      previous = group;
+      rows.push(renderModelRow(modelKey, index));
+    });
+    if (previous !== "custom") {
+      rows.push(<UnoGroupHeading key="group:custom" label={UNO_GROUP_LABEL.custom} />);
+    }
+    rows.push(
+      <a
+        key="upload-model"
+        href={UNO_UPLOAD_MODEL_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block rounded px-3 py-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+        data-testid="model-picker-upload-model"
+      >
+        Upload your own model →
+      </a>,
+    );
+    return rows;
+  };
 
   return (
     <TooltipProvider delay={0}>
@@ -1330,8 +1429,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                   />
                 </ComboboxListVirtualized>
               ) : (
-                <ComboboxList className="model-picker-list size-full divide-y px-2 py-1">
-                  {filteredModelKeys.map((modelKey, index) => renderModelRow(modelKey, index))}
+                <ComboboxList
+                  className={cn(
+                    "model-picker-list size-full px-2 py-1",
+                    showUnoGroups ? "space-y-px" : "divide-y",
+                  )}
+                >
+                  {showUnoGroups
+                    ? renderGroupedUnoRows()
+                    : filteredModelKeys.map((modelKey, index) => renderModelRow(modelKey, index))}
                 </ComboboxList>
               )}
             </div>
@@ -1346,3 +1452,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     </TooltipProvider>
   );
 });
+
+function UnoGroupHeading(props: { label: string }) {
+  return (
+    <div
+      className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70"
+      role="presentation"
+    >
+      {props.label}
+    </div>
+  );
+}

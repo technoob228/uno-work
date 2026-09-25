@@ -190,6 +190,7 @@ import type {
   AppAiOverview,
   AppAiUpdateInput,
   UnoAiSpend,
+  UnoAiStatus,
 } from "./appSdk.ts";
 import type {
   UnoComputerResources,
@@ -891,6 +892,8 @@ export interface EnvironmentApi {
     appAiModels: (input: AppAiModelsInput) => Promise<AppAiModels>;
     /** Home's "Uno AI spend": credits left and the running total over the last days. */
     appAiSpend: () => Promise<UnoAiSpend>;
+    /** Uno AI hours right now — polled while a chat works (the busy notice). */
+    appAiStatus: () => Promise<UnoAiStatus>;
     localMetrics: () => Promise<UnoComputerLocalMetrics>;
     resizeOptions: (input?: UnoComputerTargetInput) => Promise<UnoComputerResizeOptions>;
     resize: (input: UnoComputerResizeInput) => Promise<UnoComputerResizeResult>;

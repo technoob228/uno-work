@@ -365,3 +365,122 @@ describe("UnoDriver catalog normalization", () => {
     ]);
   });
 });
+
+describe("UnoDriver with AI hours (curated catalog)", () => {
+  const entry = (id: string, extra: Record<string, unknown> = {}) =>
+    __unoDriverTest.normalizeUnoCatalogEntry("default", {
+      id,
+      supports_tools: true,
+      ...extra,
+    })!;
+  const curated = {
+    "uno/uno/fast": entry("uno/fast", {
+      display_name: "Fast",
+      uno_group: "included",
+      underlying_model: "deepseek/deepseek-v4.1-flash",
+    }),
+    "uno/anthropic/claude-sonnet-5": entry("anthropic/claude-sonnet-5", {
+      display_name: "Claude Sonnet 5",
+      uno_group: "premium",
+    }),
+    "uno/uno/smart": entry("uno/smart", {
+      display_name: "Smart",
+      uno_group: "included",
+      underlying_model: "xiaomi/mimo-v2.6-pro",
+      description: "Best for most work.",
+    }),
+    "uno/anthropic/claude-opus-5.5": entry("anthropic/claude-opus-5.5", {
+      display_name: "Claude Opus 5.5",
+      uno_group: "premium",
+    }),
+  };
+
+  it("reads uno_group, the real model behind Smart/Fast and the description", () => {
+    const smart = curated["uno/uno/smart"];
+    expect(smart.group).toBe("included");
+    expect(smart.underlyingModel).toBe("MiMo-V2.6-Pro");
+    const metadata = __unoDriverTest.metadataForCatalogModel(smart);
+    expect(metadata.unoGroup).toBe("included");
+    expect(metadata.underlyingModel).toBe("MiMo-V2.6-Pro");
+    expect(metadata.description).toBe("Best for most work.");
+    expect(entry("x/y").group).toBeUndefined();
+  });
+
+  it("sorts Smart, Fast, then premium in the fixed order, private GPU last", () => {
+    const snapshot = {
+      models: [
+        { slug: "uno-personal/qwen", name: "Qwen", isCustom: false },
+        { slug: "uno/anthropic/claude-sonnet-5", name: "Sonnet", isCustom: false },
+        { slug: "uno/uno/fast", name: "Fast", isCustom: false },
+        { slug: "uno/anthropic/claude-opus-5.5", name: "Opus", isCustom: false },
+        { slug: "uno/uno/smart", name: "Smart", isCustom: false },
+      ],
+    };
+    const sorted = __unoDriverTest.sortUnoModels(curated)(snapshot as never);
+    expect(sorted.models.map((model) => model.slug)).toEqual([
+      "uno/uno/smart",
+      "uno/uno/fast",
+      "uno/anthropic/claude-opus-5.5",
+      "uno/anthropic/claude-sonnet-5",
+      "uno-personal/qwen",
+    ]);
+  });
+
+  it("hides unmarked and harness-only legacy models from the picker", () => {
+    const snapshot = {
+      models: [
+        { slug: "uno/uno/smart", name: "Smart", isCustom: false },
+        { slug: "uno/moonshotai/kimi-k2.7-code", name: "Smart", isCustom: false },
+        { slug: "uno-personal/qwen", name: "Qwen", isCustom: false },
+      ],
+    };
+    const filtered = __unoDriverTest.filterCuratedUnoModels(curated)(snapshot as never);
+    expect(filtered.models.map((model) => model.slug)).toEqual([
+      "uno/uno/smart",
+      "uno-personal/qwen",
+    ]);
+    // An older gateway (no marks): nothing is hidden.
+    const old = { "uno/x/y": entry("x/y") };
+    expect(__unoDriverTest.filterCuratedUnoModels(old)(snapshot as never).models).toHaveLength(3);
+  });
+
+  it("keeps the legacy defaults in the harness config so saved chats still run", () => {
+    const config = JSON.parse(__unoDriverTest.buildUnoConfigContent("key", curated)) as {
+      provider: { uno: { models: Record<string, { name: string }> } };
+    };
+    expect(Object.keys(config.provider.uno.models)).toEqual(
+      expect.arrayContaining([
+        "uno/smart",
+        "uno/fast",
+        "moonshotai/kimi-k2.7-code",
+        "~deepseek/deepseek-v4-flash-latest",
+      ]),
+    );
+    const oldConfig = JSON.parse(
+      __unoDriverTest.buildUnoConfigContent("key", { "uno/x/y": entry("x/y") }),
+    ) as { provider: { uno: { models: Record<string, unknown> } } };
+    expect(Object.keys(oldConfig.provider.uno.models)).toEqual(["x/y"]);
+  });
+
+  it("drops the vendor prefix from curated names and groups private GPU models", () => {
+    const withMeta = __unoDriverTest.withCatalogMetadata(curated, {
+      "uno-personal/mine": {
+        id: "mine",
+        name: "My model",
+        catalog: false,
+        size: "8B",
+        priceUsdPerHour: 1,
+        idleSleepS: 60,
+        state: "off",
+      },
+    })({
+      models: [
+        { slug: "uno/uno/smart", name: "uno/smart", isCustom: false },
+        { slug: "uno-personal/mine", name: "mine", isCustom: false },
+      ],
+    } as never);
+    expect(withMeta.models[0]).toMatchObject({ name: "Smart" });
+    expect(withMeta.models[0]!.subProvider).toBeUndefined();
+    expect(withMeta.models[1]!.capabilities?.metadata?.unoGroup).toBe("custom");
+  });
+});

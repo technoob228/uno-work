@@ -25,6 +25,7 @@ import {
   AppAiOverview,
   AppAiUpdateInput,
   UnoAiSpend,
+  UnoAiStatus,
 } from "./appSdk.ts";
 import { InboxError, InboxSnapshot, InboxUpdateInput } from "./inbox.ts";
 import { OpenError, OpenInEditorInput } from "./editor.ts";
@@ -449,6 +450,7 @@ export const WS_METHODS = {
   appAiList: "uno.appAi.list",
   appAiUpdate: "uno.appAi.update",
   appAiSpend: "uno.appAi.spend",
+  appAiStatus: "uno.appAi.status",
   appAiModels: "uno.appAi.models",
 
   // Inbox: what wants the person (agents, apps) — kept by the daemon
@@ -722,6 +724,11 @@ export const PersonalAiModel = Schema.Struct({
   /** Served name — то же, что уходит в поле model; slug в Uno — `uno-personal/<id>`. */
   id: Schema.String,
   name: Schema.String,
+  /**
+   * true — a model from Uno's GPU catalog; false — the person's own upload
+   * ("Custom model" in the picker). Absent on an older console.
+   */
+  catalog: Schema.optional(Schema.Boolean),
   size: Schema.String,
   contextTokens: Schema.optional(Schema.Number),
   priceUsdPerHour: Schema.Number,
@@ -1825,6 +1832,13 @@ export const WsAppAiSpendRpc = Rpc.make(WS_METHODS.appAiSpend, {
   error: UnoCloudRpcError,
 });
 
+/** Uno AI hours right now: hours left, AI power, slowed down or not. */
+export const WsAppAiStatusRpc = Rpc.make(WS_METHODS.appAiStatus, {
+  payload: Schema.Struct({}),
+  success: UnoAiStatus,
+  error: UnoCloudRpcError,
+});
+
 /** Models of one provider an app could use (Settings → Apps). */
 export const WsAppAiModelsRpc = Rpc.make(WS_METHODS.appAiModels, {
   payload: AppAiModelsInput,
@@ -1994,6 +2008,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsAppAiListRpc,
   WsAppAiUpdateRpc,
   WsAppAiSpendRpc,
+  WsAppAiStatusRpc,
   WsAppAiModelsRpc,
   WsInboxUpdateRpc,
   WsSubscribeInboxRpc,

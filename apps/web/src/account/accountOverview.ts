@@ -31,6 +31,9 @@ function rec(value: unknown): Rec | null {
 function num(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
+function numOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
 function str(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
@@ -318,7 +321,18 @@ export interface AccountPlan {
   readonly generation: number;
   /** The same computer with and without Uno AI share this (`plus`, `plus-ai`). */
   readonly baseSlug: string;
+  /** Premium credit a month (before AI hours: all Uno AI credits). */
   readonly aiCreditsUsd: number;
+  /**
+   * Uno AI hours (spec ai-hours.md): hours a month, AI power (×1…×8) and the
+   * premium credit. Null on a console without AI hours.
+   */
+  readonly aiHoursMonthly: number | null;
+  readonly aiHoursUnlimited: boolean;
+  /** Unlimited plans: active hours a period at full speed, then standard speed. */
+  readonly aiFullSpeedHours: number | null;
+  readonly aiPower: number | null;
+  readonly aiPremiumUsd: number | null;
   /** The biggest single computer. */
   readonly maxBoxRamMb: number;
   readonly maxBoxVcpu: number;
@@ -349,6 +363,11 @@ export function parseAccountPlan(raw: unknown): AccountPlan | null {
     generation: Math.max(1, num(r["generation"], 1)),
     baseSlug: str(r["base_slug"]) || slug,
     aiCreditsUsd: num(r["ai_credits_usd"]),
+    aiHoursMonthly: numOrNull(r["ai_hours_monthly"]),
+    aiHoursUnlimited: r["ai_hours_unlimited"] === true,
+    aiFullSpeedHours: numOrNull(r["ai_full_speed_hours"]),
+    aiPower: numOrNull(r["ai_power"]),
+    aiPremiumUsd: numOrNull(r["ai_premium_usd"]),
     maxBoxRamMb,
     maxBoxVcpu: num(maxBox?.["vcpu"]),
     peakRamMb: num(peak?.["ram_mb"], maxBoxRamMb),
@@ -405,11 +424,44 @@ export interface AccountSubscription {
     readonly periodUsd: number;
     readonly carryUsd: number;
   };
+  /** Uno AI hours; null on a console without them (or the flag is off). */
+  readonly aiHours: SubscriptionAiHours | null;
+  /** AI power of the plan; null when the console does not say. */
+  readonly aiPower: { readonly multiplier: number; readonly usdPerHour: number | null } | null;
   readonly usage: {
     readonly runningRamMb: number;
     readonly runningVcpu: number;
     readonly diskGbUsed: number;
     readonly boxCount: number;
+  };
+}
+
+export interface SubscriptionAiHours {
+  /** Minutes left; null for unlimited plans. */
+  readonly balanceMinutes: number | null;
+  readonly monthlyHours: number;
+  readonly usedThisPeriodMinutes: number;
+  readonly usedTodayMinutes: number | null;
+  readonly neverExpire: boolean;
+  readonly expiresAt: string | null;
+  /** Max+AI: no hours limit (full speed for the month's hours, then standard). */
+  readonly unlimited: boolean;
+}
+
+export function parseSubscriptionAiHours(raw: unknown): SubscriptionAiHours | null {
+  const r = rec(raw);
+  if (!r) return null;
+  const unlimited = r["unlimited"] === true;
+  const balanceMinutes = numOrNull(r["balance_minutes"]);
+  if (balanceMinutes === null && !unlimited) return null;
+  return {
+    balanceMinutes,
+    monthlyHours: num(r["monthly_hours"]),
+    usedThisPeriodMinutes: num(r["used_this_period_minutes"]),
+    usedTodayMinutes: numOrNull(r["used_today_minutes"]),
+    neverExpire: r["never_expire"] !== false,
+    expiresAt: strOrNull(r["expires_at"]),
+    unlimited,
   };
 }
 
@@ -419,6 +471,7 @@ export function parseSubscription(raw: unknown): AccountSubscription | null {
   if (!r || !plan) return null;
   const usage = rec(r["usage"]);
   const ai = rec(r["ai_credits"]);
+  const power = rec(r["ai_power"]);
   const override = r["disk_gb_override"];
   return {
     plan,
@@ -435,6 +488,11 @@ export function parseSubscription(raw: unknown): AccountSubscription | null {
       periodUsd: num(ai?.["period_usd"]),
       carryUsd: num(ai?.["carry_usd"]),
     },
+    aiHours: parseSubscriptionAiHours(r["ai_hours"]),
+    aiPower:
+      power && numOrNull(power["multiplier"]) !== null
+        ? { multiplier: num(power["multiplier"]), usdPerHour: numOrNull(power["usd_per_hour"]) }
+        : null,
     usage: {
       runningRamMb: num(usage?.["running_ram_mb"]),
       runningVcpu: num(usage?.["running_vcpu"]),
@@ -465,7 +523,10 @@ export interface AccountBalance {
    */
   readonly name: string | null;
   readonly balanceUsd: number;
+  /** `llm_balance`: premium credit + top-ups (all Uno AI credits before AI hours). */
   readonly aiBalanceUsd: number;
+  /** `ai_hours_minutes`; null when the console does not send it. */
+  readonly aiHoursMinutes: number | null;
 }
 
 export async function fetchBalance(): Promise<AccountBalance> {
@@ -480,6 +541,7 @@ export async function fetchBalance(): Promise<AccountBalance> {
       strOrNull(me["display_name"]),
     balanceUsd: num(me["balance"]),
     aiBalanceUsd: num(me["llm_balance"]),
+    aiHoursMinutes: numOrNull(me["ai_hours_minutes"]),
   };
 }
 

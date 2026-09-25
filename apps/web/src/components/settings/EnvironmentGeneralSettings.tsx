@@ -50,7 +50,7 @@ import {
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
-import { UnoGatewayBalance } from "./SettingsPanels";
+import { UnoGatewayBalance, useGatewayAiHours } from "./SettingsPanels";
 
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 
@@ -82,6 +82,7 @@ export function EnvironmentGeneralSettings({
   const supportsAgentThreads = useEnvironmentSupportsAgentThreads(environmentId);
   const settings = serverSettings ?? DEFAULT_UNIFIED_SETTINGS;
   const unoApiKey = settings.uno?.apiKey ?? "";
+  const gatewayAiHours = useGatewayAiHours(unoApiKey).data ?? null;
   const observability = config?.observability ?? null;
   const keybindingsConfigPath = config?.keybindingsConfigPath ?? null;
   const logsDirectoryPath = observability?.logsDirectoryPath ?? null;
@@ -162,7 +163,11 @@ export function EnvironmentGeneralSettings({
         {unoApiKey.length > 0 ? (
           <SettingsRow
             title="Balance"
-            description="Uno LLM Gateway credits. Each model call and web search is billed from this balance."
+            description={
+              gatewayAiHours
+                ? "Uno AI hours: Smart and Fast are unlimited inside them, web search too. Premium models are paid per token from premium credit."
+                : "Uno LLM Gateway credits. Each model call and web search is billed from this balance."
+            }
             control={<UnoGatewayBalance apiKey={unoApiKey} />}
           />
         ) : null}

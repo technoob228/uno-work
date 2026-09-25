@@ -96,6 +96,10 @@ interface SharedOpenCodeTextGenerationServerState {
 export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration")(function* (
   openCodeSettings: OpenCodeSettings,
   environment: NodeJS.ProcessEnv = process.env,
+  options: {
+    /** Swap a requested model the harness can't serve for one it can (Uno defaults). */
+    readonly resolveModelSlug?: (slug: string) => string;
+  } = {},
 ) {
   const serverConfig = yield* ServerConfig;
   const openCodeRuntime = yield* OpenCodeRuntime;
@@ -273,7 +277,9 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     readonly modelSelection: ModelSelection;
     readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
   }) {
-    const parsedModel = parseOpenCodeModelSlug(input.modelSelection.model);
+    const parsedModel = parseOpenCodeModelSlug(
+      options.resolveModelSlug?.(input.modelSelection.model) ?? input.modelSelection.model,
+    );
     if (!parsedModel) {
       return yield* new TextGenerationError({
         operation: input.operation,
