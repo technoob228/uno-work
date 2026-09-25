@@ -167,6 +167,10 @@ export const DEFAULT_CONNECTOR_ADDRESSING: ManagerConnectorAddressingConfig = {
 };
 
 export const ManagerTelegramConnectorConfig = Schema.Struct({
+  /**
+   * The owner's bot token, or `unorelay:<tgr_…>` — Uno's shared bot, reached
+   * through the console's Bot-API mirror. Never sent to clients.
+   */
   botToken: TrimmedNonEmptyString,
   /** Personal user chat ids and/or group chat ids (as strings, may be negative for groups). */
   allowedChatIds: Schema.Array(TrimmedNonEmptyString),
@@ -189,7 +193,9 @@ export type ManagerTelegramConnectorConfig = typeof ManagerTelegramConnectorConf
  * Layer is implemented separately.
  */
 export const ManagerSlackConnectorConfig = Schema.Struct({
+  /** `xoxb-…`, or `unorelay:<slr_…>` for Uno's Slack app relayed by the console. */
   botToken: TrimmedNonEmptyString,
+  /** `xapp-…`; the literal `unorelay` in relay mode (no Socket Mode). */
   appToken: TrimmedNonEmptyString,
   /** Channel ids and/or DM ids the bot may act in. */
   allowedChannelIds: Schema.Array(TrimmedNonEmptyString),
@@ -267,6 +273,11 @@ export const ManagerTelegramConnectorStatus = Schema.Struct({
   defaultModelSelection: Schema.NullOr(ModelSelection),
   /** Current addressing rules, echoed back so the settings UI can render them. */
   addressing: ManagerConnectorAddressingConfig,
+  /**
+   * True when the connector talks through Uno's shared bot (a console relay,
+   * set up by "Connect with Uno's bot") instead of the owner's own bot.
+   */
+  shared: Schema.Boolean,
 });
 export type ManagerTelegramConnectorStatus = typeof ManagerTelegramConnectorStatus.Type;
 
@@ -281,8 +292,59 @@ export const ManagerSlackConnectorStatus = Schema.Struct({
   lastError: Schema.NullOr(Schema.String),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   addressing: ManagerConnectorAddressingConfig,
+  /**
+   * True when the connector runs through Uno's Slack app ("Add to Slack",
+   * events relayed by the console) instead of the owner's own tokens.
+   */
+  shared: Schema.Boolean,
 });
 export type ManagerSlackConnectorStatus = typeof ManagerSlackConnectorStatus.Type;
+
+/**
+ * `POST /api/manager/assistant/telegram/shared` — the connector was switched
+ * to Uno's shared bot and a link code issued (`link` opens the bot with
+ * `/start <code>`).
+ */
+export const ManagerTelegramSharedResult = Schema.Struct({
+  code: TrimmedNonEmptyString,
+  expiresAt: Schema.String,
+  botUsername: Schema.NullOr(TrimmedNonEmptyString),
+  link: Schema.NullOr(Schema.String),
+});
+export type ManagerTelegramSharedResult = typeof ManagerTelegramSharedResult.Type;
+
+/** `POST /api/manager/assistant/slack/install` — where to send the person to add Uno's Slack app. */
+export const ManagerSlackInstallStartResult = Schema.Struct({
+  available: Schema.Boolean,
+  authorizeUrl: Schema.NullOr(Schema.String),
+});
+export type ManagerSlackInstallStartResult = typeof ManagerSlackInstallStartResult.Type;
+
+/** `GET /api/manager/assistant/slack/install` — the "Add to Slack" installation as the daemon sees it. */
+export const ManagerSlackInstallStatus = Schema.Struct({
+  available: Schema.Boolean,
+  installed: Schema.Boolean,
+  teamName: Schema.NullOr(Schema.String),
+  botUserName: Schema.NullOr(Schema.String),
+  /** The connector runs in relay mode and its event poller reached the console. */
+  connected: Schema.Boolean,
+});
+export type ManagerSlackInstallStatus = typeof ManagerSlackInstallStatus.Type;
+
+/**
+ * Error codes of the shared-bot / Add-to-Slack routes, in `{ error }`:
+ * `not_cloud_computer` (409, no machine token), `shared_bot_unavailable` /
+ * `slack_app_unavailable` (503), `console_unreachable` / `console_error` (502).
+ */
+export const ManagerChannelSetupErrorCode = Schema.Literals([
+  "not_cloud_computer",
+  "shared_bot_unavailable",
+  "slack_app_unavailable",
+  "slack_not_installed",
+  "console_unreachable",
+  "console_error",
+]);
+export type ManagerChannelSetupErrorCode = typeof ManagerChannelSetupErrorCode.Type;
 
 export const ManagerAssistantOverview = Schema.Struct({
   token: Schema.NullOr(ManagerCapabilityTokenDescriptor),
@@ -406,6 +468,7 @@ export const DEFAULT_SLACK_CONNECTOR_STATUS: ManagerSlackConnectorStatus = {
   lastError: null,
   defaultModelSelection: null,
   addressing: DEFAULT_CONNECTOR_ADDRESSING,
+  shared: false,
 };
 
 export const ManagerAssistantSummary = Schema.Struct({

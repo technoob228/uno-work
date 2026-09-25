@@ -57,6 +57,7 @@ import { ManagerAccountDefaultAi } from "./AccountDefaultAi.ts";
 import { ManagerTelegramService } from "./TelegramConnector.ts";
 import { ManagerSlackService } from "./SlackConnector.ts";
 import { ASSISTANT_THREAD_RUNTIME_MODE } from "../connectorBindings.ts";
+import { isRelayCredential } from "../channelRelay.ts";
 
 /** Title of a fresh assistant chat; clients show "Uno" whatever the title. */
 export const ASSISTANT_CHAT_TITLE = "Uno";
@@ -192,6 +193,31 @@ const emptyTelegramStatus = (input: {
   health: input.health,
   defaultModelSelection: null,
   addressing: DEFAULT_CONNECTOR_ADDRESSING,
+  shared: false,
+});
+
+/**
+ * A stored Telegram connector as clients see it. Built field by field: the
+ * bot token — an own bot's, or the console relay token of Uno's shared bot —
+ * never leaves the daemon; `shared` says which kind it is.
+ */
+export const telegramConnectorStatus = (
+  config: ManagerTelegramConnectorConfig,
+  runtime: {
+    readonly botUsername: string | null;
+    readonly lastError: string | null;
+    readonly health: ManagerConnectorHealth | null;
+  },
+): ManagerTelegramConnectorStatus => ({
+  configured: true,
+  enabled: config.enabled,
+  allowedChatIds: config.allowedChatIds,
+  botUsername: runtime.botUsername,
+  lastError: runtime.lastError,
+  health: runtime.health,
+  defaultModelSelection: config.defaultModelSelection ?? null,
+  addressing: config.addressing ?? DEFAULT_CONNECTOR_ADDRESSING,
+  shared: isRelayCredential(config.botToken),
 });
 
 const makeManagerAssistantService = Effect.gen(function* () {
@@ -505,16 +531,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
           connector.value.config,
         );
         if (decoded._tag === "Success") {
-          telegram = {
-            configured: true,
-            enabled: decoded.value.enabled,
-            allowedChatIds: decoded.value.allowedChatIds,
-            botUsername: runtime.botUsername,
-            lastError: runtime.lastError,
-            health: runtime.health,
-            defaultModelSelection: decoded.value.defaultModelSelection ?? null,
-            addressing: decoded.value.addressing ?? DEFAULT_CONNECTOR_ADDRESSING,
-          };
+          telegram = telegramConnectorStatus(decoded.value, runtime);
         } else {
           telegram = {
             ...emptyTelegramStatus(runtime),
@@ -546,6 +563,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
             lastError: slackRuntime.lastError,
             defaultModelSelection: decoded.value.defaultModelSelection ?? null,
             addressing: decoded.value.addressing ?? DEFAULT_CONNECTOR_ADDRESSING,
+            shared: isRelayCredential(decoded.value.botToken),
           };
         } else {
           slack = {
