@@ -237,8 +237,11 @@ export function normalizeBridgeRequestContext(input: {
  * `kind: "thread"` — токен выдан сессии конкретного треда, контекст назван им
  * самим. `kind: "legacy"` — базовый токен машины: так представляются сессии,
  * поднятые до обновления. Ручки моста на него отвечают отказом с причиной.
+ * `kind: "shared-mcp"` — токен общего сервера uno-code/OpenCode (один процесс
+ * на все чаты): открывает только uno-work MCP, а тред вызова называется
+ * сессией OpenCode (см. `unoWork/http.ts`). Ручки моста его не принимают.
  */
-export type BridgeTokenKind = "thread" | "legacy";
+export type BridgeTokenKind = "thread" | "legacy" | "shared-mcp";
 
 export interface BridgeAuthorization {
   readonly context: BrowserBridgeRequestContext | undefined;
@@ -289,6 +292,12 @@ export function requireBridgeThread(
 
 export interface BrowserBridgeShape {
   readonly token: string;
+  /**
+   * Токен uno-work MCP для общего сервера OpenCode: одинаков для всех чатов,
+   * чтобы конфиг сервера не отличался от чата к чату (иначе у каждого чата
+   * свой процесс). Сам по себе тред не называет — только вместе с сессией.
+   */
+  readonly sharedMcpToken: string;
   /** undefined, когда слушающий порт неизвестен (bridge выключен). */
   readonly baseUrl: string | undefined;
   /**
@@ -409,6 +418,8 @@ export const makeBrowserBridge = (input: {
 }) =>
   Effect.gen(function* () {
     const { token, baseUrl } = input;
+    const sharedMcpToken = randomBytes(24).toString("hex");
+    registerKnownSecret(sharedMcpToken);
     const pubsub = yield* PubSub.unbounded<BrowserBridgeStreamEvent>();
     const sequenceRef = yield* Ref.make(0);
     const subscriberCountRef = yield* Ref.make(0);
@@ -449,6 +460,12 @@ export const makeBrowserBridge = (input: {
       if (presented.length === 0) return null;
       const scopedContext = contextByScopedToken.get(presented);
       if (scopedContext) return { context: scopedContext, kind: "thread" };
+      if (
+        presented.length === sharedMcpToken.length &&
+        timingSafeEqual(Buffer.from(presented, "utf8"), Buffer.from(sharedMcpToken, "utf8"))
+      ) {
+        return { context: undefined, kind: "shared-mcp" };
+      }
       // Базовый токен машины больше не открывает ручки, но узнаётся: сессия,
       // поднятая до обновления, получает внятный отказ вместо 401.
       if (
@@ -462,6 +479,7 @@ export const makeBrowserBridge = (input: {
 
     return {
       token,
+      sharedMcpToken,
       baseUrl,
       applyEnvironment: (base, context) => {
         const overlay = scopedEnvironment(context);

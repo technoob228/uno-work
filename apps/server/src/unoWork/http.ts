@@ -21,7 +21,7 @@ import { ThreadId, type UnoMachineApp } from "@t3tools/contracts";
 import { Effect, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
-import { BrowserBridge, requireBridgeThread } from "../browserBridge.ts";
+import { BROWSER_BRIDGE_TOKEN_ENV, BrowserBridge, requireBridgeThread } from "../browserBridge.ts";
 import { ComputerResourcesService } from "../computerResources/ComputerResourcesService.ts";
 import { FilesService } from "../files/FilesService.ts";
 import { InboxService } from "../inbox/InboxService.ts";
@@ -32,6 +32,7 @@ import { handleMcpMessage } from "../mcp/mcpJsonRpc.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { openCodeSessionEnvDir, readOpenCodeSessionEnv } from "../provider/opencodeSessionEnv.ts";
 import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "../workspaceRegistry/UnoComputerService.ts";
 import {
@@ -48,6 +49,7 @@ import {
   type BridgeReply,
   type UnoWorkToolDeps,
 } from "./tools.ts";
+import { UNO_WORK_MCP_SESSION_ARG } from "./constants.ts";
 
 const LOG_MAX_BYTES = 64 * 1024;
 
@@ -117,6 +119,45 @@ const readJson = (request: HttpServerRequest.HttpServerRequest) =>
 
 function bearerToken(header: string | undefined): string {
   return header?.replace(/^Bearer\s+/i, "").trim() ?? "";
+}
+
+/** The `tools/call` arguments object of a JSON-RPC message, if it is one. */
+function toolCallArguments(body: unknown): Record<string, unknown> | undefined {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return undefined;
+  const message = body as { method?: unknown; params?: unknown };
+  if (message.method !== "tools/call") return undefined;
+  const params = message.params as { arguments?: unknown } | undefined;
+  const args = params?.arguments;
+  return args !== null && typeof args === "object" && !Array.isArray(args)
+    ? (args as Record<string, unknown>)
+    : undefined;
+}
+
+/** The session tag is ours, never a tool argument. */
+function stripSessionArg(body: unknown): void {
+  const args = toolCallArguments(body);
+  if (args) delete args[UNO_WORK_MCP_SESSION_ARG];
+}
+
+/**
+ * A shared server's call: the thread token of the OpenCode session the call
+ * names. An unknown session yields an empty token (401 from the bridge).
+ */
+function sharedServerCaller(
+  body: unknown,
+  envDir: string,
+): { readonly token: string; readonly isCall: boolean } {
+  const isCall =
+    body !== null &&
+    typeof body === "object" &&
+    !Array.isArray(body) &&
+    (body as { method?: unknown }).method === "tools/call";
+  const sessionId = toolCallArguments(body)?.[UNO_WORK_MCP_SESSION_ARG];
+  const token =
+    typeof sessionId === "string"
+      ? (readOpenCodeSessionEnv(envDir, sessionId)?.[BROWSER_BRIDGE_TOKEN_ENV] ?? "")
+      : "";
+  return { token, isCall };
 }
 
 /** Everything the tools use, bound to the calling thread. */
@@ -263,22 +304,44 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
     const request = yield* HttpServerRequest.HttpServerRequest;
     const browserBridge = yield* BrowserBridge;
     const header = request.headers["authorization"];
-    const thread = requireBridgeThread(browserBridge.authorize(header));
+    const authorization = browserBridge.authorize(header);
+    const sharedServer = authorization?.kind === "shared-mcp";
+    const body = yield* readJson(request);
+    // A shared uno-code/OpenCode server (one process for every chat) holds
+    // one token for all of them; each tool call names its OpenCode session
+    // and the thread is the one the daemon wrote that session's token for.
+    const sessionCaller = sharedServer
+      ? sharedServerCaller(body, openCodeSessionEnvDir((yield* ServerConfig).stateDir))
+      : { token: bearerToken(header), isCall: false };
+    if (sharedServer && !sessionCaller.isCall && body !== null) {
+      // initialize / tools/list / ping / notifications don't act for a thread.
+      const outcome = yield* handleMcpMessage(
+        UNO_WORK_MCP_SERVER,
+        undefined as unknown as UnoWorkToolDeps,
+        body,
+      );
+      return outcome.kind === "accepted"
+        ? HttpServerResponse.empty({ status: 202 })
+        : HttpServerResponse.jsonUnsafe(outcome.body, { status: 200 });
+    }
+    const thread = requireBridgeThread(
+      sharedServer ? browserBridge.authorize(`Bearer ${sessionCaller.token}`) : authorization,
+    );
     if (!thread.ok) {
       return HttpServerResponse.jsonUnsafe(
         { error: thread.error, message: thread.message },
         { status: thread.status },
       );
     }
-    const body = yield* readJson(request);
     if (body === null) {
       return HttpServerResponse.jsonUnsafe(
         { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } },
         { status: 400 },
       );
     }
+    stripSessionArg(body);
     const deps = yield* makeDeps({
-      token: bearerToken(header),
+      token: sessionCaller.token,
       threadId: thread.threadId,
       cwd: thread.context.cwd,
     });

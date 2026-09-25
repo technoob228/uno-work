@@ -141,6 +141,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         },
         // One `opencode serve` for all threads (see OpenCodeAdapterLiveOptions).
         shareServer: currentHarnessBudget().shareOpenCodeServer,
+        sharedMcpToken: browserBridge.sharedMcpToken,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
       const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, processEnv);

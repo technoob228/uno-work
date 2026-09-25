@@ -255,6 +255,45 @@ export function withOpenCodeMcpServers(
   });
 }
 
+/**
+ * A shared uno-code/OpenCode server (one process for every chat) can't carry a
+ * per-chat token: a different config means a different process. For it the
+ * uno-work entry authenticates with the bridge's shared MCP token instead, and
+ * each tool call names its OpenCode session (the session-env plugin adds
+ * `UNO_WORK_MCP_SESSION_ARG`), from which the daemon finds the thread.
+ * Returns the input unchanged when there is no uno-work entry.
+ */
+export function withSharedServerUnoWorkMcp(
+  configContent: string | undefined,
+  sharedMcpToken: string,
+): string | undefined {
+  if (configContent === undefined) return configContent;
+  let config: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(configContent);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return configContent;
+    }
+    config = parsed as Record<string, unknown>;
+  } catch {
+    return configContent;
+  }
+  const mcp = config.mcp;
+  if (mcp === null || typeof mcp !== "object" || Array.isArray(mcp)) return configContent;
+  const entry = (mcp as Record<string, unknown>)[UNO_WORK_MCP_SERVER_NAME];
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return configContent;
+  return JSON.stringify({
+    ...config,
+    mcp: {
+      ...(mcp as Record<string, unknown>),
+      [UNO_WORK_MCP_SERVER_NAME]: {
+        ...(entry as Record<string, unknown>),
+        headers: { Authorization: `Bearer ${sharedMcpToken}` },
+      },
+    },
+  });
+}
+
 /** OpenCode permission key of the uno-work tools (`<server>_<tool>`). */
 export const OPENCODE_UNO_WORK_PERMISSION = `${UNO_WORK_MCP_SERVER_NAME}_*`;
 

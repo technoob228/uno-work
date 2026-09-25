@@ -25,8 +25,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { UNO_WORK_MCP_SERVER_NAME, UNO_WORK_MCP_SESSION_ARG } from "../unoWork/constants.ts";
+
 /** Env var through which the plugin finds the per-session files. */
 export const OPENCODE_SESSION_ENV_DIR_ENV = "UNO_WORK_SESSION_ENV_DIR";
+
+/** OpenCode names MCP tools `<server>_<tool>`. */
+const UNO_WORK_TOOL_PREFIX = `${UNO_WORK_MCP_SERVER_NAME}_`;
 
 const PLUGIN_FILE_NAME = "uno-work-session-env.mjs";
 const ENV_DIR_NAME = "opencode-session-env";
@@ -73,21 +78,43 @@ export const UnoWorkSessionEnv = async (input) => {
     }
   };
 
+  // The nearest session (itself or a parent, for \`task\` subagents) the
+  // daemon wrote variables for.
+  const resolveSession = async (dir, sessionID, cwd) => {
+    for (let depth = 0; depth < 8 && sessionID; depth += 1) {
+      const env = readEnv(dir, sessionID);
+      if (env) return { id: sessionID, env };
+      sessionID = await lookupParent(sessionID, cwd);
+    }
+    return undefined;
+  };
+
   return {
     "shell.env": async (hookInput, output) => {
       const dir = process.env.${OPENCODE_SESSION_ENV_DIR_ENV};
-      let sessionID = hookInput && typeof hookInput.sessionID === "string" ? hookInput.sessionID : "";
+      const sessionID = hookInput && typeof hookInput.sessionID === "string" ? hookInput.sessionID : "";
       if (!dir || !sessionID) return;
-      for (let depth = 0; depth < 8 && sessionID; depth += 1) {
-        const env = readEnv(dir, sessionID);
-        if (env) {
-          for (const [key, value] of Object.entries(env)) {
-            if (typeof value === "string") output.env[key] = value;
-          }
-          return;
-        }
-        sessionID = await lookupParent(sessionID, hookInput.cwd);
+      const found = await resolveSession(dir, sessionID, hookInput.cwd);
+      if (!found) return;
+      for (const [key, value] of Object.entries(found.env)) {
+        if (typeof value === "string") output.env[key] = value;
       }
+    },
+    // One server serves every chat, so its uno-work MCP connection can't say
+    // which chat calls: each uno-work tool call names its session instead.
+    "tool.execute.before": async (hookInput, output) => {
+      const tool = hookInput && typeof hookInput.tool === "string" ? hookInput.tool : "";
+      if (!tool.startsWith(${JSON.stringify(UNO_WORK_TOOL_PREFIX)})) return;
+      const dir = process.env.${OPENCODE_SESSION_ENV_DIR_ENV};
+      const sessionID = typeof hookInput.sessionID === "string" ? hookInput.sessionID : "";
+      if (!dir || !sessionID || !output || !output.args || typeof output.args !== "object") return;
+      const found = await resolveSession(dir, sessionID, undefined);
+      if (found) output.args[${JSON.stringify(UNO_WORK_MCP_SESSION_ARG)}] = found.id;
+    },
+    // The same args object is kept as the call's input: don't leave the tag in history.
+    "tool.execute.after": async (hookInput) => {
+      const args = hookInput && hookInput.args;
+      if (args && typeof args === "object") delete args[${JSON.stringify(UNO_WORK_MCP_SESSION_ARG)}];
     },
   };
 };
@@ -104,7 +131,7 @@ export interface OpenCodeSessionEnvPaths {
  * Synchronous on purpose: called once per adapter, before the first spawn.
  */
 export function ensureOpenCodeSessionEnvFiles(stateDir: string): OpenCodeSessionEnvPaths {
-  const envDir = path.join(stateDir, ENV_DIR_NAME);
+  const envDir = openCodeSessionEnvDir(stateDir);
   fs.mkdirSync(envDir, { recursive: true, mode: 0o700 });
   try {
     fs.chmodSync(envDir, 0o700);
@@ -144,6 +171,31 @@ export function writeOpenCodeSessionEnv(
   fs.writeFileSync(tmp, JSON.stringify(env), { mode: 0o600 });
   fs.renameSync(tmp, target);
   return true;
+}
+
+/** Directory of the per-session files under a state dir. */
+export function openCodeSessionEnvDir(stateDir: string): string {
+  return path.join(stateDir, ENV_DIR_NAME);
+}
+
+/** The variables the daemon wrote for one OpenCode session, if any. */
+export function readOpenCodeSessionEnv(
+  envDir: string,
+  sessionId: string,
+): Record<string, string> | undefined {
+  const target = sessionEnvPath(envDir, sessionId);
+  if (!target) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(target, "utf8"));
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+  } catch {
+    return undefined;
+  }
 }
 
 export function removeOpenCodeSessionEnv(envDir: string, sessionId: string): void {

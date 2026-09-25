@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ensureOpenCodeSessionEnvFiles,
   OPENCODE_SESSION_ENV_DIR_ENV,
+  readOpenCodeSessionEnv,
   removeOpenCodeSessionEnv,
   withOpenCodeSessionEnvPlugin,
   writeOpenCodeSessionEnv,
@@ -97,6 +98,70 @@ describe("opencode session env plugin", () => {
     writeOpenCodeSessionEnv(first.envDir, "ses_x", { A: "1" });
     expect(fs.statSync(path.join(first.envDir, "ses_x.json")).mode & 0o777).toBe(0o600);
     expect(writeOpenCodeSessionEnv(first.envDir, "../escape", { A: "1" })).toBe(false);
+  });
+});
+
+describe("uno-work tool calls on a shared server", () => {
+  type ToolHooks = {
+    "tool.execute.before": (
+      input: { tool: string; sessionID: string; callID: string },
+      output: { args: Record<string, unknown> },
+    ) => Promise<void>;
+    "tool.execute.after": (input: {
+      tool: string;
+      sessionID: string;
+      callID: string;
+      args: Record<string, unknown>;
+    }) => Promise<void>;
+  };
+  const loadToolHooks = async (pluginUrl: string): Promise<ToolHooks> => {
+    const mod = (await import(`${pluginUrl}?t=${Date.now()}`)) as {
+      UnoWorkSessionEnv: (input: unknown) => Promise<ToolHooks>;
+    };
+    return mod.UnoWorkSessionEnv({});
+  };
+
+  it("tags uno-work calls with their session and removes the tag afterwards", async () => {
+    const { pluginUrl, envDir } = ensureOpenCodeSessionEnvFiles(stateDir);
+    process.env[OPENCODE_SESSION_ENV_DIR_ENV] = envDir;
+    writeOpenCodeSessionEnv(envDir, "ses_a", { UNO_WORK_BRIDGE_TOKEN: "tok-a" });
+    const hooks = await loadToolHooks(pluginUrl);
+
+    const args: Record<string, unknown> = { appId: "notes" };
+    await hooks["tool.execute.before"](
+      { tool: "uno-work_app_list", sessionID: "ses_a", callID: "c1" },
+      { args },
+    );
+    expect(args).toEqual({ appId: "notes", __uno_work_session: "ses_a" });
+    await hooks["tool.execute.after"]({
+      tool: "uno-work_app_list",
+      sessionID: "ses_a",
+      callID: "c1",
+      args,
+    });
+    expect(args).toEqual({ appId: "notes" });
+
+    const other: Record<string, unknown> = { command: "ls" };
+    await hooks["tool.execute.before"](
+      { tool: "bash", sessionID: "ses_a", callID: "c2" },
+      { args: other },
+    );
+    expect(other).toEqual({ command: "ls" });
+
+    const unknown: Record<string, unknown> = {};
+    await hooks["tool.execute.before"](
+      { tool: "uno-work_app_list", sessionID: "ses_zz", callID: "c3" },
+      { args: unknown },
+    );
+    expect(unknown).toEqual({});
+  });
+
+  it("reads back what the daemon wrote, never outside the directory", () => {
+    const { envDir } = ensureOpenCodeSessionEnvFiles(stateDir);
+    writeOpenCodeSessionEnv(envDir, "ses_a", { UNO_WORK_BRIDGE_TOKEN: "tok-a" });
+    expect(readOpenCodeSessionEnv(envDir, "ses_a")).toEqual({ UNO_WORK_BRIDGE_TOKEN: "tok-a" });
+    expect(readOpenCodeSessionEnv(envDir, "ses_missing")).toBeUndefined();
+    expect(readOpenCodeSessionEnv(envDir, "../ses_a")).toBeUndefined();
   });
 });
 

@@ -9,6 +9,7 @@ import {
   sessionMcpServers,
   unoWorkMcpServer,
   withOpenCodeMcpServers,
+  withSharedServerUnoWorkMcp,
 } from "./customMcpServers.ts";
 
 const docs = { name: "docs", url: " https://mcp.example.com/mcp ", enabled: true };
@@ -137,5 +138,36 @@ describe("session MCP servers: built-in uno-work + the owner's own", () => {
       headers: [{ name: "Authorization", value: "Bearer thread-token" }],
     });
     expect(acpMcpServers(servers)[1]).toMatchObject({ name: "docs", headers: [] });
+  });
+});
+
+describe("withSharedServerUnoWorkMcp", () => {
+  it("swaps the per-chat uno-work token for the shared one so chats share a server", () => {
+    const chat = (token: string) =>
+      JSON.stringify({
+        plugin: ["file:///p.mjs"],
+        mcp: {
+          "uno-work": {
+            type: "remote",
+            url: "http://127.0.0.1:1/api/uno-work/mcp",
+            enabled: true,
+            headers: { Authorization: `Bearer ${token}` },
+          },
+          mine: { type: "remote", url: "https://x", enabled: true },
+        },
+      });
+    const a = withSharedServerUnoWorkMcp(chat("thread-a"), "shared");
+    const b = withSharedServerUnoWorkMcp(chat("thread-b"), "shared");
+    expect(a).toBe(b);
+    const parsed = JSON.parse(a ?? "");
+    expect(parsed.mcp["uno-work"].headers).toEqual({ Authorization: "Bearer shared" });
+    expect(parsed.mcp.mine).toEqual({ type: "remote", url: "https://x", enabled: true });
+  });
+
+  it("leaves configs without uno-work or unparsable ones alone", () => {
+    expect(withSharedServerUnoWorkMcp(undefined, "s")).toBeUndefined();
+    expect(withSharedServerUnoWorkMcp("nope", "s")).toBe("nope");
+    const plain = JSON.stringify({ mcp: { mine: { url: "x" } } });
+    expect(withSharedServerUnoWorkMcp(plain, "s")).toBe(plain);
   });
 });

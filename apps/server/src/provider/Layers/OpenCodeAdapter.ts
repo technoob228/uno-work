@@ -58,6 +58,7 @@ import {
 } from "../opencodeSessionEnv.ts";
 import { makeSessionEventHub, type SessionEventHub } from "../sessionEventHub.ts";
 import { makeSharedProcessPool } from "../sharedProcessPool.ts";
+import { withSharedServerUnoWorkMcp } from "../../mcp/customMcpServers.ts";
 
 const PROVIDER = ProviderDriverKind.make("opencode");
 const OPENCODE_STALE_TURN_WAIT = "2 seconds";
@@ -162,6 +163,13 @@ export interface OpenCodeAdapterLiveOptions {
    * server. Ignored with an external `serverUrl`.
    */
   readonly shareServer?: boolean;
+  /**
+   * The bridge's shared uno-work MCP token. With a shared server the chat's
+   * uno-work entry (per-thread token) is rewritten to it so every chat keys
+   * the same server; tool calls then name their session through the plugin.
+   * Without it a chat with uno-work gets a server of its own.
+   */
+  readonly sharedMcpToken?: string;
   /** Linger of an unused shared server; default {@link DEFAULT_SHARED_SERVER_LINGER_MS}. */
   readonly sharedServerLingerMs?: number;
 }
@@ -1925,8 +1933,11 @@ export function makeOpenCodeAdapter(
                   [OPENCODE_SESSION_ENV_DIR_ENV]: sessionEnvPaths.envDir,
                 };
                 for (const name of Object.keys(shellEnv)) delete serverEnvironment[name];
+                const chatConfigContent = configContent ?? baseEnvironment.OPENCODE_CONFIG_CONTENT;
                 const serverConfigContent = withOpenCodeSessionEnvPlugin(
-                  configContent ?? baseEnvironment.OPENCODE_CONFIG_CONTENT,
+                  options?.sharedMcpToken
+                    ? withSharedServerUnoWorkMcp(chatConfigContent, options.sharedMcpToken)
+                    : chatConfigContent,
                   sessionEnvPaths.pluginUrl,
                 );
                 if (serverConfigContent !== undefined) {

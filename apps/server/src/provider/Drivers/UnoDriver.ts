@@ -960,6 +960,7 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         // One uno-code server for all threads (per distinct config): a Bun
         // process is 200–400 MB, a server per chat ran 2 GB boxes out of RAM.
         shareServer: currentHarnessBudget().shareOpenCodeServer,
+        sharedMcpToken: browserBridge.sharedMcpToken,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
       const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, processEnv);
