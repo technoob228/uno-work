@@ -54,6 +54,7 @@ import {
   UNO_WORK_GUIDE_TOPICS,
   isUnoWorkGuideTopic,
 } from "../agentContext/guides.ts";
+import type { ConnectorCallResult, ConnectorTool } from "../setupTools/connectors.ts";
 import { validateArgs, type ObjectSchema } from "./argsSchema.ts";
 import { decideUnoWorkGate, refusalMessage, type UnoWorkToolLevel } from "./policy.ts";
 
@@ -191,6 +192,18 @@ export interface UnoWorkToolDeps {
     readonly app: UnoMachineApp;
     readonly lines: number;
   }) => Effect.Effect<string>;
+  /**
+   * The person's connected tools (Google Drive, Gmail & Calendar, Notion,
+   * GitHub): calls go to the console with this computer's machine token.
+   * Absent where there is no console (tests, a laptop without Uno).
+   */
+  readonly connectors?: {
+    readonly call: (input: {
+      readonly provider: string;
+      readonly tool: string;
+      readonly arguments: Record<string, unknown>;
+    }) => Effect.Effect<ConnectorCallResult, UnoWorkToolError>;
+  };
 }
 
 // ── Tool definition ────────────────────────────────────────────────────
@@ -1755,22 +1768,119 @@ export function runUnoWorkTool(
       const described = appName ? { ...args, appId: appName } : args;
       const title = tool.approvalTitle?.(described) ?? tool.name;
       const detail = tool.approvalDetail?.(described);
-      const outcome = yield* deps.requestApproval({
-        tool: tool.name,
-        title,
-        ...(detail ? { detail } : {}),
-        sensitive: level === "sensitive",
-      });
-      if (outcome !== "approved") {
-        return yield* toolError(refusalMessage(outcome, title));
-      }
+      yield* askPerson(deps, { tool: tool.name, level, title, detail });
     }
     return yield* tool.run(deps, args);
   });
 }
 
+/** The approval card; a refusal fails with the message the model reads. */
+function askPerson(
+  deps: UnoWorkToolDeps,
+  input: {
+    readonly tool: string;
+    readonly level: UnoWorkToolLevel;
+    readonly title: string;
+    readonly detail: string | undefined;
+  },
+): Effect.Effect<void, UnoWorkToolError> {
+  return Effect.gen(function* () {
+    const outcome = yield* deps.requestApproval({
+      tool: input.tool,
+      title: input.title,
+      ...(input.detail ? { detail: input.detail } : {}),
+      sensitive: input.level === "sensitive",
+    });
+    if (outcome !== "approved") {
+      return yield* toolError(refusalMessage(outcome, input.title));
+    }
+  });
+}
+
+// ── Connected tools (Google Drive, Gmail & Calendar, Notion, GitHub) ────
+
+/** Connector tools that change something in the person's account. */
+const CONNECTOR_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  "drive_create",
+  "gmail_create_draft",
+  "notion_append",
+  "notion_create_page",
+  "github_create_issue",
+]);
+
+/**
+ * Reads run; anything that writes to the person's accounts is a "change"
+ * (asks in Ask mode, like starting an app). Names the console adds later
+ * are judged by their verb so a new write tool never slips through as a read.
+ */
+export function connectorToolLevel(name: string): UnoWorkToolLevel {
+  if (CONNECTOR_WRITE_TOOLS.has(name)) return "change";
+  return /_(create|append|send|delete|remove|update|edit|write|upload|share|comment|post|move|rename|reply|merge|close|archive|label|invite)(_|$)/.test(
+    name,
+  )
+    ? "change"
+    : "safe";
+}
+
+function describeConnectorArgs(args: Record<string, unknown>): string | undefined {
+  const text = JSON.stringify(args);
+  if (text === undefined || text === "{}") return undefined;
+  return text.length > 400 ? `${text.slice(0, 400)}…` : text;
+}
+
+function connectorErrorText(result: ConnectorCallResult): string {
+  const text = result.content
+    .map((block) => (typeof block.text === "string" ? block.text : ""))
+    .filter((line) => line.length > 0)
+    .join("\n");
+  return text.length > 0 ? text : "The connector reported an error.";
+}
+
+/** A connected provider's tool as an entry of the `uno-work` MCP server. */
+export function connectorMcpTool(
+  tool: ConnectorTool,
+): McpServerDefinition<UnoWorkToolDeps, UnoWorkToolError>["tools"][number] {
+  const level = connectorToolLevel(tool.name);
+  return {
+    name: tool.name,
+    description: tool.description
+      ? `${tool.description} (${tool.providerName}, connected by the person)`
+      : `${tool.providerName} tool, connected by the person.`,
+    inputSchema: tool.inputSchema,
+    annotations: { readOnlyHint: level === "safe", destructiveHint: false, openWorldHint: true },
+    run: (deps, rawArgs) =>
+      Effect.gen(function* () {
+        const args =
+          rawArgs !== null && typeof rawArgs === "object" && !Array.isArray(rawArgs)
+            ? (rawArgs as Record<string, unknown>)
+            : {};
+        if (!deps.connectors) {
+          return yield* toolError(
+            `${tool.providerName} isn't reachable from this computer right now.`,
+          );
+        }
+        if (decideUnoWorkGate(level, deps.caller.runtimeMode) === "ask") {
+          yield* askPerson(deps, {
+            tool: tool.name,
+            level,
+            title: `${tool.providerName}: ${tool.name}`,
+            detail: describeConnectorArgs(args),
+          });
+        }
+        // The console validates the arguments against its own schema.
+        const result = yield* deps.connectors.call({
+          provider: tool.provider,
+          tool: tool.name,
+          arguments: args,
+        });
+        if (result.isError) return yield* toolError(connectorErrorText(result));
+        return new McpContent(result.content);
+      }),
+  };
+}
+
 const MCP_INSTRUCTIONS =
-  "Tools for the Uno Work environment this chat runs in: this computer and its apps, widgets, files and cloud, other chats, the person's Inbox and right panel, sites, the Uno account and settings. Call uno_guide for details. Tools that change things may wait for the person's Allow; if they decline, don't retry or work around it.";
+  "Tools for the Uno Work environment this chat runs in: this computer and its apps, widgets, files and cloud, other chats, the person's Inbox and right panel, sites, the Uno account and settings, plus the tools the person connected (Google Drive, Gmail & Calendar, Notion, GitHub) when they did. Call uno_guide for details. Tools that change things may wait for the person's Allow; if they decline, don't retry or work around it.";
 
 export const UNO_WORK_MCP_SERVER: McpServerDefinition<UnoWorkToolDeps, UnoWorkToolError> = {
   serverInfo: { name: UNO_WORK_MCP_SERVER_NAME, version: "1.0.0" },
@@ -1791,3 +1901,22 @@ export const UNO_WORK_MCP_SERVER: McpServerDefinition<UnoWorkToolDeps, UnoWorkTo
   }),
   errorText: (error) => error.message,
 };
+
+/**
+ * The server with the person's connected tools added (their names come from
+ * the console already prefixed: drive_*, gmail_*, calendar_*, notion_*,
+ * github_*). A connector tool never shadows a built-in one.
+ */
+export function buildUnoWorkMcpServer(
+  connectorTools: ReadonlyArray<ConnectorTool>,
+): McpServerDefinition<UnoWorkToolDeps, UnoWorkToolError> {
+  if (connectorTools.length === 0) return UNO_WORK_MCP_SERVER;
+  const builtIn = new Set(UNO_WORK_MCP_SERVER.tools.map((tool) => tool.name));
+  return {
+    ...UNO_WORK_MCP_SERVER,
+    tools: [
+      ...UNO_WORK_MCP_SERVER.tools,
+      ...connectorTools.filter((tool) => !builtIn.has(tool.name)).map(connectorMcpTool),
+    ],
+  };
+}

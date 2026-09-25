@@ -35,6 +35,7 @@ import { ServerSettingsService } from "../serverSettings.ts";
 import { openCodeSessionEnvDir, readOpenCodeSessionEnv } from "../provider/opencodeSessionEnv.ts";
 import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "../workspaceRegistry/UnoComputerService.ts";
+import { ConnectorsService } from "../setupTools/ConnectorsService.ts";
 import {
   buildUnoWorkGuide,
   isUnoWorkGuideTopic,
@@ -44,7 +45,7 @@ import {
   UNO_WORK_APPROVAL_RESULT_PATH,
   UNO_WORK_GUIDE_PATH,
   UNO_WORK_MCP_PATH,
-  UNO_WORK_MCP_SERVER,
+  buildUnoWorkMcpServer,
   UnoWorkToolError,
   type BridgeReply,
   type UnoWorkToolDeps,
@@ -178,6 +179,7 @@ const makeDeps = (input: {
     const unoComputer = yield* UnoComputerService;
     const serverSettings = yield* ServerSettingsService;
     const serverConfig = yield* ServerConfig;
+    const connectors = Option.getOrNull(yield* Effect.serviceOption(ConnectorsService));
 
     const shell = yield* projections
       .getThreadShellById(ThreadId.make(input.threadId))
@@ -298,6 +300,18 @@ const makeDeps = (input: {
       settings: serverSettings.getSettings,
       readLogTail: ({ app, lines }) =>
         Effect.promise(() => readAppLogTail(app, lines, manifestDir)),
+      ...(connectors
+        ? {
+            connectors: {
+              call: (callInput) =>
+                connectors
+                  .call(callInput)
+                  .pipe(
+                    Effect.mapError((error) => new UnoWorkToolError({ message: error.message })),
+                  ),
+            },
+          }
+        : {}),
     };
     return deps;
   });
@@ -312,6 +326,12 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
     const authorization = browserBridge.authorize(header);
     const sharedServer = authorization?.kind === "shared-mcp";
     const body = yield* readJson(request);
+    // The person's connected tools join the built-in ones (cached; none off a
+    // cloud computer). Resolved only for authorized calls.
+    const connectorsService = Option.getOrNull(yield* Effect.serviceOption(ConnectorsService));
+    const mcpServer = connectorsService
+      ? connectorsService.tools.pipe(Effect.map(buildUnoWorkMcpServer))
+      : Effect.succeed(buildUnoWorkMcpServer([]));
     // A shared uno-code/OpenCode server (one process for every chat) holds
     // one token for all of them; each tool call names its OpenCode session
     // and the thread is the one the daemon wrote that session's token for.
@@ -321,7 +341,7 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
     if (sharedServer && !sessionCaller.isCall && body !== null) {
       // initialize / tools/list / ping / notifications don't act for a thread.
       const outcome = yield* handleMcpMessage(
-        UNO_WORK_MCP_SERVER,
+        yield* mcpServer,
         undefined as unknown as UnoWorkToolDeps,
         body,
       );
@@ -350,7 +370,7 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
       threadId: thread.threadId,
       cwd: thread.context.cwd,
     });
-    const outcome = yield* handleMcpMessage(UNO_WORK_MCP_SERVER, deps, body);
+    const outcome = yield* handleMcpMessage(yield* mcpServer, deps, body);
     if (outcome.kind === "accepted") {
       return HttpServerResponse.empty({ status: 202 });
     }
