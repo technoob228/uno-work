@@ -1253,7 +1253,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "browser_command",
     group: "person",
     description:
-      "Drive the page open in this chat's right panel: state (URL, title, visible text), screenshot, click, clickText, type, press, navigate, reload, back, forward, evaluate. Prefer precise selectors/text; never print passwords or private fields.",
+      "Drive the page open in this chat's right panel: state (URL, title, visible text), screenshot, click, clickText, type, press, navigate, reload, back, forward, evaluate. Prefer precise selectors/text; never print passwords or private fields. requestHelp (with `text`: what the person should do — sign in, captcha, 2FA code, a payment or a choice only they can make) hands the browser to the person and waits until they hand it back (default 10 min). On a new cloud computer the browser is set up on first use (~30–60 s): a reply saying it is being set up means do something else and retry after the given seconds.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1272,6 +1272,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             "back",
             "forward",
             "evaluate",
+            "requestHelp",
           ],
         },
         url: {
@@ -1284,13 +1285,17 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         key: { type: "string", maxLength: 200 },
         script: { type: "string", maxLength: 32000 },
         fullPage: { type: "boolean" },
-        timeoutMs: { type: "integer", minimum: 0, maximum: 120000 },
+        // requestHelp waits for a person; the harness gives a tool call 15 min.
+        timeoutMs: { type: "integer", minimum: 0, maximum: 840000 },
       },
       required: ["command"],
       additionalProperties: false,
     },
+    // requestHelp only asks the person — it is its own approval.
     level: (args) =>
-      args.command === "state" || args.command === "screenshot" ? "safe" : "change",
+      args.command === "state" || args.command === "screenshot" || args.command === "requestHelp"
+        ? "safe"
+        : "change",
     approvalTitle: (args) =>
       `Browser: ${str(args, "command")} ${str(args, "url") ?? str(args, "selector") ?? str(args, "text") ?? ""}`.trim(),
     run: (deps, args) =>
@@ -1299,7 +1304,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           method: "POST",
           path: "/api/browser/command",
           body: args,
-          timeoutMs: (num(args, "timeoutMs") ?? 30_000) + 10_000,
+          timeoutMs:
+            (num(args, "timeoutMs") ?? (args.command === "requestHelp" ? 600_000 : 30_000)) +
+            10_000,
         })
         .pipe(
           Effect.flatMap(bridgeOk),
