@@ -160,6 +160,7 @@ import { ManagerApprovalService } from "./manager/Services/ManagerApprovalServic
 import { ManagerToolService } from "./manager/Services/ManagerToolService.ts";
 import { ManagerAuthError, ManagerTokenAuthService } from "./manager/Services/ManagerTokenAuth.ts";
 import { ManagerTelegramService } from "./manager/Layers/TelegramConnector.ts";
+import { ManagerSlackService } from "./manager/Layers/SlackConnector.ts";
 import { ManagerAssistantService } from "./manager/Services/AssistantService.ts";
 import { ManagerAssistantLlm } from "./manager/Services/AssistantLlmService.ts";
 import { AiProviderKeys } from "./aiProviders/AiProviderKeys.ts";
@@ -681,6 +682,15 @@ const buildAppUnderTest = (options?: {
           Layer.mock(ManagerTelegramService)({
             getRuntimeStatus: () =>
               Effect.succeed({ botUsername: null, lastError: null, health: null }),
+          }),
+          Layer.mock(ManagerSlackService)({
+            getRuntimeStatus: () =>
+              Effect.succeed({
+                botUserId: null,
+                botUserName: null,
+                lastError: null,
+                connected: false,
+              }),
           }),
           Layer.mock(ManagerAssistantService)({
             listAssistants: () => Effect.succeed([]),
