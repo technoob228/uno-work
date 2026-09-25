@@ -13,6 +13,7 @@ Use these tools instead of guessing, shell tricks or raw HTTP. When the person a
 - The person: `notify` (Inbox), `open_in_panel` (URL or file in the right panel), `browser_command`, `request_secret`
 - Web: `site_publish` (a static folder or HTML file becomes a public site)
 - Account: `account_overview` (plan, computers), `computer_create`, `computer_create_status`, `settings_read`
+- Connected tools: when the person connects Google Drive, Gmail & Calendar, Notion or GitHub (Setup), their tools (names starting with gdrive, gmail, calendar, notion or github) appear in this same server; use them instead of asking the person to copy things over. A project's `materials/README.md` sums up the files they gave you: read it first.
 - Details on demand: `uno_guide` with a topic: `apps`, `app-sdk`, `widgets`, `storage`, `notify`, `browser`, `chats`, `secrets`, `account`, `plugins` (extend Uno Work itself: hooks, schedules, panels)
 
 If the tools are missing, the same guides are at `GET $UNO_WORK_BRIDGE_URL/api/uno-work/guide/<topic>` with `Authorization: Bearer $UNO_WORK_BRIDGE_TOKEN`.

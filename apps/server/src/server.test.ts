@@ -139,6 +139,8 @@ import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
 import { FilesService } from "./files/FilesService.ts";
 import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
 import { AppSdkService } from "./appSdk/AppSdkService.ts";
+import { ConnectorsService, type ConnectorsServiceShape } from "./setupTools/ConnectorsService.ts";
+import { MaterialsService, type MaterialsServiceShape } from "./setupTools/MaterialsService.ts";
 import { InboxService, type InboxServiceShape } from "./inbox/InboxService.ts";
 import { ComputerResourcesService } from "./computerResources/ComputerResourcesService.ts";
 import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
@@ -399,6 +401,8 @@ const buildAppUnderTest = (options?: {
     inbox?: Partial<InboxServiceShape>;
     connectorNotify?: Partial<ConnectorNotifyServiceShape>;
     serverBrowser?: Partial<ServerBrowserShape>;
+    connectors?: Partial<ConnectorsServiceShape>;
+    materials?: Partial<MaterialsServiceShape>;
   };
 }) =>
   Effect.gen(function* () {
@@ -689,6 +693,16 @@ const buildAppUnderTest = (options?: {
           Layer.mock(FilesService)({}),
           Layer.mock(MachineAppsService)({}),
           Layer.mock(AppSdkService)({}),
+          Layer.mock(ConnectorsService)({
+            list: () =>
+              Effect.succeed({ available: false, reason: "not_cloud_computer", connectors: [] }),
+            tools: Effect.succeed([]),
+            ...options?.layers?.connectors,
+          }),
+          Layer.mock(MaterialsService)({
+            get: () => Effect.succeed(null),
+            ...options?.layers?.materials,
+          }),
           Layer.mock(InboxService)({ ...options?.layers?.inbox }),
           Layer.mock(ComputerResourcesService)({}),
           Layer.mock(HarnessSetup)({}),
@@ -1207,6 +1221,96 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         headers: { authorization: "Bearer uwm_not-a-session" },
       });
       assert.equal(tokensWithManagerToken.status, 401);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("serves the Setup connectors and materials routes to owner sessions only", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          connectors: {
+            list: () =>
+              Effect.succeed({
+                available: true,
+                reason: null,
+                connectors: [
+                  {
+                    provider: "notion",
+                    name: "Notion",
+                    description: "Read and write pages.",
+                    available: true,
+                    connected: true,
+                    account: "Acme",
+                    connectedAt: "2026-09-25T10:00:00Z",
+                    toolCount: 4,
+                  },
+                ],
+              }),
+            start: (provider) =>
+              Effect.succeed({ authorizeUrl: `https://console.test/oauth/${provider}` }),
+          },
+          materials: {
+            get: (jobId) =>
+              Effect.succeed(
+                jobId === "job-1"
+                  ? {
+                      state: "running",
+                      items: [],
+                      learned: [],
+                      savedToCloud: null,
+                      summaryPath: null,
+                      error: null,
+                    }
+                  : null,
+              ),
+          },
+        },
+      });
+
+      const anonymous = yield* HttpClient.get("/api/manager/connectors");
+      assert.equal(anonymous.status, 401);
+
+      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+      const listed = yield* HttpClient.get("/api/manager/connectors", {
+        headers: { cookie: ownerCookie },
+      });
+      assert.equal(listed.status, 200);
+      const body = (yield* listed.json) as {
+        available: boolean;
+        connectors: Array<{ provider: string; toolCount: number }>;
+      };
+      assert.isTrue(body.available);
+      assert.equal(body.connectors[0]?.toolCount, 4);
+
+      const started = yield* HttpClient.post("/api/manager/connectors/notion/start", {
+        headers: { cookie: ownerCookie },
+      });
+      assert.equal(started.status, 200);
+      assert.deepEqual(yield* started.json, { authorizeUrl: "https://console.test/oauth/notion" });
+
+      const badProvider = yield* HttpClient.post("/api/manager/connectors/Not%20Valid/start", {
+        headers: { cookie: ownerCookie },
+      });
+      assert.equal(badProvider.status, 400);
+
+      const job = yield* HttpClient.get("/api/manager/materials/read/job-1", {
+        headers: { cookie: ownerCookie },
+      });
+      assert.equal(job.status, 200);
+      assert.equal(((yield* job.json) as { state: string }).state, "running");
+      const missing = yield* HttpClient.get("/api/manager/materials/read/nope", {
+        headers: { cookie: ownerCookie },
+      });
+      assert.equal(missing.status, 404);
+
+      const probe = yield* HttpClient.post("/api/manager/mcp/probe", {
+        headers: { cookie: ownerCookie },
+        body: HttpBody.text(JSON.stringify({ url: "file:///etc/passwd" }), "application/json"),
+      });
+      assert.equal(probe.status, 200);
+      const probed = (yield* probe.json) as { ok: boolean; error: string | null };
+      assert.isFalse(probed.ok);
+      assert.include(probed.error ?? "", "http");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
