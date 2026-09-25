@@ -40,6 +40,7 @@ import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AppearanceLayoutSection } from "./AppearanceLayoutSection";
+import { NotificationsSection } from "./NotificationsSection";
 import { DRIVER_OPTIONS } from "./providerDriverMeta";
 import {
   SettingResetButton,
@@ -773,6 +774,8 @@ export function GeneralSettingsPanel() {
       </SettingsSection>
 
       <AppearanceLayoutSection />
+
+      <NotificationsSection />
 
       <SettingsSection title="About">
         {isElectron ? (

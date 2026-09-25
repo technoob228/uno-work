@@ -4,6 +4,7 @@ import {
   type AccountComputer,
   type AccountSubscription,
   type ComputerApp,
+  describeRestartError,
   parseAccountComputer,
   parseSubscription,
 } from "../../account/accountOverview";
@@ -20,6 +21,8 @@ import {
   matchesQuery,
   matchesSite,
   planRunning,
+  RESTART_GIVE_UP_MS,
+  restartPhase,
   rowAction,
   sortEntries,
   stateLabel,
@@ -214,5 +217,70 @@ describe("plan", () => {
     expect(groupShare(entries, subscription)).toBe(26.25);
     expect(groupShare([localEntry("This Mac", false)], subscription)).toBeNull();
     expect(groupShare(entries, null)).toBeNull();
+  });
+});
+
+describe("restart", () => {
+  const asked = "2026-09-25T10:00:00Z";
+  const at = Date.parse(asked);
+  const running = (extra: Record<string, unknown>) =>
+    box({ id: 7, name: "studio", status: "running", started_at: "2026-09-25T09:00:00Z", ...extra });
+
+  it("reads the console's restart object", () => {
+    const b = running({
+      restart: { state: "restarting", requested_at: asked, finished_at: null },
+    });
+    expect(b.restart).toEqual({
+      state: "restarting",
+      requestedAt: asked,
+      finishedAt: null,
+      error: null,
+    });
+    expect(running({}).restart).toBeNull();
+    expect(running({ restart: { state: "weird" } }).restart).toBeNull();
+  });
+
+  it("follows the console until the computer is back", () => {
+    const request = { requestedAt: asked, at };
+    const going = running({ restart: { state: "restarting", requested_at: asked } });
+    expect(restartPhase(request, going, at + 5_000)).toBe("restarting");
+    const back = running({ restart: { state: "done", requested_at: asked, finished_at: asked } });
+    expect(restartPhase(request, back, at + 20_000)).toBe("done");
+    const failed = running({ restart: { state: "failed", requested_at: asked, error: "x" } });
+    expect(restartPhase(request, failed, at + 20_000)).toBe("failed");
+  });
+
+  it("an older restart's result is not this one's", () => {
+    const request = { requestedAt: asked, at };
+    const old = running({ restart: { state: "done", requested_at: "2026-09-25T09:50:00Z" } });
+    expect(restartPhase(request, old, at + 5_000)).toBe("restarting");
+  });
+
+  it("the console forgot (it restarted itself): a fresh start time means back", () => {
+    const request = { requestedAt: asked, at };
+    expect(restartPhase(request, running({}), at + 5_000)).toBe("restarting");
+    expect(
+      restartPhase(request, running({ started_at: "2026-09-25T10:00:14Z" }), at + 20_000),
+    ).toBe("done");
+  });
+
+  it("error on the computer is a failure; too long is 'lost'", () => {
+    const request = { requestedAt: asked, at };
+    expect(restartPhase(request, box({ id: 7, name: "s", status: "error" }), at + 20_000)).toBe(
+      "failed",
+    );
+    expect(restartPhase(request, undefined, at + RESTART_GIVE_UP_MS + 1)).toBe("lost");
+  });
+
+  it("says refusals in plain words", () => {
+    expect(describeRestartError(new Error('429: {"error":"RESTART_TOO_SOON"}'))).toMatch(
+      /less than a minute/,
+    );
+    expect(describeRestartError(new Error('409: {"error":"BOX_NOT_RUNNING"}'))).toMatch(
+      /Wake it up/,
+    );
+    expect(describeRestartError(new Error('403: {"error":"ACCOUNT_SCOPE_REQUIRED"}'))).toMatch(
+      /owner/,
+    );
   });
 });

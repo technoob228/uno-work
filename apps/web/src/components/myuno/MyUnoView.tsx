@@ -481,6 +481,7 @@ export function MyUnoView() {
         onSeePlans={seePlans}
       />
       {actions.confirmSleep}
+      {actions.confirmRestart}
       {isWebLite ? null : <UpdateSiteDialog site={updating} onClose={() => setUpdating(null)} />}
     </SidebarInset>
   );

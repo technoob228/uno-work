@@ -374,3 +374,44 @@ export function matchesSite(
   if (!q) return true;
   return `${site.slug} ${site.url} ${site.customDomain ?? ""}`.toLowerCase().includes(q);
 }
+
+// ---- restart ----
+
+/** A Restart this window asked for. */
+export interface RestartRequest {
+  /** When the console took it (its `requested_at`); null if it didn't say. */
+  readonly requestedAt: string | null;
+  /** When this window sent it (ms). */
+  readonly at: number;
+}
+
+export type RestartPhase = "restarting" | "done" | "failed" | "lost";
+
+/** Past this, stop waiting and say so (a restart takes ~15-30 s). */
+export const RESTART_GIVE_UP_MS = 4 * 60_000;
+
+/**
+ * How a Restart asked from here is going, from the computer as the console
+ * reports it. The console keeps the answer in memory for a while (`restart`);
+ * if it lost it (the console itself restarted), a fresh `started_at` after the
+ * request also means the computer is back.
+ */
+export function restartPhase(
+  request: RestartRequest,
+  computer: Pick<AccountComputer, "status" | "startedAt" | "restart"> | undefined,
+  now: number,
+): RestartPhase {
+  if (computer) {
+    const r = computer.restart;
+    const ours =
+      r !== null && (request.requestedAt === null || r.requestedAt === request.requestedAt);
+    if (ours && r.state === "done") return "done";
+    if (ours && r.state === "failed") return "failed";
+    if (computer.status === "error") return "failed";
+    if (!ours && request.requestedAt && computer.status === "running" && computer.startedAt) {
+      const started = Date.parse(computer.startedAt);
+      if (Number.isFinite(started) && started >= Date.parse(request.requestedAt)) return "done";
+    }
+  }
+  return now - request.at > RESTART_GIVE_UP_MS ? "lost" : "restarting";
+}
