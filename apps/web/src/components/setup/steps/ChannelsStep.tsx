@@ -494,10 +494,10 @@ function SlackCard({
           )}
           {installing ? "Waiting for Slack…" : "Add to Slack"}
         </button>
-        {state && !available ? <SoonBadge /> : null}
+        {install.isFetched && !available ? <SoonBadge /> : null}
       </div>
       {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
-      {ownApp || (state !== undefined && !available) ? (
+      {ownApp || (install.isFetched && !available) ? (
         ownApp ? (
           <div className="rounded-xl border border-border p-3">
             <SlackGuide environmentId={environmentId} summary={summary} onChanged={onChanged} />
