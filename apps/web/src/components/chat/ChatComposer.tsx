@@ -1333,9 +1333,17 @@ export const ChatComposer = memo(
     // ------------------------------------------------------------------
     // Sync refs back to parent
     // ------------------------------------------------------------------
+    // Only when the clamp moves the cursor: an unconditional setState here runs
+    // on every keystroke, and while the composer already has an update pending
+    // React can't skip it, so every keystroke commit left another render
+    // pending. A fast enough stream of prompt changes (fast typing, dictation)
+    // then hit React's nested-update limit — error #185 "Maximum update depth".
+    const composerCursorRef = useRef(composerCursor);
+    composerCursorRef.current = composerCursor;
     useEffect(() => {
       promptRef.current = prompt;
-      setComposerCursor((existing) => clampCollapsedComposerCursor(prompt, existing));
+      const clamped = clampCollapsedComposerCursor(prompt, composerCursorRef.current);
+      if (clamped !== composerCursorRef.current) setComposerCursor(clamped);
     }, [prompt, promptRef]);
 
     useEffect(() => {
