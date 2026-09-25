@@ -90,6 +90,7 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
       threadContinueDirect: true,
       assistantChat: true,
       assistantLlm: true,
+      assistantConversations: true,
     },
   } satisfies Omit<ExecutionEnvironmentDescriptor, "machineKind" | "unoBoxId">;
   const hostname = OS.hostname();

@@ -14,13 +14,14 @@ import {
   type ProviderInstallJobStatus,
   type ProviderSetupJobId,
 } from "@t3tools/contracts";
-import { findMarkedAssistantChat } from "@t3tools/shared/assistantChat";
+import { findMarkedAssistantChat, listAssistantConversations } from "@t3tools/shared/assistantChat";
 import {
   assistantModelSelection,
   coerceAssistantModelSelection,
   DEFAULT_ASSISTANT_MODEL_SELECTION,
   defaultAssistantModelFor,
   readAssistantLlmProvider,
+  sameAssistantModelSelection,
 } from "@t3tools/shared/assistantLlm";
 import { Effect, Layer, Ref } from "effect";
 import * as crypto from "node:crypto";
@@ -168,6 +169,35 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
           { origin: assistantCommandOrigin({ assistantKey: ASSISTANT_PROJECT_ID }) },
         )
         .pipe(Effect.mapError(toError("Failed to switch the assistant's model.")));
+      // One engine for all of the assistant's conversations (0.0.85).
+      const snapshot = yield* snapshotQuery
+        .getShellSnapshot()
+        .pipe(Effect.mapError(toError("Failed to load chats.")));
+      yield* Effect.forEach(
+        listAssistantConversations(snapshot.threads).filter(
+          (thread) =>
+            thread.id !== chat.id && !sameAssistantModelSelection(thread.modelSelection, next),
+        ),
+        (thread) =>
+          engine
+            .dispatch(
+              {
+                type: "thread.meta.update",
+                commandId: CommandId.make(`assistant-llm:${crypto.randomUUID()}`),
+                threadId: thread.id,
+                modelSelection: next,
+              },
+              { origin: assistantCommandOrigin({ assistantKey: ASSISTANT_PROJECT_ID }) },
+            )
+            .pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("assistant llm switch: conversation not updated").pipe(
+                  Effect.annotateLogs({ threadId: thread.id, cause }),
+                ),
+              ),
+            ),
+        { discard: true },
+      );
       yield* Effect.logInfo("assistant llm switched").pipe(
         Effect.annotateLogs({ threadId: chat.id, provider: input.provider, model: input.model }),
       );

@@ -63,6 +63,15 @@ export interface ManagerAssistantServiceShape {
     },
     ManagerAssistantError
   >;
+  /**
+   * Start another conversation with the assistant ("New conversation",
+   * 0.0.85): a chat in the assistant's workspace — same memory (AGENTS.md,
+   * NOTES.md), same engine as the main chat. Telegram / Slack keep talking
+   * to the main one.
+   */
+  readonly createConversation: (input: {
+    readonly title?: string | undefined;
+  }) => Effect.Effect<{ readonly threadId: ThreadId }, ManagerAssistantError>;
   readonly listAssistants: () => Effect.Effect<
     ReadonlyArray<ManagerAssistantSummary>,
     ManagerAssistantError

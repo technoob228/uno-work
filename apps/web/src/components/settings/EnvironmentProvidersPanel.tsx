@@ -23,9 +23,10 @@ import {
   type ServerSettings,
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import { useLocation } from "@tanstack/react-router";
 import { Equal } from "effect";
 import { LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   refreshEnvironmentProviders,
@@ -40,6 +41,7 @@ import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProviderSetupAction } from "../harness/ProviderSetupAction";
+import { AI_PROVIDER_KEYS_ANCHOR } from "../harness/harnessAuthLoss";
 import { useHarnessSetup } from "../harness/useHarnessSetup";
 import { Explain } from "../Explain";
 import { AiProviderKeysSection } from "./AiProviderKeysSection";
@@ -89,6 +91,19 @@ export function EnvironmentProvidersPanel({
   const { updateSettings, canMutate, mutationBlockedReason } =
     useUpdateEnvironmentSettings(environmentId);
   const harnessSetup = useHarnessSetup(environmentId);
+  // Opened as …/providers#ai-provider-keys (the chat's "Your key stopped
+  // working" card): bring the keys section into view once it has rendered.
+  const aiKeysAnchorRef = useRef<HTMLDivElement>(null);
+  // The router's hash, not window.location's: Electron runs on hash history.
+  const locationHash = useLocation({ select: (location) => location.hash });
+  useEffect(() => {
+    if (locationHash !== AI_PROVIDER_KEYS_ANCHOR) return;
+    const timer = window.setTimeout(
+      () => aiKeysAnchorRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }),
+      150,
+    );
+    return () => window.clearTimeout(timer);
+  }, [locationHash]);
   const clientSettings = useSettings();
   const { updateSettings: updateClientSettings } = useUpdateSettings();
 
@@ -420,7 +435,10 @@ export function EnvironmentProvidersPanel({
         })}
       </SettingsSection>
 
-      <AiProviderKeysSection environmentId={environmentId} />
+      {/* Anchor for "Update key" in the chat's signed-out card (HarnessReauthCard). */}
+      <div id={AI_PROVIDER_KEYS_ANCHOR} ref={aiKeysAnchorRef} className="scroll-mt-4">
+        <AiProviderKeysSection environmentId={environmentId} />
+      </div>
 
       <AddProviderInstanceDialog
         open={isAddInstanceDialogOpen}

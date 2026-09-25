@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   type AssistantChatCandidate,
   findMarkedAssistantChat,
+  isAssistantConversation,
+  listAssistantConversations,
   pickAssistantChatToMigrate,
   resolveAssistantChat,
 } from "./assistantChat.ts";
@@ -107,5 +109,38 @@ describe("resolveAssistantChat", () => {
     expect(
       resolveAssistantChat([threads[0]!], { assistantProjectId: HOME, daemonMarksChat: true }),
     ).toBeNull();
+  });
+});
+
+describe("isAssistantConversation", () => {
+  it("counts the main chat and every other chat in the assistant's workspace", () => {
+    expect(isAssistantConversation(chat({ id: "a", assistantRole: "chat", projectId: "p" }))).toBe(
+      true,
+    );
+    expect(isAssistantConversation(chat({ id: "b" }))).toBe(true);
+  });
+
+  it("leaves out chats the assistant or another agent started, and other projects", () => {
+    expect(isAssistantConversation(chat({ id: "a", assistantRole: "spawned" }))).toBe(false);
+    expect(isAssistantConversation(chat({ id: "b", spawnedByThreadId: "a" }))).toBe(false);
+    expect(isAssistantConversation(chat({ id: "c", projectId: "project-x" }))).toBe(false);
+  });
+});
+
+describe("listAssistantConversations", () => {
+  it("lists live, unarchived conversations: the main one first, then the one used last", () => {
+    const threads = [
+      chat({ id: "old", latestUserMessageAt: "2026-09-02T00:00:00.000Z" }),
+      chat({ id: "new", latestUserMessageAt: "2026-09-05T00:00:00.000Z" }),
+      chat({ id: "main", assistantRole: "chat", latestUserMessageAt: "2026-09-01T00:00:00.000Z" }),
+      chat({ id: "archived", archivedAt: "2026-09-06T00:00:00.000Z" }),
+      chat({ id: "deleted", deletedAt: "2026-09-06T00:00:00.000Z" }),
+      chat({ id: "work", assistantRole: "spawned" }),
+    ];
+    expect(listAssistantConversations(threads).map((thread) => thread.id)).toEqual([
+      "main",
+      "new",
+      "old",
+    ]);
   });
 });

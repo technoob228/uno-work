@@ -8,6 +8,8 @@
  * Pure: no I/O, no Effect — both sides feed it what they already hold.
  */
 
+import { ASSISTANT_PROJECT_ID } from "@t3tools/contracts";
+
 export type AssistantRole = "chat" | "spawned";
 
 export interface AssistantChatCandidate {
@@ -19,6 +21,8 @@ export interface AssistantChatCandidate {
   readonly createdAt: string;
   readonly updatedAt?: string | undefined;
   readonly latestUserMessageAt?: string | null | undefined;
+  /** Set on a chat another chat's agent started (agent-threads bridge). */
+  readonly spawnedByThreadId?: string | null | undefined;
 }
 
 function isLive(thread: AssistantChatCandidate): boolean {
@@ -86,4 +90,45 @@ export function resolveAssistantChat<T extends AssistantChatCandidate>(
   if (marked !== null) return marked;
   if (input.daemonMarksChat) return null;
   return pickAssistantChatToMigrate(threads, { assistantProjectId: input.assistantProjectId });
+}
+
+/**
+ * A conversation with the assistant ("Uno", 0.0.85): the main chat (the one
+ * marked `assistantRole: "chat"`, which Telegram / Slack talk to) and every
+ * other chat in the assistant's own workspace — "New conversation" and a
+ * Telegram / Slack chat's own thread among them. They all share the
+ * assistant's memory (AGENTS.md / NOTES.md in that workspace) and all run on
+ * the assistant's engine (Hermes). Chats the assistant started in other
+ * projects (`spawned`) and chats an agent started through the agent-threads
+ * bridge (`spawnedByThreadId`, possibly in the assistant's own folder) are
+ * work chats on the harness they were started with, not conversations.
+ */
+export function isAssistantConversation(
+  thread: Pick<AssistantChatCandidate, "projectId" | "assistantRole" | "spawnedByThreadId">,
+): boolean {
+  if (thread.assistantRole === "chat") return true;
+  return (
+    thread.projectId === ASSISTANT_PROJECT_ID &&
+    thread.assistantRole !== "spawned" &&
+    (thread.spawnedByThreadId ?? null) === null
+  );
+}
+
+/**
+ * The assistant's conversations as the sidebar lists them: live and not
+ * archived, the main one first, then the one used last.
+ */
+export function listAssistantConversations<T extends AssistantChatCandidate>(
+  threads: ReadonlyArray<T>,
+): ReadonlyArray<T> {
+  return threads
+    .filter(
+      (thread) => isLive(thread) && thread.archivedAt === null && isAssistantConversation(thread),
+    )
+    .toSorted(
+      (a, b) =>
+        Number(b.assistantRole === "chat") - Number(a.assistantRole === "chat") ||
+        lastUsedAt(b) - lastUsedAt(a) ||
+        a.id.localeCompare(b.id),
+    );
 }

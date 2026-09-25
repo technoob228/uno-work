@@ -46,7 +46,9 @@ import { ManagerConnectorBindingRepository } from "../persistence/Services/Manag
 import { ManagerConnectorRepository } from "../persistence/Services/ManagerConnectors.ts";
 import { bindingTargetLabel } from "./connectorBindings.ts";
 import { resolveNotifyThreadId } from "./connectorNotify.ts";
-import { ManagerAssistantService } from "./Services/AssistantService.ts";
+import { ManagerAssistantError, ManagerAssistantService } from "./Services/AssistantService.ts";
+import { ManagerTelegramService } from "./Layers/TelegramConnector.ts";
+import { telegramPairingLink } from "./telegramPairing.ts";
 import { ConnectorNotifyService } from "./Services/ConnectorNotify.ts";
 import { handleManagerMcpMessage } from "./mcp.ts";
 import { ManagerApprovalService } from "./Services/ManagerApprovalService.ts";
@@ -259,6 +261,91 @@ export const managerAssistantChatRouteLayer = HttpRouter.add(
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
+const ConversationCreatePayload = Schema.Struct({
+  title: Schema.optional(Schema.String),
+});
+
+/**
+ * `POST /api/manager/assistant/conversations` — "New conversation" with Uno
+ * (0.0.85): another chat in the assistant's workspace, on its engine.
+ */
+export const managerAssistantConversationCreateRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/conversations",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const assistants = yield* ManagerAssistantService;
+    const input = yield* HttpServerRequest.schemaBodyJson(ConversationCreatePayload).pipe(
+      Effect.orElseSucceed(() => ({ title: undefined })),
+    );
+    return yield* assistants.createConversation({ title: input.title }).pipe(
+      Effect.map((result) => HttpServerResponse.jsonUnsafe(result, { status: 200 })),
+      Effect.catch((cause) =>
+        Schema.is(ManagerAssistantError)(cause)
+          ? Effect.succeed(HttpServerResponse.jsonUnsafe({ error: cause.detail }, { status: 409 }))
+          : respondServerError("assistant:conversation")(cause),
+      ),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+const TelegramProjectPayload = Schema.Struct({ projectId: ProjectId });
+
+/**
+ * `POST /api/manager/assistant/telegram/pair` — a one-time code for the
+ * bot's deep link (`https://t.me/<bot>?start=<code>`, telegramPairing.ts).
+ */
+export const managerAssistantTelegramPairRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/telegram/pair",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const telegram = yield* ManagerTelegramService;
+    const input = yield* HttpServerRequest.schemaBodyJson(TelegramProjectPayload).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid pairing payload.", status: 400 })),
+    );
+    if (!isAssistantProjectId(input.projectId)) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: "projectId must be an assistant project." },
+        { status: 400 },
+      );
+    }
+    const pairing = yield* telegram.startPairing(input.projectId);
+    return HttpServerResponse.jsonUnsafe(
+      { ...pairing, link: telegramPairingLink(pairing.botUsername, pairing.code) },
+      { status: 200 },
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/** Text of the Settings / wizard "Send test message" button. */
+export const TELEGRAM_TEST_MESSAGE =
+  "Test message from Uno Work. If you see this, Telegram is connected: write here and Uno answers.";
+
+/** `POST /api/manager/assistant/telegram/test` — a test message to every linked chat. */
+export const managerAssistantTelegramTestRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/telegram/test",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const telegram = yield* ManagerTelegramService;
+    const input = yield* HttpServerRequest.schemaBodyJson(TelegramProjectPayload).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid test payload.", status: 400 })),
+    );
+    if (!isAssistantProjectId(input.projectId)) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: "projectId must be an assistant project." },
+        { status: 400 },
+      );
+    }
+    const results = yield* telegram.sendTestMessage({
+      projectId: input.projectId,
+      text: TELEGRAM_TEST_MESSAGE,
+    });
+    return HttpServerResponse.jsonUnsafe({ results }, { status: 200 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
 const assistantProjectIdFromQuery = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const url = HttpServerRequest.toURL(request);
@@ -312,7 +399,12 @@ export const managerAssistantAccessRouteLayer = HttpRouter.add(
       yield* tokenRepository.updateAccess({
         tokenId: token.value.tokenId,
         scopes: input.scopes ?? token.value.scopes,
-        projectAllowlist: input.projectAllowlist,
+        // "Only these projects" never locks the assistant out of its own
+        // workspace (its conversations, notes and skills live there).
+        projectAllowlist:
+          input.projectAllowlist === "all"
+            ? "all"
+            : [...new Set([input.projectId, ...input.projectAllowlist])],
         autoApprove: input.autoApprove ?? token.value.autoApprove,
       });
       const updated = yield* tokenRepository.getActiveByLabel(label);

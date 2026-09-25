@@ -58,14 +58,23 @@ export function isOlderAssistantChat(
 
 export type ChannelState = "off" | "on" | "problem";
 
-/** Telegram as the Connect menu shows it: off, working, or needs a look. */
+/**
+ * Telegram as the Connect menu shows it: off, working, or needs a look. A bot
+ * no chat may write to yet (the link step isn't done) is not "on".
+ */
 export function telegramChannelState(
-  status: Pick<ManagerTelegramConnectorStatus, "configured" | "enabled" | "health" | "lastError">,
+  status: Pick<
+    ManagerTelegramConnectorStatus,
+    "configured" | "enabled" | "health" | "lastError"
+  > & {
+    readonly allowedChatIds?: ReadonlyArray<string>;
+  },
 ): ChannelState {
   if (!status.configured || !status.enabled) return "off";
   const health = status.health?.status ?? null;
   if (health === "auth_expired" || health === "delivery_failed") return "problem";
   if (health === null && status.lastError) return "problem";
+  if (status.allowedChatIds !== undefined && status.allowedChatIds.length === 0) return "problem";
   return "on";
 }
 
@@ -76,3 +85,23 @@ export function slackChannelState(
   if (!status.configured || !status.enabled) return "off";
   return status.lastError ? "problem" : "on";
 }
+
+/** The one line that says what Uno is, wherever it introduces itself. */
+export const ASSISTANT_VALUE_LINE =
+  "Always on. Talks to you in Telegram or Slack, starts and watches other chats for you.";
+
+/** Why Uno's harness is not a choice (header chip, Settings). */
+export const ASSISTANT_HARNESS_NOTE =
+  "Uno always runs on Hermes: it keeps Uno's memory and tools the same in every conversation, in Telegram and in Slack, and works with any model. Pick the model and where the AI comes from instead.";
+
+/** How a conversation is named in the Uno list. */
+export function assistantConversationLabel(
+  thread: Pick<SidebarThreadSummary, "assistantRole" | "title">,
+): string {
+  if (thread.assistantRole === "chat") return "Main conversation";
+  const title = thread.title.trim();
+  return title.length > 0 ? title : "Conversation";
+}
+
+/** How many conversations the folded-out Uno row lists before "Show all". */
+export const ASSISTANT_CONVERSATIONS_PREVIEW = 5;

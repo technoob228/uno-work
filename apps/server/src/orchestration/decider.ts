@@ -11,6 +11,7 @@ import {
   coerceAssistantModelSelection,
   isAssistantHarnessSelection,
 } from "@t3tools/shared/assistantLlm";
+import { findMarkedAssistantChat, isAssistantConversation } from "@t3tools/shared/assistantChat";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import {
@@ -96,19 +97,35 @@ function assistantRoleViolation(input: {
 }
 
 /**
- * The assistant chat always runs on Hermes (0.0.84): a model selection for
- * it that names another harness — a composer's stale pick, an old client —
- * is dropped, a Hermes one is normalised to carry its LLM provider. Other
- * chats keep whatever they are given.
+ * The assistant's conversations always run on Hermes (0.0.84 main chat,
+ * 0.0.85 every conversation — see isAssistantConversation): a model
+ * selection for one that names another harness — a composer's stale pick,
+ * an old client — is dropped, a Hermes one is normalised to carry its LLM
+ * provider. Other chats keep whatever they are given.
  */
 function modelSelectionForThread(
-  thread: Pick<OrchestrationThread, "assistantRole">,
+  thread: Pick<OrchestrationThread, "assistantRole" | "projectId" | "spawnedByThreadId">,
   modelSelection: ModelSelection | undefined,
 ): ModelSelection | undefined {
-  if (modelSelection === undefined || thread.assistantRole !== "chat") return modelSelection;
+  if (modelSelection === undefined || !isAssistantConversation(thread)) return modelSelection;
   return isAssistantHarnessSelection(modelSelection)
     ? coerceAssistantModelSelection(modelSelection)
     : undefined;
+}
+
+/**
+ * What a new conversation with the assistant starts on: the Hermes selection
+ * it was given, else what the main chat runs on (its LLM provider + model),
+ * else the default (Hermes, latest Grok, Uno gateway).
+ */
+function modelSelectionForNewAssistantConversation(
+  readModel: OrchestrationReadModel,
+  modelSelection: ModelSelection,
+): ModelSelection {
+  if (isAssistantHarnessSelection(modelSelection)) {
+    return coerceAssistantModelSelection(modelSelection);
+  }
+  return coerceAssistantModelSelection(findMarkedAssistantChat(readModel.threads)?.modelSelection);
 }
 
 /** A user message no turn has picked up within this window is a failed start
@@ -458,7 +475,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           projectId: command.projectId,
           title: command.title,
-          modelSelection: command.modelSelection,
+          // A conversation with the assistant runs on its engine (Hermes).
+          modelSelection: isAssistantConversation({
+            projectId: command.projectId,
+            assistantRole: command.assistantRole ?? null,
+            spawnedByThreadId: spawnedByThreadId ?? null,
+          })
+            ? modelSelectionForNewAssistantConversation(readModel, command.modelSelection)
+            : command.modelSelection,
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,
           branch: command.branch,

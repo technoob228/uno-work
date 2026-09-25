@@ -11,12 +11,14 @@
  * Authenticated with the thread-scoped browser-bridge token every harness
  * process holds (`UNO_WORK_BRIDGE_TOKEN`), like `POST /api/channels/notify`.
  */
+import { ASSISTANT_PROJECT_ID, assistantTokenLabel } from "@t3tools/contracts";
 import { Effect, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { BrowserBridge } from "../browserBridge.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ManagerCapabilityTokenRepository } from "../persistence/Services/ManagerCapabilityTokens.ts";
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { AGENT_THREADS_PATH } from "./logic.ts";
@@ -29,6 +31,7 @@ const makeRequestContext = Effect.gen(function* () {
   const projections = yield* ProjectionSnapshotQuery;
   const serverSettings = yield* ServerSettingsService;
   const providerRegistry = yield* ProviderRegistry;
+  const tokenRepository = yield* ManagerCapabilityTokenRepository;
   const handlers = makeAgentThreadsHandlers({
     engine,
     projections,
@@ -37,6 +40,16 @@ const makeRequestContext = Effect.gen(function* () {
       Effect.map((settings) => settings.agentThreadsScope),
       Effect.orElseSucceed(() => "own-project" as const),
     ),
+    // Settings → Assistant → "Can see and manage": the assistant token's
+    // project allowlist is the single source (uno-manager enforces the same).
+    getAssistantProjectAllowlist: tokenRepository
+      .getActiveByLabel(assistantTokenLabel(ASSISTANT_PROJECT_ID))
+      .pipe(
+        Effect.map((token) =>
+          Option.isSome(token) ? token.value.projectAllowlist : ("all" as const),
+        ),
+        Effect.orElseSucceed(() => "all" as const),
+      ),
     getProviders: providerRegistry.getProviders,
   });
   return {

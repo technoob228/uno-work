@@ -1323,6 +1323,59 @@ describe("ProviderCommandReactor", () => {
         modelSelection: hermesSelection("xai", "grok-4.7"),
       });
     });
+
+    it("runs every conversation with the assistant on the main chat's engine (0.0.85)", async () => {
+      const harness = await createHarness({
+        threadModelSelection: hermesSelection("xai", "grok-4.7"),
+      });
+      await markAssistantChat(harness);
+      await Effect.runPromise(
+        harness.engine.dispatch(
+          {
+            type: "project.create",
+            commandId: CommandId.make("cmd-assistant-project"),
+            projectId: asProjectId("assistant-home"),
+            title: "Assistant",
+            workspaceRoot: "/tmp/assistant-home",
+            defaultModelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5"),
+            createdAt: new Date().toISOString(),
+          },
+          { origin: ASSISTANT_ORIGIN },
+        ),
+      );
+      const codex = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5");
+      // "New conversation" from an old client that still names Codex.
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make("cmd-conversation-create"),
+          threadId: ThreadId.make("thread-conversation"),
+          projectId: asProjectId("assistant-home"),
+          title: "New conversation",
+          modelSelection: codex,
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          ...turn(1, codex),
+          threadId: ThreadId.make("thread-conversation"),
+        }),
+      );
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+        providerInstanceId: "hermes",
+        modelSelection: hermesSelection("xai", "grok-4.7"),
+      });
+      const readModel = await harness.readModel();
+      expect(
+        readModel.threads.find((thread) => thread.id === "thread-conversation")?.modelSelection,
+      ).toEqual(hermesSelection("xai", "grok-4.7"));
+    });
   });
 
   it("restarts the provider session when runtime mode is updated on the thread", async () => {

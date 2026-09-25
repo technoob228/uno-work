@@ -195,6 +195,8 @@ import { useNavLayout } from "../navigation/useNavLayout";
 import { InboxNeedsYouList, InboxPanel } from "./inbox/InboxPanel";
 import { RailPanelHeader } from "./sidebar/NavRail";
 import { SidebarAssistantRow } from "./sidebar/SidebarAssistantRow";
+import { useShowAssistantInSidebar } from "../assistant/assistantPrefs";
+import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 import { SidebarNewButton } from "./sidebar/SidebarNewButton";
 import {
   ASSISTANT_CHAT_NAME,
@@ -1250,6 +1252,7 @@ export default function Sidebar() {
   // The Uno chat (pinned on top) and the assistant's other chats, which the
   // "Older Uno chats" scope lists when there are any.
   const assistantChatId = useAssistantChat().chat?.id ?? null;
+  const [showAssistantRow] = useShowAssistantInSidebar();
   const hasHelperProjects = useMemo(
     () =>
       threads.some(
@@ -1285,7 +1288,7 @@ export default function Sidebar() {
   const projectScopeItems = useMemo(
     () => [
       { value: ALL_SCOPE, label: "All projects" },
-      ...(hasHelperProjects ? [{ value: HELPER_SCOPE, label: "Older Uno chats" }] : []),
+      ...(hasHelperProjects ? [{ value: HELPER_SCOPE, label: "Uno conversations" }] : []),
       ...projectGroups.map((group) => ({ value: group.projectKey, label: group.displayName })),
     ],
     [hasHelperProjects, projectGroups],
@@ -1368,6 +1371,9 @@ export default function Sidebar() {
       // The assistant's other chats (older ones, Telegram / Slack chats) live
       // behind the "Older Uno chats" scope; the open one stays visible.
       if (!isRegularListChat(thread, assistantChatId)) {
+        // A conversation with Uno shows under the Uno row (unfolded while
+        // it is open), never twice.
+        if (showAssistantRow && isAssistantConversation(thread)) return false;
         return threadKeyOf(thread) === routeThreadKey;
       }
       return scopedProjectKeys === null || scopedProjectKeys.has(projectKeyOf(thread));
@@ -1384,6 +1390,7 @@ export default function Sidebar() {
     isHelperScope,
     now,
     routeThreadKey,
+    showAssistantRow,
     scopedProjectKeys,
     sidebarThreadSortOrder,
     threads,
@@ -2322,7 +2329,7 @@ export default function Sidebar() {
               scopedProjectGroup
                 ? `Filter chats by project: ${scopedProjectGroup.displayName}`
                 : isHelperScope
-                  ? "Filter chats by project: Older Uno chats"
+                  ? "Filter chats by project: Uno conversations"
                   : "Filter chats by project"
             }
           />

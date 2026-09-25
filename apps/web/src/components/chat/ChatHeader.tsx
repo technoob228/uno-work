@@ -32,9 +32,15 @@ import { toggleDevMode, useDevMode } from "../../devMode";
 import { CONTINUE_ON_MACHINE_COPY } from "../../continueOnMachineCopy";
 import { ContinueOnMachineDialog } from "../ContinueOnMachineDialog";
 import { DraftFolderChip } from "./DraftFolderChip";
+import { cn } from "../../lib/utils";
 import { AssistantChatHeaderActions } from "./AssistantChatHeaderActions";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
-import { ASSISTANT_CHAT_NAME } from "../../assistant/assistantChat.logic";
+import {
+  ASSISTANT_CHAT_NAME,
+  ASSISTANT_VALUE_LINE,
+  assistantConversationLabel,
+} from "../../assistant/assistantChat.logic";
+import { useAssistantConversations } from "../../assistant/useAssistantConversations";
 
 const HEADER_ICON_BUTTON_CLASS =
   "inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-md border border-input px-[calc(--spacing(1)-1px)] text-muted-foreground shadow-xs/5 hover:bg-accent hover:text-foreground sm:h-6 sm:min-w-6";
@@ -126,12 +132,26 @@ export const ChatHeader = memo(function ChatHeader({
   // THE assistant chat: named "Uno" whatever its stored title, no project
   // badge (the assistant is the chat, not a project), Connect ▾ + settings.
   const assistantChat = useAssistantChat().chat;
-  const isAssistantChat =
+  const assistantConversations = useAssistantConversations().conversations;
+  const isMainAssistantChat =
     !draftId &&
     assistantChat !== null &&
     assistantChat.id === activeThreadId &&
     assistantChat.environmentId === activeThreadEnvironmentId;
-  const title = isAssistantChat ? ASSISTANT_CHAT_NAME : activeThreadTitle;
+  // Any conversation with Uno (0.0.85) gets Uno's header: its engine, Connect,
+  // New conversation. The main one is just "Uno".
+  const assistantConversation = draftId
+    ? null
+    : (assistantConversations.find(
+        (thread) =>
+          thread.id === activeThreadId && thread.environmentId === activeThreadEnvironmentId,
+      ) ?? null);
+  const isAssistantChat = isMainAssistantChat || assistantConversation !== null;
+  const title = isMainAssistantChat
+    ? ASSISTANT_CHAT_NAME
+    : assistantConversation
+      ? `${ASSISTANT_CHAT_NAME} · ${assistantConversationLabel(assistantConversation)}`
+      : activeThreadTitle;
   const [continueDialogOpen, setContinueDialogOpen] = useState(false);
   // A draft has nothing to carry yet: no files were touched, no history exists.
   const canContinueOnMachine = Boolean(activeProjectName) && !draftId;
@@ -147,17 +167,41 @@ export const ChatHeader = memo(function ChatHeader({
             </Tooltip>
           </TooltipProvider>
         )}
-        <h2 className="min-w-0 shrink truncate text-sm font-medium text-foreground" title={title}>
+        <h2
+          className={cn(
+            "min-w-0 truncate text-sm font-medium text-foreground",
+            // Uno's name never gives way to the value line next to it.
+            isAssistantChat ? "max-w-[45%] shrink-0" : "shrink",
+          )}
+          title={title}
+        >
           {title}
         </h2>
         {isAssistantChat ? (
-          <Badge
-            variant="outline"
-            className="shrink-0 border-primary/30 text-primary"
-            data-testid="uno-always-on"
-          >
-            Always on
-          </Badge>
+          <>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Badge
+                    variant="outline"
+                    className="shrink-0 border-primary/30 text-primary"
+                    data-testid="uno-always-on"
+                  />
+                }
+              >
+                Always on
+              </TooltipTrigger>
+              <TooltipPopup side="bottom" className="max-w-72">
+                {ASSISTANT_VALUE_LINE}
+              </TooltipPopup>
+            </Tooltip>
+            <span
+              className="hidden min-w-0 flex-1 basis-0 truncate text-xs text-muted-foreground @5xl/header-actions:inline"
+              data-testid="uno-value-line"
+            >
+              Talks to you in Telegram or Slack, starts and watches other chats for you.
+            </span>
+          </>
         ) : draftId && activeProjectName && activeProjectCwd ? (
           <DraftFolderChip
             environmentId={activeThreadEnvironmentId}

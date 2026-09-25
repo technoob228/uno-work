@@ -4,6 +4,7 @@ import {
   EventId,
   type ModelSelection,
   type OrchestrationEvent,
+  type OrchestrationThread,
   type ProviderContextMessage,
   ProviderDriverKind,
   type ProjectId,
@@ -19,11 +20,14 @@ import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } 
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import {
   coerceAssistantModelSelection,
+  isAssistantHarnessSelection,
   readAssistantLlmProvider,
 } from "@t3tools/shared/assistantLlm";
+import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { agentMessageEnvelope } from "../../agentThreads/logic.ts";
+import { currentAssistantModelSelection } from "../../manager/assistantEngineSelection.ts";
 import { applyHandoffSeed, resolvePendingHandoffSeed } from "../handoff.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
@@ -357,6 +361,24 @@ const make = Effect.gen(function* () {
       .pipe(Effect.map(Option.getOrUndefined));
   });
 
+  /**
+   * The Hermes selection an assistant conversation's turn runs on: the one
+   * asked for / the chat's own when it is Hermes, else the main chat's (a
+   * conversation that ran on another harness before 0.0.85 follows the
+   * assistant's engine, BYOK included), else the default.
+   */
+  const assistantSelectionForTurn = (
+    thread: Pick<OrchestrationThread, "modelSelection">,
+    requested: ModelSelection | undefined,
+  ) =>
+    Effect.gen(function* () {
+      const candidate = requested ?? thread.modelSelection;
+      if (isAssistantHarnessSelection(candidate)) {
+        return coerceAssistantModelSelection(candidate);
+      }
+      return yield* currentAssistantModelSelection(projectionSnapshotQuery);
+    });
+
   const ensureSessionForThread = Effect.fn("ensureSessionForThread")(function* (
     threadId: ThreadId,
     createdAt: string,
@@ -370,11 +392,12 @@ const make = Effect.gen(function* () {
     }
 
     const desiredRuntimeMode = thread.runtimeMode;
-    // The assistant chat always runs on Hermes (0.0.84): whatever the turn
-    // asked for, its own (Hermes) selection decides.
-    const isAssistantChat = thread.assistantRole === "chat";
+    // The assistant's conversations always run on Hermes (0.0.84 main chat,
+    // 0.0.85 every conversation): whatever the turn asked for, a Hermes
+    // selection decides — the chat's own, else what the main chat runs on.
+    const isAssistantChat = isAssistantConversation(thread);
     const requestedModelSelection = isAssistantChat
-      ? coerceAssistantModelSelection(options?.modelSelection ?? thread.modelSelection)
+      ? yield* assistantSelectionForTurn(thread, options?.modelSelection)
       : options?.modelSelection;
     const resolveActiveSession = (threadId: ThreadId) =>
       providerService
@@ -629,16 +652,13 @@ const make = Effect.gen(function* () {
         new Error(`Thread '${rawInput.threadId}' was not found in read model.`),
       );
     }
-    // The assistant chat's turns always carry its (Hermes) selection.
-    const input =
-      thread.assistantRole === "chat"
-        ? {
-            ...rawInput,
-            modelSelection: coerceAssistantModelSelection(
-              rawInput.modelSelection ?? thread.modelSelection,
-            ),
-          }
-        : rawInput;
+    // The assistant's conversations always carry a Hermes selection.
+    const input = isAssistantConversation(thread)
+      ? {
+          ...rawInput,
+          modelSelection: yield* assistantSelectionForTurn(thread, rawInput.modelSelection),
+        }
+      : rawInput;
     yield* ensureSessionForThread(
       input.threadId,
       input.createdAt,

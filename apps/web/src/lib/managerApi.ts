@@ -137,6 +137,53 @@ export function ensureAssistantChat(input: EnvironmentScoped): Promise<{
   });
 }
 
+/** "New conversation" with Uno (0.0.85): another chat in its workspace, on its engine. */
+export function createAssistantConversation(
+  input: EnvironmentScoped & { readonly title?: string },
+): Promise<{ readonly threadId: ThreadId }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/conversations",
+    method: "POST",
+    body: input.title ? { title: input.title } : {},
+  });
+}
+
+/** A one-time code for the bot's deep link; pressing Start there links the chat. */
+export function startTelegramPairing(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<{
+  readonly code: string;
+  readonly expiresAt: string;
+  readonly botUsername: string | null;
+  readonly link: string | null;
+}> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/telegram/pair",
+    method: "POST",
+    body: { projectId: input.projectId },
+  });
+}
+
+/** Sends a test message to every linked Telegram chat. */
+export function sendTelegramTestMessage(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<{
+  readonly results: ReadonlyArray<{
+    readonly chatId: string;
+    readonly ok: boolean;
+    readonly error: string | null;
+  }>;
+}> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/telegram/test",
+    method: "POST",
+    body: { projectId: input.projectId },
+  });
+}
+
 export function getAssistant(
   input: EnvironmentScoped & { readonly projectId: string },
 ): Promise<ManagerAssistantSummary> {

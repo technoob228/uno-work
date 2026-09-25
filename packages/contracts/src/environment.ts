@@ -44,6 +44,13 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       `/api/manager/assistant/llm*` and `/api/ai-providers*` exist. Absent:
       clients keep the generic harness picker for that chat. */
   assistantLlm: Schema.optionalKey(Schema.Boolean),
+  /** The assistant has conversations (0.0.85): `POST
+      /api/manager/assistant/conversations`, every chat in its workspace runs
+      on its engine, Telegram linking by code
+      (`/api/manager/assistant/telegram/pair`) and a test message
+      (`/api/manager/assistant/telegram/test`). Absent: clients show the one
+      pinned chat and the manual chat-id Telegram setup. */
+  assistantConversations: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

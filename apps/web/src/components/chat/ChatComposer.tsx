@@ -70,6 +70,7 @@ import { ProviderModelPicker } from "./ProviderModelPicker";
 import { AssistantModelPicker } from "./AssistantEngine";
 import { assistantEngineSendBlock } from "../../assistant/assistantEngine.logic";
 import { useAssistantLlm } from "../../assistant/useAssistantLlm";
+import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 import { coerceAssistantModelSelection } from "@t3tools/shared/assistantLlm";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
@@ -928,7 +929,8 @@ export const ChatComposer = memo(
     );
     // The Uno chat always runs on Hermes (0.0.84): its engine picker writes
     // the chat's own selection on the daemon; turns carry exactly that.
-    const isAssistantChat = activeThread?.assistantRole === "chat";
+    // Every conversation with Uno (0.0.85), not only the main one.
+    const isAssistantChat = activeThread ? isAssistantConversation(activeThread) : false;
     const assistantLlm = useAssistantLlm(isAssistantChat ? environmentId : null);
     const assistantEngine = isAssistantChat && assistantLlm.supported;
     const assistantSendBlock = assistantEngine
@@ -3208,7 +3210,7 @@ export const ChatComposer = memo(
                                     ? "reconnecting"
                                     : "disconnected"
                               }`
-                            : activeThread?.assistantRole === "chat"
+                            : isAssistantChat
                               ? "Ask Uno anything — it can start chats for you…"
                               : phase === "disconnected"
                                 ? "Ask for follow-up changes or attach files"

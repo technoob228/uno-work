@@ -41,8 +41,26 @@ export function resolveProviderPaneKind(
   const action = resolveHarnessAction({ driver: entry.driverKind, status });
   if (action === "install") return "install";
   if (action === "signIn") return "signin";
+  // Signed out of a harness without the in-app dialog (an OpenCode key, the
+  // Uno key, Cursor's terminal login): still a sign-in pane, which points to
+  // the fix instead of greying the harness out.
+  if (
+    status === "needsSignIn" &&
+    entry.snapshot.auth.status === "unauthenticated" &&
+    SIGN_IN_ELSEWHERE_DRIVERS.has(entry.driverKind)
+  ) {
+    return "signin";
+  }
   return entry.status === "ready" ? "models" : "blocked";
 }
+
+/** Harnesses whose sign-in lives outside the in-app dialog (see ProviderSetupPane). */
+export const SIGN_IN_ELSEWHERE_DRIVERS: ReadonlySet<string> = new Set([
+  "opencode",
+  "cursor",
+  "uno",
+  "hermes",
+]);
 
 export type ProviderPaneBadge = "Not installed" | "Sign in needed" | "Installing…" | "Ready";
 

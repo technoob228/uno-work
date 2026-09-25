@@ -28,6 +28,7 @@ import {
   type ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
+import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 import { Data, Effect, Option } from "effect";
 import * as crypto from "node:crypto";
 
@@ -82,6 +83,13 @@ export interface AgentThreadsDeps {
     | "getFirstActiveThreadIdByProjectId"
   >;
   readonly getAgentThreadsScope: Effect.Effect<AgentThreadsScope>;
+  /**
+   * What the assistant ("Uno") may see and manage (Settings → Assistant,
+   * 0.0.85): "all" projects or only these. Applies to callers that are a
+   * conversation with the assistant instead of `getAgentThreadsScope`; the
+   * assistant's own workspace is always reachable. Absent: "all".
+   */
+  readonly getAssistantProjectAllowlist?: Effect.Effect<"all" | ReadonlyArray<string>>;
   readonly getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>;
   /** Long-poll step; injectable so tests do not wait for real seconds. */
   readonly pollIntervalMs?: number;
@@ -238,6 +246,26 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
     );
   };
 
+  /**
+   * Which projects the caller may reach besides its own: the person's
+   * agent-threads setting for a regular chat; for a conversation with the
+   * assistant, the assistant's own allowlist (Settings → Assistant → "Can
+   * see and manage"), enforced here for the uno-work chat tools as the
+   * manager enforces it for uno-manager's.
+   */
+  const projectAccess = (caller: OrchestrationThreadShell) =>
+    Effect.gen(function* () {
+      if (isAssistantConversation(caller)) {
+        const allowlist = deps.getAssistantProjectAllowlist
+          ? yield* deps.getAssistantProjectAllowlist
+          : ("all" as const);
+        return (projectId: string) =>
+          projectId === caller.projectId || allowlist === "all" || allowlist.includes(projectId);
+      }
+      const scope = yield* deps.getAgentThreadsScope;
+      return (projectId: string) => projectId === caller.projectId || scope === "any-project";
+    });
+
   /** A child of the caller, or 404 — foreign threads are indistinguishable from absent ones. */
   const loadChild = (caller: OrchestrationThreadShell, rawThreadId: string | undefined) =>
     Effect.gen(function* () {
@@ -263,10 +291,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
       if (trimmed.length === 0) return yield* notFound;
       const shell = yield* deps.projections.getThreadShellById(ThreadId.make(trimmed));
       if (Option.isNone(shell) || shell.value.archivedAt !== null) return yield* notFound;
-      if (shell.value.projectId !== caller.projectId) {
-        const scope = yield* deps.getAgentThreadsScope;
-        if (scope !== "any-project") return yield* notFound;
-      }
+      if (!(yield* projectAccess(caller))(shell.value.projectId)) return yield* notFound;
       return shell.value;
     });
 
@@ -283,7 +308,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
       let target: OrchestrationProjectShell | null = null;
       if (input.projectId !== undefined) {
         if (input.projectId === caller.projectId) return ownProject.value;
-        yield* requireAnyProjectScope;
+        yield* requireProjectAllowed(caller, input.projectId);
         const found = yield* deps.projections.getProjectShellById(ProjectId.make(input.projectId));
         if (Option.isNone(found)) {
           return yield* fail(404, "project_not_found", `Проект "${input.projectId}" не найден.`);
@@ -310,7 +335,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
           );
         }
         if (found.value.id === caller.projectId) return ownProject.value;
-        yield* requireAnyProjectScope;
+        yield* requireProjectAllowed(caller, found.value.id);
         const shell = yield* deps.projections.getProjectShellById(found.value.id);
         if (Option.isNone(shell)) {
           return yield* fail(404, "project_not_found", `Нет проекта с корнем "${input.cwd}".`);
@@ -320,16 +345,17 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
       return target ?? ownProject.value;
     });
 
-  const requireAnyProjectScope = Effect.gen(function* () {
-    const scope = yield* deps.getAgentThreadsScope;
-    if (scope !== "any-project") {
+  const requireProjectAllowed = (caller: OrchestrationThreadShell, projectId: string) =>
+    Effect.gen(function* () {
+      if ((yield* projectAccess(caller))(projectId)) return;
       return yield* fail(
         403,
         "project_not_allowed",
-        "Создавать треды можно только в проекте этого чата. Другие проекты разрешает пользователь в Settings.",
+        isAssistantConversation(caller)
+          ? "This project is outside what the person lets Uno see and manage (Settings → Assistant)."
+          : "Создавать треды можно только в проекте этого чата. Другие проекты разрешает пользователь в Settings.",
       );
-    }
-  });
+    });
 
   const createThread = (authorization: BridgeAuthorization | null, rawBody: unknown) =>
     run("create", authorization, (caller) =>
@@ -450,14 +476,29 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
             '"scope" — "children" (по умолчанию), "project" или "all".',
           );
         }
-        if (scope === "all") yield* requireAnyProjectScope;
+        const allowed = yield* projectAccess(caller);
+        // The assistant lists whatever it may see; any other chat needs the
+        // person's "any project" setting for "all".
+        if (
+          scope === "all" &&
+          !isAssistantConversation(caller) &&
+          (yield* deps.getAgentThreadsScope) !== "any-project"
+        ) {
+          return yield* fail(
+            403,
+            "project_not_allowed",
+            "Создавать треды можно только в проекте этого чата. Другие проекты разрешает пользователь в Settings.",
+          );
+        }
         const snapshot = yield* deps.projections.getShellSnapshot();
         const selected = snapshot.threads
           .filter((thread) =>
             scope === "children"
-              ? (thread.spawnedByThreadId ?? null) === caller.id
+              ? (thread.spawnedByThreadId ?? null) === caller.id && allowed(thread.projectId)
               : thread.archivedAt === null &&
-                (scope === "all" || thread.projectId === caller.projectId),
+                (scope === "all"
+                  ? allowed(thread.projectId)
+                  : thread.projectId === caller.projectId),
           )
           .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
         const threads = yield* Effect.forEach(

@@ -18,6 +18,7 @@ import { programRemoval, type ProgramTile } from "../programModel";
 import { ComputerDetails, type HomeComputer } from "./ComputerPill";
 import { HomeAppWidget, HomeAppWidgetOpen } from "./HomeAppWidget";
 import { HomeComposer, type HomeStartOptions } from "./HomeComposer";
+import { HomeUnoEntry } from "./HomeUnoEntry";
 import {
   ContinueCards,
   NeedsYouPill,
@@ -264,6 +265,7 @@ export function HomeStart({
                 onStart={onStartTask}
               />
               <NeedsYouPill threads={threads} now={now} />
+              <HomeUnoEntry />
             </div>
           ),
         };

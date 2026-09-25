@@ -16,7 +16,11 @@ import {
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
-import { findMarkedAssistantChat, pickAssistantChatToMigrate } from "@t3tools/shared/assistantChat";
+import {
+  findMarkedAssistantChat,
+  listAssistantConversations,
+  pickAssistantChatToMigrate,
+} from "@t3tools/shared/assistantChat";
 import {
   coerceAssistantModelSelection,
   DEFAULT_ASSISTANT_MODEL_SELECTION,
@@ -56,6 +60,8 @@ import { ASSISTANT_THREAD_RUNTIME_MODE } from "../connectorBindings.ts";
 
 /** Title of a fresh assistant chat; clients show "Uno" whatever the title. */
 export const ASSISTANT_CHAT_TITLE = "Uno";
+/** Title of a conversation started with "New conversation" until it is renamed. */
+export const ASSISTANT_CONVERSATION_TITLE = "New conversation";
 
 const ASSISTANT_INSTRUCTIONS_TEMPLATE = `# Uno Assistant (dispatcher)
 
@@ -677,6 +683,92 @@ const makeManagerAssistantService = Effect.gen(function* () {
       );
     });
 
+  /**
+   * Every other conversation with the assistant (0.0.85) runs on what the
+   * main chat runs on: one engine, one model picker. A conversation that ran
+   * on another harness before is re-pointed here (the reactor carries its
+   * history over on the next turn); its gateway calls count as the
+   * assistant's. Idempotent — nothing is dispatched once they agree.
+   */
+  const alignConversations = (
+    mainThreadId: ThreadId,
+    target: ModelSelection,
+    threads: ReadonlyArray<{
+      readonly id: ThreadId;
+      readonly projectId: ProjectId;
+      readonly modelSelection: ModelSelection;
+      readonly assistantRole?: "chat" | "spawned" | null | undefined;
+      readonly spawnedByThreadId?: ThreadId | null | undefined;
+      readonly archivedAt: string | null;
+      readonly deletedAt?: string | null | undefined;
+      readonly createdAt: string;
+    }>,
+    origin: ReturnType<typeof assistantCommandOrigin>,
+  ) =>
+    Effect.forEach(
+      listAssistantConversations(threads).filter((thread) => thread.id !== mainThreadId),
+      (thread) =>
+        Effect.gen(function* () {
+          gatewayKey.labelThread(thread.id, ASSISTANT_GATEWAY_LABEL);
+          if (sameAssistantModelSelection(thread.modelSelection, target)) return;
+          yield* orchestrationEngine.dispatch(
+            {
+              type: "thread.meta.update",
+              commandId: CommandId.make(`assistant-conversation-engine:${crypto.randomUUID()}`),
+              threadId: thread.id,
+              modelSelection: target,
+            },
+            { origin },
+          );
+        }).pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("assistant conversation engine alignment failed").pipe(
+              Effect.annotateLogs({ threadId: thread.id, cause }),
+            ),
+          ),
+        ),
+      { discard: true },
+    );
+
+  const createConversation: ManagerAssistantServiceShape["createConversation"] = (input) =>
+    Effect.gen(function* () {
+      const origin = assistantCommandOrigin({ assistantKey: ASSISTANT_PROJECT_ID });
+      const snapshot = yield* projectionSnapshotQuery
+        .getShellSnapshot()
+        .pipe(Effect.mapError(toAssistantError("Failed to load chats.")));
+      if (!snapshot.projects.some((project) => project.id === ASSISTANT_PROJECT_ID)) {
+        return yield* new ManagerAssistantError({
+          detail: "The assistant is not set up on this computer yet.",
+        });
+      }
+      const main = findMarkedAssistantChat(snapshot.threads);
+      const threadId = ThreadId.make(crypto.randomUUID());
+      gatewayKey.labelThread(threadId, ASSISTANT_GATEWAY_LABEL);
+      const title = input.title?.trim() || ASSISTANT_CONVERSATION_TITLE;
+      yield* orchestrationEngine
+        .dispatch(
+          {
+            type: "thread.create",
+            commandId: CommandId.make(`assistant-conversation-create:${crypto.randomUUID()}`),
+            threadId,
+            projectId: ASSISTANT_PROJECT_ID,
+            title,
+            modelSelection: coerceAssistantModelSelection(main?.modelSelection),
+            runtimeMode: ASSISTANT_THREAD_RUNTIME_MODE,
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: new Date().toISOString(),
+          },
+          { origin },
+        )
+        .pipe(Effect.mapError(toAssistantError("Failed to start a conversation.")));
+      yield* Effect.logInfo("assistant conversation created").pipe(
+        Effect.annotateLogs({ threadId }),
+      );
+      return { threadId };
+    });
+
   const ensureAssistantChat: ManagerAssistantServiceShape["ensureAssistantChat"] = () =>
     chatSemaphore.withPermits(1)(
       Effect.gen(function* () {
@@ -699,6 +791,12 @@ const makeManagerAssistantService = Effect.gen(function* () {
           // The pinned chat is always there: an archived one comes back.
           if (marked.archivedAt !== null) yield* unarchive(marked.id);
           yield* settleAssistantChatHarness(marked.id, marked.modelSelection, origin);
+          yield* alignConversations(
+            marked.id,
+            coerceAssistantModelSelection(marked.modelSelection),
+            snapshot.threads,
+            origin,
+          );
           return { threadId: marked.id, outcome: "existing" as const };
         }
 
@@ -723,6 +821,12 @@ const makeManagerAssistantService = Effect.gen(function* () {
           );
           if (picked.archivedAt !== null) yield* unarchive(picked.id);
           yield* settleAssistantChatHarness(picked.id, picked.modelSelection, origin);
+          yield* alignConversations(
+            picked.id,
+            coerceAssistantModelSelection(picked.modelSelection),
+            snapshot.threads,
+            origin,
+          );
           yield* Effect.logInfo("assistant chat migrated").pipe(
             Effect.annotateLogs({ threadId: picked.id, title: picked.title }),
           );
@@ -756,6 +860,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
           },
           { origin },
         );
+        yield* alignConversations(threadId, modelSelection, snapshot.threads, origin);
         yield* Effect.logInfo("assistant chat created").pipe(Effect.annotateLogs({ threadId }));
         return { threadId, outcome: "created" as const };
       }).pipe(
@@ -770,6 +875,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
   return {
     ensureAssistant,
     ensureAssistantChat,
+    createConversation,
     createAssistant,
     scanWorkspaceFolders,
     listAssistants,

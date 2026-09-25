@@ -17,6 +17,7 @@ import { Option } from "effect";
 import {
   ArrowDownIcon,
   ArrowLeftIcon,
+  BotIcon,
   ArrowUpIcon,
   CornerLeftUpIcon,
   FolderIcon,
@@ -40,6 +41,8 @@ import {
 } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useCommandPaletteStore } from "../commandPaletteStore";
+import { useAssistantChat } from "../assistant/useAssistantChat";
+import { useAssistantConversations } from "../assistant/useAssistantConversations";
 import { readEnvironmentApi } from "../environmentApi";
 import { readPrimaryEnvironmentDescriptor, usePrimaryEnvironmentId } from "../environments/primary";
 import { useDefaultEnvironment } from "../hooks/useDefaultEnvironment";
@@ -418,6 +421,8 @@ function OpenCommandPaletteDialog() {
   const queryClient = useQueryClient();
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   const settings = useSettings();
+  const assistantChat = useAssistantChat();
+  const assistantConversations = useAssistantConversations();
   const {
     activeDraftThread,
     activeThread,
@@ -1112,6 +1117,34 @@ function OpenCommandPaletteDialog() {
   }, [clearOpenIntent, openIntent, projectThreadItems]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+
+  // Uno, the assistant: always reachable here, also when hidden from the
+  // sidebar (Settings → Assistant → Show in sidebar).
+  if (assistantChat.environmentId !== null) {
+    actionItems.push({
+      kind: "action",
+      value: "action:uno-open",
+      searchTerms: ["uno", "assistant", "ask uno", "telegram", "helper"],
+      title: "Talk to Uno",
+      description: "Your assistant: main conversation",
+      icon: <BotIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await assistantChat.open();
+      },
+    });
+    if (assistantConversations.supported) {
+      actionItems.push({
+        kind: "action",
+        value: "action:uno-new-conversation",
+        searchTerms: ["uno", "assistant", "new conversation", "new chat with uno"],
+        title: "New conversation with Uno",
+        icon: <BotIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          await assistantConversations.createConversation();
+        },
+      });
+    }
+  }
 
   if (projects.length > 0) {
     const activeProjectTitle = currentProjectId
