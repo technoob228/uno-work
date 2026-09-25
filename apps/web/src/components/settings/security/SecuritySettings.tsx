@@ -30,10 +30,17 @@ export function SecuritySettings() {
   const boxes = (cloud.data?.boxes ?? []).filter(
     (box) => box.status !== "deleted" && box.workMachine === true,
   );
-  const [picked, setPicked] = useState<number | null>(null);
+  // ?box=<id> — links from Uno's notifications ("Uno is doing maintenance on …").
+  const [picked, setPicked] = useState<number | null>(() => {
+    const raw =
+      typeof window === "undefined" ? null : new URL(window.location.href).searchParams.get("box");
+    const id = raw ? Number(raw) : Number.NaN;
+    return Number.isInteger(id) && id > 0 ? id : null;
+  });
   const thisBoxId = primary?.unoBoxId ?? null;
+  const pickedId = picked !== null && boxes.some((b) => b.id === picked) ? picked : null;
   const selectedId =
-    picked ?? (boxes.some((b) => b.id === thisBoxId) ? thisBoxId : (boxes[0]?.id ?? null));
+    pickedId ?? (boxes.some((b) => b.id === thisBoxId) ? thisBoxId : (boxes[0]?.id ?? null));
   const selected = boxes.find((b) => b.id === selectedId) ?? null;
 
   return (
@@ -41,7 +48,7 @@ export function SecuritySettings() {
       <SettingsSection title="Security">
         <SettingsRow
           title="Who got into your computers, and who can reach them"
-          description="Every way in — Uno Work, SSH, commands from your AI agents, Uno's own automation and support — is listed here. Any access, including ours, is visible to you."
+          description="Every way in — Uno Work, SSH, commands from your AI agents, Uno's own automation and maintenance — is listed here. Any access, including ours, is visible to you. Uno can do maintenance without asking first, and always tells you right away, with the reason."
         />
       </SettingsSection>
       {transport === "none" || (cloud.data && !cloud.data.connected) ? (

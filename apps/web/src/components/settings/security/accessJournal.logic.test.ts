@@ -4,11 +4,16 @@ import {
   type AccessEntry,
   type AccessSummary,
   accessLogPath,
+  accessStatus,
   automaticLabel,
+  burstLabel,
   channelLabel,
+  collapseBursts,
+  entryText,
   dayLabel,
   failedAttemptsLine,
   groupByDay,
+  isMaintenance,
   isUnexplained,
   lastAccessLine,
   matchesFilter,
@@ -125,14 +130,21 @@ describe("verdict and notes", () => {
     expect(v.description).not.toMatch(/cannot access/i);
   });
 
-  it("is red and counts unmatched logins", () => {
+  it("is red for Uno's key without a record and promises an answer in 24 hours", () => {
     expect(verdictFor(summary({ uno_unexplained: 1 })).title).toBe(
-      "1 login with Uno's key has no matching record",
+      "Uno used its key 1 time without a record",
     );
-    const v = verdictFor(summary({ uno_unexplained: 3 }));
+    const v = verdictFor(summary({ uno_unexplained: 3, uno_maintenance: 46 }));
     expect(v.tone).toBe("bad");
-    expect(v.title).toBe("3 logins with Uno's key have no matching record");
-    expect(v.description).toContain("Contact support");
+    expect(v.title).toBe("Uno used its key 3 times without a record");
+    expect(v.description).toContain("within 24 hours");
+  });
+
+  it("is amber for maintenance and states Uno's access policy", () => {
+    const v = verdictFor(summary({ uno_maintenance: 46 }));
+    expect(v.tone).toBe("notice");
+    expect(v.title).toBe("Uno did maintenance on this computer (46 entries)");
+    expect(v.description).toContain("without asking first, and always tells you right away");
   });
 
   it("explains failed attempts and scan status", () => {
@@ -164,7 +176,117 @@ describe("verdict and notes", () => {
     });
     expect(overviewBadge({ ...base, uno_unexplained_30d: 2 })).toEqual({
       tone: "bad",
-      text: "2 Uno logins without a record",
+      text: "Uno without a record: 2 — we'll explain",
     });
+    expect(overviewBadge({ ...base, uno_maintenance_30d: 47 })).toEqual({
+      tone: "notice",
+      text: "Uno maintenance — see why",
+    });
+  });
+});
+
+describe("Uno's access in plain words", () => {
+  const old = (o: Partial<AccessEntry> = {}) =>
+    entry({
+      actor: "uno_staff",
+      channel: "ssh",
+      explained: false,
+      who: "Uno's key — no matching record",
+      detail: "A command ran through Uno's node channel without a matching Uno record",
+      ...o,
+    });
+
+  it("before: a bare row from an older console is red, with the new wording", () => {
+    const e = old();
+    expect(accessStatus(e)).toBe("unaccounted");
+    expect(isUnexplained(e)).toBe(true);
+    expect(entryText(e)).toEqual({
+      title: "Uno used its key without a record",
+      note: "We'll explain this here within 24 hours.",
+    });
+  });
+
+  it("a stated reason turns the row amber, not red", () => {
+    const e = old({
+      status: "maintenance_stated",
+      reason: "fix container networking (Uno agent update)",
+    });
+    expect(isUnexplained(e)).toBe(false);
+    expect(isMaintenance(e)).toBe(true);
+    expect(entryText(e).title).toBe("Uno maintenance: fix container networking (Uno agent update)");
+    expect(entryText(e).note).toContain("Reason given by Uno's maintenance tool");
+  });
+
+  it("after: an appended explanation wins, the row itself stays as it was", () => {
+    const e = old({
+      status: "maintenance",
+      explanation: { id: 9001, at: local(24, 23), reason: "fixed container networking on Sep 24" },
+    });
+    expect(accessStatus(e)).toBe("maintenance");
+    expect(entryText(e)).toEqual({
+      title: "Uno maintenance: fixed container networking on Sep 24",
+      note: "Uno added this explanation later. The entry itself is unchanged.",
+    });
+    // Without the status field (older console) the explanation still counts.
+    const { status: _status, ...withoutStatus } = e;
+    expect(accessStatus(withoutStatus)).toBe("maintenance");
+  });
+
+  it("the explanation row says how many entries it explains", () => {
+    const e = entry({
+      actor: "uno_staff",
+      channel: "maintenance",
+      explained: true,
+      status: "maintenance",
+      reason: "fixed container networking on Sep 24",
+      explains: [1, 2, 3],
+    });
+    expect(channelLabel(e)).toBe("Uno maintenance");
+    expect(entryText(e).note).toBe("Explains 3 earlier entries that had no record.");
+  });
+
+  it("a signed maintenance run shows its reference", () => {
+    const e = entry({
+      actor: "uno_staff",
+      channel: "maintenance",
+      explained: true,
+      status: "maintenance",
+      reason: "fix container networking",
+      ref: "MW-20260924-guest-net",
+    });
+    expect(entryText(e)).toEqual({
+      title: "Uno maintenance: fix container networking",
+      note: "Reference MW-20260924-guest-net",
+    });
+  });
+
+  it("collapses a 46-command run into one line", () => {
+    const run = Array.from({ length: 46 }, (_, i) =>
+      old({
+        at: new Date(2026, 8, 24, 22, 17, 16 - i).toISOString(),
+        status: "maintenance",
+        explanation: {
+          id: 9001,
+          at: local(24, 23),
+          reason: "fixed container networking on Sep 24",
+        },
+      }),
+    );
+    const you = entry({ at: new Date(2026, 8, 24, 22, 30).toISOString() });
+    const items = collapseBursts([you, ...run]);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toEqual({ kind: "entry", entry: you });
+    const burst = items[1]!;
+    if (burst.kind !== "burst") throw new Error("expected a burst");
+    expect(burst.entries).toHaveLength(46);
+    expect(burstLabel(burst)).toBe("46 commands · 22:16–22:17");
+  });
+
+  it("keeps short runs and different reasons apart", () => {
+    const a = old({ reason: "a reason here", status: "maintenance_stated" });
+    const b = old({ reason: "another reason", status: "maintenance_stated" });
+    expect(collapseBursts([a, b, a]).every((i) => i.kind === "entry")).toBe(true);
+    const far = [0, 20, 40].map((m) => old({ at: new Date(2026, 8, 24, 22, m).toISOString() }));
+    expect(collapseBursts(far).every((i) => i.kind === "entry")).toBe(true);
   });
 });

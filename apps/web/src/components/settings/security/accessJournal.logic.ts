@@ -4,7 +4,15 @@
  * labels. No React here — covered by accessJournal.logic.test.ts.
  */
 
-export type AccessChannel = "work" | "ssh" | "command" | "cron" | "app" | "system" | "support";
+export type AccessChannel =
+  | "work"
+  | "ssh"
+  | "command"
+  | "cron"
+  | "app"
+  | "system"
+  | "support"
+  | "maintenance";
 export type AccessActor = "owner" | "shared" | "agent" | "uno_auto" | "uno_staff" | "other";
 
 /** One row of GET /api/v1/boxes/{id}/security/access-log. */
@@ -19,7 +27,34 @@ export interface AccessEntry {
   readonly client?: string;
   readonly detail?: string;
   readonly explained?: boolean;
+  /**
+   * Verdict for rows where Uno's people or key touched the computer
+   * (actor uno_staff). Older consoles don't send it — see accessStatus().
+   */
+  readonly status?: AccessStatus | string;
+  /** Why Uno accessed the computer, in plain words. */
+  readonly reason?: string;
+  /** Which Uno tool or person (e.g. ops:guest-agent-rollout). Not shown. */
+  readonly initiator?: string;
+  /** Maintenance window (MW-…) or support request (A-…). */
+  readonly ref?: string;
+  /** On an explanation row: ids of the rows it explains. */
+  readonly explains?: ReadonlyArray<number>;
+  /** Explanation Uno appended to this row later (rows are never edited). */
+  readonly explanation?: {
+    readonly id: number;
+    readonly at: string;
+    readonly reason: string;
+    readonly ref?: string;
+  };
 }
+
+/**
+ * - maintenance: Uno maintenance with a record (or explained later);
+ * - maintenance_stated: no record, but Uno's tool said why;
+ * - unaccounted: no record, no reason — Uno owes an explanation within 24 h.
+ */
+export type AccessStatus = "maintenance" | "maintenance_stated" | "unaccounted";
 
 export interface AccessSummary {
   readonly total: number;
@@ -27,6 +62,8 @@ export interface AccessSummary {
   readonly agents: number;
   readonly uno_auto: number;
   readonly uno_unexplained: number;
+  /** Uno maintenance rows (recorded, explained or with a stated reason). Newer consoles only. */
+  readonly uno_maintenance?: number;
   readonly ssh_others: number;
   readonly failed_ssh_attempts: number;
   readonly failed_ssh_sources: number;
@@ -54,6 +91,7 @@ export interface SecurityComputer {
   } | null;
   readonly entries_30d: number;
   readonly uno_unexplained_30d: number;
+  readonly uno_maintenance_30d?: number;
 }
 
 export interface SecuritySummaryResponse {
@@ -81,9 +119,77 @@ export function isUnoActor(actor: string): boolean {
   return actor === "uno_auto" || actor === "uno_staff";
 }
 
-/** A login with Uno's key that has no matching Uno record — shown in red. */
+/** Verdict of a row, or null for ordinary rows (you, agents, automation, others). */
+export function accessStatus(entry: AccessEntry): AccessStatus | null {
+  if (entry.actor !== "uno_staff") return null;
+  if (
+    entry.status === "maintenance" ||
+    entry.status === "maintenance_stated" ||
+    entry.status === "unaccounted"
+  ) {
+    return entry.status;
+  }
+  // Older console: no status field.
+  if (entry.explanation) return "maintenance";
+  if (entry.explained === true) return "maintenance";
+  if (entry.reason) return "maintenance_stated";
+  return "unaccounted";
+}
+
+/** Uno used its key and nobody can say why yet — shown in red. */
 export function isUnexplained(entry: AccessEntry): boolean {
-  return entry.actor === "uno_staff" && entry.explained !== true;
+  return accessStatus(entry) === "unaccounted";
+}
+
+/** Uno maintenance with a reason — shown in amber. */
+export function isMaintenance(entry: AccessEntry): boolean {
+  const s = accessStatus(entry);
+  return s === "maintenance" || s === "maintenance_stated";
+}
+
+/** The reason the customer reads: the appended explanation wins over the row's own. */
+export function maintenanceReason(entry: AccessEntry): string | null {
+  return entry.explanation?.reason || entry.reason || null;
+}
+
+export const UNACCOUNTED_TITLE = "Uno used its key without a record";
+export const UNACCOUNTED_NOTE = "We'll explain this here within 24 hours.";
+
+/**
+ * Plain words for one row: the title and the line under it. Uno's rows get
+ * their wording from the verdict, not from the stored label, so old rows read
+ * the same way as new ones.
+ */
+export function entryText(entry: AccessEntry): {
+  readonly title: string;
+  readonly note: string | null;
+} {
+  const status = accessStatus(entry);
+  if (status === "unaccounted") {
+    return { title: UNACCOUNTED_TITLE, note: UNACCOUNTED_NOTE };
+  }
+  if (status === "maintenance" || status === "maintenance_stated") {
+    const reason = maintenanceReason(entry);
+    const title = reason ? `Uno maintenance: ${reason}` : "Uno maintenance";
+    if (entry.explains && entry.explains.length > 0) {
+      const n = entry.explains.length;
+      return {
+        title,
+        note: `Explains ${n} earlier entr${n === 1 ? "y" : "ies"} that had no record.`,
+      };
+    }
+    if (entry.explanation) {
+      return { title, note: "Uno added this explanation later. The entry itself is unchanged." };
+    }
+    if (status === "maintenance_stated") {
+      return {
+        title,
+        note: "Reason given by Uno's maintenance tool. We're matching it to our records.",
+      };
+    }
+    return { title, note: entry.ref ? `Reference ${entry.ref}` : null };
+  }
+  return { title: entry.who, note: entry.detail || null };
 }
 
 export function matchesFilter(entry: AccessEntry, filter: AccessFilter): boolean {
@@ -122,6 +228,8 @@ export function channelLabel(entry: Pick<AccessEntry, "channel" | "client">): st
       return "Uno automation";
     case "support":
       return "Uno support";
+    case "maintenance":
+      return "Uno maintenance";
     default:
       return String(entry.channel);
   }
@@ -205,21 +313,106 @@ export function automaticLabel(n: number): string {
   return `${n} automatic operation${n === 1 ? "" : "s"} by Uno`;
 }
 
+// ---- bursts: one maintenance run = one line ----
+
+/** A run of Uno's commands with the same verdict and reason, a few minutes apart. */
+export interface AccessBurst {
+  readonly kind: "burst";
+  readonly key: string;
+  /** Newest first, like the journal. */
+  readonly entries: ReadonlyArray<AccessEntry>;
+}
+
+export type AccessItem = { readonly kind: "entry"; readonly entry: AccessEntry } | AccessBurst;
+
+const BURST_GAP_MS = 10 * 60_000;
+const BURST_MIN = 3;
+
+function burstKey(entry: AccessEntry): string | null {
+  const status = accessStatus(entry);
+  if (!status || (entry.explains && entry.explains.length > 0)) return null;
+  const tone = status === "unaccounted" ? "red" : "amber";
+  return `${tone}|${maintenanceReason(entry) ?? ""}|${entry.explanation?.id ?? ""}`;
+}
+
+/**
+ * Collapses runs of ≥3 Uno rows with the same verdict and reason (each within
+ * 10 minutes of the next) into one line — 46 commands of one maintenance run
+ * read as one event, not 46 alarms. Other rows pass through unchanged.
+ */
+export function collapseBursts(entries: ReadonlyArray<AccessEntry>): AccessItem[] {
+  const out: AccessItem[] = [];
+  let run: AccessEntry[] = [];
+  let runKey: string | null = null;
+  const flush = () => {
+    if (run.length >= BURST_MIN && runKey) {
+      out.push({ kind: "burst", key: `burst-${run[0]!.id}`, entries: run });
+    } else {
+      for (const entry of run) out.push({ kind: "entry", entry });
+    }
+    run = [];
+    runKey = null;
+  };
+  for (const entry of entries) {
+    const key = burstKey(entry);
+    const prev = run[run.length - 1];
+    const close =
+      prev !== undefined &&
+      Math.abs(new Date(prev.at).getTime() - new Date(entry.at).getTime()) <= BURST_GAP_MS;
+    if (key && key === runKey && close) {
+      run.push(entry);
+      continue;
+    }
+    flush();
+    if (key) {
+      run = [entry];
+      runKey = key;
+    } else {
+      out.push({ kind: "entry", entry });
+    }
+  }
+  flush();
+  return out;
+}
+
+/** "46 commands · 22:16–22:17". */
+export function burstLabel(burst: AccessBurst): string {
+  const n = burst.entries.length;
+  const newest = burst.entries[0]!;
+  const oldest = burst.entries[n - 1]!;
+  const from = formatClock(oldest.at);
+  const to = formatClock(newest.at);
+  return `${n} commands · ${from === to ? from : `${from}–${to}`}`;
+}
+
 // ---- verdict and notes ----
 
 export interface Verdict {
-  readonly tone: "good" | "bad";
+  readonly tone: "good" | "notice" | "bad";
   readonly title: string;
   readonly description: string;
 }
 
+/** Uno's access policy, said once wherever maintenance shows up. */
+export const UNO_ACCESS_POLICY =
+  "Uno can do maintenance on your computers without asking first, and always tells you right away — with the reason.";
+
 export function verdictFor(summary: AccessSummary, days = 30): Verdict {
   const n = summary.uno_unexplained;
+  const m = summary.uno_maintenance ?? 0;
   if (n > 0) {
     return {
       tone: "bad",
-      title: `${n} login${n === 1 ? "" : "s"} with Uno's key ${n === 1 ? "has" : "have"} no matching record`,
-      description: "Contact support — we'll explain each one.",
+      title: `Uno used its key ${n} time${n === 1 ? "" : "s"} without a record`,
+      description:
+        "We're looking into it and will explain each one here within 24 hours. Nothing to do on your side.",
+    };
+  }
+  if (m > 0) {
+    return {
+      tone: "notice",
+      title: `Uno did maintenance on this computer (${m} entr${m === 1 ? "y" : "ies"})`,
+      description: `The reason is on each entry below. ${UNO_ACCESS_POLICY}`,
     };
   }
   return {
@@ -257,10 +450,12 @@ export function lastAccessLine(computer: SecurityComputer, now: number): string 
 }
 
 export function overviewBadge(computer: SecurityComputer): {
-  readonly tone: "good" | "bad";
+  readonly tone: "good" | "notice" | "bad";
   readonly text: string;
 } {
   const n = computer.uno_unexplained_30d;
-  if (n > 0) return { tone: "bad", text: `${n} Uno login${n === 1 ? "" : "s"} without a record` };
+  if (n > 0) return { tone: "bad", text: `Uno without a record: ${n} — we'll explain` };
+  if ((computer.uno_maintenance_30d ?? 0) > 0)
+    return { tone: "notice", text: "Uno maintenance — see why" };
   return { tone: "good", text: "No unexplained Uno logins (30 days)" };
 }
