@@ -1,5 +1,5 @@
 import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
-import { Effect, FileSystem, Layer, Path, Random } from "effect";
+import { Effect, FileSystem, Layer, Path, Random, Ref } from "effect";
 import * as OS from "node:os";
 
 import { ServerConfig } from "../../config.ts";
@@ -68,14 +68,15 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
     return generated;
   });
 
-  const environmentId = EnvironmentId.make(environmentIdRaw);
+  // Ref, not const: a memory-snapshot clone gets its own id in place
+  // (rotateEnvironmentId) instead of a daemon restart — see cloneIdentity.ts.
+  const environmentIdRef = yield* Ref.make(EnvironmentId.make(environmentIdRaw));
   const cwdBaseName = path.basename(serverConfig.cwd).trim();
   const label = yield* resolveServerEnvironmentLabel({
     cwdBaseName,
   });
 
   const base = {
-    environmentId,
     label,
     platform: {
       os: platformOs(),
@@ -92,27 +93,41 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
       assistantLlm: true,
       assistantConversations: true,
     },
-  } satisfies Omit<ExecutionEnvironmentDescriptor, "machineKind" | "unoBoxId">;
-  const hostname = OS.hostname();
+  } satisfies Omit<ExecutionEnvironmentDescriptor, "machineKind" | "unoBoxId" | "environmentId">;
 
   // Built per call: the box id can arrive after startup (control-plane probe),
   // and the descriptor must say "Uno box" from that moment on.
-  const getDescriptor = Effect.map(
-    unoBoxIdentity.current,
-    (unoBoxId): ExecutionEnvironmentDescriptor => ({
+  // The hostname is read per call too: a clone restored from a memory
+  // snapshot gets its name from the guest agent AFTER the daemon is running.
+  const getDescriptor = Effect.gen(function* () {
+    const unoBoxId = yield* unoBoxIdentity.current;
+    const environmentId = yield* Ref.get(environmentIdRef);
+    return {
       ...base,
+      environmentId,
       ...resolveMachineKind({
         mode: serverConfig.mode,
         platform: process.platform,
-        hostname,
+        hostname: OS.hostname(),
         unoBoxId,
       }),
-    }),
-  );
+    } satisfies ExecutionEnvironmentDescriptor;
+  });
+
+  const rotateEnvironmentId = Effect.gen(function* () {
+    const generated = yield* Random.nextUUIDv4;
+    yield* persistEnvironmentId(generated).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("environment id not persisted").pipe(Effect.annotateLogs({ cause })),
+      ),
+    );
+    yield* Ref.set(environmentIdRef, EnvironmentId.make(generated));
+  });
 
   return {
-    getEnvironmentId: Effect.succeed(environmentId),
+    getEnvironmentId: Ref.get(environmentIdRef),
     getDescriptor,
+    rotateEnvironmentId,
   } satisfies ServerEnvironmentShape;
 });
 

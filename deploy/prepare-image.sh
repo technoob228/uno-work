@@ -164,10 +164,23 @@ fi
 printf '%s\n' "${host}" > "${stamp}"
 chown "${SERVICE_USER}:${SERVICE_USER}" "${stamp}" 2>/dev/null || true
 
-# --no-block: юнит стоит Before=uno-work.service, синхронный restart отсюда
-# упёрся бы в собственную очередь systemd.
+# Клон из memory-снапшота: демон уже запущен и прогрет (харнесы опрошены,
+# чат Uno заведён). Рестарт выбросил бы весь прогрев (~20 с на 2 vCPU, замер
+# 25.09), поэтому демону шлём SIGUSR2 — он сам ротирует ключ кук и
+# environment-id на месте (apps/server/src/cloneIdentity.ts). Демон без этого
+# обработчика умирает от SIGUSR2 (дефолт Node), и systemd (Restart=always)
+# поднимает его заново — то есть прежнее поведение, ключ всё равно новый.
+#
+# Демон не запущен (холодная загрузка: юнит стоит Before=uno-work.service) —
+# ключ сгенерируется при старте, делать ничего не нужно; restart --no-block
+# оставлен как было на случай гонки со стартом.
 if [ "${rotated}" = 1 ]; then
-  systemctl restart --no-block uno-work 2>/dev/null || true
+  if systemctl is-active --quiet uno-work; then
+    systemctl kill --kill-whom=main --signal=SIGUSR2 uno-work 2>/dev/null \
+      || systemctl restart --no-block uno-work 2>/dev/null || true
+  else
+    systemctl restart --no-block uno-work 2>/dev/null || true
+  fi
 fi
 exit 0
 SCRIPT

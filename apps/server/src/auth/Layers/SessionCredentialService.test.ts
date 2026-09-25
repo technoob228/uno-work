@@ -189,3 +189,23 @@ it.layer(NodeServices.layer)("SessionCredentialServiceLive", (it) => {
     }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
   );
 });
+
+it.layer(NodeServices.layer)("SessionCredentialServiceLive clone identity", (it) => {
+  it.effect("rotates the signing key in place and revokes sessions issued under the old key", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionCredentialService;
+      const before = yield* sessions.issue({ subject: "warm-up", role: "owner" });
+      expect((yield* sessions.verify(before.token)).subject).toBe("warm-up");
+
+      expect(sessions.rotateSigningKey).toBeDefined();
+      yield* sessions.rotateSigningKey!;
+
+      const stale = yield* Effect.flip(sessions.verify(before.token));
+      expect(stale._tag).toBe("SessionCredentialError");
+      expect(yield* sessions.listActive()).toHaveLength(0);
+
+      const after = yield* sessions.issue({ subject: "clone", role: "owner" });
+      expect((yield* sessions.verify(after.token)).subject).toBe("clone");
+    }).pipe(Effect.provide(makeSessionCredentialLayer())),
+  );
+});

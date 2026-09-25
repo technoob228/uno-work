@@ -85,7 +85,12 @@ export const makeSessionCredentialService = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;
   const secretStore = yield* ServerSecretStore;
   const authSessions = yield* AuthSessionRepository;
-  const signingSecret = yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32);
+  // In a Ref, not a const: a memory-snapshot clone rotates the key in place
+  // (rotateSigningKey) instead of restarting the daemon and losing its warm
+  // state — see cloneIdentity.ts.
+  const signingSecretRef = yield* Ref.make(
+    yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32),
+  );
   const connectedSessionsRef = yield* Ref.make(new Map<string, number>());
   const changesPubSub = yield* PubSub.unbounded<SessionCredentialChange>();
   const cookieName = resolveSessionCookieName({
@@ -215,7 +220,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
         exp: expiresAt.epochMilliseconds,
       };
       const encodedPayload = base64UrlEncode(JSON.stringify(claims));
-      const signature = signPayload(encodedPayload, signingSecret);
+      const signature = signPayload(encodedPayload, yield* Ref.get(signingSecretRef));
       const client = input?.client ?? createDefaultClientMetadata();
       yield* authSessions.create({
         sessionId,
@@ -266,7 +271,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
         });
       }
 
-      const expectedSignature = signPayload(encodedPayload, signingSecret);
+      const expectedSignature = signPayload(encodedPayload, yield* Ref.get(signingSecretRef));
       if (!timingSafeEqualBase64Url(signature, expectedSignature)) {
         return yield* new SessionCredentialError({
           message: "Invalid session token signature.",
@@ -339,7 +344,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
         exp: expiresAt.epochMilliseconds,
       };
       const encodedPayload = base64UrlEncode(JSON.stringify(claims));
-      const signature = signPayload(encodedPayload, signingSecret);
+      const signature = signPayload(encodedPayload, yield* Ref.get(signingSecretRef));
       return {
         token: `${encodedPayload}.${signature}`,
         expiresAt,
@@ -355,7 +360,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
         });
       }
 
-      const expectedSignature = signPayload(encodedPayload, signingSecret);
+      const expectedSignature = signPayload(encodedPayload, yield* Ref.get(signingSecretRef));
       if (!timingSafeEqualBase64Url(signature, expectedSignature)) {
         return yield* new SessionCredentialError({
           message: "Invalid websocket token signature.",
@@ -482,6 +487,26 @@ export const makeSessionCredentialService = Effect.gen(function* () {
       return revokedSessionIds.length;
     }).pipe(Effect.mapError(toSessionCredentialError("Failed to revoke other sessions.")));
 
+  // Drops the key file first so getOrCreateRandom mints a new one (the clone's
+  // uno-work-identity script may already have removed it — both are fine).
+  // Sessions signed with the old key fail signature checks anyway; revoking
+  // them keeps "Authorized clients" honest.
+  const rotateSigningKey: NonNullable<SessionCredentialServiceShape["rotateSigningKey"]> =
+    Effect.gen(function* () {
+      yield* secretStore.remove(SIGNING_SECRET_NAME);
+      const fresh = yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32);
+      yield* Ref.set(signingSecretRef, fresh);
+      const revokedAt = yield* DateTime.now;
+      const revokedSessionIds = yield* authSessions.revokeAllExcept({
+        currentSessionId: AuthSessionId.make("clone-identity-rotation"),
+        revokedAt,
+      });
+      yield* Ref.set(connectedSessionsRef, new Map<string, number>());
+      yield* Effect.forEach(revokedSessionIds, (sessionId) => emitRemoved(sessionId), {
+        discard: true,
+      });
+    }).pipe(Effect.mapError(toSessionCredentialError("Failed to rotate the signing key.")));
+
   return {
     cookieName,
     issue,
@@ -496,6 +521,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
     revokeAllExcept,
     markConnected,
     markDisconnected,
+    rotateSigningKey,
   } satisfies SessionCredentialServiceShape;
 });
 

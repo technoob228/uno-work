@@ -77,6 +77,12 @@ export interface SessionCredentialServiceShape {
   readonly revokeAllExcept: (
     sessionId: AuthSessionId,
   ) => Effect.Effect<number, SessionCredentialError>;
+  /**
+   * Clone identity rotation (memory-snapshot clones, see cloneIdentity.ts):
+   * a fresh cookie signing key in place, every session issued under the old
+   * one revoked. Optional so test doubles need not implement it.
+   */
+  readonly rotateSigningKey?: Effect.Effect<void, SessionCredentialError>;
   readonly markConnected: (sessionId: AuthSessionId) => Effect.Effect<void, never>;
   readonly markDisconnected: (sessionId: AuthSessionId) => Effect.Effect<void, never>;
 }

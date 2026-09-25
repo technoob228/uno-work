@@ -29,6 +29,7 @@ import { ServerBrowserLive } from "./serverBrowser.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import { unoWorkRouteLayers } from "./unoWork/http.ts";
+import { warmStatusRouteLayer } from "./warmStatus.ts";
 import { setupToolsRouteLayers } from "./setupTools/http.ts";
 import { ConnectorsServiceLive } from "./setupTools/ConnectorsService.ts";
 import { MaterialsServiceLive } from "./setupTools/MaterialsService.ts";
@@ -175,6 +176,7 @@ import {
   managerTokensRevokeRouteLayer,
 } from "./manager/http.ts";
 import { ManagerAssistantBootstrapLive, ManagerLayerLive } from "./manager/runtimeLayer.ts";
+import { CloneIdentityRotationLive } from "./cloneIdentity.ts";
 import { AiProviderKeysLive } from "./aiProviders/AiProviderKeys.ts";
 import {
   aiProvidersListRouteLayer,
@@ -405,6 +407,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(
     Layer.mergeAll(
       ManagerAssistantBootstrapLive,
+      // Memory-snapshot clones: rotate the cookie key + environment id in
+      // place on SIGUSR2 from uno-work-identity (cloneIdentity.ts).
+      CloneIdentityRotationLive,
       ReminderSchedulerLive,
       SelfWatchdogLive,
       // Plugin runtime consumes the registry plus the orchestration engine
@@ -616,6 +621,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   previewSiteFileRouteLayer,
   ...filesShareRouteLayers,
   ...unoWorkRouteLayers,
+  warmStatusRouteLayer,
   ...setupToolsRouteLayers,
 ).pipe(Layer.provide(browserApiCorsLayer));
 

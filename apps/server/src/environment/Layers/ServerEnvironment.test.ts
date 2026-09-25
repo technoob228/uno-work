@@ -72,6 +72,29 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
     }),
   );
 
+  it.effect("rotates the environment id in place for a memory-snapshot clone", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-environment-rotate-test-",
+      });
+      const [before, after, persisted] = yield* Effect.gen(function* () {
+        const serverEnvironment = yield* ServerEnvironment;
+        const first = yield* serverEnvironment.getEnvironmentId;
+        yield* serverEnvironment.rotateEnvironmentId!;
+        const second = (yield* serverEnvironment.getDescriptor).environmentId;
+        return [first, second, yield* serverEnvironment.getEnvironmentId] as const;
+      }).pipe(Effect.provide(makeServerEnvironmentLayer(baseDir)));
+      expect(after).not.toBe(before);
+      expect(persisted).toBe(after);
+      // A later start of the same machine keeps the rotated id.
+      const restarted = yield* Effect.gen(function* () {
+        return yield* (yield* ServerEnvironment).getEnvironmentId;
+      }).pipe(Effect.provide(makeServerEnvironmentLayer(baseDir)));
+      expect(restarted).toBe(after);
+    }),
+  );
+
   it.effect("reports the Uno box once the identity service knows the box id", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
