@@ -47,7 +47,7 @@ import {
   readDroppedUploadFiles,
 } from "../../../projectUploadPickers";
 import type { ProjectUploadFile } from "../../../projectUpload";
-import { useServerConfig } from "../../../rpc/serverState";
+import { useServerConfig, whenServerConfigReady } from "../../../rpc/serverState";
 import { useAssistantChat } from "../../../assistant/useAssistantChat";
 import { useHomeLaunchers } from "../../computer/useHomeLaunchers";
 import { openInstallDocs } from "../../onboarding/harnessInstallLinks";
@@ -78,7 +78,7 @@ import { installSkill } from "../setupSkills";
 import { SetupFrame } from "../SetupShell";
 import { NoIndexHtmlError, droppedName, uploadAndPublishSite } from "../siteUpload";
 import { useSetupNavigation } from "../useSetupNavigation";
-import { useUpdateSetupProgress } from "../useSetupProgress";
+import { currentSetupProgress, useUpdateSetupProgress } from "../useSetupProgress";
 import { AssistantTelegramPanel } from "./ChannelsStep";
 
 const GOAL_ICON: Readonly<Record<GoalId, LucideIcon>> = {
@@ -90,6 +90,23 @@ const GOAL_ICON: Readonly<Record<GoalId, LucideIcon>> = {
 };
 
 // ── shared plumbing ────────────────────────────────────────────────────
+
+/**
+ * A settings write right after load can get lost: a fresh clone rotates its
+ * session key in the first seconds and a write sent then may never land (prod
+ * 26.09: the goal from the console was lost). Writes here are idempotent, so
+ * send once (waiting at most 6 s) and repeat a few times in the background.
+ */
+async function persistWithRetry(write: () => Promise<void>): Promise<void> {
+  const once = () =>
+    Promise.race([write(), new Promise<void>((resolve) => setTimeout(resolve, 6000))]).catch(
+      (error: unknown) => console.warn("[goal-first] settings write failed", error),
+    );
+  await once();
+  for (const delay of [3000, 8000, 15000]) {
+    setTimeout(() => void once(), delay);
+  }
+}
 
 /** Onboarding is over once a goal is picked: here and on the machine. */
 function useGoalActions() {
@@ -343,16 +360,28 @@ function GoalPicker() {
     if (machineOnboarded || decided.current || accountTransport() === "none") return;
     let cancelled = false;
     void accountRequest("GET", "/auth/me")
-      .then((me) => {
+      .then(async (me) => {
         const picked = goalFromOnboardingPath(
           (me as { readonly onboarding_path?: unknown } | null)?.onboarding_path,
         );
         if (cancelled || !picked || decided.current) return;
         decided.current = true;
-        void updateSettings({ onboardingCompleted: true, machineOnboarded: true });
-        void update((current) =>
-          withAnswer(withGoal(current, picked.goal), GOAL_PATH_KEY, picked.via),
-        );
+        // Right after load the machine's settings channel may not take writes
+        // yet (prod 26.09: the goal was lost). Wait for it and retry.
+        await persistWithRetry(async () => {
+          await whenServerConfigReady();
+          // One patch, always sent (the setup hook skips "unchanged" writes,
+          // and a lost write looks unchanged locally).
+          await updateSettings({
+            onboardingCompleted: true,
+            machineOnboarded: true,
+            setup: withAnswer(
+              withGoal(currentSetupProgress(), picked.goal),
+              GOAL_PATH_KEY,
+              picked.via,
+            ),
+          });
+        });
         void navigate({
           to: "/setup",
           search: { step: "welcome", goal: picked.goal, via: picked.via },
@@ -876,14 +905,19 @@ export function GoalStep() {
   const search = useSearch({ from: "/_chat/setup" });
   const goal = search.goal ?? null;
   const via = search.via ?? null;
-  const update = useUpdateSetupProgress();
+  const { updateSettings } = useUpdateSettings();
   // Opened straight from Home or a link: this is the goal now.
   useEffect(() => {
     if (!goal) return;
-    void update((current) =>
-      current.answers["goal"] === goal ? current : withGoal(current, goal),
-    );
-  }, [goal, update]);
+    void persistWithRetry(async () => {
+      await whenServerConfigReady();
+      const current = currentSetupProgress();
+      await updateSettings({
+        machineOnboarded: true,
+        setup: current.answers["goal"] === goal ? current : withGoal(current, goal),
+      });
+    });
+  }, [goal, updateSettings]);
   if (!goal) return <GoalPicker />;
   if (goalAsksHow(goal) && !via) return <HowPicker goal={goal} />;
   if (via === "own_agent" || goal === "own_agent") return <OwnAgentResult goal={goal} />;
