@@ -178,11 +178,27 @@ async function drive(req, res, p) {
       bucket_name: "drive",
       used_bytes: 1024 ** 2,
       quota_bytes: 25 * 1024 ** 3,
-      telegram: { shared_bot: "get_uno_bot", shared_bot_ready: true, own_bot: null, own_bots_available: true, links: [], download_limit_bytes: 20 << 20 },
+      telegram: {
+        shared_bot: "get_uno_bot",
+        shared_bot_ready: true,
+        own_bot: null,
+        own_bots_available: true,
+        links: [],
+        download_limit_bytes: 20 << 20,
+      },
     });
   }
   if (p.startsWith("/api/v1/drive/recent")) {
-    return send(res, 200, { files: [{ key: "Telegram/2026-09/contract.pdf", name: "contract.pdf", size: 81234, last_modified: "2026-09-24T10:00:00Z" }] });
+    return send(res, 200, {
+      files: [
+        {
+          key: "Telegram/2026-09/contract.pdf",
+          name: "contract.pdf",
+          size: 81234,
+          last_modified: "2026-09-24T10:00:00Z",
+        },
+      ],
+    });
   }
   return send(res, 404, { error: "NOT_IN_MOCK", path: p });
 }

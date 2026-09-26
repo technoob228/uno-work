@@ -168,7 +168,10 @@ export async function connectUnoBoxWith(
         throw new Error(`Computer #${box.id} entered status "${current.status}".`);
       }
       if (deps.now() >= deadline) {
-        throw new UnoBoxStillStartingError(box.id, new Error("the computer did not wake up in time"));
+        throw new UnoBoxStillStartingError(
+          box.id,
+          new Error("the computer did not wake up in time"),
+        );
       }
       await deps.sleep(wakePollIntervalMs);
       throwIfAborted(options.signal);
