@@ -4,7 +4,7 @@ import nodePath from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { publishToUnoHosting, suggestSiteSlug } from "./sitePublish.ts";
+import { publishToUnoHosting, liveSiteUrl, suggestSiteSlug } from "./sitePublish.ts";
 
 let dir: string;
 beforeEach(() => {
@@ -43,7 +43,24 @@ describe("publishToUnoHosting", () => {
     expect(calls[0]?.url).toBe("https://console.test/api/v1/deploy");
     expect(calls[0]?.auth).toBe("Bearer uno_agt_machine");
     expect(calls[0]?.names).toEqual(["css/a.css", "index.html"]);
-    expect(result.url).toBe("https://team-site.uno4.dev/");
+    // No url from hosting: the live pattern, not the old <slug>.uno4.dev (404).
+    expect(result.url).toBe("https://team-site.sites.uno4.dev/");
+  });
+
+  it("returns the address Uno Hosting answers with", async () => {
+    const { fetchImpl } = recordingFetch(201, {
+      slug: "yoga",
+      url: "https://yoga.sites.uno4.dev/",
+      files_count: 2,
+    });
+    const result = await publishToUnoHosting({
+      path: nodePath.join(dir, "site"),
+      slug: "yoga",
+      apiKey: "uno_agt_machine",
+      fetchImpl,
+    });
+    expect(result.url).toBe("https://yoga.sites.uno4.dev/");
+    expect(liveSiteUrl("javascript:alert(1)", "yoga")).toBe("https://yoga.sites.uno4.dev/");
   });
 
   it("explains a token that can't publish yet", async () => {

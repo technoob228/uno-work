@@ -161,7 +161,7 @@ export function ContinueCards({ threads, now }: { threads: HomeThread[]; now: nu
   if (cards.length === 0) {
     return (
       <p className="rounded-2xl border border-dashed border-border/80 px-4 py-3 text-sm text-muted-foreground">
-        Nothing to pick up. Type a task above and Uno starts on it.
+        Nothing in progress yet. Type a task above or pick a goal, and Uno starts on it.
       </p>
     );
   }

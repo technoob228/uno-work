@@ -128,6 +128,14 @@ function deployErrorMessage(status: number, body: DeployResponse | null): string
   return body?.message ?? `Uno Hosting answered ${status}.`;
 }
 
+/** Hosting's own `url` when it is an https address, else `<slug>.sites.uno4.dev`. */
+export function liveSiteUrl(fromHosting: string | undefined, slug: string): string {
+  if (typeof fromHosting === "string" && /^https:\/\/[a-z0-9.-]+\//i.test(`${fromHosting}/`)) {
+    return fromHosting.endsWith("/") ? fromHosting : `${fromHosting}/`;
+  }
+  return `https://${slug}.sites.uno4.dev/`;
+}
+
 export async function publishToUnoHosting(input: {
   readonly path: string;
   readonly slug?: string | undefined;
@@ -185,9 +193,9 @@ export async function publishToUnoHosting(input: {
   const publishedSlug = body?.slug ?? slug;
   return {
     slug: publishedSlug,
-    // Hosting's own base-domain setting has disagreed with the live host
-    // before; the live address is `<slug>.uno4.dev`.
-    url: `https://${publishedSlug}.uno4.dev/`,
+    // The address Uno Hosting answers with is the live one (since 09.2026
+    // `<slug>.sites.uno4.dev`; the old hard-coded `<slug>.uno4.dev` gave 404).
+    url: liveSiteUrl(body?.url, publishedSlug),
     filesCount: body?.files_count ?? files.length,
     sizeBytes: body?.size_bytes ?? files.reduce((sum, file) => sum + file.size, 0),
   };

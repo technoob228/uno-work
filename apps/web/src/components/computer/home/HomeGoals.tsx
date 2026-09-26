@@ -22,7 +22,6 @@ import { useEffect, useMemo } from "react";
 import { trackFunnel } from "../../../lib/funnel";
 import {
   BUILT_OWN_KEY,
-  FIRST_RESULT_KEY,
   GOAL_COPY,
   NEXT_STEP,
   NEXT_STEP_KEY,
@@ -30,6 +29,7 @@ import {
   detectFirstResult,
   goalState,
   withAnswer,
+  withFirstResult,
   type GoalId,
 } from "../../setup/goals";
 import { useSetupProgress, useUpdateSetupProgress } from "../../setup/useSetupProgress";
@@ -91,12 +91,9 @@ export function useGoalWatcher(input: {
   });
   useEffect(() => {
     if (!firstVia || !state.goal) return;
-    trackFunnel("first_result", { goal: state.goal, props: { via: firstVia } });
-    void update((current) =>
-      current.answers[FIRST_RESULT_KEY]
-        ? current
-        : withAnswer(current, FIRST_RESULT_KEY, new Date().toISOString()),
-    );
+    const goal = state.goal;
+    trackFunnel("first_result", { goal, props: { via: firstVia } });
+    void update((current) => withFirstResult(current, goal));
   }, [firstVia, state.goal, update]);
 
   const builtOwn = useMemo(
@@ -138,7 +135,7 @@ export function HomeNextStep({
     state.firstResultAt !== null &&
     state.nextStep !== "closed" &&
     state.nextStep !== "clicked";
-  const goal = state.goal;
+  const goal = state.firstResultGoal ?? state.goal;
   useEffect(() => {
     if (show && goal) trackFunnel("next_step_shown", { goal });
   }, [goal, show]);

@@ -8,6 +8,7 @@ import { ChevronDownIcon } from "lucide-react";
 import * as Schema from "effect/Schema";
 
 import { useLocalStorage } from "../../hooks/useLocalStorage";
+import { useServerConfig } from "../../rpc/serverState";
 import { goalState } from "../setup/goals";
 import { useSetupProgress } from "../setup/useSetupProgress";
 
@@ -17,7 +18,9 @@ const MORE_KEY = "uno:sidebar:more-open";
 export function useSimpleSidebar(): { simple: boolean; openMore: () => void } {
   const progress = useSetupProgress();
   const [open, setOpen] = useLocalStorage(MORE_KEY, false, Schema.Boolean);
-  const newcomer = goalState(progress).goal !== null;
+  // A fresh computer (first start not done yet) or a goal-first newcomer.
+  const fresh = useServerConfig()?.settings.machineOnboarded === false;
+  const newcomer = goalState(progress).goal !== null || fresh;
   return { simple: newcomer && !open, openMore: () => setOpen(true) };
 }
 

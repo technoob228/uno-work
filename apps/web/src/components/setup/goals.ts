@@ -193,6 +193,7 @@ export const GOAL_AT_KEY = "goal_at";
 export const GOAL_PATH_KEY = "goal_path";
 export const GOAL_PROJECT_KEY = "goal_project";
 export const FIRST_RESULT_KEY = "first_result_at";
+export const FIRST_RESULT_GOAL_KEY = "first_result_goal";
 export const NEXT_STEP_KEY = "next_step";
 export const BUILT_OWN_KEY = "built_own_at";
 
@@ -203,6 +204,8 @@ export interface GoalState {
   /** Folder of the goal's project, when it has one. */
   readonly projectPath: string | null;
   readonly firstResultAt: string | null;
+  /** The goal the first result was for (the next step follows it). */
+  readonly firstResultGoal: GoalId | null;
   /** "shown" | "clicked" | "closed" */
   readonly nextStep: string | null;
   readonly builtOwnAt: string | null;
@@ -216,6 +219,7 @@ export function goalState(progress: UnoSetupProgress): GoalState {
     path: parseConnectPath(answers[GOAL_PATH_KEY]),
     projectPath: answers[GOAL_PROJECT_KEY] || null,
     firstResultAt: answers[FIRST_RESULT_KEY] || null,
+    firstResultGoal: parseGoal(answers[FIRST_RESULT_GOAL_KEY]),
     nextStep: answers[NEXT_STEP_KEY] || null,
     builtOwnAt: answers[BUILT_OWN_KEY] || null,
   };
@@ -344,4 +348,17 @@ export function detectBuiltOwn(
     (thread) =>
       !thread.isAssistant && thread.completedAt !== null && Date.parse(thread.createdAt) > since,
   );
+}
+
+/** Records the first result once (later results don't move it). */
+export function withFirstResult(progress: UnoSetupProgress, goal: GoalId): UnoSetupProgress {
+  if (progress.answers[FIRST_RESULT_KEY]) return progress;
+  return {
+    ...progress,
+    answers: {
+      ...progress.answers,
+      [FIRST_RESULT_KEY]: new Date().toISOString(),
+      [FIRST_RESULT_GOAL_KEY]: goal,
+    },
+  };
 }

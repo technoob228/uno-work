@@ -60,13 +60,13 @@ import {
   GOAL_PROJECT_KEY,
   GOAL_SKILLS,
   GOALS,
-  FIRST_RESULT_KEY,
   NEXT_STEP,
   goalAgentsMd,
   goalAsksHow,
   goalFirstPrompt,
   impliedConnectPath,
   withAnswer,
+  withFirstResult,
   withGoal,
   type ConnectPath,
   type GoalId,
@@ -137,11 +137,7 @@ function useGoalActions() {
   const recordFirstResult = useCallback(
     (goal: GoalId, props: Readonly<Record<string, string | number | boolean>> = {}) => {
       trackFunnel("first_result", { goal, props });
-      void update((current) =>
-        current.answers[FIRST_RESULT_KEY]
-          ? current
-          : withAnswer(current, FIRST_RESULT_KEY, new Date().toISOString()),
-      );
+      void update((current) => withFirstResult(current, goal));
     },
     [update],
   );
@@ -792,7 +788,7 @@ function OwnAgentResult({ goal }: { goal: GoalId }) {
   return (
     <Page
       title="Give this computer to your agent"
-      lead="Paste one line where your agent lives. It gets this computer as a tool: commands, files, publishing sites."
+      lead="Claude Code, Codex or Cursor keeps working on this computer when your laptop is closed."
       onBack={
         goal === "own_agent"
           ? () => void navigate({ to: "/setup", search: { step: "welcome" } })
@@ -849,6 +845,14 @@ export function GoalStep() {
   const search = useSearch({ from: "/_chat/setup" });
   const goal = search.goal ?? null;
   const via = search.via ?? null;
+  const update = useUpdateSetupProgress();
+  // Opened straight from Home or a link: this is the goal now.
+  useEffect(() => {
+    if (!goal) return;
+    void update((current) =>
+      current.answers["goal"] === goal ? current : withGoal(current, goal),
+    );
+  }, [goal, update]);
   if (!goal) return <GoalPicker />;
   if (goalAsksHow(goal) && !via) return <HowPicker goal={goal} />;
   if (via === "own_agent" || goal === "own_agent") return <OwnAgentResult goal={goal} />;
