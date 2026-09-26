@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
+import { accountRequest, accountTransport } from "../../../account/unoAccount";
 import { getClientSettings, useUpdateSettings } from "../../../hooks/useSettings";
 import { useFolderChats, useHomeFolderPath } from "../../../hooks/useFolderChats";
 import { ensureEnvironmentApi } from "../../../environmentApi";
@@ -64,6 +65,7 @@ import {
   goalAgentsMd,
   goalAsksHow,
   goalFirstPrompt,
+  goalFromOnboardingPath,
   impliedConnectPath,
   withAnswer,
   withFirstResult,
@@ -333,6 +335,35 @@ function GoalPicker() {
   // The same computer already set up elsewhere goes straight in.
   const machineOnboarded = useServerConfig()?.settings.machineOnboarded === true;
   const decided = useRef(getClientSettings().onboardingCompleted);
+  const navigate = useNavigate();
+  const update = useUpdateSetupProgress();
+
+  // Picked on the console's /start already: go straight to that result.
+  useEffect(() => {
+    if (machineOnboarded || decided.current || accountTransport() === "none") return;
+    let cancelled = false;
+    void accountRequest("GET", "/auth/me")
+      .then((me) => {
+        const picked = goalFromOnboardingPath(
+          (me as { readonly onboarding_path?: unknown } | null)?.onboarding_path,
+        );
+        if (cancelled || !picked || decided.current) return;
+        decided.current = true;
+        void updateSettings({ onboardingCompleted: true, machineOnboarded: true });
+        void update((current) =>
+          withAnswer(withGoal(current, picked.goal), GOAL_PATH_KEY, picked.via),
+        );
+        void navigate({
+          to: "/setup",
+          search: { step: "welcome", goal: picked.goal, via: picked.via },
+          replace: true,
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [machineOnboarded, navigate, update, updateSettings]);
   useEffect(() => {
     if (!machineOnboarded || decided.current) return;
     decided.current = true;

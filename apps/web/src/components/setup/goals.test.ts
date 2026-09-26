@@ -14,6 +14,7 @@ import {
   hasIndexHtml,
   impliedConnectPath,
   parseConnectPath,
+  goalFromOnboardingPath,
   parseGoal,
   siteSlugFrom,
   stripSharedTopFolder,
@@ -64,7 +65,9 @@ describe("goal-first start", () => {
   it("writes goal prompts that keep secrets out of chat", () => {
     expect(goalFirstPrompt("bot", { description: "take orders" })).toContain(".env");
     expect(goalFirstPrompt("site", { description: "yoga" })).toContain("send me the link");
-    expect(goalFirstPrompt("bot", { description: "take orders." })).toContain("take orders. The bot");
+    expect(goalFirstPrompt("bot", { description: "take orders." })).toContain(
+      "take orders. The bot",
+    );
     expect(goalAgentsMd("site", "My website")).toContain("ONE concrete next step");
   });
 
@@ -142,5 +145,13 @@ describe("goal-first start", () => {
         { createdAt: "2026-09-25T11:00:00.000Z", completedAt: "x", isAssistant: false },
       ]),
     ).toBe(true);
+  });
+
+  it("takes the goal picked on the console's /start", () => {
+    expect(goalFromOnboardingPath("bot")).toEqual({ goal: "bot", via: "uno_ai" });
+    expect(goalFromOnboardingPath("agent")).toEqual({ goal: "own_agent", via: "own_agent" });
+    expect(goalFromOnboardingPath("server")).toEqual({ goal: "server", via: "ssh" });
+    expect(goalFromOnboardingPath("work")).toBeNull();
+    expect(goalFromOnboardingPath(null)).toBeNull();
   });
 });

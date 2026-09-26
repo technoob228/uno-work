@@ -362,3 +362,25 @@ export function withFirstResult(progress: UnoSetupProgress, goal: GoalId): UnoSe
     },
   };
 }
+
+/**
+ * The goal picked on the console's /start (`onboarding_path` on the account):
+ * Uno Work opens that goal's result instead of asking again. The console
+ * already asked "how": Uno AI for the goals it sends here.
+ */
+export function goalFromOnboardingPath(
+  value: unknown,
+): { readonly goal: GoalId; readonly via: ConnectPath } | null {
+  switch (value) {
+    case "assistant":
+    case "site":
+    case "bot":
+      return { goal: value, via: "uno_ai" };
+    case "server":
+      return { goal: "server", via: "ssh" };
+    case "agent":
+      return { goal: "own_agent", via: "own_agent" };
+    default:
+      return null;
+  }
+}
