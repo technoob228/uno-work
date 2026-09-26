@@ -31,6 +31,7 @@ import {
   RuntimeRequestId,
   type ThreadId,
   TurnId,
+  UNO_FAST_GATEWAY_MODEL,
 } from "@t3tools/contracts";
 import {
   DateTime,
@@ -486,6 +487,10 @@ export function makeHermesAdapter(
                   mcpServers,
                   skillsExternalDirs: [sharedSkillsRoot()],
                   speechToText: llmProvider === "uno",
+                  // Hermes' own session titles off the chat model (see
+                  // HERMES_TITLE_GENERATION_TIMEOUT_SECONDS). A brought key
+                  // keeps the default: its provider may not serve uno/fast.
+                  ...(llmProvider === "uno" ? { sideTaskModel: UNO_FAST_GATEWAY_MODEL } : {}),
                 }),
               ),
             ),
