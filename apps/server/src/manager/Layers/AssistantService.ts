@@ -40,7 +40,10 @@ import { ProjectionSnapshotQuery } from "../../orchestration/Services/Projection
 import { ManagerCapabilityTokenRepository } from "../../persistence/Services/ManagerCapabilityTokens.ts";
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
-import { awaitUsableBootDefault } from "../../provider/awaitUsableBootDefault.ts";
+import {
+  awaitUsableBootDefault,
+  bootProbesFinished,
+} from "../../provider/awaitUsableBootDefault.ts";
 import {
   FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION,
   isUnusableAutoBootstrapDefault,
@@ -356,7 +359,11 @@ const makeManagerAssistantService = Effect.gen(function* () {
       if (Option.isNone(registeredProject)) {
         // Start the assistant on a harness this machine can actually run —
         // threads it spawns without an explicit model inherit this default.
-        const bootProviders = yield* providerRegistry.getProviders;
+        // Before the boot probes land, the registry holds only cached
+        // snapshots: take the server's fallback then, which the post-probe
+        // pass below re-points (it never touches a default someone picked).
+        const probed = yield* bootProbesFinished(providerRegistry);
+        const bootProviders = probed ? yield* providerRegistry.getProviders : [];
         yield* orchestrationEngine.dispatch(
           {
             type: "project.create",
@@ -914,8 +921,11 @@ export const ManagerAssistantServiceLive = Layer.effect(
  */
 export const AssistantBootstrapLive = Layer.effectDiscard(
   Effect.gen(function* () {
-    yield* awaitUsableBootDefault();
     const assistants = yield* ManagerAssistantService;
+    // The assistant and its chat come first, before the harness probes
+    // (20+ s on a fresh 2 vCPU box): the chat runs on Hermes whatever the
+    // probes say, and until it existed the "Uno" button led to Settings
+    // ("Uno isn't set up on this computer yet").
     yield* assistants.ensureAssistant({ projectId: ASSISTANT_PROJECT_ID, title: "Assistant" });
     // The assistant is one pinned chat ("Uno"); the first start after the
     // update migrates the assistant chat the person used last.
@@ -926,6 +936,10 @@ export const AssistantBootstrapLive = Layer.effectDiscard(
           Effect.logWarning("assistant chat setup failed").pipe(Effect.annotateLogs({ cause })),
         ),
       );
+    // Now the probes: the second pass re-points a default picked before them
+    // to a harness this machine can actually run.
+    yield* awaitUsableBootDefault();
+    yield* assistants.ensureAssistant({ projectId: ASSISTANT_PROJECT_ID, title: "Assistant" });
     // What chats the assistant starts run on (account default_ai), when this
     // machine holds an account key; clients push it otherwise.
     yield* (yield* ManagerAccountDefaultAi).refreshFromAccount();

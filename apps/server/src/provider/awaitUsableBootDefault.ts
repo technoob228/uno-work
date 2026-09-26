@@ -1,6 +1,6 @@
-import { Duration, Effect } from "effect";
+import { Duration, Effect, Option } from "effect";
 
-import { ProviderRegistry } from "./Services/ProviderRegistry.ts";
+import { ProviderRegistry, type ProviderRegistryShape } from "./Services/ProviderRegistry.ts";
 
 /** Upper bound for boot-time defaults waiting on the first harness probes. */
 export const BOOT_DEFAULT_PROBE_WAIT = Duration.seconds(45);
@@ -20,3 +20,15 @@ export const awaitUsableBootDefault = (maxWait: Duration.Input = BOOT_DEFAULT_PR
     if (awaitBootProbes === undefined) return;
     yield* awaitBootProbes.pipe(Effect.timeoutOption(maxWait), Effect.asVoid);
   });
+
+/**
+ * Whether the boot probes have finished, without waiting. Registries without
+ * background probing (tests, mocks) count as finished.
+ */
+export const bootProbesFinished = (
+  providerRegistry: Pick<ProviderRegistryShape, "awaitBootProbes">,
+): Effect.Effect<boolean> => {
+  const awaitBootProbes = providerRegistry.awaitBootProbes;
+  if (awaitBootProbes === undefined) return Effect.succeed(true);
+  return awaitBootProbes.pipe(Effect.timeoutOption(Duration.millis(1)), Effect.map(Option.isSome));
+};
