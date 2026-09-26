@@ -121,6 +121,18 @@ export function assistantEngineNotice(
           busy: false,
           dismissible: true,
         };
+  } else if (!status.gatewayConfigured && status.gatewayPending === true) {
+    // A fresh computer: the console hands it the AI key seconds after sign-in.
+    return {
+      id: "getting-ready",
+      variant: "info",
+      title: "Uno is getting ready…",
+      description:
+        "Your computer is finishing its setup. Write to Uno now — the message goes out as soon as it's ready.",
+      detail: null,
+      action: null,
+      busy: true,
+    };
   } else if (!status.gatewayConfigured) {
     return {
       id: "gateway-missing",

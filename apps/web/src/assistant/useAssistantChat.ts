@@ -4,8 +4,14 @@
  * else the daemon sets one up now (the same migration it runs on start);
  * on a daemon too old for that, a new chat in the assistant's workspace;
  * with no assistant at all, its settings.
+ *
+ * A computer that has just started may still be setting its assistant up:
+ * opening then keeps asking for a while ("Getting ready…") rather than
+ * sending the person to Settings, and waits for the chat to reach this
+ * client before showing it (a route to a chat the client doesn't know yet
+ * rendered an empty page with no message box).
  */
-import { scopeProjectRef } from "@t3tools/client-runtime";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import { ASSISTANT_PROJECT_ID, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo, useState } from "react";
@@ -18,11 +24,36 @@ import { ensureAssistantChat } from "../lib/managerApi";
 import {
   selectProjectsForEnvironment,
   selectSidebarThreadsForEnvironment,
+  selectThreadExistsByRef,
   useStore,
 } from "../store";
 import { buildThreadRouteParams } from "../threadRoutes";
 import type { SidebarThreadSummary } from "../types";
-import { findAssistantChat } from "./assistantChat.logic";
+import { ensureAssistantChatWhenReady, findAssistantChat } from "./assistantChat.logic";
+
+/** How long to wait for a just-created chat to reach this client. */
+const ASSISTANT_CHAT_ARRIVAL_WAIT_MS = 5_000;
+
+/** Resolves once the thread is in the client store (or after `timeoutMs`). */
+function waitForThreadInStore(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  timeoutMs: number,
+): Promise<void> {
+  const ref = scopeThreadRef(environmentId, threadId);
+  if (selectThreadExistsByRef(useStore.getState(), ref)) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      unsubscribe();
+      resolve();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    const unsubscribe = useStore.subscribe((state) => {
+      if (selectThreadExistsByRef(state, ref)) done();
+    });
+  });
+}
 
 export interface AssistantChatState {
   readonly environmentId: EnvironmentId | null;
@@ -70,8 +101,15 @@ export function useAssistantChat(): AssistantChatState {
     setOpening(true);
     try {
       if (daemonMarksChat) {
-        const result = await ensureAssistantChat({ environmentId }).catch(() => null);
+        const result = await ensureAssistantChatWhenReady(() =>
+          ensureAssistantChat({ environmentId }),
+        );
         if (result) {
+          await waitForThreadInStore(
+            environmentId,
+            result.threadId,
+            ASSISTANT_CHAT_ARRIVAL_WAIT_MS,
+          );
           await goToThread(environmentId, result.threadId);
           return;
         }

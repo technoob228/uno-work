@@ -44,8 +44,11 @@ export function useAssistantLlm(environmentId: EnvironmentId | null): AssistantL
     enabled: supported && environmentId !== null,
     retry: false,
     refetchInterval: (current) => {
-      const state = current.state.data?.harness.state;
-      return state === "installing" || state === "checking" ? BUSY_POLL_MS : IDLE_POLL_MS;
+      const data = current.state.data;
+      const state = data?.harness.state;
+      return state === "installing" || state === "checking" || data?.gatewayPending === true
+        ? BUSY_POLL_MS
+        : IDLE_POLL_MS;
     },
   });
 

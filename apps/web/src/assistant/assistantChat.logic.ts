@@ -105,3 +105,33 @@ export function assistantConversationLabel(
 
 /** How many conversations the folded-out Uno row lists before "Show all". */
 export const ASSISTANT_CONVERSATIONS_PREVIEW = 5;
+
+/** How long opening keeps asking a computer that is still starting up. */
+export const ASSISTANT_CHAT_READY_WAIT_MS = 20_000;
+const ASSISTANT_CHAT_RETRY_MS = 1_000;
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * The daemon's answer for THE chat, asking again while it is still setting
+ * the assistant up (the call fails until then). `null`: no chat within
+ * `waitMs` — a real absence.
+ */
+export async function ensureAssistantChatWhenReady<T>(
+  ensure: () => Promise<T>,
+  options: {
+    readonly waitMs?: number;
+    readonly retryMs?: number;
+    readonly now?: () => number;
+    readonly wait?: (ms: number) => Promise<void>;
+  } = {},
+): Promise<T | null> {
+  const now = options.now ?? Date.now;
+  const wait = options.wait ?? sleep;
+  const deadline = now() + (options.waitMs ?? ASSISTANT_CHAT_READY_WAIT_MS);
+  for (;;) {
+    const result = await ensure().catch(() => null);
+    if (result !== null) return result;
+    if (now() >= deadline) return null;
+    await wait(options.retryMs ?? ASSISTANT_CHAT_RETRY_MS);
+  }
+}

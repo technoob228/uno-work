@@ -66,9 +66,11 @@ function SidebarAssistantRowVisible() {
   );
   const subtitle =
     status?.label ??
-    (others.length > 0
-      ? `${others.length + 1} conversations · always on`
-      : "Your assistant · always on");
+    (opening
+      ? "Getting ready…"
+      : others.length > 0
+        ? `${others.length + 1} conversations · always on`
+        : "Your assistant · always on");
   const closeMobile = () => {
     if (isMobile) setOpenMobile(false);
   };
