@@ -142,7 +142,10 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
       }): Effect.Effect<HermesLlmRoute, string> =>
         Effect.gen(function* () {
           if (input.provider === "uno") {
-            const apiKey = yield* gatewayKey.harnessKey();
+            // A fresh Work box gets its key from the console seconds after
+            // sign-in: a first message sent before that waits for it here
+            // (bounded) instead of reaching the gateway without a key.
+            const apiKey = yield* gatewayKey.awaitHarnessKey();
             const label = gatewayKey.appOfThread(input.threadId);
             return {
               provider: "uno" as const,

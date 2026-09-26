@@ -1,12 +1,18 @@
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer, Ref } from "effect";
+import { Duration, Effect, Fiber, Layer, Ref } from "effect";
 
 import {
   ServerSecretStore,
   type ServerSecretStoreShape,
 } from "./auth/Services/ServerSecretStore.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
-import { UNO_GATEWAY_KEY_SECRET_KEY, UnoGatewayKey, UnoGatewayKeyLive } from "./unoGatewayKey.ts";
+import {
+  UNO_GATEWAY_KEY_SECRET_KEY,
+  UnoGatewayKey,
+  UnoGatewayKeyLive,
+  gatewayKeyState,
+  looksLikeUnoBox,
+} from "./unoGatewayKey.ts";
 
 const ACCOUNT_KEY = "uno_usr_abcd1234";
 
@@ -176,6 +182,78 @@ it.effect("a key written after startup is picked up at once, not after the cache
     assert.strictEqual(yield* gateway.harnessKey(), "");
     yield* settings.updateSettings({ uno: { apiKey: "unollm_written_later" } });
     assert.strictEqual(yield* gateway.harnessKey(), "unollm_written_later");
+  }).pipe(
+    Effect.provide(
+      UnoGatewayKeyLive.pipe(
+        Layer.provideMerge(
+          Layer.mergeAll(
+            ServerSettingsService.layerTest({ uno: { apiKey: "" } }),
+            secretStoreLayer(),
+          ),
+        ),
+      ),
+    ),
+  ),
+);
+
+it("a key is pending only on an Uno box, and only for the grace window", () => {
+  const base = { key: "", firstAskedAt: 1_000, graceMs: 90_000 };
+  assert.strictEqual(
+    gatewayKeyState({ ...base, key: "unollm_x", onUnoBox: false, now: 0 }),
+    "ready",
+  );
+  assert.strictEqual(gatewayKeyState({ ...base, onUnoBox: true, now: 60_000 }), "pending");
+  assert.strictEqual(gatewayKeyState({ ...base, onUnoBox: true, now: 91_000 }), "missing");
+  // A laptop without sign-in: nothing is on its way.
+  assert.strictEqual(gatewayKeyState({ ...base, onUnoBox: false, now: 2_000 }), "missing");
+});
+
+it("recognises an Uno box by its id, token or hostname", () => {
+  const none = {
+    envBoxId: undefined,
+    hostname: "laptop",
+    settingsBoxId: null,
+    boxToken: undefined,
+  };
+  assert.isFalse(looksLikeUnoBox(none));
+  assert.isTrue(looksLikeUnoBox({ ...none, envBoxId: "1955" }));
+  assert.isTrue(looksLikeUnoBox({ ...none, settingsBoxId: 1955 }));
+  assert.isTrue(looksLikeUnoBox({ ...none, boxToken: "unobox_x" }));
+  assert.isTrue(looksLikeUnoBox({ ...none, hostname: "box-1955.uno4.dev" }));
+});
+
+// The first message on a fresh Work box, sent before the console wrote the
+// key: the Hermes route waits for it instead of calling the gateway keyless.
+it.live("awaitHarnessKey waits for a key that is on its way", () =>
+  Effect.gen(function* () {
+    const gateway = yield* UnoGatewayKey;
+    const settings = yield* ServerSettingsService;
+    assert.strictEqual(yield* gateway.keyState(), "pending");
+    const waiting = yield* gateway.awaitHarnessKey(Duration.seconds(10)).pipe(Effect.forkChild);
+    yield* Effect.sleep(Duration.millis(300));
+    yield* settings.updateSettings({ uno: { apiKey: "unollm_arrived" } });
+    assert.strictEqual(yield* Fiber.join(waiting), "unollm_arrived");
+    assert.strictEqual(yield* gateway.keyState(), "ready");
+  }).pipe(
+    Effect.provide(
+      UnoGatewayKeyLive.pipe(
+        Layer.provideMerge(
+          Layer.mergeAll(
+            ServerSettingsService.layerTest({ uno: { apiKey: "", boxId: 1955 } }),
+            secretStoreLayer(),
+          ),
+        ),
+      ),
+    ),
+  ),
+);
+
+it.live("awaitHarnessKey does not wait where no key is expected", () =>
+  Effect.gen(function* () {
+    const gateway = yield* UnoGatewayKey;
+    const started = Date.now();
+    assert.strictEqual(yield* gateway.awaitHarnessKey(Duration.seconds(10)), "");
+    assert.isBelow(Date.now() - started, 1_000);
   }).pipe(
     Effect.provide(
       UnoGatewayKeyLive.pipe(
