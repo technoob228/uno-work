@@ -1656,6 +1656,48 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  // Root on a Linux box gets the CLI's JSON; anyone else — including the
+  // service user every agent runs as — gets 403. The test sees whichever it is.
+  it.effect("mints a pairing token over loopback for root only, in the CLI's JSON", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const url = yield* getHttpServerUrl("/api/local/pairing-token");
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ role: "owner", ttl: "10m", label: "console" }),
+        }),
+      );
+      const body = (yield* Effect.promise(() => response.json())) as Record<string, unknown>;
+      const asRoot = process.platform === "linux" && process.getuid?.() === 0;
+      if (!asRoot) {
+        assert.equal(response.status, 403);
+        assert.equal(typeof body.error, "string");
+        return;
+      }
+      assert.equal(response.status, 200);
+      assert.equal(body.role, "owner");
+      assert.equal(body.label, "console");
+      assert.equal(typeof body.credential, "string");
+      const bootstrapResult = yield* bootstrapBrowserSession(body.credential as string);
+      assert.equal(bootstrapResult.response.status, 200);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("refuses a relayed local pairing request", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const url = yield* getHttpServerUrl("/api/local/pairing-token");
+      const response = yield* Effect.promise(() =>
+        fetch(url, { method: "POST", headers: { "x-forwarded-for": "203.0.113.9" } }),
+      );
+      assert.equal(response.status, 403);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   describe("link requests (use this computer)", () => {
     const WEB_APP_ORIGIN = "https://app.uno4.work";
 
