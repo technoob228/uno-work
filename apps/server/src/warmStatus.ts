@@ -1,6 +1,7 @@
 import { Duration, Effect, Option } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 
+import { AssistantPrewarm } from "./manager/assistantPrewarm.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 
 /**
@@ -11,7 +12,9 @@ import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
  * and pausing it after a fixed settle (20 s). For Uno Work that froze a daemon
  * still probing its harnesses (~20–25 s on 2 vCPU, measured 25.09), so every
  * clone would redo the probes. With this endpoint the node can wait for the
- * real signal instead: 200 once the boot probes have finished, 503 before.
+ * real signal instead: 200 once the boot probes have finished and the Uno
+ * chat's Hermes is up (or cannot be — no gateway key before provisioning — or
+ * 30 s have passed: manager/assistantPrewarm.ts), 503 before.
  *
  * Public on purpose (the node asks without a session) and says nothing but a
  * boolean. The router attaches only after the startup gate is released, so a
@@ -30,9 +33,12 @@ export const warmStatusRouteLayer = HttpRouter.add(
         : Option.isSome(
             yield* registry.awaitBootProbes.pipe(Effect.timeoutOption(Duration.millis(1))),
           );
+    const prewarm = yield* Effect.serviceOption(AssistantPrewarm);
+    const assistantReady = Option.isNone(prewarm) ? true : yield* prewarm.value.settled;
+    const warm = probesDone && assistantReady;
     return HttpServerResponse.jsonUnsafe(
-      { warm: probesDone },
-      { status: probesDone ? 200 : 503, headers: { "cache-control": "no-store" } },
+      { warm },
+      { status: warm ? 200 : 503, headers: { "cache-control": "no-store" } },
     );
   }),
 );

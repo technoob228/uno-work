@@ -31,6 +31,7 @@ import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import { unoWorkRouteLayers } from "./unoWork/http.ts";
 import { warmStatusRouteLayer } from "./warmStatus.ts";
+import { AssistantPrewarmLive } from "./manager/assistantPrewarm.ts";
 import { setupToolsRouteLayers } from "./setupTools/http.ts";
 import { ConnectorsServiceLive } from "./setupTools/ConnectorsService.ts";
 import { MaterialsServiceLive } from "./setupTools/MaterialsService.ts";
@@ -259,6 +260,9 @@ const PlatformServicesLive = Layer.unwrap(
 );
 
 const ReactorLayerLive = Layer.empty.pipe(
+  // The Uno chat's Hermes, started before its first message; rides the
+  // provider command reactor's queue (manager/assistantPrewarm.ts).
+  Layer.provideMerge(AssistantPrewarmLive),
   Layer.provideMerge(OrchestrationReactorLive),
   Layer.provideMerge(ProviderRuntimeIngestionLive),
   Layer.provideMerge(ProviderCommandReactorLive),
