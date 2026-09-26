@@ -182,9 +182,18 @@ export function useSettings<T = UnifiedSettings>(selector?: (s: UnifiedSettings)
  */
 export function useUpdateSettings() {
   const updateSettings = useCallback((patch: Partial<UnifiedSettings>): Promise<void> => {
+    const { serverPatch, clientPatch } = splitPatch(patch);
+    // Client keys are local: apply them now, before any await. A screen that
+    // saves "done" on both sides (the welcome's Skip setup) must not keep the
+    // person waiting on the machine's round trip for its own local flag — the
+    // root guard reads `onboardingCompleted` from here.
+    if (Object.keys(clientPatch).length > 0) {
+      persistClientSettings({
+        ...getClientSettingsSnapshot(),
+        ...clientPatch,
+      });
+    }
     const work = (async () => {
-      const { serverPatch, clientPatch } = splitPatch(patch);
-
       if (Object.keys(serverPatch).length > 0) {
         // Hydrate server config before optimistic apply — on cold start the
         // atom is null until the RPC welcome arrives. Without this wait the
@@ -195,13 +204,6 @@ export function useUpdateSettings() {
         // Await the RPC so callers can surface persist failures (toast,
         // rollback, etc.). Throwing here is intentional.
         await ensureLocalApi().server.updateSettings(serverPatch);
-      }
-
-      if (Object.keys(clientPatch).length > 0) {
-        persistClientSettings({
-          ...getClientSettingsSnapshot(),
-          ...clientPatch,
-        });
       }
     })();
     // Attach a default error sink so callers that don't await the returned
