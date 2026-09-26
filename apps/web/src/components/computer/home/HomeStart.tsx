@@ -5,7 +5,7 @@
  * built-in widgets and apps' own widgets. Customize lives on the page itself,
  * next to "Add a widget"; the computer lives in the header pill.
  */
-import type { EnvironmentId, UnoMachineApp } from "@t3tools/contracts";
+import { DEFAULT_RUNTIME_MODE, type EnvironmentId, type UnoMachineApp } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { CheckIcon, PencilIcon, PlusIcon, RotateCcwIcon, XIcon } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
@@ -20,6 +20,7 @@ import { programRemoval, type ProgramTile } from "../programModel";
 import { ComputerDetails, type HomeComputer } from "./ComputerPill";
 import { HomeAppWidget, HomeAppWidgetOpen } from "./HomeAppWidget";
 import { HomeComposer, type HomeStartOptions } from "./HomeComposer";
+import { HomeGoalButtons, HomeNextStep, useGoalWatcher } from "./HomeGoals";
 import { HomeUnoEntry } from "./HomeUnoEntry";
 import {
   ContinueCards,
@@ -156,6 +157,7 @@ export function HomeStart({
     },
   });
   const starters = setupHome.starters.length > 0 ? setupHome.starters : homeStarters;
+  useGoalWatcher({ threads, machineApps });
 
   const widgetApps = useMemo(() => {
     const out = new Map<string, UnoMachineApp>();
@@ -301,7 +303,18 @@ export function HomeStart({
                 defaultFolder={setupHome.project}
                 onStart={onStartTask}
               />
+              <HomeGoalButtons />
               <NeedsYouPill threads={threads} now={now} />
+              <HomeNextStep
+                onStartTask={(prompt, folder) =>
+                  void onStartTask(prompt, {
+                    folder,
+                    modelSelection: null,
+                    runtimeMode: DEFAULT_RUNTIME_MODE,
+                  })
+                }
+                onAskUno={(prompt) => void onAskUno(prompt)}
+              />
               <HomeUnoEntry />
             </div>
           ),

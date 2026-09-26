@@ -604,8 +604,8 @@ export function GeneralSettingsPanel() {
       ) : null}
       <SettingsSection title="General">
         <SettingsRow
-          title="Welcome tour"
-          description="Replay the setup walkthrough."
+          title="Start screen"
+          description="Pick what you want to do again: assistant, website, bot, your agent, server."
           control={
             <Button
               size="xs"
@@ -616,6 +616,19 @@ export function GeneralSettingsPanel() {
               }}
             >
               Show again
+            </Button>
+          }
+        />
+        <SettingsRow
+          title="Full setup"
+          description="Default AI, instructions, skills, connectors, Telegram and Slack, your files."
+          control={
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => void navigate({ to: "/setup", search: { step: "ai" } })}
+            >
+              Open
             </Button>
           }
         />
