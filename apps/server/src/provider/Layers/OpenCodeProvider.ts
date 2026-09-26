@@ -4,6 +4,9 @@ import {
   type OpenCodeSettings,
   type ServerProviderModel,
 } from "@t3tools/contracts";
+import { statSync } from "node:fs";
+import * as nodePath from "node:path";
+
 import { Cause, Data, Effect } from "effect";
 
 import { createModelCapabilities } from "@t3tools/shared/model";
@@ -308,6 +311,30 @@ export const makePendingOpenCodeProvider = (
   });
 };
 
+/**
+ * `<binary> --version` of an absolute binary path, remembered per file
+ * (path + size + mtime). The probe runs whenever an instance is created or
+ * rebuilt — on a Work box also when the gateway key lands — and starting
+ * uno-code just to print its version is a second of processor on 2 vCPU.
+ * A reinstalled binary changes size/mtime and is asked again.
+ */
+const versionByBinary = new Map<string, string>();
+
+function binaryFingerprint(binaryPath: string): string | null {
+  if (!nodePath.isAbsolute(binaryPath)) return null;
+  try {
+    const stat = statSync(binaryPath);
+    return `${binaryPath}\0${stat.size}\0${stat.mtimeMs}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Test hook. */
+export function clearOpenCodeVersionCache(): void {
+  versionByBinary.clear();
+}
+
 export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatus")(function* (
   openCodeSettings: OpenCodeSettings,
   cwd: string,
@@ -371,7 +398,11 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
   }
 
   let version: string | null = null;
-  if (!isExternalServer) {
+  const fingerprint = isExternalServer ? null : binaryFingerprint(openCodeSettings.binaryPath);
+  const cachedVersion = fingerprint === null ? undefined : versionByBinary.get(fingerprint);
+  if (cachedVersion !== undefined) {
+    version = cachedVersion;
+  } else if (!isExternalServer) {
     const versionExit = yield* Effect.exit(
       openCodeRuntime
         .runOpenCodeCommand({
@@ -419,6 +450,8 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
         },
       });
     }
+    // Only a version that passed the minimum is remembered.
+    if (fingerprint !== null) versionByBinary.set(fingerprint, version);
   }
 
   const inventoryExit = yield* Effect.exit(
