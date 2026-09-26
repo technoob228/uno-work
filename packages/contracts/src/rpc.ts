@@ -50,6 +50,9 @@ import {
   UnoComputerMetrics,
   UnoComputerLocalMetrics,
   UnoComputerPowerInput,
+  UnoComputerSetEconomyInput,
+  UnoEconomyPresence,
+  UnoEconomyPresenceInput,
   UnoComputerResizeInput,
   UnoComputerResizeOptions,
   UnoComputerResizeResult,
@@ -445,6 +448,8 @@ export const WS_METHODS = {
   unoComputerShareApp: "uno.computer.shareApp",
   unoComputerUnshareApp: "uno.computer.unshareApp",
   unoComputerPower: "uno.computer.power",
+  unoComputerSetEconomy: "uno.computer.setEconomy",
+  unoEconomyPresence: "uno.economy.presence",
   unoComputerMachineApps: "uno.computer.machineApps",
   unoComputerAppAction: "uno.computer.appAction",
   appAiList: "uno.appAi.list",
@@ -1606,6 +1611,17 @@ export const WsUnoComputerPowerRpc = Rpc.make(WS_METHODS.unoComputerPower, {
   error: UnoCloudRpcError,
 });
 
+export const WsUnoComputerSetEconomyRpc = Rpc.make(WS_METHODS.unoComputerSetEconomy, {
+  payload: UnoComputerSetEconomyInput,
+  success: UnoComputerState,
+  error: UnoCloudRpcError,
+});
+
+export const WsUnoEconomyPresenceRpc = Rpc.make(WS_METHODS.unoEconomyPresence, {
+  payload: UnoEconomyPresenceInput,
+  success: UnoEconomyPresence,
+});
+
 /* ------------------------------------------------------------------
  * Files — the computer's file manager. Paths are absolute and confined
  * to the Work user's home; shares are public `/s/<token>` links.
@@ -1971,6 +1987,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoComputerShareAppRpc,
   WsUnoComputerUnshareAppRpc,
   WsUnoComputerPowerRpc,
+  WsUnoComputerSetEconomyRpc,
+  WsUnoEconomyPresenceRpc,
   WsFilesListRpc,
   WsFilesStatRpc,
   WsFilesCreateFolderRpc,

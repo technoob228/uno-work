@@ -89,6 +89,8 @@ import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePat
 import { WorkspaceService } from "./workspaceRegistry/WorkspaceService.ts";
 import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
+import { EconomyPresence } from "./economy/EconomyPresence.ts";
+import { PRESENCE_OFF } from "./economy/economyReport.ts";
 import { FilesService } from "./files/FilesService.ts";
 import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
 import { ComputerResourcesService } from "./computerResources/ComputerResourcesService.ts";
@@ -282,6 +284,8 @@ const makeWsRpcLayer = (
       const workspaceRegistry = yield* WorkspaceService;
       const unoCloud = yield* UnoCloudService;
       const unoComputer = yield* UnoComputerService;
+      // Optional: test layers and older compositions run without it (answers "off").
+      const economyPresence = Option.getOrUndefined(yield* Effect.serviceOption(EconomyPresence));
       const files = yield* FilesService;
       const machineApps = yield* MachineAppsService;
       const appSdk = yield* AppSdkService;
@@ -1580,6 +1584,22 @@ const makeWsRpcLayer = (
               }
               return yield* unoComputer.getState({ boxId });
             }),
+            { "rpc.aggregate": "uno-computer" },
+          ),
+        // Economy mode: on/off and the idle timer (console decides the rest).
+        [WS_METHODS.unoComputerSetEconomy]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerSetEconomy,
+            unoComputer
+              .setEconomy(input)
+              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
+        // "The person is here" + when the computer plans to sleep.
+        [WS_METHODS.unoEconomyPresence]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoEconomyPresence,
+            economyPresence ? economyPresence.presence(input.input) : Effect.succeed(PRESENCE_OFF),
             { "rpc.aggregate": "uno-computer" },
           ),
         [WS_METHODS.unoComputerResizeOptions]: (input) =>

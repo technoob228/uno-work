@@ -57,6 +57,7 @@ import {
   fetchControlPlaneJson,
 } from "./unoCloudParse.ts";
 import { parseComputerBoost } from "./unoComputerBoost.ts";
+import { parseComputerEconomy } from "./unoComputerEconomy.ts";
 
 export const NOT_LINKED_MESSAGE = "Connect your Uno account first.";
 export const NO_COMPUTER_MESSAGE = "This machine isn't an Uno computer.";
@@ -220,6 +221,7 @@ export function parseComputerBox(
   const id = asNumber(record["id"], -1);
   if (id < 0) return null;
   const boost = parseComputerBoost(record["boost"]);
+  const economy = parseComputerEconomy(record["economy"]);
   return {
     id,
     name: asString(record["name"]) || `computer-${id}`,
@@ -233,6 +235,7 @@ export function parseComputerBox(
     ssh: asNullableString(record["ssh_command"]) ?? asNullableString(record["ssh"]),
     ports,
     ...(boost ? { boost } : {}),
+    ...(economy ? { economy } : {}),
   };
 }
 

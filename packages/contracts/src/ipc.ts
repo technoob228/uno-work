@@ -172,6 +172,9 @@ import type {
   UnoComputerMetrics,
   UnoComputerLocalMetrics,
   UnoComputerPowerInput,
+  UnoComputerSetEconomyInput,
+  UnoEconomyPresence,
+  UnoEconomyPresenceInput,
   UnoComputerResizeInput,
   UnoComputerResizeOptions,
   UnoComputerResizeResult,
@@ -883,6 +886,10 @@ export interface EnvironmentApi {
     shareApp: (input: UnoComputerShareAppInput) => Promise<UnoComputerAppAccess>;
     unshareApp: (input: UnoComputerUnshareAppInput) => Promise<UnoComputerAppAccess>;
     power: (input: UnoComputerPowerInput) => Promise<UnoComputerState>;
+    /** Economy mode: on/off and the idle timer. */
+    setEconomy: (input: UnoComputerSetEconomyInput) => Promise<UnoComputerState>;
+    /** "The person is here" (throttled) + the latest economy picture. */
+    economyPresence: (input: UnoEconomyPresenceInput) => Promise<UnoEconomyPresence>;
     /** Programs found on this machine (manifests, docker, systemd, open ports). */
     machineApps: () => Promise<UnoMachineApps>;
     appAction: (input: UnoMachineAppActionInput) => Promise<UnoMachineApps>;

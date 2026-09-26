@@ -37,6 +37,7 @@ import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
 import { AppCatalogDialog } from "./AppCatalogDialog";
 import { BoostControl } from "./BoostControl";
+import { EconomyCard } from "./EconomyControl";
 import { ChatInFolderDialog } from "./ChatInFolderDialog";
 import { ComputerActivityCard } from "./ComputerActivityCard";
 import { ComputerEngineersDoor } from "./ComputerEngineersDoor";
@@ -413,6 +414,8 @@ export function ComputerView() {
         </Notice>
       ) : null}
       {stateQuery.isSuccess && !computer?.linked ? <UnlinkedNote /> : null}
+      {/* Economy mode ("runs only when needed"): only when the console offers it. */}
+      {box?.economy ? <EconomyCard environmentId={environmentId} boxId={pickedBoxId} /> : null}
       {stateQuery.isSuccess && box === null && (computer?.candidates.length ?? 0) > 0 ? (
         <CloudComputers
           candidates={computer?.candidates ?? []}
@@ -543,7 +546,11 @@ export function ComputerView() {
                     onResize={canResize ? () => setResizeOpen(true) : undefined}
                     lowResource={box ? lowResource : null}
                     boost={boostNode}
+                    economy={box?.economy}
                   />
+                  {box?.economy ? (
+                    <EconomyCard environmentId={environmentId} boxId={pickedBoxId} />
+                  ) : null}
                   <ComputerPrograms
                     builtIns={builtIns}
                     showBuiltIns={false}
