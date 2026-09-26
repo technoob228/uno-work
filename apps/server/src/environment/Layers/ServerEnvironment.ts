@@ -72,12 +72,30 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
   // (rotateEnvironmentId) instead of a daemon restart — see cloneIdentity.ts.
   const environmentIdRef = yield* Ref.make(EnvironmentId.make(environmentIdRaw));
   const cwdBaseName = path.basename(serverConfig.cwd).trim();
-  const label = yield* resolveServerEnvironmentLabel({
+  const startupLabel = yield* resolveServerEnvironmentLabel({
     cwdBaseName,
+  });
+  // Имя машины на клоне из memory-снапшота: демон стартовал на warm-VM
+  // (hostname img-N-warm), а своё имя клон получает от гостевого агента уже
+  // после restore. Без перечитывания интерфейс звал компьютер «img-177-warm»
+  // (26.09). Перечитываем только когда hostname сменился — resolve запускает
+  // hostnamectl, делать это на каждый запрос дорого.
+  const labelRef = yield* Ref.make({ hostname: OS.hostname(), label: startupLabel });
+  const currentLabel = Effect.gen(function* () {
+    const hostname = OS.hostname();
+    const cached = yield* Ref.get(labelRef);
+    if (cached.hostname === hostname) {
+      return cached.label;
+    }
+    const label = yield* resolveServerEnvironmentLabel({ cwdBaseName, hostname }).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.orElseSucceed(() => cached.label),
+    );
+    yield* Ref.set(labelRef, { hostname, label });
+    return label;
   });
 
   const base = {
-    label,
     platform: {
       os: platformOs(),
       arch: platformArch(),
@@ -93,7 +111,10 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
       assistantLlm: true,
       assistantConversations: true,
     },
-  } satisfies Omit<ExecutionEnvironmentDescriptor, "machineKind" | "unoBoxId" | "environmentId">;
+  } satisfies Omit<
+    ExecutionEnvironmentDescriptor,
+    "machineKind" | "unoBoxId" | "environmentId" | "label"
+  >;
 
   // Built per call: the box id can arrive after startup (control-plane probe),
   // and the descriptor must say "Uno box" from that moment on.
@@ -102,8 +123,10 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
   const getDescriptor = Effect.gen(function* () {
     const unoBoxId = yield* unoBoxIdentity.current;
     const environmentId = yield* Ref.get(environmentIdRef);
+    const label = yield* currentLabel;
     return {
       ...base,
+      label,
       environmentId,
       ...resolveMachineKind({
         mode: serverConfig.mode,
