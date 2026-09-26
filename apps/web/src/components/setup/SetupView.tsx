@@ -16,7 +16,7 @@ import { MaterialsStep } from "./steps/MaterialsStep";
 import { ProjectStep } from "./steps/ProjectStep";
 import { SkillsStep } from "./steps/SkillsStep";
 import { TourDoneStep } from "./steps/TourDoneStep";
-import { WelcomeStep } from "./steps/WelcomeStep";
+import { GoalStep } from "./steps/GoalStep";
 import { useUpdateSetupProgress } from "./useSetupProgress";
 
 const STEP_VIEW: Readonly<Record<SetupStepId, ComponentType>> = {
@@ -42,7 +42,7 @@ export function SetupView() {
     );
   }, [step, update]);
 
-  if (step === "welcome") return <WelcomeStep />;
+  if (step === "welcome") return <GoalStep />;
   if (step === "tour-done") return <TourDoneStep />;
   const View = STEP_VIEW[step];
   return <View key={step} />;

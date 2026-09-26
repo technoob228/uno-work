@@ -18,6 +18,9 @@ import type {
 import {
   CirclePlayIcon,
   CircleStopIcon,
+  LoaderIcon,
+  MoonIcon,
+  WrenchIcon,
   EyeIcon,
   ExternalLinkIcon,
   EyeOffIcon,
@@ -45,6 +48,7 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Spinner } from "../ui/spinner";
+import { appPrimaryAction, type AppPrimaryAction } from "./appPrimaryAction";
 import { displayAddress } from "./computerFormat";
 import { ProgramIcon } from "./ComputerPrograms";
 import { CopyButton } from "./computerUi";
@@ -447,6 +451,41 @@ function AiSpendingBlock({
   );
 }
 
+const PRIMARY_ICON: Record<AppPrimaryAction["kind"], typeof ExternalLinkIcon> = {
+  open: ExternalLinkIcon,
+  start: CirclePlayIcon,
+  setup: SparklesIcon,
+  fix: WrenchIcon,
+  installing: LoaderIcon,
+  asleep: MoonIcon,
+};
+
+/** The app's one obvious button, first on its card. */
+function PrimaryActionButton({
+  action,
+  busy,
+  onRun,
+}: {
+  action: AppPrimaryAction;
+  busy: boolean;
+  onRun: () => void;
+}) {
+  const Icon = PRIMARY_ICON[action.kind];
+  return (
+    <Button
+      className="w-full"
+      variant={action.kind === "fix" ? "destructive" : "default"}
+      disabled={action.disabled || busy}
+      onClick={onRun}
+      data-testid="program-primary-button"
+      data-action={action.kind}
+    >
+      {busy || action.kind === "installing" ? <Spinner className="size-3.5" /> : <Icon />}
+      {busy && action.kind === "start" ? "Starting…" : action.label}
+    </Button>
+  );
+}
+
 export interface ProgramRemoveControls {
   readonly pending: boolean;
   readonly error: string | null;
@@ -487,7 +526,13 @@ export function ProgramDialog({
   remove,
   aiLimit,
   signIn,
+  onPrimaryAction,
 }: {
+  /**
+   * Runs the app's one primary action (Open / Start / Set up with Uno / Fix
+   * with Uno) — the big button first on the card. Absent = no such button.
+   */
+  onPrimaryAction?: ((tile: ProgramTile) => void) | undefined;
   tile: ProgramTile | null;
   machineApps: UnoMachineApps | undefined;
   browserOnMachine: boolean;
@@ -518,6 +563,9 @@ export function ProgramDialog({
     !app.loopbackOnly;
   const blocked = machineApps?.publishBlockedReason ?? null;
   const busy = pendingAction !== null || remove.pending;
+  const primary = tile && onPrimaryAction ? appPrimaryAction(tile) : null;
+  // The big button starts it; the row below keeps only the other things.
+  const startIsPrimary = primary?.kind === "start" && primary.machineAppId !== null;
   const nonWebForwards = publication?.forwards.filter(
     (f) => f.protocol !== "tcp" || !app?.http || publication.url === null,
   );
@@ -543,7 +591,14 @@ export function ProgramDialog({
                   templateId={tile.templateId}
                 />
                 <div className="min-w-0">
-                  <DialogTitle className="truncate">{tile.name}</DialogTitle>
+                  <DialogTitle className="truncate">
+                    {tile.name}
+                    {tile.product ? (
+                      <span className="ml-2 text-sm font-normal text-muted-foreground">
+                        {tile.product}
+                      </span>
+                    ) : null}
+                  </DialogTitle>
                   <DialogDescription className="flex items-center gap-1.5">
                     <span
                       className={cn(
@@ -563,6 +618,13 @@ export function ProgramDialog({
               </div>
             </DialogHeader>
             <DialogPanel className="flex flex-col gap-3">
+              {primary && onPrimaryAction ? (
+                <PrimaryActionButton
+                  action={primary}
+                  busy={primary.kind === "start" && pendingAction === "start"}
+                  onRun={() => onPrimaryAction(tile)}
+                />
+              ) : null}
               {app?.description ? (
                 <p className="text-sm leading-relaxed text-muted-foreground">{app.description}</p>
               ) : null}
@@ -674,7 +736,12 @@ export function ProgramDialog({
                       Hide from the internet
                     </Button>
                   ) : publishable && !blocked ? (
-                    <Button size="sm" disabled={busy} onClick={() => onAction(app.id, "publish")}>
+                    <Button
+                      size="sm"
+                      variant={primary ? "outline" : "default"}
+                      disabled={busy}
+                      onClick={() => onAction(app.id, "publish")}
+                    >
                       {pendingAction === "publish" ? (
                         <Spinner className="size-3.5" />
                       ) : (
@@ -698,10 +765,10 @@ export function ProgramDialog({
                       Stop
                     </Button>
                   ) : null}
-                  {app.canStart ? (
+                  {app.canStart && !startIsPrimary ? (
                     <Button
                       size="sm"
-                      variant={publication ? "outline" : "default"}
+                      variant={publication || primary ? "outline" : "default"}
                       disabled={busy}
                       onClick={() => onAction(app.id, "start")}
                     >

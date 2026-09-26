@@ -159,7 +159,7 @@ function useOwnBox() {
   return { box, loading: machine.isCloud && state.isPending, isCloud: machine.isCloud };
 }
 
-function AgentTab() {
+export function AgentTab() {
   const [target, setTarget] = useState<AgentTarget>("claude-code");
   const { box, loading } = useOwnBox();
   const account = accountTransport() !== "none";
@@ -332,7 +332,7 @@ export function sshKeyProblem(value: string): string | null {
   return null;
 }
 
-function SshTab() {
+export function SshTab() {
   const { box, loading, isCloud } = useOwnBox();
   const account = accountTransport() !== "none";
   const queryClient = useQueryClient();

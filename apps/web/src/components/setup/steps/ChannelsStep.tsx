@@ -374,6 +374,57 @@ function TelegramCard({
   );
 }
 
+/**
+ * The assistant's Telegram, on its own (goal-first start and Home): Uno's
+ * shared bot link / QR, or "Connected" with "Open Telegram". Messages go to
+ * the assistant (Uno), not to a project.
+ */
+export function AssistantTelegramPanel({
+  onConnected,
+}: {
+  onConnected?: (username: string | null) => void;
+}) {
+  const environmentId = usePrimaryEnvironmentId();
+  const queryClient = useQueryClient();
+  const summary = useAssistantSummary(environmentId, true);
+  const refresh = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: SUMMARY_KEY });
+    void queryClient.invalidateQueries({ queryKey: ["uno-assistant"] });
+  }, [queryClient]);
+  const data = summary.data;
+  const connected = data ? telegramConnected(data.telegram) : false;
+  const reported = useRef(false);
+  useEffect(() => {
+    if (!connected || reported.current || !data) return;
+    reported.current = true;
+    onConnected?.(data.telegram.botUsername ?? null);
+  }, [connected, data, onConnected]);
+  if (!environmentId || summary.isPending) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2Icon className="size-4 animate-spin" />
+        Getting your Telegram link…
+      </div>
+    );
+  }
+  if (!data) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Your assistant is still starting. Give it a few seconds.
+      </p>
+    );
+  }
+  return (
+    <TelegramCard
+      environmentId={environmentId}
+      summary={data}
+      projectId={null}
+      projectName={null}
+      onChanged={refresh}
+    />
+  );
+}
+
 // ── Slack ──────────────────────────────────────────────────────────────
 
 function SlackCard({

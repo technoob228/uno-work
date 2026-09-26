@@ -115,7 +115,14 @@ describe("buildProgramTiles", () => {
       "docker:wg-easy",
       "port:9000",
     ]);
-    expect(tiles[1]).toMatchObject({ openUrl: store.url, online: true, caption: "App Store" });
+    // Called by its task; the product name is the small line under it.
+    expect(tiles[1]).toMatchObject({
+      name: "Site monitoring",
+      product: "Uptime Kuma",
+      openUrl: store.url,
+      online: true,
+      caption: "Uptime Kuma",
+    });
   });
 
   it("does not show an App Store app twice when discovery also sees it", () => {
@@ -187,7 +194,12 @@ describe("App Store apps show up once (0.0.72)", () => {
 
   it("carries the catalog id so Home tiles can fall back to the console logo", () => {
     const [tile] = build([]);
-    expect(tile).toMatchObject({ name: "Memos", templateId: "memos", iconImage: null });
+    expect(tile).toMatchObject({
+      name: "Quick notes",
+      product: "Memos",
+      templateId: "memos",
+      iconImage: null,
+    });
   });
 
   it("hides the app's containers, its web port and the ports its containers publish", () => {
@@ -204,7 +216,7 @@ describe("App Store apps show up once (0.0.72)", () => {
       app({ id: "port:5231", name: "Memos Web", port: 5231 }),
       app({ id: "port:3000", name: "Notes" }),
     ]);
-    expect(tiles.map((t) => t.name)).toEqual(["Memos", "Notes"]);
+    expect(tiles.map((t) => t.name)).toEqual(["Quick notes", "Notes"]);
   });
 
   it("falls back to the uno-<template> project when the console doesn't send it", () => {
@@ -227,7 +239,7 @@ describe("App Store apps show up once (0.0.72)", () => {
       ],
       [oldConsole],
     );
-    expect(tiles.map((t) => t.name)).toEqual(["Vaultwarden"]);
+    expect(tiles.map((t) => t.name)).toEqual(["Passwords"]);
   });
 
   it("hides the desktop file an App Store app registers for itself", () => {
@@ -235,8 +247,8 @@ describe("App Store apps show up once (0.0.72)", () => {
       app({ id: "manifest:memos", source: "manifest", name: "Memos", port: 9999 }),
       app({ id: "manifest:notes", source: "manifest", name: "My notes", port: 4000 }),
     ]);
-    expect(tiles.map((t) => t.name)).toEqual(["My notes", "Memos"]);
-    expect(tiles.find((t) => t.name === "Memos")?.storeApp).not.toBeNull();
+    expect(tiles.map((t) => t.name)).toEqual(["My notes", "Quick notes"]);
+    expect(tiles.find((t) => t.name === "Quick notes")?.storeApp).not.toBeNull();
   });
 });
 
@@ -271,10 +283,10 @@ describe("Remove", () => {
       computerOn: true,
     });
     const removal = Object.fromEntries(tiles.map((t) => [t.name, programRemoval(t)]));
-    expect(removal["Uptime Kuma"]).toEqual({
+    expect(removal["Site monitoring"]).toEqual({
       kind: "store",
       deploymentId: 91,
-      name: "Uptime Kuma",
+      name: "Site monitoring",
       templateId: "uptime-kuma",
     });
     expect(removal["my-bot"]).toEqual({

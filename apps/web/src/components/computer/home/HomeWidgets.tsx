@@ -94,8 +94,8 @@ export const HOME_FIXED_BLOCK_META: Record<HomeFixedBlockId, WidgetMeta> = {
     removable: false,
   },
   continue: {
-    title: "Continue",
-    description: "Chats and notifications that need you or are worth picking up",
+    title: "In progress and done",
+    description: "What Uno is doing, what waits for you, what's done",
     icon: <ListChecksIcon />,
     span: 4,
     bare: true,

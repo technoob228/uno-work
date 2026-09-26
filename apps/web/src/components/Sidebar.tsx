@@ -189,6 +189,7 @@ import { SidebarMyUnoRow } from "./sidebar/SidebarMyUnoRow";
 import { SidebarEnvSwitcher } from "./SidebarEnvSwitcher";
 import { SidebarAppsList } from "./sidebar/SidebarAppsList";
 import { SidebarFilesTree } from "./sidebar/SidebarFilesTree";
+import { SidebarMoreRow, useSimpleSidebar } from "./sidebar/SidebarMoreRow";
 import { SidebarModeSwitch } from "./sidebar/SidebarModeSwitch";
 import { SidebarPinned } from "./sidebar/SidebarPinned";
 import { type SidebarMode, useNavStore } from "../navigation/navStore";
@@ -1153,9 +1154,10 @@ export default function Sidebar() {
   // the bell's popover, so a "home" or "inbox" left over from the rail (or an
   // older version) reads as Chats — the chat list never disappears behind the
   // Inbox, and Home and Inbox are never highlighted together.
+  const simpleSidebar = useSimpleSidebar();
   const listMode: SidebarMode = railLayout
     ? sidebarMode
-    : sidebarMode === "home" || sidebarMode === "inbox"
+    : sidebarMode === "home" || sidebarMode === "inbox" || simpleSidebar.simple
       ? "chats"
       : sidebarMode;
   const pathname = useLocation({ select: (location) => location.pathname });
@@ -2437,10 +2439,16 @@ export default function Sidebar() {
           <SidebarSetupRow />
           <SidebarAssistantRow />
           <SidebarComputerRow />
-          <SidebarMyUnoRow />
-          <div className="pt-1.5 pb-1">
-            <SidebarModeSwitch />
-          </div>
+          {simpleSidebar.simple ? (
+            <SidebarMoreRow onOpen={simpleSidebar.openMore} />
+          ) : (
+            <>
+              <SidebarMyUnoRow />
+              <div className="pt-1.5 pb-1">
+                <SidebarModeSwitch />
+              </div>
+            </>
+          )}
         </SidebarGroup>
       )}
       {!railLayout || listMode === "home" ? pinnedGroup : null}

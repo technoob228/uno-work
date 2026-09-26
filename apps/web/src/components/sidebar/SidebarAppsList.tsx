@@ -1,7 +1,10 @@
 /**
  * Apps mode of the sidebar: every app of the computer — from the App Store,
  * made by the person or by Uno, or found running — with a live status dot. A
- * click opens it inside Uno; hover offers "Beside a chat" and Pin. Uno Drive,
+ * click does the app's one primary action: Open (inside Uno), Start, or Set up
+ * / Fix with Uno — the last three spelled on the row. Hover offers "Beside a
+ * chat" and Pin. App Store apps go by their task ("Files & documents"), the
+ * product name small under it. Uno Drive,
  * Terminal and the App Store sit at the bottom, like fixed items of a dock.
  */
 import { useNavigate } from "@tanstack/react-router";
@@ -19,8 +22,19 @@ import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { cn } from "../../lib/utils";
 import { useOpenApp } from "../../navigation/useOpenApp";
 import { usePins } from "../../navigation/usePins";
-import { ProgramIcon, STATUS_DOT } from "../computer/ComputerPrograms";
+import { appPrimaryAction } from "../computer/appPrimaryAction";
+import {
+  ActionChip,
+  primaryActionTitle,
+  ProgramIcon,
+  STATUS_DOT,
+} from "../computer/ComputerPrograms";
 import type { ProgramTile } from "../computer/programModel";
+import {
+  type AppPrimaryRunner,
+  useAppPrimaryAction,
+  useStartingAppId,
+} from "../computer/useAppPrimaryAction";
 import { useHomeLaunchers } from "../computer/useHomeLaunchers";
 import { useProgramTiles } from "../computer/useProgramTiles";
 import { useSidebar } from "../ui/sidebar";
@@ -30,6 +44,8 @@ export const SidebarAppsList = memo(function SidebarAppsList() {
   const { tiles, loading, hasStore } = useProgramTiles();
   const machine = useActiveMachine();
   const launchers = useHomeLaunchers(machine.environmentId);
+  const primary = useAppPrimaryAction({ environmentId: machine.environmentId });
+  const startingId = useStartingAppId();
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
   const [terminalBusy, setTerminalBusy] = useState(false);
@@ -55,7 +71,13 @@ export const SidebarAppsList = memo(function SidebarAppsList() {
       ) : (
         <ul className="flex flex-col gap-px">
           {tiles.map((tile) => (
-            <AppRow key={tile.key} tile={tile} onNavigate={close} />
+            <AppRow
+              key={tile.key}
+              tile={tile}
+              primary={primary}
+              starting={startingId !== null && startingId === tile.machineApp?.id}
+              onNavigate={close}
+            />
           ))}
         </ul>
       )}
@@ -118,28 +140,46 @@ function FixedRow({
   );
 }
 
-function AppRow({ tile, onNavigate }: { tile: ProgramTile; onNavigate: () => void }) {
+function AppRow({
+  tile,
+  primary,
+  starting,
+  onNavigate,
+}: {
+  tile: ProgramTile;
+  primary: AppPrimaryRunner;
+  starting: boolean;
+  onNavigate: () => void;
+}) {
   const navigate = useNavigate();
-  const { openHere, openBeside } = useOpenApp();
+  const { openBeside } = useOpenApp();
   const { isPinned, toggle } = usePins();
   const dot = STATUS_DOT[tile.status];
   const url = tile.openUrl;
   const pinned = url ? isPinned("app", url) : false;
   const app = url ? { url, name: tile.name, icon: tile.icon } : null;
+  const action = appPrimaryAction(tile);
 
   return (
     <li className="group/app relative list-none">
       <button
         type="button"
         onClick={() => {
-          onNavigate();
-          // Without an address (stopped, asleep, not on the internet) the app's
-          // card on Home says why and has the buttons to fix it.
-          if (app) openHere(app);
-          else void navigate({ to: "/computer" });
+          // Installing or asleep: the app's card on Home says why.
+          if (action.disabled) {
+            onNavigate();
+            void navigate({ to: "/computer" });
+            return;
+          }
+          // Starting stays here; Open and the chats with Uno go to the main area.
+          if (action.kind !== "start" || action.machineAppId === null) onNavigate();
+          primary.run(tile);
         }}
-        title={url ?? `${tile.name} — ${tile.caption}`}
-        className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-lg pr-14 pl-1.5 text-left outline-hidden ring-ring transition-colors hover:bg-sidebar-row-hover focus-visible:ring-2"
+        title={[primaryActionTitle(tile, action), url].filter(Boolean).join("\n")}
+        className={cn(
+          "flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-lg pl-1.5 text-left outline-hidden ring-ring transition-colors hover:bg-sidebar-row-hover focus-visible:ring-2",
+          app ? "pr-14" : "pr-1.5",
+        )}
       >
         <span className="relative shrink-0">
           <ProgramIcon
@@ -162,9 +202,10 @@ function AppRow({ tile, onNavigate }: { tile: ProgramTile; onNavigate: () => voi
         <span className="min-w-0 flex-1 leading-tight">
           <span className="block truncate text-sm text-sidebar-foreground">{tile.name}</span>
           <span className="block truncate text-[11px] text-muted-foreground/80">
-            {tile.caption}
+            {tile.product ?? tile.caption}
           </span>
         </span>
+        <ActionChip action={action} busy={starting} className="shrink-0" />
       </button>
       {app ? (
         <div className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/app:opacity-100 focus-within:opacity-100 max-md:opacity-100">

@@ -154,8 +154,9 @@ export function setupSidebarState(
       step: "tour-done",
     };
   }
+  // The goal-first start is the whole first run: no "Set up 0/8" next to it.
   if (context.onWelcome && !progress.finished) {
-    return { hidden: false, label: "Set up", meta: `0/${total}`, ratio: 0, step: "welcome" };
+    return { hidden: true, label: "Set up", meta: `0/${total}`, ratio: 0, step: "welcome" };
   }
   const skipped = SETUP_STEPS.filter((step) => progress.skipped.includes(step));
   const doneCount = SETUP_STEPS.filter(

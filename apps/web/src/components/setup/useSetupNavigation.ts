@@ -13,11 +13,13 @@ import {
   type SetupRouteStep,
   type SetupStepId,
 } from "./setupModel";
-import { useUpdateSetupProgress } from "./useSetupProgress";
+import { goalState } from "./goals";
+import { useSetupProgress, useUpdateSetupProgress } from "./useSetupProgress";
 
 export function useSetupNavigation() {
   const navigate = useNavigate();
   const update = useUpdateSetupProgress();
+  const progress = useSetupProgress();
 
   const goToStep = useCallback(
     (step: SetupRouteStep) => {
@@ -34,11 +36,21 @@ export function useSetupNavigation() {
   const completeStep = useCallback(
     async (step: SetupStepId) => {
       await update((current) => markCompleted(current, step));
+      // The goal-first start sent the person to sign in to their own AI:
+      // back to the goal's result, not on through the old eight steps.
+      const goal = goalState(progress);
+      if (step === "ai" && goal.goal && goal.path === "own_subscription") {
+        void navigate({
+          to: "/setup",
+          search: { step: "welcome", goal: goal.goal, via: "own_subscription" },
+        });
+        return;
+      }
       const next = nextStep(step);
       if (next) goToStep(next);
       else goHome();
     },
-    [goHome, goToStep, update],
+    [goHome, goToStep, navigate, progress, update],
   );
 
   const skipStep = useCallback(

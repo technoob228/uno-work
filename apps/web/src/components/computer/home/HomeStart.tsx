@@ -5,7 +5,7 @@
  * built-in widgets and apps' own widgets. Customize lives on the page itself,
  * next to "Add a widget"; the computer lives in the header pill.
  */
-import type { EnvironmentId, UnoMachineApp } from "@t3tools/contracts";
+import { DEFAULT_RUNTIME_MODE, type EnvironmentId, type UnoMachineApp } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { CheckIcon, PencilIcon, PlusIcon, RotateCcwIcon, XIcon } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
@@ -20,6 +20,9 @@ import { programRemoval, type ProgramTile } from "../programModel";
 import { ComputerDetails, type HomeComputer } from "./ComputerPill";
 import { HomeAppWidget, HomeAppWidgetOpen } from "./HomeAppWidget";
 import { HomeComposer, type HomeStartOptions } from "./HomeComposer";
+import { goalState } from "../../setup/goals";
+import { useSetupProgress } from "../../setup/useSetupProgress";
+import { HomeGoalButtons, HomeNextStep, useGoalWatcher } from "./HomeGoals";
 import { HomeUnoEntry } from "./HomeUnoEntry";
 import {
   ContinueCards,
@@ -147,6 +150,7 @@ export function HomeStart({
   const firstName = usePersonFirstName(environmentId);
   const homeStarters = useHomeStarters({ environmentId, threads, now, tiles });
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const setupProgress = useSetupProgress();
   const setupHome = useSetupHome({
     projectHasChats: (cwd) => {
       const ids = new Set(
@@ -155,7 +159,14 @@ export function HomeStart({
       return threads.some((thread) => ids.has(thread.projectId));
     },
   });
-  const starters = setupHome.starters.length > 0 ? setupHome.starters : homeStarters;
+  // A goal-first newcomer gets the goal buttons instead of suggestion chips.
+  const goalFirst = goalState(setupProgress).goal !== null;
+  const starters = goalFirst
+    ? []
+    : setupHome.starters.length > 0
+      ? setupHome.starters
+      : homeStarters;
+  useGoalWatcher({ threads, machineApps });
 
   const widgetApps = useMemo(() => {
     const out = new Map<string, UnoMachineApp>();
@@ -211,7 +222,7 @@ export function HomeStart({
       };
     }
     // A project just set up names the Files widget (its material is inside).
-    if (id === "files" && setupHome.fresh && setupHome.project) {
+    if (id === "files" && setupHome.fresh && setupHome.project && !goalFirst) {
       return { ...HOME_WIDGETS.files, title: setupHome.project.name };
     }
     return HOME_WIDGETS[id];
@@ -224,7 +235,7 @@ export function HomeStart({
           body: (
             <FilesWidget
               environmentId={environmentId}
-              folder={setupHome.fresh ? setupHome.project : null}
+              folder={setupHome.fresh && !goalFirst ? setupHome.project : null}
             />
           ),
           action: <CloudUsageLink environmentId={environmentId} />,
@@ -301,7 +312,18 @@ export function HomeStart({
                 defaultFolder={setupHome.project}
                 onStart={onStartTask}
               />
+              <HomeGoalButtons />
               <NeedsYouPill threads={threads} now={now} />
+              <HomeNextStep
+                onStartTask={(prompt, folder) =>
+                  void onStartTask(prompt, {
+                    folder,
+                    modelSelection: null,
+                    runtimeMode: DEFAULT_RUNTIME_MODE,
+                  })
+                }
+                onAskUno={(prompt) => void onAskUno(prompt)}
+              />
               <HomeUnoEntry />
             </div>
           ),

@@ -17,9 +17,9 @@ describe("welcome and tour in the sidebar", () => {
     expect(parseSetupRouteStep("welcome")).toBe("welcome");
   });
 
-  it("shows Set up 0/8 on the welcome screen before a path is picked", () => {
+  it("hides Set up 0/8 on the goal-first start screen", () => {
     const state = setupSidebarState(EMPTY_SETUP_PROGRESS, { onWelcome: true });
-    expect(state).toMatchObject({ hidden: false, label: "Set up", meta: "0/8", step: "welcome" });
+    expect(state).toMatchObject({ hidden: true, step: "welcome" });
   });
 
   it("shows Set up · Tour while the tour runs, even on the simple path", () => {

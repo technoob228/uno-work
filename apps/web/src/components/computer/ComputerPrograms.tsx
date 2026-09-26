@@ -32,8 +32,29 @@ import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import { Spinner } from "../ui/spinner";
+import { appPrimaryAction, type AppPrimaryAction } from "./appPrimaryAction";
 import { logoSources } from "./appStoreModel";
+import { useStartingAppId } from "./useAppPrimaryAction";
 import type { ProgramStatus, ProgramTile } from "./programModel";
+
+/** A tile's tooltip: "Open Files & documents (Nextcloud)", "Fix Chat with Uno"… */
+export function primaryActionTitle(tile: ProgramTile, action: AppPrimaryAction): string {
+  const name = tile.product ? `${tile.name} (${tile.product})` : tile.name;
+  switch (action.kind) {
+    case "open":
+      return `Open ${name}`;
+    case "start":
+      return `Start ${name}`;
+    case "setup":
+      return `Set up ${name} with Uno`;
+    case "fix":
+      return `Fix ${name} with Uno`;
+    case "installing":
+      return `${name} — installing…`;
+    case "asleep":
+      return `${name} — asleep with the computer`;
+  }
+}
 
 /**
  * The "on the internet" badge: a solid circle with a border and a shadow, so
@@ -135,6 +156,49 @@ export function ProgramIcon({
   );
 }
 
+/** Soft colours of the primary-action chip, by what it does. */
+const ACTION_CHIP: Record<AppPrimaryAction["kind"], string> = {
+  open: "bg-primary/10 text-primary",
+  start: "bg-primary/10 text-primary",
+  setup: "bg-primary/10 text-primary",
+  fix: "bg-destructive/10 text-destructive-foreground",
+  installing: "bg-muted text-muted-foreground",
+  asleep: "bg-muted text-muted-foreground",
+};
+
+/**
+ * The app's one primary action, spelled under its tile ("Start", "Fix with
+ * Uno"). The tile itself is the button; "Open" goes without saying — tapping
+ * an app opens it, like on a phone — so only the other actions show a chip.
+ */
+export function ActionChip({
+  action,
+  busy = false,
+  className,
+}: {
+  action: AppPrimaryAction;
+  busy?: boolean;
+  className?: string;
+}) {
+  if (action.kind === "open") return null;
+  return (
+    <span
+      className={cn(
+        "inline-flex max-w-full items-center gap-1 truncate rounded-full px-2 py-0.5 text-[10.5px] leading-tight font-medium",
+        ACTION_CHIP[action.kind],
+        className,
+      )}
+      data-testid="program-primary-action"
+      data-action={action.kind}
+    >
+      {busy || action.kind === "installing" ? <Spinner className="size-2.5 shrink-0" /> : null}
+      <span className="truncate">
+        {busy && action.kind === "start" ? "Starting…" : action.label}
+      </span>
+    </span>
+  );
+}
+
 export function TileShell({
   label,
   caption,
@@ -148,7 +212,13 @@ export function TileShell({
   aiNote = null,
   aiWarning = null,
   small = false,
+  action = null,
+  actionBusy = false,
 }: {
+  /** The app's one primary action: a chip under the name (except "Open"). */
+  action?: AppPrimaryAction | null;
+  /** Its action is under way (starting). */
+  actionBusy?: boolean;
   /** "Anyone with the link can use this app's AI — add sign-in": an amber mark. */
   aiWarning?: string | null;
   /** "Uses AI for answers · Uno AI · $0.40 of $10" — a small mark and a tooltip line. */
@@ -239,6 +309,7 @@ export function TileShell({
             {caption}
           </span>
         ) : null}
+        {action ? <ActionChip action={action} busy={actionBusy} className="-mt-0.5" /> : null}
       </button>
       {onDetails ? (
         <Button
@@ -314,6 +385,7 @@ export function ComputerPrograms({
   unhidingId?: string | null;
   onUnhide?: (appId: string) => void;
 }) {
+  const startingId = useStartingAppId();
   return (
     <section className="flex flex-col gap-3" aria-labelledby="programs-heading">
       <header className="flex flex-wrap items-center gap-2">
@@ -393,28 +465,33 @@ export function ComputerPrograms({
           </>
         ) : null}
 
-        {tiles.map((tile) => (
-          <TileShell
-            key={tile.key}
-            label={tile.name}
-            caption={tile.caption}
-            status={tile.status}
-            online={tile.online}
-            title={tile.openUrl ? `Open ${tile.name}` : `${tile.name} — details`}
-            aiNote={tile.aiNote ?? null}
-            aiWarning={tile.aiWarning ?? null}
-            icon={
-              <ProgramIcon
-                name={tile.name}
-                icon={tile.icon}
-                iconImage={tile.iconImage}
-                templateId={tile.templateId}
-              />
-            }
-            onClick={() => onOpenTile(tile)}
-            onDetails={() => onTileDetails(tile)}
-          />
-        ))}
+        {tiles.map((tile) => {
+          const action = appPrimaryAction(tile);
+          return (
+            <TileShell
+              key={tile.key}
+              label={tile.name}
+              caption={tile.caption}
+              status={tile.status}
+              online={tile.online}
+              title={primaryActionTitle(tile, action)}
+              action={action}
+              actionBusy={startingId !== null && startingId === tile.machineApp?.id}
+              aiNote={tile.aiNote ?? null}
+              aiWarning={tile.aiWarning ?? null}
+              icon={
+                <ProgramIcon
+                  name={tile.name}
+                  icon={tile.icon}
+                  iconImage={tile.iconImage}
+                  templateId={tile.templateId}
+                />
+              }
+              onClick={() => onOpenTile(tile)}
+              onDetails={() => onTileDetails(tile)}
+            />
+          );
+        })}
 
         {loading && !machineApps
           ? [0, 1].map((i) => (
