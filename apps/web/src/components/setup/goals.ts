@@ -141,7 +141,7 @@ export function goalFirstPrompt(
   goal: GoalId,
   input: { readonly description?: string; readonly folder?: string },
 ): string {
-  const what = input.description?.trim();
+  const what = input.description?.trim().replace(/[.!\s]+$/, "");
   if (goal === "site") {
     if (input.folder) {
       return `The files in ${input.folder} should be my website. Make them work as a site (add an index.html if it's missing), publish it on Uno Hosting and send me the link.`;

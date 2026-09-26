@@ -64,6 +64,7 @@ describe("goal-first start", () => {
   it("writes goal prompts that keep secrets out of chat", () => {
     expect(goalFirstPrompt("bot", { description: "take orders" })).toContain(".env");
     expect(goalFirstPrompt("site", { description: "yoga" })).toContain("send me the link");
+    expect(goalFirstPrompt("bot", { description: "take orders." })).toContain("take orders. The bot");
     expect(goalAgentsMd("site", "My website")).toContain("ONE concrete next step");
   });
 
