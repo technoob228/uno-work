@@ -256,6 +256,17 @@ export const HERMES_AGENT_API_MAX_RETRIES = 8;
  */
 export const HERMES_AGENT_INTENT_ACK_CONTINUATION = true;
 
+/**
+ * Hermes titles its own session after the first two exchanges
+ * (`agent/title_generator.py`, a background thread started right after the
+ * reply). Without an `auxiliary.title_generation` model it calls the CHAT
+ * model — on the Uno gateway that is a second, non-streaming uno/smart call
+ * per new chat (~320 tokens in, 0.7–5 s, measured 26.09), which on a 2-vCPU
+ * box competed with delivering the answer. Nobody shows that title (the chat
+ * title is the daemon's), so it goes to the fast model with a short timeout.
+ */
+export const HERMES_TITLE_GENERATION_TIMEOUT_SECONDS = 15;
+
 export function buildHermesConfigYaml(input: {
   readonly model: string;
   readonly mcpServers: ReadonlyArray<EffectAcpSchema.McpServer>;
@@ -268,6 +279,12 @@ export function buildHermesConfigYaml(input: {
   readonly skillsExternalDirs?: ReadonlyArray<string>;
   /** Off for a brought key: Hermes' STT would send it to the gateway. Default on. */
   readonly speechToText?: boolean;
+  /**
+   * Model of Hermes' own side calls that nobody waits for (session titles).
+   * Unset: Hermes runs them on the chat model. See
+   * {@link HERMES_TITLE_GENERATION_TIMEOUT_SECONDS}.
+   */
+  readonly sideTaskModel?: string;
 }): string {
   const quote = JSON.stringify;
   const lines: Array<string> = [
@@ -293,6 +310,14 @@ export function buildHermesConfigYaml(input: {
           `    model: ${quote(HERMES_STT_MODEL)}`,
         ]),
   ];
+  if (input.sideTaskModel !== undefined && input.sideTaskModel.trim().length > 0) {
+    lines.push(
+      "auxiliary:",
+      "  title_generation:",
+      `    model: ${quote(input.sideTaskModel.trim())}`,
+      `    timeout: ${HERMES_TITLE_GENERATION_TIMEOUT_SECONDS}`,
+    );
+  }
   if (input.skillsExternalDirs && input.skillsExternalDirs.length > 0) {
     lines.push("skills:", "  external_dirs:");
     for (const dir of input.skillsExternalDirs) lines.push(`    - ${quote(dir)}`);

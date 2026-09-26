@@ -275,4 +275,18 @@ describe("hermes LLM route (0.0.84)", () => {
     expect(yaml).not.toContain("whisper");
     expect(buildHermesConfigYaml({ model: "m", mcpServers: [] })).toContain("  enabled: true");
   });
+
+  it("moves Hermes' own session titles to the side-task model when given one", () => {
+    const yaml = buildHermesConfigYaml({
+      model: "uno/smart",
+      mcpServers: [],
+      sideTaskModel: "uno/fast",
+    });
+    expect(yaml).toContain(
+      'auxiliary:\n  title_generation:\n    model: "uno/fast"\n    timeout: 15\n',
+    );
+    expect(buildHermesConfigYaml({ model: "uno/smart", mcpServers: [] })).not.toContain(
+      "auxiliary",
+    );
+  });
 });

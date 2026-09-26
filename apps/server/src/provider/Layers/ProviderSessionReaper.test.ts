@@ -50,6 +50,7 @@ const unsupported = () => Effect.die(new Error("Unsupported provider call in tes
 function makeReadModel(
   threads: ReadonlyArray<{
     readonly id: ThreadId;
+    readonly assistantRole?: "chat";
     readonly session: {
       readonly threadId: ThreadId;
       readonly status: "starting" | "running" | "ready" | "interrupted" | "stopped" | "error";
@@ -82,6 +83,7 @@ function makeReadModel(
     threads: threads.map((thread) => ({
       id: thread.id,
       projectId,
+      ...(thread.assistantRole ? { assistantRole: thread.assistantRole } : {}),
       title: `Thread ${thread.id}`,
       modelSelection: defaultModelSelection,
       interactionMode: "default" as const,
@@ -483,6 +485,54 @@ describe("ProviderSessionReaper", () => {
     expect(harness.stopSession).not.toHaveBeenCalled();
     const remaining = await runtime!.runPromise(repository.getByThreadId({ threadId }));
     expect(Option.isSome(remaining)).toBe(true);
+  });
+
+  it("keeps the pinned Uno chat's idle harness (prewarmed for its next message)", async () => {
+    const pinnedThreadId = ThreadId.make("thread-reaper-pinned-uno");
+    const reapedThreadId = ThreadId.make("thread-reaper-other");
+    const now = new Date().toISOString();
+    const session = (threadId: ThreadId) => ({
+      threadId,
+      status: "ready" as const,
+      providerName: "codex" as const,
+      runtimeMode: "full-access" as const,
+      activeTurnId: null,
+      lastError: null,
+      updatedAt: now,
+    });
+    const harness = await createHarness({
+      readModel: makeReadModel([
+        { id: pinnedThreadId, assistantRole: "chat", session: session(pinnedThreadId) },
+        { id: reapedThreadId, session: session(reapedThreadId) },
+      ]),
+    });
+    const repository = await runtime!.runPromise(Effect.service(ProviderSessionRuntimeRepository));
+    for (const threadId of [pinnedThreadId, reapedThreadId]) {
+      await runtime!.runPromise(
+        repository.upsert({
+          threadId,
+          providerName: "codex",
+          providerInstanceId: null,
+          adapterKey: "codex",
+          runtimeMode: "full-access",
+          status: "running",
+          lastSeenAt: "2026-04-14T00:00:00.000Z",
+          resumeCursor: { opaque: `resume-${threadId}` },
+          runtimePayload: null,
+        }),
+      );
+    }
+
+    const reaper = await runtime!.runPromise(Effect.service(ProviderSessionReaper));
+    scope = await Effect.runPromise(Scope.make("sequential"));
+    await Effect.runPromise(reaper.start().pipe(Scope.provide(scope)));
+
+    await waitFor(() => harness.stopSession.mock.calls.length === 1);
+    // One sweep walks every binding; give it time to reach the other one.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(harness.stopSession.mock.calls.map(([request]) => request.threadId)).toEqual([
+      reapedThreadId,
+    ]);
   });
 
   it("continues reaping other sessions when one stop attempt fails", async () => {

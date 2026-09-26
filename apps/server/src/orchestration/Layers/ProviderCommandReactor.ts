@@ -16,7 +16,18 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
-import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } from "effect";
+import {
+  Cache,
+  Cause,
+  Deferred,
+  Duration,
+  Effect,
+  Equal,
+  Layer,
+  Option,
+  Schema,
+  Stream,
+} from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import {
   coerceAssistantModelSelection,
@@ -39,6 +50,7 @@ import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
   ProviderCommandReactor,
+  type ProviderSessionPrewarmOutcome,
   type ProviderCommandReactorShape,
 } from "../Services/ProviderCommandReactor.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -57,6 +69,16 @@ type ProviderIntentEvent = Extract<
       | "thread.session-stop-requested";
   }
 >;
+
+/** A prewarm request riding the same queue as turn starts (see `prewarmSession`). */
+interface SessionPrewarmRequest {
+  readonly type: "assistant.session-prewarm";
+  readonly threadId: ThreadId;
+  readonly restart: boolean;
+  readonly outcome: Deferred.Deferred<ProviderSessionPrewarmOutcome>;
+}
+
+type ReactorWorkItem = ProviderIntentEvent | SessionPrewarmRequest;
 
 function toNonEmptyProviderInput(value: string | undefined): string | undefined {
   const normalized = value?.trim();
@@ -267,6 +289,12 @@ const make = Effect.gen(function* () {
    * process — resumed from the same Hermes session, so the context stays.
    */
   const sessionStartSelections = new Map<string, ModelSelection>();
+  /**
+   * Turns handed to the provider and not finished yet, per thread. The send
+   * runs outside the queue (forked), so the queue being idle does not mean
+   * the harness is: a prewarm restart must never kill a running turn.
+   */
+  const turnsInFlight = new Map<string, number>();
 
   const appendProviderFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -840,6 +868,7 @@ const make = Effect.gen(function* () {
 
     const isFirstUserMessageTurn =
       thread.messages.filter((entry) => entry.role === "user").length === 1;
+    let titleAfterTurn: Effect.Effect<void> | undefined;
     if (isFirstUserMessageTurn) {
       const project = yield* resolveProject(thread.projectId);
       const generationCwd =
@@ -860,12 +889,25 @@ const make = Effect.gen(function* () {
         ...generationInput,
       }).pipe(Effect.forkScoped);
 
-      if (canReplaceThreadTitle(thread.title, event.payload.titleSeed)) {
-        yield* maybeGenerateThreadTitleForFirstTurn({
+      if (
+        canReplaceThreadTitle(thread.title, event.payload.titleSeed) &&
+        // The pinned Uno chat is shown as "Uno" / "Main conversation" whatever
+        // its title: a title call would be spent for nothing.
+        thread.assistantRole !== "chat"
+      ) {
+        const generateTitle = maybeGenerateThreadTitleForFirstTurn({
           threadId: event.payload.threadId,
           cwd: generationCwd,
           ...generationInput,
-        }).pipe(Effect.forkScoped);
+        });
+        if (isAssistantConversation(thread)) {
+          // Not alongside the first answer: on a 2-vCPU box the title call
+          // (another harness, another model request) competed with the turn
+          // that the person is waiting for. It runs once the turn is over.
+          titleAfterTurn = generateTitle;
+        } else {
+          yield* generateTitle.pipe(Effect.forkScoped);
+        }
       }
     }
 
@@ -940,13 +982,87 @@ const make = Effect.gen(function* () {
     );
 
     if (Option.isNone(sendTurnRequest)) {
+      if (titleAfterTurn !== undefined) yield* titleAfterTurn.pipe(Effect.forkScoped);
       return;
     }
 
-    yield* providerService
-      .sendTurn(sendTurnRequest.value)
-      .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+    const inFlightKey = String(event.payload.threadId);
+    turnsInFlight.set(inFlightKey, (turnsInFlight.get(inFlightKey) ?? 0) + 1);
+    yield* providerService.sendTurn(sendTurnRequest.value).pipe(
+      Effect.catchCause(recoverTurnStartFailure),
+      Effect.ensuring(
+        Effect.sync(() => {
+          const left = (turnsInFlight.get(inFlightKey) ?? 1) - 1;
+          if (left > 0) turnsInFlight.set(inFlightKey, left);
+          else turnsInFlight.delete(inFlightKey);
+        }),
+      ),
+      Effect.andThen(titleAfterTurn ?? Effect.void),
+      Effect.forkScoped,
+    );
   });
+
+  /**
+   * Start an assistant chat's harness before its message arrives (see
+   * ProviderCommandReactorShape.prewarmSession). Same path as a turn start —
+   * `ensureSessionForThread` — so the message that follows finds a session
+   * with the selection, cwd and runtime mode it would have started itself
+   * and reuses it.
+   */
+  const processSessionPrewarm = Effect.fn("processSessionPrewarm")(function* (
+    request: SessionPrewarmRequest,
+  ) {
+    const thread = yield* resolveThread(request.threadId);
+    if (!thread || !isAssistantConversation(thread)) {
+      return "skipped" as const;
+    }
+    if (
+      (turnsInFlight.get(String(thread.id)) ?? 0) > 0 ||
+      thread.session?.activeTurnId != null ||
+      thread.session?.status === "running" ||
+      thread.session?.status === "starting"
+    ) {
+      return "busy" as const;
+    }
+    const live = (yield* providerService.listSessions()).some(
+      (session) => session.threadId === thread.id,
+    );
+    if (live && !request.restart) {
+      return "already-running" as const;
+    }
+    if (live) {
+      yield* Effect.logInfo("assistant chat: restarting the idle harness session ahead of use", {
+        threadId: thread.id,
+      });
+      yield* providerService.stopSession({ threadId: thread.id });
+      sessionStartSelections.delete(thread.id);
+    }
+    const startedAt = Date.now();
+    yield* ensureSessionForThread(thread.id, new Date().toISOString());
+    yield* Effect.logInfo("assistant chat: harness session prewarmed", {
+      threadId: thread.id,
+      restart: live,
+      durationMs: Date.now() - startedAt,
+    });
+    return "started" as const;
+  });
+
+  const runSessionPrewarm = (request: SessionPrewarmRequest) =>
+    processSessionPrewarm(request).pipe(
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.failCause(cause)
+          : Effect.logWarning("assistant chat: harness prewarm failed", {
+              threadId: request.threadId,
+              cause: Cause.pretty(cause),
+            }).pipe(Effect.as("failed" as const)),
+      ),
+      Effect.onExit((exit) =>
+        Deferred.succeed(request.outcome, exit._tag === "Success" ? exit.value : "failed"),
+      ),
+      Effect.asVoid,
+      Effect.catchCause(() => Effect.void),
+    );
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-interrupt-requested" }>,
@@ -1176,7 +1292,26 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const worker = yield* makeDrainableWorker(processDomainEventSafely);
+  const worker = yield* makeDrainableWorker((item: ReactorWorkItem) =>
+    item.type === "assistant.session-prewarm"
+      ? runSessionPrewarm(item)
+      : processDomainEventSafely(item),
+  );
+
+  const prewarmSession: NonNullable<ProviderCommandReactorShape["prewarmSession"]> = (
+    threadId,
+    options,
+  ) =>
+    Effect.gen(function* () {
+      const outcome = yield* Deferred.make<ProviderSessionPrewarmOutcome>();
+      yield* worker.enqueue({
+        type: "assistant.session-prewarm",
+        threadId,
+        restart: options?.restart === true,
+        outcome,
+      });
+      return yield* Deferred.await(outcome);
+    });
 
   const start: ProviderCommandReactorShape["start"] = Effect.fn("start")(function* () {
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
@@ -1200,6 +1335,7 @@ const make = Effect.gen(function* () {
   return {
     start,
     drain: worker.drain,
+    prewarmSession,
   } satisfies ProviderCommandReactorShape;
 });
 

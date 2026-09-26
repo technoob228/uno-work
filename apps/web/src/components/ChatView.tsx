@@ -3036,8 +3036,10 @@ export default function ChatView(props: ChatViewProps) {
         ctxSelectedModelSelection.options,
       );
 
-      // Auto-title from first message
-      if (isFirstMessage && isServerThread) {
+      // Auto-title from first message. Not the pinned Uno chat: it is shown as
+      // "Uno" whatever its title, and this awaited round trip sat right in
+      // front of its first turn.
+      if (isFirstMessage && isServerThread && activeThread.assistantRole !== "chat") {
         await api.orchestration.dispatchCommand({
           type: "thread.meta.update",
           commandId: newCommandId(),

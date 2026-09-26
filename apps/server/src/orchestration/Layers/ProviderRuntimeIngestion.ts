@@ -20,6 +20,7 @@ import {
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import {
@@ -68,6 +69,22 @@ const BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL = Duration.minutes(120);
 const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000;
 const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
+
+/**
+ * Where a streamed assistant delta may be cut for the screen: after the last
+ * whitespace. Every secret format we mask (secretRedaction.ts) is one
+ * unbroken token, so a prefix that ends on whitespace can be masked on its
+ * own — a key split across two deltas is never shown half-masked. Returns
+ * the length of the part that can go out now (0 — hold everything).
+ */
+export function wholeWordsPrefixLength(text: string): number {
+  for (let index = text.length - 1; index >= 0; index -= 1) {
+    const code = text.charCodeAt(index);
+    // space, \t, \n, \r
+    if (code === 32 || code === 9 || code === 10 || code === 13) return index + 1;
+  }
+  return 0;
+}
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
 
 type TurnStartRequestedDomainEvent = Extract<
@@ -806,6 +823,36 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  /**
+   * Streaming for the assistant's chats (see `assistantStreamsByWord`):
+   * append the delta and hand back the masked whole words that can be shown
+   * now; the unfinished last word waits in the buffer for the next delta or
+   * the completion (which masks and flushes it like a buffered message).
+   */
+  const takeStreamableAssistantWords = (messageId: MessageId, delta: string) =>
+    Cache.getOption(bufferedAssistantTextByMessageId, messageId).pipe(
+      Effect.flatMap((existingText) =>
+        Effect.gen(function* () {
+          const text = Option.match(existingText, {
+            onNone: () => delta,
+            onSome: (held) => `${held}${delta}`,
+          });
+          const cut =
+            text.length > MAX_BUFFERED_ASSISTANT_CHARS ? text.length : wholeWordsPrefixLength(text);
+          if (cut === 0) {
+            yield* Cache.set(bufferedAssistantTextByMessageId, messageId, text);
+            return "";
+          }
+          if (cut === text.length) {
+            yield* Cache.invalidate(bufferedAssistantTextByMessageId, messageId);
+          } else {
+            yield* Cache.set(bufferedAssistantTextByMessageId, messageId, text.slice(cut));
+          }
+          return redactSecretsInText(text.slice(0, cut));
+        }),
+      ),
+    );
+
   const takeBufferedAssistantText = (messageId: MessageId) =>
     Cache.getOption(bufferedAssistantTextByMessageId, messageId).pipe(
       Effect.flatMap((existingText) =>
@@ -1354,11 +1401,29 @@ const make = Effect.gen(function* () {
           yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
         }
 
-        const assistantDeliveryMode: AssistantDeliveryMode = yield* Effect.map(
-          serverSettingsService.getSettings,
-          (settings) => (settings.enableAssistantStreaming ? "streaming" : "buffered"),
-        );
-        if (assistantDeliveryMode === "buffered") {
+        // The assistant's chats (the pinned "Uno" chat and its other
+        // conversations) always stream: a Hermes answer used to show up only
+        // when the whole turn ended (reports/day_2026-09-25/work-first-answer).
+        const assistantStreamsByWord = isAssistantConversation(thread);
+        const assistantDeliveryMode: AssistantDeliveryMode = assistantStreamsByWord
+          ? "streaming"
+          : yield* Effect.map(serverSettingsService.getSettings, (settings) =>
+              settings.enableAssistantStreaming ? "streaming" : "buffered",
+            );
+        if (assistantStreamsByWord) {
+          const words = yield* takeStreamableAssistantWords(assistantMessageId, assistantDelta);
+          if (words.length > 0) {
+            yield* orchestrationEngine.dispatch({
+              type: "thread.message.assistant.delta",
+              commandId: providerCommandId(event, "assistant-delta-words"),
+              threadId: thread.id,
+              messageId: assistantMessageId,
+              delta: words,
+              ...(turnId ? { turnId } : {}),
+              createdAt: now,
+            });
+          }
+        } else if (assistantDeliveryMode === "buffered") {
           const spillChunk = yield* appendBufferedAssistantText(assistantMessageId, assistantDelta);
           if (spillChunk.length > 0) {
             yield* orchestrationEngine.dispatch({
