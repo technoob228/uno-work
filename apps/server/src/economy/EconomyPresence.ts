@@ -12,6 +12,7 @@
  * does nothing and presence answers "off".
  */
 import { Context, Duration, Effect, Layer, Option, Schedule } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { UnoEconomyPresence } from "@t3tools/contracts";
 
 import { SessionCredentialService } from "../auth/Services/SessionCredentialService.ts";
@@ -24,6 +25,7 @@ import {
   ECONOMY_TICK_MS,
   PRESENCE_OFF,
   buildReportBody,
+  countRunningTurns,
   detectWake,
   earliestFuture,
   presenceFromConsole,
@@ -63,6 +65,7 @@ export const EconomyPresenceLive = Layer.effect(
     const sessions = yield* SessionCredentialService;
     const providers = yield* ProviderService;
     const reminders = Option.getOrUndefined(yield* Effect.serviceOption(RemindersRepository));
+    const sql = Option.getOrUndefined(yield* Effect.serviceOption(SqlClient.SqlClient));
     const manifestDir = resolveManifestDir();
 
     const state: State = {
@@ -85,13 +88,25 @@ export const EconomyPresenceLive = Layer.effect(
         Effect.map((rows) => rows.filter((row) => row.connected).length),
         Effect.orElseSucceed(() => 0),
       );
-      const runningTurns = yield* providers.listSessions().pipe(
-        Effect.map(
-          (list) =>
-            list.filter((s) => s.status === "running" || (s.activeTurnId ?? null) !== null).length,
-        ),
-        Effect.orElseSucceed(() => 0),
-      );
+      // «Идёт ход» — по проекции диалогов (её же видит интерфейс как
+      // «Working…»): turn.started → running, turn.completed → ready, одинаково
+      // для всех харнессов. Адаптеры ведут activeTurnId по-разному (Hermes не
+      // сбрасывал его после хода — машина не засыпала никогда, 26.09).
+      // Строки running без живой сессии адаптера (демон перезапустился
+      // посреди хода) не считаем — иначе машина не уснёт уже никогда.
+      const runningTurns = yield* Effect.gen(function* () {
+        const live = yield* providers.listSessions();
+        if (!sql) {
+          return live.filter((s) => s.status === "running").length;
+        }
+        const rows = yield* sql<{
+          readonly thread_id: string;
+        }>`SELECT thread_id FROM projection_thread_sessions WHERE status = 'running'`;
+        return countRunningTurns(
+          live.map((s) => String(s.threadId)),
+          rows.map((r) => r.thread_id),
+        );
+      }).pipe(Effect.orElseSucceed(() => 0));
       const keepAwake = yield* Effect.promise(() => readKeepAwakeApps(manifestDir));
       const nextWakeAt = reminders
         ? yield* reminders.list({ includeInactive: false }).pipe(

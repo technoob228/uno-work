@@ -8,6 +8,7 @@ import {
   ECONOMY_REPORT_INTERVAL_MS,
   ECONOMY_TICK_MS,
   buildReportBody,
+  countRunningTurns,
   detectWake,
   earliestFuture,
   presenceFromConsole,
@@ -131,5 +132,16 @@ describe("readKeepAwakeApps", () => {
     await writeFile(path.join(apps, "notes.png"), "png");
     expect(await readKeepAwakeApps(apps)).toEqual(["app:bot", "app:worker"]);
     expect(await readKeepAwakeApps(path.join(dir, "missing"))).toEqual([]);
+  });
+});
+
+describe("countRunningTurns", () => {
+  it("counts running projection rows that have a live adapter session", () => {
+    expect(countRunningTurns(["a", "b"], ["a"])).toBe(1);
+    expect(countRunningTurns(["a"], [])).toBe(0);
+  });
+  it("ignores running rows left over from a daemon restart", () => {
+    expect(countRunningTurns([], ["a", "b"])).toBe(0);
+    expect(countRunningTurns(["b"], ["a"])).toBe(0);
   });
 });
