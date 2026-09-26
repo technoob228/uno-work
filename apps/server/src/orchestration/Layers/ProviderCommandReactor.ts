@@ -868,6 +868,7 @@ const make = Effect.gen(function* () {
 
     const isFirstUserMessageTurn =
       thread.messages.filter((entry) => entry.role === "user").length === 1;
+    let titleAfterTurn: Effect.Effect<void> | undefined;
     if (isFirstUserMessageTurn) {
       const project = yield* resolveProject(thread.projectId);
       const generationCwd =
@@ -888,12 +889,25 @@ const make = Effect.gen(function* () {
         ...generationInput,
       }).pipe(Effect.forkScoped);
 
-      if (canReplaceThreadTitle(thread.title, event.payload.titleSeed)) {
-        yield* maybeGenerateThreadTitleForFirstTurn({
+      if (
+        canReplaceThreadTitle(thread.title, event.payload.titleSeed) &&
+        // The pinned Uno chat is shown as "Uno" / "Main conversation" whatever
+        // its title: a title call would be spent for nothing.
+        thread.assistantRole !== "chat"
+      ) {
+        const generateTitle = maybeGenerateThreadTitleForFirstTurn({
           threadId: event.payload.threadId,
           cwd: generationCwd,
           ...generationInput,
-        }).pipe(Effect.forkScoped);
+        });
+        if (isAssistantConversation(thread)) {
+          // Not alongside the first answer: on a 2-vCPU box the title call
+          // (another harness, another model request) competed with the turn
+          // that the person is waiting for. It runs once the turn is over.
+          titleAfterTurn = generateTitle;
+        } else {
+          yield* generateTitle.pipe(Effect.forkScoped);
+        }
       }
     }
 
@@ -968,6 +982,7 @@ const make = Effect.gen(function* () {
     );
 
     if (Option.isNone(sendTurnRequest)) {
+      if (titleAfterTurn !== undefined) yield* titleAfterTurn.pipe(Effect.forkScoped);
       return;
     }
 
@@ -982,6 +997,7 @@ const make = Effect.gen(function* () {
           else turnsInFlight.delete(inFlightKey);
         }),
       ),
+      Effect.andThen(titleAfterTurn ?? Effect.void),
       Effect.forkScoped,
     );
   });

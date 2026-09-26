@@ -1354,6 +1354,86 @@ describe("ProviderCommandReactor", () => {
       expect(harness.startSession).not.toHaveBeenCalled();
     });
 
+    const seedTitle = (harness: Awaited<ReturnType<typeof createHarness>>, threadId: string) =>
+      Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.meta.update",
+          commandId: CommandId.make(`cmd-seed-title-${threadId}`),
+          threadId: ThreadId.make(threadId),
+          title: "assistant turn 1",
+        }),
+      );
+
+    it("does not spend a title call on the pinned Uno chat", async () => {
+      const harness = await createHarness({ threadModelSelection: hermesSelection("uno") });
+      harness.generateThreadTitle.mockReturnValue(Effect.succeed({ title: "Generated" }));
+      await markAssistantChat(harness);
+      await seedTitle(harness, "thread-1");
+      await Effect.runPromise(
+        harness.engine.dispatch({ ...turn(1), titleSeed: "assistant turn 1" }),
+      );
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      await harness.drain();
+      expect(harness.generateThreadTitle).not.toHaveBeenCalled();
+    });
+
+    it("titles a conversation with the assistant after its first turn, not alongside it", async () => {
+      const harness = await createHarness({ threadModelSelection: hermesSelection("uno") });
+      harness.generateThreadTitle.mockReturnValue(Effect.succeed({ title: "Generated" }));
+      await markAssistantChat(harness);
+      await Effect.runPromise(
+        harness.engine.dispatch(
+          {
+            type: "project.create",
+            commandId: CommandId.make("cmd-assistant-project-title"),
+            projectId: asProjectId("assistant-home"),
+            title: "Assistant",
+            workspaceRoot: "/tmp/assistant-home",
+            defaultModelSelection: hermesSelection("uno"),
+            createdAt: new Date().toISOString(),
+          },
+          { origin: ASSISTANT_ORIGIN },
+        ),
+      );
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make("cmd-conversation-create-title"),
+          threadId: ThreadId.make("thread-conversation"),
+          projectId: asProjectId("assistant-home"),
+          title: "assistant turn 1",
+          modelSelection: hermesSelection("uno"),
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      let finishTurn!: () => void;
+      const turnDone = new Promise<void>((resolve) => {
+        finishTurn = resolve;
+      });
+      harness.sendTurn.mockImplementationOnce(() =>
+        Effect.promise(() => turnDone).pipe(
+          Effect.as({ threadId: ThreadId.make("thread-conversation"), turnId: asTurnId("t") }),
+        ),
+      );
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          ...turn(1),
+          threadId: ThreadId.make("thread-conversation"),
+          titleSeed: "assistant turn 1",
+        }),
+      );
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(harness.generateThreadTitle).not.toHaveBeenCalled();
+
+      finishTurn();
+      await waitFor(() => harness.generateThreadTitle.mock.calls.length === 1);
+    });
+
     it("restarts Hermes with the same session when the LLM provider changes", async () => {
       const harness = await createHarness({ threadModelSelection: hermesSelection("uno") });
       await markAssistantChat(harness);
