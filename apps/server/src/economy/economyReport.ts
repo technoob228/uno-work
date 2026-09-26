@@ -183,3 +183,15 @@ export function earliestFuture(times: ReadonlyArray<string>, now: number): strin
   }
   return best === null ? null : new Date(best).toISOString();
 }
+
+/**
+ * Сколько ходов агента идёт сейчас: диалоги со статусом running в проекции,
+ * у которых есть живая сессия адаптера.
+ */
+export function countRunningTurns(
+  liveThreadIds: ReadonlyArray<string>,
+  runningThreadIds: ReadonlyArray<string>,
+): number {
+  const live = new Set(liveThreadIds);
+  return runningThreadIds.filter((id) => live.has(id)).length;
+}
