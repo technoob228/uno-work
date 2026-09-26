@@ -130,14 +130,15 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
         ? coerceAssistantModelSelection(chat.modelSelection)
         : DEFAULT_ASSISTANT_MODEL_SELECTION;
       const keys = yield* providerKeys.list();
-      const gatewayConfigured = (yield* gatewayKey.harnessKey()).length > 0;
+      const gatewayState = yield* gatewayKey.keyState();
       return {
         threadId: chat?.id ?? null,
         provider: readAssistantLlmProvider(selection),
         model: selection.model,
         harness: yield* harnessStatus,
         keys,
-        gatewayConfigured,
+        gatewayConfigured: gatewayState === "ready",
+        ...(gatewayState === "pending" ? { gatewayPending: true } : {}),
       };
     });
 

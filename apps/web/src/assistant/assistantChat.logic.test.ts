@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SidebarThreadSummary } from "../types";
 import {
+  ensureAssistantChatWhenReady,
   findAssistantChat,
   slackChannelState,
   telegramChannelState,
@@ -114,5 +115,48 @@ describe("channel states", () => {
     expect(slackChannelState({ configured: true, enabled: true, lastError: "invalid_auth" })).toBe(
       "problem",
     );
+  });
+});
+
+describe("ensureAssistantChatWhenReady", () => {
+  it("keeps asking a computer that is still setting its assistant up", async () => {
+    let clock = 0;
+    let calls = 0;
+    const result = await ensureAssistantChatWhenReady(
+      async () => {
+        calls += 1;
+        if (calls < 3) throw new Error("The assistant is not set up on this computer yet.");
+        return { threadId: "t-uno" };
+      },
+      {
+        now: () => clock,
+        wait: async (ms) => {
+          clock += ms;
+        },
+      },
+    );
+    expect(result).toEqual({ threadId: "t-uno" });
+    expect(calls).toBe(3);
+  });
+
+  it("gives up after the wait: a real absence", async () => {
+    let clock = 0;
+    let calls = 0;
+    const result = await ensureAssistantChatWhenReady(
+      async () => {
+        calls += 1;
+        throw new Error("nope");
+      },
+      {
+        waitMs: 5_000,
+        retryMs: 1_000,
+        now: () => clock,
+        wait: async (ms) => {
+          clock += ms;
+        },
+      },
+    );
+    expect(result).toBeNull();
+    expect(calls).toBe(6);
   });
 });

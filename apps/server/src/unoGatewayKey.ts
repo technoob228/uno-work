@@ -20,13 +20,17 @@
  * отозванный ключ) — харнесс остаётся без ключа: это «модель попросит
  * настроить ключ», а не «агент получил право покупать».
  */
-import { Context, Effect, Layer, Ref } from "effect";
+import { Context, Duration, Effect, Layer, Ref } from "effect";
 import os from "node:os";
 
 import { type ThreadAppLabels, makeThreadAppLabels } from "./appSdk/appTaskLabel.ts";
 import { ServerSecretStore } from "./auth/Services/ServerSecretStore.ts";
+import {
+  looksLikeUnoBoxHostname,
+  parseUnoBoxIdFromEnvironment,
+} from "./environment/machineKind.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
-import { fetchControlPlaneJson } from "./unoBoxIdentity.ts";
+import { fetchControlPlaneJson, parseSettingsBoxId } from "./unoBoxIdentity.ts";
 
 /** Префикс дочерних ключей шлюза, которые чеканит консоль. */
 export const UNO_GATEWAY_KEY_PREFIX = "unollm_";
@@ -58,12 +62,62 @@ export function isGatewayScopedKey(key: string): boolean {
   return key.startsWith(UNO_GATEWAY_KEY_PREFIX);
 }
 
+/**
+ * Есть ли у машины ключ шлюза:
+ * - `ready` — есть;
+ * - `pending` — нет, но вот-вот будет: это Uno-бокс, и консоль дописывает ключ
+ *   в settings.json через секунды после входа. Чат Uno в это время не
+ *   отправляет человека в Settings, а ждёт (`awaitHarnessKey`);
+ * - `missing` — нет и не ожидается (ноутбук без входа; бокс, которому ключ так
+ *   и не пришёл за {@link GATEWAY_KEY_GRACE}).
+ */
+export type GatewayKeyState = "ready" | "pending" | "missing";
+
+/** Сколько ждать ключ на боксе с первого вопроса о нём. */
+export const GATEWAY_KEY_GRACE = Duration.seconds(90);
+
+export function gatewayKeyState(input: {
+  readonly key: string;
+  readonly onUnoBox: boolean;
+  /** Когда о ключе спросили впервые (мс); отсчёт ожидания. */
+  readonly firstAskedAt: number;
+  readonly now: number;
+  readonly graceMs?: number;
+}): GatewayKeyState {
+  if (input.key.length > 0) return "ready";
+  if (!input.onUnoBox) return "missing";
+  const grace = input.graceMs ?? Duration.toMillis(GATEWAY_KEY_GRACE);
+  return input.now - input.firstAskedAt < grace ? "pending" : "missing";
+}
+
+/** Uno-бокс по дешёвым локальным признакам (как в machineKind.ts). */
+export function looksLikeUnoBox(input: {
+  readonly envBoxId: string | undefined;
+  readonly hostname: string;
+  readonly settingsBoxId: number | null | undefined;
+  readonly boxToken: string | undefined;
+}): boolean {
+  return (
+    parseUnoBoxIdFromEnvironment(input.envBoxId) !== null ||
+    parseSettingsBoxId(input.settingsBoxId) !== null ||
+    (input.boxToken?.trim().length ?? 0) > 0 ||
+    looksLikeUnoBoxHostname(input.hostname)
+  );
+}
+
 export interface UnoGatewayKeyShape extends ThreadAppLabels {
   /**
    * Ключ для окружения харнессов и их конфигов. Пустая строка — ключа нет
    * (не задан, не вычеканился); никогда не возвращает ключ аккаунта.
    */
   readonly harnessKey: () => Effect.Effect<string>;
+  /** Есть ли ключ, ждём ли его (см. {@link GatewayKeyState}). */
+  readonly keyState: () => Effect.Effect<GatewayKeyState>;
+  /**
+   * Ключ шлюза; пока он `pending` — ждёт его появления, но не дольше
+   * `maxWait`. Пустая строка — ключа так и нет.
+   */
+  readonly awaitHarnessKey: (maxWait?: Duration.Input) => Effect.Effect<string>;
   // labelThread / appOfThread — чей тред: задача приложения машины (Uno App
   // SDK) идёт в шлюз тем же ключом, но с меткой приложения
   // (appSdk/appTaskLabel.ts). Метку ставит только демон.
@@ -166,7 +220,47 @@ const makeUnoGatewayKey = Effect.gen(function* () {
       return key;
     });
 
-  return { harnessKey, ...makeThreadAppLabels() } satisfies UnoGatewayKeyShape;
+  // Отсчёт ожидания ключа — с первого вопроса о нём, а не со старта демона:
+  // клон из memory-снапшота «стартовал» ещё при прогреве образа.
+  let firstAskedAt: number | null = null;
+  const keyState: UnoGatewayKeyShape["keyState"] = () =>
+    Effect.gen(function* () {
+      const key = yield* harnessKey();
+      const now = Date.now();
+      firstAskedAt ??= now;
+      if (key.length > 0) return "ready" as const;
+      const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
+      return gatewayKeyState({
+        key,
+        onUnoBox: looksLikeUnoBox({
+          envBoxId: process.env.UNO_BOX_ID,
+          hostname: os.hostname(),
+          settingsBoxId: current?.uno.boxId,
+          boxToken: current?.uno.boxToken,
+        }),
+        firstAskedAt,
+        now,
+      });
+    });
+
+  const awaitHarnessKey: UnoGatewayKeyShape["awaitHarnessKey"] = (maxWait = GATEWAY_KEY_GRACE) => {
+    const deadline = Date.now() + Duration.toMillis(Duration.fromInputUnsafe(maxWait));
+    const poll: Effect.Effect<string> = Effect.gen(function* () {
+      const state = yield* keyState();
+      if (state !== "pending" || Date.now() >= deadline) return yield* harnessKey();
+      // Ключ приходит правкой settings.json; кэш настроек обновляет watcher.
+      yield* Effect.sleep(Duration.millis(250));
+      return yield* poll;
+    });
+    return poll;
+  };
+
+  return {
+    harnessKey,
+    keyState,
+    awaitHarnessKey,
+    ...makeThreadAppLabels(),
+  } satisfies UnoGatewayKeyShape;
 });
 
 export const UnoGatewayKeyLive = Layer.effect(UnoGatewayKey, makeUnoGatewayKey);
@@ -175,5 +269,7 @@ export const UnoGatewayKeyLive = Layer.effect(UnoGatewayKey, makeUnoGatewayKey);
 export const UnoGatewayKeyTest = (key = "") =>
   Layer.sync(UnoGatewayKey, () => ({
     harnessKey: () => Effect.succeed(key),
+    keyState: () => Effect.succeed(key.length > 0 ? ("ready" as const) : ("missing" as const)),
+    awaitHarnessKey: () => Effect.succeed(key),
     ...makeThreadAppLabels(),
   }));

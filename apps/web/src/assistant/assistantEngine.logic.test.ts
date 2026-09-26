@@ -69,6 +69,18 @@ describe("assistant engine notice", () => {
     expect(assistantEngineNotice(status({ gatewayConfigured: false }))?.id).toBe("gateway-missing");
   });
 
+  it("stays calm while a fresh computer's key is on its way, and lets the message go", () => {
+    const pending = status({ gatewayConfigured: false, gatewayPending: true });
+    expect(assistantEngineNotice(pending)).toMatchObject({
+      id: "getting-ready",
+      variant: "info",
+      title: "Uno is getting ready…",
+      busy: true,
+      action: null,
+    });
+    expect(assistantEngineSendBlock(pending)).toBeNull();
+  });
+
   it("leads a person who chose their own key in onboarding to add it, then to use it", () => {
     const noKeys = status({ keys: [] });
     expect(assistantEngineNotice(noKeys, { defaultAi: "byok" })).toMatchObject({

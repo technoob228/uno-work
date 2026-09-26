@@ -4,7 +4,10 @@ import { createModelCapabilities } from "@t3tools/shared/model";
 import { Deferred, Duration, Effect, Fiber, PubSub, Ref, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
-import { makeManagedServerProvider } from "./makeManagedServerProvider.ts";
+import {
+  CREATION_PROBE_REUSE_WINDOW,
+  makeManagedServerProvider,
+} from "./makeManagedServerProvider.ts";
 
 const emptyCapabilities = createModelCapabilities({ optionDescriptors: [] });
 const fastModeCapabilities = createModelCapabilities({
@@ -204,6 +207,40 @@ describe("makeManagedServerProvider", () => {
     ),
   );
 
+  // A new or rebuilt instance is refreshed by the registry right after its
+  // own creation probe starts: one probe must serve both.
+  it.effect("a refresh during the creation probe reuses it instead of probing again", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const checks = yield* Ref.make(0);
+        const releaseCheck = yield* Deferred.make<void>();
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: () => false,
+          initialSnapshot: () => initialSnapshot,
+          checkProvider: Ref.update(checks, (count) => count + 1).pipe(
+            Effect.andThen(Deferred.await(releaseCheck)),
+            Effect.as(refreshedSnapshot),
+          ),
+          refreshInterval: "1 hour",
+        });
+        yield* Effect.yieldNow;
+        const refreshing = yield* provider.refresh.pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        yield* Deferred.succeed(releaseCheck, undefined);
+        assert.deepStrictEqual(yield* Fiber.join(refreshing), refreshedSnapshot);
+        assert.strictEqual(yield* Ref.get(checks), 1);
+
+        // Later refreshes ("Refresh", installs) probe for real.
+        yield* TestClock.adjust(CREATION_PROBE_REUSE_WINDOW);
+        yield* TestClock.adjust("1 millis");
+        yield* provider.refresh;
+        assert.strictEqual(yield* Ref.get(checks), 2);
+      }),
+    ),
+  );
+
   it.effect("ignores stale enrichment callbacks after a newer refresh advances generation", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -245,6 +282,9 @@ describe("makeManagedServerProvider", () => {
         yield* Deferred.succeed(allowFirstRefresh, undefined);
         yield* Deferred.await(firstCallbackReady);
 
+        // Past the window in which a refresh reuses the creation probe.
+        yield* TestClock.adjust(CREATION_PROBE_REUSE_WINDOW);
+        yield* TestClock.adjust("1 millis");
         yield* provider.refresh;
         yield* Deferred.await(secondCallbackReady);
 

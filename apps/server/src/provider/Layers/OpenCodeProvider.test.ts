@@ -12,7 +12,11 @@ import {
   OpenCodeRuntimeError,
   type OpenCodeRuntimeShape,
 } from "../opencodeRuntime.ts";
-import { checkOpenCodeProviderStatus, type ProviderPresentation } from "./OpenCodeProvider.ts";
+import {
+  checkOpenCodeProviderStatus,
+  clearOpenCodeVersionCache,
+  type ProviderPresentation,
+} from "./OpenCodeProvider.ts";
 import type { OpenCodeInventory } from "../opencodeRuntime.ts";
 
 const DEFAULT_VERSION_STDOUT = "opencode 1.14.19\n";
@@ -29,6 +33,7 @@ const DEFAULT_VERSION_STDOUT = "opencode 1.14.19\n";
 const runtimeMock = {
   state: {
     runVersionError: null as Error | null,
+    versionCalls: 0,
     versionStdout: DEFAULT_VERSION_STDOUT,
     versionStderr: "",
     inventoryError: null as Error | null,
@@ -40,6 +45,7 @@ const runtimeMock = {
   },
   reset() {
     this.state.runVersionError = null;
+    this.state.versionCalls = 0;
     this.state.versionStdout = DEFAULT_VERSION_STDOUT;
     this.state.versionStderr = "";
     this.state.inventoryError = null;
@@ -50,6 +56,21 @@ const runtimeMock = {
     };
   },
 };
+
+const runOpenCodeVersion = () =>
+  runtimeMock.state.runVersionError
+    ? Effect.fail(
+        new OpenCodeRuntimeError({
+          operation: "runOpenCodeCommand",
+          detail: runtimeMock.state.runVersionError.message,
+          cause: runtimeMock.state.runVersionError,
+        }),
+      )
+    : Effect.succeed({
+        stdout: runtimeMock.state.versionStdout,
+        stderr: runtimeMock.state.versionStderr,
+        code: 0,
+      });
 
 const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
   startOpenCodeServerProcess: () =>
@@ -73,19 +94,10 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
       };
     }),
   runOpenCodeCommand: () =>
-    runtimeMock.state.runVersionError
-      ? Effect.fail(
-          new OpenCodeRuntimeError({
-            operation: "runOpenCodeCommand",
-            detail: runtimeMock.state.runVersionError.message,
-            cause: runtimeMock.state.runVersionError,
-          }),
-        )
-      : Effect.succeed({
-          stdout: runtimeMock.state.versionStdout,
-          stderr: runtimeMock.state.versionStderr,
-          code: 0,
-        }),
+    Effect.suspend(() => {
+      runtimeMock.state.versionCalls += 1;
+      return Effect.void;
+    }).pipe(Effect.andThen(runOpenCodeVersion())),
   createOpenCodeSdkClient: () =>
     ({}) as unknown as ReturnType<OpenCodeRuntimeShape["createOpenCodeSdkClient"]>,
   loadOpenCodeInventory: () =>
@@ -102,6 +114,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
 
 beforeEach(() => {
   runtimeMock.reset();
+  clearOpenCodeVersionCache();
 });
 
 const testLayer = Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble).pipe(
@@ -234,6 +247,31 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
       );
       assert.ok(variantDescriptor && variantDescriptor.type === "select");
       assert.equal(variantDescriptor.label, "Effort");
+    }),
+  );
+
+  it.effect("asks an installed binary for its version once, not on every probe", () =>
+    Effect.gen(function* () {
+      // Any existing absolute file stands in for the uno-code binary.
+      const settings = makeOpenCodeSettings({ binaryPath: process.execPath });
+      const first = yield* checkOpenCodeProviderStatus(settings, process.cwd());
+      const second = yield* checkOpenCodeProviderStatus(settings, process.cwd());
+
+      assert.equal(runtimeMock.state.versionCalls, 1);
+      assert.equal(first.version, "1.14.19");
+      assert.equal(second.version, "1.14.19");
+    }),
+  );
+
+  it.effect("keeps asking a binary that is too old", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.versionStdout = "0.1.0\n";
+      const settings = makeOpenCodeSettings({ binaryPath: process.execPath });
+      yield* checkOpenCodeProviderStatus(settings, process.cwd());
+      const second = yield* checkOpenCodeProviderStatus(settings, process.cwd());
+
+      assert.equal(runtimeMock.state.versionCalls, 2);
+      assert.equal(second.status, "error");
     }),
   );
 

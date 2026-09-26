@@ -176,6 +176,11 @@ export const AssistantLlmStatus = Schema.Struct({
   keys: Schema.Array(AiProviderKeySummary),
   /** The machine has a Uno gateway key (the default path works). */
   gatewayConfigured: Schema.Boolean,
+  /**
+   * No key yet, but one is on its way (a fresh Uno box: the console writes it
+   * seconds after sign-in). A message sent now waits for it. Absent = false.
+   */
+  gatewayPending: Schema.optionalKey(Schema.Boolean),
 });
 export type AssistantLlmStatus = typeof AssistantLlmStatus.Type;
 

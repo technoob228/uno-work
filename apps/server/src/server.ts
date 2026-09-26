@@ -32,6 +32,7 @@ import { websocketRpcRouteLayer } from "./ws.ts";
 import { unoWorkRouteLayers } from "./unoWork/http.ts";
 import { warmStatusRouteLayer } from "./warmStatus.ts";
 import { AssistantPrewarmLive } from "./manager/assistantPrewarm.ts";
+import { localPairingRouteLayer } from "./auth/localPairing.ts";
 import { setupToolsRouteLayers } from "./setupTools/http.ts";
 import { ConnectorsServiceLive } from "./setupTools/ConnectorsService.ts";
 import { MaterialsServiceLive } from "./setupTools/MaterialsService.ts";
@@ -559,6 +560,8 @@ export const makeRoutesLayer = Layer.mergeAll(
   authPairingCredentialRouteLayer,
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
+  // Root on the box mints a browser session without starting the CLI.
+  localPairingRouteLayer,
   // Mobile-compat: поверхность апстримного T3-клиента (мобилка из сторов).
   authWebSocketTicketRouteLayer,
   oauthTokenRouteLayer,
