@@ -56,6 +56,7 @@ import {
   type StoreFilters,
   type StoreHighlight,
 } from "./appStoreModel";
+import { appDisplayName } from "./appTaskNames";
 import { formatMemory } from "./computerFormat";
 import { installAiLines, storeAiLine } from "../settings/appAiProviderModel";
 import { OwnToolsRow } from "../setup/OwnToolsDialog";
@@ -381,6 +382,42 @@ export interface StoreBuiltInApp {
   readonly onOpen: () => void;
 }
 
+/** An app's task name ("Files & documents") with its product name small beside it ("Nextcloud"). */
+function AppName({
+  template,
+  className,
+}: {
+  template: Pick<UnoComputerAppTemplate, "id" | "name">;
+  className?: string;
+}) {
+  const shown = appDisplayName(template.id, template.name);
+  return (
+    <span className={cn("flex min-w-0 items-baseline gap-1.5", className)}>
+      <span className="truncate">{shown.title}</span>
+      {shown.product ? (
+        <span
+          className="shrink-0 truncate text-[11px] font-normal text-muted-foreground"
+          data-testid="store-product-name"
+        >
+          {shown.product}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** One plain line on what the app gives you: the catalog's, else ours, else its description. */
+function appLine(template: UnoComputerAppTemplate): string {
+  return (
+    template.tagline || appDisplayName(template.id, template.name).line || template.description
+  );
+}
+
+/** The task name alone, for titles and buttons ("Install Passwords?"). */
+function taskName(template: Pick<UnoComputerAppTemplate, "id" | "name">): string {
+  return appDisplayName(template.id, template.name).title;
+}
+
 export function AppCatalogDialog({
   open,
   onOpenChange,
@@ -512,9 +549,9 @@ export function AppCatalogDialog({
             className="size-12 rounded-2xl text-2xl"
           />
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold">{template.name}</div>
+            <AppName template={template} className="text-sm font-semibold" />
             <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-              {template.tagline || template.description}
+              {appLine(template)}
             </p>
           </div>
         </div>
@@ -549,15 +586,13 @@ export function AppCatalogDialog({
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="truncate text-sm font-medium">{template.name}</span>
+            <AppName template={template} className="text-sm font-medium" />
             {installedTemplateIds.has(template.id) ? (
               <CheckIcon className="size-3.5 shrink-0 text-success" aria-label="Installed" />
             ) : null}
             <RowHighlights template={template} />
           </div>
-          <p className="truncate text-xs text-muted-foreground">
-            {template.tagline || template.description}
-          </p>
+          <p className="truncate text-xs text-muted-foreground">{appLine(template)}</p>
           {template.ai ? (
             <p
               className="truncate text-[11px] text-primary"
@@ -572,6 +607,7 @@ export function AppCatalogDialog({
     </li>
   );
 
+  const viewingName = viewing ? appDisplayName(viewing.id, viewing.name) : null;
   const detail = viewing ? (
     <div className="flex flex-col gap-5">
       <div className="flex items-start gap-4">
@@ -582,9 +618,11 @@ export function AppCatalogDialog({
           className="size-16 rounded-2xl p-2 text-3xl"
         />
         <div className="min-w-0 flex-1">
-          {viewing.tagline ? (
-            <p className="text-sm text-muted-foreground">{viewing.tagline}</p>
-          ) : null}
+          <p className="text-sm text-muted-foreground">
+            {[viewingName?.product, viewing.tagline || viewingName?.line]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
           <div className="mt-2">
             <AppTags
               template={viewing}
@@ -832,10 +870,10 @@ export function AppCatalogDialog({
           <DialogTitle>
             {configuring
               ? configuring.settings.length === 0
-                ? `Install ${configuring.name}?`
-                : `Set up ${configuring.name}`
+                ? `Install ${taskName(configuring)}?`
+                : `Set up ${taskName(configuring)}`
               : viewing
-                ? viewing.name
+                ? taskName(viewing)
                 : "App Store"}
           </DialogTitle>
           <DialogDescription className={viewing && !configuring ? "sr-only" : undefined}>
@@ -1004,7 +1042,7 @@ export function AppCatalogDialog({
               disabled={starting !== null || missing.length > 0}
             >
               {starting ? <Spinner className="size-3.5" /> : null}
-              Install {configuring.name}
+              Install {taskName(configuring)}
             </Button>
           </DialogFooter>
         ) : null}

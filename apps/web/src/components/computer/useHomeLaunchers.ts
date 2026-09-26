@@ -150,6 +150,19 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
     [openChatWithPrompt],
   );
 
+  /**
+   * An app's "Set up with Uno" / "Fix with Uno": a new chat in the home folder
+   * that sends `prompt` at once, on the chat's own model and permissions. If it
+   * can't send, the prompt stays typed there.
+   */
+  const sendToUno = useCallback(
+    async (prompt: string) => {
+      const draftId = await openChatWithPrompt(prompt);
+      if (draftId) usePendingSendStore.getState().request(draftId, prompt);
+    },
+    [openChatWithPrompt],
+  );
+
   /** A new chat in `folder` with `prompt` typed, not sent (setup's first tasks). */
   const askInFolder = useCallback(
     async (prompt: string, folder: string) => {
@@ -158,5 +171,5 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
     [openChatWithPrompt],
   );
 
-  return { newChat, openTerminal, chatInFolder, askUno, askInFolder, startTask };
+  return { newChat, openTerminal, chatInFolder, askUno, askInFolder, startTask, sendToUno };
 }

@@ -20,13 +20,17 @@ import type {
 } from "@t3tools/contracts";
 
 import { publicChatWarning, tileAiNote } from "../settings/appAiProviderModel";
+import { appDisplayName } from "./appTaskNames";
 import type { AppInstall } from "./useAppInstalls";
 
 export type ProgramStatus = "running" | "stopped" | "installing" | "failed" | "asleep" | "unknown";
 
 export interface ProgramTile {
   readonly key: string;
+  /** What it is called on screen: the task name for App Store apps ("Files & documents"). */
   readonly name: string;
+  /** The product name, small and muted under the task name ("Nextcloud"); null/absent = none. */
+  readonly product?: string | null;
   readonly icon: string | null;
   readonly iconImage: string | null;
   /** The App Store catalog id, for the console logo fallback; null/absent = not a store app. */
@@ -305,9 +309,11 @@ export function buildProgramTiles(input: {
 
   for (const install of input.installs) {
     const running = install.state === "running";
+    const shown = appDisplayName(install.templateId, install.name);
     tiles.push({
       key: `install:${install.deploymentId}`,
-      name: install.name,
+      name: shown.title,
+      product: shown.product,
       icon: install.icon,
       iconImage: install.iconUrl ?? null,
       templateId: install.templateId,
@@ -317,7 +323,7 @@ export function buildProgramTiles(input: {
           ? "Installing…"
           : install.state === "failed"
             ? "Didn't install"
-            : "App Store",
+            : (shown.product ?? "App Store"),
       openUrl: running && input.computerOn ? install.url : null,
       online: running && install.url !== null,
       machineApp: null,
@@ -332,15 +338,21 @@ export function buildProgramTiles(input: {
   for (const app of input.storeApps) {
     if (app.deploymentId !== null && tracked.has(app.deploymentId)) continue;
     const status = storeStatus(app, input.computerOn);
+    const shown = appDisplayName(app.templateId, app.name);
     tiles.push({
       key: app.key,
-      name: app.name,
+      name: shown.title,
+      product: shown.product,
       icon: app.icon,
       iconImage: app.iconUrl ?? null,
       templateId: app.templateId,
       status,
       caption:
-        status === "asleep" ? "Asleep" : status === "installing" ? "Installing…" : "App Store",
+        status === "asleep"
+          ? "Asleep"
+          : status === "installing"
+            ? "Installing…"
+            : (shown.product ?? "App Store"),
       openUrl: status === "running" ? app.url : null,
       online: app.url !== null,
       machineApp: null,

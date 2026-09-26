@@ -8,6 +8,7 @@ import {
   INSTALLED_TAB,
   hasFilters,
   logoSources,
+  matchesQuery,
   NO_FILTERS,
   phonePlatforms,
   shelves,
@@ -183,5 +184,23 @@ describe("App Store v3", () => {
       "https://c/api/v1/apps/icons/memos.png",
     ]);
     expect(logoSources({ id: "../x", iconUrl: undefined })).toEqual([]);
+  });
+});
+
+describe("App Store search by task", () => {
+  const nextcloud = app("nextcloud", { name: "Nextcloud", description: "Sync and share" });
+  const vaultwarden = app("vaultwarden", { name: "Vaultwarden", description: "Bitwarden server" });
+
+  it("finds an app by its task name and by its product name", () => {
+    expect(matchesQuery(nextcloud, "files documents")).toBe(true);
+    expect(matchesQuery(nextcloud, "Files & documents")).toBe(true);
+    expect(matchesQuery(nextcloud, "nextcloud")).toBe(true);
+    expect(matchesQuery(vaultwarden, "passwords")).toBe(true);
+    expect(matchesQuery(vaultwarden, "vaultwarden")).toBe(true);
+    expect(matchesQuery(vaultwarden, "photos")).toBe(false);
+  });
+
+  it("finds a product name the map spells apart from the catalog's", () => {
+    expect(matchesQuery(app("wg-easy", { name: "VPN" }), "wireguard")).toBe(true);
   });
 });

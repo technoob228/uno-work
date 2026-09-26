@@ -29,7 +29,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { accountTransport } from "../../account/unoAccount";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
-import { useOpenApp } from "../../navigation/useOpenApp";
 import { useStore } from "../../store";
 import { Button } from "../ui/button";
 import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
@@ -77,7 +76,9 @@ import {
   removalCloudFiles,
   type ProgramTile,
 } from "./programModel";
+import { appPrimaryAction } from "./appPrimaryAction";
 import { useAppInstalls } from "./useAppInstalls";
+import { useAppPrimaryAction } from "./useAppPrimaryAction";
 import { useComputerBoost } from "./useComputerBoost";
 import { useHomeLaunchers } from "./useHomeLaunchers";
 
@@ -137,9 +138,9 @@ export function ComputerView() {
     inFlight: appsQuery.data?.installed.apps ?? [],
   });
   const launchers = useHomeLaunchers(environmentId);
+  const primary = useAppPrimaryAction({ environmentId, boxId: pickedBoxId });
 
   const [storeOpen, setStoreOpen] = useState(false);
-  const { openHere } = useOpenApp();
   const routeSearch = routeApi.useSearch();
   const navigate = useNavigate();
   const [folderOpen, setFolderOpen] = useState(false);
@@ -321,18 +322,13 @@ export function ComputerView() {
     },
   };
 
+  /**
+   * A tile's click is its one primary action (Open / Start / Set up with Uno /
+   * Fix with Uno); while it has none yet (installing, asleep) — its details.
+   */
   const openTile = (tile: ProgramTile) => {
-    const store = tile.storeApp;
-    if (tile.openUrl && store?.sso && store.deploymentId !== null) {
-      // Sign in with Uno: the app opens already signed in, in its own tab —
-      // the Uno sign-in cookie can't work inside Uno Work's cross-site frame.
-      const deploymentId = store.deploymentId;
-      void openAppSignedIn(() => signIn.openLink(deploymentId), tile.openUrl);
-      return;
-    }
-    // Other apps open inside Uno Work; the app bar has "New tab" for the rest.
-    if (tile.openUrl) {
-      openHere({ url: tile.openUrl, name: tile.name, icon: tile.icon });
+    if (!appPrimaryAction(tile).disabled) {
+      primary.run(tile);
       return;
     }
     resetTileMutations();
@@ -605,6 +601,16 @@ export function ComputerView() {
           )
         }
         onClose={() => setDetailsKey(null)}
+        onPrimaryAction={(tile) => {
+          const action = appPrimaryAction(tile);
+          // Starting stays on the card, with its progress and any error there.
+          if (action.kind === "start" && action.machineAppId !== null) {
+            appAction.mutate({ appId: action.machineAppId, action: "start" });
+            return;
+          }
+          primary.run(tile);
+          setDetailsKey(null);
+        }}
         remove={remove}
         aiLimit={{
           pending: setAiLimit.isPending,

@@ -27,10 +27,13 @@ import {
   BuiltInIcon,
   HiddenPrograms,
   ProgramIcon,
+  primaryActionTitle,
   TileShell,
   type BuiltInPrograms,
 } from "../ComputerPrograms";
+import { appPrimaryAction } from "../appPrimaryAction";
 import type { ProgramTile } from "../programModel";
+import { useStartingAppId } from "../useAppPrimaryAction";
 import { useMinuteClock } from "../../../hooks/useMinuteClock";
 import { aiSpendDays, formatUsdShort, type SpendDay } from "./homeInfo";
 import { recentHomeEntries } from "./homeModel";
@@ -240,6 +243,7 @@ export function AppsWidget({
   onUnhide?: (appId: string) => void;
 }) {
   const [all, setAll] = useState(false);
+  const startingId = useStartingAppId();
   // Three rows of five: the built-ins, then the apps; the rest on demand.
   const builtInCount = builtIns.onDrive !== undefined ? 5 : 4;
   const room = APPS_WIDGET_TILES - builtInCount;
@@ -311,30 +315,35 @@ export function AppsWidget({
           }
           onClick={() => builtIns.onAppStore?.()}
         />
-        {shownTiles.map((tile) => (
-          <TileShell
-            small
-            key={tile.key}
-            label={tile.name}
-            caption={tile.caption}
-            status={tile.status}
-            online={tile.online}
-            title={tile.openUrl ? `Open ${tile.name}` : `${tile.name} — details`}
-            aiNote={tile.aiNote ?? null}
-            aiWarning={tile.aiWarning ?? null}
-            icon={
-              <ProgramIcon
-                name={tile.name}
-                icon={tile.icon}
-                iconImage={tile.iconImage}
-                templateId={tile.templateId}
-                className="size-11 rounded-[14px] text-lg"
-              />
-            }
-            onClick={() => onOpenTile(tile)}
-            onDetails={() => onTileDetails(tile)}
-          />
-        ))}
+        {shownTiles.map((tile) => {
+          const action = appPrimaryAction(tile);
+          return (
+            <TileShell
+              small
+              key={tile.key}
+              label={tile.name}
+              caption={tile.caption}
+              status={tile.status}
+              online={tile.online}
+              title={primaryActionTitle(tile, action)}
+              action={action}
+              actionBusy={startingId !== null && startingId === tile.machineApp?.id}
+              aiNote={tile.aiNote ?? null}
+              aiWarning={tile.aiWarning ?? null}
+              icon={
+                <ProgramIcon
+                  name={tile.name}
+                  icon={tile.icon}
+                  iconImage={tile.iconImage}
+                  templateId={tile.templateId}
+                  className="size-11 rounded-[14px] text-lg"
+                />
+              }
+              onClick={() => onOpenTile(tile)}
+              onDetails={() => onTileDetails(tile)}
+            />
+          );
+        })}
         {overflow > 0 ? (
           <li>
             <button

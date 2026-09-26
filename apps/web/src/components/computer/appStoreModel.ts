@@ -10,6 +10,8 @@ import {
   type UnoComputerAppTemplate,
 } from "@t3tools/contracts";
 
+import { APP_TASKS } from "./appTaskNames";
+
 export const ALL_TAB = "all";
 export const INSTALLED_TAB = "installed";
 
@@ -53,13 +55,20 @@ function normalize(text: string): string {
   return text.toLocaleLowerCase().replace(/ё/g, "е").trim();
 }
 
-/** Every word of the query is found in the name, the line, the description or the keywords. */
+/**
+ * Every word of the query is found in the name — the task name ("Passwords")
+ * or the product's ("Vaultwarden") — the line, the description or the keywords.
+ */
 export function matchesQuery(template: UnoComputerAppTemplate, query: string): boolean {
   const words = normalize(query).split(/\s+/).filter(Boolean);
   if (words.length === 0) return true;
+  const task = APP_TASKS[template.id];
   const haystack = normalize(
     [
       template.name,
+      task?.task ?? "",
+      task?.product ?? "",
+      task?.line ?? "",
       template.tagline ?? "",
       template.description,
       ...(template.keywords ?? []),
