@@ -1,5 +1,17 @@
 import type { ServerProvider } from "@t3tools/contracts";
-import { Duration, Effect, Equal, Fiber, PubSub, Ref, Scope, Stream } from "effect";
+import {
+  Clock,
+  Deferred,
+  Duration,
+  Effect,
+  Equal,
+  Exit,
+  Fiber,
+  PubSub,
+  Ref,
+  Scope,
+  Stream,
+} from "effect";
 import * as Semaphore from "effect/Semaphore";
 
 import type { ServerProviderShape } from "./Services/ServerProvider.ts";
@@ -13,6 +25,19 @@ interface ProviderSnapshotState {
 // While a provider binary is missing, only every Nth periodic tick actually
 // re-probes (e.g. every ~10 minutes at the default 60s interval).
 const NOT_INSTALLED_REFRESH_BACKOFF_TICKS = 10;
+
+/**
+ * A forced refresh that arrives while the creation probe is still running (or
+ * just after it) takes that probe's result instead of starting another one.
+ *
+ * Every new or rebuilt instance used to be probed twice back to back: its own
+ * creation probe below, then the registry's force-refresh of the new instance
+ * (ProviderRegistry `syncLiveSources`), queued behind it on the semaphore.
+ * For uno-code / OpenCode a probe is `--version` plus a whole `serve`
+ * process: seconds of a full processor on a 2 vCPU Work box, twice at boot
+ * and twice again when the gateway key lands and the Uno instance is rebuilt.
+ */
+export const CREATION_PROBE_REUSE_WINDOW = Duration.seconds(2);
 
 export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(function* <
   Settings,
@@ -161,10 +186,38 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     ),
   ).pipe(Effect.forkScoped);
 
+  const creationProbe = yield* Deferred.make<ServerProvider, ServerSettingsError>();
+  const creationProbeDoneAtRef = yield* Ref.make<number | null>(null);
   yield* applySnapshot(initialSettings, { forceRefresh: true }).pipe(
+    Effect.exit,
+    Effect.tap(() =>
+      Clock.currentTimeMillis.pipe(Effect.flatMap((now) => Ref.set(creationProbeDoneAtRef, now))),
+    ),
+    Effect.flatMap((exit) => Deferred.done(creationProbe, exit)),
+    Effect.flatMap(() => Deferred.await(creationProbe)),
     Effect.ignoreCause({ log: true }),
     Effect.forkScoped,
   );
+
+  /** The creation probe's result when it is fresh enough to stand for a refresh. */
+  const reuseCreationProbe = Effect.gen(function* () {
+    const doneAt = yield* Ref.get(creationProbeDoneAtRef);
+    const now = yield* Clock.currentTimeMillis;
+    if (
+      doneAt !== null &&
+      now - doneAt > Duration.toMillis(Duration.fromInputUnsafe(CREATION_PROBE_REUSE_WINDOW))
+    ) {
+      return null;
+    }
+    const exit = yield* Effect.exit(Deferred.await(creationProbe));
+    return Exit.isSuccess(exit) ? exit.value : null;
+  });
+
+  const refreshOrReuseCreationProbe = Effect.gen(function* () {
+    const reused = yield* reuseCreationProbe;
+    if (reused !== null) return reused;
+    return yield* refreshSnapshot();
+  });
 
   return {
     getSnapshot: input.getSettings.pipe(
@@ -172,7 +225,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       Effect.tapError(Effect.logError),
       Effect.orDie,
     ),
-    refresh: refreshSnapshot().pipe(Effect.tapError(Effect.logError), Effect.orDie),
+    refresh: refreshOrReuseCreationProbe.pipe(Effect.tapError(Effect.logError), Effect.orDie),
     get streamChanges() {
       return Stream.fromPubSub(changesPubSub);
     },
