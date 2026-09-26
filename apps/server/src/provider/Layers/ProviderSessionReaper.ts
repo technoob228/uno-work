@@ -149,6 +149,15 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
           continue;
         }
 
+        // The pinned Uno chat keeps its harness up (it is started ahead of
+        // the first message, manager/assistantPrewarm.ts): reaping it would
+        // put the ~4 s cold start back on the next message. On a clone of a
+        // memory snapshot the clock also jumps forward by hours, so every
+        // idle binding looks stale right after restore.
+        if (thread?.assistantRole === "chat") {
+          continue;
+        }
+
         const reaped = yield* providerService.stopSession({ threadId: binding.threadId }).pipe(
           Effect.tap(() =>
             Effect.logInfo("provider.session.reaped", {
