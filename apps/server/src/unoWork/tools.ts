@@ -13,6 +13,7 @@
  * Every tool declares a level (see `policy.ts`); the gate runs here, before
  * the tool, so the approval rules are the same in every harness.
  */
+import { randomInt } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsp } from "node:fs";
@@ -55,7 +56,9 @@ import {
   isUnoWorkGuideTopic,
 } from "../agentContext/guides.ts";
 import type { ConnectorCallResult, ConnectorTool } from "../setupTools/connectors.ts";
+import { resolveSecretTargetDirectory, upsertEnvContent } from "../secretsEnv.ts";
 import { validateArgs, type ObjectSchema } from "./argsSchema.ts";
+import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import { decideUnoWorkGate, refusalMessage, type UnoWorkToolLevel } from "./policy.ts";
 
 import { UNO_WORK_MCP_SERVER_NAME } from "./constants.ts";
@@ -193,6 +196,14 @@ export interface UnoWorkToolDeps {
     readonly lines: number;
   }) => Effect.Effect<string>;
   /**
+   * The Uno console with this computer's own token (`consoleClient.ts`):
+   * sites' password and forms, managed databases. Absent where there is no
+   * console wiring (older tests); the tools then say the computer isn't linked.
+   */
+  readonly console?: {
+    readonly request: (input: ConsoleRequest) => Effect.Effect<ConsoleReply, UnoWorkToolError>;
+  };
+  /**
    * The person's connected tools (Google Drive, Gmail & Calendar, Notion,
    * GitHub): calls go to the console with this computer's machine token.
    * Absent where there is no console (tests, a laptop without Uno).
@@ -215,6 +226,7 @@ export type UnoWorkGroup =
   | "chats"
   | "person"
   | "sites"
+  | "databases"
   | "account"
   | "settings"
   | "docs";
@@ -480,6 +492,190 @@ const threadPath = (raw: string | undefined) => {
   const id = (raw ?? "").trim();
   return /^[A-Za-z0-9:_-]{1,200}$/.test(id) ? encodeURIComponent(id) : null;
 };
+
+// ── Console (sites, databases) ─────────────────────────────────────────
+
+const NOT_LINKED_MESSAGE =
+  "This computer isn't connected to an Uno account, so sites and databases can't be changed from here. Tell the person to sign in to Uno in Settings, Uno account.";
+
+/**
+ * A console answer → its body, or a sentence the model can act on. The
+ * machine's token may predate a right (it is refreshed when the person opens
+ * Uno Work from the console) or the person may have switched it off.
+ */
+const consoleOk = (
+  reply: ConsoleReply,
+  what: string,
+): Effect.Effect<Record<string, unknown>, UnoWorkToolError> => {
+  const body = reply.body;
+  if (reply.status >= 200 && reply.status < 300) {
+    return Effect.succeed(
+      typeof body === "object" && body !== null && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : { value: body },
+    );
+  }
+  const record =
+    typeof body === "object" && body !== null ? (body as Record<string, unknown>) : undefined;
+  const code = typeof record?.error === "string" ? record.error : "";
+  const detail =
+    typeof record?.message === "string"
+      ? record.message
+      : typeof record?.detail === "string"
+        ? record.detail
+        : typeof body === "string"
+          ? body.slice(0, 300)
+          : "";
+  switch (true) {
+    case reply.status === 401:
+      return Effect.fail(toolError(NOT_LINKED_MESSAGE));
+    case code === "WORK_MACHINE_SCOPE_DISABLED" || code === "INSUFFICIENT_SCOPE":
+      return Effect.fail(
+        toolError(
+          `This computer isn't allowed to ${what} yet. Its access to the Uno account is refreshed when the person opens Uno Work from the Uno console; creating databases also needs "Create computers" on in Settings, Computer access. Tell the person exactly that; don't try another way.`,
+        ),
+      );
+    case code === "MACHINE_CREATE_LIMIT":
+      return Effect.fail(
+        toolError(
+          "This computer already created as many computers and databases today as it may. Tell the person; they can create more from the Uno console.",
+        ),
+      );
+    case reply.status === 403 || reply.status === 404:
+      return Effect.fail(
+        toolError(
+          `Couldn't ${what}: it isn't on this Uno account${detail ? ` (${detail})` : ""}. List what exists first.`,
+        ),
+      );
+  }
+  return Effect.fail(toolError(`Couldn't ${what}: ${detail || code || `HTTP ${reply.status}`}.`));
+};
+
+const callConsole = (
+  deps: UnoWorkToolDeps,
+  request: ConsoleRequest,
+  what: string,
+): Effect.Effect<Record<string, unknown>, UnoWorkToolError> =>
+  deps.console
+    ? deps.console.request(request).pipe(Effect.flatMap((reply) => consoleOk(reply, what)))
+    : Effect.fail(toolError(NOT_LINKED_MESSAGE));
+
+/** Reads of the account (databases) follow Settings → Uno account → Agent access. */
+const requireAccountAccess = (deps: UnoWorkToolDeps) =>
+  Effect.gen(function* () {
+    const settings = yield* asToolError(deps.settings);
+    if (clampUnoAgentAccessLevel(settings.uno.agentAccess) === "off") {
+      return yield* toolError(ACCESS_OFF_MESSAGE);
+    }
+  });
+
+const SITE_SLUG_PATTERN = "^[a-z0-9][a-z0-9-]{0,62}$";
+const siteSlugArg = {
+  type: "string" as const,
+  pattern: SITE_SLUG_PATTERN,
+  description: "The site's name (slug) from sites_list, e.g. q3-report-7f2a.",
+};
+const sitePath = (slug: string, rest = "") => `/api/v1/deploys/${encodeURIComponent(slug)}${rest}`;
+const siteUrl = (slug: string) => `https://${slug}.uno4.dev/`;
+
+/** A password a person can read out: `maple-river-4821-cloud`. */
+const PASSWORD_WORDS = [
+  "maple",
+  "river",
+  "cloud",
+  "amber",
+  "cedar",
+  "delta",
+  "ember",
+  "fjord",
+  "grove",
+  "harbor",
+  "iris",
+  "juniper",
+  "koala",
+  "lumen",
+  "meadow",
+  "nectar",
+  "orbit",
+  "pebble",
+  "quartz",
+  "raven",
+  "sierra",
+  "tulip",
+  "umber",
+  "velvet",
+  "willow",
+  "yonder",
+  "zephyr",
+  "comet",
+  "lotus",
+  "prairie",
+];
+export function readablePassword(random: (max: number) => number = randomInt): string {
+  const word = () => PASSWORD_WORDS[random(PASSWORD_WORDS.length)]!;
+  const digits = String(1000 + random(9000));
+  return `${word()}-${word()}-${digits}-${word()}`;
+}
+
+/** What the forms tools show: where answers go, never tokens. */
+function formsDelivery(view: Record<string, unknown>) {
+  const email = view.email as { to?: unknown; confirmed?: unknown } | undefined;
+  const telegram = view.telegram as { chat_id?: unknown; via?: unknown } | undefined;
+  const webhook = view.webhook as { url?: unknown } | undefined;
+  return {
+    formAction: "/__forms",
+    email: email ? { to: email.to, confirmed: email.confirmed === true } : null,
+    telegram: telegram ? { connected: true, via: telegram.via ?? "uno_bot" } : null,
+    webhook: webhook ? { url: webhook.url } : null,
+  };
+}
+
+function compactDatabase(raw: Record<string, unknown>) {
+  return {
+    id: raw.id,
+    name: raw.name,
+    engine: raw.engine,
+    version: raw.version ?? null,
+    status: raw.status,
+    ramMb: raw.ram_mb ?? null,
+    diskGb: raw.disk_gb ?? null,
+    createdAt: raw.created_at ?? null,
+  };
+}
+
+/** Where db_connection writes: the chat's folder (or inside it) — never outside. */
+function envTarget(deps: UnoWorkToolDeps, args: Record<string, unknown>) {
+  const requested = str(args, "cwd") ?? deps.caller.cwd ?? deps.home;
+  const target = resolveSecretTargetDirectory({
+    threadCwd: deps.caller.cwd,
+    requestedCwd: resolveUserPath(requested, deps),
+  });
+  return target;
+}
+
+const writeEnvVar = (input: {
+  readonly folder: string;
+  readonly file: string;
+  readonly name: string;
+  readonly value: string;
+}) =>
+  Effect.tryPromise({
+    try: async () => {
+      const target = path.join(input.folder, input.file);
+      await fsp.mkdir(input.folder, { recursive: true });
+      const current = await fsp.readFile(target, "utf8").catch(() => "");
+      await fsp.writeFile(target, upsertEnvContent(current, input.name, input.value), {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      await fsp.chmod(target, 0o600);
+      return target;
+    },
+    catch: (cause) =>
+      toolError(
+        `Could not write ${input.file}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      ),
+  });
 
 // ── The tools ──────────────────────────────────────────────────────────
 
@@ -1564,6 +1760,377 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         }),
       ),
   },
+  {
+    name: "sites_list",
+    group: "sites",
+    description:
+      "The person's published websites on Uno: name (slug), address, whether a password protects it, size. Use it to find the slug for site_set_password and site_forms_set.",
+    inputSchema: noArgs,
+    level: "safe",
+    run: (deps) =>
+      callConsole(deps, { method: "GET", path: "/api/v1/work/sites" }, "list the sites").pipe(
+        Effect.map((body) => ({
+          sites: (Array.isArray(body.deploys) ? body.deploys : []).map((raw) => {
+            const site = raw as Record<string, unknown>;
+            const slug = String(site.slug ?? "");
+            return {
+              slug,
+              url: siteUrl(slug),
+              hasPassword: site.has_password === true,
+              customDomain: site.custom_domain ?? null,
+              sizeBytes: site.size_bytes ?? null,
+              updatedAt: site.updated_at ?? null,
+            };
+          }),
+        })),
+      ),
+  },
+  {
+    name: "site_set_password",
+    group: "sites",
+    description:
+      "Protect a published site with a password, or remove the password (remove: true; then anyone can open it). Do this yourself when the person wants a private site; never tell them to do it by hand. Without a password a readable one is generated. The result has the password: tell the person, visitors need it. The person always approves.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: siteSlugArg,
+        password: {
+          type: "string",
+          minLength: 10,
+          maxLength: 128,
+          description: "The password visitors type (10–128 characters). Omit to generate one.",
+        },
+        remove: {
+          type: "boolean",
+          description: "true removes the password: the site becomes public.",
+        },
+      },
+      required: ["slug"],
+      additionalProperties: false,
+    },
+    level: "sensitive",
+    approvalTitle: (args) =>
+      bool(args, "remove") === true
+        ? `Remove the password from site “${str(args, "slug")}”: anyone can open it`
+        : `Protect site “${str(args, "slug")}” with a password`,
+    approvalDetail: (args) =>
+      bool(args, "remove") === true
+        ? siteUrl(str(args, "slug") ?? "")
+        : str(args, "password")
+          ? `${siteUrl(str(args, "slug") ?? "")} · password: ${str(args, "password")}`
+          : `${siteUrl(str(args, "slug") ?? "")} · a new password is generated`,
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const slug = str(args, "slug")!;
+        const remove = bool(args, "remove") === true;
+        if (remove && str(args, "password")) {
+          return yield* toolError("Pass either password or remove: true, not both.");
+        }
+        const password = remove ? "" : (str(args, "password") ?? readablePassword());
+        yield* callConsole(
+          deps,
+          { method: "PUT", path: sitePath(slug, "/password"), body: { password } },
+          `set the password of site “${slug}”`,
+        );
+        return remove
+          ? { slug, url: siteUrl(slug), hasPassword: false, note: "Anyone can open the site now." }
+          : {
+              slug,
+              url: siteUrl(slug),
+              hasPassword: true,
+              password,
+              note: "Tell the person this password; visitors type it to open the site.",
+            };
+      }),
+  },
+  {
+    name: "site_forms_get",
+    group: "sites",
+    description:
+      'Where a site\'s form answers go (email, Telegram, webhook) and, when asked, the latest answers. A form on the site works when it posts to /__forms: <form action="/__forms" method="POST">.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: siteSlugArg,
+        submissions: {
+          type: "integer",
+          minimum: 0,
+          maximum: 50,
+          description: "How many latest answers to include (default 0).",
+        },
+      },
+      required: ["slug"],
+      additionalProperties: false,
+    },
+    level: "safe",
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const slug = str(args, "slug")!;
+        const view = yield* callConsole(
+          deps,
+          { method: "GET", path: sitePath(slug, "/forms") },
+          `read the forms of site “${slug}”`,
+        );
+        const limit = num(args, "submissions") ?? 0;
+        if (limit === 0) return { slug, delivery: formsDelivery(view) };
+        const list = yield* callConsole(
+          deps,
+          { method: "GET", path: sitePath(slug, `/forms/submissions?limit=${limit}`) },
+          `read the answers of site “${slug}”`,
+        );
+        return {
+          slug,
+          delivery: formsDelivery(view),
+          submissions: Array.isArray(list.submissions) ? list.submissions : [],
+          total: list.total ?? null,
+        };
+      }),
+  },
+  {
+    name: "site_forms_set",
+    group: "sites",
+    description:
+      "Choose where a site's form answers go: email (the account's own email works at once, another address gets a confirmation link first), telegram: true (returns a link the person opens in Telegram and presses Start), webhookUrl (https, receives JSON). An empty string switches that channel off; an omitted field stays as it is. Set this up yourself when a site has a form; never tell the person to do it by hand. The person always approves.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: siteSlugArg,
+        email: {
+          type: "string",
+          maxLength: 254,
+          description: 'Address that receives answers, or "" to switch email off.',
+        },
+        telegram: {
+          type: "boolean",
+          description: "true: get a link that connects the person's Telegram.",
+        },
+        webhookUrl: {
+          type: "string",
+          maxLength: 2048,
+          description: 'https URL that receives each answer as JSON, or "" to switch it off.',
+        },
+      },
+      required: ["slug"],
+      additionalProperties: false,
+    },
+    level: "sensitive",
+    approvalTitle: (args) => `Send form answers of site “${str(args, "slug")}”`,
+    approvalDetail: (args) => {
+      const parts: string[] = [];
+      const email = str(args, "email");
+      const webhook = str(args, "webhookUrl");
+      if (email !== undefined) parts.push(email === "" ? "email: off" : `to email ${email}`);
+      if (webhook !== undefined) parts.push(webhook === "" ? "webhook: off" : `to ${webhook}`);
+      if (bool(args, "telegram") === true) parts.push("to your Telegram (you open a link)");
+      return parts.join(" · ") || undefined;
+    },
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const slug = str(args, "slug")!;
+        const email = str(args, "email")?.trim();
+        const webhook = str(args, "webhookUrl")?.trim();
+        const telegram = bool(args, "telegram") === true;
+        if (email === undefined && webhook === undefined && !telegram) {
+          return yield* toolError("Say where answers go: email, telegram or webhookUrl.");
+        }
+        if (webhook && !webhook.startsWith("https://")) {
+          return yield* toolError("webhookUrl must start with https://.");
+        }
+        let view: Record<string, unknown> | undefined;
+        if (email !== undefined || webhook !== undefined) {
+          // The console replaces the whole setting: start from what is there.
+          const current = yield* callConsole(
+            deps,
+            { method: "GET", path: sitePath(slug, "/forms") },
+            `read the forms of site “${slug}”`,
+          );
+          const currentEmail = current.email as { to?: string } | undefined;
+          const currentWebhook = current.webhook as { url?: string } | undefined;
+          const currentTelegram = current.telegram as { chat_id?: number } | undefined;
+          const nextEmail = email === undefined ? currentEmail?.to : email;
+          const nextWebhook = webhook === undefined ? currentWebhook?.url : webhook;
+          view = yield* callConsole(
+            deps,
+            {
+              method: "PUT",
+              path: sitePath(slug, "/forms"),
+              body: {
+                ...(nextEmail ? { email: { to: nextEmail } } : {}),
+                ...(nextWebhook ? { webhook: { url: nextWebhook } } : {}),
+                ...(currentTelegram?.chat_id
+                  ? { telegram: { chat_id: currentTelegram.chat_id } }
+                  : {}),
+              },
+            },
+            `set the forms of site “${slug}”`,
+          );
+        }
+        let telegramLink: string | undefined;
+        if (telegram) {
+          const link = yield* callConsole(
+            deps,
+            { method: "POST", path: sitePath(slug, "/forms/telegram-link") },
+            `connect Telegram to site “${slug}”`,
+          );
+          telegramLink = typeof link.url === "string" ? link.url : undefined;
+        }
+        const delivery = view ? formsDelivery(view) : undefined;
+        const notes: string[] = [];
+        if (delivery?.email && delivery.email.confirmed === false) {
+          notes.push(
+            `A confirmation email went to ${String(delivery.email.to)}: answers arrive there after someone clicks the link in it.`,
+          );
+        }
+        if (telegramLink) {
+          notes.push(
+            "Give the person this Telegram link (open_in_panel or in your answer): they open it in Telegram and press Start within 15 minutes.",
+          );
+        }
+        notes.push(
+          'The site\'s form must post to /__forms: <form action="/__forms" method="POST">.',
+        );
+        return {
+          slug,
+          ...(delivery ? { delivery } : {}),
+          ...(telegramLink ? { telegramLink } : {}),
+          note: notes.join(" "),
+        };
+      }),
+  },
+
+  // Databases
+  {
+    name: "db_list",
+    group: "databases",
+    description:
+      "The person's managed databases (Postgres) on Uno: id, name, status, size. Connection details come from db_connection, never from this list.",
+    inputSchema: noArgs,
+    level: "safe",
+    run: (deps) =>
+      Effect.gen(function* () {
+        yield* requireAccountAccess(deps);
+        const body = yield* callConsole(
+          deps,
+          { method: "GET", path: "/api/v1/databases" },
+          "list the databases",
+        );
+        return {
+          databases: (Array.isArray(body.databases) ? body.databases : []).map((raw) =>
+            compactDatabase(raw as Record<string, unknown>),
+          ),
+        };
+      }),
+  },
+  {
+    name: "db_create",
+    group: "databases",
+    description:
+      "Create a managed Postgres database on Uno for an app. It runs on its own small computer and counts against the person's plan; the person always approves. Create it yourself when an app needs a database; never tell the person to do it by hand. Ready in a minute or two: then call db_connection.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          pattern: "^[a-z][a-z0-9_]{0,40}$",
+          description: "Database name, e.g. shop (lowercase letters, digits, _).",
+        },
+        ramMb: { type: "integer", minimum: 512, maximum: 16384, description: "Default 1024." },
+        diskGb: { type: "integer", minimum: 5, maximum: 500, description: "Default 10." },
+      },
+      required: ["name"],
+      additionalProperties: false,
+    },
+    level: "sensitive",
+    approvalTitle: (args) => `Create a database “${str(args, "name")}”`,
+    approvalDetail: (args) =>
+      `Postgres, ${num(args, "ramMb") ?? 1024} MB RAM, ${num(args, "diskGb") ?? 10} GB disk. It counts against your plan.`,
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        yield* requireAccountAccess(deps);
+        const body = yield* callConsole(
+          deps,
+          {
+            method: "POST",
+            path: "/api/v1/databases",
+            body: {
+              name: str(args, "name")!,
+              ram_mb: num(args, "ramMb") ?? 1024,
+              disk_gb: num(args, "diskGb") ?? 10,
+            },
+          },
+          "create a database",
+        );
+        return {
+          database: compactDatabase(body),
+          next: "It starts in a minute or two. Then call db_connection with this id: the connection string goes into the project's .env, not into the chat.",
+        };
+      }),
+  },
+  {
+    name: "db_connection",
+    group: "databases",
+    description:
+      "Put a database's connection string (with its password) into the project's .env as DATABASE_URL (or envName), file mode 0600. You never see or print the password: point the app at the env variable. Only the chat's folder or a folder inside it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        databaseId: { type: "integer", minimum: 1, description: "Id from db_list or db_create." },
+        envName: {
+          type: "string",
+          pattern: "^[A-Za-z_][A-Za-z0-9_]{0,127}$",
+          description: "Variable name, default DATABASE_URL.",
+        },
+        cwd: {
+          type: "string",
+          minLength: 1,
+          description: "Project folder (default: this chat's folder).",
+        },
+        targetFile: {
+          type: "string",
+          pattern: "^\\.env(\\.[A-Za-z0-9_-]{1,32})*$",
+          description: "Default .env.",
+        },
+      },
+      required: ["databaseId"],
+      additionalProperties: false,
+    },
+    level: "change",
+    approvalTitle: (args) =>
+      `Save the connection to database ${num(args, "databaseId")} in ${str(args, "targetFile") ?? ".env"}`,
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        yield* requireAccountAccess(deps);
+        const target = envTarget(deps, args);
+        if (!target.ok) {
+          return yield* toolError(
+            `The folder must be this chat's folder (${deps.caller.cwd ? displayPath(deps.caller.cwd, deps.home) : "~"}) or inside it.`,
+          );
+        }
+        const id = num(args, "databaseId")!;
+        const creds = yield* callConsole(
+          deps,
+          { method: "GET", path: `/api/v1/databases/${id}/dsn` },
+          `read the connection of database ${id}`,
+        );
+        const dsn = typeof creds.dsn === "string" ? creds.dsn : "";
+        if (dsn.length === 0) {
+          return yield* toolError(
+            `Database ${id} has no connection string yet: it is probably still starting. Try again in a minute.`,
+          );
+        }
+        const name = str(args, "envName") ?? "DATABASE_URL";
+        const file = str(args, "targetFile") ?? ".env";
+        const written = yield* writeEnvVar({ folder: target.cwd, file, name, value: dsn });
+        return {
+          databaseId: id,
+          envName: name,
+          file: displayPath(written, deps.home),
+          database: creds.db_name ?? null,
+          user: creds.db_user ?? null,
+          note: `Read it from the environment (process.env.${name} / os.environ["${name}"]); make sure ${file} is in .gitignore. Never print it.`,
+        };
+      }),
+  },
 
   // Account
   {
@@ -1894,7 +2461,8 @@ export const UNO_WORK_MCP_SERVER: McpServerDefinition<UnoWorkToolDeps, UnoWorkTo
       annotations: {
         readOnlyHint: level === "safe",
         destructiveHint: level === "sensitive",
-        openWorldHint: tool.group === "sites" || tool.group === "account",
+        openWorldHint:
+          tool.group === "sites" || tool.group === "databases" || tool.group === "account",
       },
       run: (deps: UnoWorkToolDeps, args: unknown) => runUnoWorkTool(tool, deps, args),
     };

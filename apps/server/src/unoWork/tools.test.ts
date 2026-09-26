@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { InboxPost } from "../inbox/inboxModel.ts";
 import { handleMcpMessage } from "../mcp/mcpJsonRpc.ts";
 import { validateArgs, type JsonSchema } from "./argsSchema.ts";
+import { consoleToken, type ConsoleReply, type ConsoleRequest } from "./consoleClient.ts";
 import { decideUnoWorkGate } from "./policy.ts";
 import {
   UNO_WORK_MCP_SERVER,
@@ -52,6 +53,7 @@ interface Recorded {
   actions: Array<{ appId: string; action: string }>;
   inbox: InboxPost[];
   bridge: Array<{ method: string; path: string; body?: unknown }>;
+  console: ConsoleRequest[];
   createdBoxes: number;
 }
 
@@ -61,11 +63,19 @@ function makeDeps(
     approval?: "approved" | "denied" | "timeout" | "no_client";
     agentAccess?: "off" | "read" | "manage";
     apiKey?: string;
+    console?: (request: ConsoleRequest) => ConsoleReply;
   } = {},
 ): { deps: UnoWorkToolDeps; recorded: Recorded; home: string } {
   const home = mkdtempSync(path.join(os.tmpdir(), "uno-work-tools-"));
   tempDirs.push(home);
-  const recorded: Recorded = { approvals: [], actions: [], inbox: [], bridge: [], createdBoxes: 0 };
+  const recorded: Recorded = {
+    approvals: [],
+    actions: [],
+    inbox: [],
+    bridge: [],
+    console: [],
+    createdBoxes: 0,
+  };
   const apps = {
     apps: [app()],
     manifestDir: "~/.uno/apps",
@@ -206,6 +216,13 @@ function makeDeps(
       createBoxStatus: () => Effect.succeed({} as never),
     },
     settings: Effect.succeed(settings),
+    console: {
+      request: (request) =>
+        Effect.sync(() => {
+          recorded.console.push(request);
+          return options.console?.(request) ?? { status: 200, body: {} };
+        }),
+    },
     readLogTail: () => Effect.succeed("hello from the app"),
   };
   return { deps, recorded, home };
@@ -279,6 +296,13 @@ describe("uno-work tool catalogue", () => {
       "notify",
       "open_in_panel",
       "site_publish",
+      "sites_list",
+      "site_set_password",
+      "site_forms_get",
+      "site_forms_set",
+      "db_create",
+      "db_list",
+      "db_connection",
       "account_overview",
       "computer_create",
       "settings_read",
@@ -294,6 +318,9 @@ describe("uno-work tool catalogue", () => {
       "file_share_link",
       "drive_share_link",
       "site_publish",
+      "site_set_password",
+      "site_forms_set",
+      "db_create",
       "computer_create",
     ]) {
       expect(toolLevel(tool(name), {}), name).toBe("sensitive");
@@ -307,6 +334,9 @@ describe("uno-work tool catalogue", () => {
       "chat_status",
       "account_overview",
       "settings_read",
+      "sites_list",
+      "site_forms_get",
+      "db_list",
       "uno_guide",
       "notify",
       "open_in_panel",
@@ -320,6 +350,7 @@ describe("uno-work tool catalogue", () => {
       "app_add_widget",
       "chat_create",
       "chat_message",
+      "db_connection",
     ]) {
       expect(toolLevel(tool(name), {}), name).toBe("change");
     }
@@ -691,5 +722,268 @@ describe("existing manifests", () => {
       port: 4000,
       widget: { path: "/w" },
     });
+  });
+});
+
+describe("sites: password and forms", () => {
+  it("sets a password only after the person allows it, and returns it to tell them", async () => {
+    const { deps, recorded } = makeDeps();
+    const result = await run("site_set_password", deps, {
+      slug: "team-site",
+      password: "correct-horse-battery",
+    });
+    expect(result._tag).toBe("Success");
+    expect(recorded.approvals[0]).toMatchObject({
+      tool: "site_set_password",
+      sensitive: true,
+      title: "Protect site “team-site” with a password",
+    });
+    expect(recorded.console).toEqual([
+      {
+        method: "PUT",
+        path: "/api/v1/deploys/team-site/password",
+        body: { password: "correct-horse-battery" },
+      },
+    ]);
+    if (result._tag === "Success") {
+      expect(result.success).toMatchObject({
+        hasPassword: true,
+        password: "correct-horse-battery",
+      });
+    }
+  });
+
+  it("generates a readable password and can remove it", async () => {
+    const generated = makeDeps();
+    const result = await run("site_set_password", generated.deps, { slug: "team-site" });
+    const sent = generated.recorded.console[0]?.body as { password: string };
+    expect(sent.password).toMatch(/^[a-z]+-[a-z]+-\d{4}-[a-z]+$/);
+    expect(sent.password.length).toBeGreaterThanOrEqual(10);
+    if (result._tag === "Success")
+      expect(result.success).toMatchObject({ password: sent.password });
+
+    const removed = makeDeps();
+    await run("site_set_password", removed.deps, { slug: "team-site", remove: true });
+    expect(removed.recorded.console[0]?.body).toEqual({ password: "" });
+    expect(removed.recorded.approvals[0]?.title).toContain("anyone can open it");
+  });
+
+  it("does nothing when the person declines", async () => {
+    const { deps, recorded } = makeDeps({ approval: "denied" });
+    const result = await run("site_set_password", deps, { slug: "team-site" });
+    expect(result._tag).toBe("Failure");
+    expect(recorded.console).toEqual([]);
+  });
+
+  it("explains a missing right instead of sending the person to do it by hand", async () => {
+    const { deps } = makeDeps({
+      console: () => ({ status: 403, body: { error: "WORK_MACHINE_SCOPE_DISABLED" } }),
+    });
+    const result = await run("site_set_password", deps, { slug: "team-site" });
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") expect(result.failure.message).toContain("isn't allowed");
+  });
+
+  it("keeps the other channels when changing one, and returns the Telegram link", async () => {
+    const { deps, recorded } = makeDeps({
+      console: (request) => {
+        if (request.method === "GET") {
+          return {
+            status: 200,
+            body: {
+              enabled: true,
+              webhook: { url: "https://hooks.example.com/a" },
+              telegram: { chat_id: 111, via: "uno_bot" },
+            },
+          };
+        }
+        if (request.path.endsWith("/telegram-link")) {
+          return { status: 200, body: { url: "https://t.me/uno_forms_bot?start=forms_x" } };
+        }
+        return {
+          status: 200,
+          body: {
+            email: { to: "me@example.com", confirmed: false },
+            webhook: { url: "https://hooks.example.com/a" },
+            telegram: { chat_id: 111, via: "uno_bot" },
+          },
+        };
+      },
+    });
+    const result = await run("site_forms_set", deps, {
+      slug: "team-site",
+      email: "me@example.com",
+      telegram: true,
+    });
+    expect(result._tag).toBe("Success");
+    expect(recorded.approvals[0]).toMatchObject({ tool: "site_forms_set", sensitive: true });
+    expect(recorded.approvals[0]).toMatchObject({
+      detail: "to email me@example.com · to your Telegram (you open a link)",
+    });
+    expect(recorded.console[1]).toEqual({
+      method: "PUT",
+      path: "/api/v1/deploys/team-site/forms",
+      body: {
+        email: { to: "me@example.com" },
+        webhook: { url: "https://hooks.example.com/a" },
+        telegram: { chat_id: 111 },
+      },
+    });
+    expect(recorded.console[2]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/deploys/team-site/forms/telegram-link",
+    });
+    if (result._tag === "Success") {
+      expect(result.success).toMatchObject({
+        telegramLink: "https://t.me/uno_forms_bot?start=forms_x",
+        delivery: { email: { to: "me@example.com", confirmed: false } },
+      });
+      expect(JSON.stringify(result.success)).not.toContain("111");
+    }
+  });
+
+  it("switches a channel off with an empty string and refuses a non-https webhook", async () => {
+    const { deps, recorded } = makeDeps({
+      console: (request) =>
+        request.method === "GET"
+          ? { status: 200, body: { email: { to: "me@example.com", confirmed: true } } }
+          : { status: 200, body: {} },
+    });
+    await run("site_forms_set", deps, { slug: "team-site", email: "" });
+    expect(recorded.console[1]?.body).toEqual({});
+
+    const bad = await run("site_forms_set", makeDeps().deps, {
+      slug: "team-site",
+      webhookUrl: "http://plain.example.com",
+    });
+    expect(bad._tag).toBe("Failure");
+  });
+
+  it("reads delivery and answers without asking", async () => {
+    const { deps, recorded } = makeDeps({
+      runtimeMode: "approval-required",
+      console: (request) =>
+        request.path.includes("submissions")
+          ? { status: 200, body: { submissions: [{ id: 1 }], total: 1 } }
+          : { status: 200, body: { email: { to: "me@example.com", confirmed: true } } },
+    });
+    const result = await run("site_forms_get", deps, { slug: "team-site", submissions: 5 });
+    expect(result._tag).toBe("Success");
+    expect(recorded.approvals).toEqual([]);
+    expect(recorded.console[1]?.path).toBe("/api/v1/deploys/team-site/forms/submissions?limit=5");
+  });
+
+  it("lists sites with their live addresses", async () => {
+    const { deps } = makeDeps({
+      console: () => ({
+        status: 200,
+        body: { deploys: [{ slug: "team-site", has_password: true, url: "https://old.host" }] },
+      }),
+    });
+    const result = await run("sites_list", deps);
+    if (result._tag !== "Success") throw new Error("sites_list failed");
+    expect(result.success).toEqual({
+      sites: [
+        {
+          slug: "team-site",
+          url: "https://team-site.uno4.dev/",
+          hasPassword: true,
+          customDomain: null,
+          sizeBytes: null,
+          updatedAt: null,
+        },
+      ],
+    });
+  });
+
+  it("rejects slugs that could leave the site's path", async () => {
+    const { deps, recorded } = makeDeps();
+    const result = await run("site_set_password", deps, { slug: "../boxes/1" });
+    expect(result._tag).toBe("Failure");
+    expect(recorded.console).toEqual([]);
+  });
+});
+
+describe("databases", () => {
+  const DSN = "postgres://shop:s3cr3t-pa55@10.0.0.7:5432/shop";
+  const dbConsole = (request: ConsoleRequest): ConsoleReply => {
+    if (request.path.endsWith("/dsn")) {
+      return {
+        status: 200,
+        body: { dsn: DSN, db_name: "shop", db_user: "shop", password: "s3cr3t-pa55" },
+      };
+    }
+    if (request.method === "POST") {
+      return { status: 201, body: { id: 7, name: "shop", engine: "postgres", status: "creating" } };
+    }
+    return {
+      status: 200,
+      body: { databases: [{ id: 7, name: "shop", dsn: "postgres://shop:${PGPASSWORD}@x" }] },
+    };
+  };
+
+  it("creates a database only after the person allows it", async () => {
+    const { deps, recorded } = makeDeps({ console: dbConsole });
+    const result = await run("db_create", deps, { name: "shop" });
+    expect(result._tag).toBe("Success");
+    expect(recorded.approvals[0]).toMatchObject({
+      tool: "db_create",
+      sensitive: true,
+      title: "Create a database “shop”",
+    });
+    expect(recorded.console[0]).toEqual({
+      method: "POST",
+      path: "/api/v1/databases",
+      body: { name: "shop", ram_mb: 1024, disk_gb: 10 },
+    });
+
+    const declined = makeDeps({ console: dbConsole, approval: "denied" });
+    await run("db_create", declined.deps, { name: "shop" });
+    expect(declined.recorded.console).toEqual([]);
+  });
+
+  it("respects agent access off", async () => {
+    const { deps, recorded } = makeDeps({ console: dbConsole, agentAccess: "off" });
+    expect((await run("db_list", deps))._tag).toBe("Failure");
+    expect((await run("db_create", deps, { name: "shop" }))._tag).toBe("Failure");
+    expect(recorded.console).toEqual([]);
+  });
+
+  it("lists databases without connection strings", async () => {
+    const { deps } = makeDeps({ console: dbConsole });
+    const result = await run("db_list", deps);
+    expect(result._tag).toBe("Success");
+    expect(JSON.stringify(result)).not.toContain("postgres://");
+  });
+
+  it("writes the connection string to .env (0600) and never returns it", async () => {
+    const { deps, home } = makeDeps({ console: dbConsole });
+    const project = path.join(home, "projects", "notes");
+    const result = await run("db_connection", deps, { databaseId: 7 });
+    expect(result._tag).toBe("Success");
+    expect(JSON.stringify(result)).not.toContain("s3cr3t");
+    const envFile = path.join(project, ".env");
+    expect(readFileSync(envFile, "utf8")).toBe(`DATABASE_URL=${DSN}\n`);
+    expect(statSync(envFile).mode & 0o777).toBe(0o600);
+
+    // A second variable keeps the first.
+    await run("db_connection", deps, { databaseId: 7, envName: "SHOP_DB" });
+    expect(readFileSync(envFile, "utf8")).toBe(`DATABASE_URL=${DSN}\nSHOP_DB=${DSN}\n`);
+  });
+
+  it("won't write outside the chat's folder", async () => {
+    const { deps, recorded } = makeDeps({ console: dbConsole });
+    const result = await run("db_connection", deps, { databaseId: 7, cwd: "~/other-project" });
+    expect(result._tag).toBe("Failure");
+    expect(recorded.console).toEqual([]);
+  });
+});
+
+describe("console credential", () => {
+  it("uses the machine token, then an account key, never the AI key", () => {
+    const settings = (uno: Record<string, unknown>) => ({ uno }) as unknown as ServerSettings;
+    expect(consoleToken(settings({ apiKey: "unollm_x", boxToken: "uno_agt_m" }))).toBe("uno_agt_m");
+    expect(consoleToken(settings({ apiKey: "acct-key" }))).toBe("acct-key");
+    expect(consoleToken(settings({ apiKey: "unollm_x" }))).toBe("");
   });
 });
