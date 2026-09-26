@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { assistantCommandOrigin } from "../commandOrigin.ts";
 import os from "node:os";
 import path from "node:path";
 
@@ -1869,6 +1870,82 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(assistantEvents[3]?.payload.streaming).toBe(false);
     expect(assistantEvents[3]?.payload.text).toBe("");
+  });
+
+  it("streams the assistant chat by whole words whatever the setting, masking split keys", async () => {
+    const harness = await createHarness();
+    await Effect.runPromise(
+      harness.engine.dispatch(
+        {
+          type: "thread.meta.update",
+          commandId: CommandId.make("cmd-assistant-role"),
+          threadId: ThreadId.make("thread-1"),
+          assistantRole: "chat",
+        },
+        { origin: assistantCommandOrigin({ assistantKey: "assistant" }) },
+      ),
+    );
+    const now = new Date().toISOString();
+    const delta = (id: string, text: string) =>
+      harness.emit({
+        type: "content.delta",
+        eventId: asEventId(id),
+        provider: ProviderDriverKind.make("hermes"),
+        createdAt: now,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-words"),
+        itemId: asItemId("item-words"),
+        payload: { streamKind: "assistant_text", delta: text },
+      });
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-words"),
+      provider: ProviderDriverKind.make("hermes"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-words"),
+    });
+    delta("evt-words-1", "Your key is unollm_abcdef");
+    const partial = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-words" && message.streaming,
+      ),
+    );
+    expect(
+      partial.messages.find(
+        (message: ProviderRuntimeTestMessage) => message.id === "assistant:item-words",
+      )?.text,
+    ).toBe("Your key is ");
+
+    delta("evt-words-2", "ghijklmnopqrstuv, keep it");
+    await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-words" &&
+          message.text === "Your key is unollm_[redacted], keep ",
+      ),
+    );
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-words-completed"),
+      provider: ProviderDriverKind.make("hermes"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-words"),
+      itemId: asItemId("item-words"),
+      payload: { itemType: "assistant_message", status: "completed" },
+    });
+    await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-words" &&
+          !message.streaming &&
+          message.text === "Your key is unollm_[redacted], keep it",
+      ),
+    );
   });
 
   it("starts a new streaming assistant message segment after approval", async () => {
