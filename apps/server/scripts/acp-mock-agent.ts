@@ -516,7 +516,8 @@ const program = Effect.gen(function* () {
   );
 
   yield* agent.handleUnknownExtRequest((method, params) => {
-    if (method !== "session/mode/set") {
+    // `session/set_mode` is how Hermes' driver switches modes (raw request).
+    if (method !== "session/mode/set" && method !== "session/set_mode") {
       return Effect.fail(AcpError.AcpRequestError.methodNotFound(method));
     }
 

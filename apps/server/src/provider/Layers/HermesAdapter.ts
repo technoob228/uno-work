@@ -156,7 +156,13 @@ interface HermesSessionContext {
   /** Последняя применённая пара (model, mode) — чтобы не гонять двойной set_model на каждый turn. */
   lastAppliedModel: string | undefined;
   lastAppliedModeId: string | undefined;
+  /** The turn a prompt is running for; undefined between turns. */
   activeTurnId: TurnId | undefined;
+  /**
+   * The last turn started on this session. Updates Hermes sends after its
+   * prompt returned (the segment close, a late chunk) still belong to it.
+   */
+  lastTurnId: TurnId | undefined;
   stopped: boolean;
   /** LLM provider the hermes process was started with (env is per process). */
   readonly llmProvider: AssistantLlmProvider;
@@ -165,6 +171,11 @@ interface HermesSessionContext {
    * chat's visible history (hermesHandoff.ts). Cleared after that prompt.
    */
   handoffPending: boolean;
+}
+
+/** The turn an update from Hermes belongs to: the running one, else the last one. */
+function eventTurnId(ctx: HermesSessionContext | undefined): TurnId | undefined {
+  return ctx === undefined ? undefined : (ctx.activeTurnId ?? ctx.lastTurnId);
 }
 
 function settlePendingApprovalsAsCancelled(
@@ -303,7 +314,7 @@ export function makeHermesAdapter(
       method: string,
     ) =>
       Effect.gen(function* () {
-        const fingerprint = `${ctx.activeTurnId ?? "no-turn"}:${JSON.stringify(payload)}`;
+        const fingerprint = `${eventTurnId(ctx) ?? "no-turn"}:${JSON.stringify(payload)}`;
         if (ctx.lastPlanFingerprint === fingerprint) {
           return;
         }
@@ -313,7 +324,7 @@ export function makeHermesAdapter(
             stamp: yield* makeEventStamp(),
             provider: PROVIDER,
             threadId: ctx.threadId,
-            turnId: ctx.activeTurnId,
+            turnId: eventTurnId(ctx),
             payload,
             source: "acp.jsonrpc",
             method,
@@ -570,7 +581,7 @@ export function makeHermesAdapter(
                     stamp: yield* makeEventStamp(),
                     provider: PROVIDER,
                     threadId: input.threadId,
-                    turnId: ctx?.activeTurnId,
+                    turnId: eventTurnId(ctx),
                     requestId: runtimeRequestId,
                     permissionRequest,
                     detail: permissionRequest.detail ?? JSON.stringify(params).slice(0, 2000),
@@ -587,7 +598,7 @@ export function makeHermesAdapter(
                     stamp: yield* makeEventStamp(),
                     provider: PROVIDER,
                     threadId: input.threadId,
-                    turnId: ctx?.activeTurnId,
+                    turnId: eventTurnId(ctx),
                     requestId: runtimeRequestId,
                     permissionRequest,
                     decision: resolved,
@@ -644,6 +655,7 @@ export function makeHermesAdapter(
             lastAppliedModel: resumeSessionId ? undefined : configuredModel,
             lastAppliedModeId: undefined,
             activeTurnId: undefined,
+            lastTurnId: undefined,
             stopped: false,
             llmProvider,
             handoffPending: resumeSessionId === undefined || started.sessionId !== resumeSessionId,
@@ -666,7 +678,7 @@ export function makeHermesAdapter(
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
                         threadId: ctx.threadId,
-                        turnId: ctx.activeTurnId,
+                        turnId: eventTurnId(ctx),
                         itemId: event.itemId,
                         lifecycle: "item.started",
                       }),
@@ -678,7 +690,7 @@ export function makeHermesAdapter(
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
                         threadId: ctx.threadId,
-                        turnId: ctx.activeTurnId,
+                        turnId: eventTurnId(ctx),
                         itemId: event.itemId,
                         lifecycle: "item.completed",
                       }),
@@ -695,7 +707,7 @@ export function makeHermesAdapter(
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
                         threadId: ctx.threadId,
-                        turnId: ctx.activeTurnId,
+                        turnId: eventTurnId(ctx),
                         toolCall: event.toolCall,
                         rawPayload: event.rawPayload,
                       }),
@@ -708,7 +720,7 @@ export function makeHermesAdapter(
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
                         threadId: ctx.threadId,
-                        turnId: ctx.activeTurnId,
+                        turnId: eventTurnId(ctx),
                         ...(event.itemId ? { itemId: event.itemId } : {}),
                         text: event.text,
                         rawPayload: event.rawPayload,
@@ -785,6 +797,19 @@ export function makeHermesAdapter(
           );
         }
         return prompt;
+      });
+
+    /**
+     * The prompt of `turnId` is over: the session is no longer in a turn (it
+     * used to report that turn as active forever — an idle chat looked busy
+     * to economy mode and to the live-harness cap). No-op when another turn
+     * has started since.
+     */
+    const endTurn = (ctx: HermesSessionContext, turnId: TurnId) =>
+      Effect.gen(function* () {
+        if (ctx.activeTurnId !== turnId) return;
+        ctx.activeTurnId = undefined;
+        ctx.session = { ...ctx.session, activeTurnId: undefined, updatedAt: yield* nowIso };
       });
 
     const sendTurn: HermesAdapterShape["sendTurn"] = (input) =>
@@ -892,6 +917,7 @@ export function makeHermesAdapter(
               model,
             });
             liveCtx.activeTurnId = turnId;
+            liveCtx.lastTurnId = turnId;
             liveCtx.lastPlanFingerprint = undefined;
             liveCtx.session = {
               ...liveCtx.session,
@@ -907,15 +933,17 @@ export function makeHermesAdapter(
                 Effect.mapError((error) =>
                   mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
                 ),
+                // A failed or interrupted prompt ends the turn as well.
+                Effect.onError(() => endTurn(liveCtx, turnId)),
               );
 
             liveCtx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });
             liveCtx.session = {
               ...liveCtx.session,
-              activeTurnId: turnId,
               updatedAt: yield* nowIso,
               model: resolvedModel,
             };
+            yield* endTurn(liveCtx, turnId);
 
             yield* offerRuntimeEvent({
               type: "turn.completed",
