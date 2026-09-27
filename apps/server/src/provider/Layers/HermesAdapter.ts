@@ -36,6 +36,7 @@ import {
 import {
   DateTime,
   Deferred,
+  Duration,
   Effect,
   Exit,
   Fiber,
@@ -61,6 +62,7 @@ import {
   ProviderAdapterValidationError,
 } from "../Errors.ts";
 import { acpPermissionOutcome, mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
+import { isUnoBillingFailureReply, normalizeUnoBillingErrorMessage } from "../unoBilling.ts";
 import { type AcpSessionRuntimeShape } from "../acp/AcpSessionRuntime.ts";
 import {
   makeAcpAssistantItemEvent,
@@ -171,6 +173,18 @@ interface HermesSessionContext {
    * chat's visible history (hermesHandoff.ts). Cleared after that prompt.
    */
   handoffPending: boolean;
+  /** The last turn that has streamed assistant text (the 402 check looks at a turn's first text only). */
+  replyTextTurnId: TurnId | undefined;
+  /** The last turn whose `turn.completed` has gone out. */
+  completedTurnId: TurnId | undefined;
+  /**
+   * The Uno gateway refused a turn for billing (Hermes relays that as the
+   * turn's reply, `HTTP 402: …`). `ready` resolves once the human message
+   * has been emitted, so the turn can fail right after it.
+   */
+  billingFailure:
+    | { readonly turnId: TurnId; readonly message: string; readonly ready: Promise<void> }
+    | undefined;
 }
 
 /** The turn an update from Hermes belongs to: the running one, else the last one. */
@@ -299,6 +313,65 @@ export function makeHermesAdapter(
           },
           threadId,
         );
+      });
+
+    /**
+     * Hermes ends a turn the Uno gateway refused for billing with the error as
+     * the turn's reply — `HTTP 402: <gateway message>` (hermes
+     * conversation_loop.py, non-retryable client error → final_response) —
+     * and a normal end_turn. Show the human sentence in its place and finalize
+     * it as the turn's message right away (the Telegram relay reads that
+     * message once the turn is over); sendTurn then fails the turn as
+     * billing_error, which brings up the chat's top-up banner.
+     */
+    const emitBillingFailureReply = (input: {
+      readonly ctx: HermesSessionContext;
+      readonly turnId: TurnId;
+      readonly itemId: string | undefined;
+      readonly message: string;
+      readonly detail: string;
+      readonly rawPayload: unknown;
+      readonly lateForTurn: boolean;
+    }) =>
+      Effect.gen(function* () {
+        const { ctx, turnId } = input;
+        yield* Effect.logWarning("hermes turn refused by the Uno gateway for billing", {
+          threadId: ctx.threadId,
+          turnId,
+          detail: input.detail.slice(0, 300),
+        });
+        yield* offerRuntimeEvent(
+          makeAcpContentDeltaEvent({
+            stamp: yield* makeEventStamp(),
+            provider: PROVIDER,
+            threadId: ctx.threadId,
+            turnId,
+            ...(input.itemId ? { itemId: input.itemId } : {}),
+            text: input.message,
+            rawPayload: input.rawPayload,
+          }),
+        );
+        if (input.itemId) {
+          yield* offerRuntimeEvent(
+            makeAcpAssistantItemEvent({
+              stamp: yield* makeEventStamp(),
+              provider: PROVIDER,
+              threadId: ctx.threadId,
+              turnId,
+              itemId: input.itemId,
+              lifecycle: "item.completed",
+            }),
+          );
+        }
+        if (input.lateForTurn) {
+          yield* offerRuntimeEvent({
+            type: "runtime.error",
+            ...(yield* makeEventStamp()),
+            provider: PROVIDER,
+            threadId: ctx.threadId,
+            payload: { message: input.message, class: "billing_error", detail: input.detail },
+          });
+        }
       });
 
     const emitPlanUpdate = (
@@ -659,6 +732,9 @@ export function makeHermesAdapter(
             stopped: false,
             llmProvider,
             handoffPending: resumeSessionId === undefined || started.sessionId !== resumeSessionId,
+            replyTextTurnId: undefined,
+            completedTurnId: undefined,
+            billingFailure: undefined,
           };
 
           yield* applyHermesSessionConfiguration({
@@ -713,8 +789,47 @@ export function makeHermesAdapter(
                       }),
                     );
                     return;
-                  case "ContentDelta":
+                  case "ContentDelta": {
                     yield* logNative(ctx.threadId, "session/update", event.rawPayload);
+                    // Synchronous from here to the first yield: sendTurn reads
+                    // and writes the same fields and must not interleave.
+                    const turnId = eventTurnId(ctx);
+                    const firstTextOfTurn =
+                      turnId !== undefined &&
+                      ctx.replyTextTurnId !== turnId &&
+                      event.text.trim().length > 0;
+                    if (firstTextOfTurn) ctx.replyTextTurnId = turnId;
+                    if (
+                      firstTextOfTurn &&
+                      ctx.llmProvider === "uno" &&
+                      isUnoBillingFailureReply(event.text)
+                    ) {
+                      const message = normalizeUnoBillingErrorMessage(event.text);
+                      // The turn already reported completed (the prompt
+                      // returned before this chunk was handled): no turn to
+                      // fail any more — raise a billing runtime error instead.
+                      const lateForTurn = ctx.completedTurnId === turnId;
+                      let settle = () => {};
+                      if (!lateForTurn) {
+                        ctx.billingFailure = {
+                          turnId,
+                          message,
+                          ready: new Promise<void>((resolve) => {
+                            settle = resolve;
+                          }),
+                        };
+                      }
+                      yield* emitBillingFailureReply({
+                        ctx,
+                        turnId,
+                        itemId: event.itemId,
+                        message,
+                        detail: event.text,
+                        rawPayload: event.rawPayload,
+                        lateForTurn,
+                      }).pipe(Effect.ensuring(Effect.sync(() => settle())));
+                      return;
+                    }
                     yield* offerRuntimeEvent(
                       makeAcpContentDeltaEvent({
                         stamp: yield* makeEventStamp(),
@@ -727,6 +842,7 @@ export function makeHermesAdapter(
                       }),
                     );
                     return;
+                  }
                 }
               }),
             ),
@@ -945,16 +1061,36 @@ export function makeHermesAdapter(
             };
             yield* endTurn(liveCtx, turnId);
 
+            // Synchronous read-and-mark: the notification fiber decides on the
+            // same fields whether a billing reply can still fail this turn.
+            const billingFailure =
+              liveCtx.billingFailure?.turnId === turnId ? liveCtx.billingFailure : undefined;
+            liveCtx.billingFailure = undefined;
+            liveCtx.completedTurnId = turnId;
+            if (billingFailure !== undefined) {
+              // The human reply goes out (and is finalized) before the turn fails.
+              yield* Effect.promise(() => billingFailure.ready).pipe(
+                Effect.timeoutOption(Duration.seconds(5)),
+              );
+            }
+
             yield* offerRuntimeEvent({
               type: "turn.completed",
               ...(yield* makeEventStamp()),
               provider: PROVIDER,
               threadId: input.threadId,
               turnId,
-              payload: {
-                state: result.stopReason === "cancelled" ? "cancelled" : "completed",
-                stopReason: result.stopReason ?? null,
-              },
+              payload:
+                billingFailure !== undefined
+                  ? {
+                      state: "failed",
+                      stopReason: result.stopReason ?? null,
+                      errorMessage: billingFailure.message,
+                    }
+                  : {
+                      state: result.stopReason === "cancelled" ? "cancelled" : "completed",
+                      stopReason: result.stopReason ?? null,
+                    },
             });
 
             return {

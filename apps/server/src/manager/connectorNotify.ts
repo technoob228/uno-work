@@ -179,6 +179,11 @@ export const formatNotificationText = (
   const title = `"${threadTitle}"`;
   switch (notification.kind) {
     case "turn.error": {
+      // Out of AI credit / hours: the error text is already the person's way
+      // out (provider/unoBilling.ts); an internal class tag does not go out.
+      if (notification.errorClass === "billing_error" && notification.errorText !== null) {
+        return `AI stopped in ${title}: ${notification.errorText}`;
+      }
       const parts = [`Turn failed in ${title}`];
       if (notification.errorClass !== null) {
         parts.push(`[${notification.errorClass}]`);

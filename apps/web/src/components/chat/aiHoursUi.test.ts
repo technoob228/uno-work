@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { aiBusyNotice } from "../../lib/aiStatusReactQuery";
 import { aiBusyNoticeText } from "./AiBusyNotice";
 import { isCuratedUnoModelList } from "./ModelPickerContent";
-import { unoBillingBannerText } from "./UnoBillingTopUpBanner";
+import { UNO_LLM_CREDITS_EMPTY_MESSAGE, unoBillingBannerText } from "./UnoBillingTopUpBanner";
 
 const status = (over: Partial<UnoAiStatus> = {}): UnoAiStatus => ({
   status: "ok",
@@ -67,11 +67,22 @@ describe("curated Uno model list", () => {
 });
 
 describe("top-up banner", () => {
-  it("shows the AI hours message when hours ran out, credits otherwise", () => {
+  it("shows the server's billing sentence, the credit message otherwise", () => {
     const hours =
-      "Your AI hours are used up. New hours arrive on Oct 24. Top up to keep going on per-token pricing.";
+      "Your AI hours are used up. New hours arrive on Oct 24, 2026; to keep going now, add AI credit at https://console.uno4.dev/billing or switch to your own AI subscription (Claude or ChatGPT).";
     expect(unoBillingBannerText(hours)).toBe(hours);
-    expect(unoBillingBannerText("Uno LLM credits are empty.")).toBe("Uno LLM credits are empty.");
-    expect(unoBillingBannerText(null)).toBe("Uno LLM credits are empty.");
+    const notIncluded =
+      "Your plan doesn't include Uno AI hours, and your AI credit is empty. Add Uno AI to your plan or top up at https://console.uno4.dev/billing, or switch to your own AI subscription (Claude or ChatGPT).";
+    expect(unoBillingBannerText(notIncluded)).toBe(notIncluded);
+    expect(unoBillingBannerText(UNO_LLM_CREDITS_EMPTY_MESSAGE)).toBe(UNO_LLM_CREDITS_EMPTY_MESSAGE);
+    expect(unoBillingBannerText(null)).toBe(UNO_LLM_CREDITS_EMPTY_MESSAGE);
+  });
+
+  it("never shows a raw gateway error", () => {
+    for (const raw of ["HTTP 402: Insufficient LLM credits", "Uno LLM credits are empty."]) {
+      const text = unoBillingBannerText(raw);
+      expect(text).toBe(UNO_LLM_CREDITS_EMPTY_MESSAGE);
+      expect(text).not.toMatch(/HTTP 402|Insufficient LLM credits/);
+    }
   });
 });

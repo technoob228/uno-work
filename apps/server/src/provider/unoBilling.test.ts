@@ -1,11 +1,33 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  classifyOrchestrationErrorDetail,
   classifyProviderErrorDetail,
   isUnoBillingErrorDetail,
+  isUnoBillingFailureReply,
   normalizeUnoBillingErrorMessage,
+  UNO_AI_CREDIT_EMPTY_MESSAGE,
+  UNO_AI_NOT_INCLUDED_MESSAGE,
   UNO_LLM_CREDITS_EMPTY_MESSAGE,
 } from "./unoBilling.ts";
+
+const HOURS_EMPTY =
+  "Your AI hours are used up. New hours arrive on Oct 24, 2026; to keep going now, add AI credit at https://console.uno4.dev/billing or switch to your own AI subscription (Claude or ChatGPT).";
+const NOT_INCLUDED =
+  "Your plan doesn't include Uno AI hours, and your AI credit is empty. Add Uno AI to your plan or top up at https://console.uno4.dev/billing, or switch to your own AI subscription (Claude or ChatGPT).";
+const CREDITS_EMPTY =
+  "Your AI credit is empty. Top up at https://console.uno4.dev/billing, add Uno AI hours to your plan, or switch to your own AI subscription (Claude or ChatGPT).";
+const CREDITS_EMPTY_SMART =
+  "Your AI credit is empty. Pick the Smart model (it runs on your AI hours), top up at https://console.uno4.dev/billing, or switch to your own AI subscription (Claude or ChatGPT).";
+
+const gatewayBody = (code: string, message: string) =>
+  JSON.stringify({
+    error: { code, type: code, message, billing_url: "https://console.uno4.dev/billing" },
+  });
+
+const expectHuman = (text: string) => {
+  expect(text).not.toMatch(/HTTP 402|Insufficient LLM credits|[{}]|billing_url/);
+};
 
 describe("Uno AI hours used up", () => {
   it("keeps the renew date from the gateway message", () => {
@@ -13,7 +35,7 @@ describe("Uno AI hours used up", () => {
       '402 {"error":{"code":"ai_hours_empty","message":"Your AI hours are used up. New hours arrive on 2026-10-24T02:39:00Z; or top up to keep going."}}';
     expect(classifyProviderErrorDetail(detail)).toBe("billing_error");
     expect(normalizeUnoBillingErrorMessage(detail)).toBe(
-      "Your AI hours are used up. New hours arrive on Oct 24. Top up to keep going on per-token pricing.",
+      "Your AI hours are used up. New hours arrive on Oct 24. To keep going now, add AI credit at https://console.uno4.dev/billing or switch to your own AI subscription (Claude or ChatGPT).",
     );
   });
 
@@ -23,11 +45,79 @@ describe("Uno AI hours used up", () => {
         "ai_hours_empty: Your AI hours are used up. New hours arrive on October 24; or top up.",
       ),
     ).toBe(
-      "Your AI hours are used up. New hours arrive on October 24. Top up to keep going on per-token pricing.",
+      "Your AI hours are used up. New hours arrive on October 24. To keep going now, add AI credit at https://console.uno4.dev/billing or switch to your own AI subscription (Claude or ChatGPT).",
     );
     expect(normalizeUnoBillingErrorMessage("402 ai_hours_empty")).toBe(
-      "Your AI hours are used up. Top up to keep going on per-token pricing.",
+      "Your AI hours are used up. To keep going now, add AI credit at https://console.uno4.dev/billing or switch to your own AI subscription (Claude or ChatGPT).",
     );
+  });
+});
+
+describe("new gateway 402 contract", () => {
+  it.each([
+    ["ai_hours_empty", HOURS_EMPTY],
+    ["ai_not_included", NOT_INCLUDED],
+    ["insufficient_credits", CREDITS_EMPTY],
+    ["insufficient_credits", CREDITS_EMPTY_SMART],
+  ])("passes the %s human message through, whatever the wrapping", (code, message) => {
+    for (const detail of [
+      gatewayBody(code, message),
+      `402 ${gatewayBody(code, message)}`,
+      `Error code: 402 - ${gatewayBody(code, message)}`,
+      // Hermes: `HTTP <status>: <error.message>`.
+      `HTTP 402: ${message}`,
+      message,
+    ]) {
+      expect(classifyProviderErrorDetail(detail)).toBe("billing_error");
+      expect(classifyOrchestrationErrorDetail(detail)).toBe("billing_error");
+      expect(normalizeUnoBillingErrorMessage(detail)).toBe(message);
+    }
+  });
+
+  it("falls back to the code's own message when the gateway's is cut off", () => {
+    // Hermes keeps only the first 300 characters of an error.
+    expect(normalizeUnoBillingErrorMessage(`HTTP 402: ${NOT_INCLUDED.slice(0, 120)}`)).toBe(
+      UNO_AI_NOT_INCLUDED_MESSAGE,
+    );
+    expect(
+      normalizeUnoBillingErrorMessage(gatewayBody("insufficient_credits", "credit exhausted")),
+    ).toBe(UNO_AI_CREDIT_EMPTY_MESSAGE);
+    expect(normalizeUnoBillingErrorMessage(gatewayBody("ai_not_included", "no plan ai"))).toBe(
+      UNO_AI_NOT_INCLUDED_MESSAGE,
+    );
+  });
+
+  it("classifies its own output as billing too (lastErrorClass survives normalization)", () => {
+    for (const message of [
+      UNO_AI_CREDIT_EMPTY_MESSAGE,
+      UNO_AI_NOT_INCLUDED_MESSAGE,
+      normalizeUnoBillingErrorMessage("402 ai_hours_empty"),
+    ]) {
+      expect(classifyOrchestrationErrorDetail(message)).toBe("billing_error");
+      expect(normalizeUnoBillingErrorMessage(message)).toBe(message);
+    }
+  });
+});
+
+describe("old gateway wording", () => {
+  it('turns the exact "HTTP 402: Insufficient LLM credits" into a way out', () => {
+    const raw = "HTTP 402: Insufficient LLM credits";
+    expect(classifyProviderErrorDetail(raw)).toBe("billing_error");
+    const text = normalizeUnoBillingErrorMessage(raw);
+    expect(text).toBe(UNO_AI_CREDIT_EMPTY_MESSAGE);
+    expectHuman(text);
+    expect(text).toContain("https://console.uno4.dev/billing");
+    expect(text).toContain("Claude or ChatGPT");
+  });
+
+  it.each([
+    "Insufficient LLM credits",
+    "Error: HTTP 402: Insufficient LLM credits",
+    'Error code: 402 - {"error":{"message":"Insufficient LLM credits"}}',
+    "Error code: 402 - {'error': {'message': 'Insufficient LLM credits', 'code': 402}}",
+  ])("%s", (raw) => {
+    expect(classifyProviderErrorDetail(raw)).toBe("billing_error");
+    expect(normalizeUnoBillingErrorMessage(raw)).toBe(UNO_AI_CREDIT_EMPTY_MESSAGE);
   });
 });
 
@@ -44,5 +134,30 @@ describe("Uno billing error normalization", () => {
     expect(isUnoBillingErrorDetail("500 upstream timeout")).toBe(false);
     expect(classifyProviderErrorDetail("500 upstream timeout")).toBe("provider_error");
     expect(normalizeUnoBillingErrorMessage("500 upstream timeout")).toBe("500 upstream timeout");
+  });
+});
+
+describe("billing failure relayed as an assistant reply", () => {
+  it("recognises Hermes' error replies", () => {
+    for (const reply of [
+      "HTTP 402: Insufficient LLM credits",
+      `HTTP 402: ${HOURS_EMPTY}`,
+      `HTTP 402: ${NOT_INCLUDED}`,
+      "Error: Error code: 402 - {'error': {'message': 'Insufficient LLM credits'}}",
+      CREDITS_EMPTY,
+    ]) {
+      expect(isUnoBillingFailureReply(reply)).toBe(true);
+    }
+  });
+
+  it("leaves ordinary replies alone, even ones about billing", () => {
+    for (const reply of [
+      "Sure! Here is your plan for today.",
+      "An HTTP 402 status means Payment Required.",
+      "Your AI credit is empty? Let me check the billing page for you.",
+      "",
+    ]) {
+      expect(isUnoBillingFailureReply(reply)).toBe(false);
+    }
   });
 });

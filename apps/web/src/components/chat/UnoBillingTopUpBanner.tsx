@@ -1,18 +1,34 @@
 import { memo, useMemo, useState } from "react";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
 import { CreditCardIcon } from "lucide-react";
+import { CONSOLE_URL } from "../../account/accountOverview";
 import { readLocalApi } from "../../localApi";
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 
-export const UNO_LLM_CREDITS_EMPTY_MESSAGE = "Uno LLM credits are empty.";
-/** The server's out-of-AI-hours message starts so (apps/server provider/unoBilling.ts). */
-const UNO_AI_HOURS_EMPTY_PREFIX = "Your AI hours are used up.";
+/** Where AI hours are added to the plan (and credit topped up) on the console. */
+export const UNO_BILLING_URL = `${CONSOLE_URL}/billing`;
 
-/** What the banner says: the AI hours message when that is the reason. */
+/** Mirrors apps/server provider/unoBilling.ts UNO_AI_CREDIT_EMPTY_MESSAGE. */
+export const UNO_LLM_CREDITS_EMPTY_MESSAGE = `Your AI credit is empty. Top up at ${UNO_BILLING_URL}, add Uno AI hours to your plan, or switch to your own AI subscription (Claude or ChatGPT).`;
+
+/**
+ * Openings of the server's human billing messages (apps/server
+ * provider/unoBilling.ts, the gateway's own 402 wording): shown as they are.
+ */
+const UNO_BILLING_MESSAGE_OPENINGS = [
+  "Your AI hours are used up.",
+  "Your plan doesn't include Uno AI hours",
+  "Your AI credit is empty.",
+];
+
+/** What the banner says: the server's own billing sentence when it has one. */
 export function unoBillingBannerText(sessionError: string | null | undefined): string {
-  return sessionError?.startsWith(UNO_AI_HOURS_EMPTY_PREFIX)
-    ? sessionError
+  const text = sessionError?.trim() ?? "";
+  return UNO_BILLING_MESSAGE_OPENINGS.some((opening) => text.startsWith(opening))
+    ? text
     : UNO_LLM_CREDITS_EMPTY_MESSAGE;
 }
 
@@ -20,12 +36,16 @@ export const UnoBillingTopUpBanner = memo(function UnoBillingTopUpBanner({
   active,
   sessionUpdatedAt,
   sessionError,
+  environmentId,
 }: {
   active: boolean;
+  /** Machine whose Settings → Agents connects Claude / ChatGPT subscriptions. */
+  environmentId?: EnvironmentId | null;
   sessionUpdatedAt: string | null;
   /** The session's last error — tells used-up AI hours from empty credits. */
   sessionError?: string | null;
 }) {
+  const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
   const bannerKey = useMemo(
@@ -71,15 +91,44 @@ export const UnoBillingTopUpBanner = memo(function UnoBillingTopUpBanner({
     }
   };
 
+  const addAiHours = async () => {
+    const api = readLocalApi();
+    if (api) {
+      try {
+        await api.shell.openExternal(UNO_BILLING_URL);
+        return;
+      } catch {
+        // Fall through to a plain browser tab.
+      }
+    }
+    window.open(UNO_BILLING_URL, "_blank", "noopener,noreferrer");
+  };
+
+  const openOwnSubscriptionSettings = () => {
+    if (!environmentId) return;
+    void navigate({
+      to: "/settings/environment/$environmentId/providers",
+      params: { environmentId },
+    });
+  };
+
   return (
     <div className="mx-auto max-w-3xl pt-3">
       <Alert variant="warning">
         <CreditCardIcon />
         <AlertDescription>{unoBillingBannerText(sessionError)}</AlertDescription>
-        <AlertAction>
+        <AlertAction className="flex-wrap">
           <Button size="sm" type="button" onClick={() => void topUp()} disabled={isLoading}>
             {isLoading ? "Opening..." : "Top up"}
           </Button>
+          <Button size="sm" type="button" variant="outline" onClick={() => void addAiHours()}>
+            Add AI hours
+          </Button>
+          {environmentId ? (
+            <Button size="sm" type="button" variant="outline" onClick={openOwnSubscriptionSettings}>
+              Use my own subscription
+            </Button>
+          ) : null}
         </AlertAction>
       </Alert>
     </div>

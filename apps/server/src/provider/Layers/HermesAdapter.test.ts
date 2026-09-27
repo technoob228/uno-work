@@ -38,23 +38,26 @@ async function makeMockHermes() {
   return { wrapperPath, hermesHome: path.join(dir, "home") };
 }
 
-const hermesAdapterTestLayer = it.layer(
-  Layer.effect(
-    HermesAdapter,
-    Effect.gen(function* () {
-      const mock = yield* Effect.promise(() => makeMockHermes());
-      return yield* makeHermesAdapter(
-        Schema.decodeSync(HermesSettings)({ binaryPath: mock.wrapperPath }),
-        { environment: { HERMES_HOME: mock.hermesHome } },
-      );
-    }),
-  ).pipe(
-    Layer.provideMerge(
-      ServerConfig.layerTest(process.cwd(), { prefix: "t3code-hermes-adapter-test-" }),
+const makeHermesAdapterTestLayer = (environment: Record<string, string> = {}) =>
+  it.layer(
+    Layer.effect(
+      HermesAdapter,
+      Effect.gen(function* () {
+        const mock = yield* Effect.promise(() => makeMockHermes());
+        return yield* makeHermesAdapter(
+          Schema.decodeSync(HermesSettings)({ binaryPath: mock.wrapperPath }),
+          { environment: { HERMES_HOME: mock.hermesHome, ...environment } },
+        );
+      }),
+    ).pipe(
+      Layer.provideMerge(
+        ServerConfig.layerTest(process.cwd(), { prefix: "t3code-hermes-adapter-test-" }),
+      ),
+      Layer.provideMerge(NodeServices.layer),
     ),
-    Layer.provideMerge(NodeServices.layer),
-  ),
-);
+  );
+
+const hermesAdapterTestLayer = makeHermesAdapterTestLayer();
 
 hermesAdapterTestLayer("HermesAdapterLive", (it) => {
   it.effect("is no longer in a turn once the turn is over; late updates keep its turn id", () =>
@@ -90,3 +93,59 @@ hermesAdapterTestLayer("HermesAdapterLive", (it) => {
     }),
   );
 });
+
+// Hermes relays a non-retryable gateway 402 as the turn's reply text.
+makeHermesAdapterTestLayer({ T3_ACP_PROMPT_RESPONSE_TEXT: "HTTP 402: Insufficient LLM credits" })(
+  "HermesAdapterLive billing reply",
+  (it) => {
+    it.effect("turns the gateway's 402 reply into a human message and a billing failure", () =>
+      Effect.gen(function* () {
+        const adapter = yield* HermesAdapter;
+        const threadId = ThreadId.make("hermes-billing-reply");
+
+        const eventsFiber = yield* Stream.filter(
+          adapter.streamEvents,
+          (event) =>
+            event.type === "content.delta" ||
+            event.type === "item.completed" ||
+            event.type === "turn.completed" ||
+            event.type === "runtime.error",
+        ).pipe(
+          Stream.takeUntil((event) => event.type === "turn.completed"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+
+        yield* adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("hermes"),
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+          modelSelection: { instanceId: ProviderInstanceId.make("hermes"), model: "uno/smart" },
+        });
+        const { turnId } = yield* adapter.sendTurn({ threadId, input: "hello", attachments: [] });
+
+        const events = Array.from(yield* Fiber.join(eventsFiber));
+        const text = events
+          .flatMap((event) => (event.type === "content.delta" ? [event.payload.delta] : []))
+          .join("");
+        assert.notInclude(text, "HTTP 402");
+        assert.notInclude(text, "Insufficient LLM credits");
+        assert.include(text, "https://console.uno4.dev/billing");
+
+        // The reply is finalized before the turn fails (Telegram relays it).
+        const itemIndex = events.findIndex((event) => event.type === "item.completed");
+        const turnIndex = events.findIndex((event) => event.type === "turn.completed");
+        assert.isAtLeast(itemIndex, 0);
+        assert.isAbove(turnIndex, itemIndex);
+        const turnCompleted = events[turnIndex];
+        assert.strictEqual(turnCompleted?.turnId, turnId);
+        if (turnCompleted?.type !== "turn.completed") throw new Error("no turn.completed");
+        assert.strictEqual(turnCompleted.payload.state, "failed");
+        assert.strictEqual(turnCompleted.payload.errorMessage, text);
+
+        yield* adapter.stopSession(threadId);
+      }),
+    );
+  },
+);
