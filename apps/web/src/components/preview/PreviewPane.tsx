@@ -26,7 +26,16 @@ import {
   XIcon,
   AppWindowIcon,
 } from "lucide-react";
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -35,6 +44,7 @@ import TurndownService from "turndown";
 import * as XLSX from "xlsx";
 
 import { cn } from "../../lib/utils";
+import { openUntrustedLinkExternally, toExternalHttpUrl } from "../../lib/externalLinks";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { openInPreferredEditor } from "../../editorPreferences";
 import { readEnvironmentApi } from "../../environmentApi";
@@ -176,6 +186,33 @@ function resolveRelativeFilePath(baseAbsolutePath: string, href: string): string
   return (baseAbsolutePath.startsWith("/") ? "/" : "") + resolved.join("/");
 }
 
+/**
+ * A link from a previewed document: http(s) opens in the system browser,
+ * anything else (file:, javascript:, custom schemes) is inert. The app
+ * window is never navigated.
+ */
+function UntrustedExternalLink({
+  href,
+  children,
+}: {
+  href?: string | undefined;
+  children: ReactNode;
+}) {
+  const safeUrl = toExternalHttpUrl(href);
+  return (
+    <a
+      href={safeUrl ?? undefined}
+      title={safeUrl ? undefined : href}
+      onClick={(event) => {
+        event.preventDefault();
+        openUntrustedLinkExternally(safeUrl);
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
 function MarkdownBody({ file, content }: { file: PreviewFile; content: string }) {
   const { openFile, currentChatEnvironmentId } = usePreviewPane();
   const fileEnv = file.environmentId ?? currentChatEnvironmentId ?? null;
@@ -185,7 +222,9 @@ function MarkdownBody({ file, content }: { file: PreviewFile; content: string })
       a({ href, children, ...rest }) {
         const isExternal = !!href && /^[a-z][a-z0-9+.-]*:/i.test(href);
         const isAnchor = !!href && href.startsWith("#");
-        if (!href || isExternal || isAnchor) {
+        if (isExternal)
+          return <UntrustedExternalLink href={href}>{children}</UntrustedExternalLink>;
+        if (!href || isAnchor) {
           return (
             <a href={href} {...rest}>
               {children}
@@ -930,8 +969,18 @@ function LoadedBody({ file, sourceView }: { file: PreviewFile; sourceView: boole
   return renderLoadedBody(file, { ...data, ...(blobUrl ? { blobUrl } : {}) }, sourceView);
 }
 
+const FROZEN_MARKDOWN_COMPONENTS: Components = {
+  a({ href, children }) {
+    return <UntrustedExternalLink href={href}>{children}</UntrustedExternalLink>;
+  },
+};
+
 const FrozenMarkdownPreview = memo(function FrozenMarkdownPreview({ source }: { source: string }) {
-  return <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>;
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={FROZEN_MARKDOWN_COMPONENTS}>
+      {source}
+    </ReactMarkdown>
+  );
 });
 
 function canEditFile(file: PreviewFile, fallbackEnvId: EnvironmentId | null): boolean {
