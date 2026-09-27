@@ -127,6 +127,27 @@ export function isCuratedUnoModelList(
     return group === "included" || group === "premium";
   });
 }
+/**
+ * Claude / GPT / Gemini are paused upstream and come back as premium models.
+ * Until the gateway lists any of them, a quiet caption closes the Premium group.
+ */
+export const UNO_PREMIUM_COMING_SOON_TEXT = "Claude, GPT and Gemini — coming soon";
+const UNO_PREMIUM_COMING_SOON_VENDORS = ["anthropic/", "openai/", "google/"] as const;
+
+/** Show the caption while there is a Premium group without Claude / GPT / Gemini in it. */
+export function showUnoPremiumComingSoon(
+  models: ReadonlyArray<Pick<ModelPickerItem, "slug" | "driverKind" | "capabilities">>,
+): boolean {
+  const premium = models.filter(
+    (model) => model.driverKind === "uno" && unoPickerGroup(model) === "premium",
+  );
+  return (
+    premium.length > 0 &&
+    !premium.some((model) =>
+      UNO_PREMIUM_COMING_SOON_VENDORS.some((vendor) => model.slug.toLowerCase().startsWith(vendor)),
+    )
+  );
+}
 const MODEL_PICKER_VIRTUALIZE_THRESHOLD = 80;
 const UNO_TIER_RANK: Record<Exclude<UnoTierFilter, "all">, number> = {
   frontier: 0,
@@ -563,6 +584,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   // AI hours: the gateway already keeps the Uno list short — no tier /
   // capability / price filters, no sort, just the groups.
   const unoCurated = useMemo(() => isCuratedUnoModelList(flatModels), [flatModels]);
+  const unoPremiumComingSoon = useMemo(() => showUnoPremiumComingSoon(flatModels), [flatModels]);
   const showUnoGroups =
     unoCurated && !isSearching && selectedInstanceEntry?.driverKind === "uno" && !isLocked;
   const showUnoFilters =
@@ -1085,12 +1107,18 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     filteredModelKeys.forEach((modelKey, index) => {
       const model = filteredModelByKey.get(modelKey);
       const group = model ? unoPickerGroup(model) : null;
+      if (previous === "premium" && group !== "premium" && unoPremiumComingSoon) {
+        rows.push(<UnoPremiumComingSoon key="premium-coming-soon" />);
+      }
       if (group !== previous && group !== null) {
         rows.push(<UnoGroupHeading key={`group:${group}`} label={UNO_GROUP_LABEL[group]} />);
       }
       previous = group;
       rows.push(renderModelRow(modelKey, index));
     });
+    if (previous === "premium" && unoPremiumComingSoon) {
+      rows.push(<UnoPremiumComingSoon key="premium-coming-soon" />);
+    }
     if (previous !== "custom") {
       rows.push(<UnoGroupHeading key="group:custom" label={UNO_GROUP_LABEL.custom} />);
     }
@@ -1452,6 +1480,20 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     </TooltipProvider>
   );
 });
+
+/** Not a model row: no hover, no click, not a combobox item. */
+function UnoPremiumComingSoon() {
+  return (
+    <div
+      className="px-3 py-1.5 text-xs text-muted-foreground/70 select-none"
+      role="note"
+      aria-disabled="true"
+      data-testid="model-picker-premium-coming-soon"
+    >
+      {UNO_PREMIUM_COMING_SOON_TEXT}
+    </div>
+  );
+}
 
 function UnoGroupHeading(props: { label: string }) {
   return (

@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 
 import { aiBusyNotice } from "../../lib/aiStatusReactQuery";
 import { aiBusyNoticeText } from "./AiBusyNotice";
-import { isCuratedUnoModelList } from "./ModelPickerContent";
+import {
+  isCuratedUnoModelList,
+  showUnoPremiumComingSoon,
+  UNO_PREMIUM_COMING_SOON_TEXT,
+} from "./ModelPickerContent";
 import { UNO_LLM_CREDITS_EMPTY_MESSAGE, unoBillingBannerText } from "./UnoBillingTopUpBanner";
 
 const status = (over: Partial<UnoAiStatus> = {}): UnoAiStatus => ({
@@ -63,6 +67,43 @@ describe("curated Uno model list", () => {
     expect(isCuratedUnoModelList([{ driverKind: "codex" as never, ...meta("premium") }])).toBe(
       false,
     );
+  });
+});
+
+describe("premium coming-soon caption", () => {
+  const uno = (slug: string, group?: "included" | "premium" | "personal") => ({
+    slug,
+    driverKind: "uno" as never,
+    ...meta(group),
+  });
+
+  it("closes the Premium group while Claude / GPT / Gemini are not in it", () => {
+    expect(UNO_PREMIUM_COMING_SOON_TEXT).toBe("Claude, GPT and Gemini — coming soon");
+    expect(
+      showUnoPremiumComingSoon([
+        uno("uno/smart", "included"),
+        uno("moonshotai/kimi-k3", "premium"),
+        uno("x-ai/grok-4.7", "premium"),
+        uno("z-ai/glm-5.3", "premium"),
+      ]),
+    ).toBe(true);
+  });
+
+  it("disappears once the gateway lists any of them as premium", () => {
+    for (const slug of ["anthropic/claude-sonnet-5", "openai/gpt-6", "google/gemini-3.5-pro"]) {
+      expect(
+        showUnoPremiumComingSoon([uno("x-ai/grok-4.7", "premium"), uno(slug, "premium")]),
+      ).toBe(false);
+    }
+  });
+
+  it("stays off without a Premium group", () => {
+    expect(showUnoPremiumComingSoon([uno("uno/smart", "included")])).toBe(false);
+    expect(
+      showUnoPremiumComingSoon([
+        { slug: "x-ai/grok-4.7", driverKind: "codex" as never, ...meta("premium") },
+      ]),
+    ).toBe(false);
   });
 });
 
