@@ -36,6 +36,49 @@ export const PLUGIN_ID_ENV = "UNO_PLUGIN_ID";
 export const PLUGIN_TRIGGER_ENV = "UNO_PLUGIN_TRIGGER";
 export const PLUGIN_EVENT_ENV = "UNO_PLUGIN_EVENT";
 export const PLUGIN_EVENT_TYPE_ENV = "UNO_PLUGIN_EVENT_TYPE";
+/** Every variable a plugin command sees beyond PATH/HOME carries this prefix. */
+export const PLUGIN_ENV_PREFIX = "UNO_PLUGIN_";
+
+/**
+ * Minimal environment for a plugin shell command.
+ *
+ * Plugin manifests are written by agents (or dropped in by anyone who can write
+ * to the plugins directory), so a command must NOT inherit the daemon's
+ * `process.env` — that holds provider API keys, auth tokens and whatever else
+ * the daemon was started with. A command gets:
+ * - `PATH` (so ordinary tools resolve) and `HOME` (so `~` works);
+ * - `UNO_PLUGIN_*` variables — both the ones the runtime deliberately passes
+ *   (`extraEnv`, id, trigger) and any the operator set on the daemon with that
+ *   prefix on purpose;
+ * - on Windows additionally `SystemRoot`/`ComSpec`, without which `cmd.exe`
+ *   cannot start at all.
+ *
+ * `extraEnv` keys without the prefix are dropped: the runtime only ever passes
+ * prefixed ones, and the filter keeps that an invariant rather than a habit.
+ */
+export function buildPluginCommandEnv(input: {
+  readonly baseEnv: Readonly<Record<string, string | undefined>>;
+  readonly extraEnv: Readonly<Record<string, string>>;
+  readonly homeDir: string;
+  readonly platform?: NodeJS.Platform;
+}): Record<string, string> {
+  const env: Record<string, string> = {};
+  const path = input.baseEnv.PATH ?? input.baseEnv.Path;
+  if (path !== undefined) env.PATH = path;
+  env.HOME = input.baseEnv.HOME ?? input.homeDir;
+  if ((input.platform ?? process.platform) === "win32") {
+    for (const key of ["SystemRoot", "ComSpec"] as const) {
+      const value = input.baseEnv[key];
+      if (value !== undefined) env[key] = value;
+    }
+  }
+  for (const source of [input.baseEnv, input.extraEnv]) {
+    for (const [key, value] of Object.entries(source)) {
+      if (value !== undefined && key.startsWith(PLUGIN_ENV_PREFIX)) env[key] = value;
+    }
+  }
+  return env;
+}
 
 function truncate(value: string, maxChars: number): string {
   return value.length <= maxChars ? value : `${value.slice(0, maxChars)}… [truncated]`;
@@ -86,12 +129,15 @@ const makePluginRuntime = (options?: PluginRuntimeLiveOptions) =>
           maximum: MAX_ACTION_TIMEOUT_MS,
         });
         const cwd = input.action.cwd ?? OS.homedir();
-        const env = {
-          ...process.env,
-          ...input.extraEnv,
-          [PLUGIN_ID_ENV]: input.pluginId,
-          [PLUGIN_TRIGGER_ENV]: input.trigger,
-        };
+        const env = buildPluginCommandEnv({
+          baseEnv: process.env,
+          extraEnv: {
+            ...input.extraEnv,
+            [PLUGIN_ID_ENV]: input.pluginId,
+            [PLUGIN_TRIGGER_ENV]: input.trigger,
+          },
+          homeDir: OS.homedir(),
+        });
         const command =
           process.platform === "win32"
             ? ChildProcess.make("cmd.exe", ["/d", "/s", "/c", input.action.command], { env, cwd })
