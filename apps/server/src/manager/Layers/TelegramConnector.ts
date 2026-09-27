@@ -251,6 +251,13 @@ export interface TurnReplyInputs {
   readonly sessionStatus: string | null;
   /** When `sessionStatus` was written; stale rows predate this request. */
   readonly sessionUpdatedAtIso: string | null;
+  /**
+   * The session's active turn. ACP harnesses (hermes etc.) emit every text
+   * chunk before a tool call as a finished assistant message, and the
+   * projection marks the turn `completed` on the first one. `activeTurnId` is
+   * only cleared when the turn really ends, so it is the reliable signal.
+   */
+  readonly sessionActiveTurnId?: string | null;
   readonly requestedAtIso: string;
   /** Wall-clock of the current poll; keeps the grace-period logic pure. */
   readonly nowIso: string;
@@ -286,7 +293,13 @@ export const resolveTurnReply = (input: TurnReplyInputs): ResolvedTurnReply | nu
     input.sessionStatus !== null &&
     DEAD_SESSION_STATUSES.has(input.sessionStatus) &&
     (input.sessionUpdatedAtIso === null || input.sessionUpdatedAtIso >= input.requestedAtIso);
-  const stillRunning = turn === null || turn.state === "pending" || turn.state === "running";
+  const stillRunning =
+    turn === null ||
+    turn.state === "pending" ||
+    turn.state === "running" ||
+    (input.sessionStatus === "running" &&
+      input.sessionActiveTurnId != null &&
+      input.sessionActiveTurnId === turn.turnId);
   if (stillRunning && !sessionDied) {
     return null;
   }
@@ -1090,6 +1103,7 @@ const makeTelegramConnector = Effect.gen(function* () {
           messages: detail.value.messages,
           sessionStatus: detail.value.session?.status ?? null,
           sessionUpdatedAtIso: detail.value.session?.updatedAt ?? null,
+          sessionActiveTurnId: detail.value.session?.activeTurnId ?? null,
           requestedAtIso: input.requestedAtIso,
           nowIso: new Date().toISOString(),
         });
