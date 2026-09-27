@@ -110,6 +110,13 @@ import {
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch.ts";
 import { resolveDesktopAppBranding } from "./appBranding.ts";
 import { UnoAccountService } from "./unoAccount.ts";
+import {
+  decideMainWindowNavigation,
+  isAllowedWebviewUrl,
+  isGuestPermissionAllowedByDefault,
+  isTrustedAppUrl,
+  resolveTrustedOrigins,
+} from "./navigationGuard.ts";
 import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider.ts";
 
 syncShellEnvironment();
@@ -1921,14 +1928,58 @@ async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
   });
 }
 
+/** Origins the main window is allowed to show: the local backend and, in dev, Vite. */
+function getTrustedAppOrigins(): ReadonlySet<string> {
+  return resolveTrustedOrigins([
+    backendHttpUrl,
+    isDevelopment ? process.env.VITE_DEV_SERVER_URL?.trim() : null,
+  ]);
+}
+
+/**
+ * IPC is only for the app itself. A frame from any other origin (a page that
+ * slipped into the window, an iframe, a webview guest) gets nothing.
+ */
+function isTrustedIpcSender(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean {
+  const frameUrl = event.senderFrame?.url;
+  if (isTrustedAppUrl(frameUrl, getTrustedAppOrigins())) return true;
+  console.warn("[desktop] rejected IPC from untrusted frame", { url: frameUrl ?? null });
+  return false;
+}
+
+function handleTrustedIpc(
+  channel: string,
+  listener: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown,
+): void {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!isTrustedIpcSender(event)) {
+      throw new Error("IPC is not available to this frame.");
+    }
+    return listener(event, ...args);
+  });
+}
+
+function onTrustedIpc(
+  channel: string,
+  listener: (event: Electron.IpcMainEvent, ...args: any[]) => void,
+): void {
+  ipcMain.on(channel, (event, ...args) => {
+    if (!isTrustedIpcSender(event)) {
+      event.returnValue = null;
+      return;
+    }
+    listener(event, ...args);
+  });
+}
+
 function registerIpcHandlers(): void {
   ipcMain.removeAllListeners(GET_APP_BRANDING_CHANNEL);
-  ipcMain.on(GET_APP_BRANDING_CHANNEL, (event) => {
+  onTrustedIpc(GET_APP_BRANDING_CHANNEL, (event) => {
     event.returnValue = desktopAppBranding;
   });
 
   ipcMain.removeAllListeners(GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL);
-  ipcMain.on(GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL, (event) => {
+  onTrustedIpc(GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL, (event) => {
     event.returnValue = {
       label: "Local environment",
       httpBaseUrl: backendHttpUrl || null,
@@ -1938,13 +1989,15 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeAllListeners(WINDOW_FULLSCREEN_GET_STATE_CHANNEL);
-  ipcMain.on(WINDOW_FULLSCREEN_GET_STATE_CHANNEL, (event) => {
+  onTrustedIpc(WINDOW_FULLSCREEN_GET_STATE_CHANNEL, (event) => {
     const senderWindow = BrowserWindow.fromWebContents(event.sender);
     event.returnValue = senderWindow ? senderWindow.isFullScreen() : false;
   });
 
   ipcMain.removeHandler(GET_CLIENT_SETTINGS_CHANNEL);
-  ipcMain.handle(GET_CLIENT_SETTINGS_CHANNEL, async () => readClientSettings(CLIENT_SETTINGS_PATH));
+  handleTrustedIpc(GET_CLIENT_SETTINGS_CHANNEL, async () =>
+    readClientSettings(CLIENT_SETTINGS_PATH),
+  );
 
   // "Sign in with Uno": the account belongs to this app, the token to the main process.
   const unoAccount = new UnoAccountService({
@@ -1958,9 +2011,9 @@ function registerIpcHandlers(): void {
     fetch: (input, init) => net.fetch(input as string, init),
   });
   ipcMain.removeHandler(UNO_ACCOUNT_STATUS_CHANNEL);
-  ipcMain.handle(UNO_ACCOUNT_STATUS_CHANNEL, async () => unoAccount.status());
+  handleTrustedIpc(UNO_ACCOUNT_STATUS_CHANNEL, async () => unoAccount.status());
   ipcMain.removeHandler(UNO_ACCOUNT_SIGN_IN_CHANNEL);
-  ipcMain.handle(UNO_ACCOUNT_SIGN_IN_CHANNEL, async () => {
+  handleTrustedIpc(UNO_ACCOUNT_SIGN_IN_CHANNEL, async () => {
     const status = await unoAccount.signIn();
     const window = BrowserWindow.getAllWindows()[0];
     if (window) {
@@ -1970,9 +2023,9 @@ function registerIpcHandlers(): void {
     return status;
   });
   ipcMain.removeHandler(UNO_ACCOUNT_SIGN_OUT_CHANNEL);
-  ipcMain.handle(UNO_ACCOUNT_SIGN_OUT_CHANNEL, async () => unoAccount.signOut());
+  handleTrustedIpc(UNO_ACCOUNT_SIGN_OUT_CHANNEL, async () => unoAccount.signOut());
   ipcMain.removeHandler(UNO_ACCOUNT_REQUEST_CHANNEL);
-  ipcMain.handle(UNO_ACCOUNT_REQUEST_CHANNEL, async (_event, raw: unknown) => {
+  handleTrustedIpc(UNO_ACCOUNT_REQUEST_CHANNEL, async (_event, raw: unknown) => {
     const input = raw as { method?: unknown; path?: unknown; body?: unknown } | null;
     const method = input?.method;
     const path = input?.path;
@@ -1990,7 +2043,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(SET_CLIENT_SETTINGS_CHANNEL);
-  ipcMain.handle(SET_CLIENT_SETTINGS_CHANNEL, async (_event, rawSettings: unknown) => {
+  handleTrustedIpc(SET_CLIENT_SETTINGS_CHANNEL, async (_event, rawSettings: unknown) => {
     if (typeof rawSettings !== "object" || rawSettings === null) {
       throw new Error("Invalid client settings payload.");
     }
@@ -1999,12 +2052,12 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL);
-  ipcMain.handle(GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL, async () =>
+  handleTrustedIpc(GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL, async () =>
     readSavedEnvironmentRegistry(SAVED_ENVIRONMENT_REGISTRY_PATH),
   );
 
   ipcMain.removeHandler(SET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL);
-  ipcMain.handle(SET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL, async (_event, rawRecords: unknown) => {
+  handleTrustedIpc(SET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL, async (_event, rawRecords: unknown) => {
     if (!Array.isArray(rawRecords)) {
       throw new Error("Invalid saved environment registry payload.");
     }
@@ -2016,7 +2069,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(GET_SAVED_ENVIRONMENT_SECRET_CHANNEL);
-  ipcMain.handle(
+  handleTrustedIpc(
     GET_SAVED_ENVIRONMENT_SECRET_CHANNEL,
     async (_event, rawEnvironmentId: unknown) => {
       if (typeof rawEnvironmentId !== "string" || rawEnvironmentId.trim().length === 0) {
@@ -2032,7 +2085,7 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.removeHandler(SET_SAVED_ENVIRONMENT_SECRET_CHANNEL);
-  ipcMain.handle(
+  handleTrustedIpc(
     SET_SAVED_ENVIRONMENT_SECRET_CHANNEL,
     async (_event, rawEnvironmentId: unknown, rawSecret: unknown) => {
       if (typeof rawEnvironmentId !== "string" || rawEnvironmentId.trim().length === 0) {
@@ -2052,7 +2105,7 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.removeHandler(REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL);
-  ipcMain.handle(
+  handleTrustedIpc(
     REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL,
     async (_event, rawEnvironmentId: unknown) => {
       if (typeof rawEnvironmentId !== "string" || rawEnvironmentId.trim().length === 0) {
@@ -2066,15 +2119,18 @@ function registerIpcHandlers(): void {
     },
   );
 
-  desktopSshEnvironmentBridge.registerIpcHandlers(ipcMain);
+  desktopSshEnvironmentBridge.registerIpcHandlers({
+    removeHandler: (channel) => ipcMain.removeHandler(channel),
+    handle: (channel, listener) => handleTrustedIpc(channel, listener),
+  });
 
   ipcMain.removeHandler(BROWSER_CREDENTIALS_LIST_CHANNEL);
-  ipcMain.handle(BROWSER_CREDENTIALS_LIST_CHANNEL, async () =>
+  handleTrustedIpc(BROWSER_CREDENTIALS_LIST_CHANNEL, async () =>
     listBrowserCredentials(BROWSER_CREDENTIALS_PATH),
   );
 
   ipcMain.removeHandler(BROWSER_CREDENTIALS_SAVE_CHANNEL);
-  ipcMain.handle(BROWSER_CREDENTIALS_SAVE_CHANNEL, async (_event, rawInput: unknown) => {
+  handleTrustedIpc(BROWSER_CREDENTIALS_SAVE_CHANNEL, async (_event, rawInput: unknown) => {
     if (
       typeof rawInput !== "object" ||
       rawInput === null ||
@@ -2092,7 +2148,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(BROWSER_CREDENTIALS_DELETE_CHANNEL);
-  ipcMain.handle(BROWSER_CREDENTIALS_DELETE_CHANNEL, async (_event, rawId: unknown) => {
+  handleTrustedIpc(BROWSER_CREDENTIALS_DELETE_CHANNEL, async (_event, rawId: unknown) => {
     if (typeof rawId !== "string" || rawId.length === 0) {
       return;
     }
@@ -2100,7 +2156,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(BROWSER_CREDENTIALS_REVEAL_CHANNEL);
-  ipcMain.handle(BROWSER_CREDENTIALS_REVEAL_CHANNEL, async (_event, rawId: unknown) => {
+  handleTrustedIpc(BROWSER_CREDENTIALS_REVEAL_CHANNEL, async (_event, rawId: unknown) => {
     if (typeof rawId !== "string" || rawId.length === 0) {
       return null;
     }
@@ -2112,7 +2168,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(BROWSER_CLEAR_DATA_CHANNEL);
-  ipcMain.handle(BROWSER_CLEAR_DATA_CHANNEL, async (_event, rawInput: unknown) => {
+  handleTrustedIpc(BROWSER_CLEAR_DATA_CHANNEL, async (_event, rawInput: unknown) => {
     if (
       typeof rawInput !== "object" ||
       rawInput === null ||
@@ -2145,10 +2201,10 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(GET_SERVER_EXPOSURE_STATE_CHANNEL);
-  ipcMain.handle(GET_SERVER_EXPOSURE_STATE_CHANNEL, async () => getDesktopServerExposureState());
+  handleTrustedIpc(GET_SERVER_EXPOSURE_STATE_CHANNEL, async () => getDesktopServerExposureState());
 
   ipcMain.removeHandler(SET_SERVER_EXPOSURE_MODE_CHANNEL);
-  ipcMain.handle(SET_SERVER_EXPOSURE_MODE_CHANNEL, async (_event, rawMode: unknown) => {
+  handleTrustedIpc(SET_SERVER_EXPOSURE_MODE_CHANNEL, async (_event, rawMode: unknown) => {
     if (rawMode !== "local-only" && rawMode !== "network-accessible") {
       throw new Error("Invalid desktop server exposure input.");
     }
@@ -2167,7 +2223,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(SET_TAILSCALE_SERVE_ENABLED_CHANNEL);
-  ipcMain.handle(SET_TAILSCALE_SERVE_ENABLED_CHANNEL, async (_event, rawInput: unknown) => {
+  handleTrustedIpc(SET_TAILSCALE_SERVE_ENABLED_CHANNEL, async (_event, rawInput: unknown) => {
     if (typeof rawInput !== "object" || rawInput === null) {
       throw new Error("Invalid Tailscale Serve input.");
     }
@@ -2189,10 +2245,10 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(GET_ADVERTISED_ENDPOINTS_CHANNEL);
-  ipcMain.handle(GET_ADVERTISED_ENDPOINTS_CHANNEL, async () => getDesktopAdvertisedEndpoints());
+  handleTrustedIpc(GET_ADVERTISED_ENDPOINTS_CHANNEL, async () => getDesktopAdvertisedEndpoints());
 
   ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
-  ipcMain.handle(PICK_FOLDER_CHANNEL, async (_event, rawOptions: unknown) => {
+  handleTrustedIpc(PICK_FOLDER_CHANNEL, async (_event, rawOptions: unknown) => {
     const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
     const defaultPath = resolvePickFolderDefaultPath(rawOptions);
     const openDialogOptions: OpenDialogOptions = {
@@ -2207,7 +2263,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(CONFIRM_CHANNEL);
-  ipcMain.handle(CONFIRM_CHANNEL, async (_event, message: unknown) => {
+  handleTrustedIpc(CONFIRM_CHANNEL, async (_event, message: unknown) => {
     if (typeof message !== "string") {
       return false;
     }
@@ -2217,7 +2273,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(SET_THEME_CHANNEL);
-  ipcMain.handle(SET_THEME_CHANNEL, async (_event, rawTheme: unknown) => {
+  handleTrustedIpc(SET_THEME_CHANNEL, async (_event, rawTheme: unknown) => {
     const theme = getSafeTheme(rawTheme);
     if (!theme) {
       return;
@@ -2227,7 +2283,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
-  ipcMain.handle(
+  handleTrustedIpc(
     CONTEXT_MENU_CHANNEL,
     async (_event, items: ContextMenuItem[], position?: { x: number; y: number }) => {
       const normalizedItems = normalizeContextMenuItems(items);
@@ -2292,7 +2348,7 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.removeHandler(OPEN_EXTERNAL_CHANNEL);
-  ipcMain.handle(OPEN_EXTERNAL_CHANNEL, async (_event, rawUrl: unknown) => {
+  handleTrustedIpc(OPEN_EXTERNAL_CHANNEL, async (_event, rawUrl: unknown) => {
     const externalUrl = getSafeExternalUrl(rawUrl);
     if (!externalUrl) {
       return false;
@@ -2310,7 +2366,7 @@ function registerIpcHandlers(): void {
   // browser asking to use this computer): the person is looking at that
   // browser, so the prompt must come to them, not wait behind it.
   ipcMain.removeHandler(FOCUS_WINDOW_CHANNEL);
-  ipcMain.handle(FOCUS_WINDOW_CHANNEL, async (event) => {
+  handleTrustedIpc(FOCUS_WINDOW_CHANNEL, async (event) => {
     const window = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
     if (window) {
       revealWindow(window);
@@ -2318,18 +2374,18 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(UPDATE_GET_STATE_CHANNEL);
-  ipcMain.handle(UPDATE_GET_STATE_CHANNEL, async () => updateState);
+  handleTrustedIpc(UPDATE_GET_STATE_CHANNEL, async () => updateState);
 
   ipcMain.removeHandler(UNO_CODE_GET_STATE_CHANNEL);
-  ipcMain.handle(UNO_CODE_GET_STATE_CHANNEL, async () => unoCodeState);
+  handleTrustedIpc(UNO_CODE_GET_STATE_CHANNEL, async () => unoCodeState);
 
   ipcMain.removeHandler(UNO_CODE_RETRY_INSTALL_CHANNEL);
-  ipcMain.handle(UNO_CODE_RETRY_INSTALL_CHANNEL, async () => {
+  handleTrustedIpc(UNO_CODE_RETRY_INSTALL_CHANNEL, async () => {
     void ensureUnoCodeInstalled();
   });
 
   ipcMain.removeHandler(UPDATE_SET_CHANNEL_CHANNEL);
-  ipcMain.handle(UPDATE_SET_CHANNEL_CHANNEL, async (_event, rawChannel: unknown) => {
+  handleTrustedIpc(UPDATE_SET_CHANNEL_CHANNEL, async (_event, rawChannel: unknown) => {
     if (rawChannel !== "latest" && rawChannel !== "nightly") {
       throw new Error("Invalid desktop update channel input.");
     }
@@ -2366,7 +2422,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(UPDATE_DOWNLOAD_CHANNEL);
-  ipcMain.handle(UPDATE_DOWNLOAD_CHANNEL, async () => {
+  handleTrustedIpc(UPDATE_DOWNLOAD_CHANNEL, async () => {
     const result = await downloadAvailableUpdate();
     return {
       accepted: result.accepted,
@@ -2376,7 +2432,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(UPDATE_INSTALL_CHANNEL);
-  ipcMain.handle(UPDATE_INSTALL_CHANNEL, async () => {
+  handleTrustedIpc(UPDATE_INSTALL_CHANNEL, async () => {
     if (isQuitting) {
       return {
         accepted: false,
@@ -2393,7 +2449,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(UPDATE_CHECK_CHANNEL);
-  ipcMain.handle(UPDATE_CHECK_CHANNEL, async () => {
+  handleTrustedIpc(UPDATE_CHECK_CHANNEL, async () => {
     if (!updaterConfigured) {
       return {
         checked: false,
@@ -2458,6 +2514,38 @@ function syncAllWindowAppearance(): void {
 }
 
 nativeTheme.on("updated", syncAllWindowAppearance);
+
+/** Schemes an iframe inside the app window may load. */
+function isAllowedAppSubframeUrl(rawUrl: string): boolean {
+  if (rawUrl === "about:blank" || rawUrl === "about:srcdoc") return true;
+  let protocol: string;
+  try {
+    protocol = new URL(rawUrl).protocol;
+  } catch {
+    return false;
+  }
+  return protocol === "http:" || protocol === "https:" || protocol === "blob:";
+}
+
+const guardedGuestSessions = new WeakSet<Electron.Session>();
+
+/**
+ * Embedded browser and app sessions: camera, microphone, location,
+ * notifications, screen capture etc. are denied. There is no per-site
+ * permission UI yet, so nothing sensitive is granted silently.
+ */
+function guardGuestSessionPermissions(guestSession: Electron.Session): void {
+  if (guardedGuestSessions.has(guestSession)) return;
+  guardedGuestSessions.add(guestSession);
+  guestSession.setPermissionRequestHandler((_contents, permission, callback) => {
+    callback(isGuestPermissionAllowedByDefault(permission));
+  });
+  guestSession.setPermissionCheckHandler((_contents, permission) =>
+    isGuestPermissionAllowedByDefault(permission),
+  );
+  guestSession.setDevicePermissionHandler(() => false);
+  guestSession.setDisplayMediaRequestHandler((_request, callback) => callback({}));
+}
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -2528,23 +2616,60 @@ function createWindow(): BrowserWindow {
     Menu.buildFromTemplate(menuTemplate).popup({ window });
   });
 
+  // The main window only ever shows the app. window.open / target=_blank
+  // goes to the system browser (web links only); any attempt to navigate the
+  // window itself away from the app is cancelled the same way, so a stray
+  // link can never load a third-party page next to the preload bridge.
   window.webContents.setWindowOpenHandler(({ url }) => {
-    const externalUrl = getSafeExternalUrl(url);
-    if (externalUrl) {
-      void shell.openExternal(externalUrl);
+    const decision = decideMainWindowNavigation(url, getTrustedAppOrigins());
+    if (decision.kind === "open-external") {
+      void shell.openExternal(decision.url);
     }
     return { action: "deny" };
+  });
+  const guardMainFrameNavigation = (event: Electron.Event, url: string) => {
+    const decision = decideMainWindowNavigation(url, getTrustedAppOrigins());
+    if (decision.kind === "allow") return;
+    event.preventDefault();
+    if (decision.kind === "open-external") {
+      void shell.openExternal(decision.url);
+    } else {
+      console.warn("[desktop] blocked main window navigation", { url });
+    }
+  };
+  window.webContents.on("will-navigate", (event, url) => guardMainFrameNavigation(event, url));
+  window.webContents.on("will-redirect", (details) => {
+    if (!details.isMainFrame) return;
+    if (!isTrustedAppUrl(details.url, getTrustedAppOrigins())) {
+      details.preventDefault();
+      console.warn("[desktop] blocked main window redirect", { url: details.url });
+    }
+  });
+  // Sub-frames of the app (previews, app widgets) may show web pages and blob
+  // previews, never local files or privileged/script schemes.
+  window.webContents.on("will-frame-navigate", (details) => {
+    if (details.isMainFrame) return;
+    if (!isAllowedAppSubframeUrl(details.url)) {
+      details.preventDefault();
+      console.warn("[desktop] blocked sub-frame navigation", { url: details.url });
+    }
   });
 
   // <webview> браузерной панели: гостевой контент не должен получить preload
   // или Node-доступ, а window.open/target=_blank превращаем в новую вкладку
   // встроенного браузера (через push в renderer).
-  window.webContents.on("will-attach-webview", (_event, webPreferences) => {
+  window.webContents.on("will-attach-webview", (event, webPreferences, params) => {
     delete webPreferences.preload;
     webPreferences.nodeIntegration = false;
     webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+    if (params.src && !isAllowedWebviewUrl(params.src)) {
+      console.warn("[desktop] refused to attach webview", { src: params.src });
+      event.preventDefault();
+    }
   });
   window.webContents.on("did-attach-webview", (_event, guestContents) => {
+    guardGuestSessionPermissions(guestContents.session);
     guestContents.setWindowOpenHandler(({ url }) => {
       const safeUrl = getSafeExternalUrl(url);
       if (safeUrl && !window.isDestroyed()) {
@@ -2552,8 +2677,21 @@ function createWindow(): BrowserWindow {
       }
       return { action: "deny" };
     });
+    // Guests may only load web pages: no file:, chrome:, devtools:,
+    // javascript:, data: or custom schemes, in any frame, even via redirect.
+    const guardGuestNavigation = (
+      details: Electron.Event<{ url: string }>,
+      kind: "navigate" | "redirect",
+    ) => {
+      if (!isAllowedWebviewUrl(details.url)) {
+        details.preventDefault();
+        console.warn(`[desktop] blocked webview ${kind}`, { url: details.url });
+      }
+    };
+    guestContents.on("will-frame-navigate", (details) => guardGuestNavigation(details, "navigate"));
+    guestContents.on("will-redirect", (details) => guardGuestNavigation(details, "redirect"));
     guestContents.on("will-navigate", (event, url) => {
-      if (!getSafeExternalUrl(url)) {
+      if (!isAllowedWebviewUrl(url)) {
         event.preventDefault();
       }
     });
