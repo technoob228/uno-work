@@ -58,17 +58,19 @@ export function buildPluginInstructions(pluginsDir: string): string {
 Как устроена панель:
 - Это обычные статические файлы: HTML + встроенный (inline) JS и CSS. Никаких localhost-серверов, сборщиков и внешних CDN — CSP разрешает только \`self\` (плюс inline-скрипты) и \`data:\`-картинки.
 - Панель рендерится в изолированном iframe (sandbox без same-origin): доступа к приложению, его кукам и хранилищу у неё нет.
-- Данные готовит cron того же плагина: пишет \`data.json\` рядом с \`index.html\`, а страница читает его \`fetch("data.json")\` (относительный путь; кэш отключён, так что после крона достаточно перезагрузить вкладку).
+- Данные готовит cron того же плагина: пишет \`data.json\` рядом с \`index.html\`, а страница читает его \`fetch("data.json")\` — ТОЛЬКО относительным путём: панель открывается по подписанной ссылке с токеном в пути, абсолютный \`/api/...\` получит 401. Кэш отключён — перечитывай \`data.json\` таймером, а не перезагрузкой страницы.
 
-**Мост панель → приложение.** Панель может не только показывать данные, но и управлять приложением — через \`postMessage\` родителю. Вставь в страницу этот сниппет (промис-обёртка) и зови методы:
+**Мост панель → приложение.** Панель может не только показывать данные, но и управлять приложением. Канал — \`MessagePort\`: после загрузки страницы приложение один раз присылает окну сообщение \`{ type: "uno-panel-init" }\` с портом, дальше всё общение идёт только через этот порт (\`window.parent.postMessage\` приложение НЕ слушает; после перехода панели на другую страницу или перезагрузки порт закрывается — вкладку нужно открыть заново). Вставь в страницу этот сниппет (промис-обёртка; вызовы до получения порта встают в очередь) и зови методы:
 
 \`\`\`html
 <script>
 const uno = (() => {
   let nextId = 1;
+  let port = null;
+  const queue = [];
   const pending = new Map();
   const listeners = [];
-  window.addEventListener("message", (event) => {
+  const onPortMessage = (event) => {
     const message = event.data;
     if (!message || message.__unoPanel !== 1) return;
     if (message.event) { listeners.forEach((fn) => fn(message.event)); return; }
@@ -76,12 +78,20 @@ const uno = (() => {
     if (!entry) return;
     pending.delete(message.id);
     message.error ? entry.reject(new Error(message.error)) : entry.resolve(message.result);
+  };
+  window.addEventListener("message", (event) => {
+    if (port || event.source !== window.parent) return;
+    if (!event.data || event.data.type !== "uno-panel-init" || !event.ports[0]) return;
+    port = event.ports[0];
+    port.onmessage = onPortMessage;
+    queue.splice(0).forEach((message) => port.postMessage(message));
   });
   const call = (method, params) =>
     new Promise((resolve, reject) => {
       const id = nextId++;
       pending.set(id, { resolve, reject });
-      window.parent.postMessage({ __unoPanel: 1, id, method, params }, "*");
+      const message = { __unoPanel: 1, id, method, params };
+      port ? port.postMessage(message) : queue.push(message);
     });
   return {
     openFile: (path) => call("openFile", { path }),

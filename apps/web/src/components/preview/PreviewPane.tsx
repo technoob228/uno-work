@@ -76,7 +76,7 @@ import {
   SCOPE_MENU_LABEL,
   type PreviewTabScope,
 } from "./previewTabScopes";
-import { createPanelBridge, shellEventToPanelEvent } from "./panelBridge";
+import { attachPanelPortHost, createPanelBridge, shellEventToPanelEvent } from "./panelBridge";
 import { usePluginPanelSignedUrl } from "./pluginPanelUrl";
 import {
   PluginPanelChat,
@@ -1204,9 +1204,9 @@ function resolvePanelFilePath(rawPath: string, projectCwd: string | null): strin
  * подписанному URL с токеном в пути (`pluginPanelUrl.ts`,
  * `apps/server/src/plugins/http.ts`).
  *
- * Общение с приложением — только через postMessage-мост (`panelBridge.ts`).
- * Сообщения принимаем ИСКЛЮЧИТЕЛЬНО от `contentWindow` своего iframe:
- * `event.origin` у opaque origin равен строке `"null"` и ничего не доказывает.
+ * Общение с приложением — только через MessagePort-мост (`panelBridge.ts`):
+ * порт выдаётся документу на первый `load` iframe, window-сообщения не
+ * принимаются, после навигации фрейма порт закрывается и не перевыдаётся.
  */
 function PluginPanelBody({ file }: { file: PreviewFile }) {
   const {
@@ -1260,11 +1260,15 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
     const frame = iframeRef.current;
     if (!frame || !pluginId) return;
 
+    // Порт выдаётся документу панели на первый `load`, window-сообщения не
+    // слушаем (см. `attachPanelPortHost`); `bridge` объявлен ниже, но до
+    // первого `load` сообщений быть не может.
+    const portHost = attachPanelPortHost({
+      frame,
+      onMessage: (data) => bridge.handleMessage(data),
+    });
     const bridge = createPanelBridge({
-      post: (message) => {
-        // targetOrigin "*" — у песочницы opaque origin, адресовать её иначе нельзя.
-        iframeRef.current?.contentWindow?.postMessage(message, "*");
-      },
+      post: (message) => portHost.post(message),
       methods: {
         openFile: ({ path }) => {
           const context = contextRef.current;
@@ -1329,13 +1333,6 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
       },
     });
 
-    const onMessage = (event: MessageEvent) => {
-      const currentFrame = iframeRef.current;
-      if (!currentFrame || event.source !== currentFrame.contentWindow) return;
-      bridge.handleMessage(event.data);
-    };
-    window.addEventListener("message", onMessage);
-
     const unsubscribe = subscribeShellEvents((notice) => {
       const context = contextRef.current;
       if (
@@ -1351,7 +1348,7 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
     });
 
     return () => {
-      window.removeEventListener("message", onMessage);
+      portHost.dispose();
       unsubscribe();
     };
   }, [pluginId, url]);

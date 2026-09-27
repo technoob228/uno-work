@@ -1,18 +1,25 @@
 /**
- * Мост «панель плагина ↔ приложение» (postMessage).
+ * Мост «панель плагина ↔ приложение» (MessagePort).
  *
  * Панель — статический HTML в sandbox-iframe без `allow-same-origin`, т.е. на
- * opaque origin. У неё нет ни DOM приложения, ни его кук, ни сессии; всё, что
- * она может, — послать сообщение родителю:
+ * opaque origin. У неё нет ни DOM приложения, ни его кук, ни сессии.
  *
- *   window.parent.postMessage({ __unoPanel: 1, id, method, params }, "*")
+ * Канал (см. `attachPanelPortHost`): на ПЕРВЫЙ `load` iframe хост создаёт
+ * `MessageChannel` и отдаёт панели `port2` одним сообщением
+ *
+ *   iframe.contentWindow.postMessage({ type: "uno-panel-init" }, "*", [port2])
+ *
+ * `targetOrigin "*"` — вынужденно (у opaque origin адреса нет), но в этом
+ * сообщении нет данных, только порт. Дальше всё общение — ТОЛЬКО через порт:
+ *
+ *   port.postMessage({ __unoPanel: 1, id, method, params })
  *   → ответ { __unoPanel: 1, id, result } либо { __unoPanel: 1, id, error }
  *
  * Правила безопасности (граница доверия — манифест, панель прав не расширяет):
- * - `event.origin` у opaque-origin iframe приходит строкой `"null"`, поэтому
- *   фильтровать по нему бессмысленно — единственная надёжная проверка — это
- *   `event.source === iframe.contentWindow` СВОЕЙ вкладки (её делает хост и
- *   передаёт результат в `handleMessage`);
+ * - `message` на window хост не слушает вообще: порт получил только документ,
+ *   загруженный по подписанной ссылке, и подделать отправителя нельзя;
+ * - если фрейм навигировал (второй и последующие `load`), порт закрывается и
+ *   новый НЕ выдаётся: чужой документ в том же iframe моста не получит;
  * - словарь методов фиксированный, неизвестный метод → `error`;
  * - rate limit (по умолчанию 10 вызовов в секунду на вкладку) — панель не
  *   должна иметь возможности завалить приложение или оркестрацию;
@@ -22,6 +29,9 @@
 import { hookMatches } from "@t3tools/shared/pluginPatterns";
 
 import type { ShellEventNotice } from "../../environments/runtime/shellEventBus";
+
+/** Тип единственного window-сообщения хоста: передача порта панели. */
+export const PANEL_INIT_MESSAGE_TYPE = "uno-panel-init";
 
 /** Маркер протокола: он же отличает наши сообщения от чужих postMessage. */
 export const PANEL_BRIDGE_MARKER = "__unoPanel";
@@ -71,17 +81,14 @@ export type PanelBridgeMethodName = (typeof PANEL_BRIDGE_METHODS)[number];
 
 export interface PanelBridgeOptions {
   readonly methods: PanelBridgeMethods;
-  /** Куда отправлять ответы и события (обычно `iframe.contentWindow.postMessage`). */
+  /** Куда отправлять ответы и события (порт из `attachPanelPortHost`). */
   readonly post: (message: PanelBridgeResponse | PanelBridgeEventMessage) => void;
   readonly maxCallsPerSecond?: number;
   readonly now?: () => number;
 }
 
 export interface PanelBridge {
-  /**
-   * Обработать сообщение от панели. Хост обязан вызывать это ТОЛЬКО после
-   * проверки `event.source === iframe.contentWindow`.
-   */
+  /** Обработать сообщение от панели — только то, что пришло в её порт. */
   readonly handleMessage: (data: unknown) => void;
   /** Прокинуть событие оркестрации в панель, если оно подходит под подписки. */
   readonly emitEvent: (event: PanelBridgeEvent) => void;
@@ -260,5 +267,77 @@ export function createPanelBridge(options: PanelBridgeOptions): PanelBridge {
       options.post({ __unoPanel: PANEL_BRIDGE_VERSION, event });
     },
     subscriptions: () => [...patterns],
+  };
+}
+
+/** Минимум iframe, который нужен хосту порта (в тестах — заглушка). */
+export interface PanelPortFrame {
+  addEventListener(type: "load", listener: () => void): void;
+  removeEventListener(type: "load", listener: () => void): void;
+  readonly contentWindow: {
+    postMessage(message: unknown, targetOrigin: string, transfer: Transferable[]): void;
+  } | null;
+}
+
+export interface PanelPortHost {
+  /** Отправить панели сообщение; до выдачи порта и после отзыва — no-op. */
+  readonly post: (message: unknown) => void;
+  /** Снять слушатель и закрыть порт (размонтирование вкладки). */
+  readonly dispose: () => void;
+}
+
+/**
+ * Выдаёт документу панели MessagePort на первый `load` iframe и дальше
+ * слушает только его. Любой следующий `load` значит, что во фрейме уже другой
+ * документ (панель перешла по ссылке или перезагрузилась): порт закрывается,
+ * новый не выдаётся — вкладку надо открыть заново (новая подписанная ссылка).
+ */
+export function attachPanelPortHost(options: {
+  readonly frame: PanelPortFrame;
+  readonly onMessage: (data: unknown) => void;
+  readonly createChannel?: () => MessageChannel;
+}): PanelPortHost {
+  const createChannel = options.createChannel ?? (() => new MessageChannel());
+  let port: MessagePort | null = null;
+  let granted = false;
+  let disposed = false;
+
+  const onPortMessage = (event: MessageEvent) => {
+    options.onMessage(event.data);
+  };
+
+  const closePort = () => {
+    if (port === null) return;
+    port.removeEventListener("message", onPortMessage);
+    port.close();
+    port = null;
+  };
+
+  const onLoad = () => {
+    if (disposed) return;
+    if (granted) {
+      closePort();
+      return;
+    }
+    const target = options.frame.contentWindow;
+    if (target === null) return;
+    granted = true;
+    const channel = createChannel();
+    port = channel.port1;
+    port.addEventListener("message", onPortMessage);
+    port.start();
+    target.postMessage({ type: PANEL_INIT_MESSAGE_TYPE }, "*", [channel.port2]);
+  };
+
+  options.frame.addEventListener("load", onLoad);
+  return {
+    post: (message) => {
+      port?.postMessage(message);
+    },
+    dispose: () => {
+      disposed = true;
+      options.frame.removeEventListener("load", onLoad);
+      closePort();
+    },
   };
 }
