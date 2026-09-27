@@ -59,12 +59,50 @@ export function remoteStateKey(target: DesktopSshEnvironmentTarget): string {
   return Crypto.createHash("sha256").update(targetConnectionKey(target)).digest("hex").slice(0, 16);
 }
 
+// Whitespace or control characters anywhere, or a leading "-" (which ssh
+// would parse as an option such as -oProxyCommand=...).
+// oxlint-disable-next-line no-control-regex
+const UNSAFE_SSH_TOKEN_PATTERN = /[\s\u0000-\u001f\u007f]/u;
+
+/**
+ * True when the value can be passed to ssh as a host alias, hostname or user
+ * without being interpreted as an option or splitting into several arguments.
+ */
+export function isSafeSshTargetToken(value: string): boolean {
+  return value.length > 0 && !value.startsWith("-") && !UNSAFE_SSH_TOKEN_PATTERN.test(value);
+}
+
+export function assertSafeSshTarget(target: DesktopSshEnvironmentTarget): void {
+  const alias = target.alias.trim();
+  const hostname = target.hostname.trim();
+  if (alias.length > 0 && !isSafeSshTargetToken(alias)) {
+    throw new Error("SSH host alias contains characters that are not allowed.");
+  }
+  if (hostname.length > 0 && !isSafeSshTargetToken(hostname)) {
+    throw new Error("SSH hostname contains characters that are not allowed.");
+  }
+  if (target.username !== null && target.username !== undefined) {
+    const username = target.username.trim();
+    if (username.length > 0 && (!isSafeSshTargetToken(username) || username.includes("@"))) {
+      throw new Error("SSH user name contains characters that are not allowed.");
+    }
+  }
+  if (
+    target.port !== null &&
+    target.port !== undefined &&
+    (!Number.isInteger(target.port) || target.port < 1 || target.port > 65_535)
+  ) {
+    throw new Error("SSH port is out of range.");
+  }
+}
+
 export function buildSshHostSpec(target: DesktopSshEnvironmentTarget): string {
+  assertSafeSshTarget(target);
   const destination = target.alias.trim() || target.hostname.trim();
   if (destination.length === 0) {
     throw new Error("SSH target is missing its alias/hostname.");
   }
-  return target.username ? `${target.username}@${destination}` : destination;
+  return target.username ? `${target.username.trim()}@${destination}` : destination;
 }
 
 export const buildSshHostSpecEffect = (
@@ -160,6 +198,8 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
       batchMode: input.batchMode ?? (input.interactiveAuth ? "no" : "yes"),
     }),
     ...(input.preHostArgs ?? []),
+    // Everything after "--" is the destination (and remote command), never an option.
+    "--",
     hostSpec,
     ...(input.remoteCommandArgs ?? []),
   ];
@@ -174,7 +214,10 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
     .spawn(
       ChildProcess.make("ssh", args, {
         env: environment,
-        shell: process.platform === "win32",
+        // Never through a shell: the host and remote command are data, and
+        // cmd.exe would interpret &, | and friends in them. libuv finds
+        // ssh.exe on PATH without a shell.
+        shell: false,
         stdin: {
           stream: stdinStream(input.stdin),
           endOnDone: true,
@@ -291,6 +334,11 @@ export const resolveSshTarget = Effect.fn("ssh/command.resolveSshTarget")(functi
   if (trimmedAlias.length === 0) {
     return yield* new SshInvalidTargetError({ message: "SSH host alias is required." });
   }
+  if (!isSafeSshTargetToken(trimmedAlias)) {
+    return yield* new SshInvalidTargetError({
+      message: "SSH host alias contains characters that are not allowed.",
+    });
+  }
 
   yield* Effect.logDebug("ssh.target.resolve.start", { alias: trimmedAlias });
   return yield* runSshCommand(
@@ -306,15 +354,21 @@ export const resolveSshTarget = Effect.fn("ssh/command.resolveSshTarget")(functi
     Effect.tap((target) =>
       Effect.logDebug("ssh.target.resolve.succeeded", sshTargetLogFields(target)),
     ),
-    Effect.catch((cause) =>
-      Effect.logDebug("ssh.target.resolve.fallback", { alias: trimmedAlias, cause }).pipe(
-        Effect.as({
-          alias: trimmedAlias,
-          hostname: trimmedAlias,
-          username: null,
-          port: null,
-        }),
-      ),
+    // No silent fallback to the raw alias: if ssh can't resolve it, fail.
+    Effect.tapError((cause) =>
+      Effect.logDebug("ssh.target.resolve.failed", { alias: trimmedAlias, cause }),
+    ),
+    Effect.flatMap((target) =>
+      Effect.try({
+        try: () => {
+          assertSafeSshTarget(target);
+          return target;
+        },
+        catch: (cause) =>
+          new SshInvalidTargetError({
+            message: cause instanceof Error ? cause.message : "SSH target is invalid.",
+          }),
+      }),
     ),
   );
 });

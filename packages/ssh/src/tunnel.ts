@@ -1065,6 +1065,7 @@ const spawnTunnelProcess = Effect.fn("ssh/tunnel.spawnTunnelProcess")(function* 
     "-N",
     "-L",
     `${input.localPort}:127.0.0.1:${input.remotePort}`,
+    "--",
     hostSpec,
   ];
   const tunnelCommand = ["ssh", ...args];
@@ -1082,7 +1083,8 @@ const spawnTunnelProcess = Effect.fn("ssh/tunnel.spawnTunnelProcess")(function* 
     .spawn(
       ChildProcess.make("ssh", args, {
         env: childEnvironment,
-        shell: process.platform === "win32",
+        // No shell: the destination must never be parsed by cmd.exe.
+        shell: false,
         stdin: {
           stream: Stream.empty,
           endOnDone: true,

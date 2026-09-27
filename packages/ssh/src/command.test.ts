@@ -6,6 +6,8 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   baseSshArgs,
+  buildSshHostSpec,
+  isSafeSshTargetToken,
   getLastNonEmptyOutputLine,
   parseSshResolveOutput,
   resolveRemoteT3CliPackageSpec,
@@ -147,5 +149,27 @@ describe("ssh command", () => {
         assert.include(result.failure.message, "SSH command timed out after 1ms.");
       }
     }).pipe(Effect.provide(processLayer));
+  });
+});
+
+describe("ssh target validation", () => {
+  it("rejects option-like and multi-word tokens", () => {
+    assert.isFalse(isSafeSshTargetToken("-oProxyCommand=open -a Calculator"));
+    assert.isFalse(isSafeSshTargetToken("host name"));
+    assert.isFalse(isSafeSshTargetToken("host\nname"));
+    assert.isFalse(isSafeSshTargetToken(""));
+    assert.isTrue(isSafeSshTargetToken("devbox"));
+    assert.isTrue(isSafeSshTargetToken("10.0.0.5"));
+  });
+
+  it("refuses to build a host spec from unsafe fields", () => {
+    const base = { alias: "devbox", hostname: "devbox", username: null, port: null };
+    assert.strictEqual(buildSshHostSpec(base), "devbox");
+    assert.strictEqual(buildSshHostSpec({ ...base, username: "me" }), "me@devbox");
+    assert.throws(() => buildSshHostSpec({ ...base, alias: "-oProxyCommand=x" }));
+    assert.throws(() => buildSshHostSpec({ ...base, alias: "", hostname: "-p22" }));
+    assert.throws(() => buildSshHostSpec({ ...base, username: "-lroot" }));
+    assert.throws(() => buildSshHostSpec({ ...base, username: "a@b" }));
+    assert.throws(() => buildSshHostSpec({ ...base, port: 70_000 }));
   });
 });
