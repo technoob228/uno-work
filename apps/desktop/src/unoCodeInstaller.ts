@@ -1,4 +1,5 @@
 import * as ChildProcess from "node:child_process";
+import * as Crypto from "node:crypto";
 import * as FS from "node:fs";
 import * as Path from "node:path";
 import { promisify } from "node:util";
@@ -13,6 +14,23 @@ const execFile = promisify(ChildProcess.execFile);
 
 const RELEASE_REPO = "technoob228/uno-code";
 const ASSET_PREFIX = "uno-code";
+
+/**
+ * The installer is pinned to one release and checks every archive against a
+ * SHA-256 embedded here before extracting, un-quarantining or running it.
+ * The release publishes no checksums asset, so the hashes were computed by
+ * downloading the assets (they match GitHub's own asset digests). A new
+ * Uno Code release means: bump the tag, recompute the hashes
+ * (`gh release download <tag> --repo technoob228/uno-code && shasum -a 256 *`).
+ * A platform without a hash here is refused — fail closed.
+ */
+export const UNO_CODE_RELEASE_TAG = "uno-v1.14.48-uno.1";
+export const UNO_CODE_ASSET_SHA256: Readonly<Record<string, string>> = {
+  "uno-code-darwin-arm64.zip": "8dc89353ad1ea011faa09ccaaca48d3e8252f1d956c774d1bc7dc5e0df509b90",
+  "uno-code-linux-arm64.tar.gz": "c0171020b324a0e3c4d3a23de08fad0c91d7f278b31d7750a92106db13bab293",
+  "uno-code-linux-x64.tar.gz": "41dfddbd042aeaebbbda56203ac71ed4be00b90f3600e5d6292589030604acf5",
+  "uno-code-windows-x64.zip": "3db10dc24246659af9b6606b5921dbfee10ac72b1fb472bcbaf2a6dc934946c5",
+};
 
 export type InstallPhase = "fetching-release" | "downloading" | "extracting" | "verifying" | "done";
 
@@ -51,6 +69,7 @@ export type UnoCodeInstallErrorCode =
   | "asset-missing"
   | "download-failed"
   | "extract-failed"
+  | "checksum-mismatch"
   | "verify-failed";
 
 export class UnoCodeInstallError extends Error {
@@ -86,8 +105,8 @@ function binaryFileName(base: string): string {
   return process.platform === "win32" ? `${base}.exe` : base;
 }
 
-async function fetchLatestRelease(): Promise<GitHubRelease> {
-  const url = `https://api.github.com/repos/${RELEASE_REPO}/releases/latest`;
+async function fetchPinnedRelease(): Promise<GitHubRelease> {
+  const url = `https://api.github.com/repos/${RELEASE_REPO}/releases/tags/${encodeURIComponent(UNO_CODE_RELEASE_TAG)}`;
   const response = await fetch(url, {
     headers: {
       "User-Agent": "uno-work-installer",
@@ -147,6 +166,29 @@ async function downloadToFile(
     await new Promise<void>((resolve, reject) => {
       writer.end((err: unknown) => (err ? reject(err) : resolve()));
     });
+  }
+}
+
+export async function sha256File(filePath: string): Promise<string> {
+  const hash = Crypto.createHash("sha256");
+  for await (const chunk of FS.createReadStream(filePath)) {
+    hash.update(chunk as Buffer);
+  }
+  return hash.digest("hex");
+}
+
+/** Throws `checksum-mismatch` unless the file's SHA-256 equals `expected`. */
+export async function verifyArchiveChecksum(filePath: string, expected: string): Promise<void> {
+  const actual = await sha256File(filePath);
+  const want = expected.trim().toLowerCase();
+  if (
+    actual.length !== want.length ||
+    !Crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(want))
+  ) {
+    throw new UnoCodeInstallError(
+      `Checksum mismatch for ${Path.basename(filePath)}: expected ${want}, got ${actual}. The download was not installed.`,
+      "checksum-mismatch",
+    );
   }
 }
 
@@ -214,11 +256,12 @@ export async function installUnoCode(opts: InstallerOptions): Promise<InstallRes
   const { installDir, onProgress } = opts;
   await FS.promises.mkdir(installDir, { recursive: true });
 
-  onProgress?.({ phase: "fetching-release", message: "Checking latest release…" });
-  const release = await fetchLatestRelease();
+  onProgress?.({ phase: "fetching-release", message: "Checking release…" });
   const assetName = platformAssetName();
+  const expectedSha256 = UNO_CODE_ASSET_SHA256[assetName];
+  const release = await fetchPinnedRelease();
   const asset = release.assets.find((a) => a.name === assetName);
-  if (!asset) {
+  if (!asset || expectedSha256 === undefined) {
     throw new UnoCodeInstallError(
       `No Uno Code build available for ${process.platform}/${process.arch} in release ${release.tag_name} yet. You can point Uno Work at a custom binary in Settings → Providers → Uno.`,
       "asset-missing",
@@ -232,6 +275,12 @@ export async function installUnoCode(opts: InstallerOptions): Promise<InstallRes
   });
   const archivePath = Path.join(installDir, "_download", asset.name);
   await downloadToFile(asset.browser_download_url, archivePath, asset.size, onProgress);
+  try {
+    await verifyArchiveChecksum(archivePath, expectedSha256);
+  } catch (cause) {
+    await FS.promises.rm(archivePath, { force: true }).catch(() => undefined);
+    throw cause;
+  }
 
   onProgress?.({ phase: "extracting", message: "Extracting…" });
   const extractDir = Path.join(installDir, "bin");
@@ -325,10 +374,14 @@ export function releaseTagToNumericVersion(tag: string): string | null {
   return match?.[1] ?? null;
 }
 
-/** Fetch the numeric version of the latest GitHub release (throws on network/API error). */
+/**
+ * Numeric version the installer would install. The installer is pinned to
+ * {@link UNO_CODE_RELEASE_TAG} (checksums are embedded), so this is the pinned
+ * tag's version, not GitHub's "latest" — otherwise a newer unpinned release
+ * would mark the pinned install outdated on every start. Kept async for callers.
+ */
 export async function fetchLatestUnoCodeReleaseVersion(): Promise<string | null> {
-  const release = await fetchLatestRelease();
-  return releaseTagToNumericVersion(release.tag_name);
+  return releaseTagToNumericVersion(UNO_CODE_RELEASE_TAG);
 }
 
 /**
