@@ -118,8 +118,9 @@ export const ServerPlugin = Schema.Struct({
   id: Schema.String,
   fileName: Schema.String,
   /**
-   * Present when the plugin ships a panel; the client opens it at
-   * `/api/plugins/<id>/panel/` (the daemon resolves the manifest entry file).
+   * Present when the plugin ships a panel; the client asks
+   * `plugins.issuePanelUrl` for a signed, short-lived URL and opens that (the
+   * daemon resolves the manifest entry file).
    */
   panel: Schema.optional(
     Schema.Struct({
@@ -216,3 +217,23 @@ export const PluginResolvePanelThreadResult = Schema.Struct({
   threadTag: Schema.String,
 });
 export type PluginResolvePanelThreadResult = typeof PluginResolvePanelThreadResult.Type;
+
+/**
+ * `plugins.issuePanelUrl` — signed URL for a panel iframe.
+ *
+ * The sandboxed panel cannot carry the app session, so the authenticated app
+ * trades its session for a capability URL
+ * (`/api/plugins/<id>/panel/<token>/`) right before mounting the iframe. The
+ * token is bound to the plugin and its panel path and expires (the entry
+ * document within minutes, the panel's own files after a working session).
+ */
+export const PluginIssuePanelUrlInput = Schema.Struct({
+  pluginId: Schema.String,
+});
+export type PluginIssuePanelUrlInput = typeof PluginIssuePanelUrlInput.Type;
+
+export const PluginIssuePanelUrlResult = Schema.Struct({
+  /** Relative to the daemon that serves the panel. */
+  url: Schema.String,
+});
+export type PluginIssuePanelUrlResult = typeof PluginIssuePanelUrlResult.Type;

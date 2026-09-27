@@ -200,6 +200,8 @@ import {
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
 import {
+  PluginIssuePanelUrlInput,
+  PluginIssuePanelUrlResult,
   PluginResolvePanelThreadInput,
   PluginResolvePanelThreadResult,
   PluginSendToThreadInput,
@@ -389,6 +391,7 @@ export const WS_METHODS = {
   serverSetPluginEnabled: "server.setPluginEnabled",
   pluginsSendToThread: "plugins.sendToThread",
   pluginsResolvePanelThread: "plugins.resolvePanelThread",
+  pluginsIssuePanelUrl: "plugins.issuePanelUrl",
 
   // Credentials vault methods (Settings panel, both shells)
   vaultList: "vault.list",
@@ -666,6 +669,12 @@ export const WsPluginsSendToThreadRpc = Rpc.make(WS_METHODS.pluginsSendToThread,
 export const WsPluginsResolvePanelThreadRpc = Rpc.make(WS_METHODS.pluginsResolvePanelThread, {
   payload: PluginResolvePanelThreadInput,
   success: PluginResolvePanelThreadResult,
+  error: PluginsError,
+});
+
+export const WsPluginsIssuePanelUrlRpc = Rpc.make(WS_METHODS.pluginsIssuePanelUrl, {
+  payload: PluginIssuePanelUrlInput,
+  success: PluginIssuePanelUrlResult,
   error: PluginsError,
 });
 
@@ -2053,6 +2062,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerSetPluginEnabledRpc,
   WsPluginsSendToThreadRpc,
   WsPluginsResolvePanelThreadRpc,
+  WsPluginsIssuePanelUrlRpc,
   WsSubscribePluginsRpc,
   WsUnoCreateLlmTopUpActionRpc,
   WsUnoPersonalAiListRpc,

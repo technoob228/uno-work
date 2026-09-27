@@ -22,7 +22,7 @@ import * as OS from "node:os";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { collectStreamAsString } from "../provider/providerSnapshot.ts";
 import { cronMatches, cronMinuteKey, parseCronExpression, parseEveryDuration } from "./cron.ts";
-import { PluginRegistry } from "./PluginRegistry.ts";
+import { isPluginActive, PluginRegistry } from "./PluginRegistry.ts";
 
 const CRON_SWEEP_INTERVAL_MS = 30 * 1000;
 const MAX_CONCURRENT_RUNS = 4;
@@ -220,7 +220,7 @@ const makePluginRuntime = (options?: PluginRuntimeLiveOptions) =>
         const plugins = yield* registry.getLoadedPlugins;
         for (const plugin of plugins) {
           const manifest = plugin.manifest;
-          if (manifest === undefined || !manifest.enabled) continue;
+          if (manifest === undefined || !isPluginActive(plugin)) continue;
           for (const hook of manifest.hooks) {
             if (!hookMatches(hook.on, event.type)) continue;
             yield* forkAction({
@@ -241,7 +241,7 @@ const makePluginRuntime = (options?: PluginRuntimeLiveOptions) =>
       const plugins = yield* registry.getLoadedPlugins;
       for (const plugin of plugins) {
         const manifest = plugin.manifest;
-        if (manifest === undefined || !manifest.enabled) continue;
+        if (manifest === undefined || !isPluginActive(plugin)) continue;
         for (const [index, cron] of manifest.crons.entries()) {
           const key = `${plugin.id}:${cron.id ?? index}`;
           if (cron.schedule !== undefined) {

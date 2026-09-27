@@ -156,7 +156,8 @@ const PLUGIN_PANEL_ID_PREFIX = "plugin-panel:";
 /**
  * Вкладка панельного плагина. URL относительный: панель раздаёт демон текущего
  * окружения (`/api/plugins/<id>/panel/`), а содержимое рендерится в
- * изолированном iframe — см. `PreviewPane`.
+ * изолированном iframe — см. `PreviewPane`. Это только идентификатор вкладки:
+ * iframe грузит подписанный URL с токеном (`pluginPanelUrl.ts`).
  */
 export function makePluginPanelFile(pluginId: string, title: string): PreviewFile {
   return {

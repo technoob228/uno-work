@@ -30,6 +30,7 @@ import {
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import {
   Cause,
+  Clock,
   Context,
   Deferred,
   Duration,
@@ -51,6 +52,12 @@ import { writeFileStringAtomically } from "../atomicWrite.ts";
 import { ServerConfig } from "../config.ts";
 import { parseCronExpression, parseEveryDuration } from "./cron.ts";
 import { resolvePluginPanelLocation } from "./panelPaths.ts";
+import {
+  generatePanelTokenSecret,
+  pluginPanelUrl,
+  signPanelToken,
+  verifyPanelTokenSignature,
+} from "./panelTokens.ts";
 
 const RECENT_RUNS_LIMIT = 20;
 const WATCH_DEBOUNCE_MS = 150;
@@ -76,6 +83,14 @@ interface PluginEntry {
   readonly fileName: string;
   readonly filePath: string;
   readonly directoryPath: string | undefined;
+}
+
+/**
+ * Whether the plugin may act: hooks/crons run and its panel is served only for
+ * active plugins.
+ */
+export function isPluginActive(plugin: LoadedPlugin): boolean {
+  return plugin.manifest !== undefined && plugin.manifest.enabled;
 }
 
 export function cronLabel(cron: PluginManifest["crons"][number]): string {
@@ -194,6 +209,25 @@ export interface PluginRegistryShape {
     readonly enabled: boolean;
   }) => Effect.Effect<PluginsSnapshot, PluginsError>;
 
+  /**
+   * Signed, short-lived panel URL (`panelTokens.ts`) for an active plugin with
+   * a panel. Only reachable through the authenticated RPC transport — this is
+   * where the app's session turns into the panel's capability.
+   */
+  readonly issuePanelUrl: (
+    pluginId: string,
+  ) => Effect.Effect<{ readonly url: string }, PluginsError>;
+
+  /**
+   * Signature check of a panel token for `pluginId` + `panelPath`; returns the
+   * issue time (ms) or `null`. Freshness is the caller's decision.
+   */
+  readonly verifyPanelToken: (input: {
+    readonly pluginId: string;
+    readonly panelPath: string;
+    readonly token: string;
+  }) => Effect.Effect<number | null>;
+
   /** Record a hook/cron execution for the settings UI. */
   readonly recordRun: (pluginId: string, run: ServerPluginRun) => Effect.Effect<void>;
 
@@ -249,6 +283,9 @@ const makePluginRegistry = (options?: PluginRegistryLiveOptions) =>
     const panelThreadsRef = yield* Ref.make<ReadonlyMap<string, ThreadId>>(new Map());
     const changesPubSub = yield* PubSub.unbounded<PluginsSnapshot>();
     const startedRef = yield* Ref.make(false);
+    // Ключ подписи ссылок панелей: живёт в памяти процесса, рестарт демона
+    // отзывает все выданные ссылки (вкладка просто запросит новую).
+    const panelTokenSecret = generatePanelTokenSecret();
     const startedDeferred = yield* Deferred.make<void, PluginsError>();
     const watcherScope = yield* Scope.make("sequential");
     yield* Effect.addFinalizer(() => Scope.close(watcherScope, Exit.void));
@@ -609,6 +646,30 @@ const makePluginRegistry = (options?: PluginRegistryLiveOptions) =>
             yield* PubSub.publish(changesPubSub, snapshot);
             return snapshot;
           }),
+        ),
+      issuePanelUrl: (pluginId) =>
+        Effect.gen(function* () {
+          const plugins = yield* Ref.get(pluginsRef);
+          const plugin = plugins.find((candidate) => candidate.id === pluginId);
+          const panel = plugin?.manifest?.panel;
+          if (plugin === undefined || panel === undefined) {
+            return yield* toPluginsError(`plugin "${pluginId}" has no panel`);
+          }
+          if (!isPluginActive(plugin)) {
+            return yield* toPluginsError(`plugin "${pluginId}" is not enabled`);
+          }
+          const issuedAtMs = yield* Clock.currentTimeMillis;
+          const token = signPanelToken({
+            secret: panelTokenSecret,
+            pluginId,
+            panelPath: panel.path,
+            issuedAtMs,
+          });
+          return { url: pluginPanelUrl(pluginId, token) };
+        }),
+      verifyPanelToken: ({ pluginId, panelPath, token }) =>
+        Effect.sync(() =>
+          verifyPanelTokenSignature({ secret: panelTokenSecret, pluginId, panelPath, token }),
         ),
       getPanelThreadId: ({ pluginId, threadTag }) =>
         Ref.get(panelThreadsRef).pipe(

@@ -1732,6 +1732,12 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.pluginsResolvePanelThread, resolvePluginPanelThread(input), {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.pluginsIssuePanelUrl]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pluginsIssuePanelUrl,
+            pluginRegistry.issuePanelUrl(input.pluginId),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.unoPersonalAiList]: () =>
           observeRpcEffect(WS_METHODS.unoPersonalAiList, listPersonalAi(), {
             "rpc.aggregate": "uno",

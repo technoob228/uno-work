@@ -77,6 +77,7 @@ import {
   type PreviewTabScope,
 } from "./previewTabScopes";
 import { createPanelBridge, shellEventToPanelEvent } from "./panelBridge";
+import { usePluginPanelSignedUrl } from "./pluginPanelUrl";
 import {
   PluginPanelChat,
   PluginPanelSplit,
@@ -1199,8 +1200,9 @@ function resolvePanelFilePath(rawPath: string, projectCwd: string | null): strin
  * Панель плагина: статические файлы демона в изолированном iframe.
  * `sandbox="allow-scripts"` БЕЗ `allow-same-origin` — origin документа
  * непрозрачный, поэтому у панели нет доступа ни к DOM приложения, ни к его
- * кукам и хранилищу. Ценой этого субресурсы панели грузятся без сессии — так
- * и задумано, см. `apps/server/src/plugins/http.ts`.
+ * кукам и хранилищу. Сессию панель не несёт, поэтому все её запросы идут по
+ * подписанному URL с токеном в пути (`pluginPanelUrl.ts`,
+ * `apps/server/src/plugins/http.ts`).
  *
  * Общение с приложением — только через postMessage-мост (`panelBridge.ts`).
  * Сообщения принимаем ИСКЛЮЧИТЕЛЬНО от `contentWindow` своего iframe:
@@ -1224,7 +1226,10 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
   // зависит: мост создаётся в эффекте ниже по pluginId/url, а чат — просто
   // соседний элемент split-раскладки.
   const panelChat = panels.find((panel) => panel.id === pluginId)?.chat;
-  const url = file.url;
+  // Подписанный URL (токен в пути) — см. `pluginPanelUrl.ts`; `file.url` без
+  // токена демон не отдаст.
+  const panelUrl = usePluginPanelSignedUrl(pluginId);
+  const url = panelUrl.status === "ready" ? panelUrl.url : null;
 
   // Мост живёт ровно столько же, сколько документ панели: пересоздать его на
   // смене контекста значило бы молча потерять подписки, оформленные панелью
@@ -1352,7 +1357,12 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
   }, [pluginId, url]);
 
   if (!url) {
-    return <MetadataPlaceholder file={file} label="У панели нет адреса" />;
+    return (
+      <MetadataPlaceholder
+        file={file}
+        label={panelUrl.status === "error" ? panelUrl.message : "Loading panel…"}
+      />
+    );
   }
   return (
     <PluginPanelSplit

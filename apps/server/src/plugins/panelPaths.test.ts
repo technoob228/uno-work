@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  isPanelNavigationRequest,
   parsePluginPanelRequestPath,
   resolvePluginPanelAssetPath,
   resolvePluginPanelLocation,
+  splitPanelTokenFromRest,
 } from "./panelPaths.ts";
 
 const pluginDir = "/tmp/plugins/demo";
@@ -70,12 +70,12 @@ describe("plugin panel paths", () => {
     expect(parsePluginPanelRequestPath("/attachments/demo")).toBeNull();
   });
 
-  it("treats documents and unknown clients as navigation, subresources as not", () => {
-    for (const dest of ["iframe", "document", "frame", undefined, ""]) {
-      expect(isPanelNavigationRequest(dest)).toBe(true);
-    }
-    for (const dest of ["empty", "script", "style", "image", "font"]) {
-      expect(isPanelNavigationRequest(dest)).toBe(false);
-    }
+  it("splits the capability token off the panel path", () => {
+    expect(splitPanelTokenFromRest("tok/data.json")).toEqual({ token: "tok", rest: "data.json" });
+    expect(splitPanelTokenFromRest("tok/")).toEqual({ token: "tok", rest: "" });
+    expect(splitPanelTokenFromRest("tok")).toEqual({ token: "tok", rest: "" });
+    expect(splitPanelTokenFromRest("tok/js/app.js")).toEqual({ token: "tok", rest: "js/app.js" });
+    expect(splitPanelTokenFromRest("")).toBeNull();
+    expect(splitPanelTokenFromRest("/data.json")).toBeNull();
   });
 });
