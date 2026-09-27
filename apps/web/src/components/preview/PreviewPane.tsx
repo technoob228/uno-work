@@ -936,9 +936,14 @@ function LoadedBody({ file, sourceView }: { file: PreviewFile; sourceView: boole
 
   const blobUrl = useMemo(() => {
     if (!data || data.encoding !== "base64") return undefined;
-    const mime = data.mimeType ?? "application/octet-stream";
+    // A "PDF" is always rendered as a PDF: a file named .pdf whose bytes or
+    // reported type say HTML must never run as a page in the app's origin.
+    // (No sandbox attribute on the PDF frame: Chromium refuses to show its
+    // PDF viewer inside sandboxed frames.)
+    const mime =
+      file.kind === "pdf" ? "application/pdf" : (data.mimeType ?? "application/octet-stream");
     return base64ToBlobUrl(data.content, mime);
-  }, [data]);
+  }, [data, file.kind]);
 
   useEffect(() => {
     return () => {
