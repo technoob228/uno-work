@@ -1696,7 +1696,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "request_secret",
     group: "person",
     description:
-      "Ask the person for a secret (API key, token, password) through a masked field in Uno Work. The value is written to the project's .env (or .env.<x>) and never reaches you or the chat. Waits until they answer (up to 15 min). Use this instead of ever asking for a secret in chat.",
+      "Ask the person for a secret (API key, token, password) through a masked field in Uno Work. The value is written to the project's .env (or .env.<x>), not the chat; read it from there, never print it. Waits until they answer (up to 15 min). Use this instead of ever asking for a secret in chat.",
     inputSchema: {
       type: "object",
       properties: {
