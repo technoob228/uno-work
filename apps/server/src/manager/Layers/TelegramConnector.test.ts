@@ -29,6 +29,37 @@ const assistantMessage = (text: string, createdAt: string) => ({
 });
 
 describe("resolveTurnReply", () => {
+  it("keeps waiting while the session still runs the turn, even if the turn row already says completed (hermes pre-tool text)", () => {
+    // Box 395 regression: the projection marks the turn completed on the first
+    // finished assistant chunk ("Сейчас посмотрю…") emitted before a tool call.
+    const turnId = TurnId.make("turn-1");
+    const firstChunkAt = "2026-07-03T23:03:00.000Z";
+    const early = resolveTurnReply({
+      turns: [turnRow({ turnId, state: "completed", completedAt: firstChunkAt })],
+      messages: [assistantMessage("Сейчас посмотрю…", firstChunkAt)],
+      sessionStatus: "running",
+      sessionUpdatedAtIso: requestedAtIso,
+      sessionActiveTurnId: turnId,
+      requestedAtIso,
+      nowIso,
+    });
+    expect(early).toBeNull();
+
+    const final = resolveTurnReply({
+      turns: [turnRow({ turnId, state: "completed", completedAt: "2026-07-03T23:03:35.000Z" })],
+      messages: [
+        assistantMessage("Сейчас посмотрю…", firstChunkAt),
+        assistantMessage("Итоговый ответ", "2026-07-03T23:03:35.000Z"),
+      ],
+      sessionStatus: "ready",
+      sessionUpdatedAtIso: "2026-07-03T23:03:35.000Z",
+      sessionActiveTurnId: null,
+      requestedAtIso,
+      nowIso,
+    });
+    expect(final).toEqual({ text: "Итоговый ответ", files: [] });
+  });
+
   it("waits while the turn is still running", () => {
     expect(
       resolveTurnReply({

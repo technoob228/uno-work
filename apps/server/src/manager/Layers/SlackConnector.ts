@@ -663,6 +663,7 @@ const makeSlackConnector = Effect.gen(function* () {
           messages: detail.value.messages,
           sessionStatus: detail.value.session?.status ?? null,
           sessionUpdatedAtIso: detail.value.session?.updatedAt ?? null,
+          sessionActiveTurnId: detail.value.session?.activeTurnId ?? null,
           requestedAtIso: input.requestedAtIso,
           nowIso: new Date().toISOString(),
         });
