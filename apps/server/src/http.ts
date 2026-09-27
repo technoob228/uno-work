@@ -48,6 +48,7 @@ import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts
 import { executeBridgeCommand, executeBridgeOpenUrl } from "./browserCommandRouter.ts";
 import { announceBrowserHelp } from "./browserHelpNotify.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
+import { UNTRUSTED_FILE_HEADERS } from "./untrustedFileHeaders.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { OFFICE_ENGINE_ROUTE_PREFIX, resolveOfficeEngineFilePath } from "./officeEngine.ts";
 import {
@@ -663,6 +664,7 @@ export const attachmentsRouteLayer = HttpRouter.add(
       status: 200,
       headers: {
         "Cache-Control": "public, max-age=31536000, immutable",
+        ...UNTRUSTED_FILE_HEADERS,
       },
     }).pipe(
       Effect.catch(() =>
@@ -700,10 +702,13 @@ export const projectFaviconRouteLayer = HttpRouter.add(
       });
     }
 
+    // The favicon comes from the project (any cloned repo): same treatment
+    // as attachments, an SVG must not script the app's origin.
     return yield* HttpServerResponse.file(faviconFilePath, {
       status: 200,
       headers: {
         "Cache-Control": PROJECT_FAVICON_CACHE_CONTROL,
+        ...UNTRUSTED_FILE_HEADERS,
       },
     }).pipe(
       Effect.catch(() =>

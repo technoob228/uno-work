@@ -2266,6 +2266,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
       assert.equal(response.status, 200);
       assert.equal(yield* response.text, "attachment-ok");
+      // Attachment bytes are untrusted: no sniffing, and scripts can't run
+      // even if the file (an SVG, say) is opened directly as a document.
+      assert.equal(response.headers["x-content-type-options"], "nosniff");
+      assert.include(response.headers["content-security-policy"] ?? "", "sandbox");
+      assert.include(response.headers["content-security-policy"] ?? "", "default-src 'none'");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
