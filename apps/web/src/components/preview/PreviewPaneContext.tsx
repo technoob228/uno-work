@@ -11,7 +11,7 @@ import type { BrowserLivePage, EnvironmentId, ProjectId } from "@t3tools/contrac
 import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
 
 import { liveBrowserTabId, liveBrowserTabName } from "./browserLiveStore";
-import { browserTabNameForUrl } from "./browserUrl";
+import { browserTabNameForUrl, normalizeBrowserUrl } from "./browserUrl";
 import { forgetScrollPosition } from "./previewScrollMemory";
 import {
   collectPersistableTabs,
@@ -496,7 +496,12 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
 
   const openUrlForTarget = useCallback(
     (target: PreviewTabTarget, scope: PreviewTabScope, url?: string) => {
-      const trimmed = url?.trim() ?? "";
+      // Every caller (agents, plugins, links) goes through the address-bar
+      // rules: http(s) only — file:, javascript:, chrome:, devtools: never
+      // reach a webview. No url = an empty new tab.
+      const requested = url?.trim() ?? "";
+      const trimmed = requested ? (normalizeBrowserUrl(requested) ?? "") : "";
+      if (requested && !/^https?:\/\//i.test(trimmed)) return;
       const bucketKey = scopeKeyForTarget(target, scope);
       setStatesByScopeKey((prev) => {
         // Уже открытая вкладка с тем же URL на любом видимом уровне — фокус на неё.

@@ -96,3 +96,63 @@ export function browserPartitionForScope(input: {
   }
   return "persist:uno-browser";
 }
+
+function parseIpv4(host: string): [number, number, number, number] | null {
+  const parts = host.split(".");
+  if (parts.length !== 4) return null;
+  const octets = parts.map((part) => (/^\d{1,3}$/.test(part) ? Number(part) : Number.NaN));
+  if (octets.some((octet) => Number.isNaN(octet) || octet > 255)) return null;
+  return octets as [number, number, number, number];
+}
+
+/**
+ * Whether a URL points at this computer or its local network: localhost,
+ * loopback, RFC 1918, link-local, CGNAT/Tailscale (100.64/10), unspecified,
+ * IPv6 loopback / unique-local / link-local. Only literal hosts are
+ * recognised; a public name that resolves to a private address is not.
+ */
+export function isPrivateNetworkUrl(rawUrl: string): boolean {
+  let hostname: string;
+  try {
+    hostname = new URL(rawUrl).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;
+  if (hostname.startsWith("[") && hostname.endsWith("]")) {
+    const v6 = hostname.slice(1, -1);
+    if (v6 === "::1" || v6 === "::") return true;
+    if (/^f[cd][0-9a-f]{2}:/.test(v6)) return true;
+    if (/^fe[89ab][0-9a-f]:/.test(v6)) return true;
+    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(v6);
+    return mapped?.[1] ? isPrivateNetworkUrl(`http://${mapped[1]}/`) : false;
+  }
+  const ip = parseIpv4(hostname);
+  if (!ip) return false;
+  const [a, b] = ip;
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127)
+  );
+}
+
+/**
+ * An address an agent (or a plugin) asked the embedded browser to open:
+ * normalised to http(s), or null when it must not be opened at all
+ * (file:, javascript:, chrome:, devtools:, …).
+ */
+export function normalizeAgentBrowserUrl(rawUrl: string | undefined): string | null {
+  const trimmed = rawUrl?.trim() ?? "";
+  if (!trimmed) return null;
+  const url = normalizeBrowserUrl(trimmed);
+  if (!url || !/^https?:\/\//i.test(url)) return null;
+  return url;
+}
+
+export const AGENT_PRIVATE_URL_MESSAGE =
+  "Opening an address on this computer or its local network needs the user's confirmation; they were asked in the app.";

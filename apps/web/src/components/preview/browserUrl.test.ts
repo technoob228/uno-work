@@ -5,6 +5,8 @@ import {
   browserTabNameForUrl,
   browserUrlOrigin,
   normalizeBrowserUrl,
+  isPrivateNetworkUrl,
+  normalizeAgentBrowserUrl,
 } from "./browserUrl";
 
 describe("normalizeBrowserUrl", () => {
@@ -72,5 +74,47 @@ describe("browserPartitionForScope", () => {
     expect(browserPartitionForScope({ scope: "project", projectKey: null })).toBe(
       "persist:uno-browser",
     );
+  });
+});
+
+describe("isPrivateNetworkUrl", () => {
+  it("recognises this computer and local networks", () => {
+    for (const url of [
+      "http://localhost:3000/",
+      "http://app.localhost/",
+      "http://127.0.0.1:13773/",
+      "http://10.1.2.3/",
+      "http://172.20.0.1/",
+      "http://192.168.1.1/",
+      "http://169.254.169.254/latest/meta-data",
+      "http://100.100.1.1/",
+      "http://0.0.0.0:8080/",
+      "http://[::1]:3000/",
+      "http://[fd12:3456::1]/",
+      "http://[fe80::1]/",
+    ]) {
+      expect(isPrivateNetworkUrl(url), url).toBe(true);
+    }
+  });
+  it("leaves public addresses alone", () => {
+    for (const url of ["https://example.com/", "http://8.8.8.8/", "http://172.32.0.1/"]) {
+      expect(isPrivateNetworkUrl(url), url).toBe(false);
+    }
+  });
+});
+
+describe("normalizeAgentBrowserUrl", () => {
+  it("allows only http(s)", () => {
+    expect(normalizeAgentBrowserUrl("example.com")).toBe("https://example.com/");
+    for (const url of [
+      "file:///etc/passwd",
+      "javascript:alert(1)",
+      "chrome://settings",
+      "devtools://devtools/bundled/inspector.html",
+      "",
+      undefined,
+    ]) {
+      expect(normalizeAgentBrowserUrl(url)).toBeNull();
+    }
   });
 });
