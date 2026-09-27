@@ -106,8 +106,8 @@ const SecretRequestCard = memo(function SecretRequestCard({
         {event.description ? <> — {event.description}</> : null}
       </p>
       <p className="mt-1 text-xs text-muted-foreground/65">
-        Saved into <code className="font-mono">{event.targetFile}</code> in the project — it never
-        enters the chat.
+        Saved to the project&apos;s <code className="font-mono">{event.targetFile}</code> file, not
+        the chat. The agent can read it from there.
       </p>
       {/*
         Deliberately not a <form>: the panel renders inside the composer's
