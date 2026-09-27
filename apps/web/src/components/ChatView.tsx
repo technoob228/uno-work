@@ -3987,6 +3987,7 @@ export default function ChatView(props: ChatViewProps) {
             active={activeThread.session?.lastErrorClass === "billing_error"}
             sessionUpdatedAt={activeThread.session?.updatedAt ?? null}
             sessionError={activeThread.session?.lastError ?? activeThread.error ?? null}
+            environmentId={activeThread.environmentId}
           />
           <ThreadErrorBanner
             error={

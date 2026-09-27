@@ -254,7 +254,19 @@ describe("formatNotificationText", () => {
         },
         "Fix billing",
       ),
-    ).toBe('Turn failed in "Fix billing" [billing_error]: no credit');
+    ).toBe('AI stopped in "Fix billing": no credit');
+    expect(
+      formatNotificationText(
+        {
+          kind: "turn.error",
+          threadId,
+          origin: undefined,
+          errorClass: "provider_error",
+          errorText: "boom",
+        },
+        "Fix billing",
+      ),
+    ).toBe('Turn failed in "Fix billing" [provider_error]: boom');
     expect(
       formatNotificationText(
         { kind: "turn.error", threadId, origin: undefined, errorClass: null, errorText: null },
