@@ -76,7 +76,12 @@ import {
   SCOPE_MENU_LABEL,
   type PreviewTabScope,
 } from "./previewTabScopes";
-import { attachPanelPortHost, createPanelBridge, shellEventToPanelEvent } from "./panelBridge";
+import {
+  attachPanelPortHost,
+  createPanelBridge,
+  createPanelSendConfirmer,
+  shellEventToPanelEvent,
+} from "./panelBridge";
 import { usePluginPanelSignedUrl } from "./pluginPanelUrl";
 import {
   PluginPanelChat,
@@ -1222,6 +1227,8 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
   const panels = usePluginPanels();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const pluginId = pluginIdFromPanelFile(file);
+  const panelTitleRef = useRef(file.name);
+  panelTitleRef.current = file.name;
   // Чат объявляет манифест (`panel.chat`). Жизненный цикл моста от него НЕ
   // зависит: мост создаётся в эффекте ниже по pluginId/url, а чат — просто
   // соседний элемент split-раскладки.
@@ -1260,6 +1267,11 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
     const frame = iframeRef.current;
     if (!frame || !pluginId) return;
 
+    // Каждая отправка агенту — только после явного клика пользователя.
+    const localApi = readLocalApi();
+    const confirmSend = createPanelSendConfirmer(
+      localApi ? (message) => localApi.dialogs.confirm(message) : undefined,
+    );
     // Порт выдаётся документу панели на первый `load`, window-сообщения не
     // слушаем (см. `attachPanelPortHost`); `bridge` объявлен ниже, но до
     // первого `load` сообщений быть не может.
@@ -1315,6 +1327,7 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
           ) {
             throw new Error("панель работает только с проектами основного окружения");
           }
+          await confirmSend({ panelTitle: panelTitleRef.current, text, threadTag });
           const result = await getPrimaryEnvironmentConnection().client.server.sendPluginToThread({
             pluginId,
             projectId: context.currentChatProjectId,

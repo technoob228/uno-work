@@ -341,3 +341,52 @@ export function attachPanelPortHost(options: {
     },
   };
 }
+
+const CONFIRM_TEXT_PREVIEW_CHARS = 600;
+
+/** Text of the confirmation the user sees before a panel talks to the agent. */
+export function panelSendConfirmMessage(input: {
+  readonly panelTitle: string;
+  readonly text: string;
+  readonly threadTag?: string | undefined;
+}): string {
+  const preview =
+    input.text.length > CONFIRM_TEXT_PREVIEW_CHARS
+      ? `${input.text.slice(0, CONFIRM_TEXT_PREVIEW_CHARS)}…`
+      : input.text;
+  const thread = input.threadTag ? ` (thread "${input.threadTag}")` : "";
+  return `The plugin panel "${input.panelTitle}" wants to send this task to the agent${thread}:\n\n${preview}\n\nSend it?`;
+}
+
+/**
+ * `sendToThread` from a panel starts real agent work, so every call needs an
+ * explicit click from the user (a modal confirm, not a toast after the fact).
+ * One confirmation at a time: while a dialog is open further calls are
+ * refused instead of queueing a wall of dialogs. No confirm UI available →
+ * refused (fails closed).
+ */
+export function createPanelSendConfirmer(
+  confirm: ((message: string) => Promise<boolean>) | undefined,
+): (input: {
+  readonly panelTitle: string;
+  readonly text: string;
+  readonly threadTag?: string | undefined;
+}) => Promise<void> {
+  let pending = false;
+  return async (input) => {
+    if (confirm === undefined) {
+      throw new Error("cannot ask the user for confirmation here; nothing was sent");
+    }
+    if (pending) {
+      throw new Error("another request is already waiting for the user's confirmation");
+    }
+    pending = true;
+    let approved = false;
+    try {
+      approved = await confirm(panelSendConfirmMessage(input));
+    } finally {
+      pending = false;
+    }
+    if (!approved) throw new Error("the user declined to send this to the agent");
+  };
+}

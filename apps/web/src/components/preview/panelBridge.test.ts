@@ -10,6 +10,8 @@ import type { ShellEventNotice } from "../../environments/runtime/shellEventBus"
 import {
   attachPanelPortHost,
   createPanelBridge,
+  createPanelSendConfirmer,
+  panelSendConfirmMessage,
   PANEL_INIT_MESSAGE_TYPE,
   type PanelPortFrame,
   DEFAULT_PANEL_BRIDGE_RATE_LIMIT,
@@ -299,5 +301,45 @@ describe("attachPanelPortHost", () => {
     expect(listeners.size).toBe(0);
     load();
     expect(granted).toHaveLength(0);
+  });
+});
+
+describe("createPanelSendConfirmer", () => {
+  it("shows the panel, thread and text, and sends only after the user agrees", async () => {
+    const confirm = vi.fn(async () => true);
+    const confirmSend = createPanelSendConfirmer(confirm);
+    await confirmSend({ panelTitle: "Deploys", text: "redeploy api", threadTag: "ops" });
+    expect(confirm).toHaveBeenCalledWith(
+      panelSendConfirmMessage({ panelTitle: "Deploys", text: "redeploy api", threadTag: "ops" }),
+    );
+    const message = (confirm.mock.calls[0] as unknown as [string])[0];
+    expect(message).toContain('"Deploys"');
+    expect(message).toContain('thread "ops"');
+    expect(message).toContain("redeploy api");
+  });
+
+  it("refuses when the user declines or no confirm UI exists", async () => {
+    await expect(
+      createPanelSendConfirmer(async () => false)({ panelTitle: "P", text: "x" }),
+    ).rejects.toThrow(/declined/);
+    await expect(
+      createPanelSendConfirmer(undefined)({ panelTitle: "P", text: "x" }),
+    ).rejects.toThrow(/nothing was sent/);
+  });
+
+  it("allows one open confirmation at a time", async () => {
+    const pending: Array<(value: boolean) => void> = [];
+    const confirm = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+    const confirmSend = createPanelSendConfirmer(confirm);
+    const first = confirmSend({ panelTitle: "P", text: "one" });
+    await expect(confirmSend({ panelTitle: "P", text: "two" })).rejects.toThrow(/already waiting/);
+    pending[0]!(true);
+    await expect(first).resolves.toBeUndefined();
+    expect(confirm).toHaveBeenCalledTimes(1);
   });
 });
