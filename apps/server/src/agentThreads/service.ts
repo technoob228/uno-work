@@ -15,7 +15,10 @@
  *   only with `agentThreadsScope: "any-project"` (anything else is 404, not
  *   403 — no probing of foreign threads); release stays parent-only;
  * - an agent never writes into a thread that waits for the human or that the
- *   human took over (plan 22).
+ *   human took over (plan 22);
+ * - an agent never widens its own permissions: a spawned thread runs in at
+ *   most the caller's runtime mode, and a turn is never started in a thread
+ *   whose runtime mode is wider than the caller's (403 runtime_mode_escalation).
  */
 import {
   CommandId,
@@ -35,7 +38,11 @@ import * as crypto from "node:crypto";
 import { requireBridgeThread, type BridgeAuthorization } from "../browserBridge.ts";
 import type { OrchestrationDispatchError } from "../orchestration/Errors.ts";
 import type { ProjectionRepositoryError } from "../persistence/Errors.ts";
-import { inheritProjectThreadModes } from "../orchestration/projectThreadModes.ts";
+import {
+  capRuntimeMode,
+  inheritProjectThreadModes,
+  isRuntimeModeWider,
+} from "../orchestration/projectThreadModes.ts";
 import type { OrchestrationEngineShape } from "../orchestration/Services/OrchestrationEngine.ts";
 import type { ProjectionSnapshotQueryShape } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
@@ -87,7 +94,8 @@ export interface AgentThreadsDeps {
    * What the assistant ("Uno") may see and manage (Settings → Assistant,
    * 0.0.85): "all" projects or only these. Applies to callers that are a
    * conversation with the assistant instead of `getAgentThreadsScope`; the
-   * assistant's own workspace is always reachable. Absent: "all".
+   * assistant's own workspace is always reachable. Absent: only that
+   * workspace (no token/allowlist never widens access).
    */
   readonly getAssistantProjectAllowlist?: Effect.Effect<"all" | ReadonlyArray<string>>;
   readonly getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>;
@@ -258,7 +266,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
       if (isAssistantConversation(caller)) {
         const allowlist = deps.getAssistantProjectAllowlist
           ? yield* deps.getAssistantProjectAllowlist
-          : ("all" as const);
+          : ([] as ReadonlyArray<string>);
         return (projectId: string) =>
           projectId === caller.projectId || allowlist === "all" || allowlist.includes(projectId);
       }
@@ -410,9 +418,14 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
           );
         }
 
-        const modes = sameProject
+        const inherited = sameProject
           ? { runtimeMode: caller.runtimeMode, interactionMode: caller.interactionMode }
           : yield* inheritProjectThreadModes(deps.projections, project.id);
+        // Never spawn a thread with more permissions than the caller has.
+        const modes = {
+          ...inherited,
+          runtimeMode: capRuntimeMode(inherited.runtimeMode, caller.runtimeMode),
+        };
         const threadTitle = title.value ?? defaultTitleFromText(text.value);
         const threadId = ThreadId.make(crypto.randomUUID());
         const createdAt = new Date(nowMs()).toISOString();
@@ -634,6 +647,15 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
           block = deliveryBlock(caller, target);
         }
         if (block !== null) return yield* fail(block.status, block.error, block.message);
+        // The decider runs the turn in the target's own mode, so a caller may
+        // not drive a thread that is allowed more than the caller itself.
+        if (isRuntimeModeWider(target.runtimeMode, caller.runtimeMode)) {
+          return yield* fail(
+            403,
+            "runtime_mode_escalation",
+            `Этот тред работает в режиме "${target.runtimeMode}", шире твоего ("${caller.runtimeMode}"). Писать в него может только человек.`,
+          );
+        }
 
         yield* dispatch(
           {
@@ -646,7 +668,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
               text: text.value,
               attachments: [],
             },
-            runtimeMode: target.runtimeMode,
+            runtimeMode: capRuntimeMode(target.runtimeMode, caller.runtimeMode),
             interactionMode: target.interactionMode,
             createdAt: new Date(nowMs()).toISOString(),
           },

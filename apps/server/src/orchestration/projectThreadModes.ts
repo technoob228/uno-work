@@ -53,3 +53,24 @@ export function inheritProjectThreadModes(
     };
   });
 }
+
+/**
+ * Permission order of runtime modes, narrowest first. Anything automated
+ * acting on a thread's behalf (the agent-threads bridge) may never run work
+ * in a mode wider than the acting thread's own.
+ */
+const RUNTIME_MODE_RANK: Readonly<Record<RuntimeMode, number>> = {
+  "approval-required": 0,
+  "auto-accept-edits": 1,
+  "full-access": 2,
+};
+
+/** `mode` grants more than `ceiling` (e.g. full-access vs approval-required). */
+export function isRuntimeModeWider(mode: RuntimeMode, ceiling: RuntimeMode): boolean {
+  return RUNTIME_MODE_RANK[mode] > RUNTIME_MODE_RANK[ceiling];
+}
+
+/** `mode`, narrowed to `ceiling` when it would grant more. */
+export function capRuntimeMode(mode: RuntimeMode, ceiling: RuntimeMode): RuntimeMode {
+  return isRuntimeModeWider(mode, ceiling) ? ceiling : mode;
+}

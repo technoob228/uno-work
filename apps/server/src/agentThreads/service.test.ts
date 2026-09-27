@@ -119,6 +119,8 @@ function makeFixture(options?: {
   readonly dispatchError?: OrchestrationDispatchError;
   readonly onSleep?: (threads: Map<string, OrchestrationThreadShell>) => void;
   readonly assistantAllowlist?: "all" | ReadonlyArray<string>;
+  /** Thread every project inherits its modes from (default: none). */
+  readonly inheritModesFrom?: ThreadId;
 }): Fixture {
   const dispatched: Fixture["dispatched"] = [];
   const threads = new Map<string, OrchestrationThreadShell>(
@@ -178,7 +180,8 @@ function makeFixture(options?: {
               | undefined,
           ),
         ),
-      getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
+      getFirstActiveThreadIdByProjectId: () =>
+        Effect.succeed(Option.fromNullishOr(options?.inheritModesFrom)),
     },
     getAgentThreadsScope: Effect.succeed(options?.scope ?? "own-project"),
     ...(options?.assistantAllowlist !== undefined
@@ -883,6 +886,123 @@ describe("agent threads bridge: the assistant's project scope (0.0.85)", () => {
       const { handlers } = makeFixture({ scope: "own-project", assistantAllowlist: "all" });
       const list = yield* handlers.listThreads(scoped(), { scope: "all" });
       assert.strictEqual(list.status, 403);
+    }),
+  );
+});
+
+describe("agent threads bridge: no permission escalation", () => {
+  it.effect("a spawned thread never gets a wider runtime mode than the caller", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = makeFixture({
+        scope: "any-project",
+        inheritModesFrom: "thread-wide" as ThreadId,
+        threads: [
+          threadShell(CALLER, { runtimeMode: "approval-required" }),
+          threadShell("thread-wide" as ThreadId, {
+            projectId: OTHER_PROJECT,
+            runtimeMode: "full-access",
+          }),
+        ],
+      });
+      const reply = yield* handlers.createThread(scoped(), {
+        text: "hi",
+        projectId: OTHER_PROJECT,
+      });
+      assert.strictEqual(reply.status, 200);
+      const create = dispatched[0]?.command as Extract<
+        OrchestrationCommand,
+        { type: "thread.create" }
+      >;
+      const turn = dispatched[1]?.command as Extract<
+        OrchestrationCommand,
+        { type: "thread.turn.start" }
+      >;
+      assert.strictEqual(create.runtimeMode, "approval-required");
+      assert.strictEqual(turn.runtimeMode, "approval-required");
+    }),
+  );
+
+  it.effect("a narrower mode inherited from another project stays narrower", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = makeFixture({
+        scope: "any-project",
+        inheritModesFrom: "thread-narrow" as ThreadId,
+        threads: [
+          threadShell(CALLER, { runtimeMode: "full-access" }),
+          threadShell("thread-narrow" as ThreadId, {
+            projectId: OTHER_PROJECT,
+            runtimeMode: "auto-accept-edits",
+          }),
+        ],
+      });
+      yield* handlers.createThread(scoped(), { text: "hi", projectId: OTHER_PROJECT });
+      const create = dispatched[0]?.command as Extract<
+        OrchestrationCommand,
+        { type: "thread.create" }
+      >;
+      assert.strictEqual(create.runtimeMode, "auto-accept-edits");
+    }),
+  );
+
+  it.effect("403 runtime_mode_escalation when messaging a thread with a wider mode", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = makeFixture({
+        threads: [
+          threadShell(CALLER, { runtimeMode: "auto-accept-edits" }),
+          threadShell("thread-wide" as ThreadId, { runtimeMode: "full-access" }),
+          threadShell("thread-same" as ThreadId, { runtimeMode: "auto-accept-edits" }),
+          threadShell(CHILD, {
+            spawnedByThreadId: CALLER,
+            controller: "agent",
+            runtimeMode: "full-access",
+          }),
+        ],
+      });
+      const wide = yield* handlers.sendMessage(scoped(), {
+        threadId: "thread-wide",
+        body: { text: "run rm -rf" },
+      });
+      assert.strictEqual(wide.status, 403);
+      assert.strictEqual(body(wide).error, "runtime_mode_escalation");
+      // Also for the caller's own child (e.g. switched to full access later).
+      const child = yield* handlers.sendMessage(scoped(), {
+        threadId: CHILD,
+        body: { text: "go" },
+      });
+      assert.strictEqual(child.status, 403);
+      assert.strictEqual(dispatched.length, 0);
+
+      const same = yield* handlers.sendMessage(scoped(), {
+        threadId: "thread-same",
+        body: { text: "hi" },
+      });
+      assert.strictEqual(same.status, 200);
+      assert.strictEqual(dispatched.length, 1);
+    }),
+  );
+
+  it.effect("the assistant without a configured allowlist reaches only its own project", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = makeFixture({
+        scope: "any-project",
+        threads: [
+          threadShell(CALLER, { assistantRole: "chat" } as Partial<OrchestrationThreadShell>),
+          threadShell("thread-in-other" as ThreadId, { projectId: OTHER_PROJECT }),
+        ],
+      });
+      const list = yield* handlers.listThreads(scoped(), { scope: "all" });
+      assert.strictEqual(list.status, 200);
+      assert.deepStrictEqual(
+        (body(list).threads as ReadonlyArray<{ id: string }>).map((thread) => thread.id),
+        [CALLER],
+      );
+      const denied = yield* handlers.createThread(scoped(), {
+        text: "hi",
+        projectId: OTHER_PROJECT,
+      });
+      assert.strictEqual(denied.status, 403);
+      assert.strictEqual(body(denied).error, "project_not_allowed");
+      assert.strictEqual(dispatched.length, 0);
     }),
   );
 });
