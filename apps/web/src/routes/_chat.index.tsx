@@ -8,7 +8,7 @@ import { isAssistantProjectId } from "@t3tools/contracts";
 import { NoActiveThreadState } from "../components/NoActiveThreadState";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
-import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
+import { SidebarInset } from "../components/ui/sidebar";
 import { useSavedEnvironmentRegistryStore } from "../environments/runtime";
 import { APP_BASE_NAME, APP_DISPLAY_NAME } from "~/branding";
 import { resolveDefaultLandingTarget } from "../defaultLanding";
@@ -23,6 +23,7 @@ import {
 } from "../store";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
+import { SidebarShowButton } from "../components/sidebar/SidebarShowButton";
 
 /**
  * Landing on "pick a thread to continue" makes the user choose before they can
@@ -127,7 +128,7 @@ function HostedStaticOnboardingState() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
         <header className="border-b border-border px-3 py-2 sm:px-5 sm:py-3">
           <div className="flex items-center gap-2">
-            <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+            <SidebarShowButton />
             <span className="text-sm font-medium text-foreground md:text-muted-foreground/60">
               {APP_DISPLAY_NAME}
             </span>

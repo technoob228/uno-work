@@ -10,10 +10,11 @@ import type { ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
-import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
+import { SidebarInset } from "../ui/sidebar";
 import { SETUP_STEPS, SETUP_STEP_LABEL, previousStep, type SetupStepId } from "./setupModel";
 import { useSetupProgress } from "./useSetupProgress";
 import { useSetupNavigation } from "./useSetupNavigation";
+import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 
 export interface SetupPrimaryAction {
   readonly label: string;
@@ -43,7 +44,7 @@ export function SetupFrame({
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden">
         <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 sm:px-5">
-          <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+          <SidebarShowButton />
           {icon ? <SparklesIcon className="size-4 text-muted-foreground" aria-hidden /> : null}
           <span className="truncate text-sm font-medium">{title}</span>
           <div className="ml-auto flex items-center gap-1">{headerAction}</div>

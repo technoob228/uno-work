@@ -7,12 +7,18 @@
  * of the T3 stage backdrop, and the machine switcher folded into the footer
  * row next to the utility icons.
  */
-import { BotIcon, SettingsIcon } from "lucide-react";
+import { ArrowUpRightIcon, BotIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 
+import { CONSOLE_URL } from "../../account/accountOverview";
+import { accountTransport } from "../../account/unoAccount";
 import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../../branding";
+import { isElectron as runningInElectron } from "../../env";
+import { useServerKeybindings } from "../../rpc/serverState";
+import { openInstallDocs } from "../onboarding/harnessInstallLinks";
+import { sidebarToggleLabel } from "./sidebarShortcut";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { SidebarWorkspaceSwitcher } from "../SidebarWorkspaceSwitcher";
 import { SidebarFooter, SidebarHeader, SidebarTrigger, useSidebar } from "../ui/sidebar";
@@ -28,11 +34,14 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   /** The Inbox bell next to the logo (the chat-list sidebar; not settings). */
   showBell?: boolean;
 }) {
+  const shortcut = sidebarToggleLabel(useServerKeybindings());
   const wordmark = (
     <div className="flex min-w-0 flex-1 items-center gap-2">
       <Tooltip>
         <TooltipTrigger render={<SidebarTrigger className="size-7 shrink-0" />} />
-        <TooltipPopup side="bottom">Hide sidebar</TooltipPopup>
+        <TooltipPopup side="bottom">
+          Hide sidebar{shortcut ? ` · ${shortcut}` : ""}. The Menu button brings it back.
+        </TooltipPopup>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger
@@ -132,6 +141,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu(props: {
   return (
     <div className="flex min-w-0 items-center gap-0.5">
       <SidebarUtilityItem icon={<SettingsIcon />} label="Settings" onClick={handleSettingsClick} />
+      <ConsoleExitItem />
       {props.showHelper ? (
         <SidebarUtilityItem icon={<BotIcon />} label="Helper" onClick={handleHelperClick} />
       ) : null}
@@ -142,6 +152,25 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu(props: {
     </div>
   );
 });
+
+/**
+ * The way out to the Uno console (Rama 26.09: he came from the console and
+ * couldn't "close" Uno Work to get back). In the browser it leaves in the same
+ * tab, like a back link; the desktop app opens the console in the browser.
+ */
+function ConsoleExitItem() {
+  if (accountTransport() === "none") return null;
+  return (
+    <SidebarUtilityItem
+      icon={<ArrowUpRightIcon />}
+      label={runningInElectron ? "Open Uno console" : "Back to Uno console"}
+      onClick={() => {
+        if (runningInElectron) openInstallDocs(CONSOLE_URL);
+        else window.location.assign(CONSOLE_URL);
+      }}
+    />
+  );
+}
 
 export const SidebarChromeFooter = memo(function SidebarChromeFooter(props: {
   showHelper?: boolean;

@@ -18,6 +18,7 @@ const balance = (over: Partial<AccountBalance> = {}): AccountBalance => ({
   balanceUsd: 10,
   aiBalanceUsd: 0,
   aiHoursMinutes: null,
+  onboardingPath: null,
   ...over,
 });
 

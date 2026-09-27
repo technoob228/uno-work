@@ -11,6 +11,7 @@ import {
   fetchComputerApps,
   fetchComputerLogs,
   fetchComputerMetrics,
+  fetchNextStep,
   fetchPayments,
   fetchPlanCatalog,
   fetchSites,
@@ -27,6 +28,7 @@ export const myUnoKeys = {
   plans: [...ROOT, "plans"] as const,
   balance: [...ROOT, "balance"] as const,
   sites: [...ROOT, "sites"] as const,
+  nextStep: [...ROOT, "nextStep"] as const,
   cloud: [...ROOT, "cloud"] as const,
   payments: [...ROOT, "payments"] as const,
   apps: (id: number) => [...ROOT, "apps", id] as const,
@@ -82,6 +84,17 @@ export const balanceQuery = () =>
     enabled: enabled(),
     staleTime: 30_000,
     retry,
+  });
+
+/** The account's next step (backend); errors (404 on an older backend) fall back to local rules. */
+export const nextStepQuery = () =>
+  queryOptions({
+    queryKey: myUnoKeys.nextStep,
+    queryFn: fetchNextStep,
+    enabled: enabled(),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    retry: false,
   });
 
 export const sitesQuery = () =>

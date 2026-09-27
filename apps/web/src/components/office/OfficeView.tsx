@@ -22,7 +22,7 @@ import { readEnvironmentApi } from "../../environmentApi";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useStore } from "../../store";
 import { Button } from "../ui/button";
-import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
+import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
 import { base64ToBytes } from "./officeBytes";
 import {
@@ -59,6 +59,7 @@ import {
 } from "./officeCloud";
 import { OfficeDocsChrome, type DocsSaveStatus } from "./OfficeDocsChrome";
 import type { DocsShell } from "./officeDocsShell";
+import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 
 /** Docs shell autosave: this long after the last edit. */
 const DOCS_AUTOSAVE_MS = 3_000;
@@ -651,7 +652,7 @@ export function OfficeView({
         ) : (
           <header className="border-b border-border px-3 py-2">
             <div className="flex items-center gap-2">
-              {standalone ? null : <SidebarTrigger className="size-7 shrink-0 md:hidden" />}
+              {standalone ? null : <SidebarShowButton />}
               <Button
                 size="icon-xs"
                 variant="ghost"

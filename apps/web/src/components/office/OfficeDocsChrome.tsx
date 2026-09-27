@@ -73,7 +73,6 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { SidebarTrigger } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import {
   DOCS_COLORS,
@@ -91,6 +90,7 @@ import {
 } from "./officeDocsShell";
 import { officeEngineBase } from "./officeEngine";
 import { OFFICE_SOURCE_LABEL, OFFICE_SOURCE_URL } from "./officeLinks";
+import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 
 export type DocsSaveStatus =
   | { kind: "idle" }
@@ -443,7 +443,7 @@ export function OfficeDocsChrome(props: OfficeDocsChromeProps) {
       <header className="shrink-0 bg-background" data-testid="office-docs-chrome">
         {/* Title bar */}
         <div className="flex h-12 items-center gap-1.5 px-3">
-          {props.standalone ? null : <SidebarTrigger className="size-7 shrink-0 md:hidden" />}
+          {props.standalone ? null : <SidebarShowButton />}
           <Button size="icon-xs" variant="ghost" aria-label="Back to Files" onClick={props.onBack}>
             <ArrowLeftIcon />
           </Button>

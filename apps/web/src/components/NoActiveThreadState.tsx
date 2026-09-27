@@ -23,7 +23,7 @@ import {
   MenuSubTrigger,
   MenuTrigger,
 } from "./ui/menu";
-import { SidebarInset, SidebarTrigger } from "./ui/sidebar";
+import { SidebarInset } from "./ui/sidebar";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { isElectron } from "../env";
 import { usePrimaryEnvironmentId } from "../environments/primary";
@@ -47,6 +47,7 @@ import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
 import { formatElapsedAgoLabel } from "../timestampFormat";
 import { Explain } from "./Explain";
+import { SidebarShowButton } from "./sidebar/SidebarShowButton";
 
 /** "A folder the agent works in." → "a folder the agent works in" for mid-sentence use. */
 function asClause(sentence: string): string {
@@ -199,7 +200,7 @@ export function NoActiveThreadState() {
             </span>
           ) : (
             <div className="flex items-center gap-2">
-              <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+              <SidebarShowButton />
               <span className="text-sm font-medium text-foreground md:text-muted-foreground/60">
                 No chat open
               </span>

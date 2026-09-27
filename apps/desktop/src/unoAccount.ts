@@ -78,6 +78,10 @@ const ALLOWED: ReadonlyArray<{ method: string; pattern: RegExp; query?: RegExp }
   { method: "GET", pattern: /^\/api\/v1\/buckets$/ },
   { method: "GET", pattern: /^\/pay\/(history|spending)$/ },
   { method: "PATCH", pattern: /^\/api\/v1\/boxes\/\d+$/ },
+  // Home's one next step, the same answer the console's Overview shows, and
+  // the goal picked in Uno Work written to the account (27.09).
+  { method: "GET", pattern: /^\/api\/v1\/account\/next-step$/ },
+  { method: "PUT", pattern: /^\/api\/v1\/account\/goal$/ },
   { method: "GET", pattern: /^\/api\/v1\/boxes\/\d+\/(metrics|apps)$/ },
   // "Use your own tools" (onboarding v3): a key for an agent pinned to this
   // computer, and SSH (the command, adding a public key).

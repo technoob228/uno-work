@@ -14,6 +14,7 @@
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { DEFAULT_RUNTIME_MODE } from "@t3tools/contracts";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
@@ -34,7 +35,9 @@ import {
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
+import { saveAccountGoal } from "../../../account/accountOverview";
 import { accountRequest, accountTransport } from "../../../account/unoAccount";
+import { myUnoKeys } from "../../myuno/myUnoQueries";
 import { getClientSettings, useUpdateSettings } from "../../../hooks/useSettings";
 import { useFolderChats, useHomeFolderPath } from "../../../hooks/useFolderChats";
 import { ensureEnvironmentApi } from "../../../environmentApi";
@@ -108,16 +111,36 @@ async function persistWithRetry(write: () => Promise<void>): Promise<void> {
   }
 }
 
+/**
+ * A goal picked in Uno Work goes to the account too (`onboarding_path`), so
+ * the console's Overview and Home show the same next step. Quiet on an older
+ * backend (404) or without an account.
+ */
+function useRememberGoalOnAccount(): (goal: GoalId) => void {
+  const queryClient = useQueryClient();
+  return useCallback(
+    (goal: GoalId) => {
+      if (accountTransport() === "none") return;
+      void saveAccountGoal(goal)
+        .then(() => queryClient.invalidateQueries({ queryKey: myUnoKeys.nextStep }))
+        .catch(() => undefined);
+    },
+    [queryClient],
+  );
+}
+
 /** Onboarding is over once a goal is picked: here and on the machine. */
 function useGoalActions() {
   const { updateSettings } = useUpdateSettings();
   const update = useUpdateSetupProgress();
   const navigate = useNavigate();
   const environmentId = usePrimaryEnvironmentId();
+  const rememberGoal = useRememberGoalOnAccount();
 
   const pickGoal = useCallback(
     async (goal: GoalId) => {
       trackFunnel("onboarding_goal_selected", { goal });
+      rememberGoal(goal);
       await updateSettings({ onboardingCompleted: true, machineOnboarded: true });
       await update((current) => withGoal(current, goal));
       if (environmentId) {
@@ -136,7 +159,7 @@ function useGoalActions() {
         search: { step: "welcome", goal, ...(implied ? { via: implied } : {}) },
       });
     },
-    [environmentId, navigate, update, updateSettings],
+    [environmentId, navigate, rememberGoal, update, updateSettings],
   );
 
   const pickPath = useCallback(
@@ -906,9 +929,11 @@ export function GoalStep() {
   const goal = search.goal ?? null;
   const via = search.via ?? null;
   const { updateSettings } = useUpdateSettings();
+  const rememberGoal = useRememberGoalOnAccount();
   // Opened straight from Home or a link: this is the goal now.
   useEffect(() => {
     if (!goal) return;
+    if (currentSetupProgress().answers["goal"] !== goal) rememberGoal(goal);
     void persistWithRetry(async () => {
       await whenServerConfigReady();
       const current = currentSetupProgress();
@@ -917,7 +942,7 @@ export function GoalStep() {
         setup: current.answers["goal"] === goal ? current : withGoal(current, goal),
       });
     });
-  }, [goal, updateSettings]);
+  }, [goal, rememberGoal, updateSettings]);
   if (!goal) return <GoalPicker />;
   if (goalAsksHow(goal) && !via) return <HowPicker goal={goal} />;
   if (via === "own_agent" || goal === "own_agent") return <OwnAgentResult goal={goal} />;

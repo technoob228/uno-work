@@ -31,7 +31,7 @@ import { useStore } from "../../store";
 import { isOfficeFile } from "../office/officeFormats";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
+import { SidebarInset } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
 import { CloudBrowser, CloudUsageBar, formatQuota } from "../files/CloudBrowser";
@@ -55,6 +55,7 @@ import {
   driveStateQueryOptions,
   type DriveTab,
 } from "./driveApi";
+import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 
 const TABS: ReadonlyArray<{ id: DriveTab; label: string; icon: typeof HardDriveIcon }> = [
   { id: "files", label: "My files", icon: HardDriveIcon },
@@ -141,7 +142,7 @@ export function DriveView() {
   const header = (
     <header className="shrink-0 border-b border-border px-3 pt-2 sm:px-5 sm:pt-3">
       <div className="flex items-center gap-3">
-        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+        <SidebarShowButton />
         <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 to-indigo-600 text-white">
           <HardDriveIcon className="size-4.5" />
         </span>
