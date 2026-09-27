@@ -1,117 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  aiAvailableFrom,
   goalFromAccountPath,
-  guessGoal,
   nextStepDoneKey,
   nextStepSkipKey,
   parseNextStepPlan,
-  planNextStep,
   visibleNextStep,
-  type NextStepSignals,
 } from "./nextStep";
 
-const signals = (over: Partial<NextStepSignals> = {}): NextStepSignals => ({
-  aiAvailable: true,
-  aiHoursLeftMinutes: 120,
-  ownAi: false,
-  hasPlan: true,
-  plan: "small",
-  computers: 1,
-  hasWorkComputer: true,
-  sites: 0,
-  formsConfigured: null,
-  agentKeyCreated: false,
-  agentConnected: false,
-  telegramLinked: false,
-  sshKeys: 0,
-  firstResultGoal: null,
-  ideasDone: [],
-  ...over,
-});
-
-const picked = (goal: Parameters<typeof planNextStep>[0]["goal"]) =>
-  ({ goal, goalSource: "console" }) as const;
-
-describe("planNextStep", () => {
-  it("own agent: connect first (Rama 26.09), then a site, then a computer", () => {
-    expect(planNextStep(picked("own_agent"), signals()).next?.id).toBe("connect_agent");
-    const connected = planNextStep(picked("own_agent"), signals({ agentConnected: true }));
-    expect(connected.next?.id).toBe("agent_publish_site");
-    expect(connected.stage).toBe("first_result");
-    const all = planNextStep(
-      picked("own_agent"),
-      signals({ agentConnected: true, sites: 1, computers: 1 }),
-    );
-    expect(all.next).toBeNull();
-    expect(all.stage).toBe("growing");
-  });
-
-  it("assistant without AI: turn AI on first, never 'talk' or 'Telegram'", () => {
-    const plan = planNextStep(picked("assistant"), signals({ aiAvailable: false }));
-    expect(plan.next?.id).toBe("get_ai_hours");
-    expect(plan.steps.map((step) => step.id).slice(0, 2)).toEqual(["get_ai_hours", "talk_to_uno"]);
-  });
-
-  it("assistant with AI: talk to Uno, then Telegram, then the morning plan idea", () => {
-    expect(planNextStep(picked("assistant"), signals()).next?.id).toBe("talk_to_uno");
-    expect(
-      planNextStep(picked("assistant"), signals({ firstResultGoal: "assistant" })).next?.id,
-    ).toBe("connect_telegram");
-    expect(
-      planNextStep(
-        picked("assistant"),
-        signals({ firstResultGoal: "assistant", telegramLinked: true }),
-      ).next?.id,
-    ).toBe("morning_plan");
-  });
-
-  it("site: describe it, then a form", () => {
-    expect(planNextStep(picked("site"), signals()).next?.id).toBe("describe_site");
-    expect(planNextStep(picked("site"), signals({ sites: 1 })).next?.id).toBe("site_add_form");
-    expect(
-      planNextStep(picked("site"), signals({ sites: 1, formsConfigured: true })).next,
-    ).toBeNull();
-  });
-
-  it("bot: a plan only when there's no computer to run it", () => {
-    expect(planNextStep(picked("bot"), signals({ computers: 0 })).next?.id).toBe("get_computer");
-    const onComputer = planNextStep(picked("bot"), signals());
-    expect(onComputer.next?.id).toBe("describe_bot");
-    expect(onComputer.steps.some((step) => step.id === "get_computer")).toBe(false);
-  });
-
-  it("server: start it, connect, first app", () => {
-    expect(planNextStep(picked("server"), signals({ computers: 0 })).next?.id).toBe(
-      "create_computer",
-    );
-    expect(planNextStep(picked("server"), signals()).next?.id).toBe("connect_ssh");
-    expect(planNextStep(picked("server"), signals({ sshKeys: 1 })).next?.id).toBe("install_app");
-  });
-
-  it("no goal: guessed from the account, else 'pick a goal'", () => {
-    const guessed = planNextStep({ goal: null, goalSource: "none" }, signals({ sites: 2 }));
-    expect(guessed.goal).toBe("site");
-    expect(guessed.goalSource).toBe("guessed");
-    const none = planNextStep(
-      { goal: null, goalSource: "none" },
-      signals({ computers: 0, hasWorkComputer: false }),
-    );
-    expect(none.goalSource).toBe("none");
-    expect(none.next?.id).toBe("pick_goal");
-  });
-});
-
-describe("guessGoal / goalFromAccountPath", () => {
-  it("prefers an agent key, then sites, then a Work computer, then any computer", () => {
-    expect(guessGoal(signals({ agentKeyCreated: true, sites: 3 }))).toBe("own_agent");
-    expect(guessGoal(signals({ sites: 1 }))).toBe("site");
-    expect(guessGoal(signals())).toBe("assistant");
-    expect(guessGoal(signals({ hasWorkComputer: false }))).toBe("server");
-    expect(guessGoal(signals({ hasWorkComputer: false, computers: 0 }))).toBeNull();
-  });
-
+describe("goalFromAccountPath", () => {
   it("maps the console's v2 paths", () => {
     expect(goalFromAccountPath("agent")).toBe("own_agent");
     expect(goalFromAccountPath("hardware")).toBe("own_agent");
@@ -159,33 +56,57 @@ describe("parseNextStepPlan", () => {
 });
 
 describe("visibleNextStep", () => {
-  const plan = planNextStep(picked("site"), signals());
+  const step = (id: string, done = false) => ({ id, title: id, done, console_path: "/work" });
+  const assistant = parseNextStepPlan({
+    version: 1,
+    goal: "assistant",
+    goal_source: "console",
+    stage: "first_result",
+    next: { id: "morning_plan", title: "Morning plan", console_path: "/work" },
+    steps: [step("talk_to_uno", true), step("connect_telegram", true), step("morning_plan")],
+    signals: { ai_available: true },
+  });
 
-  it("shows the first step not done", () => {
-    expect(visibleNextStep(plan, {})?.id).toBe("describe_site");
+  it("shows the backend's next step as is", () => {
+    const plan = parseNextStepPlan({
+      version: 1,
+      goal: "bot",
+      goal_source: "console",
+      stage: "first_result",
+      // A rule on the backend may pick a step that isn't the first open one.
+      next: { id: "get_computer", title: "Get a computer", console_path: "/billing?tab=plan" },
+      steps: [step("describe_bot", true), step("bot_save_orders"), step("get_computer")],
+      signals: {},
+    });
+    expect(visibleNextStep(plan, {})?.id).toBe("get_computer");
+  });
+
+  it("an id Work doesn't know still shows", () => {
+    const plan = parseNextStepPlan({
+      version: 1,
+      goal: "site",
+      next: { id: "brand_new_step", title: "New", console_path: "/x" },
+      steps: [],
+      signals: {},
+    });
+    expect(visibleNextStep(plan, {})?.title).toBe("New");
+  });
+
+  it("nothing to push, no answer — no card", () => {
+    expect(visibleNextStep(null, {})).toBeNull();
+    expect(
+      visibleNextStep(
+        parseNextStepPlan({ version: 1, next: null, steps: [step("a", true)], signals: {} }),
+        {},
+      ),
+    ).toBeNull();
   });
 
   it("'Not now' hides the card, it doesn't jump ahead", () => {
-    expect(visibleNextStep(plan, { [nextStepSkipKey("describe_site")]: "x" })).toBeNull();
+    expect(visibleNextStep(assistant, { [nextStepSkipKey("morning_plan")]: "x" })).toBeNull();
   });
 
-  it("an idea taken here moves on", () => {
-    const assistant = planNextStep(
-      picked("assistant"),
-      signals({ firstResultGoal: "assistant", telegramLinked: true }),
-    );
+  it("an idea taken here moves on before the account catches up", () => {
     expect(visibleNextStep(assistant, { [nextStepDoneKey("morning_plan")]: "x" })).toBeNull();
-  });
-});
-
-describe("aiAvailableFrom", () => {
-  it("zero hours is 'no AI'; unknown, unlimited or no pool is not", () => {
-    expect(aiAvailableFrom({ status: "ok", hoursLeftMinutes: 0, unlimited: false })).toBe(false);
-    expect(aiAvailableFrom({ status: "ok", hoursLeftMinutes: 0, unlimited: true })).toBe(true);
-    expect(aiAvailableFrom({ status: "ok", hoursLeftMinutes: null, unlimited: false })).toBe(true);
-    expect(aiAvailableFrom({ status: "unavailable", hoursLeftMinutes: 0, unlimited: false })).toBe(
-      true,
-    );
-    expect(aiAvailableFrom(null)).toBe(true);
   });
 });

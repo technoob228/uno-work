@@ -181,7 +181,7 @@ export function HomeStart({
       ? setupHome.starters
       : homeStarters;
   useGoalWatcher({ threads, machineApps });
-  const nextStep = useNextStep(environmentId);
+  const nextStep = useNextStep();
   // A step to push → Home stays calm: greeting, the step, the composer, what
   // needs you. Files, apps, widgets and other goals wait under one row.
   const calm = nextStep.step !== null;

@@ -86,7 +86,7 @@ export const balanceQuery = () =>
     retry,
   });
 
-/** The account's next step (backend); errors (404 on an older backend) fall back to local rules. */
+/** The account's next step (backend) — Home renders it as is; an error means no card. */
 export const nextStepQuery = () =>
   queryOptions({
     queryKey: myUnoKeys.nextStep,

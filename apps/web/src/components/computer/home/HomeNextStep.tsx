@@ -2,28 +2,18 @@
  * Home's ONE next step (Misha 27.09: "Home must depend on the person's stage
  * and goal — simple like the Grok bot, and the power still shows"). The step
  * comes from the account (`GET /api/v1/account/next-step`, the same answer the
- * console's Overview shows); while the backend doesn't serve it, the same
- * rules run here (nextStep.ts). Every step has one button and "Not now".
+ * console's Overview shows). Work only renders it — no rules here. Every step
+ * has one button and "Not now".
  */
-import type { EnvironmentId } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowRightIcon, WandSparklesIcon } from "lucide-react";
 import { useEffect, useMemo } from "react";
 
 import { CONSOLE_URL } from "../../../account/accountOverview";
-import { useAssistantChannels } from "../../../assistant/useAssistantChannels";
 import { useAssistantChat } from "../../../assistant/useAssistantChat";
 import { trackFunnel } from "../../../lib/funnel";
-import { useAiStatus } from "../../../lib/aiStatusReactQuery";
-import {
-  accountReachable,
-  balanceQuery,
-  computersQuery,
-  nextStepQuery,
-  sitesQuery,
-  subscriptionQuery,
-} from "../../myuno/myUnoQueries";
+import { nextStepQuery } from "../../myuno/myUnoQueries";
 import { openInstallDocs } from "../../onboarding/harnessInstallLinks";
 import { NEXT_STEP, goalState, withAnswer, type GoalId } from "../../setup/goals";
 import { useSetupProgress, useUpdateSetupProgress } from "../../setup/useSetupProgress";
@@ -31,12 +21,9 @@ import { Button } from "../../ui/button";
 import { toastManager } from "../../ui/toast";
 import { HomeGoalButtons } from "./HomeGoals";
 import {
-  aiAvailableFrom,
-  goalFromAccountPath,
   parseNextStepPlan,
   nextStepDoneKey,
   nextStepSkipKey,
-  planNextStep,
   visibleNextStep,
   type NextStepItem,
   type NextStepPlan,
@@ -47,74 +34,14 @@ export interface HomeNextStepState {
   readonly step: NextStepItem | null;
 }
 
-/** The account's answer, or the same rules on what this interface can see. */
-export function useNextStep(environmentId: EnvironmentId | null): HomeNextStepState {
+/** The account's answer (null while loading or when the account can't be read). */
+export function useNextStep(): HomeNextStepState {
   const progress = useSetupProgress();
-  const machineGoal = goalState(progress);
   const backend = useQuery(nextStepQuery());
-  const backendPlan = useMemo(() => parseNextStepPlan(backend.data), [backend.data]);
-  // The fallback reads only while the backend has no answer (404 / not signed in).
-  const local = backendPlan === null && !backend.isPending;
-  const me = useQuery({ ...balanceQuery(), enabled: local && accountReachable() });
-  const sites = useQuery({ ...sitesQuery(), enabled: local && accountReachable() });
-  const subscription = useQuery({ ...subscriptionQuery(), enabled: local && accountReachable() });
-  const computers = useQuery({ ...computersQuery(), enabled: local && accountReachable() });
-  const ai = useAiStatus(environmentId);
-  const channels = useAssistantChannels(environmentId, local);
-
-  const plan = useMemo<NextStepPlan | null>(() => {
-    if (backendPlan) return backendPlan;
-    if (backend.isPending && accountReachable()) return null;
-    const accountGoal = goalFromAccountPath(me.data?.onboardingPath ?? null);
-    const goal: GoalId | null = machineGoal.goal ?? accountGoal;
-    const list = computers.data ?? [];
-    const aiAvailable =
-      machineGoal.path === "own_subscription" ||
-      aiAvailableFrom(ai ?? (me.data?.aiHoursMinutes === 0 ? zeroHours : null));
-    return planNextStep(
-      { goal, goalSource: goal ? "console" : "none" },
-      {
-        aiAvailable,
-        aiHoursLeftMinutes: ai?.hoursLeftMinutes ?? me.data?.aiHoursMinutes ?? null,
-        ownAi: machineGoal.path === "own_subscription",
-        hasPlan: subscription.data != null,
-        plan: subscription.data?.plan ?? null,
-        // Home runs on a computer: this one counts even when the account can't be read.
-        computers: Math.max(list.length, environmentId ? 1 : 0),
-        hasWorkComputer: list.some((computer) => computer.workMachine),
-        sites: sites.data?.sites.length ?? 0,
-        formsConfigured: null,
-        agentKeyCreated: machineGoal.path === "own_agent",
-        agentConnected: false,
-        telegramLinked: channels.telegram === "on",
-        sshKeys: 0,
-        firstResultGoal: machineGoal.firstResultAt
-          ? (machineGoal.firstResultGoal ?? machineGoal.goal)
-          : null,
-        ideasDone: [],
-      },
-    );
-  }, [
-    ai,
-    backend.isPending,
-    backendPlan,
-    channels.telegram,
-    computers.data,
-    environmentId,
-    machineGoal.firstResultAt,
-    machineGoal.firstResultGoal,
-    machineGoal.goal,
-    machineGoal.path,
-    me.data?.aiHoursMinutes,
-    me.data?.onboardingPath,
-    sites.data?.sites.length,
-    subscription.data,
-  ]);
+  const plan = useMemo(() => parseNextStepPlan(backend.data), [backend.data]);
   const step = visibleNextStep(plan, progress.answers ?? {});
   return { plan, step };
 }
-
-const zeroHours = { status: "ok", hoursLeftMinutes: 0, unlimited: false } as const;
 
 /** Work's own words and button per step; the backend's title is the fallback. */
 const WORK_COPY: Readonly<Record<string, { title: string; hint: string; button: string }>> = {

@@ -45,6 +45,7 @@ import type {
 import { clampUnoAgentAccessLevel } from "@t3tools/contracts";
 import { Data, Effect } from "effect";
 
+import { liveSiteUrl } from "../files/sitePublish.ts";
 import { validateManifest } from "../machineApps/appManifest.ts";
 import { displayManifestDir } from "../machineApps/manifestDir.ts";
 import type { InboxPost } from "../inbox/inboxModel.ts";
@@ -576,7 +577,8 @@ const siteSlugArg = {
   description: "The site's name (slug) from sites_list, e.g. q3-report-7f2a.",
 };
 const sitePath = (slug: string, rest = "") => `/api/v1/deploys/${encodeURIComponent(slug)}${rest}`;
-const siteUrl = (slug: string) => `https://${slug}.uno4.dev/`;
+// The live address (`<slug>.sites.uno4.dev`); the old `<slug>.uno4.dev` answers 404.
+const siteUrl = (slug: string) => liveSiteUrl(undefined, slug);
 
 /** A password a person can read out: `maple-river-4821-cloud`. */
 const PASSWORD_WORDS = [

@@ -225,7 +225,7 @@ const makeAssistantPrewarm = Effect.gen(function* () {
     );
 
     yield* poke;
-    yield* Queue.take(pokes).pipe(
+    return yield* Queue.take(pokes).pipe(
       Effect.flatMap(() => check),
       Effect.tap((state) => (state === "waiting" ? Effect.void : settle)),
       Effect.andThen(Effect.sleep(CHECK_SPACING)),

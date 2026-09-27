@@ -886,7 +886,7 @@ describe("sites: password and forms", () => {
       sites: [
         {
           slug: "team-site",
-          url: "https://team-site.uno4.dev/",
+          url: "https://team-site.sites.uno4.dev/",
           hasPassword: true,
           customDomain: null,
           sizeBytes: null,
