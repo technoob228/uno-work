@@ -656,20 +656,22 @@ function isUnoImageGenerationModel(
   );
 }
 
+/**
+ * Uno models that still get the `<uno_final_answer>` marker instruction and
+ * the visible-text filter. Kimi, MiniMax M2, Step 3.5, Qwen3 thinking and
+ * "*thinking*" ids left this list on 25.09.2026: through the gateway their
+ * reasoning arrives in `delta.reasoning` and opencode (1.14.48 and 1.18.32,
+ * @ai-sdk/openai-compatible 2.0.41) keeps it in a separate reasoning part —
+ * 0 leaks in ~120 real single- and multi-turn runs. The English "thinking
+ * aloud" that users saw came from `reasoningEffort: "none"` forced by
+ * UnoDriver (removed there). Gemini 3 stays until it can be checked (the
+ * gateway's OpenRouter account answered 403 for Gemini at the time).
+ */
 function isUnoLeakyReasoningModel(model: ReturnType<typeof parseOpenCodeModelSlug> | undefined) {
   if (!model || (model.providerID !== "uno" && model.providerID !== "uno-russia")) {
     return false;
   }
-  const modelId = model.modelID.toLowerCase();
-  return (
-    modelId.includes("kimi") ||
-    modelId.includes("thinking") ||
-    modelId.includes("reasoning") ||
-    modelId.includes("minimax-m2") ||
-    modelId.includes("step-3.5") ||
-    /qwen3.*thinking/u.test(modelId) ||
-    /gemini-3(?:[._/ -]|$)/u.test(modelId)
-  );
+  return /gemini-3(?:[._/ -]|$)/u.test(model.modelID.toLowerCase());
 }
 
 function imageMarkdownFromUrl(url: string, index: number): string {
