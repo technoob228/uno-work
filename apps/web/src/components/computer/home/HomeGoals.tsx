@@ -1,30 +1,20 @@
 /**
  * Home for a newcomer (meeting feedback 25.09): under the composer, the four
- * goals as buttons (the same screens as the first start), and after the
- * first result one next step beyond the ready scenario. Home also notices
+ * goals as buttons (the same screens as the first start). The one next step
+ * lives in HomeNextStep.tsx (27.09: from the account). Home also notices
  * the first result of goals Uno builds in a chat (a published site, a
  * running bot) and "built something of their own" for the funnel.
  */
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { isAssistantProjectId, type UnoMachineApp } from "@t3tools/contracts";
-import {
-  BotIcon,
-  GlobeIcon,
-  SparklesIcon,
-  UserRoundIcon,
-  WandSparklesIcon,
-  XIcon,
-  type LucideIcon,
-} from "lucide-react";
+import { BotIcon, GlobeIcon, SparklesIcon, UserRoundIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo } from "react";
 
 import { trackFunnel } from "../../../lib/funnel";
 import {
   BUILT_OWN_KEY,
   GOAL_COPY,
-  NEXT_STEP,
-  NEXT_STEP_KEY,
   detectBuiltOwn,
   detectFirstResult,
   goalState,
@@ -34,7 +24,6 @@ import {
 } from "../../setup/goals";
 import { useSetupProgress, useUpdateSetupProgress } from "../../setup/useSetupProgress";
 import { sitesQuery } from "../../myuno/myUnoQueries";
-import { Button } from "../../ui/button";
 import type { HomeThread } from "./homeModel";
 
 const HOME_GOALS: ReadonlyArray<{ goal: GoalId; icon: LucideIcon; via: string }> = [
@@ -117,59 +106,4 @@ export function useGoalWatcher(input: {
         : withAnswer(current, BUILT_OWN_KEY, new Date().toISOString()),
     );
   }, [builtOwn, state.goal, update]);
-}
-
-/** One idea beyond the ready scenario, once the first result is there. */
-export function HomeNextStep({
-  onStartTask,
-  onAskUno,
-}: {
-  onStartTask: (prompt: string, folder: string) => void;
-  onAskUno: (prompt: string) => void;
-}) {
-  const progress = useSetupProgress();
-  const update = useUpdateSetupProgress();
-  const state = goalState(progress);
-  const show =
-    state.goal !== null &&
-    state.firstResultAt !== null &&
-    state.nextStep !== "closed" &&
-    state.nextStep !== "clicked";
-  const goal = state.firstResultGoal ?? state.goal;
-  useEffect(() => {
-    if (show && goal) trackFunnel("next_step_shown", { goal });
-  }, [goal, show]);
-  if (!show || !goal) return null;
-  const idea = NEXT_STEP[goal];
-  const act = () => {
-    trackFunnel("next_step_clicked", { goal });
-    void update((current) => withAnswer(current, NEXT_STEP_KEY, "clicked"));
-    if (state.projectPath) onStartTask(idea.prompt, state.projectPath);
-    else onAskUno(idea.prompt);
-  };
-  return (
-    <div
-      className="flex items-center gap-3 rounded-xl border border-dashed border-primary/40 bg-primary/[0.03] px-3 py-2.5"
-      data-testid="home-next-step"
-    >
-      <WandSparklesIcon className="size-4 shrink-0 text-primary" />
-      <span className="min-w-0 flex-1 text-sm">
-        <span className="font-medium">Next step: </span>
-        <span className="text-muted-foreground">{idea.title}</span>
-      </span>
-      {idea.prompt ? (
-        <Button size="sm" variant="outline" onClick={act}>
-          Do it
-        </Button>
-      ) : null}
-      <button
-        type="button"
-        aria-label="Not now"
-        onClick={() => void update((current) => withAnswer(current, NEXT_STEP_KEY, "closed"))}
-        className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
-      >
-        <XIcon className="size-3.5" />
-      </button>
-    </div>
-  );
 }

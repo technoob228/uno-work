@@ -31,11 +31,12 @@ import { usePins } from "../../navigation/usePins";
 import { ProgramIcon } from "../computer/ComputerPrograms";
 import { useProgramTiles } from "../computer/useProgramTiles";
 import { Button } from "../ui/button";
-import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
+import { SidebarInset } from "../ui/sidebar";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AppFrame } from "./AppFrame";
 import { appHost, belongsToComputer } from "./appAddress";
+import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 
 const routeApi = getRouteApi("/_chat/app");
 
@@ -128,7 +129,7 @@ export function AppView() {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="drag-region flex h-[52px] shrink-0 items-center gap-1 border-b border-border px-2 sm:gap-1.5 sm:px-3 wco:h-[env(titlebar-area-height)]">
-          <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+          <SidebarShowButton />
           <Button
             size="xs"
             variant="ghost"

@@ -23,15 +23,22 @@
  */
 import type { UnoMachineAppAction } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, getRouteApi, useNavigate, useRouter } from "@tanstack/react-router";
-import { HardDriveIcon, HouseIcon, LayoutGridIcon, MonitorIcon, RefreshCwIcon } from "lucide-react";
+import { Link, getRouteApi, useCanGoBack, useNavigate, useRouter } from "@tanstack/react-router";
+import {
+  ArrowLeftIcon,
+  HardDriveIcon,
+  HouseIcon,
+  LayoutGridIcon,
+  MonitorIcon,
+  RefreshCwIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { accountTransport } from "../../account/unoAccount";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useStore } from "../../store";
 import { Button } from "../ui/button";
-import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
+import { SidebarInset } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
 import { AppCatalogDialog } from "./AppCatalogDialog";
@@ -82,6 +89,7 @@ import { useAppInstalls } from "./useAppInstalls";
 import { useAppPrimaryAction } from "./useAppPrimaryAction";
 import { useComputerBoost } from "./useComputerBoost";
 import { useHomeLaunchers } from "./useHomeLaunchers";
+import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 
 const routeApi = getRouteApi("/_chat/computer");
 
@@ -97,6 +105,7 @@ export function ComputerView() {
   const environmentId = activeEnvironmentId ?? primaryEnvironmentId;
   const queryClient = useQueryClient();
   const router = useRouter();
+  const canGoBack = useCanGoBack();
   /** Only set when the daemon is not an Uno computer and the user picked one. */
   const [pickedBoxId, setPickedBoxId] = useState<number | null>(null);
   const thisMachine = pickedBoxId === null;
@@ -426,7 +435,20 @@ export function ComputerView() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
         <header className="border-b border-border px-3 py-2 sm:px-5 sm:py-3">
           <div className="flex min-h-8 items-center gap-2">
-            <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+            <SidebarShowButton />
+            {thisMachine && canGoBack && !look ? (
+              // Rama 26.09: "from Home there's no way back to where I was".
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => window.history.back()}
+                aria-label="Back"
+                data-testid="home-back"
+              >
+                <ArrowLeftIcon className="size-3.5" />
+                <span className="hidden sm:inline">Back</span>
+              </Button>
+            ) : null}
             {thisMachine ? (
               <>
                 <HouseIcon className="size-4 text-muted-foreground" />

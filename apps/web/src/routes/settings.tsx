@@ -18,12 +18,13 @@ import {
   useSettingsScopeModel,
 } from "../components/settings/useSettingsScope";
 import { Button } from "../components/ui/button";
-import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
+import { SidebarInset } from "../components/ui/sidebar";
 import { isElectron } from "../env";
 import { readPrimaryEnvironmentDescriptor } from "../environments/primary";
 import { useSavedEnvironmentRegistryStore } from "../environments/runtime";
 import { useUiStateStore } from "../uiStateStore";
 import { LITE_HOME_PATH } from "../lite/webLite";
+import { SidebarShowButton } from "../components/sidebar/SidebarShowButton";
 
 function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
@@ -107,7 +108,7 @@ function SettingsContentLayout() {
         {!isElectron && (
           <header className="border-b border-border px-3 py-2 sm:px-5">
             <div className="flex min-h-7 flex-wrap items-center gap-2 sm:min-h-6">
-              <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+              <SidebarShowButton />
               <span className="text-sm font-medium text-foreground">Settings</span>
               {/* The browser build serves one machine, so the control mostly
                   reads "This app | <that box>" — still the one place that
@@ -126,6 +127,9 @@ function SettingsContentLayout() {
 
         {isElectron && (
           <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5 wco:h-[env(titlebar-area-height)] wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]">
+            <div className="no-drag me-2 empty:hidden">
+              <SidebarShowButton />
+            </div>
             <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
               Settings
             </span>

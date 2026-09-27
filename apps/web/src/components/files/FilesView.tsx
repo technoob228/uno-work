@@ -49,7 +49,7 @@ import { useStore } from "../../store";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
-import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
+import { SidebarInset } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
 import { DeleteDialog, MoveDialog, NameDialog } from "./FilesDialogs";
@@ -81,6 +81,7 @@ import { CloudBrowser } from "./CloudBrowser";
 import { CopyToCloudDialog } from "./CopyToCloudDialog";
 import { FilesLocationSwitch } from "./FilesLocationSwitch";
 import { prewarmOfficeEngine, readUsedKinds } from "../office/officePrewarm";
+import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 
 /** Let the listing load first. */
 const FILES_OFFICE_PREWARM_DELAY_MS = 2_000;
@@ -510,7 +511,7 @@ function FolderBrowser({
     >
       <header className="shrink-0 border-b border-border px-3 py-2 sm:px-5 sm:py-3">
         <div className="flex items-center gap-2">
-          <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+          <SidebarShowButton />
           <FilesLocationSwitch
             location="computer"
             onComputer={() => onOpenFolder(undefined)}

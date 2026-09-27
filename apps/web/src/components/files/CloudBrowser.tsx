@@ -44,7 +44,6 @@ import {
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
-import { SidebarTrigger } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
 import { MoveDialog, NameDialog } from "./FilesDialogs";
@@ -65,6 +64,7 @@ import {
   filesListQueryOptions,
   filesQueryKeys,
 } from "./filesApi";
+import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong.";
@@ -208,7 +208,7 @@ export function CloudBrowser({
   const header = (
     <header className="shrink-0 border-b border-border px-3 py-2 sm:px-5 sm:py-3">
       <div className="flex items-center gap-2">
-        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+        <SidebarShowButton />
         {embedded ? (
           embedded.leading
         ) : (

@@ -78,6 +78,10 @@ describe("UnoAccountService", () => {
     expect(isAllowedAccountRequest("GET", "/api/v1/work/sites")).toBe(true);
     expect(isAllowedAccountRequest("POST", "/api/v1/work/servers")).toBe(true);
     expect(isAllowedAccountRequest("GET", "/pay/history")).toBe(true);
+    // Home's next step and the goal picked in Uno Work (27.09).
+    expect(isAllowedAccountRequest("GET", "/api/v1/account/next-step")).toBe(true);
+    expect(isAllowedAccountRequest("PUT", "/api/v1/account/goal")).toBe(true);
+    expect(isAllowedAccountRequest("DELETE", "/api/v1/account/goal")).toBe(false);
     expect(isAllowedAccountRequest("PATCH", "/api/v1/boxes/12")).toBe(true);
     expect(isAllowedAccountRequest("GET", "/api/v1/boxes/12/metrics")).toBe(true);
     expect(isAllowedAccountRequest("GET", "/api/v1/boxes/12/applogs?source=auto&tail=200")).toBe(

@@ -527,6 +527,8 @@ export interface AccountBalance {
   readonly aiBalanceUsd: number;
   /** `ai_hours_minutes`; null when the console does not send it. */
   readonly aiHoursMinutes: number | null;
+  /** `onboarding_path`: the goal picked on the console's /start (raw value). */
+  readonly onboardingPath: string | null;
 }
 
 export async function fetchBalance(): Promise<AccountBalance> {
@@ -542,7 +544,20 @@ export async function fetchBalance(): Promise<AccountBalance> {
     balanceUsd: num(me["balance"]),
     aiBalanceUsd: num(me["llm_balance"]),
     aiHoursMinutes: numOrNull(me["ai_hours_minutes"]),
+    onboardingPath: strOrNull(me["onboarding_path"]),
   };
+}
+
+// ---- next step (one source of truth with the console) ----
+
+/** `GET /api/v1/account/next-step` — raw; parse with parseNextStepPlan. A 404 = older backend. */
+export async function fetchNextStep(): Promise<unknown> {
+  return accountRequest("GET", "/api/v1/account/next-step");
+}
+
+/** The goal picked in Uno Work goes to the account too, so the console shows the same next step. */
+export async function saveAccountGoal(goal: string): Promise<void> {
+  await accountRequest("PUT", "/api/v1/account/goal", { goal });
 }
 
 // ---- sites ----

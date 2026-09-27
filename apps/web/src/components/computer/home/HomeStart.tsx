@@ -7,7 +7,14 @@
  */
 import { DEFAULT_RUNTIME_MODE, type EnvironmentId, type UnoMachineApp } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { CheckIcon, PencilIcon, PlusIcon, RotateCcwIcon, XIcon } from "lucide-react";
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  PencilIcon,
+  PlusIcon,
+  RotateCcwIcon,
+  XIcon,
+} from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import * as Schema from "effect/Schema";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
@@ -22,7 +29,8 @@ import { HomeAppWidget, HomeAppWidgetOpen } from "./HomeAppWidget";
 import { HomeComposer, type HomeStartOptions } from "./HomeComposer";
 import { goalState } from "../../setup/goals";
 import { useSetupProgress } from "../../setup/useSetupProgress";
-import { HomeGoalButtons, HomeNextStep, useGoalWatcher } from "./HomeGoals";
+import { HomeGoalButtons, useGoalWatcher } from "./HomeGoals";
+import { HomeNextStepCard, useNextStep } from "./HomeNextStep";
 import { HomeUnoEntry } from "./HomeUnoEntry";
 import {
   ContinueCards,
@@ -70,6 +78,12 @@ import { selectProjectsAcrossEnvironments, useStore } from "../../../store";
 import { useSetupHome, type SetupHome } from "../../setup/useSetupHome";
 
 const LAYOUT_SCHEMA = Schema.Array(Schema.String);
+/** "Everything else on Home" opened by the person (remembered per device). */
+const HOME_MORE_KEY = "uno-work:home:more-open";
+
+/** What this place is, in one line (Misha 27.09: Uno Work + a computer + an assistant read as a pile). */
+export const HOME_PLACE_LINE =
+  "Your own computer in the cloud. Uno and your agents work here, even when your laptop is closed.";
 
 /** The layout (per device) and the Customize mode. */
 export function useHomeLayout() {
@@ -167,6 +181,12 @@ export function HomeStart({
       ? setupHome.starters
       : homeStarters;
   useGoalWatcher({ threads, machineApps });
+  const nextStep = useNextStep(environmentId);
+  // A step to push → Home stays calm: greeting, the step, the composer, what
+  // needs you. Files, apps, widgets and other goals wait under one row.
+  const calm = nextStep.step !== null;
+  const [moreOpen, setMoreOpen] = useLocalStorage(HOME_MORE_KEY, false, Schema.Boolean);
+  const showAll = !calm || moreOpen || layout.editing;
 
   const widgetApps = useMemo(() => {
     const out = new Map<string, UnoMachineApp>();
@@ -189,6 +209,10 @@ export function HomeStart({
   const shown = layout.blocks.filter((id) =>
     isAppWidgetBlockId(id) ? widgetApps.has(appIdOfBlock(id)) : available.includes(id),
   );
+  // Calm: the fixed blocks first, the widgets below "Also here" once opened.
+  const split = calm && !layout.editing;
+  const primaryBlocks = split ? shown.filter(isHomeFixedBlockId) : shown;
+  const secondaryBlocks = split && moreOpen ? shown.filter((id) => !isHomeFixedBlockId(id)) : [];
   const appWidgets = useMemo<AddableAppWidget[]>(
     () =>
       [...widgetApps.entries()].map(([id, app]) => ({
@@ -289,16 +313,31 @@ export function HomeStart({
                 {firstName ? `, ${firstName}` : null}
               </h1>
               <p className="mt-1 text-sm text-muted-foreground" data-testid="home-subtitle">
-                {setupHome.project ? (
+                {setupHome.project && !calm ? (
                   <>
                     Working on{" "}
                     <b className="font-medium text-foreground">{setupHome.project.name}</b>. What
                     should we do?
                   </>
                 ) : (
-                  "What should we work on?"
+                  HOME_PLACE_LINE
                 )}
               </p>
+              {layout.editing ? null : (
+                <div className="mt-5">
+                  <HomeNextStepCard
+                    state={nextStep}
+                    onStartTask={(prompt, folder) =>
+                      void onStartTask(prompt, {
+                        folder,
+                        modelSelection: null,
+                        runtimeMode: DEFAULT_RUNTIME_MODE,
+                      })
+                    }
+                    onAskUno={(prompt) => void onAskUno(prompt)}
+                  />
+                </div>
+              )}
             </div>
           ),
         };
@@ -312,19 +351,7 @@ export function HomeStart({
                 defaultFolder={setupHome.project}
                 onStart={onStartTask}
               />
-              <HomeGoalButtons />
               <NeedsYouPill threads={threads} now={now} />
-              <HomeNextStep
-                onStartTask={(prompt, folder) =>
-                  void onStartTask(prompt, {
-                    folder,
-                    modelSelection: null,
-                    runtimeMode: DEFAULT_RUNTIME_MODE,
-                  })
-                }
-                onAskUno={(prompt) => void onAskUno(prompt)}
-              />
-              <HomeUnoEntry />
             </div>
           ),
         };
@@ -368,14 +395,46 @@ export function HomeStart({
       ) : null}
 
       <HomeWidgetGrid
-        blocks={shown}
+        blocks={primaryBlocks}
         editing={layout.editing}
         dispatch={layout.dispatch}
         metaOf={metaOf}
         render={render}
       />
 
-      {layout.editing ? null : (
+      {calm && !layout.editing ? (
+        <button
+          type="button"
+          onClick={() => setMoreOpen(!moreOpen)}
+          aria-expanded={moreOpen}
+          className="flex items-center gap-1.5 self-start rounded-full px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          data-testid="home-more"
+        >
+          <ChevronDownIcon
+            className={`size-3.5 transition-transform ${moreOpen ? "rotate-180" : ""}`}
+          />
+          {moreOpen ? "Show less" : "Also here: your files, apps, chats and other things to start"}
+        </button>
+      ) : null}
+
+      {showAll && !layout.editing ? (
+        <HomeAlsoHere
+          goalButtons={nextStep.step?.id !== "pick_goal"}
+          assistant={nextStep.plan?.aiAvailable !== false && nextStep.step?.id !== "talk_to_uno"}
+        />
+      ) : null}
+
+      {secondaryBlocks.length > 0 ? (
+        <HomeWidgetGrid
+          blocks={secondaryBlocks}
+          editing={false}
+          dispatch={layout.dispatch}
+          metaOf={metaOf}
+          render={render}
+        />
+      ) : null}
+
+      {!showAll || layout.editing ? null : (
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -409,6 +468,26 @@ export function HomeStart({
         dispatch={layout.dispatch}
       />
     </div>
+  );
+}
+
+/**
+ * The calm, secondary part of Home: other goals to start and the assistant.
+ * The assistant only when AI can answer (Rama 26.09: "write in Telegram" with
+ * zero AI hours ended in "Insufficient LLM credits").
+ */
+function HomeAlsoHere({ goalButtons, assistant }: { goalButtons: boolean; assistant: boolean }) {
+  if (!goalButtons && !assistant) return null;
+  return (
+    <section className="flex flex-col gap-3" data-testid="home-also-here">
+      {goalButtons ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-muted-foreground">Start something else</p>
+          <HomeGoalButtons />
+        </div>
+      ) : null}
+      {assistant ? <HomeUnoEntry /> : null}
+    </section>
   );
 }
 

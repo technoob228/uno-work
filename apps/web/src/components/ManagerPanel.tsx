@@ -24,7 +24,8 @@ import { createAssistant, listAssistants } from "../lib/managerApi";
 import { ProposalsList, useManagerProposals } from "./helper/ProposalsList";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import { SidebarInset, SidebarTrigger } from "./ui/sidebar";
+import { SidebarInset } from "./ui/sidebar";
+import { SidebarShowButton } from "./sidebar/SidebarShowButton";
 
 export function ManagerPanel() {
   const navigate = useNavigate();
@@ -87,7 +88,7 @@ export function ManagerPanel() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
         <header className="border-b border-border px-3 py-2 sm:px-5 sm:py-3">
           <div className="flex items-center gap-2">
-            <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+            <SidebarShowButton />
             <BotIcon className="size-4 text-muted-foreground" />
             <span className="text-sm font-medium text-foreground">Assistant</span>
             {proposals.pending.length > 0 ? (

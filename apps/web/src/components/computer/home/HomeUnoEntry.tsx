@@ -30,7 +30,7 @@ export function HomeUnoEntry() {
         U
         <span className="absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full border-2 border-background bg-success" />
       </span>
-      <span className="flex min-w-0 flex-1 flex-col">
+      <span className="flex min-w-[12rem] flex-1 basis-[14rem] flex-col">
         <span className="text-sm font-medium text-foreground">
           Your assistant is already working
         </span>

@@ -42,6 +42,7 @@ import {
   liteStanding,
   openCloudWork,
 } from "./webLite";
+import { SidebarShortcutListener } from "../components/sidebar/SidebarShowButton";
 
 /** The root of the lite app (rendered by routes/__root.tsx in the lite build). */
 export function LiteRoot() {
@@ -85,6 +86,7 @@ function LiteShell({ children }: { children: ReactNode }) {
         <LiteSidebar />
       </Sidebar>
       {leaving ? null : children}
+      <SidebarShortcutListener />
     </SidebarProvider>
   );
 }

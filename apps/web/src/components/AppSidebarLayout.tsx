@@ -9,6 +9,7 @@ import { InboxListener } from "../inbox/InboxListener";
 import { useNavLayout } from "../navigation/useNavLayout";
 import { DesktopTabs } from "./DesktopTabs";
 import { NavRail, RAIL_WIDTH } from "./sidebar/NavRail";
+import { SidebarShortcutListener } from "./sidebar/SidebarShowButton";
 import { BrowserBridgeListener } from "./preview/BrowserBridgeListener";
 import { BrowserLiveListener } from "./preview/BrowserLiveListener";
 import { FileBrowser } from "./preview/FileBrowser";
@@ -133,6 +134,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           children
         )}
         <PreviewPane suppressed={inSettings} />
+        <SidebarShortcutListener />
         {/* Inside the provider: opening an item may close the phone sidebar. */}
         <InboxListener />
       </SidebarProvider>
