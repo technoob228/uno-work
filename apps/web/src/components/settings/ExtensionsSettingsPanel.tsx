@@ -14,6 +14,7 @@ export function ExtensionsSettingsPanel() {
   const pluginsEnabled = useFeatureFlag("plugins");
   const [snapshot, setSnapshot] = useState<PluginsSnapshot | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
   const { openFile } = usePreviewPane();
   const navigate = useNavigate();
 
@@ -53,6 +54,26 @@ export function ExtensionsSettingsPanel() {
     }
   }, []);
 
+  const handleApprove = useCallback(async (plugin: ServerPlugin) => {
+    if (!plugin.manifestHash) return;
+    setApprovingId(plugin.id);
+    try {
+      const next = await getPrimaryEnvironmentConnection().client.server.approvePlugin({
+        pluginId: plugin.id,
+        manifestHash: plugin.manifestHash,
+      });
+      setSnapshot(next);
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not approve the plugin",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setApprovingId(null);
+    }
+  }, []);
+
   const plugins = snapshot?.plugins ?? [];
 
   if (!pluginsEnabled) {
@@ -78,7 +99,9 @@ export function ExtensionsSettingsPanel() {
               key={plugin.id}
               plugin={plugin}
               toggling={togglingId === plugin.id}
+              approving={approvingId === plugin.id}
               onToggle={() => void handleToggle(plugin)}
+              onApprove={() => void handleApprove(plugin)}
               onOpenPanel={() => handleOpenPanel(plugin)}
             />
           ))
@@ -100,17 +123,31 @@ export function ExtensionsSettingsPanel() {
   );
 }
 
+/**
+ * Плагин с неодобренным манифестом не исполняется, даже если включён: хуки,
+ * кроны и панель заработают только после «Approve» (одобряется ровно
+ * показанный манифест — сервер сверяет хэш).
+ */
+export function pluginNeedsApproval(plugin: ServerPlugin): boolean {
+  return plugin.valid && plugin.approval !== undefined && plugin.approval !== "approved";
+}
+
 function PluginRow({
   plugin,
   toggling,
+  approving,
   onToggle,
+  onApprove,
   onOpenPanel,
 }: {
   plugin: ServerPlugin;
   toggling: boolean;
+  approving: boolean;
   onToggle: () => void;
+  onApprove: () => void;
   onOpenPanel: () => void;
 }) {
+  const needsApproval = pluginNeedsApproval(plugin);
   const summaryParts = [
     ...(plugin.panel ? [`панель: ${plugin.panel.title}`] : []),
     ...(plugin.hooks.length > 0
@@ -139,6 +176,28 @@ function PluginRow({
           {!plugin.valid && plugin.error ? (
             <span className="block text-destructive">{plugin.error}</span>
           ) : null}
+          {needsApproval ? (
+            <span className="block text-amber-600 dark:text-amber-400">
+              {plugin.approval === "changed"
+                ? "Needs approval: manifest changed"
+                : "Needs approval: new plugin"}{" "}
+              — it will not run until you review what it does and approve.
+            </span>
+          ) : null}
+          {needsApproval && (plugin.hooks.length > 0 || plugin.crons.length > 0) ? (
+            <span className="block space-y-0.5 font-mono text-[11px]">
+              {plugin.hooks.map((hook) => (
+                <span key={`hook:${hook.on}:${hook.command ?? ""}`} className="block break-all">
+                  on {hook.on}: {hook.command ?? "?"}
+                </span>
+              ))}
+              {plugin.crons.map((cron) => (
+                <span key={`cron:${cron.label}:${cron.command ?? ""}`} className="block break-all">
+                  {cron.label}: {cron.command ?? "?"}
+                </span>
+              ))}
+            </span>
+          ) : null}
           {summaryParts.length > 0 ? (
             <span className="block font-mono text-[11px]">{summaryParts.join(" · ")}</span>
           ) : null}
@@ -154,7 +213,17 @@ function PluginRow({
       control={
         plugin.valid ? (
           <span className="flex items-center gap-2">
-            {plugin.panel && plugin.enabled ? (
+            {needsApproval ? (
+              <button
+                type="button"
+                disabled={approving || !plugin.manifestHash}
+                onClick={onApprove}
+                className="rounded-md border border-input bg-accent px-3 py-1.5 text-xs text-accent-foreground hover:bg-accent/80"
+              >
+                Approve
+              </button>
+            ) : null}
+            {plugin.panel && plugin.enabled && !needsApproval ? (
               <button
                 type="button"
                 onClick={onOpenPanel}

@@ -1724,6 +1724,10 @@ const makeWsRpcLayer = (
               "rpc.aggregate": "server",
             },
           ),
+        [WS_METHODS.serverApprovePlugin]: (input) =>
+          observeRpcEffect(WS_METHODS.serverApprovePlugin, pluginRegistry.approvePlugin(input), {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.pluginsSendToThread]: (input) =>
           observeRpcEffect(WS_METHODS.pluginsSendToThread, sendPluginPanelToThread(input), {
             "rpc.aggregate": "server",

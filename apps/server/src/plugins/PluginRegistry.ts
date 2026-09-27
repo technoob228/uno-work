@@ -49,9 +49,24 @@ import {
 import * as Semaphore from "effect/Semaphore";
 
 import { writeFileStringAtomically } from "../atomicWrite.ts";
+import { ServerSecretStoreLive } from "../auth/Layers/ServerSecretStore.ts";
+import { ServerSecretStore } from "../auth/Services/ServerSecretStore.ts";
 import { ServerConfig } from "../config.ts";
 import { parseCronExpression, parseEveryDuration } from "./cron.ts";
 import { resolvePluginPanelLocation } from "./panelPaths.ts";
+import {
+  approvePluginManifest,
+  generatePluginApprovalsKey,
+  grandfatherPluginApprovals,
+  manifestApprovalHash,
+  parsePluginApprovals,
+  PLUGIN_APPROVALS_FILE,
+  PLUGIN_APPROVALS_KEY_SECRET,
+  type PluginApprovals,
+  type PluginApprovalStatus,
+  pluginApprovalStatus,
+  serializePluginApprovals,
+} from "./pluginApproval.ts";
 import {
   generatePanelTokenSecret,
   pluginPanelUrl,
@@ -75,6 +90,10 @@ export interface LoadedPlugin {
   /** Present only when the file parsed and validated. */
   readonly manifest: PluginManifest | undefined;
   readonly error: string | undefined;
+  /** sha256 of the canonical manifest (`pluginApproval.ts`); valid plugins only. */
+  readonly manifestHash?: string | undefined;
+  /** Whether the user approved exactly this manifest; valid plugins only. */
+  readonly approval?: PluginApprovalStatus | undefined;
 }
 
 /** One discovered manifest before it is read/parsed. */
@@ -87,10 +106,29 @@ interface PluginEntry {
 
 /**
  * Whether the plugin may act: hooks/crons run and its panel is served only for
- * active plugins.
+ * active plugins — valid, enabled, and with exactly this manifest approved by
+ * the user.
  */
 export function isPluginActive(plugin: LoadedPlugin): boolean {
-  return plugin.manifest !== undefined && plugin.manifest.enabled;
+  return plugin.manifest !== undefined && plugin.manifest.enabled && plugin.approval === "approved";
+}
+
+/** Attaches manifest hash + approval status to freshly loaded plugins. */
+export function withPluginApprovals(
+  plugins: ReadonlyArray<LoadedPlugin>,
+  approvals: PluginApprovals,
+): ReadonlyArray<LoadedPlugin> {
+  return plugins.map((plugin): LoadedPlugin => {
+    if (plugin.manifest === undefined) {
+      return { ...plugin, manifestHash: undefined, approval: undefined };
+    }
+    const manifestHash = manifestApprovalHash(plugin.manifest);
+    return {
+      ...plugin,
+      manifestHash,
+      approval: pluginApprovalStatus(approvals, plugin.id, manifestHash),
+    };
+  });
 }
 
 export function cronLabel(cron: PluginManifest["crons"][number]): string {
@@ -186,6 +224,7 @@ function pluginsSignature(plugins: ReadonlyArray<LoadedPlugin>): string {
       plugin.fileName,
       plugin.error ?? null,
       plugin.manifest ?? null,
+      plugin.approval ?? null,
     ]),
   );
 }
@@ -227,6 +266,16 @@ export interface PluginRegistryShape {
     readonly panelPath: string;
     readonly token: string;
   }) => Effect.Effect<number | null>;
+
+  /**
+   * Approve the plugin's current manifest. `manifestHash` is the hash the user
+   * was shown; if the file changed in between, the call fails instead of
+   * approving something nobody looked at.
+   */
+  readonly approvePlugin: (input: {
+    readonly pluginId: string;
+    readonly manifestHash: string;
+  }) => Effect.Effect<PluginsSnapshot, PluginsError>;
 
   /** Record a hook/cron execution for the settings UI. */
   readonly recordRun: (pluginId: string, run: ServerPluginRun) => Effect.Effect<void>;
@@ -273,11 +322,17 @@ const DEFAULT_SWEEP_INTERVAL_MS = 10_000;
 
 const makePluginRegistry = (options?: PluginRegistryLiveOptions) =>
   Effect.gen(function* () {
-    const { pluginsDir } = yield* ServerConfig;
+    const { pluginsDir, stateDir } = yield* ServerConfig;
     const fs = yield* FileSystem.FileSystem;
     const pathService = yield* Path.Path;
     const stateSemaphore = yield* Semaphore.make(1);
     const pluginsRef = yield* Ref.make<ReadonlyArray<LoadedPlugin>>([]);
+    const approvalsPath = pathService.join(stateDir, PLUGIN_APPROVALS_FILE);
+    const approvalsRef = yield* Ref.make<PluginApprovals>({});
+    const secretStore = yield* ServerSecretStore;
+    // Ключ подписи записей одобрения; до initApprovals — случайный в памяти,
+    // т.е. ни одна запись с диска не проходит проверку.
+    const approvalsKeyRef = yield* Ref.make<Uint8Array>(generatePluginApprovalsKey());
     const runsRef = yield* Ref.make<ReadonlyMap<string, ReadonlyArray<ServerPluginRun>>>(new Map());
     // `pluginId\u0000threadTag` → тред панели (см. getPanelThreadId).
     const panelThreadsRef = yield* Ref.make<ReadonlyMap<string, ThreadId>>(new Map());
@@ -402,7 +457,7 @@ const makePluginRegistry = (options?: PluginRegistryLiveOptions) =>
       return discovered as ReadonlyArray<PluginEntry>;
     });
 
-    const loadPluginsFromDisk = Effect.gen(function* () {
+    const loadRawPluginsFromDisk = Effect.gen(function* () {
       const entries = yield* discoverPluginEntries;
       const byId = new Map<string, PluginEntry[]>();
       for (const entry of entries) {
@@ -433,6 +488,69 @@ const makePluginRegistry = (options?: PluginRegistryLiveOptions) =>
       return plugins as ReadonlyArray<LoadedPlugin>;
     });
 
+    const loadPluginsFromDisk = Effect.gen(function* () {
+      const plugins = yield* loadRawPluginsFromDisk;
+      return withPluginApprovals(plugins, yield* Ref.get(approvalsRef));
+    });
+
+    const writeApprovals = (approvals: PluginApprovals) =>
+      Effect.gen(function* () {
+        const key = yield* Ref.get(approvalsKeyRef);
+        yield* writeFileStringAtomically({
+          filePath: approvalsPath,
+          contents: serializePluginApprovals(approvals, key),
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provideService(Path.Path, pathService),
+          Effect.mapError((cause) => toPluginsError("failed to write plugin approvals", cause)),
+        );
+      });
+
+    /**
+     * Loads the signing key and the verified approvals. The one-off upgrade
+     * grandfathering (see `pluginApproval.ts`) runs only when the key does not
+     * exist yet; the approvals file is written BEFORE the key is persisted, so
+     * a crash in between just repeats the same migration on the next start.
+     * If the secret store is unusable the key stays in memory only: nothing on
+     * disk verifies and every plugin waits for approval (fails closed).
+     */
+    const initApprovals = Effect.gen(function* () {
+      const storedKey = yield* secretStore.get(PLUGIN_APPROVALS_KEY_SECRET).pipe(
+        Effect.map((key) => ({ ok: true as const, key })),
+        Effect.catch((cause) =>
+          Effect.logWarning("plugins.approvals.secret-store-unavailable", { cause }).pipe(
+            Effect.as({ ok: false as const, key: null }),
+          ),
+        ),
+      );
+      if (!storedKey.ok) return;
+
+      if (storedKey.key !== null) {
+        yield* Ref.set(approvalsKeyRef, storedKey.key);
+        const raw = yield* fs.readFileString(approvalsPath).pipe(Effect.orElseSucceed(() => ""));
+        yield* Ref.set(approvalsRef, parsePluginApprovals(raw, storedKey.key));
+        return;
+      }
+
+      const key = generatePluginApprovalsKey();
+      yield* Ref.set(approvalsKeyRef, key);
+      const grandfathered = grandfatherPluginApprovals(yield* loadRawPluginsFromDisk);
+      yield* writeApprovals(grandfathered);
+      // Не сохранили ключ — одобрения живут до рестарта, затем миграция
+      // повторится; блокировать из-за этого весь реестр не стоит.
+      yield* secretStore
+        .set(PLUGIN_APPROVALS_KEY_SECRET, key)
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("plugins.approvals.key-not-persisted", { cause }),
+          ),
+        );
+      yield* Ref.set(approvalsRef, grandfathered);
+      yield* Effect.logInfo("plugins.approvals.grandfathered", {
+        pluginIds: Object.keys(grandfathered),
+      });
+    });
+
     const buildSnapshot = Effect.gen(function* () {
       const plugins = yield* Ref.get(pluginsRef);
       const runs = yield* Ref.get(runsRef);
@@ -448,6 +566,8 @@ const makePluginRegistry = (options?: PluginRegistryLiveOptions) =>
             ...(manifest?.version !== undefined ? { version: manifest.version } : {}),
             enabled: manifest?.enabled ?? false,
             valid: manifest !== undefined,
+            ...(plugin.manifestHash !== undefined ? { manifestHash: plugin.manifestHash } : {}),
+            ...(plugin.approval !== undefined ? { approval: plugin.approval } : {}),
             ...(manifest?.panel !== undefined
               ? {
                   panel: {
@@ -464,8 +584,13 @@ const makePluginRegistry = (options?: PluginRegistryLiveOptions) =>
                 }
               : {}),
             ...(plugin.error !== undefined ? { error: plugin.error } : {}),
-            hooks: manifest?.hooks.map((hook) => ({ on: hook.on })) ?? [],
-            crons: manifest?.crons.map((cron) => ({ label: cronLabel(cron) })) ?? [],
+            hooks:
+              manifest?.hooks.map((hook) => ({ on: hook.on, command: hook.run.command })) ?? [],
+            crons:
+              manifest?.crons.map((cron) => ({
+                label: cronLabel(cron),
+                command: cron.run.command,
+              })) ?? [],
             recentRuns: runs.get(plugin.id) ?? [],
           };
         }),
@@ -583,6 +708,7 @@ const makePluginRegistry = (options?: PluginRegistryLiveOptions) =>
       }
 
       const startup = Effect.gen(function* () {
+        yield* initApprovals;
         yield* startWatcher;
         yield* reloadAndEmit;
       });
@@ -656,7 +782,7 @@ const makePluginRegistry = (options?: PluginRegistryLiveOptions) =>
             return yield* toPluginsError(`plugin "${pluginId}" has no panel`);
           }
           if (!isPluginActive(plugin)) {
-            return yield* toPluginsError(`plugin "${pluginId}" is not enabled`);
+            return yield* toPluginsError(`plugin "${pluginId}" is not enabled or not approved`);
           }
           const issuedAtMs = yield* Clock.currentTimeMillis;
           const token = signPanelToken({
@@ -670,6 +796,38 @@ const makePluginRegistry = (options?: PluginRegistryLiveOptions) =>
       verifyPanelToken: ({ pluginId, panelPath, token }) =>
         Effect.sync(() =>
           verifyPanelTokenSignature({ secret: panelTokenSecret, pluginId, panelPath, token }),
+        ),
+      approvePlugin: ({ pluginId, manifestHash }) =>
+        stateSemaphore.withPermits(1)(
+          Effect.gen(function* () {
+            const plugins = yield* loadPluginsFromDisk;
+            const plugin = plugins.find((candidate) => candidate.id === pluginId);
+            if (plugin === undefined) {
+              return yield* toPluginsError(`plugin "${pluginId}" not found`);
+            }
+            if (plugin.manifestHash === undefined) {
+              return yield* toPluginsError(`plugin "${pluginId}" is invalid; fix it first`);
+            }
+            if (plugin.manifestHash !== manifestHash) {
+              return yield* toPluginsError(
+                `plugin "${pluginId}" changed since it was shown; review it again`,
+              );
+            }
+            const next = approvePluginManifest(
+              yield* Ref.get(approvalsRef),
+              pluginId,
+              manifestHash,
+            );
+            yield* writeApprovals(next);
+            yield* Ref.set(approvalsRef, next);
+            const reloaded = withPluginApprovals(plugins, next);
+            yield* Ref.set(pluginsRef, reloaded);
+            yield* Ref.set(signatureRef, pluginsSignature(reloaded));
+            yield* Effect.logInfo("plugins.approved", { pluginId, manifestHash });
+            const snapshot = yield* buildSnapshot;
+            yield* PubSub.publish(changesPubSub, snapshot);
+            return snapshot;
+          }),
         ),
       getPanelThreadId: ({ pluginId, threadTag }) =>
         Ref.get(panelThreadsRef).pipe(
@@ -696,6 +854,8 @@ const makePluginRegistry = (options?: PluginRegistryLiveOptions) =>
   });
 
 export const makePluginRegistryLive = (options?: PluginRegistryLiveOptions) =>
-  Layer.effect(PluginRegistry, makePluginRegistry(options));
+  Layer.effect(PluginRegistry, makePluginRegistry(options)).pipe(
+    Layer.provide(ServerSecretStoreLive),
+  );
 
 export const PluginRegistryLive = makePluginRegistryLive();

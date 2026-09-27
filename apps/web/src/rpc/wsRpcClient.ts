@@ -147,6 +147,7 @@ export interface WsRpcClient {
     >;
     readonly listPlugins: RpcUnaryNoArgMethod<typeof WS_METHODS.serverListPlugins>;
     readonly setPluginEnabled: RpcUnaryMethod<typeof WS_METHODS.serverSetPluginEnabled>;
+    readonly approvePlugin: RpcUnaryMethod<typeof WS_METHODS.serverApprovePlugin>;
     /** Мост панели плагина: «спроси агента» из sandbox-iframe. */
     readonly sendPluginToThread: RpcUnaryMethod<typeof WS_METHODS.pluginsSendToThread>;
     /** Тред встроенного чата панели — тот же mapping, что у sendToThread. */
@@ -468,6 +469,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       listPlugins: () => transport.request((client) => client[WS_METHODS.serverListPlugins]({})),
       setPluginEnabled: (input) =>
         transport.request((client) => client[WS_METHODS.serverSetPluginEnabled](input)),
+      approvePlugin: (input) =>
+        transport.request((client) => client[WS_METHODS.serverApprovePlugin](input)),
       sendPluginToThread: (input) =>
         transport.request((client) => client[WS_METHODS.pluginsSendToThread](input)),
       resolvePluginPanelThread: (input) =>

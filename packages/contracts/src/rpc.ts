@@ -209,6 +209,7 @@ import {
   PluginsError,
   PluginsSnapshot,
   SetPluginEnabledInput,
+  ApprovePluginInput,
 } from "./plugins.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
@@ -389,6 +390,7 @@ export const WS_METHODS = {
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverListPlugins: "server.listPlugins",
   serverSetPluginEnabled: "server.setPluginEnabled",
+  serverApprovePlugin: "server.approvePlugin",
   pluginsSendToThread: "plugins.sendToThread",
   pluginsResolvePanelThread: "plugins.resolvePanelThread",
   pluginsIssuePanelUrl: "plugins.issuePanelUrl",
@@ -656,6 +658,12 @@ export const WsServerListPluginsRpc = Rpc.make(WS_METHODS.serverListPlugins, {
 
 export const WsServerSetPluginEnabledRpc = Rpc.make(WS_METHODS.serverSetPluginEnabled, {
   payload: SetPluginEnabledInput,
+  success: PluginsSnapshot,
+  error: PluginsError,
+});
+
+export const WsServerApprovePluginRpc = Rpc.make(WS_METHODS.serverApprovePlugin, {
+  payload: ApprovePluginInput,
   success: PluginsSnapshot,
   error: PluginsError,
 });
@@ -2060,6 +2068,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsCustomHarnessInstallStatusRpc,
   WsServerListPluginsRpc,
   WsServerSetPluginEnabledRpc,
+  WsServerApprovePluginRpc,
   WsPluginsSendToThreadRpc,
   WsPluginsResolvePanelThreadRpc,
   WsPluginsIssuePanelUrlRpc,

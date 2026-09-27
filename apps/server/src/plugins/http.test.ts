@@ -65,6 +65,7 @@ const makeFixture = Effect.gen(function* () {
       directoryPath: pluginDir,
       manifest: manifest({ panel: { title: "Demo", path: "panel/index.html" } }),
       error: undefined,
+      approval: "approved",
     },
     {
       id: "off",
@@ -76,6 +77,7 @@ const makeFixture = Effect.gen(function* () {
         panel: { title: "Off", path: "panel/index.html" },
       }),
       error: undefined,
+      approval: "approved",
     },
     {
       id: "no-panel",
@@ -84,6 +86,7 @@ const makeFixture = Effect.gen(function* () {
       directoryPath: undefined,
       manifest: manifest(),
       error: undefined,
+      approval: "approved",
     },
   ];
 

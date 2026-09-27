@@ -44,7 +44,7 @@ import * as crypto from "node:crypto";
 import type { OrchestrationEngineShape } from "../orchestration/Services/OrchestrationEngine.ts";
 import { inheritProjectThreadModes } from "../orchestration/projectThreadModes.ts";
 import type { ProjectionSnapshotQueryShape } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import type { PluginRegistryShape } from "./PluginRegistry.ts";
+import { isPluginActive, type PluginRegistryShape } from "./PluginRegistry.ts";
 
 export const DEFAULT_PANEL_THREAD_TAG = "panel";
 const PANEL_RUN_TRIGGER = "panel sendToThread";
@@ -105,9 +105,15 @@ function loadPanelContext(
     const plugins = yield* deps.registry.getLoadedPlugins;
     const plugin = plugins.find((candidate) => candidate.id === input.pluginId);
     const manifest = plugin?.manifest;
-    // Панель выключенного/невалидного плагина открыть нельзя (роут отдаёт
-    // 404), но вкладка может остаться открытой с прошлого раза — проверяем.
-    if (manifest === undefined || !manifest.enabled || manifest.panel === undefined) {
+    // Панель выключенного/невалидного/неодобренного плагина открыть нельзя
+    // (роут отдаёт 404), но вкладка может остаться открытой с прошлого раза —
+    // проверяем.
+    if (
+      plugin === undefined ||
+      manifest === undefined ||
+      !isPluginActive(plugin) ||
+      manifest.panel === undefined
+    ) {
       return yield* new PluginsError({
         detail: `${input.what}: plugin "${input.pluginId}" has no enabled panel`,
       });
