@@ -13,7 +13,18 @@ import {
   normalizeBridgeRequestContext,
   requireBridgeThread,
   BROWSER_BRIDGE_URL_ENV,
+  tokensEqual,
 } from "./browserBridge.ts";
+
+it("tokensEqual compares in constant time and never throws on odd input", () => {
+  assert.isTrue(tokensEqual("abc123", "abc123"));
+  assert.isFalse(tokensEqual("abc123", "abc124"));
+  assert.isFalse(tokensEqual("abc", "abc123"));
+  // Same string length, different byte length: must be false, not a throw.
+  assert.isFalse(tokensEqual("é", "e"));
+  assert.isFalse(tokensEqual(undefined, "abc"));
+  assert.isFalse(tokensEqual(123, "123"));
+});
 
 it.effect("delivers browser command results to the pending publisher", () =>
   Effect.gen(function* () {
