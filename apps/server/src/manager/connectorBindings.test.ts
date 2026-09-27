@@ -513,3 +513,48 @@ describe("personal Telegram chats talk to the main conversation (0.0.86)", () =>
     ]);
   });
 });
+
+describe("decideThreadRouting for non-owner senders", () => {
+  it("refuses a bound thread that runs in a wider mode", () => {
+    const routing = decideThreadRouting({
+      target: { kind: "thread", threadId },
+      mappedThread: null,
+      targetThread: shell({ runtimeMode: "full-access" }),
+      connectorModelSelection: null,
+      projectModelSelection: null,
+      inheritedModes: null,
+      forcedRuntimeMode: "approval-required",
+    });
+    expect(routing.kind).toBe("reject");
+  });
+
+  it("never reuses a full-access assistant thread and creates an approval-required one", () => {
+    const routing = decideThreadRouting({
+      target: { kind: "assistant", projectId: assistantId },
+      mappedThread: shell({
+        projectId: assistantId,
+        runtimeMode: "full-access",
+        modelSelection: uno,
+      }),
+      targetThread: null,
+      connectorModelSelection: uno,
+      projectModelSelection: uno,
+      inheritedModes: null,
+      forcedRuntimeMode: "approval-required",
+    });
+    expect(routing).toMatchObject({ kind: "create", runtimeMode: "approval-required" });
+  });
+
+  it("reuses a thread already in the forced mode", () => {
+    const routing = decideThreadRouting({
+      target: { kind: "assistant", projectId: assistantId },
+      mappedThread: shell({ projectId: assistantId, modelSelection: uno }),
+      targetThread: null,
+      connectorModelSelection: uno,
+      projectModelSelection: uno,
+      inheritedModes: null,
+      forcedRuntimeMode: "approval-required",
+    });
+    expect(routing).toMatchObject({ kind: "reuse", runtimeMode: "approval-required" });
+  });
+});

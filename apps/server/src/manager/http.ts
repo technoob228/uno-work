@@ -29,6 +29,7 @@ import {
   ManagerOwnerResolveProposalInput,
   ManagerProposalStatus,
   ManagerConnectorAddressingConfig,
+  ManagerConnectorGroupMembersPolicy,
   ManagerSlackConnectorConfig,
   ManagerTelegramConnectorConfig,
   ManagerTokenId,
@@ -551,6 +552,7 @@ const TelegramConfigPayload = Schema.Struct({
   enabled: Schema.Boolean,
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   addressing: Schema.optional(ManagerConnectorAddressingConfig),
+  groupMembers: Schema.optional(ManagerConnectorGroupMembersPolicy),
 });
 
 export const managerAssistantTelegramRouteLayer = HttpRouter.add(
@@ -600,6 +602,12 @@ export const managerAssistantTelegramRouteLayer = HttpRouter.add(
           ? existingConfig.value.addressing
           : undefined;
       const mergedAddressing = input.addressing ?? previousAddressing;
+      const previousSuccess =
+        existingConfig !== null && existingConfig._tag === "Success" ? existingConfig.value : null;
+      // Owners are recorded by the daemon (linking by code); the settings
+      // form never sends them, so they survive every save.
+      const ownerUserIds = previousSuccess?.ownerUserIds;
+      const groupMembers = input.groupMembers ?? previousSuccess?.groupMembers;
       const config = {
         botToken,
         allowedChatIds: input.allowedChatIds
@@ -611,6 +619,8 @@ export const managerAssistantTelegramRouteLayer = HttpRouter.add(
             ? input.defaultModelSelection
             : previousModelSelection,
         ...(mergedAddressing !== undefined ? { addressing: mergedAddressing } : {}),
+        ...(ownerUserIds !== undefined ? { ownerUserIds } : {}),
+        ...(groupMembers !== undefined ? { groupMembers } : {}),
       } satisfies ManagerTelegramConnectorConfig;
       yield* connectorRepository.upsert({
         projectId: input.projectId,
@@ -642,6 +652,7 @@ const SlackConfigPayload = Schema.Struct({
   enabled: Schema.Boolean,
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   addressing: Schema.optional(ManagerConnectorAddressingConfig),
+  groupMembers: Schema.optional(ManagerConnectorGroupMembersPolicy),
 });
 
 export const managerAssistantSlackRouteLayer = HttpRouter.add(
@@ -699,6 +710,7 @@ export const managerAssistantSlackRouteLayer = HttpRouter.add(
         );
       }
       const mergedAddressing = input.addressing ?? existingConfig?.addressing;
+      const slackGroupMembers = input.groupMembers ?? existingConfig?.groupMembers;
       const config = {
         botToken,
         appToken,
@@ -711,6 +723,11 @@ export const managerAssistantSlackRouteLayer = HttpRouter.add(
             ? input.defaultModelSelection
             : (existingConfig?.defaultModelSelection ?? null),
         ...(mergedAddressing !== undefined ? { addressing: mergedAddressing } : {}),
+        // Owners are recorded by the daemon (installer, DM senders).
+        ...(existingConfig?.ownerUserIds !== undefined
+          ? { ownerUserIds: existingConfig.ownerUserIds }
+          : {}),
+        ...(slackGroupMembers !== undefined ? { groupMembers: slackGroupMembers } : {}),
       } satisfies ManagerSlackConnectorConfig;
       yield* connectorRepository.upsert({
         projectId: input.projectId,

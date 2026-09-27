@@ -166,6 +166,7 @@ const context: ConnectorCommandContext = {
   chatId: "100",
   connectorProjectId: assistantId,
   origin: telegramCommandOrigin("100"),
+  senderIsOwner: true,
 };
 
 const run = (harness: Harness, command: ConnectorCommand) =>
@@ -345,5 +346,18 @@ describe("executeConnectorCommand", () => {
     expect(reply).toBe(
       "Command failed: SQL error in ManagerConnectorBindingRepository.upsert:query: disk full",
     );
+  });
+
+  it("refuses every command from someone other than the owner", async () => {
+    const harness = makeHarness();
+    const reply = await Effect.runPromise(
+      executeConnectorCommand(
+        harness.deps,
+        { ...context, senderIsOwner: false },
+        { name: "use", query: "Uno API" },
+      ),
+    );
+    expect(reply).toBe("Only the owner of this assistant can use chat commands.");
+    expect(harness.bindings.size).toBe(0);
   });
 });
