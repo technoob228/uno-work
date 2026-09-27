@@ -57,7 +57,12 @@ import {
   isUnoWorkGuideTopic,
 } from "../agentContext/guides.ts";
 import type { ConnectorCallResult, ConnectorTool } from "../setupTools/connectors.ts";
-import { resolveSecretTargetDirectory, upsertEnvContent } from "../secretsEnv.ts";
+import {
+  isValidSecretTargetFile,
+  resolveSecretTargetDirectory,
+  secretNameProblem,
+  upsertEnvContent,
+} from "../secretsEnv.ts";
 import { validateArgs, type ObjectSchema } from "./argsSchema.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import { decideUnoWorkGate, refusalMessage, type UnoWorkToolLevel } from "./policy.ts";
@@ -2122,6 +2127,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         }
         const name = str(args, "envName") ?? "DATABASE_URL";
         const file = str(args, "targetFile") ?? ".env";
+        const nameProblem = secretNameProblem(name);
+        if (nameProblem !== null)
+          return yield* toolError(nameProblem.replace('"name"', '"envName"'));
+        if (!isValidSecretTargetFile(file)) {
+          return yield* toolError('Invalid "targetFile": expected .env or .env.<suffix>.');
+        }
         const written = yield* writeEnvVar({ folder: target.cwd, file, name, value: dsn });
         return {
           databaseId: id,

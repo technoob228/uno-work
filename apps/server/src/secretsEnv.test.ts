@@ -5,8 +5,45 @@ import {
   isValidSecretName,
   isValidSecretTargetFile,
   resolveSecretTargetDirectory,
+  secretNameProblem,
   upsertEnvContent,
 } from "./secretsEnv.ts";
+
+describe("forbidden secret names", () => {
+  const forbidden = [
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "ld_preload",
+    "DYLD_INSERT_LIBRARIES",
+    "NODE_OPTIONS",
+    "PYTHONPATH",
+    "BASH_ENV",
+    "ENV",
+    "PROMPT_COMMAND",
+  ];
+
+  it("rejects names that change how programs start, with a clear reason", () => {
+    for (const name of forbidden) {
+      expect(isValidSecretName(name), name).toBe(false);
+      expect(secretNameProblem(name), name).toContain("changes how programs start");
+    }
+  });
+
+  it("keeps ordinary names, lookalikes and PATH", () => {
+    for (const name of ["OPENAI_API_KEY", "LDAP_URL", "NODE_ENV", "ENVIRONMENT", "PATH"]) {
+      expect(isValidSecretName(name), name).toBe(true);
+      expect(secretNameProblem(name), name).toBeNull();
+    }
+  });
+
+  it("never writes a forbidden or malformed name into the env file", () => {
+    expect(() => upsertEnvContent("A=1\n", "LD_PRELOAD", "/tmp/evil.so")).toThrow(
+      /changes how programs start/,
+    );
+    expect(() => upsertEnvContent("", "NODE_OPTIONS", "--require /tmp/x.js")).toThrow();
+    expect(() => upsertEnvContent("", "A\nLD_PRELOAD", "x")).toThrow(/Invalid "name"/);
+  });
+});
 
 describe("isValidSecretName", () => {
   it("accepts env-style names", () => {
