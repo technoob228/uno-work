@@ -99,6 +99,23 @@ describe("buildHermesModels", () => {
     ]);
   });
 
+  it("AI hours: Smart, Fast, then premium exactly in the gateway's order", () => {
+    const models = buildHermesModels([
+      catalogModel({ modelId: "uno/fast", provider: "uno", group: "included" }),
+      catalogModel({ modelId: "anthropic/claude-opus-6", tier: "frontier", group: "premium" }),
+      catalogModel({ modelId: "x-ai/grok-4.7", tier: "strong", group: "premium" }),
+      catalogModel({ modelId: "anthropic/claude-sonnet-5", tier: "frontier", group: "premium" }),
+      catalogModel({ modelId: "uno/smart", provider: "uno", group: "included" }),
+    ]);
+    expect(models.map((model) => model.slug)).toEqual([
+      "uno/smart",
+      "uno/fast",
+      "anthropic/claude-opus-6",
+      "x-ai/grok-4.7",
+      "anthropic/claude-sonnet-5",
+    ]);
+  });
+
   it("returns only the fallback default on an empty catalog", () => {
     expect(buildHermesModels([]).map((model) => model.slug)).toEqual(["uno/smart"]);
   });

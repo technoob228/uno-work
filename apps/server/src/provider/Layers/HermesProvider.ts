@@ -42,6 +42,7 @@ import {
   type UnoGatewayModelResponse,
   type UnoModelTier,
 } from "../Drivers/UnoDriver.ts";
+import { curatedModelRank } from "../Drivers/unoCuratedModels.ts";
 
 const PROVIDER = ProviderDriverKind.make("hermes");
 const HERMES_PRESENTATION = {
@@ -135,8 +136,23 @@ export function buildHermesModels(
 ): ReadonlyArray<ServerProviderModel> {
   const filtered = catalog.filter(isHermesPickerModel);
   const seen = new Set<string>();
+  // AI hours: the gateway marks its short list and already sends it in
+  // display order (Smart, Fast, then premium, newest of each family) — keep
+  // it, no client-side list of premium ids. Without marks: tier, then name.
+  const gatewayIndex = new Map(catalog.map((model, index) => [model, index]));
+  const curated = catalog.some((model) => model.group !== undefined);
   const models: Array<ServerProviderModel> = filtered
     .toSorted((a, b) => {
+      if (curated) {
+        if (a.group === undefined || b.group === undefined) {
+          if (a.group !== b.group) return a.group === undefined ? 1 : -1;
+        } else {
+          const rankDiff =
+            curatedModelRank(a.modelId, a.group, gatewayIndex.get(a)) -
+            curatedModelRank(b.modelId, b.group, gatewayIndex.get(b));
+          if (rankDiff !== 0) return rankDiff;
+        }
+      }
       const tierDiff = TIER_RANK[a.tier] - TIER_RANK[b.tier];
       if (tierDiff !== 0) return tierDiff;
       return a.modelId.localeCompare(b.modelId);

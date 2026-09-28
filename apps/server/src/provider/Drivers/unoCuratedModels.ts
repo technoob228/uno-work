@@ -5,8 +5,9 @@
  * (`included` — Smart / Fast, spent from the plan's AI hours; `premium` —
  * Claude / GPT / Gemini, per token from premium credit) and hides the rest of
  * the catalog. When any model carries the mark the picker trusts it: only the
- * marked models (plus the account's private-GPU models) are shown, in a fixed
- * order. An older gateway sends no marks and everything stays as before.
+ * marked models (plus the account's private-GPU models) are shown, Smart and
+ * Fast first, then in the gateway's order. An older gateway sends no marks
+ * and everything stays as before.
  *
  * Spec: fishcode `back/knowledge/ai-hours.md`.
  *
@@ -27,23 +28,34 @@ export function parseUnoCatalogGroup(value: unknown): UnoCatalogGroup | undefine
   return value === "included" || value === "premium" ? value : undefined;
 }
 
-/** Included models first, in this order; then premium in this order. */
-const CURATED_ORDER: ReadonlyArray<string> = [
+/**
+ * Smart and Fast lead the list. Everything else — the premium models above
+ * all — keeps the order the gateway sends: `/v1/models` already lists them
+ * in display order and picks the newest version of each family itself
+ * (Opus 6 replaces Opus 5.5 without a client release), so the client holds
+ * no list of premium ids.
+ */
+const PINNED_CURATED_ORDER: ReadonlyArray<string> = [
   UNO_SMART_GATEWAY_MODEL,
   UNO_FAST_GATEWAY_MODEL,
-  "anthropic/claude-opus-5.5",
-  "anthropic/claude-sonnet-5",
-  "anthropic/claude-fable-5.1",
-  "openai/gpt-6-sol",
-  "openai/gpt-6-astra",
-  "google/gemini-3.8-flash",
 ];
-const CURATED_RANK = new Map(CURATED_ORDER.map((id, index) => [id, index]));
+const PINNED_CURATED_RANK = new Map(PINNED_CURATED_ORDER.map((id, index) => [id, index]));
 const GROUP_RANK: Record<UnoCatalogGroup, number> = { included: 0, premium: 1 };
 
-/** Sort key of a curated model: group, then the fixed order, then unknown ones. */
-export function curatedModelRank(gatewayId: string, group: UnoCatalogGroup): number {
-  return GROUP_RANK[group] * 1_000 + (CURATED_RANK.get(gatewayId) ?? 999);
+/**
+ * Sort key of a curated model: group, then Smart / Fast, then the gateway's
+ * own order (`gatewayIndex` — the model's position in `/v1/models`).
+ */
+export function curatedModelRank(
+  gatewayId: string,
+  group: UnoCatalogGroup,
+  gatewayIndex = 0,
+): number {
+  const pinned = PINNED_CURATED_RANK.get(gatewayId);
+  return (
+    GROUP_RANK[group] * 1_000_000 +
+    (pinned !== undefined ? pinned : PINNED_CURATED_ORDER.length + Math.max(0, gatewayIndex))
+  );
 }
 
 /**

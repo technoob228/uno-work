@@ -588,7 +588,15 @@ function buildUnoConfigContent(
   models: UnoCatalog,
   instructionsFilePath?: string,
   personalModels: ReadonlyArray<PersonalAiModel> = [],
-  options: { readonly streamTimeouts?: boolean } = {},
+  options: {
+    readonly streamTimeouts?: boolean;
+    /**
+     * Models the gateway listed earlier in this run but no longer does (a
+     * premium family moved to a newer version). Chats saved on them must keep
+     * running — the harness accepts them, the picker does not list them.
+     */
+    readonly retainedModels?: ReadonlyArray<UnoCatalogModel>;
+  } = {},
 ): string {
   const streamTimeouts = options.streamTimeouts === true ? UNO_GATEWAY_STREAM_TIMEOUTS : {};
   // opencode's config schema only accepts `{ name }`-shaped model entries;
@@ -611,6 +619,10 @@ function buildUnoConfigContent(
     for (const legacy of UNO_LEGACY_HARNESS_MODEL_IDS) {
       opencodeModelsByProvider[UNO_PROVIDER_ID][legacy.id] ??= { name: legacy.name };
     }
+  }
+  for (const model of options.retainedModels ?? []) {
+    const providerId = model.route === "russia" ? UNO_RUSSIA_PROVIDER_ID : UNO_PROVIDER_ID;
+    opencodeModelsByProvider[providerId][model.modelId] ??= { name: model.name };
   }
   const config: Record<string, unknown> = {
     $schema: "https://opencode.ai/config.json",
@@ -870,9 +882,10 @@ const withCatalogMetadata =
     }),
   });
 
-const sortUnoModels =
-  (catalog: UnoCatalog) =>
-  (snapshot: ServerProviderDraft): ServerProviderDraft => ({
+const sortUnoModels = (catalog: UnoCatalog) => {
+  // The gateway's own order of `/v1/models` (default route first).
+  const gatewayIndex = new Map(Object.keys(catalog).map((key, index) => [key, index]));
+  return (snapshot: ServerProviderDraft): ServerProviderDraft => ({
     ...snapshot,
     models: snapshot.models.toSorted((a, b) => {
       // Personal AI — отдельной группой в конце: это «своя машина», а не
@@ -885,13 +898,15 @@ const sortUnoModels =
       const aId = stripUnoPrefix(a.slug);
       const bId = stripUnoPrefix(b.slug);
 
-      // AI hours: Smart, Fast, then premium in the gateway's fixed order.
+      // AI hours: Smart, Fast, then premium in the gateway's order.
       const aGroup = catalog[a.slug]?.group;
       const bGroup = catalog[b.slug]?.group;
       if (aGroup !== undefined || bGroup !== undefined) {
         if (aGroup === undefined) return 1;
         if (bGroup === undefined) return -1;
-        const rankDiff = curatedModelRank(aId, aGroup) - curatedModelRank(bId, bGroup);
+        const rankDiff =
+          curatedModelRank(aId, aGroup, gatewayIndex.get(a.slug)) -
+          curatedModelRank(bId, bGroup, gatewayIndex.get(b.slug));
         if (rankDiff !== 0) return rankDiff;
         return aId.localeCompare(bId);
       }
@@ -914,6 +929,45 @@ const sortUnoModels =
       return aId.localeCompare(bId);
     }),
   });
+};
+
+/**
+ * How often the gateway's model list is read again while the app runs. The
+ * premium list follows OpenRouter (a new Claude replaces the old one on the
+ * gateway without a client release); reading `/v1/models` is one small
+ * request, and the costly harness re-probe only runs when the list changed.
+ */
+export const UNO_CATALOG_REFRESH_INTERVAL = Duration.minutes(10);
+
+/** What of the catalog the picker and the harness config depend on. */
+export function unoCatalogSignature(catalog: UnoCatalog): string {
+  return JSON.stringify(
+    Object.entries(catalog).map(([key, model]) => [
+      key,
+      model.name,
+      model.group ?? null,
+      model.underlyingModel ?? null,
+      model.description ?? null,
+      model.availableRoutes,
+    ]),
+  );
+}
+
+/**
+ * Models of `previous` that `next` no longer lists, plus those already
+ * retained: kept in the harness config so chats on them keep working.
+ */
+export function retainDroppedUnoModels(
+  previous: UnoCatalog,
+  next: UnoCatalog,
+  retained: ReadonlyMap<string, UnoCatalogModel>,
+): Map<string, UnoCatalogModel> {
+  const result = new Map<string, UnoCatalogModel>();
+  for (const [key, model] of [...retained.entries(), ...Object.entries(previous)]) {
+    if (next[key] === undefined) result.set(key, model);
+  }
+  return result;
+}
 
 export const __unoDriverTest = {
   buildUnoConfigContent,
@@ -1002,28 +1056,52 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         upstreamPath: UNO_UPSTREAM_BINARY_PATH,
         exists: existsSync,
       });
-      const unoConfigContent = buildUnoConfigContent(
-        unoApiKey,
-        unoCatalog,
-        instructionsFilePath,
-        personalModels,
-        { streamTimeouts: harness.kind === "upstream" },
-      );
+      const shellEnvRestorePlugin =
+        harness.kind === "upstream"
+          ? ensureUnoShellEnvRestorePlugin(serverConfig.stateDir)
+          : undefined;
+      const harnessConfigContent = (
+        catalog: UnoCatalog,
+        retainedModels: ReadonlyArray<UnoCatalogModel>,
+      ): string => {
+        const content = buildUnoConfigContent(
+          unoApiKey,
+          catalog,
+          instructionsFilePath,
+          personalModels,
+          { streamTimeouts: harness.kind === "upstream", retainedModels },
+        );
+        return shellEnvRestorePlugin !== undefined
+          ? (withOpenCodeSessionEnvPlugin(content, shellEnvRestorePlugin) ?? content)
+          : content;
+      };
       const processEnv: NodeJS.ProcessEnv = {
         ...unoAgentEnv,
         ...baseProcessEnv,
         ...(harness.kind === "upstream"
           ? unoUpstreamIsolationEnvironment(UNO_UPSTREAM_HOME, baseProcessEnv)
           : {}),
-        OPENCODE_CONFIG_CONTENT:
-          harness.kind === "upstream"
-            ? (withOpenCodeSessionEnvPlugin(
-                unoConfigContent,
-                ensureUnoShellEnvRestorePlugin(serverConfig.stateDir),
-              ) ?? unoConfigContent)
-            : unoConfigContent,
+        OPENCODE_CONFIG_CONTENT: harnessConfigContent(unoCatalog, []),
         ...(unoApiKey.length > 0 ? { UNO_API_KEY: unoApiKey } : {}),
       };
+      // The gateway's list is read again every UNO_CATALOG_REFRESH_INTERVAL
+      // (see below). New chats get the current list (a changed config starts
+      // its own shared harness server); running chats keep theirs.
+      const catalogState: {
+        catalog: UnoCatalog;
+        signature: string;
+        retained: Map<string, UnoCatalogModel>;
+        configContent: string | undefined;
+      } = {
+        catalog: unoCatalog,
+        signature: unoCatalogSignature(unoCatalog),
+        retained: new Map(),
+        configContent: processEnv.OPENCODE_CONFIG_CONTENT,
+      };
+      const currentProcessEnv = (): NodeJS.ProcessEnv =>
+        catalogState.configContent === processEnv.OPENCODE_CONFIG_CONTENT
+          ? processEnv
+          : { ...processEnv, OPENCODE_CONFIG_CONTENT: catalogState.configContent };
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,
@@ -1049,9 +1127,9 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         environment: processEnv,
         bridgeEnvironment: (context) => {
           const bridge = browserBridge.scopedEnvironment(context);
-          return unoSessionEnvironment({
+          const env = unoSessionEnvironment({
             bridge,
-            configContent: processEnv.OPENCODE_CONFIG_CONTENT,
+            configContent: catalogState.configContent,
             appId: gatewayKey.appOfThread(context.threadId),
             // Built-in uno-work (per-thread token) + the owner's own servers.
             mcpServers: sessionMcpServers({
@@ -1059,6 +1137,13 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
               custom: customMcpServers(),
             }),
           });
+          // A refreshed catalog: the chat's config differs from the one the
+          // adapter was built with even without MCP servers or an app label.
+          return env.OPENCODE_CONFIG_CONTENT === undefined &&
+            catalogState.configContent !== undefined &&
+            catalogState.configContent !== processEnv.OPENCODE_CONFIG_CONTENT
+            ? { ...env, OPENCODE_CONFIG_CONTENT: catalogState.configContent }
+            : env;
         },
         // uno-code's per-directory `/event` stream is silent (only
         // `server.connected`); session events only reach `/global/event`.
@@ -1082,19 +1167,21 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
 
       const sortByCatalog = sortUnoModels(unoCatalog);
 
-      const checkProvider = checkOpenCodeProviderStatus(
-        effectiveConfig,
-        serverConfig.cwd,
-        processEnv,
-        UNO_PRESENTATION,
-      ).pipe(
-        Effect.map(filterUnoModels),
-        Effect.map(filterCuratedUnoModels(unoCatalog)),
-        Effect.map(withCatalogMetadata(unoCatalog, personalCatalog)),
-        Effect.map(sortByCatalog),
-        Effect.map(stampIdentity),
-        Effect.provideService(OpenCodeRuntime, openCodeRuntime),
-      );
+      const checkProvider = Effect.suspend(() => {
+        const catalog = catalogState.catalog;
+        return checkOpenCodeProviderStatus(
+          effectiveConfig,
+          serverConfig.cwd,
+          currentProcessEnv(),
+          UNO_PRESENTATION,
+        ).pipe(
+          Effect.map(filterUnoModels),
+          Effect.map(filterCuratedUnoModels(catalog)),
+          Effect.map(withCatalogMetadata(catalog, personalCatalog)),
+          Effect.map(sortUnoModels(catalog)),
+          Effect.map(stampIdentity),
+        );
+      }).pipe(Effect.provideService(OpenCodeRuntime, openCodeRuntime));
 
       const snapshot = yield* makeManagedServerProvider<OpenCodeSettings>({
         getSettings: Effect.succeed(effectiveConfig),
@@ -1126,6 +1213,39 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
             }),
         ),
       );
+
+      // New premium models (a newer Claude) reach the picker without a
+      // restart: read the list again, and re-probe only when it changed.
+      if (unoApiKey.length > 0) {
+        const refreshCatalog = Effect.gen(function* () {
+          const next = yield* Effect.tryPromise(() => fetchUnoModelsCatalog(unoApiKey)).pipe(
+            Effect.orElseSucceed((): UnoCatalog => ({})),
+          );
+          if (Object.keys(next).length === 0) return;
+          const signature = unoCatalogSignature(next);
+          if (signature === catalogState.signature) return;
+          const retained = retainDroppedUnoModels(
+            catalogState.catalog,
+            next,
+            catalogState.retained,
+          );
+          catalogState.catalog = next;
+          catalogState.signature = signature;
+          catalogState.retained = retained;
+          catalogState.configContent = harnessConfigContent(next, [...retained.values()]);
+          yield* Effect.logInfo("uno.catalog.refreshed", {
+            models: Object.keys(next).length,
+            retained: retained.size,
+          });
+          yield* snapshot.refresh;
+        });
+        yield* Effect.sleep(UNO_CATALOG_REFRESH_INTERVAL).pipe(
+          Effect.andThen(refreshCatalog),
+          Effect.catchCause((cause) => Effect.logWarning("uno.catalog.refresh-failed", cause)),
+          Effect.forever,
+          Effect.forkScoped,
+        );
+      }
 
       return {
         instanceId,

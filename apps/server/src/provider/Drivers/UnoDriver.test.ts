@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { __unoDriverTest, fetchUnoModelsCatalogWithRetry } from "./UnoDriver.ts";
+import {
+  __unoDriverTest,
+  fetchUnoModelsCatalogWithRetry,
+  retainDroppedUnoModels,
+  unoCatalogSignature,
+} from "./UnoDriver.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -412,7 +417,7 @@ describe("UnoDriver with AI hours (curated catalog)", () => {
     expect(entry("x/y").group).toBeUndefined();
   });
 
-  it("sorts Smart, Fast, then premium in the fixed order, private GPU last", () => {
+  it("sorts Smart, Fast, then premium in the gateway's order, private GPU last", () => {
     const snapshot = {
       models: [
         { slug: "uno-personal/qwen", name: "Qwen", isCustom: false },
@@ -426,10 +431,69 @@ describe("UnoDriver with AI hours (curated catalog)", () => {
     expect(sorted.models.map((model) => model.slug)).toEqual([
       "uno/uno/smart",
       "uno/uno/fast",
-      "uno/anthropic/claude-opus-5.5",
+      // The gateway listed Sonnet before Opus: no client-side premium list.
       "uno/anthropic/claude-sonnet-5",
+      "uno/anthropic/claude-opus-5.5",
       "uno-personal/qwen",
     ]);
+  });
+
+  it("a new premium model the client never heard of takes the gateway's place", () => {
+    const next = {
+      "uno/uno/smart": curated["uno/uno/smart"],
+      "uno/uno/fast": curated["uno/uno/fast"],
+      "uno/anthropic/claude-opus-6": entry("anthropic/claude-opus-6", {
+        display_name: "Claude Opus 6",
+        uno_group: "premium",
+      }),
+      "uno/anthropic/claude-sonnet-5": curated["uno/anthropic/claude-sonnet-5"],
+    };
+    const snapshot = {
+      models: [
+        { slug: "uno/anthropic/claude-sonnet-5", name: "Sonnet", isCustom: false },
+        { slug: "uno/anthropic/claude-opus-6", name: "Opus 6", isCustom: false },
+        { slug: "uno/uno/smart", name: "Smart", isCustom: false },
+        { slug: "uno/uno/fast", name: "Fast", isCustom: false },
+      ],
+    };
+    expect(
+      __unoDriverTest
+        .sortUnoModels(next)(snapshot as never)
+        .models.map((model) => model.slug),
+    ).toEqual([
+      "uno/uno/smart",
+      "uno/uno/fast",
+      "uno/anthropic/claude-opus-6",
+      "uno/anthropic/claude-sonnet-5",
+    ]);
+  });
+
+  it("a refreshed catalog keeps dropped models in the harness config, not the picker", () => {
+    const next = {
+      "uno/uno/smart": curated["uno/uno/smart"],
+      "uno/anthropic/claude-opus-6": entry("anthropic/claude-opus-6", {
+        display_name: "Claude Opus 6",
+        uno_group: "premium",
+      }),
+    };
+    expect(unoCatalogSignature(next)).not.toBe(unoCatalogSignature(curated));
+    expect(unoCatalogSignature({ ...curated })).toBe(unoCatalogSignature(curated));
+    const retained = retainDroppedUnoModels(curated, next, new Map());
+    expect([...retained.keys()].toSorted()).toEqual([
+      "uno/anthropic/claude-opus-5.5",
+      "uno/anthropic/claude-sonnet-5",
+      "uno/uno/fast",
+    ]);
+    // A model that comes back is no longer "retained".
+    expect(retainDroppedUnoModels(next, curated, retained).size).toBe(1);
+    const config = JSON.parse(
+      __unoDriverTest.buildUnoConfigContent("key", next, undefined, [], {
+        retainedModels: [...retained.values()],
+      }),
+    ) as { provider: { uno: { models: Record<string, { name: string }> } } };
+    expect(Object.keys(config.provider.uno.models)).toEqual(
+      expect.arrayContaining(["uno/smart", "anthropic/claude-opus-6", "anthropic/claude-opus-5.5"]),
+    );
   });
 
   it("hides unmarked and harness-only legacy models from the picker", () => {
