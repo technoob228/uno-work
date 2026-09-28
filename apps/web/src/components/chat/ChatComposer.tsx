@@ -126,6 +126,7 @@ import { proposedPlanTitle } from "../../proposedPlan";
 import {
   getProviderInteractionModeToggle,
   getProviderModelCapabilities,
+  resolveDefaultThreadProvider,
 } from "../../providerModels";
 import { modelCannotRunCodingAgent } from "./modelCapabilities";
 import {
@@ -753,14 +754,25 @@ export const ChatComposer = memo(
       activeThreadModelSelection?.instanceId ??
       activeProjectDefaultModelSelection?.instanceId ??
       null;
-    const explicitSelectedInstanceId = selectedProviderByThreadId ?? threadProvider;
-
-    const unlockedSelectedProvider =
-      resolveProviderDriverKindForInstanceSelection(
-        providerInstanceEntries,
-        providerStatuses,
-        explicitSelectedInstanceId,
-      ) ?? ProviderDriverKind.make("codex");
+    // The person's pick in this draft wins; otherwise the saved thread/project
+    // instance is a machine default and goes through the same rules as
+    // ChatView (a logged-out harness or Uno Code where Hermes can answer are
+    // passed over — Hermes is the default since 0.0.94).
+    const unlockedSelectedProvider = selectedProviderByThreadId
+      ? (resolveProviderDriverKindForInstanceSelection(
+          providerInstanceEntries,
+          providerStatuses,
+          selectedProviderByThreadId,
+        ) ?? ProviderDriverKind.make("codex"))
+      : resolveDefaultThreadProvider(providerStatuses, threadProvider);
+    const threadProviderKind = resolveProviderDriverKindForInstanceSelection(
+      providerInstanceEntries,
+      providerStatuses,
+      threadProvider,
+    );
+    const explicitSelectedInstanceId =
+      selectedProviderByThreadId ??
+      (threadProviderKind === unlockedSelectedProvider ? threadProvider : null);
     const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
     const lockedContinuationGroupKey = useMemo((): string | null => {
       if (!lockedProvider || !activeThread) return null;
