@@ -137,6 +137,15 @@ describe("transcriptItems", () => {
 });
 
 describe("askQuestions", () => {
+  it("drops a (recommended) note the model wrote into the option", () => {
+    expect(
+      askQuestions({
+        question: "Как?",
+        options: ["Онлайн (рекомендую)", "Оффлайн"],
+        recommended: "Онлайн (рекомендую)",
+      }),
+    ).toEqual([{ question: "Как?", options: ["Онлайн", "Оффлайн"], recommended: "Онлайн" }]);
+  });
   it("reads the old three-questions shape and stars", () => {
     expect(
       askQuestions({ questions: [{ question: "Where?", options: ["Telegram ★", "Email"] }] }),

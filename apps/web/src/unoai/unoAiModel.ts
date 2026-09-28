@@ -79,6 +79,9 @@ function parseResult(content: string | null): Record<string, unknown> {
 }
 
 const STAR = /\s*[★⭐✱*]+\s*$/u;
+/** "(recommended)" the model sometimes writes into the option itself — the chat marks it already. */
+const RECOMMENDED_NOTE =
+  /\s*[([](?:recommended|recommend|рекомендую|советую|recomendado|recomendada|recomiendo)[)\]]\s*$/iu;
 
 function normQuestion(raw: unknown): AiQuestion | null {
   if (!raw || typeof raw !== "object") return null;
@@ -86,6 +89,7 @@ function normQuestion(raw: unknown): AiQuestion | null {
   const question = String(q["question"] ?? "").trim();
   if (!question) return null;
   let recommended = String(q["recommended"] ?? "")
+    .replace(RECOMMENDED_NOTE, "")
     .replace(STAR, "")
     .trim();
   const options = (Array.isArray(q["options"]) ? q["options"] : [])
@@ -93,7 +97,9 @@ function normQuestion(raw: unknown): AiQuestion | null {
     .filter(Boolean)
     .slice(0, 5)
     .map((o) => {
-      const clean = o.replace(STAR, "").trim();
+      const noted = RECOMMENDED_NOTE.test(o);
+      const clean = o.replace(RECOMMENDED_NOTE, "").replace(STAR, "").trim();
+      if (!recommended && noted) recommended = clean;
       if (!recommended && clean !== o) recommended = clean;
       return clean;
     });
