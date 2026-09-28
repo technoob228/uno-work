@@ -9,6 +9,7 @@ import {
 } from "@t3tools/contracts";
 import {
   createModelSelection,
+  listedDefaultModel,
   normalizeModelSlug,
   resolveSelectableModel,
 } from "@t3tools/shared/model";
@@ -247,6 +248,9 @@ export function resolveAppModelSelectionForInstance(
   const options = getAppModelOptionsForInstance(settings, entry);
   return (
     resolveSelectableModel(entry.driverKind, selectedModel, options) ??
+    // The driver's canonical default (Uno / Hermes: Smart) before the first
+    // listed model — Hermes lists frontier (premium) models first.
+    listedDefaultModel(entry.driverKind, options) ??
     options[0]?.slug ??
     entry.models[0]?.slug ??
     null

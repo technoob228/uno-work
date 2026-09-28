@@ -131,7 +131,10 @@ export function DoneStep() {
   const aiId = stickyActive ?? ProviderInstanceId.make("uno");
   const aiProvider = providers.find((provider) => provider.instanceId === aiId);
   const aiName =
-    aiId === "uno" ? "Uno AI" : (getDriverOption(aiProvider?.driver)?.label ?? String(aiId));
+    // Hermes is the built-in Uno AI's default engine.
+    aiId === "uno" || aiId === "hermes"
+      ? "Uno AI"
+      : (getDriverOption(aiProvider?.driver)?.label ?? String(aiId));
 
   const skillsStatus = useSkillsStatus();
   const skillNames = ALL_SETUP_SKILLS.filter((skill) =>

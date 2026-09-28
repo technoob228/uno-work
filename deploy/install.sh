@@ -245,7 +245,7 @@ UNIT
 # All three authenticate through the Uno gateway, so the user never pastes a
 # provider key. The key itself is written to the daemon's settings, not here.
 if [ "${UNO_WORK_SKIP_HARNESSES:-0}" != "1" ]; then
-  log "Installing bundled harnesses (uno-code, opencode, hermes)"
+  log "Installing bundled harnesses (opencode, hermes)"
   sudo -u "${SERVICE_USER}" env HOME="/home/${SERVICE_USER}" UNO_WORK_OPENCODE_VERSION="${UNO_WORK_OPENCODE_VERSION:-}" UNO_WORK_HERMES_INSTALL_CMD="${UNO_WORK_HERMES_INSTALL_CMD:-}" UNO_WORK_HERMES_VERSION="${UNO_WORK_HERMES_VERSION:-}" bash -s <<'HARNESS' || log "WARNING: harness install had failures; the daemon still works"
 set -uo pipefail
 npm_prefix="$HOME/.local"
@@ -254,18 +254,11 @@ npm config set prefix "$npm_prefix" >/dev/null 2>&1 || true
 grep -q '.local/bin' "$HOME/.profile" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.profile"
 export PATH="$npm_prefix/bin:$PATH"
 
-curl -fsSL https://console.uno4.dev/cli/uno-code/install.sh | bash || echo "uno-code install failed"
-# UnoDriver ждёт бинарь по фиксированному пути ~/.unowork/uno-code/bin/uno-code
-# (не через PATH), а установщик кладёт его в ~/.local/bin — без этого симлинка
-# демон спавнит uno-code с ENOENT и гейт-харнес не стартует вовсе.
-uno_code_bin="$(command -v uno-code || echo "$HOME/.local/bin/uno-code")"
-if [ -x "$uno_code_bin" ]; then
-  mkdir -p "$HOME/.unowork/uno-code/bin"
-  ln -sf "$uno_code_bin" "$HOME/.unowork/uno-code/bin/uno-code"
-fi
-# Stock opencode: the OpenCode harness, and the Uno harness too — UnoDriver
-# prefers ~/.unowork/opencode/bin/opencode over the uno-code fork and runs it
-# with private XDG dirs (apps/server/src/provider/unoHarnessIsolation.ts).
+# The uno-code fork is no longer installed (0.0.94): stock opencode is both
+# the OpenCode harness and the engine of Uno Code — UnoDriver runs
+# ~/.unowork/opencode/bin/opencode with private XDG dirs
+# (apps/server/src/provider/unoHarnessIsolation.ts) and falls back to a fork
+# still on disk only when stock opencode is missing.
 # Pinned: a new opencode reaches boxes only after it passed our checks.
 npm install -g "opencode-ai@${UNO_WORK_OPENCODE_VERSION:-1.18.32}" --loglevel=error || echo "opencode install failed"
 opencode_bin="$(command -v opencode || echo "$HOME/.local/bin/opencode")"
@@ -317,7 +310,7 @@ os.chmod(path, 0o600)
 PY
 fi
 
-# Work-бокс — 2 ГБ RAM без свопа, а демон + два-три uno-code (bun) легко
+# Work-бокс — 2 ГБ RAM без свопа, а демон + два-три opencode (bun) легко
 # съедают гигабайт. Без свопа упор в память = зависший бокс (SSH без баннера,
 # run-канал BOX_BUSY) — видели 01.09 на боксе 395, лечилось только ребутом.
 # Своп превращает это в замедление, а OOM-killer получает шанс сработать.

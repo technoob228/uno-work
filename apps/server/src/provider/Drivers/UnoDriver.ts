@@ -571,12 +571,26 @@ function resolveUnoSearchBridge(): UnoSearchBridge | undefined {
   return { nodeBin, scriptPath };
 }
 
+/**
+ * Stream timeouts for the gateway providers (stock opencode only: the fork
+ * predates `chunkTimeout`). In the harness benchmark of 27.09.2026 requests to
+ * the model hung for 4–28 minutes; now a silent stream is aborted and the
+ * adapter retries the turn once (OpenCodeAdapter `retryStalledTurn`). Models
+ * that think stream their reasoning, so two silent minutes mean a dead stream.
+ */
+export const UNO_GATEWAY_STREAM_TIMEOUTS = {
+  headerTimeout: 120_000,
+  chunkTimeout: 120_000,
+} as const;
+
 function buildUnoConfigContent(
   unoApiKey: string,
   models: UnoCatalog,
   instructionsFilePath?: string,
   personalModels: ReadonlyArray<PersonalAiModel> = [],
+  options: { readonly streamTimeouts?: boolean } = {},
 ): string {
+  const streamTimeouts = options.streamTimeouts === true ? UNO_GATEWAY_STREAM_TIMEOUTS : {};
   // opencode's config schema only accepts `{ name }`-shaped model entries;
   // strip the local tier metadata before injecting via OPENCODE_CONFIG_CONTENT.
   const opencodeModelsByProvider: Record<
@@ -626,6 +640,7 @@ function buildUnoConfigContent(
         options: {
           baseURL: UNO_GATEWAY_BASE_URL,
           apiKey: "{env:UNO_API_KEY}",
+          ...streamTimeouts,
         },
         models: opencodeModelsByProvider[UNO_PROVIDER_ID],
       },
@@ -635,6 +650,7 @@ function buildUnoConfigContent(
         options: {
           baseURL: UNO_RUSSIA_GATEWAY_BASE_URL,
           apiKey: "{env:UNO_API_KEY}",
+          ...streamTimeouts,
         },
         models: opencodeModelsByProvider[UNO_RUSSIA_PROVIDER_ID],
       },
@@ -991,6 +1007,7 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         unoCatalog,
         instructionsFilePath,
         personalModels,
+        { streamTimeouts: harness.kind === "upstream" },
       );
       const processEnv: NodeJS.ProcessEnv = {
         ...unoAgentEnv,

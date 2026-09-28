@@ -19,6 +19,7 @@ import { usePrimaryEnvironmentId } from "../../../environments/primary";
 import { useSettings } from "../../../hooks/useSettings";
 import { cn } from "../../../lib/utils";
 import { resolveAppModelSelectionForInstance } from "../../../modelSelection";
+import { pickUsableDefaultModelSelection } from "../../../providerModels";
 import { useServerProviders } from "../../../rpc/serverState";
 import { HarnessSignInPanel } from "../../harness/HarnessSignInDialog";
 import { OpenCodeKeyForm } from "../../harness/OpenCodeKeyForm";
@@ -164,9 +165,23 @@ export function AiStep() {
   };
 
   const confirm = () => {
-    const instanceId = ProviderInstanceId.make(picked);
-    const model = resolveAppModelSelectionForInstance(instanceId, settings, providers, null);
-    if (model) setSticky({ instanceId, model });
+    // "Uno AI" is the built-in AI, not one harness: its default engine is
+    // Hermes (Uno Code where Hermes cannot answer yet).
+    const builtIn =
+      picked === "uno"
+        ? pickUsableDefaultModelSelection(
+            providers.filter(
+              (provider) => provider.driver === "hermes" || provider.driver === "uno",
+            ),
+          )
+        : null;
+    if (builtIn) {
+      setSticky(builtIn);
+    } else {
+      const instanceId = ProviderInstanceId.make(picked);
+      const model = resolveAppModelSelectionForInstance(instanceId, settings, providers, null);
+      if (model) setSticky({ instanceId, model });
+    }
     void completeStep("ai");
   };
 

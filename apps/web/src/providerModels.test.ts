@@ -2,6 +2,7 @@ import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3
 import { describe, expect, it } from "vitest";
 import {
   getDefaultServerModel,
+  isLegacyMachineDefaultInstance,
   isUsableDefaultProvider,
   pickUsableDefaultModelSelection,
   resolveDefaultThreadProvider,
@@ -189,6 +190,48 @@ describe("resolveDefaultThreadProvider", () => {
 
     expect(resolveDefaultThreadProvider(providers, ProviderInstanceId.make("codex"))).toBe("codex");
     expect(resolveDefaultThreadProvider([], null)).toBe("codex");
+  });
+});
+
+const hermesConnected = provider({
+  provider: "hermes",
+  models: ["uno/smart", "uno/fast", "x-ai/grok-4.7"],
+});
+const hermesMissing = provider({ provider: "hermes", installed: false, models: ["uno/smart"] });
+
+describe("Hermes is the default harness (0.0.94)", () => {
+  it("wins over Uno Code and signed-in harnesses when nothing is seeded", () => {
+    expect(resolveDefaultThreadProvider([codexLoggedIn, unoConnected, hermesConnected], null)).toBe(
+      "hermes",
+    );
+  });
+
+  it("a project default saved on Uno Code by the machine no longer decides", () => {
+    const providers = [unoConnected, hermesConnected];
+
+    expect(isLegacyMachineDefaultInstance(ProviderInstanceId.make("uno"), providers)).toBe(true);
+    expect(resolveDefaultThreadProvider(providers, ProviderInstanceId.make("uno"))).toBe("hermes");
+  });
+
+  it("keeps Uno Code where Hermes cannot answer", () => {
+    const providers = [unoConnected, hermesMissing];
+
+    expect(isLegacyMachineDefaultInstance(ProviderInstanceId.make("uno"), providers)).toBe(false);
+    expect(resolveDefaultThreadProvider(providers, ProviderInstanceId.make("uno"))).toBe("uno");
+    expect(resolveDefaultThreadProvider(providers, null)).toBe("uno");
+  });
+
+  it("other seeded harnesses are honored as before", () => {
+    const providers = [unoConnected, hermesConnected, codexLoggedIn];
+
+    expect(resolveDefaultThreadProvider(providers, ProviderInstanceId.make("codex"))).toBe("codex");
+  });
+
+  it("the starter project and Home start on Hermes' Smart", () => {
+    expect(pickUsableDefaultModelSelection([unoConnected, hermesConnected])).toEqual({
+      instanceId: "hermes",
+      model: "uno/smart",
+    });
   });
 });
 

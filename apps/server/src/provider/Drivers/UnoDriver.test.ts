@@ -104,6 +104,23 @@ describe("UnoDriver catalog normalization", () => {
     });
   });
 
+  it("sets stream timeouts on the gateway providers for stock opencode only", () => {
+    type Config = {
+      readonly provider: Record<string, { readonly options: Record<string, unknown> }>;
+    };
+    const upstream = JSON.parse(
+      __unoDriverTest.buildUnoConfigContent("k", {}, undefined, [], { streamTimeouts: true }),
+    ) as Config;
+    for (const id of ["uno", "uno-russia"]) {
+      expect(upstream.provider[id]?.options).toMatchObject({
+        headerTimeout: 120_000,
+        chunkTimeout: 120_000,
+      });
+    }
+    const fork = JSON.parse(__unoDriverTest.buildUnoConfigContent("k", {})) as Config;
+    expect(fork.provider.uno?.options).not.toHaveProperty("chunkTimeout");
+  });
+
   it("never forces a reasoning effort on gateway models", () => {
     // `reasoningEffort: "none"` made Grok 4.7 / GLM-5.3 fail with HTTP 400
     // "Reasoning is mandatory" and made Fast narrate its plan in the answer.

@@ -63,6 +63,7 @@ import {
   markPromotedDraftThreadByRef,
   markPromotedDraftThreads,
   markPromotedDraftThreadsByRef,
+  releaseLegacyUnoMachineDefault,
   type ComposerImageAttachment,
   useComposerDraftStore,
   DraftId,
@@ -1563,5 +1564,82 @@ describe("createDebouncedStorage", () => {
     vi.advanceTimersByTime(300);
     expect(base.setItem).toHaveBeenCalledTimes(1);
     expect(base.setItem).toHaveBeenCalledWith("key", "v2");
+  });
+});
+
+describe("releaseLegacyUnoMachineDefault (Hermes default, 0.0.94)", () => {
+  const UNO = ProviderInstanceId.make("uno");
+  const HERMES = ProviderInstanceId.make("hermes");
+  const base = {
+    draftsByThreadKey: {},
+    draftThreadsByThreadKey: {},
+    logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+  };
+
+  it("lets go of a sticky Uno Code on its machine default (Smart or pre-hours Kimi)", () => {
+    for (const model of ["uno/uno/smart", "uno/moonshotai/kimi-k2.7-code"]) {
+      const next = releaseLegacyUnoMachineDefault({
+        ...base,
+        stickyModelSelectionByProvider: { [UNO]: createModelSelection(UNO, model) },
+        stickyActiveProvider: UNO,
+      });
+      expect(next.stickyActiveProvider).toBeNull();
+      // The saved model stays: picking Uno Code again starts on it.
+      expect(next.stickyModelSelectionByProvider?.[UNO]?.model).toBe(model);
+      expect(next.hermesDefaultApplied).toBe(true);
+    }
+  });
+
+  it("keeps a Uno Code pick on another model, and picks of other harnesses", () => {
+    const fast = releaseLegacyUnoMachineDefault({
+      ...base,
+      stickyModelSelectionByProvider: { [UNO]: createModelSelection(UNO, "uno/uno/fast") },
+      stickyActiveProvider: UNO,
+    });
+    expect(fast.stickyActiveProvider).toBe(UNO);
+
+    const claude = releaseLegacyUnoMachineDefault({
+      ...base,
+      stickyModelSelectionByProvider: {
+        [CLAUDE_AGENT_INSTANCE]: createModelSelection(CLAUDE_AGENT_INSTANCE, "claude-sonnet-4-6"),
+      },
+      stickyActiveProvider: CLAUDE_AGENT_INSTANCE,
+    });
+    expect(claude.stickyActiveProvider).toBe(CLAUDE_AGENT_INSTANCE);
+  });
+
+  it("runs once: a later Uno Code pick on Smart is the person's own", () => {
+    const state = {
+      ...base,
+      stickyModelSelectionByProvider: { [UNO]: createModelSelection(UNO, "uno/uno/smart") },
+      stickyActiveProvider: UNO,
+      hermesDefaultApplied: true,
+    };
+    expect(releaseLegacyUnoMachineDefault(state)).toBe(state);
+  });
+
+  it("releases unsent drafts seeded with the machine default too", () => {
+    const next = releaseLegacyUnoMachineDefault({
+      ...base,
+      draftsByThreadKey: {
+        a: {
+          prompt: "hi",
+          attachments: [],
+          modelSelectionByProvider: { [UNO]: createModelSelection(UNO, "uno/uno/smart") },
+          activeProvider: UNO,
+        },
+        b: {
+          prompt: "",
+          attachments: [],
+          modelSelectionByProvider: { [HERMES]: createModelSelection(HERMES, "uno/smart") },
+          activeProvider: HERMES,
+        },
+      },
+      stickyModelSelectionByProvider: {},
+      stickyActiveProvider: null,
+    });
+    expect(next.draftsByThreadKey.a?.activeProvider).toBeNull();
+    expect(next.draftsByThreadKey.a?.prompt).toBe("hi");
+    expect(next.draftsByThreadKey.b?.activeProvider).toBe(HERMES);
   });
 });
