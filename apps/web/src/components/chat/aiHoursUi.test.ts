@@ -166,7 +166,7 @@ describe("premium credit", () => {
     expect(notice).toEqual({
       text: "Premium credit used up — answering with Smart. New credit on Oct 24.",
       actionLabel: "Continue from balance",
-      actionUrl: "https://console.uno4.dev/billing",
+      actionUrl: "https://console.uno4.dev/billing#premium",
     });
     expect(
       premiumFallbackNotice(

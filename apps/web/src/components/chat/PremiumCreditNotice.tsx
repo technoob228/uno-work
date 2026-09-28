@@ -23,8 +23,8 @@ import { AI_STATUS_PREMIUM_POLL_MS, useAiStatus } from "../../lib/aiStatusReactQ
 import { openInNewTab } from "../../navigation/useOpenApp";
 import { unoGatewayModelId } from "./unoModelIds";
 
-/** "Continue from balance" and the premium credit live on the console's billing page. */
-export const UNO_PREMIUM_BILLING_URL = `${CONSOLE_URL}/billing`;
+/** "Continue from balance" and the premium credit: the console billing page's premium card. */
+export const UNO_PREMIUM_BILLING_URL = `${CONSOLE_URL}/billing#premium`;
 export const UNO_PREMIUM_CONTINUE_LABEL = "Continue from balance";
 
 const INCLUDED_GATEWAY_IDS: ReadonlySet<string> = new Set([
