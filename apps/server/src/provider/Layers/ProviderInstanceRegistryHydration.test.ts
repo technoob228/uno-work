@@ -19,8 +19,10 @@ describe("deriveProviderInstanceConfigMap — uno gateway key fingerprint", () =
     );
 
     expect(configOf(map[UNO_ID]).unoGatewayKeyFingerprint).toBe("1234");
-    // Only the uno envelope carries the stamp — a key change must not churn
-    // the other drivers' instances.
+    // Hermes runs on the same key: a key landing after start rebuilds it too.
+    expect(configOf(map[ProviderInstanceId.make("hermes")]).unoGatewayKeyFingerprint).toBe("1234");
+    // Only the gateway harnesses carry the stamp — a key change must not
+    // churn the other drivers' instances.
     expect(configOf(map[CODEX_ID]).unoGatewayKeyFingerprint).toBeUndefined();
   });
 

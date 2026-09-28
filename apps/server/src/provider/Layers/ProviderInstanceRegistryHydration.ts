@@ -121,7 +121,13 @@ export const deriveProviderInstanceConfigMap = (
   return merged as ProviderInstanceConfigMap;
 };
 
-const UNO_DRIVER_KIND = "uno";
+/**
+ * Drivers whose instance is built around the Uno gateway key: Uno Code and
+ * Hermes (0.0.94: Hermes is the default harness — without the stamp a fresh
+ * Work machine's Hermes stayed "no key" until the daemon restarted, and new
+ * chats fell back to Uno Code).
+ */
+const UNO_GATEWAY_KEY_DRIVER_KINDS: ReadonlySet<string> = new Set(["uno", "hermes"]);
 
 /**
  * Make the Uno gateway key участником сравнения конфигов при reconcile.
@@ -143,7 +149,7 @@ const stampUnoGatewayKeyFingerprint = (
   entry: ProviderInstanceConfig,
   fingerprint: string,
 ): ProviderInstanceConfig => {
-  if (entry.driver !== UNO_DRIVER_KIND) {
+  if (!UNO_GATEWAY_KEY_DRIVER_KINDS.has(entry.driver)) {
     return entry;
   }
   const config = entry.config !== null && typeof entry.config === "object" ? entry.config : {};
