@@ -42,13 +42,14 @@ const makeRequestContext = Effect.gen(function* () {
     ),
     // Settings → Assistant → "Can see and manage": the assistant token's
     // project allowlist is the single source (uno-manager enforces the same).
+    // No token / unreadable → only the caller's own project, never "all".
     getAssistantProjectAllowlist: tokenRepository
       .getActiveByLabel(assistantTokenLabel(ASSISTANT_PROJECT_ID))
       .pipe(
-        Effect.map((token) =>
-          Option.isSome(token) ? token.value.projectAllowlist : ("all" as const),
+        Effect.map((token): "all" | ReadonlyArray<string> =>
+          Option.isSome(token) ? token.value.projectAllowlist : [],
         ),
-        Effect.orElseSucceed(() => "all" as const),
+        Effect.orElseSucceed((): ReadonlyArray<string> => []),
       ),
     getProviders: providerRegistry.getProviders,
   });

@@ -2,7 +2,7 @@
  * Path resolution for plugin panels — pure helpers shared by the registry
  * (manifest validation) and the HTTP route that serves panel assets.
  *
- * URL shape: `GET /api/plugins/<pluginId>/panel/<rest>`.
+ * URL shape: `GET /api/plugins/<pluginId>/panel/<token>/<rest>` (token: `panelTokens.ts`).
  *
  * `<rest>` is resolved relative to the *panel root* — the directory that holds
  * the manifest entry file (`dirname(panel.path)` inside the plugin directory) —
@@ -129,20 +129,15 @@ export function parsePluginPanelRequestPath(pathname: string): ParsedPluginPanel
 }
 
 /**
- * Auth split for panel assets (see `plugins/http.ts` for the rationale).
- * Navigation requests (the iframe's own document) must carry the session;
- * subresources fetched by the sandboxed panel cannot carry it at all.
+ * Splits the capability token (first segment, see `panelTokens.ts`) off the
+ * wildcard part of a panel URL: `<token>/<rest>` → `{ token, rest }`.
+ * `null` when there is no token segment at all.
  */
-const NAVIGATION_FETCH_DESTINATIONS = new Set([
-  "document",
-  "iframe",
-  "frame",
-  "embed",
-  "object",
-  "nested-document",
-]);
-
-export function isPanelNavigationRequest(secFetchDest: string | undefined): boolean {
-  if (secFetchDest === undefined || secFetchDest.trim().length === 0) return true;
-  return NAVIGATION_FETCH_DESTINATIONS.has(secFetchDest.trim().toLowerCase());
+export function splitPanelTokenFromRest(
+  rest: string,
+): { readonly token: string; readonly rest: string } | null {
+  const separatorIndex = rest.indexOf("/");
+  const token = separatorIndex === -1 ? rest : rest.slice(0, separatorIndex);
+  if (token.length === 0) return null;
+  return { token, rest: separatorIndex === -1 ? "" : rest.slice(separatorIndex + 1) };
 }

@@ -423,8 +423,16 @@ export class BrowserBridge extends Context.Service<BrowserBridge, BrowserBridgeS
   "t3/browserBridge",
 ) {}
 
-function tokensEqual(a: string, b: string): boolean {
-  return a.length === b.length && timingSafeEqual(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+/**
+ * Constant-time token compare. Lengths are checked on the encoded buffers
+ * (a string length match does not imply equal byte lengths, which would make
+ * `timingSafeEqual` throw).
+ */
+export function tokensEqual(a: unknown, b: unknown): boolean {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const left = Buffer.from(a, "utf8");
+  const right = Buffer.from(b, "utf8");
+  return left.length === right.length && timingSafeEqual(left, right);
 }
 
 export function bridgeContextKey(context: BrowserBridgeRequestContext): string {
@@ -480,18 +488,12 @@ export const makeBrowserBridge = (input: {
       if (presented.length === 0) return null;
       const scopedContext = contextByScopedToken.get(presented);
       if (scopedContext) return { context: scopedContext, kind: "thread" };
-      if (
-        presented.length === sharedMcpToken.length &&
-        timingSafeEqual(Buffer.from(presented, "utf8"), Buffer.from(sharedMcpToken, "utf8"))
-      ) {
+      if (tokensEqual(presented, sharedMcpToken)) {
         return { context: undefined, kind: "shared-mcp" };
       }
       // Базовый токен машины больше не открывает ручки, но узнаётся: сессия,
       // поднятая до обновления, получает внятный отказ вместо 401.
-      if (
-        presented.length === token.length &&
-        timingSafeEqual(Buffer.from(presented, "utf8"), Buffer.from(token, "utf8"))
-      ) {
+      if (tokensEqual(presented, token)) {
         return { context: undefined, kind: "legacy" };
       }
       return null;
@@ -578,7 +580,7 @@ export const makeBrowserBridge = (input: {
       resolveCommandResult: (input) =>
         Effect.gen(function* () {
           const pending = pendingCommands.get(input.commandId);
-          if (!pending || pending.responseToken !== input.responseToken) {
+          if (!pending || !tokensEqual(pending.responseToken, input.responseToken)) {
             return false;
           }
           pendingCommands.delete(input.commandId);
@@ -666,7 +668,7 @@ export const makeBrowserBridge = (input: {
       peekSecretRequest: (input) =>
         Effect.sync(() => {
           const pending = pendingSecretRequests.get(input.requestId);
-          if (!pending || pending.responseToken !== input.responseToken) {
+          if (!pending || !tokensEqual(pending.responseToken, input.responseToken)) {
             return null;
           }
           return { name: pending.name, targetFile: pending.targetFile, cwd: pending.cwd };
@@ -674,7 +676,7 @@ export const makeBrowserBridge = (input: {
       completeSecretRequest: (input) =>
         Effect.gen(function* () {
           const pending = pendingSecretRequests.get(input.requestId);
-          if (!pending || pending.responseToken !== input.responseToken) {
+          if (!pending || !tokensEqual(pending.responseToken, input.responseToken)) {
             return false;
           }
           pendingSecretRequests.delete(input.requestId);

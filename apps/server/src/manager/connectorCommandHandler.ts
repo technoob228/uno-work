@@ -53,6 +53,12 @@ export interface ConnectorCommandContext {
   /** Assistant project whose connector carries the chat. */
   readonly connectorProjectId: ProjectId;
   readonly origin: OrchestrationCommandOrigin;
+  /**
+   * Whether the sender is the owner (see `connectorSenders.ts`). Commands
+   * rebind the chat and resolve approvals, so anyone else is refused —
+   * connectors drop such messages earlier; this is the backstop.
+   */
+  readonly senderIsOwner: boolean;
 }
 
 const THREADS_LIST_LIMIT = 20;
@@ -113,6 +119,9 @@ export const executeConnectorCommand = (
   command: ConnectorCommand,
 ): Effect.Effect<string> =>
   Effect.gen(function* () {
+    if (!context.senderIsOwner) {
+      return "Only the owner of this assistant can use chat commands.";
+    }
     const now = () => (deps.now ?? (() => new Date()))();
     const key = { kind: context.kind, chatId: context.chatId };
     const snapshot = yield* deps.projections.getShellSnapshot();

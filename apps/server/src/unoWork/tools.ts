@@ -57,7 +57,12 @@ import {
   isUnoWorkGuideTopic,
 } from "../agentContext/guides.ts";
 import type { ConnectorCallResult, ConnectorTool } from "../setupTools/connectors.ts";
-import { resolveSecretTargetDirectory, upsertEnvContent } from "../secretsEnv.ts";
+import {
+  isValidSecretTargetFile,
+  resolveSecretTargetDirectory,
+  secretNameProblem,
+  upsertEnvContent,
+} from "../secretsEnv.ts";
 import { validateArgs, type ObjectSchema } from "./argsSchema.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import { decideUnoWorkGate, refusalMessage, type UnoWorkToolLevel } from "./policy.ts";
@@ -1691,7 +1696,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "request_secret",
     group: "person",
     description:
-      "Ask the person for a secret (API key, token, password) through a masked field in Uno Work. The value is written to the project's .env (or .env.<x>) and never reaches you or the chat. Waits until they answer (up to 15 min). Use this instead of ever asking for a secret in chat.",
+      "Ask the person for a secret (API key, token, password) through a masked field in Uno Work. The value is written to the project's .env (or .env.<x>), not the chat; read it from there, never print it. Waits until they answer (up to 15 min). Use this instead of ever asking for a secret in chat.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2122,6 +2127,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         }
         const name = str(args, "envName") ?? "DATABASE_URL";
         const file = str(args, "targetFile") ?? ".env";
+        const nameProblem = secretNameProblem(name);
+        if (nameProblem !== null)
+          return yield* toolError(nameProblem.replace('"name"', '"envName"'));
+        if (!isValidSecretTargetFile(file)) {
+          return yield* toolError('Invalid "targetFile": expected .env or .env.<suffix>.');
+        }
         const written = yield* writeEnvVar({ folder: target.cwd, file, name, value: dsn });
         return {
           databaseId: id,

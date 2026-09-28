@@ -71,6 +71,12 @@ import {
 import { classifyWake } from "../wakeClassifier.ts";
 import { currentAssistantModelSelection } from "../assistantEngineSelection.ts";
 import { sameAssistantEngine } from "../connectorBindings.ts";
+import {
+  classifySlackSender,
+  type ConnectorSenderRole,
+  withOwnerUserId,
+} from "../connectorSenders.ts";
+import { resolveConnectorOutgoingFile } from "../connectorOutgoingFiles.ts";
 import { resolveTurnReply } from "./TelegramConnector.ts";
 import {
   parseRelayCredential,
@@ -575,6 +581,8 @@ const makeSlackConnector = Effect.gen(function* () {
     readonly chatKey: string;
     readonly title: string;
     readonly config: ManagerSlackConnectorConfig;
+    /** Owner: full access (the assistant's own chats). Members: approval-required. */
+    readonly runtimeMode: "full-access" | "approval-required";
   }) =>
     Effect.gen(function* () {
       // The assistant's Slack chats run on the Uno chat's engine (Hermes +
@@ -589,7 +597,11 @@ const makeSlackConnector = Effect.gen(function* () {
       });
       if (Option.isSome(existing)) {
         const shell = yield* projectionSnapshotQuery.getThreadShellById(existing.value);
-        if (Option.isSome(shell) && shell.value.archivedAt === null) {
+        if (
+          Option.isSome(shell) &&
+          shell.value.archivedAt === null &&
+          shell.value.runtimeMode === input.runtimeMode
+        ) {
           if (
             modelSelection === null ||
             sameAssistantEngine(shell.value.modelSelection, modelSelection)
@@ -611,7 +623,7 @@ const makeSlackConnector = Effect.gen(function* () {
           projectId: input.projectId,
           title: input.title,
           modelSelection,
-          runtimeMode: "full-access",
+          runtimeMode: input.runtimeMode,
           interactionMode: "default",
           branch: null,
           worktreePath: null,
@@ -628,6 +640,47 @@ const makeSlackConnector = Effect.gen(function* () {
       });
       return threadId;
     });
+
+  // Where a thread's `[[send-file: …]]` may read from: its worktree, else
+  // its project's workspace.
+  const workspaceRootsForThread = (threadId: ThreadId) =>
+    projectionSnapshotQuery.getThreadCheckpointContext(threadId).pipe(
+      Effect.map((context) =>
+        Option.isSome(context)
+          ? [context.value.worktreePath ?? context.value.workspaceRoot]
+          : ([] as Array<string>),
+      ),
+      Effect.orElseSucceed(() => [] as Array<string>),
+    );
+
+  // A DM belongs to exactly one person: whoever writes in an allowlisted DM
+  // is an owner, and may then drive the assistant from allowlisted channels.
+  // Re-reads the stored row so a concurrent settings save is not lost.
+  const rememberSlackOwner = (projectId: ProjectId, userId: string) =>
+    Effect.gen(function* () {
+      const stored = yield* connectorRepository.get({ projectId, kind: "slack" });
+      if (Option.isNone(stored)) return;
+      const decoded = Schema.decodeUnknownExit(ManagerSlackConnectorConfig)(stored.value.config);
+      if (decoded._tag !== "Success") return;
+      const current = decoded.value;
+      const ownerUserIds = withOwnerUserId(current.ownerUserIds, userId);
+      if (ownerUserIds === current.ownerUserIds) return;
+      yield* connectorRepository.upsert({
+        projectId,
+        kind: "slack",
+        config: { ...current, ownerUserIds },
+        updatedAt: new Date().toISOString(),
+      });
+      yield* Effect.logInfo("slack owner recorded from DM").pipe(
+        Effect.annotateLogs({ projectId }),
+      );
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("slack owner could not be recorded").pipe(
+          Effect.annotateLogs({ projectId, cause: String(cause) }),
+        ),
+      ),
+    );
 
   const watchAndReply = (input: {
     readonly web: WebClient;
@@ -676,13 +729,29 @@ const makeSlackConnector = Effect.gen(function* () {
         } else if (reply.files.length === 0) {
           yield* postMessage(input.web, input.channel, "Done.", input.threadTs);
         }
-        for (const filePath of reply.files) {
+        const roots = yield* workspaceRootsForThread(input.threadId);
+        for (const rawPath of reply.files) {
+          const resolved = yield* Effect.promise(() =>
+            resolveConnectorOutgoingFile(rawPath, roots),
+          );
+          if (!resolved.ok) {
+            yield* Effect.logWarning("slack send-file refused").pipe(
+              Effect.annotateLogs({ channel: input.channel, filePath: rawPath }),
+            );
+            yield* postMessage(
+              input.web,
+              input.channel,
+              `Could not send ${nodePath.basename(rawPath)}: ${resolved.reason}.`,
+              input.threadTs,
+            );
+            continue;
+          }
           yield* sendSlackFile({
             web: input.web,
             botToken: input.botToken,
             channel: input.channel,
             threadTs: input.threadTs,
-            filePath,
+            filePath: resolved.path,
           });
         }
         yield* markHotWindow(input.hotKey);
@@ -726,8 +795,30 @@ const makeSlackConnector = Effect.gen(function* () {
       }
       const senderIsBot = event.bot_id !== undefined || event.user === botUserId;
       const isDM = event.channel_type === "im";
+      // An allowlisted channel is not an allowlisted person: only the owner
+      // drives the assistant (full access); other members are ignored unless
+      // the owner let them in, and then run approval-required.
+      const senderRole: ConnectorSenderRole = classifySlackSender({
+        userId: event.user,
+        senderIsBot,
+        isDirectMessage: isDM,
+        ownerUserIds: config.ownerUserIds,
+        groupMembers: config.groupMembers,
+      });
+      if (senderRole === "ignore") {
+        yield* Effect.logDebug("slack message from a non-owner sender ignored").pipe(
+          Effect.annotateLogs({ projectId, channel }),
+        );
+        return;
+      }
+      if (isDM && event.user !== undefined) {
+        yield* rememberSlackOwner(projectId, event.user);
+      }
       const threadTs = typeof event.thread_ts === "string" ? event.thread_ts : null;
-      const chatKey = slackChatKey(channel, isDM ? null : (threadTs ?? ts));
+      const ownerChatKey = slackChatKey(channel, isDM ? null : (threadTs ?? ts));
+      // Members never share (or widen) the owner's session.
+      const chatKey = senderRole === "member" ? `${ownerChatKey}#members` : ownerChatKey;
+      const runtimeMode = senderRole === "member" ? "approval-required" : "full-access";
       const addressing = config.addressing ?? DEFAULT_ADDRESSING_CONFIG;
       const mentionToken = `<@${botUserId}>`;
       const cleanedText = rawText.split(mentionToken).join(" ").replace(/\s+/g, " ").trim();
@@ -771,7 +862,13 @@ const makeSlackConnector = Effect.gen(function* () {
       }
 
       const title = isDM ? `Slack DM ${channel}` : `Slack: ${channel}`;
-      const threadId = yield* ensureThreadForChat({ projectId, chatKey, title, config });
+      const threadId = yield* ensureThreadForChat({
+        projectId,
+        chatKey,
+        title: senderRole === "member" ? `${title} (members)` : title,
+        config,
+        runtimeMode,
+      });
       // First contact inside an existing Slack thread: the session has no
       // history yet, but the humans in the thread do — hand it over so the
       // assistant is not blind to the message it was called under.
@@ -811,7 +908,7 @@ const makeSlackConnector = Effect.gen(function* () {
             text: body,
             attachments: ingested.attachments,
           },
-          runtimeMode: "full-access",
+          runtimeMode,
           interactionMode: "default",
           createdAt: requestedAtIso,
         },

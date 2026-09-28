@@ -197,9 +197,41 @@ export function removeSlackInstall(
 }
 
 /**
+ * Origin the sign-in callback page will post from: the `redirect_uri` of the
+ * provider's authorize URL (the console's OAuth callback), else the authorize
+ * URL's own origin. Null when neither parses — then no message is trusted.
+ */
+export function expectedAuthCallbackOrigin(authorizeUrl: string): string | null {
+  try {
+    const url = new URL(authorizeUrl);
+    const redirect = url.searchParams.get("redirect_uri");
+    return new URL(redirect ?? url.href).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** A sign-in result only counts from our popup, posted by the expected origin. */
+export function isTrustedAuthMessage(
+  event: Pick<MessageEvent, "origin" | "source" | "data">,
+  expected: {
+    readonly origin: string | null;
+    readonly popup: unknown;
+    readonly messageType: string;
+  },
+): boolean {
+  if (expected.origin === null || expected.origin === "null") return false;
+  if (expected.popup === null || expected.popup === undefined) return false;
+  if (event.origin !== expected.origin || event.source !== expected.popup) return false;
+  const data = event.data as { readonly type?: unknown } | null;
+  return typeof data === "object" && data !== null && data.type === expected.messageType;
+}
+
+/**
  * Opens a provider's sign-in in a small window (a popup keeps Uno Work
  * where it is). Resolves when the console's callback page reports back
- * (`postMessage` {type, ok}) or the window closes. Popup blocked → a new tab.
+ * (`postMessage` {type, ok} from that popup and the callback's origin) or
+ * the window closes. Popup blocked → a new tab.
  */
 export function openAuthWindow(
   url: string,
@@ -223,9 +255,10 @@ export function openAuthWindow(
       window.clearInterval(timer);
       resolve(result);
     };
+    const expectedOrigin = expectedAuthCallbackOrigin(url);
     const onMessage = (event: MessageEvent) => {
-      const data = event.data as { readonly type?: unknown; readonly ok?: unknown } | null;
-      if (!data || data.type !== messageType) return;
+      if (!isTrustedAuthMessage(event, { origin: expectedOrigin, popup, messageType })) return;
+      const data = event.data as { readonly ok?: unknown };
       finish({ ok: data.ok === true, closed: false });
     };
     window.addEventListener("message", onMessage);

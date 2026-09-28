@@ -26,7 +26,16 @@ import {
   XIcon,
   AppWindowIcon,
 } from "lucide-react";
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -36,6 +45,7 @@ import * as XLSX from "xlsx";
 
 import { sanitizeDocumentHtml } from "../../lib/safeHtml";
 import { cn } from "../../lib/utils";
+import { openUntrustedLinkExternally, toExternalHttpUrl } from "../../lib/externalLinks";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { openInPreferredEditor } from "../../editorPreferences";
 import { readEnvironmentApi } from "../../environmentApi";
@@ -67,7 +77,13 @@ import {
   SCOPE_MENU_LABEL,
   type PreviewTabScope,
 } from "./previewTabScopes";
-import { createPanelBridge, shellEventToPanelEvent } from "./panelBridge";
+import {
+  attachPanelPortHost,
+  createPanelBridge,
+  createPanelSendConfirmer,
+  shellEventToPanelEvent,
+} from "./panelBridge";
+import { usePluginPanelSignedUrl } from "./pluginPanelUrl";
 import {
   PluginPanelChat,
   PluginPanelSplit,
@@ -177,6 +193,33 @@ function resolveRelativeFilePath(baseAbsolutePath: string, href: string): string
   return (baseAbsolutePath.startsWith("/") ? "/" : "") + resolved.join("/");
 }
 
+/**
+ * A link from a previewed document: http(s) opens in the system browser,
+ * anything else (file:, javascript:, custom schemes) is inert. The app
+ * window is never navigated.
+ */
+function UntrustedExternalLink({
+  href,
+  children,
+}: {
+  href?: string | undefined;
+  children: ReactNode;
+}) {
+  const safeUrl = toExternalHttpUrl(href);
+  return (
+    <a
+      href={safeUrl ?? undefined}
+      title={safeUrl ? undefined : href}
+      onClick={(event) => {
+        event.preventDefault();
+        openUntrustedLinkExternally(safeUrl);
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
 function MarkdownBody({ file, content }: { file: PreviewFile; content: string }) {
   const { openFile, currentChatEnvironmentId } = usePreviewPane();
   const fileEnv = file.environmentId ?? currentChatEnvironmentId ?? null;
@@ -186,7 +229,9 @@ function MarkdownBody({ file, content }: { file: PreviewFile; content: string })
       a({ href, children, ...rest }) {
         const isExternal = !!href && /^[a-z][a-z0-9+.-]*:/i.test(href);
         const isAnchor = !!href && href.startsWith("#");
-        if (!href || isExternal || isAnchor) {
+        if (isExternal)
+          return <UntrustedExternalLink href={href}>{children}</UntrustedExternalLink>;
+        if (!href || isAnchor) {
           return (
             <a href={href} {...rest}>
               {children}
@@ -901,9 +946,14 @@ function LoadedBody({ file, sourceView }: { file: PreviewFile; sourceView: boole
 
   const blobUrl = useMemo(() => {
     if (!data || data.encoding !== "base64") return undefined;
-    const mime = data.mimeType ?? "application/octet-stream";
+    // A "PDF" is always rendered as a PDF: a file named .pdf whose bytes or
+    // reported type say HTML must never run as a page in the app's origin.
+    // (No sandbox attribute on the PDF frame: Chromium refuses to show its
+    // PDF viewer inside sandboxed frames.)
+    const mime =
+      file.kind === "pdf" ? "application/pdf" : (data.mimeType ?? "application/octet-stream");
     return base64ToBlobUrl(data.content, mime);
-  }, [data]);
+  }, [data, file.kind]);
 
   useEffect(() => {
     return () => {
@@ -934,8 +984,18 @@ function LoadedBody({ file, sourceView }: { file: PreviewFile; sourceView: boole
   return renderLoadedBody(file, { ...data, ...(blobUrl ? { blobUrl } : {}) }, sourceView);
 }
 
+const FROZEN_MARKDOWN_COMPONENTS: Components = {
+  a({ href, children }) {
+    return <UntrustedExternalLink href={href}>{children}</UntrustedExternalLink>;
+  },
+};
+
 const FrozenMarkdownPreview = memo(function FrozenMarkdownPreview({ source }: { source: string }) {
-  return <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>;
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={FROZEN_MARKDOWN_COMPONENTS}>
+      {source}
+    </ReactMarkdown>
+  );
 });
 
 function canEditFile(file: PreviewFile, fallbackEnvId: EnvironmentId | null): boolean {
@@ -1149,12 +1209,13 @@ function resolvePanelFilePath(rawPath: string, projectCwd: string | null): strin
  * Панель плагина: статические файлы демона в изолированном iframe.
  * `sandbox="allow-scripts"` БЕЗ `allow-same-origin` — origin документа
  * непрозрачный, поэтому у панели нет доступа ни к DOM приложения, ни к его
- * кукам и хранилищу. Ценой этого субресурсы панели грузятся без сессии — так
- * и задумано, см. `apps/server/src/plugins/http.ts`.
+ * кукам и хранилищу. Сессию панель не несёт, поэтому все её запросы идут по
+ * подписанному URL с токеном в пути (`pluginPanelUrl.ts`,
+ * `apps/server/src/plugins/http.ts`).
  *
- * Общение с приложением — только через postMessage-мост (`panelBridge.ts`).
- * Сообщения принимаем ИСКЛЮЧИТЕЛЬНО от `contentWindow` своего iframe:
- * `event.origin` у opaque origin равен строке `"null"` и ничего не доказывает.
+ * Общение с приложением — только через MessagePort-мост (`panelBridge.ts`):
+ * порт выдаётся документу на первый `load` iframe, window-сообщения не
+ * принимаются, после навигации фрейма порт закрывается и не перевыдаётся.
  */
 function PluginPanelBody({ file }: { file: PreviewFile }) {
   const {
@@ -1170,11 +1231,16 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
   const panels = usePluginPanels();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const pluginId = pluginIdFromPanelFile(file);
+  const panelTitleRef = useRef(file.name);
+  panelTitleRef.current = file.name;
   // Чат объявляет манифест (`panel.chat`). Жизненный цикл моста от него НЕ
   // зависит: мост создаётся в эффекте ниже по pluginId/url, а чат — просто
   // соседний элемент split-раскладки.
   const panelChat = panels.find((panel) => panel.id === pluginId)?.chat;
-  const url = file.url;
+  // Подписанный URL (токен в пути) — см. `pluginPanelUrl.ts`; `file.url` без
+  // токена демон не отдаст.
+  const panelUrl = usePluginPanelSignedUrl(pluginId);
+  const url = panelUrl.status === "ready" ? panelUrl.url : null;
 
   // Мост живёт ровно столько же, сколько документ панели: пересоздать его на
   // смене контекста значило бы молча потерять подписки, оформленные панелью
@@ -1205,11 +1271,20 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
     const frame = iframeRef.current;
     if (!frame || !pluginId) return;
 
+    // Каждая отправка агенту — только после явного клика пользователя.
+    const localApi = readLocalApi();
+    const confirmSend = createPanelSendConfirmer(
+      localApi ? (message) => localApi.dialogs.confirm(message) : undefined,
+    );
+    // Порт выдаётся документу панели на первый `load`, window-сообщения не
+    // слушаем (см. `attachPanelPortHost`); `bridge` объявлен ниже, но до
+    // первого `load` сообщений быть не может.
+    const portHost = attachPanelPortHost({
+      frame,
+      onMessage: (data) => bridge.handleMessage(data),
+    });
     const bridge = createPanelBridge({
-      post: (message) => {
-        // targetOrigin "*" — у песочницы opaque origin, адресовать её иначе нельзя.
-        iframeRef.current?.contentWindow?.postMessage(message, "*");
-      },
+      post: (message) => portHost.post(message),
       methods: {
         openFile: ({ path }) => {
           const context = contextRef.current;
@@ -1256,6 +1331,7 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
           ) {
             throw new Error("панель работает только с проектами основного окружения");
           }
+          await confirmSend({ panelTitle: panelTitleRef.current, text, threadTag });
           const result = await getPrimaryEnvironmentConnection().client.server.sendPluginToThread({
             pluginId,
             projectId: context.currentChatProjectId,
@@ -1274,13 +1350,6 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
       },
     });
 
-    const onMessage = (event: MessageEvent) => {
-      const currentFrame = iframeRef.current;
-      if (!currentFrame || event.source !== currentFrame.contentWindow) return;
-      bridge.handleMessage(event.data);
-    };
-    window.addEventListener("message", onMessage);
-
     const unsubscribe = subscribeShellEvents((notice) => {
       const context = contextRef.current;
       if (
@@ -1296,13 +1365,18 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
     });
 
     return () => {
-      window.removeEventListener("message", onMessage);
+      portHost.dispose();
       unsubscribe();
     };
   }, [pluginId, url]);
 
   if (!url) {
-    return <MetadataPlaceholder file={file} label="У панели нет адреса" />;
+    return (
+      <MetadataPlaceholder
+        file={file}
+        label={panelUrl.status === "error" ? panelUrl.message : "Loading panel…"}
+      />
+    );
   }
   return (
     <PluginPanelSplit

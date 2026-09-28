@@ -149,6 +149,12 @@ import {
   type TelegramPairing,
 } from "../telegramPairing.ts";
 import {
+  classifyTelegramSender,
+  type ConnectorSenderRole,
+  withOwnerUserId,
+} from "../connectorSenders.ts";
+import { resolveConnectorOutgoingFile } from "../connectorOutgoingFiles.ts";
+import {
   callTelegramBotMethod,
   isRelayCredential,
   redactConnectorSecrets,
@@ -627,9 +633,15 @@ const makeTelegramConnector = Effect.gen(function* () {
     readonly chatId: string;
     readonly chatLabel: string;
     readonly config: ManagerTelegramConnectorConfig;
+    readonly senderRole: Exclude<ConnectorSenderRole, "ignore">;
   }) =>
     Effect.gen(function* () {
       const { target } = input;
+      // Group members the owner let in get a thread of their own, pinned to
+      // approval-required: they never share (or widen) the owner's thread.
+      const forcedRuntimeMode = input.senderRole === "member" ? "approval-required" : null;
+      const mappingChatId =
+        input.senderRole === "member" ? `${input.chatId}:members` : input.chatId;
       const routing = yield* Effect.gen(function* () {
         if (target.kind === "thread") {
           const targetThread = yield* projectionSnapshotQuery.getThreadShellById(target.threadId);
@@ -640,6 +652,7 @@ const makeTelegramConnector = Effect.gen(function* () {
             connectorModelSelection: null,
             projectModelSelection: null,
             inheritedModes: null,
+            forcedRuntimeMode,
           });
         }
         const project = yield* projectionSnapshotQuery.getProjectShellById(target.projectId);
@@ -651,7 +664,7 @@ const makeTelegramConnector = Effect.gen(function* () {
         const existing = yield* connectorRepository.getThreadForChat({
           projectId: target.projectId,
           kind: "telegram",
-          chatId: input.chatId,
+          chatId: mappingChatId,
         });
         const mappedThread = Option.isSome(existing)
           ? routingShell(yield* projectionSnapshotQuery.getThreadShellById(existing.value))
@@ -675,6 +688,7 @@ const makeTelegramConnector = Effect.gen(function* () {
           connectorModelSelection: input.config.defaultModelSelection ?? null,
           projectModelSelection: project.value.defaultModelSelection,
           inheritedModes,
+          forcedRuntimeMode,
         });
       });
 
@@ -706,7 +720,10 @@ const makeTelegramConnector = Effect.gen(function* () {
               commandId: CommandId.make(`telegram:${crypto.randomUUID()}`),
               threadId,
               projectId: routing.projectId,
-              title: `Telegram: ${input.chatLabel}`,
+              title:
+                input.senderRole === "member"
+                  ? `Telegram: ${input.chatLabel} (members)`
+                  : `Telegram: ${input.chatLabel}`,
               modelSelection: routing.modelSelection,
               runtimeMode: routing.runtimeMode,
               interactionMode: routing.interactionMode,
@@ -719,7 +736,7 @@ const makeTelegramConnector = Effect.gen(function* () {
           yield* connectorRepository.setThreadForChat({
             projectId: routing.projectId,
             kind: "telegram",
-            chatId: input.chatId,
+            chatId: mappingChatId,
             threadId,
             createdAt,
           });
@@ -1075,6 +1092,18 @@ const makeTelegramConnector = Effect.gen(function* () {
       }
     });
 
+  // Where a thread's `[[send-file: …]]` may read from: its worktree, else
+  // its project's workspace.
+  const workspaceRootsForThread = (threadId: ThreadId) =>
+    projectionSnapshotQuery.getThreadCheckpointContext(threadId).pipe(
+      Effect.map((context) =>
+        Option.isSome(context)
+          ? [context.value.worktreePath ?? context.value.workspaceRoot]
+          : ([] as Array<string>),
+      ),
+      Effect.orElseSucceed(() => [] as Array<string>),
+    );
+
   const sendReplyWhenTurnCompletes = (input: {
     readonly projectId: ProjectId;
     readonly botToken: string;
@@ -1113,8 +1142,26 @@ const makeTelegramConnector = Effect.gen(function* () {
         } else if (reply.files.length === 0) {
           yield* sendTelegramText(input.projectId, input.botToken, input.chatId, "Done.");
         }
+        const roots = yield* workspaceRootsForThread(input.threadId);
         for (const file of reply.files) {
-          yield* sendTelegramFile(input.projectId, input.botToken, input.chatId, file);
+          const resolved = yield* Effect.promise(() => resolveConnectorOutgoingFile(file, roots));
+          if (!resolved.ok) {
+            yield* Effect.logWarning("telegram send-file refused").pipe(
+              Effect.annotateLogs({
+                chatId: input.chatId,
+                filePath: file,
+                reason: resolved.reason,
+              }),
+            );
+            yield* sendTelegramText(
+              input.projectId,
+              input.botToken,
+              input.chatId,
+              `Could not send ${nodePath.basename(file)}: ${resolved.reason}.`,
+            );
+            continue;
+          }
+          yield* sendTelegramFile(input.projectId, input.botToken, input.chatId, resolved.path);
         }
         yield* markHotWindow(input.hotKey);
         return;
@@ -1156,11 +1203,20 @@ const makeTelegramConnector = Effect.gen(function* () {
         ? Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(stored.value.config)
         : null;
       const base = current !== null && current._tag === "Success" ? current.value : config;
-      if (!base.allowedChatIds.includes(chatId)) {
+      // Linking happens only from a private chat, whose id is the user's id:
+      // that user is recorded as an owner (the only sender groups obey).
+      const ownerUserIds = withOwnerUserId(base.ownerUserIds, String(message.from?.id ?? chatId));
+      if (!base.allowedChatIds.includes(chatId) || ownerUserIds !== (base.ownerUserIds ?? [])) {
         yield* connectorRepository.upsert({
           projectId,
           kind: "telegram",
-          config: { ...base, allowedChatIds: [...base.allowedChatIds, chatId] },
+          config: {
+            ...base,
+            allowedChatIds: base.allowedChatIds.includes(chatId)
+              ? base.allowedChatIds
+              : [...base.allowedChatIds, chatId],
+            ownerUserIds,
+          },
           updatedAt: new Date().toISOString(),
         });
       }
@@ -1214,6 +1270,27 @@ const makeTelegramConnector = Effect.gen(function* () {
       if (startPayload !== null) {
         const pairing = (yield* Ref.get(pairingsRef)).get(projectId);
         if (matchesTelegramPairing(pairing, startPayload, Date.now())) {
+          // Only a person, in a private chat with the bot, can link: a group
+          // would hand every member of it the owner's assistant.
+          const fromId = message.from?.id === undefined ? null : String(message.from.id);
+          if (
+            !isPrivateTelegramChat(message.chat) ||
+            message.from?.is_bot === true ||
+            fromId !== chatId
+          ) {
+            yield* Effect.logInfo("telegram link code used outside a private chat; refused").pipe(
+              Effect.annotateLogs({ projectId, chatId }),
+            );
+            if (message.from?.is_bot !== true) {
+              yield* sendTelegramText(
+                projectId,
+                config.botToken,
+                chatId,
+                "Link Telegram from a private chat with this bot. Groups can be added in Uno Work settings.",
+              );
+            }
+            return;
+          }
           yield* linkChat(projectId, config, message);
           return;
         }
@@ -1242,6 +1319,23 @@ const makeTelegramConnector = Effect.gen(function* () {
         return;
       }
 
+      // --- Who is writing. An allowlisted group is not an allowlisted person:
+      // only the owner drives the assistant; other members are ignored unless
+      // the owner let them in, and then run approval-required only.
+      const senderRole: ConnectorSenderRole = classifyTelegramSender({
+        chat: message.chat,
+        from: message.from,
+        allowedChatIds: config.allowedChatIds,
+        ownerUserIds: config.ownerUserIds,
+        groupMembers: config.groupMembers,
+      });
+      if (senderRole === "ignore") {
+        yield* Effect.logDebug("telegram message from a non-owner sender ignored").pipe(
+          Effect.annotateLogs({ projectId, chatId }),
+        );
+        return;
+      }
+
       const botUsername = (yield* getRuntime(projectId)).botUsername;
 
       // --- Chat commands (`/use`, `/where`, `/approve`, …) come before the
@@ -1249,6 +1343,13 @@ const makeTelegramConnector = Effect.gen(function* () {
       // harness. Anything else is message text for the bound target.
       const command = parseConnectorCommand(text, botUsername);
       if (command !== null) {
+        // Commands rebind the chat and resolve approvals: owner only.
+        if (senderRole !== "owner") {
+          yield* Effect.logDebug("telegram command from a non-owner ignored").pipe(
+            Effect.annotateLogs({ projectId, chatId }),
+          );
+          return;
+        }
         const reply = yield* executeConnectorCommand(
           {
             bindings: bindingRepository,
@@ -1261,6 +1362,7 @@ const makeTelegramConnector = Effect.gen(function* () {
             chatId,
             connectorProjectId: projectId,
             origin: telegramCommandOrigin(chatId),
+            senderIsOwner: senderRole === "owner",
           },
           command,
         );
@@ -1360,6 +1462,7 @@ const makeTelegramConnector = Effect.gen(function* () {
           chatId,
           chatLabel,
           config,
+          senderRole,
         },
       );
       const ingested =

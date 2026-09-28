@@ -27,6 +27,7 @@ import {
 } from "@t3tools/ssh/tunnel";
 import { Effect, Exit, Layer, ManagedRuntime, Scope } from "effect";
 
+import { isSafeSshTargetToken } from "@t3tools/ssh/command";
 export { resolveRemoteT3CliPackageSpec } from "@t3tools/ssh/command";
 
 const DISCOVER_SSH_HOSTS_CHANNEL = "desktop:discover-ssh-hosts";
@@ -172,16 +173,19 @@ function getSafeDesktopSshTarget(rawTarget: unknown): DesktopSshEnvironmentTarge
 
   const alias = target.alias.trim();
   const hostname = target.hostname.trim();
-  if (alias.length === 0 || hostname.length === 0) {
+  if (!isSafeSshTargetToken(alias) || !isSafeSshTargetToken(hostname)) {
+    return null;
+  }
+  const username = target.username?.trim() || null;
+  if (username !== null && (!isSafeSshTargetToken(username) || username.includes("@"))) {
+    return null;
+  }
+  const port = target.port ?? null;
+  if (port !== null && (port < 1 || port > 65_535)) {
     return null;
   }
 
-  return {
-    alias,
-    hostname,
-    username: target.username?.trim() || null,
-    port: target.port ?? null,
-  };
+  return { alias, hostname, username, port };
 }
 
 /** Minimal subset of Electron's BrowserWindow used by the SSH bridge. */

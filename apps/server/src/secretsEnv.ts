@@ -22,8 +22,49 @@ export const SECRET_TARGET_FILE_PATTERN = /^\.env(\.[A-Za-z0-9_-]{1,32})*$/;
 export const SECRET_VALUE_MAX_LENGTH = 65_536;
 export const SECRET_DESCRIPTION_MAX_LENGTH = 2_000;
 
+/**
+ * Names that change how programs start rather than configure an app: a value
+ * in one of them (once the `.env` is sourced or loaded into a process) runs
+ * attacker-chosen code — preloaded libraries, Node/Python/shell startup hooks.
+ * An agent may never ask the person to fill one, whatever it claims.
+ *
+ * `PATH` is deliberately not blocked: apps and tooling legitimately set it,
+ * and a hostile PATH still needs a planted binary (the agent can already
+ * write files), so blocking it would break setups without closing a hole.
+ */
+export const FORBIDDEN_SECRET_NAMES: ReadonlySet<string> = new Set([
+  "NODE_OPTIONS",
+  "PYTHONPATH",
+  "BASH_ENV",
+  "ENV",
+  "PROMPT_COMMAND",
+]);
+
+/** Dynamic-loader families: `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`, … */
+export const FORBIDDEN_SECRET_NAME_PREFIXES: ReadonlyArray<string> = ["LD_", "DYLD_"];
+
+/** Case-insensitive: some loaders and shells are lenient, the check should not be. */
+export const isForbiddenSecretName = (value: string): boolean => {
+  const upper = value.toUpperCase();
+  return (
+    FORBIDDEN_SECRET_NAMES.has(upper) ||
+    FORBIDDEN_SECRET_NAME_PREFIXES.some((prefix) => upper.startsWith(prefix))
+  );
+};
+
+/** Why `value` cannot be a secret name, or null when it can. */
+export const secretNameProblem = (value: unknown): string | null => {
+  if (typeof value !== "string" || !SECRET_NAME_PATTERN.test(value)) {
+    return 'Invalid "name": expected an env-style variable name (letters, digits, _).';
+  }
+  if (isForbiddenSecretName(value)) {
+    return `"${value}" can't be stored: it changes how programs start (LD_*, DYLD_*, NODE_OPTIONS, PYTHONPATH, BASH_ENV, ENV, PROMPT_COMMAND are not allowed). Use an app-specific name instead.`;
+  }
+  return null;
+};
+
 export const isValidSecretName = (value: unknown): value is string =>
-  typeof value === "string" && SECRET_NAME_PATTERN.test(value);
+  secretNameProblem(value) === null;
 
 export const isValidSecretTargetFile = (value: unknown): value is string =>
   typeof value === "string" && SECRET_TARGET_FILE_PATTERN.test(value);
@@ -48,9 +89,13 @@ export const formatEnvValue = (value: string): string => {
 /**
  * Replaces the first active `NAME=`/`export NAME=` line (commented lines are
  * left alone) or appends the assignment at the end. Always returns content
- * with a trailing newline.
+ * with a trailing newline. Throws on an invalid or forbidden name.
  */
 export const upsertEnvContent = (content: string, name: string, value: string): string => {
+  // Last line of defence for every writer (secret requests, db_connection):
+  // an invalid name would also break the line regex below.
+  const problem = secretNameProblem(name);
+  if (problem !== null) throw new Error(problem);
   const assignment = `${name}=${formatEnvValue(value)}`;
   const lines = content.length === 0 ? [] : content.split("\n");
   const linePattern = new RegExp(`^\\s*(?:export\\s+)?${name}\\s*=`);

@@ -38,6 +38,7 @@ const loadedPlugin = (overrides: Partial<LoadedPlugin> = {}): LoadedPlugin => ({
   directoryPath: "/tmp/plugins/deploys",
   manifest: manifest(),
   error: undefined,
+  approval: "approved",
   ...overrides,
 });
 
