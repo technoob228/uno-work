@@ -71,6 +71,21 @@ describe("parseComputerBoost", () => {
     });
   });
 
+  it("reads boost hours earned by economy only when Uno sends them", () => {
+    expect(parseComputerBoost(BOOST_OFF)).not.toHaveProperty("hoursEarnedEconomy");
+    expect(parseComputerBoost(BOOST_OFF)).not.toHaveProperty("economyEarn");
+    expect(
+      parseComputerBoost({
+        ...BOOST_OFF,
+        hours_earned_economy: 1.8,
+        economy_earn: { enabled: true, hours_per_sleep_hour: 0.1, monthly_cap_hours: 10 },
+      }),
+    ).toMatchObject({
+      hoursEarnedEconomy: 1.8,
+      economyEarn: { enabled: true, hoursPerSleepHour: 0.1, monthlyCapHours: 10 },
+    });
+  });
+
   it("treats an unknown state as off and keeps the reason", () => {
     const boost = parseComputerBoost({
       ...BOOST_OFF,

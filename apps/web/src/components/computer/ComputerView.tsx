@@ -43,7 +43,8 @@ import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
 import { AppCatalogDialog } from "./AppCatalogDialog";
 import { BoostControl } from "./BoostControl";
-import { EconomyCard } from "./EconomyControl";
+import { EconomyCard, EconomyLine } from "./EconomyControl";
+import { boostSummaryLine } from "./boostModel";
 import { ChatInFolderDialog } from "./ChatInFolderDialog";
 import { ComputerActivityCard } from "./ComputerActivityCard";
 import { ComputerEngineersDoor } from "./ComputerEngineersDoor";
@@ -407,6 +408,13 @@ export function ComputerView() {
           onAllComputers:
             accountTransport() !== "none" ? () => void navigate({ to: "/my-uno" }) : undefined,
           lowResource: box ? lowResource : null,
+          // Economy is on by default and good for Uno: a quiet line in the
+          // computer menu, not a card on Home (Misha 27.09).
+          economyOn: box?.economy?.enabled === true,
+          economy: box?.economy ? (
+            <EconomyLine environmentId={environmentId} boxId={pickedBoxId} />
+          ) : null,
+          boostSummary: computer?.linked ? boostSummaryLine(box?.boost) : null,
         };
   const pill = <ComputerPill computer={homeComputer} loading={stateQuery.isPending} />;
 
@@ -419,8 +427,6 @@ export function ComputerView() {
         </Notice>
       ) : null}
       {stateQuery.isSuccess && !computer?.linked ? <UnlinkedNote /> : null}
-      {/* Economy mode ("runs only when needed"): only when the console offers it. */}
-      {box?.economy ? <EconomyCard environmentId={environmentId} boxId={pickedBoxId} /> : null}
       {stateQuery.isSuccess && box === null && (computer?.candidates.length ?? 0) > 0 ? (
         <CloudComputers
           candidates={computer?.candidates ?? []}

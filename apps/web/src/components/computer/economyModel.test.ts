@@ -6,7 +6,9 @@ import {
   economyChip,
   economyDescription,
   economyStatusLine,
+  economySummary,
   idleLabel,
+  idleShort,
   shouldHoldReconnect,
 } from "./economyModel";
 
@@ -56,6 +58,18 @@ describe("economy chip and words", () => {
       "Last woke up because a Telegram message.",
     );
     expect(economyStatusLine({ ...economy, enabled: false }, now)).toBeNull();
+  });
+});
+
+describe("economy summary line", () => {
+  it("is one calm line", () => {
+    expect(economySummary(economy)).toBe("Economy: on · sleeps after 10 min idle, wakes in ~1 s");
+    expect(economySummary({ ...economy, idleTimeoutS: 3600 })).toBe(
+      "Economy: on · sleeps after 1 h idle, wakes in ~1 s",
+    );
+    expect(economySummary({ ...economy, enabled: false })).toBe("Economy: off");
+    expect(economySummary(undefined)).toBeNull();
+    expect(idleShort(300)).toBe("5 min");
   });
 });
 

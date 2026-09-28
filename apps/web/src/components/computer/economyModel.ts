@@ -43,6 +43,24 @@ export function idleLabel(seconds: number): string {
   return m === 1 ? "1 minute" : `${m} minutes`;
 }
 
+/** "10 min", "1 h" — the idle timer, short, for the one-line summary. */
+export function idleShort(seconds: number): string {
+  if (seconds >= 3600 && seconds % 3600 === 0) return `${seconds / 3600} h`;
+  return `${Math.max(1, Math.round(seconds / 60))} min`;
+}
+
+/**
+ * The quiet one-liner in the computer menu: "Economy: on · sleeps after 10 min
+ * idle, wakes in ~1 s" / "Economy: off". Null when economy isn't offered.
+ */
+export function economySummary(
+  economy: Pick<UnoComputerEconomy, "enabled" | "idleTimeoutS"> | null | undefined,
+): string | null {
+  if (!economy) return null;
+  if (!economy.enabled) return "Economy: off";
+  return `Economy: on · sleeps after ${idleShort(economy.idleTimeoutS)} idle, wakes in ~1 s`;
+}
+
 /** The idle timers the person can pick. */
 export const ECONOMY_IDLE_CHOICES: ReadonlyArray<number> = [300, 600, 1800, 3600, 3 * 3600];
 

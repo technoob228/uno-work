@@ -73,6 +73,20 @@ export const UnoComputerBoost = Schema.Struct({
   periodResetsAt: Schema.NullOr(Schema.String),
   /** Plain words why a boost can't start; null when it can. */
   reason: Schema.NullOr(Schema.String),
+  /**
+   * Boost hours earned this month by economy mode (every full hour the
+   * computer sleeps earns a little). Whole hours are already in `hoursLeft`.
+   * Absent when Uno doesn't reward economy for this account.
+   */
+  hoursEarnedEconomy: Schema.optional(Schema.Number),
+  /** The rule: boost hours per slept hour and the monthly cap. */
+  economyEarn: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.Boolean,
+      hoursPerSleepHour: Schema.Number,
+      monthlyCapHours: Schema.Number,
+    }),
+  ),
 });
 export type UnoComputerBoost = typeof UnoComputerBoost.Type;
 
