@@ -15,7 +15,7 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveSidebarNewThreadEnvMode } from "~/components/Sidebar.logic";
 import { useSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "~/rpc/serverState";
-import { liteRedirectPath } from "~/lite/webLite";
+import { liteRedirectHref } from "~/lite/webLite";
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
@@ -136,8 +136,8 @@ function ChatRouteLayout() {
 export const Route = createFileRoute("/_chat")({
   beforeLoad: async ({ context, location }) => {
     if (context.authGateState.status === "account-only") {
-      const to = liteRedirectPath(location.pathname);
-      if (to) throw redirect({ to, replace: true });
+      const href = liteRedirectHref(location.pathname, location.searchStr);
+      if (href) throw redirect({ href, replace: true });
       return;
     }
     if (

@@ -90,6 +90,20 @@ const ALLOWED: ReadonlyArray<{ method: string; pattern: RegExp; query?: RegExp }
   { method: "DELETE", pattern: /^\/api\/v1\/boxes\/\d+\/work\/agent-keys\/\d+$/ },
   { method: "GET", pattern: /^\/api\/v1\/boxes\/\d+\/work\/ssh$/ },
   { method: "POST", pattern: /^\/api\/v1\/boxes\/\d+\/work\/ssh-keys$/ },
+  // Uno AI without a computer (28.09): the chats (the console's /ask history),
+  // a turn that runs on the server and its progress, the AI meter by the
+  // composer, confirming the account's email and a trial code from the chat.
+  { method: "GET", pattern: /^\/api\/v1\/ai\/chats$/ },
+  { method: "GET", pattern: /^\/api\/v1\/ai\/chats\/[A-Za-z0-9_-]{1,64}$/ },
+  {
+    method: "GET",
+    pattern: /^\/api\/v1\/ai\/chats\/[A-Za-z0-9_-]{1,64}\/live$/,
+    query: /^after=\d{1,5}$/,
+  },
+  { method: "POST", pattern: /^\/api\/v1\/ai\/chats\/[A-Za-z0-9_-]{1,64}\/turn$/ },
+  { method: "GET", pattern: /^\/api\/v1\/ai\/meter$/ },
+  { method: "POST", pattern: /^\/api\/v1\/ai\/verify-email$/ },
+  { method: "POST", pattern: /^\/api\/v1\/ai\/computer\/trial$/ },
   {
     method: "GET",
     pattern: /^\/api\/v1\/boxes\/\d+\/applogs$/,

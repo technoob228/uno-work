@@ -83,6 +83,7 @@ import { appPrimaryAction } from "./appPrimaryAction";
 import { useAppInstalls } from "./useAppInstalls";
 import { useAppPrimaryAction } from "./useAppPrimaryAction";
 import { useHomeLaunchers } from "./useHomeLaunchers";
+import { useUnoAiArrivals } from "../../unoai/useUnoAiArrivals";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 
 const routeApi = getRouteApi("/_chat/computer");
@@ -149,6 +150,8 @@ export function ComputerView() {
     inFlight: appsQuery.data?.installed.apps ?? [],
   });
   const launchers = useHomeLaunchers(environmentId);
+  // The console's first message / a Uno AI chat moving to this computer.
+  useUnoAiArrivals(thisMachine ? environmentId : null, launchers.sendToUno);
   const primary = useAppPrimaryAction({ environmentId, boxId: pickedBoxId });
 
   const [storeOpen, setStoreOpen] = useState(false);

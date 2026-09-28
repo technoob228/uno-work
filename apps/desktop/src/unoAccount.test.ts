@@ -92,6 +92,16 @@ describe("UnoAccountService", () => {
     );
     expect(isAllowedAccountRequest("GET", "/api/v1/boxes/12/metrics?token=x")).toBe(false);
     expect(isAllowedAccountRequest("GET", "/api/v1/boxes?x=1")).toBe(false);
+    // Uno AI without a computer (28.09).
+    expect(isAllowedAccountRequest("GET", "/api/v1/ai/chats")).toBe(true);
+    expect(isAllowedAccountRequest("GET", "/api/v1/ai/chats/wabc12")).toBe(true);
+    expect(isAllowedAccountRequest("GET", "/api/v1/ai/chats/wabc12/live?after=7")).toBe(true);
+    expect(isAllowedAccountRequest("GET", "/api/v1/ai/chats/wabc12/live?after=7&x=1")).toBe(false);
+    expect(isAllowedAccountRequest("POST", "/api/v1/ai/chats/wabc12/turn")).toBe(true);
+    expect(isAllowedAccountRequest("PUT", "/api/v1/ai/chats/wabc12")).toBe(false);
+    expect(isAllowedAccountRequest("GET", "/api/v1/ai/meter")).toBe(true);
+    expect(isAllowedAccountRequest("POST", "/api/v1/ai/verify-email")).toBe(true);
+    expect(isAllowedAccountRequest("POST", "/api/v1/ai/computer/trial")).toBe(true);
     expect(isAllowedAccountRequest("POST", "/api/v1/box-subscription/change")).toBe(false);
     expect(isAllowedAccountRequest("POST", "/pay/direct/create")).toBe(false);
     expect(isAllowedAccountRequest("POST", "/api/v1/boxes")).toBe(false);

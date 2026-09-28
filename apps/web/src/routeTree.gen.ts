@@ -33,6 +33,7 @@ import { Route as ChatDriveRouteImport } from './routes/_chat.drive'
 import { Route as ChatComputerRouteImport } from './routes/_chat.computer'
 import { Route as ChatAssistantRouteImport } from './routes/_chat.assistant'
 import { Route as ChatAppRouteImport } from './routes/_chat.app'
+import { Route as ChatAiRouteImport } from './routes/_chat.ai'
 import { Route as ChatAssistantIndexRouteImport } from './routes/_chat.assistant.index'
 import { Route as SettingsEnvironmentEnvironmentIdRouteImport } from './routes/settings.environment.$environmentId'
 import { Route as SettingsAppPhoneRouteImport } from './routes/settings.app.phone'
@@ -170,6 +171,11 @@ const ChatAppRoute = ChatAppRouteImport.update({
   path: '/app',
   getParentRoute: () => ChatRoute,
 } as any)
+const ChatAiRoute = ChatAiRouteImport.update({
+  id: '/ai',
+  path: '/ai',
+  getParentRoute: () => ChatRoute,
+} as any)
 const ChatAssistantIndexRoute = ChatAssistantIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -271,6 +277,7 @@ export interface FileRoutesByFullPath {
   '/onboarding': typeof OnboardingRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/ai': typeof ChatAiRoute
   '/app': typeof ChatAppRoute
   '/assistant': typeof ChatAssistantRouteWithChildren
   '/computer': typeof ChatComputerRoute
@@ -312,6 +319,7 @@ export interface FileRoutesByTo {
   '/onboarding': typeof OnboardingRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/ai': typeof ChatAiRoute
   '/app': typeof ChatAppRoute
   '/computer': typeof ChatComputerRoute
   '/drive': typeof ChatDriveRoute
@@ -355,6 +363,7 @@ export interface FileRoutesById {
   '/onboarding': typeof OnboardingRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/_chat/ai': typeof ChatAiRoute
   '/_chat/app': typeof ChatAppRoute
   '/_chat/assistant': typeof ChatAssistantRouteWithChildren
   '/_chat/computer': typeof ChatComputerRoute
@@ -400,6 +409,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/pair'
     | '/settings'
+    | '/ai'
     | '/app'
     | '/assistant'
     | '/computer'
@@ -441,6 +451,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/pair'
     | '/settings'
+    | '/ai'
     | '/app'
     | '/computer'
     | '/drive'
@@ -483,6 +494,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/pair'
     | '/settings'
+    | '/_chat/ai'
     | '/_chat/app'
     | '/_chat/assistant'
     | '/_chat/computer'
@@ -699,6 +711,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatAppRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/_chat/ai': {
+      id: '/_chat/ai'
+      path: '/ai'
+      fullPath: '/ai'
+      preLoaderRoute: typeof ChatAiRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/assistant/': {
       id: '/_chat/assistant/'
       path: '/'
@@ -837,6 +856,7 @@ const ChatAssistantRouteWithChildren = ChatAssistantRoute._addFileChildren(
 )
 
 interface ChatRouteChildren {
+  ChatAiRoute: typeof ChatAiRoute
   ChatAppRoute: typeof ChatAppRoute
   ChatAssistantRoute: typeof ChatAssistantRouteWithChildren
   ChatComputerRoute: typeof ChatComputerRoute
@@ -851,6 +871,7 @@ interface ChatRouteChildren {
 }
 
 const ChatRouteChildren: ChatRouteChildren = {
+  ChatAiRoute: ChatAiRoute,
   ChatAppRoute: ChatAppRoute,
   ChatAssistantRoute: ChatAssistantRouteWithChildren,
   ChatComputerRoute: ChatComputerRoute,

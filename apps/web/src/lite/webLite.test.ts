@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { parseAccountPlan, parsePlanCatalog, parseSubscription } from "../account/accountOverview";
 import {
-  LITE_HOME_PATH,
+  LITE_AI_PATH,
   cheapestCloudPlan,
   isWebLite,
   liteEmptyComputersCopy,
   liteLadder,
+  liteRedirectHref,
   liteRedirectPath,
   liteStanding,
 } from "./webLite";
@@ -56,13 +57,22 @@ describe("web lite flag", () => {
 });
 
 describe("liteRedirectPath", () => {
-  it("keeps My Uno and sends everything else there", () => {
+  it("keeps Uno AI and My Uno and sends everything else to Uno AI", () => {
     expect(liteRedirectPath("/my-uno")).toBeNull();
     expect(liteRedirectPath("/my-uno/")).toBeNull();
+    expect(liteRedirectPath("/ai")).toBeNull();
     for (const path of ["/", "/pair", "/onboarding", "/settings/general", "/computer", "/files"]) {
-      expect(liteRedirectPath(path)).toBe(LITE_HOME_PATH);
+      expect(liteRedirectPath(path)).toBe(LITE_AI_PATH);
     }
-    expect(liteRedirectPath("/env-1/thread-1")).toBe(LITE_HOME_PATH);
+    expect(liteRedirectPath("/env-1/thread-1")).toBe(LITE_AI_PATH);
+  });
+});
+
+describe("liteRedirectHref", () => {
+  it("keeps the console's first message on the way to Uno AI", () => {
+    expect(liteRedirectHref("/", "?q=I%20want%20a%20site")).toBe("/ai?q=I%20want%20a%20site");
+    expect(liteRedirectHref("/", "?t=x")).toBe("/ai");
+    expect(liteRedirectHref("/ai", "?q=x")).toBeNull();
   });
 });
 

@@ -2,9 +2,10 @@
  * "Web lite" — Uno Work in the browser for people without Uno Work in the
  * cloud (Free and Small plans). app.uno4.work serves this build to a
  * signed-in person who has no Uno Work computer and no plan that could run
- * one (fishcode: BOX_WORK_LITE_DIR). It is My Uno only — computers, sites,
- * cloud storage, plan & billing — read from the account API; no chats, no
- * agent, no terminal, no machine connection.
+ * one (fishcode: BOX_WORK_LITE_DIR). It is Uno AI (the chat that builds sites
+ * without a computer, run by the console — see unoai/) and My Uno — computers,
+ * sites, cloud storage, plan & billing — read from the account API; no agent
+ * on a machine, no terminal, no machine connection.
  *
  * Chosen at build time (`bun run build:lite` → dist-lite), never guessed at
  * runtime: the same bundle can't accidentally turn into the full app or back.
@@ -19,17 +20,31 @@ import { planHasUnoAi } from "../account/aiHours";
 /** True in the lite build only (VITE_UNO_WORK_LITE=1 / `vite build --mode lite`). */
 export { isWebLite } from "./flag";
 
-/** Where lite lives. Every other path of the full app lands here. */
+/** My Uno in lite. */
 export const LITE_HOME_PATH = "/my-uno";
+/** Uno AI — where lite opens (My Uno for accounts before the work_ai rollout, see unoai/UnoAiRoute). */
+export const LITE_AI_PATH = "/ai";
 
 /**
  * The path lite should be on for a requested one, or null when it may stay.
- * Only My Uno exists in lite; chats, settings, pairing and onboarding need a
- * computer this page is not connected to.
+ * Uno AI and My Uno exist in lite; the machine's chats, settings, pairing and
+ * onboarding need a computer this page is not connected to — they land on
+ * Uno AI.
  */
 export function liteRedirectPath(pathname: string): string | null {
   const path = pathname.replace(/\/+$/, "") || "/";
-  return path === LITE_HOME_PATH ? null : LITE_HOME_PATH;
+  return path === LITE_HOME_PATH || path === LITE_AI_PATH ? null : LITE_AI_PATH;
+}
+
+/**
+ * The same as an href that keeps the first message of the console's hand-off
+ * (`/?q=…` → `/ai?q=…`). Other query parameters are dropped.
+ */
+export function liteRedirectHref(pathname: string, search: string): string | null {
+  const to = liteRedirectPath(pathname);
+  if (!to) return null;
+  const q = new URLSearchParams(search).get("q");
+  return q && to === LITE_AI_PATH ? `${to}?q=${encodeURIComponent(q)}` : to;
 }
 
 export const liteLinks = {
@@ -75,12 +90,12 @@ export function cheapestCloudPlan(catalog: PlanCatalog | undefined): AccountPlan
 }
 
 /**
- * "Open Uno Work in the cloud": the backend decides what "/" serves. After
- * an upgrade it provisions the cloud computer on this load (its plan cache
- * can lag up to ~30 s — the button says so).
+ * "Open Uno Work in the cloud": `/?computer=create` goes past the Uno chat
+ * straight to the machine — the backend creates it on this load (after an
+ * upgrade its plan cache can lag up to ~30 s — the button says so).
  */
 export function openCloudWork(): void {
-  window.location.assign("/");
+  window.location.assign("/?computer=create");
 }
 
 export interface LiteRung {

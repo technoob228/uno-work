@@ -5,6 +5,7 @@
  * built-in widgets and apps' own widgets. Customize lives on the page itself,
  * next to "Add a widget"; the computer lives in the header pill.
  */
+import { UnoAiChatsCard } from "../../../unoai/UnoAiChatsList";
 import { DEFAULT_RUNTIME_MODE, type EnvironmentId, type UnoMachineApp } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -356,7 +357,14 @@ export function HomeStart({
           ),
         };
       case "continue":
-        return { body: <ContinueCards threads={threads} now={now} /> };
+        return {
+          body: (
+            <div className="flex flex-col gap-4">
+              <ContinueCards threads={threads} now={now} />
+              <UnoAiChatsCard />
+            </div>
+          ),
+        };
       default:
         return renderWidget(id);
     }

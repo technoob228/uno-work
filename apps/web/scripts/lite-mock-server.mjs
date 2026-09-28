@@ -12,6 +12,10 @@
  *
  * Env: PORT (default 8093), LITE_DIST (default ./dist-lite).
  *
+ * LITE_PROXY=https://console.uno4.dev LITE_PROXY_TOKEN=<session JWT> forwards
+ * /_account/* to a real console as that account instead (Uno AI end to end
+ * on a laptop: the chat runs on the real server).
+ *
  * LITE_FIXTURES=<dir> answers GETs from recorded responses instead: the file
  * for /api/v1/work/plans is <dir>/_api_v1_work_plans.json (a trailing
  * "<http_code> <time>s" line from curl -w is ignored). Missing files answer
@@ -281,6 +285,29 @@ const TYPES = {
   ".wasm": "application/wasm",
 };
 
+async function proxyAccount(req, res, pathAndQuery) {
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
+  const body = chunks.length ? Buffer.concat(chunks) : undefined;
+  try {
+    const r = await fetch(process.env.LITE_PROXY + pathAndQuery, {
+      method: req.method,
+      headers: {
+        Authorization: `Bearer ${process.env.LITE_PROXY_TOKEN ?? ""}`,
+        ...(body ? { "Content-Type": req.headers["content-type"] ?? "application/json" } : {}),
+      },
+      body,
+    });
+    res.writeHead(r.status, {
+      "Content-Type": r.headers.get("content-type") ?? "application/json",
+    });
+    res.end(Buffer.from(await r.arrayBuffer()));
+  } catch (e) {
+    res.writeHead(502, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "PROXY", detail: String(e) }));
+  }
+}
+
 function serveStatic(res, pathname) {
   let file = path.join(DIST, decodeURIComponent(pathname));
   if (!file.startsWith(DIST)) file = path.join(DIST, "index.html");
@@ -294,6 +321,9 @@ function serveStatic(res, pathname) {
 http
   .createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
+    if (url.pathname.startsWith("/_account/") && process.env.LITE_PROXY) {
+      return void proxyAccount(req, res, url.pathname.slice("/_account".length) + url.search);
+    }
     if (url.pathname.startsWith("/_account/")) {
       const accountPath = url.pathname.slice("/_account".length);
       if (accountPath.startsWith("/api/v1/drive") && req.headers["x-uno-account"] === "1") {

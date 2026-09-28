@@ -38,12 +38,14 @@ import type { MyUnoRouteSearch } from "../routes/_chat.my-uno";
 import {
   LITE_HOME_PATH,
   liteLinks,
-  liteRedirectPath,
+  liteRedirectHref,
   liteStanding,
   openCloudWork,
 } from "./webLite";
 import { SidebarShortcutListener } from "../components/sidebar/SidebarShowButton";
 import { PaymentNoticeBanner } from "../components/billing/PaymentNoticeBanner";
+import { UnoAiSidebarGroup } from "../unoai/UnoAiChatsList";
+import { WORK_AI_FEATURE } from "../unoai/unoAiApi";
 
 /** The root of the lite app (rendered by routes/__root.tsx in the lite build). */
 export function LiteRoot() {
@@ -64,13 +66,14 @@ export function LiteRoot() {
  */
 function useLiteHomeRedirect(): boolean {
   const pathname = useLocation({ select: (location) => location.pathname });
+  const searchStr = useLocation({ select: (location) => location.searchStr });
   const navigate = useNavigate();
-  const target = liteRedirectPath(pathname);
+  const target = liteRedirectHref(pathname, searchStr);
   const redirected = useRef<string | null>(null);
   useEffect(() => {
     if (!target || redirected.current === pathname) return;
     redirected.current = pathname;
-    void navigate({ to: target, replace: true });
+    void navigate({ href: target, replace: true });
   }, [navigate, pathname, target]);
   return target !== null;
 }
@@ -95,6 +98,8 @@ function LiteShell({ children }: { children: ReactNode }) {
 
 function LiteSidebar() {
   const search = useSearch({ strict: false }) as MyUnoRouteSearch;
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const onMyUno = pathname.startsWith(LITE_HOME_PATH);
   const subscription = useQuery(subscriptionQuery());
   const balance = useQuery(balanceQuery());
   const sub = subscription.data ?? null;
@@ -103,7 +108,8 @@ function LiteSidebar() {
   const plan = subscription.isPending ? null : sub ? planTitle(sub.limits, sub.plan) : "Free";
 
   const here = (tab: MyUnoRouteSearch["tab"], section: MyUnoRouteSearch["section"]) =>
-    search.tab === tab && (tab === "billing" || search.section === section);
+    onMyUno && search.tab === tab && (tab === "billing" || search.section === section);
+  const workAi = (balance.data?.features ?? []).includes(WORK_AI_FEATURE);
 
   const nav: ReadonlyArray<{
     label: string;
@@ -170,6 +176,7 @@ function LiteSidebar() {
         </div>
       </SidebarHeader>
       <SidebarContent>
+        {workAi ? <UnoAiSidebarGroup active={!onMyUno} /> : null}
         <SidebarGroup>
           <SidebarGroupLabel>My Uno</SidebarGroupLabel>
           <SidebarMenu>

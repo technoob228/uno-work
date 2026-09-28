@@ -574,6 +574,8 @@ export interface AccountBalance {
   readonly aiHoursMinutes: number | null;
   /** `onboarding_path`: the goal picked on the console's /start (raw value). */
   readonly onboardingPath: string | null;
+  /** `/auth/me` `features` (feature flags on for this account, e.g. `work_ai`). */
+  readonly features?: ReadonlyArray<string>;
 }
 
 export async function fetchBalance(): Promise<AccountBalance> {
@@ -590,6 +592,9 @@ export async function fetchBalance(): Promise<AccountBalance> {
     aiBalanceUsd: num(me["llm_balance"]),
     aiHoursMinutes: numOrNull(me["ai_hours_minutes"]),
     onboardingPath: strOrNull(me["onboarding_path"]),
+    features: Array.isArray(me["features"])
+      ? (me["features"] as unknown[]).filter((f): f is string => typeof f === "string")
+      : [],
   };
 }
 
