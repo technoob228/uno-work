@@ -13,6 +13,8 @@ import { useSavedEnvironmentRegistryStore } from "../environments/runtime";
 import { APP_BASE_NAME, APP_DISPLAY_NAME } from "~/branding";
 import { resolveDefaultLandingTarget } from "../defaultLanding";
 import { useActiveMachine } from "../hooks/useActiveMachine";
+import { useSettings } from "../hooks/useSettings";
+import { isWebApp } from "../webMode";
 import { useDefaultEnvironment } from "../hooks/useDefaultEnvironment";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { getProjectOrderKey } from "../logicalProject";
@@ -87,16 +89,30 @@ function useDefaultLandingRedirect(enabled: boolean) {
 }
 
 function ChatIndexRouteView() {
-  const { authGateState } = Route.useRouteContext();
+  const context = Route.useRouteContext();
+  const { authGateState } = context;
   const savedEnvironmentCount = useSavedEnvironmentRegistryStore(
     (state) => Object.keys(state.byId).length,
   );
   const needsEnvironment = authGateState.status === "hosted-static" && savedEnvironmentCount === 0;
+  // In the browser the root sends a not-yet-onboarded person to /setup. This
+  // view must not race it with its own redirect: while the root's async
+  // beforeLoad is pending the router keeps "/" matched, this view remounts
+  // (fresh ref) after every root redirect and sent the browser back to
+  // /computer — /computer ↔ /setup ~20 times, the whole tree remounted each
+  // time (27× server.getConfig over the socket, toasts' portals → React
+  // #185), ~0.3 s lost on every first open in a new browser (27.09).
+  const onboardingCompleted = useSettings((settings) => settings.onboardingCompleted);
+  const rootSendsToSetup =
+    isWebApp &&
+    "needsOnboarding" in context &&
+    context.needsOnboarding === true &&
+    !onboardingCompleted;
   // A cloud computer opens on its home screen (programs, files, apps); a
   // local one resumes the most recent chat.
   const machine = useActiveMachine();
-  const openHome = !needsEnvironment && machine.isCloud;
-  useDefaultLandingRedirect(!needsEnvironment && !openHome);
+  const openHome = !needsEnvironment && !rootSendsToSetup && machine.isCloud;
+  useDefaultLandingRedirect(!needsEnvironment && !rootSendsToSetup && !openHome);
   // Once, not <Navigate>: this view stays mounted while the root's async
   // beforeLoad is pending, and a <Navigate> re-fired the same navigation on
   // every render — React "Maximum update depth exceeded" (#185).
