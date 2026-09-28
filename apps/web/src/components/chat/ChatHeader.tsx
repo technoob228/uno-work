@@ -34,6 +34,7 @@ import { ContinueOnMachineDialog } from "../ContinueOnMachineDialog";
 import { DraftFolderChip } from "./DraftFolderChip";
 import { cn } from "../../lib/utils";
 import { AssistantChatHeaderActions } from "./AssistantChatHeaderActions";
+import { ComputerChip } from "../computer/home/ComputerChip";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
 import {
   ASSISTANT_CHAT_NAME,
@@ -235,6 +236,8 @@ export const ChatHeader = memo(function ChatHeader({
         </TooltipProvider>
       </div>
       <div className="flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3">
+        {/* Which computer, and switching to another, from any chat (0.0.96). */}
+        <ComputerChip />
         {isAssistantChat ? (
           <AssistantChatHeaderActions environmentId={activeThreadEnvironmentId} />
         ) : null}

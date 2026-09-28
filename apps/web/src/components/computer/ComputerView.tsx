@@ -32,7 +32,7 @@ import {
   MonitorIcon,
   RefreshCwIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { accountTransport } from "../../account/unoAccount";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
@@ -43,15 +43,14 @@ import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
 import { AppCatalogDialog } from "./AppCatalogDialog";
 import { BoostControl } from "./BoostControl";
-import { EconomyCard, EconomyLine } from "./EconomyControl";
-import { boostSummaryLine } from "./boostModel";
+import { EconomyCard } from "./EconomyControl";
 import { ChatInFolderDialog } from "./ChatInFolderDialog";
 import { ComputerActivityCard } from "./ComputerActivityCard";
 import { ComputerEngineersDoor } from "./ComputerEngineersDoor";
 import { ComputerCloudStorageRow } from "./ComputerCloudStorageRow";
-import { ComputerHero, PowerConfirmDialog, type ComputerLoad } from "./ComputerHero";
+import { ComputerHero } from "./ComputerHero";
 import { ComputerPrograms, type BuiltInPrograms } from "./ComputerPrograms";
-import { awakeLine, computerPowerState, humanDuration, sizeLine } from "./computerFormat";
+import { computerPowerState } from "./computerFormat";
 import {
   appAiQueryKey,
   appAiQueryOptions,
@@ -59,11 +58,7 @@ import {
   appSignInApi,
   computerActivityQueryOptions,
   computerAppsQueryOptions,
-  computerMetricsQueryOptions,
-  computerPowerMutationOptions,
   computerQueryKeys,
-  computerStateQueryOptions,
-  localMetricsQueryOptions,
   machineAppActionMutationOptions,
   machineAppsQueryOptions,
   removeStoreAppMutationOptions,
@@ -71,12 +66,11 @@ import {
 } from "./computerQueries";
 import { ProgramDialog, type ProgramRemoveControls } from "./ProgramDialog";
 import { openAppSignedIn } from "./openSignedIn";
-import { ComputerPill, type HomeComputer } from "./home/ComputerPill";
+import { ComputerPill } from "./home/ComputerPill";
+import { useHomeComputer } from "./home/useHomeComputer";
 import { HomeStart, useHomeLayout } from "./home/HomeStart";
-import { ResizeDialog } from "./ResizeDialog";
 import { ResourcesView } from "./resources/ResourcesView";
 import type { ResourceLook } from "./resources/resourceModel";
-import { LOW_DISK_PCT, LOW_MEMORY_PCT, isSustained } from "./resizeModel";
 import {
   buildProgramTiles,
   withAiNotes,
@@ -88,17 +82,10 @@ import {
 import { appPrimaryAction } from "./appPrimaryAction";
 import { useAppInstalls } from "./useAppInstalls";
 import { useAppPrimaryAction } from "./useAppPrimaryAction";
-import { useComputerBoost } from "./useComputerBoost";
 import { useHomeLaunchers } from "./useHomeLaunchers";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 
 const routeApi = getRouteApi("/_chat/computer");
-
-const PLATFORM_WORD: Record<string, string> = {
-  linux: "Linux",
-  darwin: "Mac",
-  win32: "Windows",
-};
 
 export function ComputerView() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -111,17 +98,33 @@ export function ComputerView() {
   const [pickedBoxId, setPickedBoxId] = useState<number | null>(null);
   const thisMachine = pickedBoxId === null;
 
-  const stateQuery = useQuery(computerStateQueryOptions(environmentId, pickedBoxId));
-  const computer = stateQuery.data;
-  const box = computer?.box ?? null;
-  const power = computerPowerState(box?.status);
-  const hasBox = box !== null;
-  const computerOn = box ? power === "on" : true;
+  const routeSearch = routeApi.useSearch();
+  const navigate = useNavigate();
+  // "What's using your computer": this machine's own daemon reads it.
+  const look = thisMachine ? routeSearch.look : undefined;
+  const openLook = (next: ResourceLook, replace = false) =>
+    void navigate({ to: "/computer", search: { look: next }, replace });
 
-  const localMetricsQuery = useQuery(localMetricsQueryOptions(environmentId, thisMachine));
-  const cloudMetricsQuery = useQuery(
-    computerMetricsQueryOptions(environmentId, pickedBoxId, hasBox && !thisMachine),
-  );
+  const home = useHomeComputer({
+    environmentId,
+    boxId: pickedBoxId,
+    onOpenLook: thisMachine ? (next) => openLook(next) : undefined,
+  });
+  const {
+    stateQuery,
+    computer,
+    box,
+    computerOn,
+    load,
+    lowResource,
+    boostControls,
+    boosting,
+    openResize,
+    powerMutation,
+    powerControls,
+    homeComputer,
+  } = home;
+  const hasBox = box !== null;
   const machineAppsQuery = useQuery(machineAppsQueryOptions(environmentId, thisMachine));
   const activityQuery = useQuery(computerActivityQueryOptions(environmentId, pickedBoxId, hasBox));
   const appsQuery = useQuery(computerAppsQueryOptions(environmentId, pickedBoxId, hasBox));
@@ -132,9 +135,6 @@ export function ComputerView() {
     refetchInterval: false,
   });
 
-  const powerMutation = useMutation(
-    computerPowerMutationOptions(environmentId, pickedBoxId, queryClient),
-  );
   const appAction = useMutation(machineAppActionMutationOptions(environmentId, queryClient));
   const removeStoreApp = useMutation(
     removeStoreAppMutationOptions(environmentId, pickedBoxId, queryClient),
@@ -152,12 +152,8 @@ export function ComputerView() {
   const primary = useAppPrimaryAction({ environmentId, boxId: pickedBoxId });
 
   const [storeOpen, setStoreOpen] = useState(false);
-  const routeSearch = routeApi.useSearch();
-  const navigate = useNavigate();
   const [folderOpen, setFolderOpen] = useState(false);
   const [detailsKey, setDetailsKey] = useState<string | null>(null);
-  const [resizeOpen, setResizeOpen] = useState(false);
-  const [powerConfirm, setPowerConfirm] = useState<"sleep" | "stop" | null>(null);
   const layout = useHomeLayout();
 
   const browserOnMachine =
@@ -186,37 +182,6 @@ export function ComputerView() {
     ],
   );
   const detailsTile = tiles.find((tile) => tile.key === detailsKey) ?? null;
-
-  const load: ComputerLoad | null = thisMachine
-    ? localMetricsQuery.data
-      ? {
-          cpuPct: localMetricsQuery.data.cpuPct,
-          memUsedMb: localMetricsQuery.data.memUsedMb,
-          memTotalMb: localMetricsQuery.data.memTotalMb,
-          diskUsedGb: localMetricsQuery.data.diskUsedGb,
-          diskTotalGb: localMetricsQuery.data.diskTotalGb,
-        }
-      : null
-    : cloudMetricsQuery.data?.availability === "ok"
-      ? {
-          cpuPct: cloudMetricsQuery.data.cpuPct,
-          memUsedMb: cloudMetricsQuery.data.memUsedMb,
-          memTotalMb: cloudMetricsQuery.data.memLimitMb,
-          diskUsedGb: cloudMetricsQuery.data.diskUsedGb,
-          diskTotalGb: cloudMetricsQuery.data.diskTotalGb ?? box?.diskGb ?? null,
-        }
-      : null;
-
-  const lowResource = useLowResource(load);
-
-  const local = localMetricsQuery.data;
-  const heroName = box?.name ?? local?.hostname ?? "This computer";
-  const heroSubtitle = box
-    ? [sizeLine(box), awakeLine(box)].filter(Boolean).join(" · ") ||
-      "Your computer in the Uno cloud"
-    : local
-      ? `${PLATFORM_WORD[local.platform] ?? local.platform} · ${local.cpuCount} cores · awake ${humanDuration(local.uptimeS)}`
-      : null;
 
   const catalog = appsQuery.data?.catalog;
   const hasFilesApp = "/files" in (router.routesByPath as unknown as Record<string, unknown>);
@@ -354,21 +319,8 @@ export function ComputerView() {
     void navigate({ to: "/computer", search: {}, replace: true });
   }, [navigate, routeSearch.store, storeAvailable]);
 
-  // "What's using your computer": this machine's own daemon reads it.
-  const look = thisMachine ? routeSearch.look : undefined;
-  const openLook = (next: ResourceLook, replace = false) =>
-    void navigate({ to: "/computer", search: { look: next }, replace });
-  const boostControls = useComputerBoost({
-    environmentId,
-    boxId: pickedBoxId,
-    boost: computer?.linked ? box?.boost : undefined,
-    stateUpdatedAt: stateQuery.dataUpdatedAt,
-  });
-  // Resizing a boosted computer would fight the boost: one at a time.
-  const boosting = boostControls !== null && boostControls.state !== "off";
-  const canResize = box !== null && computer?.linked === true && !boosting;
   const boostNode =
-    boostControls && (power === "on" || boosting) ? (
+    boostControls && (home.power === "on" || boosting) ? (
       <BoostControl controls={boostControls} />
     ) : null;
 
@@ -376,46 +328,6 @@ export function ComputerView() {
     void queryClient.invalidateQueries({ queryKey: computerQueryKeys.all });
   };
 
-  const powerControls = box
-    ? {
-        pendingAction: powerMutation.isPending ? (powerMutation.variables?.action ?? null) : null,
-        error: powerMutation.error instanceof Error ? powerMutation.error.message : null,
-      }
-    : null;
-  // Home's header pill (and the "This computer" widget): the hero, folded.
-  const homeComputer: HomeComputer | null =
-    stateQuery.isPending || stateQuery.isError
-      ? null
-      : {
-          name: heroName,
-          subtitle: heroSubtitle,
-          status: box?.status ?? null,
-          address: box?.address ?? null,
-          load,
-          boosted: boosting,
-          boost: boostControls ? <BoostControl controls={boostControls} size="xs" /> : null,
-          onResize: canResize ? () => setResizeOpen(true) : undefined,
-          power: powerControls
-            ? {
-                ...powerControls,
-                onPower: (action) =>
-                  action === "sleep" || action === "stop"
-                    ? setPowerConfirm(action)
-                    : powerMutation.mutate({ action }),
-              }
-            : null,
-          onOpenLook: thisMachine ? (next) => openLook(next) : undefined,
-          onAllComputers:
-            accountTransport() !== "none" ? () => void navigate({ to: "/my-uno" }) : undefined,
-          lowResource: box ? lowResource : null,
-          // Economy is on by default and good for Uno: a quiet line in the
-          // computer menu, not a card on Home (Misha 27.09).
-          economyOn: box?.economy?.enabled === true,
-          economy: box?.economy ? (
-            <EconomyLine environmentId={environmentId} boxId={pickedBoxId} />
-          ) : null,
-          boostSummary: computer?.linked ? boostSummaryLine(box?.boost) : null,
-        };
   const pill = <ComputerPill computer={homeComputer} loading={stateQuery.isPending} />;
 
   const notices = (
@@ -496,7 +408,7 @@ export function ComputerView() {
               look={look}
               onLookChange={(next) => openLook(next, true)}
               onBack={() => void navigate({ to: "/computer", search: {} })}
-              onResize={canResize ? () => setResizeOpen(true) : undefined}
+              onResize={openResize}
               onAskUno={launchers.askUno}
               boost={boostNode}
               footer={
@@ -552,13 +464,13 @@ export function ComputerView() {
                 <>
                   {/* Another cloud computer, picked from a laptop: its full view. */}
                   <ComputerHero
-                    name={heroName}
-                    subtitle={heroSubtitle}
+                    name={home.name}
+                    subtitle={home.subtitle}
                     status={box?.status ?? null}
                     address={box?.address ?? null}
                     own={computer?.own ?? false}
                     load={load}
-                    loadLive={cloudMetricsQuery.isSuccess}
+                    loadLive={home.loadLive}
                     power={
                       powerControls
                         ? {
@@ -567,7 +479,7 @@ export function ComputerView() {
                           }
                         : null
                     }
-                    onResize={canResize ? () => setResizeOpen(true) : undefined}
+                    onResize={openResize}
                     lowResource={box ? lowResource : null}
                     boost={boostNode}
                     economy={box?.economy}
@@ -604,15 +516,7 @@ export function ComputerView() {
         </div>
       </div>
 
-      <PowerConfirmDialog
-        confirm={powerConfirm}
-        own={computer?.own ?? false}
-        onCancel={() => setPowerConfirm(null)}
-        onConfirm={(action) => {
-          powerMutation.mutate({ action });
-          setPowerConfirm(null);
-        }}
-      />
+      {home.dialogs}
 
       <ProgramDialog
         tile={detailsTile}
@@ -671,13 +575,6 @@ export function ComputerView() {
               return r;
             }),
         }}
-      />
-
-      <ResizeDialog
-        environmentId={environmentId}
-        boxId={pickedBoxId}
-        open={resizeOpen}
-        onOpenChange={setResizeOpen}
       />
 
       <ChatInFolderDialog
@@ -744,34 +641,6 @@ export function ComputerView() {
       />
     </SidebarInset>
   );
-}
-
-/**
- * "Running low" only when it is steady: the last few readings (a few seconds
- * apart) all over the line — memory > 85 %, disk > 90 %.
- */
-function useLowResource(load: ComputerLoad | null): "memory" | "disk" | null {
-  const memory = useRef<number[]>([]);
-  const disk = useRef<number[]>([]);
-  const [low, setLow] = useState<"memory" | "disk" | null>(null);
-  const memPct =
-    load?.memUsedMb != null && load.memTotalMb ? (load.memUsedMb / load.memTotalMb) * 100 : null;
-  const diskPct =
-    load?.diskUsedGb != null && load.diskTotalGb
-      ? (load.diskUsedGb / load.diskTotalGb) * 100
-      : null;
-  useEffect(() => {
-    if (memPct !== null) memory.current = [...memory.current, memPct].slice(-10);
-    if (diskPct !== null) disk.current = [...disk.current, diskPct].slice(-10);
-    setLow(
-      isSustained(memory.current, LOW_MEMORY_PCT)
-        ? "memory"
-        : isSustained(disk.current, LOW_DISK_PCT, 2)
-          ? "disk"
-          : null,
-    );
-  }, [memPct, diskPct]);
-  return low;
 }
 
 function UnlinkedNote() {

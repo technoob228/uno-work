@@ -2,7 +2,7 @@ import "../../../index.css";
 
 import type { EnvironmentId, UnoComputerState } from "@t3tools/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 import { describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
@@ -160,5 +160,57 @@ describe("ComputerPill — the one computer menu", () => {
     await page.getByTestId("home-computer-pill").click();
     await page.getByText("Add computer").click();
     expect(openAddComputer).toHaveBeenCalled();
+  });
+
+  describe("in the chat header (fit=chat)", () => {
+    const chip = (width: number) => (
+      <div className="@container/header-actions flex justify-end p-2" style={{ width }}>
+        <ComputerPill
+          loading={false}
+          fit="chat"
+          computer={{
+            name: "uno-work",
+            subtitle: null,
+            status: "running",
+            address: null,
+            load: { cpuPct: 12, memUsedMb: 1400, memTotalMb: 4096, diskUsedGb: 9, diskTotalGb: 20 },
+            boosted: false,
+            boost: null,
+            power: null,
+          }}
+        />
+        <button type="button">after</button>
+      </div>
+    );
+
+    it("folds to an icon and the dot when the header is narrow, and opens from the keyboard", async () => {
+      await page.viewport(1100, 820);
+      render(chip(420));
+      const trigger = page.getByTestId("chat-computer-chip");
+      await expect.element(trigger).toHaveAccessibleName("uno-work — computer menu");
+      await expect.element(trigger.getByText("uno-work")).not.toBeVisible();
+      expect((trigger.element() as HTMLElement).getBoundingClientRect().width).toBeLessThan(48);
+      if (import.meta.env.VITE_PILL_SCREENSHOT) {
+        await page.screenshot({ path: "chat-chip-narrow.png" });
+      }
+      (trigger.element() as HTMLElement).focus();
+      await userEvent.keyboard("{Enter}");
+      await expect.element(page.getByText("lab-box")).toBeVisible();
+      await expect.element(page.getByText("Add computer")).toBeVisible();
+      await userEvent.keyboard("{Escape}");
+      await expect.element(page.getByText("Add computer")).not.toBeInTheDocument();
+      await expect.element(trigger).toHaveFocus();
+    });
+
+    it("shows the name, and the meters in a roomy header", async () => {
+      await page.viewport(1400, 820);
+      render(chip(1300));
+      const trigger = page.getByTestId("chat-computer-chip");
+      await expect.element(trigger.getByText("uno-work")).toBeVisible();
+      await expect.element(trigger.getByText("CPU")).toBeVisible();
+      if (import.meta.env.VITE_PILL_SCREENSHOT) {
+        await page.screenshot({ path: "chat-chip-wide.png" });
+      }
+    });
   });
 });
