@@ -167,6 +167,8 @@ const serverCommandId = (tag: string): CommandId =>
 
 const HANDLED_TURN_START_KEY_MAX = 10_000;
 const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
+/** Longest an assistant prewarm may hold the reactor's serial worker. */
+const SESSION_PREWARM_TIMEOUT = Duration.seconds(90);
 const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 const DEFAULT_THREAD_TITLE = "New thread";
 
@@ -1049,6 +1051,10 @@ const make = Effect.gen(function* () {
 
   const runSessionPrewarm = (request: SessionPrewarmRequest) =>
     processSessionPrewarm(request).pipe(
+      // The worker is serial: a prewarm that never ends holds every chat's
+      // turn start on the machine (0.0.93: an ACP session/load that never
+      // returned). A slow start gives up; the next message starts the harness.
+      Effect.timeout(SESSION_PREWARM_TIMEOUT),
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.failCause(cause)

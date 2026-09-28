@@ -517,7 +517,12 @@ const makeAcpSessionRuntime = (
           // реплея припишется первому turn'у). Счётчик сегментов НЕ сбрасываем:
           // реплей его продвинул ровно на длину истории, и id новых сообщений
           // не коллизят с уже сохранёнными от прошлых запусков этой сессии.
-          yield* Queue.takeAll(eventQueue);
+          // `Queue.clear`, not `takeAll`: `takeAll` waits for at least one
+          // event, so a session whose load replays nothing into the queue
+          // (only commands/usage updates, or an empty history) hung here —
+          // and with it the assistant prewarm, which blocks every chat's
+          // turn start on the machine (seen on 0.0.93/0.0.94 after a restart).
+          yield* Queue.clear(eventQueue);
           yield* Ref.set(toolCallsRef, new Map());
           yield* Ref.update(assistantSegmentRef, (state) => ({
             nextSegmentIndex: state.nextSegmentIndex,

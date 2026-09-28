@@ -20,6 +20,8 @@ const emitAskQuestion = process.env.T3_ACP_EMIT_ASK_QUESTION === "1";
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
+/** `session/load` answers without replaying any history (an empty session). */
+const loadWithoutReplay = process.env.T3_ACP_LOAD_WITHOUT_REPLAY === "1";
 const sessionId = "mock-session-1";
 
 let currentModeId = "ask";
@@ -232,20 +234,21 @@ const program = Effect.gen(function* () {
   );
 
   yield* agent.handleLoadSession((request) =>
-    agent.client
-      .sessionUpdate({
-        sessionId: String(request.sessionId ?? sessionId),
-        update: {
-          sessionUpdate: "user_message_chunk",
-          content: { type: "text", text: "replay" },
-        },
-      })
-      .pipe(
-        Effect.as({
-          modes: modeState(),
-          configOptions: configOptions(),
-        }),
-      ),
+    (loadWithoutReplay
+      ? Effect.void
+      : agent.client.sessionUpdate({
+          sessionId: String(request.sessionId ?? sessionId),
+          update: {
+            sessionUpdate: "user_message_chunk",
+            content: { type: "text", text: "replay" },
+          },
+        })
+    ).pipe(
+      Effect.as({
+        modes: modeState(),
+        configOptions: configOptions(),
+      }),
+    ),
   );
 
   yield* agent.handleSetSessionConfigOption((request) =>

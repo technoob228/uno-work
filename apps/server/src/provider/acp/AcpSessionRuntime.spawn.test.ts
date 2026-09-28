@@ -1,4 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Effect, Exit, Layer, Scope } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -98,4 +100,41 @@ describe("ACP harness SIGTERM → SIGKILL deadline", () => {
     expect(Exit.isSuccess(exit)).toBe(true);
     expect(Date.now() - started).toBeLessThan(5_000);
   }, 15_000);
+});
+
+describe("ACP session/load", () => {
+  const mockAgentPath = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../scripts/acp-mock-agent.ts",
+  );
+  const resume = (env: Record<string, string>) =>
+    Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const runtime = yield* AcpSessionRuntime;
+        return yield* runtime.start();
+      }).pipe(
+        Effect.provide(
+          AcpSessionRuntime.layer({
+            spawn: { command: "bun", args: [mockAgentPath], env },
+            cwd: process.cwd(),
+            resumeSessionId: "mock-session-1",
+            clientInfo: { name: "t3-test", version: "0.0.0" },
+            authMethodId: "test",
+          }).pipe(Layer.provide(NodeServices.layer)),
+        ),
+        Effect.scoped,
+        Effect.timeout("10 seconds"),
+      ),
+    );
+
+  it("resumes a session whose load replays nothing (used to hang forever)", async () => {
+    const exit = await resume({ T3_ACP_LOAD_WITHOUT_REPLAY: "1" });
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (Exit.isSuccess(exit)) expect(exit.value.sessionId).toBe("mock-session-1");
+  }, 20_000);
+
+  it("resumes a session with a replayed history", async () => {
+    const exit = await resume({});
+    expect(Exit.isSuccess(exit)).toBe(true);
+  }, 20_000);
 });
