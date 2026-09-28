@@ -12,6 +12,10 @@
  *     (this used to be a separate switcher at the top of the sidebar).
  *
  * The same details (compact) make the "This computer" widget.
+ *
+ * The chat header shows the same chip (`fit="chat"`, via `ComputerChip`) so the
+ * computer can be switched from any screen; there it folds to a monitor icon
+ * and the dot when the header is narrow, and the menu still opens.
  */
 import {
   ChevronDownIcon,
@@ -97,9 +101,49 @@ function loadPercents(load: ComputerLoad | null) {
   };
 }
 
-function MiniMeter({ label, pct }: { label: string; pct: number | null }) {
+/**
+ * Where the chip sits. Home's header has room: name and meters from `md`.
+ * The chat header is shared with the chat's own actions: below a roomy header
+ * (its `header-actions` container) the chip is just an icon and the dot.
+ */
+export type ComputerPillFit = "home" | "chat";
+
+const FIT: Record<
+  ComputerPillFit,
+  {
+    readonly button: string;
+    readonly icon: string;
+    readonly detail: string;
+    readonly meter: string;
+  }
+> = {
+  home: {
+    button: "h-8 gap-2.5 pr-2.5 pl-3",
+    icon: "hidden",
+    detail: "",
+    meter: "md:flex",
+  },
+  chat: {
+    button: "h-7 gap-1.5 px-2 sm:h-6 @3xl/header-actions:gap-2 @3xl/header-actions:pl-2.5",
+    icon: "",
+    detail: "hidden @3xl/header-actions:inline",
+    meter: "@6xl/header-actions:flex",
+  },
+};
+
+function MiniMeter({
+  label,
+  pct,
+  className,
+}: {
+  label: string;
+  pct: number | null;
+  className: string;
+}) {
   return (
-    <span className="hidden items-center gap-1.5 text-[11px] text-muted-foreground md:flex">
+    <span
+      className={cn("hidden items-center gap-1.5 text-[11px] text-muted-foreground", className)}
+    >
       {label}
       <Meter value={pct ?? 0} className="h-1 w-8" />
     </span>
@@ -109,14 +153,24 @@ function MiniMeter({ label, pct }: { label: string; pct: number | null }) {
 export function ComputerPill({
   computer,
   loading,
+  fit = "home",
 }: {
   computer: HomeComputer | null;
   loading: boolean;
+  fit?: ComputerPillFit;
 }) {
   const [open, setOpen] = useState(false);
   const switcher = useComputerSwitcher(() => setOpen(false));
+  const look = FIT[fit];
   if (loading) {
-    return <Skeleton className="h-8 w-56 rounded-full" />;
+    return (
+      <Skeleton
+        className={cn(
+          "rounded-full",
+          fit === "home" ? "h-8 w-56" : "h-7 w-10 sm:h-6 @3xl/header-actions:w-32",
+        )}
+      />
+    );
   }
   // Can't read this computer right now: the menu still switches computers.
   const state = computer ? powerStateOf(computer) : "unknown";
@@ -160,10 +214,18 @@ export function ComputerPill({
           render={
             <button
               type="button"
-              data-testid="home-computer-pill"
+              data-testid={fit === "home" ? "home-computer-pill" : "chat-computer-chip"}
               aria-label={`${name} — computer menu`}
-              className="flex h-8 min-w-0 items-center gap-2.5 rounded-full border border-border/70 bg-card/60 pr-2.5 pl-3 text-xs transition-colors hover:bg-accent/60"
+              title={fit === "chat" ? name : undefined}
+              className={cn(
+                "flex min-w-0 shrink-0 items-center rounded-full border border-border/70 bg-card/60 text-xs transition-colors outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring",
+                look.button,
+              )}
             >
+              <MonitorIcon
+                className={cn("size-3.5 shrink-0 text-muted-foreground", look.icon)}
+                aria-hidden
+              />
               <span
                 className={cn(
                   "size-2 shrink-0 rounded-full",
@@ -171,29 +233,41 @@ export function ComputerPill({
                 )}
                 aria-hidden
               />
-              <span className="max-w-40 truncate font-medium">{name}</span>
+              <span
+                className={cn(
+                  "truncate font-medium",
+                  fit === "home" ? "max-w-40" : "max-w-32",
+                  look.detail,
+                )}
+              >
+                {name}
+              </span>
               {computer?.boosted ? (
                 <ZapIcon
-                  className="size-3 shrink-0 fill-amber-400 text-amber-500"
+                  className={cn("size-3 shrink-0 fill-amber-400 text-amber-500", look.detail)}
                   aria-label="Boosted"
                 />
               ) : null}
               {computer?.economyOn ? (
                 <LeafIcon
-                  className="size-3 shrink-0 text-muted-foreground/70"
+                  className={cn("size-3 shrink-0 text-muted-foreground/70", look.detail)}
                   aria-label="Economy on"
                 />
               ) : null}
               {!computer ? null : state === "on" ? (
                 <>
-                  <MiniMeter label="CPU" pct={pct.cpu} />
-                  <MiniMeter label="RAM" pct={pct.mem} />
-                  <MiniMeter label="Disk" pct={pct.disk} />
+                  <MiniMeter label="CPU" pct={pct.cpu} className={look.meter} />
+                  <MiniMeter label="RAM" pct={pct.mem} className={look.meter} />
+                  <MiniMeter label="Disk" pct={pct.disk} className={look.meter} />
                 </>
               ) : (
-                <span className="text-muted-foreground">{POWER_STATE_LABEL[state]}</span>
+                <span className={cn("text-muted-foreground", look.detail)}>
+                  {POWER_STATE_LABEL[state]}
+                </span>
               )}
-              <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <ChevronDownIcon
+                className={cn("size-3.5 shrink-0 text-muted-foreground", look.detail)}
+              />
             </button>
           }
         />
