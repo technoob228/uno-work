@@ -426,8 +426,11 @@ export type CursorSettings = typeof CursorSettings.Type;
 
 export const HermesSettings = makeProviderSettingsSchema(
   {
+    // On by default since 0.0.94: Hermes is the default harness of new chats
+    // (it always ran the Uno assistant). An explicit `false` saved by the
+    // person still hides it from the pickers.
     enabled: Schema.Boolean.pipe(
-      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.withDecodingDefault(Effect.succeed(true)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
     binaryPath: makeBinaryPathSetting("hermes").pipe(
