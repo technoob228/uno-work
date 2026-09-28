@@ -113,6 +113,7 @@ import { UnoAccountService } from "./unoAccount.ts";
 import {
   decideMainWindowNavigation,
   isAllowedWebviewUrl,
+  isBuiltinPdfViewerFrameUrl,
   isGuestPermissionAllowedByDefault,
   isTrustedAppUrl,
   resolveTrustedOrigins,
@@ -2518,6 +2519,9 @@ nativeTheme.on("updated", syncAllWindowAppearance);
 /** Schemes an iframe inside the app window may load. */
 function isAllowedAppSubframeUrl(rawUrl: string): boolean {
   if (rawUrl === "about:blank" || rawUrl === "about:srcdoc") return true;
+  // PDF previews (blob:/https: frames) render through Electron's PDF viewer
+  // sub-frame since Electron 41.
+  if (isBuiltinPdfViewerFrameUrl(rawUrl)) return true;
   let protocol: string;
   try {
     protocol = new URL(rawUrl).protocol;
@@ -2679,10 +2683,13 @@ function createWindow(): BrowserWindow {
     });
     // Guests may only load web pages: no file:, chrome:, devtools:,
     // javascript:, data: or custom schemes, in any frame, even via redirect.
+    // Exception: the built-in PDF viewer sub-frame (Electron 41+), never as
+    // the guest's top-level page.
     const guardGuestNavigation = (
-      details: Electron.Event<{ url: string }>,
+      details: Electron.Event<{ url: string; isMainFrame: boolean }>,
       kind: "navigate" | "redirect",
     ) => {
+      if (!details.isMainFrame && isBuiltinPdfViewerFrameUrl(details.url)) return;
       if (!isAllowedWebviewUrl(details.url)) {
         details.preventDefault();
         console.warn(`[desktop] blocked webview ${kind}`, { url: details.url });
