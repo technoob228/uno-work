@@ -434,6 +434,50 @@ export interface AccountSubscription {
     readonly diskGbUsed: number;
     readonly boxCount: number;
   };
+  /** Overdue payment the console wants shown; null when all is paid. */
+  readonly paymentNotice: PaymentNotice | null;
+}
+
+/**
+ * The console's overdue-payment notice (`payment_notice` on
+ * /api/v1/box-subscription). The client shows title, message and the action
+ * exactly as sent: all copy and dates come from the backend.
+ */
+export interface PaymentNotice {
+  /** "grace" (still running, pay by a date) or "paused"; other values pass through. */
+  readonly state: string;
+  readonly severity: string;
+  readonly title: string;
+  readonly message: string;
+  readonly payBy: string | null;
+  readonly deleteAfter: string | null;
+  readonly actionLabel: string | null;
+  /** Only http(s) links are kept. */
+  readonly actionUrl: string | null;
+}
+
+function httpUrlOrNull(value: unknown): string | null {
+  const text = strOrNull(value);
+  return text && /^https?:\/\//i.test(text) ? text : null;
+}
+
+export function parsePaymentNotice(raw: unknown): PaymentNotice | null {
+  const r = rec(raw);
+  if (!r) return null;
+  const title = str(r["title"]).trim();
+  const message = str(r["message"]).trim();
+  if (!title && !message) return null;
+  const actionUrl = httpUrlOrNull(r["action_url"]);
+  return {
+    state: str(r["state"]) || "grace",
+    severity: str(r["severity"]) || "critical",
+    title,
+    message,
+    payBy: strOrNull(r["pay_by"]),
+    deleteAfter: strOrNull(r["delete_after"]),
+    actionLabel: actionUrl ? strOrNull(r["action_label"]) : null,
+    actionUrl,
+  };
 }
 
 export interface SubscriptionAiHours {
@@ -499,6 +543,7 @@ export function parseSubscription(raw: unknown): AccountSubscription | null {
       diskGbUsed: num(usage?.["disk_gb_used"]),
       boxCount: num(usage?.["box_count"]),
     },
+    paymentNotice: parsePaymentNotice(r["payment_notice"]),
   };
 }
 
@@ -731,3 +776,11 @@ export const consoleLinks = {
   apiKeys: `${CONSOLE_URL}/settings`,
   computer: (id: number) => `${CONSOLE_URL}/boxes/${id}`,
 };
+
+/**
+ * What a per-session dismiss remembers: a new state, date or wording shows
+ * the notice again.
+ */
+export function paymentNoticeKey(notice: PaymentNotice): string {
+  return [notice.state, notice.payBy ?? "", notice.deleteAfter ?? "", notice.title].join("|");
+}
