@@ -3,34 +3,31 @@ import { assert, it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Path, Stream } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 
-import { AuthError, ServerAuth, type AuthenticatedSession } from "../auth/Services/ServerAuth.ts";
 import { pluginPanelRouteLayer } from "./http.ts";
+import {
+  PANEL_TOKEN_LOAD_WINDOW_MS,
+  PANEL_TOKEN_SESSION_MS,
+  signPanelToken,
+  verifyPanelTokenSignature,
+} from "./panelTokens.ts";
 import { PluginRegistry, type LoadedPlugin } from "./PluginRegistry.ts";
 
-const AUTH_HEADER = "x-test-session";
-
-const testSession = {
-  sessionId: "test-session",
-  subject: "test",
-  method: "cookie",
-  role: "owner",
-} as unknown as AuthenticatedSession;
-
-const authLayer = Layer.mock(ServerAuth)({
-  authenticateHttpRequest: (request) =>
-    request.headers[AUTH_HEADER] === "yes"
-      ? Effect.succeed(testSession)
-      : Effect.fail(new AuthError({ message: "Unauthorized", status: 401 })),
-});
+const SECRET = new Uint8Array(32).fill(7);
+const PANEL_PATH = "panel/index.html";
 
 const registryLayer = (plugins: ReadonlyArray<LoadedPlugin>) =>
   Layer.mock(PluginRegistry)({
     start: Effect.void,
     ready: Effect.void,
     getLoadedPlugins: Effect.succeed(plugins),
+    verifyPanelToken: ({ pluginId, panelPath, token }) =>
+      Effect.sync(() => verifyPanelTokenSignature({ secret: SECRET, pluginId, panelPath, token })),
     recordRun: () => Effect.void,
     streamChanges: Stream.empty,
   });
+
+const mint = (pluginId: string, ageMs = 0, secret = SECRET) =>
+  signPanelToken({ secret, pluginId, panelPath: PANEL_PATH, issuedAtMs: Date.now() - ageMs });
 
 const manifest = (overrides: Partial<LoadedPlugin["manifest"] & object> = {}) =>
   ({
@@ -57,7 +54,7 @@ const makeFixture = Effect.gen(function* () {
   yield* fs.writeFileString(path.join(pluginDir, "panel", "data.json"), `{"ok":true}`);
   yield* fs.writeFileString(path.join(baseDir, "outside.txt"), "outside secret");
   // Симлинк из панельной папки наружу: текстовая проверка путей его пропускает,
-  // ловить обязана realpath-проверка (субресурсы отдаются без сессии).
+  // ловить обязана realpath-проверка.
   yield* fs.symlink(path.join(baseDir, "outside.txt"), path.join(pluginDir, "panel", "leak.txt"));
 
   const plugins: ReadonlyArray<LoadedPlugin> = [
@@ -68,6 +65,7 @@ const makeFixture = Effect.gen(function* () {
       directoryPath: pluginDir,
       manifest: manifest({ panel: { title: "Demo", path: "panel/index.html" } }),
       error: undefined,
+      approval: "approved",
     },
     {
       id: "off",
@@ -79,6 +77,7 @@ const makeFixture = Effect.gen(function* () {
         panel: { title: "Off", path: "panel/index.html" },
       }),
       error: undefined,
+      approval: "approved",
     },
     {
       id: "no-panel",
@@ -87,23 +86,19 @@ const makeFixture = Effect.gen(function* () {
       directoryPath: undefined,
       manifest: manifest(),
       error: undefined,
+      approval: "approved",
     },
   ];
 
   // Зависимости роута — фантомные Requires, они выходят наружу как контекст
   // самого handler'а, поэтому собираем их слои отдельно и передаём вызовом.
-  const context = yield* Layer.build(
-    Layer.mergeAll(authLayer, registryLayer(plugins), NodeServices.layer),
-  );
+  const context = yield* Layer.build(Layer.mergeAll(registryLayer(plugins), NodeServices.layer));
   const { handler, dispose } = HttpRouter.toWebHandler(pluginPanelRouteLayer, {
     disableLogger: true,
   });
   yield* Effect.addFinalizer(() => Effect.promise(() => dispose()));
 
-  const get = (
-    pathAndQuery: string,
-    headers: Record<string, string> = { [AUTH_HEADER]: "yes", "sec-fetch-dest": "iframe" },
-  ) =>
+  const get = (pathAndQuery: string, headers: Record<string, string> = {}) =>
     Effect.promise(() =>
       handler(new Request(`http://127.0.0.1${pathAndQuery}`, { headers }), context),
     );
@@ -115,16 +110,21 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("plugin panel route"
   it.effect("serves the manifest entry and sibling assets with MIME and hardening headers", () =>
     Effect.gen(function* () {
       const { get } = yield* makeFixture;
+      const token = mint("demo");
 
-      const entry = yield* get("/api/plugins/demo/panel/");
+      const entry = yield* get(`/api/plugins/demo/panel/${token}/`);
       assert.equal(entry.status, 200);
       assert.include(entry.headers.get("content-type") ?? "", "text/html");
       assert.equal(entry.headers.get("x-content-type-options"), "nosniff");
       assert.equal(entry.headers.get("cache-control"), "no-cache");
-      assert.include(entry.headers.get("content-security-policy") ?? "", "default-src 'self'");
+      const csp = entry.headers.get("content-security-policy") ?? "";
+      assert.include(csp, "default-src 'self'");
+      assert.include(csp, "sandbox allow-scripts");
+      assert.notInclude(csp, "allow-same-origin");
       assert.equal(yield* Effect.promise(() => entry.text()), "<h1>panel</h1>");
 
-      const data = yield* get("/api/plugins/demo/panel/data.json", {
+      // Relative sub-resources resolve under the same tokenised prefix.
+      const data = yield* get(`/api/plugins/demo/panel/${token}/data.json`, {
         "sec-fetch-dest": "empty",
       });
       assert.equal(data.status, 200);
@@ -133,40 +133,59 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("plugin panel route"
     }).pipe(Effect.scoped),
   );
 
-  it.effect("requires a session for navigation but not for subresources", () =>
+  it.effect("requires a valid token for every request, whatever Sec-Fetch-Dest says", () =>
     Effect.gen(function* () {
       const { get } = yield* makeFixture;
 
-      const iframeNoAuth = yield* get("/api/plugins/demo/panel/", { "sec-fetch-dest": "iframe" });
-      assert.equal(iframeNoAuth.status, 401);
+      for (const dest of ["iframe", "document", "empty", "script", ""]) {
+        const headers: Record<string, string> = dest ? { "sec-fetch-dest": dest } : {};
+        assert.equal((yield* get("/api/plugins/demo/panel/", headers)).status, 401);
+        assert.equal((yield* get("/api/plugins/demo/panel/data.json", headers)).status, 401);
+      }
 
-      // Без Sec-Fetch-Dest (curl и прочие не-браузеры) — считаем навигацией.
-      const bareNoAuth = yield* get("/api/plugins/demo/panel/", {});
-      assert.equal(bareNoAuth.status, 401);
+      const forged = mint("demo", 0, new Uint8Array(32).fill(9));
+      assert.equal((yield* get(`/api/plugins/demo/panel/${forged}/data.json`)).status, 401);
 
-      const subresourceNoAuth = yield* get("/api/plugins/demo/panel/data.json", {
-        "sec-fetch-dest": "empty",
-      });
-      assert.equal(subresourceNoAuth.status, 200);
+      // A token for another plugin does not open this one.
+      const foreign = mint("off");
+      assert.equal((yield* get(`/api/plugins/demo/panel/${foreign}/data.json`)).status, 401);
+
+      const tampered = `${mint("demo").slice(0, -2)}AA`;
+      assert.equal((yield* get(`/api/plugins/demo/panel/${tampered}/data.json`)).status, 401);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("the entry document needs a fresh token, assets live for the panel session", () =>
+    Effect.gen(function* () {
+      const { get } = yield* makeFixture;
+
+      const loaded = mint("demo", PANEL_TOKEN_LOAD_WINDOW_MS + 60_000);
+      assert.equal((yield* get(`/api/plugins/demo/panel/${loaded}/`)).status, 401);
+      assert.equal((yield* get(`/api/plugins/demo/panel/${loaded}/index.html`)).status, 401);
+      assert.equal((yield* get(`/api/plugins/demo/panel/${loaded}/data.json`)).status, 200);
+
+      const expired = mint("demo", PANEL_TOKEN_SESSION_MS + 60_000);
+      assert.equal((yield* get(`/api/plugins/demo/panel/${expired}/data.json`)).status, 401);
     }).pipe(Effect.scoped),
   );
 
   it.effect("rejects traversal out of the panel directory", () =>
     Effect.gen(function* () {
       const { get } = yield* makeFixture;
+      const token = mint("demo");
 
       for (const candidate of [
-        "/api/plugins/demo/panel/..%2f..%2foutside.txt",
-        "/api/plugins/demo/panel/%2e%2e%2f%2e%2e%2foutside.txt",
-        "/api/plugins/demo/panel/..%2fsecret-at-plugin-root.txt",
-        "/api/plugins/demo/panel/%2e%2e/secret-at-plugin-root.txt",
-        "/api/plugins/demo/panel//etc/passwd",
-        "/api/plugins/demo/panel/%2fetc%2fpasswd",
-        "/api/plugins/..%2f..%2fetc/panel/passwd",
+        `/api/plugins/demo/panel/${token}/..%2f..%2foutside.txt`,
+        `/api/plugins/demo/panel/${token}/%2e%2e%2f%2e%2e%2foutside.txt`,
+        `/api/plugins/demo/panel/${token}/..%2fsecret-at-plugin-root.txt`,
+        `/api/plugins/demo/panel/${token}/%2e%2e/secret-at-plugin-root.txt`,
+        `/api/plugins/demo/panel/${token}//etc/passwd`,
+        `/api/plugins/demo/panel/${token}/%2fetc%2fpasswd`,
+        `/api/plugins/..%2f..%2fetc/panel/${token}/passwd`,
       ]) {
         const response = yield* get(candidate);
         assert.include(
-          [400, 404],
+          [400, 401, 404],
           response.status,
           `${candidate} must not be served (got ${response.status})`,
         );
@@ -177,14 +196,8 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("plugin panel route"
   it.effect("refuses a symlink that escapes the plugin directory", () =>
     Effect.gen(function* () {
       const { get } = yield* makeFixture;
-
-      const navigation = yield* get("/api/plugins/demo/panel/leak.txt");
-      assert.include([400, 404], navigation.status);
-
-      const subresource = yield* get("/api/plugins/demo/panel/leak.txt", {
-        "sec-fetch-dest": "empty",
-      });
-      assert.include([400, 404], subresource.status);
+      const response = yield* get(`/api/plugins/demo/panel/${mint("demo")}/leak.txt`);
+      assert.include([400, 404], response.status);
     }).pipe(Effect.scoped),
   );
 
@@ -192,10 +205,11 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("plugin panel route"
     Effect.gen(function* () {
       const { get } = yield* makeFixture;
 
-      assert.equal((yield* get("/api/plugins/off/panel/")).status, 404);
-      assert.equal((yield* get("/api/plugins/off/panel/data.json")).status, 404);
-      assert.equal((yield* get("/api/plugins/no-panel/panel/")).status, 404);
-      assert.equal((yield* get("/api/plugins/nope/panel/")).status, 404);
+      assert.equal((yield* get(`/api/plugins/off/panel/${mint("off")}/`)).status, 404);
+      assert.equal((yield* get(`/api/plugins/off/panel/${mint("off")}/data.json`)).status, 404);
+      // No panel / unknown id: indistinguishable from a bad token.
+      assert.equal((yield* get(`/api/plugins/no-panel/panel/${mint("no-panel")}/`)).status, 401);
+      assert.equal((yield* get(`/api/plugins/nope/panel/${mint("nope")}/`)).status, 401);
     }).pipe(Effect.scoped),
   );
 });

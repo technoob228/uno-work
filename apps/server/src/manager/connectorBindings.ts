@@ -231,6 +231,13 @@ export interface ThreadRoutingInput {
   readonly projectModelSelection: ModelSelection | null;
   /** Modes a fresh thread in the target project inherits (`project` targets). */
   readonly inheritedModes: RoutingModes | null;
+  /**
+   * Set for messages from someone other than the owner (a group member the
+   * owner let in): the turn must run in exactly this (restrictive) mode. A
+   * thread in any other mode is never reused for them, and a bound thread
+   * in another mode refuses them.
+   */
+  readonly forcedRuntimeMode?: RuntimeMode | null;
 }
 
 const sameHarnessAndModel = (a: ModelSelection, b: ModelSelection): boolean =>
@@ -255,6 +262,7 @@ export const sameAssistantEngine = (a: ModelSelection, b: ModelSelection): boole
  */
 export const decideThreadRouting = (input: ThreadRoutingInput): ThreadRouting => {
   const { target } = input;
+  const forced = input.forcedRuntimeMode ?? null;
   if (target.kind === "thread") {
     const thread = input.targetThread;
     if (thread === null) {
@@ -267,6 +275,12 @@ export const decideThreadRouting = (input: ThreadRoutingInput): ThreadRouting =>
       return {
         kind: "reject",
         message: `This chat is bound to thread ${target.threadId}, which is archived. Unarchive it in the app, or rebind with /thread, /use or /assistant.`,
+      };
+    }
+    if (forced !== null && thread.runtimeMode !== forced) {
+      return {
+        kind: "reject",
+        message: "Only the owner of this assistant can write to the thread this chat is bound to.",
       };
     }
     return {
@@ -289,12 +303,13 @@ export const decideThreadRouting = (input: ThreadRoutingInput): ThreadRouting =>
   if (
     mapped !== null &&
     mapped.archivedAt === null &&
+    (forced === null || mapped.runtimeMode === forced) &&
     (modelSelection === null || same(mapped.modelSelection, modelSelection))
   ) {
     return {
       kind: "reuse",
       threadId: mapped.id,
-      runtimeMode: isAssistant ? ASSISTANT_THREAD_RUNTIME_MODE : mapped.runtimeMode,
+      runtimeMode: forced ?? (isAssistant ? ASSISTANT_THREAD_RUNTIME_MODE : mapped.runtimeMode),
       interactionMode: isAssistant ? "default" : mapped.interactionMode,
     };
   }
@@ -313,7 +328,7 @@ export const decideThreadRouting = (input: ThreadRoutingInput): ThreadRouting =>
     kind: "create",
     projectId: target.projectId,
     modelSelection,
-    runtimeMode: modes.runtimeMode,
+    runtimeMode: forced ?? modes.runtimeMode,
     interactionMode: modes.interactionMode,
     previousThreadId: mapped?.id ?? null,
   };

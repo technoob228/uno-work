@@ -9,6 +9,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 
+import { hardenLinks } from "../../../lib/safeHtml";
 import { cn } from "../../../lib/utils";
 import type { FileOpener, FileViewProps } from "../fileOpeners";
 import { useFileBytes } from "../fileSource";
@@ -56,7 +57,11 @@ function DocxView({ source }: FileViewProps) {
         }),
       )
       .then(
-        () => !cancelled && setState("done"),
+        () => {
+          // docx-preview copies hyperlink targets as-is (`javascript:` too).
+          hardenLinks(body);
+          if (!cancelled) setState("done");
+        },
         (error: unknown) =>
           !cancelled && setState(error instanceof Error ? error : new Error(String(error))),
       );

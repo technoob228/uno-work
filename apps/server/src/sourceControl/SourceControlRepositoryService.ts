@@ -234,7 +234,8 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
     yield* git.execute({
       operation: "SourceControlRepositoryService.cloneRepository",
       cwd: preparedDestination.parentPath,
-      args: ["clone", remoteUrl, preparedDestination.directoryName],
+      // `--`: a "URL" like `--upload-pack=...` must not become a git option.
+      args: ["clone", "--", remoteUrl, preparedDestination.directoryName],
       timeoutMs: 120_000,
       maxOutputBytes: 256 * 1024,
     });

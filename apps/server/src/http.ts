@@ -42,12 +42,14 @@ import {
   SECRET_REQUEST_PATH,
   SECRET_RESULT_PATH,
   SECRET_VALUE_MAX_LENGTH,
+  secretNameProblem,
   upsertEnvContent,
 } from "./secretsEnv.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { executeBridgeCommand, executeBridgeOpenUrl } from "./browserCommandRouter.ts";
 import { announceBrowserHelp } from "./browserHelpNotify.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
+import { UNTRUSTED_FILE_HEADERS } from "./untrustedFileHeaders.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { OFFICE_ENGINE_ROUTE_PREFIX, resolveOfficeEngineFilePath } from "./officeEngine.ts";
 import {
@@ -446,13 +448,8 @@ export const secretsRequestRouteLayer = HttpRouter.add(
     const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
     const input = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
     if (!isValidSecretName(input.name)) {
-      return HttpServerResponse.jsonUnsafe(
-        {
-          ok: false,
-          error: 'Invalid "name": expected an env-style variable name (letters, digits, _).',
-        },
-        { status: 400 },
-      );
+      const nameProblem = secretNameProblem(input.name);
+      return HttpServerResponse.jsonUnsafe({ ok: false, error: nameProblem }, { status: 400 });
     }
     const targetFile = input.targetFile ?? ".env";
     if (!isValidSecretTargetFile(targetFile)) {
@@ -663,6 +660,7 @@ export const attachmentsRouteLayer = HttpRouter.add(
       status: 200,
       headers: {
         "Cache-Control": "public, max-age=31536000, immutable",
+        ...UNTRUSTED_FILE_HEADERS,
       },
     }).pipe(
       Effect.catch(() =>
@@ -700,10 +698,13 @@ export const projectFaviconRouteLayer = HttpRouter.add(
       });
     }
 
+    // The favicon comes from the project (any cloned repo): same treatment
+    // as attachments, an SVG must not script the app's origin.
     return yield* HttpServerResponse.file(faviconFilePath, {
       status: 200,
       headers: {
         "Cache-Control": PROJECT_FAVICON_CACHE_CONTROL,
+        ...UNTRUSTED_FILE_HEADERS,
       },
     }).pipe(
       Effect.catch(() =>

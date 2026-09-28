@@ -147,10 +147,13 @@ export interface WsRpcClient {
     >;
     readonly listPlugins: RpcUnaryNoArgMethod<typeof WS_METHODS.serverListPlugins>;
     readonly setPluginEnabled: RpcUnaryMethod<typeof WS_METHODS.serverSetPluginEnabled>;
+    readonly approvePlugin: RpcUnaryMethod<typeof WS_METHODS.serverApprovePlugin>;
     /** Мост панели плагина: «спроси агента» из sandbox-iframe. */
     readonly sendPluginToThread: RpcUnaryMethod<typeof WS_METHODS.pluginsSendToThread>;
     /** Тред встроенного чата панели — тот же mapping, что у sendToThread. */
     readonly resolvePluginPanelThread: RpcUnaryMethod<typeof WS_METHODS.pluginsResolvePanelThread>;
+    /** Подписанный короткоживущий URL iframe панели плагина. */
+    readonly issuePluginPanelUrl: RpcUnaryMethod<typeof WS_METHODS.pluginsIssuePanelUrl>;
     readonly subscribePlugins: RpcStreamMethod<typeof WS_METHODS.subscribePlugins>;
     readonly createUnoLlmTopUpAction: RpcUnaryMethod<typeof WS_METHODS.unoCreateLlmTopUpAction>;
     readonly listPersonalAi: RpcUnaryNoArgMethod<typeof WS_METHODS.unoPersonalAiList>;
@@ -466,10 +469,14 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       listPlugins: () => transport.request((client) => client[WS_METHODS.serverListPlugins]({})),
       setPluginEnabled: (input) =>
         transport.request((client) => client[WS_METHODS.serverSetPluginEnabled](input)),
+      approvePlugin: (input) =>
+        transport.request((client) => client[WS_METHODS.serverApprovePlugin](input)),
       sendPluginToThread: (input) =>
         transport.request((client) => client[WS_METHODS.pluginsSendToThread](input)),
       resolvePluginPanelThread: (input) =>
         transport.request((client) => client[WS_METHODS.pluginsResolvePanelThread](input)),
+      issuePluginPanelUrl: (input) =>
+        transport.request((client) => client[WS_METHODS.pluginsIssuePanelUrl](input)),
       subscribePlugins: (listener, options) =>
         transport.subscribe((client) => client[WS_METHODS.subscribePlugins]({}), listener, {
           ...options,

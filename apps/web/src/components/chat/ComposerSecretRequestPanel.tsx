@@ -3,14 +3,17 @@
  *
  * Renders above the composer like the pending-question quiz. The value is
  * POSTed straight to the environment's `/api/secrets/result`, which writes it
- * into the project env file — it never touches the chat transcript or the
- * agent's context.
+ * into the project env file — it never touches the chat transcript (the
+ * agent can still read the file). The card names the asking thread and the
+ * exact file so the person knows who gets what, and where.
  */
 
+import type { ThreadId } from "@t3tools/contracts";
 import { memo, useState } from "react";
 import { LockIcon } from "lucide-react";
 
 import { environmentFetchJson, isEnvironmentHttpError } from "../../environments/http/target";
+import { useThreadTitle } from "../../hooks/useThreadTitle";
 import {
   type ActiveSecretRequest,
   removeSecretRequest,
@@ -52,6 +55,14 @@ const SecretRequestCard = memo(function SecretRequestCard({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { event } = request;
+  const requesterThreadId = event.context?.threadId;
+  const requesterTitle = useThreadTitle(
+    request.environmentId,
+    (requesterThreadId ?? null) as ThreadId | null,
+  );
+  const requester =
+    requesterTitle ?? (requesterThreadId ? `chat ${requesterThreadId}` : "an unidentified session");
+  const targetPath = secretTargetPath(event.cwd, event.targetFile);
 
   const submit = async (decline: boolean) => {
     if (isSubmitting) return;
@@ -105,9 +116,16 @@ const SecretRequestCard = memo(function SecretRequestCard({
         The agent needs <code className="rounded bg-muted/50 px-1 font-mono">{event.name}</code>
         {event.description ? <> — {event.description}</> : null}
       </p>
+      <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-xs">
+        <dt className="text-muted-foreground/65">Asked by</dt>
+        <dd className="min-w-0 truncate font-medium text-foreground/90" title={requester}>
+          {requester}
+        </dd>
+        <dt className="text-muted-foreground/65">Saved to</dt>
+        <dd className="min-w-0 break-all font-mono text-foreground/90">{targetPath}</dd>
+      </dl>
       <p className="mt-1 text-xs text-muted-foreground/65">
-        Saved into <code className="font-mono">{event.targetFile}</code> in the project — it never
-        enters the chat.
+        Not the chat. The agent can read it from this file.
       </p>
       {/*
         Deliberately not a <form>: the panel renders inside the composer's
@@ -157,3 +175,9 @@ const SecretRequestCard = memo(function SecretRequestCard({
     </div>
   );
 });
+
+/** Full path of the env file the server writes: the request's folder + file name. */
+export function secretTargetPath(cwd: string, targetFile: string): string {
+  const folder = cwd.replace(/[/\\]+$/, "");
+  return folder.length > 0 ? `${folder}/${targetFile}` : targetFile;
+}

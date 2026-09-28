@@ -166,6 +166,19 @@ export const DEFAULT_CONNECTOR_ADDRESSING: ManagerConnectorAddressingConfig = {
   hotWindowSec: 0,
 };
 
+/**
+ * Who, besides the owner, may drive the assistant from a group chat / shared
+ * channel. `owners` (default): only the owner's own account; messages from
+ * other members are ignored. `anyone-with-approval`: other members are
+ * heard, but their turns always run in approval-required mode (never full
+ * access) and they can't use chat commands.
+ */
+export const ManagerConnectorGroupMembersPolicy = Schema.Literals([
+  "owners",
+  "anyone-with-approval",
+]);
+export type ManagerConnectorGroupMembersPolicy = typeof ManagerConnectorGroupMembersPolicy.Type;
+
 export const ManagerTelegramConnectorConfig = Schema.Struct({
   /**
    * The owner's bot token, or `unorelay:<tgr_…>` — Uno's shared bot, reached
@@ -183,6 +196,14 @@ export const ManagerTelegramConnectorConfig = Schema.Struct({
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   /** When to react. Absent on legacy rows → connector applies the defaults. */
   addressing: Schema.optionalKey(ManagerConnectorAddressingConfig),
+  /**
+   * Telegram user ids of the owner (recorded when a private chat is linked
+   * by code). Private allowlisted chats count as owners too: in Telegram a
+   * private chat's id is the user's id.
+   */
+  ownerUserIds: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+  /** Absent = `owners`. */
+  groupMembers: Schema.optionalKey(ManagerConnectorGroupMembersPolicy),
 });
 export type ManagerTelegramConnectorConfig = typeof ManagerTelegramConnectorConfig.Type;
 
@@ -202,6 +223,13 @@ export const ManagerSlackConnectorConfig = Schema.Struct({
   enabled: Schema.Boolean,
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   addressing: Schema.optionalKey(ManagerConnectorAddressingConfig),
+  /**
+   * Slack user ids (`U…`) of the owner: the person who added the app, and
+   * whoever writes in an allowlisted DM (a DM belongs to exactly one person).
+   */
+  ownerUserIds: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+  /** Absent = `owners`. */
+  groupMembers: Schema.optionalKey(ManagerConnectorGroupMembersPolicy),
 });
 export type ManagerSlackConnectorConfig = typeof ManagerSlackConnectorConfig.Type;
 

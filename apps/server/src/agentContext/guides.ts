@@ -117,7 +117,7 @@ export function buildUnoWorkGuide(
     case "secrets":
       return [
         "## Secrets",
-        "Call `request_secret` with the variable name and where to get it. The person types it into a masked field; the value is written to the project's `.env` and never reaches you or the chat. Logins for websites: ask the person to save them in Settings, Credentials instead.",
+        "Call `request_secret` with the variable name and where to get it. The person types it into a masked field; the value is written to the project's `.env`, not the chat. Read it from there when the app needs it; never print it. Logins for websites: ask the person to save them in Settings, Credentials instead.",
         HTTP_FALLBACK_NOTE,
         section(bridge, "Безопасный запрос секретов"),
       ].join("\n\n");

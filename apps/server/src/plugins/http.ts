@@ -1,47 +1,51 @@
 /**
- * Static file serving for plugin panels: `GET /api/plugins/:pluginId/panel/*`.
+ * Static file serving for plugin panels:
+ * `GET /api/plugins/:pluginId/panel/<token>/*`.
  *
  * The panel is rendered by the app inside a sandboxed iframe **without**
- * `allow-same-origin`, so the document lives on an opaque origin. That is what
- * keeps a plugin from touching the app: no DOM access, no app cookies, no
- * storage. The price is that requests the iframe makes for its own assets
- * (`data.json`, `app.js`) have a null site-for-cookies and therefore carry no
- * session cookie — they simply cannot be authenticated.
+ * `allow-same-origin`, and the CSP below repeats that (`sandbox allow-scripts`)
+ * for anyone opening the URL directly: the document lives on an opaque origin,
+ * so a plugin cannot touch the app — no DOM access, no app cookies, no storage.
+ * The price is that no panel request can carry the session cookie.
  *
- * Hence the split, deliberate and documented:
- * - navigation requests (the iframe document itself, `Sec-Fetch-Dest: iframe` /
- *   `document`, and anything without the header — curl included) require a
- *   session, exactly like attachments;
- * - subresource requests (`fetch`, `script`, `style`, `image`, …) are served
- *   without auth, but only for files inside this plugin's panel directory.
+ * So every request — the document and all its sub-resources alike — must carry
+ * a signed capability token in the path (`panelTokens.ts`), issued to the
+ * authenticated app over RPC (`plugins.issuePanelUrl`). No header heuristics:
+ * a request without a valid token is 401, whatever it claims to be.
  *
- * That is acceptable because the panel's contents are no more secret than the
- * manifest itself, and path resolution (`panelPaths.ts`) makes it impossible to
- * escape the plugin directory. Disabled plugins and plugins without a panel are
- * 404 for every request, so a panel cannot be probed after being turned off.
+ * Path resolution (`panelPaths.ts`) plus a realpath check keep every read inside
+ * this plugin's panel directory. Unknown plugins look exactly like bad tokens
+ * (401) so ids cannot be probed; disabled plugins and plugins without a panel
+ * are 404 even with a valid token.
  */
 import Mime from "@effect/platform-node/Mime";
-import { Effect, FileSystem, Option } from "effect";
+import { Clock, Effect, FileSystem, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
-import { respondToAuthError } from "../auth/http.ts";
-import { ServerAuth } from "../auth/Services/ServerAuth.ts";
 import {
   isInsideDirectory,
-  isPanelNavigationRequest,
   parsePluginPanelRequestPath,
   PLUGIN_PANEL_ROUTE_PREFIX,
   resolvePluginPanelAssetPath,
   resolvePluginPanelLocation,
+  splitPanelTokenFromRest,
 } from "./panelPaths.ts";
-import { PluginRegistry } from "./PluginRegistry.ts";
+import {
+  isPanelTokenFresh,
+  PANEL_TOKEN_LOAD_WINDOW_MS,
+  PANEL_TOKEN_SESSION_MS,
+} from "./panelTokens.ts";
+import { isPluginActive, PluginRegistry } from "./PluginRegistry.ts";
 
 /**
  * Panels are agent-written single-file apps: inline `<script>`/`<style>` is the
  * norm, so the CSP allows `unsafe-inline` while keeping every origin but the
  * daemon out (no external scripts, no remote fetches, no framing of others).
+ * `sandbox allow-scripts` forces an opaque origin even when the URL is opened
+ * outside the app's sandboxed iframe (new tab, `window.open`, top navigation).
  */
 const PANEL_CONTENT_SECURITY_POLICY = [
+  "sandbox allow-scripts",
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
@@ -50,6 +54,10 @@ const PANEL_CONTENT_SECURITY_POLICY = [
 ].join("; ");
 
 const notFound = HttpServerResponse.text("Not Found", { status: 404 });
+const unauthorized = HttpServerResponse.text("Unauthorized", {
+  status: 401,
+  headers: { "Cache-Control": "no-store" },
+});
 
 /**
  * Разыменовывает файл и директорию плагина и проверяет, что файл физически
@@ -84,22 +92,29 @@ const servePanelAsset = Effect.gen(function* () {
     return HttpServerResponse.text("Invalid panel path", { status: 400 });
   }
 
-  if (isPanelNavigationRequest(request.headers["sec-fetch-dest"])) {
-    const serverAuth = yield* ServerAuth;
-    yield* serverAuth.authenticateHttpRequest(request);
+  const tokenised = splitPanelTokenFromRest(parsed.rest);
+  if (tokenised === null) {
+    return unauthorized;
   }
 
   const registry = yield* PluginRegistry;
   const plugins = yield* registry.getLoadedPlugins;
   const plugin = plugins.find((candidate) => candidate.id === parsed.pluginId);
   const manifest = plugin?.manifest;
-  if (
-    plugin === undefined ||
-    manifest === undefined ||
-    !manifest.enabled ||
-    manifest.panel === undefined ||
-    plugin.directoryPath === undefined
-  ) {
+  // Без панели в манифесте токен не с чем сверить — ответ тот же, что на
+  // поддельный токен, чтобы id плагинов нельзя было перебирать.
+  if (plugin === undefined || manifest?.panel === undefined) {
+    return unauthorized;
+  }
+  const issuedAtMs = yield* registry.verifyPanelToken({
+    pluginId: plugin.id,
+    panelPath: manifest.panel.path,
+    token: tokenised.token,
+  });
+  if (issuedAtMs === null) {
+    return unauthorized;
+  }
+  if (!isPluginActive(plugin) || plugin.directoryPath === undefined) {
     return notFound;
   }
 
@@ -114,10 +129,19 @@ const servePanelAsset = Effect.gen(function* () {
   const filePath = resolvePluginPanelAssetPath({
     location,
     pluginDir: plugin.directoryPath,
-    rest: parsed.rest,
+    rest: tokenised.rest,
   });
   if (filePath === null) {
     return HttpServerResponse.text("Invalid panel path", { status: 400 });
+  }
+
+  // Документ панели грузится сразу после выдачи ссылки; остальные файлы
+  // (скрипты, data.json, который панель перечитывает) — пока вкладка открыта.
+  const nowMs = yield* Clock.currentTimeMillis;
+  const maxAgeMs =
+    filePath === location.entryFilePath ? PANEL_TOKEN_LOAD_WINDOW_MS : PANEL_TOKEN_SESSION_MS;
+  if (!isPanelTokenFresh({ issuedAtMs, nowMs, maxAgeMs })) {
+    return unauthorized;
   }
 
   const fileSystem = yield* FileSystem.FileSystem;
@@ -127,7 +151,7 @@ const servePanelAsset = Effect.gen(function* () {
   }
 
   // Проверка путей выше — текстовая; симлинк внутри панельной папки увёл бы
-  // чтение наружу (а субресурсы отдаются без сессии). Поэтому сверяем ещё и
+  // чтение наружу. Поэтому сверяем ещё и
   // фактический путь после разыменования.
   const resolved = yield* resolveRealPathInsidePlugin({
     fileSystem,
@@ -153,7 +177,7 @@ const servePanelAsset = Effect.gen(function* () {
       "Content-Security-Policy": PANEL_CONTENT_SECURITY_POLICY,
     },
   });
-}).pipe(Effect.catchTag("AuthError", respondToAuthError));
+});
 
 /**
  * Один wildcard-роут: `/panel/` отдаёт entry-файл манифеста, `/panel/<rest>` —

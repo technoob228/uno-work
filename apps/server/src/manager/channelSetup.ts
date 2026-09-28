@@ -41,6 +41,7 @@ import {
 import { ManagerSlackService } from "./Layers/SlackConnector.ts";
 import { ManagerTelegramService } from "./Layers/TelegramConnector.ts";
 import { telegramPairingLink } from "./telegramPairing.ts";
+import { withOwnerUserId } from "./connectorSenders.ts";
 import {
   callWorkConsole,
   consoleBoolean,
@@ -151,6 +152,8 @@ export const connectSharedTelegram = (input: {
       enabled: true,
       defaultModelSelection: previous?.defaultModelSelection ?? null,
       ...(previous?.addressing !== undefined ? { addressing: previous.addressing } : {}),
+      ...(previous?.ownerUserIds !== undefined ? { ownerUserIds: previous.ownerUserIds } : {}),
+      ...(previous?.groupMembers !== undefined ? { groupMembers: previous.groupMembers } : {}),
     } satisfies ManagerTelegramConnectorConfig;
     yield* repository.upsert({
       projectId: input.projectId,
@@ -356,6 +359,8 @@ export const readSlackInstall = (input: {
         enabled: true,
         defaultModelSelection: previous?.defaultModelSelection ?? null,
         ...(previous?.addressing !== undefined ? { addressing: previous.addressing } : {}),
+        ...(previous?.ownerUserIds !== undefined ? { ownerUserIds: previous.ownerUserIds } : {}),
+        ...(previous?.groupMembers !== undefined ? { groupMembers: previous.groupMembers } : {}),
       } satisfies ManagerSlackConnectorConfig;
       yield* repository.upsert({
         projectId: input.projectId,
@@ -383,7 +388,8 @@ export const readSlackInstall = (input: {
           Effect.annotateLogs({ projectId: input.projectId }),
         );
       } else {
-        if (!relayRow.allowedChannelIds.includes(dmChannelId)) {
+        const installerIsOwner = (relayRow.ownerUserIds ?? []).includes(installerUserId);
+        if (!relayRow.allowedChannelIds.includes(dmChannelId) || !installerIsOwner) {
           // Re-read so a concurrent settings save is not overwritten.
           const latest = yield* repository.get({ projectId: input.projectId, kind: "slack" });
           const base =
@@ -393,6 +399,8 @@ export const readSlackInstall = (input: {
             allowedChannelIds: base.allowedChannelIds.includes(dmChannelId)
               ? base.allowedChannelIds
               : [...base.allowedChannelIds, dmChannelId],
+            // The person who added the app is the owner channels obey.
+            ownerUserIds: withOwnerUserId(base.ownerUserIds, installerUserId),
           } satisfies ManagerSlackConnectorConfig;
           yield* repository.upsert({
             projectId: input.projectId,

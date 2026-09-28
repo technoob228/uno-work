@@ -1,12 +1,12 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { OrchestrationEvent } from "@t3tools/contracts";
-import { assert, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import { Duration, Effect, FileSystem, Layer, Path, PubSub, Stream } from "effect";
 
 import { ServerConfig } from "../config.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { PluginRegistry, PluginRegistryLive } from "./PluginRegistry.ts";
-import { PluginRuntime, PluginRuntimeLive } from "./PluginRuntime.ts";
+import { buildPluginCommandEnv, PluginRuntime, PluginRuntimeLive } from "./PluginRuntime.ts";
 
 const testEvent = (type: string): OrchestrationEvent =>
   ({ type, payload: { marker: "plugin-runtime-test" } }) as unknown as OrchestrationEvent;
@@ -59,12 +59,22 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("plugin runtime", (i
             hooks: [
               {
                 on: "thread.*",
-                run: { kind: "shell", command: 'printf "type=%s" "$UNO_PLUGIN_EVENT_TYPE"' },
+                run: {
+                  kind: "shell",
+                  command:
+                    'printf "type=%s leak=%s" "$UNO_PLUGIN_EVENT_TYPE" "$UNO_TEST_DAEMON_SECRET"',
+                },
               },
             ],
           }),
         );
 
+        process.env.UNO_TEST_DAEMON_SECRET = "daemon-secret";
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            delete process.env.UNO_TEST_DAEMON_SECRET;
+          }),
+        );
         const registry = yield* PluginRegistry;
         yield* registry.start;
         const runtime = yield* PluginRuntime;
@@ -81,6 +91,8 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("plugin runtime", (i
         assert.equal(run!.ok, true);
         assert.equal(run!.trigger, "thread.created");
         assert.include(run!.detail ?? "", "type=thread.created");
+        // The daemon's own env must not reach plugin commands.
+        assert.notInclude(run!.detail ?? "", "daemon-secret");
 
         const snapshot = yield* registry.getSnapshot;
         const plugin = snapshot.plugins.find((candidate) => candidate.id === "echo")!;
@@ -136,4 +148,54 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("plugin runtime", (i
       }).pipe(Effect.provide(runtimeLayer), Effect.scoped);
     }),
   );
+});
+
+describe("buildPluginCommandEnv", () => {
+  it("passes only PATH, HOME and UNO_PLUGIN_* from the daemon env", () => {
+    const env = buildPluginCommandEnv({
+      baseEnv: {
+        PATH: "/usr/bin:/bin",
+        HOME: "/home/uno",
+        OPENAI_API_KEY: "sk-secret",
+        UNO_WORK_TOKEN: "secret-token",
+        AWS_SECRET_ACCESS_KEY: "aws",
+        UNO_PLUGIN_OPERATOR_FLAG: "1",
+      },
+      extraEnv: { UNO_PLUGIN_ID: "digest", UNO_PLUGIN_TRIGGER: "cron" },
+      homeDir: "/fallback",
+      platform: "linux",
+    });
+    assert.deepStrictEqual(env, {
+      PATH: "/usr/bin:/bin",
+      HOME: "/home/uno",
+      UNO_PLUGIN_OPERATOR_FLAG: "1",
+      UNO_PLUGIN_ID: "digest",
+      UNO_PLUGIN_TRIGGER: "cron",
+    });
+  });
+
+  it("drops unprefixed extra vars and falls back to the home dir", () => {
+    const env = buildPluginCommandEnv({
+      baseEnv: {},
+      extraEnv: { SECRET: "x", UNO_PLUGIN_EVENT_TYPE: "thread.created" },
+      homeDir: "/fallback",
+      platform: "linux",
+    });
+    assert.deepStrictEqual(env, { HOME: "/fallback", UNO_PLUGIN_EVENT_TYPE: "thread.created" });
+  });
+
+  it("keeps the variables cmd.exe needs on Windows", () => {
+    const env = buildPluginCommandEnv({
+      baseEnv: { Path: "C:\\Windows", SystemRoot: "C:\\Windows", ComSpec: "cmd.exe", TOKEN: "t" },
+      extraEnv: {},
+      homeDir: "C:\\Users\\uno",
+      platform: "win32",
+    });
+    assert.deepStrictEqual(env, {
+      PATH: "C:\\Windows",
+      HOME: "C:\\Users\\uno",
+      SystemRoot: "C:\\Windows",
+      ComSpec: "cmd.exe",
+    });
+  });
 });

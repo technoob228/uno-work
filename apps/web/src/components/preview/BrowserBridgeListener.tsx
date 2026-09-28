@@ -26,6 +26,11 @@ import {
   runExtensionBrowserCommand,
 } from "../../browserExtensionBridge";
 import { isWebApp } from "../../webMode";
+import {
+  AGENT_PRIVATE_URL_MESSAGE,
+  isPrivateNetworkUrl,
+  normalizeAgentBrowserUrl,
+} from "./browserUrl";
 
 const EXTENSION_MISSING_MESSAGE =
   "No browser to drive: install the Uno Work Companion extension to act in this browser, or set the browser executor to the machine's own browser in settings.";
@@ -62,6 +67,27 @@ async function postCommandResult(
  * 2. Пуш от Electron main-процесса — target=_blank/window.open изнутри
  *    webview превращается в новую браузерную вкладку.
  */
+/**
+ * An agent asked to open an address on this computer or its local network:
+ * nothing opens until the person clicks "Open".
+ */
+function askBeforeOpeningPrivateUrl(url: string, open: () => void): void {
+  let host = url;
+  try {
+    host = new URL(url).host;
+  } catch {
+    // keep the raw url
+  }
+  toastManager.add(
+    stackedThreadToast({
+      type: "info",
+      title: `An agent wants to open ${host}`,
+      description: "This address is on your computer or local network.",
+      actionProps: { children: "Open", onClick: open },
+    }),
+  );
+}
+
 export function BrowserBridgeListener() {
   const { openUrl, openUrlForTarget, openFileForTarget, currentProjectKey, currentChatThreadId } =
     usePreviewPane();
@@ -174,13 +200,23 @@ export function BrowserBridgeListener() {
           event.type === "openUrl" || event.type === "openFile" ? (event.scope ?? "chat") : "chat";
 
         if (event.type === "openUrl") {
-          if (isWebApp) {
-            void runExtensionBrowserCommand({ command: "openUrl", url: event.url }).catch(
-              () => undefined,
-            );
+          const url = normalizeAgentBrowserUrl(event.url);
+          if (!url) return;
+          if (isPrivateNetworkUrl(url)) {
+            askBeforeOpeningPrivateUrl(url, () => {
+              if (isWebApp) {
+                void runExtensionBrowserCommand({ command: "openUrl", url }).catch(() => undefined);
+              } else {
+                openUrlForTargetRef.current(target, scope, url);
+              }
+            });
             return;
           }
-          openUrlForTargetRef.current(target, scope, event.url);
+          if (isWebApp) {
+            void runExtensionBrowserCommand({ command: "openUrl", url }).catch(() => undefined);
+            return;
+          }
+          openUrlForTargetRef.current(target, scope, url);
           return;
         }
         if (event.type === "openFile") {
@@ -222,6 +258,28 @@ export function BrowserBridgeListener() {
             }
             // The hosted build has no Electron webview: commands run in the
             // user's own tabs through the companion extension.
+            // Agents may not steer the browser at this computer or its LAN
+            // (the local daemon, router pages, other machines) on their own.
+            const agentUrl =
+              event.input.command === "openUrl" || event.input.command === "navigate"
+                ? normalizeAgentBrowserUrl(event.input.url)
+                : null;
+            if (
+              (event.input.command === "openUrl" || event.input.command === "navigate") &&
+              !agentUrl
+            ) {
+              throw new Error("Only http(s) addresses can be opened.");
+            }
+            if (agentUrl && isPrivateNetworkUrl(agentUrl)) {
+              askBeforeOpeningPrivateUrl(agentUrl, () =>
+                isWebApp
+                  ? void runExtensionBrowserCommand({ command: "openUrl", url: agentUrl }).catch(
+                      () => undefined,
+                    )
+                  : openUrlForTargetRef.current(target, scope, agentUrl),
+              );
+              throw new Error(AGENT_PRIVATE_URL_MESSAGE);
+            }
             if (isWebApp) {
               if (!isBrowserExtensionConnected() && (await detectBrowserExtension()) === null) {
                 throw new Error(EXTENSION_MISSING_MESSAGE);
@@ -230,10 +288,9 @@ export function BrowserBridgeListener() {
               await postCommandResult(event, { ok: true, data });
               return;
             }
-            if (event.input.command === "openUrl") {
-              if (!event.input.url) throw new Error("Missing url.");
-              openUrlForTargetRef.current(target, scope, event.input.url);
-              await postCommandResult(event, { ok: true, data: { url: event.input.url } });
+            if (event.input.command === "openUrl" && agentUrl) {
+              openUrlForTargetRef.current(target, scope, agentUrl);
+              await postCommandResult(event, { ok: true, data: { url: agentUrl } });
               return;
             }
             const data = await runBrowserAutomationCommand(

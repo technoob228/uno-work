@@ -8,7 +8,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ShellEventNotice } from "../../environments/runtime/shellEventBus";
 import {
+  attachPanelPortHost,
   createPanelBridge,
+  createPanelSendConfirmer,
+  panelSendConfirmMessage,
+  PANEL_INIT_MESSAGE_TYPE,
+  type PanelPortFrame,
   DEFAULT_PANEL_BRIDGE_RATE_LIMIT,
   parsePanelRequest,
   shellEventToPanelEvent,
@@ -216,5 +221,125 @@ describe("shellEventToPanelEvent", () => {
         notice({ kind: "thread-removed", sequence: 4, threadId: "thread-9" as ThreadId }),
       ),
     ).toBeNull();
+  });
+});
+
+function nextMessage(port: MessagePort): Promise<unknown> {
+  return new Promise((resolve) => {
+    port.addEventListener("message", (event) => resolve(event.data), { once: true });
+    port.start();
+  });
+}
+
+describe("attachPanelPortHost", () => {
+  function makeFrame() {
+    const listeners = new Set<() => void>();
+    const granted: Array<{ message: unknown; targetOrigin: string; ports: MessagePort[] }> = [];
+    const frame: PanelPortFrame = {
+      addEventListener: (_type, listener) => listeners.add(listener),
+      removeEventListener: (_type, listener) => listeners.delete(listener),
+      contentWindow: {
+        postMessage: (message, targetOrigin, transfer) => {
+          granted.push({ message, targetOrigin, ports: transfer as MessagePort[] });
+        },
+      },
+    };
+    const load = () => listeners.forEach((listener) => listener());
+    return { frame, granted, load, listeners };
+  }
+
+  it("hands the panel a port on the first load and talks only over it", async () => {
+    const { frame, granted, load } = makeFrame();
+    const received: unknown[] = [];
+    const host = attachPanelPortHost({ frame, onMessage: (data) => received.push(data) });
+
+    host.post({ early: true }); // before the grant: dropped, nothing to send to
+    expect(granted).toHaveLength(0);
+
+    load();
+    expect(granted).toHaveLength(1);
+    expect(granted[0]!.message).toEqual({ type: PANEL_INIT_MESSAGE_TYPE });
+    expect(granted[0]!.targetOrigin).toBe("*");
+    const panelPort = granted[0]!.ports[0]!;
+
+    const reply = nextMessage(panelPort);
+    host.post({ hello: "panel" });
+    expect(await reply).toEqual({ hello: "panel" });
+
+    panelPort.postMessage(call("openUrl", { url: "https://example.com" }), []);
+    await vi.waitFor(() => expect(received).toHaveLength(1));
+    expect(received[0]).toEqual(call("openUrl", { url: "https://example.com" }));
+
+    host.dispose();
+    panelPort.close();
+  });
+
+  it("closes the port on navigation and never grants a new one", async () => {
+    const { frame, granted, load } = makeFrame();
+    const received: unknown[] = [];
+    const host = attachPanelPortHost({ frame, onMessage: (data) => received.push(data) });
+
+    load();
+    const panelPort = granted[0]!.ports[0]!;
+    load(); // the frame navigated: another document now
+    load();
+    expect(granted).toHaveLength(1);
+
+    panelPort.postMessage(call("openUrl", { url: "https://example.com" }), []);
+    await flush();
+    await flush();
+    expect(received).toHaveLength(0);
+
+    host.dispose();
+    panelPort.close();
+  });
+
+  it("dispose removes the load listener", () => {
+    const { frame, granted, load, listeners } = makeFrame();
+    const host = attachPanelPortHost({ frame, onMessage: () => undefined });
+    host.dispose();
+    expect(listeners.size).toBe(0);
+    load();
+    expect(granted).toHaveLength(0);
+  });
+});
+
+describe("createPanelSendConfirmer", () => {
+  it("shows the panel, thread and text, and sends only after the user agrees", async () => {
+    const confirm = vi.fn(async () => true);
+    const confirmSend = createPanelSendConfirmer(confirm);
+    await confirmSend({ panelTitle: "Deploys", text: "redeploy api", threadTag: "ops" });
+    expect(confirm).toHaveBeenCalledWith(
+      panelSendConfirmMessage({ panelTitle: "Deploys", text: "redeploy api", threadTag: "ops" }),
+    );
+    const message = (confirm.mock.calls[0] as unknown as [string])[0];
+    expect(message).toContain('"Deploys"');
+    expect(message).toContain('thread "ops"');
+    expect(message).toContain("redeploy api");
+  });
+
+  it("refuses when the user declines or no confirm UI exists", async () => {
+    await expect(
+      createPanelSendConfirmer(async () => false)({ panelTitle: "P", text: "x" }),
+    ).rejects.toThrow(/declined/);
+    await expect(
+      createPanelSendConfirmer(undefined)({ panelTitle: "P", text: "x" }),
+    ).rejects.toThrow(/nothing was sent/);
+  });
+
+  it("allows one open confirmation at a time", async () => {
+    const pending: Array<(value: boolean) => void> = [];
+    const confirm = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+    const confirmSend = createPanelSendConfirmer(confirm);
+    const first = confirmSend({ panelTitle: "P", text: "one" });
+    await expect(confirmSend({ panelTitle: "P", text: "two" })).rejects.toThrow(/already waiting/);
+    pending[0]!(true);
+    await expect(first).resolves.toBeUndefined();
+    expect(confirm).toHaveBeenCalledTimes(1);
   });
 });

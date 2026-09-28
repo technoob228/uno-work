@@ -49,7 +49,10 @@ export function usePluginPanels(): ReadonlyArray<PluginPanelDescriptor> {
         if (cancelled) return;
         setPanels(
           snapshot.plugins.flatMap((plugin) =>
-            plugin.valid && plugin.enabled && plugin.panel
+            plugin.valid &&
+            plugin.enabled &&
+            (plugin.approval === undefined || plugin.approval === "approved") &&
+            plugin.panel
               ? [
                   {
                     id: plugin.id,

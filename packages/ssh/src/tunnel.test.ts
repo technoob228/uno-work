@@ -265,7 +265,7 @@ describe("ssh tunnel scripts", () => {
             tunnelKillCount += 1;
           });
         }
-        if (args.includes("sh") && args.includes("--")) {
+        if (args.includes("sh") && args.lastIndexOf("--") > args.indexOf("sh")) {
           return makeSuccessfulProcess('{"remotePort":3773}\n');
         }
         if (args.includes("sh")) {
@@ -394,7 +394,7 @@ describe("ssh tunnel supervision", () => {
           tunnelProcesses.push(controllable);
           return controllable.handle;
         }
-        if (args.includes("sh") && args.includes("--")) {
+        if (args.includes("sh") && args.lastIndexOf("--") > args.indexOf("sh")) {
           launchCount += 1;
           if (launchCount > 1 && options?.failLaunchAfterFirst !== undefined) {
             return makeFailingProcess(options.failLaunchAfterFirst, 255);

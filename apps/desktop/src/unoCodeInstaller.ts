@@ -1,4 +1,5 @@
 import * as ChildProcess from "node:child_process";
+import * as Crypto from "node:crypto";
 import * as FS from "node:fs";
 import * as Path from "node:path";
 import { promisify } from "node:util";
@@ -21,6 +22,22 @@ export const UNO_HARNESS_OPENCODE_VERSION = "1.18.32";
 const RELEASE_REPO = "sst/opencode";
 const RELEASE_TAG = `v${UNO_HARNESS_OPENCODE_VERSION}`;
 const ASSET_PREFIX = "opencode";
+
+/**
+ * The installer checks every archive against a SHA-256 embedded here before
+ * extracting, un-quarantining or running it (fail closed: a platform without a
+ * hash is refused). Hashes are GitHub's asset digests for RELEASE_TAG. Bumping
+ * UNO_HARNESS_OPENCODE_VERSION means recomputing them:
+ * `gh api repos/sst/opencode/releases/tags/v<ver> -q '.assets[] | .name+" "+.digest'`.
+ */
+export const UNO_CODE_ASSET_SHA256: Readonly<Record<string, string>> = {
+  "opencode-darwin-arm64.zip": "fa643f93401c13508d8d513780e54ce9cc01203d501114be9b88d62408b8101f",
+  "opencode-darwin-x64.zip": "a24bf10499382f8855e19d2a081b8683e4ab99c7c2affb32dc89b17c8a00ccd6",
+  "opencode-linux-arm64.tar.gz": "568461b7d4d8c19865c97e9a1102e613049c6039d01fe772154de873c1865840",
+  "opencode-linux-x64.tar.gz": "3046e0404fdc60fb80307e7a47824ba07477364178a4d09baa8548496dd6d43b",
+  "opencode-windows-arm64.zip": "5c1c21e85b694ac3fedccff22f934484c29273d5b5780eff006960304108e124",
+  "opencode-windows-x64.zip": "1483c72d5adced825590a0ecf8cc18b3e87e535960a125dbf539d33bce135d0f",
+};
 
 export type InstallPhase = "fetching-release" | "downloading" | "extracting" | "verifying" | "done";
 
@@ -59,6 +76,7 @@ export type UnoCodeInstallErrorCode =
   | "asset-missing"
   | "download-failed"
   | "extract-failed"
+  | "checksum-mismatch"
   | "verify-failed";
 
 export class UnoCodeInstallError extends Error {
@@ -158,6 +176,29 @@ async function downloadToFile(
   }
 }
 
+export async function sha256File(filePath: string): Promise<string> {
+  const hash = Crypto.createHash("sha256");
+  for await (const chunk of FS.createReadStream(filePath)) {
+    hash.update(chunk as Buffer);
+  }
+  return hash.digest("hex");
+}
+
+/** Throws `checksum-mismatch` unless the file's SHA-256 equals `expected`. */
+export async function verifyArchiveChecksum(filePath: string, expected: string): Promise<void> {
+  const actual = await sha256File(filePath);
+  const want = expected.trim().toLowerCase();
+  if (
+    actual.length !== want.length ||
+    !Crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(want))
+  ) {
+    throw new UnoCodeInstallError(
+      `Checksum mismatch for ${Path.basename(filePath)}: expected ${want}, got ${actual}. The download was not installed.`,
+      "checksum-mismatch",
+    );
+  }
+}
+
 async function extractArchive(archivePath: string, destDir: string): Promise<void> {
   await FS.promises.mkdir(destDir, { recursive: true });
   try {
@@ -225,8 +266,9 @@ export async function installUnoCode(opts: InstallerOptions): Promise<InstallRes
   onProgress?.({ phase: "fetching-release", message: `Looking up opencode ${RELEASE_TAG}…` });
   const release = await fetchPinnedRelease();
   const assetName = platformAssetName();
+  const expectedSha256 = UNO_CODE_ASSET_SHA256[assetName];
   const asset = release.assets.find((a) => a.name === assetName);
-  if (!asset) {
+  if (!asset || expectedSha256 === undefined) {
     throw new UnoCodeInstallError(
       `No Uno Code build available for ${process.platform}/${process.arch} in release ${release.tag_name} yet. You can point Uno Work at a custom binary in Settings → Providers → Uno.`,
       "asset-missing",
@@ -240,6 +282,12 @@ export async function installUnoCode(opts: InstallerOptions): Promise<InstallRes
   });
   const archivePath = Path.join(installDir, "_download", asset.name);
   await downloadToFile(asset.browser_download_url, archivePath, asset.size, onProgress);
+  try {
+    await verifyArchiveChecksum(archivePath, expectedSha256);
+  } catch (cause) {
+    await FS.promises.rm(archivePath, { force: true }).catch(() => undefined);
+    throw cause;
+  }
 
   onProgress?.({ phase: "extracting", message: "Extracting…" });
   const extractDir = Path.join(installDir, "bin");

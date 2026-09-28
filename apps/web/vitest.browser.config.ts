@@ -6,32 +6,35 @@ import viteConfig from "./vite.config";
 
 const srcPath = fileURLToPath(new URL("./src", import.meta.url));
 
-export default mergeConfig(
-  viteConfig,
-  defineConfig({
-    resolve: {
-      alias: {
-        "~": srcPath,
-      },
-    },
-    server: {
-      // The app dev server uses a fixed port, but browser tests need to allow
-      // concurrent runs to claim the next available port.
-      strictPort: false,
-    },
-    test: {
-      include: ["src/components/**/*.browser.tsx"],
-      browser: {
-        enabled: true,
-        provider: playwright(),
-        instances: [{ browser: "chromium" }],
-        headless: true,
-        api: {
-          strictPort: false,
+// vite.config.ts exports a config function (it reads `mode`); resolve it first.
+export default defineConfig((env) =>
+  mergeConfig(
+    viteConfig(env),
+    defineConfig({
+      resolve: {
+        alias: {
+          "~": srcPath,
         },
       },
-      testTimeout: 30_000,
-      hookTimeout: 30_000,
-    },
-  }),
+      server: {
+        // The app dev server uses a fixed port, but browser tests need to allow
+        // concurrent runs to claim the next available port.
+        strictPort: false,
+      },
+      test: {
+        include: ["src/components/**/*.browser.tsx"],
+        browser: {
+          enabled: true,
+          provider: playwright(),
+          instances: [{ browser: "chromium" }],
+          headless: true,
+          api: {
+            strictPort: false,
+          },
+        },
+        testTimeout: 30_000,
+        hookTimeout: 30_000,
+      },
+    }),
+  ),
 );

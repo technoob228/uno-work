@@ -200,6 +200,8 @@ import {
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
 import {
+  PluginIssuePanelUrlInput,
+  PluginIssuePanelUrlResult,
   PluginResolvePanelThreadInput,
   PluginResolvePanelThreadResult,
   PluginSendToThreadInput,
@@ -207,6 +209,7 @@ import {
   PluginsError,
   PluginsSnapshot,
   SetPluginEnabledInput,
+  ApprovePluginInput,
 } from "./plugins.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
@@ -387,8 +390,10 @@ export const WS_METHODS = {
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverListPlugins: "server.listPlugins",
   serverSetPluginEnabled: "server.setPluginEnabled",
+  serverApprovePlugin: "server.approvePlugin",
   pluginsSendToThread: "plugins.sendToThread",
   pluginsResolvePanelThread: "plugins.resolvePanelThread",
+  pluginsIssuePanelUrl: "plugins.issuePanelUrl",
 
   // Credentials vault methods (Settings panel, both shells)
   vaultList: "vault.list",
@@ -657,6 +662,12 @@ export const WsServerSetPluginEnabledRpc = Rpc.make(WS_METHODS.serverSetPluginEn
   error: PluginsError,
 });
 
+export const WsServerApprovePluginRpc = Rpc.make(WS_METHODS.serverApprovePlugin, {
+  payload: ApprovePluginInput,
+  success: PluginsSnapshot,
+  error: PluginsError,
+});
+
 export const WsPluginsSendToThreadRpc = Rpc.make(WS_METHODS.pluginsSendToThread, {
   payload: PluginSendToThreadInput,
   success: PluginSendToThreadResult,
@@ -666,6 +677,12 @@ export const WsPluginsSendToThreadRpc = Rpc.make(WS_METHODS.pluginsSendToThread,
 export const WsPluginsResolvePanelThreadRpc = Rpc.make(WS_METHODS.pluginsResolvePanelThread, {
   payload: PluginResolvePanelThreadInput,
   success: PluginResolvePanelThreadResult,
+  error: PluginsError,
+});
+
+export const WsPluginsIssuePanelUrlRpc = Rpc.make(WS_METHODS.pluginsIssuePanelUrl, {
+  payload: PluginIssuePanelUrlInput,
+  success: PluginIssuePanelUrlResult,
   error: PluginsError,
 });
 
@@ -2051,8 +2068,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsCustomHarnessInstallStatusRpc,
   WsServerListPluginsRpc,
   WsServerSetPluginEnabledRpc,
+  WsServerApprovePluginRpc,
   WsPluginsSendToThreadRpc,
   WsPluginsResolvePanelThreadRpc,
+  WsPluginsIssuePanelUrlRpc,
   WsSubscribePluginsRpc,
   WsUnoCreateLlmTopUpActionRpc,
   WsUnoPersonalAiListRpc,
