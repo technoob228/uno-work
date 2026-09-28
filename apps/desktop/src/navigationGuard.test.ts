@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   decideMainWindowNavigation,
   isAllowedWebviewUrl,
+  isBuiltinPdfViewerFrameUrl,
   isGuestPermissionAllowedByDefault,
   isTrustedAppUrl,
   resolveTrustedOrigins,
@@ -80,5 +81,31 @@ describe("isGuestPermissionAllowedByDefault", () => {
       expect(isGuestPermissionAllowedByDefault(permission)).toBe(false);
     }
     expect(isGuestPermissionAllowedByDefault("fullscreen")).toBe(true);
+  });
+});
+
+describe("isBuiltinPdfViewerFrameUrl", () => {
+  it("accepts only Electron's built-in PDF viewer extension origin", () => {
+    expect(
+      isBuiltinPdfViewerFrameUrl(
+        "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/812e5a93-a95d-413f-bf55-47dc7c741741",
+      ),
+    ).toBe(true);
+    expect(
+      isBuiltinPdfViewerFrameUrl("chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html"),
+    ).toBe(true);
+  });
+
+  it("rejects other extensions, schemes and look-alikes", () => {
+    for (const url of [
+      "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/index.html",
+      "https://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html",
+      "chrome://mhjfbmdgcfjbbpaeojofohoefgiehjai/",
+      "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai.evil.com/",
+      "not a url",
+      undefined,
+    ]) {
+      expect(isBuiltinPdfViewerFrameUrl(url)).toBe(false);
+    }
   });
 });

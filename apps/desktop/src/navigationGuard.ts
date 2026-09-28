@@ -79,6 +79,28 @@ export function isAllowedWebviewUrl(rawUrl: unknown): boolean {
 }
 
 /**
+ * Electron's built-in PDF viewer extension. Since Electron 41 a PDF is no
+ * longer a separate guest WebContents: Chromium renders it as an
+ * out-of-process sub-frame at chrome-extension://<this id>/, inside whatever
+ * frame showed the PDF. Sub-frame guards must let exactly this origin through
+ * or every PDF preview goes blank. Its pages are not web-accessible, so a web
+ * page cannot navigate a frame there on its own.
+ */
+export const ELECTRON_PDF_VIEWER_EXTENSION_ID = "mhjfbmdgcfjbbpaeojofohoefgiehjai";
+
+export function isBuiltinPdfViewerFrameUrl(rawUrl: unknown): boolean {
+  if (typeof rawUrl !== "string") return false;
+  try {
+    const url = new URL(rawUrl);
+    return (
+      url.protocol === "chrome-extension:" && url.hostname === ELECTRON_PDF_VIEWER_EXTENSION_ID
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Permissions a guest page may be granted without asking. Everything that
  * touches the person (camera, microphone, location, notifications, screen,
  * HID/USB/serial, MIDI, clipboard read) is denied by default.
