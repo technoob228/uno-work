@@ -37,13 +37,23 @@ log "Проверяю, что демон и харнесы живые"
 systemctl is-active --quiet uno-work || die "uno-work service is not running"
 curl -fsS --max-time 10 "http://127.0.0.1:${PORT}/api/health" >/dev/null || die "health probe failed"
 
-for harness in uno-code opencode hermes; do
+for harness in opencode hermes; do
   if sudo -u "${SERVICE_USER}" env HOME="/home/${SERVICE_USER}" bash -lc "command -v ${harness}" >/dev/null 2>&1; then
     log "  ${harness}: ok"
   else
     log "  ${harness}: НЕ УСТАНОВЛЕН — образ будет без него"
   fi
 done
+# Uno Code = штатный opencode по фиксированному пути (UnoDriver не ищет в PATH);
+# без симлинка Uno Code откатится на форк uno-code, если он остался на диске.
+if [ -x "/home/${SERVICE_USER}/.unowork/opencode/bin/opencode" ]; then
+  log "  uno code (opencode $(sudo -u "${SERVICE_USER}" "/home/${SERVICE_USER}/.unowork/opencode/bin/opencode" --version 2>/dev/null || echo '?')): ok"
+else
+  log "  uno code: НЕТ ~/.unowork/opencode/bin/opencode — Uno Code не заработает на штатном opencode"
+fi
+if [ -e "/home/${SERVICE_USER}/.unowork/uno-code" ] || [ -e "/home/${SERVICE_USER}/.local/bin/uno-code" ]; then
+  log "  форк uno-code ещё на диске — в образ не нужен (0.0.94)"
+fi
 
 # 2. Погасить демон, чтобы он не переписал состояние после чистки.
 log "Останавливаю демон"
@@ -76,7 +86,7 @@ rm -rf /home/"${SERVICE_USER}"/projects/* 2>/dev/null || true
 rm -rf /var/lib/apt/lists/* /var/log/journal/* 2>/dev/null || true
 apt-get clean >/dev/null 2>&1 || true
 # TMPDIR демона живёт на диске состояния (см. uno-work.service), и там копятся
-# распакованные .so от bun-бинарей харнесов — по 4.7 МБ на запуск uno-code, без
+# распакованные .so от bun-бинарей харнесов — по 4.7 МБ на запуск opencode, без
 # уборки. В golden v9 первой съёмкой уехало 3.9 ГБ такого мусора, и min_disk
 # образа вырос с 8 до 11 ГБ. npm-кэш root — от `npm install` установщика.
 rm -rf /root/.npm/_cacache 2>/dev/null || true

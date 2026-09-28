@@ -60,6 +60,43 @@ describe("selectAutoBootstrapModelSelection", () => {
     });
   });
 
+  it("prefers Hermes on the Uno gateway over Uno Code and every signed-in harness", () => {
+    const unoLinked = provider({
+      instanceId: "uno",
+      driver: "uno",
+      models: ["uno/uno/smart", "uno/uno/fast"],
+    });
+    const hermesLinked = provider({
+      instanceId: "hermes",
+      driver: "hermes",
+      models: ["uno/smart", "uno/fast", "x-ai/grok-4.7"],
+    });
+
+    expect(selectAutoBootstrapModelSelection([codexReady, unoLinked, hermesLinked])).toEqual({
+      instanceId: ProviderInstanceId.make("hermes"),
+      model: "uno/smart",
+    });
+  });
+
+  it("falls back to Uno Code when Hermes is not installed", () => {
+    const unoLinked = provider({
+      instanceId: "uno",
+      driver: "uno",
+      models: ["uno/uno/smart", "uno/uno/fast"],
+    });
+    const hermesMissing = provider({
+      instanceId: "hermes",
+      driver: "hermes",
+      installed: false,
+      models: ["uno/smart"],
+    });
+
+    expect(selectAutoBootstrapModelSelection([hermesMissing, unoLinked, codexReady])).toEqual({
+      instanceId: ProviderInstanceId.make("uno"),
+      model: "uno/uno/smart",
+    });
+  });
+
   it("prefers a linked built-in Uno gateway over every signed-in harness", () => {
     const unoLinked = provider({
       instanceId: "uno",

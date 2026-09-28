@@ -249,3 +249,45 @@ describe("instance-scoped model selection", () => {
     });
   });
 });
+
+describe("Hermes as the default harness (0.0.94)", () => {
+  const hermes = provider({
+    provider: ProviderDriverKind.make("hermes"),
+    instanceId: "hermes",
+    // Hermes lists frontier (premium) models first.
+    models: ["x-ai/grok-4.7", "z-ai/glm-5.3", "uno/smart", "uno/fast"],
+  });
+  const uno = provider({
+    provider: ProviderDriverKind.make("uno"),
+    instanceId: "uno",
+    models: ["uno/uno/smart", "uno/uno/fast"],
+  });
+
+  it("starts Hermes on Smart, not on the first (premium) model", () => {
+    expect(
+      resolveAppModelSelectionForInstance(
+        ProviderInstanceId.make("hermes"),
+        DEFAULT_UNIFIED_SETTINGS,
+        [hermes, uno],
+        null,
+      ),
+    ).toBe("uno/smart");
+  });
+
+  it("a project saved on Uno Code does not lend its model to Hermes", async () => {
+    const { deriveEffectiveComposerModelState } = await import("./composerDraftStore");
+    const state = deriveEffectiveComposerModelState({
+      draft: null,
+      providers: [hermes, uno],
+      selectedProvider: ProviderDriverKind.make("hermes"),
+      selectedInstanceId: ProviderInstanceId.make("hermes"),
+      threadModelSelection: null,
+      projectModelSelection: {
+        instanceId: ProviderInstanceId.make("uno"),
+        model: "uno/uno/smart",
+      },
+      settings: DEFAULT_UNIFIED_SETTINGS,
+    });
+    expect(state.selectedModel).toBe("uno/smart");
+  });
+});

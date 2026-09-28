@@ -117,12 +117,20 @@ function unoPickerGroup(model: Pick<ModelPickerItem, "capabilities">): UnoPicker
     : null;
 }
 
+/**
+ * Harnesses whose list is the Uno gateway's catalog (with `uno_group`): Uno
+ * Code and Hermes show the same short grouped list.
+ */
+function listsUnoGatewayCatalog(driverKind: ProviderDriverKind | undefined): boolean {
+  return driverKind === "uno" || driverKind === "hermes";
+}
+
 /** The gateway has AI hours: at least one Uno model is Smart/Fast or premium. */
 export function isCuratedUnoModelList(
   models: ReadonlyArray<Pick<ModelPickerItem, "driverKind" | "capabilities">>,
 ): boolean {
   return models.some((model) => {
-    if (model.driverKind !== "uno") return false;
+    if (!listsUnoGatewayCatalog(model.driverKind)) return false;
     const group = unoPickerGroup(model);
     return group === "included" || group === "premium";
   });
@@ -139,7 +147,7 @@ export function showUnoPremiumComingSoon(
   models: ReadonlyArray<Pick<ModelPickerItem, "slug" | "driverKind" | "capabilities">>,
 ): boolean {
   const premium = models.filter(
-    (model) => model.driverKind === "uno" && unoPickerGroup(model) === "premium",
+    (model) => listsUnoGatewayCatalog(model.driverKind) && unoPickerGroup(model) === "premium",
   );
   return (
     premium.length > 0 &&
@@ -586,7 +594,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const unoCurated = useMemo(() => isCuratedUnoModelList(flatModels), [flatModels]);
   const unoPremiumComingSoon = useMemo(() => showUnoPremiumComingSoon(flatModels), [flatModels]);
   const showUnoGroups =
-    unoCurated && !isSearching && selectedInstanceEntry?.driverKind === "uno" && !isLocked;
+    unoCurated &&
+    !isSearching &&
+    listsUnoGatewayCatalog(selectedInstanceEntry?.driverKind) &&
+    !isLocked;
   const showUnoFilters =
     !unoCurated &&
     (selectedInstanceEntry?.driverKind === "uno" ||

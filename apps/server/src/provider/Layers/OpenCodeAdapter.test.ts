@@ -22,7 +22,9 @@ import {
   type OpenCodeRuntimeShape,
 } from "../opencodeRuntime.ts";
 import {
+  OPENCODE_STALL_RETRY_PROMPT,
   appendOpenCodeAssistantTextDelta,
+  isOpenCodeStreamStall,
   makeOpenCodeAdapter,
   mergeOpenCodeAssistantText,
   visibleUnoAssistantTextFromRaw,
@@ -56,6 +58,10 @@ const runtimeMock = {
     closeError: null as Error | null,
     messages: [] as MessageEntry[],
     subscribedEvents: [] as unknown[],
+    /** Delay before the subscribed events arrive (lets a test start a turn first). */
+    subscribeDelayMs: 0,
+    /** Keeps the stream open after the events (a closed stream ends the session). */
+    subscribeHoldOpenMs: 0,
   },
   reset() {
     this.state.startCalls.length = 0;
@@ -69,6 +75,8 @@ const runtimeMock = {
     this.state.closeError = null;
     this.state.messages = [];
     this.state.subscribedEvents = [];
+    this.state.subscribeDelayMs = 0;
+    this.state.subscribeHoldOpenMs = 0;
   },
 };
 
@@ -154,9 +162,13 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
       event: {
         subscribe: async () => ({
           stream: (async function* () {
+            const delay = runtimeMock.state.subscribeDelayMs;
+            if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
             for (const event of runtimeMock.state.subscribedEvents) {
               yield event;
             }
+            const holdOpen = runtimeMock.state.subscribeHoldOpenMs;
+            if (holdOpen > 0) await new Promise((resolve) => setTimeout(resolve, holdOpen));
           })(),
         }),
       },
@@ -489,7 +501,88 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }).pipe(Effect.provide(adapterLayer));
   });
 
-  it.effect("adds a final-answer marker instruction for Uno Kimi turns", () => {
+  const stallTestLayer = () =>
+    Layer.effect(
+      OpenCodeAdapter,
+      Effect.gen(function* () {
+        return yield* makeOpenCodeAdapter(openCodeAdapterTestSettings);
+      }),
+    ).pipe(
+      Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(providerSessionDirectoryTestLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+  const stallSessionId = "http://127.0.0.1:9999/session";
+  const stallEvent = {
+    type: "session.error",
+    properties: {
+      sessionID: stallSessionId,
+      error: { name: "UnknownError", data: { message: "SSE read timed out" } },
+    },
+  };
+  const idleEvent = {
+    type: "session.status",
+    properties: { sessionID: stallSessionId, status: { type: "idle" } },
+  };
+  const runStalledTurn = (threadId: string, events: ReadonlyArray<unknown>) =>
+    Effect.gen(function* () {
+      runtimeMock.state.subscribeDelayMs = 40;
+      runtimeMock.state.subscribeHoldOpenMs = 1_000;
+      runtimeMock.state.subscribedEvents = [...events];
+      const adapter = yield* OpenCodeAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId: asThreadId(threadId),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId: asThreadId(threadId),
+        input: "Do it",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "anthropic/claude-sonnet-4-5",
+        ),
+      });
+      yield* sleep(300);
+      const sessions = yield* adapter.listSessions();
+      return sessions.find((entry) => entry.threadId === threadId);
+    }).pipe(Effect.provide(stallTestLayer()));
+
+  it.effect("continues a turn whose model stream stalled, with the same model", () =>
+    Effect.gen(function* () {
+      const session = yield* runStalledTurn("thread-stall", [stallEvent, idleEvent]);
+
+      assert.equal(runtimeMock.state.promptCalls.length, 2);
+      assert.deepEqual(runtimeMock.state.promptCalls[1], {
+        sessionID: stallSessionId,
+        model: { providerID: "anthropic", modelID: "claude-sonnet-4-5" },
+        parts: [{ type: "text", text: OPENCODE_STALL_RETRY_PROMPT }],
+      });
+      // The idle of the stalled run did not close the turn the retry continues.
+      assert.equal(session?.status, "running");
+      assert.notEqual(session?.activeTurnId, undefined);
+    }),
+  );
+
+  it.effect("fails the turn when its stream stalls a second time", () =>
+    Effect.gen(function* () {
+      const session = yield* runStalledTurn("thread-stall-twice", [stallEvent, stallEvent]);
+
+      assert.equal(runtimeMock.state.promptCalls.length, 1);
+      assert.equal(session?.status, "error");
+      assert.equal(session?.activeTurnId, undefined);
+    }),
+  );
+
+  it("recognizes opencode's stream timeouts as stalls", () => {
+    assert.equal(isOpenCodeStreamStall("SSE read timed out"), true);
+    assert.equal(isOpenCodeStreamStall("Provider response headers timed out after 120000ms"), true);
+    assert.equal(isOpenCodeStreamStall("Insufficient balance"), false);
+  });
+
+  it.effect("sends Uno Kimi turns without the final-answer marker instruction", () => {
     const unoInstanceId = ProviderInstanceId.make("uno");
     const adapterLayer = Layer.effect(
       OpenCodeAdapter,
@@ -526,6 +619,54 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         model: {
           providerID: "uno",
           modelID: "moonshotai/kimi-k2.6",
+        },
+        parts: [
+          {
+            type: "text",
+            text: "Проверь статус",
+          },
+        ],
+      });
+    }).pipe(Effect.provide(adapterLayer));
+  });
+
+  it.effect("keeps the final-answer marker instruction for Uno Gemini 3 turns", () => {
+    const unoInstanceId = ProviderInstanceId.make("uno");
+    const adapterLayer = Layer.effect(
+      OpenCodeAdapter,
+      Effect.gen(function* () {
+        return yield* makeOpenCodeAdapter(openCodeAdapterTestSettings, {
+          instanceId: unoInstanceId,
+        });
+      }),
+    ).pipe(
+      Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(providerSessionDirectoryTestLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    return Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-uno-gemini-marker");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId,
+        input: "Проверь статус",
+        modelSelection: createModelSelection(unoInstanceId, "uno/google/gemini-3.1-pro-preview"),
+      });
+
+      assert.deepEqual(runtimeMock.state.promptCalls.at(-1), {
+        sessionID: "http://127.0.0.1:9999/session",
+        model: {
+          providerID: "uno",
+          modelID: "google/gemini-3.1-pro-preview",
         },
         parts: [
           {

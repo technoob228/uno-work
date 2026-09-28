@@ -3,16 +3,24 @@ import * as FS from "node:fs";
 import * as Path from "node:path";
 import { promisify } from "node:util";
 
-import {
-  UNO_CODE_MINIMUM_VERSION,
-  compareCliVersions,
-  extractNumericCliVersion,
-} from "@t3tools/contracts";
+import { compareCliVersions, extractNumericCliVersion } from "@t3tools/contracts";
 
 const execFile = promisify(ChildProcess.execFile);
 
-const RELEASE_REPO = "technoob228/uno-code";
-const ASSET_PREFIX = "uno-code";
+/**
+ * The engine of the Uno Code harness: stock opencode, pinned (0.0.94). The
+ * technoob228/uno-code fork is no longer installed — its only functional
+ * change was the app directory name, and the daemon now isolates stock
+ * opencode itself (apps/server/src/provider/unoHarnessIsolation.ts). The fork
+ * left in `<stateDir>/uno-code/` by older versions is not touched: the daemon
+ * falls back to it only while this binary is missing.
+ *
+ * Keep in step with `UNO_WORK_OPENCODE_VERSION` in deploy/install.sh.
+ */
+export const UNO_HARNESS_OPENCODE_VERSION = "1.18.32";
+const RELEASE_REPO = "sst/opencode";
+const RELEASE_TAG = `v${UNO_HARNESS_OPENCODE_VERSION}`;
+const ASSET_PREFIX = "opencode";
 
 export type InstallPhase = "fetching-release" | "downloading" | "extracting" | "verifying" | "done";
 
@@ -86,8 +94,8 @@ function binaryFileName(base: string): string {
   return process.platform === "win32" ? `${base}.exe` : base;
 }
 
-async function fetchLatestRelease(): Promise<GitHubRelease> {
-  const url = `https://api.github.com/repos/${RELEASE_REPO}/releases/latest`;
+async function fetchPinnedRelease(): Promise<GitHubRelease> {
+  const url = `https://api.github.com/repos/${RELEASE_REPO}/releases/tags/${RELEASE_TAG}`;
   const response = await fetch(url, {
     headers: {
       "User-Agent": "uno-work-installer",
@@ -96,7 +104,7 @@ async function fetchLatestRelease(): Promise<GitHubRelease> {
   });
   if (response.status === 404) {
     throw new UnoCodeInstallError(
-      "No Uno Code release is available yet. You can point Uno Work at a custom binary in Settings → Providers → Uno.",
+      `opencode ${RELEASE_TAG} is not published. You can point Uno Work at a custom binary in Settings → Providers → Uno.`,
       "release-not-published",
     );
   }
@@ -214,8 +222,8 @@ export async function installUnoCode(opts: InstallerOptions): Promise<InstallRes
   const { installDir, onProgress } = opts;
   await FS.promises.mkdir(installDir, { recursive: true });
 
-  onProgress?.({ phase: "fetching-release", message: "Checking latest release…" });
-  const release = await fetchLatestRelease();
+  onProgress?.({ phase: "fetching-release", message: `Looking up opencode ${RELEASE_TAG}…` });
+  const release = await fetchPinnedRelease();
   const assetName = platformAssetName();
   const asset = release.assets.find((a) => a.name === assetName);
   if (!asset) {
@@ -239,7 +247,7 @@ export async function installUnoCode(opts: InstallerOptions): Promise<InstallRes
   await extractArchive(archivePath, extractDir);
 
   const extracted = await findExtractedBinary(extractDir);
-  const finalBinary = Path.join(extractDir, binaryFileName("uno-code"));
+  const finalBinary = Path.join(extractDir, binaryFileName(ASSET_PREFIX));
   if (extracted !== finalBinary) {
     await FS.promises.rename(extracted, finalBinary);
   }
@@ -273,12 +281,13 @@ export async function installUnoCode(opts: InstallerOptions): Promise<InstallRes
   return { binaryPath: finalBinary, version, releaseTag: release.tag_name };
 }
 
+/** `<stateDir>/opencode/` — where UnoDriver looks for stock opencode first. */
 export function getDefaultInstallDir(stateDir: string): string {
-  return Path.join(stateDir, "uno-code");
+  return Path.join(stateDir, "opencode");
 }
 
 export function getDefaultBinaryPath(stateDir: string): string {
-  return Path.join(stateDir, "uno-code", "bin", binaryFileName("uno-code"));
+  return Path.join(stateDir, "opencode", "bin", binaryFileName(ASSET_PREFIX));
 }
 
 export async function isUnoCodeInstalled(binaryPath: string): Promise<boolean> {
@@ -325,10 +334,12 @@ export function releaseTagToNumericVersion(tag: string): string | null {
   return match?.[1] ?? null;
 }
 
-/** Fetch the numeric version of the latest GitHub release (throws on network/API error). */
+/**
+ * The version the harness should run: pinned, so no network lookup — a new
+ * opencode reaches users only after it passed our checks.
+ */
 export async function fetchLatestUnoCodeReleaseVersion(): Promise<string | null> {
-  const release = await fetchLatestRelease();
-  return releaseTagToNumericVersion(release.tag_name);
+  return UNO_HARNESS_OPENCODE_VERSION;
 }
 
 /**
@@ -352,8 +363,8 @@ export function decideInstall(opts: {
   readonly targetVersion?: string;
 }): InstallDecision {
   const targetNumeric =
-    extractNumericCliVersion(opts.targetVersion ?? UNO_CODE_MINIMUM_VERSION) ??
-    extractNumericCliVersion(UNO_CODE_MINIMUM_VERSION);
+    extractNumericCliVersion(opts.targetVersion ?? UNO_HARNESS_OPENCODE_VERSION) ??
+    extractNumericCliVersion(UNO_HARNESS_OPENCODE_VERSION);
 
   if (!opts.exists) {
     return {
@@ -396,15 +407,15 @@ export function decideInstall(opts: {
 }
 
 /**
- * Decide whether uno-code needs to be installed or upgraded at startup.
+ * Decide whether the Uno Code engine (stock opencode) needs to be installed
+ * or upgraded at startup.
  *
  * `targetVersion` is the desired version to compare against — typically the
- * numeric core of the latest GitHub release tag, falling back to
- * `UNO_CODE_MINIMUM_VERSION` when offline. See {@link decideInstall}.
+ * pinned opencode version. See {@link decideInstall}.
  */
 export async function needsInstallOrUpgrade(
   binaryPath: string,
-  targetVersion: string = UNO_CODE_MINIMUM_VERSION,
+  targetVersion: string = UNO_HARNESS_OPENCODE_VERSION,
 ): Promise<InstallDecision> {
   const exists = await isUnoCodeInstalled(binaryPath);
   const installedVersionRaw = exists ? await readUnoCodeVersion(binaryPath) : null;

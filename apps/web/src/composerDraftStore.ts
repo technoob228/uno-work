@@ -20,6 +20,8 @@ import {
   type UnoVideoJobStage,
   type UnoVideoJobStatus,
   type UnoVideoUploadId,
+  UNO_LEGACY_DEFAULT_MODEL_SLUG,
+  UNO_SMART_MODEL_SLUG,
   type VideoDigest,
   type VideoDigestId,
   type VideoMimeType,
@@ -233,6 +235,8 @@ const PersistedComposerDraftStoreState = Schema.Struct({
     Schema.Record(ProviderInstanceId, ModelSelection),
   ),
   stickyActiveProvider: Schema.optionalKey(Schema.NullOr(ProviderInstanceId)),
+  /** Set once {@link releaseLegacyUnoMachineDefault} ran on this browser (0.0.94). */
+  hermesDefaultApplied: Schema.optionalKey(Schema.Boolean),
 });
 type PersistedComposerDraftStoreState = typeof PersistedComposerDraftStoreState.Type;
 
@@ -888,8 +892,16 @@ export function deriveEffectiveComposerModelState(input: {
   projectModelSelection: ModelSelection | null | undefined;
   settings: UnifiedSettings;
 }): EffectiveComposerModelState {
+  // A saved thread/project selection of another instance (a machine default
+  // the composer passed over, e.g. Uno Code now that Hermes is the default)
+  // says nothing about this instance's model: start on its default.
+  const carriesModelFor = (selection: ModelSelection | null | undefined) =>
+    selection != null &&
+    (!input.selectedInstanceId || selection.instanceId === input.selectedInstanceId);
   const baseModelCandidate =
-    input.threadModelSelection?.model ?? input.projectModelSelection?.model ?? null;
+    (carriesModelFor(input.threadModelSelection) ? input.threadModelSelection?.model : null) ??
+    (carriesModelFor(input.projectModelSelection) ? input.projectModelSelection?.model : null) ??
+    null;
   const baseModel =
     (input.selectedInstanceId
       ? resolveAppModelSelectionForInstance(
@@ -1718,6 +1730,57 @@ function partializeComposerDraftStoreState(
       state.stickyModelSelectionByProvider,
     ),
     stickyActiveProvider: state.stickyActiveProvider,
+    hermesDefaultApplied: true,
+  };
+}
+
+const UNO_INSTANCE_ID = ProviderInstanceId.make("uno");
+/** Models the machine (not the person) put on Uno Code before 0.0.94. */
+const UNO_MACHINE_DEFAULT_MODELS: ReadonlySet<string> = new Set([
+  UNO_SMART_MODEL_SLUG,
+  UNO_LEGACY_DEFAULT_MODEL_SLUG,
+]);
+
+function isUnoMachineDefaultPick(
+  activeProvider: ProviderInstanceId | null | undefined,
+  selections: Partial<Record<ProviderInstanceId, ModelSelection>> | undefined,
+): boolean {
+  if (activeProvider !== UNO_INSTANCE_ID) return false;
+  const model = selections?.[UNO_INSTANCE_ID]?.model;
+  return model === undefined || UNO_MACHINE_DEFAULT_MODELS.has(model);
+}
+
+/**
+ * Hermes became the default harness in 0.0.94. Until then the "Uno AI" step
+ * of the setup saved the machine's default — Uno Code on Smart (or Kimi
+ * before AI hours) — as the sticky pick, so on most browsers a sticky Uno
+ * Code on its default model is not a choice the person made. Those picks are
+ * let go once (the new chat then follows the machine default: Hermes where it
+ * can answer, Uno Code otherwise); a Uno Code pick on any other model is the
+ * person's own and stays, as do picks of every other harness.
+ */
+export function releaseLegacyUnoMachineDefault(
+  state: PersistedComposerDraftStoreState,
+): PersistedComposerDraftStoreState {
+  if (state.hermesDefaultApplied === true) return state;
+  const draftsByThreadKey = Object.fromEntries(
+    Object.entries(state.draftsByThreadKey).map(([threadKey, draft]) => [
+      threadKey,
+      isUnoMachineDefaultPick(draft.activeProvider, draft.modelSelectionByProvider)
+        ? { ...draft, activeProvider: null }
+        : draft,
+    ]),
+  );
+  return {
+    ...state,
+    draftsByThreadKey,
+    stickyActiveProvider: isUnoMachineDefaultPick(
+      state.stickyActiveProvider,
+      state.stickyModelSelectionByProvider,
+    )
+      ? null
+      : (state.stickyActiveProvider ?? null),
+    hermesDefaultApplied: true,
   };
 }
 
@@ -1779,7 +1842,7 @@ function normalizeCurrentPersistedComposerDraftStoreState(
     stickyActiveProvider = normalizeProviderInstanceId(normalizedPersistedState.stickyProvider);
   }
 
-  return {
+  return releaseLegacyUnoMachineDefault({
     draftsByThreadKey: normalizePersistedDraftsByThreadId(
       normalizedPersistedState.draftsByThreadKey ?? normalizedPersistedState.draftsByThreadId,
       draftThreadsByThreadKey,
@@ -1788,7 +1851,10 @@ function normalizeCurrentPersistedComposerDraftStoreState(
     logicalProjectDraftThreadKeyByLogicalProjectKey,
     stickyModelSelectionByProvider: compactModelSelectionByProvider(stickyModelSelectionByProvider),
     stickyActiveProvider,
-  };
+    ...(normalizedPersistedState.hermesDefaultApplied === true
+      ? { hermesDefaultApplied: true }
+      : {}),
+  });
 }
 
 function readPersistedAttachmentIdsFromStorage(threadKey: string): string[] {

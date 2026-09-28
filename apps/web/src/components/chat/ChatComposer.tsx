@@ -795,7 +795,7 @@ export const ChatComposer = memo(
         activeThreadModelSelection?.instanceId,
         activeProjectDefaultModelSelection?.instanceId,
       ];
-      for (const candidate of candidates) {
+      for (const [index, candidate] of candidates.entries()) {
         if (!candidate) continue;
         const match = providerInstanceEntries.find(
           (entry) => entry.instanceId === candidate && entry.enabled,
@@ -804,6 +804,11 @@ export const ChatComposer = memo(
           // When locked to a specific driver kind, ignore persisted instance
           // ids from a different kind or continuation group.
           if (lockedProvider && match.driverKind !== lockedProvider) continue;
+          // A saved thread/project instance of another kind than the
+          // resolved provider is a machine default that was passed over
+          // (a logged-out harness, or Uno Code now that Hermes is the
+          // default): only the person's own pick (the draft) may differ.
+          if (index > 0 && !lockedProvider && match.driverKind !== selectedProvider) continue;
           if (
             lockedContinuationGroupKey &&
             match.continuationGroupKey !== lockedContinuationGroupKey

@@ -111,6 +111,13 @@ interface OpenCodeSessionContext {
   activeModel: ReturnType<typeof parseOpenCodeModelSlug> | undefined;
   activeVariant: string | undefined;
   /**
+   * The active turn's retry after the model stream stalled (see
+   * {@link isOpenCodeStreamStall}): at most {@link OPENCODE_STALL_RETRIES}
+   * per turn. `awaitingIdle` holds back the idle that closes the stalled run,
+   * so it does not complete the turn the retry continues.
+   */
+  stallRetry: { turnId: TurnId; attempts: number; awaitingIdle: boolean } | undefined;
+  /**
    * One-shot guard flipped by `stopOpenCodeContext` / `emitUnexpectedExit`.
    * The session lifecycle is owned by `sessionScope`; this Ref exists only
    * so concurrent callers can race the transition safely via `getAndSet`.
@@ -634,6 +641,26 @@ function toolStateCreatedAt(part: Extract<Part, { type: "tool" }>): string | und
   }
 }
 
+/** Retries of one turn after its model stream stalled. */
+export const OPENCODE_STALL_RETRIES = 1;
+/** How long a stall retry waits for the stalled run's idle before sending. */
+const OPENCODE_STALL_RETRY_IDLE_WAIT_MS = 5_000;
+/** The prompt that continues a turn whose model stream stalled. */
+export const OPENCODE_STALL_RETRY_PROMPT =
+  "The model connection stalled and your last response was cut off. Continue the task from where you stopped; don't repeat finished steps.";
+
+/**
+ * The model stopped streaming: opencode's `chunkTimeout` / `headerTimeout`
+ * (set for the Uno gateway by UnoDriver) aborted the request. In the harness
+ * benchmark of 27.09.2026 such requests hung for 4–28 minutes; with the
+ * timeouts the turn fails fast, and the adapter retries it once.
+ */
+export function isOpenCodeStreamStall(message: string): boolean {
+  return /SSE read timed out|response headers timed out|ProviderHeaderTimeoutError|Model stopped responding/iu.test(
+    message,
+  );
+}
+
 function sessionErrorMessage(error: unknown): string {
   if (!error || typeof error !== "object") {
     return "OpenCode session failed.";
@@ -656,20 +683,22 @@ function isUnoImageGenerationModel(
   );
 }
 
+/**
+ * Uno models that still get the `<uno_final_answer>` marker instruction and
+ * the visible-text filter. Kimi, MiniMax M2, Step 3.5, Qwen3 thinking and
+ * "*thinking*" ids left this list on 25.09.2026: through the gateway their
+ * reasoning arrives in `delta.reasoning` and opencode (1.14.48 and 1.18.32,
+ * @ai-sdk/openai-compatible 2.0.41) keeps it in a separate reasoning part —
+ * 0 leaks in ~120 real single- and multi-turn runs. The English "thinking
+ * aloud" that users saw came from `reasoningEffort: "none"` forced by
+ * UnoDriver (removed there). Gemini 3 stays until it can be checked (the
+ * gateway's OpenRouter account answered 403 for Gemini at the time).
+ */
 function isUnoLeakyReasoningModel(model: ReturnType<typeof parseOpenCodeModelSlug> | undefined) {
   if (!model || (model.providerID !== "uno" && model.providerID !== "uno-russia")) {
     return false;
   }
-  const modelId = model.modelID.toLowerCase();
-  return (
-    modelId.includes("kimi") ||
-    modelId.includes("thinking") ||
-    modelId.includes("reasoning") ||
-    modelId.includes("minimax-m2") ||
-    modelId.includes("step-3.5") ||
-    /qwen3.*thinking/u.test(modelId) ||
-    /gemini-3(?:[._/ -]|$)/u.test(modelId)
-  );
+  return /gemini-3(?:[._/ -]|$)/u.test(model.modelID.toLowerCase());
 }
 
 function imageMarkdownFromUrl(url: string, index: number): string {
@@ -1532,6 +1561,62 @@ export function makeOpenCodeAdapter(
       }
     });
 
+    /**
+     * The model stream of the active turn stalled: instead of failing the
+     * turn, ask the same model to continue — once per turn. Waits for the
+     * stalled run's idle (or {@link OPENCODE_STALL_RETRY_IDLE_WAIT_MS}) so the
+     * continuation is not sent into a session that is still busy. `false`
+     * when this error is not retried (the caller fails the turn as before).
+     */
+    const retryStalledTurn = Effect.fn("retryStalledOpenCodeTurn")(function* (
+      context: OpenCodeSessionContext,
+      rawMessage: string,
+      raw: unknown,
+    ) {
+      const turnId = context.activeTurnId;
+      const model = context.activeModel;
+      if (!turnId || !model || !isOpenCodeStreamStall(rawMessage)) return false;
+      const previous = context.stallRetry?.turnId === turnId ? context.stallRetry.attempts : 0;
+      if (previous >= OPENCODE_STALL_RETRIES) return false;
+      context.stallRetry = { turnId, attempts: previous + 1, awaitingIdle: true };
+      yield* emit({
+        ...(yield* buildEventBase({ threadId: context.session.threadId, turnId, raw })),
+        type: "runtime.warning",
+        payload: {
+          message: "The model stopped responding. Retrying once…",
+          detail: rawMessage,
+        },
+      });
+      const agent = context.activeAgent;
+      const variant = context.activeVariant;
+      yield* Effect.gen(function* () {
+        for (let waited = 0; waited < OPENCODE_STALL_RETRY_IDLE_WAIT_MS; waited += 100) {
+          if (context.stallRetry?.turnId !== turnId || !context.stallRetry.awaitingIdle) break;
+          yield* Effect.sleep("100 millis");
+        }
+        if (context.activeTurnId !== turnId) return;
+        if (context.stallRetry?.turnId === turnId) context.stallRetry.awaitingIdle = false;
+        const sent = yield* Effect.exit(
+          runOpenCodeSdk("session.promptAsync", () =>
+            context.client.session.promptAsync({
+              sessionID: context.openCodeSessionId,
+              model,
+              ...(agent ? { agent } : {}),
+              ...(variant ? { variant } : {}),
+              parts: [{ type: "text" as const, text: OPENCODE_STALL_RETRY_PROMPT }],
+            }),
+          ),
+        );
+        if (Exit.isFailure(sent) && context.activeTurnId === turnId) {
+          yield* completeActiveTurn(context, {
+            state: "failed",
+            errorMessage: normalizeUnoBillingErrorMessage(rawMessage),
+          });
+        }
+      }).pipe(Effect.forkIn(context.sessionScope));
+      return true;
+    });
+
     const handleSubscribedEvent = Effect.fn("handleSubscribedEvent")(function* (
       context: OpenCodeSessionContext,
       event: OpenCodeSubscribedEvent,
@@ -1810,6 +1895,11 @@ export function makeOpenCodeAdapter(
           }
 
           if (event.properties.status.type === "idle" && turnId) {
+            if (context.stallRetry?.turnId === turnId && context.stallRetry.awaitingIdle) {
+              // The stalled run is over; the retry continues this turn.
+              context.stallRetry.awaitingIdle = false;
+              break;
+            }
             yield* completeActiveTurn(context, { state: "completed", raw: event });
           }
           break;
@@ -1817,6 +1907,9 @@ export function makeOpenCodeAdapter(
 
         case "session.error": {
           const rawMessage = sessionErrorMessage(event.properties.error);
+          if (yield* retryStalledTurn(context, rawMessage, event)) {
+            break;
+          }
           const message = normalizeUnoBillingErrorMessage(rawMessage);
           const errorClass = classifyProviderErrorDetail(rawMessage);
           const activeTurnId = context.activeTurnId;
@@ -2102,6 +2195,7 @@ export function makeOpenCodeAdapter(
           completedAssistantPartIds: new Set(),
           turns: [],
           promptIdle: undefined,
+          stallRetry: undefined,
           activeTurnId: undefined,
           activeAgent: undefined,
           activeModel: undefined,

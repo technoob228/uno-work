@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -6,7 +7,12 @@ import { describe, expect, it } from "vitest";
 
 import { renderBrief, SOURCE, TARGET } from "../../scripts/embed-agent-context.ts";
 import { UNO_WORK_TOOLS } from "../unoWork/tools.ts";
-import { buildUnoWorkBrief } from "./unoWorkBrief.ts";
+import {
+  UNO_WORK_TASK_RULES,
+  buildUnoWorkBrief,
+  buildUnoWorkBriefWithTaskRules,
+  writeUnoWorkBriefFile,
+} from "./unoWorkBrief.ts";
 import { UNO_WORK_GUIDE_TOPICS, buildUnoWorkGuide } from "./guides.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -47,5 +53,22 @@ describe("Uno Work environment brief", () => {
     expect(brief).toContain("request_secret");
     expect(brief).toMatch(/Never ask for passwords, API keys or tokens in the chat/);
     expect(brief).toMatch(/Free: .* Small: .* Plus and up: an always-on cloud Uno Work computer/s);
+  });
+
+  it("task rules: do what was asked, finish with Done / Checked / Your call", () => {
+    expect(UNO_WORK_TASK_RULES).toMatch(/do it to the end/);
+    expect(UNO_WORK_TASK_RULES).toMatch(/never a raw log/);
+    for (const label of ["**Done:**", "**Checked:**", "**Your call:**"]) {
+      expect(UNO_WORK_TASK_RULES).toContain(label);
+    }
+    expect(buildUnoWorkBriefWithTaskRules()).toBe(
+      `${buildUnoWorkBrief()}\n\n${UNO_WORK_TASK_RULES}`,
+    );
+  });
+
+  it("the instructions file of OpenCode / Uno Code carries the task rules", () => {
+    const filePath = writeUnoWorkBriefFile(mkdtempSync(path.join(tmpdir(), "uno-brief-")));
+    expect(filePath).toBeDefined();
+    expect(readFileSync(filePath!, "utf8")).toBe(`${buildUnoWorkBriefWithTaskRules()}\n`);
   });
 });

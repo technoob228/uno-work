@@ -26,7 +26,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as os from "node:os";
 
 import { ServerConfig } from "../../config.ts";
-import { buildUnoWorkBrief } from "../../agentContext/unoWorkBrief.ts";
+import { buildUnoWorkBriefWithTaskRules } from "../../agentContext/unoWorkBrief.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
@@ -170,9 +170,10 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
         hermesHome: path.join(serverConfig.stateDir, `hermes-home-${instanceId}`),
       });
       const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
-      // One brief for every harness (agentContext/unoWorkBrief.md); the long
-      // contracts are served on demand by the uno-work MCP server.
-      const harnessInstructions = buildUnoWorkBrief();
+      // One brief for every harness (agentContext/unoWorkBrief.md) plus the
+      // task rules (finish with a short summary, not a verification log); the
+      // long contracts are served on demand by the uno-work MCP server.
+      const harnessInstructions = buildUnoWorkBriefWithTaskRules();
       const processEnv = {
         ...unoAgentEnv,
         // `uv tool install` puts hermes into ~/.local/bin, which a desktop

@@ -140,19 +140,38 @@ export function getDefaultServerModel(
 
 /**
  * Preference order for machine-picked defaults (no explicit user choice):
- * built-in Uno AI first when its gateway key is live, then the
- * bring-your-own-subscription harnesses, then OpenCode (its free Zen models
- * answer without any login) as the safety net. Mirrors the server's
- * `autoBootstrapModelSelection` DRIVER_PREFERENCE.
+ * built-in Uno AI first when its gateway key is live — Hermes, then Uno Code
+ * where Hermes is not installed — then the bring-your-own-subscription
+ * harnesses, then OpenCode (its free Zen models answer without any login) as
+ * the safety net. Mirrors the server's `autoBootstrapModelSelection`
+ * DRIVER_PREFERENCE.
  */
 const DEFAULT_THREAD_DRIVER_PREFERENCE: ReadonlyArray<string> = [
+  "hermes",
   "uno",
   "codex",
   "claudeAgent",
   "opencode",
-  "hermes",
   "cursor",
 ];
+
+/**
+ * Until 0.0.94 the machine default was the Uno Code harness (instance `uno`),
+ * and it is saved as the default of every project the machine created. Such a
+ * saved default is not the person's choice: while Hermes can answer, it no
+ * longer decides the harness of a new chat. An explicit pick in the model
+ * picker is kept separately (the composer's sticky / draft provider) and
+ * still wins.
+ */
+export function isLegacyMachineDefaultInstance(
+  instanceId: ProviderDriverKind | ProviderInstanceId | null | undefined,
+  providers: ReadonlyArray<ServerProvider>,
+): boolean {
+  if (instanceId !== "uno") return false;
+  return providers.some(
+    (candidate) => candidate.driver === "hermes" && isUsableDefaultProvider(candidate),
+  );
+}
 
 /**
  * A harness a machine-picked default may route a first message to: shipped,
@@ -190,7 +209,11 @@ export function resolveDefaultThreadProvider(
   machineDefault: ProviderDriverKind | ProviderInstanceId | null | undefined,
 ): ProviderDriverKind {
   const requestedEntry = providers.find((candidate) => candidate.instanceId === machineDefault);
-  if (requestedEntry && isUsableDefaultProvider(requestedEntry)) {
+  if (
+    requestedEntry &&
+    isUsableDefaultProvider(requestedEntry) &&
+    !isLegacyMachineDefaultInstance(requestedEntry.instanceId, providers)
+  ) {
     return requestedEntry.driver;
   }
   const usable = providers

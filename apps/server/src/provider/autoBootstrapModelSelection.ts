@@ -36,23 +36,27 @@ export const FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION: ModelSelection = {
 };
 
 /**
- * Driver preference, most preferred first. The built-in Uno gateway leads:
- * when the box (or laptop) has a working Uno key, the out-of-the-box default
- * must answer without any harness login — Codex and Claude stay one click
- * away as "bring your own subscription" options. Providers that need a
- * subscription login rank next; the rest are ordered by how self-sufficient
- * they are for unattended work (OpenCode serves free Zen models without
- * auth, so it is the safety net when nothing else is signed in).
+ * Driver preference, most preferred first. The built-in Uno AI leads: when
+ * the box (or laptop) has a working Uno key, the out-of-the-box default must
+ * answer without any harness login — Codex and Claude stay one click away as
+ * "bring your own subscription" options. Of the two harnesses that run on the
+ * Uno gateway, Hermes comes first (27.09.2026: 12 of 15 real tasks done
+ * against 5 for Uno Code and 4 for stock OpenCode, same price —
+ * reports/harness_bench_2026-09); Uno Code stays the fallback where Hermes
+ * is not installed (a laptop without uv). Providers that need a subscription
+ * login rank next; the rest are ordered by how self-sufficient they are for
+ * unattended work (OpenCode serves free Zen models without auth, so it is the
+ * safety net when nothing else is signed in).
  *
  * Note: the Claude driver kind is `claudeAgent` (a bare `"claude"` entry
  * here would never match and silently unranked it).
  */
 const DRIVER_PREFERENCE: ReadonlyArray<string> = [
+  "hermes",
   "uno",
   "codex",
   "claudeAgent",
   "opencode",
-  "hermes",
   "cursor",
 ];
 
