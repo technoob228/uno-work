@@ -71,6 +71,7 @@ import { isWebLite } from "../lite/flag";
 import { isWebApp } from "../webMode";
 import { LiteRoot } from "../lite/LiteShell";
 import { EconomyPresenceBootstrap } from "../components/economy/EconomyPresence";
+import { hasUnoAiArrival } from "../unoai/useUnoAiArrivals";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -118,6 +119,8 @@ export const Route = createRootRouteWithContext<{
     const needsOnboarding =
       authGateState.status === "authenticated" &&
       !getClientSettings().onboardingCompleted &&
+      // A Uno AI chat moving here / the console's first message: straight to Home.
+      !hasUnoAiArrival() &&
       location.pathname !== "/onboarding" &&
       location.pathname !== "/pair";
 

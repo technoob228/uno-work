@@ -39,6 +39,18 @@ export function rememberHandoff(chatId: string, now = Date.now(), s: Store | nul
   }
 }
 
+/** A fresh hand-off is waiting (not consumed). */
+export function peekHandoff(now = Date.now(), s: Store | null = store()): boolean {
+  try {
+    const raw = s?.getItem(KEY);
+    if (!raw) return false;
+    const v = JSON.parse(raw) as Partial<PendingHandoff>;
+    return typeof v.chatId === "string" && typeof v.at === "number" && now - v.at <= HANDOFF_TTL_MS;
+  } catch {
+    return false;
+  }
+}
+
 /** The pending hand-off, removed as it is read (it runs once). */
 export function takeHandoff(now = Date.now(), s: Store | null = store()): PendingHandoff | null {
   if (!s) return null;
