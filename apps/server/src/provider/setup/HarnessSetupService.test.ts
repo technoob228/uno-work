@@ -88,7 +88,7 @@ describe("install jobs", () => {
 
     const process = harness.latest();
     expect(process.input.command).toBe("npm");
-    expect(process.input.args).toEqual(["install", "-g", "@openai/codex"]);
+    expect(process.input.args).toEqual(["install", "-g", "@openai/codex@latest"]);
     // Global prefix is not writable in this harness, so the user prefix is used.
     expect(process.input.env.npm_config_prefix).toBe("/home/unowork/.local");
     expect(process.input.env.PATH).toContain("/home/unowork/.local/bin");

@@ -25,7 +25,11 @@ import { UnoAgentAccessTest } from "../../unoAgentAccess.ts";
 import { UnoGatewayKeyTest } from "../../unoGatewayKey.ts";
 import { AiProviderKeysTest } from "../../aiProviders/AiProviderKeys.ts";
 import { checkCodexProviderStatus, type CodexAppServerProviderSnapshot } from "./CodexProvider.ts";
-import { checkClaudeProviderStatus } from "./ClaudeProvider.ts";
+import {
+  CLAUDE_UNO_AI_MESSAGE,
+  type ClaudeCliModel,
+  checkClaudeProviderStatus,
+} from "./ClaudeProvider.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./ProviderInstanceRegistryHydration.ts";
@@ -101,6 +105,7 @@ type TestClaudeCapabilities = {
   readonly subscriptionType: string | undefined;
   readonly tokenSource: string | undefined;
   readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
+  readonly models?: ReadonlyArray<ClaudeCliModel>;
 };
 
 function claudeCapabilities(overrides: Partial<TestClaudeCapabilities> = {}) {
@@ -1303,7 +1308,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           );
           assert.strictEqual(
             status.message,
-            "Claude Code v2.1.218 is too old for Claude Opus 5. Upgrade to v2.1.219 or newer to access it.",
+            "Claude Code v2.1.218 is too old for Claude Opus 5.5. Upgrade to v2.1.280 or newer to access it.",
           );
         }).pipe(
           Effect.provide(
@@ -1333,7 +1338,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           );
           assert.strictEqual(
             status.message,
-            "Claude Code v2.1.196 is too old for Claude Sonnet 5. Upgrade to v2.1.197 or newer to access it.",
+            "Claude Code v2.1.196 is too old for Claude Opus 5.5. Upgrade to v2.1.280 or newer to access it.",
           );
         }).pipe(
           Effect.provide(
@@ -1358,7 +1363,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           );
           assert.strictEqual(
             status.message,
-            "Claude Code v2.1.110 is too old for Claude Opus 4.7. Upgrade to v2.1.111 or newer to access it.",
+            "Claude Code v2.1.110 is too old for Claude Opus 5.5. Upgrade to v2.1.280 or newer to access it.",
           );
         }).pipe(
           Effect.provide(
@@ -1376,6 +1381,173 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           ),
         ),
       );
+
+      it.effect(
+        "lists Claude Opus 5.5 and Fable 5.1 from Claude Code 2.1.280, no update needed",
+        () =>
+          Effect.gen(function* () {
+            const status = yield* checkClaudeProviderStatus(
+              defaultClaudeSettings,
+              claudeCapabilities(),
+            );
+            const slugs = status.models.map((model) => model.slug);
+            assert.strictEqual(slugs[0], "claude-opus-5-5");
+            assert.strictEqual(slugs.includes("claude-fable-5-1"), true);
+            assert.strictEqual(slugs.includes("claude-sonnet-5"), true);
+            assert.strictEqual(
+              status.models.find((model) => model.slug === "claude-opus-5-5")?.name,
+              "Claude Opus 5.5",
+            );
+            assert.strictEqual(status.message, undefined);
+            assert.strictEqual(status.updateAvailable, undefined);
+          }).pipe(
+            Effect.provide(
+              mockSpawnerLayer((args) => {
+                const joined = args.join(" ");
+                if (joined === "--version") return { stdout: "2.1.280\n", stderr: "", code: 0 };
+                throw new Error(`Unexpected args: ${joined}`);
+              }),
+            ),
+          ),
+      );
+
+      it.effect("offers an update while the CLI is too old for the newest models", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            claudeCapabilities(),
+          );
+          assert.strictEqual(
+            status.models.some((model) => model.slug === "claude-opus-5-5"),
+            false,
+          );
+          assert.strictEqual(
+            status.models.some((model) => model.slug === "claude-fable-5-1"),
+            true,
+          );
+          assert.strictEqual(status.updateAvailable, true);
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.1.270\n", stderr: "", code: 0 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("adds the models the installed CLI lists, even ones this build doesn't know", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            claudeCapabilities({
+              models: [
+                { value: "default", resolvedModel: "claude-opus-6[1m]", supportsFastMode: true },
+                { value: "opus[1m]", resolvedModel: "claude-opus-6[1m]" },
+                { value: "sonnet", resolvedModel: "claude-sonnet-5" },
+                { value: "haiku", resolvedModel: "claude-haiku-4-5-20251001" },
+              ],
+            }),
+          );
+          const opus6 = status.models.find((model) => model.slug === "claude-opus-6");
+          assert.strictEqual(opus6?.name, "Claude Opus 6");
+          assert.strictEqual(status.models[0]?.slug, "claude-opus-6");
+          assert.strictEqual(
+            opus6?.capabilities?.optionDescriptors?.some((d) => d.id === "contextWindow"),
+            true,
+          );
+          assert.strictEqual(
+            status.models.filter((model) => model.slug === "claude-haiku-4-5").length,
+            1,
+          );
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.1.290\n", stderr: "", code: 0 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("runs on Uno AI when Claude has no sign-in of its own", () => {
+        const modes: string[] = [];
+        const probedModes: string[] = [];
+        return Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            (_settings, mode) => {
+              probedModes.push(mode);
+              return claudeCapabilities({ tokenSource: "ANTHROPIC_AUTH_TOKEN" })();
+            },
+            {},
+            {
+              environment: () => ({
+                ANTHROPIC_BASE_URL: "https://api.getuno.xyz",
+                ANTHROPIC_AUTH_TOKEN: "unollm_test",
+              }),
+              setMode: (mode) => modes.push(mode),
+            },
+          );
+          assert.deepStrictEqual(modes, ["uno"]);
+          assert.deepStrictEqual(probedModes, ["uno"]);
+          assert.strictEqual(status.status, "ready");
+          assert.strictEqual(status.auth.status, "authenticated");
+          assert.strictEqual(status.auth.label, "Uno AI");
+          assert.strictEqual(status.message, CLAUDE_UNO_AI_MESSAGE);
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.1.280\n", stderr: "", code: 0 };
+              if (joined === "auth status --json")
+                return { stdout: '{"loggedIn":false,"authMethod":"none"}\n', stderr: "", code: 0 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        );
+      });
+
+      it.effect("never overrides the person's own Claude sign-in", () => {
+        const modes: string[] = [];
+        const gateway = {
+          environment: () => ({ ANTHROPIC_AUTH_TOKEN: "unollm_test" }),
+          setMode: (mode: "own" | "uno") => modes.push(mode),
+        };
+        return Effect.gen(function* () {
+          const signedIn = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            claudeCapabilities({ subscriptionType: "max" }),
+            {},
+            gateway,
+          );
+          assert.strictEqual(signedIn.auth.label, "Claude Max Subscription");
+          // An API key in the environment counts without asking the CLI.
+          yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            claudeCapabilities(),
+            { ANTHROPIC_API_KEY: "sk-ant-test" },
+            gateway,
+          );
+          assert.deepStrictEqual(modes, ["own", "own"]);
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.1.280\n", stderr: "", code: 0 };
+              if (joined === "auth status --json")
+                return {
+                  stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                  stderr: "",
+                  code: 0,
+                };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        );
+      });
 
       it.effect("returns a display label for claude subscription types", () =>
         Effect.gen(function* () {

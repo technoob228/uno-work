@@ -131,6 +131,9 @@ export const ServerProvider = Schema.Struct({
   auth: ServerProviderAuth,
   checkedAt: IsoDateTime,
   message: Schema.optional(TrimmedNonEmptyString),
+  // The installed CLI is older than the newest models need; installing the
+  // harness again updates it (Settings shows "Update").
+  updateAvailable: Schema.optional(Schema.Boolean),
   // Optional for back-compat: every legacy producer omits this field and
   // an absent value is interpreted as `"available"` by consumers (see
   // `isProviderAvailable`). New `ProviderInstanceRegistry` outputs set it

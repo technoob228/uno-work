@@ -191,6 +191,8 @@ export function buildServerProvider(input: {
   slashCommands?: ReadonlyArray<ServerProviderSlashCommand>;
   skills?: ReadonlyArray<ServerProviderSkill>;
   probe: ProviderProbeResult;
+  /** A newer CLI is needed for the newest models; installing again updates it. */
+  updateAvailable?: boolean;
 }): ServerProviderDraft {
   return {
     displayName: input.presentation.displayName,
@@ -205,6 +207,7 @@ export function buildServerProvider(input: {
     auth: input.probe.auth,
     checkedAt: input.checkedAt,
     ...(input.probe.message ? { message: input.probe.message } : {}),
+    ...(input.updateAvailable ? { updateAvailable: true } : {}),
     models: input.models,
     slashCommands: [...(input.slashCommands ?? [])],
     skills: [...(input.skills ?? [])],

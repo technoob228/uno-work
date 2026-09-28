@@ -54,6 +54,8 @@ const ClaudeOutputEnvelope = Schema.Struct({
 export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(function* (
   claudeSettings: ClaudeSettings,
   environment: NodeJS.ProcessEnv = process.env,
+  /** Read per run: Claude Code on Uno AI (ClaudeDriver) adds the gateway env. */
+  environmentOverlay?: () => Readonly<Record<string, string>>,
 ) {
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
@@ -133,7 +135,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
           "--dangerously-skip-permissions",
         ],
         {
-          env: claudeEnvironment,
+          env: { ...claudeEnvironment, ...environmentOverlay?.() },
           cwd,
           shell: process.platform === "win32",
           stdin: {

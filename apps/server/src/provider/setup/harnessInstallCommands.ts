@@ -99,7 +99,11 @@ export function resolveInstallPlan(
     const env = context.npmGlobalWritable
       ? {}
       : { npm_config_prefix: userLocalNpmPrefix(context.homeDir) };
-    const args = ["install", "-g", npmPackage];
+    // `@latest`: the same button installs and updates. A CLI that is
+    // already installed would otherwise stay on whatever version it has —
+    // too old for the newest models (Claude Opus 5.5 needs Claude Code
+    // 2.1.280). Claude Code's own auto-updater is left on.
+    const args = ["install", "-g", `${npmPackage}@latest`];
     return {
       kind: "command",
       command: "npm",

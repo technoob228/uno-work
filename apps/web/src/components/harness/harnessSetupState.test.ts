@@ -10,6 +10,7 @@ import {
   progressLine,
   resolveHarnessAction,
   resolveHarnessStatus,
+  runsOnUnoAi,
 } from "./harnessSetupState";
 
 const driver = (value: string) => ProviderDriverKind.make(value);
@@ -156,5 +157,21 @@ describe("row list", () => {
     ] as const) {
       expect(HARNESS_STATUS_LABEL[status].length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("Claude on Uno AI", () => {
+  it("is ready without a Claude sign-in and still offers one", () => {
+    const provider = makeProvider({
+      driver: driver("claudeAgent"),
+      auth: { status: "authenticated", type: "unoAi", label: "Uno AI" },
+    });
+    expect(runsOnUnoAi(provider)).toBe(true);
+    expect(resolveHarnessStatus({ provider, providersLoaded: true })).toBe("ready");
+    expect(resolveHarnessAction({ driver: driver("claudeAgent"), status: "ready" })).toBe("none");
+    expect(runsOnUnoAi(makeProvider({ auth: { status: "authenticated", type: "maxplan" } }))).toBe(
+      false,
+    );
+    expect(runsOnUnoAi(undefined)).toBe(false);
   });
 });

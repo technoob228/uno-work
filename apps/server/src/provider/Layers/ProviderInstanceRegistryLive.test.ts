@@ -41,10 +41,10 @@ import { UnoGatewayKeyTest } from "../../unoGatewayKey.ts";
 import { AiProviderKeysTest } from "../../aiProviders/AiProviderKeys.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { ClaudeDriver } from "../Drivers/ClaudeDriver.ts";
+import { ClaudeDriver, type ClaudeDriverEnv } from "../Drivers/ClaudeDriver.ts";
 import { CodexDriver } from "../Drivers/CodexDriver.ts";
 import { CursorDriver } from "../Drivers/CursorDriver.ts";
-import { OpenCodeDriver } from "../Drivers/OpenCodeDriver.ts";
+import { OpenCodeDriver, type OpenCodeDriverEnv } from "../Drivers/OpenCodeDriver.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { makeProviderInstanceRegistry } from "./ProviderInstanceRegistryLive.ts";
@@ -284,10 +284,12 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
         },
       };
 
-      const { registry } = yield* makeProviderInstanceRegistry({
-        drivers: [CodexDriver, ClaudeDriver, CursorDriver, OpenCodeDriver],
-        configMap,
-      });
+      const { registry } = yield* makeProviderInstanceRegistry<ClaudeDriverEnv | OpenCodeDriverEnv>(
+        {
+          drivers: [CodexDriver, ClaudeDriver, CursorDriver, OpenCodeDriver],
+          configMap,
+        },
+      );
 
       // Every configured instance must materialize — none downgraded to a
       // shadow snapshot, because every driver in the map is registered.

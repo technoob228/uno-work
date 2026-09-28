@@ -66,6 +66,15 @@ export function resolveHarnessStatus(input: {
   return provider.enabled ? "needsSignIn" : "attention";
 }
 
+/**
+ * Claude Code without a sign-in of its own runs on the plan's Uno AI premium
+ * credit (the daemon reports `auth.type` "unoAi"). It is ready; signing in
+ * switches it to the person's own subscription.
+ */
+export function runsOnUnoAi(provider: ServerProvider | undefined): boolean {
+  return provider?.auth.status === "authenticated" && provider.auth.type === "unoAi";
+}
+
 export const HARNESS_STATUS_LABEL: Readonly<Record<HarnessStatus, string>> = {
   checking: "Checking…",
   ready: "Ready",

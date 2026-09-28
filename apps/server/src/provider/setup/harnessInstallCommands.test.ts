@@ -32,9 +32,9 @@ describe("resolveInstallPlan", () => {
     expect(plan).toEqual({
       kind: "command",
       command: "npm",
-      args: ["install", "-g", "@openai/codex"],
+      args: ["install", "-g", "@openai/codex@latest"],
       env: {},
-      display: "npm install -g @openai/codex",
+      display: "npm install -g @openai/codex@latest",
     });
   });
 
@@ -45,7 +45,7 @@ describe("resolveInstallPlan", () => {
     });
     if (plan.kind !== "command") throw new Error("expected a command plan");
     expect(plan.env.npm_config_prefix).toBe(userLocalNpmPrefix("/home/unowork"));
-    expect(plan.args).toEqual(["install", "-g", "@anthropic-ai/claude-code"]);
+    expect(plan.args).toEqual(["install", "-g", "@anthropic-ai/claude-code@latest"]);
     expect(plan.display).toContain("npm_config_prefix=/home/unowork/.local");
   });
 
@@ -54,9 +54,9 @@ describe("resolveInstallPlan", () => {
       const plan = resolveInstallPlan(driver(value), baseContext);
       return plan.kind === "command" ? plan.args.at(-1) : plan.reason;
     };
-    expect(packageFor("codex")).toBe("@openai/codex");
-    expect(packageFor("claudeAgent")).toBe("@anthropic-ai/claude-code");
-    expect(packageFor("opencode")).toBe("opencode-ai");
+    expect(packageFor("codex")).toBe("@openai/codex@latest");
+    expect(packageFor("claudeAgent")).toBe("@anthropic-ai/claude-code@latest");
+    expect(packageFor("opencode")).toBe("opencode-ai@latest");
   });
 
   it("installs hermes through uv, passing the extras and mcp pin unquoted", () => {

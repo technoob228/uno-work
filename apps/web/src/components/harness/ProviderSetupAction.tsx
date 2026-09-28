@@ -17,9 +17,11 @@ import { getDriverOption } from "../settings/providerDriverMeta";
 import { HarnessSignInDialog } from "./HarnessSignInDialog";
 import {
   isAuthableDriver,
+  isInstallableDriver,
   isJobActive,
   resolveHarnessAction,
   resolveHarnessStatus,
+  runsOnUnoAi,
 } from "./harnessSetupState";
 import type { HarnessSetupApi } from "./useHarnessSetup";
 
@@ -67,11 +69,41 @@ export function ProviderSetupAction({
     );
   }
 
-  if (action === "signIn" && isAuthableDriver(driver)) {
+  // The CLI is older than the newest models need: installing again updates it.
+  const canUpdate =
+    action === "none" && provider?.updateAvailable === true && isInstallableDriver(driver);
+  // Claude on Uno AI works already; signing in switches it to the person's own
+  // subscription or API key.
+  const canUseOwnAccount = action === "none" && runsOnUnoAi(provider) && isAuthableDriver(driver);
+
+  if (canUpdate && !canUseOwnAccount) {
+    return (
+      <Button
+        size="xs"
+        variant="outline"
+        disabled={!enabled}
+        onClick={() => void setup.startInstall(driver)}
+      >
+        {installJob?.state === "failed" ? "Retry update" : "Update"}
+      </Button>
+    );
+  }
+
+  if ((action === "signIn" || canUseOwnAccount) && isAuthableDriver(driver)) {
     return (
       <>
+        {canUpdate ? (
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={!enabled}
+            onClick={() => void setup.startInstall(driver)}
+          >
+            {installJob?.state === "failed" ? "Retry update" : "Update"}
+          </Button>
+        ) : null}
         <Button size="xs" variant="outline" disabled={!enabled} onClick={() => setSignInOpen(true)}>
-          Sign in
+          {canUseOwnAccount ? "Sign in with Claude" : "Sign in"}
         </Button>
         {signInOpen ? (
           <HarnessSignInDialog

@@ -44,12 +44,85 @@ const CLAUDE_PRESENTATION = {
   displayName: "Claude",
   showInteractionModeToggle: true,
 } as const;
+/**
+ * The first Claude Code release that knows each model id (checked in the
+ * published CLI binaries, 28.09.2026: `claude-opus-5-5` first appears in
+ * 2.1.280, `claude-fable-5-1` in 2.1.257). A CLI that is older keeps the
+ * model out of the list and offers an update (`updateAvailable`).
+ */
+const MINIMUM_CLAUDE_OPUS_5_5_VERSION = "2.1.280";
+const MINIMUM_CLAUDE_FABLE_5_1_VERSION = "2.1.257";
 const MINIMUM_CLAUDE_OPUS_5_VERSION = "2.1.219";
 const MINIMUM_CLAUDE_SONNET_5_VERSION = "2.1.197";
 const MINIMUM_CLAUDE_FABLE_5_VERSION = "2.1.169";
 const MINIMUM_CLAUDE_OPUS_4_8_VERSION = "2.1.154";
 const MINIMUM_CLAUDE_OPUS_4_7_VERSION = "2.1.111";
+
+/**
+ * Reasoning / fast mode / 1M context of the current Claude generation. Also
+ * used for a newer model the installed CLI lists that this build doesn't
+ * know yet (see {@link claudeModelsFromCli}).
+ */
+function modernClaudeCapabilities(input: {
+  readonly fastMode: boolean;
+  readonly contextWindow: boolean;
+}): ModelCapabilities {
+  return createModelCapabilities({
+    optionDescriptors: [
+      buildSelectOptionDescriptor({
+        id: "effort",
+        label: "Reasoning",
+        options: [
+          { value: "low", label: "Low" },
+          { value: "medium", label: "Medium" },
+          { value: "high", label: "High", isDefault: true },
+          { value: "xhigh", label: "Extra High" },
+          { value: "max", label: "Max" },
+          { value: "ultracode", label: "Ultracode" },
+          { value: "ultrathink", label: "Ultrathink" },
+        ],
+        promptInjectedValues: ["ultrathink"],
+      }),
+      ...(input.fastMode
+        ? [
+            buildBooleanOptionDescriptor({
+              id: "fastMode",
+              label: "Fast Mode",
+            }),
+          ]
+        : []),
+      ...(input.contextWindow
+        ? [
+            buildSelectOptionDescriptor({
+              id: "contextWindow",
+              label: "Context Window",
+              options: [
+                { value: "200k", label: "200k", isDefault: true },
+                { value: "1m", label: "1M" },
+              ],
+            }),
+          ]
+        : []),
+    ],
+  });
+}
+
+const HAIKU_CAPABILITIES: ModelCapabilities = createModelCapabilities({
+  optionDescriptors: [
+    buildBooleanOptionDescriptor({
+      id: "thinking",
+      label: "Thinking",
+    }),
+  ],
+});
+
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
+  {
+    slug: "claude-opus-5-5",
+    name: "Claude Opus 5.5",
+    isCustom: false,
+    capabilities: modernClaudeCapabilities({ fastMode: true, contextWindow: true }),
+  },
   {
     slug: "claude-opus-5",
     name: "Claude Opus 5",
@@ -115,6 +188,12 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
         }),
       ],
     }),
+  },
+  {
+    slug: "claude-fable-5-1",
+    name: "Claude Fable 5.1",
+    isCustom: false,
+    capabilities: modernClaudeCapabilities({ fastMode: false, contextWindow: true }),
   },
   {
     slug: "claude-fable-5",
@@ -304,92 +383,157 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     slug: "claude-haiku-4-5",
     name: "Claude Haiku 4.5",
     isCustom: false,
-    capabilities: createModelCapabilities({
-      optionDescriptors: [
-        buildBooleanOptionDescriptor({
-          id: "thinking",
-          label: "Thinking",
-        }),
-      ],
-    }),
+    capabilities: HAIKU_CAPABILITIES,
   },
 ];
+const BUILT_IN_MODEL_SLUGS: ReadonlySet<string> = new Set(BUILT_IN_MODELS.map((m) => m.slug));
 
-function supportsClaudeOpus5(version: string | null | undefined): boolean {
-  return version ? compareCliVersions(version, MINIMUM_CLAUDE_OPUS_5_VERSION) >= 0 : false;
-}
+/** Built-in models that need a minimum Claude Code, newest requirement first. */
+const MINIMUM_VERSION_BY_MODEL: ReadonlyArray<{
+  readonly slug: string;
+  readonly name: string;
+  readonly version: string;
+}> = [
+  { slug: "claude-opus-5-5", name: "Claude Opus 5.5", version: MINIMUM_CLAUDE_OPUS_5_5_VERSION },
+  { slug: "claude-fable-5-1", name: "Claude Fable 5.1", version: MINIMUM_CLAUDE_FABLE_5_1_VERSION },
+  { slug: "claude-opus-5", name: "Claude Opus 5", version: MINIMUM_CLAUDE_OPUS_5_VERSION },
+  { slug: "claude-sonnet-5", name: "Claude Sonnet 5", version: MINIMUM_CLAUDE_SONNET_5_VERSION },
+  { slug: "claude-fable-5", name: "Claude Fable 5", version: MINIMUM_CLAUDE_FABLE_5_VERSION },
+  { slug: "claude-opus-4-8", name: "Claude Opus 4.8", version: MINIMUM_CLAUDE_OPUS_4_8_VERSION },
+  { slug: "claude-opus-4-7", name: "Claude Opus 4.7", version: MINIMUM_CLAUDE_OPUS_4_7_VERSION },
+];
 
-function supportsClaudeSonnet5(version: string | null | undefined): boolean {
-  return version ? compareCliVersions(version, MINIMUM_CLAUDE_SONNET_5_VERSION) >= 0 : false;
-}
-
-function supportsClaudeFable5(version: string | null | undefined): boolean {
-  return version ? compareCliVersions(version, MINIMUM_CLAUDE_FABLE_5_VERSION) >= 0 : false;
-}
-
-function supportsClaudeOpus48(version: string | null | undefined): boolean {
-  return version ? compareCliVersions(version, MINIMUM_CLAUDE_OPUS_4_8_VERSION) >= 0 : false;
-}
-
-function supportsClaudeOpus47(version: string | null | undefined): boolean {
-  return version ? compareCliVersions(version, MINIMUM_CLAUDE_OPUS_4_7_VERSION) >= 0 : false;
+function supportsVersion(version: string | null | undefined, minimum: string): boolean {
+  return version ? compareCliVersions(version, minimum) >= 0 : false;
 }
 
 function getBuiltInClaudeModelsForVersion(
   version: string | null | undefined,
 ): ReadonlyArray<ServerProviderModel> {
   return BUILT_IN_MODELS.filter((model) => {
-    if (model.slug === "claude-opus-5") {
-      return supportsClaudeOpus5(version);
-    }
-    if (model.slug === "claude-sonnet-5") {
-      return supportsClaudeSonnet5(version);
-    }
-    if (model.slug === "claude-fable-5") {
-      return supportsClaudeFable5(version);
-    }
-    if (model.slug === "claude-opus-4-8") {
-      return supportsClaudeOpus48(version);
-    }
-    if (model.slug === "claude-opus-4-7") {
-      return supportsClaudeOpus47(version);
-    }
-    return true;
+    const requirement = MINIMUM_VERSION_BY_MODEL.find((entry) => entry.slug === model.slug);
+    return requirement ? supportsVersion(version, requirement.version) : true;
   });
 }
 
-function formatClaudeOpus5UpgradeMessage(version: string | null): string {
+/**
+ * The newest model the installed CLI is too old for, or undefined when it
+ * runs them all: "Claude Code v2.1.270 is too old for Claude Opus 5.5.
+ * Upgrade to v2.1.280 or newer to access it."
+ */
+function claudeVersionUpgradeMessage(version: string | null): string | undefined {
+  const missing = MINIMUM_VERSION_BY_MODEL.filter(
+    (entry) => !supportsVersion(version, entry.version),
+  ).toSorted((a, b) => compareCliVersions(b.version, a.version))[0];
+  if (!missing) return undefined;
   const versionLabel = version ? `v${version}` : "the installed version";
-  return `Claude Code ${versionLabel} is too old for Claude Opus 5. Upgrade to v${MINIMUM_CLAUDE_OPUS_5_VERSION} or newer to access it.`;
+  return `Claude Code ${versionLabel} is too old for ${missing.name}. Upgrade to v${missing.version} or newer to access it.`;
 }
 
-function formatClaudeSonnet5UpgradeMessage(version: string | null): string {
-  const versionLabel = version ? `v${version}` : "the installed version";
-  return `Claude Code ${versionLabel} is too old for Claude Sonnet 5. Upgrade to v${MINIMUM_CLAUDE_SONNET_5_VERSION} or newer to access it.`;
+/**
+ * `claude-opus-5-5` → `Claude Opus 5.5`, `claude-haiku-4-5-20251001` →
+ * `Claude Haiku 4.5`; anything else is kept as it is.
+ */
+export function claudeModelDisplayName(slug: string): string {
+  const match = /^claude-([a-z]+)((?:-\d{1,2})+)$/.exec(stripClaudeModelSuffixes(slug));
+  if (!match) return slug;
+  const family = match[1]!;
+  const version = match[2]!.slice(1).split("-").join(".");
+  return `Claude ${family[0]!.toUpperCase()}${family.slice(1)} ${version}`;
 }
 
-function formatClaudeFable5UpgradeMessage(version: string | null): string {
-  const versionLabel = version ? `v${version}` : "the installed version";
-  return `Claude Code ${versionLabel} is too old for Claude Fable 5. Upgrade to v${MINIMUM_CLAUDE_FABLE_5_VERSION} or newer to access it.`;
+/** `claude-sonnet-5[1m]` → `claude-sonnet-5`, `claude-haiku-4-5-20251001` → `claude-haiku-4-5`. */
+function stripClaudeModelSuffixes(id: string): string {
+  return id
+    .trim()
+    .toLowerCase()
+    .replace(/\[[^\]]*\]$/, "")
+    .replace(/-\d{8}$/, "");
 }
 
-function formatClaudeOpus48UpgradeMessage(version: string | null): string {
-  const versionLabel = version ? `v${version}` : "the installed version";
-  return `Claude Code ${versionLabel} is too old for Claude Opus 4.8. Upgrade to v${MINIMUM_CLAUDE_OPUS_4_8_VERSION} or newer to access it.`;
+/** A model the CLI lists (`/model`): id, and whether it has fast mode / a 1M variant. */
+export interface ClaudeCliModel {
+  readonly value: string;
+  readonly resolvedModel?: string | undefined;
+  readonly supportsFastMode?: boolean | undefined;
 }
 
-function formatClaudeOpus47UpgradeMessage(version: string | null): string {
-  const versionLabel = version ? `v${version}` : "the installed version";
-  return `Claude Code ${versionLabel} is too old for Claude Opus 4.7. Upgrade to v${MINIMUM_CLAUDE_OPUS_4_7_VERSION} or newer to access it.`;
+/**
+ * The installed CLI's own model list (`initializationResult().models`,
+ * aliases like `opus` carry `resolvedModel`) → concrete model ids with what
+ * they support. A newer CLI brings newer models without a Uno Work release.
+ */
+export function claudeModelsFromCli(
+  models: ReadonlyArray<ClaudeCliModel> | undefined,
+): Map<string, { readonly fastMode: boolean; readonly contextWindow: boolean }> {
+  const result = new Map<string, { fastMode: boolean; contextWindow: boolean }>();
+  for (const model of models ?? []) {
+    const raw = (model.resolvedModel ?? model.value ?? "").trim();
+    const id = stripClaudeModelSuffixes(raw);
+    if (!/^claude-[a-z]+-\d/.test(id)) continue;
+    const existing = result.get(id) ?? { fastMode: false, contextWindow: false };
+    result.set(id, {
+      fastMode: existing.fastMode || model.supportsFastMode === true,
+      contextWindow: existing.contextWindow || /\[1m\]$/i.test(raw),
+    });
+  }
+  return result;
+}
+
+/** Built-ins the CLI can run, plus the models it lists that this build doesn't know. */
+function claudeModelsForCli(
+  version: string | null,
+  cliModels: ReadonlyArray<ClaudeCliModel> | undefined,
+): ReadonlyArray<ServerProviderModel> {
+  const listed = claudeModelsFromCli(cliModels);
+  const builtIns = BUILT_IN_MODELS.filter(
+    (model) =>
+      listed.has(model.slug) ||
+      getBuiltInClaudeModelsForVersion(version).some((known) => known.slug === model.slug),
+  );
+  const discovered: ServerProviderModel[] = [];
+  for (const [slug, support] of listed) {
+    if (BUILT_IN_MODEL_SLUGS.has(slug)) continue;
+    discovered.push({
+      slug,
+      name: claudeModelDisplayName(slug),
+      isCustom: false,
+      capabilities: slug.startsWith("claude-haiku-")
+        ? HAIKU_CAPABILITIES
+        : modernClaudeCapabilities(support),
+    });
+  }
+  // Newer than anything this build knows: first.
+  return [...discovered, ...builtIns];
 }
 
 export function getClaudeModelCapabilities(model: string | null | undefined): ModelCapabilities {
   const slug = model?.trim();
-  return (
-    BUILT_IN_MODELS.find((candidate) => candidate.slug === slug)?.capabilities ??
-    DEFAULT_CLAUDE_MODEL_CAPABILITIES
-  );
+  const builtIn = BUILT_IN_MODELS.find((candidate) => candidate.slug === slug)?.capabilities;
+  if (builtIn) return builtIn;
+  // A newer model the CLI listed (claudeModelsForCli): current-generation options.
+  if (slug && isNewerClaudeModel(slug)) {
+    return slug.startsWith("claude-haiku-")
+      ? HAIKU_CAPABILITIES
+      : modernClaudeCapabilities({ fastMode: false, contextWindow: true });
+  }
+  return DEFAULT_CLAUDE_MODEL_CAPABILITIES;
 }
+
+/** A Claude id this build doesn't list (a model newer than the build). */
+function isNewerClaudeModel(slug: string): boolean {
+  return !BUILT_IN_MODEL_SLUGS.has(slug) && /^claude-[a-z]+-\d/.test(slug);
+}
+
+/** Models whose Claude Code effort scale includes `xhigh`. */
+const CLAUDE_XHIGH_MODELS: ReadonlySet<string> = new Set([
+  "claude-opus-5-5",
+  "claude-fable-5-1",
+  "claude-opus-5",
+  "claude-sonnet-5",
+  "claude-fable-5",
+  "claude-opus-4-8",
+]);
 
 export function resolveClaudeEffort(
   caps: ModelCapabilities,
@@ -426,10 +570,7 @@ export function normalizeClaudeCliEffort(
   }
   if (
     effort === "xhigh" &&
-    model !== "claude-opus-5" &&
-    model !== "claude-sonnet-5" &&
-    model !== "claude-fable-5" &&
-    model !== "claude-opus-4-8"
+    !(model && (CLAUDE_XHIGH_MODELS.has(model) || isNewerClaudeModel(model)))
   ) {
     return "max";
   }
@@ -564,6 +705,8 @@ type ClaudeCapabilitiesProbe = {
   readonly subscriptionType: string | undefined;
   readonly tokenSource: string | undefined;
   readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
+  /** The CLI's own model list (`/model`); undefined when it didn't say. */
+  readonly models?: ReadonlyArray<ClaudeCliModel> | undefined;
 };
 
 function parseClaudeInitializationCommands(
@@ -689,6 +832,9 @@ const probeClaudeCapabilities = (
         subscriptionType: account?.subscriptionType,
         tokenSource: account?.tokenSource,
         slashCommands: parseClaudeInitializationCommands(init.commands),
+        models: Array.isArray(init.models)
+          ? (init.models as ReadonlyArray<ClaudeCliModel>)
+          : undefined,
       } satisfies ClaudeCapabilitiesProbe;
     });
   }).pipe(
@@ -719,12 +865,62 @@ const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
   return yield* spawnAndCollect(claudeSettings.binaryPath, command);
 });
 
+/**
+ * Claude Code on Uno AI: with no Claude sign-in of its own on this machine,
+ * Claude Code runs against the Uno gateway's Anthropic Messages API
+ * (`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` = the machine's gateway
+ * key), billed from the plan's premium credit. A person who signed in to
+ * Claude (subscription or API key) keeps running on that — never overridden.
+ */
+export type ClaudeAuthMode = "own" | "uno";
+
+export interface ClaudeUnoGateway {
+  /** Env that runs Claude Code on the Uno gateway; null without a gateway key. */
+  readonly environment: () => Readonly<Record<string, string>> | null;
+  /** Who chats started from now on run as (read by the adapter per query). */
+  readonly setMode: (mode: ClaudeAuthMode) => void;
+}
+
+/** Shown on the Claude card while it runs on Uno AI. */
+export const CLAUDE_UNO_AI_MESSAGE =
+  "Runs on your Uno AI premium credit. Sign in with Claude to use your own subscription instead.";
+
+/** Env names that mean "this Claude has credentials of its own". */
+const CLAUDE_OWN_CREDENTIAL_ENV = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CODE_USE_FOUNDRY",
+] as const;
+
+export function hasOwnClaudeCredentialsInEnv(environment: NodeJS.ProcessEnv): boolean {
+  return CLAUDE_OWN_CREDENTIAL_ENV.some((name) => (environment[name]?.trim().length ?? 0) > 0);
+}
+
+/** `claude auth status` → signed in on its own; null when it couldn't tell. */
+export function parseClaudeAuthStatusLoggedIn(stdout: string): boolean | null {
+  const start = stdout.indexOf("{");
+  const end = stdout.lastIndexOf("}");
+  if (start === -1 || end <= start) return null;
+  try {
+    const parsed = JSON.parse(stdout.slice(start, end + 1)) as { loggedIn?: unknown };
+    return typeof parsed.loggedIn === "boolean" ? parsed.loggedIn : null;
+  } catch {
+    return null;
+  }
+}
+
 export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(function* (
   claudeSettings: ClaudeSettings,
   resolveCapabilities?: (
     claudeSettings: ClaudeSettings,
+    mode: ClaudeAuthMode,
   ) => Effect.Effect<ClaudeCapabilitiesProbe | undefined>,
   environment: NodeJS.ProcessEnv = process.env,
+  unoGateway?: ClaudeUnoGateway,
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
@@ -816,27 +1012,40 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
+  const versionUpgradeMessage = claudeVersionUpgradeMessage(parsedVersion);
+  const updateAvailable = versionUpgradeMessage !== undefined;
+
+  // Uno AI: only when the machine has a gateway key and Claude has no
+  // sign-in of its own (env credentials, or `claude auth status`). A status
+  // that can't be read counts as "own" — never override a real sign-in.
+  let mode: ClaudeAuthMode = "own";
+  if (unoGateway && unoGateway.environment() !== null) {
+    let own = hasOwnClaudeCredentialsInEnv(environment);
+    if (!own) {
+      const authStatus = yield* runClaudeCommand(
+        claudeSettings,
+        ["auth", "status", "--json"],
+        environment,
+      ).pipe(Effect.timeoutOption(DEFAULT_TIMEOUT_MS), Effect.result);
+      const loggedIn =
+        Result.isSuccess(authStatus) && Option.isSome(authStatus.success)
+          ? parseClaudeAuthStatusLoggedIn(authStatus.success.value.stdout)
+          : null;
+      own = loggedIn !== false;
+    }
+    mode = own ? "own" : "uno";
+    unoGateway.setMode(mode);
+  }
+
+  const capabilities = resolveCapabilities
+    ? yield* resolveCapabilities(claudeSettings, mode).pipe(Effect.orElseSucceed(() => undefined))
+    : undefined;
   const models = providerModelsFromSettings(
-    getBuiltInClaudeModelsForVersion(parsedVersion),
+    claudeModelsForCli(parsedVersion, capabilities?.models),
     PROVIDER,
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
   );
-  const versionUpgradeMessage = supportsClaudeOpus5(parsedVersion)
-    ? undefined
-    : supportsClaudeSonnet5(parsedVersion)
-      ? formatClaudeOpus5UpgradeMessage(parsedVersion)
-      : supportsClaudeFable5(parsedVersion)
-        ? formatClaudeSonnet5UpgradeMessage(parsedVersion)
-        : supportsClaudeOpus48(parsedVersion)
-          ? formatClaudeFable5UpgradeMessage(parsedVersion)
-          : supportsClaudeOpus47(parsedVersion)
-            ? formatClaudeOpus48UpgradeMessage(parsedVersion)
-            : formatClaudeOpus47UpgradeMessage(parsedVersion);
-
-  const capabilities = resolveCapabilities
-    ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
-    : undefined;
   const slashCommands = capabilities?.slashCommands ?? [];
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands);
 
@@ -854,13 +1063,20 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         auth: { status: "unknown" },
         message: "Could not verify Claude authentication status from initialization result.",
       },
+      ...(updateAvailable ? { updateAvailable } : {}),
     });
   }
 
-  const authMetadata = claudeAuthMetadata({
-    subscriptionType: capabilities.subscriptionType,
-    authMethod: capabilities.tokenSource,
-  });
+  const authMetadata =
+    mode === "uno"
+      ? { type: "unoAi", label: "Uno AI" }
+      : claudeAuthMetadata({
+          subscriptionType: capabilities.subscriptionType,
+          authMethod: capabilities.tokenSource,
+        });
+  const message = [mode === "uno" ? CLAUDE_UNO_AI_MESSAGE : undefined, versionUpgradeMessage]
+    .filter((part): part is string => part !== undefined)
+    .join(" ");
   return buildServerProvider({
     presentation: CLAUDE_PRESENTATION,
     enabled: claudeSettings.enabled,
@@ -873,11 +1089,12 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       status: "ready",
       auth: {
         status: "authenticated",
-        ...(capabilities.email ? { email: capabilities.email } : {}),
+        ...(capabilities.email && mode === "own" ? { email: capabilities.email } : {}),
         ...(authMetadata ? authMetadata : {}),
       },
-      ...(versionUpgradeMessage ? { message: versionUpgradeMessage } : {}),
+      ...(message.length > 0 ? { message } : {}),
     },
+    ...(updateAvailable ? { updateAvailable } : {}),
   });
 });
 

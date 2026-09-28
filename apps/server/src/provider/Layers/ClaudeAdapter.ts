@@ -74,6 +74,7 @@ import {
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { isUnoGatewayBillingDetail, normalizeUnoBillingErrorMessage } from "../unoBilling.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import {
   getClaudeModelCapabilities,
@@ -1334,6 +1335,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     context: ClaudeSessionContext,
     message: string,
     cause?: unknown,
+    errorClass: "provider_error" | "billing_error" = "provider_error",
   ) {
     if (cause !== undefined) {
       void cause;
@@ -1349,7 +1351,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       ...(turnState ? { turnId: asCanonicalTurnId(turnState.turnId) } : {}),
       payload: {
         message,
-        class: "provider_error",
+        class: errorClass,
         ...(cause !== undefined ? { detail: cause } : {}),
       },
       providerRefs: nativeProviderRefs(context),
@@ -2056,11 +2058,26 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return;
     }
 
-    const status = turnStatusFromResult(message);
-    const errorMessage = message.subtype === "success" ? undefined : message.errors[0];
+    const rawStatus = turnStatusFromResult(message);
+    const rawError = message.subtype === "success" ? undefined : message.errors[0];
+    // Claude Code on Uno AI: the gateway's 402 (premium limit, no AI hours)
+    // comes back as the turn's error or as an error "result" text. Show the
+    // gateway's human sentence and the billing banner, never the raw body.
+    const billingDetail = [
+      rawError,
+      message.subtype === "success" && message.is_error ? message.result : undefined,
+    ].find(isUnoGatewayBillingDetail);
+    const status = billingDetail !== undefined ? "failed" : rawStatus;
+    const errorMessage =
+      billingDetail !== undefined ? normalizeUnoBillingErrorMessage(billingDetail) : rawError;
 
     if (status === "failed") {
-      yield* emitRuntimeError(context, errorMessage ?? "Claude turn failed.");
+      yield* emitRuntimeError(
+        context,
+        errorMessage ?? "Claude turn failed.",
+        undefined,
+        billingDetail !== undefined ? "billing_error" : "provider_error",
+      );
     }
 
     yield* completeTurn(context, status, errorMessage, message);

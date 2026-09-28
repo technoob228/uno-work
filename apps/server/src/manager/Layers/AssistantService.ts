@@ -135,8 +135,8 @@ Cheapest thing that reliably does the job wins.
 
 | Task type | Harness (instanceId) | Model | Effort | Why |
 |---|---|---|---|---|
-| Architecture, planning, tricky debugging | claudeAgent | claude-sonnet-4-6 | high | strongest reasoning |
-| Complex multi-file implementation | claudeAgent | claude-sonnet-4-6 | default | reliable executor |
+| Architecture, planning, tricky debugging | claudeAgent | claude-opus-5-5 | high | strongest reasoning |
+| Complex multi-file implementation | claudeAgent | claude-sonnet-5 | default | reliable executor |
 | Routine implementation, small fixes, tests | codex | gpt-5.4 | reasoningEffort: low | cheap and fast |
 | Docs reading, codebase exploration, summaries | opencode | (cheap default) | — | grunt work |
 | Long-form text / prose | (best available writing model) | — | — | quality of prose over code skill |

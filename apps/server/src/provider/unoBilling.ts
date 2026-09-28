@@ -242,6 +242,19 @@ export function isUnoBillingFailureReply(text: string): boolean {
   );
 }
 
+/**
+ * A billing failure that can only have come from the Uno gateway (its error
+ * codes or its billing page). Stricter than {@link isUnoBillingErrorDetail}:
+ * used where the harness may also run on the person's own account (Claude
+ * Code on Uno AI vs. their own subscription), so a bare "402" doesn't count.
+ */
+export function isUnoGatewayBillingDetail(detail: string | null | undefined): boolean {
+  if (!detail) return false;
+  return /premium_limit_reached|ai_hours_empty|ai_not_included|insufficient_credits|console\.uno4\.dev\/billing|your ai hours are used up|your premium credit is used up/i.test(
+    detail,
+  );
+}
+
 export function classifyProviderErrorDetail(
   detail: string | null | undefined,
 ): ProviderSessionErrorClass {

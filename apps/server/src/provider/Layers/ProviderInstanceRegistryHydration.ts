@@ -125,9 +125,10 @@ export const deriveProviderInstanceConfigMap = (
  * Drivers whose instance is built around the Uno gateway key: Uno Code and
  * Hermes (0.0.94: Hermes is the default harness — without the stamp a fresh
  * Work machine's Hermes stayed "no key" until the daemon restarted, and new
- * chats fell back to Uno Code).
+ * chats fell back to Uno Code), and Claude (0.0.96: without a Claude sign-in
+ * it runs on Uno AI with the gateway key).
  */
-const UNO_GATEWAY_KEY_DRIVER_KINDS: ReadonlySet<string> = new Set(["uno", "hermes"]);
+const UNO_GATEWAY_KEY_DRIVER_KINDS: ReadonlySet<string> = new Set(["uno", "hermes", "claudeAgent"]);
 
 /**
  * Make the Uno gateway key участником сравнения конфигов при reconcile.

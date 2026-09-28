@@ -12,19 +12,26 @@
  *
  * @module provider/Drivers/ClaudeDriver
  */
-import { ClaudeSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import {
+  ClaudeSettings,
+  ProviderDriverKind,
+  UNO_GATEWAY_BASE_URL,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import { Cache, Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeClaudeTextGeneration } from "../../textGeneration/ClaudeTextGeneration.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
+import { UnoGatewayKey } from "../../unoGatewayKey.ts";
 import { buildUnoWorkBrief } from "../../agentContext/unoWorkBrief.ts";
 import { ServerConfig } from "../../config.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { customMcpServersGetter } from "../../mcp/customMcpServers.ts";
 import { makeClaudeAdapter } from "../Layers/ClaudeAdapter.ts";
 import {
+  type ClaudeAuthMode,
   checkClaudeProviderStatus,
   makePendingClaudeProvider,
   probeClaudeCapabilities,
@@ -51,7 +58,23 @@ export type ClaudeDriverEnv =
   | ProviderEventLoggers
   | BrowserBridge
   | UnoAgentAccess
+  | UnoGatewayKey
   | ServerConfig;
+
+/**
+ * Claude Code on Uno AI talks to the gateway's Anthropic Messages API:
+ * Claude Code appends `/v1/messages` to `ANTHROPIC_BASE_URL`, so the base is
+ * the gateway host without `/v1`.
+ */
+export const UNO_ANTHROPIC_BASE_URL = UNO_GATEWAY_BASE_URL.replace(/\/v1\/?$/, "");
+
+/** Env that runs Claude Code on the Uno gateway with the machine's gateway key. */
+export function unoClaudeEnvironment(gatewayKey: string): Record<string, string> {
+  return {
+    ANTHROPIC_BASE_URL: UNO_ANTHROPIC_BASE_URL,
+    ANTHROPIC_AUTH_TOKEN: gatewayKey,
+  };
+}
 
 const withInstanceIdentity =
   (input: {
@@ -84,6 +107,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const eventLoggers = yield* ProviderEventLoggers;
       const browserBridge = yield* BrowserBridge;
       const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
+      // Uno AI for Claude Code (no Claude sign-in of its own): the gateway key
+      // is read once per instance — the registry rebuilds Claude when it
+      // changes (ProviderInstanceRegistryHydration). Who Claude runs as is
+      // decided by every status check and read per query.
+      const unoGatewayKey = yield* (yield* UnoGatewayKey).harnessKey();
+      const unoOverlay = unoGatewayKey.length > 0 ? unoClaudeEnvironment(unoGatewayKey) : null;
+      let authMode: ClaudeAuthMode = "own";
+      const authOverlay = (): Record<string, string> =>
+        authMode === "uno" && unoOverlay !== null ? unoOverlay : {};
       const processEnv = {
         ...unoAgentEnv,
         ...browserBridge.applyEnvironment(mergeProviderInstanceEnvironment(environment)),
@@ -109,42 +141,60 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         instanceId,
         customMcpServers,
         environment: processEnv,
-        bridgeEnvironment: (context: { readonly threadId?: string; readonly cwd?: string }) =>
-          browserBridge.scopedEnvironment(context),
+        bridgeEnvironment: (context: { readonly threadId?: string; readonly cwd?: string }) => ({
+          ...browserBridge.scopedEnvironment(context),
+          ...authOverlay(),
+        }),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         ...(harnessInstructions ? { appendSystemPrompt: harnessInstructions } : {}),
       };
       const adapter = yield* makeClaudeAdapter(effectiveConfig, adapterOptions);
-      const textGeneration = yield* makeClaudeTextGeneration(effectiveConfig, processEnv);
+      const textGeneration = yield* makeClaudeTextGeneration(
+        effectiveConfig,
+        processEnv,
+        authOverlay,
+      );
 
       // Per-instance capabilities cache: keyed on binary + resolved HOME so
       // account-specific probes never share auth metadata across instances.
+      // (keyed by auth mode too: on Uno AI the probe runs with the gateway env).
       const capabilitiesProbeCache = yield* Cache.make({
-        capacity: 1,
+        capacity: 2,
         timeToLive: CAPABILITIES_PROBE_TTL,
-        lookup: () =>
-          probeClaudeCapabilities(effectiveConfig, processEnv).pipe(
-            Effect.provideService(Path.Path, path),
-          ),
+        lookup: (key: string) =>
+          probeClaudeCapabilities(
+            effectiveConfig,
+            key.endsWith("\0uno") && unoOverlay !== null
+              ? { ...processEnv, ...unoOverlay }
+              : processEnv,
+          ).pipe(Effect.provideService(Path.Path, path)),
       });
       const capabilitiesCacheKey = yield* makeClaudeCapabilitiesCacheKey(effectiveConfig);
 
       // A probe that could not verify auth (typically: not signed in yet) is
       // not worth caching for the full TTL — the user may sign in from the
       // UI moments later and the explicit refresh that follows must see it.
-      const resolveCapabilities = () =>
-        Cache.get(capabilitiesProbeCache, capabilitiesCacheKey).pipe(
+      const resolveCapabilities = (_settings: ClaudeSettings, mode: ClaudeAuthMode) => {
+        const key = `${capabilitiesCacheKey}\0${mode}`;
+        return Cache.get(capabilitiesProbeCache, key).pipe(
           Effect.tap((capabilities) =>
             capabilities === undefined
-              ? Cache.invalidate(capabilitiesProbeCache, capabilitiesCacheKey)
+              ? Cache.invalidate(capabilitiesProbeCache, key)
               : Effect.void,
           ),
         );
+      };
 
       const checkProvider = checkClaudeProviderStatus(
         effectiveConfig,
         resolveCapabilities,
         processEnv,
+        {
+          environment: () => unoOverlay,
+          setMode: (mode) => {
+            authMode = mode;
+          },
+        },
       ).pipe(
         Effect.map(stampIdentity),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),

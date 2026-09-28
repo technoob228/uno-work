@@ -144,7 +144,7 @@ describe("resolveProviderModelSelection", () => {
     provider({
       instanceId: "claudeAgent",
       driver: "claudeAgent",
-      models: ["claude-haiku-4-5", "claude-sonnet-4-6"],
+      models: ["claude-haiku-4-5", "claude-sonnet-5"],
     }),
     provider({ instanceId: "codex_work", driver: "codex", models: ["gpt-5.4"] }),
     provider({ instanceId: "cursor", driver: "cursor", installed: false }),
@@ -155,7 +155,7 @@ describe("resolveProviderModelSelection", () => {
       resolveProviderModelSelection({ provider: "claudeAgent", model: undefined, providers }),
     ).toEqual({
       ok: true,
-      selection: { instanceId: "claudeAgent", model: "claude-sonnet-4-6" },
+      selection: { instanceId: "claudeAgent", model: "claude-sonnet-5" },
     });
   });
 
