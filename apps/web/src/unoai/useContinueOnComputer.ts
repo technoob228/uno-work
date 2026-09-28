@@ -10,12 +10,14 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { useStore } from "../store";
 import { aiChatLive } from "./unoAiApi";
 import { handoffPrompt } from "./unoAiHandoff";
+import { useUnoDefaultSelection } from "./useUnoDefaultSelection";
 
 export function useContinueOnComputer() {
   const primary = usePrimaryEnvironmentId();
   const active = useStore((state) => state.activeEnvironmentId);
   const environmentId = active ?? primary;
   const launchers = useHomeLaunchers(environmentId);
+  const uno = useUnoDefaultSelection();
 
   const run = useCallback(
     async (chatId: string) => {
@@ -26,9 +28,9 @@ export function useContinueOnComputer() {
         messages: chat.messages,
         sites: chat.sites,
       });
-      await launchers.sendToUno(prompt);
+      await launchers.startTask(prompt, uno.startOptions());
     },
-    [launchers],
+    [launchers, uno],
   );
 
   return { available: environmentId !== null, run };

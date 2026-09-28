@@ -151,7 +151,7 @@ export function ComputerView() {
   });
   const launchers = useHomeLaunchers(environmentId);
   // The console's first message / a Uno AI chat moving to this computer.
-  useUnoAiArrivals(thisMachine ? environmentId : null, launchers.sendToUno);
+  useUnoAiArrivals(thisMachine ? environmentId : null, launchers.startTask);
   const primary = useAppPrimaryAction({ environmentId, boxId: pickedBoxId });
 
   const [storeOpen, setStoreOpen] = useState(false);

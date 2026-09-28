@@ -12,10 +12,12 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect } from "react";
 
+import type { HomeStartOptions } from "../components/computer/home/HomeComposer";
 import { useUpdateSettings } from "../hooks/useSettings";
 import { isWebLite } from "../lite/flag";
 import { aiChatLive } from "./unoAiApi";
 import { handoffPrompt, peekHandoff, takeHandoff } from "./unoAiHandoff";
+import { useUnoDefaultSelection } from "./useUnoDefaultSelection";
 
 let arrivedQ: string | null = null;
 if (!isWebLite && typeof window !== "undefined") {
@@ -45,19 +47,21 @@ export function hasUnoAiArrival(): boolean {
 
 export function useUnoAiArrivals(
   environmentId: EnvironmentId | null,
-  sendToUno: (prompt: string) => Promise<void>,
+  startTask: (prompt: string, options: HomeStartOptions) => Promise<void>,
 ): void {
   const { updateSettings } = useUpdateSettings();
+  const uno = useUnoDefaultSelection();
   useEffect(() => {
-    if (handled || environmentId === null) return;
+    if (handled || environmentId === null || !uno.ready) return;
     if (arrivedQ === null && !peekHandoff()) return;
     handled = true;
     // The goal is known: don't bring the welcome picker back on the next load.
     void updateSettings({ onboardingCompleted: true, machineOnboarded: true }).catch(() => {});
     const q = arrivedQ;
     arrivedQ = null;
+    const send = (prompt: string) => startTask(prompt, uno.startOptions());
     if (q) {
-      void sendToUno(q);
+      void send(q);
       return;
     }
     const pending = takeHandoff();
@@ -66,12 +70,12 @@ export function useUnoAiArrivals(
       try {
         const chat = await aiChatLive(pending.chatId, 0);
         if (!chat || chat.messages.length === 0) return;
-        await sendToUno(
+        await send(
           handoffPrompt({ title: chat.title ?? "", messages: chat.messages, sites: chat.sites }),
         );
       } catch {
         // the chat is still in Uno AI; "Continue on this computer" there
       }
     })();
-  }, [environmentId, sendToUno, updateSettings]);
+  }, [environmentId, startTask, updateSettings, uno]);
 }
