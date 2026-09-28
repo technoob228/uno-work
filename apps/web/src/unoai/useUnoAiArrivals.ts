@@ -12,9 +12,10 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect } from "react";
 
+import { useUpdateSettings } from "../hooks/useSettings";
 import { isWebLite } from "../lite/flag";
 import { aiChatLive } from "./unoAiApi";
-import { handoffPrompt, takeHandoff } from "./unoAiHandoff";
+import { handoffPrompt, peekHandoff, takeHandoff } from "./unoAiHandoff";
 
 let arrivedQ: string | null = null;
 if (!isWebLite && typeof window !== "undefined") {
@@ -33,13 +34,26 @@ if (!isWebLite && typeof window !== "undefined") {
 
 let handled = false;
 
+/**
+ * Something arrived for Uno (a first message, a hand-off): the person already
+ * said what they want — the welcome "What do you want to do?" is skipped and
+ * Home opens with the chat (routes/__root.tsx).
+ */
+export function hasUnoAiArrival(): boolean {
+  return !isWebLite && (arrivedQ !== null || peekHandoff());
+}
+
 export function useUnoAiArrivals(
   environmentId: EnvironmentId | null,
   sendToUno: (prompt: string) => Promise<void>,
 ): void {
+  const { updateSettings } = useUpdateSettings();
   useEffect(() => {
     if (handled || environmentId === null) return;
+    if (arrivedQ === null && !peekHandoff()) return;
     handled = true;
+    // The goal is known: don't bring the welcome picker back on the next load.
+    void updateSettings({ onboardingCompleted: true, machineOnboarded: true }).catch(() => {});
     const q = arrivedQ;
     arrivedQ = null;
     if (q) {
@@ -59,5 +73,5 @@ export function useUnoAiArrivals(
         // the chat is still in Uno AI; "Continue on this computer" there
       }
     })();
-  }, [environmentId, sendToUno]);
+  }, [environmentId, sendToUno, updateSettings]);
 }
