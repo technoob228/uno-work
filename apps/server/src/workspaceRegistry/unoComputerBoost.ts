@@ -64,6 +64,8 @@ export function parseComputerBoost(raw: unknown): UnoComputerBoost | null {
   const baseRamMb = num(record["base_ram_mb"]);
   const baseVcpu = num(record["base_vcpu"]);
   const reason = asNullableString(record["reason"])?.trim() ?? "";
+  const earn = asRecord(record["economy_earn"]);
+  const earned = record["hours_earned_economy"];
   return {
     available: record["available"] === true,
     state,
@@ -81,6 +83,18 @@ export function parseComputerBoost(raw: unknown): UnoComputerBoost | null {
     hoursLeft: num(record["hours_left"], num(record["hours_left_today"])),
     periodResetsAt: asNullableString(record["period_resets_at"]),
     reason: reason.length > 0 ? reason : null,
+    ...(typeof earned === "number" && Number.isFinite(earned)
+      ? { hoursEarnedEconomy: earned }
+      : {}),
+    ...(earn
+      ? {
+          economyEarn: {
+            enabled: earn["enabled"] === true,
+            hoursPerSleepHour: num(earn["hours_per_sleep_hour"]),
+            monthlyCapHours: num(earn["monthly_cap_hours"]),
+          },
+        }
+      : {}),
   };
 }
 

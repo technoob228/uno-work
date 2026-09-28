@@ -10,6 +10,8 @@ import {
   boostPillLabel,
   boostResetDay,
   boostRefetchMs,
+  boostSummaryLine,
+  economyEarnSentence,
   isConnectionDrop,
   minutesLeft,
   pendingSettled,
@@ -65,6 +67,34 @@ describe("boost copy", () => {
     // The reset is 00:00 UTC: the day is the UTC calendar day, wherever the person is.
     expect(boostResetDay("2027-01-01T00:00:00Z")).toBe("Jan 1");
     expect(boostResetDay("nope")).toBeNull();
+  });
+});
+
+describe("boost hours earned by economy", () => {
+  it("shows hours left, and what economy added when it did", () => {
+    expect(boostSummaryLine(OFF)).toBe("Boost: 3 h left this month");
+    expect(boostSummaryLine({ ...OFF, hoursLeft: 4, hoursEarnedEconomy: 1.8 })).toBe(
+      "Boost: 4 h left this month (+1.8 h earned by economy)",
+    );
+    expect(boostSummaryLine({ ...OFF, hoursEarnedEconomy: 0 })).toBe("Boost: 3 h left this month");
+    expect(boostSummaryLine({ ...OFF, hoursPerMonth: 0, hoursLeft: 0 })).toBeNull();
+    expect(boostSummaryLine(undefined)).toBeNull();
+  });
+
+  it("counts whole earned hours in the allowance", () => {
+    expect(boostConfirmCopy({ ...OFF, hoursLeft: 4, hoursEarnedEconomy: 1.8 }).allowance).toBe(
+      "4 of 11 boost hours left this month.",
+    );
+  });
+
+  it("explains the rule only when Uno rewards economy", () => {
+    expect(economyEarnSentence(OFF)).toBeNull();
+    const earn = { enabled: true, hoursPerSleepHour: 0.1, monthlyCapHours: 10 };
+    expect(economyEarnSentence({ ...OFF, economyEarn: earn })).toBe(
+      "Every 10 hours asleep earn you 1 extra Boost hour (up to 10 h a month).",
+    );
+    expect(economyEarnSentence({ ...OFF, economyEarn: { ...earn, enabled: false } })).toBeNull();
+    expect(economyEarnSentence({ ...OFF, hoursPerMonth: 0, economyEarn: earn })).toBeNull();
   });
 });
 

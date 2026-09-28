@@ -121,10 +121,50 @@ export function boostResetDay(periodResetsAt: string | null): string | null {
   });
 }
 
-/** "3 of 10 boost hours left this month." */
+/** Whole boost hours economy mode added to this month (already in `hoursLeft`). */
+function earnedWholeHours(boost: UnoComputerBoost): number {
+  return Math.max(0, Math.floor(boost.hoursEarnedEconomy ?? 0));
+}
+
+/** "3 of 10 boost hours left this month." (the 10 includes hours economy earned) */
 export function boostAllowance(boost: UnoComputerBoost): string {
   const left = Math.max(0, boost.hoursLeft);
-  return `${left} of ${boost.hoursPerMonth} boost ${boost.hoursPerMonth === 1 ? "hour" : "hours"} left this month.`;
+  const total = boost.hoursPerMonth + earnedWholeHours(boost);
+  return `${left} of ${total} boost ${total === 1 ? "hour" : "hours"} left this month.`;
+}
+
+/** "1.8 h" / "2 h" — hours with at most one decimal. */
+export function formatHours(hours: number): string {
+  const rounded = Math.round(hours * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} h`;
+}
+
+/**
+ * The quiet line in the computer menu: "Boost: 7 h left this month (+1.8 h
+ * earned by economy)". Null when the plan has no boost hours (the Boost button
+ * already points to plans then).
+ */
+export function boostSummaryLine(boost: UnoComputerBoost | null | undefined): string | null {
+  if (!boost || boost.hoursPerMonth <= 0) return null;
+  const base = `Boost: ${formatHours(Math.max(0, boost.hoursLeft))} left this month`;
+  const earned = boost.hoursEarnedEconomy ?? 0;
+  return earned > 0 ? `${base} (+${formatHours(earned)} earned by economy)` : base;
+}
+
+/**
+ * How economy pays back in Boost, for the "How it works" text: "Every 10
+ * hours asleep earn you 1 extra Boost hour (up to 10 h a month)." Null when
+ * Uno doesn't reward economy for this account.
+ */
+export function economyEarnSentence(boost: UnoComputerBoost | null | undefined): string | null {
+  const earn = boost?.economyEarn;
+  if (!earn?.enabled || earn.hoursPerSleepHour <= 0 || boost!.hoursPerMonth <= 0) return null;
+  const perBoostHour = Math.max(1, Math.round(1 / earn.hoursPerSleepHour));
+  const cap =
+    earn.monthlyCapHours > 0 ? ` (up to ${formatHours(earn.monthlyCapHours)} a month)` : "";
+  return perBoostHour === 1
+    ? `Every hour asleep earns you 1 extra Boost hour${cap}.`
+    : `Every ${perBoostHour} hours asleep earn you 1 extra Boost hour${cap}.`;
 }
 
 export const BOOST_NO_HOURS_REASON = "Your plan has no boost hours.";

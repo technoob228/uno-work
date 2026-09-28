@@ -186,7 +186,6 @@ import { SidebarComputerRow } from "./sidebar/SidebarComputerRow";
 import { SidebarSetupRow } from "./sidebar/SidebarSetupRow";
 import { SidebarEmptyProjects } from "./sidebar/SidebarEmptyProjects";
 import { SidebarMyUnoRow } from "./sidebar/SidebarMyUnoRow";
-import { SidebarEnvSwitcher } from "./SidebarEnvSwitcher";
 import { SidebarAppsList } from "./sidebar/SidebarAppsList";
 import { SidebarFilesTree } from "./sidebar/SidebarFilesTree";
 import { SidebarMoreRow, useSimpleSidebar } from "./sidebar/SidebarMoreRow";
@@ -2428,14 +2427,13 @@ export default function Sidebar() {
       {railLayout ? (
         listMode === "home" ? (
           <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-0">
-            <SidebarEnvSwitcher variant="header" />
             <SidebarSetupRow />
             <SidebarMyUnoRow />
           </SidebarGroup>
         ) : null
       ) : (
         <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-0">
-          <SidebarEnvSwitcher variant="header" />
+          {/* Switching computers lives in the computer menu in Home's header (27.09). */}
           <SidebarSetupRow />
           <SidebarAssistantRow />
           <SidebarComputerRow />

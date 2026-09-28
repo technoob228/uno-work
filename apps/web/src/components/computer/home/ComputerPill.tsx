@@ -1,9 +1,17 @@
 /**
  * The computer, folded into one line in Home's header: is it on, how busy it
- * is (three tiny meters), boosted or not. A click opens the old hero as a
- * popover — size, live load with values, Boost, "Memory / cores", Sleep /
- * Turn off / Wake up, and the ways deeper: "What's using my computer" and
- * "All my computers". The same details make the "This computer" widget.
+ * is (three tiny meters), boosted or not, a faint leaf when economy is on.
+ * A click opens the computer menu — the one place for "which computer":
+ *
+ *   - this computer: size, live load with values, Boost, "Memory / cores",
+ *     Sleep / Turn off / Wake up;
+ *   - two quiet lines: economy (with "How it works") and Boost hours left
+ *     (and what economy earned);
+ *   - "What's using my computer";
+ *   - the other computers to switch to, "All computers", "Add computer"
+ *     (this used to be a separate switcher at the top of the sidebar).
+ *
+ * The same details (compact) make the "This computer" widget.
  */
 import {
   ChevronDownIcon,
@@ -12,6 +20,7 @@ import {
   GlobeIcon,
   HardDriveIcon,
   LayoutGridIcon,
+  LeafIcon,
   MemoryStickIcon,
   MonitorIcon,
   MoonIcon,
@@ -26,6 +35,11 @@ import { useState, type ReactNode } from "react";
 import { cn } from "~/lib/utils";
 import { Button } from "../../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../../ui/popover";
+import {
+  ComputerSwitcherDialogs,
+  ComputerSwitcherList,
+} from "../../computerSwitcher/ComputerSwitcherList";
+import { useComputerSwitcher } from "../../computerSwitcher/useComputerSwitcher";
 import { Skeleton } from "../../ui/skeleton";
 import { Spinner } from "../../ui/spinner";
 import { POWER_DOT, type ComputerLoad, type PowerAction } from "../ComputerHero";
@@ -63,6 +77,12 @@ export interface HomeComputer {
   readonly onAllComputers?: (() => void) | undefined;
   /** Steadily short of memory or disk: said in the details, a warning dot on the pill. */
   readonly lowResource?: "memory" | "disk" | null | undefined;
+  /** Economy is on: a faint leaf on the pill. */
+  readonly economyOn?: boolean | undefined;
+  /** `<EconomyLine />` for the menu; null when economy isn't offered. */
+  readonly economy?: ReactNode;
+  /** "Boost: 7 h left this month (+1.8 h earned by economy)"; null when no boost hours. */
+  readonly boostSummary?: string | null | undefined;
 }
 
 function powerStateOf(computer: HomeComputer): ComputerPowerState {
@@ -94,11 +114,13 @@ export function ComputerPill({
   loading: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  if (loading || computer === null) {
+  const switcher = useComputerSwitcher(() => setOpen(false));
+  if (loading) {
     return <Skeleton className="h-8 w-56 rounded-full" />;
   }
-  const state = powerStateOf(computer);
-  const pct = loadPercents(computer.load);
+  // Can't read this computer right now: the menu still switches computers.
+  const state = computer ? powerStateOf(computer) : "unknown";
+  const pct = loadPercents(computer?.load ?? null);
   // Dialogs (resize, sleep) outlive the popover: close it as they open.
   const closeThen = (fn: (() => void) | undefined): (() => void) | undefined =>
     fn
@@ -107,66 +129,91 @@ export function ComputerPill({
           fn();
         }
       : undefined;
-  const folded: HomeComputer = {
-    ...computer,
-    onResize: closeThen(computer.onResize),
-    onAllComputers: closeThen(computer.onAllComputers),
-    onOpenLook: computer.onOpenLook
-      ? (look) => {
-          setOpen(false);
-          computer.onOpenLook?.(look);
-        }
-      : undefined,
-    power: computer.power
-      ? {
-          ...computer.power,
-          onPower: (action) => {
-            if (action === "sleep" || action === "stop") setOpen(false);
-            computer.power?.onPower(action);
-          },
-        }
-      : null,
-  };
+  const folded: HomeComputer | null = computer
+    ? {
+        ...computer,
+        onResize: closeThen(computer.onResize),
+        // The switcher below has "All computers, sites and plan".
+        onAllComputers: undefined,
+        onOpenLook: computer.onOpenLook
+          ? (look) => {
+              setOpen(false);
+              computer.onOpenLook?.(look);
+            }
+          : undefined,
+        power: computer.power
+          ? {
+              ...computer.power,
+              onPower: (action) => {
+                if (action === "sleep" || action === "stop") setOpen(false);
+                computer.power?.onPower(action);
+              },
+            }
+          : null,
+      }
+    : null;
+  const name = computer?.name ?? switcher.current?.name ?? "This computer";
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <button
-            type="button"
-            data-testid="home-computer-pill"
-            className="flex h-8 min-w-0 items-center gap-2.5 rounded-full border border-border/70 bg-card/60 pr-2.5 pl-3 text-xs transition-colors hover:bg-accent/60"
-          >
-            <span
-              className={cn(
-                "size-2 shrink-0 rounded-full",
-                computer.lowResource && state === "on" ? "bg-warning" : POWER_DOT[state],
-              )}
-              aria-hidden
-            />
-            <span className="max-w-40 truncate font-medium">{computer.name}</span>
-            {computer.boosted ? (
-              <ZapIcon
-                className="size-3 shrink-0 fill-amber-400 text-amber-500"
-                aria-label="Boosted"
+    <>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger
+          render={
+            <button
+              type="button"
+              data-testid="home-computer-pill"
+              aria-label={`${name} — computer menu`}
+              className="flex h-8 min-w-0 items-center gap-2.5 rounded-full border border-border/70 bg-card/60 pr-2.5 pl-3 text-xs transition-colors hover:bg-accent/60"
+            >
+              <span
+                className={cn(
+                  "size-2 shrink-0 rounded-full",
+                  computer?.lowResource && state === "on" ? "bg-warning" : POWER_DOT[state],
+                )}
+                aria-hidden
               />
-            ) : null}
-            {state === "on" ? (
-              <>
-                <MiniMeter label="CPU" pct={pct.cpu} />
-                <MiniMeter label="RAM" pct={pct.mem} />
-                <MiniMeter label="Disk" pct={pct.disk} />
-              </>
-            ) : (
-              <span className="text-muted-foreground">{POWER_STATE_LABEL[state]}</span>
-            )}
-            <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          </button>
-        }
-      />
-      <PopoverPopup align="end" className="w-[380px]">
-        <ComputerDetails computer={folded} />
-      </PopoverPopup>
-    </Popover>
+              <span className="max-w-40 truncate font-medium">{name}</span>
+              {computer?.boosted ? (
+                <ZapIcon
+                  className="size-3 shrink-0 fill-amber-400 text-amber-500"
+                  aria-label="Boosted"
+                />
+              ) : null}
+              {computer?.economyOn ? (
+                <LeafIcon
+                  className="size-3 shrink-0 text-muted-foreground/70"
+                  aria-label="Economy on"
+                />
+              ) : null}
+              {!computer ? null : state === "on" ? (
+                <>
+                  <MiniMeter label="CPU" pct={pct.cpu} />
+                  <MiniMeter label="RAM" pct={pct.mem} />
+                  <MiniMeter label="Disk" pct={pct.disk} />
+                </>
+              ) : (
+                <span className="text-muted-foreground">{POWER_STATE_LABEL[state]}</span>
+              )}
+              <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            </button>
+          }
+        />
+        <PopoverPopup
+          align="end"
+          className="max-h-[min(85vh,720px)] w-[min(380px,calc(100vw-1.5rem))] overflow-y-auto"
+        >
+          <div className="flex flex-col gap-3">
+            {folded ? <ComputerDetails computer={folded} /> : null}
+            <section
+              aria-label="Switch computer"
+              className={cn("-mx-1 flex flex-col", folded && "border-t border-border/60 pt-2")}
+            >
+              <ComputerSwitcherList switcher={switcher} />
+            </section>
+          </div>
+        </PopoverPopup>
+      </Popover>
+      <ComputerSwitcherDialogs switcher={switcher} />
+    </>
   );
 }
 
@@ -314,6 +361,18 @@ export function ComputerDetails({
         <p className="text-xs text-destructive" role="alert">
           {computer.power.error}
         </p>
+      ) : null}
+
+      {!compact && (computer.economy || computer.boostSummary) ? (
+        <div className="flex flex-col gap-1.5 border-t border-border/60 pt-2.5">
+          {computer.economy}
+          {computer.boostSummary ? (
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
+              <ZapIcon className="size-3.5 shrink-0" aria-hidden />
+              {computer.boostSummary}
+            </p>
+          ) : null}
+        </div>
       ) : null}
 
       {compact ? null : (
