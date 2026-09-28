@@ -51,6 +51,8 @@ const CLAUDE_PRESENTATION = {
  * model out of the list and offers an update (`updateAvailable`).
  */
 const MINIMUM_CLAUDE_OPUS_5_5_VERSION = "2.1.280";
+/** Sonnet 5.5 (28.09.2026): first in the published 2.1.284 binary (2.1.281–283 don't have it). */
+const MINIMUM_CLAUDE_SONNET_5_5_VERSION = "2.1.284";
 const MINIMUM_CLAUDE_FABLE_5_1_VERSION = "2.1.257";
 const MINIMUM_CLAUDE_OPUS_5_VERSION = "2.1.219";
 const MINIMUM_CLAUDE_SONNET_5_VERSION = "2.1.197";
@@ -157,6 +159,12 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
         }),
       ],
     }),
+  },
+  {
+    slug: "claude-sonnet-5-5",
+    name: "Claude Sonnet 5.5",
+    isCustom: false,
+    capabilities: modernClaudeCapabilities({ fastMode: false, contextWindow: true }),
   },
   {
     slug: "claude-sonnet-5",
@@ -394,6 +402,11 @@ const MINIMUM_VERSION_BY_MODEL: ReadonlyArray<{
   readonly name: string;
   readonly version: string;
 }> = [
+  {
+    slug: "claude-sonnet-5-5",
+    name: "Claude Sonnet 5.5",
+    version: MINIMUM_CLAUDE_SONNET_5_5_VERSION,
+  },
   { slug: "claude-opus-5-5", name: "Claude Opus 5.5", version: MINIMUM_CLAUDE_OPUS_5_5_VERSION },
   { slug: "claude-fable-5-1", name: "Claude Fable 5.1", version: MINIMUM_CLAUDE_FABLE_5_1_VERSION },
   { slug: "claude-opus-5", name: "Claude Opus 5", version: MINIMUM_CLAUDE_OPUS_5_VERSION },

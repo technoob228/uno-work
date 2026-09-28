@@ -1308,7 +1308,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           );
           assert.strictEqual(
             status.message,
-            "Claude Code v2.1.218 is too old for Claude Opus 5.5. Upgrade to v2.1.280 or newer to access it.",
+            "Claude Code v2.1.218 is too old for Claude Sonnet 5.5. Upgrade to v2.1.284 or newer to access it.",
           );
         }).pipe(
           Effect.provide(
@@ -1338,7 +1338,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           );
           assert.strictEqual(
             status.message,
-            "Claude Code v2.1.196 is too old for Claude Opus 5.5. Upgrade to v2.1.280 or newer to access it.",
+            "Claude Code v2.1.196 is too old for Claude Sonnet 5.5. Upgrade to v2.1.284 or newer to access it.",
           );
         }).pipe(
           Effect.provide(
@@ -1363,7 +1363,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           );
           assert.strictEqual(
             status.message,
-            "Claude Code v2.1.110 is too old for Claude Opus 5.5. Upgrade to v2.1.280 or newer to access it.",
+            "Claude Code v2.1.110 is too old for Claude Sonnet 5.5. Upgrade to v2.1.284 or newer to access it.",
           );
         }).pipe(
           Effect.provide(
@@ -1383,7 +1383,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
       );
 
       it.effect(
-        "lists Claude Opus 5.5 and Fable 5.1 from Claude Code 2.1.280, no update needed",
+        "lists Claude Sonnet 5.5, Opus 5.5 and Fable 5.1 from Claude Code 2.1.284, no update needed",
         () =>
           Effect.gen(function* () {
             const status = yield* checkClaudeProviderStatus(
@@ -1395,6 +1395,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             assert.strictEqual(slugs.includes("claude-fable-5-1"), true);
             assert.strictEqual(slugs.includes("claude-sonnet-5"), true);
             assert.strictEqual(
+              status.models.find((model) => model.slug === "claude-sonnet-5-5")?.name,
+              "Claude Sonnet 5.5",
+            );
+            assert.strictEqual(
               status.models.find((model) => model.slug === "claude-opus-5-5")?.name,
               "Claude Opus 5.5",
             );
@@ -1404,7 +1408,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             Effect.provide(
               mockSpawnerLayer((args) => {
                 const joined = args.join(" ");
-                if (joined === "--version") return { stdout: "2.1.280\n", stderr: "", code: 0 };
+                if (joined === "--version") return { stdout: "2.1.284\n", stderr: "", code: 0 };
                 throw new Error(`Unexpected args: ${joined}`);
               }),
             ),
@@ -1501,7 +1505,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           Effect.provide(
             mockSpawnerLayer((args) => {
               const joined = args.join(" ");
-              if (joined === "--version") return { stdout: "2.1.280\n", stderr: "", code: 0 };
+              if (joined === "--version") return { stdout: "2.1.284\n", stderr: "", code: 0 };
               if (joined === "auth status --json")
                 return { stdout: '{"loggedIn":false,"authMethod":"none"}\n', stderr: "", code: 0 };
               throw new Error(`Unexpected args: ${joined}`);
@@ -1536,7 +1540,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           Effect.provide(
             mockSpawnerLayer((args) => {
               const joined = args.join(" ");
-              if (joined === "--version") return { stdout: "2.1.280\n", stderr: "", code: 0 };
+              if (joined === "--version") return { stdout: "2.1.284\n", stderr: "", code: 0 };
               if (joined === "auth status --json")
                 return {
                   stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',

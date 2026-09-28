@@ -150,6 +150,25 @@ describe("resolveProviderModelSelection", () => {
     provider({ instanceId: "cursor", driver: "cursor", installed: false }),
   ];
 
+  it("picks Sonnet 5.5 as Claude's default when the CLI lists it", () => {
+    const withSonnet55 = providers.map((p) =>
+      p.instanceId === "claudeAgent"
+        ? provider({
+            instanceId: "claudeAgent",
+            driver: "claudeAgent",
+            models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-sonnet-5"],
+          })
+        : p,
+    );
+    expect(
+      resolveProviderModelSelection({
+        provider: "claudeAgent",
+        model: undefined,
+        providers: withSonnet55,
+      }),
+    ).toEqual({ ok: true, selection: { instanceId: "claudeAgent", model: "claude-sonnet-5-5" } });
+  });
+
   it("accepts a driver kind and picks the driver's default model", () => {
     expect(
       resolveProviderModelSelection({ provider: "claudeAgent", model: undefined, providers }),
