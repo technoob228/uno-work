@@ -9,6 +9,7 @@ import {
   UNO_AI_CREDIT_EMPTY_MESSAGE,
   UNO_AI_NOT_INCLUDED_MESSAGE,
   UNO_LLM_CREDITS_EMPTY_MESSAGE,
+  UNO_PREMIUM_LIMIT_REACHED_MESSAGE,
 } from "./unoBilling.ts";
 
 const HOURS_EMPTY =
@@ -96,6 +97,36 @@ describe("new gateway 402 contract", () => {
       expect(classifyOrchestrationErrorDetail(message)).toBe("billing_error");
       expect(normalizeUnoBillingErrorMessage(message)).toBe(message);
     }
+  });
+});
+
+describe("premium limit reached (402 premium_limit_reached)", () => {
+  it("shows the gateway's own sentence, with the way out added", () => {
+    const detail = `HTTP 402: ${gatewayBody(
+      "premium_limit_reached",
+      "Premium credit is used up and no AI hours are left for Smart",
+    )}`;
+    expect(isUnoBillingErrorDetail(detail)).toBe(true);
+    expect(classifyProviderErrorDetail(detail)).toBe("billing_error");
+    const text = normalizeUnoBillingErrorMessage(detail);
+    expect(text).toBe(
+      "Premium credit is used up and no AI hours are left for Smart. Manage premium credit at https://console.uno4.dev/billing.",
+    );
+    expectHuman(text);
+  });
+
+  it("keeps a complete gateway sentence and falls back without one", () => {
+    const complete =
+      "Premium credit is used up. Continue from balance at https://console.uno4.dev/billing.";
+    expect(
+      normalizeUnoBillingErrorMessage(
+        `Error code: 402 - ${gatewayBody("premium_limit_reached", complete)}`,
+      ),
+    ).toBe(complete);
+    expect(
+      normalizeUnoBillingErrorMessage(JSON.stringify({ error: { code: "premium_limit_reached" } })),
+    ).toBe(UNO_PREMIUM_LIMIT_REACHED_MESSAGE);
+    expect(isUnoBillingFailureReply(UNO_PREMIUM_LIMIT_REACHED_MESSAGE)).toBe(true);
   });
 });
 

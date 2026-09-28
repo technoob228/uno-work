@@ -8,7 +8,13 @@ import {
   showUnoPremiumComingSoon,
   UNO_PREMIUM_COMING_SOON_TEXT,
 } from "./ModelPickerContent";
+import { unoGatewayModelId } from "./unoModelIds";
 import { UNO_LLM_CREDITS_EMPTY_MESSAGE, unoBillingBannerText } from "./UnoBillingTopUpBanner";
+import {
+  isUnoPremiumModelSelected,
+  premiumCreditHeading,
+  premiumFallbackNotice,
+} from "./PremiumCreditNotice";
 
 const status = (over: Partial<UnoAiStatus> = {}): UnoAiStatus => ({
   status: "ok",
@@ -97,6 +103,35 @@ describe("premium coming-soon caption", () => {
     }
   });
 
+  it("disappears under Uno Code too, whose slugs carry the harness provider", () => {
+    for (const slug of [
+      "uno/anthropic/claude-opus-5.5",
+      "uno/openai/gpt-6-sol",
+      "uno-russia/google/gemini-3.8-flash",
+    ]) {
+      expect(
+        showUnoPremiumComingSoon([uno("uno/x-ai/grok-4.7", "premium"), uno(slug, "premium")]),
+      ).toBe(false);
+    }
+    // Hermes lists gateway ids.
+    const hermes = (slug: string) => ({ slug, driverKind: "hermes" as never, ...meta("premium") });
+    expect(showUnoPremiumComingSoon([hermes("anthropic/claude-sonnet-5")])).toBe(false);
+    expect(showUnoPremiumComingSoon([hermes("z-ai/glm-5.3")])).toBe(true);
+    expect(
+      showUnoPremiumComingSoon([
+        uno("uno/x-ai/grok-4.7", "premium"),
+        uno("uno/z-ai/glm-5.3", "premium"),
+      ]),
+    ).toBe(true);
+  });
+
+  it("strips only the harness provider from a slug", () => {
+    expect(unoGatewayModelId("uno/anthropic/claude-opus-5.5")).toBe("anthropic/claude-opus-5.5");
+    expect(unoGatewayModelId("uno-russia/openai/gpt-6-sol")).toBe("openai/gpt-6-sol");
+    expect(unoGatewayModelId("anthropic/claude-sonnet-5")).toBe("anthropic/claude-sonnet-5");
+    expect(unoGatewayModelId("uno/uno/smart")).toBe("uno/smart");
+  });
+
   it("stays off without a Premium group", () => {
     expect(showUnoPremiumComingSoon([uno("uno/smart", "included")])).toBe(false);
     expect(
@@ -104,6 +139,87 @@ describe("premium coming-soon caption", () => {
         { slug: "x-ai/grok-4.7", driverKind: "codex" as never, ...meta("premium") },
       ]),
     ).toBe(false);
+  });
+});
+
+const premium = (over: Partial<NonNullable<UnoAiStatus["premium"]>> = {}) => ({
+  limited: true,
+  limitUsd: 30,
+  leftUsd: 23.4,
+  monthlyUsd: 30,
+  overage: false,
+  balanceUsd: 0,
+  renewsAt: "2026-10-24T02:39:00Z",
+  exhausted: false,
+  ...over,
+});
+
+const caps = (unoGroup?: "included" | "premium" | "personal") =>
+  ({ optionDescriptors: [], metadata: unoGroup ? { unoGroup } : {} }) as never;
+
+describe("premium credit", () => {
+  it("says the premium model is answered by Smart, with the way to keep it", () => {
+    const notice = premiumFallbackNotice(
+      status({ premium: premium({ exhausted: true, leftUsd: 0 }) }),
+      true,
+    );
+    expect(notice).toEqual({
+      text: "Premium credit used up — answering with Smart. New credit on Oct 24.",
+      actionLabel: "Continue from balance",
+      actionUrl: "https://console.uno4.dev/billing",
+    });
+    expect(
+      premiumFallbackNotice(
+        status({ premium: premium({ exhausted: true, renewsAt: null }), renewsAt: null }),
+        true,
+      )?.text,
+    ).toBe(
+      "Premium credit used up — answering with Smart. New credit arrives when your plan renews.",
+    );
+  });
+
+  it("says nothing on Smart / Fast, with credit left, or without the premium field", () => {
+    expect(
+      premiumFallbackNotice(status({ premium: premium({ exhausted: true }) }), false),
+    ).toBeNull();
+    expect(premiumFallbackNotice(status({ premium: premium() }), true)).toBeNull();
+    expect(premiumFallbackNotice(status(), true)).toBeNull();
+    expect(premiumFallbackNotice(null, true)).toBeNull();
+  });
+
+  it("puts the credit left into the Premium heading", () => {
+    expect(premiumCreditHeading(premium())).toBe("Premium · $23.40 of $30 left");
+    expect(premiumCreditHeading(premium({ monthlyUsd: null, limitUsd: null, leftUsd: 5 }))).toBe(
+      "Premium · $5 left",
+    );
+    expect(premiumCreditHeading(premium({ leftUsd: null }))).toBeNull();
+    expect(premiumCreditHeading(null)).toBeNull();
+  });
+
+  it("knows a premium pick under both Uno harnesses", () => {
+    expect(
+      isUnoPremiumModelSelected({
+        driverKind: "uno",
+        slug: "uno/anthropic/claude-opus-5.5",
+        capabilities: caps("premium"),
+      }),
+    ).toBe(true);
+    expect(
+      isUnoPremiumModelSelected({ driverKind: "hermes", slug: "anthropic/claude-sonnet-5" }),
+    ).toBe(true);
+    expect(isUnoPremiumModelSelected({ driverKind: "hermes", slug: "uno/smart" })).toBe(false);
+    expect(isUnoPremiumModelSelected({ driverKind: "uno", slug: "uno/uno/fast" })).toBe(false);
+    expect(
+      isUnoPremiumModelSelected({
+        driverKind: "uno",
+        slug: "uno/uno/smart",
+        capabilities: caps("included"),
+      }),
+    ).toBe(false);
+    expect(isUnoPremiumModelSelected({ driverKind: "uno", slug: "uno-personal/qwen" })).toBe(false);
+    expect(isUnoPremiumModelSelected({ driverKind: "claudeAgent", slug: "claude-opus-5-5" })).toBe(
+      false,
+    );
   });
 });
 
@@ -117,6 +233,15 @@ describe("top-up banner", () => {
     expect(unoBillingBannerText(notIncluded)).toBe(notIncluded);
     expect(unoBillingBannerText(UNO_LLM_CREDITS_EMPTY_MESSAGE)).toBe(UNO_LLM_CREDITS_EMPTY_MESSAGE);
     expect(unoBillingBannerText(null)).toBe(UNO_LLM_CREDITS_EMPTY_MESSAGE);
+  });
+
+  it("shows the premium-limit sentence the server passed through", () => {
+    const premiumLimit =
+      "Premium credit is used up and no AI hours are left for Smart. Manage premium credit at https://console.uno4.dev/billing.";
+    expect(unoBillingBannerText(premiumLimit)).toBe(premiumLimit);
+    expect(unoBillingBannerText('HTTP 402: {"error":{"code":"premium_limit_reached"}}')).toBe(
+      UNO_LLM_CREDITS_EMPTY_MESSAGE,
+    );
   });
 
   it("never shows a raw gateway error", () => {

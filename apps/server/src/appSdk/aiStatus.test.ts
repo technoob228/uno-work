@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { openAiStatusReader, parseGatewayAiStatus } from "./aiStatus.ts";
+import { openAiStatusReader, parseGatewayAiStatus, parseGatewayPremiumStatus } from "./aiStatus.ts";
 
 const gateway = async () => ({ baseUrl: "https://gw/v1", key: "k" });
 
@@ -36,6 +36,43 @@ describe("parseGatewayAiStatus", () => {
     expect(parseGatewayAiStatus({ error: "x" })).toBeNull();
     expect(parseGatewayAiStatus({ enabled: false, hours_left_minutes: 0, power: 0 })).toBeNull();
     expect(parseGatewayAiStatus(null)).toBeNull();
+  });
+});
+
+describe("premium credit in the status", () => {
+  it("reads the premium object when the limit applies", () => {
+    const status = parseGatewayAiStatus({
+      hours_left_minutes: 600,
+      premium: {
+        limit: 30,
+        left_usd: 23.4,
+        monthly_usd: 30,
+        overage: false,
+        balance_usd: 5,
+        renews_at: "2026-10-24T02:39:00Z",
+        exhausted: false,
+      },
+    });
+    expect(status?.premium).toEqual({
+      limited: true,
+      limitUsd: 30,
+      leftUsd: 23.4,
+      monthlyUsd: 30,
+      overage: false,
+      balanceUsd: 5,
+      renewsAt: "2026-10-24T02:39:00Z",
+      exhausted: false,
+    });
+    expect(
+      parseGatewayPremiumStatus({ limit: true, left_usd: 0, exhausted: true })?.exhausted,
+    ).toBe(true);
+  });
+
+  it("no premium limit, no premium field", () => {
+    expect(parseGatewayAiStatus({ hours_left_minutes: 600 })?.premium).toBeNull();
+    expect(parseGatewayPremiumStatus({ limit: false, left_usd: 3 })).toBeNull();
+    expect(parseGatewayPremiumStatus({ limit: 0 })).toBeNull();
+    expect(parseGatewayPremiumStatus("x")).toBeNull();
   });
 });
 

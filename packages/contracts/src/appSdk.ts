@@ -311,6 +311,26 @@ export const UnoAiSpend = Schema.Struct({
 export type UnoAiSpend = typeof UnoAiSpend.Type;
 
 /**
+ * Premium credit of the plan (`premium` of `/v1/ai/status`), present when
+ * the premium limit applies to the account. `exhausted` — the credit is used
+ * up and "continue from balance" is off: premium requests are answered by
+ * Smart until `renewsAt`.
+ */
+export const UnoAiPremiumStatus = Schema.Struct({
+  /** The monthly premium limit applies (the gateway may send it as the limit in USD). */
+  limited: Schema.Boolean,
+  limitUsd: Schema.NullOr(Schema.Number),
+  leftUsd: Schema.NullOr(Schema.Number),
+  monthlyUsd: Schema.NullOr(Schema.Number),
+  /** "Continue from balance" is on: past the credit premium is paid from the balance. */
+  overage: Schema.Boolean,
+  balanceUsd: Schema.NullOr(Schema.Number),
+  renewsAt: Schema.NullOr(Schema.String),
+  exhausted: Schema.Boolean,
+});
+export type UnoAiPremiumStatus = typeof UnoAiPremiumStatus.Type;
+
+/**
  * Uno AI hours right now (`GET /v1/ai/status`, spec ai-hours.md): hours
  * left, AI power, requests in flight and whether they run slower than full
  * speed. "unavailable" — the gateway has no AI hours (older backend or the
@@ -330,6 +350,8 @@ export const UnoAiStatus = Schema.Struct({
   speedPct: Schema.NullOr(Schema.Number),
   renewsAt: Schema.NullOr(Schema.String),
   plan: Schema.NullOr(Schema.String),
+  /** Premium credit; absent on older daemons and when no premium limit applies. */
+  premium: Schema.optional(Schema.NullOr(UnoAiPremiumStatus)),
   checkedAt: Schema.NullOr(Schema.String),
 });
 export type UnoAiStatus = typeof UnoAiStatus.Type;

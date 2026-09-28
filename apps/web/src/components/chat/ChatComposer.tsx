@@ -67,6 +67,7 @@ import {
 } from "../composerFooterLayout";
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
 import { ProviderModelPicker } from "./ProviderModelPicker";
+import { isUnoPremiumModelSelected, PremiumCreditNotice } from "./PremiumCreditNotice";
 import { AssistantModelPicker } from "./AssistantEngine";
 import { assistantEngineSendBlock } from "../../assistant/assistantEngine.logic";
 import { useAssistantLlm } from "../../assistant/useAssistantLlm";
@@ -907,6 +908,12 @@ export const ChatComposer = memo(
     );
     const hasKnownUnsupportedCodingTools =
       selectedProvider === "uno" && modelCannotRunCodingAgent(selectedModelCapabilities);
+    // Premium model picked: say so when its answers come from Smart (credit used up).
+    const unoPremiumSelected = isUnoPremiumModelSelected({
+      driverKind: selectedProvider,
+      slug: selectedModel,
+      capabilities: selectedModelCapabilities,
+    });
     // Personal AI: модель на личном GPU. Пока не поднята — сообщение ждёт в
     // поле ввода и уходит само, когда модель готова.
     const personalAiId =
@@ -2875,6 +2882,10 @@ export const ChatComposer = memo(
           >
             <ComposerSecretRequestPanel threadId={activeThread?.id} />
             <ComposerToolApprovalPanel threadId={activeThread?.id} />
+            <PremiumCreditNotice
+              environmentId={environmentId}
+              premiumSelected={unoPremiumSelected}
+            />
             {personalAiId !== null ? (
               <PersonalAiPanel
                 handle={personalAi}

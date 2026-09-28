@@ -9,7 +9,7 @@
  * without AI hours answers 404 — then the status is "unavailable" and the
  * gateway is not asked again for {@link AI_STATUS_UNAVAILABLE_BACKOFF_MS}.
  */
-import type { UnoAiStatus } from "@t3tools/contracts";
+import type { UnoAiPremiumStatus, UnoAiStatus } from "@t3tools/contracts";
 
 const TIMEOUT_MS = 5_000;
 /** The interface polls every 15 s while a chat works; one gateway call per window. */
@@ -38,7 +38,31 @@ export const EMPTY_AI_STATUS_FIELDS: StatusFields = {
   speedPct: null,
   renewsAt: null,
   plan: null,
+  premium: null,
 };
+
+/**
+ * `premium` of the gateway's status → fields; null when the premium limit
+ * doesn't apply to the account (no object, or `limit` false / 0).
+ */
+export function parseGatewayPremiumStatus(value: unknown): UnoAiPremiumStatus | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const r = value as Record<string, unknown>;
+  const limit = r["limit"];
+  const limitUsd = num(limit);
+  const limited = limit === true || (limitUsd !== null && limitUsd > 0);
+  if (!limited) return null;
+  return {
+    limited,
+    limitUsd: limitUsd !== null && limitUsd > 0 ? limitUsd : null,
+    leftUsd: num(r["left_usd"]),
+    monthlyUsd: num(r["monthly_usd"]),
+    overage: r["overage"] === true,
+    balanceUsd: num(r["balance_usd"]),
+    renewsAt: str(r["renews_at"]),
+    exhausted: r["exhausted"] === true,
+  };
+}
 
 /** The gateway's JSON → fields; null when it isn't a status at all. */
 export function parseGatewayAiStatus(json: unknown): StatusFields | null {
@@ -61,6 +85,7 @@ export function parseGatewayAiStatus(json: unknown): StatusFields | null {
     speedPct,
     renewsAt: str(r["renews_at"]),
     plan: str(r["plan"]),
+    premium: parseGatewayPremiumStatus(r["premium"]),
   };
 }
 

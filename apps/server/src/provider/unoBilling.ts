@@ -24,7 +24,22 @@ export const UNO_AI_NOT_INCLUDED_MESSAGE = `Your plan doesn't include Uno AI hou
 export const UNO_AI_HOURS_EMPTY_PREFIX = "Your AI hours are used up.";
 const UNO_AI_HOURS_TOP_UP_TAIL = `To keep going now, add AI credit at ${UNO_BILLING_URL} or ${OWN_SUBSCRIPTION}.`;
 
-type UnoBillingKind = "ai_hours_empty" | "ai_not_included" | "insufficient_credits";
+/**
+ * The gateway's 402 `premium_limit_reached`: the premium credit is used up,
+ * "continue from balance" is off and there are no AI hours left for Smart
+ * to answer instead.
+ */
+export const UNO_PREMIUM_LIMIT_REACHED_MESSAGE = `Your premium credit is used up, and there are no AI hours left to answer with Smart. Turn on "Continue from balance" or add AI hours at ${UNO_BILLING_URL}.`;
+
+type UnoBillingKind =
+  | "ai_hours_empty"
+  | "ai_not_included"
+  | "insufficient_credits"
+  | "premium_limit_reached";
+
+function isUnoPremiumLimitDetail(detail: string): boolean {
+  return /premium_limit_reached/i.test(detail);
+}
 
 /**
  * The gateway's 402 `ai_hours_empty` (spec ai-hours.md): the month's AI
@@ -71,6 +86,7 @@ export function isUnoBillingErrorDetail(detail: string | null | undefined): bool
   return (
     isUnoAiHoursEmptyDetail(detail) ||
     isUnoAiNotIncludedDetail(detail) ||
+    isUnoPremiumLimitDetail(detail) ||
     normalized.includes("402") ||
     normalized.includes("insufficient_credits") ||
     normalized.includes("insufficient_balance") ||
@@ -132,9 +148,15 @@ function parseGatewayError(detail: string): { code?: string; message?: string } 
 }
 
 function billingKind(detail: string, code: string | undefined): UnoBillingKind {
-  if (code === "ai_hours_empty" || code === "ai_not_included" || code === "insufficient_credits") {
+  if (
+    code === "ai_hours_empty" ||
+    code === "ai_not_included" ||
+    code === "insufficient_credits" ||
+    code === "premium_limit_reached"
+  ) {
     return code;
   }
+  if (isUnoPremiumLimitDetail(detail)) return "premium_limit_reached";
   if (isUnoAiHoursEmptyDetail(detail)) return "ai_hours_empty";
   if (isUnoAiNotIncludedDetail(detail)) return "ai_not_included";
   return "insufficient_credits";
@@ -158,12 +180,35 @@ function isCompleteHumanBillingMessage(text: string): boolean {
   );
 }
 
+/** A human sentence (no JSON, no HTTP status), fit to be shown as it is. */
+function isPlainSentence(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    trimmed.length > 0 &&
+    trimmed.length <= 600 &&
+    !/[{}]/.test(trimmed) &&
+    !/\bhttp\s+\d{3}\b/i.test(trimmed) &&
+    !/premium_limit_reached/i.test(trimmed)
+  );
+}
+
 export function normalizeUnoBillingErrorMessage(detail: string): string {
   if (!isUnoBillingErrorDetail(detail)) return detail;
   const gateway = parseGatewayError(detail);
   const human = gateway.message ?? stripWrappers(detail);
   if (isCompleteHumanBillingMessage(human)) return human.trim();
-  switch (billingKind(detail, gateway.code)) {
+  const kind = billingKind(detail, gateway.code);
+  // The premium limit: the gateway's own sentence, with the way out added
+  // when it doesn't point at the billing page itself.
+  if (kind === "premium_limit_reached" && gateway.message && isPlainSentence(gateway.message)) {
+    const sentence = gateway.message.trim().replace(/([^.!?])$/, "$1.");
+    return /console\.uno4\.dev\/billing/i.test(sentence)
+      ? sentence
+      : `${sentence} Manage premium credit at ${UNO_BILLING_URL}.`;
+  }
+  switch (kind) {
+    case "premium_limit_reached":
+      return UNO_PREMIUM_LIMIT_REACHED_MESSAGE;
     case "ai_hours_empty":
       return unoAiHoursEmptyMessage(detail);
     case "ai_not_included":
@@ -184,14 +229,14 @@ export function isUnoBillingFailureReply(text: string): boolean {
   if (trimmed.length === 0 || trimmed.length > 1200) return false;
   if (/^(?:error\s*:\s*)?(?:error code\s*:?\s*)?(?:http\s+)?402\b/i.test(trimmed)) return true;
   if (
-    /^(?:error\s*:\s*)?(?:insufficient llm credits|ai_hours_empty|ai_not_included|insufficient_credits)\b/i.test(
+    /^(?:error\s*:\s*)?(?:insufficient llm credits|ai_hours_empty|ai_not_included|insufficient_credits|premium_limit_reached)\b/i.test(
       trimmed,
     )
   ) {
     return true;
   }
   return (
-    /^(?:your ai hours are used up|your plan doesn.t include uno ai hours|your ai credit is empty)/i.test(
+    /^(?:your ai hours are used up|your plan doesn.t include uno ai hours|your ai credit is empty|your premium credit is used up)/i.test(
       trimmed,
     ) && /console\.uno4\.dev\/billing/i.test(trimmed)
   );

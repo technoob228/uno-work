@@ -12,17 +12,29 @@ import { ensureEnvironmentApi } from "../environmentApi";
 /** While a chat works, the busy notice asks this often. */
 export const AI_STATUS_POLL_MS = 15_000;
 
+/** While a premium model is picked, the premium credit is re-read this often. */
+export const AI_STATUS_PREMIUM_POLL_MS = 60_000;
+
+export interface AiStatusQueryFlags {
+  /** Poll every {@link AI_STATUS_POLL_MS} (a chat on Uno AI is working). */
+  readonly poll?: boolean;
+  /** Poll at this interval instead (0/undefined: see `poll`). */
+  readonly pollMs?: number;
+  readonly enabled?: boolean;
+}
+
 export function aiStatusQueryOptions(
   environmentId: EnvironmentId | null,
-  options: { readonly poll?: boolean; readonly enabled?: boolean } = {},
+  options: AiStatusQueryFlags = {},
 ) {
+  const pollMs = options.poll ? AI_STATUS_POLL_MS : (options.pollMs ?? 0);
   return queryOptions({
     queryKey: ["uno-ai", "status", environmentId] as const,
     queryFn: (): Promise<UnoAiStatus> =>
       ensureEnvironmentApi(environmentId!).unoComputer.appAiStatus(),
     enabled: environmentId !== null && options.enabled !== false,
-    refetchInterval: options.poll ? AI_STATUS_POLL_MS : false,
-    staleTime: options.poll ? AI_STATUS_POLL_MS : 60_000,
+    refetchInterval: pollMs > 0 ? pollMs : false,
+    staleTime: pollMs > 0 ? pollMs : 60_000,
     retry: false,
   });
 }
@@ -30,7 +42,7 @@ export function aiStatusQueryOptions(
 /** The reading when the gateway has AI hours; null otherwise (or not read yet). */
 export function useAiStatus(
   environmentId: EnvironmentId | null,
-  options: { readonly poll?: boolean; readonly enabled?: boolean } = {},
+  options: AiStatusQueryFlags = {},
 ): UnoAiStatus | null {
   const data = useQuery(aiStatusQueryOptions(environmentId, options)).data;
   return data?.status === "ok" ? data : null;

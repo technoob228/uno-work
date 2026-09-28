@@ -22,12 +22,30 @@ const UNO_BILLING_MESSAGE_OPENINGS = [
   "Your AI hours are used up.",
   "Your plan doesn't include Uno AI hours",
   "Your AI credit is empty.",
+  "Your premium credit is used up",
 ];
+
+/**
+ * The gateway's own sentence the server passed through (e.g. its
+ * `premium_limit_reached` message): human words pointing at the billing page,
+ * no JSON, no HTTP status.
+ */
+function isHumanBillingSentence(text: string): boolean {
+  return (
+    text.length > 0 &&
+    text.length <= 800 &&
+    !/[{}]/.test(text) &&
+    !/\bhttp\s+\d{3}\b|\b402\b/i.test(text) &&
+    !/insufficient llm credits|premium_limit_reached/i.test(text) &&
+    text.includes(UNO_BILLING_URL)
+  );
+}
 
 /** What the banner says: the server's own billing sentence when it has one. */
 export function unoBillingBannerText(sessionError: string | null | undefined): string {
   const text = sessionError?.trim() ?? "";
-  return UNO_BILLING_MESSAGE_OPENINGS.some((opening) => text.startsWith(opening))
+  return UNO_BILLING_MESSAGE_OPENINGS.some((opening) => text.startsWith(opening)) ||
+    isHumanBillingSentence(text)
     ? text
     : UNO_LLM_CREDITS_EMPTY_MESSAGE;
 }

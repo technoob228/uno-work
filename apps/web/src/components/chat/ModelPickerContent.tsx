@@ -18,6 +18,10 @@ import {
 } from "react";
 import { SearchIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
+import { unoGatewayModelId } from "./unoModelIds";
+import { premiumCreditHeading } from "./PremiumCreditNotice";
+import { useAiStatus } from "../../lib/aiStatusReactQuery";
+import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { modelCannotRunCodingAgent, modelMatchesCapabilityFilter } from "./modelCapabilities";
 import { ModelPickerSidebar, type ModelPickerSidebarPaneState } from "./ModelPickerSidebar";
 import { isModelPickerNewModel } from "./modelPickerModelHighlights";
@@ -151,9 +155,10 @@ export function showUnoPremiumComingSoon(
   );
   return (
     premium.length > 0 &&
-    !premium.some((model) =>
-      UNO_PREMIUM_COMING_SOON_VENDORS.some((vendor) => model.slug.toLowerCase().startsWith(vendor)),
-    )
+    !premium.some((model) => {
+      const gatewayId = unoGatewayModelId(model.slug);
+      return UNO_PREMIUM_COMING_SOON_VENDORS.some((vendor) => gatewayId.startsWith(vendor));
+    })
   );
 }
 const MODEL_PICKER_VIRTUALIZE_THRESHOLD = 80;
@@ -593,6 +598,19 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   // capability / price filters, no sort, just the groups.
   const unoCurated = useMemo(() => isCuratedUnoModelList(flatModels), [flatModels]);
   const unoPremiumComingSoon = useMemo(() => showUnoPremiumComingSoon(flatModels), [flatModels]);
+  // Premium credit left, in the Premium group's heading (AI hours only).
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const hasUnoPremiumGroup = useMemo(
+    () =>
+      flatModels.some(
+        (model) => listsUnoGatewayCatalog(model.driverKind) && unoPickerGroup(model) === "premium",
+      ),
+    [flatModels],
+  );
+  const aiStatus = useAiStatus(props.environmentId ?? primaryEnvironmentId, {
+    enabled: unoCurated && hasUnoPremiumGroup,
+  });
+  const unoPremiumHeading = premiumCreditHeading(aiStatus?.premium) ?? UNO_GROUP_LABEL.premium;
   const showUnoGroups =
     unoCurated &&
     !isSearching &&
@@ -1122,7 +1140,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         rows.push(<UnoPremiumComingSoon key="premium-coming-soon" />);
       }
       if (group !== previous && group !== null) {
-        rows.push(<UnoGroupHeading key={`group:${group}`} label={UNO_GROUP_LABEL[group]} />);
+        rows.push(
+          <UnoGroupHeading
+            key={`group:${group}`}
+            label={group === "premium" ? unoPremiumHeading : UNO_GROUP_LABEL[group]}
+          />,
+        );
       }
       previous = group;
       rows.push(renderModelRow(modelKey, index));
