@@ -34,6 +34,7 @@ import remarkGfm from "remark-gfm";
 import TurndownService from "turndown";
 import * as XLSX from "xlsx";
 
+import { sanitizeDocumentHtml } from "../../lib/safeHtml";
 import { cn } from "../../lib/utils";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { openInPreferredEditor } from "../../editorPreferences";
@@ -528,7 +529,9 @@ function DocxBody({ file, base64 }: { file: PreviewFile; base64: string }) {
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
       const result = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
-      return result.value;
+      // mammoth passes hyperlink targets through verbatim (a `javascript:`
+      // link runs in the app's origin on click), so sanitize before render.
+      return sanitizeDocumentHtml(result.value);
     },
     staleTime: Infinity,
   });
@@ -553,7 +556,8 @@ function DocxBody({ file, base64 }: { file: PreviewFile; base64: string }) {
     <MemoizedScrollArea fileId={file.id} className="h-full">
       <div
         className="preview-markdown px-5 py-4"
-        // mammoth выдаёт sanitized HTML без скриптов; всё содержимое — стилизованный текст.
+        // HTML прошёл sanitizeDocumentHtml (DOMPurify): без скриптов, on*-обработчиков
+        // и javascript:/data:-ссылок; внешние ссылки открываются в системном браузере.
         dangerouslySetInnerHTML={{ __html: data }}
       />
     </MemoizedScrollArea>
