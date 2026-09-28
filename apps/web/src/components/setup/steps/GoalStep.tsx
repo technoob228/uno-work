@@ -251,13 +251,20 @@ function Page({
   footer?: ReactNode;
 }) {
   const { goHome } = useSetupNavigation();
+  const { updateSettings } = useUpdateSettings();
+  // "Go to Home" is a way out of the start: without marking it done the
+  // browser's onboarding guard sent a new person straight back here (27.09).
+  const leaveToHome = () => {
+    void updateSettings({ onboardingCompleted: true });
+    goHome();
+  };
   return (
     <SetupFrame
       title="Start"
       icon={false}
       progress={null}
       headerAction={
-        <Button size="xs" variant="ghost" onClick={goHome} data-testid="goal-home">
+        <Button size="xs" variant="ghost" onClick={leaveToHome} data-testid="goal-home">
           Go to Home
         </Button>
       }
