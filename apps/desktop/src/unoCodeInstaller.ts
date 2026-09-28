@@ -267,7 +267,6 @@ export async function installUnoCode(opts: InstallerOptions): Promise<InstallRes
   const release = await fetchPinnedRelease();
   const assetName = platformAssetName();
   const expectedSha256 = UNO_CODE_ASSET_SHA256[assetName];
-  const release = await fetchPinnedRelease();
   const asset = release.assets.find((a) => a.name === assetName);
   if (!asset || expectedSha256 === undefined) {
     throw new UnoCodeInstallError(
