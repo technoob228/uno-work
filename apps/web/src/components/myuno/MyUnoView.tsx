@@ -78,6 +78,7 @@ import {
   subscriptionQuery,
 } from "./myUnoQueries";
 import { PlanLine, WorthALook } from "./OverviewTop";
+import { PaymentNoticeCard } from "../billing/PaymentNoticeBanner";
 import { useAiStatus } from "../../lib/aiStatusReactQuery";
 import { SitesTab } from "./SitesTab";
 import { useComputerActions } from "./useComputerActions";
@@ -341,6 +342,9 @@ export function MyUnoView() {
         <div className="flex min-h-0 flex-1">
           <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
             <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 p-4 pb-16 sm:px-6 sm:pt-5">
+              {!needsSignIn && sub?.paymentNotice ? (
+                <PaymentNoticeCard notice={sub.paymentNotice} />
+              ) : null}
               {needsSignIn ? (
                 <section className="rounded-2xl border border-border/60 bg-card/40 p-6">
                   <h1 className="mb-1 text-lg font-semibold">Everything in one place</h1>

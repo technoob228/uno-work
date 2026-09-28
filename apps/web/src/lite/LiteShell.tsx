@@ -43,6 +43,7 @@ import {
   openCloudWork,
 } from "./webLite";
 import { SidebarShortcutListener } from "../components/sidebar/SidebarShowButton";
+import { PaymentNoticeBanner } from "../components/billing/PaymentNoticeBanner";
 
 /** The root of the lite app (rendered by routes/__root.tsx in the lite build). */
 export function LiteRoot() {
@@ -87,6 +88,7 @@ function LiteShell({ children }: { children: ReactNode }) {
       </Sidebar>
       {leaving ? null : children}
       <SidebarShortcutListener />
+      <PaymentNoticeBanner />
     </SidebarProvider>
   );
 }

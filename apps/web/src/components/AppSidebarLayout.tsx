@@ -6,6 +6,7 @@ import ThreadSidebar from "./Sidebar";
 import { isElectron } from "../env";
 import { useFeatureFlag } from "../hooks/useFeatureFlags";
 import { InboxListener } from "../inbox/InboxListener";
+import { PaymentNoticeBanner } from "./billing/PaymentNoticeBanner";
 import { useNavLayout } from "../navigation/useNavLayout";
 import { DesktopTabs } from "./DesktopTabs";
 import { NavRail, RAIL_WIDTH } from "./sidebar/NavRail";
@@ -141,6 +142,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       <FileBrowser />
       <BrowserBridgeListener />
       <BrowserLiveListener />
+      <PaymentNoticeBanner />
     </>
   );
 }
