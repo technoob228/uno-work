@@ -839,7 +839,13 @@ export function makeCursorAdapter(
                 }
               }),
             ),
-          ).pipe(Effect.forkChild);
+          ).pipe(
+            // Tied to the session, not to the fiber that started it: a start run
+            // inside a race (the assistant prewarm under Effect.timeout) ends
+            // that fiber right away, and a child listener died with it — the
+            // harness answered, nobody read it (Uno chat mute on 0.0.94–0.0.100).
+            Effect.forkIn(sessionScope),
+          );
 
           ctx.notificationFiber = nf;
           sessions.set(input.threadId, ctx);

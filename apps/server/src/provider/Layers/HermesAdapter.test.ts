@@ -92,6 +92,41 @@ hermesAdapterTestLayer("HermesAdapterLive", (it) => {
       yield* adapter.stopSession(threadId);
     }),
   );
+
+  // The assistant prewarm starts the session under Effect.timeout (a race: the
+  // start runs in a fiber that ends as soon as it returns). The reply listener
+  // must outlive that fiber, or every answer of the session is dropped.
+  it.effect("streams replies of a session started inside a race (assistant prewarm)", () =>
+    Effect.gen(function* () {
+      const adapter = yield* HermesAdapter;
+      const threadId = ThreadId.make("hermes-prewarmed");
+
+      yield* adapter
+        .startSession({
+          threadId,
+          provider: ProviderDriverKind.make("hermes"),
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+          modelSelection: { instanceId: ProviderInstanceId.make("hermes"), model: "uno/smart" },
+        })
+        .pipe(Effect.timeout("30 seconds"));
+
+      const eventsFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "content.delta" || event.type === "turn.completed",
+      ).pipe(
+        Stream.takeUntil((event) => event.type === "turn.completed"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* adapter.sendTurn({ threadId, input: "hello", attachments: [] });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      assert.isAbove(events.filter((event) => event.type === "content.delta").length, 0);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
 });
 
 // Hermes relays a non-retryable gateway 402 as the turn's reply text.
