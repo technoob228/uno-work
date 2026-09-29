@@ -293,9 +293,16 @@ function ComboboxValue({ ...props }: ComboboxPrimitive.Value.Props) {
   return <ComboboxPrimitive.Value data-slot="combobox-value" {...props} />;
 }
 
-function ComboboxList({ className, ...props }: ComboboxPrimitive.List.Props) {
+function ComboboxList({
+  className,
+  scrollAreaClassName,
+  ...props
+}: ComboboxPrimitive.List.Props & {
+  /** Bound the scroll area (e.g. `max-h-72`) so a long list scrolls instead of being clipped. */
+  scrollAreaClassName?: string;
+}) {
   return (
-    <ScrollArea scrollbarGutter scrollFade>
+    <ScrollArea scrollbarGutter scrollFade className={scrollAreaClassName}>
       <ComboboxPrimitive.List
         className={cn("not-empty:scroll-py-1 not-empty:px-1 not-empty:py-1", className)}
         data-slot="combobox-list"

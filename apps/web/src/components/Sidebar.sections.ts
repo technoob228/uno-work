@@ -26,6 +26,12 @@ export type SidebarSection = "pinned" | "active" | "snoozed" | "settled";
 export const SIDEBAR_SETTLE_AFTER_IDLE_MS = 3 * 24 * 60 * 60 * 1_000;
 /** Settled rows shown before "Show more". */
 export const SIDEBAR_SETTLED_PREVIEW_LIMIT = 5;
+/**
+ * Active rows shown before "Show more". A busy project easily has a dozen
+ * chats younger than the settle threshold; chats that need the person and
+ * the open chat always stay visible on top of this.
+ */
+export const SIDEBAR_ACTIVE_PREVIEW_LIMIT = 6;
 
 export type SidebarSectionThread = Pick<
   SidebarThreadSummary,
@@ -195,7 +201,9 @@ export interface SidebarInboxLayout<T> {
 
 /**
  * Build one project's list. The snoozed shelf renders collapsed by default;
- * settled rows show the first SIDEBAR_SETTLED_PREVIEW_LIMIT until expanded.
+ * active rows show the first SIDEBAR_ACTIVE_PREVIEW_LIMIT and settled rows the
+ * first SIDEBAR_SETTLED_PREVIEW_LIMIT until expanded, behind one toggle at the
+ * end of the list.
  * `forceVisibleKey` keeps the open chat rendered in its section even when
  * its shelf is collapsed, so the selection never disappears.
  */
@@ -222,7 +230,19 @@ export function buildSidebarInboxLayout<T extends SidebarSectionThread>(
   };
 
   for (const thread of sections.pinned) pushThread(thread, "pinned");
-  for (const thread of sections.active) pushThread(thread, "active");
+  // Rows past the preview limits; with the list expanded they are rendered
+  // and the count only decides whether "Show less" appears.
+  let overflowCount = 0;
+  sections.active.forEach((thread, index) => {
+    const beyondLimit = index >= SIDEBAR_ACTIVE_PREVIEW_LIMIT;
+    if (beyondLimit && !input.settledExpanded && !threadNeedsUser(thread) && !isForced(thread)) {
+      overflowCount += 1;
+      hiddenThreads.push(thread);
+    } else {
+      if (beyondLimit && input.settledExpanded) overflowCount += 1;
+      pushThread(thread, "active");
+    }
+  });
 
   if (sections.snoozed.length > 0) {
     items.push({
@@ -238,7 +258,9 @@ export function buildSidebarInboxLayout<T extends SidebarSectionThread>(
 
   if (sections.settled.length > 0) {
     items.push({ kind: "settled-header", count: sections.settled.length });
-    const overflowing = sections.settled.length > SIDEBAR_SETTLED_PREVIEW_LIMIT;
+    if (sections.settled.length > SIDEBAR_SETTLED_PREVIEW_LIMIT) {
+      overflowCount += sections.settled.length - SIDEBAR_SETTLED_PREVIEW_LIMIT;
+    }
     sections.settled.forEach((thread, index) => {
       if (input.settledExpanded || index < SIDEBAR_SETTLED_PREVIEW_LIMIT || isForced(thread)) {
         pushThread(thread, "settled");
@@ -246,13 +268,14 @@ export function buildSidebarInboxLayout<T extends SidebarSectionThread>(
         hiddenThreads.push(thread);
       }
     });
-    if (overflowing) {
-      items.push({
-        kind: "settled-toggle",
-        hiddenCount: sections.settled.length - SIDEBAR_SETTLED_PREVIEW_LIMIT,
-        expanded: input.settledExpanded,
-      });
-    }
+  }
+
+  if (overflowCount > 0) {
+    items.push({
+      kind: "settled-toggle",
+      hiddenCount: overflowCount,
+      expanded: input.settledExpanded,
+    });
   }
 
   return { sections, items, visibleThreads, hiddenThreads };

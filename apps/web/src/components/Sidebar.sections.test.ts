@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SidebarThreadSummary, ThreadSession } from "../types";
 import {
+  SIDEBAR_ACTIVE_PREVIEW_LIMIT,
   SIDEBAR_SETTLED_PREVIEW_LIMIT,
   buildSidebarInboxLayout,
   isThreadSettled,
@@ -291,6 +292,41 @@ describe("buildSidebarInboxLayout", () => {
     });
     expect(layout.visibleThreads.map((thread) => thread.id)).toContain("snoozed-b");
     expect(layout.visibleThreads.map((thread) => thread.id)).not.toContain("snoozed-a");
+  });
+
+  it("caps a long Active list behind Show more, keeping the open chat", () => {
+    const active = Array.from({ length: SIDEBAR_ACTIVE_PREVIEW_LIMIT + 4 }, (_, index) =>
+      makeThread(`active-${index}`, {
+        updatedAt: ago((index + 1) * 60_000),
+        latestUserMessageAt: ago((index + 1) * 60_000),
+      }),
+    );
+    const collapsed = buildSidebarInboxLayout(active, {
+      now: NOW,
+      sortOrder: "updated_at",
+      snoozedExpanded: false,
+      settledExpanded: false,
+      threadKey,
+      forceVisibleKey: "active-9",
+    });
+    expect(collapsed.visibleThreads).toHaveLength(SIDEBAR_ACTIVE_PREVIEW_LIMIT + 1);
+    expect(collapsed.visibleThreads.map((thread) => thread.id)).toContain("active-9");
+    expect(collapsed.hiddenThreads).toHaveLength(3);
+    expect(collapsed.items.at(-1)).toEqual({
+      kind: "settled-toggle",
+      hiddenCount: 3,
+      expanded: false,
+    });
+
+    const expanded = buildSidebarInboxLayout(active, {
+      now: NOW,
+      sortOrder: "updated_at",
+      snoozedExpanded: false,
+      settledExpanded: true,
+      threadKey,
+    });
+    expect(expanded.visibleThreads).toHaveLength(active.length);
+    expect(expanded.items.at(-1)).toMatchObject({ kind: "settled-toggle", expanded: true });
   });
 
   it("omits empty section markers", () => {

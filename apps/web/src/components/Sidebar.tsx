@@ -1378,7 +1378,12 @@ export default function Sidebar() {
         if (showAssistantRow && isAssistantConversation(thread)) return false;
         return threadKeyOf(thread) === routeThreadKey;
       }
-      return scopedProjectKeys === null || scopedProjectKeys.has(projectKeyOf(thread));
+      // The open chat stays listed even when the scope is another project.
+      return (
+        scopedProjectKeys === null ||
+        scopedProjectKeys.has(projectKeyOf(thread)) ||
+        threadKeyOf(thread) === routeThreadKey
+      );
     });
     const sections = partitionSidebarThreads(visible, { now, sortOrder: sidebarThreadSortOrder });
     return {
@@ -2367,7 +2372,7 @@ export default function Sidebar() {
           }
         />
         <ComboboxEmpty>No matching projects.</ComboboxEmpty>
-        <ComboboxList className="p-1">
+        <ComboboxList className="p-1" scrollAreaClassName="max-h-72">
           {(item: (typeof projectScopeItems)[number]) => {
             const group = projectGroupByScopeKey.get(item.value) ?? null;
             return (
