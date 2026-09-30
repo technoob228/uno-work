@@ -168,8 +168,10 @@ import {
 import {
   partitionSidebarThreads,
   resolveSettledThreadTimestamp,
+  resolveThreadActivityMs,
   type SidebarSection,
 } from "./Sidebar.sections";
+import { toSortableTimestamp } from "../lib/threadSort";
 import {
   canSnoozeThread,
   formatSnoozePickerValue,
@@ -2223,10 +2225,30 @@ export default function Sidebar() {
     handledNewChatRequest.current = newChatRequest;
     handleNewThreadClick();
   }, [handleNewThreadClick, newChatRequest]);
-  // "New ▾ → New chat in a project": the projects used last on this computer.
+  // "New ▾ → New chat in a project": every project on this computer, the
+  // ones chatted in last first (a project's own updatedAt barely moves, so it
+  // alone buried the project the person works in all day).
   const homeFolderPath = useHomeFolderPath(newThreadContext.activeEnvironmentId);
+  const lastChatMsByProjectKey = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const thread of threads) {
+      if (thread.archivedAt !== null) continue;
+      const activityMs =
+        resolveThreadActivityMs(thread) ?? toSortableTimestamp(thread.updatedAt ?? undefined);
+      if (activityMs === null) continue;
+      const key = projectKeyOf(thread);
+      if (activityMs > (map.get(key) ?? Number.NEGATIVE_INFINITY)) map.set(key, activityMs);
+    }
+    return map;
+  }, [threads]);
   const newMenuProjects = useMemo(() => {
     const home = homeFolderPath?.replace(/\/+$/, "") ?? null;
+    const lastUsedMs = (project: (typeof projects)[number]) =>
+      Math.max(
+        lastChatMsByProjectKey.get(`${project.environmentId}:${project.id}`) ??
+          Number.NEGATIVE_INFINITY,
+        toSortableTimestamp(project.updatedAt ?? undefined) ?? Number.NEGATIVE_INFINITY,
+      );
     return projects
       .filter(
         (project) =>
@@ -2234,8 +2256,7 @@ export default function Sidebar() {
           project.environmentId === newThreadContext.activeEnvironmentId &&
           project.cwd.replace(/\/+$/, "") !== home,
       )
-      .toSorted((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
-      .slice(0, 5)
+      .toSorted((a, b) => lastUsedMs(b) - lastUsedMs(a))
       .map((project) => ({
         key: `${project.environmentId}:${project.id}`,
         name: projectDisplayNameByKey.get(`${project.environmentId}:${project.id}`) ?? project.name,
@@ -2253,6 +2274,7 @@ export default function Sidebar() {
     defaultThreadEnvMode,
     homeFolderPath,
     isMobile,
+    lastChatMsByProjectKey,
     newThreadContext,
     projectDisplayNameByKey,
     projects,

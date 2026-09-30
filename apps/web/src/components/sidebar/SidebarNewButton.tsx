@@ -1,7 +1,7 @@
 /**
  * "New ▾" — the one way to start something from the sidebar. The button is a
  * new chat in the home folder (the "Home folder ▾" chip on the chat moves it);
- * the arrow opens: a new chat in one of the recent projects, and New project
+ * the arrow opens: a new chat in any project (last used first, scrolls), and New project
  * (a folder on this computer, empty, from GitHub).
  */
 import { ChevronDownIcon, FolderOpenIcon, PlusIcon, SquarePenIcon } from "lucide-react";
@@ -98,17 +98,19 @@ export function SidebarNewButton(props: {
           {props.recentProjects.length > 0 ? (
             <MenuGroup>
               <MenuGroupLabel>New chat in a project</MenuGroupLabel>
-              {props.recentProjects.map((project) => (
-                <MenuItem key={project.key} onClick={project.onSelect}>
-                  <span
-                    aria-hidden
-                    className="grid size-4 shrink-0 place-items-center rounded bg-muted text-[9px] font-semibold uppercase"
-                  >
-                    {project.name.slice(0, 1)}
-                  </span>
-                  <span className="max-w-56 truncate">{project.name}</span>
-                </MenuItem>
-              ))}
+              <div className="max-h-64 overflow-y-auto overscroll-contain">
+                {props.recentProjects.map((project) => (
+                  <MenuItem key={project.key} onClick={project.onSelect}>
+                    <span
+                      aria-hidden
+                      className="grid size-4 shrink-0 place-items-center rounded bg-muted text-[9px] font-semibold uppercase"
+                    >
+                      {project.name.slice(0, 1)}
+                    </span>
+                    <span className="max-w-56 truncate">{project.name}</span>
+                  </MenuItem>
+                ))}
+              </div>
             </MenuGroup>
           ) : null}
           <MenuSeparator />
