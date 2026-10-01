@@ -13,7 +13,7 @@ export const DEFAULT_ADDRESSING_FORM: AddressingFormState = addressingFormFromCo
 const SURFACE_COPY = {
   telegram: {
     namesDescription:
-      "Names the bot answers to in groups (comma-separated). Matched loosely, so “Антоха” also answers to “Антон”. Private chats always get a reply.",
+      "Names the bot answers to in groups (comma-separated). Matched loosely, so “Sam” also answers to “Samuel”. Private chats always get a reply.",
     mentionTitle: "Only reply when addressed (groups)",
     mentionDescription:
       "In group chats, react only to an @mention, a reply to the bot, or one of its names above. Turn off to answer every message (only for a chat dedicated to the bot).",
@@ -64,7 +64,7 @@ export function AddressingRows({
             disabled={disabled}
             aria-label={`${surface} bot names`}
             onChange={(event) => onChange({ ...state, names: event.target.value })}
-            placeholder="Антоха, Антон"
+            placeholder="Sam, Samuel"
             className="w-64 rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
           />
         }

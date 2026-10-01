@@ -46,7 +46,7 @@ export function ExtensionsSettingsPanel() {
     } catch (error) {
       toastManager.add({
         type: "error",
-        title: "Не удалось переключить плагин",
+        title: "Couldn't turn the plugin on or off",
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -82,16 +82,16 @@ export function ExtensionsSettingsPanel() {
 
   return (
     <SettingsPageContainer>
-      <SettingsSection title="Плагины" icon={<PuzzleIcon className="size-3.5" />}>
+      <SettingsSection title="Plugins" icon={<PuzzleIcon className="size-3.5" />}>
         {snapshot === null ? (
           <SettingsRow
             title={<Loader2Icon className="size-4 animate-spin text-muted-foreground" />}
-            description="Загрузка…"
+            description="Loading…"
           />
         ) : plugins.length === 0 ? (
           <SettingsRow
-            title="Пока пусто"
-            description="Попросите агента в чате расширить приложение — например: «сделай, чтобы каждый вечер в 19:00 мне собирался дайджест коммитов». Агент создаст плагин, и он появится здесь."
+            title="Nothing here yet"
+            description="Ask the agent in a chat to extend the app, for example: “send me a digest of commits every evening at 7 pm”. The agent will make a plugin and it will show up here."
           />
         ) : (
           plugins.map((plugin) => (
@@ -110,13 +110,13 @@ export function ExtensionsSettingsPanel() {
 
       {snapshot !== null ? (
         <p className="px-1 text-xs text-muted-foreground">
-          Плагин — это{" "}
-          <code className="rounded bg-muted px-1 py-0.5 text-[11px]">&lt;id&gt;.json</code> или
-          директория{" "}
-          <code className="rounded bg-muted px-1 py-0.5 text-[11px]">&lt;id&gt;/plugin.json</code> в{" "}
+          A plugin is a{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-[11px]">&lt;id&gt;.json</code> file or
+          a <code className="rounded bg-muted px-1 py-0.5 text-[11px]">&lt;id&gt;/plugin.json</code>{" "}
+          folder in{" "}
           <code className="rounded bg-muted px-1 py-0.5 text-[11px]">{snapshot.pluginsDir}</code>.
-          Демон подхватывает изменения без рестарта; hooks реагируют на события приложения, crons
-          выполняются по расписанию, а панель плагина открывается вкладкой в правой панели.
+          Changes apply without a restart. Hooks react to app events, crons run on a schedule, and a
+          plugin panel opens as a tab in the right panel.
         </p>
       ) : null}
     </SettingsPageContainer>
@@ -149,7 +149,7 @@ function PluginRow({
 }) {
   const needsApproval = pluginNeedsApproval(plugin);
   const summaryParts = [
-    ...(plugin.panel ? [`панель: ${plugin.panel.title}`] : []),
+    ...(plugin.panel ? [`panel: ${plugin.panel.title}`] : []),
     ...(plugin.hooks.length > 0
       ? [`hooks: ${plugin.hooks.map((hook) => hook.on).join(", ")}`]
       : []),
@@ -203,8 +203,8 @@ function PluginRow({
           ) : null}
           {lastRun ? (
             <span className="block text-[11px]">
-              Последний запуск: {lastRun.ok ? "ok" : "ошибка"} ·{" "}
-              {new Date(lastRun.at).toLocaleString()} · {lastRun.trigger}
+              Last run: {lastRun.ok ? "ok" : "error"} · {new Date(lastRun.at).toLocaleString()} ·{" "}
+              {lastRun.trigger}
               {!lastRun.ok && lastRun.detail ? ` — ${lastRun.detail}` : ""}
             </span>
           ) : null}
@@ -229,7 +229,7 @@ function PluginRow({
                 onClick={onOpenPanel}
                 className="rounded-md border border-input px-3 py-1.5 text-xs text-foreground hover:bg-accent"
               >
-                Открыть панель
+                Open panel
               </button>
             ) : null}
             <button
@@ -237,7 +237,7 @@ function PluginRow({
               disabled={toggling}
               onClick={onToggle}
               className="inline-flex overflow-hidden rounded-md border border-input text-xs"
-              aria-label={plugin.enabled ? "Выключить плагин" : "Включить плагин"}
+              aria-label={plugin.enabled ? "Turn off plugin" : "Turn on plugin"}
             >
               <span
                 className={
@@ -246,7 +246,7 @@ function PluginRow({
                     : "px-3 py-1.5 text-muted-foreground"
                 }
               >
-                Вкл
+                On
               </span>
               <span
                 className={
@@ -255,7 +255,7 @@ function PluginRow({
                     : "bg-accent px-3 py-1.5 text-accent-foreground"
                 }
               >
-                Выкл
+                Off
               </span>
             </button>
           </span>

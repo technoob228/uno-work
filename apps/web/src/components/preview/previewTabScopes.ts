@@ -87,13 +87,13 @@ export function viewScopeKey(target: PreviewTabTarget): string {
 
 /** Человекочитаемое название уровня — для тултипов и меню. */
 export const SCOPE_LABEL: Record<PreviewTabScope, string> = {
-  chat: "этот чат",
-  project: "проект",
-  global: "везде",
+  chat: "this chat",
+  project: "project",
+  global: "everywhere",
 };
 
 export const SCOPE_MENU_LABEL: Record<PreviewTabScope, string> = {
-  chat: "Оставить только в этом чате",
-  project: "Держать на уровне проекта",
-  global: "Держать открытой везде",
+  chat: "Keep in this chat only",
+  project: "Keep for the whole project",
+  global: "Keep open everywhere",
 };

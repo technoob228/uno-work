@@ -35,7 +35,7 @@ export async function writeOfficeBytes(
   chunkBytes = OFFICE_SAVE_CHUNK_BYTES,
 ): Promise<void> {
   const target = splitWriteTarget(path);
-  if (!target) throw new Error(`Некорректный путь: ${path}`);
+  if (!target) throw new Error(`Not a valid path: ${path}`);
   let offset = 0;
   do {
     const chunk = bytes.subarray(offset, offset + chunkBytes);

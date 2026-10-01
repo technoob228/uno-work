@@ -52,7 +52,7 @@ function parseCsvTable(content: string, delimiter: string): ParsedTable {
   if (exceedsEditLimits(sheets)) {
     return {
       sheets: [],
-      error: `Таблица слишком большая для редактирования (лимит ${EDIT_MAX_ROWS}×${EDIT_MAX_COLS}).`,
+      error: `This table is too big to edit (limit ${EDIT_MAX_ROWS}×${EDIT_MAX_COLS}).`,
     };
   }
   return { sheets, error: null };
@@ -87,14 +87,14 @@ function parseXlsxTable(base64: string): ParsedTable {
     if (exceedsEditLimits(sheets)) {
       return {
         sheets: [],
-        error: `Таблица слишком большая для редактирования (лимит ${EDIT_MAX_ROWS}×${EDIT_MAX_COLS}).`,
+        error: `This table is too big to edit (limit ${EDIT_MAX_ROWS}×${EDIT_MAX_COLS}).`,
       };
     }
     return { sheets, error: null };
   } catch (error) {
     return {
       sheets: [],
-      error: error instanceof Error ? error.message : "Не удалось прочитать Excel-файл",
+      error: error instanceof Error ? error.message : "Couldn't read the Excel file",
     };
   }
 }
@@ -126,7 +126,7 @@ function EditPlaceholder({ label, onCancel }: { label: string; onCancel: () => v
     <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
       <div className="text-sm text-muted-foreground">{label}</div>
       <Button size="sm" variant="outline" onClick={onCancel}>
-        Назад к просмотру
+        Back to preview
       </Button>
     </div>
   );
@@ -194,7 +194,7 @@ function GridSheetEditor({
                     <button
                       type="button"
                       tabIndex={-1}
-                      aria-label={`Удалить колонку ${spreadsheetColumnLabel(colIndex)}`}
+                      aria-label={`Delete column ${spreadsheetColumnLabel(colIndex)}`}
                       onClick={() =>
                         onMutateStructure((current) => {
                           current.forEach((row) => row.splice(colIndex, 1));
@@ -219,7 +219,7 @@ function GridSheetEditor({
                     <button
                       type="button"
                       tabIndex={-1}
-                      aria-label={`Удалить строку ${rowIndex + 1}`}
+                      aria-label={`Delete row ${rowIndex + 1}`}
                       onClick={() =>
                         onMutateStructure((current) => {
                           current.splice(rowIndex, 1);
@@ -285,7 +285,7 @@ export function TableEditableBody({
     queryFn: async () => {
       if (!path) return null;
       const api = readEnvironmentApi(effectiveEnvironmentId);
-      if (!api) throw new Error("Окружение недоступно");
+      if (!api) throw new Error("Computer unavailable");
       return api.filesystem.readFile({ path });
     },
     enabled: Boolean(path && !hasInlineContent),
@@ -298,7 +298,7 @@ export function TableEditableBody({
   const initialError = useMemo(() => {
     if (sheetsRef.current) return null;
     if (loaded?.truncated) {
-      return "Файл был обрезан при чтении — редактирование запрещено, иначе данные потеряются.";
+      return "The file was cut off while reading. Editing is off so no data gets lost.";
     }
     let parsed: ParsedTable | null = null;
     if (hasInlineContent) {
@@ -308,12 +308,12 @@ export function TableEditableBody({
         parsed =
           loaded.encoding === "base64"
             ? parseXlsxTable(loaded.content)
-            : { sheets: [], error: "Не удалось прочитать Excel-файл" };
+            : { sheets: [], error: "Couldn't read the Excel file" };
       } else {
         parsed =
           loaded.encoding === "utf8"
             ? parseCsvTable(loaded.content, delimiterForFileName(file.name))
-            : { sheets: [], error: "Файл не является текстовой таблицей" };
+            : { sheets: [], error: "This file isn't a text table" };
       }
     }
     if (!parsed) return null;
@@ -353,7 +353,7 @@ export function TableEditableBody({
     setSaving(true);
     try {
       const api = readEnvironmentApi(effectiveEnvironmentId);
-      if (!api) throw new Error("Окружение недоступно");
+      if (!api) throw new Error("Computer unavailable");
       if (isXlsx) {
         const base64 = serializeXlsx(sheets);
         await api.projects.writeFile({
@@ -386,13 +386,13 @@ export function TableEditableBody({
           cancelEditing();
         }
       }
-      toastManager.add({ type: "success", title: "Сохранено", description: file.name });
+      toastManager.add({ type: "success", title: "Saved", description: file.name });
     } catch (err) {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Не удалось сохранить файл",
-          description: err instanceof Error ? err.message : "Ошибка",
+          title: "Couldn't save the file",
+          description: err instanceof Error ? err.message : "Error",
         }),
       );
     } finally {
@@ -413,14 +413,14 @@ export function TableEditableBody({
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         <Loader2Icon className="mr-2 size-4 animate-spin" />
-        Загрузка таблицы...
+        Loading table...
       </div>
     );
   }
   if (isError) {
     return (
       <EditPlaceholder
-        label={error instanceof Error ? error.message : "Не удалось прочитать файл"}
+        label={error instanceof Error ? error.message : "Couldn't read the file"}
         onCancel={cancelEditing}
       />
     );
@@ -430,7 +430,7 @@ export function TableEditableBody({
   }
   const sheets = sheetsRef.current;
   if (!sheets || sheets.length === 0) {
-    return <EditPlaceholder label="Нет данных для редактирования" onCancel={cancelEditing} />;
+    return <EditPlaceholder label="Nothing to edit" onCancel={cancelEditing} />;
   }
 
   const activeSheet = sheets[Math.min(activeSheetIndex, sheets.length - 1)]!;
@@ -441,11 +441,11 @@ export function TableEditableBody({
         <TooltipProvider delay={300} closeDelay={0}>
           <Button size="sm" variant="outline" onClick={handleAddRow} disabled={saving}>
             <PlusIcon className="size-3.5" />
-            Строка
+            Row
           </Button>
           <Button size="sm" variant="outline" onClick={handleAddColumn} disabled={saving}>
             <PlusIcon className="size-3.5" />
-            Колонка
+            Column
           </Button>
           <Tooltip>
             <TooltipTrigger
@@ -455,22 +455,22 @@ export function TableEditableBody({
                 </span>
               }
             />
-            <TooltipPopup side="bottom">Строк × колонок</TooltipPopup>
+            <TooltipPopup side="bottom">Rows × columns</TooltipPopup>
           </Tooltip>
         </TooltipProvider>
         <span className="flex-1" />
         <Button size="sm" variant="outline" onClick={cancelEditing} disabled={saving}>
-          Отмена
+          Cancel
         </Button>
         <Button size="sm" onClick={handleSave} disabled={saving}>
           {saving ? <Loader2Icon className="mr-1.5 size-3.5 animate-spin" /> : null}
-          Сохранить
+          Save
         </Button>
       </div>
       {isXlsx ? (
         <div className="shrink-0 border-b border-border bg-card px-3 py-1 text-[11px] text-muted-foreground">
-          Сохраняются только значения ячеек: формулы и форматирование Excel будут заменены
-          результатами.
+          Only cell values are saved. Excel formulas and formatting will be replaced with their
+          results.
         </div>
       ) : null}
       {sheets.length > 1 ? (

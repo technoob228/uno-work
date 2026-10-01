@@ -164,13 +164,13 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 export function formatUploadBytes(bytes: number): string {
   if (bytes >= 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} ГБ`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
   }
   if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
   if (bytes >= 1024) {
-    return `${Math.round(bytes / 1024)} КБ`;
+    return `${Math.round(bytes / 1024)} KB`;
   }
-  return `${bytes} Б`;
+  return `${bytes} B`;
 }

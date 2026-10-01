@@ -61,15 +61,15 @@ export function CompanionExtensionPanel({
       toastManager.add(
         stackedThreadToast({
           type: "success",
-          title: "Открыто во вкладке браузера",
-          description: "Агент получил доступ к этой вкладке.",
+          title: "Opened in a browser tab",
+          description: "The agent can now use this tab.",
         }),
       );
     } catch (error) {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Расширение не открыло вкладку",
+          title: "The extension didn't open the tab",
           description: error instanceof Error ? error.message : String(error),
         }),
       );
@@ -80,7 +80,7 @@ export function CompanionExtensionPanel({
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-muted-foreground">
         <Loader2Icon className="size-6 animate-spin opacity-60" />
-        <p className="text-xs">Ищем расширение Uno Work Companion…</p>
+        <p className="text-xs">Looking for the Uno Work Companion extension…</p>
       </div>
     );
   }
@@ -91,22 +91,22 @@ export function CompanionExtensionPanel({
         <CheckCircle2Icon className="size-8 text-emerald-500" />
         <div className="space-y-1">
           <p className="text-sm font-medium text-foreground">
-            Расширение подключено{version ? ` (v${version})` : ""}
+            Extension connected{version ? ` (v${version})` : ""}
           </p>
           <p className="mx-auto max-w-sm text-xs">
-            Агент открывает страницы во вкладках этого браузера — в ваших живых сессиях. Он видит
-            только вкладки, которые открыл сам
-            {sharedTabs !== null ? ` (сейчас: ${sharedTabs})` : ""}, или те, что вы расшарили через
-            значок расширения.
+            The agent opens pages in tabs of this browser, using your signed-in sessions. It only
+            sees tabs it opened itself
+            {sharedTabs !== null ? ` (now: ${sharedTabs})` : ""} or tabs you shared with the
+            extension icon.
           </p>
         </div>
         {url ? (
           <Button size="sm" variant="outline" onClick={() => void openViaExtension()}>
             <ExternalLinkIcon className="size-3.5" />
-            Открыть {new URL(url).hostname} во вкладке
+            Open {new URL(url).hostname} in a tab
           </Button>
         ) : (
-          <p className="text-xs">Введите адрес в строке выше — он откроется новой вкладкой.</p>
+          <p className="text-xs">Enter an address above. It will open in a new tab.</p>
         )}
       </div>
     );
@@ -117,35 +117,34 @@ export function CompanionExtensionPanel({
       <PuzzleIcon className="size-8 opacity-40" />
       <div className="space-y-1 text-center">
         <p className="text-sm font-medium text-foreground">
-          Подключите расширение Uno Work Companion
+          Connect the Uno Work Companion extension
         </p>
         <p className="mx-auto max-w-sm text-xs">
-          В браузерной версии агент работает с вебом через расширение — в ваших вкладках и сессиях,
-          без пароля и без удалённого браузера.
+          In the web version, the agent browses through the extension, in your own tabs and
+          sessions. No passwords, no remote browser.
         </p>
       </div>
       <ol className="max-w-sm list-decimal space-y-1 pl-5 text-left text-xs">
-        <li>Скачайте архив и распакуйте его в папку.</li>
+        <li>Download the archive and unzip it into a folder.</li>
         <li>
-          Откройте <span className="font-mono">chrome://extensions</span> и включите «Режим
-          разработчика».
+          Open <span className="font-mono">chrome://extensions</span> and turn on Developer mode.
         </li>
-        <li>Нажмите «Загрузить распакованное расширение» и укажите папку из архива.</li>
-        <li>Вернитесь сюда и обновите страницу.</li>
+        <li>Click "Load unpacked" and pick the folder from the archive.</li>
+        <li>Come back here and reload the page.</li>
       </ol>
       <div className="flex flex-wrap items-center justify-center gap-2">
         <Button size="sm" render={<a href={COMPANION_EXTENSION_DOWNLOAD_URL} download />}>
           <DownloadIcon className="size-3.5" />
-          Скачать расширение
+          Download extension
         </Button>
         <Button size="sm" variant="outline" onClick={() => void check()}>
           <RefreshCwIcon className="size-3.5" />
-          Проверить снова
+          Check again
         </Button>
         {url ? (
           <Button size="sm" variant="ghost" onClick={onOpenExternal}>
             <ExternalLinkIcon className="size-3.5" />
-            Открыть в новой вкладке
+            Open in a new tab
           </Button>
         ) : null}
       </div>

@@ -17,7 +17,7 @@ const PROGRESS_UPDATE_INTERVAL_MS = 400;
 
 function skippedSummary(skippedCount: number): string {
   return skippedCount > 0
-    ? ` Пропущено ${skippedCount} (служебные каталоги, слишком большие или вне лимита).`
+    ? ` Skipped ${skippedCount} (system folders, too large or over the limit).`
     : "";
 }
 
@@ -37,8 +37,8 @@ export async function runProjectUpload(input: {
     toastManager.add(
       stackedThreadToast({
         type: "error",
-        title: "Загрузка не удалась",
-        description: "Окружение не подключено.",
+        title: "Upload failed",
+        description: "Computer not connected.",
       }),
     );
     return false;
@@ -47,8 +47,8 @@ export async function runProjectUpload(input: {
   const toastId = toastManager.add(
     stackedThreadToast({
       type: "loading",
-      title: "Загрузка файлов…",
-      description: `Выбрано файлов: ${input.files.length}.`,
+      title: "Uploading files…",
+      description: `${input.files.length} files selected.`,
       timeout: 0,
     }),
   );
@@ -66,7 +66,7 @@ export async function runProjectUpload(input: {
           if (now - lastUpdateAt < PROGRESS_UPDATE_INTERVAL_MS) return;
           lastUpdateAt = now;
           toastManager.update(toastId, {
-            description: `${progress.completedFiles} из ${progress.totalFiles} файлов · ${formatUploadBytes(progress.sentBytes)} из ${formatUploadBytes(progress.totalBytes)}`,
+            description: `${progress.completedFiles} of ${progress.totalFiles} files · ${formatUploadBytes(progress.sentBytes)} of ${formatUploadBytes(progress.totalBytes)}`,
           });
         },
       },
@@ -77,8 +77,8 @@ export async function runProjectUpload(input: {
       toastManager.add(
         stackedThreadToast({
           type: "warning",
-          title: "Нечего загружать",
-          description: `Все ${result.plan.skipped.length} файлов отфильтрованы (служебные каталоги, слишком большие или вне лимита).`,
+          title: "Nothing to upload",
+          description: `All ${result.plan.skipped.length} files were skipped (system folders, too large or over the limit).`,
         }),
       );
       return false;
@@ -87,8 +87,8 @@ export async function runProjectUpload(input: {
     toastManager.add(
       stackedThreadToast({
         type: "success",
-        title: "Загрузка завершена",
-        description: `${result.uploadedFiles} файлов (${formatUploadBytes(result.plan.totalBytes)}) в ${input.targetDir}.${skippedSummary(result.plan.skipped.length)}`,
+        title: "Upload complete",
+        description: `${result.uploadedFiles} files (${formatUploadBytes(result.plan.totalBytes)}) to ${input.targetDir}.${skippedSummary(result.plan.skipped.length)}`,
       }),
     );
     return true;
@@ -97,7 +97,7 @@ export async function runProjectUpload(input: {
     toastManager.add(
       stackedThreadToast({
         type: "error",
-        title: "Загрузка не удалась",
+        title: "Upload failed",
         description: error instanceof Error ? error.message : String(error),
       }),
     );

@@ -276,9 +276,9 @@ export function VaultSettings() {
             type: "error",
             title:
               direction === "push"
-                ? "Не удалось отправить в аккаунт Uno"
-                : "Не удалось забрать из аккаунта Uno",
-            description: result.error ?? "Неизвестная причина.",
+                ? "Couldn't send to your Uno account"
+                : "Couldn't get from your Uno account",
+            description: result.error ?? "Unknown reason.",
           });
           return;
         }
@@ -287,12 +287,12 @@ export function VaultSettings() {
           type: "success",
           title:
             direction === "push"
-              ? `Отправлено в аккаунт Uno: ${result.count ?? 0}`
-              : `Забрано из аккаунта Uno: ${result.count ?? 0}`,
+              ? `Sent to your Uno account: ${result.count ?? 0}`
+              : `Got from your Uno account: ${result.count ?? 0}`,
           description:
             direction === "push"
-              ? "Другие машины получат их при включённой синхронизации."
-              : "Локальное хранилище заменено состоянием из аккаунта.",
+              ? "Your other computers get them when sync is on."
+              : "Logins here were replaced with the ones from your account.",
         });
       } finally {
         setSyncing(null);
@@ -308,25 +308,23 @@ export function VaultSettings() {
   return (
     <SettingsPageContainer>
       <SettingsSection
-        title="Одно хранилище на все машины"
+        title="One list for all your computers"
         icon={<RefreshCwIcon className="size-3.5" />}
       >
         <div className={ROW_CLASSNAME}>
           <div className={ROW_INNER_CLASSNAME}>
             <div className="min-w-0 flex-1 space-y-1">
-              <h3 className="text-sm font-medium text-foreground">
-                Синхронизация через аккаунт Uno
-              </h3>
+              <h3 className="text-sm font-medium text-foreground">Sync through your Uno account</h3>
               <p className="text-xs text-muted-foreground/70">
-                Логины лежат на той машине, где работает демон: у браузерной версии — на боксе, у
-                десктопа — локально. Включите синхронизацию, чтобы хранить их в аккаунте Uno и
-                видеть один и тот же список везде. Обмен идёт набором целиком: «Отправить» заменяет
-                состояние в аккаунте, «Забрать» — локальное. Новая машина с пустым хранилищем
-                подтягивает логины сама при старте.
+                Logins are stored where Uno Work runs: on your computer in the cloud for the web
+                version, on this device for the desktop app. Turn on sync to keep them in your Uno
+                account and see the same list everywhere. Sync swaps the whole list: Send replaces
+                the list in your account, Get replaces the list here. A new computer with no saved
+                logins gets them on start.
               </p>
               {!unoApiKey ? (
                 <p className="text-xs text-amber-500">
-                  Нужен ключ аккаунта Uno — Settings → Uno account.
+                  Needs your Uno account key: Settings → Uno account.
                 </p>
               ) : null}
             </div>
@@ -346,7 +344,7 @@ export function VaultSettings() {
                     : "rounded-md border border-input px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
                 }
               >
-                {credentialsSync ? "Включена" : "Выключена"}
+                {credentialsSync ? "On" : "Off"}
               </button>
               <Button
                 size="xs"
@@ -354,7 +352,7 @@ export function VaultSettings() {
                 disabled={!credentialsSync || syncing !== null}
                 onClick={() => void runSync("push")}
               >
-                {syncing === "push" ? "…" : "Отправить"}
+                {syncing === "push" ? "…" : "Send"}
               </Button>
               <Button
                 size="xs"
@@ -362,7 +360,7 @@ export function VaultSettings() {
                 disabled={!credentialsSync || syncing !== null}
                 onClick={() => void runSync("pull")}
               >
-                {syncing === "pull" ? "…" : "Забрать"}
+                {syncing === "pull" ? "…" : "Get"}
               </Button>
             </div>
           </div>

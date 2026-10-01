@@ -448,7 +448,9 @@ function BrowserView({
       const failEvent = event as WebviewFailLoadEvent;
       // -3 (ERR_ABORTED) приходит при штатной отмене навигации.
       if (!failEvent.isMainFrame || failEvent.errorCode === -3) return;
-      setLoadError(`${failEvent.errorDescription || "Ошибка загрузки"} (${failEvent.errorCode})`);
+      setLoadError(
+        `${failEvent.errorDescription || "Page failed to load"} (${failEvent.errorCode})`,
+      );
     };
 
     view.addEventListener("dom-ready", onDomReady);
@@ -488,14 +490,14 @@ function BrowserView({
         });
         if (!result.filled) {
           toastManager.add({
-            title: "Не удалось заполнить логин",
-            description: result.error ?? "Откройте форму входа на странице и попробуйте ещё раз.",
+            title: "Couldn't fill in the login",
+            description: result.error ?? "Open the sign-in form on the page and try again.",
             type: "warning",
           });
         }
       } catch (error) {
         toastManager.add({
-          title: "Хранилище логинов недоступно",
+          title: "Saved logins are unavailable",
           description: error instanceof Error ? error.message : String(error),
           type: "error",
         });
@@ -532,13 +534,13 @@ function BrowserView({
       await invalidateCredentials();
       toastManager.add({
         type: "success",
-        title: existing ? `Пароль для ${host} обновлён` : `Логин для ${host} сохранён`,
-        description: "Дальше заполняется кнопкой с ключом в адресной строке.",
+        title: existing ? `Password for ${host} updated` : `Login for ${host} saved`,
+        description: "Use the key button in the address bar to fill it in.",
       });
     } catch (error) {
       toastManager.add({
         type: "error",
-        title: "Не удалось сохранить логин",
+        title: "Couldn't save the login",
         description: error instanceof Error ? error.message : String(error),
       });
     }
@@ -586,16 +588,16 @@ function BrowserView({
     if (!dataUrl) {
       toastManager.add({
         type: "warning",
-        title: "Скриншот недоступен",
-        description: "Electron webview не вернул изображение страницы.",
+        title: "Screenshot unavailable",
+        description: "The page didn't return an image.",
       });
       return null;
     }
     await navigator.clipboard?.writeText(dataUrl).catch(() => undefined);
     toastManager.add({
       type: "success",
-      title: "Скриншот страницы готов",
-      description: "Data URL скопирован в буфер обмена.",
+      title: "Screenshot ready",
+      description: "Copied to the clipboard as a data URL.",
     });
     return dataUrl;
   }, []);
@@ -614,10 +616,10 @@ function BrowserView({
         type: "success",
         title:
           kind === "cache"
-            ? "Кэш очищен"
+            ? "Cache cleared"
             : kind === "cookies"
-              ? "Cookies очищены"
-              : "Данные очищены",
+              ? "Cookies cleared"
+              : "Data cleared",
       });
     },
     [currentUrl, partition],
@@ -711,7 +713,7 @@ function BrowserView({
             buildFillLoginScript(input.username, input.password),
             true,
           );
-          if (filled !== true) throw new Error("Поля логина на странице не найдены.");
+          if (filled !== true) throw new Error("No login fields found on the page.");
           return { filled: true };
         }
       }
@@ -753,7 +755,7 @@ function BrowserView({
             type="button"
             onClick={() => webviewRef.current?.goBack()}
             disabled={!canGoBack}
-            aria-label="Назад"
+            aria-label="Back"
             className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           >
             <ArrowLeftIcon className="size-3.5" />
@@ -762,7 +764,7 @@ function BrowserView({
             type="button"
             onClick={() => webviewRef.current?.goForward()}
             disabled={!canGoForward}
-            aria-label="Вперёд"
+            aria-label="Forward"
             className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           >
             <ArrowRightIcon className="size-3.5" />
@@ -774,7 +776,7 @@ function BrowserView({
               else webviewRef.current?.reload();
             }}
             disabled={!mountSrc}
-            aria-label={loading ? "Остановить" : "Обновить"}
+            aria-label={loading ? "Stop" : "Reload"}
             className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           >
             {loading ? <XIcon className="size-3.5" /> : <RotateCwIcon className="size-3.5" />}
@@ -799,7 +801,7 @@ function BrowserView({
                 event.currentTarget.select();
               }}
               onBlur={() => setAddressFocused(false)}
-              placeholder="Введите адрес или запрос"
+              placeholder="Enter an address or search"
               autoFocus={!mountSrc}
               spellCheck={false}
               autoCorrect="off"
@@ -814,8 +816,8 @@ function BrowserView({
             type="button"
             onClick={() => applyZoom(zoomFactor - ZOOM_STEP)}
             disabled={!mountSrc}
-            aria-label="Уменьшить масштаб"
-            title="Уменьшить масштаб"
+            aria-label="Zoom out"
+            title="Zoom out"
             className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           >
             <MinusIcon className="size-3.5" />
@@ -824,8 +826,8 @@ function BrowserView({
             type="button"
             onClick={() => applyZoom(DEFAULT_ZOOM_FACTOR)}
             disabled={!mountSrc}
-            aria-label="Сбросить масштаб"
-            title="Сбросить масштаб"
+            aria-label="Reset zoom"
+            title="Reset zoom"
             className="inline-flex h-6 min-w-8 shrink-0 items-center justify-center rounded px-1 font-mono text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           >
             {Math.round(zoomFactor * 100)}%
@@ -834,8 +836,8 @@ function BrowserView({
             type="button"
             onClick={() => applyZoom(zoomFactor + ZOOM_STEP)}
             disabled={!mountSrc}
-            aria-label="Увеличить масштаб"
-            title="Увеличить масштаб"
+            aria-label="Zoom in"
+            title="Zoom in"
             className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           >
             <PlusIcon className="size-3.5" />
@@ -846,15 +848,15 @@ function BrowserView({
               const rect = event.currentTarget.getBoundingClientRect();
               const choice = await readLocalApi()?.contextMenu.show(
                 [
-                  { id: "force-reload", label: "Обновить без кэша" },
-                  { id: "screenshot", label: "Скриншот страницы" },
+                  { id: "force-reload", label: "Reload without cache" },
+                  { id: "screenshot", label: "Take a screenshot" },
                   { id: "responsive", label: "Responsive" },
                   { id: "mobile", label: "Mobile 390x844" },
                   { id: "tablet", label: "Tablet 768x1024" },
                   { id: "desktop", label: "Desktop 1280x800" },
-                  { id: "cache", label: "Очистить кэш" },
-                  { id: "cookies", label: "Очистить cookies текущего сайта" },
-                  { id: "all", label: "Очистить cookies и кэш" },
+                  { id: "cache", label: "Clear cache" },
+                  { id: "cookies", label: "Clear cookies for this site" },
+                  { id: "all", label: "Clear cookies and cache" },
                 ],
                 { x: rect.left, y: rect.bottom + 4 },
               );
@@ -881,8 +883,8 @@ function BrowserView({
               }
             }}
             disabled={!mountSrc}
-            aria-label="Дополнительные действия"
-            title="Дополнительные действия"
+            aria-label="More actions"
+            title="More actions"
             className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           >
             <MoreVerticalIcon className="size-3.5" />
@@ -899,8 +901,8 @@ function BrowserView({
                   disabled={matchedCredentials.length === 0}
                   aria-label={
                     matchedCredentials.length > 0
-                      ? "Заполнить сохранённый логин"
-                      : "Нет сохранённых логинов для текущего сайта"
+                      ? "Fill in saved login"
+                      : "No saved logins for this site"
                   }
                   className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
                 >
@@ -910,10 +912,10 @@ function BrowserView({
             />
             <TooltipPopup side="bottom">
               {matchedCredentials.length > 0
-                ? "Заполнить логин и пароль"
+                ? "Fill in login and password"
                 : origin
-                  ? `Нет сохранённых логинов для ${origin}`
-                  : "Откройте сайт, чтобы подобрать сохранённый логин"}
+                  ? `No saved logins for ${origin}`
+                  : "Open a site to find a saved login"}
             </TooltipPopup>
           </Tooltip>
           <Tooltip>
@@ -923,14 +925,14 @@ function BrowserView({
                   type="button"
                   onClick={openExternal}
                   disabled={!currentUrl}
-                  aria-label="Открыть в системном браузере"
+                  aria-label="Open in your browser"
                   className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <ExternalLinkIcon className="size-3.5" />
                 </button>
               }
             />
-            <TooltipPopup side="bottom">Открыть в системном браузере</TooltipPopup>
+            <TooltipPopup side="bottom">Open in your browser</TooltipPopup>
           </Tooltip>
         </TooltipProvider>
       </div>
@@ -939,7 +941,7 @@ function BrowserView({
           <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border bg-primary/10 px-3 text-xs">
             <KeyRoundIcon className="size-3.5 shrink-0 text-primary" />
             <span className="min-w-0 flex-1 truncate">
-              Сохранить логин <span className="font-medium">{pendingLogin.username}</span> для{" "}
+              Save login <span className="font-medium">{pendingLogin.username}</span> for{" "}
               {pendingLogin.origin}?
             </span>
             <button
@@ -947,14 +949,14 @@ function BrowserView({
               onClick={() => void savePendingLogin()}
               className="shrink-0 rounded bg-primary px-2 py-1 text-primary-foreground hover:opacity-90"
             >
-              Сохранить
+              Save
             </button>
             <button
               type="button"
               onClick={() => setPendingLogin(null)}
               className="shrink-0 rounded px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
             >
-              Не сейчас
+              Not now
             </button>
           </div>
         ) : null}
@@ -988,7 +990,7 @@ function BrowserView({
             <button
               type="button"
               onClick={() => setDeviceToolbarOpen(false)}
-              aria-label="Скрыть device toolbar"
+              aria-label="Hide device toolbar"
               className="ml-auto inline-flex size-5 items-center justify-center rounded hover:bg-accent hover:text-foreground"
             >
               <ChevronDownIcon className="size-3.5" />
@@ -1041,7 +1043,7 @@ function NewTabPlaceholder({
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-muted-foreground">
       <GlobeIcon className="size-8 opacity-40" />
-      <p className="text-xs">Введите адрес в строке выше</p>
+      <p className="text-xs">Enter an address above</p>
       {recentUrls.length > 0 ? (
         <div className="grid w-full max-w-md gap-1.5">
           {recentUrls.slice(0, 6).map((url) => (

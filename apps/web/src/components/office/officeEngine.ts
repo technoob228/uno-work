@@ -153,12 +153,12 @@ export function loadDocsApi(): Promise<DocsApi> {
         script.async = true;
         script.addEventListener("load", () => {
           if (window.DocsAPI) resolve(window.DocsAPI);
-          else reject(new Error("Офисный движок загрузился, но не отдал DocsAPI"));
+          else reject(new Error("The office editor loaded but did not start (no DocsAPI)"));
         });
         script.addEventListener("error", () => {
           apiPromise = null;
           script.remove();
-          reject(new Error("Не удалось загрузить офисный движок"));
+          reject(new Error("Couldn't load the office editor"));
         });
         document.head.appendChild(script);
       }),
@@ -352,7 +352,7 @@ export async function createOfficeEditor(
       onDocumentStateChange: (event: { data?: boolean }) =>
         options.onDirtyChange?.(Boolean(event?.data)),
       onError: (event: { data?: { errorDescription?: string } }) =>
-        options.onError?.(event?.data?.errorDescription ?? "Ошибка офисного движка"),
+        options.onError?.(event?.data?.errorDescription ?? "The office editor hit an error"),
       onRequestSaveAs: () => options.onSaveRequest?.(),
     },
   });
@@ -360,16 +360,16 @@ export async function createOfficeEditor(
   const runExport = (format: string) =>
     new Promise<Uint8Array>((resolve, reject) => {
       if (destroyed) {
-        reject(new Error("Редактор закрыт"));
+        reject(new Error("The editor is closed"));
         return;
       }
       if (!hookFrame()) {
-        reject(new Error("Редактор ещё не готов"));
+        reject(new Error("The editor isn't ready yet"));
         return;
       }
       const timer = window.setTimeout(() => {
         pendingExport = null;
-        reject(new Error("Движок не отдал файл за 2 минуты"));
+        reject(new Error("The editor didn't return the file within 2 minutes"));
       }, EXPORT_TIMEOUT_MS);
       pendingExport = {
         resolve: (bytes) => {
@@ -432,7 +432,7 @@ export async function createOfficeEditor(
       shell = null;
       window.removeEventListener("keydown", onKeyDown, true);
       hookedWindow?.removeEventListener("keydown", onKeyDown, true);
-      pendingExport?.reject(new Error("Редактор закрыт"));
+      pendingExport?.reject(new Error("The editor is closed"));
       pendingExport = null;
       try {
         editor.destroyEditor();

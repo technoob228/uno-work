@@ -130,10 +130,10 @@ const KIND_LABEL: Record<PreviewFileKind, string> = {
   image: "Image",
   svg: "SVG",
   text: "Text",
-  browser: "Браузер",
-  "live-browser": "Браузер компьютера",
-  "plugin-panel": "Панель плагина",
-  app: "Приложение",
+  browser: "Browser",
+  "live-browser": "Computer browser",
+  "plugin-panel": "Plugin panel",
+  app: "App",
   unknown: "File",
 };
 
@@ -384,7 +384,7 @@ function MetadataPlaceholder({ file, label }: { file: PreviewFile; label: string
       <div className="text-xs text-muted-foreground">{label}</div>
       {file.path ? (
         <Button size="sm" variant="outline" onClick={() => openFileInEditor(file.path!)}>
-          Открыть в редакторе
+          Open in editor
         </Button>
       ) : null}
       {file.blobUrl ? (
@@ -393,7 +393,7 @@ function MetadataPlaceholder({ file, label }: { file: PreviewFile; label: string
           variant="outline"
           render={<a href={file.blobUrl} target="_blank" rel="noreferrer" download={file.name} />}
         >
-          Открыть внешне
+          Open in another app
         </Button>
       ) : null}
     </div>
@@ -430,7 +430,7 @@ function CsvBody({ file, content }: { file: PreviewFile; content: string }) {
   const delimiter = ext === "tsv" ? "\t" : ",";
   const rows = useMemo(() => parseDelimitedRows(content, delimiter), [content, delimiter]);
   if (rows.length === 0) {
-    return <MetadataPlaceholder file={file} label="Пустая таблица" />;
+    return <MetadataPlaceholder file={file} label="Empty table" />;
   }
   const header = rows[0]!;
   const columns = useMemo(
@@ -480,7 +480,7 @@ function CsvBody({ file, content }: { file: PreviewFile; content: string }) {
         </table>
         {truncated ? (
           <div className="mt-2 text-center text-[10px] text-muted-foreground">
-            Показаны первые {CSV_MAX_ROWS} строк из {rows.length - 1}.
+            Showing the first {CSV_MAX_ROWS} of {rows.length - 1} rows.
           </div>
         ) : null}
       </div>
@@ -585,7 +585,7 @@ function DocxBody({ file, base64 }: { file: PreviewFile; base64: string }) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         <Loader2Icon className="mr-2 size-4 animate-spin" />
-        Конвертация документа...
+        Converting document...
       </div>
     );
   }
@@ -593,7 +593,7 @@ function DocxBody({ file, base64 }: { file: PreviewFile; base64: string }) {
     return (
       <MetadataPlaceholder
         file={file}
-        label={error instanceof Error ? error.message : "Не удалось прочитать .docx"}
+        label={error instanceof Error ? error.message : "Couldn't read the .docx file"}
       />
     );
   }
@@ -698,7 +698,7 @@ function SpreadsheetBody({
     } catch (error) {
       return {
         preview: null,
-        error: error instanceof Error ? error.message : "Не удалось прочитать Excel-файл",
+        error: error instanceof Error ? error.message : "Couldn't read the Excel file",
       };
     }
   }, [content]);
@@ -711,7 +711,7 @@ function SpreadsheetBody({
     return <MetadataPlaceholder file={file} label={parsed.error} />;
   }
   if (!selectedSheet) {
-    return <MetadataPlaceholder file={file} label="В workbook нет листов для предпросмотра" />;
+    return <MetadataPlaceholder file={file} label="No sheets to preview" />;
   }
 
   const rowCount = selectedSheet.rows.length;
@@ -742,7 +742,7 @@ function SpreadsheetBody({
       ) : null}
       {rowCount === 0 ? (
         <div className="min-h-0 flex-1">
-          <MetadataPlaceholder file={file} label="Лист пустой" />
+          <MetadataPlaceholder file={file} label="Empty sheet" />
         </div>
       ) : (
         <div ref={tableScrollRef} className="min-h-0 flex-1 overflow-auto">
@@ -791,12 +791,12 @@ function SpreadsheetBody({
       )}
       {rowCount > 0 && (sourceTruncated || truncatedRows || truncatedCols) ? (
         <div className="shrink-0 border-t border-border bg-card px-3 py-2 text-[11px] text-muted-foreground">
-          {sourceTruncated ? "Файл был обрезан при чтении. " : null}
+          {sourceTruncated ? "The file was cut off while reading. " : null}
           {truncatedRows
-            ? `Показаны первые ${rowCount} строк из ${selectedSheet.totalRows}. `
+            ? `Showing the first ${rowCount} of ${selectedSheet.totalRows} rows. `
             : null}
           {truncatedCols
-            ? `Показаны первые ${selectedSheet.renderedCols} колонок из ${selectedSheet.totalCols}.`
+            ? `Showing the first ${selectedSheet.renderedCols} of ${selectedSheet.totalCols} columns.`
             : null}
         </div>
       ) : null}
@@ -894,7 +894,7 @@ function renderLoadedBody(file: PreviewFile, data: LoadedFileData, sourceView: b
     }
   }
 
-  return <MetadataPlaceholder file={file} label="Формат пока не поддерживается" />;
+  return <MetadataPlaceholder file={file} label="This format isn't supported yet" />;
 }
 
 /**
@@ -932,7 +932,7 @@ function LoadedBody({ file, sourceView }: { file: PreviewFile; sourceView: boole
     queryFn: async () => {
       if (!path || !environmentId) return null;
       const api = readEnvironmentApi(environmentId);
-      if (!api) throw new Error("Окружение недоступно");
+      if (!api) throw new Error("Computer unavailable");
       return api.filesystem.readFile({ path });
     },
     enabled: Boolean(path && environmentId),
@@ -965,7 +965,7 @@ function LoadedBody({ file, sourceView }: { file: PreviewFile; sourceView: boole
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         <Loader2Icon className="mr-2 size-4 animate-spin" />
-        Загрузка файла...
+        Loading file...
       </div>
     );
   }
@@ -973,12 +973,12 @@ function LoadedBody({ file, sourceView }: { file: PreviewFile; sourceView: boole
     return (
       <MetadataPlaceholder
         file={file}
-        label={error instanceof Error ? error.message : "Не удалось прочитать файл"}
+        label={error instanceof Error ? error.message : "Couldn't read the file"}
       />
     );
   }
   if (!data) {
-    return <MetadataPlaceholder file={file} label="Нет данных" />;
+    return <MetadataPlaceholder file={file} label="No data" />;
   }
 
   return renderLoadedBody(file, { ...data, ...(blobUrl ? { blobUrl } : {}) }, sourceView);
@@ -1198,10 +1198,10 @@ function EditableBody({
 /** Абсолютный путь для `openFile` из панели: относительный резолвим от cwd проекта. */
 function resolvePanelFilePath(rawPath: string, projectCwd: string | null): string {
   const trimmed = rawPath.trim();
-  if (trimmed.length === 0) throw new Error("path пустой");
-  if (trimmed.split(/[\\/]/).includes("..")) throw new Error("path не должен содержать «..»");
+  if (trimmed.length === 0) throw new Error("Path is empty");
+  if (trimmed.split(/[\\/]/).includes("..")) throw new Error('Path can\'t contain ".."');
   if (trimmed.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(trimmed)) return trimmed;
-  if (!projectCwd) throw new Error("относительный path без открытого проекта");
+  if (!projectCwd) throw new Error("Relative path needs an open project");
   return `${projectCwd.replace(/\/+$/, "")}/${trimmed.replace(/^\.\//, "")}`;
 }
 
@@ -1319,7 +1319,7 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
         sendToThread: async ({ text, threadTag }) => {
           const context = contextRef.current;
           if (!context.currentChatProjectId) {
-            throw new Error("нет открытого проекта: откройте тред проекта и повторите");
+            throw new Error("No open project. Open a project chat and try again.");
           }
           // Панель раздаёт демон основного окружения (URL вкладки
           // относительный), поэтому и плагин, и тред живут там же. Проект
@@ -1329,7 +1329,7 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
             context.primaryEnvironmentId !== null &&
             context.currentChatEnvironmentId !== context.primaryEnvironmentId
           ) {
-            throw new Error("панель работает только с проектами основного окружения");
+            throw new Error("The panel works only with projects on your main computer");
           }
           await confirmSend({ panelTitle: panelTitleRef.current, text, threadTag });
           const result = await getPrimaryEnvironmentConnection().client.server.sendPluginToThread({
@@ -1341,7 +1341,7 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
           toastManager.add(
             stackedThreadToast({
               type: "info",
-              title: `Плагин ${result.pluginName} отправил задачу агенту`,
+              title: `Plugin ${result.pluginName} sent a task to the agent`,
               description: text.length > 120 ? `${text.slice(0, 120)}…` : text,
             }),
           );
@@ -1437,7 +1437,7 @@ function Body({ file }: { file: PreviewFile }) {
   }
 
   if (!hasInlineContent) {
-    return <MetadataPlaceholder file={file} label="Нет данных для предпросмотра" />;
+    return <MetadataPlaceholder file={file} label="Nothing to preview" />;
   }
 
   if (sourceView && file.content) {
@@ -1462,16 +1462,28 @@ function Body({ file }: { file: PreviewFile }) {
     case "svg":
       return <SvgBody file={file} content={file.content} />;
     case "pdf":
-      return <MetadataPlaceholder file={file} label="PDF доступен только из файловой системы" />;
+      return (
+        <MetadataPlaceholder file={file} label="PDF preview works only for files on the computer" />
+      );
     case "xlsx":
-      return <MetadataPlaceholder file={file} label="Excel доступен только из файловой системы" />;
+      return (
+        <MetadataPlaceholder
+          file={file}
+          label="Excel preview works only for files on the computer"
+        />
+      );
     case "docx":
-      return <MetadataPlaceholder file={file} label="Word доступен только из файловой системы" />;
+      return (
+        <MetadataPlaceholder
+          file={file}
+          label="Word preview works only for files on the computer"
+        />
+      );
     default:
       if (file.content) {
         return <CodeFileView fileId={file.id} fileName={file.name} content={file.content} />;
       }
-      return <MetadataPlaceholder file={file} label="Формат не поддерживается" />;
+      return <MetadataPlaceholder file={file} label="Format not supported" />;
   }
 }
 
@@ -1591,7 +1603,7 @@ function PathBar({
                 <button
                   type="button"
                   onClick={() => toggleSourceView(file.id)}
-                  aria-label={isSourceView ? "Показать превью" : "Показать исходный код"}
+                  aria-label={isSourceView ? "Show preview" : "Show source"}
                   className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
                 >
                   {isSourceView ? (
@@ -1602,7 +1614,7 @@ function PathBar({
                 </button>
               }
             />
-            <TooltipPopup side="bottom">{isSourceView ? "Превью" : "Исходный код"}</TooltipPopup>
+            <TooltipPopup side="bottom">{isSourceView ? "Preview" : "Source"}</TooltipPopup>
           </Tooltip>
         ) : null}
         {canEdit ? (
@@ -1678,7 +1690,7 @@ async function showTabScopeMenu(input: {
       id: `scope:${scope}`,
       label: SCOPE_MENU_LABEL[scope],
     })),
-    { id: "close", label: "Закрыть вкладку" },
+    { id: "close", label: "Close tab" },
   ];
   const choice = await readLocalApi()?.contextMenu.show(items, input.position);
   if (!choice) return;
@@ -1862,8 +1874,8 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
             size="icon-xs"
             variant="ghost"
             onClick={toggleSidebar}
-            aria-label="Показать левую панель"
-            title="Показать левую панель"
+            aria-label="Show sidebar"
+            title="Show sidebar"
             className="mr-1 shrink-0"
           >
             <PanelLeftOpenIcon />
@@ -1916,7 +1928,7 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
                       ? "bg-accent text-accent-foreground"
                       : "text-muted-foreground hover:bg-accent/50",
                   )}
-                  title={`${KIND_LABEL[file.kind]} — ${file.name}\nУровень: ${SCOPE_LABEL[scope]} (правый клик — сменить)${dualView ? "\nДвойной клик: код ↔ превью" : ""}`}
+                  title={`${KIND_LABEL[file.kind]} — ${file.name}\nKept in: ${SCOPE_LABEL[scope]} (right-click to change)${dualView ? "\nDouble-click: code ↔ preview" : ""}`}
                 >
                   <Icon className="size-3.5 shrink-0" />
                   {ScopeIcon ? (
@@ -1956,15 +1968,15 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
               const rect = event.currentTarget.getBoundingClientRect();
               const choice = await readLocalApi()?.contextMenu.show(
                 [
-                  { id: "file", label: "Открыть файл…" },
+                  { id: "file", label: "Open file…" },
                   ...(browserCompanionEnabled || chatBrowsesOnMachine
-                    ? [{ id: "page", label: "Открыть страницу" }]
+                    ? [{ id: "page", label: "Open page" }]
                     : []),
                   ...(pluginsEnabled && panels.length > 0
                     ? [
                         {
                           id: "panels",
-                          label: "Панели",
+                          label: "Panels",
                           children: panels.map((panel) => ({
                             id: `${PANEL_MENU_ID_PREFIX}${panel.id}`,
                             label: panel.title,
@@ -1988,8 +2000,8 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
                 if (panel) openFile(makePluginPanelFile(panel.id, panel.title));
               }
             }}
-            aria-label="Открыть файл, страницу или панель плагина"
-            title="Открыть файл, страницу или панель плагина"
+            aria-label="Open a file, page or plugin panel"
+            title="Open a file, page or plugin panel"
             className="sticky right-0 inline-flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-md bg-card text-muted-foreground before:pointer-events-none before:absolute before:inset-0 before:bg-accent before:opacity-0 hover:text-foreground hover:before:opacity-100 sm:size-6"
           >
             <PlusIcon className="relative size-3.5" />
@@ -1999,8 +2011,8 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
           size="icon-xs"
           variant="ghost"
           onClick={togglePreviewLayoutMode}
-          aria-label={isFocusMode ? "Вернуть боковую панель" : "Фокус preview"}
-          title={isFocusMode ? "Вернуть боковую панель" : "Фокус preview"}
+          aria-label={isFocusMode ? "Show sidebar" : "Focus preview"}
+          title={isFocusMode ? "Show sidebar" : "Focus preview"}
           className="relative shrink-0"
         >
           {isFocusMode ? <Minimize2Icon /> : <Maximize2Icon />}
@@ -2009,7 +2021,7 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
           size="icon-xs"
           variant="ghost"
           onClick={() => setOpen(false)}
-          aria-label="Закрыть панель"
+          aria-label="Close panel"
           className="relative shrink-0"
         >
           <XIcon />

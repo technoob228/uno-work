@@ -250,7 +250,7 @@ export function BrowserBridgeListener() {
             if (event.input.command === "fillCredential" && event.input.tabId && !isWebApp) {
               const handler = findBrowserTabAutomationHandler(event.input.tabId);
               if (!handler) {
-                throw new Error("Вкладка для автозаполнения больше не открыта.");
+                throw new Error("The tab to fill in is no longer open.");
               }
               const data = await handler(event.input);
               await postCommandResult(event, { ok: true, data });

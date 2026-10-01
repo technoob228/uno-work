@@ -342,7 +342,7 @@ export const ChatHeader = memo(function ChatHeader({
               </button>
             }
           />
-          <TooltipPopup side="bottom">Открыть файловый браузер</TooltipPopup>
+          <TooltipPopup side="bottom">Browse files</TooltipPopup>
         </Tooltip>
         {(browserCompanionEnabled || browsesOnMachine) && (
           <Tooltip>
@@ -351,14 +351,14 @@ export const ChatHeader = memo(function ChatHeader({
                 <button
                   type="button"
                   onClick={openChatBrowser}
-                  aria-label="Открыть браузер"
+                  aria-label="Open browser"
                   className={HEADER_ICON_BUTTON_CLASS}
                 >
                   <GlobeIcon className="size-3" />
                 </button>
               }
             />
-            <TooltipPopup side="bottom">Открыть браузер</TooltipPopup>
+            <TooltipPopup side="bottom">Open browser</TooltipPopup>
           </Tooltip>
         )}
         {canContinueOnMachine && (
@@ -400,7 +400,7 @@ export const ChatHeader = memo(function ChatHeader({
                 </button>
               }
             />
-            <TooltipPopup side="bottom">Переключить панель превью</TooltipPopup>
+            <TooltipPopup side="bottom">Toggle preview panel</TooltipPopup>
           </Tooltip>
         )}
       </div>

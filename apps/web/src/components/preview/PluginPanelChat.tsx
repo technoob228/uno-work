@@ -150,7 +150,7 @@ export function PluginPanelSplit({
           <div
             role="separator"
             aria-orientation="horizontal"
-            aria-label="Изменить размер чата панели"
+            aria-label="Resize panel chat"
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={endDrag}
@@ -228,10 +228,10 @@ export function PluginPanelChat({
   }, [foreignEnvironment, pluginId, projectId, threadTag]);
 
   if (foreignEnvironment) {
-    return <PanelChatNotice text="Панель работает только с проектами основного окружения" />;
+    return <PanelChatNotice text="The panel works only with projects on your main computer" />;
   }
   if (projectId === null) {
-    return <PanelChatNotice text="Откройте тред проекта — чат панели живёт в его проекте" />;
+    return <PanelChatNotice text="Open a project chat. The panel chat lives in that project." />;
   }
   if (state.status === "error") {
     return <PanelChatNotice text={state.message} />;
@@ -240,7 +240,7 @@ export function PluginPanelChat({
     return (
       <PanelChatNotice
         icon={<Loader2Icon className="size-3.5 animate-spin" />}
-        text="Готовим тред панели…"
+        text="Preparing the panel chat…"
       />
     );
   }

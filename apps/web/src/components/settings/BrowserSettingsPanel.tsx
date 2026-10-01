@@ -68,11 +68,11 @@ export function BrowserSettingsPanel() {
       await Promise.all([legacyQuery.refetch(), invalidateCredentials()]);
       toastManager.add({
         type: failed.length > 0 ? "warning" : "success",
-        title: `Перенесено логинов: ${moved}`,
+        title: `Logins moved: ${moved}`,
         description:
           failed.length > 0
-            ? `Не удалось перенести: ${failed.join(", ")}. Они остались в старом хранилище.`
-            : "Теперь они видны и в браузерной версии, и в десктопе.",
+            ? `Couldn't move: ${failed.join(", ")}. They stay in the old storage.`
+            : "You can now see them in both the web and desktop app.",
       });
     } finally {
       setMigrating(false);
@@ -85,10 +85,10 @@ export function BrowserSettingsPanel() {
 
   return (
     <SettingsPageContainer>
-      <SettingsSection title="Профиль браузера" icon={<GlobeIcon className="size-3.5" />}>
+      <SettingsSection title="Browser profile" icon={<GlobeIcon className="size-3.5" />}>
         <SettingsRow
-          title="Профиль сессий и cookies"
-          description="Общий профиль на весь аккаунт или отдельный профиль для каждого проекта (изолированные cookies и вход)."
+          title="Sessions and cookies"
+          description="One profile for your whole account, or a separate one per project with its own cookies and sign-ins."
           control={
             <div className="inline-flex overflow-hidden rounded-md border border-input text-xs">
               {(["account", "project"] as const).map((scope) => (
@@ -102,7 +102,7 @@ export function BrowserSettingsPanel() {
                       : "px-3 py-1.5 text-muted-foreground hover:bg-accent/50"
                   }
                 >
-                  {scope === "account" ? "Аккаунт" : "Проект"}
+                  {scope === "account" ? "Account" : "Project"}
                 </button>
               ))}
             </div>
@@ -113,7 +113,7 @@ export function BrowserSettingsPanel() {
       <SettingsSection title="Automation" icon={<ShieldIcon className="size-3.5" />}>
         <SettingsRow
           title="Browser automation"
-          description="Уровень команд, которые агент может выполнять во встроенном браузере через Uno Work bridge."
+          description="What the agent is allowed to do in the built-in browser."
           control={
             <div className="inline-flex overflow-hidden rounded-md border border-input text-xs">
               {(["full", "safe", "off"] as const).map((level) => (
@@ -135,24 +135,24 @@ export function BrowserSettingsPanel() {
         />
       </SettingsSection>
 
-      <SettingsSection title="Сохранённые входы" icon={<KeyRoundIcon className="size-3.5" />}>
+      <SettingsSection title="Saved logins" icon={<KeyRoundIcon className="size-3.5" />}>
         <SettingsRow
-          title="Логины живут в разделе Credentials"
-          description="Один список на всё приложение: браузерная версия и десктоп читают его из демона, кнопка с ключом в адресной строке подставляет пароль на совпадающем домене."
+          title="Logins live in Credentials"
+          description="One list for the whole app, web and desktop. The key button in the address bar fills in the password on a matching site."
           control={
             <Button
               size="xs"
               variant="outline"
               onClick={() => void navigate({ to: "/settings/vault" })}
             >
-              Открыть Credentials
+              Open Credentials
             </Button>
           }
         />
         {legacyCredentials.length > 0 ? (
           <SettingsRow
-            title={`Перенести ${legacyCredentials.length} ${legacyCredentials.length === 1 ? "логин" : "логина"} из старого локального хранилища`}
-            description="Раньше пароли десктопа лежали отдельно от общего хранилища и были видны только на этом Mac. Перенос копирует их в Credentials и убирает из старого файла."
+            title={`Move ${legacyCredentials.length} ${legacyCredentials.length === 1 ? "login" : "logins"} from old local storage`}
+            description="Desktop passwords used to be stored apart and were visible only on this Mac. Moving copies them to Credentials and removes them from the old file."
             control={
               <Button
                 size="xs"
@@ -161,7 +161,7 @@ export function BrowserSettingsPanel() {
                 onClick={() => void migrateLegacy()}
               >
                 {migrating ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
-                Перенести
+                Move
               </Button>
             }
           />

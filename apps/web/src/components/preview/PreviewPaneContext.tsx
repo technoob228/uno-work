@@ -520,7 +520,7 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
         const id = `browser-${++browserTabCounter}`;
         const tab: PreviewFile = {
           id,
-          name: trimmed ? browserTabNameForUrl(trimmed) : "Новая вкладка",
+          name: trimmed ? browserTabNameForUrl(trimmed) : "New tab",
           kind: "browser",
           content: "",
           url: trimmed,

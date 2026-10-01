@@ -294,7 +294,7 @@ export function FileBrowser() {
               {dragOver && (
                 <div className="pointer-events-none absolute inset-1.5 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-primary/60 bg-primary/5">
                   <div className="rounded-md bg-popover/95 px-3 py-1.5 text-sm text-foreground shadow-sm">
-                    Отпустите — файлы загрузятся в{" "}
+                    Drop to upload to{" "}
                     <span className="font-mono">{stripTrailingSlash(currentPath)}</span>
                   </div>
                 </div>
@@ -357,7 +357,7 @@ export function FileBrowser() {
                   <Input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Поиск в этой папке..."
+                    placeholder="Search this folder..."
                     className="h-6 border-0 bg-transparent px-0 text-xs shadow-none focus-visible:ring-0"
                   />
                 </div>
@@ -366,24 +366,23 @@ export function FileBrowser() {
                 <div className="flex flex-col gap-0.5 p-2">
                   {!browseEnvironmentId && (
                     <div className="px-4 py-12 text-center text-sm text-muted-foreground">
-                      У треда нет привязанного окружения — выберите environment
+                      This chat has no computer. Pick one first.
                     </div>
                   )}
                   {browseEnvironmentId && isPending && (
                     <div className="flex items-center justify-center px-4 py-12 text-sm text-muted-foreground">
                       <Loader2Icon className="mr-2 size-4 animate-spin" />
-                      Загрузка...
+                      Loading...
                     </div>
                   )}
                   {browseEnvironmentId && isError && (
                     <div className="px-4 py-12 text-center text-sm text-destructive">
-                      Не удалось прочитать папку:{" "}
-                      {error instanceof Error ? error.message : "ошибка"}
+                      Couldn't read the folder: {error instanceof Error ? error.message : "error"}
                     </div>
                   )}
                   {browseEnvironmentId && !isPending && !isError && folders.length > 0 && (
                     <div className="px-2 pt-2 pb-1 font-medium text-[10px] uppercase tracking-wider text-muted-foreground">
-                      Папки
+                      Folders
                     </div>
                   )}
                   {folders.map((folder) => (
@@ -399,7 +398,7 @@ export function FileBrowser() {
                   ))}
                   {browseEnvironmentId && !isPending && !isError && files.length > 0 && (
                     <div className="px-2 pt-3 pb-1 font-medium text-[10px] uppercase tracking-wider text-muted-foreground">
-                      Файлы
+                      Files
                     </div>
                   )}
                   {files.map((file) => {
@@ -430,7 +429,7 @@ export function FileBrowser() {
                     folders.length === 0 &&
                     files.length === 0 && (
                       <div className="px-4 py-12 text-center text-sm text-muted-foreground">
-                        Ничего не найдено
+                        Nothing found
                       </div>
                     )}
                 </div>
@@ -451,7 +450,7 @@ export function FileBrowser() {
                       ) : (
                         <FileUpIcon className="size-3" />
                       )}
-                      Загрузить файлы
+                      Upload files
                     </Button>
                     <Button
                       size="xs"
@@ -462,22 +461,22 @@ export function FileBrowser() {
                       }
                     >
                       <FolderUpIcon className="size-3" />
-                      Папку
+                      Folder
                     </Button>
                   </>
                 )}
                 <span>
-                  {folders.length} папок · {files.length} файлов
+                  {folders.length} folders · {files.length} files
                 </span>
                 {hiddenCount > 0 && !showHidden && (
                   <button
                     type="button"
                     onClick={() => setShowHidden(true)}
                     className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
-                    aria-label="Показать скрытые"
+                    aria-label="Show hidden"
                   >
                     <EyeIcon className="size-3" />
-                    скрыто {hiddenCount}
+                    {hiddenCount} hidden
                   </button>
                 )}
                 {showHidden && (
@@ -485,10 +484,10 @@ export function FileBrowser() {
                     type="button"
                     onClick={() => setShowHidden(false)}
                     className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
-                    aria-label="Спрятать скрытые"
+                    aria-label="Hide hidden files"
                   >
                     <EyeOffIcon className="size-3" />
-                    спрятать скрытые
+                    hide hidden
                   </button>
                 )}
                 <span className="ml-auto truncate font-mono">{displayPath}</span>
