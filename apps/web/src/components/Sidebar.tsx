@@ -184,23 +184,22 @@ import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
-import { SidebarComputerRow } from "./sidebar/SidebarComputerRow";
 import { SidebarSetupRow } from "./sidebar/SidebarSetupRow";
 import { SidebarEmptyProjects } from "./sidebar/SidebarEmptyProjects";
 import { SidebarMyUnoRow } from "./sidebar/SidebarMyUnoRow";
+import { SidebarPrimaryNav } from "./sidebar/SidebarPrimaryNav";
+import { doneShelfLabel, threadContextMenuItems } from "./sidebar/simpleSidebar.logic";
+import { useDevMode } from "../devMode";
+import { usePins } from "../navigation/usePins";
 import { SidebarAppsList } from "./sidebar/SidebarAppsList";
 import { SidebarFilesTree } from "./sidebar/SidebarFilesTree";
-import { SidebarMoreRow, useSimpleSidebar } from "./sidebar/SidebarMoreRow";
-import { SidebarModeSwitch } from "./sidebar/SidebarModeSwitch";
 import { SidebarPinned } from "./sidebar/SidebarPinned";
 import { type SidebarMode, useNavStore } from "../navigation/navStore";
 import { useNavLayout } from "../navigation/useNavLayout";
 import { InboxNeedsYouList, InboxPanel } from "./inbox/InboxPanel";
 import { RailPanelHeader } from "./sidebar/NavRail";
-import { SidebarAssistantRow } from "./sidebar/SidebarAssistantRow";
-import { useShowAssistantInSidebar } from "../assistant/assistantPrefs";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
-import { SidebarNewButton } from "./sidebar/SidebarNewButton";
+import { SidebarAddMenu } from "./sidebar/SidebarNewButton";
 import {
   ASSISTANT_CHAT_NAME,
   isFromAssistant,
@@ -496,6 +495,8 @@ interface SidebarThreadRowProps {
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
   onUnpin: (threadRef: ScopedThreadRef) => void;
   onOpenPrLink: (event: ReactMouseEvent<HTMLElement>, url: string) => void;
+  /** Without Dev mode: no snooze, and "Settle" reads "Done". */
+  simple: boolean;
 }
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
@@ -620,7 +621,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const [snoozeMenuOpenRaw, setSnoozeMenuOpen] = useState(false);
   // Snooze is offered only where it can succeed: capability-gated and never
   // on blocked-on-you work or queued turns (the server rejects both).
-  const showSnoozeButton = snoozeSupported && canSnoozeThread(thread, props.now);
+  const showSnoozeButton = !props.simple && snoozeSupported && canSnoozeThread(thread, props.now);
   const snoozeMenuOpen = snoozeMenuOpenRaw && showSnoozeButton;
   useEffect(() => {
     if (!showSnoozeButton) setSnoozeMenuOpen(false);
@@ -909,7 +910,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   render={
                     <button
                       type="button"
-                      aria-label="Un-settle chat"
+                      aria-label={props.simple ? "Move back from Done" : "Un-settle chat"}
                       onClick={stopAnd(onUnsettle)}
                       className={slimActionClassName}
                     />
@@ -917,7 +918,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 >
                   <Undo2Icon className="mb-px size-3.5" />
                 </TooltipTrigger>
-                <TooltipPopup side="top">Un-settle chat</TooltipPopup>
+                <TooltipPopup side="top">
+                  {props.simple ? "Move back from Done" : "Un-settle chat"}
+                </TooltipPopup>
               </Tooltip>
             ) : null}
           </span>
@@ -1023,16 +1026,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         render={
                           <button
                             type="button"
-                            aria-label="Settle chat"
+                            aria-label={props.simple ? "Mark chat done" : "Settle chat"}
                             onClick={stopAnd(onSettle)}
                             className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
                           />
                         }
                       >
                         <CheckIcon className="size-3.5" />
-                        Settle
+                        {props.simple ? "Done" : "Settle"}
                       </TooltipTrigger>
-                      <TooltipPopup>Settle chat: move it to the settled list</TooltipPopup>
+                      <TooltipPopup>
+                        {props.simple
+                          ? "Done: move it to the Done list"
+                          : "Settle chat: move it to the settled list"}
+                      </TooltipPopup>
                     </Tooltip>
                   ) : null}
                 </span>
@@ -1155,12 +1162,16 @@ export default function Sidebar() {
   // the bell's popover, so a "home" or "inbox" left over from the rail (or an
   // older version) reads as Chats — the chat list never disappears behind the
   // Inbox, and Home and Inbox are never highlighted together.
-  const simpleSidebar = useSimpleSidebar();
   const listMode: SidebarMode = railLayout
     ? sidebarMode
-    : sidebarMode === "home" || sidebarMode === "inbox" || simpleSidebar.simple
+    : sidebarMode === "home" || sidebarMode === "inbox"
       ? "chats"
       : sidebarMode;
+  // Simplification 01.10: without Dev mode the chat menu has four items and
+  // the history is one "Done" shelf; Dev mode brings back the rest.
+  const devMode = useDevMode();
+  const simple = !devMode;
+  const { pins } = usePins();
   const pathname = useLocation({ select: (location) => location.pathname });
   const isOnSettings = pathname.startsWith("/settings");
   const router = useRouter();
@@ -1256,7 +1267,9 @@ export default function Sidebar() {
   // The Uno chat (pinned on top) and the assistant's other chats, which the
   // "Older Uno chats" scope lists when there are any.
   const assistantChatId = useAssistantChat().chat?.id ?? null;
-  const [showAssistantRow] = useShowAssistantInSidebar();
+  // The Uno row left the sidebar (01.10): the assistant lives under
+  // Assistants, so its conversations are not folded under a row any more.
+  const showAssistantRow = false;
   const hasHelperProjects = useMemo(
     () =>
       threads.some(
@@ -1441,10 +1454,10 @@ export default function Sidebar() {
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
   }, [routeThreadKey, settledShelfExpanded, visibleSettledThreads]);
   const renderedSnoozedThreads = useMemo(() => {
-    if (snoozedShelfExpanded) return snoozedThreads;
+    if (simple ? settledShelfExpanded : snoozedShelfExpanded) return snoozedThreads;
     const routeThread = snoozedThreads.find((thread) => threadKeyOf(thread) === routeThreadKey);
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
-  }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
+  }, [routeThreadKey, settledShelfExpanded, simple, snoozedShelfExpanded, snoozedThreads]);
 
   const orderedThreads = useMemo(
     () => [
@@ -1967,17 +1980,20 @@ export default function Sidebar() {
           );
         }
         const clicked = await api.contextMenu.show(
-          [
-            { id: "rename", label: "Rename chat" },
-            { id: "pin", label: isPinned ? "Unpin chat" : "Pin chat" },
-            ...lifecycleItems,
-            { id: "mark-unread", label: "Mark unread" },
-            { id: "copy-path", label: "Copy Path" },
-            { id: "copy-thread-id", label: "Copy chat ID" },
-            { id: "continue-on-machine", label: CONTINUE_ON_MACHINE_COPY.action },
-            { id: "archive", label: "Archive" },
-            { id: "delete", label: "Delete", destructive: true },
-          ],
+          threadContextMenuItems<ContextMenuItem>(
+            [
+              { id: "rename", label: "Rename chat" },
+              { id: "pin", label: isPinned ? "Unpin chat" : "Pin chat" },
+              ...lifecycleItems,
+              { id: "mark-unread", label: "Mark unread" },
+              { id: "copy-path", label: "Copy Path" },
+              { id: "copy-thread-id", label: "Copy chat ID" },
+              { id: "continue-on-machine", label: CONTINUE_ON_MACHINE_COPY.action },
+              { id: "archive", label: "Archive" },
+              { id: "delete", label: "Delete", destructive: true },
+            ],
+            devMode,
+          ),
           position,
         );
         if (clicked === "snooze:pick") {
@@ -2069,6 +2085,7 @@ export default function Sidebar() {
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
+      devMode,
       handleMultiSelectContextMenu,
       markThreadUnread,
       openSnoozePicker,
@@ -2280,12 +2297,6 @@ export default function Sidebar() {
     projects,
     setOpenMobile,
   ]);
-  const newThreadShortcutLabel = shortcutLabelForCommand(keybindings, "chat.new", platform);
-  const newThreadInProjectShortcutLabel = shortcutLabelForCommand(
-    keybindings,
-    "chat.newLocal",
-    platform,
-  );
 
   if (isOnSettings) {
     return (
@@ -2330,6 +2341,7 @@ export default function Sidebar() {
         onUnsnooze={attemptUnsnooze}
         onUnpin={attemptUnpin}
         onOpenPrLink={openPrLink}
+        simple={simple}
       />
     );
   };
@@ -2449,7 +2461,7 @@ export default function Sidebar() {
       {railLayout ? (
         <RailPanelHeader mode={listMode} isElectron={isElectron} />
       ) : (
-        <SidebarChromeHeader isElectron={isElectron} showBell />
+        <SidebarChromeHeader isElectron={isElectron} showBell showNewChat />
       )}
       {railLayout ? (
         listMode === "home" ? (
@@ -2459,24 +2471,19 @@ export default function Sidebar() {
           </SidebarGroup>
         ) : null
       ) : (
-        <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-0">
-          {/* Switching computers lives in the computer menu in Home's header (27.09). */}
+        <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-1.5">
+          {/* 01.10: four places — Chats, Assistants, Files, Apps. Home is the
+              logo and "New chat"; the computer lives in the start screen's pill;
+              My Uno and the console are in the account menu at the bottom. */}
           <SidebarSetupRow />
-          <SidebarAssistantRow />
-          <SidebarComputerRow />
-          {simpleSidebar.simple ? (
-            <SidebarMoreRow onOpen={simpleSidebar.openMore} />
-          ) : (
-            <>
-              <SidebarMyUnoRow />
-              <div className="pt-1.5 pb-1">
-                <SidebarModeSwitch />
-              </div>
-            </>
-          )}
+          <SidebarPrimaryNav />
         </SidebarGroup>
       )}
-      {!railLayout || listMode === "home" ? pinnedGroup : null}
+      {(!railLayout || listMode === "home") &&
+      // "Pinned" appears with the first pin, not before.
+      (railLayout || pins.length > 0 || pinnedThreads.length > 0)
+        ? pinnedGroup
+        : null}
       {listMode === "home" ? (
         <SidebarContent className="min-h-full gap-0 border-t border-border/50">
           <SidebarGroup className="px-[var(--sidebar-content-inset)] pt-1.5 pb-1">
@@ -2514,11 +2521,8 @@ export default function Sidebar() {
               hasProjects={projects.length > 0}
               projectScope={projectScopePicker}
               newButton={
-                <SidebarNewButton
-                  onNewChat={handleNewThreadClick}
+                <SidebarAddMenu
                   disabled={projects.length === 0 && newThreadContext.activeEnvironmentId === null}
-                  shortcutLabel={newThreadShortcutLabel}
-                  inProjectShortcutLabel={newThreadInProjectShortcutLabel}
                   recentProjects={newMenuProjects}
                 />
               }
@@ -2579,7 +2583,19 @@ export default function Sidebar() {
                     )}
                   >
                     {activeThreads.map((thread) => renderRow(thread, "active"))}
-                    {snoozedThreads.length > 0 ? (
+                    {simple && snoozedThreads.length + settledThreads.length > 0 ? (
+                      <SidebarSectionHeader
+                        kind="settled"
+                        className="mt-auto"
+                        label={doneShelfLabel(
+                          snoozedThreads.length + settledThreads.length,
+                          settledShelfExpanded,
+                        )}
+                        expanded={settledShelfExpanded}
+                        onToggle={() => setSettledShelfExpanded((value) => !value)}
+                      />
+                    ) : null}
+                    {!simple && snoozedThreads.length > 0 ? (
                       <SidebarSectionHeader
                         kind="snoozed"
                         className="mt-auto"
@@ -2591,7 +2607,7 @@ export default function Sidebar() {
                       />
                     ) : null}
                     {renderedSnoozedThreads.map((thread) => renderRow(thread, "snoozed"))}
-                    {settledThreads.length > 0 ? (
+                    {!simple && settledThreads.length > 0 ? (
                       <SidebarSectionHeader
                         kind="settled"
                         className={cn(snoozedThreads.length === 0 && "mt-auto")}
@@ -2679,7 +2695,7 @@ export default function Sidebar() {
           <SidebarUpdatePill />
         </SidebarFooter>
       ) : (
-        <SidebarChromeFooter />
+        <SidebarChromeFooter simple />
       )}
 
       <ContinueOnMachineDialog

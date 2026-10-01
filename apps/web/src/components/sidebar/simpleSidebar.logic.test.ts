@@ -1,0 +1,56 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  activePrimaryNavItem,
+  doneShelfLabel,
+  threadContextMenuItems,
+} from "./simpleSidebar.logic";
+
+const ALL = [
+  { id: "rename", label: "Rename chat" },
+  { id: "pin", label: "Pin chat" },
+  { id: "settle", label: "Settle chat" },
+  { id: "snooze", label: "Snooze" },
+  { id: "mark-unread", label: "Mark unread" },
+  { id: "copy-path", label: "Copy Path" },
+  { id: "copy-thread-id", label: "Copy chat ID" },
+  { id: "continue-on-machine", label: "Continue on another machine…" },
+  { id: "archive", label: "Archive" },
+  { id: "delete", label: "Delete", destructive: true },
+];
+
+describe("threadContextMenuItems", () => {
+  it("keeps four items without Dev mode", () => {
+    expect(threadContextMenuItems(ALL, false).map((item) => item.id)).toEqual([
+      "rename",
+      "pin",
+      "archive",
+      "delete",
+    ]);
+  });
+
+  it("keeps everything in Dev mode", () => {
+    expect(threadContextMenuItems(ALL, true)).toHaveLength(ALL.length);
+  });
+});
+
+describe("activePrimaryNavItem", () => {
+  it("lights Assistants on its screen, whatever the sidebar lists", () => {
+    expect(activePrimaryNavItem({ pathname: "/assistants", mode: "files" })).toBe("assistants");
+  });
+
+  it("follows the sidebar's list elsewhere", () => {
+    expect(activePrimaryNavItem({ pathname: "/computer", mode: "chats" })).toBe("chats");
+    expect(activePrimaryNavItem({ pathname: "/files", mode: "files" })).toBe("files");
+    expect(activePrimaryNavItem({ pathname: "/x/y", mode: "apps" })).toBe("apps");
+    // Rail-only modes read as the chat list.
+    expect(activePrimaryNavItem({ pathname: "/computer", mode: "inbox" })).toBe("chats");
+  });
+});
+
+describe("doneShelfLabel", () => {
+  it("counts while folded", () => {
+    expect(doneShelfLabel(3, false)).toBe("Done (3)");
+    expect(doneShelfLabel(3, true)).toBe("Done");
+  });
+});

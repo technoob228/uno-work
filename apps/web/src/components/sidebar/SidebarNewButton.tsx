@@ -4,7 +4,13 @@
  * the arrow opens: a new chat in any project (last used first, scrolls), and New project
  * (a folder on this computer, empty, from GitHub).
  */
-import { ChevronDownIcon, FolderOpenIcon, PlusIcon, SquarePenIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  FolderOpenIcon,
+  FolderPlusIcon,
+  PlusIcon,
+  SquarePenIcon,
+} from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import { GitHubIcon } from "../Icons";
@@ -130,5 +136,57 @@ export function SidebarNewButton(props: {
         </MenuPopup>
       </Menu>
     </div>
+  );
+}
+
+/**
+ * The chat list's "+" (simplification 01.10): a new chat in one of the
+ * projects, or a new project. A plain new chat is the header's "New chat"
+ * (the start screen), so it is not repeated here.
+ */
+export function SidebarAddMenu(props: {
+  recentProjects: ReadonlyArray<SidebarNewButtonProject>;
+  disabled?: boolean;
+}) {
+  return (
+    <Menu>
+      <MenuTrigger
+        aria-label="New chat in a project, or a new project"
+        title="New chat in a project, or a new project"
+        data-testid="sidebar-add-menu"
+        disabled={props.disabled}
+        className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-0.5 rounded-md px-1.5 text-muted-foreground outline-hidden transition-colors hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 data-[popup-open]:bg-sidebar-row-hover data-[popup-open]:text-foreground"
+      >
+        <PlusIcon className="size-4" />
+        <ChevronDownIcon className="size-3 opacity-60" />
+      </MenuTrigger>
+      <MenuPopup align="end" side="bottom" className="min-w-60">
+        {props.recentProjects.length > 0 ? (
+          <>
+            <MenuGroup>
+              <MenuGroupLabel>New chat in a project</MenuGroupLabel>
+              <div className="max-h-64 overflow-y-auto overscroll-contain">
+                {props.recentProjects.map((project) => (
+                  <MenuItem key={project.key} onClick={project.onSelect}>
+                    <span
+                      aria-hidden
+                      className="grid size-4 shrink-0 place-items-center rounded bg-muted text-[9px] font-semibold uppercase"
+                    >
+                      {project.name.slice(0, 1)}
+                    </span>
+                    <span className="max-w-56 truncate">{project.name}</span>
+                  </MenuItem>
+                ))}
+              </div>
+            </MenuGroup>
+            <MenuSeparator />
+          </>
+        ) : null}
+        <MenuItem onClick={() => openNewProject()} data-testid="sidebar-new-project">
+          <FolderPlusIcon className="size-4" />
+          New project…
+        </MenuItem>
+      </MenuPopup>
+    </Menu>
   );
 }
