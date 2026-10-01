@@ -4,8 +4,8 @@
  * 01.10 (Misha): a newcomer is not asked "What do you want to do?" with cards
  * any more, nor "How do you want to work?". With no goal from the console the
  * welcome just finishes and Home opens — the start screen with one box
- * ("What do you want to build or do?", Upload a project / drop a folder, and
- * the quiet "own agent" / "SSH" links). A goal picked on the console's /start
+ * ("What do you want to build?", the paperclip / a dropped folder, and one
+ * quiet "Using Claude Code or Codex? Connect it" line). A goal picked on the console's /start
  * (`onboarding_path` on the account) still opens its result here, as before.
  * Old links with a goal keep working:
  *

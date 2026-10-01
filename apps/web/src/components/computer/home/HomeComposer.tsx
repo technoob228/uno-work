@@ -5,8 +5,11 @@
  * chat, as it does there) and with the chosen permissions. The chat sends the
  * task itself (the same send as Enter in a chat).
  *
- * On the start screen the same box takes a project: "Upload a project" and a
- * folder / .zip dropped on it (`onUploadProject` / `onDropProject`).
+ * On the start screen the same box takes a project: the paperclip ("Upload a
+ * project") and a folder / .zip dropped anywhere on it (`onUploadProject` /
+ * `onDropProject`). A newcomer's first screen (`minimal`) is only the box: no
+ * folder chip, model or permissions pickers, no suggestions — the defaults a
+ * new chat gets — and the empty box cycles through `examples`.
  */
 import {
   DEFAULT_RUNTIME_MODE,
@@ -25,6 +28,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { type DragEvent, useEffect, useMemo, useRef, useState } from "react";
+
+import { useMediaQuery } from "../../../hooks/useMediaQuery";
 
 import { cn } from "~/lib/utils";
 import { useComposerDraftStore } from "../../../composerDraftStore";
@@ -112,6 +117,9 @@ export function HomeComposer({
   placeholder = "What should Uno do? For example: build a sales report from the sheets in my cloud",
   onUploadProject,
   onDropProject,
+  minimal = false,
+  examples,
+  ariaLabel = "What should we do?",
 }: {
   environmentId: EnvironmentId | null;
   /** The folder the chip starts on (the setup's project); null = the home folder. */
@@ -125,6 +133,11 @@ export function HomeComposer({
   onUploadProject?: () => void;
   /** Files / a folder dropped on the box. */
   onDropProject?: (data: DataTransfer) => void;
+  /** Only the box, the paperclip and the arrow (a newcomer's first screen). */
+  minimal?: boolean;
+  /** Shown in the empty box one at a time, every ~3 s (the first one with reduced motion). */
+  examples?: ReadonlyArray<string>;
+  ariaLabel?: string;
 }) {
   // A first task handed over by the setup's last step is typed in, once.
   const [handoff] = useState(() => useSetupHandoff.getState().take());
@@ -142,6 +155,8 @@ export function HomeComposer({
   useEffect(() => {
     ref.current?.focus();
   }, []);
+
+  const example = useCyclingExample(examples);
 
   const submit = async () => {
     const prompt = text.trim();
@@ -207,86 +222,107 @@ export function HomeComposer({
               void submit();
             }
           }}
-          rows={2}
-          placeholder={placeholder}
-          aria-label="What should we do?"
+          rows={minimal ? 3 : 2}
+          placeholder={examples && examples.length > 0 ? undefined : placeholder}
+          aria-label={ariaLabel}
           data-testid="home-composer"
-          className="block min-h-[64px] w-full resize-none bg-transparent px-4 pt-3.5 text-[15px] text-foreground outline-none placeholder:text-muted-foreground/70"
+          className={cn(
+            "block w-full resize-none bg-transparent px-4 pt-3.5 text-foreground outline-none placeholder:text-muted-foreground/70",
+            minimal ? "min-h-[88px] text-base" : "min-h-[64px] text-[15px]",
+          )}
         />
+        {example !== null && text === "" ? (
+          <span
+            aria-hidden
+            className={cn(
+              "pointer-events-none absolute top-3.5 right-4 left-4 truncate text-muted-foreground/70 transition-opacity duration-300 ease-out motion-reduce:transition-none",
+              minimal ? "text-base" : "text-[15px]",
+              example.shown ? "opacity-100" : "opacity-0",
+            )}
+            data-testid="home-composer-example"
+          >
+            {example.text}
+          </span>
+        ) : null}
         <div className="flex items-center gap-1 px-2.5 pt-1 pb-2.5">
           {onUploadProject ? (
             <button
               type="button"
               onClick={onUploadProject}
-              className="flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              aria-label="Upload a project"
+              title="Upload a project"
+              className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               data-testid="home-upload-project"
             >
-              <PaperclipIcon className="size-3.5" />
-              Upload a project
+              <PaperclipIcon className="size-4" />
             </button>
           ) : null}
-          <FolderChipMenu
-            environmentId={environmentId}
-            folder={folder}
-            onPick={(next) => {
-              setFolder(next);
-              ref.current?.focus();
-            }}
-            testId="home-folder-chip"
-          />
-          {picker.selection ? (
-            <ProviderModelPicker
-              compact
-              activeInstanceId={picker.selection.instanceId}
-              model={picker.selection.model}
-              lockedProvider={null}
-              instanceEntries={picker.instanceEntries}
-              environmentId={environmentId}
-              modelOptionsByInstance={picker.modelOptionsByInstance}
-              open={pickerOpen}
-              onOpenChange={setPickerOpen}
-              onInstanceModelChange={(instanceId, model) => {
-                picker.pick(instanceId, model);
-                ref.current?.focus();
-              }}
-              triggerVariant="ghost"
-              triggerClassName="text-muted-foreground"
-            />
-          ) : null}
-          <Select value={runtimeMode} onValueChange={(value) => setRuntimeMode(value!)}>
-            <SelectTrigger
-              variant="ghost"
-              size="sm"
-              className="h-7 w-auto shrink-0 rounded-full px-2.5 text-xs text-muted-foreground hover:text-foreground"
-              aria-label="Permissions"
-              title={PERMISSION_MODES[runtimeMode].consequence}
-              data-testid="home-permissions"
-            >
-              {(() => {
-                const Icon = RUNTIME_MODE_ICON[runtimeMode];
-                return <Icon className="size-3.5" />;
-              })()}
-              <SelectValue>{PERMISSION_MODES[runtimeMode].label}</SelectValue>
-            </SelectTrigger>
-            <SelectPopup alignItemWithTrigger={false}>
-              {PERMISSION_MODE_ORDER.map((mode) => {
-                const Icon = RUNTIME_MODE_ICON[mode];
-                return (
-                  <SelectItem key={mode} value={mode} className="min-w-64 py-2">
-                    <div className="grid min-w-0 gap-0.5">
-                      <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                        <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                        {PERMISSION_MODES[mode].label}
-                      </span>
-                      <span className="text-xs leading-4 text-muted-foreground">
-                        {PERMISSION_MODES[mode].consequence}
-                      </span>
-                    </div>
-                  </SelectItem>
-                );
-              })}
-            </SelectPopup>
-          </Select>
+          {minimal ? null : (
+            <>
+              <FolderChipMenu
+                environmentId={environmentId}
+                folder={folder}
+                onPick={(next) => {
+                  setFolder(next);
+                  ref.current?.focus();
+                }}
+                testId="home-folder-chip"
+              />
+              {picker.selection ? (
+                <ProviderModelPicker
+                  compact
+                  activeInstanceId={picker.selection.instanceId}
+                  model={picker.selection.model}
+                  lockedProvider={null}
+                  instanceEntries={picker.instanceEntries}
+                  environmentId={environmentId}
+                  modelOptionsByInstance={picker.modelOptionsByInstance}
+                  open={pickerOpen}
+                  onOpenChange={setPickerOpen}
+                  onInstanceModelChange={(instanceId, model) => {
+                    picker.pick(instanceId, model);
+                    ref.current?.focus();
+                  }}
+                  triggerVariant="ghost"
+                  triggerClassName="text-muted-foreground"
+                />
+              ) : null}
+              <Select value={runtimeMode} onValueChange={(value) => setRuntimeMode(value!)}>
+                <SelectTrigger
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-auto shrink-0 rounded-full px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                  aria-label="Permissions"
+                  title={PERMISSION_MODES[runtimeMode].consequence}
+                  data-testid="home-permissions"
+                >
+                  {(() => {
+                    const Icon = RUNTIME_MODE_ICON[runtimeMode];
+                    return <Icon className="size-3.5" />;
+                  })()}
+                  <SelectValue>{PERMISSION_MODES[runtimeMode].label}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup alignItemWithTrigger={false}>
+                  {PERMISSION_MODE_ORDER.map((mode) => {
+                    const Icon = RUNTIME_MODE_ICON[mode];
+                    return (
+                      <SelectItem key={mode} value={mode} className="min-w-64 py-2">
+                        <div className="grid min-w-0 gap-0.5">
+                          <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                            <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                            {PERMISSION_MODES[mode].label}
+                          </span>
+                          <span className="text-xs leading-4 text-muted-foreground">
+                            {PERMISSION_MODES[mode].consequence}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectPopup>
+              </Select>
+            </>
+          )}
           <button
             type="button"
             onClick={() => void submit()}
@@ -303,7 +339,7 @@ export function HomeComposer({
           </button>
         </div>
       </div>
-      {starters.length > 0 ? (
+      {!minimal && starters.length > 0 ? (
         <div className="flex flex-wrap gap-1.5" data-testid="home-starters">
           {starters.map((starter) => (
             <button
@@ -331,4 +367,31 @@ export function HomeComposer({
       ) : null}
     </div>
   );
+}
+
+/** One example at a time with a soft fade; null without examples. */
+function useCyclingExample(
+  examples: ReadonlyArray<string> | undefined,
+): { text: string; shown: boolean } | null {
+  const reduced = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const [index, setIndex] = useState(0);
+  const [shown, setShown] = useState(true);
+  const count = examples?.length ?? 0;
+  useEffect(() => {
+    if (count < 2 || reduced) return;
+    let swap: ReturnType<typeof setTimeout> | undefined;
+    const tick = setInterval(() => {
+      setShown(false);
+      swap = setTimeout(() => {
+        setIndex((i) => (i + 1) % count);
+        setShown(true);
+      }, 300);
+    }, 3200);
+    return () => {
+      clearInterval(tick);
+      if (swap) clearTimeout(swap);
+    };
+  }, [count, reduced]);
+  if (!examples || count === 0) return null;
+  return reduced ? { text: examples[0]!, shown: true } : { text: examples[index % count]!, shown };
 }

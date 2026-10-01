@@ -6,7 +6,12 @@
  * next to "Add a widget"; the computer lives in the header pill.
  */
 import { UnoAiChatsCard } from "../../../unoai/UnoAiChatsList";
-import { DEFAULT_RUNTIME_MODE, type EnvironmentId, type UnoMachineApp } from "@t3tools/contracts";
+import {
+  DEFAULT_RUNTIME_MODE,
+  isAssistantProjectId,
+  type EnvironmentId,
+  type UnoMachineApp,
+} from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
   CheckIcon,
@@ -77,7 +82,11 @@ import { HOME_WIDGET_IDS, attentionThreads, greeting, type HomeWidgetId } from "
 import { useDevMode } from "../../../devMode";
 import { usePersonFirstName } from "./useHomeInfo";
 import { useHomeStarters } from "./useHomeStarters";
-import { selectProjectsAcrossEnvironments, useStore } from "../../../store";
+import {
+  selectBootstrapCompleteForActiveEnvironment,
+  selectProjectsAcrossEnvironments,
+  useStore,
+} from "../../../store";
 import { useSetupHome, type SetupHome } from "../../setup/useSetupHome";
 import { OwnToolsDialog, type OwnToolsTab } from "../../setup/OwnToolsDialog";
 import type { ProjectUploadFile } from "../../../projectUpload";
@@ -87,6 +96,17 @@ import { openUploadAndAsk } from "../../newProject/uploadAndAsk";
 const LAYOUT_SCHEMA = Schema.Array(Schema.String);
 /** "Everything else on Home" opened by the person (remembered per device). */
 const HOME_MORE_KEY = "uno-work:home:more-open";
+
+/**
+ * A newcomer's first screen (Misha 01.10: "same goal, not overloaded"): the
+ * empty box shows these one at a time — the same four as the console's /start.
+ */
+export const FIRST_SCREEN_EXAMPLES = [
+  "A site for my bakery that takes orders…",
+  "A Telegram bot that answers my clients…",
+  "Put my project online…",
+  "Clean up this spreadsheet…",
+] as const;
 
 /** What this place is, in one line (Misha 27.09: Uno Work + a computer + an assistant read as a pile). */
 export const HOME_PLACE_LINE =
@@ -172,6 +192,7 @@ export function HomeStart({
   onAskUno: (prompt: string) => Promise<void>;
 }) {
   const { threads, now } = useHomeThreads();
+  const bootstrapped = useStore(selectBootstrapCompleteForActiveEnvironment);
   // 01.10: the simple start screen unless Dev mode is on.
   const devMode = useDevMode();
   // The same box takes a project (Misha 01.10): Upload a project or a dropped
@@ -405,6 +426,65 @@ export function HomeStart({
     ).slice(0, 4);
     const widgetBlocks = shown.filter((id) => !isHomeFixedBlockId(id));
     const waiting = attentionThreads(threads, now);
+    // A newcomer (no chats yet) gets one box and one quiet line, nothing else:
+    // no greeting, next step, empty sections, widgets or Customize.
+    // (The assistant's own chats — Telegram & co — don't count: not on Home.)
+    const firstScreen =
+      bootstrapped &&
+      !layout.editing &&
+      !threads.some((thread) => !isAssistantProjectId(thread.projectId));
+    const ownAgentLine = (
+      <p className="px-1 text-center text-[13px] text-muted-foreground" data-testid="home-own-ways">
+        <button
+          type="button"
+          onClick={() => setOwnTools("agent")}
+          className="hover:text-foreground hover:underline"
+          data-testid="home-own-agent"
+        >
+          Using Claude Code or Codex? Connect it →
+        </button>
+      </p>
+    );
+    const ownToolsDialog = (
+      <OwnToolsDialog
+        open={ownTools !== null}
+        tab={ownTools ?? "agent"}
+        onTabChange={setOwnTools}
+        onOpenChange={(open) => {
+          if (!open) setOwnTools(null);
+        }}
+      />
+    );
+    if (firstScreen) {
+      return (
+        <div
+          className="mx-auto flex min-h-full w-full max-w-[680px] flex-col justify-center gap-4 pt-6 pb-[14vh]"
+          data-testid="home-simple"
+          data-first-screen=""
+        >
+          {notices}
+          <h1
+            className="mb-2 text-center text-[28px] font-semibold tracking-tight"
+            data-testid="home-greeting"
+          >
+            What do you want to build?
+          </h1>
+          <HomeComposer
+            environmentId={environmentId}
+            starters={[]}
+            defaultFolder={setupHome.project}
+            onStart={onStartTask}
+            minimal
+            examples={FIRST_SCREEN_EXAMPLES}
+            ariaLabel="What do you want to build?"
+            onUploadProject={() => openUpload()}
+            onDropProject={dropProject}
+          />
+          {ownAgentLine}
+          {ownToolsDialog}
+        </div>
+      );
+    }
     return (
       <div
         className="mx-auto flex w-full max-w-3xl flex-col gap-7 pt-6 pb-16 sm:pt-16"
@@ -442,39 +522,12 @@ export function HomeStart({
             starters={simpleStarters}
             defaultFolder={setupHome.project}
             onStart={onStartTask}
-            placeholder="What do you want to build or do?"
+            placeholder="What do you want to build?"
             onUploadProject={() => openUpload()}
             onDropProject={dropProject}
           />
-          <div
-            className="flex flex-wrap gap-x-5 gap-y-1 px-1 text-[13px] text-muted-foreground"
-            data-testid="home-own-ways"
-          >
-            <button
-              type="button"
-              onClick={() => setOwnTools("agent")}
-              className="hover:text-foreground hover:underline"
-              data-testid="home-own-agent"
-            >
-              Use my own agent (Claude Code, Codex, Cursor) →
-            </button>
-            <button
-              type="button"
-              onClick={() => setOwnTools("ssh")}
-              className="hover:text-foreground hover:underline"
-              data-testid="home-own-ssh"
-            >
-              Just a server (SSH) →
-            </button>
-          </div>
-          <OwnToolsDialog
-            open={ownTools !== null}
-            tab={ownTools ?? "agent"}
-            onTabChange={setOwnTools}
-            onOpenChange={(open) => {
-              if (!open) setOwnTools(null);
-            }}
-          />
+          {ownAgentLine}
+          {ownToolsDialog}
         </div>
         {waiting.length > 0 ? (
           <section className="flex flex-col gap-2" data-testid="home-needs-you-section">
@@ -482,9 +535,13 @@ export function HomeStart({
             <NeedsYouWidget threads={threads} now={now} />
           </section>
         ) : null}
-        <section className="flex flex-col gap-2" data-testid="home-in-progress">
+        {/* No empty "In progress": the section shows only with something in it. */}
+        <section
+          className="hidden flex-col gap-2 has-[[data-testid=home-continue]]:flex"
+          data-testid="home-in-progress"
+        >
           <HomeSectionTitle>In progress</HomeSectionTitle>
-          <ContinueCards threads={threads} now={now} withoutWaiting />
+          <ContinueCards threads={threads} now={now} withoutWaiting hideWhenEmpty />
         </section>
 
         {layout.editing ? (

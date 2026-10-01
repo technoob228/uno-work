@@ -157,11 +157,14 @@ export function ContinueCards({
   threads,
   now,
   withoutWaiting = false,
+  hideWhenEmpty = false,
 }: {
   threads: HomeThread[];
   now: number;
   /** "Needs you" is shown above (the simple start screen): leave those chats out. */
   withoutWaiting?: boolean;
+  /** Nothing at all when there is nothing to continue (no empty section on the simple Home). */
+  hideWhenEmpty?: boolean;
 }) {
   const open = useOpenThread();
   const openItem = useOpenInboxItem();
@@ -174,6 +177,7 @@ export function ContinueCards({
     { now },
   );
   if (cards.length === 0) {
+    if (hideWhenEmpty) return null;
     return (
       <p className="rounded-2xl border border-dashed border-border/80 px-4 py-3 text-sm text-muted-foreground">
         {withoutWaiting
