@@ -4,7 +4,9 @@
  *
  * - Upload from my computer (first, 01.10): a folder or a .zip from the
  *   person's laptop goes to `~/projects/<name>` on the computer (zips are
- *   unpacked in the browser), with progress; then a chat opens in it.
+ *   unpacked in the browser), with progress; then a chat opens in it. From
+ *   the start screen the dropped files come in already and Uno gets a first
+ *   task instead of an empty chat (store `files` / `afterUpload`).
  * - From GitHub: clone a repository into `~/<repo>`.
  * - Empty project: a new folder `~/<name>`.
  * - A folder on this computer (Dev mode): click through the home folder
@@ -268,6 +270,8 @@ function UploadStep({
   const zipInput = useRef<HTMLInputElement>(null);
   const { ensureFolderProject } = useFolderChats(environmentId);
   const { handleNewThread } = useNewThreadHandler();
+  const takeFiles = useNewProjectStore((state) => state.takeFiles);
+  const afterUpload = useNewProjectStore((state) => state.afterUpload);
   const projectsListing = useQuery({
     queryKey: ["uno-computer", "browse-folder", environmentId, `${home}/projects/`],
     queryFn: () =>
@@ -302,6 +306,15 @@ function UploadStep({
       .finally(() => setReading(false));
   };
 
+  // Dropped on the start screen: the dialog opens with them.
+  const dropped = useRef(false);
+  useEffect(() => {
+    if (dropped.current) return;
+    dropped.current = true;
+    const files = takeFiles();
+    if (files) accept(files);
+  }, [takeFiles]);
+
   const submit = async () => {
     if (!picked || !name || !target || !plan) return;
     setError(null);
@@ -323,7 +336,14 @@ function UploadStep({
             }),
         },
       );
-      await handleNewThread(projectRef, { envMode: "local" });
+      let started = false;
+      if (afterUpload) {
+        started = await afterUpload({ name, folder: target }).then(
+          () => true,
+          () => false,
+        );
+      }
+      if (!started) await handleNewThread(projectRef, { envMode: "local" });
       onDone();
     } catch (cause) {
       setError(errorMessage(cause, "The upload stopped. Try again."));

@@ -1,7 +1,15 @@
 /**
- * The first screen in Uno Work (`/setup?step=welcome`), goal first:
+ * The first screen in Uno Work (`/setup?step=welcome`), goal first.
  *
- * 1. "What do you want to do?" — my assistant, a website, a Telegram bot,
+ * 01.10 (Misha): a newcomer is not asked "What do you want to do?" with cards
+ * any more, nor "How do you want to work?". With no goal from the console the
+ * welcome just finishes and Home opens — the start screen with one box
+ * ("What do you want to build or do?", Upload a project / drop a folder, and
+ * the quiet "own agent" / "SSH" links). A goal picked on the console's /start
+ * (`onboarding_path` on the account) still opens its result here, as before.
+ * Old links with a goal keep working:
+ *
+ * 1. (old) "What do you want to do?" — my assistant, a website, a Telegram bot,
  *    my own agent, just a server;
  * 2. "How do you want to work?" — Uno AI (default), my Claude/ChatGPT
  *    subscription here, or my agent on my laptop (assistant/site/bot only);
@@ -19,12 +27,10 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
-  BotIcon,
   CheckIcon,
   CopyIcon,
   ExternalLinkIcon,
   FolderUpIcon,
-  GlobeIcon,
   Loader2Icon,
   MessageCircleIcon,
   SparklesIcon,
@@ -63,7 +69,6 @@ import {
   GOAL_PROJECT,
   GOAL_PROJECT_KEY,
   GOAL_SKILLS,
-  GOALS,
   NEXT_STEP,
   goalAgentsMd,
   goalAsksHow,
@@ -83,14 +88,6 @@ import { NoIndexHtmlError, droppedName, uploadAndPublishSite } from "../siteUplo
 import { useSetupNavigation } from "../useSetupNavigation";
 import { currentSetupProgress, useUpdateSetupProgress } from "../useSetupProgress";
 import { AssistantTelegramPanel } from "./ChannelsStep";
-
-const GOAL_ICON: Readonly<Record<GoalId, LucideIcon>> = {
-  assistant: UserRoundIcon,
-  site: GlobeIcon,
-  bot: BotIcon,
-  own_agent: SparklesIcon,
-  server: TerminalIcon,
-};
 
 // ── shared plumbing ────────────────────────────────────────────────────
 
@@ -374,8 +371,6 @@ function NextStepCard({ goal, onClick }: { goal: GoalId; onClick?: () => void })
 // ── screen 1 ───────────────────────────────────────────────────────────
 
 function GoalPicker() {
-  const { pickGoal } = useGoalActions();
-  const [busy, setBusy] = useState<GoalId | null>(null);
   const { goHome } = useSetupNavigation();
   const { updateSettings } = useUpdateSettings();
 
@@ -383,18 +378,35 @@ function GoalPicker() {
   const machineOnboarded = useServerConfig()?.settings.machineOnboarded === true;
   const decided = useRef(getClientSettings().onboardingCompleted);
   const navigate = useNavigate();
-  const update = useUpdateSetupProgress();
 
-  // Picked on the console's /start already: go straight to that result.
+  // No cards (01.10): the start screen on Home is the first screen. Only a goal
+  // picked on the console's /start opens its result here.
   useEffect(() => {
-    if (machineOnboarded || decided.current || accountTransport() === "none") return;
+    if (decided.current) return;
+    const toHome = () => {
+      if (decided.current) return;
+      decided.current = true;
+      void persistWithRetry(async () => {
+        await whenServerConfigReady();
+        await updateSettings({ onboardingCompleted: true, machineOnboarded: true });
+      });
+      goHome();
+    };
+    if (machineOnboarded || accountTransport() === "none") {
+      toHome();
+      return;
+    }
     let cancelled = false;
     void accountRequest("GET", "/auth/me")
       .then(async (me) => {
+        if (cancelled || decided.current) return;
         const picked = goalFromOnboardingPath(
           (me as { readonly onboarding_path?: unknown } | null)?.onboarding_path,
         );
-        if (cancelled || !picked || decided.current) return;
+        if (!picked) {
+          toHome();
+          return;
+        }
         decided.current = true;
         // Right after load the machine's settings channel may not take writes
         // yet (prod 26.09: the goal was lost). Wait for it and retry.
@@ -418,41 +430,21 @@ function GoalPicker() {
           replace: true,
         });
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancelled) toHome();
+      });
     return () => {
       cancelled = true;
     };
-  }, [machineOnboarded, navigate, update, updateSettings]);
-  useEffect(() => {
-    if (!machineOnboarded || decided.current) return;
-    decided.current = true;
-    void updateSettings({ onboardingCompleted: true });
-    goHome();
-  }, [machineOnboarded, goHome, updateSettings]);
+  }, [machineOnboarded, goHome, navigate, updateSettings]);
 
   return (
-    <Page
-      title="What do you want to do?"
-      lead="Pick one. Uno sets it up. You can do everything else later."
+    <div
+      className="flex min-h-[60vh] items-center justify-center text-muted-foreground"
+      data-testid="goal-checking"
     >
-      <div className="flex flex-col gap-3" role="list">
-        {GOALS.map((goal) => (
-          <BigChoice
-            key={goal}
-            icon={GOAL_ICON[goal]}
-            title={GOAL_COPY[goal].title}
-            sub={GOAL_COPY[goal].sub}
-            disabled={busy !== null}
-            testId={`goal-${goal}`}
-            onClick={() => {
-              decided.current = true;
-              setBusy(goal);
-              void pickGoal(goal).finally(() => setBusy(null));
-            }}
-          />
-        ))}
-      </div>
-    </Page>
+      <Loader2Icon className="size-5 animate-spin" />
+    </div>
   );
 }
 

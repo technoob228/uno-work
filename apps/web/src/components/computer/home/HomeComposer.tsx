@@ -4,6 +4,9 @@
  * picked here (the chat composer's own picker; a pick sticks for the next new
  * chat, as it does there) and with the chosen permissions. The chat sends the
  * task itself (the same send as Enter in a chat).
+ *
+ * On the start screen the same box takes a project: "Upload a project" and a
+ * folder / .zip dropped on it (`onUploadProject` / `onDropProject`).
  */
 import {
   DEFAULT_RUNTIME_MODE,
@@ -12,8 +15,16 @@ import {
   type ProviderInstanceId,
   type RuntimeMode,
 } from "@t3tools/contracts";
-import { ArrowUpIcon, LockIcon, LockOpenIcon, PenLineIcon, type LucideIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowUpIcon,
+  FolderUpIcon,
+  LockIcon,
+  LockOpenIcon,
+  PaperclipIcon,
+  PenLineIcon,
+  type LucideIcon,
+} from "lucide-react";
+import { type DragEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { useComposerDraftStore } from "../../../composerDraftStore";
@@ -99,6 +110,8 @@ export function HomeComposer({
   defaultFolder = null,
   onStart,
   placeholder = "What should Uno do? For example: build a sales report from the sheets in my cloud",
+  onUploadProject,
+  onDropProject,
 }: {
   environmentId: EnvironmentId | null;
   /** The folder the chip starts on (the setup's project); null = the home folder. */
@@ -108,6 +121,10 @@ export function HomeComposer({
   /** Starts a chat on `options` and sends `prompt`. */
   onStart: (prompt: string, options: HomeStartOptions) => Promise<void>;
   placeholder?: string;
+  /** "Upload a project" in the box (the start screen). */
+  onUploadProject?: () => void;
+  /** Files / a folder dropped on the box. */
+  onDropProject?: (data: DataTransfer) => void;
 }) {
   // A first task handed over by the setup's last step is typed in, once.
   const [handoff] = useState(() => useSetupHandoff.getState().take());
@@ -118,6 +135,9 @@ export function HomeComposer({
   const [pickerOpen, setPickerOpen] = useState(false);
   const picker = useHomeModelPicker(environmentId);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const carriesFiles = (event: DragEvent) =>
+    onDropProject !== undefined && Array.from(event.dataTransfer.types).includes("Files");
 
   useEffect(() => {
     ref.current?.focus();
@@ -150,7 +170,33 @@ export function HomeComposer({
 
   return (
     <div className="flex flex-col gap-2.5">
-      <div className="rounded-[20px] border bg-card shadow-xs/5 transition-colors has-focus-visible:border-ring/45">
+      <div
+        className={cn(
+          "relative rounded-[20px] border bg-card shadow-xs/5 transition-colors has-focus-visible:border-ring/45",
+          dragging && "border-primary border-dashed bg-primary/[0.03]",
+        )}
+        onDragOver={(event) => {
+          if (!carriesFiles(event)) return;
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
+        }}
+        onDrop={(event) => {
+          if (!carriesFiles(event)) return;
+          event.preventDefault();
+          setDragging(false);
+          onDropProject?.(event.dataTransfer);
+        }}
+        data-testid="home-composer-box"
+      >
+        {dragging ? (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-[20px] bg-card/90 text-sm font-medium text-primary">
+            <FolderUpIcon className="size-4" />
+            Drop your project folder or .zip
+          </div>
+        ) : null}
         <textarea
           ref={ref}
           value={text}
@@ -168,6 +214,17 @@ export function HomeComposer({
           className="block min-h-[64px] w-full resize-none bg-transparent px-4 pt-3.5 text-[15px] text-foreground outline-none placeholder:text-muted-foreground/70"
         />
         <div className="flex items-center gap-1 px-2.5 pt-1 pb-2.5">
+          {onUploadProject ? (
+            <button
+              type="button"
+              onClick={onUploadProject}
+              className="flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              data-testid="home-upload-project"
+            >
+              <PaperclipIcon className="size-3.5" />
+              Upload a project
+            </button>
+          ) : null}
           <FolderChipMenu
             environmentId={environmentId}
             folder={folder}

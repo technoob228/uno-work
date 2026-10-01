@@ -79,6 +79,10 @@ import { usePersonFirstName } from "./useHomeInfo";
 import { useHomeStarters } from "./useHomeStarters";
 import { selectProjectsAcrossEnvironments, useStore } from "../../../store";
 import { useSetupHome, type SetupHome } from "../../setup/useSetupHome";
+import { OwnToolsDialog, type OwnToolsTab } from "../../setup/OwnToolsDialog";
+import type { ProjectUploadFile } from "../../../projectUpload";
+import { readDroppedUploadFiles } from "../../../projectUploadPickers";
+import { openUploadAndAsk } from "../../newProject/uploadAndAsk";
 
 const LAYOUT_SCHEMA = Schema.Array(Schema.String);
 /** "Everything else on Home" opened by the person (remembered per device). */
@@ -170,6 +174,21 @@ export function HomeStart({
   const { threads, now } = useHomeThreads();
   // 01.10: the simple start screen unless Dev mode is on.
   const devMode = useDevMode();
+  // The same box takes a project (Misha 01.10): Upload a project or a dropped
+  // folder / .zip → New project → Upload; once it's on the computer, Uno looks
+  // at it and offers to put it online. (The console's ?do=upload: WorkIntentBridge.)
+  const openUpload = useCallback(
+    (files?: ReadonlyArray<ProjectUploadFile>) => openUploadAndAsk(onStartTask, files),
+    [onStartTask],
+  );
+  const dropProject = useCallback(
+    (data: DataTransfer) =>
+      void readDroppedUploadFiles(data).then((files) => {
+        if (files.length > 0) openUpload(files);
+      }),
+    [openUpload],
+  );
+  const [ownTools, setOwnTools] = useState<OwnToolsTab | null>(null);
   const firstName = usePersonFirstName(environmentId);
   const homeStarters = useHomeStarters({ environmentId, threads, now, tiles });
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
@@ -359,6 +378,8 @@ export function HomeStart({
                 starters={starters}
                 defaultFolder={setupHome.project}
                 onStart={onStartTask}
+                onUploadProject={() => openUpload()}
+                onDropProject={dropProject}
               />
               <NeedsYouPill threads={threads} now={now} />
             </div>
@@ -402,7 +423,7 @@ export function HomeStart({
             </p>
           ) : null}
         </div>
-        {layout.editing ? null : (
+        {layout.editing || nextStep.step?.id === "pick_goal" ? null : (
           <HomeNextStepCard
             state={nextStep}
             onStartTask={(prompt, folder) =>
@@ -415,13 +436,46 @@ export function HomeStart({
             onAskUno={(prompt) => void onAskUno(prompt)}
           />
         )}
-        <HomeComposer
-          environmentId={environmentId}
-          starters={simpleStarters}
-          defaultFolder={setupHome.project}
-          onStart={onStartTask}
-          placeholder="What should we do?"
-        />
+        <div className="flex flex-col gap-3">
+          <HomeComposer
+            environmentId={environmentId}
+            starters={simpleStarters}
+            defaultFolder={setupHome.project}
+            onStart={onStartTask}
+            placeholder="What do you want to build or do?"
+            onUploadProject={() => openUpload()}
+            onDropProject={dropProject}
+          />
+          <div
+            className="flex flex-wrap gap-x-5 gap-y-1 px-1 text-[13px] text-muted-foreground"
+            data-testid="home-own-ways"
+          >
+            <button
+              type="button"
+              onClick={() => setOwnTools("agent")}
+              className="hover:text-foreground hover:underline"
+              data-testid="home-own-agent"
+            >
+              Use my own agent (Claude Code, Codex, Cursor) →
+            </button>
+            <button
+              type="button"
+              onClick={() => setOwnTools("ssh")}
+              className="hover:text-foreground hover:underline"
+              data-testid="home-own-ssh"
+            >
+              Just a server (SSH) →
+            </button>
+          </div>
+          <OwnToolsDialog
+            open={ownTools !== null}
+            tab={ownTools ?? "agent"}
+            onTabChange={setOwnTools}
+            onOpenChange={(open) => {
+              if (!open) setOwnTools(null);
+            }}
+          />
+        </div>
         {waiting.length > 0 ? (
           <section className="flex flex-col gap-2" data-testid="home-needs-you-section">
             <HomeSectionTitle>Needs you</HomeSectionTitle>

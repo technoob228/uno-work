@@ -112,6 +112,8 @@ describe("upload as a new project", () => {
   it("names the project after the folder or the zip", () => {
     expect(uploadProjectName([{ relativePath: "My Site/index.html" }])).toBe("My-Site");
     expect(uploadProjectName([{ relativePath: "shop.zip" }])).toBe("shop");
+    // One loose file is not a project name.
+    expect(uploadProjectName([{ relativePath: "index.html" }])).toBe("my-project");
     expect(uploadProjectName([{ relativePath: "a.txt" }, { relativePath: "b.txt" }])).toBe(
       "my-project",
     );

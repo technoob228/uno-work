@@ -47,7 +47,7 @@ export function uploadProjectName(
   const first = picked[0]?.relativePath ?? "";
   const raw = first.includes("/")
     ? first.split("/")[0]!
-    : picked.length === 1
+    : picked.length === 1 && /\.zip$/i.test(first)
       ? first.replace(/\.zip$/i, "")
       : "";
   return normalizeProjectName(raw) || "my-project";

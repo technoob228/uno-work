@@ -17,6 +17,7 @@ import { SplashScreen } from "../components/SplashScreen";
 import { CommandPalette } from "../components/CommandPalette";
 import { SetupTourCoach } from "../components/setup/SetupTour";
 import { NewProjectDialog } from "../components/newProject/NewProjectDialog";
+import { WorkIntentBridge } from "../components/newProject/uploadAndAsk";
 import { PreviewPaneProvider } from "../components/preview/PreviewPaneContext";
 import { LinkRequestPromptDialog } from "../components/desktop/LinkRequestPromptDialog";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
@@ -72,6 +73,7 @@ import { isWebApp } from "../webMode";
 import { LiteRoot } from "../lite/LiteShell";
 import { EconomyPresenceBootstrap } from "../components/economy/EconomyPresence";
 import { hasUnoAiArrival } from "../unoai/useUnoAiArrivals";
+import { hasWorkIntent } from "../unoai/workIntent";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -119,8 +121,10 @@ export const Route = createRootRouteWithContext<{
     const needsOnboarding =
       authGateState.status === "authenticated" &&
       !getClientSettings().onboardingCompleted &&
-      // A Uno AI chat moving here / the console's first message: straight to Home.
+      // A Uno AI chat moving here / the console's first message / the console's
+      // "Upload a project" (?do=upload): straight to Home, which acts on it.
       !hasUnoAiArrival() &&
+      !hasWorkIntent() &&
       location.pathname !== "/onboarding" &&
       location.pathname !== "/pair";
 
@@ -209,6 +213,7 @@ function RootRouteView() {
           <Outlet />
         </AppSidebarLayout>
         <NewProjectDialog />
+        <WorkIntentBridge />
         <SetupTourCoach />
       </CommandPalette>
     </PreviewPaneProvider>
