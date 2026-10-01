@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   NEW_PROJECT_SOURCES,
+  freeProjectName,
+  newProjectSources,
+  uploadProjectName,
+  uploadedProjectPath,
   checkNewFolderName,
   checkRepositoryInput,
   clampToHome,
@@ -97,4 +101,25 @@ describe("checkRepositoryInput", () => {
 
 it("does not offer templates until there are project templates", () => {
   expect(NEW_PROJECT_SOURCES).not.toContain("template");
+});
+
+describe("upload as a new project", () => {
+  it("offers upload first, then GitHub, then empty; a folder on the computer in Dev mode", () => {
+    expect(newProjectSources(false)).toEqual(["upload", "github", "empty"]);
+    expect(newProjectSources(true)).toEqual(["upload", "github", "empty", "folder"]);
+  });
+
+  it("names the project after the folder or the zip", () => {
+    expect(uploadProjectName([{ relativePath: "My Site/index.html" }])).toBe("My-Site");
+    expect(uploadProjectName([{ relativePath: "shop.zip" }])).toBe("shop");
+    expect(uploadProjectName([{ relativePath: "a.txt" }, { relativePath: "b.txt" }])).toBe(
+      "my-project",
+    );
+  });
+
+  it("lands in ~/projects and never over an existing folder", () => {
+    expect(uploadedProjectPath("/home/uno/", "shop")).toBe("/home/uno/projects/shop");
+    expect(freeProjectName("shop", new Set(["shop", "shop-2"]))).toBe("shop-3");
+    expect(freeProjectName("shop", new Set())).toBe("shop");
+  });
 });

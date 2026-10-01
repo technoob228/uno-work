@@ -9,13 +9,59 @@ import {
   normalizeProjectName,
 } from "../../firstProject";
 
-export type NewProjectSource = "folder" | "empty" | "github" | "template";
+export type NewProjectSource = "upload" | "folder" | "empty" | "github" | "template";
 
 /**
- * Sources the dialog offers. "From a template" stays out until the product
- * has project templates (today there is only the onboarding tutorial).
+ * Sources the dialog offers, in order (01.10): your own files first, then
+ * GitHub, then an empty folder. "A folder on this computer" (one already on
+ * the computer) is for Dev mode. "From a template" stays out until the
+ * product has project templates (today there is only the onboarding tutorial).
  */
-export const NEW_PROJECT_SOURCES: ReadonlyArray<NewProjectSource> = ["folder", "empty", "github"];
+export const NEW_PROJECT_SOURCES: ReadonlyArray<NewProjectSource> = [
+  "upload",
+  "github",
+  "empty",
+  "folder",
+];
+
+export function newProjectSources(devMode: boolean): ReadonlyArray<NewProjectSource> {
+  return devMode
+    ? NEW_PROJECT_SOURCES
+    : NEW_PROJECT_SOURCES.filter((source) => source !== "folder");
+}
+
+/** Uploaded projects land in `~/projects/<name>`, like the legacy upload and Move. */
+export const UPLOADED_PROJECTS_FOLDER = "projects";
+
+export function uploadedProjectPath(home: string, name: string): string {
+  return `${trimSlashes(home)}/${UPLOADED_PROJECTS_FOLDER}/${name}`;
+}
+
+/**
+ * The project's name from what was picked: the folder's name, or the zip's
+ * without `.zip`. Falls back to "my-project".
+ */
+export function uploadProjectName(
+  picked: ReadonlyArray<{ readonly relativePath: string }>,
+): string {
+  const first = picked[0]?.relativePath ?? "";
+  const raw = first.includes("/")
+    ? first.split("/")[0]!
+    : picked.length === 1
+      ? first.replace(/\.zip$/i, "")
+      : "";
+  return normalizeProjectName(raw) || "my-project";
+}
+
+/** A name not taken in `~/projects`: `site`, then `site-2`, `site-3`… */
+export function freeProjectName(name: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(name)) return name;
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${name}-${index}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${name}-${Date.now()}`;
+}
 
 function trimSlashes(path: string): string {
   return path.length > 1 ? path.replace(/\/+$/, "") : path;

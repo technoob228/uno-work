@@ -1,11 +1,16 @@
 /**
  * "New project" — a small dialog with the ways a project starts (sidebar
- * New ▾ → New project, the command palette, empty states):
+ * "+" → New project, the command palette, empty states):
  *
- * - A folder on this computer: click through the home folder (recent folders
- *   first). No typed paths, nothing outside the home folder.
- * - Empty project: a new folder `~/<name>`.
+ * - Upload from my computer (first, 01.10): a folder or a .zip from the
+ *   person's laptop goes to `~/projects/<name>` on the computer (zips are
+ *   unpacked in the browser), with progress; then a chat opens in it.
  * - From GitHub: clone a repository into `~/<repo>`.
+ * - Empty project: a new folder `~/<name>`.
+ * - A folder on this computer (Dev mode): click through the home folder
+ *   (recent folders first). No typed paths, nothing outside the home folder.
+ *
+ * The dialog always says which computer the project goes to.
  *
  * Every path ends the same way: the folder becomes a project and a new chat
  * opens in it. ("From a template" is not offered: there are no project
@@ -17,16 +22,31 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CodeIcon,
+  FileArchiveIcon,
   FolderIcon,
   FolderOpenIcon,
+  FolderUpIcon,
   HouseIcon,
   LockIcon,
+  MonitorIcon,
   PlusIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 
+import { useDevMode } from "../../devMode";
 import { ensureEnvironmentApi } from "../../environmentApi";
+import { useMachineRows } from "../../hooks/useMachineRows";
+import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
+import {
+  formatUploadBytes,
+  planProjectUpload,
+  uploadFilesIntoDirectory,
+  type ProjectUploadFile,
+} from "../../projectUpload";
+import { pickFolderForProjectUpload, readDroppedUploadFiles } from "../../projectUploadPickers";
+import { stripSharedTopFolder } from "../setup/goals";
+import { expandZips } from "../setup/siteUpload";
 import { GitHubIcon } from "../Icons";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { folderDisplayName, useFolderChats, useHomeFolderPath } from "../../hooks/useFolderChats";
@@ -47,9 +67,12 @@ import { Input } from "../ui/input";
 import { Skeleton } from "../ui/skeleton";
 import { Spinner } from "../ui/spinner";
 import {
-  NEW_PROJECT_SOURCES,
   type NewProjectSource,
   checkNewFolderName,
+  freeProjectName,
+  newProjectSources,
+  uploadProjectName,
+  uploadedProjectPath,
   checkRepositoryInput,
   clampToHome,
   homeCrumbs,
@@ -63,6 +86,11 @@ const SOURCE_COPY: Record<
   Exclude<NewProjectSource, "template">,
   { title: string; body: string; Icon: React.ComponentType<{ className?: string }> }
 > = {
+  upload: {
+    title: "Upload from my computer",
+    body: "A folder or a .zip from your laptop",
+    Icon: FolderUpIcon,
+  },
   folder: {
     title: "A folder on this computer",
     body: "Something you already have in your home folder",
@@ -91,6 +119,8 @@ export function NewProjectDialog() {
   const close = useNewProjectStore((state) => state.close);
   const { environmentId } = useActiveMachine();
   const home = useHomeFolderPath(environmentId);
+  const devMode = useDevMode();
+  const machineLabel = useMachineLabel(environmentId);
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? undefined : close())}>
@@ -100,15 +130,23 @@ export function NewProjectDialog() {
           <DialogDescription>
             A project is a folder with its chats. Everything the agent makes stays in it.
           </DialogDescription>
+          <p
+            className="flex items-center gap-1.5 text-xs text-muted-foreground"
+            data-testid="new-project-machine"
+          >
+            <MonitorIcon className="size-3.5" />
+            On computer <b className="font-medium text-foreground">{machineLabel}</b>
+          </p>
         </DialogHeader>
         {step === "choose" ? (
           <DialogPanel>
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-              {NEW_PROJECT_SOURCES.map((source) =>
+            <div className="flex flex-col gap-2">
+              {newProjectSources(devMode).map((source) =>
                 source === "template" ? null : (
                   <SourceCard
                     key={source}
                     source={source}
+                    primary={source === "upload"}
                     onClick={() => setStep(source as NewProjectStep)}
                   />
                 ),
@@ -124,6 +162,14 @@ export function NewProjectDialog() {
                 : "Looking for your home folder…"}
             </p>
           </DialogPanel>
+        ) : step === "upload" ? (
+          <UploadStep
+            environmentId={environmentId}
+            home={home}
+            machineLabel={machineLabel}
+            onBack={() => setStep("choose")}
+            onDone={close}
+          />
         ) : step === "folder" ? (
           <FolderStep
             environmentId={environmentId}
@@ -151,11 +197,18 @@ export function NewProjectDialog() {
   );
 }
 
+function useMachineLabel(environmentId: ReturnType<typeof useActiveMachine>["environmentId"]) {
+  const rows = useMachineRows();
+  return rows.find((row) => row.environmentId === environmentId)?.label ?? "this computer";
+}
+
 function SourceCard({
   source,
+  primary = false,
   onClick,
 }: {
   source: Exclude<NewProjectSource, "template">;
+  primary?: boolean;
   onClick: () => void;
 }) {
   const { title, body, Icon } = SOURCE_COPY[source];
@@ -164,14 +217,243 @@ function SourceCard({
       type="button"
       onClick={onClick}
       data-testid={`new-project-source-${source}`}
-      className="flex cursor-pointer flex-col items-start gap-2 rounded-xl border border-border/70 p-4 text-left outline-hidden transition-colors hover:border-primary/40 hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring"
+      className={cn(
+        "flex cursor-pointer items-center gap-3 rounded-xl border p-3.5 text-left outline-hidden transition-colors hover:border-primary/40 hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring",
+        primary ? "border-primary/40 bg-primary/[0.03]" : "border-border/70",
+      )}
     >
-      <span className="grid size-8 place-items-center rounded-lg bg-primary/10 text-primary">
+      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
         <Icon className="size-4" />
       </span>
-      <span className="text-sm font-semibold">{title}</span>
-      <span className="text-xs leading-snug text-muted-foreground">{body}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-semibold">{title}</span>
+        <span className="block text-xs leading-snug text-muted-foreground">{body}</span>
+      </span>
+      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground/60" />
     </button>
+  );
+}
+
+// ── Upload from my computer ──────────────────────────────────────────
+
+interface PickedUpload {
+  readonly files: ReadonlyArray<ProjectUploadFile>;
+  readonly name: string;
+  readonly fromZip: boolean;
+}
+
+/** Zips unpacked, a shared top folder (the picked folder itself) taken off. */
+async function preparePicked(raw: ReadonlyArray<ProjectUploadFile>): Promise<PickedUpload> {
+  const fromZip = raw.some((file) => /\.zip$/i.test(file.relativePath));
+  const name = uploadProjectName(raw);
+  const expanded = await expandZips(raw);
+  const files = stripSharedTopFolder(expanded, (file, relativePath) => ({ ...file, relativePath }));
+  return { files, name, fromZip };
+}
+
+function UploadStep({
+  environmentId,
+  home,
+  machineLabel,
+  onBack,
+  onDone,
+}: StepProps & { readonly machineLabel: string }) {
+  const [picked, setPicked] = useState<PickedUpload | null>(null);
+  const [reading, setReading] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number; bytes: string } | null>(
+    null,
+  );
+  const [error, setError] = useState<string | null>(null);
+  const zipInput = useRef<HTMLInputElement>(null);
+  const { ensureFolderProject } = useFolderChats(environmentId);
+  const { handleNewThread } = useNewThreadHandler();
+  const projectsListing = useQuery({
+    queryKey: ["uno-computer", "browse-folder", environmentId, `${home}/projects/`],
+    queryFn: () =>
+      ensureEnvironmentApi(environmentId).filesystem.browse({ partialPath: `${home}/projects/` }),
+    retry: false,
+  });
+  const taken = useMemo(
+    () => new Set((projectsListing.data?.entries ?? []).map((entry) => entry.name)),
+    [projectsListing.data],
+  );
+  const name = picked ? freeProjectName(picked.name, taken) : null;
+  const target = name ? uploadedProjectPath(home, name) : null;
+  const plan = useMemo(
+    () => (picked ? planProjectUpload(picked.files, { filterIgnored: true }) : null),
+    [picked],
+  );
+  const busy = progress !== null;
+
+  const accept = (raw: ReadonlyArray<ProjectUploadFile>) => {
+    if (raw.length === 0) return;
+    setError(null);
+    setReading(true);
+    void preparePicked(raw)
+      .then((next) => {
+        if (next.files.length === 0) {
+          setError("There are no files in it.");
+          return;
+        }
+        setPicked(next);
+      })
+      .catch((cause: unknown) => setError(errorMessage(cause, "Couldn't read these files.")))
+      .finally(() => setReading(false));
+  };
+
+  const submit = async () => {
+    if (!picked || !name || !target || !plan) return;
+    setError(null);
+    setProgress({ done: 0, total: plan.accepted.length, bytes: "" });
+    try {
+      const projectRef = await ensureFolderProject(target, name, { createFolder: true });
+      const api = ensureEnvironmentApi(environmentId);
+      await uploadFilesIntoDirectory(
+        { writeFile: (write) => api.projects.writeFile(write) },
+        {
+          targetDir: target,
+          files: picked.files,
+          filterIgnored: true,
+          onProgress: (next) =>
+            setProgress({
+              done: next.completedFiles,
+              total: next.totalFiles,
+              bytes: `${formatUploadBytes(next.sentBytes)} of ${formatUploadBytes(next.totalBytes)}`,
+            }),
+        },
+      );
+      await handleNewThread(projectRef, { envMode: "local" });
+      onDone();
+    } catch (cause) {
+      setError(errorMessage(cause, "The upload stopped. Try again."));
+    } finally {
+      setProgress(null);
+    }
+  };
+
+  return (
+    <>
+      <DialogPanel className="flex flex-col gap-3">
+        {busy ? null : <BackToOptions onBack={onBack} />}
+        {picked === null ? (
+          <div
+            onDragOver={(event) => {
+              event.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(event) => {
+              event.preventDefault();
+              setDragging(false);
+              void readDroppedUploadFiles(event.dataTransfer).then(accept);
+            }}
+            data-testid="new-project-upload-drop"
+            className={cn(
+              "flex flex-col items-center gap-3 rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors",
+              dragging ? "border-primary bg-primary/5" : "border-border",
+            )}
+          >
+            <FolderUpIcon className="size-7 text-muted-foreground" />
+            <p className="text-sm">
+              {reading ? "Reading the files…" : "Drop a folder or a .zip here"}
+            </p>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button
+                size="sm"
+                disabled={reading}
+                onClick={() => pickFolderForProjectUpload(accept)}
+                data-testid="new-project-upload-folder"
+              >
+                <FolderOpenIcon className="size-4" />
+                Choose a folder…
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={reading}
+                onClick={() => zipInput.current?.click()}
+              >
+                <FileArchiveIcon className="size-4" />
+                Choose a .zip…
+              </Button>
+              <input
+                ref={zipInput}
+                type="file"
+                accept=".zip,application/zip"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = "";
+                  if (file) accept([{ relativePath: file.name, size: file.size, blob: file }]);
+                }}
+              />
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Up to 2 GB. Zips are unpacked. node_modules, .git and other heavy folders are skipped.
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2 rounded-xl border border-border p-3.5">
+            <div className="flex items-center gap-2.5">
+              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-sky-500/10 text-sky-600">
+                {picked.fromZip ? (
+                  <FileArchiveIcon className="size-4" />
+                ) : (
+                  <FolderIcon className="size-4" />
+                )}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold">{name}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {plan
+                    ? `${plan.accepted.length} files · ${formatUploadBytes(plan.totalBytes)}`
+                    : null}
+                  {plan && plan.skipped.length > 0 ? ` · ${plan.skipped.length} skipped` : null}
+                </span>
+              </span>
+              {busy ? null : (
+                <Button size="xs" variant="ghost" onClick={() => setPicked(null)}>
+                  Change
+                </Button>
+              )}
+            </div>
+            {progress ? (
+              <div className="flex flex-col gap-1" role="status">
+                <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-primary transition-[width]"
+                    style={{
+                      width: `${progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0}%`,
+                    }}
+                  />
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  Uploading {progress.done} of {progress.total} files
+                  {progress.bytes ? ` · ${progress.bytes}` : ""}
+                </span>
+              </div>
+            ) : null}
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground" data-testid="new-project-destination">
+          Goes to{" "}
+          <span className="font-mono text-foreground">
+            {target ? tildePath(target, home) : "~/projects/<name>"}
+          </span>{" "}
+          on computer {machineLabel}.
+        </p>
+      </DialogPanel>
+      <StepFooter
+        error={error}
+        busy={busy}
+        disabled={picked === null || plan === null || plan.accepted.length === 0 || reading}
+        label={busy ? "Uploading…" : "Upload and open"}
+        icon={<FolderUpIcon />}
+        onSubmit={() => void submit()}
+        onCancel={onDone}
+      />
+    </>
   );
 }
 
@@ -456,7 +738,8 @@ function EmptyStep({ environmentId, home, onBack, onDone }: StepProps) {
           }}
         />
         <p className="text-xs text-muted-foreground">
-          {check.ok ? `Creates ${tildePath(`${home}/${check.name}`, home)}` : "Creates ~/<name>"}
+          {check.ok ? `Creates ${tildePath(`${home}/${check.name}`, home)}` : "Creates ~/<name>"} on
+          this computer.
         </p>
       </DialogPanel>
       <StepFooter

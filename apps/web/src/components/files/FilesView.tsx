@@ -26,6 +26,7 @@ import {
   GlobeIcon,
   LinkIcon,
   Loader2Icon,
+  MessageSquarePlusIcon,
   PlusIcon,
   PresentationIcon,
   RefreshCwIcon,
@@ -75,6 +76,7 @@ import {
 } from "./filesApi";
 import { registerBuiltInFileOpeners } from "./openers";
 import { PinPathButton } from "./PinPathButton";
+import { useFolderChats } from "../../hooks/useFolderChats";
 import { ShareDialog, SharedLinksDialog } from "./ShareDialog";
 import { blankExtensionFor, blankOfficeFile } from "../office/officeBlank";
 import { CloudBrowser } from "./CloudBrowser";
@@ -454,6 +456,17 @@ function FolderBrowser({
     void uploads.start({ targetDir, files });
   };
 
+  // "Start chat here" (01.10): the folder becomes a project and a chat opens in it.
+  const { chatInFolder } = useFolderChats(environmentId);
+  const startChatIn = (path: string) =>
+    void chatInFolder(path).catch((error: unknown) =>
+      toastManager.add({
+        type: "error",
+        title: "Couldn't start a chat here",
+        description: errorText(error),
+      }),
+    );
+
   const onDownload = (entry: FilesEntry) =>
     environmentId &&
     void downloadFile(environmentId, entry.path).catch((error: unknown) =>
@@ -575,6 +588,17 @@ function FolderBrowser({
             ) : null}
           </div>
           {currentPath ? <PinPathButton kind="folder" path={currentPath} /> : null}
+          {currentPath ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => startChatIn(currentPath)}
+              data-testid="files-start-chat-here"
+            >
+              <MessageSquarePlusIcon />
+              <span className="hidden md:inline">Start chat here</span>
+            </Button>
+          ) : null}
           <Button size="sm" variant="ghost" onClick={() => onDialog({ type: "links" })}>
             <LinkIcon />
             <span className="hidden lg:inline">Shared links</span>
@@ -833,6 +857,7 @@ function FolderBrowser({
                   onMove={() => onDialog({ type: "move", entries: [entry] })}
                   onDelete={() => onDialog({ type: "delete", entries: [entry] })}
                   onCopyToCloud={() => onDialog({ type: "toCloud", entries: [entry] })}
+                  onStartChat={() => startChatIn(entry.path)}
                 />
               ))}
             </tbody>
@@ -915,6 +940,7 @@ function FileRow({
   onMove,
   onDelete,
   onCopyToCloud,
+  onStartChat,
 }: {
   entry: FilesEntry;
   shared: boolean;
@@ -933,6 +959,8 @@ function FileRow({
   onMove: () => void;
   onDelete: () => void;
   onCopyToCloud: () => void;
+  /** Folders: a chat that works in this folder. */
+  onStartChat: () => void;
 }) {
   const kind = fileKindOf(entry.name, entry.kind === "directory");
   const Icon = kind === "folder" ? FolderOpenIcon : FILE_KIND_ICON[kind];
@@ -1027,6 +1055,12 @@ function FileRow({
               <EllipsisIcon />
             </MenuTrigger>
             <MenuPopup align="end" className="w-48">
+              {entry.kind === "directory" ? (
+                <MenuItem onClick={onStartChat} data-testid="files-row-start-chat">
+                  <MessageSquarePlusIcon />
+                  Start chat here
+                </MenuItem>
+              ) : null}
               <MenuItem onClick={onOpen}>
                 <FolderOpenIcon />
                 Open
