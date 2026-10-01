@@ -5,11 +5,12 @@
  * chat, as it does there) and with the chosen permissions. The chat sends the
  * task itself (the same send as Enter in a chat).
  *
- * On the start screen the same box takes a project: the paperclip ("Upload a
- * project") and a folder / .zip dropped anywhere on it (`onUploadProject` /
- * `onDropProject`). A newcomer's first screen (`minimal`) is only the box: no
- * folder chip, model or permissions pickers, no suggestions — the defaults a
- * new chat gets — and the empty box cycles through `examples`.
+ * Under the box one row of light pills (Misha 01.10, "simple hint buttons"):
+ * the starters (a click fills the box and focuses it — never sends), then
+ * "I have a project" (`onUploadProject`). A folder / .zip dropped anywhere on
+ * the box is taken too (`onDropProject`). A newcomer's first screen
+ * (`minimal`) is only the box and the pills: no folder chip, model or
+ * permissions pickers — the defaults a new chat gets.
  */
 import {
   DEFAULT_RUNTIME_MODE,
@@ -20,16 +21,14 @@ import {
 } from "@t3tools/contracts";
 import {
   ArrowUpIcon,
+  FolderIcon,
   FolderUpIcon,
   LockIcon,
   LockOpenIcon,
-  PaperclipIcon,
   PenLineIcon,
   type LucideIcon,
 } from "lucide-react";
 import { type DragEvent, useEffect, useMemo, useRef, useState } from "react";
-
-import { useMediaQuery } from "../../../hooks/useMediaQuery";
 
 import { cn } from "~/lib/utils";
 import { useComposerDraftStore } from "../../../composerDraftStore";
@@ -118,25 +117,22 @@ export function HomeComposer({
   onUploadProject,
   onDropProject,
   minimal = false,
-  examples,
   ariaLabel = "What should we do?",
 }: {
   environmentId: EnvironmentId | null;
   /** The folder the chip starts on (the setup's project); null = the home folder. */
   defaultFolder?: PickedFolder | null;
-  /** Chips under the composer (see homeStarters.ts); a click only pre-fills. */
-  starters: ReadonlyArray<HomeStarter>;
+  /** Pills under the composer (see homeStarters.ts); a click only pre-fills. */
+  starters: ReadonlyArray<Pick<HomeStarter, "id" | "label" | "prompt" | "folder">>;
   /** Starts a chat on `options` and sends `prompt`. */
   onStart: (prompt: string, options: HomeStartOptions) => Promise<void>;
   placeholder?: string;
-  /** "Upload a project" in the box (the start screen). */
+  /** The last pill, "I have a project": upload a folder / .zip. */
   onUploadProject?: () => void;
   /** Files / a folder dropped on the box. */
   onDropProject?: (data: DataTransfer) => void;
-  /** Only the box, the paperclip and the arrow (a newcomer's first screen). */
+  /** Only the box, the arrow and the pills (a newcomer's first screen; pills centred). */
   minimal?: boolean;
-  /** Shown in the empty box one at a time, every ~3 s (the first one with reduced motion). */
-  examples?: ReadonlyArray<string>;
   ariaLabel?: string;
 }) {
   // A first task handed over by the setup's last step is typed in, once.
@@ -155,8 +151,6 @@ export function HomeComposer({
   useEffect(() => {
     ref.current?.focus();
   }, []);
-
-  const example = useCyclingExample(examples);
 
   const submit = async () => {
     const prompt = text.trim();
@@ -223,7 +217,7 @@ export function HomeComposer({
             }
           }}
           rows={minimal ? 3 : 2}
-          placeholder={examples && examples.length > 0 ? undefined : placeholder}
+          placeholder={placeholder}
           aria-label={ariaLabel}
           data-testid="home-composer"
           className={cn(
@@ -231,32 +225,7 @@ export function HomeComposer({
             minimal ? "min-h-[88px] text-base" : "min-h-[64px] text-[15px]",
           )}
         />
-        {example !== null && text === "" ? (
-          <span
-            aria-hidden
-            className={cn(
-              "pointer-events-none absolute top-3.5 right-4 left-4 truncate text-muted-foreground/70 transition-opacity duration-300 ease-out motion-reduce:transition-none",
-              minimal ? "text-base" : "text-[15px]",
-              example.shown ? "opacity-100" : "opacity-0",
-            )}
-            data-testid="home-composer-example"
-          >
-            {example.text}
-          </span>
-        ) : null}
         <div className="flex items-center gap-1 px-2.5 pt-1 pb-2.5">
-          {onUploadProject ? (
-            <button
-              type="button"
-              onClick={onUploadProject}
-              aria-label="Upload a project"
-              title="Upload a project"
-              className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              data-testid="home-upload-project"
-            >
-              <PaperclipIcon className="size-4" />
-            </button>
-          ) : null}
           {minimal ? null : (
             <>
               <FolderChipMenu
@@ -339,8 +308,12 @@ export function HomeComposer({
           </button>
         </div>
       </div>
-      {!minimal && starters.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5" data-testid="home-starters">
+      {starters.length > 0 || onUploadProject ? (
+        // One row of light pills; on a narrow screen they wrap (no sideways scroll).
+        <div
+          className={cn("flex flex-wrap gap-2", minimal && "justify-center")}
+          data-testid="home-starters"
+        >
           {starters.map((starter) => (
             <button
               key={starter.id}
@@ -352,46 +325,35 @@ export function HomeComposer({
                 const input = ref.current;
                 if (input) {
                   input.focus();
-                  // Caret at the end, so "Make me an app that " continues naturally.
+                  // Caret at the end, so they can keep typing.
                   requestAnimationFrame(() =>
                     input.setSelectionRange(input.value.length, input.value.length),
                   );
                 }
               }}
-              className="max-w-full truncate rounded-full border border-border/70 bg-card/40 px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className={PILL}
+              data-testid="home-starter"
             >
-              {starter.label}
+              <span className="truncate">{starter.label}</span>
             </button>
           ))}
+          {onUploadProject ? (
+            <button
+              type="button"
+              onClick={onUploadProject}
+              className={PILL}
+              data-testid="home-upload-project"
+            >
+              <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              I have a project
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
   );
 }
 
-/** One example at a time with a soft fade; null without examples. */
-function useCyclingExample(
-  examples: ReadonlyArray<string> | undefined,
-): { text: string; shown: boolean } | null {
-  const reduced = useMediaQuery("(prefers-reduced-motion: reduce)");
-  const [index, setIndex] = useState(0);
-  const [shown, setShown] = useState(true);
-  const count = examples?.length ?? 0;
-  useEffect(() => {
-    if (count < 2 || reduced) return;
-    let swap: ReturnType<typeof setTimeout> | undefined;
-    const tick = setInterval(() => {
-      setShown(false);
-      swap = setTimeout(() => {
-        setIndex((i) => (i + 1) % count);
-        setShown(true);
-      }, 300);
-    }, 3200);
-    return () => {
-      clearInterval(tick);
-      if (swap) clearTimeout(swap);
-    };
-  }, [count, reduced]);
-  if (!examples || count === 0) return null;
-  return reduced ? { text: examples[0]!, shown: true } : { text: examples[index % count]!, shown };
-}
+/** The pill under the box — the same look for every hint and "I have a project". */
+const PILL =
+  "inline-flex max-w-full items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:outline-none";

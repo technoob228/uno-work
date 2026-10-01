@@ -98,15 +98,26 @@ const LAYOUT_SCHEMA = Schema.Array(Schema.String);
 const HOME_MORE_KEY = "uno-work:home:more-open";
 
 /**
- * A newcomer's first screen (Misha 01.10: "same goal, not overloaded"): the
- * empty box shows these one at a time — the same four as the console's /start.
+ * The hint pills under a simple Home's box (Misha 01.10: "simple hint
+ * buttons") — the same three as the console's /start. A click puts `prompt`
+ * in the box and focuses it; it never sends. "I have a project" follows them.
  */
 export const FIRST_SCREEN_EXAMPLES = [
-  "A site for my bakery that takes orders…",
-  "A Telegram bot that answers my clients…",
-  "Put my project online…",
-  "Clean up this spreadsheet…",
+  {
+    id: "example-site",
+    label: "A site for my business",
+    prompt: "A site for my business that takes orders and sends them to me",
+  },
+  { id: "example-bot", label: "A Telegram bot", prompt: "A Telegram bot that answers my customers" },
+  {
+    id: "example-assistant",
+    label: "An AI assistant for my work",
+    prompt: "An AI assistant that sorts my email and reminds me of tasks",
+  },
 ] as const;
+
+/** The first screen's box, empty (static — no rotating examples). */
+export const FIRST_SCREEN_PLACEHOLDER = "Describe it in your own words…";
 
 /** What this place is, in one line (Misha 27.09: Uno Work + a computer + an assistant read as a pile). */
 export const HOME_PLACE_LINE =
@@ -421,12 +432,16 @@ export function HomeStart({
   };
 
   if (!devMode) {
-    const simpleStarters = (
+    // The same row of pills as the first screen: their own hints (from their
+    // chats, apps, files, sites) when there are some, else the three examples.
+    const personalStarters = (
       setupHome.starters.length > 0 ? setupHome.starters : homeStarters
-    ).slice(0, 4);
+    ).filter((starter) => starter.source !== "generic");
+    const simpleStarters =
+      personalStarters.length > 0 ? personalStarters.slice(0, 3) : FIRST_SCREEN_EXAMPLES;
     const widgetBlocks = shown.filter((id) => !isHomeFixedBlockId(id));
     const waiting = attentionThreads(threads, now);
-    // A newcomer (no chats yet) gets one box and one quiet line, nothing else:
+    // A newcomer (no chats yet) gets one box, the pills and one quiet line, nothing else:
     // no greeting, next step, empty sections, widgets or Customize.
     // (The assistant's own chats — Telegram & co — don't count: not on Home.)
     const firstScreen =
@@ -471,11 +486,11 @@ export function HomeStart({
           </h1>
           <HomeComposer
             environmentId={environmentId}
-            starters={[]}
+            starters={FIRST_SCREEN_EXAMPLES}
             defaultFolder={setupHome.project}
             onStart={onStartTask}
             minimal
-            examples={FIRST_SCREEN_EXAMPLES}
+            placeholder={FIRST_SCREEN_PLACEHOLDER}
             ariaLabel="What do you want to build?"
             onUploadProject={() => openUpload()}
             onDropProject={dropProject}
