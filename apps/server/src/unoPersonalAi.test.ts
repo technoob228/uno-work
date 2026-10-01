@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { __unoDriverTest } from "./provider/Drivers/UnoDriver.ts";
+import { __unoDriverTest, personalModelLimit } from "./provider/Drivers/UnoDriver.ts";
 import {
   PersonalAiRequestError,
   fetchPersonalAiModels,
@@ -97,10 +97,17 @@ describe("Personal AI client", () => {
 describe("UnoDriver Personal AI provider", () => {
   const personal = normalizePersonalAiModel(QWEN)!;
 
+  it("keeps a small window usable and skips limits when the window is unknown", () => {
+    expect(personalModelLimit(32768)).toEqual({ context: 32768, input: 27307, output: 5461 });
+    expect(personalModelLimit(undefined)).toBeUndefined();
+    expect(personalModelLimit(0)).toBeUndefined();
+  });
+
   it("adds the Personal AI provider with quiet warm-up only when models exist", () => {
     const withPersonal = JSON.parse(
       __unoDriverTest.buildUnoConfigContent("uno-key", {}, undefined, [personal]),
     ) as {
+      compaction: unknown;
       provider: Record<
         string,
         { name: string; options: Record<string, unknown>; models: Record<string, unknown> }
@@ -111,7 +118,15 @@ describe("UnoDriver Personal AI provider", () => {
     expect(provider.options.baseURL).toBe("https://gpu.uno4.dev/v1");
     expect(provider.options.apiKey).toBe("{env:UNO_API_KEY}");
     expect(provider.options.headers).toEqual({ "X-Uno-Warmup": "quiet" });
-    expect(provider.models).toEqual({ "qwen3.8-27b-fp8": { name: "Qwen 3.8 27B" } });
+    // The window reaches opencode, so it compacts before the GPU rejects the
+    // prompt; prompt + answer never exceed the 120k the server allows.
+    expect(provider.models).toEqual({
+      "qwen3.8-27b-fp8": {
+        name: "Qwen 3.8 27B",
+        limit: { context: 120000, input: 103616, output: 16384 },
+      },
+    });
+    expect(withPersonal.compaction).toEqual({ auto: true, prune: true });
 
     const without = JSON.parse(__unoDriverTest.buildUnoConfigContent("uno-key", {})) as {
       provider: Record<string, unknown>;

@@ -164,6 +164,26 @@ describe("UnoDriver catalog normalization", () => {
     expect(config.enabled_providers).toEqual(["uno", "uno-russia"]);
   });
 
+  it("passes the gateway context window to opencode so long chats auto-compact", () => {
+    const smart = __unoDriverTest.normalizeUnoCatalogEntry("default", {
+      id: "smart",
+      display_name: "Smart",
+      context_length: 200000,
+    });
+    const small = __unoDriverTest.normalizeUnoCatalogEntry("default", {
+      id: "tiny",
+      display_name: "Tiny",
+      context_length: 32768,
+    });
+    const config = JSON.parse(
+      __unoDriverTest.buildUnoConfigContent("uno-key", { "uno/smart": smart!, "uno/tiny": small! }),
+    ) as { readonly provider: { readonly uno: { readonly models: Record<string, unknown> } } };
+    expect(config.provider.uno.models).toEqual({
+      smart: { name: "Smart", limit: { context: 200000, output: 32000 } },
+      tiny: { name: "Tiny", limit: { context: 32768, output: 8192 } },
+    });
+  });
+
   it("uses conservative fallbacks for known vision and image-generation model families", () => {
     const gemini = __unoDriverTest.normalizeUnoCatalogEntry("default", {
       id: "google/gemini-3.1-pro-preview",

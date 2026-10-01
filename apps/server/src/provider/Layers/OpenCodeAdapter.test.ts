@@ -853,17 +853,21 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
-  it.effect("deduplicates overlapping assistant text deltas after part updates", () =>
+  it.effect("appends assistant text deltas verbatim, keeping doubled letters and digits", () =>
     Effect.sync(() => {
-      const firstUpdate = mergeOpenCodeAssistantText(undefined, "Hello");
-      const overlapDelta = appendOpenCodeAssistantTextDelta(firstUpdate.latestText, "lo world");
-      const secondUpdate = mergeOpenCodeAssistantText(overlapDelta.nextText, "Hello world!");
+      const firstUpdate = mergeOpenCodeAssistantText(undefined, "Посмотрю ком");
+      const letters = appendOpenCodeAssistantTextDelta(firstUpdate.latestText, "мит, лимит 120 0");
+      const digits = appendOpenCodeAssistantTextDelta(letters.nextText, "00 токенов");
+      const finalUpdate = mergeOpenCodeAssistantText(
+        digits.nextText,
+        "Посмотрю коммит, лимит 120 000 токенов.",
+      );
 
       assert.deepEqual(
-        [firstUpdate.deltaToEmit, overlapDelta.deltaToEmit, secondUpdate.deltaToEmit],
-        ["Hello", " world", "!"],
+        [letters.deltaToEmit, digits.deltaToEmit, finalUpdate.deltaToEmit],
+        ["мит, лимит 120 0", "00 токенов", "."],
       );
-      assert.equal(secondUpdate.latestText, "Hello world!");
+      assert.equal(finalUpdate.latestText, "Посмотрю коммит, лимит 120 000 токенов.");
     }),
   );
 
@@ -907,6 +911,71 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           "Paris",
         );
       }),
+  );
+
+  it.effect("shows auto-compaction as a notice instead of the summary text", () =>
+    Effect.gen(function* () {
+      const sessionID = "http://127.0.0.1:9999/session";
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "message.updated",
+          properties: {
+            sessionID,
+            info: { id: "msg-summary", role: "assistant", mode: "compaction", summary: true },
+          },
+        },
+        {
+          type: "message.part.delta",
+          properties: {
+            sessionID,
+            messageID: "msg-summary",
+            partID: "part-summary",
+            field: "text",
+            delta: "## Objective\n- internal notes",
+          },
+        },
+        {
+          type: "message.updated",
+          properties: { sessionID, info: { id: "msg-answer", role: "assistant", mode: "build" } },
+        },
+        {
+          type: "message.part.delta",
+          properties: {
+            sessionID,
+            messageID: "msg-answer",
+            partID: "part-answer",
+            field: "text",
+            delta: "Готово",
+          },
+        },
+      ];
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-compaction-notice");
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.threadId === threadId &&
+            (event.type === "content.delta" || event.type === "thread.state.changed"),
+        ),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      assert.deepEqual(
+        events.map((event) =>
+          event.type === "content.delta" ? `delta:${event.payload.delta}` : event.type,
+        ),
+        ["thread.state.changed", "delta:Готово"],
+      );
+    }),
   );
 
   it.effect("writes provider-native observability records using the session thread id", () =>

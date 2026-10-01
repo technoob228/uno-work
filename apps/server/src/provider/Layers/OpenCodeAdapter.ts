@@ -118,6 +118,12 @@ interface OpenCodeSessionContext {
   readonly emittedTextByPartId: Map<string, string>;
   readonly visibleTextByPartId: Map<string, string>;
   readonly completedAssistantPartIds: Set<string>;
+  /**
+   * opencode's auto-compaction writes its summary ("## Objective …") as an
+   * assistant message. It is the harness's own note, not an answer: the chat
+   * shows "Context compacted" instead of the summary text.
+   */
+  readonly compactionMessageIds: Set<string>;
   readonly turns: Array<OpenCodeTurnSnapshot>;
   promptIdle: Deferred.Deferred<void> | undefined;
   activeTurnId: TurnId | undefined;
@@ -484,16 +490,6 @@ function commonPrefixLength(left: string, right: string): number {
   return index;
 }
 
-function suffixPrefixOverlap(text: string, delta: string): number {
-  const maxLength = Math.min(text.length, delta.length);
-  for (let length = maxLength; length > 0; length -= 1) {
-    if (text.endsWith(delta.slice(0, length))) {
-      return length;
-    }
-  }
-  return 0;
-}
-
 function resolveLatestAssistantText(previousText: string | undefined, nextText: string): string {
   if (previousText && previousText.length > nextText.length && previousText.startsWith(nextText)) {
     return previousText;
@@ -509,9 +505,13 @@ export function mergeOpenCodeAssistantText(
   readonly deltaToEmit: string;
 } {
   const latestText = resolveLatestAssistantText(previousText, nextText);
+  const previous = previousText ?? "";
+  const prefixLength = latestText.startsWith(previous)
+    ? previous.length
+    : commonPrefixLength(previous, latestText);
   return {
     latestText,
-    deltaToEmit: latestText.slice(commonPrefixLength(previousText ?? "", latestText)),
+    deltaToEmit: latestText.slice(prefixLength),
   };
 }
 
@@ -522,10 +522,12 @@ export function appendOpenCodeAssistantTextDelta(
   readonly nextText: string;
   readonly deltaToEmit: string;
 } {
-  const deltaToEmit = delta.slice(suffixPrefixOverlap(previousText, delta));
+  // message.part.delta is a pure append. Trimming a "repeated" prefix ate real
+  // double letters and digits at chunk boundaries ("коммит" -> "комит",
+  // "120 000" -> "120 0") — same fix as upstream t3code #2526.
   return {
-    nextText: previousText + deltaToEmit,
-    deltaToEmit,
+    nextText: previousText + delta,
+    deltaToEmit: delta,
   };
 }
 
@@ -1503,7 +1505,7 @@ export function makeOpenCodeAdapter(
       raw: unknown,
     ) {
       const text = textFromPart(part);
-      if (text === undefined) {
+      if (text === undefined || context.compactionMessageIds.has(part.messageID)) {
         return;
       }
       const previousText = context.emittedTextByPartId.get(part.id);
@@ -1657,8 +1659,25 @@ export function makeOpenCodeAdapter(
 
       switch (event.type) {
         case "message.updated": {
-          context.messageRoleById.set(event.properties.info.id, event.properties.info.role);
-          if (event.properties.info.role === "assistant") {
+          const info = event.properties.info;
+          context.messageRoleById.set(info.id, info.role);
+          if (
+            info.role === "assistant" &&
+            (info.summary === true || info.mode === "compaction") &&
+            !context.compactionMessageIds.has(info.id)
+          ) {
+            context.compactionMessageIds.add(info.id);
+            yield* emit({
+              ...(yield* buildEventBase({
+                threadId: context.session.threadId,
+                turnId,
+                raw: event,
+              })),
+              type: "thread.state.changed",
+              payload: { state: "compacted" },
+            });
+          }
+          if (info.role === "assistant") {
             for (const part of context.partById.values()) {
               if (part.messageID !== event.properties.info.id) {
                 continue;
@@ -1676,7 +1695,11 @@ export function makeOpenCodeAdapter(
 
         case "message.part.delta": {
           const delta = event.properties.delta;
-          if (typeof delta !== "string" || delta.length === 0) {
+          if (
+            typeof delta !== "string" ||
+            delta.length === 0 ||
+            context.compactionMessageIds.has(event.properties.messageID)
+          ) {
             break;
           }
           const existingPart = context.partById.get(event.properties.partID);
@@ -2230,6 +2253,7 @@ export function makeOpenCodeAdapter(
           visibleTextByPartId: new Map(),
           messageRoleById: new Map(),
           completedAssistantPartIds: new Set(),
+          compactionMessageIds: new Set(),
           turns: [],
           promptIdle: undefined,
           stallRetry: undefined,

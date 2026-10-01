@@ -214,7 +214,48 @@ type UnoCatalog = Record<string, UnoCatalogModel>;
 // reasoning part, so nothing leaks into the answer text.
 type UnoOpenCodeModelConfig = {
   readonly name: string;
+  readonly limit?: UnoOpenCodeModelLimit;
 };
+
+type UnoOpenCodeModelLimit = {
+  readonly context: number;
+  readonly input?: number;
+  readonly output: number;
+};
+
+// opencode only auto-compacts a chat when it knows the model's window: with no
+// `limit` it treats the window as 0 (never compact) and reserves its default
+// 32k for the answer. On Private GPU Qwen (120k window) that meant every long
+// chat died at ~88k input with "maximum context length" instead of compacting.
+const OPENCODE_DEFAULT_OUTPUT_TOKENS = 32_000;
+// Qwen on Private GPU never spent more than ~15k tokens (answer + thinking) on
+// one step on 30.09; 16k leaves the rest of the window to the conversation.
+const UNO_PERSONAL_OUTPUT_TOKENS = 16_384;
+
+function gatewayModelLimit(contextTokens: number | undefined): UnoOpenCodeModelLimit | undefined {
+  if (contextTokens === undefined || contextTokens <= 0) return undefined;
+  return {
+    context: contextTokens,
+    output: Math.min(OPENCODE_DEFAULT_OUTPUT_TOKENS, Math.floor(contextTokens / 4)),
+  };
+}
+
+/**
+ * The prompt is capped at window − answer, so prompt + answer always fits the
+ * GPU server. opencode compacts once a step's total crosses input − answer,
+ * which leaves one answer's worth of room for the next tool output.
+ */
+export function personalModelLimit(
+  contextTokens: number | undefined,
+): UnoOpenCodeModelLimit | undefined {
+  if (contextTokens === undefined || contextTokens <= 0) return undefined;
+  const output = Math.min(UNO_PERSONAL_OUTPUT_TOKENS, Math.floor(contextTokens / 6));
+  return { context: contextTokens, input: contextTokens - output, output };
+}
+
+function withLimit(name: string, limit: UnoOpenCodeModelLimit | undefined): UnoOpenCodeModelConfig {
+  return limit ? { name, limit } : { name };
+}
 
 export interface UnoGatewayModelResponse {
   readonly id?: unknown;
@@ -600,8 +641,9 @@ function buildUnoConfigContent(
   } = {},
 ): string {
   const streamTimeouts = options.streamTimeouts === true ? UNO_GATEWAY_STREAM_TIMEOUTS : {};
-  // opencode's config schema only accepts `{ name }`-shaped model entries;
-  // strip the local tier metadata before injecting via OPENCODE_CONFIG_CONTENT.
+  // opencode's config schema only accepts its own model fields (`name`,
+  // `limit`, …); strip the local tier metadata before injecting via
+  // OPENCODE_CONFIG_CONTENT.
   const opencodeModelsByProvider: Record<
     typeof UNO_PROVIDER_ID | typeof UNO_RUSSIA_PROVIDER_ID,
     Record<string, UnoOpenCodeModelConfig>
@@ -611,7 +653,10 @@ function buildUnoConfigContent(
   };
   for (const model of Object.values(models)) {
     const providerId = model.route === "russia" ? UNO_RUSSIA_PROVIDER_ID : UNO_PROVIDER_ID;
-    opencodeModelsByProvider[providerId][model.modelId] = { name: model.name };
+    opencodeModelsByProvider[providerId][model.modelId] = withLimit(
+      model.name,
+      gatewayModelLimit(model.contextLength),
+    );
   }
   // AI hours hide the old defaults from `/v1/models`, but chats saved on them
   // must keep running (the gateway remaps them to Smart / Fast). Kept in the
@@ -623,7 +668,10 @@ function buildUnoConfigContent(
   }
   for (const model of options.retainedModels ?? []) {
     const providerId = model.route === "russia" ? UNO_RUSSIA_PROVIDER_ID : UNO_PROVIDER_ID;
-    opencodeModelsByProvider[providerId][model.modelId] ??= { name: model.name };
+    opencodeModelsByProvider[providerId][model.modelId] ??= withLimit(
+      model.name,
+      gatewayModelLimit(model.contextLength),
+    );
   }
   const config: Record<string, unknown> = {
     $schema: "https://opencode.ai/config.json",
@@ -636,6 +684,9 @@ function buildUnoConfigContent(
     ],
     autoupdate: false,
     share: "disabled",
+    // Compact before the window is full and drop old tool outputs first, so
+    // long agent runs keep going instead of failing on the context limit.
+    compaction: { auto: true, prune: true },
     agent: {
       [UNO_IMAGE_GENERATION_AGENT_ID]: {
         description: "Generate images without exposing coding tools to image-generation models.",
@@ -680,7 +731,10 @@ function buildUnoConfigContent(
                 headers: { ...UNO_PERSONAL_WARMUP_HEADERS },
               },
               models: Object.fromEntries(
-                personalModels.map((model) => [model.id, { name: model.name }]),
+                personalModels.map((model) => [
+                  model.id,
+                  withLimit(model.name, personalModelLimit(model.contextTokens)),
+                ]),
               ),
             },
           }
