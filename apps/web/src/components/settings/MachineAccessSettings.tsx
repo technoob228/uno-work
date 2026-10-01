@@ -152,6 +152,15 @@ function MachineAccessCard({ box }: { readonly box: UnoBox }) {
 }
 
 export function MachineAccessSettings() {
+  return (
+    <SettingsPageContainer>
+      <MachineAccessSections />
+    </SettingsPageContainer>
+  );
+}
+
+/** The sections without the page (Settings → Computer embeds them). */
+export function MachineAccessSections() {
   const transport = accountTransport();
   const cloud = useQuery({
     queryKey: ["account", "cloudState"],
@@ -163,7 +172,7 @@ export function MachineAccessSettings() {
   );
 
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection title="Computer access">
         <SettingsRow
           title="What your computers may do in your Uno account"
@@ -179,6 +188,6 @@ export function MachineAccessSettings() {
       ) : (
         boxes.map((box) => <MachineAccessCard key={box.id} box={box} />)
       )}
-    </SettingsPageContainer>
+    </>
   );
 }

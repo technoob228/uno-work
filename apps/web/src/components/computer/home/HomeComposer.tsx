@@ -55,7 +55,7 @@ export interface HomeStartOptions {
  * The chat composer's model picker, fed the same way: this computer's
  * harnesses, the default a new chat would get, and a pick that sticks.
  */
-function useHomeModelPicker(environmentId: EnvironmentId | null) {
+export function useHomeModelPicker(environmentId: EnvironmentId | null) {
   const providers = useEnvironmentProviders(environmentId);
   const settings = useSettings();
   const stickyActiveProvider = useComposerDraftStore((store) => store.stickyActiveProvider);

@@ -20,11 +20,16 @@ import { Route as SettingsSourceControlRouteImport } from './routes/settings.sou
 import { Route as SettingsSecurityRouteImport } from './routes/settings.security'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsExtensionsRouteImport } from './routes/settings.extensions'
+import { Route as SettingsDeveloperRouteImport } from './routes/settings.developer'
 import { Route as SettingsConnectionsRouteImport } from './routes/settings.connections'
 import { Route as SettingsComputerAccessRouteImport } from './routes/settings.computer-access'
+import { Route as SettingsComputerRouteImport } from './routes/settings.computer'
 import { Route as SettingsBrowserRouteImport } from './routes/settings.browser'
+import { Route as SettingsAssistantsPhoneRouteImport } from './routes/settings.assistants-phone'
 import { Route as SettingsAssistantRouteImport } from './routes/settings.assistant'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
+import { Route as SettingsAiRouteImport } from './routes/settings.ai'
+import { Route as SettingsAccountRouteImport } from './routes/settings.account'
 import { Route as ChatSetupRouteImport } from './routes/_chat.setup'
 import { Route as ChatOfficeRouteImport } from './routes/_chat.office'
 import { Route as ChatMyUnoRouteImport } from './routes/_chat.my-uno'
@@ -107,6 +112,11 @@ const SettingsExtensionsRoute = SettingsExtensionsRouteImport.update({
   path: '/extensions',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsDeveloperRoute = SettingsDeveloperRouteImport.update({
+  id: '/developer',
+  path: '/developer',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsConnectionsRoute = SettingsConnectionsRouteImport.update({
   id: '/connections',
   path: '/connections',
@@ -117,9 +127,19 @@ const SettingsComputerAccessRoute = SettingsComputerAccessRouteImport.update({
   path: '/computer-access',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsComputerRoute = SettingsComputerRouteImport.update({
+  id: '/computer',
+  path: '/computer',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsBrowserRoute = SettingsBrowserRouteImport.update({
   id: '/browser',
   path: '/browser',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsAssistantsPhoneRoute = SettingsAssistantsPhoneRouteImport.update({
+  id: '/assistants-phone',
+  path: '/assistants-phone',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsAssistantRoute = SettingsAssistantRouteImport.update({
@@ -130,6 +150,16 @@ const SettingsAssistantRoute = SettingsAssistantRouteImport.update({
 const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
   id: '/archived',
   path: '/archived',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsAiRoute = SettingsAiRouteImport.update({
+  id: '/ai',
+  path: '/ai',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsAccountRoute = SettingsAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
   getParentRoute: () => SettingsRoute,
 } as any)
 const ChatSetupRoute = ChatSetupRouteImport.update({
@@ -293,11 +323,16 @@ export interface FileRoutesByFullPath {
   '/my-uno': typeof ChatMyUnoRoute
   '/office': typeof ChatOfficeRoute
   '/setup': typeof ChatSetupRoute
+  '/settings/account': typeof SettingsAccountRoute
+  '/settings/ai': typeof SettingsAiRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/assistant': typeof SettingsAssistantRoute
+  '/settings/assistants-phone': typeof SettingsAssistantsPhoneRoute
   '/settings/browser': typeof SettingsBrowserRoute
+  '/settings/computer': typeof SettingsComputerRoute
   '/settings/computer-access': typeof SettingsComputerAccessRoute
   '/settings/connections': typeof SettingsConnectionsRoute
+  '/settings/developer': typeof SettingsDeveloperRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/security': typeof SettingsSecurityRoute
@@ -335,11 +370,16 @@ export interface FileRoutesByTo {
   '/my-uno': typeof ChatMyUnoRoute
   '/office': typeof ChatOfficeRoute
   '/setup': typeof ChatSetupRoute
+  '/settings/account': typeof SettingsAccountRoute
+  '/settings/ai': typeof SettingsAiRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/assistant': typeof SettingsAssistantRoute
+  '/settings/assistants-phone': typeof SettingsAssistantsPhoneRoute
   '/settings/browser': typeof SettingsBrowserRoute
+  '/settings/computer': typeof SettingsComputerRoute
   '/settings/computer-access': typeof SettingsComputerAccessRoute
   '/settings/connections': typeof SettingsConnectionsRoute
+  '/settings/developer': typeof SettingsDeveloperRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/security': typeof SettingsSecurityRoute
@@ -381,11 +421,16 @@ export interface FileRoutesById {
   '/_chat/my-uno': typeof ChatMyUnoRoute
   '/_chat/office': typeof ChatOfficeRoute
   '/_chat/setup': typeof ChatSetupRoute
+  '/settings/account': typeof SettingsAccountRoute
+  '/settings/ai': typeof SettingsAiRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/assistant': typeof SettingsAssistantRoute
+  '/settings/assistants-phone': typeof SettingsAssistantsPhoneRoute
   '/settings/browser': typeof SettingsBrowserRoute
+  '/settings/computer': typeof SettingsComputerRoute
   '/settings/computer-access': typeof SettingsComputerAccessRoute
   '/settings/connections': typeof SettingsConnectionsRoute
+  '/settings/developer': typeof SettingsDeveloperRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/security': typeof SettingsSecurityRoute
@@ -428,11 +473,16 @@ export interface FileRouteTypes {
     | '/my-uno'
     | '/office'
     | '/setup'
+    | '/settings/account'
+    | '/settings/ai'
     | '/settings/archived'
     | '/settings/assistant'
+    | '/settings/assistants-phone'
     | '/settings/browser'
+    | '/settings/computer'
     | '/settings/computer-access'
     | '/settings/connections'
+    | '/settings/developer'
     | '/settings/extensions'
     | '/settings/general'
     | '/settings/security'
@@ -470,11 +520,16 @@ export interface FileRouteTypes {
     | '/my-uno'
     | '/office'
     | '/setup'
+    | '/settings/account'
+    | '/settings/ai'
     | '/settings/archived'
     | '/settings/assistant'
+    | '/settings/assistants-phone'
     | '/settings/browser'
+    | '/settings/computer'
     | '/settings/computer-access'
     | '/settings/connections'
+    | '/settings/developer'
     | '/settings/extensions'
     | '/settings/general'
     | '/settings/security'
@@ -515,11 +570,16 @@ export interface FileRouteTypes {
     | '/_chat/my-uno'
     | '/_chat/office'
     | '/_chat/setup'
+    | '/settings/account'
+    | '/settings/ai'
     | '/settings/archived'
     | '/settings/assistant'
+    | '/settings/assistants-phone'
     | '/settings/browser'
+    | '/settings/computer'
     | '/settings/computer-access'
     | '/settings/connections'
+    | '/settings/developer'
     | '/settings/extensions'
     | '/settings/general'
     | '/settings/security'
@@ -632,6 +692,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsExtensionsRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/developer': {
+      id: '/settings/developer'
+      path: '/developer'
+      fullPath: '/settings/developer'
+      preLoaderRoute: typeof SettingsDeveloperRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/connections': {
       id: '/settings/connections'
       path: '/connections'
@@ -646,11 +713,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsComputerAccessRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/computer': {
+      id: '/settings/computer'
+      path: '/computer'
+      fullPath: '/settings/computer'
+      preLoaderRoute: typeof SettingsComputerRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/browser': {
       id: '/settings/browser'
       path: '/browser'
       fullPath: '/settings/browser'
       preLoaderRoute: typeof SettingsBrowserRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/assistants-phone': {
+      id: '/settings/assistants-phone'
+      path: '/assistants-phone'
+      fullPath: '/settings/assistants-phone'
+      preLoaderRoute: typeof SettingsAssistantsPhoneRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/assistant': {
@@ -665,6 +746,20 @@ declare module '@tanstack/react-router' {
       path: '/archived'
       fullPath: '/settings/archived'
       preLoaderRoute: typeof SettingsArchivedRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/ai': {
+      id: '/settings/ai'
+      path: '/ai'
+      fullPath: '/settings/ai'
+      preLoaderRoute: typeof SettingsAiRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/account': {
+      id: '/settings/account'
+      path: '/account'
+      fullPath: '/settings/account'
+      preLoaderRoute: typeof SettingsAccountRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/_chat/setup': {
@@ -942,11 +1037,16 @@ const SettingsEnvironmentEnvironmentIdRouteWithChildren =
   )
 
 interface SettingsRouteChildren {
+  SettingsAccountRoute: typeof SettingsAccountRoute
+  SettingsAiRoute: typeof SettingsAiRoute
   SettingsArchivedRoute: typeof SettingsArchivedRoute
   SettingsAssistantRoute: typeof SettingsAssistantRoute
+  SettingsAssistantsPhoneRoute: typeof SettingsAssistantsPhoneRoute
   SettingsBrowserRoute: typeof SettingsBrowserRoute
+  SettingsComputerRoute: typeof SettingsComputerRoute
   SettingsComputerAccessRoute: typeof SettingsComputerAccessRoute
   SettingsConnectionsRoute: typeof SettingsConnectionsRoute
+  SettingsDeveloperRoute: typeof SettingsDeveloperRoute
   SettingsExtensionsRoute: typeof SettingsExtensionsRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsSecurityRoute: typeof SettingsSecurityRoute
@@ -962,11 +1062,16 @@ interface SettingsRouteChildren {
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsAccountRoute: SettingsAccountRoute,
+  SettingsAiRoute: SettingsAiRoute,
   SettingsArchivedRoute: SettingsArchivedRoute,
   SettingsAssistantRoute: SettingsAssistantRoute,
+  SettingsAssistantsPhoneRoute: SettingsAssistantsPhoneRoute,
   SettingsBrowserRoute: SettingsBrowserRoute,
+  SettingsComputerRoute: SettingsComputerRoute,
   SettingsComputerAccessRoute: SettingsComputerAccessRoute,
   SettingsConnectionsRoute: SettingsConnectionsRoute,
+  SettingsDeveloperRoute: SettingsDeveloperRoute,
   SettingsExtensionsRoute: SettingsExtensionsRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsSecurityRoute: SettingsSecurityRoute,

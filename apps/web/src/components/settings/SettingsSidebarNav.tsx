@@ -3,6 +3,7 @@ import { ArrowLeftIcon, ChevronDownIcon } from "lucide-react";
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
 
 import { isWebApp } from "../../webMode";
+import { useDevMode } from "../../devMode";
 import { type FeatureFlagKey, resolveFeatureFlag } from "../../featureFlags";
 import { useFeatureFlagOverrides } from "../../hooks/useFeatureFlags";
 import { cn } from "../../lib/utils";
@@ -36,6 +37,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const flagOverrides = useFeatureFlagOverrides();
   const model = useSettingsScopeModel(pathname);
   const { location, selectedMachine, unknownMachine } = model;
+  // 01.10: five entries without Dev mode; with it, everything after them.
+  const devMode = useDevMode();
 
   const groups = useMemo(() => {
     const isFlagEnabled = (flag: FeatureFlagKey | undefined) =>
@@ -48,8 +51,13 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         : selectedMachine
           ? { environmentId: selectedMachine.environmentId, label: selectedMachine.label }
           : null;
-    return buildSettingsNavGroups({ isWebApp, isFlagEnabled, machine });
-  }, [flagOverrides, location.environmentId, selectedMachine, unknownMachine]);
+    return buildSettingsNavGroups({
+      isWebApp,
+      isFlagEnabled,
+      machine,
+      mode: devMode ? "developer" : "simple",
+    });
+  }, [devMode, flagOverrides, location.environmentId, selectedMachine, unknownMachine]);
 
   const handleSectionClick = useCallback(
     (to: string) => {
@@ -144,7 +152,7 @@ function NavGroupHeading({
   readonly group: SettingsNavGroup;
   readonly model: SettingsScopeModel;
 }) {
-  if (group.kind === "app") {
+  if (group.kind === "app" || group.kind === "simple") {
     return <SidebarGroupLabel className={GROUP_HEADING_CLASS}>{group.heading}</SidebarGroupLabel>;
   }
 

@@ -3,6 +3,11 @@ import { useEffect, useState } from "react";
 const DEV_MODE_STORAGE_KEY = "ui_dev_mode";
 const DEV_MODE_EVENT = "uno:dev-mode-change";
 
+/** Dev mode as stored on this device (outside React: route guards, landing pages). */
+export function readDevMode(): boolean {
+  return readStoredDevMode();
+}
+
 function readStoredDevMode(): boolean {
   if (typeof window === "undefined") return false;
   return window.localStorage.getItem(DEV_MODE_STORAGE_KEY) === "1";

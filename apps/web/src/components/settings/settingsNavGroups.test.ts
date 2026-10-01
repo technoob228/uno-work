@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   APP_NAV_GROUP_HEADING,
   buildSettingsNavGroups,
+  isSimpleSettingsPath,
   machineNavGroupHeading,
 } from "./settingsNavGroups.ts";
 
@@ -92,5 +93,41 @@ describe("buildSettingsNavGroups", () => {
 
   it("names the machine in plain words", () => {
     expect(machineNavGroupHeading("Home Mac")).toBe("Machine: Home Mac");
+  });
+});
+
+describe("simple settings (01.10)", () => {
+  it("shows five entries without Dev mode", () => {
+    const groups = buildSettingsNavGroups({
+      isWebApp: true,
+      isFlagEnabled: allFlagsOn,
+      machine: BOX,
+      mode: "simple",
+    });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.entries.map((entry) => entry.label)).toEqual([
+      "Account & plan",
+      "AI",
+      "Assistants & phone",
+      "Computer",
+      "Developer",
+    ]);
+  });
+
+  it("puts everything after the five in Dev mode", () => {
+    const groups = buildSettingsNavGroups({
+      isWebApp: false,
+      isFlagEnabled: allFlagsOn,
+      machine: BOX,
+      mode: "developer",
+    });
+    expect(groups.map((group) => group.kind)).toEqual(["simple", "app", "machine"]);
+    expect(groups[1]!.entries.map((entry) => entry.label)).toContain("Labs");
+    expect(groups[2]!.entries.map((entry) => entry.label)).toContain("Harnesses");
+  });
+
+  it("knows its pages", () => {
+    expect(isSimpleSettingsPath("/settings/ai")).toBe(true);
+    expect(isSimpleSettingsPath("/settings/app/general")).toBe(false);
   });
 });

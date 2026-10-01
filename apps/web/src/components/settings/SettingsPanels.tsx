@@ -1,11 +1,10 @@
 import { ArchiveIcon, ArchiveX } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { type DesktopUpdateChannel, type ScopedThreadRef } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { DEFAULT_UNIFIED_SETTINGS, UNO_GATEWAY_BASE_URL } from "@t3tools/contracts/settings";
-import { Equal } from "effect";
 import { APP_BASE_NAME, APP_VERSION } from "../../branding";
 import { isLoopbackHostname } from "../../environments/primary";
 import { isWebApp } from "../../webMode";
@@ -43,7 +42,7 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AppearanceLayoutSection } from "./AppearanceLayoutSection";
 import { NotificationsSection } from "./NotificationsSection";
-import { DRIVER_OPTIONS } from "./providerDriverMeta";
+import { changedDeviceSettingLabels, deviceRestorePatch } from "./settingsRestore.logic";
 import {
   SettingResetButton,
   SettingsPageContainer,
@@ -74,10 +73,6 @@ const TIMESTAMP_FORMAT_LABELS = {
   "24-hour": "24-hour",
 } as const;
 
-const PROVIDER_SETTINGS = DRIVER_OPTIONS.map((definition) => ({
-  provider: definition.value,
-}));
-
 function AboutVersionTitle() {
   return (
     <span className="inline-flex items-center gap-2">
@@ -87,7 +82,7 @@ function AboutVersionTitle() {
   );
 }
 
-function AboutVersionSection() {
+function AboutVersionSection({ simple = false }: { simple?: boolean }) {
   const queryClient = useQueryClient();
   const updateStateQuery = useDesktopUpdateState();
   const [isChangingUpdateChannel, setIsChangingUpdateChannel] = useState(false);
@@ -247,36 +242,38 @@ function AboutVersionSection() {
           </Tooltip>
         }
       />
-      <SettingsRow
-        title="Update track"
-        description="Stable follows full releases. Nightly follows the nightly desktop channel and can switch back to stable immediately."
-        control={
-          <Select
-            value={selectedUpdateChannel}
-            onValueChange={(value) => {
-              handleUpdateChannelChange(value as DesktopUpdateChannel);
-            }}
-          >
-            <SelectTrigger
-              className="w-full sm:w-40"
-              aria-label="Update track"
-              disabled={!hasDesktopBridge || isChangingUpdateChannel}
+      {simple ? null : (
+        <SettingsRow
+          title="Update track"
+          description="Stable follows full releases. Nightly follows the nightly desktop channel and can switch back to stable immediately."
+          control={
+            <Select
+              value={selectedUpdateChannel}
+              onValueChange={(value) => {
+                handleUpdateChannelChange(value as DesktopUpdateChannel);
+              }}
             >
-              <SelectValue>
-                {selectedUpdateChannel === "nightly" ? "Nightly" : "Stable"}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectPopup align="end" alignItemWithTrigger={false}>
-              <SelectItem hideIndicator value="latest">
-                Stable
-              </SelectItem>
-              <SelectItem hideIndicator value="nightly">
-                Nightly
-              </SelectItem>
-            </SelectPopup>
-          </Select>
-        }
-      />
+              <SelectTrigger
+                className="w-full sm:w-40"
+                aria-label="Update track"
+                disabled={!hasDesktopBridge || isChangingUpdateChannel}
+              >
+                <SelectValue>
+                  {selectedUpdateChannel === "nightly" ? "Nightly" : "Stable"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="latest">
+                  Stable
+                </SelectItem>
+                <SelectItem hideIndicator value="nightly">
+                  Nightly
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+      )}
     </>
   );
 }
@@ -469,105 +466,31 @@ function UnoCodeInstallSection() {
 export function useSettingsRestore(onRestored?: () => void) {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
-  const { resetSettings } = useUpdateSettings();
+  const { updateSettings } = useUpdateSettings();
 
-  const isGitWritingModelDirty = !Equal.equals(
-    settings.textGenerationModelSelection ?? null,
-    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
-  );
-  // A provider surface is "dirty" if either the legacy per-kind
-  // `settings.providers[kind]` struct differs from defaults (for users
-  // on pre-migration data) or the new `settings.providerInstances` map
-  // has any entries (every edit to a default slot promotes it into an
-  // explicit entry, so any key in that map represents user intent to
-  // diverge from factory defaults). Checking both keeps the Restore
-  // Defaults chip accurate throughout the legacy→instance migration.
-  const areProviderSettingsDirty =
-    PROVIDER_SETTINGS.some((providerSettings) => {
-      type LegacyProviderSettings = (typeof settings.providers)[keyof typeof settings.providers];
-      const currentProviders = settings.providers as Record<
-        string,
-        LegacyProviderSettings | undefined
-      >;
-      const defaultProviders = DEFAULT_UNIFIED_SETTINGS.providers as Record<
-        string,
-        LegacyProviderSettings | undefined
-      >;
-      const currentSettings = currentProviders[providerSettings.provider];
-      const defaultSettings = defaultProviders[providerSettings.provider];
-      return !Equal.equals(currentSettings, defaultSettings);
-    }) ||
-    Object.keys(settings.providerInstances ?? {}).length > 0 ||
-    Object.keys(settings.providerModelPreferences ?? {}).length > 0 ||
-    (settings.favorites ?? []).length > 0;
-
+  // Device preferences only (01.10): the old reset also sent the machine its
+  // defaults — `uno.apiKey: ""`, `pins: []`, `setup: {}`… See
+  // settingsRestore.logic.ts.
   const changedSettingLabels = useMemo(
-    () => [
-      ...(theme !== "system" ? ["Theme"] : []),
-      ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
-        ? ["Time format"]
-        : []),
-      ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
-        ? ["Diff line wrapping"]
-        : []),
-      ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
-        ? ["Diff whitespace changes"]
-        : []),
-      ...(settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar
-        ? ["Auto-open task panel"]
-        : []),
-      ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
-        ? ["Assistant output"]
-        : []),
-      ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
-        ? ["New chat mode"]
-        : []),
-      ...(settings.agentThreadsScope !== DEFAULT_UNIFIED_SETTINGS.agentThreadsScope
-        ? ["Cross-project chats"]
-        : []),
-      ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
-        ? ["Add project base directory"]
-        : []),
-      ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
-        ? ["Archive confirmation"]
-        : []),
-      ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
-        ? ["Delete confirmation"]
-        : []),
-      ...(isGitWritingModelDirty ? ["Git writing model"] : []),
-      ...(areProviderSettingsDirty ? ["Providers"] : []),
-    ],
-    [
-      areProviderSettingsDirty,
-      isGitWritingModelDirty,
-      settings.autoOpenPlanSidebar,
-      settings.confirmThreadArchive,
-      settings.confirmThreadDelete,
-      settings.addProjectBaseDirectory,
-      settings.agentThreadsScope,
-      settings.defaultThreadEnvMode,
-      settings.diffIgnoreWhitespace,
-      settings.diffWordWrap,
-      settings.enableAssistantStreaming,
-      settings.timestampFormat,
-      theme,
-    ],
+    () => changedDeviceSettingLabels(settings, theme),
+    [settings, theme],
   );
 
   const restoreDefaults = useCallback(async () => {
     if (changedSettingLabels.length === 0) return;
     const api = readLocalApi();
     const confirmed = await (api ?? ensureLocalApi()).dialogs.confirm(
-      ["Restore default settings?", `This will reset: ${changedSettingLabels.join(", ")}.`].join(
-        "\n",
-      ),
+      [
+        "Restore default settings on this device?",
+        `This will reset: ${changedSettingLabels.join(", ")}.`,
+      ].join("\n"),
     );
     if (!confirmed) return;
 
     setTheme("system");
-    resetSettings();
+    void updateSettings(deviceRestorePatch());
     onRestored?.();
-  }, [changedSettingLabels, onRestored, resetSettings, setTheme]);
+  }, [changedSettingLabels, onRestored, setTheme, updateSettings]);
 
   return {
     changedSettingLabels,
@@ -575,7 +498,19 @@ export function useSettingsRestore(onRestored?: () => void) {
   };
 }
 
-export function GeneralSettingsPanel() {
+/**
+ * App → General. `simple` (Settings → Account & plan, without Dev mode)
+ * leaves out what only developers change: diff defaults, the task panel,
+ * the layout options, the update track, Uno Code and the Office source link.
+ */
+export function GeneralSettingsPanel({
+  simple = false,
+  before,
+}: {
+  simple?: boolean;
+  /** Sections shown above General (Account & plan puts the account there). */
+  before?: ReactNode;
+} = {}) {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
@@ -584,6 +519,7 @@ export function GeneralSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      {before}
       {showWebLogout ? (
         <SettingsSection title="Uno account">
           <SettingsRow
@@ -708,81 +644,85 @@ export function GeneralSettingsPanel() {
           }
         />
 
-        <SettingsRow
-          title="Diff line wrapping"
-          description="Set the default wrap state when the diff panel opens."
-          resetAction={
-            settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap ? (
-              <SettingResetButton
-                label="diff line wrapping"
-                onClick={() =>
-                  updateSettings({
-                    diffWordWrap: DEFAULT_UNIFIED_SETTINGS.diffWordWrap,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.diffWordWrap}
-              onCheckedChange={(checked) => updateSettings({ diffWordWrap: Boolean(checked) })}
-              aria-label="Wrap diff lines by default"
-            />
-          }
-        />
-
-        <SettingsRow
-          title="Hide whitespace changes"
-          description="Set whether the diff panel ignores whitespace-only edits by default."
-          resetAction={
-            settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace ? (
-              <SettingResetButton
-                label="diff whitespace changes"
-                onClick={() =>
-                  updateSettings({
-                    diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.diffIgnoreWhitespace}
-              onCheckedChange={(checked) =>
-                updateSettings({ diffIgnoreWhitespace: Boolean(checked) })
+        {simple ? null : (
+          <>
+            <SettingsRow
+              title="Diff line wrapping"
+              description="Set the default wrap state when the diff panel opens."
+              resetAction={
+                settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap ? (
+                  <SettingResetButton
+                    label="diff line wrapping"
+                    onClick={() =>
+                      updateSettings({
+                        diffWordWrap: DEFAULT_UNIFIED_SETTINGS.diffWordWrap,
+                      })
+                    }
+                  />
+                ) : null
               }
-              aria-label="Hide whitespace changes by default"
-            />
-          }
-        />
-
-        <SettingsRow
-          title="Auto-open task panel"
-          description="Open the right-side plan and task panel automatically when steps appear."
-          resetAction={
-            settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar ? (
-              <SettingResetButton
-                label="auto-open task panel"
-                onClick={() =>
-                  updateSettings({
-                    autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.autoOpenPlanSidebar}
-              onCheckedChange={(checked) =>
-                updateSettings({ autoOpenPlanSidebar: Boolean(checked) })
+              control={
+                <Switch
+                  checked={settings.diffWordWrap}
+                  onCheckedChange={(checked) => updateSettings({ diffWordWrap: Boolean(checked) })}
+                  aria-label="Wrap diff lines by default"
+                />
               }
-              aria-label="Open the task panel automatically"
             />
-          }
-        />
+
+            <SettingsRow
+              title="Hide whitespace changes"
+              description="Set whether the diff panel ignores whitespace-only edits by default."
+              resetAction={
+                settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace ? (
+                  <SettingResetButton
+                    label="diff whitespace changes"
+                    onClick={() =>
+                      updateSettings({
+                        diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
+                      })
+                    }
+                  />
+                ) : null
+              }
+              control={
+                <Switch
+                  checked={settings.diffIgnoreWhitespace}
+                  onCheckedChange={(checked) =>
+                    updateSettings({ diffIgnoreWhitespace: Boolean(checked) })
+                  }
+                  aria-label="Hide whitespace changes by default"
+                />
+              }
+            />
+
+            <SettingsRow
+              title="Auto-open task panel"
+              description="Open the right-side plan and task panel automatically when steps appear."
+              resetAction={
+                settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar ? (
+                  <SettingResetButton
+                    label="auto-open task panel"
+                    onClick={() =>
+                      updateSettings({
+                        autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
+                      })
+                    }
+                  />
+                ) : null
+              }
+              control={
+                <Switch
+                  checked={settings.autoOpenPlanSidebar}
+                  onCheckedChange={(checked) =>
+                    updateSettings({ autoOpenPlanSidebar: Boolean(checked) })
+                  }
+                  aria-label="Open the task panel automatically"
+                />
+              }
+            />
+          </>
+        )}
 
         <SettingsRow
           title="Archive confirmation"
@@ -837,35 +777,39 @@ export function GeneralSettingsPanel() {
         />
       </SettingsSection>
 
-      <AppearanceLayoutSection />
+      {simple ? null : <AppearanceLayoutSection />}
 
       <NotificationsSection />
 
       <SettingsSection title="About">
         {isElectron ? (
-          <AboutVersionSection />
+          <AboutVersionSection simple={simple} />
         ) : (
           <SettingsRow
             title={<AboutVersionTitle />}
             description="Current version of the application."
           />
         )}
-        {isElectron ? <UnoCodeInstallSection /> : null}
-        <SettingsRow
-          title="Office editor"
-          description="Word, Excel and PowerPoint files open in ONLYOFFICE, which is AGPL-3.0. Our changes to it are published."
-          control={
-            <a
-              href={OFFICE_SOURCE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-primary underline-offset-4 hover:underline"
-              data-testid="about-office-source"
-            >
-              {OFFICE_SOURCE_LABEL}
-            </a>
-          }
-        />
+        {isElectron && !simple ? <UnoCodeInstallSection /> : null}
+        {simple ? null : (
+          <>
+            <SettingsRow
+              title="Office editor"
+              description="Word, Excel and PowerPoint files open in ONLYOFFICE, which is AGPL-3.0. Our changes to it are published."
+              control={
+                <a
+                  href={OFFICE_SOURCE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-primary underline-offset-4 hover:underline"
+                  data-testid="about-office-source"
+                >
+                  {OFFICE_SOURCE_LABEL}
+                </a>
+              }
+            />
+          </>
+        )}
       </SettingsSection>
     </SettingsPageContainer>
   );

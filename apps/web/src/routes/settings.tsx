@@ -13,6 +13,11 @@ import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { SettingsScopeSwitcher } from "../components/settings/SettingsScopeSwitcher";
 import { settingsLandingPath } from "../components/settings/settingsScopeRoutes";
 import {
+  SIMPLE_SETTINGS_LANDING,
+  isSimpleSettingsPath,
+} from "../components/settings/settingsNavGroups";
+import { readDevMode, useDevMode } from "../devMode";
+import {
   SettingsScopeBadgeContext,
   settingsScopeBadgeInfo,
   useSettingsScopeModel,
@@ -72,12 +77,19 @@ function SettingsContentLayout() {
   const canGoBack = useCanGoBack();
   const [restoreSignal, setRestoreSignal] = useState(0);
   const scopeModel = useSettingsScopeModel(location.pathname);
-  const badgeInfo = settingsScopeBadgeInfo(scopeModel);
+  // 01.10: the five simple pages mix this app and the computer on purpose, so
+  // they carry no "applies to" badge or switcher; nor does anything without
+  // Dev mode.
+  const devMode = useDevMode();
+  const simplePage = isSimpleSettingsPath(location.pathname);
+  const showScope = devMode && !simplePage;
+  const badgeInfo = showScope ? settingsScopeBadgeInfo(scopeModel) : null;
   // Restoring defaults only ever resets this device's own preferences, so it
   // is offered on the app scope's general page and nowhere else — a button
   // that could mean "reset a daemon" depending on the page would be worse
   // than no button.
-  const showRestoreDefaults = location.pathname === "/settings/app/general";
+  const showRestoreDefaults =
+    location.pathname === "/settings/app/general" || location.pathname === SIMPLE_SETTINGS_LANDING;
   const handleRestored = () => setRestoreSignal((value) => value + 1);
   const navigateBackWithinApp = useCallback(() => {
     if (canGoBack) {
@@ -113,9 +125,11 @@ function SettingsContentLayout() {
               {/* The browser build serves one machine, so the control mostly
                   reads "This app | <that box>" — still the one place that
                   says which of the two a page belongs to. */}
-              <div className="ms-1 min-w-0">
-                <SettingsScopeSwitcher model={scopeModel} />
-              </div>
+              {showScope ? (
+                <div className="ms-1 min-w-0">
+                  <SettingsScopeSwitcher model={scopeModel} />
+                </div>
+              ) : null}
               {showRestoreDefaults ? (
                 <div className="ms-auto flex items-center gap-2">
                   <RestoreDefaultsButton onRestored={handleRestored} />
@@ -133,9 +147,11 @@ function SettingsContentLayout() {
             <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
               Settings
             </span>
-            <div className="no-drag ms-3 min-w-0">
-              <SettingsScopeSwitcher model={scopeModel} />
-            </div>
+            {showScope ? (
+              <div className="no-drag ms-3 min-w-0">
+                <SettingsScopeSwitcher model={scopeModel} />
+              </div>
+            ) : null}
             {showRestoreDefaults ? (
               <div className="no-drag ms-auto flex items-center gap-2">
                 <RestoreDefaultsButton onRestored={handleRestored} />
@@ -173,6 +189,9 @@ export const Route = createFileRoute("/settings")({
       throw redirect({ to: "/pair", replace: true });
     }
 
+    if (location.pathname === "/settings" && !readDevMode()) {
+      throw redirect({ to: SIMPLE_SETTINGS_LANDING, replace: true });
+    }
     if (location.pathname === "/settings") {
       // Come back to the machine the user was configuring last, as long as
       // the app still knows it; otherwise the app's own general page.

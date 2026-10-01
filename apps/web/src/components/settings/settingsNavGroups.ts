@@ -17,6 +17,8 @@ import {
   ArchiveIcon,
   BotIcon,
   CircleUserIcon,
+  CodeIcon,
+  MonitorIcon,
   FlaskConicalIcon,
   GitBranchIcon,
   GlobeIcon,
@@ -120,6 +122,11 @@ export interface SettingsNavEntry {
 
 export type SettingsNavGroup =
   | {
+      readonly kind: "simple";
+      readonly heading: string;
+      readonly entries: ReadonlyArray<SettingsNavEntry>;
+    }
+  | {
       readonly kind: "app";
       readonly heading: string;
       readonly entries: ReadonlyArray<SettingsNavEntry>;
@@ -132,6 +139,36 @@ export type SettingsNavGroup =
     };
 
 export const APP_NAV_GROUP_HEADING = "This app";
+
+/**
+ * Settings in five (simplification 01.10). Without Dev mode these are the
+ * whole of Settings; with it, the full list (this app, the machine) follows.
+ * Nothing behind them was removed — the pages stay at their addresses.
+ */
+export const SIMPLE_SETTINGS_PATHS = {
+  account: "/settings/account",
+  ai: "/settings/ai",
+  assistants: "/settings/assistants-phone",
+  computer: "/settings/computer",
+  developer: "/settings/developer",
+} as const;
+
+export const SIMPLE_NAV_ENTRIES: ReadonlyArray<SettingsNavEntry> = [
+  { label: "Account & plan", to: SIMPLE_SETTINGS_PATHS.account, icon: CircleUserIcon },
+  { label: "AI", to: SIMPLE_SETTINGS_PATHS.ai, icon: SparklesIcon },
+  { label: "Assistants & phone", to: SIMPLE_SETTINGS_PATHS.assistants, icon: SmartphoneIcon },
+  { label: "Computer", to: SIMPLE_SETTINGS_PATHS.computer, icon: MonitorIcon },
+  { label: "Developer", to: SIMPLE_SETTINGS_PATHS.developer, icon: CodeIcon },
+];
+
+export const SIMPLE_NAV_GROUP_HEADING = "Settings";
+
+export function isSimpleSettingsPath(pathname: string): boolean {
+  return (Object.values(SIMPLE_SETTINGS_PATHS) as ReadonlyArray<string>).includes(pathname);
+}
+
+/** Where Settings opens without Dev mode. */
+export const SIMPLE_SETTINGS_LANDING = SIMPLE_SETTINGS_PATHS.account;
 
 export function machineNavGroupHeading(machineLabel: string): string {
   return `Machine: ${machineLabel}`;
@@ -146,7 +183,18 @@ export function buildSettingsNavGroups(input: {
   readonly isWebApp: boolean;
   readonly isFlagEnabled: (flag: FeatureFlagKey | undefined) => boolean;
   readonly machine: { readonly environmentId: EnvironmentId; readonly label: string } | null;
+  /**
+   * "simple": the five entries only (no Dev mode). "developer": the five,
+   * then everything. "classic" (default): everything, as before 01.10.
+   */
+  readonly mode?: "classic" | "simple" | "developer";
 }): ReadonlyArray<SettingsNavGroup> {
+  const simpleGroup: SettingsNavGroup = {
+    kind: "simple",
+    heading: SIMPLE_NAV_GROUP_HEADING,
+    entries: SIMPLE_NAV_ENTRIES,
+  };
+  if (input.mode === "simple") return [simpleGroup];
   const appEntries: SettingsNavEntry[] = [
     ...APP_NAV_ITEMS.filter((item) => input.isFlagEnabled(item.flag)).map((item) => ({
       label: item.label,
@@ -161,6 +209,7 @@ export function buildSettingsNavGroups(input: {
   ];
 
   const groups: SettingsNavGroup[] = [
+    ...(input.mode === "developer" ? [simpleGroup] : []),
     { kind: "app", heading: APP_NAV_GROUP_HEADING, entries: appEntries },
   ];
 
