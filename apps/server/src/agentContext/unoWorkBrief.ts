@@ -26,6 +26,8 @@ export function buildUnoWorkBrief(): string {
  * (reports/harness_bench_2026-09) found Hermes ending finished work with a raw
  * verification log instead of an answer, and OpenCode stopping at "Shall I?"
  * right after "do it". Kept out of the brief itself (its ~1.5k-token budget).
+ * "Saving context" (01.10.2026): Qwen on Private GPU read whole files itself,
+ * hit its 120k window in every long chat on 30.09 and almost never delegated.
  */
 export const UNO_WORK_TASK_RULES = `## Doing the task
 
@@ -40,7 +42,13 @@ export const UNO_WORK_TASK_RULES = `## Doing the task
 - A message that starts with "(Uno Work)" comes from the computer, not the person: act on it, never quote or answer it as if they wrote it.
 - Ask first for what only the person can give (a bot token, a login, a choice that is theirs): in your first answer, in one line, then do the rest while they get it. Don't discover after ten minutes of work that you needed it.
 - If the person will give a key or token later, call \`request_secret\` with \`wait: false\`, finish everything else and end the turn; their answer comes back to this chat.
-- Before building something big, check Uno doesn't already have it: their assistant (\`assistant_connect\`), sites, apps on Home, connected tools. One minute with what exists beats twenty minutes of new code.`;
+- Before building something big, check Uno doesn't already have it: their assistant (\`assistant_connect\`), sites, apps on Home, connected tools. One minute with what exists beats twenty minutes of new code.
+
+## Saving context
+
+Every step resends the whole conversation, so a full context makes a long task slow and then stops it.
+- Hand exploration (searching the code, reading big or many files, "how does X work") to a subagent: the \`task\` tool with the \`explore\` agent (\`delegate_task\` in Hermes). Keep only its conclusion. Independent questions: up to 3 subagents at once.
+- Read files in ranges and search with grep instead of reading whole files; don't re-read what you already have.`;
 
 /** The brief plus {@link UNO_WORK_TASK_RULES}. */
 export function buildUnoWorkBriefWithTaskRules(): string {
