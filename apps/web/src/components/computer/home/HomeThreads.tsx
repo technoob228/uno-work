@@ -153,15 +153,32 @@ const CARD_CLASS =
  * has Done — for a chat it settles it, for a notification it dismisses it —
  * so Continue, the sidebar and the Inbox stay in agreement.
  */
-export function ContinueCards({ threads, now }: { threads: HomeThread[]; now: number }) {
+export function ContinueCards({
+  threads,
+  now,
+  withoutWaiting = false,
+}: {
+  threads: HomeThread[];
+  now: number;
+  /** "Needs you" is shown above (the simple start screen): leave those chats out. */
+  withoutWaiting?: boolean;
+}) {
   const open = useOpenThread();
   const openItem = useOpenInboxItem();
   const inbox = useInboxEntries();
-  const cards = pickContinueItems(threads, inbox, { now });
+  const cards = pickContinueItems(
+    withoutWaiting
+      ? threads.filter((thread) => !thread.hasPendingApprovals && !thread.hasPendingUserInput)
+      : threads,
+    inbox,
+    { now },
+  );
   if (cards.length === 0) {
     return (
       <p className="rounded-2xl border border-dashed border-border/80 px-4 py-3 text-sm text-muted-foreground">
-        Nothing in progress yet. Type a task above or pick a goal, and Uno starts on it.
+        {withoutWaiting
+          ? "Nothing in progress yet. Type a task above and it starts here."
+          : "Nothing in progress yet. Type a task above or pick a goal, and Uno starts on it."}
       </p>
     );
   }

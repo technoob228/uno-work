@@ -37,6 +37,7 @@ import {
 import { useState, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
+import { useDevMode } from "../../../devMode";
 import { Button } from "../../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../../ui/popover";
 import {
@@ -162,6 +163,9 @@ export function ComputerPill({
   const [open, setOpen] = useState(false);
   const switcher = useComputerSwitcher(() => setOpen(false));
   const look = FIT[fit];
+  // 01.10: on the start screen the pill is the name, on/asleep and "Details";
+  // the meters, boost and economy marks are for Dev mode (all of it is in the menu).
+  const simple = !useDevMode() && fit === "home";
   if (loading) {
     return (
       <Skeleton
@@ -242,19 +246,25 @@ export function ComputerPill({
               >
                 {name}
               </span>
-              {computer?.boosted ? (
+              {computer?.boosted && !simple ? (
                 <ZapIcon
                   className={cn("size-3 shrink-0 fill-amber-400 text-amber-500", look.detail)}
                   aria-label="Boosted"
                 />
               ) : null}
-              {computer?.economyOn ? (
+              {computer?.economyOn && !simple ? (
                 <LeafIcon
                   className={cn("size-3 shrink-0 text-muted-foreground/70", look.detail)}
                   aria-label="Economy on"
                 />
               ) : null}
-              {!computer ? null : state === "on" ? (
+              {simple ? (
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  {computer ? <span>{POWER_STATE_LABEL[state]}</span> : null}
+                  {computer ? <span aria-hidden>·</span> : null}
+                  <span className="text-foreground/80">Details</span>
+                </span>
+              ) : !computer ? null : state === "on" ? (
                 <>
                   <MiniMeter label="CPU" pct={pct.cpu} className={look.meter} />
                   <MiniMeter label="RAM" pct={pct.mem} className={look.meter} />

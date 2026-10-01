@@ -85,6 +85,7 @@ import { useAppPrimaryAction } from "./useAppPrimaryAction";
 import { useHomeLaunchers } from "./useHomeLaunchers";
 import { useUnoAiArrivals } from "../../unoai/useUnoAiArrivals";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
+import { useDevMode } from "../../devMode";
 
 const routeApi = getRouteApi("/_chat/computer");
 
@@ -95,6 +96,7 @@ export function ComputerView() {
   const queryClient = useQueryClient();
   const router = useRouter();
   const canGoBack = useCanGoBack();
+  const devMode = useDevMode();
   /** Only set when the daemon is not an Uno computer and the user picked one. */
   const [pickedBoxId, setPickedBoxId] = useState<number | null>(null);
   const thisMachine = pickedBoxId === null;
@@ -372,8 +374,14 @@ export function ComputerView() {
             ) : null}
             {thisMachine ? (
               <>
-                <HouseIcon className="size-4 text-muted-foreground" />
-                <span className="text-sm font-medium text-foreground">Home</span>
+                {/* 01.10: no "Home" title in the simple start screen — it's the
+                    logo and "New chat"; Dev mode keeps it. */}
+                {devMode ? (
+                  <>
+                    <HouseIcon className="size-4 text-muted-foreground" />
+                    <span className="text-sm font-medium text-foreground">Home</span>
+                  </>
+                ) : null}
                 <div className="ml-auto flex min-w-0 items-center gap-1.5">{pill}</div>
               </>
             ) : (

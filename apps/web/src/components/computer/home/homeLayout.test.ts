@@ -33,9 +33,23 @@ describe("migrateHomeLayout", () => {
     expect(migrateHomeLayout(["files", "composer"], ["apps"])).toEqual(["files", "composer"]);
   });
 
-  it("gives the default with nothing saved", () => {
+  it("gives the default with nothing saved: no widgets (01.10)", () => {
     expect(migrateHomeLayout(undefined, undefined)).toEqual([...DEFAULT_HOME_LAYOUT]);
-    expect(DEFAULT_HOME_LAYOUT).toEqual(["greeting", "composer", "continue", "files", "apps"]);
+    expect(DEFAULT_HOME_LAYOUT).toEqual(["greeting", "composer", "continue"]);
+  });
+
+  it("moves an untouched old default to the new one, keeps an arranged layout", () => {
+    expect(
+      migrateHomeLayout(["greeting", "composer", "continue", "files", "apps"], undefined),
+    ).toEqual(["greeting", "composer", "continue"]);
+    expect(migrateHomeLayout(undefined, ["files", "apps"])).toEqual([
+      "greeting",
+      "composer",
+      "continue",
+    ]);
+    expect(
+      migrateHomeLayout(["greeting", "composer", "continue", "apps", "files"], undefined),
+    ).toEqual(["greeting", "composer", "continue", "apps", "files"]);
   });
 });
 

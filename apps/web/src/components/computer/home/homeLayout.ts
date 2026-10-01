@@ -7,6 +7,11 @@
  * Kept per device in localStorage. The 0.0.81 layout (only the widgets under
  * Continue) is migrated once: greeting, composer, Continue, then those widgets
  * in the person's order.
+ *
+ * Since 01.10 (simplification) Home starts with no widgets: the start screen
+ * is the field "What should we do?", what needs you and what's in progress.
+ * A layout nobody touched (the old default with Files and Apps) moves to the
+ * new default; a layout the person arranged is kept.
  */
 import {
   DEFAULT_HOME_WIDGETS,
@@ -15,7 +20,9 @@ import {
   type HomeWidgetId,
 } from "./homeModel";
 
-export const HOME_LAYOUT_KEY = "uno-work:home:layout:v2";
+export const HOME_LAYOUT_KEY = "uno-work:home:layout:v3";
+/** The 0.0.82–0.0.103 key. Read once for the migration. */
+export const HOME_LAYOUT_V2_KEY = "uno-work:home:layout:v2";
 /** The 0.0.81 key (widgets under Continue only). Read once for the migration. */
 export const HOME_WIDGETS_V1_KEY = "uno-work:home:widgets";
 
@@ -28,10 +35,18 @@ export type HomeBlockId = HomeFixedBlockId | HomeWidgetId | AppWidgetBlockId;
 
 export const COMPOSER_BLOCK: HomeFixedBlockId = "composer";
 
-export const DEFAULT_HOME_LAYOUT: ReadonlyArray<HomeBlockId> = [
+/** No widgets by default (01.10); Customize → Add widget brings them. */
+export const DEFAULT_HOME_LAYOUT: ReadonlyArray<HomeBlockId> = [...HOME_FIXED_BLOCKS];
+
+/** The default until 0.0.103: the fixed blocks, then Files and Apps. */
+const UNTOUCHED_V2_LAYOUT: ReadonlyArray<HomeBlockId> = [
   ...HOME_FIXED_BLOCKS,
   ...DEFAULT_HOME_WIDGETS,
 ];
+
+function sameBlocks(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean {
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}
 
 const APP_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
@@ -74,12 +89,20 @@ export function normalizeHomeLayout(raw: unknown): HomeBlockId[] {
 /**
  * The layout to start from: the saved 0.0.82 layout when there is one, else
  * the 0.0.81 widget list behind greeting, composer and Continue, else the
- * default.
+ * default. A saved layout that is just the old default (nobody arranged it)
+ * becomes the new default — no widgets.
  */
 export function migrateHomeLayout(v2: unknown, v1: unknown): HomeBlockId[] {
-  if (Array.isArray(v2)) return normalizeHomeLayout(v2);
-  if (Array.isArray(v1))
-    return normalizeHomeLayout([...HOME_FIXED_BLOCKS, ...normalizeHomeWidgets(v1)]);
+  if (Array.isArray(v2)) {
+    const layout = normalizeHomeLayout(v2);
+    return sameBlocks(layout, UNTOUCHED_V2_LAYOUT) ? [...DEFAULT_HOME_LAYOUT] : layout;
+  }
+  if (Array.isArray(v1)) {
+    const widgets = normalizeHomeWidgets(v1);
+    return sameBlocks(widgets, DEFAULT_HOME_WIDGETS)
+      ? [...DEFAULT_HOME_LAYOUT]
+      : normalizeHomeLayout([...HOME_FIXED_BLOCKS, ...widgets]);
+  }
   return [...DEFAULT_HOME_LAYOUT];
 }
 

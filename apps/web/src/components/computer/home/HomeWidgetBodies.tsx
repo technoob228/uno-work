@@ -11,7 +11,6 @@ import {
   FolderIcon,
   HardDriveIcon,
   ShoppingBagIcon,
-  SparklesIcon,
   SquareTerminalIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -245,25 +244,14 @@ export function AppsWidget({
   const [all, setAll] = useState(false);
   const startingId = useStartingAppId();
   // Three rows of five: the built-ins, then the apps; the rest on demand.
-  const builtInCount = builtIns.onDrive !== undefined ? 5 : 4;
+  // (No "Uno" tile since 01.10: a new chat is the sidebar's New chat.)
+  const builtInCount = builtIns.onDrive !== undefined ? 4 : 3;
   const room = APPS_WIDGET_TILES - builtInCount;
   const overflow = all || tiles.length <= room ? 0 : tiles.length - (room - 1);
   const shownTiles = overflow > 0 ? tiles.slice(0, room - 1) : tiles;
   return (
     <div className="flex flex-col gap-2">
       <ul className="grid grid-cols-4 gap-x-1 gap-y-2 sm:grid-cols-5" aria-label="Apps">
-        <TileShell
-          small
-          label="Uno"
-          caption="New chat"
-          title="Start a new chat with Uno"
-          icon={
-            <BuiltInIcon small className="bg-gradient-to-br from-primary to-primary/70">
-              <SparklesIcon />
-            </BuiltInIcon>
-          }
-          onClick={builtIns.onNewChat}
-        />
         <TileShell
           small
           label="Files"

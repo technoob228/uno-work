@@ -98,6 +98,7 @@ export function HomeComposer({
   starters,
   defaultFolder = null,
   onStart,
+  placeholder = "What should Uno do? For example: build a sales report from the sheets in my cloud",
 }: {
   environmentId: EnvironmentId | null;
   /** The folder the chip starts on (the setup's project); null = the home folder. */
@@ -106,6 +107,7 @@ export function HomeComposer({
   starters: ReadonlyArray<HomeStarter>;
   /** Starts a chat on `options` and sends `prompt`. */
   onStart: (prompt: string, options: HomeStartOptions) => Promise<void>;
+  placeholder?: string;
 }) {
   // A first task handed over by the setup's last step is typed in, once.
   const [handoff] = useState(() => useSetupHandoff.getState().take());
@@ -160,8 +162,8 @@ export function HomeComposer({
             }
           }}
           rows={2}
-          placeholder="What should Uno do? For example: build a sales report from the sheets in my cloud"
-          aria-label="Give Uno a task"
+          placeholder={placeholder}
+          aria-label="What should we do?"
           data-testid="home-composer"
           className="block min-h-[64px] w-full resize-none bg-transparent px-4 pt-3.5 text-[15px] text-foreground outline-none placeholder:text-muted-foreground/70"
         />

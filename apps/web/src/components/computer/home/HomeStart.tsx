@@ -59,6 +59,7 @@ import {
 import {
   HOME_FIXED_BLOCKS,
   HOME_LAYOUT_KEY,
+  HOME_LAYOUT_V2_KEY,
   HOME_WIDGETS_V1_KEY,
   appIdOfBlock,
   appWidgetBlockId,
@@ -72,7 +73,8 @@ import {
   type HomeBlockId,
   type HomeLayoutAction,
 } from "./homeLayout";
-import { HOME_WIDGET_IDS, greeting, type HomeWidgetId } from "./homeModel";
+import { HOME_WIDGET_IDS, attentionThreads, greeting, type HomeWidgetId } from "./homeModel";
+import { useDevMode } from "../../../devMode";
 import { usePersonFirstName } from "./useHomeInfo";
 import { useHomeStarters } from "./useHomeStarters";
 import { selectProjectsAcrossEnvironments, useStore } from "../../../store";
@@ -88,9 +90,13 @@ export const HOME_PLACE_LINE =
 
 /** The layout (per device) and the Customize mode. */
 export function useHomeLayout() {
-  // Migration from the 0.0.81 widget list happens once, when there's no v2 layout yet.
+  // Migration from the 0.0.82 layout (or the 0.0.81 widget list) happens once,
+  // when there's no v3 layout yet.
   const [initial] = useState(() =>
-    migrateHomeLayout(undefined, readStored(HOME_WIDGETS_V1_KEY) ?? undefined),
+    migrateHomeLayout(
+      readStored(HOME_LAYOUT_V2_KEY) ?? undefined,
+      readStored(HOME_WIDGETS_V1_KEY) ?? undefined,
+    ),
   );
   const [stored, setStored] = useLocalStorage<ReadonlyArray<string>, ReadonlyArray<string>>(
     HOME_LAYOUT_KEY,
@@ -162,6 +168,8 @@ export function HomeStart({
   onAskUno: (prompt: string) => Promise<void>;
 }) {
   const { threads, now } = useHomeThreads();
+  // 01.10: the simple start screen unless Dev mode is on.
+  const devMode = useDevMode();
   const firstName = usePersonFirstName(environmentId);
   const homeStarters = useHomeStarters({ environmentId, threads, now, tiles });
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
@@ -370,6 +378,122 @@ export function HomeStart({
     }
   };
 
+  if (!devMode) {
+    const simpleStarters = (
+      setupHome.starters.length > 0 ? setupHome.starters : homeStarters
+    ).slice(0, 4);
+    const widgetBlocks = shown.filter((id) => !isHomeFixedBlockId(id));
+    const waiting = attentionThreads(threads, now);
+    return (
+      <div
+        className="mx-auto flex w-full max-w-3xl flex-col gap-7 pt-6 pb-16 sm:pt-16"
+        data-testid="home-simple"
+      >
+        {notices}
+        {setupHome.banner ? <SetupDoneBanner setup={setupHome} /> : null}
+        <div className="flex flex-col gap-1">
+          <h1 className="text-[28px] font-semibold tracking-tight" data-testid="home-greeting">
+            {greeting(new Date(now).getHours())}
+            {firstName ? `, ${firstName}` : null}
+          </h1>
+          {setupHome.project ? (
+            <p className="text-sm text-muted-foreground" data-testid="home-subtitle">
+              Working on <b className="font-medium text-foreground">{setupHome.project.name}</b>
+            </p>
+          ) : null}
+        </div>
+        {layout.editing ? null : (
+          <HomeNextStepCard
+            state={nextStep}
+            onStartTask={(prompt, folder) =>
+              void onStartTask(prompt, {
+                folder,
+                modelSelection: null,
+                runtimeMode: DEFAULT_RUNTIME_MODE,
+              })
+            }
+            onAskUno={(prompt) => void onAskUno(prompt)}
+          />
+        )}
+        <HomeComposer
+          environmentId={environmentId}
+          starters={simpleStarters}
+          defaultFolder={setupHome.project}
+          onStart={onStartTask}
+          placeholder="What should we do?"
+        />
+        {waiting.length > 0 ? (
+          <section className="flex flex-col gap-2" data-testid="home-needs-you-section">
+            <HomeSectionTitle>Needs you</HomeSectionTitle>
+            <NeedsYouWidget threads={threads} now={now} />
+          </section>
+        ) : null}
+        <section className="flex flex-col gap-2" data-testid="home-in-progress">
+          <HomeSectionTitle>In progress</HomeSectionTitle>
+          <ContinueCards threads={threads} now={now} withoutWaiting />
+        </section>
+
+        {layout.editing ? (
+          <div
+            className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/50 px-3 py-2"
+            data-testid="home-customize-bar"
+          >
+            <p className="mr-auto text-xs text-muted-foreground">
+              Widgets: drag to rearrange, × to hide.
+            </p>
+            <Button size="xs" variant="ghost" onClick={() => layout.dispatch({ type: "reset" })}>
+              <RotateCcwIcon />
+              Reset
+            </Button>
+            <Button size="xs" variant="outline" onClick={() => layout.setAdding(true)}>
+              <PlusIcon />
+              Add widget
+            </Button>
+            <Button
+              size="xs"
+              onClick={() => layout.setEditing(false)}
+              data-testid="home-customize-done"
+            >
+              <CheckIcon />
+              Done
+            </Button>
+          </div>
+        ) : null}
+        {widgetBlocks.length > 0 ? (
+          <HomeWidgetGrid
+            blocks={widgetBlocks}
+            editing={layout.editing}
+            dispatch={layout.dispatch}
+            metaOf={metaOf}
+            render={render}
+          />
+        ) : null}
+        {layout.editing ? null : (
+          <button
+            type="button"
+            onClick={() => layout.setEditing(true)}
+            data-testid="home-customize"
+            className="flex items-center gap-1 self-end rounded-full px-2 py-0.5 text-[11px] text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <PencilIcon className="size-3" />
+            Customize
+          </button>
+        )}
+        <AddWidgetDialog
+          open={layout.adding}
+          onOpenChange={layout.setAdding}
+          blocks={shown}
+          available={available}
+          metaOf={metaOf}
+          appWidgets={appWidgets}
+          customIdeas={ideas}
+          onAskForWidget={(prompt) => void onAskUno(prompt)}
+          dispatch={layout.dispatch}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 pt-6 pb-16 sm:pt-12">
       {notices}
@@ -496,6 +620,14 @@ function HomeAlsoHere({ goalButtons, assistant }: { goalButtons: boolean; assist
       ) : null}
       {assistant ? <HomeUnoEntry /> : null}
     </section>
+  );
+}
+
+function HomeSectionTitle({ children }: { children: ReactNode }) {
+  return (
+    <h2 className="px-0.5 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground/80 uppercase">
+      {children}
+    </h2>
   );
 }
 
