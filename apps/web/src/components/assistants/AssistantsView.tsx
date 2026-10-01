@@ -150,17 +150,6 @@ export function AssistantsView() {
                 <span className="text-sm font-medium text-foreground">Assistants</span>
               </>
             )}
-            {!creating && !showCard && model.entity === null ? (
-              <Button
-                size="xs"
-                className="ml-auto"
-                onClick={() => setView("new")}
-                data-testid="assistants-create"
-              >
-                <PlusIcon className="size-3.5" />
-                Create
-              </Button>
-            ) : null}
           </div>
         </header>
 
@@ -168,7 +157,7 @@ export function AssistantsView() {
           <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 pt-2 sm:pt-6">
             {environmentId === null ? (
               <p className="text-sm text-muted-foreground">No computer is connected.</p>
-            ) : creating ? (
+            ) : creating && model.loading ? null : creating ? (
               <CreateAssistant
                 environmentId={environmentId}
                 machineLabel={machineLabel}
@@ -525,7 +514,11 @@ function CreateAssistant({
             <Button variant="ghost" onClick={() => setStep(1)}>
               Back
             </Button>
-            <Button onClick={() => void finish()} data-testid="assistants-finish">
+            <Button
+              variant={where === "here" || connected ? "default" : "outline"}
+              onClick={() => void finish()}
+              data-testid="assistants-finish"
+            >
               {where === "here" ? (
                 <>
                   <MessageSquareIcon className="size-4" />

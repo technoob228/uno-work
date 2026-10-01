@@ -52,12 +52,17 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   const shortcut = sidebarToggleLabel(useServerKeybindings());
   const wordmark = (
     <div className="flex min-w-0 flex-1 items-center gap-2">
-      <Tooltip>
-        <TooltipTrigger render={<SidebarTrigger className="size-7 shrink-0" />} />
-        <TooltipPopup side="bottom">
-          Hide sidebar{shortcut ? ` · ${shortcut}` : ""}. The Menu button brings it back.
-        </TooltipPopup>
-      </Tooltip>
+      {/* With "New chat" the row has no room for the hide button in the
+          browser: ⌘B and the sidebar's edge hide it, the Menu button brings
+          it back. The desktop app keeps it (New chat is an icon there). */}
+      {showNewChat && !isElectron ? null : (
+        <Tooltip>
+          <TooltipTrigger render={<SidebarTrigger className="size-7 shrink-0" />} />
+          <TooltipPopup side="bottom">
+            Hide sidebar{shortcut ? ` · ${shortcut}` : ""}. The Menu button brings it back.
+          </TooltipPopup>
+        </Tooltip>
+      )}
       <Tooltip>
         <TooltipTrigger
           render={
@@ -97,7 +102,12 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       {showBell ? <InboxBell /> : null}
     </SidebarHeader>
   ) : (
-    <SidebarHeader className="flex-row items-center gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">
+    <SidebarHeader
+      className={cn(
+        "flex-row items-center px-3 py-2 sm:py-3",
+        showNewChat ? "gap-1.5" : "gap-3 sm:gap-2.5 sm:px-4",
+      )}
+    >
       {wordmark}
       {showNewChat ? <SidebarNewChatButton /> : null}
       {showBell ? <InboxBell /> : null}
@@ -123,7 +133,7 @@ function SidebarNewChatButton({ iconOnly = false }: { iconOnly?: boolean }) {
             data-testid="sidebar-header-new-chat"
             className={cn(
               "no-drag inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-primary text-xs font-semibold whitespace-nowrap text-primary-foreground shadow-xs outline-hidden transition-colors hover:bg-primary/85 focus-visible:ring-2 focus-visible:ring-ring",
-              iconOnly ? "w-7 justify-center" : "px-2.5",
+              iconOnly ? "w-7 justify-center" : "px-2",
             )}
           />
         }

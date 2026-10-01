@@ -24,6 +24,7 @@ export interface SimplePickerEntry {
 export interface SimpleModelChoice {
   readonly key: string;
   readonly instanceId: ProviderInstanceId;
+  readonly driverKind: ProviderDriverKind;
   readonly model: string;
   readonly label: string;
   readonly description: string;
@@ -86,6 +87,7 @@ export function buildSimpleModelChoices<E extends SimplePickerEntry>(input: {
       const choice: SimpleModelChoice = {
         key: `${gateway.instanceId}:${model.slug}`,
         instanceId: gateway.instanceId,
+        driverKind: gateway.driverKind,
         model: model.slug,
         label: displayName(model),
         description: group === "included" ? "Included in your AI hours" : "From premium credit",
@@ -107,6 +109,7 @@ export function buildSimpleModelChoices<E extends SimplePickerEntry>(input: {
     subscriptions.push({
       key: `${entry.instanceId}:subscription`,
       instanceId: entry.instanceId,
+      driverKind: entry.driverKind,
       model,
       label,
       description: "Your subscription",

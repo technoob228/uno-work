@@ -9,6 +9,7 @@ import { CheckIcon, ChevronDownIcon, CrownIcon, SparklesIcon, ZapIcon } from "lu
 import { useState, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
+import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import {
   isSimpleChoiceSelected,
   type SimpleModelChoice,
@@ -110,7 +111,14 @@ export function SimpleModelPickerContent(props: {
         <>
           <GroupLabel>Your subscription</GroupLabel>
           {props.choices.subscriptions.map((choice) =>
-            row(choice, <span className="text-[11px] font-semibold">{choice.label[0]}</span>),
+            row(
+              choice,
+              <ProviderInstanceIcon
+                driverKind={choice.driverKind}
+                displayName={choice.label}
+                iconClassName="size-4"
+              />,
+            ),
           )}
         </>
       ) : null}
