@@ -1,9 +1,8 @@
 /**
- * The header of a conversation with Uno: Uno's engine — model and where its
- * AI comes from (Uno gateway / your key) — with "Runs on Hermes" (not a
- * choice; the tooltip says why), "New conversation", "Connect ▾" (Telegram /
- * Slack: a guided dialog, see ConnectChannelDialog) and the settings gear
- * (what Uno may see and do, Telegram, Slack).
+ * The header of a conversation with Uno: "New conversation", "Connect ▾"
+ * (Telegram by Uno's bot with a QR, Slack — see ConnectChannelDialog) and the
+ * settings gear. In Dev mode also Uno's engine: the model picker (a copy of
+ * the composer's) and "Runs on Hermes".
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
@@ -13,6 +12,7 @@ import { useState } from "react";
 import { ASSISTANT_HARNESS_NOTE, type ChannelState } from "../../assistant/assistantChat.logic";
 import { useAssistantChannels } from "../../assistant/useAssistantChannels";
 import { useAssistantConversations } from "../../assistant/useAssistantConversations";
+import { useDevMode } from "../../devMode";
 import { useEnvironmentSupportsAssistantLlm } from "../../environments/assistantChatSupport";
 import { ConnectChannelDialog, type ConnectChannel } from "../assistant/ConnectChannelDialog";
 import { AssistantModelPicker } from "./AssistantEngine";
@@ -40,11 +40,17 @@ function SlackMark(props: { className?: string }) {
 export function AssistantChatHeaderActions({ environmentId }: { environmentId: EnvironmentId }) {
   const navigate = useNavigate();
   const channels = useAssistantChannels(environmentId);
+  // 01.10: the model is picked in the composer below; the header's copy of the
+  // picker and the engine note are for Dev mode.
+  const devMode = useDevMode();
+  // The gear: the assistant's card (Dev mode: all of its settings).
   const openSettings = () =>
-    void navigate({
-      to: "/settings/environment/$environmentId/assistants",
-      params: { environmentId },
-    });
+    void (devMode
+      ? navigate({
+          to: "/settings/environment/$environmentId/assistants",
+          params: { environmentId },
+        })
+      : navigate({ to: "/assistants", search: { view: "card" } }));
   const anyOn = channels.telegram === "on" || channels.slack === "on";
   const [connecting, setConnecting] = useState<ConnectChannel | null>(null);
   const conversations = useAssistantConversations();
@@ -52,8 +58,8 @@ export function AssistantChatHeaderActions({ environmentId }: { environmentId: E
 
   return (
     <div className="flex shrink-0 items-center gap-1.5" data-testid="uno-header-actions">
-      <AssistantModelPicker environmentId={environmentId} />
-      {runsOnHermes ? (
+      {devMode ? <AssistantModelPicker environmentId={environmentId} /> : null}
+      {devMode && runsOnHermes ? (
         <Tooltip>
           <TooltipTrigger
             render={

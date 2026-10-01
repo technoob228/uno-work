@@ -45,7 +45,7 @@ import {
   type SharedTelegramLink,
 } from "../../../lib/setupApi";
 import { cn } from "../../../lib/utils";
-import { TelegramWizard } from "../../assistant/ConnectChannelDialog";
+import { TelegramWizard } from "../../assistant/TelegramWizard";
 import { openInstallDocs } from "../../onboarding/harnessInstallLinks";
 import { Button } from "../../ui/button";
 import { QRCodeSvg } from "../../ui/qr-code";
@@ -153,19 +153,24 @@ function TelegramCard({
   projectId,
   projectName,
   onChanged,
+  initialMode,
 }: {
   environmentId: EnvironmentId;
   summary: ManagerAssistantSummary;
   projectId: ProjectId | null;
   projectName: string | null;
   onChanged: () => void;
+  /** "own": open on "a bot of your own" (BotFather) instead of Uno's shared bot. */
+  initialMode?: "shared" | "own";
 }) {
   const telegram = summary.telegram;
   const connected = telegramConnected(telegram);
   const shared = isSharedTelegram(telegram);
   // Uno's bot is the default unless a bot of the person's own is set up.
   const ownBotConfigured = telegram.configured && !shared;
-  const [mode, setMode] = useState<"shared" | "own">(ownBotConfigured ? "own" : "shared");
+  const [mode, setMode] = useState<"shared" | "own">(
+    initialMode ?? (ownBotConfigured ? "own" : "shared"),
+  );
   const [link, setLink] = useState<SharedTelegramLink | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [waiting, setWaiting] = useState(false);
@@ -381,10 +386,16 @@ function TelegramCard({
  */
 export function AssistantTelegramPanel({
   onConnected,
+  environmentId: environmentIdProp,
+  initialMode,
 }: {
   onConnected?: (username: string | null) => void;
+  /** The computer whose assistant this is; the primary one when absent. */
+  environmentId?: EnvironmentId | null;
+  initialMode?: "shared" | "own";
 }) {
-  const environmentId = usePrimaryEnvironmentId();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const environmentId = environmentIdProp ?? primaryEnvironmentId;
   const queryClient = useQueryClient();
   const summary = useAssistantSummary(environmentId, true);
   const refresh = useCallback(() => {
@@ -421,8 +432,41 @@ export function AssistantTelegramPanel({
       projectId={null}
       projectName={null}
       onChanged={refresh}
+      {...(initialMode ? { initialMode } : {})}
     />
   );
+}
+
+/** The assistant's Slack on its own (the Assistants screen): Add to Slack, or your own app. */
+export function AssistantSlackPanel({
+  environmentId: environmentIdProp,
+}: {
+  environmentId?: EnvironmentId | null;
+}) {
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const environmentId = environmentIdProp ?? primaryEnvironmentId;
+  const queryClient = useQueryClient();
+  const summary = useAssistantSummary(environmentId, true);
+  const refresh = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: SUMMARY_KEY });
+    void queryClient.invalidateQueries({ queryKey: ["uno-assistant"] });
+  }, [queryClient]);
+  if (!environmentId || summary.isPending) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2Icon className="size-4 animate-spin" />
+        Checking Slack…
+      </div>
+    );
+  }
+  if (!summary.data) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Your assistant is still starting. Give it a few seconds.
+      </p>
+    );
+  }
+  return <SlackCard environmentId={environmentId} summary={summary.data} onChanged={refresh} />;
 }
 
 // ── Slack ──────────────────────────────────────────────────────────────
