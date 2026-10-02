@@ -49,6 +49,13 @@ export interface HarnessSetupApi {
     readonly driver: ProviderAuthDriver;
     readonly code: string;
   }) => Promise<void>;
+  /**
+   * Sign the CLI out on the machine (`claude auth logout` / `codex logout`).
+   * Resolves with the daemon's answer; never throws.
+   */
+  readonly signOut: (
+    driver: ProviderAuthDriver,
+  ) => Promise<{ readonly signedOut: boolean; readonly error?: string }>;
   /** Forget a settled job so the dialog can start over. */
   readonly clearAuth: (driver: ProviderAuthDriver) => void;
   readonly clearInstall: (driver: ProviderDriverKind) => void;
@@ -196,6 +203,24 @@ export function useHarnessSetup(explicitEnvironmentId?: EnvironmentId | null): H
     [environmentId],
   );
 
+  const signOut = useCallback<HarnessSetupApi["signOut"]>(
+    async (driver) => {
+      try {
+        const client = resolveClient(environmentId);
+        const result = await client.providerSetup.authSignOut({ driver });
+        authIds.current.delete(driver);
+        setAuthJobs((current) => ({ ...current, [driver]: undefined }));
+        refreshProviders(driver);
+        return result.error
+          ? { signedOut: result.signedOut, error: result.error }
+          : { signedOut: result.signedOut };
+      } catch (error) {
+        return { signedOut: false, error: errorMessage(error) };
+      }
+    },
+    [environmentId, refreshProviders],
+  );
+
   const clearAuth = useCallback((driver: ProviderAuthDriver) => {
     authIds.current.delete(driver);
     setAuthJobs((current) => ({ ...current, [driver]: undefined }));
@@ -270,9 +295,19 @@ export function useHarnessSetup(explicitEnvironmentId?: EnvironmentId | null): H
       startInstall,
       startAuth,
       submitAuthCode,
+      signOut,
       clearAuth,
       clearInstall,
     }),
-    [installJobs, authJobs, startInstall, startAuth, submitAuthCode, clearAuth, clearInstall],
+    [
+      installJobs,
+      authJobs,
+      startInstall,
+      startAuth,
+      submitAuthCode,
+      signOut,
+      clearAuth,
+      clearInstall,
+    ],
   );
 }

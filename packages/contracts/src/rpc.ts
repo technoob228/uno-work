@@ -215,6 +215,8 @@ import {
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   ProviderAuthJobStatus,
+  ProviderAuthSignOutInput,
+  ProviderAuthSignOutResult,
   ProviderAuthStartInput,
   ProviderAuthStartResult,
   ProviderAuthStatusInput,
@@ -517,6 +519,7 @@ export const WS_METHODS = {
   providerAuthStart: "provider.auth.start",
   providerAuthStatus: "provider.auth.status",
   providerAuthSubmitCode: "provider.auth.submitCode",
+  providerAuthSignOut: "provider.auth.signOut",
 
   // Custom (ACP) harnesses: list, test, secrets of file harnesses, install
   customHarnessList: "customHarness.list",
@@ -1469,6 +1472,12 @@ export const WsProviderAuthSubmitCodeRpc = Rpc.make(WS_METHODS.providerAuthSubmi
   error: ProviderSetupRpcError,
 });
 
+export const WsProviderAuthSignOutRpc = Rpc.make(WS_METHODS.providerAuthSignOut, {
+  payload: ProviderAuthSignOutInput,
+  success: ProviderAuthSignOutResult,
+  error: ProviderSetupRpcError,
+});
+
 /* ------------------------------------------------------------------ *
  * Custom (ACP) harnesses
  * ------------------------------------------------------------------ */
@@ -2071,6 +2080,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProviderAuthStartRpc,
   WsProviderAuthStatusRpc,
   WsProviderAuthSubmitCodeRpc,
+  WsProviderAuthSignOutRpc,
   WsCustomHarnessListRpc,
   WsCustomHarnessTestRpc,
   WsCustomHarnessSetSecretRpc,

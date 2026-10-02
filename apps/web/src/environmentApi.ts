@@ -104,6 +104,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       authStart: rpcClient.providerSetup.authStart,
       authStatus: rpcClient.providerSetup.authStatus,
       authSubmitCode: rpcClient.providerSetup.authSubmitCode,
+      authSignOut: rpcClient.providerSetup.authSignOut,
     },
     customHarness: {
       list: rpcClient.customHarness.list,
