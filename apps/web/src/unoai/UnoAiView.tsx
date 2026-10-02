@@ -830,7 +830,7 @@ function OfferFrame({
   );
 }
 
-/** Lite: create the computer (plan allows) or start a trial with a code / pick a plan. */
+/** Lite: create the computer (plan allows), or start the free trial (no code) / pick a plan. */
 function ComputerOffer({ reason, chatId }: { reason: string; chatId: string }) {
   const subscription = useQuery(subscriptionQuery());
   const standing = subscription.isPending ? null : liteStanding(subscription.data ?? null);
@@ -843,16 +843,18 @@ function ComputerOffer({ reason, chatId }: { reason: string; chatId: string }) {
     rememberHandoff(chatId);
     window.location.assign("/?computer=create");
   };
-  const redeem = async () => {
-    if (!code.trim()) return;
+  // The free trial needs no code (WORK_TRIAL=all, 02.10); a code still works
+  // for the promo trials, one quiet link away.
+  const redeem = async (withCode: string) => {
     setBusy(true);
     setErr(null);
     try {
-      await redeemComputerTrial(code.trim());
+      await redeemComputerTrial(withCode);
       create();
     } catch (e) {
       const info = accountErrorInfo(e);
-      setErr(info.detail || "That code didn't work.");
+      if (!withCode && info.code === "CODE_REQUIRED") setCodeOpen(true);
+      setErr(info.detail || (withCode ? "That code didn't work." : "Couldn't start the trial."));
       setBusy(false);
     }
   };
@@ -870,7 +872,7 @@ function ComputerOffer({ reason, chatId }: { reason: string; chatId: string }) {
               className="flex flex-wrap items-center gap-2"
               onSubmit={(e) => {
                 e.preventDefault();
-                void redeem();
+                if (code.trim()) void redeem(code.trim());
               }}
             >
               <input
@@ -886,11 +888,17 @@ function ComputerOffer({ reason, chatId }: { reason: string; chatId: string }) {
                 Start free trial
               </Button>
             </form>
-          ) : (
-            <Button size="sm" onClick={() => setCodeOpen(true)} data-testid="uno-ai-have-code">
-              I have a trial code
+          ) : standing === "free" || standing === null ? (
+            <Button
+              size="sm"
+              onClick={() => void redeem("")}
+              disabled={busy}
+              data-testid="uno-ai-start-trial"
+            >
+              {busy ? <LoaderIcon className="animate-spin" /> : null}
+              Start free — 3 days
             </Button>
-          )}
+          ) : null}
           <Button
             size="sm"
             variant="outline"
@@ -910,6 +918,19 @@ function ComputerOffer({ reason, chatId }: { reason: string; chatId: string }) {
       <p className="w-full text-xs text-muted-foreground">
         When it's ready, this conversation continues there — Uno on your computer gets everything
         from here.
+        {standing !== "cloud" && !codeOpen ? (
+          <>
+            {" "}
+            <button
+              type="button"
+              onClick={() => setCodeOpen(true)}
+              className="cursor-pointer underline underline-offset-2 hover:text-foreground"
+              data-testid="uno-ai-have-code"
+            >
+              I have a trial code
+            </button>
+          </>
+        ) : null}
       </p>
       {err ? <p className="w-full text-xs text-destructive">{err}</p> : null}
     </OfferFrame>
