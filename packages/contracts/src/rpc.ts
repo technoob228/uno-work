@@ -1513,6 +1513,18 @@ export const UnoCloudCreateBoxInput = Schema.Struct({
   diskGb: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
   /** Only `work` exists today: a box launched from the Uno Work golden image. */
   purpose: Schema.optional(Schema.Literals(["work"])),
+  /**
+   * Assistants MVP: a Work computer that is one assistant's home. The console
+   * stores it as `computer_role` and picks the shape and economy mode itself.
+   */
+  computerRole: Schema.optional(Schema.Literals(["assistant"])),
+  assistant: Schema.optional(
+    Schema.Struct({
+      name: Schema.String.check(Schema.isMaxLength(40)),
+      emoji: Schema.String.check(Schema.isMaxLength(16)),
+      template: Schema.String.check(Schema.isMaxLength(32)),
+    }),
+  ),
 });
 export type UnoCloudCreateBoxInput = typeof UnoCloudCreateBoxInput.Type;
 

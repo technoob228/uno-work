@@ -1,17 +1,19 @@
 /**
- * Assistants (simplification 01.10) — bots that answer in Telegram or Slack
- * 24/7. Empty until the person creates one; creating is two steps:
+ * Assistants — every assistant on the account.
+ *
+ * Since the assistants MVP (02.10) each assistant has its own Work computer
+ * (role `assistant`): "New assistant" is one sentence → up to three questions
+ * → "Will do / Won't do" → Create (`NewAssistantFlow.tsx`), and its page
+ * (`AssistantPage.tsx`) has access, schedule, memory, channels and chat.
+ *
+ * The assistant of the computer the app is looking at (the 01.10 one: the
+ * computer's Hermes assistant, see `assistantEntity.ts`) stays in the list
+ * with its card; "here" is the old two-step setup for it, used where there
+ * is no Uno account to make computers with:
  *
  *   1. a name and "what it does" (one line, can be skipped);
- *   2. where it answers: Telegram by Uno's bot with a QR (default, the
- *      goal-first flow people like), "My own Telegram bot" (BotFather),
- *      Slack, or "Only here".
- *
- * The card of an assistant says where it answers, which computer it lives on,
- * its last conversations, and has Pause and Delete.
- *
- * v1: one assistant per computer — the computer's Hermes assistant, see
- * `assistantEntity.ts` for why and where its name lives.
+ *   2. where it answers: Telegram by Uno's bot with a QR, "My own Telegram
+ *      bot" (BotFather), Slack, or "Only here".
  */
 import { ASSISTANT_PROJECT_ID, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -58,6 +60,16 @@ import { SlackBrandMark, TelegramMark } from "../setup/brandMarks";
 import { EMPTY_SETUP_PROGRESS } from "../setup/setupModel";
 import { AssistantSlackPanel, AssistantTelegramPanel } from "../setup/steps/ChannelsStep";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
+import { EmojiAvatar, StatusPill } from "./AssistantBits";
+import { AssistantPage } from "./AssistantPage";
+import { findTemplate } from "./assistantTemplates";
+import { NewAssistantFlow } from "./NewAssistantFlow";
+import {
+  useAssistantComputers,
+  useAssistantList,
+  useBoxIdOfEnvironment,
+  type AssistantListItem,
+} from "./useAssistants";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { SidebarInset } from "../ui/sidebar";
@@ -69,7 +81,6 @@ import {
   ASSISTANT_ABOUT_KEY,
   ASSISTANT_NAME_MAX,
   DEFAULT_ASSISTANT_NAME,
-  ONE_ASSISTANT_NOTE,
   assistantEntity,
   assistantWhereLine,
   withAgentsProfile,
@@ -81,8 +92,13 @@ import {
 } from "./assistantEntity";
 
 export interface AssistantsRouteSearch {
-  /** "new" — the two-step Create; "card" — the assistant's card. */
-  readonly view?: "new" | "card";
+  /**
+   * "new" — New assistant (its own computer); "here" — the two-step setup of
+   * this computer's assistant; "card" — that assistant's card; "assistant" —
+   * the page of the assistant on computer `box`.
+   */
+  readonly view?: "new" | "here" | "card" | "assistant";
+  readonly box?: number;
 }
 
 const SUMMARY_KEY = ["uno-assistant", "summary"] as const;
@@ -127,11 +143,29 @@ export function AssistantsView() {
   const { environmentId } = useActiveMachine();
   const model = useAssistantModel(environmentId);
   const machineLabel = useMachineLabel(environmentId);
-  const setView = (view: AssistantsRouteSearch["view"]) =>
-    void navigate({ to: "/assistants", search: view ? { view } : {} });
+  const assistants = useAssistantList(environmentId);
+  const computers = useAssistantComputers();
+  const activeBoxId = useBoxIdOfEnvironment(environmentId);
+  const setView = (view: AssistantsRouteSearch["view"], box?: number) =>
+    void navigate({
+      to: "/assistants",
+      search: view ? { view, ...(box !== undefined ? { box } : {}) } : {},
+    });
+
+  // The assistant of the computer the app is looking at — unless that
+  // computer is itself one of the assistants' own (then it is listed there).
+  const activeIsAssistantComputer =
+    activeBoxId !== null && assistants.some((item) => item.computer.boxId === activeBoxId);
+  const localEntity = activeIsAssistantComputer ? null : model.entity;
 
   const creating = search.view === "new";
+  const settingUpHere = search.view === "here";
   const showCard = search.view === "card" && model.entity !== null;
+  const pageItem =
+    search.view === "assistant"
+      ? (assistants.find((item) => item.computer.boxId === search.box) ?? null)
+      : null;
+  const inside = creating || settingUpHere || showCard || search.view === "assistant";
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -139,7 +173,7 @@ export function AssistantsView() {
         <header className="border-b border-border px-3 py-2 sm:px-5 sm:py-3">
           <div className="flex min-h-8 items-center gap-2">
             <SidebarShowButton />
-            {creating || showCard ? (
+            {inside ? (
               <Button size="xs" variant="ghost" onClick={() => setView(undefined)}>
                 <ArrowLeftIcon className="size-3.5" />
                 <span className="hidden sm:inline">Assistants</span>
@@ -157,7 +191,13 @@ export function AssistantsView() {
           <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 pt-2 sm:pt-6">
             {environmentId === null ? (
               <p className="text-sm text-muted-foreground">No computer is connected.</p>
-            ) : creating && model.loading ? null : creating ? (
+            ) : creating ? (
+              <NewAssistantFlow
+                environmentId={environmentId}
+                onOpen={(box) => setView("assistant", box)}
+                onSetUpHere={() => setView("here")}
+              />
+            ) : settingUpHere && model.loading ? null : settingUpHere ? (
               <CreateAssistant
                 environmentId={environmentId}
                 machineLabel={machineLabel}
@@ -172,21 +212,55 @@ export function AssistantsView() {
                 model={model}
                 onDeleted={() => setView(undefined)}
               />
-            ) : model.entity ? (
-              <>
-                <AssistantRow
-                  entity={model.entity}
-                  machineLabel={machineLabel}
-                  onOpen={() => setView("card")}
+            ) : search.view === "assistant" ? (
+              pageItem ? (
+                <AssistantPage
+                  key={pageItem.computer.boxId}
+                  item={pageItem}
+                  accountEnvironmentId={environmentId}
+                  onDeleted={() => setView(undefined)}
                 />
-                <p className="px-1 text-xs text-muted-foreground" data-testid="assistants-one-note">
-                  {ONE_ASSISTANT_NOTE}
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {computers.isLoading
+                    ? "Loading…"
+                    : "This assistant isn't on your account any more."}
                 </p>
+              )
+            ) : localEntity || assistants.length > 0 ? (
+              <>
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="min-w-0 flex-1">
+                    <h1 className="text-xl font-semibold tracking-tight">Assistants</h1>
+                    <p className="text-sm text-muted-foreground">
+                      Each one has its own computer and opens only the apps you allow.
+                    </p>
+                  </div>
+                  <Button onClick={() => setView("new")} data-testid="assistants-new">
+                    <PlusIcon className="size-4" />
+                    New assistant
+                  </Button>
+                </div>
+                <div className="flex flex-col gap-2" data-testid="assistants-list">
+                  {assistants.map((item) => (
+                    <MachineAssistantRow
+                      key={item.computer.boxId}
+                      item={item}
+                      onOpen={() => setView("assistant", item.computer.boxId)}
+                    />
+                  ))}
+                  {localEntity ? (
+                    <AssistantRow
+                      entity={localEntity}
+                      machineLabel={machineLabel}
+                      onOpen={() => setView("card")}
+                    />
+                  ) : null}
+                </div>
               </>
             ) : (
               <EmptyAssistants
-                machineLabel={machineLabel}
-                loading={model.loading}
+                loading={model.loading || computers.isLoading}
                 onCreate={() => setView("new")}
               />
             )}
@@ -197,37 +271,57 @@ export function AssistantsView() {
   );
 }
 
-function EmptyAssistants({
-  machineLabel,
-  loading,
-  onCreate,
-}: {
-  machineLabel: string;
-  loading: boolean;
-  onCreate: () => void;
-}) {
+function EmptyAssistants({ loading, onCreate }: { loading: boolean; onCreate: () => void }) {
   return (
     <section
       className="flex flex-col items-center gap-4 rounded-3xl border border-dashed border-border px-6 py-12 text-center"
       data-testid="assistants-empty"
     >
-      <span className="flex size-14 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-500">
-        <TelegramMark className="size-7" />
+      <span className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-2xl">
+        🤖
       </span>
       <div className="flex max-w-md flex-col gap-1.5">
         <h1 className="text-xl font-semibold tracking-tight">
-          Create an assistant that answers in Telegram 24/7
+          An assistant that works while you don't
         </h1>
         <p className="text-sm text-muted-foreground">
-          Write to it like to a colleague: it answers questions, does tasks on {machineLabel} and
-          remembers what you told it.
+          Describe it in one sentence: it answers your customers, keeps your inbox in order or
+          prepares posts. Each one gets its own computer and opens only the apps you allow.
         </p>
       </div>
       <Button onClick={onCreate} disabled={loading} data-testid="assistants-empty-create">
         <PlusIcon className="size-4" />
-        Create an assistant
+        New assistant
       </Button>
     </section>
+  );
+}
+
+function MachineAssistantRow({ item, onOpen }: { item: AssistantListItem; onOpen: () => void }) {
+  const { label } = item.computer;
+  const template = findTemplate(label.template);
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      data-testid="assistants-machine-row"
+      className="flex w-full cursor-pointer items-center gap-3 rounded-2xl border border-border/70 bg-card/40 px-4 py-3.5 text-left transition-colors hover:bg-accent/40"
+    >
+      <EmojiAvatar emoji={label.emoji} />
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="truncate text-sm font-semibold">{label.name}</span>
+          {template ? (
+            <span className="text-xs text-muted-foreground">{template.title}</span>
+          ) : null}
+          <StatusPill status={item.status} />
+        </span>
+        <span className="block truncate text-xs text-muted-foreground">
+          Its own computer · {item.computer.boxName}
+        </span>
+      </span>
+      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+    </button>
   );
 }
 
@@ -738,7 +832,6 @@ function AssistantCard({
         <div className="flex items-center gap-3 py-1">
           <MonitorIcon className="size-4 text-muted-foreground" />
           <span className="text-sm">{machineLabel}</span>
-          <span className="ml-auto text-xs text-muted-foreground">{ONE_ASSISTANT_NOTE}</span>
         </div>
       </Block>
 

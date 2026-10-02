@@ -9,9 +9,11 @@
  * - `POST   /api/manager/mcp/probe` {url}             → {ok, toolCount, toolNames, needsAuth, error}
  * - `POST   /api/manager/materials/read` {projectPath, links} → {jobId}
  * - `GET    /api/manager/materials/read/:jobId`       → the job
+ * - `POST   /api/manager/assistant/draft` {phrase, template} → name, emoji, job, schedule, ≤3 questions
  *
  * @module setupTools/http
  */
+import { AssistantDraftInput } from "@t3tools/contracts";
 import { Effect, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
@@ -22,6 +24,7 @@ import { ConnectorsService } from "./ConnectorsService.ts";
 import { MaterialsService } from "./MaterialsService.ts";
 import type { MaterialsJobError } from "./materialsJob.ts";
 import { probeMcpServer } from "./mcpProbe.ts";
+import { AssistantDraftService } from "./AssistantDraftService.ts";
 
 const json = (body: unknown, status = 200) => HttpServerResponse.jsonUnsafe(body, { status });
 
@@ -146,6 +149,45 @@ export const materialsReadStatusRouteLayer = HttpRouter.add(
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
+/**
+ * "New assistant": Uno AI turns the person's sentence into a draft. 503 when
+ * this computer has no gateway key, 502 when the AI answered badly — the
+ * client then asks its built-in questions for the template.
+ */
+export const assistantDraftRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/draft",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(AssistantDraftInput).pipe(
+      Effect.mapError(
+        () => new AuthError({ message: "Expected {phrase, template}.", status: 400 }),
+      ),
+    );
+    const drafts = yield* AssistantDraftService;
+    return yield* drafts.draft(input).pipe(
+      Effect.map((draft) => json(draft)),
+      Effect.catchTag("AssistantDraftError", (error) =>
+        Effect.logWarning("assistant draft failed", {
+          code: error.code,
+          message: error.message,
+        }).pipe(
+          Effect.as(
+            json(
+              {
+                error: error.code,
+                message:
+                  error.code === "no_ai" ? error.message : "Uno AI couldn't draft it this time.",
+              },
+              error.status,
+            ),
+          ),
+        ),
+      ),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
 export const setupToolsRouteLayers = [
   connectorsListRouteLayer,
   connectorsStartRouteLayer,
@@ -153,4 +195,5 @@ export const setupToolsRouteLayers = [
   mcpProbeRouteLayer,
   materialsReadRouteLayer,
   materialsReadStatusRouteLayer,
+  assistantDraftRouteLayer,
 ] as const;

@@ -10,6 +10,8 @@
  * fails rather than falling back.
  */
 import type {
+  AssistantDraftInput,
+  AssistantDraftResult,
   AssistantEditableFileName,
   EnvironmentId,
   ManagerActionProposal,
@@ -274,6 +276,23 @@ export function writeAssistantFile(
   return environmentFetchJson({
     environmentId,
     pathname: "/api/manager/assistant/file",
+    method: "POST",
+    body,
+  });
+}
+
+/**
+ * "New assistant": Uno AI drafts a name, a job and ≤3 questions from one
+ * sentence (assistants MVP). Fails on an older computer (404), without Uno AI
+ * (503) or on a bad answer (502) — callers fall back to built-in questions.
+ */
+export function draftAssistant(
+  input: EnvironmentScoped & AssistantDraftInput,
+): Promise<AssistantDraftResult> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/draft",
     method: "POST",
     body,
   });

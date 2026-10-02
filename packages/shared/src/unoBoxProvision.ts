@@ -40,12 +40,19 @@ import {
 
 export interface UnoBoxLaunchBody {
   readonly name: string;
-  readonly ram_mb: number;
-  readonly vcpu: number;
-  readonly disk_gb: number;
+  /** Omitted for an assistant: the console picks its shape (2 GB / 1 vCPU). */
+  readonly ram_mb?: number;
+  readonly vcpu?: number;
+  readonly disk_gb?: number;
+  /** Assistants MVP: `assistant` = this Work computer is one assistant's home. */
+  readonly computer_role?: string;
+  readonly assistant?: { readonly name: string; readonly emoji: string; readonly template: string };
 }
 
 export interface UnoBoxPlainCreateBody extends UnoBoxLaunchBody {
+  readonly ram_mb: number;
+  readonly vcpu: number;
+  readonly disk_gb: number;
   readonly template: string;
   readonly network_profile: string;
 }
@@ -126,6 +133,11 @@ export interface UnoBoxProvisionInput {
    * built into this release.
    */
   readonly goldenImageId?: number | null | undefined;
+  /** Assistants MVP: sent to the console as `computer_role` (+ `assistant`). */
+  readonly computerRole?: "assistant" | undefined;
+  readonly assistant?:
+    | { readonly name: string; readonly emoji: string; readonly template: string }
+    | undefined;
 }
 
 /** Plain-box fallback: what the console would create from its own "New box" form. */
@@ -156,6 +168,18 @@ function errorMessage(cause: unknown): string {
 }
 
 function toLaunchBody(input: UnoBoxProvisionInput): UnoBoxLaunchBody {
+  if (input.computerRole === "assistant") {
+    // The console picks an assistant's shape (the smallest Work runs on) and
+    // its economy mode; sizes go only when the caller names them.
+    return {
+      name: input.name,
+      ...(input.ramMb !== undefined ? { ram_mb: input.ramMb } : {}),
+      ...(input.vcpu !== undefined ? { vcpu: input.vcpu } : {}),
+      ...(input.diskGb !== undefined ? { disk_gb: input.diskGb } : {}),
+      computer_role: "assistant",
+      ...(input.assistant ? { assistant: input.assistant } : {}),
+    };
+  }
   return {
     name: input.name,
     ram_mb: input.ramMb ?? UNO_BOX_DEFAULT_RAM_MB,
@@ -247,6 +271,9 @@ export async function runUnoBoxProvisionJob(
       box = parseUnoBox(
         await client.createPlainBox({
           ...body,
+          ram_mb: body.ram_mb ?? UNO_BOX_DEFAULT_RAM_MB,
+          vcpu: body.vcpu ?? UNO_BOX_DEFAULT_VCPU,
+          disk_gb: body.disk_gb ?? UNO_BOX_DEFAULT_DISK_GB,
           template: PLAIN_BOX_TEMPLATE,
           network_profile: PLAIN_BOX_NETWORK_PROFILE,
         }),

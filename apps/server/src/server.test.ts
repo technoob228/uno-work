@@ -141,6 +141,7 @@ import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
 import { AppSdkService } from "./appSdk/AppSdkService.ts";
 import { ConnectorsService, type ConnectorsServiceShape } from "./setupTools/ConnectorsService.ts";
 import { MaterialsService, type MaterialsServiceShape } from "./setupTools/MaterialsService.ts";
+import { AssistantDraftService } from "./setupTools/AssistantDraftService.ts";
 import { InboxService, type InboxServiceShape } from "./inbox/InboxService.ts";
 import { ComputerResourcesService } from "./computerResources/ComputerResourcesService.ts";
 import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
@@ -713,6 +714,7 @@ const buildAppUnderTest = (options?: {
             get: () => Effect.succeed(null),
             ...options?.layers?.materials,
           }),
+          Layer.mock(AssistantDraftService)({}),
           Layer.mock(InboxService)({ ...options?.layers?.inbox }),
           Layer.mock(ComputerResourcesService)({}),
           Layer.mock(HarnessSetup)({}),

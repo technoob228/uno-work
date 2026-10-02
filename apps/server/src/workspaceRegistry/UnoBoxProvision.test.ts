@@ -165,6 +165,24 @@ describe("runUnoBoxProvisionJob", () => {
     expect(harness.client.createPlainBox).not.toHaveBeenCalled();
   });
 
+  it("launches an assistant's computer with its role and lets the console pick the size", async () => {
+    const harness = makeHarness();
+    await runUnoBoxProvisionJob(
+      {
+        ...INPUT,
+        computerRole: "assistant",
+        assistant: { name: "Ana", emoji: "📣", template: "marketing" },
+      },
+      harness.deps,
+    );
+
+    expect(harness.client.launchImage).toHaveBeenCalledWith(UNO_WORK_GOLDEN_IMAGE_ID, {
+      name: "my-app",
+      computer_role: "assistant",
+      assistant: { name: "Ana", emoji: "📣", template: "marketing" },
+    });
+  });
+
   it("honours explicit size and image overrides", async () => {
     const harness = makeHarness();
     await runUnoBoxProvisionJob(
