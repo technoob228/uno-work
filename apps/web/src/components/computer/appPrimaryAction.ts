@@ -52,7 +52,7 @@ export interface AppPrimaryAction {
 const LABEL: Record<AppPrimaryKind, string> = {
   open: "Open",
   telegram: "Open in Telegram",
-  token: "Add the bot's token",
+  token: "Add token",
   publish: "Show on the internet",
   start: "Start",
   setup: "Set up with Uno",
