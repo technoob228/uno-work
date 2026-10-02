@@ -6,6 +6,7 @@ import {
   claudePreApprovedTools,
   codexMcpConfigArgs,
   enabledMcpServers,
+  mcpToolTimeoutsSec,
   sessionMcpServers,
   unoWorkMcpServer,
   withOpenCodeMcpServers,
@@ -60,6 +61,19 @@ describe("custom MCP servers", () => {
     });
     expect(withOpenCodeMcpServers("{}", [])).toBe("{}");
     expect(withOpenCodeMcpServers("not json", [docs])).toBe("not json");
+  });
+});
+
+describe("mcpToolTimeoutsSec", () => {
+  it("gives uno-work its 15-minute tool timeout (for Hermes' config.yaml)", () => {
+    const servers = sessionMcpServers({
+      bridgeEnvironment: {
+        UNO_WORK_BRIDGE_URL: "http://127.0.0.1:3773",
+        UNO_WORK_BRIDGE_TOKEN: "t",
+      },
+      custom: [docs],
+    });
+    expect(mcpToolTimeoutsSec(servers)).toEqual({ "uno-work": 900 });
   });
 });
 

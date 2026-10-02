@@ -192,6 +192,7 @@ import { doneShelfLabel, threadContextMenuItems } from "./sidebar/simpleSidebar.
 import { useDevMode } from "../devMode";
 import { usePins } from "../navigation/usePins";
 import { SidebarAppsList } from "./sidebar/SidebarAppsList";
+import { SidebarUnoAiChats } from "../unoai/UnoAiChatsList";
 import { SidebarFilesTree } from "./sidebar/SidebarFilesTree";
 import { SidebarPinned } from "./sidebar/SidebarPinned";
 import { type SidebarMode, useNavStore } from "../navigation/navStore";
@@ -202,6 +203,7 @@ import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 import { SidebarAddMenu } from "./sidebar/SidebarNewButton";
 import {
   ASSISTANT_CHAT_NAME,
+  isEmptyAutoChat,
   isFromAssistant,
   isOlderAssistantChat,
   isRegularListChat,
@@ -1273,7 +1275,10 @@ export default function Sidebar() {
   const hasHelperProjects = useMemo(
     () =>
       threads.some(
-        (thread) => thread.archivedAt === null && isOlderAssistantChat(thread, assistantChatId),
+        (thread) =>
+          thread.archivedAt === null &&
+          isOlderAssistantChat(thread, assistantChatId) &&
+          !isEmptyAutoChat(thread),
       ),
     [assistantChatId, threads],
   );
@@ -1381,6 +1386,8 @@ export default function Sidebar() {
   const { pinnedThreads, activeThreads, snoozedThreads, settledThreads } = useMemo(() => {
     const visible = threads.filter((thread) => {
       if (thread.archivedAt !== null) return false;
+      // A chat Uno opened by itself that nobody wrote in yet is noise.
+      if (isEmptyAutoChat(thread) && threadKeyOf(thread) !== routeThreadKey) return false;
       // The Uno chat is pinned on top of the sidebar, never in the list.
       if (assistantChatId !== null && thread.id === assistantChatId) return false;
       const isOlderUnoChat = isOlderAssistantChat(thread, assistantChatId);
@@ -2636,6 +2643,7 @@ export default function Sidebar() {
                   </ul>
                 </TooltipProvider>
               )}
+              {!isSearchingThreads ? <SidebarUnoAiChats /> : null}
               {!isSearchingThreads &&
               totalThreadCount === 0 &&
               pinnedThreads.length === 0 &&

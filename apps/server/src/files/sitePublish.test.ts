@@ -43,8 +43,8 @@ describe("publishToUnoHosting", () => {
     expect(calls[0]?.url).toBe("https://console.test/api/v1/deploy");
     expect(calls[0]?.auth).toBe("Bearer uno_agt_machine");
     expect(calls[0]?.names).toEqual(["css/a.css", "index.html"]);
-    // No url from hosting: the live pattern, not the old <slug>.uno4.dev (404).
-    expect(result.url).toBe("https://team-site.sites.uno4.dev/");
+    // No url from hosting: the production pattern (`<slug>.uno4.me`).
+    expect(result.url).toBe("https://team-site.uno4.me/");
   });
 
   it("returns the address Uno Hosting answers with", async () => {
@@ -60,7 +60,7 @@ describe("publishToUnoHosting", () => {
       fetchImpl,
     });
     expect(result.url).toBe("https://yoga.sites.uno4.dev/");
-    expect(liveSiteUrl("javascript:alert(1)", "yoga")).toBe("https://yoga.sites.uno4.dev/");
+    expect(liveSiteUrl("javascript:alert(1)", "yoga")).toBe("https://yoga.uno4.me/");
   });
 
   it("explains a token that can't publish yet", async () => {

@@ -27,6 +27,7 @@ import {
   GlobeIcon,
   LayoutGridIcon,
   KeyRoundIcon,
+  SendIcon,
   SparklesIcon,
   Trash2Icon,
   TriangleAlertIcon,
@@ -453,6 +454,9 @@ function AiSpendingBlock({
 
 const PRIMARY_ICON: Record<AppPrimaryAction["kind"], typeof ExternalLinkIcon> = {
   open: ExternalLinkIcon,
+  telegram: SendIcon,
+  token: KeyRoundIcon,
+  publish: GlobeIcon,
   start: CirclePlayIcon,
   setup: SparklesIcon,
   fix: WrenchIcon,
@@ -735,7 +739,7 @@ export function ProgramDialog({
                       )}
                       Hide from the internet
                     </Button>
-                  ) : publishable && !blocked ? (
+                  ) : publishable && !blocked && primary?.kind !== "publish" ? (
                     <Button
                       size="sm"
                       variant={primary ? "outline" : "default"}

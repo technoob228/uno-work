@@ -56,6 +56,21 @@ export function isOlderAssistantChat(
   return isAssistantProjectId(thread.projectId) && thread.id !== assistantChatId;
 }
 
+/**
+ * A chat Uno opened by itself (the assistant's own thread, prewarmed for a
+ * newcomer) that nobody has written in yet: noise in Chats until it has a
+ * message. Only Uno's own chats — an empty chat the person made stays.
+ */
+export function isEmptyAutoChat(
+  thread: Pick<
+    SidebarThreadSummary,
+    "projectId" | "latestUserMessageAt" | "latestTurn" | "assistantRole"
+  >,
+): boolean {
+  if (thread.latestUserMessageAt !== null || thread.latestTurn !== null) return false;
+  return isAssistantProjectId(thread.projectId) || thread.assistantRole != null;
+}
+
 export type ChannelState = "off" | "on" | "problem";
 
 /**

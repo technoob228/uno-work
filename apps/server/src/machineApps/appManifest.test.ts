@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   MANIFEST_AI_MAX_LIMIT_USD,
+  envFileHasValue,
   manifestIdFromFileName,
+  parseTelegramUsername,
   parseAppAiRequest,
   parseAppPath,
   parseAppWidget,
@@ -20,6 +22,44 @@ import {
 const HOME = "/home/unowork";
 const DIR = "/home/unowork/.uno/apps";
 const opts = { home: HOME, manifestDir: DIR };
+
+describe("Telegram bot manifests", () => {
+  it("reads a bot: no port, its username and where its token lives", () => {
+    const result = validateManifest(
+      "cafe-bot",
+      {
+        name: "Café Bot",
+        type: "telegram-bot",
+        telegram: "@our_cafe_bot",
+        tokenEnv: "TELEGRAM_BOT_TOKEN",
+        command: "python3 bot.py",
+        cwd: "~/projects/cafe-bot",
+      },
+      opts,
+    );
+    expect(result.ok && result.manifest.telegramBot).toEqual({
+      username: "our_cafe_bot",
+      tokenEnv: "TELEGRAM_BOT_TOKEN",
+    });
+    expect(result.ok && result.manifest.port).toBeNull();
+  });
+
+  it("refuses a username or token variable that isn't one", () => {
+    expect(validateManifest("b", { command: "x", telegram: "no spaces!" }, opts).ok).toBe(false);
+    expect(validateManifest("b", { command: "x", tokenEnv: "A-B" }, opts).ok).toBe(false);
+  });
+
+  it("accepts a t.me link as the username", () => {
+    expect(parseTelegramUsername("https://t.me/our_cafe_bot")).toBe("our_cafe_bot");
+    expect(parseTelegramUsername("bot")).toBeNull();
+  });
+
+  it("tells whether a token is in .env without returning it", () => {
+    expect(envFileHasValue("A=1\nTELEGRAM_BOT_TOKEN=123:abc\n", "TELEGRAM_BOT_TOKEN")).toBe(true);
+    expect(envFileHasValue('export TELEGRAM_BOT_TOKEN=""\n', "TELEGRAM_BOT_TOKEN")).toBe(false);
+    expect(envFileHasValue("# TELEGRAM_BOT_TOKEN=1\n", "TELEGRAM_BOT_TOKEN")).toBe(false);
+  });
+});
 
 describe("manifest fields", () => {
   it("accepts short ids and nothing else", () => {

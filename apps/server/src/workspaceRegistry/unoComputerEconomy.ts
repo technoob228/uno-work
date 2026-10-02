@@ -109,3 +109,40 @@ export async function setComputerEconomy(
   if (!parsed) throw new UnoComputerActionError("The console answered without economy settings.");
   return parsed;
 }
+
+/**
+ * What an agent must know before promising "runs 24/7" (computer_status):
+ * whether this computer sleeps when idle, and what keeps an app awake.
+ * null — not an Uno computer, or the console doesn't report economy.
+ */
+export function computerSleepInfo(economy: UnoComputerEconomy | null | undefined): {
+  readonly sleepsWhenIdle: boolean;
+  readonly afterIdle: string | null;
+  readonly canStayOn: boolean;
+  readonly note: string;
+} | null {
+  if (!economy) return null;
+  if (!economy.enabled) {
+    return {
+      sleepsWhenIdle: false,
+      afterIdle: null,
+      canStayOn: true,
+      note: "Always on: apps here (bots too) keep running when nobody has Uno Work open.",
+    };
+  }
+  const after = economyIdleLabel(economy.idleTimeoutS || economy.defaultIdleTimeoutS);
+  if (economy.locked) {
+    return {
+      sleepsWhenIdle: true,
+      afterIdle: after,
+      canStayOn: false,
+      note: `Free trial computer: it sleeps after ${after} without use, and every app on it sleeps too (a Telegram bot stops answering) until something wakes it — Uno Work opening, a visit to one of its web addresses. "runs": "always" is ignored here. Never say an app runs 24/7: say it works while the computer is awake, and for 24/7 suggest a plan (Small and up) from account_overview.`,
+    };
+  }
+  return {
+    sleepsWhenIdle: true,
+    afterIdle: after,
+    canStayOn: true,
+    note: `Economy mode is on: it sleeps after ${after} without use and its apps sleep with it. An app that must answer all the time (a Telegram bot on long polling, a queue worker) needs "runs": "always" in its manifest, which keeps the computer awake; otherwise don't promise 24/7. The person can also turn economy mode off in Settings, Computer.`,
+  };
+}

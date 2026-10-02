@@ -44,13 +44,16 @@ function tileOf(input: {
   machineApps?: UnoMachineApp[];
   storeApps?: UnoComputerInstalledApp[];
   computerOn?: boolean;
+  publishBlockedReason?: string | null;
+  browserOnMachine?: boolean;
 }): ProgramTile {
   const [tile] = buildProgramTiles({
     machineApps: input.machineApps ?? [],
     storeApps: input.storeApps ?? [],
     installs: [],
-    browserOnMachine: false,
+    browserOnMachine: input.browserOnMachine ?? false,
     computerOn: input.computerOn ?? true,
+    publishBlockedReason: input.publishBlockedReason ?? null,
   });
   if (!tile) throw new Error("no tile");
   return tile;
@@ -108,13 +111,13 @@ describe("appPrimaryAction", () => {
     );
   });
 
-  it("offers Set up with Uno for a running web port nobody can open yet", () => {
+  it("offers Show on the internet for a running web port nobody can open yet", () => {
     const action = appPrimaryAction(
       tileOf({
         machineApps: [machineApp({ id: "port:3000", source: "port", port: 3000, http: true })],
       }),
     );
-    expect(action.kind).toBe("setup");
+    expect(action).toMatchObject({ kind: "publish", machineAppId: "port:3000" });
   });
 
   it("offers Set up with Uno for a running App Store app with no address", () => {
@@ -156,5 +159,79 @@ describe("appPrimaryAction", () => {
     expect(
       appPrimaryAction(build({ ...base, state: "running", url: "https://vw.app.uno4.dev" })),
     ).toMatchObject({ kind: "open", url: "https://vw.app.uno4.dev" });
+  });
+
+  describe("an app the AI built on a cloud computer", () => {
+    const web = machineApp({
+      id: "manifest:orders",
+      source: "manifest",
+      name: "Orders",
+      port: 8087,
+      http: true,
+      localUrl: "http://localhost:8087/",
+      canStart: false,
+    });
+
+    it("offers Show on the internet, not Set up with Uno, for a web app only the computer reaches", () => {
+      const action = appPrimaryAction(tileOf({ machineApps: [web] }));
+      expect(action.kind).toBe("publish");
+      expect(action.label).toBe("Show on the internet");
+      expect(action.machineAppId).toBe("manifest:orders");
+    });
+
+    it("opens it right here when the browser runs on that machine", () => {
+      const action = appPrimaryAction(tileOf({ machineApps: [web], browserOnMachine: true }));
+      expect(action).toMatchObject({ kind: "open", url: "http://localhost:8087/" });
+    });
+
+    it("falls back to Uno when this machine can't show apps on the internet", () => {
+      const action = appPrimaryAction(
+        tileOf({ machineApps: [web], publishBlockedReason: "Only an Uno computer can…" }),
+      );
+      expect(action.kind).toBe("setup");
+    });
+
+    const bot = machineApp({
+      id: "manifest:cafe-bot",
+      source: "manifest",
+      name: "Café Bot",
+      port: null,
+      telegramBot: {
+        username: "our_cafe_bot",
+        link: "https://t.me/our_cafe_bot",
+        tokenReady: true,
+      },
+    });
+
+    it("opens a Telegram bot in Telegram", () => {
+      const tile = tileOf({ machineApps: [bot] });
+      expect(tile.caption).toBe("@our_cafe_bot");
+      expect(appPrimaryAction(tile)).toMatchObject({
+        kind: "telegram",
+        label: "Open in Telegram",
+        url: "https://t.me/our_cafe_bot",
+      });
+    });
+
+    it("asks for the token while the bot waits for it", () => {
+      const waiting = machineApp({
+        ...bot,
+        telegramBot: {
+          username: "our_cafe_bot",
+          link: "https://t.me/our_cafe_bot",
+          tokenReady: false,
+        },
+      });
+      const tile = tileOf({ machineApps: [waiting] });
+      expect(tile.caption).toBe("Waiting for token");
+      const action = appPrimaryAction(tile);
+      expect(action.kind).toBe("token");
+      expect(action.prompt).toContain("Telegram token");
+    });
+
+    it("starts a stopped bot first", () => {
+      const stopped = machineApp({ ...bot, status: "stopped", canStart: true, canStop: false });
+      expect(appPrimaryAction(tileOf({ machineApps: [stopped] })).kind).toBe("start");
+    });
   });
 });

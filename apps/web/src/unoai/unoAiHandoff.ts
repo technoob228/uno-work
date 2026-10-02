@@ -72,6 +72,44 @@ export function takeHandoff(now = Date.now(), s: Store | null = store()): Pendin
   }
 }
 
+/** The first line of a hand-off message — how the chat recognises one. */
+export const UNO_AI_HANDOFF_OPENING =
+  "Continue my conversation with Uno AI from before this computer existed. Don't ask again what's already settled below.";
+const UNO_AI_HANDOFF_SITES_HEADER = "Already live (published by Uno AI on Uno Hosting):";
+
+export function isUnoAiHandoff(text: string): boolean {
+  return text.trimStart().startsWith(UNO_AI_HANDOFF_OPENING);
+}
+
+export interface UnoAiHandoffSummary {
+  readonly goal: string | null;
+  readonly sites: ReadonlyArray<{ readonly title: string | null; readonly url: string }>;
+}
+
+/**
+ * What the chat shows of a hand-off message as a card: the goal and the live
+ * sites (each with Open), instead of a wall of text with the address buried
+ * in it. Call after `isUnoAiHandoff`.
+ */
+export function describeUnoAiHandoff(text: string): UnoAiHandoffSummary {
+  const lines = text.split("\n");
+  const goalLine = lines.find((line) => line.startsWith("My goal: "));
+  const sites: Array<{ title: string | null; url: string }> = [];
+  const start = lines.indexOf(UNO_AI_HANDOFF_SITES_HEADER);
+  if (start !== -1) {
+    for (const line of lines.slice(start + 1)) {
+      if (!line.startsWith("- ")) break;
+      const match = /(https:\/\/[^\s]+)\s*$/.exec(line);
+      if (!match?.[1]) continue;
+      const url = match[1];
+      const before = line.slice(2, line.length - match[0].length).trim();
+      const title = before.endsWith(":") ? before.slice(0, -1).trim() || null : null;
+      sites.push({ title, url });
+    }
+  }
+  return { goal: goalLine ? goalLine.slice("My goal: ".length).trim() || null : null, sites };
+}
+
 function clip(text: string, max: number): string {
   const t = text.replace(/\s+/g, " ").trim();
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
@@ -89,9 +127,7 @@ export function handoffPrompt(input: {
 }): string {
   const items = transcriptItems(input.messages);
   const lines: string[] = [];
-  lines.push(
-    "Continue my conversation with Uno AI from before this computer existed. Don't ask again what's already settled below.",
-  );
+  lines.push(UNO_AI_HANDOFF_OPENING);
   const firstUser = items.find((i) => i.kind === "user");
   if (firstUser && firstUser.kind === "user")
     lines.push("", `My goal: ${clip(firstUser.text, 600)}`);
@@ -117,7 +153,7 @@ export function handoffPrompt(input: {
 
   const sites = input.sites ?? [];
   if (sites.length) {
-    lines.push("", "Already live (published by Uno AI on Uno Hosting):");
+    lines.push("", UNO_AI_HANDOFF_SITES_HEADER);
     for (const s of sites) lines.push(`- ${s.title ? `${clip(s.title, 80)}: ` : ""}${s.url}`);
     lines.push(
       "Its current code: `curl -s <url>` (index.html; forms post to /__forms and arrive in my email/Telegram). To change the site, edit it and republish with the Uno CLI/API under the same address.",

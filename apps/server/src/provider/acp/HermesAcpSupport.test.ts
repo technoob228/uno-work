@@ -125,6 +125,21 @@ describe("applyHermesAcpModelSelection", () => {
 });
 
 describe("buildHermesConfigYaml", () => {
+  it("writes a server's tool-call timeout (ACP session/new can't carry it)", () => {
+    const yaml = buildHermesConfigYaml({
+      model: "uno/smart",
+      mcpServers: [
+        { type: "http", name: "uno-work", url: "http://127.0.0.1:1/api/uno-work/mcp", headers: [] },
+        { type: "http", name: "docs", url: "https://docs.example/mcp", headers: [] },
+      ],
+      mcpToolTimeoutSec: { "uno-work": 900 },
+    });
+    expect(yaml).toContain(
+      '  "uno-work":\n    timeout: 900\n    url: "http://127.0.0.1:1/api/uno-work/mcp"',
+    );
+    expect(yaml).toContain('  "docs":\n    url: "https://docs.example/mcp"');
+  });
+
   it("pins provider+default model and inlines mcp servers (survives set_model rebuilds)", () => {
     const yaml = buildHermesConfigYaml({
       model: "anthropic/claude-haiku-4.5",

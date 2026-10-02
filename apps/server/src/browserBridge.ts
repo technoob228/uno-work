@@ -192,6 +192,12 @@ export interface SecretRequestOutcome {
   readonly name?: string;
   readonly file?: string;
   readonly error?: string;
+  /**
+   * The person hasn't answered yet, but the request stays open (the card in
+   * their window, replayed when a window connects) — see `holdMs`.
+   */
+  readonly queued?: boolean;
+  readonly requestId?: string;
 }
 
 /** Метаданные запроса секрета — по ним result-роут пишет env-файл. */
@@ -206,7 +212,15 @@ interface PendingSecretRequest extends PendingSecretRequestMeta {
   readonly deferred: Deferred.Deferred<SecretRequestOutcome>;
   /** Опубликованное событие целиком — для реплея новым подписчикам стрима. */
   readonly event: BridgeSecretRequestEvent;
+  /**
+   * Set once the agent's call returned `queued`: nobody awaits `deferred`
+   * any more, the answer goes here instead (e.g. a message into the chat).
+   */
+  lateOutcome?: (outcome: SecretRequestOutcome) => Effect.Effect<void>;
 }
+
+/** Longest a queued secret request stays open after the agent's call returned. */
+export const MAX_SECRET_HOLD_MS = 7 * 24 * 3_600_000;
 
 /** How long an agent waits for Allow / Deny on a `uno-work` tool. */
 const DEFAULT_APPROVAL_TIMEOUT_MS = 300_000;
@@ -368,7 +382,17 @@ export interface BrowserBridgeShape {
       readonly description?: string;
       readonly targetFile: string;
       readonly cwd: string;
+      /** How long the call waits for the answer (0 = return at once). */
       readonly timeoutMs?: number;
+      /**
+       * Unanswered after `timeoutMs`: keep the request open this much longer
+       * (the card stays, a window that connects later gets it) and return
+       * `{ queued: true }` instead of a timeout. Without it the request is
+       * dropped as before.
+       */
+      readonly holdMs?: number;
+      /** A queued request's answer — runs when the person answers later. */
+      readonly onLateOutcome?: (outcome: SecretRequestOutcome) => Effect.Effect<void>;
     },
     context?: BrowserBridgeRequestContext,
   ) => Effect.Effect<SecretRequestOutcome>;
@@ -406,7 +430,11 @@ export interface BrowserBridgeShape {
   }) => Effect.Effect<boolean>;
   /** Show a file in the app's Office / Files view (see `BridgeOpenInAppEvent`). */
   readonly publishOpenInApp: (
-    input: { readonly view: "office" | "files"; readonly path: string },
+    input: {
+      readonly view: "office" | "files" | "app";
+      readonly path: string;
+      readonly name?: string;
+    },
     context?: BrowserBridgeRequestContext,
   ) => Effect.Effect<BrowserBridgeStreamEvent>;
   readonly stream: Stream.Stream<BrowserBridgeStreamEvent>;
@@ -644,14 +672,61 @@ export const makeBrowserBridge = (input: {
           });
           yield* PubSub.publish(pubsub, event);
 
-          const timeoutMs = secretRequestTimeoutMs(input.timeoutMs);
-          const maybeOutcome = yield* Deferred.await(deferred).pipe(
-            Effect.timeoutOption(Duration.millis(timeoutMs)),
-            Effect.ensuring(Effect.sync(() => pendingSecretRequests.delete(requestId))),
-          );
+          const holdMs =
+            input.holdMs !== undefined && input.holdMs > 0
+              ? Math.min(MAX_SECRET_HOLD_MS, input.holdMs)
+              : 0;
+          // 0 is allowed only for a held request: nobody to ask right now.
+          const timeoutMs =
+            holdMs > 0 && input.timeoutMs === 0 ? 0 : secretRequestTimeoutMs(input.timeoutMs);
+          const maybeOutcome =
+            timeoutMs === 0
+              ? Option.none<SecretRequestOutcome>()
+              : yield* Deferred.await(deferred).pipe(
+                  Effect.timeoutOption(Duration.millis(timeoutMs)),
+                  Effect.ensuring(
+                    Effect.sync(() => {
+                      if (holdMs === 0) pendingSecretRequests.delete(requestId);
+                    }),
+                  ),
+                );
 
           if (Option.isSome(maybeOutcome)) {
+            pendingSecretRequests.delete(requestId);
             return maybeOutcome.value;
+          }
+          const stillPending = pendingSecretRequests.get(requestId);
+          if (holdMs > 0 && stillPending !== undefined) {
+            stillPending.lateOutcome = (outcome) =>
+              input.onLateOutcome ? input.onLateOutcome(outcome) : Effect.void;
+            // Expire it later: drop the card if it is still the same request.
+            yield* Effect.sleep(Duration.millis(holdMs)).pipe(
+              Effect.andThen(
+                Effect.gen(function* () {
+                  if (pendingSecretRequests.get(requestId) !== stillPending) return;
+                  pendingSecretRequests.delete(requestId);
+                  const expiredSequence = yield* Ref.updateAndGet(
+                    sequenceRef,
+                    (value) => value + 1,
+                  );
+                  yield* PubSub.publish(pubsub, {
+                    version: 1,
+                    type: "secretSettled",
+                    sequence: expiredSequence,
+                    requestId,
+                  } satisfies BrowserBridgeStreamEvent);
+                }),
+              ),
+              Effect.forkDetach,
+            );
+            return {
+              ok: false,
+              queued: true,
+              name: input.name,
+              requestId,
+              error:
+                "The person hasn't answered yet. The request stays open in Uno Work (and their Inbox); when they enter it, the value is saved to the env file and this chat gets a message.",
+            } satisfies SecretRequestOutcome;
           }
           const settledSequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
           yield* PubSub.publish(pubsub, {
@@ -688,6 +763,15 @@ export const makeBrowserBridge = (input: {
             sequence,
             requestId: input.requestId,
           } satisfies BrowserBridgeStreamEvent);
+          if (pending.lateOutcome) {
+            yield* pending
+              .lateOutcome(input.outcome)
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("secret request: late answer handler failed", { cause }),
+                ),
+              );
+          }
           return true;
         }),
       requestToolApproval: (input, context?) =>
@@ -754,6 +838,7 @@ export const makeBrowserBridge = (input: {
                 sequence,
                 view: input.view,
                 path: input.path,
+                ...(input.name !== undefined ? { name: input.name } : {}),
                 ...(context ? { context } : {}),
               }) satisfies BrowserBridgeStreamEvent,
           ),

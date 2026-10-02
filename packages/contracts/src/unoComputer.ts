@@ -599,6 +599,19 @@ export const UnoMachineAppWidget = Schema.Struct({
 });
 export type UnoMachineAppWidget = typeof UnoMachineAppWidget.Type;
 
+export const UnoMachineAppTelegramBot = Schema.Struct({
+  /** Username without @; null until the agent wrote it into the manifest. */
+  username: Schema.NullOr(Schema.String),
+  /** `https://t.me/<username>` — "Open in Telegram"; null without a username. */
+  link: Schema.NullOr(Schema.String),
+  /**
+   * Its token is in the project's `.env` (`tokenEnv`); false = "Waiting for
+   * token"; null = the manifest doesn't say where the token lives.
+   */
+  tokenReady: Schema.NullOr(Schema.Boolean),
+});
+export type UnoMachineAppTelegramBot = typeof UnoMachineAppTelegramBot.Type;
+
 export const UnoMachineApp = Schema.Struct({
   /** Stable key: `manifest:<id>`, `docker:<name>`, `systemd:<unit>`, `port:<n>`. */
   id: Schema.String,
@@ -650,6 +663,11 @@ export const UnoMachineApp = Schema.Struct({
   codeDirKeepReason: Schema.optional(Schema.NullOr(Schema.String)),
   /** A Home widget the app declares (registered apps only); null/absent = none. */
   widget: Schema.optional(Schema.NullOr(UnoMachineAppWidget)),
+  /**
+   * A Telegram bot (`"type": "telegram-bot"` in its manifest): no port, it is
+   * opened in Telegram. Absent for every other app.
+   */
+  telegramBot: Schema.optional(UnoMachineAppTelegramBot),
 });
 export type UnoMachineApp = typeof UnoMachineApp.Type;
 
@@ -804,3 +822,31 @@ export const UnoComputerBoostResult = Schema.Struct({
   boost: Schema.NullOr(UnoComputerBoost),
 });
 export type UnoComputerBoostResult = typeof UnoComputerBoostResult.Type;
+
+/**
+ * One of the person's sites on Uno Hosting, as the computer's daemon reads it
+ * from the console (`GET /api/v1/work/sites` with the machine's own token) —
+ * so the list works on the computer's direct address too, where the browser
+ * has no account session.
+ */
+export const UnoWorkSite = Schema.Struct({
+  slug: Schema.String,
+  /** The live address hosting answers with (`https://<slug>.uno4.me/`), or the custom domain. */
+  url: Schema.String,
+  customDomain: Schema.NullOr(Schema.String),
+  hasPassword: Schema.Boolean,
+  sizeBytes: Schema.NullOr(Schema.Number),
+  updatedAt: Schema.NullOr(Schema.String),
+});
+export type UnoWorkSite = typeof UnoWorkSite.Type;
+
+export const UnoWorkSites = Schema.Struct({
+  /** `ok`; `not_linked` — this computer has no Uno account token; `unavailable` — the console didn't answer. */
+  availability: Schema.Literals(["ok", "not_linked", "unavailable"]),
+  sites: Schema.Array(UnoWorkSite),
+  storageUsedBytes: Schema.NullOr(Schema.Number),
+  storageLimitBytes: Schema.NullOr(Schema.Number),
+  /** Why the list is empty when it isn't `ok`, in plain words. */
+  message: Schema.NullOr(Schema.String),
+});
+export type UnoWorkSites = typeof UnoWorkSites.Type;

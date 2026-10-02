@@ -493,8 +493,11 @@ export const BridgeOpenInAppEvent = Schema.Struct({
   version: Schema.Literal(1),
   type: Schema.Literal("openInApp"),
   sequence: NonNegativeInt,
-  view: Schema.Literals(["office", "files"]),
+  /** `app`: `path` is the public address of an app of the computer (open_in_panel). */
+  view: Schema.Literals(["office", "files", "app"]),
   path: Schema.String,
+  /** `app`: its name for the panel tab. */
+  name: Schema.optional(Schema.String),
   context: Schema.optional(BrowserBridgeRequestContext),
 });
 export type BridgeOpenInAppEvent = typeof BridgeOpenInAppEvent.Type;

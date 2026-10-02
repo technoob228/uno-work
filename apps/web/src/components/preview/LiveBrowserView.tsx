@@ -27,6 +27,7 @@ import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
 import { matchCredentialsForOrigin } from "./BrowserPane";
+import { LiveBrowserOpenOutside } from "./LiveBrowserOpenOutside";
 import { useBrowserLivePage, useBrowserLiveState } from "./browserLiveStore";
 import { browserUrlOrigin, normalizeBrowserUrl } from "./browserUrl";
 import type { PreviewFile } from "./PreviewPaneContext";
@@ -527,6 +528,7 @@ function Toolbar({
           <KeyRoundIcon />
         </Button>
       ) : null}
+      <LiveBrowserOpenOutside environmentId={environmentId} pageUrl={page.url} />
     </div>
   );
 }

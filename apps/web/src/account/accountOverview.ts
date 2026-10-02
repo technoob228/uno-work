@@ -639,7 +639,7 @@ export function parseSites(raw: unknown): SitesState {
     return [
       {
         slug,
-        url: domain ? `https://${domain}` : str(d["url"]) || `https://${slug}.sites.uno4.dev`,
+        url: domain ? `https://${domain}` : str(d["url"]) || `https://${slug}.uno4.me`,
         sizeBytes: num(d["size_bytes"]),
         filesCount: num(d["files_count"]),
         customDomain: domain,

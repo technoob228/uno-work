@@ -9,7 +9,9 @@ import {
   economySummary,
   idleLabel,
   idleShort,
+  canReleaseOnVisible,
   shouldHoldReconnect,
+  shouldHoldWhileHidden,
 } from "./economyModel";
 
 const economy: UnoComputerEconomy = {
@@ -110,5 +112,33 @@ describe("shouldHoldReconnect", () => {
     expect(
       shouldHoldReconnect({ ...presence, state: "sleeping", sleepAfter: null }, now, now),
     ).toBe(true);
+  });
+});
+
+describe("background tabs never wake an economy computer", () => {
+  const now = Date.parse("2026-10-02T03:00:00Z");
+  const awake: UnoEconomyPresence = {
+    enabled: true,
+    state: "awake",
+    sleepAfter: new Date(now + 4 * 60_000).toISOString(),
+    idleTimeoutS: 300,
+    busy: [],
+    reportedAt: null,
+  };
+
+  it("holds a hidden tab nobody touched for a minute", () => {
+    expect(shouldHoldWhileHidden(awake, true, now - 2 * 60_000, now)).toBe(true);
+    expect(shouldHoldWhileHidden(awake, true, null, now)).toBe(true);
+    expect(shouldHoldWhileHidden(awake, true, now - 10_000, now)).toBe(false);
+    expect(shouldHoldWhileHidden(awake, false, null, now)).toBe(false);
+    expect(shouldHoldWhileHidden({ ...awake, enabled: false }, true, null, now)).toBe(false);
+  });
+
+  it("lets a tab that became visible reconnect only to an awake computer", () => {
+    expect(canReleaseOnVisible(awake, now)).toBe(true);
+    expect(canReleaseOnVisible({ ...awake, state: "sleeping" }, now)).toBe(false);
+    expect(
+      canReleaseOnVisible({ ...awake, sleepAfter: new Date(now - 60_000).toISOString() }, now),
+    ).toBe(false);
   });
 });

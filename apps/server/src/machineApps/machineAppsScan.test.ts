@@ -144,6 +144,36 @@ describe("scanMachineApps", () => {
     expect(notes).toMatchObject({ status: "stopped", canStart: true, canStop: false });
   });
 
+  it("a bot the daemon started is running even before its port answers (no second copy)", async () => {
+    const [bot] = await scanMachineApps(fakeProbe(), {
+      manifests: [{ ...MANIFEST, id: "cafe-bot", port: 8087, command: "python3 bot.py" }],
+      manifestIcons: new Map(),
+      markedPids: new Map([["cafe-bot", [27733, 27740]]]),
+    });
+    expect(bot).toMatchObject({
+      status: "running",
+      canStart: false,
+      canStop: true,
+      control: { kind: "marked", pids: [27733, 27740] },
+    });
+  });
+
+  it("knows whether a port-less app runs when it can see the processes", async () => {
+    const portless = { ...MANIFEST, id: "worker", port: null, command: "python3 worker.py" };
+    const [stopped] = await scanMachineApps(fakeProbe(), {
+      manifests: [portless],
+      manifestIcons: new Map(),
+      markedPids: new Map(),
+    });
+    expect(stopped).toMatchObject({ status: "stopped", canStart: true });
+    // A machine without /proc can't tell: unknown, never started twice.
+    const [unknown] = await scanMachineApps(fakeProbe(), {
+      manifests: [portless],
+      manifestIcons: new Map(),
+    });
+    expect(unknown).toMatchObject({ status: "unknown", canStart: false });
+  });
+
   it("recognises a VPN container and its web UI port", async () => {
     const apps = await scanMachineApps(fakeProbe(), { manifests: [], manifestIcons: new Map() });
     expect(apps.find((a) => a.id === "docker:wg-easy")).toMatchObject({
@@ -410,6 +440,13 @@ describe("pickAutostartApps", () => {
     ).toEqual(["manifest:bookings"]);
   });
 
+  it("starts a port-less bot whose processes the daemon can see are gone", () => {
+    const seen = new Set<string>();
+    expect(
+      pickAutostartApps([app({ id: "bot", port: null }, "stopped")], seen).map((a) => a.id),
+    ).toEqual(["manifest:bot"]);
+  });
+
   it("leaves an app the person stopped alone", () => {
     const seen = new Set<string>();
     pickAutostartApps([app({ id: "notes" }, "running")], seen);
@@ -423,7 +460,8 @@ describe("pickAutostartApps", () => {
         [
           app({ id: "off", autostart: false }),
           app({ id: "nocmd", command: null }),
-          app({ id: "noport", port: null }),
+          app({ id: "noport", port: null }, "unknown"),
+          app({ id: "already", port: 8087 }, "running"),
         ],
         seen,
       ),

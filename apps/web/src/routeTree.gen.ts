@@ -30,6 +30,7 @@ import { Route as SettingsAssistantRouteImport } from './routes/settings.assista
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as SettingsAiRouteImport } from './routes/settings.ai'
 import { Route as SettingsAccountRouteImport } from './routes/settings.account'
+import { Route as ChatSitesRouteImport } from './routes/_chat.sites'
 import { Route as ChatSetupRouteImport } from './routes/_chat.setup'
 import { Route as ChatOfficeRouteImport } from './routes/_chat.office'
 import { Route as ChatMyUnoRouteImport } from './routes/_chat.my-uno'
@@ -161,6 +162,11 @@ const SettingsAccountRoute = SettingsAccountRouteImport.update({
   id: '/account',
   path: '/account',
   getParentRoute: () => SettingsRoute,
+} as any)
+const ChatSitesRoute = ChatSitesRouteImport.update({
+  id: '/sites',
+  path: '/sites',
+  getParentRoute: () => ChatRoute,
 } as any)
 const ChatSetupRoute = ChatSetupRouteImport.update({
   id: '/setup',
@@ -323,6 +329,7 @@ export interface FileRoutesByFullPath {
   '/my-uno': typeof ChatMyUnoRoute
   '/office': typeof ChatOfficeRoute
   '/setup': typeof ChatSetupRoute
+  '/sites': typeof ChatSitesRoute
   '/settings/account': typeof SettingsAccountRoute
   '/settings/ai': typeof SettingsAiRoute
   '/settings/archived': typeof SettingsArchivedRoute
@@ -370,6 +377,7 @@ export interface FileRoutesByTo {
   '/my-uno': typeof ChatMyUnoRoute
   '/office': typeof ChatOfficeRoute
   '/setup': typeof ChatSetupRoute
+  '/sites': typeof ChatSitesRoute
   '/settings/account': typeof SettingsAccountRoute
   '/settings/ai': typeof SettingsAiRoute
   '/settings/archived': typeof SettingsArchivedRoute
@@ -421,6 +429,7 @@ export interface FileRoutesById {
   '/_chat/my-uno': typeof ChatMyUnoRoute
   '/_chat/office': typeof ChatOfficeRoute
   '/_chat/setup': typeof ChatSetupRoute
+  '/_chat/sites': typeof ChatSitesRoute
   '/settings/account': typeof SettingsAccountRoute
   '/settings/ai': typeof SettingsAiRoute
   '/settings/archived': typeof SettingsArchivedRoute
@@ -473,6 +482,7 @@ export interface FileRouteTypes {
     | '/my-uno'
     | '/office'
     | '/setup'
+    | '/sites'
     | '/settings/account'
     | '/settings/ai'
     | '/settings/archived'
@@ -520,6 +530,7 @@ export interface FileRouteTypes {
     | '/my-uno'
     | '/office'
     | '/setup'
+    | '/sites'
     | '/settings/account'
     | '/settings/ai'
     | '/settings/archived'
@@ -570,6 +581,7 @@ export interface FileRouteTypes {
     | '/_chat/my-uno'
     | '/_chat/office'
     | '/_chat/setup'
+    | '/_chat/sites'
     | '/settings/account'
     | '/settings/ai'
     | '/settings/archived'
@@ -761,6 +773,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings/account'
       preLoaderRoute: typeof SettingsAccountRouteImport
       parentRoute: typeof SettingsRoute
+    }
+    '/_chat/sites': {
+      id: '/_chat/sites'
+      path: '/sites'
+      fullPath: '/sites'
+      preLoaderRoute: typeof ChatSitesRouteImport
+      parentRoute: typeof ChatRoute
     }
     '/_chat/setup': {
       id: '/_chat/setup'
@@ -980,6 +999,7 @@ interface ChatRouteChildren {
   ChatMyUnoRoute: typeof ChatMyUnoRoute
   ChatOfficeRoute: typeof ChatOfficeRoute
   ChatSetupRoute: typeof ChatSetupRoute
+  ChatSitesRoute: typeof ChatSitesRoute
   ChatIndexRoute: typeof ChatIndexRoute
   ChatEnvironmentIdThreadIdRoute: typeof ChatEnvironmentIdThreadIdRoute
   ChatDraftDraftIdRoute: typeof ChatDraftDraftIdRoute
@@ -996,6 +1016,7 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatMyUnoRoute: ChatMyUnoRoute,
   ChatOfficeRoute: ChatOfficeRoute,
   ChatSetupRoute: ChatSetupRoute,
+  ChatSitesRoute: ChatSitesRoute,
   ChatIndexRoute: ChatIndexRoute,
   ChatEnvironmentIdThreadIdRoute: ChatEnvironmentIdThreadIdRoute,
   ChatDraftDraftIdRoute: ChatDraftDraftIdRoute,

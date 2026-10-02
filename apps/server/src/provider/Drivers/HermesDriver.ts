@@ -34,6 +34,7 @@ import { UnoGatewayKey } from "../../unoGatewayKey.ts";
 import { AiProviderKeys } from "../../aiProviders/AiProviderKeys.ts";
 import {
   acpMcpServers,
+  mcpToolTimeoutsSec,
   customMcpServersGetter,
   sessionMcpServers,
 } from "../../mcp/customMcpServers.ts";
@@ -237,6 +238,15 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
         // + the owner's settings.mcpServers.
         extraMcpServers: (context) =>
           acpMcpServers(
+            sessionMcpServers({
+              bridgeEnvironment: browserBridge.scopedEnvironment(context),
+              custom: customMcpServers(),
+            }),
+          ),
+        // ACP can't carry a tool timeout: without it Hermes cut uno-work calls
+        // that wait for the person (approvals, request_secret) at 300 s.
+        extraMcpToolTimeoutsSec: (context) =>
+          mcpToolTimeoutsSec(
             sessionMcpServers({
               bridgeEnvironment: browserBridge.scopedEnvironment(context),
               custom: customMcpServers(),

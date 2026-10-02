@@ -14,7 +14,8 @@ import {
   runBrowserAutomationCommand,
 } from "./BrowserAutomationRegistry";
 import { resolveBridgeEventProjectKey } from "./browserBridgeRouting";
-import { detectFileKind, usePreviewPane } from "./PreviewPaneContext";
+import { detectFileKind, makeAppFile, usePreviewPane } from "./PreviewPaneContext";
+import { openInNewTab } from "../../navigation/useOpenApp";
 import { automationScopeKeys, type PreviewTabScope } from "./previewTabScopes";
 import { addSecretRequest, removeSecretRequest } from "../../secretRequestStore";
 import { addToolApproval, removeToolApproval } from "../../toolApprovalStore";
@@ -89,8 +90,14 @@ function askBeforeOpeningPrivateUrl(url: string, open: () => void): void {
 }
 
 export function BrowserBridgeListener() {
-  const { openUrl, openUrlForTarget, openFileForTarget, currentProjectKey, currentChatThreadId } =
-    usePreviewPane();
+  const {
+    openUrl,
+    openUrlForTarget,
+    openFileForTarget,
+    openAppTab,
+    currentProjectKey,
+    currentChatThreadId,
+  } = usePreviewPane();
   const browserAutomationLevel = useSettings((settings) => settings.browserAutomationLevel);
   const groupingSettings = useSettings((settings) => ({
     sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
@@ -111,6 +118,8 @@ export function BrowserBridgeListener() {
   openUrlForTargetRef.current = openUrlForTarget;
   const openFileForTargetRef = useRef(openFileForTarget);
   openFileForTargetRef.current = openFileForTarget;
+  const openAppTabRef = useRef(openAppTab);
+  openAppTabRef.current = openAppTab;
   const navigate = useNavigate();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
@@ -149,6 +158,33 @@ export function BrowserBridgeListener() {
         }
         if (event.type === "toolApprovalSettled") {
           removeToolApproval(event.requestId);
+          return;
+        }
+        if (event.type === "openInApp" && event.view === "app") {
+          // An app's public address (open_in_panel): framed as the app in the
+          // panel. An http address can't be framed inside https Uno Work, so
+          // it is offered in a new tab (a click: popup blockers).
+          const url = event.path;
+          const name = event.name ?? url;
+          const frameable = !(window.location.protocol === "https:" && /^http:/i.test(url));
+          const here =
+            !event.context?.threadId || event.context.threadId === currentThreadIdRef.current;
+          if (frameable && here) {
+            openAppTabRef.current(makeAppFile({ url, name }));
+            return;
+          }
+          toastManager.add(
+            stackedThreadToast({
+              type: "info",
+              title: `${name} is ready to open`,
+              description: url,
+              actionProps: {
+                children: "Open",
+                onClick: () =>
+                  frameable ? openAppTabRef.current(makeAppFile({ url, name })) : openInNewTab(url),
+              },
+            }),
+          );
           return;
         }
         if (event.type === "openInApp") {

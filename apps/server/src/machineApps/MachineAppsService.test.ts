@@ -444,6 +444,45 @@ const NOTES = {
   storage: true,
 };
 
+it.effect("a bot the daemon already started is running: Start is refused, no second copy", () => {
+  const commands: string[][] = [];
+  const uid = process.getuid?.() ?? 0;
+  return Effect.gen(function* () {
+    // Port 8087 doesn't answer yet (the bot waits for its token).
+    const dirs = yield* Effect.promise(() =>
+      registeredAppHome({ name: "Our Café Bot", port: 8087, command: "python3 bot.py" }),
+    );
+    const layer = serviceLayer({
+      ownBoxId: 42,
+      boxToken: "uno_agt_machine",
+      probe: registeredProbe(commands),
+      storeApps: [],
+      options: {
+        home: dirs.home,
+        manifestDir: dirs.manifestDir,
+        keysDir: dirs.keysDir,
+        processTable: async () => [
+          { pid: 27733, ppid: process.pid, uid, comm: "bash", cwd: null, appMarker: "notes" },
+          { pid: 27740, ppid: 27733, uid, comm: "python3", cwd: null, appMarker: "notes" },
+        ],
+      },
+    });
+    yield* Effect.gen(function* () {
+      const service = yield* MachineAppsService;
+      const listed = yield* service.list;
+      const bot = listed.apps.find((a) => a.id === "manifest:notes");
+      assert.strictEqual(bot?.status, "running");
+      assert.strictEqual(bot?.canStart, false);
+      assert.strictEqual(bot?.canStop, true);
+      const started = yield* service
+        .action({ appId: "manifest:notes", action: "start" })
+        .pipe(Effect.result);
+      assert.strictEqual(started._tag, "Failure");
+    }).pipe(Effect.provide(layer));
+    yield* Effect.promise(() => rm(dirs.root, { recursive: true, force: true }));
+  });
+});
+
 it.effect(
   "removes an app an AI built here: stops it, its units and files go, the code stays",
   () => {

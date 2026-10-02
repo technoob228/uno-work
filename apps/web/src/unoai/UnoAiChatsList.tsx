@@ -115,3 +115,44 @@ export function UnoAiChatsCard() {
     </section>
   );
 }
+
+/**
+ * Full app, Chats: the Uno AI chats (made before this computer existed, or
+ * in the console) as one small group under the computer's own chats — the
+ * site Uno AI made is one click away. Hidden when there are none, and on the
+ * computer's direct address (no account session there).
+ */
+export function SidebarUnoAiChats() {
+  const chats = useQuery(aiChatsQuery());
+  const search = useSearch({ strict: false }) as { chat?: string };
+  const list: ReadonlyArray<AiChatSummary> = (chats.data?.chats ?? []).slice(0, 5);
+  if (list.length === 0) return null;
+  return (
+    <div className="mt-3 flex flex-col gap-px" data-testid="sidebar-uno-ai-chats">
+      <div className="flex items-center gap-1.5 px-2 pb-0.5 text-[11px] font-medium text-sidebar-muted-foreground">
+        <SparklesIcon className="size-3" />
+        Uno AI
+      </div>
+      {list.map((c) => (
+        <Link
+          key={c.id}
+          to="/ai"
+          search={{ chat: c.id }}
+          title={chatTitle(c.title)}
+          className={
+            "flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-sm text-sidebar-foreground/85 hover:bg-sidebar-row-hover" +
+            (search.chat === c.id ? " bg-sidebar-row-active" : "")
+          }
+        >
+          <MessageSquareIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate">{chatTitle(c.title)}</span>
+          {c.sites && c.sites.length > 0 ? (
+            <span className="shrink-0 rounded-full bg-emerald-500/10 px-1.5 py-px text-[10px] text-emerald-700 dark:text-emerald-400">
+              site
+            </span>
+          ) : null}
+        </Link>
+      ))}
+    </div>
+  );
+}

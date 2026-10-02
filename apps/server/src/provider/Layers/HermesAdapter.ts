@@ -130,6 +130,11 @@ export interface HermesAdapterLiveOptions {
     readonly threadId: string;
     readonly cwd: string;
   }) => ReadonlyArray<EffectAcpSchema.McpServer>;
+  /** Tool-call timeouts (seconds) of those servers by name — written to config.yaml. */
+  readonly extraMcpToolTimeoutsSec?: (context: {
+    readonly threadId: string;
+    readonly cwd: string;
+  }) => Readonly<Record<string, number>>;
   readonly resolveLlmRoute?: (input: {
     readonly threadId: ThreadId;
     readonly provider: AssistantLlmProvider;
@@ -569,6 +574,8 @@ export function makeHermesAdapter(
                 buildHermesConfigYaml({
                   model: configuredModel,
                   mcpServers,
+                  mcpToolTimeoutSec:
+                    options?.extraMcpToolTimeoutsSec?.({ threadId: input.threadId, cwd }) ?? {},
                   skillsExternalDirs: [sharedSkillsRoot()],
                   speechToText: llmProvider === "uno",
                   // Hermes' own session titles off the chat model (see

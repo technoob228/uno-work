@@ -361,6 +361,81 @@ it.effect("replays pending secret requests to new stream subscribers", () =>
   }).pipe(Effect.provide(BrowserBridgeTest)),
 );
 
+it.effect(
+  "queues a held secret request when nobody can answer now and delivers the late answer",
+  () =>
+    Effect.gen(function* () {
+      const browserBridge = yield* BrowserBridge;
+      const late: Array<{ ok: boolean; name?: string }> = [];
+      // No window connected: timeoutMs 0 + holdMs returns at once, queued.
+      const outcome = yield* browserBridge.publishSecretRequest({
+        name: "TELEGRAM_BOT_TOKEN",
+        targetFile: ".env",
+        cwd: "/tmp/bot",
+        timeoutMs: 0,
+        holdMs: 60_000,
+        onLateOutcome: (result) =>
+          Effect.sync(() => {
+            late.push({ ok: result.ok, ...(result.name ? { name: result.name } : {}) });
+          }),
+      });
+      assert.isFalse(outcome.ok);
+      assert.isTrue(outcome.queued);
+      assert.equal(outcome.name, "TELEGRAM_BOT_TOKEN");
+
+      // A window that connects later still gets the card.
+      const replayed = yield* browserBridge.stream.pipe(
+        Stream.runHead,
+        Effect.map((option) => Option.getOrThrow(option)),
+      );
+      assert.equal(replayed.type, "secretRequest");
+      if (replayed.type !== "secretRequest") throw new Error("Expected secretRequest.");
+      assert.equal(replayed.requestId, outcome.requestId);
+
+      const completed = yield* browserBridge.completeSecretRequest({
+        requestId: replayed.requestId,
+        responseToken: replayed.responseToken,
+        outcome: { ok: true, name: "TELEGRAM_BOT_TOKEN", file: ".env" },
+      });
+      assert.isTrue(completed);
+      assert.deepEqual(late, [{ ok: true, name: "TELEGRAM_BOT_TOKEN" }]);
+      // Answered once: the card is gone.
+      const again = yield* browserBridge.peekSecretRequest({
+        requestId: replayed.requestId,
+        responseToken: replayed.responseToken,
+      });
+      assert.isNull(again);
+    }).pipe(Effect.provide(BrowserBridgeTest)),
+);
+
+it.effect("a held request answered in time returns the answer, not queued", () =>
+  Effect.gen(function* () {
+    const browserBridge = yield* BrowserBridge;
+    const fiber = yield* browserBridge
+      .publishSecretRequest({
+        name: "API_KEY",
+        targetFile: ".env",
+        cwd: "/tmp/project",
+        timeoutMs: 5_000,
+        holdMs: 60_000,
+      })
+      .pipe(Effect.forkScoped);
+    yield* Effect.yieldNow;
+    const replayed = yield* browserBridge.stream.pipe(
+      Stream.runHead,
+      Effect.map((option) => Option.getOrThrow(option)),
+    );
+    if (replayed.type !== "secretRequest") throw new Error("Expected secretRequest.");
+    yield* browserBridge.completeSecretRequest({
+      requestId: replayed.requestId,
+      responseToken: replayed.responseToken,
+      outcome: { ok: true, name: "API_KEY", file: ".env" },
+    });
+    const outcome = yield* Fiber.join(fiber);
+    assert.deepEqual(outcome, { ok: true, name: "API_KEY", file: ".env" });
+  }).pipe(Effect.provide(BrowserBridgeTest)),
+);
+
 it.effect("supersedes a pending secret request for the same name and cwd", () =>
   Effect.gen(function* () {
     const browserBridge = yield* BrowserBridge;

@@ -18,7 +18,7 @@ export function buildMachineAppsInstructions(manifestDir = resolveManifestDir())
   const sdkJs = path.join(os.homedir(), ".uno", "sdk", "js", "uno-app.mjs");
   return `## Apps on this computer — register what you build
 
-Uno Work shows this machine as a computer with a home screen of programs. Services running here appear there by themselves (listening ports, docker containers, systemd services), but a program **you** create for the person — a web app, a bot with a dashboard, a tool, a site — must be registered so it gets a proper name, icon and Start button.
+Uno Work shows this machine as a computer with a home screen of programs. Services running here appear there by themselves (listening ports, docker containers, systemd services), but a program **you** create for the person — a web app, a Telegram bot, a tool, a worker — must be registered so it gets a proper name, icon and Start button.
 
 When you create or run an app or long-running service on this machine, write \`${dir}/<id>.json\` (create the folder if needed; \`<id>\` = short lowercase name like \`notes\`, letters/digits/-/_ only):
 
@@ -37,7 +37,27 @@ When you create or run an app or long-running service on this machine, write \`$
 - \`port\` — the TCP port the app listens on. Make web apps listen on \`0.0.0.0\` (not only 127.0.0.1), otherwise they can't be shown on the internet later.
 - \`command\` + \`cwd\` — how to start it (run with \`bash -lc\` inside the home folder, \`PORT\` is set). With a command the app gets a Start button; Uno starts it by itself within ~20 seconds of the manifest appearing and again whenever the computer boots (\`"autostart": false\` turns that off), so don't also start a second copy after writing the manifest. Its output goes to \`${dir}/<id>.log\`.
 - Optional: \`"path": "/admin"\` — what to open on that port; \`"url"\` — an https address the app already has elsewhere.
-- Start the app (e.g. \`nohup … &\` or via its command) so it is running when you finish, then tell the person it is on their home screen ("This computer").
+- Don't start it yourself (no \`nohup … &\`, no \`app_start\` right after registering): Uno starts it, and a copy you start runs next to Uno's — a Telegram bot then fights itself for updates (409). Check it with \`apps_list\` / \`app_logs\`, then tell the person it is on their home screen ("This computer").
+- Tests and trial runs never write into the app's real data (its config, orders, users): point them at a temporary folder or fixtures.
+- **On a cloud computer the right panel is a browser running on the machine** — \`http://localhost:<port>\` works there, but the person can't open it on their own phone or laptop. To give them their own link, use \`app_show_on_internet\` (they approve it).
+- **Sleep.** Check \`sleep\` in \`computer_status\`. When the computer sleeps when idle (the free trial always does), every app on it sleeps too: a web app wakes when opened, a Telegram bot on long polling does NOT — it stops answering until something wakes the computer. Never tell the person an app runs 24/7 then; say so plainly and offer an always-on plan (Small and up). Where economy mode is optional, \`"runs": "always"\` in the manifest keeps the computer awake for that app (ignored on the free trial).
+
+**A Telegram bot** has no port and nothing to show in the panel. Its manifest:
+
+\`\`\`json
+{
+  "name": "Café Bot",
+  "icon": "🤖",
+  "type": "telegram-bot",
+  "telegram": "our_cafe_bot",
+  "tokenEnv": "TELEGRAM_BOT_TOKEN",
+  "command": "python3 bot.py",
+  "cwd": "~/projects/cafe-bot",
+  "runs": "always"
+}
+\`\`\`
+
+\`telegram\` is the bot's username (without @, from BotFather; leave it out until you know it), \`tokenEnv\` the variable in the project's \`.env\` that holds its token — ask for it with \`request_secret\`, never in chat. The person's Apps list then shows "Open in Telegram" (https://t.me/<username>) and "Waiting for token" until the token is in \`.env\`. "Open" for a bot is that t.me link — give it to the person; never open the bot in the panel.
 - Never put secrets in the manifest. Don't publish ports to the internet yourself — the person does that with the "Show on the internet" button.
 - Remove the manifest when you delete the app.
 

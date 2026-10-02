@@ -51,7 +51,13 @@ import { resolveAppApiPort } from "../appSdk/appApiPort.ts";
 import { appKeyDir, removeAppKey, resolveAppKeysDir } from "../appSdk/appKeys.ts";
 import { CpuLoadWindow, type CpuTotals } from "../computerResources/cpuWindow.ts";
 import { parseCpuTotals, parseVmStat } from "../computerResources/resourceParsers.ts";
-import { readIconDataUrl, readManifestDir, type AppManifest } from "./appManifest.ts";
+import {
+  envFileHasValue,
+  readIconDataUrl,
+  readManifestDir,
+  telegramBotLink,
+  type AppManifest,
+} from "./appManifest.ts";
 import { extractHtmlTitle, parseCgroupOwner } from "./discoveryParsers.ts";
 import { openHiddenApps } from "./hiddenApps.ts";
 import { displayManifestDir, resolveManifestDir } from "./manifestDir.ts";
@@ -60,6 +66,7 @@ import {
   codeFolderFor,
   pickAppProcesses,
   pickAppUnits,
+  readMarkedProcesses,
   readProcessTable,
   readUserUnitFiles,
   removePaths,
@@ -258,6 +265,20 @@ function startManifestCommand(manifest: AppManifest, manifestDir: string, home: 
 interface KnownApp extends ScannedApp {
   readonly hidden: boolean;
   readonly code: (CodeFolder & { readonly display: string }) | null;
+  /** A Telegram bot's token is in its `.env`; null = unknown / not a bot. */
+  readonly botTokenReady?: boolean | null;
+}
+
+/** A bot's token is in `<cwd>/.env` (only its presence is read, never kept). */
+async function botTokenReady(manifest: AppManifest, home: string): Promise<boolean | null> {
+  const tokenEnv = manifest.telegramBot?.tokenEnv ?? null;
+  if (tokenEnv === null) return null;
+  try {
+    const text = await readFile(path.join(manifest.cwd ?? home, ".env"), "utf8");
+    return envFileHasValue(text, tokenEnv);
+  } catch {
+    return false;
+  }
 }
 
 /** `~`, `~/projects/notes` — or the absolute path outside home. */
@@ -270,7 +291,7 @@ function toPublic(
   forwards: ReadonlyArray<PortForward>,
   hostname: string | null,
 ): UnoMachineApp {
-  const { control: _control, manifest: _manifest, code, ...rest } = app;
+  const { control: _control, manifest: _manifest, code, botTokenReady: _token, ...rest } = app;
   return {
     ...rest,
     publication: publicationFor(app, forwards, hostname),
@@ -279,6 +300,17 @@ function toPublic(
           codeDir: code?.display ?? null,
           codeDirKeepReason: code?.keepReason ?? null,
           widget: app.manifest?.widget ?? null,
+        }
+      : {}),
+    ...(app.manifest?.telegramBot
+      ? {
+          telegramBot: {
+            username: app.manifest.telegramBot.username,
+            link: app.manifest.telegramBot.username
+              ? telegramBotLink(app.manifest.telegramBot.username)
+              : null,
+            tokenReady: app.botTokenReady ?? null,
+          },
         }
       : {}),
   };
@@ -398,6 +430,28 @@ export const makeMachineAppsService = (
       return units;
     };
 
+    /**
+     * Processes the daemon started for registered apps, by app id (this
+     * user's only). Null where there is no /proc to read (a Mac).
+     */
+    const readMarkedPids = async (): Promise<ReadonlyMap<string, number[]> | null> => {
+      if (probe.platform !== "linux" && options.processTable === undefined) return null;
+      const uid = typeof process.getuid === "function" ? process.getuid() : null;
+      const byApp = new Map<string, number[]>();
+      const table = options.processTable
+        ? await options.processTable()
+        : await readMarkedProcesses();
+      for (const proc of table) {
+        if (proc.appMarker === null || proc.pid === probe.selfPid) continue;
+        if (uid !== null && proc.uid !== null && proc.uid !== uid) continue;
+        const pids = byApp.get(proc.appMarker) ?? [];
+        pids.push(proc.pid);
+        byApp.set(proc.appMarker, pids);
+      }
+      for (const pids of byApp.values()) pids.sort((a, b) => a - b);
+      return byApp;
+    };
+
     const scanNow = async (fresh: boolean) => {
       const { manifests, warnings } = await readManifestDir({ manifestDir, home });
       const icons = new Map<string, string>();
@@ -408,11 +462,21 @@ export const makeMachineAppsService = (
           if (data) icons.set(m.id, data);
         }),
       );
+      const markedPids = await readMarkedPids();
+      const tokens = new Map<string, boolean | null>();
+      await Promise.all(
+        manifests
+          .filter((m) => m.telegramBot)
+          .map(async (m) => {
+            tokens.set(m.id, await botTokenReady(m, home));
+          }),
+      );
       const [scanned, code] = await Promise.all([
         scanMachineApps(probe, {
           manifests,
           manifestIcons: icons,
           readUnits: (p) => readUnitsCached(p, fresh),
+          ...(markedPids ? { markedPids } : {}),
         }),
         codeFolders(manifests),
       ]);
@@ -426,6 +490,9 @@ export const makeMachineAppsService = (
                 canRemove: true,
                 hidden: false,
                 code: code.get(app.manifest.id) ?? null,
+                ...(tokens.has(app.manifest.id)
+                  ? { botTokenReady: tokens.get(app.manifest.id) ?? null }
+                  : {}),
               }
             : { ...app, hidden: hiddenApps.has(app.id), code: null },
       );
@@ -594,6 +661,11 @@ export const makeMachineAppsService = (
       if (app.control.kind === "systemd" && app.control.user) {
         const result = await runCommand("systemctl", ["--user", "stop", app.control.unit], 30_000);
         if (!result.ok) throw new ActionError("The service didn't stop.");
+        return;
+      }
+      if (app.control.kind === "marked") {
+        const left = await stopPids(app.control.pids);
+        if (left.length > 0) throw new ActionError("It didn't stop. Try again in a moment.");
         return;
       }
       if (app.control.kind === "process") {

@@ -16,7 +16,17 @@
  *     "storage": {"limitGb": 5}     // optional: keep files in the account's cloud (App SDK)
  *     "notify": true                // optional: put notifications into the person's Inbox (App SDK)
  *     "widget": {"path": "/widget", "size": "medium", "title": "Orders"}  // optional: a Home widget
+ *     "runs": "always"              // optional: keep an economy-mode computer awake for it
  *   }
+ *
+ * A Telegram bot has no port and nothing to show in a browser:
+ *
+ *   { "name": "Café Bot", "type": "telegram-bot", "telegram": "our_cafe_bot",
+ *     "tokenEnv": "TELEGRAM_BOT_TOKEN", "command": "python3 bot.py", "cwd": "~/projects/cafe-bot" }
+ *
+ * `telegram` — the bot's username (its "Open in Telegram" link is t.me/<it>);
+ * `tokenEnv` — the variable in `<cwd>/.env` holding its token ("Waiting for
+ * token" until it is there).
  *
  * Everything in the file is untrusted text written by whoever can write to the
  * home directory, and it ends up on the desktop and in links. So: names are
@@ -69,6 +79,51 @@ export interface AppManifest {
   readonly notify?: boolean;
   /** A Home widget (`"widget": {"path": "/widget"}`); absent = none. */
   readonly widget?: AppWidget;
+  /** `"type": "telegram-bot"` — a bot: no port, opened in Telegram. Absent = a regular app. */
+  readonly telegramBot?: TelegramBotManifest;
+}
+
+export interface TelegramBotManifest {
+  /** The bot's username without @; null until the agent knows it. */
+  readonly username: string | null;
+  /** The env variable in `<cwd>/.env` that holds its token; null = not declared. */
+  readonly tokenEnv: string | null;
+}
+
+export const APP_TYPE_TELEGRAM_BOT = "telegram-bot";
+
+const TELEGRAM_USERNAME_RE = /^[A-Za-z][A-Za-z0-9_]{3,31}$/;
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+
+/** `our_cafe_bot`, `@our_cafe_bot`, `https://t.me/our_cafe_bot` → `our_cafe_bot`; else null. */
+export function parseTelegramUsername(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const raw = value
+    .trim()
+    .replace(/^https?:\/\/(www\.)?(t\.me|telegram\.me)\//i, "")
+    .replace(/^@/, "")
+    .replace(/\/+$/, "");
+  return TELEGRAM_USERNAME_RE.test(raw) ? raw : null;
+}
+
+/** The "Open in Telegram" link of a bot. */
+export function telegramBotLink(username: string): string {
+  return `https://t.me/${username}`;
+}
+
+/** Is `name` set to something non-empty in this `.env` text? Never returns the value. */
+export function envFileHasValue(text: string, name: string): boolean {
+  if (!ENV_NAME_RE.test(name)) return false;
+  for (const line of text.split(/\r?\n/)) {
+    const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+    if (!match || match[1] !== name) continue;
+    const value = (match[2] ?? "")
+      .trim()
+      .replace(/^(['"])(.*)\1$/, "$2")
+      .trim();
+    if (value.length > 0) return true;
+  }
+  return false;
 }
 
 export type AppWidgetSize = "small" | "medium" | "wide";
@@ -268,6 +323,16 @@ export function validateManifest(
   if (record["cwd"] !== undefined && cwd === null) {
     return { ok: false, reason: "has a cwd outside the home folder" };
   }
+  const isTelegramBot = record["type"] === APP_TYPE_TELEGRAM_BOT;
+  if (record["telegram"] !== undefined && parseTelegramUsername(record["telegram"]) === null) {
+    return { ok: false, reason: "has a telegram username that isn't a bot's username" };
+  }
+  if (
+    record["tokenEnv"] !== undefined &&
+    (typeof record["tokenEnv"] !== "string" || !ENV_NAME_RE.test(record["tokenEnv"]))
+  ) {
+    return { ok: false, reason: "has a tokenEnv that isn't an env variable name" };
+  }
   const widget = record["widget"] === undefined ? null : parseAppWidget(record["widget"]);
   if (record["widget"] !== undefined && widget === null) {
     return {
@@ -305,6 +370,14 @@ export function validateManifest(
       storage: parseAppStorageRequest(record["storage"]),
       ...(parseAppNotifyRequest(record["notify"]) ? { notify: true } : {}),
       ...(widget ? { widget } : {}),
+      ...(isTelegramBot
+        ? {
+            telegramBot: {
+              username: parseTelegramUsername(record["telegram"]),
+              tokenEnv: typeof record["tokenEnv"] === "string" ? record["tokenEnv"] : null,
+            },
+          }
+        : {}),
     },
   };
 }

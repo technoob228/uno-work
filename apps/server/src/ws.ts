@@ -76,6 +76,7 @@ import {
 } from "./credentialsAccountSync.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
+import { listWorkSites } from "./sites/workSites.ts";
 import {
   PersonalAiRequestError,
   fetchPersonalAiModels,
@@ -1660,6 +1661,15 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.appAiSpend, appSdk.spend, {
             "rpc.aggregate": "app-sdk",
           }),
+        [WS_METHODS.workSites]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.workSites,
+            serverSettings.getSettings.pipe(
+              Effect.flatMap((settings) => Effect.promise(() => listWorkSites(settings))),
+              Effect.mapError((cause) => new UnoCloudRpcError({ message: String(cause) })),
+            ),
+            { "rpc.aggregate": "uno-cloud" },
+          ),
         [WS_METHODS.appAiStatus]: (_input) =>
           observeRpcEffect(WS_METHODS.appAiStatus, appSdk.aiStatus, {
             "rpc.aggregate": "app-sdk",
