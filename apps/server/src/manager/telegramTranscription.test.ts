@@ -104,7 +104,10 @@ describe("transcribeTelegramAudio", () => {
       const fetchImpl: FetchLike = async () =>
         new Response(
           JSON.stringify({
-            error: { code: "dictation_limit_reached", message: "You've used today's free dictation." },
+            error: {
+              code: "dictation_limit_reached",
+              message: "You've used today's free dictation.",
+            },
           }),
           { status: 429, headers: { "content-type": "application/json" } },
         );
