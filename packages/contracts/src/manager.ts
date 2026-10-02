@@ -176,8 +176,53 @@ export type AssistantDraftResult = typeof AssistantDraftResult.Type;
 
 export const ManagerCreateAssistantInput = Schema.Struct({
   name: TrimmedNonEmptyString,
+  /** "New assistant" (0.0.106): its picture and role template, kept in `.uno/profile.json`. */
+  emoji: Schema.optional(Schema.String.check(Schema.isMaxLength(16))),
+  template: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(40)))),
 });
 export type ManagerCreateAssistantInput = typeof ManagerCreateAssistantInput.Type;
+
+/**
+ * Apps (connectors) an assistant on THIS computer may open (0.0.106, "by
+ * default — right here"). Stored and checked by Work on this computer: the
+ * console sees one machine token for every assistant of a computer, so only
+ * an assistant on its own computer gets the console's check.
+ */
+export const AssistantAppLevel = Schema.Literals(["none", "read", "write"]);
+export type AssistantAppLevel = typeof AssistantAppLevel.Type;
+
+export const AssistantAppAccess = Schema.Struct({
+  permissions: Schema.Record(Schema.String, AssistantAppLevel),
+  /** False: nothing set yet, every app is allowed (full access by default). */
+  restricted: Schema.Boolean,
+  /** Who checks it: `computer` — Work on this computer (not the console). */
+  enforcedBy: Schema.Literal("computer"),
+});
+export type AssistantAppAccess = typeof AssistantAppAccess.Type;
+
+export const AssistantAppAccessInput = Schema.Struct({
+  projectId: ProjectId,
+  permissions: Schema.Record(Schema.String, AssistantAppLevel),
+});
+export type AssistantAppAccessInput = typeof AssistantAppAccessInput.Type;
+
+/** What "New assistant" picked for an assistant on this computer. */
+export const ManagerAssistantProfile = Schema.Struct({
+  emoji: Schema.NullOr(Schema.String),
+  template: Schema.NullOr(Schema.String),
+  createdAt: Schema.NullOr(Schema.String),
+});
+export type ManagerAssistantProfile = typeof ManagerAssistantProfile.Type;
+
+/** A deleted assistant of this computer, kept 7 days with Restore. */
+export const ManagerDeletedAssistant = Schema.Struct({
+  projectId: ProjectId,
+  title: Schema.String,
+  emoji: Schema.NullOr(Schema.String),
+  deletedAt: IsoDateTime,
+  keepUntil: IsoDateTime,
+});
+export type ManagerDeletedAssistant = typeof ManagerDeletedAssistant.Type;
 
 /** Owner-editable access profile of the in-app assistant. */
 export const ManagerAssistantAccessInput = Schema.Struct({
@@ -565,6 +610,8 @@ export const ManagerAssistantSummary = Schema.Struct({
   slack: ManagerSlackConnectorStatus,
   /** Names of skill files under the workspace `skills/` directory. */
   skills: Schema.Array(Schema.String),
+  /** Emoji / template from "New assistant"; absent on older daemons. */
+  profile: Schema.optional(Schema.NullOr(ManagerAssistantProfile)),
 });
 export type ManagerAssistantSummary = typeof ManagerAssistantSummary.Type;
 

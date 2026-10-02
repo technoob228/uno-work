@@ -15,6 +15,7 @@
  *
  * @module assistants/assistantChats
  */
+import { owningAssistant } from "./localAssistantStore.ts";
 import {
   isAssistantProjectId,
   type AssistantChatBilling,
@@ -176,14 +177,28 @@ export async function fetchGatewayThreadUsage(input: {
   }
 }
 
-/** The chats the assistant started, newest first, without usage yet. */
+/**
+ * The chats the assistant started, newest first, without usage yet. With
+ * `assistantProjectId` only that assistant's (several assistants on one
+ * computer, 0.0.106): who started a chat comes from the started-chats
+ * ledger (`localAssistantStore.ts`) or its parent chat.
+ */
 export function selectAssistantChats(input: {
   readonly threads: ReadonlyArray<OrchestrationThreadShell>;
   readonly limit?: number;
+  readonly assistantProjectId?: string | undefined;
+  readonly startedBy?: ReadonlyMap<string, string> | undefined;
 }): ReadonlyArray<OrchestrationThreadShell> {
   const projectOf = new Map(input.threads.map((thread) => [thread.id as string, thread.projectId]));
+  const byId = new Map(input.threads.map((thread) => [thread.id as string, thread]));
+  const startedBy = input.startedBy ?? new Map<string, string>();
   return input.threads
     .filter((thread) => isAssistantStartedChat(thread, (id) => projectOf.get(id) ?? null))
+    .filter(
+      (thread) =>
+        input.assistantProjectId === undefined ||
+        owningAssistant(thread, (id) => byId.get(id), startedBy) === input.assistantProjectId,
+    )
     .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, input.limit ?? ASSISTANT_CHATS_LIMIT);
 }

@@ -236,6 +236,19 @@ export interface UnoWorkToolDeps {
       readonly tool: string;
       readonly arguments: Record<string, unknown>;
     }) => Effect.Effect<ConnectorCallResult, UnoWorkToolError>;
+    /**
+     * Apps an assistant of this computer may open (0.0.106): the calling
+     * chat's assistant and the person's choice for this provider. Work
+     * checks it here because the console sees one machine token for every
+     * assistant of a computer. Absent = no assistant rules (allowed).
+     */
+    readonly access?: (input: {
+      readonly provider: string;
+      readonly changesThings: boolean;
+    }) => Effect.Effect<{
+      readonly decision: "allow" | "none" | "read-only";
+      readonly assistant: string | null;
+    }>;
   };
 }
 
@@ -2540,6 +2553,20 @@ export function connectorMcpTool(
         if (!deps.connectors) {
           return yield* toolError(
             `${tool.providerName} isn't reachable from this computer right now.`,
+          );
+        }
+        const access = deps.connectors.access
+          ? yield* deps.connectors.access({
+              provider: tool.provider,
+              changesThings: level !== "safe",
+            })
+          : null;
+        if (access !== null && access.decision !== "allow") {
+          const who = access.assistant ?? "This assistant";
+          return yield* toolError(
+            access.decision === "none"
+              ? `${who} isn't allowed to open ${tool.providerName}. The person can change that on ${who}'s page in Uno Work (Apps it can open). Tell them; don't retry or work around it.`
+              : `${who} may only read ${tool.providerName}; ${tool.name} would change something. The person can allow changes on ${who}'s page in Uno Work. Tell them; don't retry.`,
           );
         }
         if (decideUnoWorkGate(level, deps.caller.runtimeMode) === "ask") {

@@ -17,6 +17,8 @@
  */
 import {
   UNO_GATEWAY_BASE_URL,
+  ASSISTANT_PROJECT_ID,
+  AssistantAppAccessInput,
   AssistantEditableFileName,
   assistantTokenLabel,
   CHANNEL_NOTIFY_PATH,
@@ -69,6 +71,12 @@ import {
 import { readWorkMachineIdentity } from "./workConsole.ts";
 import { ConnectorNotifyService } from "./Services/ConnectorNotify.ts";
 import { AssistantScheduledTurns } from "../assistants/scheduledTurn.ts";
+import {
+  readAppAccess,
+  readStartedChats,
+  writeAppAccess,
+} from "../assistants/localAssistantStore.ts";
+import { ServerConfig } from "../config.ts";
 import { AssistantSchedules } from "../assistants/schedules.ts";
 import {
   buildAssistantChats,
@@ -316,10 +324,16 @@ export const managerAssistantsCreateRouteLayer = HttpRouter.add(
     const input = yield* HttpServerRequest.schemaBodyJson(ManagerCreateAssistantInput).pipe(
       Effect.mapError(() => new AuthError({ message: "Invalid assistant payload.", status: 400 })),
     );
-    return yield* assistants.createAssistant({ name: input.name }).pipe(
-      Effect.map((result) => HttpServerResponse.jsonUnsafe(result, { status: 201 })),
-      Effect.catch(respondServerError("assistants:create")),
-    );
+    return yield* assistants
+      .createAssistant({
+        name: input.name,
+        ...(input.emoji !== undefined ? { emoji: input.emoji } : {}),
+        ...(input.template !== undefined ? { template: input.template } : {}),
+      })
+      .pipe(
+        Effect.map((result) => HttpServerResponse.jsonUnsafe(result, { status: 201 })),
+        Effect.catch(respondServerError("assistants:create")),
+      );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
@@ -327,12 +341,30 @@ export const managerAssistantsCreateRouteLayer = HttpRouter.add(
  * THE assistant chat ("Uno"): found, or set up now (the same migration the
  * daemon runs on start). Clients call it when the pinned chat is missing.
  */
+const AssistantChatPayload = Schema.Struct({ projectId: Schema.optional(ProjectId) });
+
 export const managerAssistantChatRouteLayer = HttpRouter.add(
   "POST",
   "/api/manager/assistant/chat",
   Effect.gen(function* () {
     yield* authenticateOwnerSession;
     const assistants = yield* ManagerAssistantService;
+    const input = yield* HttpServerRequest.schemaBodyJson(AssistantChatPayload).pipe(
+      Effect.orElseSucceed(() => ({ projectId: undefined })),
+    );
+    // Another assistant of this computer: its latest conversation (0.0.106).
+    if (input.projectId !== undefined && input.projectId !== ASSISTANT_PROJECT_ID) {
+      return yield* assistants.ensureConversation(input.projectId).pipe(
+        Effect.map((result) => HttpServerResponse.jsonUnsafe(result, { status: 200 })),
+        Effect.catch((cause) =>
+          Schema.is(ManagerAssistantError)(cause)
+            ? Effect.succeed(
+                HttpServerResponse.jsonUnsafe({ error: cause.detail }, { status: 404 }),
+              )
+            : respondServerError("assistants:chat")(cause),
+        ),
+      );
+    }
     return yield* assistants.ensureAssistantChat().pipe(
       Effect.map((result) => HttpServerResponse.jsonUnsafe(result, { status: 200 })),
       Effect.catch(respondServerError("assistants:chat")),
@@ -342,6 +374,7 @@ export const managerAssistantChatRouteLayer = HttpRouter.add(
 
 const ConversationCreatePayload = Schema.Struct({
   title: Schema.optional(Schema.String),
+  projectId: Schema.optional(ProjectId),
 });
 
 /**
@@ -355,16 +388,20 @@ export const managerAssistantConversationCreateRouteLayer = HttpRouter.add(
     yield* authenticateOwnerSession;
     const assistants = yield* ManagerAssistantService;
     const input = yield* HttpServerRequest.schemaBodyJson(ConversationCreatePayload).pipe(
-      Effect.orElseSucceed(() => ({ title: undefined })),
+      Effect.orElseSucceed(() => ({ title: undefined, projectId: undefined })),
     );
-    return yield* assistants.createConversation({ title: input.title }).pipe(
-      Effect.map((result) => HttpServerResponse.jsonUnsafe(result, { status: 200 })),
-      Effect.catch((cause) =>
-        Schema.is(ManagerAssistantError)(cause)
-          ? Effect.succeed(HttpServerResponse.jsonUnsafe({ error: cause.detail }, { status: 409 }))
-          : respondServerError("assistant:conversation")(cause),
-      ),
-    );
+    return yield* assistants
+      .createConversation({ title: input.title, projectId: input.projectId })
+      .pipe(
+        Effect.map((result) => HttpServerResponse.jsonUnsafe(result, { status: 200 })),
+        Effect.catch((cause) =>
+          Schema.is(ManagerAssistantError)(cause)
+            ? Effect.succeed(
+                HttpServerResponse.jsonUnsafe({ error: cause.detail }, { status: 409 }),
+              )
+            : respondServerError("assistant:conversation")(cause),
+        ),
+      );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
@@ -876,9 +913,22 @@ export const managerAssistantChatsRouteLayer = HttpRouter.add(
     const providerRegistry = yield* ProviderRegistry;
     // Optional so a wiring without the gateway (tests) still answers.
     const gatewayKey = yield* Effect.serviceOption(UnoGatewayKey);
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    const rawProjectId = url._tag === "Some" ? url.value.searchParams.get("projectId") : null;
+    const assistantProjectId = rawProjectId?.trim() || undefined;
+    const stateDir = Option.map(yield* Effect.serviceOption(ServerConfig), (c) => c.stateDir);
     return yield* Effect.gen(function* () {
       const snapshot = yield* projections.getShellSnapshot();
-      const chats = selectAssistantChats({ threads: snapshot.threads });
+      // One assistant's chats when asked (several assistants per computer).
+      const startedBy = Option.isSome(stateDir)
+        ? yield* Effect.promise(() => readStartedChats(stateDir.value))
+        : new Map<string, string>();
+      const chats = selectAssistantChats({
+        threads: snapshot.threads,
+        assistantProjectId,
+        startedBy,
+      });
       const localTokens = new Map<string, number | null>();
       yield* Effect.forEach(
         chats,
@@ -928,6 +978,102 @@ function assistantGatewayBaseUrl(): string {
     "",
   );
 }
+
+// ── Assistants on this computer (0.0.106): delete / restore / apps ──
+
+const respondAssistantError = (scope: string) => (cause: unknown) =>
+  Schema.is(ManagerAssistantError)(cause)
+    ? Effect.succeed(HttpServerResponse.jsonUnsafe({ error: cause.detail }, { status: 409 }))
+    : respondServerError(scope)(cause);
+
+/** `DELETE /api/manager/assistants?projectId=` — kept 7 days, see `deleteAssistant`. */
+export const managerAssistantDeleteRouteLayer = HttpRouter.add(
+  "DELETE",
+  "/api/manager/assistants",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const projectId = yield* assistantProjectIdFromQuery;
+    yield* requireAssistantProject(projectId);
+    const assistants = yield* ManagerAssistantService;
+    return yield* assistants.deleteAssistant(projectId).pipe(
+      Effect.map(() => HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 })),
+      Effect.catch(respondAssistantError("assistants:delete")),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/** `GET /api/manager/assistants/deleted` — deleted assistants still kept (Restore). */
+export const managerAssistantsDeletedRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/assistants/deleted",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const assistants = yield* ManagerAssistantService;
+    return yield* assistants.listDeletedAssistants().pipe(
+      Effect.map((deleted) => HttpServerResponse.jsonUnsafe({ deleted }, { status: 200 })),
+      Effect.catch(respondServerError("assistants:deleted")),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+const RestorePayload = Schema.Struct({ projectId: ProjectId });
+
+/** `POST /api/manager/assistants/restore` {projectId}. */
+export const managerAssistantRestoreRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistants/restore",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(RestorePayload).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid payload.", status: 400 })),
+    );
+    yield* requireAssistantProject(input.projectId);
+    const assistants = yield* ManagerAssistantService;
+    return yield* assistants.restoreAssistant(input.projectId).pipe(
+      Effect.map(() => HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 })),
+      Effect.catch(respondAssistantError("assistants:restore")),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * `GET /api/manager/assistant/apps?projectId=` — which apps an assistant of
+ * this computer may open. Checked by Work here (`unoWork/tools.ts`), not by
+ * the console: on a shared computer the console sees one machine token.
+ */
+export const managerAssistantAppsGetRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/assistant/apps",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const projectId = yield* assistantProjectIdFromQuery;
+    yield* requireAssistantProject(projectId);
+    const config = yield* ServerConfig;
+    const access = yield* Effect.promise(() => readAppAccess(config.stateDir, projectId));
+    return HttpServerResponse.jsonUnsafe({ ...access, enforcedBy: "computer" }, { status: 200 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/** `POST /api/manager/assistant/apps` {projectId, permissions} — owner session only. */
+export const managerAssistantAppsPutRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/apps",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(AssistantAppAccessInput).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid payload.", status: 400 })),
+    );
+    yield* requireAssistantProject(input.projectId);
+    const config = yield* ServerConfig;
+    const access = yield* Effect.tryPromise(() =>
+      writeAppAccess(config.stateDir, input.projectId, input.permissions),
+    ).pipe(Effect.orDie);
+    yield* Effect.logInfo("assistant app access changed").pipe(
+      Effect.annotateLogs({ projectId: input.projectId, permissions: access.permissions }),
+    );
+    return HttpServerResponse.jsonUnsafe({ ...access, enforcedBy: "computer" }, { status: 200 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
 
 export const managerTokensListRouteLayer = HttpRouter.add(
   "GET",

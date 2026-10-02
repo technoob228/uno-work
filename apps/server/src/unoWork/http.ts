@@ -39,6 +39,12 @@ import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "../workspaceRegistry/UnoComputerService.ts";
 import { ConnectorsService } from "../setupTools/ConnectorsService.ts";
 import {
+  connectorAccessDecision,
+  owningAssistant,
+  readAppAccess,
+  readStartedChats,
+} from "../assistants/localAssistantStore.ts";
+import {
   buildUnoWorkGuide,
   isUnoWorkGuideTopic,
   UNO_WORK_GUIDE_TOPICS,
@@ -356,6 +362,34 @@ const makeDeps = (input: {
                   .pipe(
                     Effect.mapError((error) => new UnoWorkToolError({ message: error.message })),
                   ),
+              access: ({ provider, changesThings }) =>
+                Effect.gen(function* () {
+                  // Whose chat is this: an assistant's (its workspace, a chat
+                  // it started, a chat one of those started) or the person's.
+                  const snapshot = yield* projections.getShellSnapshot();
+                  const byId = new Map(
+                    snapshot.threads.map((entry) => [entry.id as string, entry]),
+                  );
+                  const self = byId.get(input.threadId);
+                  if (self === undefined) return { decision: "allow" as const, assistant: null };
+                  const startedBy = yield* Effect.promise(() =>
+                    readStartedChats(serverConfig.stateDir),
+                  );
+                  const owner = owningAssistant(self, (id) => byId.get(id), startedBy);
+                  if (owner === null) return { decision: "allow" as const, assistant: null };
+                  const access = yield* Effect.promise(() =>
+                    readAppAccess(serverConfig.stateDir, owner),
+                  );
+                  const title =
+                    snapshot.projects.find((project) => project.id === owner)?.title ?? null;
+                  return {
+                    decision: connectorAccessDecision(access, provider, changesThings),
+                    assistant: title,
+                  };
+                }).pipe(
+                  // Can't tell: the person's own chat rules apply (Ask / Allow).
+                  Effect.orElseSucceed(() => ({ decision: "allow" as const, assistant: null })),
+                ),
             },
           }
         : {}),

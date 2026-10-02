@@ -11,6 +11,7 @@
 import type {
   AssistantEditableFileName,
   ManagerAssistantSummary,
+  ManagerDeletedAssistant,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -45,9 +46,14 @@ export interface ManagerAssistantServiceShape {
     { readonly adopted: ReadonlyArray<ProjectId> },
     ManagerAssistantError
   >;
-  /** Create a new assistant from a human name; returns its project id. */
+  /**
+   * Create a new assistant on this computer from a human name (and what
+   * "New assistant" picked: emoji, template); returns its project id.
+   */
   readonly createAssistant: (input: {
     readonly name: string;
+    readonly emoji?: string | undefined;
+    readonly template?: string | null | undefined;
   }) => Effect.Effect<{ readonly projectId: ProjectId }, ManagerAssistantError>;
   /**
    * Make sure THE assistant chat ("Uno", `assistantRole: "chat"`) exists and
@@ -71,7 +77,37 @@ export interface ManagerAssistantServiceShape {
    */
   readonly createConversation: (input: {
     readonly title?: string | undefined;
+    /** Another assistant of this computer; the default one when absent. */
+    readonly projectId?: ProjectId | undefined;
   }) => Effect.Effect<{ readonly threadId: ThreadId }, ManagerAssistantError>;
+  /**
+   * The chat "Chat" opens for an assistant of this computer that is not the
+   * default one: its latest conversation (not a Telegram / Slack chat), or a
+   * new one on the assistant engine.
+   */
+  readonly ensureConversation: (
+    projectId: ProjectId,
+  ) => Effect.Effect<
+    { readonly threadId: ThreadId; readonly outcome: "existing" | "created" },
+    ManagerAssistantError
+  >;
+  /**
+   * Delete an assistant of this computer (never the default one): it stops
+   * answering (connectors and chat bindings put aside, chats archived, token
+   * revoked) and its folder moves to `~/UnoWork/Assistants/.trash` — kept
+   * 7 days, then purged ({@link purgeDeletedAssistants}).
+   */
+  readonly deleteAssistant: (projectId: ProjectId) => Effect.Effect<void, ManagerAssistantError>;
+  readonly restoreAssistant: (projectId: ProjectId) => Effect.Effect<void, ManagerAssistantError>;
+  readonly listDeletedAssistants: () => Effect.Effect<
+    ReadonlyArray<ManagerDeletedAssistant>,
+    ManagerAssistantError
+  >;
+  /** Removes for good what was deleted more than 7 days ago. */
+  readonly purgeDeletedAssistants: () => Effect.Effect<
+    { readonly purged: ReadonlyArray<ProjectId> },
+    ManagerAssistantError
+  >;
   readonly listAssistants: () => Effect.Effect<
     ReadonlyArray<ManagerAssistantSummary>,
     ManagerAssistantError

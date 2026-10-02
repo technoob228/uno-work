@@ -13,6 +13,8 @@ import { ProjectionSnapshotQuery } from "../../orchestration/Services/Projection
 import { ManagerActionProposalRepository } from "../../persistence/Services/ManagerActionProposals.ts";
 import { ManagerCapabilityTokenRepository } from "../../persistence/Services/ManagerCapabilityTokens.ts";
 import { ManagerAccountDefaultAi } from "./AccountDefaultAi.ts";
+import { ServerConfig } from "../../config.ts";
+import { recordStartedChat } from "../../assistants/localAssistantStore.ts";
 import {
   ManagerExecutionError,
   ManagerNotFoundError,
@@ -31,20 +33,22 @@ const makeManagerApprovalService = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const tokenRepository = yield* ManagerCapabilityTokenRepository;
   const accountDefaultAi = yield* ManagerAccountDefaultAi;
+  // Optional: wirings without a state dir (tests) just don't keep the ledger.
+  const serverConfig = Option.getOrNull(yield* Effect.serviceOption(ServerConfig));
 
   /**
    * Chats an assistant's token starts are "from Uno" (assistantRole
    * `spawned`); an external manager brain's are not. Best-effort: a failed
    * lookup only loses the label.
    */
-  const isAssistantToken = (tokenId: string) =>
+  const assistantOfToken = (tokenId: string) =>
     tokenRepository.list().pipe(
-      Effect.map((tokens) =>
-        tokens.some(
-          (token) => token.tokenId === tokenId && token.label.startsWith(assistantTokenLabel("")),
-        ),
-      ),
-      Effect.orElseSucceed(() => false),
+      Effect.map((tokens) => {
+        const prefix = assistantTokenLabel("");
+        const label = tokens.find((token) => token.tokenId === tokenId)?.label ?? "";
+        return label.startsWith(prefix) ? label.slice(prefix.length) : null;
+      }),
+      Effect.orElseSucceed((): string | null => null),
     );
 
   const makeCommandId = () => CommandId.make(`manager:${crypto.randomUUID()}`);
@@ -70,7 +74,8 @@ const makeManagerApprovalService = Effect.gen(function* () {
               detail: `Project ${action.projectId} no longer exists.`,
             });
           }
-          const fromAssistant = yield* isAssistantToken(proposal.tokenId);
+          const startedBy = yield* assistantOfToken(proposal.tokenId);
+          const fromAssistant = startedBy !== null;
           // A chat the Uno assistant starts without naming a model runs on the
           // person's own AI (account default_ai, when usable here), else on
           // the project's default. The assistant itself runs on Hermes.
@@ -110,6 +115,13 @@ const makeManagerApprovalService = Effect.gen(function* () {
             },
             { origin },
           );
+          // Which assistant of this computer started it ("Chats Ana started",
+          // and its app permissions follow the chat). Best effort.
+          if (startedBy !== null && serverConfig !== null) {
+            yield* Effect.promise(() =>
+              recordStartedChat(serverConfig.stateDir, threadId, startedBy).catch(() => undefined),
+            );
+          }
           yield* orchestrationEngine.dispatch(
             {
               type: "thread.turn.start",

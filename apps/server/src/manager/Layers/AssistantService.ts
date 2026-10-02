@@ -7,9 +7,11 @@ import {
   DEFAULT_CONNECTOR_ADDRESSING,
   DEFAULT_SLACK_CONNECTOR_STATUS,
   isAssistantProjectId,
+  ManagerConnectorBinding,
   ManagerSlackConnectorConfig,
   ManagerTelegramConnectorConfig,
   type ManagerAssistantSummary,
+  type ManagerDeletedAssistant,
   type ManagerConnectorHealth,
   type ManagerTelegramConnectorStatus,
   type ModelSelection,
@@ -31,6 +33,7 @@ import {
 import { Effect, Layer, Option, Path, FileSystem, Schema } from "effect";
 import * as Semaphore from "effect/Semaphore";
 import * as crypto from "node:crypto";
+import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 
 import { ServerConfig } from "../../config.ts";
@@ -40,6 +43,18 @@ import { OrchestrationEngineService } from "../../orchestration/Services/Orchest
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerCapabilityTokenRepository } from "../../persistence/Services/ManagerCapabilityTokens.ts";
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
+import { ManagerConnectorBindingRepository } from "../../persistence/Services/ManagerConnectorBindings.ts";
+import {
+  dropDeletedAssistant,
+  freeTrashPath,
+  isPastKeep,
+  keepUntil,
+  putDeletedAssistant,
+  readDeletedAssistants,
+  readProfile,
+  writeProfile,
+  type DeletedAssistantRecord,
+} from "../../assistants/localAssistantStore.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import {
   awaitUsableBootDefault,
@@ -61,7 +76,12 @@ import { ManagerAccountDefaultAi } from "./AccountDefaultAi.ts";
 import { ManagerTelegramService } from "./TelegramConnector.ts";
 import { ManagerSlackService } from "./SlackConnector.ts";
 import { ASSISTANT_THREAD_RUNTIME_MODE } from "../connectorBindings.ts";
-import { isRelayCredential, isRouteCredential } from "../channelRelay.ts";
+import {
+  isRelayCredential,
+  isRouteCredential,
+  parseRouteCredential,
+  routeCredential,
+} from "../channelRelay.ts";
 
 /** Title of a fresh assistant chat; clients show "Uno" whatever the title. */
 export const ASSISTANT_CHAT_TITLE = "Uno";
@@ -302,6 +322,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const connectorRepository = yield* ManagerConnectorRepository;
+  const bindingRepository = yield* ManagerConnectorBindingRepository;
   const telegramService = yield* ManagerTelegramService;
   const slackService = yield* ManagerSlackService;
   const providerRegistry = yield* ProviderRegistry;
@@ -490,7 +511,11 @@ const makeManagerAssistantService = Effect.gen(function* () {
       ),
     );
 
-  const createAssistant: ManagerAssistantServiceShape["createAssistant"] = ({ name }) =>
+  const createAssistant: ManagerAssistantServiceShape["createAssistant"] = ({
+    name,
+    emoji,
+    template,
+  }) =>
     Effect.gen(function* () {
       const base = slugifyAssistantName(name);
       let candidate = ProjectId.make(`${ASSISTANT_PROJECT_ID_PREFIX}${base}`);
@@ -503,6 +528,20 @@ const makeManagerAssistantService = Effect.gen(function* () {
         );
       }
       yield* ensureAssistant({ projectId: candidate, title: name });
+      if (emoji !== undefined || template !== undefined) {
+        const project = yield* projectionSnapshotQuery
+          .getProjectShellById(candidate)
+          .pipe(Effect.mapError(toAssistantError("Failed to read the new assistant.")));
+        if (Option.isSome(project)) {
+          yield* Effect.promise(() =>
+            writeProfile(project.value.workspaceRoot, {
+              emoji: emoji?.trim() || null,
+              template: template ?? null,
+              createdAt: new Date().toISOString(),
+            }),
+          );
+        }
+      }
       return { projectId: candidate };
     });
 
@@ -657,6 +696,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
       const skills = yield* fs
         .readDirectory(skillsDir)
         .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
+      const profile = yield* Effect.promise(() => readProfile(input.workspaceRoot));
       return {
         projectId: input.projectId,
         title: input.title,
@@ -664,7 +704,8 @@ const makeManagerAssistantService = Effect.gen(function* () {
         token: Option.getOrNull(token),
         telegram,
         slack,
-        skills: [...skills].filter((entry) => !entry.startsWith(".")).sort(),
+        skills: [...skills].filter((entry) => !entry.startsWith(".")).toSorted(),
+        profile,
       };
     });
 
@@ -681,8 +722,14 @@ const makeManagerAssistantService = Effect.gen(function* () {
       const snapshot = yield* projectionSnapshotQuery
         .getShellSnapshot()
         .pipe(Effect.mapError(toAssistantError("Failed to load projects.")));
-      const assistantProjects = snapshot.projects.filter((project) =>
-        isAssistantProjectId(project.id),
+      // Deleted assistants of this computer are kept 7 days, but not listed.
+      const deleted = new Set(
+        (yield* Effect.promise(() => readDeletedAssistants(config.stateDir))).map(
+          (record) => record.projectId,
+        ),
+      );
+      const assistantProjects = snapshot.projects.filter(
+        (project) => isAssistantProjectId(project.id) && !deleted.has(project.id),
       );
       const summaries: ManagerAssistantSummary[] = [];
       for (const project of assistantProjects) {
@@ -848,15 +895,20 @@ const makeManagerAssistantService = Effect.gen(function* () {
 
   const createConversation: ManagerAssistantServiceShape["createConversation"] = (input) =>
     Effect.gen(function* () {
-      const origin = assistantCommandOrigin({ assistantKey: ASSISTANT_PROJECT_ID });
+      const projectId = input.projectId ?? ASSISTANT_PROJECT_ID;
+      if (!isAssistantProjectId(projectId)) {
+        return yield* new ManagerAssistantError({ detail: `Unknown assistant: ${projectId}.` });
+      }
+      const origin = assistantCommandOrigin({ assistantKey: projectId });
       const snapshot = yield* projectionSnapshotQuery
         .getShellSnapshot()
         .pipe(Effect.mapError(toAssistantError("Failed to load chats.")));
-      if (!snapshot.projects.some((project) => project.id === ASSISTANT_PROJECT_ID)) {
+      if (!snapshot.projects.some((project) => project.id === projectId)) {
         return yield* new ManagerAssistantError({
           detail: "The assistant is not set up on this computer yet.",
         });
       }
+      // Every assistant of this computer runs on what the Uno chat runs on.
       const main = findMarkedAssistantChat(snapshot.threads);
       const threadId = ThreadId.make(crypto.randomUUID());
       gatewayKey.labelThread(threadId, ASSISTANT_GATEWAY_LABEL);
@@ -867,7 +919,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
             type: "thread.create",
             commandId: CommandId.make(`assistant-conversation-create:${crypto.randomUUID()}`),
             threadId,
-            projectId: ASSISTANT_PROJECT_ID,
+            projectId,
             title,
             modelSelection: coerceAssistantModelSelection(main?.modelSelection),
             runtimeMode: ASSISTANT_THREAD_RUNTIME_MODE,
@@ -988,10 +1040,373 @@ const makeManagerAssistantService = Effect.gen(function* () {
       ),
     );
 
+  const ensureConversation: ManagerAssistantServiceShape["ensureConversation"] = (projectId) =>
+    Effect.gen(function* () {
+      if (projectId === ASSISTANT_PROJECT_ID) {
+        const chat = yield* ensureAssistantChat();
+        return {
+          threadId: chat.threadId,
+          outcome: chat.outcome === "created" ? "created" : "existing",
+        };
+      }
+      const snapshot = yield* projectionSnapshotQuery
+        .getShellSnapshot()
+        .pipe(Effect.mapError(toAssistantError("Failed to load chats.")));
+      const project = snapshot.projects.find((entry) => entry.id === projectId);
+      if (project === undefined || !isAssistantProjectId(projectId)) {
+        return yield* new ManagerAssistantError({ detail: `Unknown assistant: ${projectId}.` });
+      }
+      // Its Telegram / Slack chats are threads of its workspace too: "Chat"
+      // opens a conversation of the app, never a group chat.
+      const connectorThreadIds = new Set(
+        yield* connectorRepository
+          .listChatThreadIds()
+          .pipe(Effect.mapError(toAssistantError("Failed to read connector chats."))),
+      );
+      const latest = snapshot.threads
+        .filter(
+          (thread) =>
+            thread.projectId === projectId &&
+            thread.archivedAt === null &&
+            ((thread as { readonly deletedAt?: string | null }).deletedAt ?? null) === null &&
+            !connectorThreadIds.has(thread.id),
+        )
+        .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+      if (latest !== undefined) return { threadId: latest.id, outcome: "existing" as const };
+      const created = yield* createConversation({ projectId, title: project.title });
+      return { threadId: created.threadId, outcome: "created" as const };
+    });
+
+  // ── Deleted assistants of this computer (kept 7 days) ─────────────
+
+  const trashDir = path.join(assistantsBaseDir, ".trash");
+
+  /**
+   * The rows routed through `holder` (Uno's shared bot, `unoroute:`) and a
+   * successor among them: the default assistant first.
+   */
+  const routedThrough = (holder: ProjectId) =>
+    connectorRepository.listByKind("telegram").pipe(
+      Effect.map((rows) =>
+        rows.flatMap((row) => {
+          const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(row.config);
+          return decoded._tag === "Success" &&
+            parseRouteCredential(decoded.value.botToken) === holder
+            ? [{ projectId: row.projectId, config: decoded.value }]
+            : [];
+        }),
+      ),
+    );
+
+  /**
+   * The deleted assistant held this computer's shared bot: hand the relay to
+   * one of the assistants routed through it (and re-point the others and the
+   * chats' bindings), so they keep answering.
+   */
+  const handOverRelay = (holder: ProjectId, relayConfig: ManagerTelegramConnectorConfig) =>
+    Effect.gen(function* () {
+      const routed = yield* routedThrough(holder);
+      if (routed.length === 0) return;
+      const successor = routed.find((row) => row.projectId === ASSISTANT_PROJECT_ID) ?? routed[0]!;
+      const now = new Date().toISOString();
+      yield* connectorRepository.upsert({
+        projectId: successor.projectId,
+        kind: "telegram",
+        config: {
+          ...successor.config,
+          botToken: relayConfig.botToken,
+          // The holder's own chats were the shared bot's chats too.
+          allowedChatIds: [
+            ...new Set([...successor.config.allowedChatIds, ...relayConfig.allowedChatIds]),
+          ],
+        },
+        updatedAt: now,
+      });
+      for (const row of routed) {
+        if (row.projectId === successor.projectId) continue;
+        yield* connectorRepository.upsert({
+          projectId: row.projectId,
+          kind: "telegram",
+          config: { ...row.config, botToken: routeCredential(successor.projectId) },
+          updatedAt: now,
+        });
+      }
+      const bindings = yield* bindingRepository.listAll();
+      for (const binding of bindings) {
+        if (binding.connectorProjectId !== holder) continue;
+        yield* bindingRepository.upsert({
+          ...binding,
+          connectorProjectId: successor.projectId,
+          updatedAt: now,
+        });
+      }
+      yield* Effect.logInfo("shared Telegram bot handed over to another assistant").pipe(
+        Effect.annotateLogs({ from: holder, to: successor.projectId }),
+      );
+    });
+
+  const deleteAssistant: ManagerAssistantServiceShape["deleteAssistant"] = (projectId) =>
+    Effect.gen(function* () {
+      if (projectId === ASSISTANT_PROJECT_ID || !isAssistantProjectId(projectId)) {
+        return yield* new ManagerAssistantError({
+          detail: "The computer's own assistant can't be deleted, only paused.",
+        });
+      }
+      const snapshot = yield* projectionSnapshotQuery.getShellSnapshot();
+      const project = snapshot.projects.find((entry) => entry.id === projectId);
+      if (project === undefined) {
+        return yield* new ManagerAssistantError({ detail: `Unknown assistant: ${projectId}.` });
+      }
+      const now = new Date();
+      const profile = yield* Effect.promise(() => readProfile(project.workspaceRoot));
+
+      // 1. It stops answering: its connectors and the chats bound to it.
+      const connectorRows: Array<{ kind: string; config: unknown }> = [];
+      for (const kind of ["telegram", "slack"] as const) {
+        const row = yield* connectorRepository.get({ projectId, kind });
+        if (Option.isNone(row)) continue;
+        connectorRows.push({ kind, config: row.value.config });
+        if (kind === "telegram") {
+          const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(
+            row.value.config,
+          );
+          if (decoded._tag === "Success" && isRelayCredential(decoded.value.botToken)) {
+            yield* handOverRelay(projectId, decoded.value);
+          }
+        }
+        yield* connectorRepository.remove({ projectId, kind });
+      }
+      const threadProject = new Map(
+        snapshot.threads.map((thread) => [thread.id, thread.projectId]),
+      );
+      const bindings = (yield* bindingRepository.listAll()).filter(
+        (binding) =>
+          (binding.target.kind !== "thread" && binding.target.projectId === projectId) ||
+          (binding.target.kind === "thread" &&
+            threadProject.get(binding.target.threadId) === projectId),
+      );
+      for (const binding of bindings) {
+        yield* bindingRepository.remove({ kind: binding.kind, chatId: binding.chatId });
+      }
+
+      // 2. Its chats leave the lists; its token stops working.
+      const archivedThreadIds: Array<string> = [];
+      for (const thread of snapshot.threads) {
+        if (thread.projectId !== projectId || thread.archivedAt !== null) continue;
+        if (((thread as { readonly deletedAt?: string | null }).deletedAt ?? null) !== null)
+          continue;
+        yield* orchestrationEngine.dispatch(
+          {
+            type: "thread.archive",
+            commandId: CommandId.make(`assistant-delete:${crypto.randomUUID()}`),
+            threadId: thread.id,
+          },
+          { origin: assistantCommandOrigin({ assistantKey: projectId }) },
+        );
+        archivedThreadIds.push(thread.id);
+      }
+      const token = yield* tokenRepository.getActiveByLabel(assistantTokenLabel(projectId));
+      if (Option.isSome(token)) {
+        yield* tokenRepository.revoke({
+          tokenId: token.value.tokenId,
+          revokedAt: now.toISOString(),
+        });
+      }
+
+      // 3. Its folder is kept aside (a dot folder: the scan never adopts it).
+      const trashPath = yield* Effect.promise(() =>
+        freeTrashPath(trashDir, path.basename(project.workspaceRoot), now),
+      );
+      yield* Effect.tryPromise({
+        try: async () => {
+          await fsp.mkdir(trashDir, { recursive: true });
+          await fsp
+            .rename(project.workspaceRoot, trashPath)
+            .catch((cause: NodeJS.ErrnoException) => {
+              if (cause.code !== "ENOENT") throw cause;
+            });
+        },
+        catch: toAssistantError("Failed to put the assistant's folder aside."),
+      });
+      const record: DeletedAssistantRecord = {
+        projectId,
+        title: project.title,
+        emoji: profile?.emoji ?? null,
+        deletedAt: now.toISOString(),
+        workspaceRoot: project.workspaceRoot,
+        trashPath,
+        connectorRows,
+        bindings,
+        archivedThreadIds,
+      };
+      yield* Effect.promise(() => putDeletedAssistant(config.stateDir, record));
+      yield* Effect.logInfo("assistant deleted (kept 7 days)").pipe(
+        Effect.annotateLogs({ projectId, trashPath }),
+      );
+    }).pipe(
+      Effect.catch((cause) =>
+        Schema.is(ManagerAssistantError)(cause)
+          ? Effect.fail(cause)
+          : Effect.fail(toAssistantError(`Failed to delete assistant ${projectId}.`)(cause)),
+      ),
+    );
+
+  const restoreAssistant: ManagerAssistantServiceShape["restoreAssistant"] = (projectId) =>
+    Effect.gen(function* () {
+      const records = yield* Effect.promise(() => readDeletedAssistants(config.stateDir));
+      const record = records.find((entry) => entry.projectId === projectId);
+      if (record === undefined) {
+        return yield* new ManagerAssistantError({ detail: "This assistant isn't kept any more." });
+      }
+      yield* Effect.tryPromise({
+        try: async () => {
+          const taken = await fsp
+            .access(record.workspaceRoot)
+            .then(() => true)
+            .catch(() => false);
+          if (taken) throw new Error(`${record.workspaceRoot} exists again; move it away first.`);
+          await fsp
+            .rename(record.trashPath, record.workspaceRoot)
+            .catch((cause: NodeJS.ErrnoException) => {
+              if (cause.code !== "ENOENT") throw cause;
+            });
+        },
+        catch: (cause) =>
+          new ManagerAssistantError({
+            detail: cause instanceof Error ? cause.message : "Failed to bring its folder back.",
+          }),
+      });
+      const now = new Date().toISOString();
+      // Uno's shared bot may have moved to another assistant meanwhile: a
+      // relay row comes back routed through whoever holds it now.
+      const telegramRows = yield* connectorRepository.listByKind("telegram");
+      const currentHolder = telegramRows.find((row) => {
+        const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(row.config);
+        return decoded._tag === "Success" && isRelayCredential(decoded.value.botToken);
+      })?.projectId;
+      for (const row of record.connectorRows) {
+        let restored = row.config;
+        if (row.kind === "telegram") {
+          const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(row.config);
+          if (decoded._tag === "Success") {
+            const value = decoded.value;
+            const holder = parseRouteCredential(value.botToken);
+            if (isRelayCredential(value.botToken) && currentHolder !== undefined) {
+              restored = { ...value, botToken: routeCredential(currentHolder) };
+            } else if (holder !== null && currentHolder !== undefined && holder !== currentHolder) {
+              restored = { ...value, botToken: routeCredential(currentHolder) };
+            }
+          }
+        }
+        if (row.kind !== "telegram" && row.kind !== "slack") continue;
+        yield* connectorRepository.upsert({
+          projectId,
+          kind: row.kind,
+          config: restored,
+          updatedAt: now,
+        });
+      }
+      for (const raw of record.bindings) {
+        const decoded = Schema.decodeUnknownExit(ManagerConnectorBinding)(raw);
+        if (decoded._tag !== "Success") continue;
+        const binding = decoded.value;
+        const connectorProjectId =
+          binding.kind === "telegram" &&
+          currentHolder !== undefined &&
+          binding.connectorProjectId === projectId
+            ? currentHolder
+            : binding.connectorProjectId;
+        yield* bindingRepository.upsert({ ...binding, connectorProjectId, updatedAt: now });
+      }
+      for (const threadId of record.archivedThreadIds) {
+        yield* orchestrationEngine
+          .dispatch(
+            {
+              type: "thread.unarchive",
+              commandId: CommandId.make(`assistant-restore:${crypto.randomUUID()}`),
+              threadId: ThreadId.make(threadId),
+            },
+            { origin: assistantCommandOrigin({ assistantKey: projectId }) },
+          )
+          .pipe(Effect.catch(() => Effect.void));
+      }
+      // A fresh token and `.mcp.json` (the old token was revoked).
+      yield* ensureAssistant({ projectId, title: record.title });
+      yield* Effect.promise(() => dropDeletedAssistant(config.stateDir, projectId));
+      yield* Effect.logInfo("assistant restored").pipe(Effect.annotateLogs({ projectId }));
+    }).pipe(
+      Effect.catch((cause) =>
+        Schema.is(ManagerAssistantError)(cause)
+          ? Effect.fail(cause)
+          : Effect.fail(toAssistantError(`Failed to restore assistant ${projectId}.`)(cause)),
+      ),
+    );
+
+  const listDeletedAssistants: ManagerAssistantServiceShape["listDeletedAssistants"] = () =>
+    Effect.promise(() => readDeletedAssistants(config.stateDir)).pipe(
+      Effect.map((records) =>
+        records
+          .map(
+            (record): ManagerDeletedAssistant => ({
+              projectId: ProjectId.make(record.projectId),
+              title: record.title,
+              emoji: record.emoji,
+              deletedAt: record.deletedAt,
+              keepUntil: keepUntil(record.deletedAt),
+            }),
+          )
+          .toSorted((a, b) => b.deletedAt.localeCompare(a.deletedAt)),
+      ),
+    );
+
+  const purgeDeletedAssistants: ManagerAssistantServiceShape["purgeDeletedAssistants"] = () =>
+    Effect.gen(function* () {
+      const now = new Date();
+      const records = yield* Effect.promise(() => readDeletedAssistants(config.stateDir));
+      const purged: Array<ProjectId> = [];
+      for (const record of records) {
+        if (!isPastKeep(record, now)) continue;
+        const projectId = ProjectId.make(record.projectId);
+        yield* orchestrationEngine
+          .dispatch(
+            {
+              type: "project.delete",
+              commandId: CommandId.make(`assistant-purge:${crypto.randomUUID()}`),
+              projectId,
+              force: true,
+            },
+            { origin: assistantCommandOrigin({ assistantKey: projectId }) },
+          )
+          .pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("deleted assistant project purge failed").pipe(
+                Effect.annotateLogs({ projectId, cause }),
+              ),
+            ),
+          );
+        yield* Effect.promise(() =>
+          fsp.rm(record.trashPath, { recursive: true, force: true }).catch(() => undefined),
+        );
+        yield* Effect.promise(() => dropDeletedAssistant(config.stateDir, projectId));
+        purged.push(projectId);
+      }
+      if (purged.length > 0) {
+        yield* Effect.logInfo("deleted assistants purged after 7 days").pipe(
+          Effect.annotateLogs({ purged }),
+        );
+      }
+      return { purged };
+    });
+
   return {
     ensureAssistant,
     ensureAssistantChat,
     createConversation,
+    ensureConversation,
+    deleteAssistant,
+    restoreAssistant,
+    listDeletedAssistants,
+    purgeDeletedAssistants,
     createAssistant,
     scanWorkspaceFolders,
     listAssistants,
@@ -1047,6 +1462,14 @@ export const AssistantBootstrapLive = Layer.effectDiscard(
         ),
       );
     yield* assistants.scanWorkspaceFolders();
+    // Deleted assistants of this computer are kept 7 days, then removed.
+    yield* assistants
+      .purgeDeletedAssistants()
+      .pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("deleted assistants purge failed").pipe(Effect.annotateLogs({ cause })),
+        ),
+      );
     // Legacy single-assistant token label from before per-assistant scoping.
     const tokenRepository = yield* ManagerCapabilityTokenRepository;
     const legacy = yield* tokenRepository.getActiveByLabel("assistant-inapp");
