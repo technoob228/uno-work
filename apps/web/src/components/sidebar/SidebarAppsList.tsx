@@ -38,6 +38,7 @@ import {
 import { useHomeLaunchers } from "../computer/useHomeLaunchers";
 import { useProgramTiles } from "../computer/useProgramTiles";
 import { useSidebar } from "../ui/sidebar";
+import { SidebarAppServers } from "./SidebarAppServers";
 import { Skeleton } from "../ui/skeleton";
 
 export const SidebarAppsList = memo(function SidebarAppsList() {
@@ -81,6 +82,8 @@ export const SidebarAppsList = memo(function SidebarAppsList() {
           ))}
         </ul>
       )}
+
+      <SidebarAppServers />
 
       <div className="mt-auto flex flex-col gap-px border-t border-border/60 pt-1">
         <FixedRow
@@ -226,7 +229,12 @@ function AppRow({
             aria-label={pinned ? `Unpin ${tile.name}` : `Pin ${tile.name}`}
             title={pinned ? "Unpin" : "Pin to the sidebar"}
             onClick={() =>
-              toggle({ kind: "app", title: tile.name, target: app.url, icon: tile.icon })
+              toggle({
+                kind: "app",
+                title: tile.name,
+                target: app.url,
+                icon: tile.icon,
+              })
             }
             className={cn(
               "inline-flex size-6 cursor-pointer items-center justify-center rounded-md hover:bg-accent hover:text-foreground",

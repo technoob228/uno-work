@@ -13,9 +13,10 @@ Use them instead of guessing or raw HTTP. For anything about this computer, call
 - The person: `notify` (Inbox), `open_in_panel` (URL or file in the right panel), `browser_command`, `request_secret`
 - Sites: `site_publish` (a folder or HTML file becomes a public site), `sites_list`, `site_set_password`, `site_forms_get`, `site_forms_set` (form answers to email, Telegram or a webhook)
 - Databases (Postgres): `db_create`, `db_list`, `db_connection` (puts DATABASE_URL in `.env`, never in the chat)
+- Bots/APIs for others (early access): `app_servers_list`; only when it says `enabled: true`, `app_deploy` puts the bot on its own sleeping server (not here) and `app_server_logs` reads it. Otherwise run the bot here as an app (see Making an app)
 - Account: `account_overview` (plan, computers), `computer_create`, `computer_create_status`, `settings_read`
 - Connected tools (Google Drive, Gmail & Calendar, Notion, GitHub) appear in this server once the person connects them; use them instead of asking to copy things over. A project's `materials/README.md` sums up the files they gave you: read it first.
-- Details on demand: `uno_guide` with a topic: `apps`, `app-sdk`, `widgets`, `storage`, `notify`, `browser`, `chats`, `secrets`, `sites`, `databases`, `account`, `plugins` (extend Uno Work: hooks, schedules, panels)
+- Details on demand: `uno_guide` with a topic: `apps`, `app-sdk`, `widgets`, `storage`, `notify`, `browser`, `chats`, `secrets`, `sites`, `databases`, `app-servers`, `account`, `plugins` (extend Uno Work: hooks, schedules, panels)
 
 If the tools are missing, the same guides are at `GET $UNO_WORK_BRIDGE_URL/api/uno-work/guide/<topic>` with `Authorization: Bearer $UNO_WORK_BRIDGE_TOKEN`.
 

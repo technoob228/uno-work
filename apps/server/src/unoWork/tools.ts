@@ -66,6 +66,7 @@ import {
   upsertEnvContent,
 } from "../secretsEnv.ts";
 import { validateArgs, type ObjectSchema } from "./argsSchema.ts";
+import { appServerTools } from "./appServerTools.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import { decideUnoWorkGate, refusalMessage, type UnoWorkToolLevel } from "./policy.ts";
 
@@ -402,7 +403,10 @@ const writeManifestRecord = (deps: UnoWorkToolDeps, id: string, record: Record<s
       catch: (cause) =>
         toolError(`Could not write ${target}: ${cause instanceof Error ? cause.message : cause}`),
     });
-    return { manifest: checked.manifest, file: displayManifestDir(target, deps.home) };
+    return {
+      manifest: checked.manifest,
+      file: displayManifestDir(target, deps.home),
+    };
   });
 
 function accountAccess(settings: ServerSettings) {
@@ -423,15 +427,24 @@ const openTargetSchema: ObjectSchema = {
       type: "string",
       description: "A file inside the home folder, e.g. ~/Documents/report.docx.",
     },
-    appId: { type: "string", description: 'A registered app id, e.g. "notes".' },
-    appPath: { type: "string", description: 'A path inside that app, e.g. "/orders".' },
+    appId: {
+      type: "string",
+      description: 'A registered app id, e.g. "notes".',
+    },
+    appPath: {
+      type: "string",
+      description: 'A path inside that app, e.g. "/orders".',
+    },
     url: { type: "string", description: "An https:// address." },
   },
   additionalProperties: false,
 };
 
 function openTargetFrom(raw: unknown, deps: UnoWorkToolDeps): InboxOpenTarget {
-  const fallback: InboxOpenTarget = { kind: "thread", threadId: deps.caller.threadId };
+  const fallback: InboxOpenTarget = {
+    kind: "thread",
+    threadId: deps.caller.threadId,
+  };
   if (typeof raw !== "object" || raw === null) return fallback;
   const record = raw as Record<string, unknown>;
   if (typeof record.file === "string" && record.file.trim()) {
@@ -701,7 +714,11 @@ const writeEnvVar = (input: {
 
 // ── The tools ──────────────────────────────────────────────────────────
 
-const noArgs: ObjectSchema = { type: "object", properties: {}, additionalProperties: false };
+const noArgs: ObjectSchema = {
+  type: "object",
+  properties: {},
+  additionalProperties: false,
+};
 const appIdArg = {
   type: "string" as const,
   description:
@@ -750,7 +767,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
                 vcpu: box.vcpu,
                 diskGb: box.diskGb,
                 ...(box.boost
-                  ? { boostHoursLeft: box.boost.hoursLeft, boostActive: box.boost.state }
+                  ? {
+                      boostHoursLeft: box.boost.hoursLeft,
+                      boostActive: box.boost.state,
+                    }
                   : {}),
               }
             : null,
@@ -796,7 +816,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     inputSchema: {
       type: "object",
       properties: {
-        includeHidden: { type: "boolean", description: "Also list apps the person hid from Home." },
+        includeHidden: {
+          type: "boolean",
+          description: "Also list apps the person hid from Home.",
+        },
       },
       additionalProperties: false,
     },
@@ -852,7 +875,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       type: "object",
       properties: {
         appId: appIdArg,
-        lines: { type: "integer", minimum: 1, maximum: 500, description: "Default 80." },
+        lines: {
+          type: "integer",
+          minimum: 1,
+          maximum: 500,
+          description: "Default 80.",
+        },
       },
       required: ["appId"],
       additionalProperties: false,
@@ -861,7 +889,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     run: (deps, args) =>
       Effect.gen(function* () {
         const app = yield* findApp(deps, str(args, "appId") ?? "");
-        const text = yield* deps.readLogTail({ app, lines: num(args, "lines") ?? 80 });
+        const text = yield* deps.readLogTail({
+          app,
+          lines: num(args, "lines") ?? 80,
+        });
         return `${app.name} (${app.id}, ${app.status}):\n${text || "(no output recorded)"}`;
       }),
   },
@@ -933,7 +964,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           pattern: MANIFEST_ID_PATTERN,
           description: "Short lowercase id: letters, digits, - and _, e.g. notes.",
         },
-        name: { type: "string", minLength: 1, maxLength: 60, description: "What the person sees." },
+        name: {
+          type: "string",
+          minLength: 1,
+          maxLength: 60,
+          description: "What the person sees.",
+        },
         icon: {
           type: "string",
           maxLength: 80,
@@ -952,14 +988,23 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           description:
             'How Uno starts it (bash -lc in cwd, PORT is set), e.g. "python3 app.py". Give it for anything you built so it has a Start button and survives reboots.',
         },
-        cwd: { type: "string", description: "Its folder inside home, e.g. ~/projects/notes." },
-        path: { type: "string", description: 'What to open on the port, e.g. "/admin".' },
+        cwd: {
+          type: "string",
+          description: "Its folder inside home, e.g. ~/projects/notes.",
+        },
+        path: {
+          type: "string",
+          description: 'What to open on the port, e.g. "/admin".',
+        },
         url: {
           type: "string",
           description:
             "Only for an app hosted somewhere else (an https address). Leave it out for apps on this computer — use port + command.",
         },
-        autostart: { type: "boolean", description: "Start at boot (default true with a command)." },
+        autostart: {
+          type: "boolean",
+          description: "Start at boot (default true with a command).",
+        },
         ai: {
           type: "object",
           description: "Use the computer's AI through the App SDK.",
@@ -1151,7 +1196,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Folder, e.g. ~/Documents. Default: home." },
+        path: {
+          type: "string",
+          description: "Folder, e.g. ~/Documents. Default: home.",
+        },
         showHidden: { type: "boolean" },
       },
       additionalProperties: false,
@@ -1232,7 +1280,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         const query = str(args, "query")?.trim() ?? "";
         const list = query
           ? yield* asToolError(
-              drive.driveSearch({ query, ...(bool(args, "smart") ? { smart: true } : {}) }),
+              drive.driveSearch({
+                query,
+                ...(bool(args, "smart") ? { smart: true } : {}),
+              }),
             )
           : yield* asToolError(drive.driveRecent({ limit: num(args, "limit") ?? 20 }));
         return {
@@ -1323,7 +1374,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
               : {}),
           }),
         );
-        return { ok: true, url: share.url, key: share.key, expiresAt: share.expiresAt };
+        return {
+          ok: true,
+          url: share.url,
+          key: share.key,
+          expiresAt: share.expiresAt,
+        };
       }),
   },
   {
@@ -1351,7 +1407,11 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         const where = str(args, "where") ?? "panel";
         if (where === "panel") {
           return yield* deps
-            .bridge({ method: "POST", path: "/api/browser/open", body: { file: absolute } })
+            .bridge({
+              method: "POST",
+              path: "/api/browser/open",
+              body: { file: absolute },
+            })
             .pipe(Effect.flatMap(bridgeOk));
         }
         const entry = yield* asToolError(deps.files.stat({ path: absolute }));
@@ -1424,7 +1484,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       'List chats: scope "children" (default — chats you started), "project" (every chat in this project; relation self/parent/child/peer) or "all" (every project, only if the person allowed it). Shows status (running, waiting, error, idle), who is in control and the last answer.',
     inputSchema: {
       type: "object",
-      properties: { scope: { type: "string", enum: ["children", "project", "all"] } },
+      properties: {
+        scope: { type: "string", enum: ["children", "project", "all"] },
+      },
       additionalProperties: false,
     },
     level: "safe",
@@ -1556,7 +1618,11 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       properties: {
         title: { type: "string", minLength: 1, maxLength: 140 },
         body: { type: "string", maxLength: 500 },
-        level: { type: "string", enum: ["info", "warning", "error"], description: "Default info." },
+        level: {
+          type: "string",
+          enum: ["info", "warning", "error"],
+          description: "Default info.",
+        },
         open: openTargetSchema,
         alsoMessenger: { type: "boolean" },
       },
@@ -1765,7 +1831,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             const { dataUrl: _omit, ...meta } = data as Record<string, unknown>;
             return new McpContent([
               { type: "image", mimeType: match[1], data: match[2] },
-              { type: "text", text: JSON.stringify({ ...(result as object), data: meta }) },
+              {
+                type: "text",
+                text: JSON.stringify({ ...(result as object), data: meta }),
+              },
             ]);
           }),
         ),
@@ -1789,7 +1858,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           maxLength: 500,
           description: "What it is and where to get it — the person reads this.",
         },
-        targetFile: { type: "string", pattern: "^\\.env(\\.[A-Za-z0-9_.-]+)?$" },
+        targetFile: {
+          type: "string",
+          pattern: "^\\.env(\\.[A-Za-z0-9_.-]+)?$",
+        },
       },
       required: ["name"],
       additionalProperties: false,
@@ -1910,11 +1982,20 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         const password = remove ? "" : (str(args, "password") ?? readablePassword());
         yield* callConsole(
           deps,
-          { method: "PUT", path: sitePath(slug, "/password"), body: { password } },
+          {
+            method: "PUT",
+            path: sitePath(slug, "/password"),
+            body: { password },
+          },
           `set the password of site “${slug}”`,
         );
         return remove
-          ? { slug, url: siteUrl(slug), hasPassword: false, note: "Anyone can open the site now." }
+          ? {
+              slug,
+              url: siteUrl(slug),
+              hasPassword: false,
+              note: "Anyone can open the site now.",
+            }
           : {
               slug,
               url: siteUrl(slug),
@@ -1956,7 +2037,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         if (limit === 0) return { slug, delivery: formsDelivery(view) };
         const list = yield* callConsole(
           deps,
-          { method: "GET", path: sitePath(slug, `/forms/submissions?limit=${limit}`) },
+          {
+            method: "GET",
+            path: sitePath(slug, `/forms/submissions?limit=${limit}`),
+          },
           `read the answers of site “${slug}”`,
         );
         return {
@@ -2115,8 +2199,18 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           pattern: "^[a-z][a-z0-9_]{0,40}$",
           description: "Database name, e.g. shop (lowercase letters, digits, _).",
         },
-        ramMb: { type: "integer", minimum: 512, maximum: 16384, description: "Default 1024." },
-        diskGb: { type: "integer", minimum: 5, maximum: 500, description: "Default 10." },
+        ramMb: {
+          type: "integer",
+          minimum: 512,
+          maximum: 16384,
+          description: "Default 1024.",
+        },
+        diskGb: {
+          type: "integer",
+          minimum: 5,
+          maximum: 500,
+          description: "Default 10.",
+        },
       },
       required: ["name"],
       additionalProperties: false,
@@ -2155,7 +2249,11 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     inputSchema: {
       type: "object",
       properties: {
-        databaseId: { type: "integer", minimum: 1, description: "Id from db_list or db_create." },
+        databaseId: {
+          type: "integer",
+          minimum: 1,
+          description: "Id from db_list or db_create.",
+        },
         envName: {
           type: "string",
           pattern: "^[A-Za-z_][A-Za-z0-9_]{0,127}$",
@@ -2207,7 +2305,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         if (!isValidSecretTargetFile(file)) {
           return yield* toolError('Invalid "targetFile": expected .env or .env.<suffix>.');
         }
-        const written = yield* writeEnvVar({ folder: target.cwd, file, name, value: dsn });
+        const written = yield* writeEnvVar({
+          folder: target.cwd,
+          file,
+          name,
+          value: dsn,
+        });
         return {
           databaseId: id,
           envName: name,
@@ -2218,6 +2321,13 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         };
       }),
   },
+
+  // App servers: bots and backends on their own sleeping server (appServerTools.ts)
+  ...appServerTools({
+    callConsole: (deps, request, what) => callConsole(deps, request, what),
+    resolvePath: (raw, deps) => resolveUserPath(raw, deps),
+    fail: toolError,
+  }),
 
   // Account
   {
@@ -2379,7 +2489,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     description: `Detailed how-to for Uno Work, on demand. Topics: ${UNO_WORK_GUIDE_TOPICS.join(", ")}. Read "app-sdk" before building an app that uses AI, cloud files or notifications; "apps" / "widgets" for the manifest; "storage" for where app data goes.`,
     inputSchema: {
       type: "object",
-      properties: { topic: { type: "string", enum: [...UNO_WORK_GUIDE_TOPICS] } },
+      properties: {
+        topic: { type: "string", enum: [...UNO_WORK_GUIDE_TOPICS] },
+      },
       required: ["topic"],
       additionalProperties: false,
     },
@@ -2501,7 +2613,11 @@ export function connectorMcpTool(
       ? `${tool.description} (${tool.providerName}, connected by the person)`
       : `${tool.providerName} tool, connected by the person.`,
     inputSchema: tool.inputSchema,
-    annotations: { readOnlyHint: level === "safe", destructiveHint: false, openWorldHint: true },
+    annotations: {
+      readOnlyHint: level === "safe",
+      destructiveHint: false,
+      openWorldHint: true,
+    },
     run: (deps, rawArgs) =>
       Effect.gen(function* () {
         const args =
