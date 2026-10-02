@@ -23,6 +23,11 @@ export interface ConnectorNotifyServiceShape {
     readonly threadId: ThreadId | null;
     readonly projectId: ProjectId | null;
     readonly includeAssistantFallback: boolean;
+    /**
+     * Also resolve Slack chats (bound ones, and the owner's DMs in the
+     * assistant fallback). Off for the events forwarder, on for `notify`.
+     */
+    readonly includeSlack?: boolean;
   }) => Effect.Effect<ReadonlyArray<ResolvedNotifyChat>>;
   readonly sendToChats: (
     chats: ReadonlyArray<ResolvedNotifyChat>,
