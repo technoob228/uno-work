@@ -35,6 +35,8 @@ import { EconomyCard, useComputerEconomy } from "../computer/EconomyControl";
 import { useHomeModelPicker } from "../computer/home/HomeComposer";
 import { openInstallDocs } from "../onboarding/harnessInstallLinks";
 import { useHarnessSetup } from "../harness/useHarnessSetup";
+import { runsOnUnoAi } from "../harness/harnessSetupState";
+import { subscriptionRowState } from "./simpleSubscriptionRow.logic";
 import { TelegramMark } from "../setup/brandMarks";
 import { Button } from "../ui/button";
 import { QRCodeSvg } from "../ui/qr-code";
@@ -134,8 +136,18 @@ export function AccountPlanSettings() {
 // ── AI ───────────────────────────────────────────────────────────────
 
 const SUBSCRIPTIONS = [
-  { driver: "claudeAgent", label: "Claude", description: "Your Claude Pro or Max subscription" },
-  { driver: "codex", label: "ChatGPT", description: "Your ChatGPT Plus or Pro subscription" },
+  {
+    driver: "claudeAgent",
+    label: "Claude",
+    plans: "Claude Pro or Max",
+    description: "Your Claude Pro or Max subscription",
+  },
+  {
+    driver: "codex",
+    label: "ChatGPT",
+    plans: "ChatGPT Plus or Pro",
+    description: "Your ChatGPT Plus or Pro subscription",
+  },
 ] as const;
 
 export function AiSettings() {
@@ -183,36 +195,47 @@ export function AiSettings() {
             picker.instanceEntries.find(
               (candidate) => candidate.driverKind === sub.driver && candidate.isDefault,
             ) ?? picker.instanceEntries.find((candidate) => candidate.driverKind === sub.driver);
-          const kind = entry ? resolveProviderPaneKind(entry) : "blocked";
+          const row = subscriptionRowState({
+            kind: entry ? resolveProviderPaneKind(entry) : "blocked",
+            onUnoAi: entry ? runsOnUnoAi(entry.snapshot) : false,
+            accountLabel: entry?.snapshot.auth.label ?? null,
+            email: entry?.snapshot.auth.email ?? null,
+          });
+          const description =
+            row.state === "unoAi"
+              ? `Works now on Uno AI (premium credit). Have ${sub.plans}? Sign in to use it instead.`
+              : row.state === "connected"
+                ? `Signed in${row.detail ? ` · ${row.detail}` : ""}. Pick its model under "Model for new chats".`
+                : sub.description;
           return (
             <SettingsRow
               key={sub.driver}
               title={sub.label}
-              description={sub.description}
+              description={description}
               control={
-                kind === "models" ? (
+                row.state === "connected" ? (
                   <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success">
                     <CheckCircle2Icon className="size-3.5" />
                     Connected
                   </span>
-                ) : kind === "install" || kind === "signin" ? (
+                ) : row.paneKind ? (
                   <Button
                     size="xs"
                     variant="outline"
                     onClick={() => setOpen(open === sub.driver ? null : sub.driver)}
                   >
-                    {open === sub.driver ? "Close" : "Connect"}
+                    {open === sub.driver ? "Close" : row.state === "unoAi" ? "Sign in" : "Connect"}
                   </Button>
                 ) : (
                   <span className="text-xs text-muted-foreground">Not on this computer</span>
                 )
               }
             >
-              {open === sub.driver && entry && (kind === "install" || kind === "signin") ? (
+              {open === sub.driver && entry && row.paneKind ? (
                 <div className="-mx-4 mt-3 border-t border-border/60 sm:-mx-5">
                   <ProviderSetupPane
                     entry={entry}
-                    kind={kind}
+                    kind={row.paneKind}
                     setup={setup}
                     environmentId={environmentId}
                   />

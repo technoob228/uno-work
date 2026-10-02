@@ -94,4 +94,44 @@ describe("buildSimpleModelChoices", () => {
       isSimpleChoiceSelected(claude, { instanceId: id("claudeAgent"), model: "claude-haiku" }),
     ).toBe(true);
   });
+
+  it("does not list Claude on Uno AI as your subscription", () => {
+    const choices = buildSimpleModelChoices({
+      entries: [entry("hermes", "hermes"), entry("claudeAgent", "claudeAgent")],
+      isReady: () => true,
+      isOwnAccount: (e) => e.instanceId !== id("claudeAgent"),
+      modelOptionsByInstance: OPTIONS,
+      activeInstanceId: id("hermes"),
+      activeModel: "uno/smart",
+    });
+    expect(choices.subscriptions).toEqual([]);
+    // Its Claude models are still there, under Premium.
+    expect(choices.premium.map((choice) => choice.model)).toEqual(["anthropic/claude-sonnet"]);
+  });
+
+  it("lets you pick the subscription's model", () => {
+    const options = new Map([
+      [
+        id("claudeAgent"),
+        [model("claude-opus-5-5", "Claude Opus 5.5"), model("claude-sonnet-5", "Claude Sonnet 5")],
+      ],
+    ]);
+    const choices = buildSimpleModelChoices({
+      entries: [entry("claudeAgent", "claudeAgent")],
+      isReady: () => true,
+      modelOptionsByInstance: options,
+      activeInstanceId: id("claudeAgent"),
+      activeModel: "claude-sonnet-5",
+    });
+    const claude = choices.subscriptions[0]!;
+    expect(claude.models.map((choice) => choice.model)).toEqual([
+      "claude-opus-5-5",
+      "claude-sonnet-5",
+    ]);
+    const active = { instanceId: id("claudeAgent"), model: "claude-sonnet-5" };
+    expect(claude.models.map((choice) => isSimpleChoiceSelected(choice, active))).toEqual([
+      false,
+      true,
+    ]);
+  });
 });

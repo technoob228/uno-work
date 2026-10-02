@@ -30,13 +30,19 @@ export interface SimpleModelChoice {
   readonly description: string;
 }
 
+/** A subscription row: the harness, plus its models to choose from. */
+export interface SimpleSubscriptionChoice extends SimpleModelChoice {
+  /** Every model of the subscription (Opus, Sonnet, …), in the harness's order. */
+  readonly models: ReadonlyArray<SimpleModelChoice>;
+}
+
 export interface SimpleModelChoices {
   /** Smart, Fast — included in AI hours. */
   readonly included: ReadonlyArray<SimpleModelChoice>;
   /** Premium models (from premium credit), behind one "Premium" row. */
   readonly premium: ReadonlyArray<SimpleModelChoice>;
   /** The person's own Claude / ChatGPT subscription, when signed in here. */
-  readonly subscriptions: ReadonlyArray<SimpleModelChoice>;
+  readonly subscriptions: ReadonlyArray<SimpleSubscriptionChoice>;
 }
 
 const GATEWAY_DRIVERS = ["hermes", "uno"] as const;
@@ -67,6 +73,12 @@ function pickEntry<E extends SimplePickerEntry>(
 export function buildSimpleModelChoices<E extends SimplePickerEntry>(input: {
   readonly entries: ReadonlyArray<E>;
   readonly isReady: (entry: E) => boolean;
+  /**
+   * False for a harness that is ready but not on the person's own account —
+   * Claude Code on Uno AI (`runsOnUnoAi`): it is not "your subscription", and
+   * its Claude models are already under Premium. Defaults to true.
+   */
+  readonly isOwnAccount?: (entry: E) => boolean;
   readonly modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
   readonly activeInstanceId: ProviderInstanceId | null;
   readonly activeModel: string | null;
@@ -96,9 +108,13 @@ export function buildSimpleModelChoices<E extends SimplePickerEntry>(input: {
     }
   }
 
-  const subscriptions: SimpleModelChoice[] = [];
+  const subscriptions: SimpleSubscriptionChoice[] = [];
+  const isOwnAccount = input.isOwnAccount ?? (() => true);
   for (const { driver, label } of SUBSCRIPTIONS) {
-    const entry = pickEntry(ready, driver);
+    const entry = pickEntry(
+      ready.filter((candidate) => isOwnAccount(candidate)),
+      driver,
+    );
     if (!entry) continue;
     const models = input.modelOptionsByInstance.get(entry.instanceId) ?? [];
     const model =
@@ -113,6 +129,14 @@ export function buildSimpleModelChoices<E extends SimplePickerEntry>(input: {
       model,
       label,
       description: "Your subscription",
+      models: models.map((option) => ({
+        key: `${entry.instanceId}:${option.slug}`,
+        instanceId: entry.instanceId,
+        driverKind: entry.driverKind,
+        model: option.slug,
+        label: displayName(option),
+        description: "Your subscription",
+      })),
     });
   }
 

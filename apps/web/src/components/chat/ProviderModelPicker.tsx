@@ -4,6 +4,7 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
+import { useRouter } from "@tanstack/react-router";
 import { memo, useEffect, useMemo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
@@ -21,6 +22,7 @@ import {
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { useHarnessSetup } from "../harness/useHarnessSetup";
+import { runsOnUnoAi } from "../harness/harnessSetupState";
 import { useDevMode } from "../../devMode";
 import { resolveProviderPaneKind } from "./modelPickerProviderPane";
 import { SimpleModelPickerContent } from "./SimpleModelPickerContent";
@@ -65,11 +67,16 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   // person's subscription; the harness column is for Dev mode. A locked
   // provider (editing a sent message) or nothing to offer keeps the full one.
   const devMode = useDevMode();
+  // No router in isolated renders (browser tests): the link then just closes.
+  const router = useRouter({ warn: false }) as ReturnType<typeof useRouter> | undefined;
   const simpleChoices = useMemo(
     () =>
       buildSimpleModelChoices({
         entries: props.instanceEntries,
         isReady: (entry) => resolveProviderPaneKind(entry) === "models",
+        // Claude Code on Uno AI is not the person's subscription (its Claude
+        // models are under Premium); it signs in from Settings → AI.
+        isOwnAccount: (entry) => !runsOnUnoAi(entry.snapshot),
         modelOptionsByInstance: props.modelOptionsByInstance,
         activeInstanceId: props.activeInstanceId,
         activeModel: props.model,
@@ -213,6 +220,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             activeInstanceId={activeInstanceId}
             model={props.model}
             onPick={handleInstanceModelChange}
+            onConnectSubscription={() => {
+              setIsMenuOpen(false);
+              void router?.navigate({ to: "/settings/ai" });
+            }}
           />
         ) : (
           <ModelPickerContent

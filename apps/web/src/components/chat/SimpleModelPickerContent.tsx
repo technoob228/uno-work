@@ -21,12 +21,16 @@ export function SimpleModelPickerContent(props: {
   activeInstanceId: ProviderInstanceId;
   model: string;
   onPick: (instanceId: ProviderInstanceId, model: string) => void;
+  /** "Use your Claude or ChatGPT subscription" when none is signed in here (Settings → AI). */
+  onConnectSubscription?: () => void;
 }) {
   const active = { instanceId: props.activeInstanceId, model: props.model };
   const premiumSelected = props.choices.premium.some((choice) =>
     isSimpleChoiceSelected(choice, active),
   );
   const [premiumOpen, setPremiumOpen] = useState(premiumSelected);
+  // Which subscription's model list is open (Claude: Opus / Sonnet / …).
+  const [subscriptionOpen, setSubscriptionOpen] = useState<string | null>(null);
   const premiumLabel = premiumSelected
     ? (props.choices.premium.find((choice) => isSimpleChoiceSelected(choice, active))?.label ??
       "Premium")
@@ -110,17 +114,58 @@ export function SimpleModelPickerContent(props: {
       {props.choices.subscriptions.length > 0 ? (
         <>
           <GroupLabel>Your subscription</GroupLabel>
-          {props.choices.subscriptions.map((choice) =>
-            row(
-              choice,
-              <ProviderInstanceIcon
-                driverKind={choice.driverKind}
-                displayName={choice.label}
-                iconClassName="size-4"
-              />,
-            ),
-          )}
+          {props.choices.subscriptions.map((choice) => {
+            const selected = isSimpleChoiceSelected(choice, active);
+            const open = subscriptionOpen === choice.key;
+            const current = selected
+              ? choice.models.find((option) => option.model === props.model)
+              : undefined;
+            return (
+              <div key={choice.key} className="flex flex-col">
+                <div className="flex items-center">
+                  <div className="min-w-0 flex-1">
+                    {row(
+                      current ? { ...choice, description: current.label } : choice,
+                      <ProviderInstanceIcon
+                        driverKind={choice.driverKind}
+                        displayName={choice.label}
+                        iconClassName="size-4"
+                      />,
+                    )}
+                  </div>
+                  {choice.models.length > 1 ? (
+                    <button
+                      type="button"
+                      onClick={() => setSubscriptionOpen(open ? null : choice.key)}
+                      aria-expanded={open}
+                      aria-label={`${choice.label} models`}
+                      data-testid={`simple-model-${choice.label.toLowerCase()}-models`}
+                      className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-accent"
+                    >
+                      <ChevronDownIcon
+                        className={cn("size-3.5 transition-transform", open && "rotate-180")}
+                      />
+                    </button>
+                  ) : null}
+                </div>
+                {open ? (
+                  <div className="flex max-h-56 flex-col overflow-y-auto">
+                    {choice.models.map((option) => row(option, null, true))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </>
+      ) : props.onConnectSubscription ? (
+        <button
+          type="button"
+          onClick={props.onConnectSubscription}
+          data-testid="simple-model-connect-subscription"
+          className="mt-0.5 w-full cursor-pointer rounded-lg px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          Have Claude Pro / Max or ChatGPT Plus? Use your subscription →
+        </button>
       ) : null}
       <p className="px-2 pt-1 pb-0.5 text-[11px] leading-snug text-muted-foreground/80">
         Other agents and models: Settings → Developer → Dev mode.
