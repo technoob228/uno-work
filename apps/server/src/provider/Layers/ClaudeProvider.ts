@@ -879,6 +879,31 @@ export interface ClaudeUnoGateway {
   readonly environment: () => Readonly<Record<string, string>> | null;
   /** Who chats started from now on run as (read by the adapter per query). */
   readonly setMode: (mode: ClaudeAuthMode) => void;
+  /**
+   * Whether the account may run Claude on Uno AI at all. False on a trial
+   * computer (free chat: the gateway answers /v1/messages with 403), where
+   * Claude must ask for the person's own sign-in instead of looking ready.
+   * Omitted = allowed.
+   */
+  readonly available?: () => Effect.Effect<boolean>;
+}
+
+/** Shown on the Claude card when Claude on Uno AI isn't in the account's plan. */
+export const CLAUDE_UNO_UNAVAILABLE_MESSAGE =
+  "Sign in with Claude to use your Claude Pro or Max subscription here. Claude on Uno AI comes with paid plans.";
+
+/** `plan` values of `GET /v1/ai/status` that have no Claude on Uno AI. */
+export const UNO_PLANS_WITHOUT_CLAUDE: ReadonlySet<string> = new Set(["work-trial"]);
+
+/**
+ * From the gateway's `GET /v1/ai/status`: may this account run Claude on
+ * Uno AI? null when the answer doesn't say (then it stays allowed).
+ */
+export function claudeOnUnoAllowedByAiStatus(json: unknown): boolean | null {
+  if (typeof json !== "object" || json === null || Array.isArray(json)) return null;
+  const plan = (json as Record<string, unknown>)["plan"];
+  if (typeof plan !== "string" || plan.length === 0) return null;
+  return !UNO_PLANS_WITHOUT_CLAUDE.has(plan);
 }
 
 /** Shown on the Claude card while it runs on Uno AI. */
@@ -1019,6 +1044,8 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   // sign-in of its own (env credentials, or `claude auth status`). A status
   // that can't be read counts as "own" — never override a real sign-in.
   let mode: ClaudeAuthMode = "own";
+  // Not signed in, and the plan has no Claude on Uno AI (trial): ask for a sign-in.
+  let unoUnavailable = false;
   if (unoGateway && unoGateway.environment() !== null) {
     let own = hasOwnClaudeCredentialsInEnv(environment);
     if (!own) {
@@ -1033,7 +1060,12 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
           : null;
       own = loggedIn !== false;
     }
-    mode = own ? "own" : "uno";
+    const allowed =
+      own || !unoGateway.available
+        ? true
+        : yield* unoGateway.available().pipe(Effect.orElseSucceed(() => true));
+    unoUnavailable = !own && !allowed;
+    mode = own || unoUnavailable ? "own" : "uno";
     unoGateway.setMode(mode);
   }
 
@@ -1048,6 +1080,24 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   );
   const slashCommands = capabilities?.slashCommands ?? [];
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands);
+
+  if (unoUnavailable) {
+    return buildServerProvider({
+      presentation: CLAUDE_PRESENTATION,
+      enabled: claudeSettings.enabled,
+      checkedAt,
+      models,
+      slashCommands: dedupedSlashCommands,
+      probe: {
+        installed: true,
+        version: parsedVersion,
+        status: "warning",
+        auth: { status: "unauthenticated" },
+        message: CLAUDE_UNO_UNAVAILABLE_MESSAGE,
+      },
+      ...(updateAvailable ? { updateAvailable } : {}),
+    });
+  }
 
   if (!capabilities) {
     return buildServerProvider({

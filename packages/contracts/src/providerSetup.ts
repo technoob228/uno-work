@@ -132,3 +132,25 @@ export const ProviderAuthSubmitCodeInput = Schema.Struct({
   code: Schema.String,
 });
 export type ProviderAuthSubmitCodeInput = typeof ProviderAuthSubmitCodeInput.Type;
+
+/* ------------------------------------------------------------------ *
+ * Sign out
+ * ------------------------------------------------------------------ */
+
+/**
+ * Sign the CLI out on this machine: `claude auth logout` (plus the stored
+ * `ANTHROPIC_API_KEY` of the default Claude instance), `codex logout`. A Uno
+ * box then runs Claude Code on Uno AI again, where the plan allows it.
+ */
+export const ProviderAuthSignOutInput = Schema.Struct({
+  driver: ProviderAuthDriver,
+});
+export type ProviderAuthSignOutInput = typeof ProviderAuthSignOutInput.Type;
+
+export const ProviderAuthSignOutResult = Schema.Struct({
+  driver: ProviderAuthDriver,
+  /** False when the CLI refused; `error` says why. */
+  signedOut: Schema.Boolean,
+  error: Schema.optional(Schema.String),
+});
+export type ProviderAuthSignOutResult = typeof ProviderAuthSignOutResult.Type;

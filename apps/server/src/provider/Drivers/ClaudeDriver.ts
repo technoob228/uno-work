@@ -37,6 +37,7 @@ import {
   probeClaudeCapabilities,
 } from "../Layers/ClaudeProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
+import { makeUnoClaudeAvailability } from "./unoClaudeAvailability.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
   defaultProviderContinuationIdentity,
@@ -113,6 +114,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       // decided by every status check and read per query.
       const unoGatewayKey = yield* (yield* UnoGatewayKey).harnessKey();
       const unoOverlay = unoGatewayKey.length > 0 ? unoClaudeEnvironment(unoGatewayKey) : null;
+      // A trial computer (free chat) has no Claude on Uno AI: the gateway says so.
+      const unoAvailable =
+        unoGatewayKey.length > 0
+          ? makeUnoClaudeAvailability({ baseUrl: UNO_GATEWAY_BASE_URL, key: unoGatewayKey })
+          : null;
       let authMode: ClaudeAuthMode = "own";
       const authOverlay = (): Record<string, string> =>
         authMode === "uno" && unoOverlay !== null ? unoOverlay : {};
@@ -194,6 +200,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
           setMode: (mode) => {
             authMode = mode;
           },
+          ...(unoAvailable ? { available: () => Effect.promise(() => unoAvailable()) } : {}),
         },
       ).pipe(
         Effect.map(stampIdentity),

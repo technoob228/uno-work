@@ -16,6 +16,10 @@
  *                           instance's environment (secret store backed).
  *   auth claudeAgent oauth  `claude auth login`; URL parsed from stdout, the
  *                           user pastes the code back via `submitCode`.
+ *   sign out codex          `codex logout`.
+ *   sign out claudeAgent    `claude auth logout` + drop the stored
+ *                           ANTHROPIC_API_KEY; on a Uno box Claude Code then
+ *                           runs on Uno AI again (where the plan allows it).
  *
  * Job logs never contain the API key: it is scrubbed by the job store.
  *
@@ -32,6 +36,8 @@ import {
   type ProviderAuthDriver,
   type ProviderAuthJobStatus,
   type ProviderAuthMethod,
+  type ProviderAuthSignOutInput,
+  type ProviderAuthSignOutResult,
   type ProviderAuthStartInput,
   type ProviderAuthStartResult,
   type ProviderAuthStatusInput,
@@ -64,6 +70,7 @@ import {
 import { lastNonEmptyLine, parseOAuthPrompt } from "./harnessSetupParsers.ts";
 
 export const AUTH_JOB_TIMEOUT_MS = 10 * 60_000;
+export const SIGN_OUT_TIMEOUT_MS = 30_000;
 export const INSTALL_JOB_TIMEOUT_MS = 15 * 60_000;
 export const ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY";
 
@@ -83,6 +90,9 @@ export interface HarnessSetupShape {
   readonly authSubmitCode: (
     input: ProviderAuthSubmitCodeInput,
   ) => Effect.Effect<ProviderAuthJobStatus, ProviderSetupRpcError>;
+  readonly authSignOut: (
+    input: ProviderAuthSignOutInput,
+  ) => Effect.Effect<ProviderAuthSignOutResult, ProviderSetupRpcError>;
 }
 
 export class HarnessSetup extends Context.Service<HarnessSetup, HarnessSetupShape>()(
@@ -108,8 +118,11 @@ export interface HarnessSetupRunnerDeps {
   /** Binary + environment the daemon itself uses to run that driver's CLI. */
   readonly resolveCliEnvironment: (driver: ProviderAuthDriver) => Promise<CliEnvironment>;
   readonly storeClaudeApiKey: (apiKey: string) => Promise<void>;
+  /** Drops ANTHROPIC_API_KEY from the default Claude instance; true if one was there. */
+  readonly removeClaudeApiKey: () => Promise<boolean>;
   readonly refreshProvider: (driver: ProviderDriverKind) => Promise<void>;
   readonly authTimeoutMs?: number;
+  readonly signOutTimeoutMs?: number;
   readonly installTimeoutMs?: number;
   readonly now?: () => number;
   readonly makeJobId?: () => string;
@@ -136,6 +149,7 @@ export interface HarnessSetupRunner {
   readonly authStart: (input: ProviderAuthStartInput) => ProviderAuthStartResult;
   readonly authStatus: (input: ProviderAuthStatusInput) => ProviderAuthJobStatus;
   readonly authSubmitCode: (input: ProviderAuthSubmitCodeInput) => ProviderAuthJobStatus;
+  readonly authSignOut: (input: ProviderAuthSignOutInput) => Promise<ProviderAuthSignOutResult>;
   /** Kill every running child. Used on daemon shutdown. */
   readonly shutdown: () => void;
   /** Resolves once every job started so far has settled. Test helper. */
@@ -452,12 +466,82 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     return toAuthStatus(auths.updateExtra(job.jobId, { needsCodeInput: false }) ?? job);
   };
 
+  /* ---------------------------- sign out --------------------------- */
+
+  /** One short CLI call, output collected (no job: sign-out is quick). */
+  const runQuick = (
+    command: string,
+    args: ReadonlyArray<string>,
+    env: NodeJS.ProcessEnv,
+  ): Promise<{ readonly code: number | null; readonly output: string; readonly reason?: string }> =>
+    new Promise((resolve) => {
+      let output = "";
+      let timedOut = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const handle = deps.spawn({
+        command,
+        args,
+        env,
+        onOutput: (chunk) => {
+          output += chunk;
+        },
+        onExit: (exit) => {
+          if (timer) clearTimeout(timer);
+          if (exit.error) {
+            resolve({ code: null, output, reason: describeSpawnError(command, exit.error) });
+            return;
+          }
+          if (timedOut) {
+            resolve({ code: null, output, reason: "Timed out waiting for the command to finish." });
+            return;
+          }
+          resolve({ code: exit.code, output });
+        },
+      });
+      timer = setTimeout(() => {
+        timedOut = true;
+        handle.kill();
+      }, deps.signOutTimeoutMs ?? SIGN_OUT_TIMEOUT_MS);
+      timer.unref?.();
+      handle.endInput();
+    });
+
+  const authSignOut = async (
+    input: ProviderAuthSignOutInput,
+  ): Promise<ProviderAuthSignOutResult> => {
+    const driver = input.driver;
+    const running = auths.findActive("auth", driver);
+    if (running) {
+      throw fail("conflict", `A sign-in for ${driver} is in progress. Cancel it first.`);
+    }
+    const cli = await deps.resolveCliEnvironment(driver);
+    const args = driver === "codex" ? ["logout"] : ["auth", "logout"];
+    const result = await runQuick(
+      cli.binaryPath,
+      args,
+      withUserLocalBinOnPath({ ...deps.baseEnv, ...cli.env }, deps.homeDir),
+    );
+    const removedKey = driver === "claudeAgent" ? await deps.removeClaudeApiKey() : false;
+    await refreshAfterSuccess(ProviderDriverKind.make(driver));
+    // `claude auth logout` without a login, or after only an API key, may
+    // complain; the stored key going away is a sign-out too.
+    if (result.code === 0 || removedKey) return { driver, signedOut: true };
+    log("provider sign-out failed", { driver, code: result.code, reason: result.reason });
+    return {
+      driver,
+      signedOut: false,
+      error:
+        result.reason ?? `Sign-out exited with code ${result.code}.${summarizeTail(result.output)}`,
+    };
+  };
+
   return {
     installStart,
     installStatus,
     authStart,
     authStatus,
     authSubmitCode,
+    authSignOut,
     shutdown: () => {
       for (const handle of handles.values()) handle.kill();
     },
@@ -509,6 +593,14 @@ export function makeHarnessSetupShape(runner: HarnessSetupRunner): HarnessSetupS
     authStart: liftSync(runner.authStart),
     authStatus: liftSync(runner.authStatus),
     authSubmitCode: liftSync(runner.authSubmitCode),
+    authSignOut: (input) =>
+      Effect.tryPromise({
+        try: () => runner.authSignOut(input),
+        catch: (error) =>
+          isProviderSetupRpcError(error)
+            ? error
+            : new ProviderSetupRpcError({ code: "failed", message: describeError(error) }),
+      }),
   };
 }
 
@@ -624,6 +716,26 @@ export const HarnessSetupLive = Layer.effect(
         });
       });
 
+    const removeClaudeApiKey = Effect.gen(function* () {
+      const settings = yield* serverSettings.getSettings;
+      const instanceId = defaultInstanceIdForDriver(ProviderDriverKind.make("claudeAgent"));
+      const existing = settings.providerInstances[instanceId];
+      const environment = existing?.environment ?? [];
+      if (!existing || !environment.some((entry) => entry.name === ANTHROPIC_API_KEY_ENV)) {
+        return false;
+      }
+      yield* serverSettings.updateSettings({
+        providerInstances: {
+          ...settings.providerInstances,
+          [instanceId]: {
+            ...existing,
+            environment: environment.filter((entry) => entry.name !== ANTHROPIC_API_KEY_ENV),
+          },
+        },
+      });
+      return true;
+    });
+
     const runner = makeHarnessSetupRunner({
       spawn: spawnHarnessProcess,
       platform: process.platform,
@@ -633,6 +745,7 @@ export const HarnessSetupLive = Layer.effect(
       probeUvAvailable: () => probeCommandAvailable("uv", baseEnv),
       resolveCliEnvironment: (driver) => runPromise(resolveCliEnvironment(driver)),
       storeClaudeApiKey: (apiKey) => runPromise(storeClaudeApiKey(apiKey)),
+      removeClaudeApiKey: () => runPromise(removeClaudeApiKey),
       refreshProvider: (driver) =>
         runPromise(providerRegistry.refresh(driver)).then(() => undefined),
       log: (message, meta) => {

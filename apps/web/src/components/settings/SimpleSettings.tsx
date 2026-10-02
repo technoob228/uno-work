@@ -36,7 +36,7 @@ import { useHomeModelPicker } from "../computer/home/HomeComposer";
 import { openInstallDocs } from "../onboarding/harnessInstallLinks";
 import { useHarnessSetup } from "../harness/useHarnessSetup";
 import { runsOnUnoAi } from "../harness/harnessSetupState";
-import { subscriptionRowState } from "./simpleSubscriptionRow.logic";
+import { subscriptionActionLabel, subscriptionRowState } from "./simpleSubscriptionRow.logic";
 import { TelegramMark } from "../setup/brandMarks";
 import { Button } from "../ui/button";
 import { QRCodeSvg } from "../ui/qr-code";
@@ -156,6 +156,11 @@ export function AiSettings() {
   const picker = useHomeModelPicker(environmentId);
   const setup = useHarnessSetup(environmentId);
   const [open, setOpen] = useState<string | null>(null);
+  const [signingOut, setSigningOut] = useState<string | null>(null);
+  const [signOutError, setSignOutError] = useState<{
+    readonly driver: string;
+    readonly message: string;
+  } | null>(null);
   return (
     <SettingsPageContainer>
       <SettingsSection title="AI">
@@ -201,12 +206,32 @@ export function AiSettings() {
             accountLabel: entry?.snapshot.auth.label ?? null,
             email: entry?.snapshot.auth.email ?? null,
           });
+          const action = subscriptionActionLabel(row, sub);
+          const busy = signingOut === sub.driver;
           const description =
-            row.state === "unoAi"
-              ? `Works now on Uno AI (premium credit). Have ${sub.plans}? Sign in to use it instead.`
-              : row.state === "connected"
-                ? `Signed in${row.detail ? ` · ${row.detail}` : ""}. Pick its model under "Model for new chats".`
-                : sub.description;
+            signOutError?.driver === sub.driver
+              ? `Couldn't sign out: ${signOutError.message}`
+              : row.state === "unoAi"
+                ? `Works now on Uno AI (premium credit). Have ${sub.plans}? Sign in to use it instead.`
+                : row.state === "connected"
+                  ? `Signed in${row.detail ? ` · ${row.detail}` : ""}. Pick its model under "Model for new chats".`
+                  : sub.description;
+          const signOut = async () => {
+            const confirmed = window.confirm(
+              `Sign out of ${sub.label} on this computer? You can sign in again any time.`,
+            );
+            if (!confirmed) return;
+            setSigningOut(sub.driver);
+            setSignOutError(null);
+            const result = await setup.signOut(sub.driver);
+            setSigningOut(null);
+            if (!result.signedOut) {
+              setSignOutError({
+                driver: sub.driver,
+                message: result.error ?? "the computer did not answer.",
+              });
+            }
+          };
           return (
             <SettingsRow
               key={sub.driver}
@@ -214,17 +239,30 @@ export function AiSettings() {
               description={description}
               control={
                 row.state === "connected" ? (
-                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success">
-                    <CheckCircle2Icon className="size-3.5" />
-                    Connected
+                  <span className="inline-flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success">
+                      <CheckCircle2Icon className="size-3.5" />
+                      Connected
+                    </span>
+                    {row.canSignOut ? (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => void signOut()}
+                        data-testid={`subscription-sign-out-${sub.driver}`}
+                      >
+                        {busy ? "Signing out…" : "Sign out"}
+                      </Button>
+                    ) : null}
                   </span>
-                ) : row.paneKind ? (
+                ) : action ? (
                   <Button
                     size="xs"
                     variant="outline"
                     onClick={() => setOpen(open === sub.driver ? null : sub.driver)}
                   >
-                    {open === sub.driver ? "Close" : row.state === "unoAi" ? "Sign in" : "Connect"}
+                    {open === sub.driver ? "Close" : action}
                   </Button>
                 ) : (
                   <span className="text-xs text-muted-foreground">Not on this computer</span>

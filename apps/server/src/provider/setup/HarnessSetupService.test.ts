@@ -53,6 +53,7 @@ function makeHarness(overrides: Partial<HarnessSetupRunnerDeps> = {}): Harness {
     storeClaudeApiKey: async (apiKey) => {
       storedKeys.push(apiKey);
     },
+    removeClaudeApiKey: async () => false,
     refreshProvider: async (driver) => {
       refreshed.push(driver);
     },
@@ -328,5 +329,64 @@ describe("auth jobs", () => {
     harness.runner.shutdown();
     await harness.runner.drain();
     expect(harness.processes.every((process) => process.killed)).toBe(true);
+  });
+});
+
+describe("sign out", () => {
+  it("runs `claude auth logout` and refreshes Claude", async () => {
+    const harness = makeHarness();
+    const done = harness.runner.authSignOut({ driver: "claudeAgent" });
+    await tick(8);
+    const process = harness.latest();
+    expect(process.input.command).toBe("claude");
+    expect(process.input.args).toEqual(["auth", "logout"]);
+    process.input.onExit({ code: 0, signal: null });
+    await expect(done).resolves.toEqual({ driver: "claudeAgent", signedOut: true });
+    expect(harness.refreshed).toEqual(["claudeAgent"]);
+  });
+
+  it("runs `codex logout`", async () => {
+    const harness = makeHarness();
+    const done = harness.runner.authSignOut({ driver: "codex" });
+    await tick(8);
+    expect(harness.latest().input.args).toEqual(["logout"]);
+    harness.latest().input.onExit({ code: 0, signal: null });
+    await expect(done).resolves.toEqual({ driver: "codex", signedOut: true });
+  });
+
+  it("an API key stored for Claude is dropped, and that counts as signed out", async () => {
+    let removed = 0;
+    const harness = makeHarness({
+      removeClaudeApiKey: async () => {
+        removed += 1;
+        return true;
+      },
+    });
+    const done = harness.runner.authSignOut({ driver: "claudeAgent" });
+    await tick(8);
+    harness.latest().input.onOutput("Not logged in\n");
+    harness.latest().input.onExit({ code: 1, signal: null });
+    await expect(done).resolves.toEqual({ driver: "claudeAgent", signedOut: true });
+    expect(removed).toBe(1);
+  });
+
+  it("reports the CLI's refusal", async () => {
+    const harness = makeHarness();
+    const done = harness.runner.authSignOut({ driver: "codex" });
+    await tick(8);
+    harness.latest().input.onOutput("error: config is read-only\n");
+    harness.latest().input.onExit({ code: 2, signal: null });
+    const result = await done;
+    expect(result.signedOut).toBe(false);
+    expect(result.error).toContain("read-only");
+  });
+
+  it("is refused while a sign-in is running", async () => {
+    const harness = makeHarness();
+    harness.runner.authStart({ driver: "codex", method: "oauth" });
+    await tick();
+    await expect(harness.runner.authSignOut({ driver: "codex" })).rejects.toThrow(/in progress/);
+    harness.runner.shutdown();
+    await harness.runner.drain();
   });
 });

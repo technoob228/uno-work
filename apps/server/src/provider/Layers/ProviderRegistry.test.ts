@@ -27,6 +27,8 @@ import { AiProviderKeysTest } from "../../aiProviders/AiProviderKeys.ts";
 import { checkCodexProviderStatus, type CodexAppServerProviderSnapshot } from "./CodexProvider.ts";
 import {
   CLAUDE_UNO_AI_MESSAGE,
+  CLAUDE_UNO_UNAVAILABLE_MESSAGE,
+  claudeOnUnoAllowedByAiStatus,
   type ClaudeCliModel,
   checkClaudeProviderStatus,
 } from "./ClaudeProvider.ts";
@@ -1508,6 +1510,51 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             }),
           ),
         );
+      });
+
+      it.effect("asks for a sign-in where the plan has no Claude on Uno AI (trial)", () => {
+        const modes: string[] = [];
+        const probedModes: string[] = [];
+        return Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            (_settings, mode) => {
+              probedModes.push(mode);
+              return claudeCapabilities({ tokenSource: "none" })();
+            },
+            {},
+            {
+              environment: () => ({
+                ANTHROPIC_BASE_URL: "https://api.getuno.xyz",
+                ANTHROPIC_AUTH_TOKEN: "unollm_test",
+              }),
+              setMode: (mode) => modes.push(mode),
+              available: () => Effect.succeed(false),
+            },
+          );
+          assert.deepStrictEqual(modes, ["own"]);
+          assert.deepStrictEqual(probedModes, ["own"]);
+          assert.strictEqual(status.status, "warning");
+          assert.strictEqual(status.auth.status, "unauthenticated");
+          assert.strictEqual(status.message, CLAUDE_UNO_UNAVAILABLE_MESSAGE);
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.1.280\n", stderr: "", code: 0 };
+              if (joined === "auth status --json")
+                return { stdout: '{"loggedIn":false,"authMethod":"none"}\n', stderr: "", code: 0 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        );
+      });
+
+      it("reads the plan of /v1/ai/status", () => {
+        assert.strictEqual(claudeOnUnoAllowedByAiStatus({ plan: "work-trial" }), false);
+        assert.strictEqual(claudeOnUnoAllowedByAiStatus({ plan: "plus-ai" }), true);
+        assert.strictEqual(claudeOnUnoAllowedByAiStatus({ enabled: false }), null);
+        assert.strictEqual(claudeOnUnoAllowedByAiStatus(null), null);
       });
 
       it.effect("never overrides the person's own Claude sign-in", () => {

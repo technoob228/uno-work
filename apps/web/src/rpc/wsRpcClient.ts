@@ -231,6 +231,7 @@ export interface WsRpcClient {
     readonly authStart: RpcUnaryMethod<typeof WS_METHODS.providerAuthStart>;
     readonly authStatus: RpcUnaryMethod<typeof WS_METHODS.providerAuthStatus>;
     readonly authSubmitCode: RpcUnaryMethod<typeof WS_METHODS.providerAuthSubmitCode>;
+    readonly authSignOut: RpcUnaryMethod<typeof WS_METHODS.providerAuthSignOut>;
   };
   readonly customHarness: {
     readonly list: RpcUnaryNoArgMethod<typeof WS_METHODS.customHarnessList>;
@@ -631,6 +632,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.providerAuthStatus](input)),
       authSubmitCode: (input) =>
         transport.request((client) => client[WS_METHODS.providerAuthSubmitCode](input)),
+      authSignOut: (input) =>
+        transport.request((client) => client[WS_METHODS.providerAuthSignOut](input)),
     },
     customHarness: {
       list: () => transport.request((client) => client[WS_METHODS.customHarnessList]({})),
