@@ -38,6 +38,7 @@ import {
 import { useHomeLaunchers } from "../computer/useHomeLaunchers";
 import { useProgramTiles } from "../computer/useProgramTiles";
 import { useSidebar } from "../ui/sidebar";
+import { SidebarAppServers } from "./SidebarAppServers";
 import { Skeleton } from "../ui/skeleton";
 
 export const SidebarAppsList = memo(function SidebarAppsList() {
@@ -75,12 +76,16 @@ export const SidebarAppsList = memo(function SidebarAppsList() {
               key={tile.key}
               tile={tile}
               primary={primary}
-              starting={startingId !== null && startingId === tile.machineApp?.id}
+              starting={
+                startingId !== null && startingId === tile.machineApp?.id
+              }
               onNavigate={close}
             />
           ))}
         </ul>
       )}
+
+      <SidebarAppServers />
 
       <div className="mt-auto flex flex-col gap-px border-t border-border/60 pt-1">
         <FixedRow
@@ -134,7 +139,9 @@ function FixedRow({
       onClick={onClick}
       className="flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-sm text-muted-foreground outline-hidden ring-ring transition-colors hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 disabled:cursor-wait"
     >
-      <span className="flex size-6 shrink-0 items-center justify-center">{icon}</span>
+      <span className="flex size-6 shrink-0 items-center justify-center">
+        {icon}
+      </span>
       <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
     </button>
   );
@@ -172,10 +179,13 @@ function AppRow({
             return;
           }
           // Starting stays here; Open and the chats with Uno go to the main area.
-          if (action.kind !== "start" || action.machineAppId === null) onNavigate();
+          if (action.kind !== "start" || action.machineAppId === null)
+            onNavigate();
           primary.run(tile);
         }}
-        title={[primaryActionTitle(tile, action), url].filter(Boolean).join("\n")}
+        title={[primaryActionTitle(tile, action), url]
+          .filter(Boolean)
+          .join("\n")}
         className={cn(
           "flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-lg pl-1.5 text-left outline-hidden ring-ring transition-colors hover:bg-sidebar-row-hover focus-visible:ring-2",
           app ? "pr-14" : "pr-1.5",
@@ -200,7 +210,9 @@ function AppRow({
           ) : null}
         </span>
         <span className="min-w-0 flex-1 leading-tight">
-          <span className="block truncate text-sm text-sidebar-foreground">{tile.name}</span>
+          <span className="block truncate text-sm text-sidebar-foreground">
+            {tile.name}
+          </span>
           <span className="block truncate text-[11px] text-muted-foreground/80">
             {tile.product ?? tile.caption}
           </span>
@@ -226,14 +238,23 @@ function AppRow({
             aria-label={pinned ? `Unpin ${tile.name}` : `Pin ${tile.name}`}
             title={pinned ? "Unpin" : "Pin to the sidebar"}
             onClick={() =>
-              toggle({ kind: "app", title: tile.name, target: app.url, icon: tile.icon })
+              toggle({
+                kind: "app",
+                title: tile.name,
+                target: app.url,
+                icon: tile.icon,
+              })
             }
             className={cn(
               "inline-flex size-6 cursor-pointer items-center justify-center rounded-md hover:bg-accent hover:text-foreground",
               pinned ? "text-primary" : "text-muted-foreground",
             )}
           >
-            {pinned ? <PinOffIcon className="size-3.5" /> : <PinIcon className="size-3.5" />}
+            {pinned ? (
+              <PinOffIcon className="size-3.5" />
+            ) : (
+              <PinIcon className="size-3.5" />
+            )}
           </button>
         </div>
       ) : null}

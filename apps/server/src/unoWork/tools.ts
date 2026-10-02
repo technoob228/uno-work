@@ -56,7 +56,10 @@ import {
   UNO_WORK_GUIDE_TOPICS,
   isUnoWorkGuideTopic,
 } from "../agentContext/guides.ts";
-import type { ConnectorCallResult, ConnectorTool } from "../setupTools/connectors.ts";
+import type {
+  ConnectorCallResult,
+  ConnectorTool,
+} from "../setupTools/connectors.ts";
 import {
   isValidSecretTargetFile,
   resolveSecretTargetDirectory,
@@ -64,8 +67,13 @@ import {
   upsertEnvContent,
 } from "../secretsEnv.ts";
 import { validateArgs, type ObjectSchema } from "./argsSchema.ts";
+import { appServerTools } from "./appServerTools.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
-import { decideUnoWorkGate, refusalMessage, type UnoWorkToolLevel } from "./policy.ts";
+import {
+  decideUnoWorkGate,
+  refusalMessage,
+  type UnoWorkToolLevel,
+} from "./policy.ts";
 
 import { UNO_WORK_MCP_SERVER_NAME } from "./constants.ts";
 
@@ -148,13 +156,19 @@ export interface UnoWorkToolDeps {
       readonly path: string;
       readonly slug?: string;
     }) => Effect.Effect<FilesPublishSiteResult, { readonly message: string }>;
-    readonly cloudState: Effect.Effect<FilesCloudState, { readonly message: string }>;
+    readonly cloudState: Effect.Effect<
+      FilesCloudState,
+      { readonly message: string }
+    >;
     readonly cloudList: (input: {
       readonly bucketId: number;
       readonly prefix?: string;
     }) => Effect.Effect<FilesCloudListResult, { readonly message: string }>;
     /** Uno Drive = the bucket "drive" (see files/drive.ts). Optional: older wiring. */
-    readonly driveState?: Effect.Effect<FilesDriveState, { readonly message: string }>;
+    readonly driveState?: Effect.Effect<
+      FilesDriveState,
+      { readonly message: string }
+    >;
     readonly driveSearch?: (input: {
       readonly query: string;
       readonly smart?: boolean;
@@ -173,7 +187,9 @@ export interface UnoWorkToolDeps {
       readonly prefix?: string;
     }) => Effect.Effect<FilesCloudTransferResult, { readonly message: string }>;
   };
-  readonly inboxPost: (post: InboxPost) => Effect.Effect<{ readonly id: string }>;
+  readonly inboxPost: (
+    post: InboxPost,
+  ) => Effect.Effect<{ readonly id: string }>;
   readonly messengerNotify: (input: {
     readonly text: string;
     readonly kind: "info" | "warning" | "error";
@@ -196,7 +212,10 @@ export interface UnoWorkToolDeps {
       readonly jobId: string;
     }) => Effect.Effect<UnoBoxCreateJobStatus, { readonly message: string }>;
   };
-  readonly settings: Effect.Effect<ServerSettings, { readonly message: string }>;
+  readonly settings: Effect.Effect<
+    ServerSettings,
+    { readonly message: string }
+  >;
   readonly readLogTail: (input: {
     readonly app: UnoMachineApp;
     readonly lines: number;
@@ -207,7 +226,9 @@ export interface UnoWorkToolDeps {
    * console wiring (older tests); the tools then say the computer isn't linked.
    */
   readonly console?: {
-    readonly request: (input: ConsoleRequest) => Effect.Effect<ConsoleReply, UnoWorkToolError>;
+    readonly request: (
+      input: ConsoleRequest,
+    ) => Effect.Effect<ConsoleReply, UnoWorkToolError>;
   };
   /**
    * The person's connected tools (Google Drive, Gmail & Calendar, Notion,
@@ -243,17 +264,23 @@ export interface UnoWorkTool {
   readonly description: string;
   readonly inputSchema: ObjectSchema;
   /** Fixed level, or one that depends on the arguments (browser commands). */
-  readonly level: UnoWorkToolLevel | ((args: Record<string, unknown>) => UnoWorkToolLevel);
+  readonly level:
+    UnoWorkToolLevel | ((args: Record<string, unknown>) => UnoWorkToolLevel);
   /** The approval card's line, e.g. `Show “Notes” on the internet`. */
   readonly approvalTitle?: (args: Record<string, unknown>) => string;
-  readonly approvalDetail?: (args: Record<string, unknown>) => string | undefined;
+  readonly approvalDetail?: (
+    args: Record<string, unknown>,
+  ) => string | undefined;
   readonly run: (
     deps: UnoWorkToolDeps,
     args: Record<string, unknown>,
   ) => Effect.Effect<unknown, UnoWorkToolError>;
 }
 
-export function toolLevel(tool: UnoWorkTool, args: Record<string, unknown>): UnoWorkToolLevel {
+export function toolLevel(
+  tool: UnoWorkTool,
+  args: Record<string, unknown>,
+): UnoWorkToolLevel {
   return typeof tool.level === "function" ? tool.level(args) : tool.level;
 }
 
@@ -263,11 +290,17 @@ const str = (args: Record<string, unknown>, key: string): string | undefined =>
   typeof args[key] === "string" ? (args[key] as string) : undefined;
 const num = (args: Record<string, unknown>, key: string): number | undefined =>
   typeof args[key] === "number" ? (args[key] as number) : undefined;
-const bool = (args: Record<string, unknown>, key: string): boolean | undefined =>
+const bool = (
+  args: Record<string, unknown>,
+  key: string,
+): boolean | undefined =>
   typeof args[key] === "boolean" ? (args[key] as boolean) : undefined;
 
 /** `~/x`, `/abs` or a path relative to the chat's folder (then home). */
-export function resolveUserPath(raw: string, deps: Pick<UnoWorkToolDeps, "home" | "caller">) {
+export function resolveUserPath(
+  raw: string,
+  deps: Pick<UnoWorkToolDeps, "home" | "caller">,
+) {
   const value = raw.trim();
   if (value === "~") return deps.home;
   if (value.startsWith("~/")) return path.join(deps.home, value.slice(2));
@@ -311,7 +344,9 @@ const findApp = (deps: UnoWorkToolDeps, rawId: string) =>
       const app =
         apps.apps.find((entry) => entry.id === wanted) ??
         apps.apps.find((entry) => entry.id === `manifest:${wanted}`) ??
-        apps.apps.find((entry) => entry.name.toLowerCase() === wanted.toLowerCase());
+        apps.apps.find(
+          (entry) => entry.name.toLowerCase() === wanted.toLowerCase(),
+        );
       return app
         ? Effect.succeed(app)
         : Effect.fail(
@@ -333,20 +368,25 @@ const appAction = (
       deps.machineApps.action({
         appId: app.id,
         action,
-        ...(action === "remove" && bool(args, "deleteCode") ? { deleteCode: true } : {}),
+        ...(action === "remove" && bool(args, "deleteCode")
+          ? { deleteCode: true }
+          : {}),
       }),
     );
     const after = result.apps.find((entry) => entry.id === app.id);
     return {
       ok: true,
-      app: after ? compactApp(after) : { id: app.id, removed: action === "remove" },
+      app: after
+        ? compactApp(after)
+        : { id: app.id, removed: action === "remove" },
       ...(action === "publish" && result.publishBlockedReason
         ? { note: result.publishBlockedReason }
         : {}),
     };
   });
 
-const appIdLabel = (args: Record<string, unknown>) => str(args, "appId") ?? "an app";
+const appIdLabel = (args: Record<string, unknown>) =>
+  str(args, "appId") ?? "an app";
 
 const MANIFEST_ID_PATTERN = "^[a-z0-9][a-z0-9_-]{0,63}$";
 
@@ -355,7 +395,8 @@ const manifestPath = (deps: UnoWorkToolDeps, id: string) =>
 
 const readManifestRecord = (deps: UnoWorkToolDeps, id: string) =>
   Effect.tryPromise({
-    try: async () => JSON.parse(await fsp.readFile(manifestPath(deps, id), "utf8")) as unknown,
+    try: async () =>
+      JSON.parse(await fsp.readFile(manifestPath(deps, id), "utf8")) as unknown,
     catch: () =>
       toolError(
         `No registered app "${id}" (no ${displayManifestDir(manifestPath(deps, id), deps.home)}). Register it with app_register first.`,
@@ -364,11 +405,17 @@ const readManifestRecord = (deps: UnoWorkToolDeps, id: string) =>
     Effect.flatMap((raw) =>
       typeof raw === "object" && raw !== null && !Array.isArray(raw)
         ? Effect.succeed(raw as Record<string, unknown>)
-        : Effect.fail(toolError(`The manifest of "${id}" is not a JSON object.`)),
+        : Effect.fail(
+            toolError(`The manifest of "${id}" is not a JSON object.`),
+          ),
     ),
   );
 
-const writeManifestRecord = (deps: UnoWorkToolDeps, id: string, record: Record<string, unknown>) =>
+const writeManifestRecord = (
+  deps: UnoWorkToolDeps,
+  id: string,
+  record: Record<string, unknown>,
+) =>
   Effect.gen(function* () {
     const checked = validateManifest(id, record, {
       home: deps.home,
@@ -382,13 +429,22 @@ const writeManifestRecord = (deps: UnoWorkToolDeps, id: string, record: Record<s
       try: async () => {
         await fsp.mkdir(deps.manifestDir, { recursive: true });
         const temp = `${target}.${process.pid}.tmp`;
-        await fsp.writeFile(temp, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+        await fsp.writeFile(
+          temp,
+          `${JSON.stringify(record, null, 2)}\n`,
+          "utf8",
+        );
         await fsp.rename(temp, target);
       },
       catch: (cause) =>
-        toolError(`Could not write ${target}: ${cause instanceof Error ? cause.message : cause}`),
+        toolError(
+          `Could not write ${target}: ${cause instanceof Error ? cause.message : cause}`,
+        ),
     });
-    return { manifest: checked.manifest, file: displayManifestDir(target, deps.home) };
+    return {
+      manifest: checked.manifest,
+      file: displayManifestDir(target, deps.home),
+    };
   });
 
 function accountAccess(settings: ServerSettings) {
@@ -407,17 +463,27 @@ const openTargetSchema: ObjectSchema = {
   properties: {
     file: {
       type: "string",
-      description: "A file inside the home folder, e.g. ~/Documents/report.docx.",
+      description:
+        "A file inside the home folder, e.g. ~/Documents/report.docx.",
     },
-    appId: { type: "string", description: 'A registered app id, e.g. "notes".' },
-    appPath: { type: "string", description: 'A path inside that app, e.g. "/orders".' },
+    appId: {
+      type: "string",
+      description: 'A registered app id, e.g. "notes".',
+    },
+    appPath: {
+      type: "string",
+      description: 'A path inside that app, e.g. "/orders".',
+    },
     url: { type: "string", description: "An https:// address." },
   },
   additionalProperties: false,
 };
 
 function openTargetFrom(raw: unknown, deps: UnoWorkToolDeps): InboxOpenTarget {
-  const fallback: InboxOpenTarget = { kind: "thread", threadId: deps.caller.threadId };
+  const fallback: InboxOpenTarget = {
+    kind: "thread",
+    threadId: deps.caller.threadId,
+  };
   if (typeof raw !== "object" || raw === null) return fallback;
   const record = raw as Record<string, unknown>;
   if (typeof record.file === "string" && record.file.trim()) {
@@ -433,7 +499,10 @@ function openTargetFrom(raw: unknown, deps: UnoWorkToolDeps): InboxOpenTarget {
           : null,
     };
   }
-  if (typeof record.url === "string" && /^https?:\/\//i.test(record.url.trim())) {
+  if (
+    typeof record.url === "string" &&
+    /^https?:\/\//i.test(record.url.trim())
+  ) {
     return { kind: "url", url: record.url.trim() };
   }
   return fallback;
@@ -447,8 +516,11 @@ function openTargetFrom(raw: unknown, deps: UnoWorkToolDeps): InboxOpenTarget {
 const BROWSER_FIRST_USE_MS = 45_000 + 20_000;
 
 /** Bridge replies: 2xx → body; anything else → the reason from the body. */
-const bridgeOk = (reply: BridgeReply): Effect.Effect<unknown, UnoWorkToolError> => {
-  if (reply.status >= 200 && reply.status < 300) return Effect.succeed(reply.body);
+const bridgeOk = (
+  reply: BridgeReply,
+): Effect.Effect<unknown, UnoWorkToolError> => {
+  if (reply.status >= 200 && reply.status < 300)
+    return Effect.succeed(reply.body);
   const body = reply.body;
   const reason =
     typeof body === "string"
@@ -466,7 +538,12 @@ const bridgeOk = (reply: BridgeReply): Effect.Effect<unknown, UnoWorkToolError> 
 function isLocalAddress(value: string): boolean {
   try {
     const host = new URL(value).hostname;
-    return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "[::1]";
+    return (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "0.0.0.0" ||
+      host === "[::1]"
+    );
   } catch {
     return false;
   }
@@ -475,7 +552,10 @@ function isLocalAddress(value: string): boolean {
 export function isCompleteHttpUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
-    return (parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.hostname !== "";
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      parsed.hostname !== ""
+    );
   } catch {
     return false;
   }
@@ -522,7 +602,9 @@ const consoleOk = (
     );
   }
   const record =
-    typeof body === "object" && body !== null ? (body as Record<string, unknown>) : undefined;
+    typeof body === "object" && body !== null
+      ? (body as Record<string, unknown>)
+      : undefined;
   const code = typeof record?.error === "string" ? record.error : "";
   const detail =
     typeof record?.message === "string"
@@ -535,7 +617,8 @@ const consoleOk = (
   switch (true) {
     case reply.status === 401:
       return Effect.fail(toolError(NOT_LINKED_MESSAGE));
-    case code === "WORK_MACHINE_SCOPE_DISABLED" || code === "INSUFFICIENT_SCOPE":
+    case code === "WORK_MACHINE_SCOPE_DISABLED" ||
+      code === "INSUFFICIENT_SCOPE":
       return Effect.fail(
         toolError(
           `This computer isn't allowed to ${what} yet. Its access to the Uno account is refreshed when the person opens Uno Work from the Uno console; creating databases also needs "Create computers" on in Settings, Computer access. Tell the person exactly that; don't try another way.`,
@@ -554,7 +637,9 @@ const consoleOk = (
         ),
       );
   }
-  return Effect.fail(toolError(`Couldn't ${what}: ${detail || code || `HTTP ${reply.status}`}.`));
+  return Effect.fail(
+    toolError(`Couldn't ${what}: ${detail || code || `HTTP ${reply.status}`}.`),
+  );
 };
 
 const callConsole = (
@@ -563,7 +648,9 @@ const callConsole = (
   what: string,
 ): Effect.Effect<Record<string, unknown>, UnoWorkToolError> =>
   deps.console
-    ? deps.console.request(request).pipe(Effect.flatMap((reply) => consoleOk(reply, what)))
+    ? deps.console
+        .request(request)
+        .pipe(Effect.flatMap((reply) => consoleOk(reply, what)))
     : Effect.fail(toolError(NOT_LINKED_MESSAGE));
 
 /** Reads of the account (databases) follow Settings → Uno account → Agent access. */
@@ -581,7 +668,8 @@ const siteSlugArg = {
   pattern: SITE_SLUG_PATTERN,
   description: "The site's name (slug) from sites_list, e.g. q3-report-7f2a.",
 };
-const sitePath = (slug: string, rest = "") => `/api/v1/deploys/${encodeURIComponent(slug)}${rest}`;
+const sitePath = (slug: string, rest = "") =>
+  `/api/v1/deploys/${encodeURIComponent(slug)}${rest}`;
 // The live address (`<slug>.sites.uno4.dev`); the old `<slug>.uno4.dev` answers 404.
 const siteUrl = (slug: string) => liveSiteUrl(undefined, slug);
 
@@ -618,7 +706,9 @@ const PASSWORD_WORDS = [
   "lotus",
   "prairie",
 ];
-export function readablePassword(random: (max: number) => number = randomInt): string {
+export function readablePassword(
+  random: (max: number) => number = randomInt,
+): string {
   const word = () => PASSWORD_WORDS[random(PASSWORD_WORDS.length)]!;
   const digits = String(1000 + random(9000));
   return `${word()}-${word()}-${digits}-${word()}`;
@@ -627,12 +717,15 @@ export function readablePassword(random: (max: number) => number = randomInt): s
 /** What the forms tools show: where answers go, never tokens. */
 function formsDelivery(view: Record<string, unknown>) {
   const email = view.email as { to?: unknown; confirmed?: unknown } | undefined;
-  const telegram = view.telegram as { chat_id?: unknown; via?: unknown } | undefined;
+  const telegram = view.telegram as
+    { chat_id?: unknown; via?: unknown } | undefined;
   const webhook = view.webhook as { url?: unknown } | undefined;
   return {
     formAction: "/__forms",
     email: email ? { to: email.to, confirmed: email.confirmed === true } : null,
-    telegram: telegram ? { connected: true, via: telegram.via ?? "uno_bot" } : null,
+    telegram: telegram
+      ? { connected: true, via: telegram.via ?? "uno_bot" }
+      : null,
     webhook: webhook ? { url: webhook.url } : null,
   };
 }
@@ -671,10 +764,14 @@ const writeEnvVar = (input: {
       const target = path.join(input.folder, input.file);
       await fsp.mkdir(input.folder, { recursive: true });
       const current = await fsp.readFile(target, "utf8").catch(() => "");
-      await fsp.writeFile(target, upsertEnvContent(current, input.name, input.value), {
-        encoding: "utf8",
-        mode: 0o600,
-      });
+      await fsp.writeFile(
+        target,
+        upsertEnvContent(current, input.name, input.value),
+        {
+          encoding: "utf8",
+          mode: 0o600,
+        },
+      );
       await fsp.chmod(target, 0o600);
       return target;
     },
@@ -686,7 +783,11 @@ const writeEnvVar = (input: {
 
 // ── The tools ──────────────────────────────────────────────────────────
 
-const noArgs: ObjectSchema = { type: "object", properties: {}, additionalProperties: false };
+const noArgs: ObjectSchema = {
+  type: "object",
+  properties: {},
+  additionalProperties: false,
+};
 const appIdArg = {
   type: "string" as const,
   description:
@@ -712,7 +813,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             deps.machineApps.list,
             deps.computerState.pipe(
               Effect.timeoutOption("4 seconds"),
-              Effect.map((option) => (option._tag === "Some" ? option.value : null)),
+              Effect.map((option) =>
+                option._tag === "Some" ? option.value : null,
+              ),
             ),
           ],
           { concurrency: "unbounded" },
@@ -722,7 +825,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           hostname: os.hostname(),
           platform: resources.platform,
           home: deps.home,
-          chatFolder: deps.caller.cwd ? displayPath(deps.caller.cwd, deps.home) : null,
+          chatFolder: deps.caller.cwd
+            ? displayPath(deps.caller.cwd, deps.home)
+            : null,
           appsFolder: displayManifestDir(deps.manifestDir, deps.home),
           sdkFolder: "~/.uno/sdk",
           unoCloudComputer: box
@@ -735,12 +840,19 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
                 vcpu: box.vcpu,
                 diskGb: box.diskGb,
                 ...(box.boost
-                  ? { boostHoursLeft: box.boost.hoursLeft, boostActive: box.boost.state }
+                  ? {
+                      boostHoursLeft: box.boost.hoursLeft,
+                      boostActive: box.boost.state,
+                    }
                   : {}),
               }
             : null,
           linkedToUnoAccount: computer?.linked ?? null,
-          cpu: { count: resources.cpuCount, usedPct: resources.cpuPct, load1: resources.load1 },
+          cpu: {
+            count: resources.cpuCount,
+            usedPct: resources.cpuPct,
+            load1: resources.load1,
+          },
           memoryMb: {
             total: resources.memory.totalMb,
             used: resources.memory.usedMb,
@@ -779,7 +891,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     inputSchema: {
       type: "object",
       properties: {
-        includeHidden: { type: "boolean", description: "Also list apps the person hid from Home." },
+        includeHidden: {
+          type: "boolean",
+          description: "Also list apps the person hid from Home.",
+        },
       },
       additionalProperties: false,
     },
@@ -794,7 +909,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           ...(apps.publishBlockedReason
             ? { showOnInternetUnavailable: apps.publishBlockedReason }
             : {}),
-          ...(apps.warnings.length > 0 ? { manifestWarnings: apps.warnings } : {}),
+          ...(apps.warnings.length > 0
+            ? { manifestWarnings: apps.warnings }
+            : {}),
         })),
       ),
   },
@@ -815,7 +932,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
   {
     name: "app_stop",
     group: "computer",
-    description: "Stop a running app (its Stop button on Home). It can be started again.",
+    description:
+      "Stop a running app (its Stop button on Home). It can be started again.",
     inputSchema: {
       type: "object",
       properties: { appId: appIdArg },
@@ -835,7 +953,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       type: "object",
       properties: {
         appId: appIdArg,
-        lines: { type: "integer", minimum: 1, maximum: 500, description: "Default 80." },
+        lines: {
+          type: "integer",
+          minimum: 1,
+          maximum: 500,
+          description: "Default 80.",
+        },
       },
       required: ["appId"],
       additionalProperties: false,
@@ -844,7 +967,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     run: (deps, args) =>
       Effect.gen(function* () {
         const app = yield* findApp(deps, str(args, "appId") ?? "");
-        const text = yield* deps.readLogTail({ app, lines: num(args, "lines") ?? 80 });
+        const text = yield* deps.readLogTail({
+          app,
+          lines: num(args, "lines") ?? 80,
+        });
         return `${app.name} (${app.id}, ${app.status}):\n${text || "(no output recorded)"}`;
       }),
   },
@@ -867,7 +993,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
   {
     name: "app_hide_from_internet",
     group: "computer",
-    description: "Take an app's public address away again. It keeps running on this computer.",
+    description:
+      "Take an app's public address away again. It keeps running on this computer.",
     inputSchema: {
       type: "object",
       properties: { appId: appIdArg },
@@ -889,7 +1016,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         appId: appIdArg,
         deleteCode: {
           type: "boolean",
-          description: "Also delete the app's code folder (default false — code stays).",
+          description:
+            "Also delete the app's code folder (default false — code stays).",
         },
       },
       required: ["appId"],
@@ -898,7 +1026,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     level: "sensitive",
     approvalTitle: (args) => `Remove ${appIdLabel(args)} from this computer`,
     approvalDetail: (args) =>
-      bool(args, "deleteCode") ? "Its code folder will be deleted too." : "Its code folder stays.",
+      bool(args, "deleteCode")
+        ? "Its code folder will be deleted too."
+        : "Its code folder stays.",
     run: (deps, args) => appAction(deps, args, "remove"),
   },
 
@@ -914,13 +1044,20 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         id: {
           type: "string",
           pattern: MANIFEST_ID_PATTERN,
-          description: "Short lowercase id: letters, digits, - and _, e.g. notes.",
+          description:
+            "Short lowercase id: letters, digits, - and _, e.g. notes.",
         },
-        name: { type: "string", minLength: 1, maxLength: 60, description: "What the person sees." },
+        name: {
+          type: "string",
+          minLength: 1,
+          maxLength: 60,
+          description: "What the person sees.",
+        },
         icon: {
           type: "string",
           maxLength: 80,
-          description: "One emoji, or an image file name placed in ~/.uno/apps.",
+          description:
+            "One emoji, or an image file name placed in ~/.uno/apps.",
         },
         description: { type: "string", maxLength: 200 },
         port: {
@@ -935,14 +1072,23 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           description:
             'How Uno starts it (bash -lc in cwd, PORT is set), e.g. "python3 app.py". Give it for anything you built so it has a Start button and survives reboots.',
         },
-        cwd: { type: "string", description: "Its folder inside home, e.g. ~/projects/notes." },
-        path: { type: "string", description: 'What to open on the port, e.g. "/admin".' },
+        cwd: {
+          type: "string",
+          description: "Its folder inside home, e.g. ~/projects/notes.",
+        },
+        path: {
+          type: "string",
+          description: 'What to open on the port, e.g. "/admin".',
+        },
         url: {
           type: "string",
           description:
             "Only for an app hosted somewhere else (an https address). Leave it out for apps on this computer — use port + command.",
         },
-        autostart: { type: "boolean", description: "Start at boot (default true with a command)." },
+        autostart: {
+          type: "boolean",
+          description: "Start at boot (default true with a command).",
+        },
         ai: {
           type: "object",
           description: "Use the computer's AI through the App SDK.",
@@ -959,13 +1105,17 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           properties: { limitGb: { type: "integer", minimum: 1, maximum: 20 } },
           additionalProperties: false,
         },
-        notify: { type: "boolean", description: "May put notifications into the person's Inbox." },
+        notify: {
+          type: "boolean",
+          description: "May put notifications into the person's Inbox.",
+        },
       },
       required: ["id", "name"],
       additionalProperties: false,
     },
     level: "change",
-    approvalTitle: (args) => `Register the app “${str(args, "name") ?? str(args, "id")}” on Home`,
+    approvalTitle: (args) =>
+      `Register the app “${str(args, "name") ?? str(args, "id")}” on Home`,
     approvalDetail: (args) => str(args, "command"),
     run: (deps, args) =>
       Effect.gen(function* () {
@@ -988,7 +1138,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           "ai",
           "notify",
         ]) {
-          if (args[key] !== undefined && args[key] !== null) record[key] = args[key];
+          if (args[key] !== undefined && args[key] !== null)
+            record[key] = args[key];
         }
         if (args.storage !== undefined && args.storage !== null) {
           const limitGb = (args.storage as { limitGb?: unknown }).limitGb;
@@ -999,7 +1150,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         // which is only for apps hosted elsewhere. Be forgiving: a path
         // becomes `path`, a local address is dropped for the port.
         const notes: Array<string> = [];
-        const rawUrl = typeof record.url === "string" ? record.url.trim() : undefined;
+        const rawUrl =
+          typeof record.url === "string" ? record.url.trim() : undefined;
         if (rawUrl !== undefined) {
           if (rawUrl.startsWith("/")) {
             delete record.url;
@@ -1009,7 +1161,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             );
           } else if (isLocalAddress(rawUrl) && record.port !== undefined) {
             delete record.url;
-            notes.push("A local address isn't needed: Uno reaches the app by its port.");
+            notes.push(
+              "A local address isn't needed: Uno reaches the app by its port.",
+            );
           } else if (!isCompleteHttpUrl(rawUrl)) {
             return yield* toolError(
               `url "${rawUrl}" is not an address. url is only for an app hosted somewhere else (https://…); for an app on this computer leave url out and give port + command.`,
@@ -1072,11 +1226,14 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           size: str(args, "size") ?? "medium",
           ...(str(args, "title") ? { title: str(args, "title") } : {}),
         };
-        const alreadySet = JSON.stringify(record.widget) === JSON.stringify(widget);
+        const alreadySet =
+          JSON.stringify(record.widget) === JSON.stringify(widget);
         const written = alreadySet
           ? { manifest: null }
           : yield* writeManifestRecord(deps, id, { ...record, widget });
-        const name = written.manifest?.name ?? (typeof record.name === "string" ? record.name : id);
+        const name =
+          written.manifest?.name ??
+          (typeof record.name === "string" ? record.name : id);
         const hasAddress =
           written.manifest === null
             ? record.port !== undefined || record.url !== undefined
@@ -1106,7 +1263,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Folder, e.g. ~/Documents. Default: home." },
+        path: {
+          type: "string",
+          description: "Folder, e.g. ~/Documents. Default: home.",
+        },
         showHidden: { type: "boolean" },
       },
       additionalProperties: false,
@@ -1115,7 +1275,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     run: (deps, args) =>
       asToolError(
         deps.files.list({
-          ...(str(args, "path") ? { path: resolveUserPath(str(args, "path")!, deps) } : {}),
+          ...(str(args, "path")
+            ? { path: resolveUserPath(str(args, "path")!, deps) }
+            : {}),
           ...(bool(args, "showHidden") ? { showHidden: true } : {}),
         }),
       ).pipe(
@@ -1127,7 +1289,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             size: entry.kind === "file" ? entry.size : null,
             modifiedAt: entry.modifiedAt,
           })),
-          ...(result.entries.length > 300 ? { truncated: result.entries.length } : {}),
+          ...(result.entries.length > 300
+            ? { truncated: result.entries.length }
+            : {}),
         })),
       ),
   },
@@ -1179,17 +1343,26 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       Effect.gen(function* () {
         const drive = deps.files;
         if (!drive.driveState || !drive.driveSearch || !drive.driveRecent) {
-          return yield* toolError("Uno Drive isn't available in this Uno Work version.");
+          return yield* toolError(
+            "Uno Drive isn't available in this Uno Work version.",
+          );
         }
         const state = yield* asToolError(drive.driveState);
         if (!state.available)
-          return yield* toolError(state.message ?? "Uno Drive isn't available.");
+          return yield* toolError(
+            state.message ?? "Uno Drive isn't available.",
+          );
         const query = str(args, "query")?.trim() ?? "";
         const list = query
           ? yield* asToolError(
-              drive.driveSearch({ query, ...(bool(args, "smart") ? { smart: true } : {}) }),
+              drive.driveSearch({
+                query,
+                ...(bool(args, "smart") ? { smart: true } : {}),
+              }),
             )
-          : yield* asToolError(drive.driveRecent({ limit: num(args, "limit") ?? 20 }));
+          : yield* asToolError(
+              drive.driveRecent({ limit: num(args, "limit") ?? 20 }),
+            );
         return {
           bucketId: state.bucketId,
           usedBytes: state.usedBytes,
@@ -1212,7 +1385,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           type: "array",
           items: { type: "string", minLength: 1 },
           maxItems: 100,
-          description: "Files or folders on this computer, e.g. ~/Documents/report.pdf.",
+          description:
+            "Files or folders on this computer, e.g. ~/Documents/report.pdf.",
         },
         folder: { type: "string", maxLength: 1024 },
       },
@@ -1226,16 +1400,23 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       Effect.gen(function* () {
         const drive = deps.files;
         if (!drive.driveState || !drive.cloudCopyToCloud) {
-          return yield* toolError("Uno Drive isn't available in this Uno Work version.");
+          return yield* toolError(
+            "Uno Drive isn't available in this Uno Work version.",
+          );
         }
         const state = yield* asToolError(drive.driveState);
         if (!state.available || state.bucketId === null) {
-          return yield* toolError(state.message ?? "Uno Drive isn't available.");
+          return yield* toolError(
+            state.message ?? "Uno Drive isn't available.",
+          );
         }
         const raw = str(args, "folder")?.trim().replace(/^\/+/, "") ?? "";
         const folder = raw && !raw.endsWith("/") ? `${raw}/` : raw;
-        const paths = (args["paths"] as string[]).map((item) => resolveUserPath(item, deps));
-        if (paths.length === 0) return yield* toolError("Name at least one file or folder.");
+        const paths = (args["paths"] as string[]).map((item) =>
+          resolveUserPath(item, deps),
+        );
+        if (paths.length === 0)
+          return yield* toolError("Name at least one file or folder.");
         const result = yield* asToolError(
           drive.cloudCopyToCloud({
             paths,
@@ -1261,13 +1442,16 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       additionalProperties: false,
     },
     level: "sensitive",
-    approvalTitle: (args) => `Create a download link to ${str(args, "key")} (Uno Drive)`,
+    approvalTitle: (args) =>
+      `Create a download link to ${str(args, "key")} (Uno Drive)`,
     approvalDetail: (args) =>
       `Anyone with the link can download it for ${num(args, "expiresInHours") ?? 168} h.`,
     run: (deps, args) =>
       Effect.gen(function* () {
         if (!deps.files.driveShareCreate) {
-          return yield* toolError("Uno Drive isn't available in this Uno Work version.");
+          return yield* toolError(
+            "Uno Drive isn't available in this Uno Work version.",
+          );
         }
         const share = yield* asToolError(
           deps.files.driveShareCreate({
@@ -1278,7 +1462,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
               : {}),
           }),
         );
-        return { ok: true, url: share.url, key: share.key, expiresAt: share.expiresAt };
+        return {
+          ok: true,
+          url: share.url,
+          key: share.key,
+          expiresAt: share.expiresAt,
+        };
       }),
   },
   {
@@ -1306,18 +1495,25 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         const where = str(args, "where") ?? "panel";
         if (where === "panel") {
           return yield* deps
-            .bridge({ method: "POST", path: "/api/browser/open", body: { file: absolute } })
+            .bridge({
+              method: "POST",
+              path: "/api/browser/open",
+              body: { file: absolute },
+            })
             .pipe(Effect.flatMap(bridgeOk));
         }
         const entry = yield* asToolError(deps.files.stat({ path: absolute }));
         if (entry.kind !== "file") {
-          return yield* toolError(`${displayPath(absolute, deps.home)} is not a file.`);
+          return yield* toolError(
+            `${displayPath(absolute, deps.home)} is not a file.`,
+          );
         }
         const result = yield* deps.openInApp({
           view: where === "office" ? "office" : "files",
           path: absolute,
         });
-        if (!result.ok) return yield* toolError(result.error ?? "Could not open it.");
+        if (!result.ok)
+          return yield* toolError(result.error ?? "Could not open it.");
         return { ok: true, shown: displayPath(absolute, deps.home), in: where };
       }),
   },
@@ -1345,7 +1541,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         const share = yield* asToolError(
           deps.files.createShare({
             path: resolveUserPath(str(args, "path")!, deps),
-            ...(str(args, "access") ? { access: str(args, "access") as "view" } : {}),
+            ...(str(args, "access")
+              ? { access: str(args, "access") as "view" }
+              : {}),
             ...(num(args, "expiresInHours")
               ? { expiresInSeconds: num(args, "expiresInHours")! * 3600 }
               : {}),
@@ -1353,12 +1551,16 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         );
         const computer = yield* deps.computerState.pipe(
           Effect.timeoutOption("4 seconds"),
-          Effect.map((option) => (option._tag === "Some" ? option.value : null)),
+          Effect.map((option) =>
+            option._tag === "Some" ? option.value : null,
+          ),
         );
         const address = computer?.own ? computer.box?.address : null;
         return {
           ok: true,
-          url: address ? `${address.replace(/\/+$/, "")}${share.urlPath}` : null,
+          url: address
+            ? `${address.replace(/\/+$/, "")}${share.urlPath}`
+            : null,
           path: share.urlPath,
           access: share.access,
           expiresAt: share.expiresAt,
@@ -1379,7 +1581,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       'List chats: scope "children" (default — chats you started), "project" (every chat in this project; relation self/parent/child/peer) or "all" (every project, only if the person allowed it). Shows status (running, waiting, error, idle), who is in control and the last answer.',
     inputSchema: {
       type: "object",
-      properties: { scope: { type: "string", enum: ["children", "project", "all"] } },
+      properties: {
+        scope: { type: "string", enum: ["children", "project", "all"] },
+      },
       additionalProperties: false,
     },
     level: "safe",
@@ -1408,7 +1612,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         title: { type: "string", maxLength: 120 },
         cwd: {
           type: "string",
-          description: "Folder to work in, e.g. ~/projects/site. Default: this chat's project.",
+          description:
+            "Folder to work in, e.g. ~/projects/site. Default: this chat's project.",
         },
         projectId: { type: "string" },
         provider: { type: "string" },
@@ -1428,9 +1633,15 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           body: {
             text: str(args, "text"),
             ...(str(args, "title") ? { title: str(args, "title") } : {}),
-            ...(str(args, "cwd") ? { cwd: resolveUserPath(str(args, "cwd")!, deps) } : {}),
-            ...(str(args, "projectId") ? { projectId: str(args, "projectId") } : {}),
-            ...(str(args, "provider") ? { provider: str(args, "provider") } : {}),
+            ...(str(args, "cwd")
+              ? { cwd: resolveUserPath(str(args, "cwd")!, deps) }
+              : {}),
+            ...(str(args, "projectId")
+              ? { projectId: str(args, "projectId") }
+              : {}),
+            ...(str(args, "provider")
+              ? { provider: str(args, "provider") }
+              : {}),
             ...(str(args, "model") ? { model: str(args, "model") } : {}),
           },
         })
@@ -1452,10 +1663,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       additionalProperties: false,
     },
     level: "change",
-    approvalTitle: (args) => `Message another chat: “${(str(args, "text") ?? "").slice(0, 80)}”`,
+    approvalTitle: (args) =>
+      `Message another chat: “${(str(args, "text") ?? "").slice(0, 80)}”`,
     run: (deps, args) => {
       const id = threadPath(str(args, "threadId"));
-      if (id === null) return Effect.fail(toolError("threadId is not a valid chat id."));
+      if (id === null)
+        return Effect.fail(toolError("threadId is not a valid chat id."));
       const waitMs = num(args, "waitMs");
       return deps
         .bridge({
@@ -1485,7 +1698,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     level: "safe",
     run: (deps, args) => {
       const id = threadPath(str(args, "threadId"));
-      if (id === null) return Effect.fail(toolError("threadId is not a valid chat id."));
+      if (id === null)
+        return Effect.fail(toolError("threadId is not a valid chat id."));
       const query = new URLSearchParams();
       if (num(args, "limit")) query.set("limit", String(num(args, "limit")));
       if (num(args, "waitMs")) query.set("waitMs", String(num(args, "waitMs")));
@@ -1511,7 +1725,11 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       properties: {
         title: { type: "string", minLength: 1, maxLength: 140 },
         body: { type: "string", maxLength: 500 },
-        level: { type: "string", enum: ["info", "warning", "error"], description: "Default info." },
+        level: {
+          type: "string",
+          enum: ["info", "warning", "error"],
+          description: "Default info.",
+        },
         open: openTargetSchema,
         alsoMessenger: { type: "boolean" },
       },
@@ -1521,7 +1739,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     level: "safe",
     run: (deps, args) =>
       Effect.gen(function* () {
-        const level = (str(args, "level") ?? "info") as "info" | "warning" | "error";
+        const level = (str(args, "level") ?? "info") as
+          "info" | "warning" | "error";
         const item = yield* deps.inboxPost({
           kind: level === "info" ? "agent.done" : "agent.error",
           source: {
@@ -1537,7 +1756,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         });
         const messenger = bool(args, "alsoMessenger")
           ? yield* deps.messengerNotify({
-              text: [str(args, "title"), str(args, "body")].filter(Boolean).join("\n"),
+              text: [str(args, "title"), str(args, "body")]
+                .filter(Boolean)
+                .join("\n"),
               kind: level,
             })
           : null;
@@ -1559,7 +1780,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         appId: {
           type: "string",
           maxLength: 200,
-          description: 'An app from apps_list, e.g. "notes" or "manifest:notes".',
+          description:
+            'An app from apps_list, e.g. "notes" or "manifest:notes".',
         },
         path: {
           type: "string",
@@ -1569,11 +1791,13 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         url: {
           type: "string",
           maxLength: 8192,
-          description: 'A complete http(s) address with host, e.g. "https://example.com/docs".',
+          description:
+            'A complete http(s) address with host, e.g. "https://example.com/docs".',
         },
         file: {
           type: "string",
-          description: "A file path (~/…, absolute, or relative to this chat's folder).",
+          description:
+            "A file path (~/…, absolute, or relative to this chat's folder).",
         },
         scope: { type: "string", enum: ["chat", "project", "global"] },
       },
@@ -1585,7 +1809,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         const appId = str(args, "appId");
         const file = str(args, "file");
         let url = str(args, "url");
-        if ([appId, url, file].filter((value) => value !== undefined).length !== 1) {
+        if (
+          [appId, url, file].filter((value) => value !== undefined).length !== 1
+        ) {
           return yield* toolError("Give exactly one of appId, url or file.");
         }
         if (appId !== undefined) {
@@ -1608,10 +1834,14 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             method: "POST",
             path: "/api/browser/open",
             body: {
-              ...(url !== undefined ? { url } : { file: resolveUserPath(file!, deps) }),
+              ...(url !== undefined
+                ? { url }
+                : { file: resolveUserPath(file!, deps) }),
               ...(str(args, "scope") ? { scope: str(args, "scope") } : {}),
             },
-            ...(url !== undefined ? { timeoutMs: 30_000 + BROWSER_FIRST_USE_MS + 10_000 } : {}),
+            ...(url !== undefined
+              ? { timeoutMs: 30_000 + BROWSER_FIRST_USE_MS + 10_000 }
+              : {}),
           })
           .pipe(Effect.flatMap(bridgeOk));
         return url !== undefined ? { ok: true, opened: url } : opened;
@@ -1645,7 +1875,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         },
         url: {
           type: "string",
-          description: 'For openUrl/navigate: a complete address, e.g. "http://localhost:3000/".',
+          description:
+            'For openUrl/navigate: a complete address, e.g. "http://localhost:3000/".',
         },
         selector: { type: "string", maxLength: 2000 },
         text: { type: "string", maxLength: 16000 },
@@ -1661,7 +1892,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     },
     // requestHelp only asks the person — it is its own approval.
     level: (args) =>
-      args.command === "state" || args.command === "screenshot" || args.command === "requestHelp"
+      args.command === "state" ||
+      args.command === "screenshot" ||
+      args.command === "requestHelp"
         ? "safe"
         : "change",
     approvalTitle: (args) =>
@@ -1673,21 +1906,29 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           path: "/api/browser/command",
           body: args,
           timeoutMs:
-            (num(args, "timeoutMs") ?? (args.command === "requestHelp" ? 600_000 : 30_000)) +
+            (num(args, "timeoutMs") ??
+              (args.command === "requestHelp" ? 600_000 : 30_000)) +
             BROWSER_FIRST_USE_MS +
             10_000,
         })
         .pipe(
           Effect.flatMap(bridgeOk),
           Effect.map((result) => {
-            const data = (result as { data?: { dataUrl?: unknown } } | null)?.data;
-            const dataUrl = typeof data?.dataUrl === "string" ? data.dataUrl : null;
-            const match = dataUrl ? /^data:(image\/[a-z]+);base64,(.*)$/s.exec(dataUrl) : null;
+            const data = (result as { data?: { dataUrl?: unknown } } | null)
+              ?.data;
+            const dataUrl =
+              typeof data?.dataUrl === "string" ? data.dataUrl : null;
+            const match = dataUrl
+              ? /^data:(image\/[a-z]+);base64,(.*)$/s.exec(dataUrl)
+              : null;
             if (!match) return result;
             const { dataUrl: _omit, ...meta } = data as Record<string, unknown>;
             return new McpContent([
               { type: "image", mimeType: match[1], data: match[2] },
-              { type: "text", text: JSON.stringify({ ...(result as object), data: meta }) },
+              {
+                type: "text",
+                text: JSON.stringify({ ...(result as object), data: meta }),
+              },
             ]);
           }),
         ),
@@ -1709,9 +1950,13 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         description: {
           type: "string",
           maxLength: 500,
-          description: "What it is and where to get it — the person reads this.",
+          description:
+            "What it is and where to get it — the person reads this.",
         },
-        targetFile: { type: "string", pattern: "^\\.env(\\.[A-Za-z0-9_.-]+)?$" },
+        targetFile: {
+          type: "string",
+          pattern: "^\\.env(\\.[A-Za-z0-9_.-]+)?$",
+        },
       },
       required: ["name"],
       additionalProperties: false,
@@ -1724,8 +1969,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           path: "/api/secrets/request",
           body: {
             name: str(args, "name"),
-            ...(str(args, "description") ? { description: str(args, "description") } : {}),
-            ...(str(args, "targetFile") ? { targetFile: str(args, "targetFile") } : {}),
+            ...(str(args, "description")
+              ? { description: str(args, "description") }
+              : {}),
+            ...(str(args, "targetFile")
+              ? { targetFile: str(args, "targetFile") }
+              : {}),
             ...(deps.caller.cwd ? { cwd: deps.caller.cwd } : {}),
           },
           timeoutMs: 16 * 60_000,
@@ -1758,7 +2007,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     },
     level: "sensitive",
     approvalTitle: (args) => `Publish ${str(args, "path")} as a public website`,
-    approvalDetail: (args) => (str(args, "slug") ? `Site name: ${str(args, "slug")}` : undefined),
+    approvalDetail: (args) =>
+      str(args, "slug") ? `Site name: ${str(args, "slug")}` : undefined,
     run: (deps, args) =>
       asToolError(
         deps.files.publishSite({
@@ -1775,20 +2025,26 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     inputSchema: noArgs,
     level: "safe",
     run: (deps) =>
-      callConsole(deps, { method: "GET", path: "/api/v1/work/sites" }, "list the sites").pipe(
+      callConsole(
+        deps,
+        { method: "GET", path: "/api/v1/work/sites" },
+        "list the sites",
+      ).pipe(
         Effect.map((body) => ({
-          sites: (Array.isArray(body.deploys) ? body.deploys : []).map((raw) => {
-            const site = raw as Record<string, unknown>;
-            const slug = String(site.slug ?? "");
-            return {
-              slug,
-              url: siteUrl(slug),
-              hasPassword: site.has_password === true,
-              customDomain: site.custom_domain ?? null,
-              sizeBytes: site.size_bytes ?? null,
-              updatedAt: site.updated_at ?? null,
-            };
-          }),
+          sites: (Array.isArray(body.deploys) ? body.deploys : []).map(
+            (raw) => {
+              const site = raw as Record<string, unknown>;
+              const slug = String(site.slug ?? "");
+              return {
+                slug,
+                url: siteUrl(slug),
+                hasPassword: site.has_password === true,
+                customDomain: site.custom_domain ?? null,
+                sizeBytes: site.size_bytes ?? null,
+                updatedAt: site.updated_at ?? null,
+              };
+            },
+          ),
         })),
       ),
   },
@@ -1805,7 +2061,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           type: "string",
           minLength: 10,
           maxLength: 128,
-          description: "The password visitors type (10–128 characters). Omit to generate one.",
+          description:
+            "The password visitors type (10–128 characters). Omit to generate one.",
         },
         remove: {
           type: "boolean",
@@ -1831,16 +2088,29 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         const slug = str(args, "slug")!;
         const remove = bool(args, "remove") === true;
         if (remove && str(args, "password")) {
-          return yield* toolError("Pass either password or remove: true, not both.");
+          return yield* toolError(
+            "Pass either password or remove: true, not both.",
+          );
         }
-        const password = remove ? "" : (str(args, "password") ?? readablePassword());
+        const password = remove
+          ? ""
+          : (str(args, "password") ?? readablePassword());
         yield* callConsole(
           deps,
-          { method: "PUT", path: sitePath(slug, "/password"), body: { password } },
+          {
+            method: "PUT",
+            path: sitePath(slug, "/password"),
+            body: { password },
+          },
           `set the password of site “${slug}”`,
         );
         return remove
-          ? { slug, url: siteUrl(slug), hasPassword: false, note: "Anyone can open the site now." }
+          ? {
+              slug,
+              url: siteUrl(slug),
+              hasPassword: false,
+              note: "Anyone can open the site now.",
+            }
           : {
               slug,
               url: siteUrl(slug),
@@ -1882,7 +2152,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         if (limit === 0) return { slug, delivery: formsDelivery(view) };
         const list = yield* callConsole(
           deps,
-          { method: "GET", path: sitePath(slug, `/forms/submissions?limit=${limit}`) },
+          {
+            method: "GET",
+            path: sitePath(slug, `/forms/submissions?limit=${limit}`),
+          },
           `read the answers of site “${slug}”`,
         );
         return {
@@ -1905,7 +2178,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         email: {
           type: "string",
           maxLength: 254,
-          description: 'Address that receives answers, or "" to switch email off.',
+          description:
+            'Address that receives answers, or "" to switch email off.',
         },
         telegram: {
           type: "boolean",
@@ -1914,7 +2188,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         webhookUrl: {
           type: "string",
           maxLength: 2048,
-          description: 'https URL that receives each answer as JSON, or "" to switch it off.',
+          description:
+            'https URL that receives each answer as JSON, or "" to switch it off.',
         },
       },
       required: ["slug"],
@@ -1926,9 +2201,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       const parts: string[] = [];
       const email = str(args, "email");
       const webhook = str(args, "webhookUrl");
-      if (email !== undefined) parts.push(email === "" ? "email: off" : `to email ${email}`);
-      if (webhook !== undefined) parts.push(webhook === "" ? "webhook: off" : `to ${webhook}`);
-      if (bool(args, "telegram") === true) parts.push("to your Telegram (you open a link)");
+      if (email !== undefined)
+        parts.push(email === "" ? "email: off" : `to email ${email}`);
+      if (webhook !== undefined)
+        parts.push(webhook === "" ? "webhook: off" : `to ${webhook}`);
+      if (bool(args, "telegram") === true)
+        parts.push("to your Telegram (you open a link)");
       return parts.join(" · ") || undefined;
     },
     run: (deps, args) =>
@@ -1938,7 +2216,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         const webhook = str(args, "webhookUrl")?.trim();
         const telegram = bool(args, "telegram") === true;
         if (email === undefined && webhook === undefined && !telegram) {
-          return yield* toolError("Say where answers go: email, telegram or webhookUrl.");
+          return yield* toolError(
+            "Say where answers go: email, telegram or webhookUrl.",
+          );
         }
         if (webhook && !webhook.startsWith("https://")) {
           return yield* toolError("webhookUrl must start with https://.");
@@ -1952,10 +2232,13 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             `read the forms of site “${slug}”`,
           );
           const currentEmail = current.email as { to?: string } | undefined;
-          const currentWebhook = current.webhook as { url?: string } | undefined;
-          const currentTelegram = current.telegram as { chat_id?: number } | undefined;
+          const currentWebhook = current.webhook as
+            { url?: string } | undefined;
+          const currentTelegram = current.telegram as
+            { chat_id?: number } | undefined;
           const nextEmail = email === undefined ? currentEmail?.to : email;
-          const nextWebhook = webhook === undefined ? currentWebhook?.url : webhook;
+          const nextWebhook =
+            webhook === undefined ? currentWebhook?.url : webhook;
           view = yield* callConsole(
             deps,
             {
@@ -2022,8 +2305,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           "list the databases",
         );
         return {
-          databases: (Array.isArray(body.databases) ? body.databases : []).map((raw) =>
-            compactDatabase(raw as Record<string, unknown>),
+          databases: (Array.isArray(body.databases) ? body.databases : []).map(
+            (raw) => compactDatabase(raw as Record<string, unknown>),
           ),
         };
       }),
@@ -2039,10 +2322,21 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         name: {
           type: "string",
           pattern: "^[a-z][a-z0-9_]{0,40}$",
-          description: "Database name, e.g. shop (lowercase letters, digits, _).",
+          description:
+            "Database name, e.g. shop (lowercase letters, digits, _).",
         },
-        ramMb: { type: "integer", minimum: 512, maximum: 16384, description: "Default 1024." },
-        diskGb: { type: "integer", minimum: 5, maximum: 500, description: "Default 10." },
+        ramMb: {
+          type: "integer",
+          minimum: 512,
+          maximum: 16384,
+          description: "Default 1024.",
+        },
+        diskGb: {
+          type: "integer",
+          minimum: 5,
+          maximum: 500,
+          description: "Default 10.",
+        },
       },
       required: ["name"],
       additionalProperties: false,
@@ -2081,7 +2375,11 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     inputSchema: {
       type: "object",
       properties: {
-        databaseId: { type: "integer", minimum: 1, description: "Id from db_list or db_create." },
+        databaseId: {
+          type: "integer",
+          minimum: 1,
+          description: "Id from db_list or db_create.",
+        },
         envName: {
           type: "string",
           pattern: "^[A-Za-z_][A-Za-z0-9_]{0,127}$",
@@ -2131,9 +2429,16 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         if (nameProblem !== null)
           return yield* toolError(nameProblem.replace('"name"', '"envName"'));
         if (!isValidSecretTargetFile(file)) {
-          return yield* toolError('Invalid "targetFile": expected .env or .env.<suffix>.');
+          return yield* toolError(
+            'Invalid "targetFile": expected .env or .env.<suffix>.',
+          );
         }
-        const written = yield* writeEnvVar({ folder: target.cwd, file, name, value: dsn });
+        const written = yield* writeEnvVar({
+          folder: target.cwd,
+          file,
+          name,
+          value: dsn,
+        });
         return {
           databaseId: id,
           envName: name,
@@ -2144,6 +2449,13 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         };
       }),
   },
+
+  // App servers: bots and backends on their own sleeping server (appServerTools.ts)
+  ...appServerTools({
+    callConsole: (deps, request, what) => callConsole(deps, request, what),
+    resolvePath: (raw, deps) => resolveUserPath(raw, deps),
+    fail: toolError,
+  }),
 
   // Account
   {
@@ -2231,7 +2543,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         const settings = yield* asToolError(deps.settings);
         const access = accountAccess(settings);
         if (!access.linked) {
-          return yield* toolError("Uno Work isn't signed in to an Uno account.");
+          return yield* toolError(
+            "Uno Work isn't signed in to an Uno account.",
+          );
         }
         if (access.level !== "manage") {
           return yield* toolError(
@@ -2261,7 +2575,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       additionalProperties: false,
     },
     level: "safe",
-    run: (deps, args) => asToolError(deps.account.createBoxStatus({ jobId: str(args, "jobId")! })),
+    run: (deps, args) =>
+      asToolError(deps.account.createBoxStatus({ jobId: str(args, "jobId")! })),
   },
 
   // Settings
@@ -2280,7 +2595,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             signedInToUno: access.linked,
             agentAccessToAccount: access.level,
             chatsMayStartChatsIn:
-              settings.agentThreadsScope === "any-project" ? "any project" : "own project only",
+              settings.agentThreadsScope === "any-project"
+                ? "any project"
+                : "own project only",
             harnesses: Object.entries(settings.providerInstances)
               .filter(([, instance]) => instance.enabled !== false)
               .map(([id, instance]) => ({ id, driver: instance.driver })),
@@ -2305,15 +2622,23 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     description: `Detailed how-to for Uno Work, on demand. Topics: ${UNO_WORK_GUIDE_TOPICS.join(", ")}. Read "app-sdk" before building an app that uses AI, cloud files or notifications; "apps" / "widgets" for the manifest; "storage" for where app data goes.`,
     inputSchema: {
       type: "object",
-      properties: { topic: { type: "string", enum: [...UNO_WORK_GUIDE_TOPICS] } },
+      properties: {
+        topic: { type: "string", enum: [...UNO_WORK_GUIDE_TOPICS] },
+      },
       required: ["topic"],
       additionalProperties: false,
     },
     level: "safe",
     run: (deps, args) =>
       isUnoWorkGuideTopic(args.topic)
-        ? Effect.succeed(buildUnoWorkGuide(args.topic, { pluginsDir: deps.pluginsDir }))
-        : Effect.fail(toolError(`Unknown topic. Use one of: ${UNO_WORK_GUIDE_TOPICS.join(", ")}.`)),
+        ? Effect.succeed(
+            buildUnoWorkGuide(args.topic, { pluginsDir: deps.pluginsDir }),
+          )
+        : Effect.fail(
+            toolError(
+              `Unknown topic. Use one of: ${UNO_WORK_GUIDE_TOPICS.join(", ")}.`,
+            ),
+          ),
   },
 ];
 
@@ -2402,7 +2727,9 @@ export function connectorToolLevel(name: string): UnoWorkToolLevel {
     : "safe";
 }
 
-function describeConnectorArgs(args: Record<string, unknown>): string | undefined {
+function describeConnectorArgs(
+  args: Record<string, unknown>,
+): string | undefined {
   const text = JSON.stringify(args);
   if (text === undefined || text === "{}") return undefined;
   return text.length > 400 ? `${text.slice(0, 400)}…` : text;
@@ -2427,11 +2754,17 @@ export function connectorMcpTool(
       ? `${tool.description} (${tool.providerName}, connected by the person)`
       : `${tool.providerName} tool, connected by the person.`,
     inputSchema: tool.inputSchema,
-    annotations: { readOnlyHint: level === "safe", destructiveHint: false, openWorldHint: true },
+    annotations: {
+      readOnlyHint: level === "safe",
+      destructiveHint: false,
+      openWorldHint: true,
+    },
     run: (deps, rawArgs) =>
       Effect.gen(function* () {
         const args =
-          rawArgs !== null && typeof rawArgs === "object" && !Array.isArray(rawArgs)
+          rawArgs !== null &&
+          typeof rawArgs === "object" &&
+          !Array.isArray(rawArgs)
             ? (rawArgs as Record<string, unknown>)
             : {};
         if (!deps.connectors) {
@@ -2462,7 +2795,10 @@ export function connectorMcpTool(
 const MCP_INSTRUCTIONS =
   "Tools for the Uno Work environment this chat runs in: this computer and its apps, widgets, files and cloud, other chats, the person's Inbox and right panel, sites, the Uno account and settings, plus the tools the person connected (Google Drive, Gmail & Calendar, Notion, GitHub) when they did. Call uno_guide for details. Tools that change things may wait for the person's Allow; if they decline, don't retry or work around it.";
 
-export const UNO_WORK_MCP_SERVER: McpServerDefinition<UnoWorkToolDeps, UnoWorkToolError> = {
+export const UNO_WORK_MCP_SERVER: McpServerDefinition<
+  UnoWorkToolDeps,
+  UnoWorkToolError
+> = {
   serverInfo: { name: UNO_WORK_MCP_SERVER_NAME, version: "1.0.0" },
   instructions: MCP_INSTRUCTIONS,
   tools: UNO_WORK_TOOLS.map((tool) => {
@@ -2475,9 +2811,12 @@ export const UNO_WORK_MCP_SERVER: McpServerDefinition<UnoWorkToolDeps, UnoWorkTo
         readOnlyHint: level === "safe",
         destructiveHint: level === "sensitive",
         openWorldHint:
-          tool.group === "sites" || tool.group === "databases" || tool.group === "account",
+          tool.group === "sites" ||
+          tool.group === "databases" ||
+          tool.group === "account",
       },
-      run: (deps: UnoWorkToolDeps, args: unknown) => runUnoWorkTool(tool, deps, args),
+      run: (deps: UnoWorkToolDeps, args: unknown) =>
+        runUnoWorkTool(tool, deps, args),
     };
   }),
   errorText: (error) => error.message,
@@ -2497,7 +2836,9 @@ export function buildUnoWorkMcpServer(
     ...UNO_WORK_MCP_SERVER,
     tools: [
       ...UNO_WORK_MCP_SERVER.tools,
-      ...connectorTools.filter((tool) => !builtIn.has(tool.name)).map(connectorMcpTool),
+      ...connectorTools
+        .filter((tool) => !builtIn.has(tool.name))
+        .map(connectorMcpTool),
     ],
   };
 }

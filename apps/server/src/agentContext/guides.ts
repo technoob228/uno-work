@@ -27,14 +27,18 @@ export const UNO_WORK_GUIDE_TOPICS = [
   "secrets",
   "sites",
   "databases",
+  "app-servers",
   "account",
   "plugins",
 ] as const;
 export type UnoWorkGuideTopic = (typeof UNO_WORK_GUIDE_TOPICS)[number];
 
-export function isUnoWorkGuideTopic(value: unknown): value is UnoWorkGuideTopic {
+export function isUnoWorkGuideTopic(
+  value: unknown,
+): value is UnoWorkGuideTopic {
   return (
-    typeof value === "string" && (UNO_WORK_GUIDE_TOPICS as ReadonlyArray<string>).includes(value)
+    typeof value === "string" &&
+    (UNO_WORK_GUIDE_TOPICS as ReadonlyArray<string>).includes(value)
   );
 }
 
@@ -55,7 +59,9 @@ export function splitSections(markdown: string): ReadonlyArray<{
 
 function section(markdown: string, headingPrefix: string): string {
   return (
-    splitSections(markdown).find((entry) => entry.heading.startsWith(headingPrefix))?.text ?? ""
+    splitSections(markdown).find((entry) =>
+      entry.heading.startsWith(headingPrefix),
+    )?.text ?? ""
   );
 }
 
@@ -73,7 +79,8 @@ export function buildUnoWorkGuide(
   const apps = buildMachineAppsInstructions();
   // The bridge doc needs a URL only to decide it exists; the curl examples
   // read $UNO_WORK_BRIDGE_URL from the environment.
-  const bridge = buildBrowserInstructions(options.bridgeBaseUrl ?? "http://127.0.0.1") ?? "";
+  const bridge =
+    buildBrowserInstructions(options.bridgeBaseUrl ?? "http://127.0.0.1") ?? "";
   switch (topic) {
     case "overview":
       return UNO_WORK_BRIEF_MARKDOWN;
@@ -135,6 +142,12 @@ export function buildUnoWorkGuide(
         "`db_create` makes a managed Postgres database on its own small Uno computer (it counts against the plan; the person always approves). It starts in a minute or two; `db_list` shows its status.",
         "`db_connection` writes the connection string, password included, into the project's `.env` as `DATABASE_URL` (or `envName`), file mode 0600, in this chat's folder or a folder inside it. You never see the password: the app reads the variable (`process.env.DATABASE_URL`, `os.environ[\"DATABASE_URL\"]`). Keep `.env` in `.gitignore` and never print it.",
         "The database is reachable from the account's Uno computers on its internal address, not from the internet. Deleting a database is done in the Uno console.",
+      ].join("\n\n");
+    case "app-servers":
+      return [
+        "## App servers: bots and backends for other people",
+        "A Telegram bot, a webhook receiver or an API for customers does NOT run on this computer or in the right panel. It goes on an app server: a small separate server that sleeps when nobody calls it and wakes in under a second.",
+        "1. Write it in `~/projects/<name>` as a webhook app, not polling: listen on `$PORT`, handle `POST /telegram`, check the header `X-Telegram-Bot-Api-Secret-Token` equals `$UNO_TELEGRAM_SECRET`, read the token from `$TELEGRAM_BOT_TOKEN`, keep data that must survive updates in `$UNO_DATA_DIR`. Python: `requirements.txt` + `main.py`/`bot.py`; Node: `package.json` with `start`.\n2. Tests use a temporary folder, never the real data.\n3. `app_deploy` (path, server name). The version waits for the person's Allow in the Uno console (App servers); say so in one sentence.\n4. The bot token from @BotFather goes in the same console screen (Bot token & settings), never in the chat and never into `request_secret` here: this computer must not hold it. Uno connects the bot to Telegram by itself.\n5. To check it, `app_servers_list` (state, address) and `app_server_logs`.",
       ].join("\n\n");
     case "account":
       return [
