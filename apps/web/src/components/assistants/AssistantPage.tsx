@@ -1,12 +1,14 @@
 /**
  * One assistant on its own computer (assistants MVP): what it can open
  * (connector permissions, stored and checked by the console), its schedule,
- * its memory (USER.md / NOTES.md on its computer), its channels and chat.
+ * "Memory & models" (AssistantMemoryModels.tsx: memory files, the routing
+ * table, chats it started and their cost, computers it can use), its
+ * channels and chat.
  *
  * Access and schedule come from the console and work while the computer
  * sleeps; memory, channels and chat need the computer awake and connected.
  */
-import { ASSISTANT_PROJECT_ID, type EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -29,7 +31,7 @@ import {
   listAssistantSchedules,
   putConnectorPermissions,
 } from "../../lib/assistantsConsoleApi";
-import { ensureAssistantChat, readAssistantFile, writeAssistantFile } from "../../lib/managerApi";
+import { ensureAssistantChat } from "../../lib/managerApi";
 import {
   listConnectors,
   openAuthWindow,
@@ -45,13 +47,12 @@ import { SlackBrandMark, TelegramMark } from "../setup/brandMarks";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { Block, EmojiAvatar, LevelPicker, StatusPill } from "./AssistantBits";
+import { ChatsBlock, ComputersBlock, MemoryBlock, ModelsBlock } from "./AssistantMemoryModels";
 import {
   CONNECTOR_LABEL,
   CONNECTOR_PROVIDERS,
   describeCron,
   findTemplate,
-  memoryItems,
-  withoutMemoryLine,
   type ConnectorLevel,
   type ConnectorPermissions,
   type ConnectorProvider,
@@ -227,12 +228,24 @@ export function AssistantPage({
       <AccessBlock boxId={boxId} name={name} accountEnvironmentId={accountEnvironmentId} />
       <ScheduleBlock boxId={boxId} name={name} />
       <MemoryBlock
-        boxId={boxId}
         name={name}
         environmentId={environmentId}
         waking={busy === "wake"}
         onWake={() => void wake()}
       />
+      <ModelsBlock
+        name={name}
+        environmentId={environmentId}
+        waking={busy === "wake"}
+        onWake={() => void wake()}
+      />
+      <ChatsBlock
+        name={name}
+        environmentId={environmentId}
+        waking={busy === "wake"}
+        onWake={() => void wake()}
+      />
+      <ComputersBlock name={name} boxId={boxId} />
 
       <Block title="Answers in">
         {environmentId ? (
@@ -500,131 +513,6 @@ function ScheduleBlock({ boxId, name }: { boxId: number; name: string }) {
             </li>
           ))}
         </ul>
-      )}
-    </Block>
-  );
-}
-
-const MEMORY_FILES = [
-  { name: "USER.md", title: "About you" },
-  { name: "NOTES.md", title: "Notes" },
-] as const;
-
-function MemoryBlock({
-  boxId,
-  name,
-  environmentId,
-  waking,
-  onWake,
-}: {
-  boxId: number;
-  name: string;
-  environmentId: EnvironmentId | null;
-  waking: boolean;
-  onWake: () => void;
-}) {
-  const queryClient = useQueryClient();
-  const key = ["uno-assistant-memory", boxId, environmentId] as const;
-  const memory = useQuery({
-    queryKey: key,
-    enabled: environmentId !== null,
-    retry: false,
-    queryFn: async () =>
-      Promise.all(
-        MEMORY_FILES.map(async (file) => ({
-          name: file.name,
-          title: file.title,
-          content: await readAssistantFile({
-            environmentId: environmentId!,
-            projectId: ASSISTANT_PROJECT_ID,
-            name: file.name,
-          })
-            .then((result) => result.content)
-            .catch(() => ""),
-        })),
-      ),
-  });
-
-  const forget = async (
-    fileName: (typeof MEMORY_FILES)[number]["name"],
-    content: string,
-    line: number,
-  ) => {
-    if (!environmentId) return;
-    try {
-      await writeAssistantFile({
-        environmentId,
-        projectId: ASSISTANT_PROJECT_ID,
-        name: fileName,
-        content: withoutMemoryLine(content, line),
-      });
-      await queryClient.invalidateQueries({ queryKey: key });
-    } catch (cause) {
-      toastManager.add({
-        type: "error",
-        title: "Couldn't remove it",
-        description: errorText(cause, `${name}'s computer didn't answer.`),
-      });
-    }
-  };
-
-  if (!environmentId) {
-    return (
-      <Block title="Memory" testId="assistant-memory">
-        <div className="flex items-center gap-3 py-1">
-          <p className="min-w-0 flex-1 text-sm text-muted-foreground">
-            {name} is asleep. Its memory lives on its computer.
-          </p>
-          <Button size="xs" variant="outline" onClick={onWake} disabled={waking}>
-            {waking ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : null}
-            Wake to see it
-          </Button>
-        </div>
-      </Block>
-    );
-  }
-
-  return (
-    <Block title="Memory" testId="assistant-memory">
-      {memory.isLoading ? (
-        <p className="py-1 text-sm text-muted-foreground">Loading…</p>
-      ) : (
-        <div className="flex flex-col gap-3 py-1">
-          {(memory.data ?? []).map((file) => {
-            const items = memoryItems(file.content);
-            return (
-              <div key={file.name}>
-                <h3 className="pb-1 text-xs font-medium text-muted-foreground">{file.title}</h3>
-                {items.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nothing yet.</p>
-                ) : (
-                  <ul className="flex flex-col" data-testid={`assistant-memory-${file.name}`}>
-                    {items.map((entry) => (
-                      <li
-                        key={`${entry.line}-${entry.text}`}
-                        className="group flex items-start gap-2 py-1 text-sm"
-                      >
-                        <span className="min-w-0 flex-1">{entry.text}</span>
-                        <button
-                          type="button"
-                          aria-label="Forget this"
-                          title="Forget this"
-                          onClick={() => void forget(file.name, file.content, entry.line)}
-                          className="cursor-pointer rounded p-0.5 text-muted-foreground opacity-60 hover:bg-accent hover:text-foreground group-hover:opacity-100"
-                        >
-                          <XIcon className="size-3.5" />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            );
-          })}
-          <p className="text-xs text-muted-foreground">
-            {name} adds to its notes as it works. Remove anything it shouldn't remember.
-          </p>
-        </div>
       )}
     </Block>
   );

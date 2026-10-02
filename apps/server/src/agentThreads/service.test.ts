@@ -1006,3 +1006,18 @@ describe("agent threads bridge: no permission escalation", () => {
     }),
   );
 });
+
+describe("agent threads bridge: computerId (assistants MVP)", () => {
+  it.effect("this computer passes; another computer is not allowed yet", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = makeFixture();
+      const here = yield* handlers.createThread(scoped(), { text: "hi", computerId: "this" });
+      assert.strictEqual(here.status, 200);
+      const other = yield* handlers.createThread(scoped(), { text: "hi", computerId: 3120 });
+      assert.strictEqual(other.status, 403);
+      assert.strictEqual(body(other).error, "computer_not_allowed");
+      assert.match(String(body(other).message), /not allowed yet/);
+      assert.strictEqual(dispatched.length, 2);
+    }),
+  );
+});

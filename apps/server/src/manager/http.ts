@@ -16,6 +16,7 @@
  *   harness process holds (a thread-scoped token implies the thread).
  */
 import {
+  UNO_GATEWAY_BASE_URL,
   AssistantEditableFileName,
   assistantTokenLabel,
   CHANNEL_NOTIFY_PATH,
@@ -68,6 +69,14 @@ import { readWorkMachineIdentity } from "./workConsole.ts";
 import { ConnectorNotifyService } from "./Services/ConnectorNotify.ts";
 import { AssistantScheduledTurns } from "../assistants/scheduledTurn.ts";
 import { AssistantSchedules } from "../assistants/schedules.ts";
+import {
+  buildAssistantChats,
+  fetchGatewayThreadUsage,
+  selectAssistantChats,
+  tokensFromActivities,
+} from "../assistants/assistantChats.ts";
+import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
+import { UnoGatewayKey } from "../unoGatewayKey.ts";
 import { handleManagerMcpMessage } from "./mcp.ts";
 import { ManagerApprovalService } from "./Services/ManagerApprovalService.ts";
 import { ManagerTokenAuthService } from "./Services/ManagerTokenAuth.ts";
@@ -799,6 +808,8 @@ const FilePayload = Schema.Struct({
   projectId: ProjectId,
   name: AssistantEditableFileName,
   content: Schema.String,
+  /** The content the editor started from: a crossing write is merged, not overwritten. */
+  base: Schema.optional(Schema.String),
 });
 
 export const managerAssistantFileReadRouteLayer = HttpRouter.add(
@@ -831,11 +842,83 @@ export const managerAssistantFileWriteRouteLayer = HttpRouter.add(
       Effect.mapError(() => new AuthError({ message: "Invalid file payload.", status: 400 })),
     );
     return yield* assistants.writeWorkspaceFile(input).pipe(
-      Effect.map(() => HttpServerResponse.jsonUnsafe({ saved: true }, { status: 200 })),
+      Effect.map((written) =>
+        HttpServerResponse.jsonUnsafe(
+          { saved: true, content: written.content, merged: written.merged },
+          { status: 200 },
+        ),
+      ),
       Effect.catch(respondServerError("assistant:file-write")),
     );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
+
+/**
+ * `GET /api/manager/assistant/chats` — the chats this computer's assistant
+ * started, with model, status, tokens and (Uno AI) cost. The assistant page
+ * reads it ("Chats Ana started"). Owner session only.
+ */
+export const managerAssistantChatsRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/assistant/chats",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const projections = yield* ProjectionSnapshotQuery;
+    const providerRegistry = yield* ProviderRegistry;
+    // Optional so a wiring without the gateway (tests) still answers.
+    const gatewayKey = yield* Effect.serviceOption(UnoGatewayKey);
+    return yield* Effect.gen(function* () {
+      const snapshot = yield* projections.getShellSnapshot();
+      const chats = selectAssistantChats({ threads: snapshot.threads });
+      const localTokens = new Map<string, number | null>();
+      yield* Effect.forEach(
+        chats,
+        (thread) =>
+          projections.getThreadDetailById(thread.id).pipe(
+            Effect.map((detail) =>
+              localTokens.set(
+                thread.id,
+                Option.isSome(detail) ? tokensFromActivities(detail.value.activities) : null,
+              ),
+            ),
+            Effect.orElseSucceed(() => localTokens.set(thread.id, null)),
+          ),
+        { concurrency: 4, discard: true },
+      );
+      const providers = yield* providerRegistry.getProviders;
+      const key = Option.isSome(gatewayKey) ? yield* gatewayKey.value.harnessKey() : "";
+      const unoInstances = new Set(
+        providers
+          .filter((provider) => provider.driver === "uno")
+          .map((p) => p.instanceId as string),
+      );
+      const gateway = yield* Effect.promise(() =>
+        fetchGatewayThreadUsage({
+          gateway: key.length > 0 ? { baseUrl: assistantGatewayBaseUrl(), key } : null,
+          threadIds: chats
+            .filter((thread) => unoInstances.has(thread.modelSelection.instanceId))
+            .map((thread) => thread.id),
+        }),
+      );
+      const result = buildAssistantChats({
+        threads: chats,
+        projects: snapshot.projects,
+        providers,
+        localTokens,
+        gateway,
+      });
+      return HttpServerResponse.jsonUnsafe(result, { status: 200 });
+    }).pipe(Effect.catch(respondServerError("assistant:chats")));
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/** Same gateway as the App SDK (its `UNO_WORK_APP_GATEWAY_URL` overrides, for stands). */
+function assistantGatewayBaseUrl(): string {
+  return (process.env["UNO_WORK_APP_GATEWAY_URL"]?.trim() || UNO_GATEWAY_BASE_URL).replace(
+    /\/+$/,
+    "",
+  );
+}
 
 export const managerTokensListRouteLayer = HttpRouter.add(
   "GET",

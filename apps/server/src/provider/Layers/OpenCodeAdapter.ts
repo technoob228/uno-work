@@ -68,6 +68,7 @@ import {
   removeOpenCodeSessionEnv,
   withOpenCodeSessionEnvPlugin,
   writeOpenCodeSessionEnv,
+  OPENCODE_SESSION_THREAD_ENV,
 } from "../opencodeSessionEnv.ts";
 import { makeSessionEventHub, type SessionEventHub } from "../sessionEventHub.ts";
 import { makeSharedProcessPool } from "../sharedProcessPool.ts";
@@ -2070,7 +2071,9 @@ export function makeOpenCodeAdapter(
                 yield* Scope.addFinalizer(sessionScope, lease.release);
                 server = { url: lease.value.url, exitCode: lease.value.exitCode, external: false };
                 events = lease.value.events;
-                sessionShellEnv = shellEnv;
+                // The chat's id travels with it: its shells see it and the
+                // plugin labels its Uno AI gateway calls (`X-Uno-Thread`).
+                sessionShellEnv = { ...shellEnv, [OPENCODE_SESSION_THREAD_ENV]: input.threadId };
               } else {
                 // The runtime binds the server's lifetime to the Scope.Scope
                 // we provide below — closing `sessionScope` kills the child

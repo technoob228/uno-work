@@ -83,11 +83,21 @@ export interface ManagerAssistantServiceShape {
     readonly projectId: ProjectId;
     readonly name: AssistantEditableFileName;
   }) => Effect.Effect<{ readonly content: string }, ManagerAssistantError>;
+  /**
+   * Writes a workspace file. With `base` (the content the editor started
+   * from), an edit that crossed the assistant's own write is replayed onto
+   * the file as it is now (`rebaseEdit`) instead of overwriting it. Returns
+   * what was written.
+   */
   readonly writeWorkspaceFile: (input: {
     readonly projectId: ProjectId;
     readonly name: AssistantEditableFileName;
     readonly content: string;
-  }) => Effect.Effect<void, ManagerAssistantError>;
+    readonly base?: string | undefined;
+  }) => Effect.Effect<
+    { readonly content: string; readonly merged: boolean },
+    ManagerAssistantError
+  >;
 }
 
 export class ManagerAssistantService extends Context.Service<

@@ -12,6 +12,7 @@
 import type {
   AssistantDraftInput,
   AssistantDraftResult,
+  AssistantChatsResult,
   AssistantEditableFileName,
   EnvironmentId,
   ManagerActionProposal,
@@ -265,13 +266,20 @@ export function readAssistantFile(
   });
 }
 
+/**
+ * Writes an assistant file. Pass `base` (what the editor started from): if
+ * the assistant wrote the file meanwhile, the daemon replays this edit onto
+ * its version instead of overwriting it, and answers with what it wrote
+ * (older daemons answer only `saved`).
+ */
 export function writeAssistantFile(
   input: EnvironmentScoped & {
     readonly projectId: string;
     readonly name: AssistantEditableFileName;
     readonly content: string;
+    readonly base?: string;
   },
-): Promise<{ saved: boolean }> {
+): Promise<{ saved: boolean; content?: string; merged?: boolean }> {
   const { environmentId, ...body } = input;
   return environmentFetchJson({
     environmentId,
@@ -428,4 +436,12 @@ export async function listThreadsForBindingPicker(
     .filter((thread) => thread.archivedAt === null)
     .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .map((thread) => ({ id: thread.id, projectId: thread.projectId, title: thread.title }));
+}
+
+/** The chats this computer's assistant started, with model, status and cost. */
+export function listAssistantChats(input: EnvironmentScoped): Promise<AssistantChatsResult> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/chats",
+  });
 }

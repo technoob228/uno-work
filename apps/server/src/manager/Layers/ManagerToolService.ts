@@ -45,6 +45,8 @@ import {
 import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { ManagerApprovalService } from "../Services/ManagerApprovalService.ts";
 import { wrapUntrustedContent } from "../../untrustedContent.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
+import { checkTargetComputer, ownBoxIdFromSettings } from "../../assistants/targetComputer.ts";
 import { ManagerBudgetService } from "../Services/ManagerBudgetService.ts";
 import {
   changedFilesOf,
@@ -519,8 +521,23 @@ const makeManagerToolService = Effect.gen(function* () {
       return { approvals };
     });
 
+  // Optional: tests and older wirings run without settings (= a laptop).
+  const serverSettings = yield* Effect.serviceOption(ServerSettingsService);
+  const ownBoxId = Option.match(serverSettings, {
+    onNone: () => Effect.succeed<number | null>(null),
+    onSome: (service) =>
+      service.getSettings.pipe(
+        Effect.map((settings) => ownBoxIdFromSettings(settings.uno)),
+        Effect.orElseSucceed(() => null),
+      ),
+  });
+
   const createThread: ManagerToolServiceShape["createThread"] = (caller, input) =>
     Effect.gen(function* () {
+      const target = checkTargetComputer(input.computerId, yield* ownBoxId);
+      if (!target.ok) {
+        return yield* new ManagerInvalidRequestError({ detail: target.message });
+      }
       yield* requireProjectAllowed(caller, input.projectId);
       const project = yield* projectionSnapshotQuery.getProjectShellById(input.projectId);
       if (Option.isNone(project)) {

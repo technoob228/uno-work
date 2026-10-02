@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ensureOpenCodeSessionEnvFiles,
+  GATEWAY_THREAD_HEADER,
   OPENCODE_SESSION_ENV_DIR_ENV,
+  OPENCODE_SESSION_THREAD_ENV,
   readOpenCodeSessionEnv,
   removeOpenCodeSessionEnv,
   withOpenCodeSessionEnvPlugin,
@@ -196,5 +198,42 @@ describe("withOpenCodeSessionEnvPlugin", () => {
   it("leaves a config it can't parse untouched", () => {
     expect(withOpenCodeSessionEnvPlugin("not json", "file:///p.mjs")).toBe("not json");
     expect(withOpenCodeSessionEnvPlugin("[1]", "file:///p.mjs")).toBe("[1]");
+  });
+});
+
+describe("chat label on Uno AI gateway calls (assistants MVP)", () => {
+  type HeadersHook = (
+    input: { sessionID: string; provider: { info: { id: string } } },
+    output: { headers: Record<string, string> },
+  ) => Promise<void>;
+  const loadHeadersHook = async (pluginUrl: string): Promise<HeadersHook> => {
+    const mod = (await import(`${pluginUrl}?t=${Date.now()}`)) as {
+      UnoWorkSessionEnv: (input: unknown) => Promise<{ "chat.headers": HeadersHook }>;
+    };
+    return (await mod.UnoWorkSessionEnv({}))["chat.headers"];
+  };
+
+  it("labels the session's Uno gateway calls with its chat id, nothing else", async () => {
+    const { pluginUrl, envDir } = ensureOpenCodeSessionEnvFiles(stateDir);
+    process.env[OPENCODE_SESSION_ENV_DIR_ENV] = envDir;
+    writeOpenCodeSessionEnv(envDir, "ses_a", { [OPENCODE_SESSION_THREAD_ENV]: "thread-1" });
+    writeOpenCodeSessionEnv(envDir, "ses_bad", { [OPENCODE_SESSION_THREAD_ENV]: "a b" });
+    const hook = await loadHeadersHook(pluginUrl);
+
+    const uno = { headers: {} as Record<string, string> };
+    await hook({ sessionID: "ses_a", provider: { info: { id: "uno" } } }, uno);
+    expect(uno.headers).toEqual({ [GATEWAY_THREAD_HEADER]: "thread-1" });
+
+    const other = { headers: {} as Record<string, string> };
+    await hook({ sessionID: "ses_a", provider: { info: { id: "openai" } } }, other);
+    expect(other.headers).toEqual({});
+
+    const unknown = { headers: {} as Record<string, string> };
+    await hook({ sessionID: "ses_x", provider: { info: { id: "uno" } } }, unknown);
+    expect(unknown.headers).toEqual({});
+
+    const bad = { headers: {} as Record<string, string> };
+    await hook({ sessionID: "ses_bad", provider: { info: { id: "uno-russia" } } }, bad);
+    expect(bad.headers).toEqual({});
   });
 });

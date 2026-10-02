@@ -1429,6 +1429,11 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         projectId: { type: "string" },
         provider: { type: "string" },
         model: { type: "string" },
+        computerId: {
+          type: "string",
+          description:
+            'Computer the chat runs on (box id or "this"). Leave it out: for now only this computer is allowed.',
+        },
       },
       required: ["text"],
       additionalProperties: false,
@@ -1448,6 +1453,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             ...(str(args, "projectId") ? { projectId: str(args, "projectId") } : {}),
             ...(str(args, "provider") ? { provider: str(args, "provider") } : {}),
             ...(str(args, "model") ? { model: str(args, "model") } : {}),
+            ...(args["computerId"] !== undefined && args["computerId"] !== null
+              ? { computerId: args["computerId"] }
+              : {}),
           },
         })
         .pipe(Effect.flatMap(bridgeOk)),

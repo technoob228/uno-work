@@ -51,7 +51,8 @@ import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGen
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
-import { withAppLabelHeaders } from "../../appSdk/appTaskLabel.ts";
+import { withAppLabelHeaders, withGatewayHeaders } from "../../appSdk/appTaskLabel.ts";
+import { GATEWAY_THREAD_HEADER } from "../opencodeSessionEnv.ts";
 import {
   UNO_PERSONAL_PROVIDER_ID,
   UNO_PERSONAL_WARMUP_HEADERS,
@@ -726,14 +727,27 @@ export function unoSessionEnvironment(input: {
   readonly bridge: Record<string, string>;
   readonly configContent: string | undefined;
   readonly appId: string | null;
+  /**
+   * The chat's id for its gateway calls (`X-Uno-Thread`), when this chat
+   * gets its own OpenCode server. A shared server must keep one config for
+   * all chats: there the session-env plugin adds the header instead.
+   */
+  readonly threadLabel?: string | null | undefined;
   /** This chat's MCP servers (built-in uno-work + settings.mcpServers). */
   readonly mcpServers?: ReadonlyArray<McpServerEntry>;
 }): Record<string, string> {
   const withMcp = withOpenCodeMcpServers(input.configContent, input.mcpServers ?? []);
-  const labelled =
+  const appLabelled =
     input.appId === null
       ? withMcp
       : withAppLabelHeaders(withMcp, input.appId, [UNO_PROVIDER_ID, UNO_RUSSIA_PROVIDER_ID]);
+  const labelled =
+    input.threadLabel && /^[A-Za-z0-9_-]+$/.test(input.threadLabel)
+      ? withGatewayHeaders(appLabelled, { [GATEWAY_THREAD_HEADER]: input.threadLabel }, [
+          UNO_PROVIDER_ID,
+          UNO_RUSSIA_PROVIDER_ID,
+        ])
+      : appLabelled;
   return labelled === undefined || labelled === input.configContent
     ? input.bridge
     : { ...input.bridge, OPENCODE_CONFIG_CONTENT: labelled };
@@ -1122,6 +1136,7 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
       } satisfies OpenCodeSettings;
 
       const customMcpServers = yield* customMcpServersGetter;
+      const sharesOpenCodeServer = currentHarnessBudget().shareOpenCodeServer;
       const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
         instanceId,
         environment: processEnv,
@@ -1131,6 +1146,8 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
             bridge,
             configContent: catalogState.configContent,
             appId: gatewayKey.appOfThread(context.threadId),
+            // A shared server gets the chat label from its plugin instead.
+            threadLabel: sharesOpenCodeServer ? null : context.threadId,
             // Built-in uno-work (per-thread token) + the owner's own servers.
             mcpServers: sessionMcpServers({
               bridgeEnvironment: bridge,
@@ -1152,7 +1169,7 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
         eventSource: "global",
         // One uno-code server for all threads (per distinct config): a Bun
         // process is 200–400 MB, a server per chat ran 2 GB boxes out of RAM.
-        shareServer: currentHarnessBudget().shareOpenCodeServer,
+        shareServer: sharesOpenCodeServer,
         sharedMcpToken: browserBridge.sharedMcpToken,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });

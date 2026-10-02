@@ -211,6 +211,11 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
           enum: ["approval-required", "auto-accept-edits", "full-access"],
           description: "Defaults to approval-required for manager-created threads.",
         },
+        computerId: {
+          type: "string",
+          description:
+            'Computer the chat runs on (box id or "this"). Leave it out: for now only this computer is allowed.',
+        },
       },
       required: ["projectId", "title", "prompt"],
       additionalProperties: false,

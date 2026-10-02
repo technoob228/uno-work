@@ -36,6 +36,7 @@ import { Data, Effect, Option } from "effect";
 import * as crypto from "node:crypto";
 
 import { requireBridgeThread, type BridgeAuthorization } from "../browserBridge.ts";
+import { checkTargetComputer } from "../assistants/targetComputer.ts";
 import type { OrchestrationDispatchError } from "../orchestration/Errors.ts";
 import type { ProjectionRepositoryError } from "../persistence/Errors.ts";
 import {
@@ -99,6 +100,11 @@ export interface AgentThreadsDeps {
    */
   readonly getAssistantProjectAllowlist?: Effect.Effect<"all" | ReadonlyArray<string>>;
   readonly getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>;
+  /**
+   * This computer's box id (null on a laptop): the only `computerId` a new
+   * thread may name for now (assistants/targetComputer.ts). Absent = null.
+   */
+  readonly getOwnBoxId?: Effect.Effect<number | null>;
   /** Long-poll step; injectable so tests do not wait for real seconds. */
   readonly pollIntervalMs?: number;
   readonly sleep?: (ms: number) => Effect.Effect<void>;
@@ -378,6 +384,11 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         }
         const text = checkMessageText(body.text);
         if (!text.ok) return yield* fail(400, "invalid_payload", text.message);
+        const target = checkTargetComputer(
+          body.computerId,
+          deps.getOwnBoxId ? yield* deps.getOwnBoxId : null,
+        );
+        if (!target.ok) return yield* fail(403, target.code, target.message);
         const title = optionalString(body, "title", AGENT_THREAD_MAX_TITLE_CHARS);
         const provider = optionalString(body, "provider", 200);
         const model = optionalString(body, "model", 500);

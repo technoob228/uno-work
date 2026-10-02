@@ -835,6 +835,12 @@ export const ManagerCreateThreadInput = Schema.Struct({
   prompt: TrimmedNonEmptyString,
   modelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   runtimeMode: Schema.optional(RuntimeMode),
+  /**
+   * The computer the chat runs on (box id, or `"this"`). Absent = this
+   * computer. Only this computer is allowed for now (assistants MVP); the
+   * cross-machine Allow comes with the next wave.
+   */
+  computerId: Schema.optional(Schema.NullOr(Schema.Union([Schema.Number, Schema.String]))),
 });
 export type ManagerCreateThreadInput = typeof ManagerCreateThreadInput.Type;
 
@@ -1089,3 +1095,67 @@ export const ManagerAssistantTurnResult = Schema.Struct({
   delivered: NonNegativeInt,
 });
 export type ManagerAssistantTurnResult = typeof ManagerAssistantTurnResult.Type;
+
+// ===============================
+// Chats an assistant started (assistants MVP, "Memory & models")
+// ===============================
+//
+// `GET /api/manager/assistant/chats` — the chats this computer's assistant
+// started (`create_thread` / `chat_create`), with what each one cost. Uno AI
+// chats are priced by the gateway (`X-Uno-Thread` label, behind the
+// console's ASSISTANTS_MVP); chats on the person's Claude / ChatGPT plan cost
+// Uno nothing and show tokens only.
+
+export const AssistantChatStatus = Schema.Literals(["working", "waiting", "done", "failed"]);
+export type AssistantChatStatus = typeof AssistantChatStatus.Type;
+
+/**
+ * - `uno-ai` — priced by the gateway (`costUsd`, `aiHoursRequests`);
+ * - `uno-ai-unlabelled` — on Uno AI, but this harness can't label its calls
+ *   (Hermes): the cost is only in the computer's total;
+ * - `plan` — the person's own subscription (Claude, ChatGPT, Cursor);
+ * - `other` — own API keys or unknown.
+ */
+export const AssistantChatBilling = Schema.Literals([
+  "uno-ai",
+  "uno-ai-unlabelled",
+  "plan",
+  "other",
+]);
+export type AssistantChatBilling = typeof AssistantChatBilling.Type;
+
+export const AssistantChatSummary = Schema.Struct({
+  threadId: ThreadId,
+  title: Schema.String,
+  projectId: ProjectId,
+  projectTitle: Schema.String,
+  instanceId: Schema.String,
+  /** Harness display name ("Claude", "Uno", …). */
+  harness: Schema.String,
+  model: Schema.String,
+  /** Effort / reasoning option of the chat, if any. */
+  effort: Schema.NullOr(Schema.String),
+  status: AssistantChatStatus,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  billing: AssistantChatBilling,
+  /** Tokens: from the gateway for Uno AI, else from the chat's own usage reports. */
+  tokens: Schema.NullOr(NonNegativeInt),
+  /** What the wallet paid (plan credit or balance); null = not priced here. */
+  costUsd: Schema.NullOr(Schema.Number),
+  /** Gateway requests of this chat that ran on AI hours. */
+  aiHoursRequests: Schema.NullOr(NonNegativeInt),
+});
+export type AssistantChatSummary = typeof AssistantChatSummary.Type;
+
+export const AssistantChatsResult = Schema.Struct({
+  chats: Schema.Array(AssistantChatSummary),
+  /**
+   * `metered` — the gateway priced the Uno AI chats; `unavailable` — the
+   * account's console doesn't price chats yet (flag off / older backend);
+   * `no-key` — no Uno AI key on this computer; `unknown` — the gateway
+   * didn't answer.
+   */
+  gateway: Schema.Literals(["metered", "unavailable", "no-key", "unknown"]),
+});
+export type AssistantChatsResult = typeof AssistantChatsResult.Type;

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { hermesAppLabelEnvironment } from "../provider/acp/HermesAcpSupport.ts";
 import { unoSessionEnvironment } from "../provider/Drivers/UnoDriver.ts";
 import {
+  withGatewayHeaders,
   APP_LABEL_HEADER,
   gatewayBaseUrlForApp,
   makeThreadAppLabels,
@@ -73,5 +74,34 @@ describe("harness session environments", () => {
     expect(hermesAppLabelEnvironment("../x")).toEqual({});
     expect(hermesAppLabelEnvironment("digest").OPENAI_BASE_URL).toMatch(/\/v1\/apps\/digest$/);
     expect(gatewayBaseUrlForApp("https://gw/v1/", "a")).toBe("https://gw/v1/apps/a");
+  });
+});
+
+describe("chat label (X-Uno-Thread, assistants MVP)", () => {
+  const bridge = { UNO_WORK_BROWSER_URL: "http://127.0.0.1:1" };
+
+  it("a chat with its own server gets the label on the Uno gateway providers only", () => {
+    const env = unoSessionEnvironment({
+      bridge,
+      configContent: unoConfig,
+      appId: "digest",
+      threadLabel: "0b6f0a9e-3c1d-4b8e",
+    });
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT!);
+    expect(config.provider.uno.options.headers).toEqual({
+      [APP_LABEL_HEADER]: "digest",
+      "X-Uno-Thread": "0b6f0a9e-3c1d-4b8e",
+    });
+    expect(config.provider["uno-personal"].options.headers).toEqual({ "X-Warm": "1" });
+  });
+
+  it("no label (shared server) or a bad one leaves the config as it was", () => {
+    expect(
+      unoSessionEnvironment({ bridge, configContent: unoConfig, appId: null, threadLabel: null }),
+    ).toEqual(bridge);
+    expect(
+      unoSessionEnvironment({ bridge, configContent: unoConfig, appId: null, threadLabel: "a b" }),
+    ).toEqual(bridge);
+    expect(withGatewayHeaders(unoConfig, {}, ["uno"])).toBe(unoConfig);
   });
 });

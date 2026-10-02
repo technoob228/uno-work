@@ -21,6 +21,7 @@ import {
   listAssistantConversations,
   pickAssistantChatToMigrate,
 } from "@t3tools/shared/assistantChat";
+import { rebaseEdit, ROUTING_PERSON_RULE } from "@t3tools/shared/assistantMemory";
 import {
   coerceAssistantModelSelection,
   DEFAULT_ASSISTANT_MODEL_SELECTION,
@@ -159,6 +160,28 @@ harness + model + effort. Follow it, and evolve it:
   by evidence — tests, diff, checks — not by the thread's own claim). When a
   pattern emerges (a cheap model keeps handling a task type well — or keeps
   failing), update the routing table itself. This is your learning loop.
+- Rows with Source \`you\` are the person's rules: follow them, NEVER change
+  or remove them. Rows you change get Source \`learned\`.
+- The table has six columns: Task type | Harness | Model | Effort | Source |
+  Why. Keep that shape: the person edits it on your page.
+
+## "Remember …" — the person's rules and facts
+
+- "remember: UI — Opus high" / "запомни: …" about WHICH AI does WHAT:
+  add or replace that row in ROUTING.md with Source \`you\` (harness id,
+  model id, effort word), then confirm in one short line.
+- Any other "remember that …" / "запомни, что …": append to NOTES.md as
+  \`- YYYY-MM-DD <the fact> (you)\`. Lines ending in \`(you)\` are the
+  person's: keep them, never rewrite them.
+- USER.md (about the person) and SOUL.md (who you are, your rules) are
+  edited by the person on your page; read them at the start of every
+  conversation and follow them.
+
+## Where chats run
+
+- \`create_thread\` and \`chat_create\` take an optional \`computerId\`.
+  For now only this computer is allowed: leave it out. Another id answers
+  "not allowed yet" — tell the person, don't retry.
 
 ## Style & safety
 
@@ -171,23 +194,28 @@ harness + model + effort. Follow it, and evolve it:
 
 const ROUTING_TEMPLATE = `# Routing table — which harness/model for which task
 
-Starting point, hand-tuned; the assistant updates it from real outcomes.
-Cheapest thing that reliably does the job wins.
+Starting point by Uno; the person edits it on your page, you tune it from
+real outcomes. Cheapest thing that reliably does the job wins.
 
-| Task type | Harness (instanceId) | Model | Effort | Why |
-|---|---|---|---|---|
-| Architecture, planning, tricky debugging | claudeAgent | claude-opus-5-5 | high | strongest reasoning |
-| Complex multi-file implementation | claudeAgent | claude-sonnet-5 | default | reliable executor |
-| Routine implementation, small fixes, tests | codex | gpt-5.4 | reasoningEffort: low | cheap and fast |
-| Docs reading, codebase exploration, summaries | opencode | (cheap default) | — | grunt work |
-| Long-form text / prose | (best available writing model) | — | — | quality of prose over code skill |
-| Trivia, quick factual lookups | (cheapest available) | — | low | do not burn smart tokens |
+${ROUTING_PERSON_RULE}
+
+| Task type | Harness | Model | Effort | Source | Why |
+|---|---|---|---|---|---|
+| Quick questions, status | self | — | — | default | answer yourself, no chat |
+| Simple tasks, small fixes | claudeAgent | claude-sonnet-5-5 | medium | default | reliable and cheap |
+| Anything with UI | claudeAgent | claude-opus-5-5 | high | default | taste and detail |
+| Hard bugs, architecture | claudeAgent | claude-opus-5-5 | max | default | strongest reasoning |
+| Reading code, summaries | claudeAgent | claude-haiku-4-5 | low | default | grunt work |
 
 Notes:
-- Effort keys differ per harness: claude → options.effort, codex →
-  options.reasoningEffort, cursor → options.fastMode.
-- If unsure between two tiers, try the cheaper one first; escalate on failure
-  and record the outcome below.
+- Harness \`self\` = answer in this chat, do not start a thread.
+- No Claude on this computer (no subscription)? Use Uno AI instead: harness
+  \`uno\`, model \`uno/uno/smart\` where the table says Sonnet or Haiku, the
+  newest Premium Opus-class model of the Uno model list where it says Opus.
+- A model this computer doesn't offer: take the newest one of the same
+  family (opus / sonnet / haiku).
+- Effort → harness option: claude → options.effort (low, medium, high, max),
+  codex → options.reasoningEffort (low, medium, high, xhigh for max).
 
 ## Outcomes log
 
@@ -704,17 +732,34 @@ const makeManagerAssistantService = Effect.gen(function* () {
       return { content };
     });
 
+  // One writer at a time per file content check + write (the page; the
+  // assistant writes with its own tools and is reconciled through `base`).
+  const fileWriteSemaphore = yield* Semaphore.make(1);
+
   const writeWorkspaceFile: ManagerAssistantServiceShape["writeWorkspaceFile"] = ({
     projectId,
     name,
     content,
+    base,
   }) =>
-    Effect.gen(function* () {
-      const filePath = yield* resolveEditablePath(projectId, name);
-      yield* fs
-        .writeFileString(filePath, content)
-        .pipe(Effect.mapError(toAssistantError(`Failed to write ${name}.`)));
-    });
+    fileWriteSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const filePath = yield* resolveEditablePath(projectId, name);
+        let next = content;
+        let merged = false;
+        if (base !== undefined) {
+          const current = yield* fs.readFileString(filePath).pipe(Effect.orElseSucceed(() => base));
+          if (current !== base) {
+            next = rebaseEdit(base, content, current);
+            merged = true;
+          }
+        }
+        yield* fs
+          .writeFileString(filePath, next)
+          .pipe(Effect.mapError(toAssistantError(`Failed to write ${name}.`)));
+        return { content: next, merged };
+      }),
+    );
 
   const chatSemaphore = yield* Semaphore.make(1);
 
