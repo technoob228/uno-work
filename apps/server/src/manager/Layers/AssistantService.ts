@@ -315,6 +315,10 @@ const makeManagerAssistantService = Effect.gen(function* () {
         "See AGENTS.md — it is the single source of instructions for this assistant.\n",
       );
       yield* writeFileIfMissing(path.join(workspaceRoot, "NOTES.md"), "# Assistant notes\n");
+      // Assistants MVP: who it is (SOUL.md) and what it knows about the person
+      // (USER.md). "New assistant" fills them; seeded empty so the files exist.
+      yield* writeFileIfMissing(path.join(workspaceRoot, "SOUL.md"), "# Who I am\n");
+      yield* writeFileIfMissing(path.join(workspaceRoot, "USER.md"), "# About the person\n");
       yield* writeFileIfMissing(path.join(workspaceRoot, "ROUTING.md"), ROUTING_TEMPLATE);
 
       const label = assistantTokenLabel(projectId);

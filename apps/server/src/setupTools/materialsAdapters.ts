@@ -73,7 +73,8 @@ export interface GatewayModelOptions {
 /** Tried when the picked model answers with nothing usable (rate limits, empty text). */
 export const MATERIALS_FALLBACK_MODEL = "moonshotai/kimi-k2.6";
 
-async function complete(
+/** One short completion on the gateway; retries once on MATERIALS_FALLBACK_MODEL. */
+export async function complete(
   options: GatewayModelOptions,
   messages: ReadonlyArray<{ role: "system" | "user"; content: string }>,
   maxTokens: number,

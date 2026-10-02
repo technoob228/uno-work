@@ -119,10 +119,59 @@ export const isAssistantProjectId = (projectId: string): boolean =>
 /** Every assistant owns one capability token, identified by this label. */
 export const assistantTokenLabel = (projectId: string): string => `assistant:${projectId}`;
 
-/** Workspace files the settings UI may read/write for an assistant. */
-export const ASSISTANT_EDITABLE_FILES = ["AGENTS.md", "NOTES.md", "ROUTING.md"] as const;
+/**
+ * Workspace files the settings UI may read/write for an assistant. SOUL.md
+ * (who it is, its rules) and USER.md (about the person) come with "New
+ * assistant" (assistants MVP, 02.10); NOTES.md stays the running memory.
+ */
+export const ASSISTANT_EDITABLE_FILES = [
+  "AGENTS.md",
+  "NOTES.md",
+  "ROUTING.md",
+  "SOUL.md",
+  "USER.md",
+] as const;
 export const AssistantEditableFileName = Schema.Literals(ASSISTANT_EDITABLE_FILES);
 export type AssistantEditableFileName = typeof AssistantEditableFileName.Type;
+
+/** Role templates of "New assistant" (assistants MVP). */
+export const ASSISTANT_TEMPLATE_IDS = ["personal", "marketing", "security", "support"] as const;
+export const AssistantTemplateId = Schema.Literals(ASSISTANT_TEMPLATE_IDS);
+export type AssistantTemplateId = typeof AssistantTemplateId.Type;
+
+/**
+ * `POST /api/manager/assistant/draft` — Uno AI reads the person's one
+ * sentence and proposes a name, an emoji, a one-line job, a schedule if the
+ * sentence names one, and at most three questions with options.
+ */
+export const AssistantDraftInput = Schema.Struct({
+  phrase: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1000)),
+  template: Schema.optional(Schema.NullOr(AssistantTemplateId)),
+});
+export type AssistantDraftInput = typeof AssistantDraftInput.Type;
+
+export const AssistantDraftOption = Schema.Struct({
+  label: Schema.String,
+  /** 5-field cron when picking this option sets how often the assistant works. */
+  cron: Schema.optional(Schema.NullOr(Schema.String)),
+});
+export type AssistantDraftOption = typeof AssistantDraftOption.Type;
+
+export const AssistantDraftQuestion = Schema.Struct({
+  id: Schema.String,
+  text: Schema.String,
+  options: Schema.Array(AssistantDraftOption),
+});
+export type AssistantDraftQuestion = typeof AssistantDraftQuestion.Type;
+
+export const AssistantDraftResult = Schema.Struct({
+  name: Schema.String,
+  emoji: Schema.String,
+  job: Schema.String,
+  schedule: Schema.NullOr(Schema.Struct({ label: Schema.String, cron: Schema.String })),
+  questions: Schema.Array(AssistantDraftQuestion),
+});
+export type AssistantDraftResult = typeof AssistantDraftResult.Type;
 
 export const ManagerCreateAssistantInput = Schema.Struct({
   name: TrimmedNonEmptyString,
