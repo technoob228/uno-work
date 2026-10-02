@@ -45,6 +45,16 @@ describe("image generation", () => {
     ).toContain("Not on a trial.");
     expect(imageGatewayProblem(402, { error: "images_need_balance" })).toContain("balance");
     expect(imageGatewayProblem(404, null)).toContain("isn't switched on");
+    const limit = imageGatewayProblem(429, {
+      error: {
+        code: "images_daily_limit",
+        message:
+          "Daily image limit reached (20 pictures a day). It resets at 00:00 UTC, in 5 h 13 min.",
+      },
+    });
+    expect(limit).toContain("Daily image limit reached (20 pictures a day)");
+    expect(limit).toContain("don't retry");
+    expect(imageGatewayProblem(429, null)).toContain("Daily image limit reached.");
   });
 
   it("names files from the prompt and never overwrites", async () => {

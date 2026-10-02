@@ -164,10 +164,7 @@ export function AssistantPage({
   };
 
   const remove = async () => {
-    const question = [
-      `Delete ${name}?`,
-      "Its computer, its memory and its schedule are deleted. Your other assistants and computers stay as they are.",
-    ].join("\n");
+    const question = [`Delete ${name}?`, "Deleted assistants are kept for 7 days."].join("\n");
     const api = readLocalApi();
     const confirmed = api ? await api.dialogs.confirm(question) : window.confirm(question);
     if (!confirmed) return;

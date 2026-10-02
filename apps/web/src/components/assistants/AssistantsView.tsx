@@ -23,6 +23,7 @@ import {
   BotIcon,
   CheckIcon,
   ChevronRightIcon,
+  LoaderCircleIcon,
   MessageSquareIcon,
   MonitorIcon,
   PauseIcon,
@@ -50,6 +51,11 @@ import {
   saveAssistantTelegram,
   writeAssistantFile,
 } from "../../lib/managerApi";
+import {
+  keptUntilText,
+  restoreAssistantComputer,
+  type AssistantComputer,
+} from "../../lib/assistantsConsoleApi";
 import { getSlackInstall, removeSlackInstall } from "../../lib/setupApi";
 import { cn } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
@@ -65,8 +71,10 @@ import { AssistantPage } from "./AssistantPage";
 import { findTemplate } from "./assistantTemplates";
 import { NewAssistantFlow } from "./NewAssistantFlow";
 import {
+  ASSISTANT_COMPUTERS_KEY,
   useAssistantComputers,
   useAssistantList,
+  useDeletedAssistants,
   useBoxIdOfEnvironment,
   type AssistantListItem,
 } from "./useAssistants";
@@ -144,6 +152,7 @@ export function AssistantsView() {
   const model = useAssistantModel(environmentId);
   const machineLabel = useMachineLabel(environmentId);
   const assistants = useAssistantList(environmentId);
+  const deleted = useDeletedAssistants();
   const computers = useAssistantComputers();
   const activeBoxId = useBoxIdOfEnvironment(environmentId);
   const setView = (view: AssistantsRouteSearch["view"], box?: number) =>
@@ -227,7 +236,7 @@ export function AssistantsView() {
                     : "This assistant isn't on your account any more."}
                 </p>
               )
-            ) : localEntity || assistants.length > 0 ? (
+            ) : localEntity || assistants.length > 0 || deleted.length > 0 ? (
               <>
                 <div className="flex flex-wrap items-end gap-3">
                   <div className="min-w-0 flex-1">
@@ -257,6 +266,7 @@ export function AssistantsView() {
                     />
                   ) : null}
                 </div>
+                {deleted.length > 0 ? <DeletedAssistants computers={deleted} /> : null}
               </>
             ) : (
               <EmptyAssistants
@@ -293,6 +303,62 @@ function EmptyAssistants({ loading, onCreate }: { loading: boolean; onCreate: ()
         <PlusIcon className="size-4" />
         New assistant
       </Button>
+    </section>
+  );
+}
+
+/** Deleted assistants kept for 7 days by the console, with Restore. */
+function DeletedAssistants({ computers }: { computers: ReadonlyArray<AssistantComputer> }) {
+  const queryClient = useQueryClient();
+  const [restoring, setRestoring] = useState<number | null>(null);
+  const restore = async (computer: AssistantComputer) => {
+    setRestoring(computer.boxId);
+    try {
+      await restoreAssistantComputer(computer.boxId);
+      toastManager.add({ type: "success", title: `${computer.label.name} is back` });
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: `Couldn't restore ${computer.label.name}`,
+        description: errorText(cause, "Uno didn't answer. Try again in a minute."),
+      });
+    } finally {
+      setRestoring(null);
+      void queryClient.invalidateQueries({ queryKey: ASSISTANT_COMPUTERS_KEY });
+    }
+  };
+  return (
+    <section className="flex flex-col gap-2" data-testid="assistants-deleted">
+      <h2 className="text-sm font-medium text-muted-foreground">Recently deleted</h2>
+      {computers.map((computer) => (
+        <div
+          key={computer.boxId}
+          data-testid="assistants-deleted-row"
+          className="flex items-center gap-3 rounded-2xl border border-dashed border-border px-4 py-3"
+        >
+          <EmojiAvatar emoji={computer.label.emoji} className="opacity-60" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-muted-foreground">
+              {computer.label.name}
+            </span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {keptUntilText(computer.purgeAt)}
+            </span>
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={restoring !== null}
+            onClick={() => void restore(computer)}
+            data-testid="assistants-restore"
+          >
+            {restoring === computer.boxId ? (
+              <LoaderCircleIcon className="size-3.5 animate-spin" />
+            ) : null}
+            Restore
+          </Button>
+        </div>
+      ))}
     </section>
   );
 }

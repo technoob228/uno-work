@@ -1645,7 +1645,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "image_generate",
     group: "files",
     description:
-      "Make a picture from a text description with Uno AI (works in any chat). Saves it in the chat's folder under images/ and shows it in the right panel; returns the file path to use next (e.g. in a site, a document, a post). Costs a little from the person's balance per picture: make one, look, then refine — no batches.",
+      "Make a picture from a text description with Uno AI (works in any chat). Saves it in the chat's folder under images/ and shows it in the right panel; returns the file path to use next (e.g. in a site, a document, a post). Paid from the person's AI hours (or a few cents of balance when hours run out), up to 20 pictures a day: make one, look, then refine — no batches.",
     inputSchema: {
       type: "object",
       properties: {

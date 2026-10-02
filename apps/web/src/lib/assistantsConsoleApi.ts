@@ -49,6 +49,22 @@ export interface AssistantComputer {
   readonly status: string;
   readonly label: AssistantLabel;
   readonly createdAt: string | null;
+  /**
+   * Deleted and kept until `purgeAt` (7 days, console decision 02.10): its
+   * disk waits in an archive and Restore brings it back. Null = live.
+   */
+  readonly deletedAt: string | null;
+  readonly purgeAt: string | null;
+}
+
+/** Deleted assistants stay this long before they are gone for good. */
+export const ASSISTANT_KEEP_DAYS = 7;
+
+/** "Kept until Oct 9" under a deleted assistant (local date). */
+export function keptUntilText(purgeAt: string | null): string {
+  const at = purgeAt ? new Date(purgeAt) : null;
+  if (!at || Number.isNaN(at.getTime())) return `Kept for ${ASSISTANT_KEEP_DAYS} days`;
+  return `Kept until ${at.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 }
 
 /** A box of `GET /api/v1/boxes` that is an assistant's home, or null. */
@@ -71,6 +87,8 @@ export function parseAssistantComputer(raw: unknown): AssistantComputer | null {
     status,
     label,
     createdAt: str(meta?.["created_at"]) || str(r["created_at"]) || null,
+    deletedAt: str(meta?.["deleted_at"]) || null,
+    purgeAt: str(meta?.["purge_at"]) || null,
   };
 }
 
@@ -91,9 +109,19 @@ export async function listAssistantComputers(): Promise<ReadonlyArray<AssistantC
     .filter((computer): computer is AssistantComputer => computer !== null);
 }
 
+/**
+ * Delete an assistant: the console keeps it for ASSISTANT_KEEP_DAYS (its disk
+ * goes to an archive) and then deletes the computer for good.
+ */
 export async function deleteAssistantComputer(boxId: number): Promise<void> {
   if (isAssistantsDemo) return assistantsDemo.deleteComputer(boxId);
   await accountRequest("DELETE", `/api/v1/boxes/${boxId}`);
+}
+
+/** Bring a deleted assistant back (within ASSISTANT_KEEP_DAYS). */
+export async function restoreAssistantComputer(boxId: number): Promise<void> {
+  if (isAssistantsDemo) return assistantsDemo.restoreComputer(boxId);
+  await accountRequest("POST", `/api/v1/boxes/${boxId}/assistant/restore`);
 }
 
 // ── Connector permissions (contract §2) ──────────────────────────────

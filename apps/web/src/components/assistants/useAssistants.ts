@@ -94,10 +94,17 @@ function environmentForBox(
   };
 }
 
+/** Assistants the person deleted that are still kept (Restore is possible). */
+export function useDeletedAssistants(): ReadonlyArray<AssistantComputer> {
+  const all = useAssistantComputers().data ?? NO_COMPUTERS;
+  return useMemo(() => all.filter((computer) => Boolean(computer.deletedAt)), [all]);
+}
+
 export function useAssistantList(
   activeEnvironmentId: EnvironmentId | null,
 ): ReadonlyArray<AssistantListItem> {
-  const computers = useAssistantComputers().data ?? NO_COMPUTERS;
+  const all = useAssistantComputers().data ?? NO_COMPUTERS;
+  const computers = useMemo(() => all.filter((computer) => !computer.deletedAt), [all]);
   const rows = useMachineRows();
   // One word per computer ("waiting" / "working" / "idle") keeps the
   // selector shallow-comparable while threads stream.

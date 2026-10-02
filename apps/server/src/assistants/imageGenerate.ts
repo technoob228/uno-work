@@ -4,9 +4,12 @@
  * chat's folder and shown in the right panel. Works in every harness — it is
  * a tool of the daemon, not a model of the chat.
  *
- * The gateway key is the harness key (`unollm_…`), the same one chats use;
- * the account pays per picture by the one-wallet rules (the console decides,
- * a free chat key / trial computer gets 403 with a human sentence).
+ * The gateway key is the harness key (`unollm_…`), the same one chats use.
+ * The console decides how a picture is paid: from the account's AI hours
+ * (fishcode 02.10), or by the one-wallet rules when no hours are left; at
+ * most IMAGES_DAILY_LIMIT (20) pictures a day per account — then 429 with
+ * "Daily image limit reached … resets at 00:00 UTC". A free chat key / trial
+ * computer gets 403 with a human sentence.
  *
  * @module assistants/imageGenerate
  */
@@ -45,9 +48,11 @@ export function imageGatewayProblem(status: number, body: unknown): string {
     case 401:
       return "This computer has no working Uno AI key, so it can't make pictures. Tell the person.";
     case 402:
-      return `Not enough balance for a picture${said ? ` (${said})` : ""}. Tell the person; don't retry.`;
+      return `No AI hours or balance left for a picture${said ? ` (${said})` : ""}. Tell the person; don't retry.`;
     case 403:
       return `Pictures aren't available on this plan${said ? `: ${said}` : ""}. Tell the person; don't retry.`;
+    case 429:
+      return `${said ?? "Daily image limit reached."} Tell the person; don't retry until it resets.`;
     case 404:
     case 405:
       return "Picture generation isn't switched on in the Uno gateway yet. Tell the person.";

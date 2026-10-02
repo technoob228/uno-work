@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  keptUntilText,
   parseAssistantComputer,
   parseConnectorPermissions,
   parseSchedules,
@@ -22,6 +23,32 @@ describe("parseAssistantComputer", () => {
       status: "sleeping",
       label: { name: "Ana", emoji: "📣", template: "marketing" },
       createdAt: "2026-10-02",
+      deletedAt: null,
+      purgeAt: null,
+    });
+  });
+
+  it("keeps a deleted assistant with the date it is gone for good", () => {
+    expect(
+      parseAssistantComputer({
+        id: 6,
+        name: "assistant-liza",
+        status: "archived",
+        computer_role: "assistant",
+        assistant: {
+          name: "Liza",
+          emoji: "🦊",
+          template: "personal",
+          created_at: "2026-10-01T10:00:00Z",
+          deleted_at: "2026-10-02T18:00:00Z",
+          purge_at: "2026-10-09T18:00:00Z",
+        },
+      }),
+    ).toMatchObject({
+      boxId: 6,
+      status: "archived",
+      deletedAt: "2026-10-02T18:00:00Z",
+      purgeAt: "2026-10-09T18:00:00Z",
     });
   });
 
@@ -32,6 +59,14 @@ describe("parseAssistantComputer", () => {
     expect(
       parseAssistantComputer({ id: 2, status: "deleted", computer_role: "assistant" }),
     ).toBeNull();
+  });
+});
+
+describe("keptUntilText", () => {
+  it("names the day a deleted assistant is gone for good", () => {
+    expect(keptUntilText("2026-10-09T12:00:00Z")).toBe("Kept until Oct 9");
+    expect(keptUntilText(null)).toBe("Kept for 7 days");
+    expect(keptUntilText("soon")).toBe("Kept for 7 days");
   });
 });
 

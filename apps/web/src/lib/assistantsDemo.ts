@@ -43,19 +43,38 @@ function save(state: DemoState) {
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export const assistantsDemo = {
+  // Computers saved before deletion existed have no deletedAt: read as live.
   listComputers: async (): Promise<ReadonlyArray<AssistantComputer>> => load().computers,
-  addComputer: async (computer: Omit<AssistantComputer, "boxId">): Promise<number> => {
+  addComputer: async (
+    computer: Omit<AssistantComputer, "boxId" | "deletedAt" | "purgeAt">,
+  ): Promise<number> => {
     await wait(1200);
     const state = load();
     const boxId = state.nextId++;
-    state.computers.push({ ...computer, boxId });
+    state.computers.push({ ...computer, boxId, deletedAt: null, purgeAt: null });
     save(state);
     return boxId;
   },
+  // Like the console: a deleted assistant is kept for 7 days and can come back.
   deleteComputer: async (boxId: number) => {
     const state = load();
-    state.computers = state.computers.filter((computer) => computer.boxId !== boxId);
-    state.schedules = state.schedules.filter((task) => !task.name.endsWith(`#${boxId}`));
+    const now = Date.now();
+    state.computers = state.computers.map((computer) =>
+      computer.boxId === boxId && !computer.deletedAt
+        ? {
+            ...computer,
+            deletedAt: new Date(now).toISOString(),
+            purgeAt: new Date(now + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          }
+        : computer,
+    );
+    save(state);
+  },
+  restoreComputer: async (boxId: number) => {
+    const state = load();
+    state.computers = state.computers.map((computer) =>
+      computer.boxId === boxId ? { ...computer, deletedAt: null, purgeAt: null } : computer,
+    );
     save(state);
   },
   getPermissions: async (boxId: number): Promise<ConnectorPermissionsState> => {
