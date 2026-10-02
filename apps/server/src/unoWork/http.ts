@@ -17,10 +17,11 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fsp } from "node:fs";
 
-import { ThreadId, type UnoMachineApp } from "@t3tools/contracts";
+import { ThreadId, UNO_GATEWAY_BASE_URL, type UnoMachineApp } from "@t3tools/contracts";
 import { Effect, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
+import { requestGatewayImage } from "../assistants/imageGenerate.ts";
 import { BROWSER_BRIDGE_TOKEN_ENV, BrowserBridge, requireBridgeThread } from "../browserBridge.ts";
 import { ComputerResourcesService } from "../computerResources/ComputerResourcesService.ts";
 import { FilesService } from "../files/FilesService.ts";
@@ -33,6 +34,7 @@ import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSna
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { openCodeSessionEnvDir, readOpenCodeSessionEnv } from "../provider/opencodeSessionEnv.ts";
+import { UnoGatewayKey } from "../unoGatewayKey.ts";
 import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "../workspaceRegistry/UnoComputerService.ts";
 import { ConnectorsService } from "../setupTools/ConnectorsService.ts";
@@ -182,6 +184,7 @@ const makeDeps = (input: {
     const serverSettings = yield* ServerSettingsService;
     const serverConfig = yield* ServerConfig;
     const connectors = Option.getOrNull(yield* Effect.serviceOption(ConnectorsService));
+    const gatewayKey = Option.getOrNull(yield* Effect.serviceOption(UnoGatewayKey));
 
     const shell = yield* projections
       .getThreadShellById(ThreadId.make(input.threadId))
@@ -320,6 +323,30 @@ const makeDeps = (input: {
       },
       readLogTail: ({ app, lines }) =>
         Effect.promise(() => readAppLogTail(app, lines, manifestDir)),
+      ...(gatewayKey
+        ? {
+            images: {
+              generate: ({ prompt, size }) =>
+                gatewayKey.harnessKey().pipe(
+                  Effect.flatMap((apiKey) =>
+                    Effect.tryPromise({
+                      try: () =>
+                        requestGatewayImage({
+                          baseUrl: UNO_GATEWAY_BASE_URL,
+                          apiKey,
+                          prompt,
+                          ...(size ? { size } : {}),
+                        }),
+                      catch: (cause) =>
+                        new UnoWorkToolError({
+                          message: cause instanceof Error ? cause.message : String(cause),
+                        }),
+                    }),
+                  ),
+                ),
+            },
+          }
+        : {}),
       ...(connectors
         ? {
             connectors: {
