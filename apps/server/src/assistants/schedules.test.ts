@@ -189,8 +189,10 @@ describe("AssistantSchedules service (console mocked)", () => {
   };
 
   it("creates on its own box with the machine token and the assistant-turn command", async () => {
-    const { calls, run } = setup((_method, _path, body) =>
-      json(201, { id: 41, box_id: 7, ...(body as object), cron_expr: "0 10 * * 1" }),
+    const { calls: allCalls, run } = setup((method, path, body) =>
+      method === "GET" && path === "/api/v1/boxes/7"
+        ? json(200, { id: 7, computer_role: "assistant" })
+        : json(201, { id: 41, box_id: 7, ...(body as object), cron_expr: "0 10 * * 1" }),
     );
     const result = await run(
       withService((schedules) =>
@@ -204,6 +206,7 @@ describe("AssistantSchedules service (console mocked)", () => {
       ),
     );
     expect(result._tag).toBe("Success");
+    const calls = allCalls.filter((entry) => entry.path === "/api/v1/scheduled-tasks");
     expect(calls).toHaveLength(1);
     const call = calls[0]!;
     expect(call.method).toBe("POST");
@@ -214,12 +217,33 @@ describe("AssistantSchedules service (console mocked)", () => {
     expect(body.cron_expr).toBe("0 10 * * 1");
     expect(body.timezone).toBe("Europe/Berlin");
     expect(body.timeout_sec).toBe(600 + 120);
+    // An assistant's own computer goes back to sleep after the run.
+    expect(body.on_finish).toBe("hibernate");
     expect(parseAssistantTurnCommand(String(body.command))).toMatchObject({
       workspaceRoot: WORKSPACE,
       prompt: "Collect Uno mentions in X; draft a post in Notion.",
       timeoutSec: 600,
     });
     if (result._tag === "Success") expect(result.success.schedule?.scheduleId).toBe(41);
+  });
+
+  it("never puts the person's own computer to sleep after a run (assistant right here)", async () => {
+    const { calls, run } = setup((method, path, body) =>
+      method === "GET" && path === "/api/v1/boxes/7"
+        ? json(200, { id: 7, computer_role: "workspace" })
+        : json(201, { id: 42, box_id: 7, ...(body as object) }),
+    );
+    await run(
+      withService((schedules) =>
+        schedules.create(caller("assistant:assistant-home"), {
+          name: "Morning",
+          cron: "0 9 * * *",
+          prompt: "Check the inbox.",
+        }),
+      ),
+    );
+    const created = calls.find((entry) => entry.path === "/api/v1/scheduled-tasks");
+    expect((created?.body as Record<string, unknown>).on_finish).toBe("keep");
   });
 
   it("refuses to delete a task that is not one of this assistant's", async () => {

@@ -29,6 +29,7 @@ import { Context, Data, Effect, Layer, Option, Schema } from "effect";
 
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { ASSISTANT_COMPUTER_ROLE, makeOwnComputerRoleReader } from "./computerRole.ts";
 import type { ManagerCaller } from "../manager/Services/ManagerToolService.ts";
 import {
   callMachineConsole,
@@ -287,10 +288,23 @@ export class AssistantSchedules extends Context.Service<
 
 const fail = (message: string) => Effect.fail(new AssistantScheduleError({ message }));
 
+/**
+ * What the console does with the computer after a scheduled run. Only an
+ * assistant's own computer goes back to sleep; on a person's computer (an
+ * assistant that lives "right here", 0.0.106) the run must never hibernate
+ * the machine under them — economy mode puts it to sleep on idle instead.
+ */
+export function scheduleOnFinish(computerRole: string | null): "hibernate" | "keep" {
+  return computerRole === ASSISTANT_COMPUTER_ROLE ? "hibernate" : "keep";
+}
+
 export const makeAssistantSchedules = (options?: { readonly fetchImpl?: FetchLike }) =>
   Effect.gen(function* () {
     const settingsService = yield* ServerSettingsService;
     const projections = yield* ProjectionSnapshotQuery;
+    const readRole = makeOwnComputerRoleReader(
+      options?.fetchImpl !== undefined ? { fetchImpl: options.fetchImpl } : {},
+    );
 
     /** Who is asking: the machine identity and the assistant's workspace. */
     const resolveScope = (caller: ManagerCaller) =>
@@ -369,7 +383,10 @@ export const makeAssistantSchedules = (options?: { readonly fetchImpl?: FetchLik
           prompt: input.prompt,
           timeoutSec: turnTimeoutSec,
         });
+        const settings = yield* settingsService.getSettings.pipe(Effect.orElseSucceed(() => null));
+        const role = yield* Effect.promise(() => readRole(settings?.uno));
         const response = yield* call(scope.identity, "POST", SCHEDULED_TASKS_PATH, {
+          on_finish: scheduleOnFinish(role),
           name: normalizeScheduleText(input.name),
           box_id: scope.identity.boxId,
           cron_expr: input.cron,
