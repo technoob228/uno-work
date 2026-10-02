@@ -143,6 +143,7 @@ async function loadState(): Promise<UnoCloudState> {
       email: asNullableString(me["email"]),
       balance: asNumber(me["balance"]),
       llmBalance: asNumber(me["llm_balance"]),
+      ...(me["one_wallet"] === true ? { oneWallet: true } : {}),
       role: asString(me["role"]) || "user",
     },
     boxes,

@@ -203,6 +203,7 @@ const makeUnoCloudService = Effect.gen(function* () {
         email: asNullableString(accountRecord["email"]),
         balance: asNumber(accountRecord["balance"]),
         llmBalance: asNumber(accountRecord["llm_balance"]),
+        ...(accountRecord["one_wallet"] === true ? { oneWallet: true } : {}),
         role: asString(accountRecord["role"]) || "user",
       },
       boxes: boxesResult._tag === "Success" ? parseUnoBoxList(boxesResult.success) : [],

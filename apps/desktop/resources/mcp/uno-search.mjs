@@ -37,7 +37,7 @@ const TOOLS = [
   {
     name: "web_search",
     description:
-      "Search the web via Uno's billed proxy (Brave-powered). Returns a list of result snippets. Each call is billed against the user's Uno LLM balance.",
+      "Search the web via Uno's billed proxy (Brave-powered). Returns a list of result snippets. Each call is billed to the user's Uno balance.",
     inputSchema: {
       type: "object",
       properties: {
@@ -103,7 +103,7 @@ async function callWebSearch(args) {
   if (!response.ok) {
     if (response.status === 402) {
       throw new Error(
-        "Uno LLM balance is empty. Top it up via the Uno dashboard to keep using web search.",
+        "Your Uno balance is empty. Top it up in the Uno console to keep using web search.",
       );
     }
     if (response.status === 429) {

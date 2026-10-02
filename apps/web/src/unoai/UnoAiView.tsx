@@ -420,7 +420,7 @@ export function meterLine(m: AiMeter | undefined): string | null {
   if (m.mode === "free" && m.free) {
     return `Free Uno AI · ${formatAiMinutes(m.free.minutes_left)} left${premium}`;
   }
-  if (m.balance_usd >= 0.01) return `AI balance · $${m.balance_usd.toFixed(2)}${premium}`;
+  if (m.balance_usd >= 0.01) return `Balance · $${m.balance_usd.toFixed(2)}${premium}`;
   return premium ? premium.slice(3) : null;
 }
 

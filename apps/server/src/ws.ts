@@ -799,7 +799,7 @@ const makeWsRpcLayer = (
           const apiKey = settings.uno.apiKey.trim();
           if (apiKey.length === 0) {
             return yield* new UnoBillingRpcError({
-              message: "Connect your Uno account before topping up LLM credits.",
+              message: "Connect your Uno account before topping up.",
             });
           }
           const apiBaseUrl = UNO_GATEWAY_BASE_URL.replace(/\/v1\/?$/, "");
@@ -822,8 +822,7 @@ const makeWsRpcLayer = (
           if (buyResponse.ok) {
             const body = (yield* Effect.tryPromise({
               try: () => buyResponse.json(),
-              catch: () =>
-                new UnoBillingRpcError({ message: "Uno credits purchase response was invalid." }),
+              catch: () => new UnoBillingRpcError({ message: "Uno top-up response was invalid." }),
             })) as {
               readonly llm_balance?: unknown;
               readonly charged_from_balance?: unknown;
@@ -835,12 +834,14 @@ const makeWsRpcLayer = (
                 typeof body.charged_from_balance === "number" ? body.charged_from_balance : amount,
             };
           }
+          // 402: not enough on the balance, or (one wallet) the AI wallet is
+          // gone — `{"error":{"code":"one_wallet"}}`. Either way: a payment link.
           if (buyResponse.status !== 402) {
             const detail = yield* Effect.promise(() =>
               buyResponse.text().catch(() => `HTTP ${buyResponse.status}`),
             );
             return yield* new UnoBillingRpcError({
-              message: detail || `Uno credits purchase failed with HTTP ${buyResponse.status}.`,
+              message: detail || `Uno top-up failed with HTTP ${buyResponse.status}.`,
             });
           }
           const linkResponse = yield* Effect.tryPromise({

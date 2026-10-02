@@ -8,11 +8,13 @@ import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 
-/** Where AI hours are added to the plan (and credit topped up) on the console. */
+/** Where AI hours are added to the plan on the console. */
 export const UNO_BILLING_URL = `${CONSOLE_URL}/billing`;
+/** Where the one Uno balance is topped up (AI past the hours is paid from it). */
+export const UNO_TOP_UP_URL = `${UNO_BILLING_URL}?tab=payments`;
 
 /** Mirrors apps/server provider/unoBilling.ts UNO_AI_CREDIT_EMPTY_MESSAGE. */
-export const UNO_LLM_CREDITS_EMPTY_MESSAGE = `Your AI credit is empty. Top up at ${UNO_BILLING_URL}, add Uno AI hours to your plan, or switch to your own AI subscription (Claude or ChatGPT).`;
+export const UNO_LLM_CREDITS_EMPTY_MESSAGE = `Your balance is empty. Top up at ${UNO_TOP_UP_URL}, add Uno AI hours to your plan, or switch to your own AI subscription (Claude or ChatGPT).`;
 
 /**
  * Openings of the server's human billing messages (apps/server
@@ -21,8 +23,11 @@ export const UNO_LLM_CREDITS_EMPTY_MESSAGE = `Your AI credit is empty. Top up at
 const UNO_BILLING_MESSAGE_OPENINGS = [
   "Your AI hours are used up.",
   "Your plan doesn't include Uno AI hours",
+  "Your balance is empty",
+  // Old gateways: a separate AI wallet.
   "Your AI credit is empty.",
   "Your premium credit is used up",
+  "Your premium credit for this month is used up",
 ];
 
 /**
@@ -92,7 +97,7 @@ export const UnoBillingTopUpBanner = memo(function UnoBillingTopUpBanner({
         setDismissedKey(bannerKey);
         toastManager.add({
           type: "success",
-          title: "Uno LLM credits topped up.",
+          title: "Balance topped up.",
         });
         return;
       }

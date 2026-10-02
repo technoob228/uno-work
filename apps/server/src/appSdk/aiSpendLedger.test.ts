@@ -23,6 +23,9 @@ describe("parseGatewayCredits", () => {
     expect(parseGatewayCredits({ llm_balance: 12.5, total_spent: 3.2, total_requests: 9 })).toEqual(
       { balanceUsd: 12.5, totalSpentUsd: 3.2 },
     );
+    expect(
+      parseGatewayCredits({ llm_balance: 30, total_spent: 1, one_wallet: true, balance: 42.5 }),
+    ).toEqual({ balanceUsd: 30, totalSpentUsd: 1, oneWallet: true, mainBalanceUsd: 42.5 });
     expect(parseGatewayCredits({ llm_balance: 1 })).toBeNull();
     expect(parseGatewayCredits({ error: "x" })).toBeNull();
     expect(parseGatewayCredits(null)).toBeNull();

@@ -90,7 +90,10 @@ export function buildSimpleModelChoices<E extends SimplePickerEntry>(input: {
         driverKind: gateway.driverKind,
         model: model.slug,
         label: displayName(model),
-        description: group === "included" ? "Included in your AI hours" : "From premium credit",
+        description:
+          group === "included"
+            ? "Included in your AI hours"
+            : "From premium credit, then your balance",
       };
       (group === "included" ? included : premium).push(choice);
     }

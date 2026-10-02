@@ -324,15 +324,23 @@ export function UnoGatewayBalance({ apiKey }: { readonly apiKey: string }) {
       if (!response.ok) {
         throw new Error(`credits request failed: ${response.status}`);
       }
-      return (await response.json()) as { readonly llm_balance?: number };
+      return (await response.json()) as {
+        readonly llm_balance?: number;
+        /** One wallet: AI is paid from `balance`; `llm_balance` = premium credit only. */
+        readonly one_wallet?: boolean;
+        readonly balance?: number;
+      };
     },
     staleTime: 60_000,
     retry: 1,
   });
+  const oneWallet = query.data?.one_wallet === true;
 
   const topUpLink = (
     <a
-      href="https://console.uno4.dev/llm"
+      href={
+        oneWallet ? "https://console.uno4.dev/billing?tab=payments" : "https://console.uno4.dev/llm"
+      }
       target="_blank"
       rel="noopener noreferrer"
       className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
@@ -349,6 +357,24 @@ export function UnoGatewayBalance({ apiKey }: { readonly apiKey: string }) {
       ? "Unlimited AI"
       : `${formatAiMinutes(hours.leftMinutes)} left · never expire`
     : null;
+  if (oneWallet && typeof query.data?.balance === "number") {
+    return (
+      <span className="flex items-center gap-2">
+        {hoursLabel ? (
+          <span className="text-sm font-semibold tabular-nums">{hoursLabel}</span>
+        ) : null}
+        <span
+          className={cn(
+            "tabular-nums",
+            hoursLabel ? "text-xs text-muted-foreground" : "text-sm font-semibold",
+          )}
+        >
+          Balance ${query.data.balance.toFixed(2)}
+        </span>
+        {topUpLink}
+      </span>
+    );
+  }
   if (query.isError || typeof query.data?.llm_balance !== "number") {
     return hoursLabel ? (
       <span className="flex items-center gap-2">

@@ -825,7 +825,13 @@ export function WorkspaceSettings() {
               title="Uno account"
               description={
                 cloud?.connected
-                  ? `${cloud.account?.username ?? "account"}${cloud.account?.email ? ` · ${cloud.account.email}` : ""} · balance $${(cloud.account?.balance ?? 0).toFixed(2)} · LLM $${(cloud.account?.llmBalance ?? 0).toFixed(2)}`
+                  ? `${cloud.account?.username ?? "account"}${cloud.account?.email ? ` · ${cloud.account.email}` : ""} · balance $${(cloud.account?.balance ?? 0).toFixed(2)}${
+                      cloud.account?.oneWallet
+                        ? cloud.account.llmBalance > 0
+                          ? ` · premium credit $${cloud.account.llmBalance.toFixed(2)}`
+                          : ""
+                        : ` · LLM $${(cloud.account?.llmBalance ?? 0).toFixed(2)}`
+                    }`
                   : cloudQuery.isPending
                     ? "Asking Uno who this account is…"
                     : "Not linked. Add your Uno API key in Settings → Machine → Account to see this account's computers here."

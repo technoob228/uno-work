@@ -142,7 +142,10 @@ export const UnoAccount = Schema.Struct({
   username: Schema.String,
   email: Schema.NullOr(Schema.String),
   balance: Schema.Number,
+  /** With one wallet: the plan's premium credit only. */
   llmBalance: Schema.Number,
+  /** `/auth/me` `one_wallet`: AI is paid from `balance` (absent on older backends). */
+  oneWallet: Schema.optionalKey(Schema.Boolean),
   role: Schema.String,
 });
 export type UnoAccount = typeof UnoAccount.Type;

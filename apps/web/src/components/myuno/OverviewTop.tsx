@@ -96,7 +96,7 @@ export function PlanLine({
             </>
           ) : null}
         </span>
-      ) : (
+      ) : balance?.oneWallet ? null : (
         <span className="text-xs text-muted-foreground">
           Uno AI credits{" "}
           <span className="font-medium text-foreground tabular-nums">

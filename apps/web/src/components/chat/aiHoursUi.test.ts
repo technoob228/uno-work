@@ -235,6 +235,21 @@ describe("top-up banner", () => {
     expect(unoBillingBannerText(null)).toBe(UNO_LLM_CREDITS_EMPTY_MESSAGE);
   });
 
+  it("shows the one-wallet balance sentences as they are", () => {
+    expect(UNO_LLM_CREDITS_EMPTY_MESSAGE).toContain(
+      "https://console.uno4.dev/billing?tab=payments",
+    );
+    for (const message of [
+      "Your balance is empty. Top up at https://console.uno4.dev/billing?tab=payments, add Uno AI hours to your plan, or switch to your own AI subscription (Claude or ChatGPT).",
+      "Your balance is empty, and this model is paid per token. Pick the Smart model (it runs on your AI hours), top up at https://console.uno4.dev/billing?tab=payments, or switch to your own AI subscription (Claude or ChatGPT).",
+      "Your plan doesn't include Uno AI hours, and your balance is empty. Add Uno AI to your plan or top up at https://console.uno4.dev/billing?tab=payments, or switch to your own AI subscription (Claude or ChatGPT).",
+      "Your AI hours are used up. New hours arrive on Oct 24, 2026; to keep going now, top up your balance at https://console.uno4.dev/billing?tab=payments or switch to your own AI subscription (Claude or ChatGPT).",
+      'Your premium credit for this month is used up. Switch to Smart — it is included in your AI hours; new premium credit arrives on Nov 1. To keep using premium models from your balance, turn on "Continue premium from balance".',
+    ]) {
+      expect(unoBillingBannerText(message)).toBe(message);
+    }
+  });
+
   it("shows the premium-limit sentence the server passed through", () => {
     const premiumLimit =
       "Premium credit is used up and no AI hours are left for Smart. Manage premium credit at https://console.uno4.dev/billing.";

@@ -178,8 +178,8 @@ export function EnvironmentGeneralSettings({
             title="Balance"
             description={
               gatewayAiHours
-                ? "Uno AI hours: Smart and Fast are unlimited inside them, web search too. Premium models are paid per token from premium credit."
-                : "Uno LLM Gateway credits. Each model call and web search is billed from this balance."
+                ? "Uno AI hours: Smart and Fast are unlimited inside them, web search too. Premium models are paid per token from premium credit, then your balance."
+                : "AI past your hours and premium past the plan's credit are paid from your Uno balance."
             }
             control={<UnoGatewayBalance apiKey={unoApiKey} />}
           />
@@ -241,7 +241,7 @@ export function EnvironmentGeneralSettings({
           title="Web search"
           description={
             unoApiKey.length > 0
-              ? "Enabled — the Uno agent gets a `web_search` tool (Brave-powered). Each query is billed against your Uno LLM balance."
+              ? "Enabled — the Uno agent gets a `web_search` tool (Brave-powered). Each query past your AI hours is paid from your Uno balance."
               : "Add an API key above to let the Uno agent search the web through Uno's billed proxy."
           }
           control={

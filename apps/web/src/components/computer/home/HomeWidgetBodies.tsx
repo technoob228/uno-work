@@ -442,7 +442,7 @@ export function AiHoursBody({
 }
 
 export function AiSpendWidget({ environmentId }: { environmentId: EnvironmentId | null }) {
-  const { spend, creditsUsd } = useAiSpend(environmentId);
+  const { spend, creditsUsd, oneWallet, balanceUsd } = useAiSpend(environmentId);
   const hours = useAiHours(environmentId);
   const clock = useMinuteClock();
   if (hours) {
@@ -474,7 +474,13 @@ export function AiSpendWidget({ environmentId }: { environmentId: EnvironmentId 
       </div>
       {seenDays > 1 ? <SpendBars days={days} /> : null}
       <div className="text-xs text-muted-foreground">
-        {creditsUsd !== null ? `${formatUsdShort(creditsUsd)} of credits left` : null}
+        {oneWallet
+          ? balanceUsd !== null
+            ? `Balance ${formatUsdShort(balanceUsd)}`
+            : null
+          : creditsUsd !== null
+            ? `${formatUsdShort(creditsUsd)} of credits left`
+            : null}
         {status !== "ok" ? (
           <span className="block">Can't read Uno AI spend just now.</span>
         ) : seenDays <= 1 ? (

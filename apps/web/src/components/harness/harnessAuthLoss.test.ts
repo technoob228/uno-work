@@ -157,6 +157,8 @@ describe("detectHarnessAuthLoss — billing is not a sign-in", () => {
   it.each([
     "402 Payment Required",
     "Uno LLM credits are empty.",
+    "Your AI credit is empty. Top up at https://console.uno4.dev/billing.",
+    "Your balance is empty. Top up at https://console.uno4.dev/billing?tab=payments.",
     "insufficient_balance",
     "workspace_owner_credits_depleted (401)",
   ])("%s", (text) => {

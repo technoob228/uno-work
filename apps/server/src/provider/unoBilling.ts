@@ -11,18 +11,24 @@ import type { OrchestrationSessionErrorClass, ProviderSessionErrorClass } from "
  */
 
 export const UNO_BILLING_URL = "https://console.uno4.dev/billing";
+/** Where the one Uno balance is topped up (AI past the hours is paid from it). */
+export const UNO_TOP_UP_URL = `${UNO_BILLING_URL}?tab=payments`;
 const OWN_SUBSCRIPTION = "switch to your own AI subscription (Claude or ChatGPT)";
 
-/** No AI hours in play (or hours unknown) and the AI credit is spent. */
-export const UNO_AI_CREDIT_EMPTY_MESSAGE = `Your AI credit is empty. Top up at ${UNO_BILLING_URL}, add Uno AI hours to your plan, or ${OWN_SUBSCRIPTION}.`;
+/**
+ * No AI hours in play (or hours unknown) and the balance is spent. Old
+ * gateways (a separate AI wallet) said "Your AI credit is empty." — still
+ * recognised below.
+ */
+export const UNO_AI_CREDIT_EMPTY_MESSAGE = `Your balance is empty. Top up at ${UNO_TOP_UP_URL}, add Uno AI hours to your plan, or ${OWN_SUBSCRIPTION}.`;
 /** Kept under its old name: the generic "out of credit" message. */
 export const UNO_LLM_CREDITS_EMPTY_MESSAGE = UNO_AI_CREDIT_EMPTY_MESSAGE;
-/** The gateway's `ai_not_included`: the plan has no Uno AI hours and no credit is left. */
-export const UNO_AI_NOT_INCLUDED_MESSAGE = `Your plan doesn't include Uno AI hours, and your AI credit is empty. Add Uno AI to your plan or top up at ${UNO_BILLING_URL}, or ${OWN_SUBSCRIPTION}.`;
+/** The gateway's `ai_not_included`: the plan has no Uno AI hours and the balance is empty. */
+export const UNO_AI_NOT_INCLUDED_MESSAGE = `Your plan doesn't include Uno AI hours, and your balance is empty. Add Uno AI to your plan or top up at ${UNO_TOP_UP_URL}, or ${OWN_SUBSCRIPTION}.`;
 
 /** Start of the out-of-hours message; the interface recognises it by this. */
 export const UNO_AI_HOURS_EMPTY_PREFIX = "Your AI hours are used up.";
-const UNO_AI_HOURS_TOP_UP_TAIL = `To keep going now, add AI credit at ${UNO_BILLING_URL} or ${OWN_SUBSCRIPTION}.`;
+const UNO_AI_HOURS_TOP_UP_TAIL = `To keep going now, top up your balance at ${UNO_TOP_UP_URL} or ${OWN_SUBSCRIPTION}.`;
 
 /**
  * The gateway's 402 `premium_limit_reached`: the premium credit is used up,
@@ -71,7 +77,7 @@ function formatRenewDate(raw: string): string {
 
 /**
  * "Your AI hours are used up. New hours arrive on Oct 24. To keep going now,
- * add AI credit at … or switch to your own AI subscription …" — the date from
+ * top up your balance at … or switch to your own AI subscription …" — the date from
  * the gateway's own message when it has one.
  */
 export function unoAiHoursEmptyMessage(detail: string): string {
@@ -95,6 +101,7 @@ export function isUnoBillingErrorDetail(detail: string | null | undefined): bool
     normalized.includes("llm balance") ||
     normalized.includes("llm credits") ||
     normalized.includes("ai credit is empty") ||
+    normalized.includes("your balance is empty") ||
     normalized.includes("credits depleted") ||
     normalized.includes("workspace_owner_credits_depleted") ||
     normalized.includes("workspace_member_credits_depleted")
@@ -236,7 +243,7 @@ export function isUnoBillingFailureReply(text: string): boolean {
     return true;
   }
   return (
-    /^(?:your ai hours are used up|your plan doesn.t include uno ai hours|your ai credit is empty|your premium credit is used up)/i.test(
+    /^(?:your ai hours are used up|your plan doesn.t include uno ai hours|your ai credit is empty|your balance is empty|your premium credit (?:for this month )?is used up)/i.test(
       trimmed,
     ) && /console\.uno4\.dev\/billing/i.test(trimmed)
   );
@@ -250,7 +257,7 @@ export function isUnoBillingFailureReply(text: string): boolean {
  */
 export function isUnoGatewayBillingDetail(detail: string | null | undefined): boolean {
   if (!detail) return false;
-  return /premium_limit_reached|ai_hours_empty|ai_not_included|insufficient_credits|console\.uno4\.dev\/billing|your ai hours are used up|your premium credit is used up/i.test(
+  return /premium_limit_reached|ai_hours_empty|ai_not_included|insufficient_credits|console\.uno4\.dev\/billing|your ai hours are used up|your premium credit (?:for this month )?is used up/i.test(
     detail,
   );
 }

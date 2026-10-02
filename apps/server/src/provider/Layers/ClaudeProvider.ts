@@ -883,7 +883,7 @@ export interface ClaudeUnoGateway {
 
 /** Shown on the Claude card while it runs on Uno AI. */
 export const CLAUDE_UNO_AI_MESSAGE =
-  "Runs on your Uno AI premium credit. Sign in with Claude to use your own subscription instead.";
+  "Runs on your Uno AI premium credit, then your balance. Sign in with Claude to use your own subscription instead.";
 
 /** Env names that mean "this Claude has credentials of its own". */
 const CLAUDE_OWN_CREDENTIAL_ENV = [
