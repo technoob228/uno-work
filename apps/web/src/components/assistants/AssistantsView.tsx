@@ -1,10 +1,12 @@
 /**
  * Assistants — every assistant on the account.
  *
- * Since the assistants MVP (02.10) each assistant has its own Work computer
- * (role `assistant`): "New assistant" is one sentence → up to three questions
- * → "Will do / Won't do" → Create (`NewAssistantFlow.tsx`), and its page
- * (`AssistantPage.tsx`) has access, schedule, memory, channels and chat.
+ * "New assistant" is one sentence → up to three questions → "Will do / Won't
+ * do" → Create (`NewAssistantFlow.tsx`). By default (decision 02.10 evening)
+ * it lives on THIS computer, next to the others (`LocalAssistantPage.tsx`);
+ * "Give it its own computer" makes it a Work computer of role `assistant`
+ * (`AssistantPage.tsx`). Both pages have access, schedule, memory, models,
+ * channels and chat.
  *
  * The assistant of the computer the app is looking at (the 01.10 one: the
  * computer's Hermes assistant, see `assistantEntity.ts`) stays in the list
@@ -56,6 +58,8 @@ import {
   restoreAssistantComputer,
   type AssistantComputer,
 } from "../../lib/assistantsConsoleApi";
+import { restoreLocalAssistant } from "../../lib/managerApi";
+import type { ManagerAssistantSummary, ManagerDeletedAssistant } from "@t3tools/contracts";
 import { getSlackInstall, removeSlackInstall } from "../../lib/setupApi";
 import { cn } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
@@ -69,13 +73,17 @@ import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 import { EmojiAvatar, StatusPill } from "./AssistantBits";
 import { AssistantPage } from "./AssistantPage";
 import { findTemplate } from "./assistantTemplates";
+import { LocalAssistantPage } from "./LocalAssistantPage";
 import { NewAssistantFlow } from "./NewAssistantFlow";
 import {
   ASSISTANT_COMPUTERS_KEY,
+  LOCAL_ASSISTANTS_KEY,
   useAssistantComputers,
   useAssistantList,
   useDeletedAssistants,
+  useDeletedLocalAssistants,
   useBoxIdOfEnvironment,
+  useLocalAssistants,
   type AssistantListItem,
 } from "./useAssistants";
 import { Button } from "../ui/button";
@@ -101,12 +109,14 @@ import {
 
 export interface AssistantsRouteSearch {
   /**
-   * "new" — New assistant (its own computer); "here" — the two-step setup of
-   * this computer's assistant; "card" — that assistant's card; "assistant" —
-   * the page of the assistant on computer `box`.
+   * "new" — New assistant; "here" — the two-step setup of this computer's
+   * default assistant; "card" — that assistant's card; "assistant" — the
+   * page of the assistant on its own computer `box`; "local" — the page of
+   * assistant `project` that lives on this computer.
    */
-  readonly view?: "new" | "here" | "card" | "assistant";
+  readonly view?: "new" | "here" | "card" | "assistant" | "local";
   readonly box?: number;
+  readonly project?: string;
 }
 
 const SUMMARY_KEY = ["uno-assistant", "summary"] as const;
@@ -155,10 +165,19 @@ export function AssistantsView() {
   const deleted = useDeletedAssistants();
   const computers = useAssistantComputers();
   const activeBoxId = useBoxIdOfEnvironment(environmentId);
-  const setView = (view: AssistantsRouteSearch["view"], box?: number) =>
+  const localAssistants = useLocalAssistants(environmentId);
+  const deletedLocal = useDeletedLocalAssistants(environmentId).data ?? [];
+  const local = localAssistants.data ?? [];
+  const setView = (view: AssistantsRouteSearch["view"], box?: number, project?: string) =>
     void navigate({
       to: "/assistants",
-      search: view ? { view, ...(box !== undefined ? { box } : {}) } : {},
+      search: view
+        ? {
+            view,
+            ...(box !== undefined ? { box } : {}),
+            ...(project !== undefined ? { project } : {}),
+          }
+        : {},
     });
 
   // The assistant of the computer the app is looking at — unless that
@@ -174,7 +193,12 @@ export function AssistantsView() {
     search.view === "assistant"
       ? (assistants.find((item) => item.computer.boxId === search.box) ?? null)
       : null;
-  const inside = creating || settingUpHere || showCard || search.view === "assistant";
+  const localItem =
+    search.view === "local"
+      ? (local.find((item) => item.projectId === search.project) ?? null)
+      : null;
+  const inside =
+    creating || settingUpHere || showCard || search.view === "assistant" || search.view === "local";
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -203,8 +227,10 @@ export function AssistantsView() {
             ) : creating ? (
               <NewAssistantFlow
                 environmentId={environmentId}
+                boxId={activeBoxId}
+                machineLabel={machineLabel}
                 onOpen={(box) => setView("assistant", box)}
-                onSetUpHere={() => setView("here")}
+                onOpenHere={(project) => setView("local", undefined, project)}
               />
             ) : settingUpHere && model.loading ? null : settingUpHere ? (
               <CreateAssistant
@@ -221,6 +247,24 @@ export function AssistantsView() {
                 model={model}
                 onDeleted={() => setView(undefined)}
               />
+            ) : search.view === "local" ? (
+              localItem ? (
+                <LocalAssistantPage
+                  key={localItem.projectId}
+                  summary={localItem}
+                  environmentId={environmentId}
+                  machineLabel={machineLabel}
+                  boxId={activeBoxId}
+                  onDeleted={() => setView(undefined)}
+                  onMoved={(box) => setView("assistant", box)}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {localAssistants.isLoading
+                    ? "Loading…"
+                    : "This assistant isn't on this computer any more."}
+                </p>
+              )
             ) : search.view === "assistant" ? (
               pageItem ? (
                 <AssistantPage
@@ -236,13 +280,18 @@ export function AssistantsView() {
                     : "This assistant isn't on your account any more."}
                 </p>
               )
-            ) : localEntity || assistants.length > 0 || deleted.length > 0 ? (
+            ) : localEntity ||
+              assistants.length > 0 ||
+              local.length > 0 ||
+              deleted.length > 0 ||
+              deletedLocal.length > 0 ? (
               <>
                 <div className="flex flex-wrap items-end gap-3">
                   <div className="min-w-0 flex-1">
                     <h1 className="text-xl font-semibold tracking-tight">Assistants</h1>
                     <p className="text-sm text-muted-foreground">
-                      Each one has its own computer and opens only the apps you allow.
+                      They live on this computer and open only the apps you allow. Give one its own
+                      computer when it reads other people's emails or sites.
                     </p>
                   </div>
                   <Button onClick={() => setView("new")} data-testid="assistants-new">
@@ -265,8 +314,22 @@ export function AssistantsView() {
                       onOpen={() => setView("card")}
                     />
                   ) : null}
+                  {local.map((item) => (
+                    <LocalAssistantRow
+                      key={item.projectId}
+                      summary={item}
+                      machineLabel={machineLabel}
+                      onOpen={() => setView("local", undefined, item.projectId)}
+                    />
+                  ))}
                 </div>
-                {deleted.length > 0 ? <DeletedAssistants computers={deleted} /> : null}
+                {deleted.length > 0 || deletedLocal.length > 0 ? (
+                  <DeletedAssistants
+                    computers={deleted}
+                    local={deletedLocal}
+                    environmentId={environmentId}
+                  />
+                ) : null}
               </>
             ) : (
               <EmptyAssistants
@@ -296,7 +359,8 @@ function EmptyAssistants({ loading, onCreate }: { loading: boolean; onCreate: ()
         </h1>
         <p className="text-sm text-muted-foreground">
           Describe it in one sentence: it answers your customers, keeps your inbox in order or
-          prepares posts. Each one gets its own computer and opens only the apps you allow.
+          prepares posts. It lives on this computer, or on its own, and opens only the apps you
+          allow.
         </p>
       </div>
       <Button onClick={onCreate} disabled={loading} data-testid="assistants-empty-create">
@@ -307,10 +371,34 @@ function EmptyAssistants({ loading, onCreate }: { loading: boolean; onCreate: ()
   );
 }
 
-/** Deleted assistants kept for 7 days by the console, with Restore. */
-function DeletedAssistants({ computers }: { computers: ReadonlyArray<AssistantComputer> }) {
+/** Deleted assistants kept for 7 days (by the console, or by this computer), with Restore. */
+function DeletedAssistants({
+  computers,
+  local,
+  environmentId,
+}: {
+  computers: ReadonlyArray<AssistantComputer>;
+  local: ReadonlyArray<ManagerDeletedAssistant>;
+  environmentId: EnvironmentId;
+}) {
   const queryClient = useQueryClient();
-  const [restoring, setRestoring] = useState<number | null>(null);
+  const [restoring, setRestoring] = useState<number | string | null>(null);
+  const restoreHere = async (assistant: ManagerDeletedAssistant) => {
+    setRestoring(assistant.projectId);
+    try {
+      await restoreLocalAssistant({ environmentId, projectId: assistant.projectId });
+      toastManager.add({ type: "success", title: `${assistant.title} is back` });
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: `Couldn't restore ${assistant.title}`,
+        description: errorText(cause, "This computer didn't answer."),
+      });
+    } finally {
+      setRestoring(null);
+      void queryClient.invalidateQueries({ queryKey: LOCAL_ASSISTANTS_KEY });
+    }
+  };
   const restore = async (computer: AssistantComputer) => {
     setRestoring(computer.boxId);
     try {
@@ -359,7 +447,74 @@ function DeletedAssistants({ computers }: { computers: ReadonlyArray<AssistantCo
           </Button>
         </div>
       ))}
+      {local.map((assistant) => (
+        <div
+          key={assistant.projectId}
+          data-testid="assistants-deleted-local-row"
+          className="flex items-center gap-3 rounded-2xl border border-dashed border-border px-4 py-3"
+        >
+          <EmojiAvatar emoji={assistant.emoji ?? "🤖"} className="opacity-60" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-muted-foreground">
+              {assistant.title}
+            </span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {keptUntilText(assistant.keepUntil)}
+            </span>
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={restoring !== null}
+            onClick={() => void restoreHere(assistant)}
+            data-testid="assistants-restore-local"
+          >
+            {restoring === assistant.projectId ? (
+              <LoaderCircleIcon className="size-3.5 animate-spin" />
+            ) : null}
+            Restore
+          </Button>
+        </div>
+      ))}
     </section>
+  );
+}
+
+function LocalAssistantRow({
+  summary,
+  machineLabel,
+  onOpen,
+}: {
+  summary: ManagerAssistantSummary;
+  machineLabel: string;
+  onOpen: () => void;
+}) {
+  const template = findTemplate(summary.profile?.template ?? null);
+  const channels = [
+    summary.telegram.configured && summary.telegram.allowedChatIds.length > 0 ? "Telegram" : null,
+    summary.slack.configured && summary.slack.allowedChannelIds.length > 0 ? "Slack" : null,
+  ].filter((entry): entry is string => entry !== null);
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      data-testid="assistants-local-row"
+      className="flex w-full cursor-pointer items-center gap-3 rounded-2xl border border-border/70 bg-card/40 px-4 py-3.5 text-left transition-colors hover:bg-accent/40"
+    >
+      <EmojiAvatar emoji={summary.profile?.emoji ?? template?.emoji ?? "🤖"} />
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="truncate text-sm font-semibold">{summary.title}</span>
+          {template ? (
+            <span className="text-xs text-muted-foreground">{template.title}</span>
+          ) : null}
+        </span>
+        <span className="block truncate text-xs text-muted-foreground">
+          {channels.length > 0 ? `${channels.join(" · ")} · ` : ""}On this computer · {machineLabel}
+        </span>
+      </span>
+      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+    </button>
   );
 }
 

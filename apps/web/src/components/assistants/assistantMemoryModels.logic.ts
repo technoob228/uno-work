@@ -97,6 +97,20 @@ export function chatCostText(
   }
 }
 
+/**
+ * Under the token count, when it isn't Uno's money: a chat on the person's
+ * Claude / ChatGPT subscription is "in your … plan" (decision 02.10: no $).
+ */
+export function chatTokensNote(
+  chat: Pick<AssistantChatSummary, "billing" | "instanceId" | "harness">,
+): string | null {
+  if (chat.billing !== "plan") return null;
+  const harness = `${chat.instanceId} ${chat.harness}`.toLowerCase();
+  if (harness.includes("codex") || harness.includes("chatgpt")) return "in your ChatGPT plan";
+  if (harness.includes("cursor")) return "in your Cursor plan";
+  return "in your Claude plan";
+}
+
 const WEEK_MS = 7 * 24 * 60 * 60 * 1_000;
 
 export function weekTotals(chats: ReadonlyArray<AssistantChatSummary>, now: number) {

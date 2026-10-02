@@ -233,6 +233,12 @@ export async function createAssistantSchedule(input: {
   readonly name: string;
   readonly cron: string;
   readonly command: string;
+  /**
+   * After the run: `hibernate` (an assistant's own computer goes back to
+   * sleep) or `keep` — an assistant on the person's own computer must never
+   * put that computer to sleep under them; economy mode does it on idle.
+   */
+  readonly onFinish?: "hibernate" | "keep";
 }): Promise<void> {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   if (isAssistantsDemo) return assistantsDemo.createSchedule({ ...input, timezone });
@@ -242,7 +248,6 @@ export async function createAssistantSchedule(input: {
     cron_expr: input.cron,
     timezone,
     command: input.command,
-    // Default policy: the computer goes back to sleep after the run.
-    on_finish: "hibernate",
+    on_finish: input.onFinish ?? "hibernate",
   });
 }

@@ -83,7 +83,11 @@ export function TelegramWizard(props: {
   const telegram = summary.telegram;
   const navigate = useNavigate();
   const supportsPairing = useEnvironmentSupportsAssistantConversations(environmentId);
-  const mainChat = useAssistantChat().chat;
+  // The assistant this wizard sets up (several per computer since 0.0.106);
+  // only the computer's default one has the pinned main conversation.
+  const projectId = summary.projectId;
+  const defaultChat = useAssistantChat().chat;
+  const mainChat = projectId === ASSISTANT_PROJECT_ID ? defaultChat : null;
   const [linkingAnother, setLinkingAnother] = useState(false);
   const step = telegramWizardStep(telegram, { linkingAnother });
   const status = describeTelegramStatus(telegram);
@@ -99,8 +103,8 @@ export function TelegramWizard(props: {
   const [linkedCount, setLinkedCount] = useState(telegram.allowedChatIds.length);
 
   const bindings = useQuery({
-    queryKey: ["uno-assistant", "telegram-bindings", environmentId],
-    queryFn: () => listConnectorBindings({ environmentId, projectId: ASSISTANT_PROJECT_ID }),
+    queryKey: ["uno-assistant", "telegram-bindings", environmentId, projectId],
+    queryFn: () => listConnectorBindings({ environmentId, projectId }),
     enabled: step === "done",
     retry: false,
   });
@@ -111,13 +115,13 @@ export function TelegramWizard(props: {
     try {
       const pairing = await startTelegramPairing({
         environmentId,
-        projectId: ASSISTANT_PROJECT_ID,
+        projectId,
       });
       setCode(pairing.code);
     } catch (cause) {
       setError(errorText(cause, "Couldn't make a link."));
     }
-  }, [environmentId, supportsPairing]);
+  }, [environmentId, projectId, supportsPairing]);
   useEffect(() => {
     if (step === "link" && code === null) void requestCode();
   }, [code, requestCode, step]);
@@ -135,7 +139,7 @@ export function TelegramWizard(props: {
     try {
       await saveAssistantTelegram({
         environmentId,
-        projectId: ASSISTANT_PROJECT_ID,
+        projectId,
         ...(input.botToken ? { botToken: input.botToken } : {}),
         allowedChatIds: input.allowedChatIds ?? telegram.allowedChatIds,
         enabled: true,
@@ -174,7 +178,7 @@ export function TelegramWizard(props: {
         environmentId,
         kind: "telegram",
         chatId: id,
-        connectorProjectId: ASSISTANT_PROJECT_ID,
+        connectorProjectId: projectId,
         target: { kind: "thread", threadId: mainChat.id },
       }).catch(() => undefined);
     }
@@ -188,7 +192,7 @@ export function TelegramWizard(props: {
         environmentId,
         kind: "telegram",
         chatId,
-        connectorProjectId: ASSISTANT_PROJECT_ID,
+        connectorProjectId: projectId,
         target: { kind: "thread", threadId: mainChat.id },
       });
       void bindings.refetch();
@@ -203,7 +207,7 @@ export function TelegramWizard(props: {
     try {
       const { results } = await sendTelegramTestMessage({
         environmentId,
-        projectId: ASSISTANT_PROJECT_ID,
+        projectId,
       });
       setTestResult(describeTestResults(results));
     } catch (cause) {

@@ -23,7 +23,16 @@ import {
   type AssistantComputer,
 } from "../../lib/assistantsConsoleApi";
 import { assistantsDemo, isAssistantsDemo } from "../../lib/assistantsDemo";
-import { ensureAssistantChat, readAssistantFile, writeAssistantFile } from "../../lib/managerApi";
+import {
+  createAssistant as createAssistantOnComputer,
+  ensureAssistantChat,
+  getAssistant,
+  listAssistants,
+  listDeletedLocalAssistants,
+  putAssistantApps,
+  readAssistantFile,
+  writeAssistantFile,
+} from "../../lib/managerApi";
 import { getServerConfig } from "../../rpc/serverState";
 import { useStore } from "../../store";
 import { createUnoBoxAndConnect } from "../../unoBoxCreation";
@@ -35,7 +44,12 @@ import {
   type AssistantPlan,
   type AssistantStatus,
 } from "./assistantTemplates";
-import type { CreateAssistantDeps, CreateStage } from "./createAssistant";
+import type {
+  CreateAssistantDeps,
+  CreateStage,
+  LocalCreateDeps,
+  LocalCreateStage,
+} from "./createAssistant";
 
 export const ASSISTANT_COMPUTERS_KEY = ["uno-assistants", "computers"] as const;
 
@@ -226,6 +240,75 @@ export function makeCreateAssistantDeps(
     getPermissions: getConnectorPermissions,
     putPermissions: putConnectorPermissions,
     createSchedule: createAssistantSchedule,
+    onStage,
+  };
+}
+
+// ── Assistants on this computer (the default since 02.10 evening) ─────
+
+export const LOCAL_ASSISTANTS_KEY = ["uno-assistants", "local"] as const;
+
+/**
+ * The assistants that live on the computer the app is looking at, except
+ * its own default one ("Uno", shown by its card): folders in
+ * ~/UnoWork/Assistants with their own memory, apps and channels.
+ */
+export function useLocalAssistants(environmentId: EnvironmentId | null) {
+  return useQuery({
+    queryKey: [...LOCAL_ASSISTANTS_KEY, environmentId],
+    queryFn: async () =>
+      (await listAssistants({ environmentId: environmentId! })).assistants.filter(
+        (assistant) => assistant.projectId !== ASSISTANT_PROJECT_ID,
+      ),
+    enabled: environmentId !== null,
+    refetchInterval: 15_000,
+    retry: false,
+  });
+}
+
+/** Deleted assistants of this computer still kept (Restore); older daemons have none. */
+export function useDeletedLocalAssistants(environmentId: EnvironmentId | null) {
+  return useQuery({
+    queryKey: [...LOCAL_ASSISTANTS_KEY, "deleted", environmentId],
+    queryFn: () =>
+      listDeletedLocalAssistants({ environmentId: environmentId! })
+        .then((result) => result.deleted)
+        .catch(() => []),
+    enabled: environmentId !== null,
+    refetchInterval: 30_000,
+    retry: false,
+  });
+}
+
+/** "Create" of an assistant on this computer (`createLocalAssistant`). */
+export function makeLocalCreateDeps(
+  environmentId: EnvironmentId,
+  /** This computer's box (schedules wake it); null on a computer without one. */
+  boxId: number | null,
+  onStage: (stage: LocalCreateStage) => void,
+): LocalCreateDeps {
+  return {
+    createAssistant: async ({ name, emoji, template }) => {
+      const { projectId } = await createAssistantOnComputer({
+        environmentId,
+        name,
+        emoji,
+        template,
+      });
+      const summary = await getAssistant({ environmentId, projectId }).catch(() => null);
+      return { projectId, workspaceRoot: summary?.workspaceRoot ?? null };
+    },
+    readFile: (projectId, name) =>
+      readAssistantFile({ environmentId, projectId, name }).then((file) => file.content),
+    writeFile: (projectId, name, content) =>
+      writeAssistantFile({ environmentId, projectId, name, content }).then(() => undefined),
+    putApps: (projectId, permissions) =>
+      putAssistantApps({ environmentId, projectId, permissions }).then(() => undefined),
+    createSchedule:
+      boxId === null
+        ? null
+        : // A shared computer: the run must not put it to sleep under the person.
+          (input) => createAssistantSchedule({ boxId, ...input, onFinish: "keep" }),
     onStage,
   };
 }

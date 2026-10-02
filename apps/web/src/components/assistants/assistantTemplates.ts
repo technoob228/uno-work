@@ -518,14 +518,27 @@ export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-/** The command a scheduled task runs on the assistant's computer (contract §3). */
-export function assistantTurnCommand(prompt: string): string {
-  return `uno-work assistant-turn --prompt ${shellQuote(prompt.replace(/\s+/g, " ").trim())}`;
+/**
+ * The command a scheduled task runs on the assistant's computer (contract §3).
+ * An assistant that shares a computer with others names its folder.
+ */
+export function assistantTurnCommand(prompt: string, workspaceRoot?: string | null): string {
+  const where = workspaceRoot ? `--workspace ${shellQuote(workspaceRoot)} ` : "";
+  return `uno-work assistant-turn ${where}--prompt ${shellQuote(prompt.replace(/\s+/g, " ").trim())}`;
+}
+
+/** The `--workspace` of an assistant-turn command, if it names one. */
+export function workspaceFromCommand(command: string): string | null {
+  const match = /--workspace\s+'((?:[^']|'\\'')*)'/.exec(command);
+  return match ? match[1]!.replace(/'\\''/g, "'") : null;
 }
 
 /** The prompt of a task, read back from its command; null when it's another command. */
 export function promptFromCommand(command: string): string | null {
-  const match = /^uno-work assistant-turn --prompt '((?:[^']|'\\'')*)'$/.exec(command.trim());
+  // `--workspace`, `--name`, `--timeout-sec` may come first (schedule_create).
+  const match = /^uno-work assistant-turn (?:.*? )?--prompt '((?:[^']|'\\'')*)'$/.exec(
+    command.trim(),
+  );
   return match ? match[1]!.replace(/'\\''/g, "'") : null;
 }
 

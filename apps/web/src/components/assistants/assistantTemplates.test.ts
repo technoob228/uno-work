@@ -15,6 +15,7 @@ import {
   scheduleFromPhrase,
   willDo,
   withoutMemoryLine,
+  workspaceFromCommand,
   wontDo,
 } from "./assistantTemplates";
 
@@ -186,5 +187,26 @@ describe("assistantStatus", () => {
     expect(assistantStatus({ boxStatus: "hibernated", threads: [] })).toBe("asleep");
     expect(assistantStatus({ boxStatus: "running", threads: [idle] })).toBe("awake");
     expect(assistantStatus({ boxStatus: "creating", threads: [] })).toBe("starting");
+  });
+});
+
+describe("schedules of an assistant that shares its computer", () => {
+  it("names its folder and reads back both forms", () => {
+    const command = assistantTurnCommand("Check mail", "/home/u/UnoWork/Assistants/ana");
+    expect(command).toBe(
+      "uno-work assistant-turn --workspace '/home/u/UnoWork/Assistants/ana' --prompt 'Check mail'",
+    );
+    expect(workspaceFromCommand(command)).toBe("/home/u/UnoWork/Assistants/ana");
+    expect(promptFromCommand(command)).toBe("Check mail");
+    // What the assistant's own schedule_create writes.
+    expect(
+      promptFromCommand(
+        "uno-work assistant-turn --workspace '/w' --name 'Digest' --timeout-sec 600 --prompt 'It''s Monday'".replace(
+          "It''s",
+          "It'\\''s",
+        ),
+      ),
+    ).toBe("It's Monday");
+    expect(workspaceFromCommand(assistantTurnCommand("x"))).toBeNull();
   });
 });

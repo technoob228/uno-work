@@ -58,16 +58,19 @@ import { useSetupProgress } from "../useSetupProgress";
 
 const SUMMARY_KEY = ["uno-setup", "assistant"] as const;
 
-function useAssistantSummary(environmentId: EnvironmentId | null, fast: boolean) {
+function useAssistantSummary(
+  environmentId: EnvironmentId | null,
+  fast: boolean,
+  projectId: ProjectId = ASSISTANT_PROJECT_ID,
+) {
   return useQuery({
-    queryKey: [...SUMMARY_KEY, environmentId],
+    queryKey: [...SUMMARY_KEY, environmentId, projectId],
     queryFn: async (): Promise<ManagerAssistantSummary> => {
       try {
-        return await getAssistant({
-          environmentId: environmentId!,
-          projectId: ASSISTANT_PROJECT_ID,
-        });
-      } catch {
+        return await getAssistant({ environmentId: environmentId!, projectId });
+      } catch (cause) {
+        // Another assistant of the computer has no helper to fall back on.
+        if (projectId !== ASSISTANT_PROJECT_ID) throw cause;
         return (await ensureHelper({ environmentId: environmentId! })).helper;
       }
     },
@@ -180,13 +183,13 @@ function TelegramCard({
   const requestLink = useCallback(async () => {
     setProblem(null);
     try {
-      const next = await connectSharedTelegram({ environmentId, projectId: ASSISTANT_PROJECT_ID });
+      const next = await connectSharedTelegram({ environmentId, projectId: summary.projectId });
       setLink(next);
       onChanged();
     } catch (cause) {
       setProblem(sharedTelegramProblem(cause));
     }
-  }, [environmentId, onChanged]);
+  }, [environmentId, onChanged, summary.projectId]);
 
   useEffect(() => {
     if (mode !== "shared" || connected || requested.current) return;
@@ -353,6 +356,13 @@ function TelegramCard({
           </div>
         </div>
       </div>
+      {summary.projectId !== ASSISTANT_PROJECT_ID ? (
+        <p className="text-xs text-muted-foreground" data-testid="setup-telegram-shared-several">
+          Uno’s bot is one chat in your Telegram. If another assistant of this computer already
+          talks to you there, that chat moves to this one; send /assistant and a name to switch. For
+          a chat of its own, use your own bot.
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
         {waiting ? (
           <button
@@ -388,16 +398,19 @@ export function AssistantTelegramPanel({
   onConnected,
   environmentId: environmentIdProp,
   initialMode,
+  projectId,
 }: {
   onConnected?: (username: string | null) => void;
   /** The computer whose assistant this is; the primary one when absent. */
   environmentId?: EnvironmentId | null;
   initialMode?: "shared" | "own";
+  /** Another assistant of that computer; its default one when absent. */
+  projectId?: ProjectId;
 }) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const environmentId = environmentIdProp ?? primaryEnvironmentId;
   const queryClient = useQueryClient();
-  const summary = useAssistantSummary(environmentId, true);
+  const summary = useAssistantSummary(environmentId, true, projectId);
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: SUMMARY_KEY });
     void queryClient.invalidateQueries({ queryKey: ["uno-assistant"] });
@@ -440,13 +453,16 @@ export function AssistantTelegramPanel({
 /** The assistant's Slack on its own (the Assistants screen): Add to Slack, or your own app. */
 export function AssistantSlackPanel({
   environmentId: environmentIdProp,
+  projectId,
 }: {
   environmentId?: EnvironmentId | null;
+  /** Another assistant of that computer; its default one when absent. */
+  projectId?: ProjectId;
 }) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const environmentId = environmentIdProp ?? primaryEnvironmentId;
   const queryClient = useQueryClient();
-  const summary = useAssistantSummary(environmentId, true);
+  const summary = useAssistantSummary(environmentId, true, projectId);
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: SUMMARY_KEY });
     void queryClient.invalidateQueries({ queryKey: ["uno-assistant"] });
@@ -485,10 +501,11 @@ function SlackCard({
   const [ownApp, setOwnApp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const install = useQuery({
-    queryKey: ["uno-setup", "slack-install", environmentId],
+    queryKey: ["uno-setup", "slack-install", environmentId, summary.projectId],
     queryFn: async () => {
       try {
-        return await getSlackInstall({ environmentId, projectId: ASSISTANT_PROJECT_ID });
+        // 409 slack_app_in_use: Uno's app answers for another assistant here.
+        return await getSlackInstall({ environmentId, projectId: summary.projectId });
       } catch {
         return null; // an older daemon: only your own Slack app
       }
@@ -511,7 +528,7 @@ function SlackCard({
     setError(null);
     setInstalling(true);
     try {
-      const started = await startSlackInstall({ environmentId, projectId: ASSISTANT_PROJECT_ID });
+      const started = await startSlackInstall({ environmentId, projectId: summary.projectId });
       if (!started.available || !started.authorizeUrl) {
         setInstalling(false);
         setOwnApp(true);
@@ -528,7 +545,7 @@ function SlackCard({
 
   const disconnect = async () => {
     if (state?.installed) {
-      await removeSlackInstall({ environmentId, projectId: ASSISTANT_PROJECT_ID }).catch(
+      await removeSlackInstall({ environmentId, projectId: summary.projectId }).catch(
         () => undefined,
       );
     } else {

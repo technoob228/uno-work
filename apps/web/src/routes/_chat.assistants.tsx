@@ -12,6 +12,12 @@ export const Route = createFileRoute("/_chat/assistants")({
     if (view === "assistant") {
       return Number.isInteger(box) && box > 0 ? { view, box } : {};
     }
+    const project = search["project"];
+    if (view === "local") {
+      return typeof project === "string" && project.startsWith("assistant-")
+        ? { view, project }
+        : {};
+    }
     return view === "new" || view === "here" || view === "card" ? { view } : {};
   },
   component: AssistantsView,

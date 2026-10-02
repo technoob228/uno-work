@@ -1,7 +1,11 @@
 /**
  * New assistant (assistants MVP): one sentence (or a role template) → at most
- * three questions from Uno AI → a "Will do / Won't do" card → Create, which
- * makes the assistant its own computer (see `createAssistant.ts`).
+ * three questions from Uno AI → a "Will do / Won't do" card → Create.
+ *
+ * Where it lives (decision 02.10 evening, "by default — right here"): on THIS
+ * computer, a folder in ~/UnoWork/Assistants next to the others; "Give it its
+ * own computer" is the option, highlighted for templates that read other
+ * people's emails and sites (see `createAssistant.ts`).
  */
 import type { AssistantDraftResult, EnvironmentId } from "@t3tools/contracts";
 import { useQueryClient } from "@tanstack/react-query";
@@ -9,13 +13,14 @@ import {
   ArrowRightIcon,
   CheckIcon,
   ChevronLeftIcon,
+  HouseIcon,
   LoaderCircleIcon,
   LockIcon,
   MonitorIcon,
   ShieldCheckIcon,
   XIcon,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 import { UNO_WORK_URL } from "../../account/unoAccount";
 import { isAssistantsDemo } from "../../lib/assistantsDemo";
@@ -43,17 +48,27 @@ import {
 } from "./assistantTemplates";
 import {
   CREATE_STAGES,
+  LOCAL_CREATE_STAGES,
   createAssistant,
+  createLocalAssistant,
   pendingAssistantSetup,
   type CreateAssistantResult,
   type CreateStage,
+  type LocalCreateResult,
+  type LocalCreateStage,
 } from "./createAssistant";
+import { OWN_COMPUTER_CAPTION, suggestsOwnComputer } from "./LocalAssistantPage";
 import {
   ASSISTANT_COMPUTERS_KEY,
+  LOCAL_ASSISTANTS_KEY,
   makeCreateAssistantDeps,
+  makeLocalCreateDeps,
   useAssistantsAvailability,
   type AssistantsAvailability,
 } from "./useAssistants";
+
+/** Where the new assistant lives: on this computer (default), or its own. */
+export type AssistantHome = "here" | "own";
 
 const PHRASE_MAX = 1000;
 const DRAFT_TIMEOUT_MS = 25_000;
@@ -63,8 +78,9 @@ type Step =
   | { kind: "thinking" }
   | { kind: "ask"; draft: AssistantDraftResult; index: number; answers: AssistantAnswer[] }
   | { kind: "review" }
-  | { kind: "creating"; stage: CreateStage }
+  | { kind: "creating"; stage: CreateStage | LocalCreateStage }
   | { kind: "done"; result: CreateAssistantResult }
+  | { kind: "done-here"; result: LocalCreateResult }
   | { kind: "failed"; message: string };
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -76,20 +92,26 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 export function NewAssistantFlow({
   environmentId,
+  boxId,
+  machineLabel,
   onOpen,
-  onSetUpHere,
+  onOpenHere,
 }: {
-  /** The computer this page talks to: asks Uno AI, and holds the account. */
+  /** The computer this page talks to: asks Uno AI, holds the account, and is "here". */
   environmentId: EnvironmentId;
+  /** This computer's box (its schedules wake it), null when it has none. */
+  boxId: number | null;
+  machineLabel: string;
   onOpen: (boxId: number) => void;
-  /** No Uno account here: the old way, an assistant on this computer. */
-  onSetUpHere: () => void;
+  /** An assistant made on this computer. */
+  onOpenHere: (projectId: string) => void;
 }) {
   const queryClient = useQueryClient();
   const [phrase, setPhrase] = useState("");
   const [template, setTemplate] = useState<AssistantTemplate | null>(null);
   const [step, setStep] = useState<Step>({ kind: "describe" });
   const [plan, setPlan] = useState<AssistantPlan | null>(null);
+  const [home, setHome] = useState<AssistantHome>("here");
   const creating = useRef(false);
   const availability = useAssistantsAvailability();
 
@@ -143,6 +165,30 @@ export function NewAssistantFlow({
   const create = async () => {
     if (!plan || creating.current) return;
     creating.current = true;
+    if (home === "here") {
+      setStep({ kind: "creating", stage: "assistant" });
+      try {
+        const result = await createLocalAssistant(
+          plan,
+          makeLocalCreateDeps(environmentId, boxId, (stage) =>
+            setStep({ kind: "creating", stage }),
+          ),
+        );
+        void queryClient.invalidateQueries({ queryKey: LOCAL_ASSISTANTS_KEY });
+        setStep({ kind: "done-here", result });
+      } catch (cause) {
+        setStep({
+          kind: "failed",
+          message:
+            cause instanceof Error && cause.message
+              ? cause.message
+              : "This computer didn't answer.",
+        });
+      } finally {
+        creating.current = false;
+      }
+      return;
+    }
     setStep({ kind: "creating", stage: "computer" });
     try {
       const result = await createAssistant(
@@ -296,16 +342,20 @@ export function NewAssistantFlow({
       <ReviewCard
         plan={plan}
         availability={availability}
+        home={home}
+        machineLabel={machineLabel}
+        onHome={setHome}
         onChange={setPlan}
         onBack={() => setStep({ kind: "describe" })}
         onCreate={() => void create()}
-        onSetUpHere={onSetUpHere}
       />
     );
   }
 
   if (step.kind === "creating" && plan) {
-    const current = CREATE_STAGES.findIndex((entry) => entry.stage === step.stage);
+    const stages: ReadonlyArray<{ stage: string; label: string }> =
+      home === "here" ? LOCAL_CREATE_STAGES : CREATE_STAGES;
+    const current = stages.findIndex((entry) => entry.stage === step.stage);
     return (
       <section className="flex flex-col gap-5 pt-4" data-testid="assistant-new-creating">
         <div className="flex items-center gap-3">
@@ -313,13 +363,16 @@ export function NewAssistantFlow({
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Creating {plan.name}</h1>
             <p className="text-sm text-muted-foreground">
-              About a minute. You can leave this page: {plan.name} keeps getting ready.
+              {home === "here"
+                ? "A few seconds."
+                : `About a minute. You can leave this page: ${plan.name} keeps getting ready.`}
             </p>
           </div>
         </div>
         <ol className="flex flex-col gap-2.5">
-          {CREATE_STAGES.filter((entry) => entry.stage !== "schedule" || plan.schedule).map(
-            (entry, index) => (
+          {stages
+            .filter((entry) => entry.stage !== "schedule" || plan.schedule)
+            .map((entry, index) => (
               <li key={entry.stage} className="flex items-center gap-2.5 text-sm">
                 {index < current ? (
                   <CheckIcon className="size-4 text-success" />
@@ -332,8 +385,7 @@ export function NewAssistantFlow({
                   {entry.label}
                 </span>
               </li>
-            ),
-          )}
+            ))}
         </ol>
       </section>
     );
@@ -373,6 +425,40 @@ export function NewAssistantFlow({
     );
   }
 
+  if (step.kind === "done-here" && plan) {
+    const { result } = step;
+    return (
+      <section className="flex flex-col gap-5 pt-4" data-testid="assistant-new-done-here">
+        <div className="flex items-center gap-3">
+          <EmojiAvatar emoji={plan.emoji} className="size-12 text-2xl" />
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight">{plan.name} is ready</h1>
+            <p className="text-sm text-muted-foreground">
+              It lives on {machineLabel}. Say hello in the chat, or connect Telegram to reach it
+              from your phone.
+            </p>
+          </div>
+        </div>
+        {result.notes.length > 0 ? (
+          <ul className="flex flex-col gap-1.5 rounded-xl bg-warning/8 px-4 py-3 text-sm">
+            {result.notes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="flex justify-end">
+          <Button
+            onClick={() => onOpenHere(result.projectId)}
+            data-testid="assistant-new-open-here"
+          >
+            Open {plan.name}
+            <ArrowRightIcon className="size-4" />
+          </Button>
+        </div>
+      </section>
+    );
+  }
+
   if (step.kind === "failed") {
     return (
       <section className="flex flex-col gap-4 pt-4" data-testid="assistant-new-failed">
@@ -397,22 +483,27 @@ export function NewAssistantFlow({
 function ReviewCard({
   plan,
   availability,
+  home,
+  machineLabel,
+  onHome,
   onChange,
   onBack,
   onCreate,
-  onSetUpHere,
 }: {
   plan: AssistantPlan;
   availability: AssistantsAvailability;
+  home: AssistantHome;
+  machineLabel: string;
+  onHome: (home: AssistantHome) => void;
   onChange: (plan: AssistantPlan) => void;
   onBack: () => void;
   onCreate: () => void;
-  onSetUpHere: () => void;
 }) {
   const setLevel = (provider: ConnectorProvider, level: ConnectorLevel) =>
     onChange({ ...plan, connectors: { ...plan.connectors, [provider]: level } });
   const name = plan.name.trim() || "Uno";
-  const canCreate = availability === "on";
+  const canCreate = home === "here" || availability === "on";
+  const suggestOwn = suggestsOwnComputer(plan.template);
   return (
     <section className="flex flex-col gap-4 pt-2" data-testid="assistant-new-review">
       <div className="flex items-start gap-3">
@@ -481,18 +572,37 @@ function ReviewCard({
           ))}
         </div>
         <p className="pt-1 text-xs text-muted-foreground">
-          Uno checks this on every request, so a tricky email can't talk {name} past it. Connect the
-          apps themselves later, when {name} needs them.
+          {home === "here"
+            ? `Work on this computer checks this on every request: it stops mistakes, not a determined attack. For a wall Uno's servers enforce, give ${name} its own computer.`
+            : `Uno checks this on every request, so a tricky email can't talk ${name} past it.`}{" "}
+          Connect the apps themselves later, when {name} needs them.
         </p>
       </div>
 
-      <p className="flex items-center gap-2 text-xs text-muted-foreground">
-        <MonitorIcon className="size-3.5 shrink-0" />
-        {name} gets its own computer. It sleeps when idle and wakes up for Telegram, its schedule
-        and you. Your other computers and assistants stay out of its reach.
-      </p>
+      <div className="flex flex-col gap-2" role="radiogroup" aria-label="Where it lives">
+        <h2 className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+          Where {name} lives
+        </h2>
+        <HomeOption
+          selected={home === "here"}
+          onSelect={() => onHome("here")}
+          icon={<HouseIcon className="size-4" />}
+          title="On this computer"
+          body={`Next to your other assistants on ${machineLabel}. Works while it is on.`}
+          testId="assistant-home-here"
+        />
+        <HomeOption
+          selected={home === "own"}
+          onSelect={() => onHome("own")}
+          icon={<MonitorIcon className="size-4" />}
+          title="Give it its own computer"
+          body={`${OWN_COMPUTER_CAPTION} It sleeps when idle and wakes for Telegram, its schedule and you.`}
+          badge={suggestOwn ? "Suggested for this one" : null}
+          testId="assistant-home-own"
+        />
+      </div>
 
-      {availability === "no-account" ? (
+      {home === "here" ? null : availability === "no-account" ? (
         <div
           className="rounded-xl bg-warning/8 px-4 py-3 text-sm"
           data-testid="assistant-review-no-account"
@@ -505,30 +615,15 @@ function ReviewCard({
           >
             app.uno4.work
           </button>
-          . Or{" "}
-          <button
-            type="button"
-            className="cursor-pointer font-medium underline underline-offset-2"
-            onClick={onSetUpHere}
-          >
-            set it up on this computer
-          </button>
-          .
+          . Or keep it on this computer.
         </div>
       ) : availability === "not-yet" ? (
         <div
           className="rounded-xl bg-warning/8 px-4 py-3 text-sm"
           data-testid="assistant-review-not-yet"
         >
-          Assistants with their own computer aren't on your account yet. You can{" "}
-          <button
-            type="button"
-            className="cursor-pointer font-medium underline underline-offset-2"
-            onClick={onSetUpHere}
-          >
-            set {name} up on this computer
-          </button>{" "}
-          for now.
+          Assistants with their own computer aren't on your account yet. Keep {name} on this
+          computer for now: you can move it later from its page.
         </div>
       ) : null}
 
@@ -547,5 +642,54 @@ function ReviewCard({
         </Button>
       </div>
     </section>
+  );
+}
+
+function HomeOption({
+  selected,
+  onSelect,
+  icon,
+  title,
+  body,
+  badge = null,
+  testId,
+}: {
+  selected: boolean;
+  onSelect: () => void;
+  icon: ReactNode;
+  title: string;
+  body: string;
+  badge?: string | null;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onSelect}
+      data-testid={testId}
+      className={cn(
+        "flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-left transition-colors",
+        selected
+          ? "border-primary/60 bg-primary/[0.04] ring-1 ring-primary/30"
+          : "border-border/70 hover:bg-accent/40",
+      )}
+    >
+      <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-border bg-background text-muted-foreground">
+        {icon}
+      </span>
+      <span className="min-w-0">
+        <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+          {title}
+          {badge ? (
+            <span className="rounded-full bg-primary/10 px-1.5 py-px text-[10px] font-medium text-primary">
+              {badge}
+            </span>
+          ) : null}
+        </span>
+        <span className="block text-xs text-muted-foreground">{body}</span>
+      </span>
+    </button>
   );
 }

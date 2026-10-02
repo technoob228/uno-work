@@ -2,11 +2,17 @@
  * "Memory & models" on the assistant page (assistants MVP, 0.0.106; spec
  * reports/day_2026-10-02/assistants/spec-projects/SPEC-memory-models.md):
  *
- * - Memory — NOTES.md as editable lines, USER.md and SOUL.md as text, the
- *   dispatcher's AGENTS.md under Advanced;
- * - Models — ROUTING.md as a table "kind of task → model, thinking";
- * - Chats it started — model, status, tokens, cost per chat;
+ * - Memory — NOTES.md as editable lines, USER.md and SOUL.md as text, and
+ *   "Instructions" (AGENTS.md: shown, edited behind "Edit instructions
+ *   (advanced)", Uno's newer versions offered with "Update and keep my
+ *   edits");
+ * - Models — ROUTING.md as a table "kind of task → model, thinking", with the
+ *   assistant's proposals to change the person's rows (Yes / No);
+ * - Chats it started — model, status, tokens per chat (no $, decision 02.10);
  * - Computers it can use — the place for cross-machine chats (Soon).
+ *
+ * Every block takes the assistant's `projectId`: several assistants live on
+ * one computer since 02.10 evening (the default one when absent).
  *
  * Files live on the assistant's computer: the blocks need it awake. Every
  * save sends the content it started from (`base`), so a line the assistant
@@ -19,15 +25,26 @@ import {
   type EnvironmentId,
 } from "@t3tools/contracts";
 import {
+  merge3,
+  splitAgentsProfile,
+  type ConflictChoice,
+  type MergeChunk,
+} from "@t3tools/shared/assistantInstructions";
+import {
+  acceptProposal,
   addNote,
+  declineProposal,
   editNote,
   parseNotes,
+  parseProposals,
   parseRouting,
+  proposalFor,
   removeLine,
   ROUTING_SELF_HARNESS,
   ROUTING_THINKING,
   thinkingOf,
   writeRouting,
+  type RoutingProposal,
   type RoutingRule,
   type RoutingThinking,
 } from "@t3tools/shared/assistantMemory";
@@ -39,7 +56,13 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { waitForThreadInStore } from "../../assistant/useAssistantChat";
 import { useEnvironmentProviders } from "../../environments/settings/serverSettings";
 import { useMachineRows } from "../../hooks/useMachineRows";
-import { listAssistantChats, readAssistantFile, writeAssistantFile } from "../../lib/managerApi";
+import {
+  getAssistantInstructions,
+  listAssistantChats,
+  readAssistantFile,
+  resolveAssistantInstructions,
+  writeAssistantFile,
+} from "../../lib/managerApi";
 import { cn } from "../../lib/utils";
 import { useStore } from "../../store";
 import { buildThreadRouteParams } from "../../threadRoutes";
@@ -48,6 +71,7 @@ import { toastManager } from "../ui/toast";
 import { Block } from "./AssistantBits";
 import {
   chatCostText,
+  chatTokensNote,
   choiceValue,
   formatTokens,
   formatUsd,
@@ -94,16 +118,18 @@ function SavedHint({ at }: { at: number }) {
 }
 
 /** One assistant file: its content, and a save that keeps crossing writes. */
-function useAssistantFile(environmentId: EnvironmentId, name: AssistantEditableFileName) {
+function useAssistantFile(
+  environmentId: EnvironmentId,
+  projectId: string,
+  name: AssistantEditableFileName,
+) {
   const queryClient = useQueryClient();
-  const key = ["uno-assistant-file", environmentId, name] as const;
+  const key = ["uno-assistant-file", environmentId, projectId, name] as const;
   const file = useQuery({
     queryKey: key,
     retry: false,
     queryFn: () =>
-      readAssistantFile({ environmentId, projectId: ASSISTANT_PROJECT_ID, name }).then(
-        (result) => result.content,
-      ),
+      readAssistantFile({ environmentId, projectId, name }).then((result) => result.content),
   });
   const [savedAt, setSavedAt] = useState(0);
   const save = async (next: string, base: string) => {
@@ -111,7 +137,7 @@ function useAssistantFile(environmentId: EnvironmentId, name: AssistantEditableF
     try {
       const result = await writeAssistantFile({
         environmentId,
-        projectId: ASSISTANT_PROJECT_ID,
+        projectId,
         name,
         content: next,
         base,
@@ -127,21 +153,23 @@ function useAssistantFile(environmentId: EnvironmentId, name: AssistantEditableF
       void queryClient.invalidateQueries({ queryKey: key });
     }
   };
-  return { file, save, savedAt };
+  return { file, save, savedAt, key };
 }
 
 // ── Memory ───────────────────────────────────────────────────────────
 
-type MemoryTab = "notes" | "user" | "soul";
+type MemoryTab = "notes" | "user" | "soul" | "instructions";
 
 export function MemoryBlock({
   name,
   environmentId,
+  projectId = ASSISTANT_PROJECT_ID,
   waking,
   onWake,
 }: {
   name: string;
   environmentId: EnvironmentId | null;
+  projectId?: string;
   waking: boolean;
   onWake: () => void;
 }) {
@@ -152,7 +180,7 @@ export function MemoryBlock({
       </Block>
     );
   }
-  return <AwakeMemory name={name} environmentId={environmentId} />;
+  return <AwakeMemory name={name} environmentId={environmentId} projectId={projectId} />;
 }
 
 function AsleepLine({
@@ -179,12 +207,20 @@ function AsleepLine({
   );
 }
 
-function AwakeMemory({ name, environmentId }: { name: string; environmentId: EnvironmentId }) {
+function AwakeMemory({
+  name,
+  environmentId,
+  projectId,
+}: {
+  name: string;
+  environmentId: EnvironmentId;
+  projectId: string;
+}) {
   const [tab, setTab] = useState<MemoryTab>("notes");
-  const notes = useAssistantFile(environmentId, "NOTES.md");
-  const user = useAssistantFile(environmentId, "USER.md");
-  const soul = useAssistantFile(environmentId, "SOUL.md");
-  const agents = useAssistantFile(environmentId, "AGENTS.md");
+  const notes = useAssistantFile(environmentId, projectId, "NOTES.md");
+  const user = useAssistantFile(environmentId, projectId, "USER.md");
+  const soul = useAssistantFile(environmentId, projectId, "SOUL.md");
+  const agents = useAssistantFile(environmentId, projectId, "AGENTS.md");
   const savedAt = Math.max(notes.savedAt, user.savedAt, soul.savedAt, agents.savedAt);
 
   return (
@@ -201,6 +237,7 @@ function AwakeMemory({ name, environmentId }: { name: string; environmentId: Env
             ["notes", `What ${name} remembers`],
             ["user", "About you"],
             ["soul", `Who ${name} is`],
+            ["instructions", "Instructions"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -229,25 +266,276 @@ function AwakeMemory({ name, environmentId }: { name: string; environmentId: Env
           placeholder="Who you are, how you like answers, what matters to you."
           testId="assistant-memory-user"
         />
-      ) : (
+      ) : tab === "soul" ? (
         <TextFile
           file={soul}
           placeholder={`${name}'s job and its rules, in your words.`}
           testId="assistant-memory-soul"
         />
+      ) : (
+        <InstructionsTab
+          name={name}
+          environmentId={environmentId}
+          projectId={projectId}
+          file={agents}
+        />
       )}
-      <details className="mt-3">
-        <summary className="cursor-pointer text-xs text-muted-foreground">
-          Advanced: system instructions (AGENTS.md)
-        </summary>
-        <p className="pt-2 pb-1 text-xs text-muted-foreground">
-          Written by Uno for every assistant. Your own rules fit better in “Who {name} is”: Uno
-          won't touch them there.
-        </p>
-        <TextFile file={agents} placeholder="" testId="assistant-memory-agents" rows={12} mono />
-      </details>
     </Block>
   );
+}
+
+// ── Instructions (AGENTS.md) ──────────────────────────────────────────
+
+/**
+ * AGENTS.md: the person may edit all of it (decision 02.10), but editing sits
+ * behind "Edit instructions (advanced)" — a broken system prompt breaks the
+ * assistant, and most rules fit better in "Who … is". Uno's newer versions:
+ * an untouched file is updated by the computer itself; an edited one gets
+ * the banner "Uno has newer instructions".
+ */
+function InstructionsTab({
+  name,
+  environmentId,
+  projectId,
+  file,
+}: {
+  name: string;
+  environmentId: EnvironmentId;
+  projectId: string;
+  file: AssistantFile;
+}) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const statusKey = ["uno-assistant-instructions", environmentId, projectId] as const;
+  const status = useQuery({
+    queryKey: statusKey,
+    retry: false,
+    queryFn: () => getAssistantInstructions({ environmentId, projectId }),
+  });
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: statusKey });
+    void queryClient.invalidateQueries({ queryKey: file.key });
+  };
+  const text = file.file.data ?? "";
+  return (
+    <div className="flex flex-col gap-2" data-testid="assistant-memory-instructions">
+      {status.data?.state === "update-available" ? (
+        <InstructionsUpdate
+          environmentId={environmentId}
+          projectId={projectId}
+          status={status.data}
+          onDone={refresh}
+        />
+      ) : null}
+      <p className="text-xs text-muted-foreground">
+        How {name} works: written by Uno for every assistant
+        {status.data?.state === "edited" ? ", with your changes" : ""}. Your own rules fit better in
+        “Who {name} is”.
+      </p>
+      {editing ? (
+        <>
+          <p className="text-xs text-warning-foreground">
+            A broken instruction can stop {name} from working. Uno keeps its own version: you can
+            always go back to it.
+          </p>
+          <TextFile file={file} placeholder="" testId="assistant-memory-agents" rows={14} mono />
+          <div className="flex gap-2">
+            <Button size="xs" variant="ghost" onClick={() => setEditing(false)}>
+              Done
+            </Button>
+            {status.data && status.data.state !== "current" ? (
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() =>
+                  void resolveAssistantInstructions({ environmentId, projectId, action: "replace" })
+                    .then(refresh)
+                    .catch(() => undefined)
+                }
+              >
+                Go back to Uno's version
+              </Button>
+            ) : null}
+          </div>
+        </>
+      ) : (
+        <>
+          <pre className="max-h-64 overflow-auto rounded-lg bg-muted/50 px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
+            {file.file.isLoading ? "Loading…" : text}
+          </pre>
+          <div>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => setEditing(true)}
+              data-testid="assistant-instructions-edit"
+            >
+              Edit instructions (advanced)
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function InstructionsUpdate({
+  environmentId,
+  projectId,
+  status,
+  onDone,
+}: {
+  environmentId: EnvironmentId;
+  projectId: string;
+  status: { readonly current: string; readonly base: string; readonly next: string };
+  onDone: () => void;
+}) {
+  const [showChanges, setShowChanges] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const chunks = useMemo(
+    () => merge3(status.base, splitAgentsProfile(status.current).body, status.next),
+    [status],
+  );
+  const conflicts = chunks.filter(
+    (chunk): chunk is Extract<MergeChunk, { kind: "conflict" }> => chunk.kind === "conflict",
+  );
+  const [choices, setChoices] = useState<ConflictChoice[]>(() => conflicts.map(() => "both"));
+  const [resolving, setResolving] = useState(false);
+  const changes = useMemo(() => lineChanges(status.base, status.next), [status]);
+  const act = async (action: "update" | "keep") => {
+    setBusy(true);
+    try {
+      await resolveAssistantInstructions({
+        environmentId,
+        projectId,
+        action,
+        ...(action === "update" ? { choices } : {}),
+      });
+      onDone();
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: "Couldn't update the instructions",
+        description: errorText(cause, "The computer didn't answer."),
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div
+      className="rounded-xl bg-warning/8 px-3 py-2.5 text-sm"
+      data-testid="assistant-instructions-update"
+    >
+      <p className="font-medium">Uno has newer instructions</p>
+      <p className="text-xs text-muted-foreground">
+        You changed these instructions, so Uno didn't replace them.
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Button size="xs" variant="ghost" onClick={() => setShowChanges((open) => !open)}>
+          {showChanges ? "Hide changes" : "See changes"}
+        </Button>
+        <Button
+          size="xs"
+          disabled={busy}
+          onClick={() =>
+            conflicts.length > 0 && !resolving ? setResolving(true) : void act("update")
+          }
+          data-testid="assistant-instructions-merge"
+        >
+          Update and keep my edits
+        </Button>
+        <Button size="xs" variant="outline" disabled={busy} onClick={() => void act("keep")}>
+          Keep mine
+        </Button>
+      </div>
+      {showChanges ? (
+        <pre className="mt-2 max-h-48 overflow-auto rounded-lg bg-background px-2 py-1.5 font-mono text-[11px] whitespace-pre-wrap">
+          {changes.map((change) => (
+            <span
+              key={`${change.kind}:${change.text}`}
+              className={
+                change.kind === "added"
+                  ? "text-success-foreground"
+                  : "text-destructive line-through"
+              }
+            >
+              {change.kind === "added" ? "+ " : "- "}
+              {change.text}
+              {"\n"}
+            </span>
+          ))}
+        </pre>
+      ) : null}
+      {resolving ? (
+        <div className="mt-2 flex flex-col gap-2">
+          <p className="text-xs">
+            You and Uno changed the same {conflicts.length === 1 ? "place" : "places"}. Pick what
+            stays:
+          </p>
+          {conflicts.map((conflict, index) => (
+            <div
+              key={`${conflict.base.join("\n")}|${conflict.mine.join("\n")}`}
+              className="rounded-lg bg-background p-2 text-xs"
+            >
+              <div className="grid gap-2 sm:grid-cols-2">
+                <pre className="font-mono whitespace-pre-wrap">
+                  {conflict.mine.join("\n") || "(removed)"}
+                </pre>
+                <pre className="font-mono whitespace-pre-wrap">
+                  {conflict.theirs.join("\n") || "(removed)"}
+                </pre>
+              </div>
+              <div className="mt-1 flex gap-1" role="radiogroup">
+                {(
+                  [
+                    ["mine", "Mine"],
+                    ["theirs", "Uno's"],
+                    ["both", "Both"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <Button
+                    key={value}
+                    size="xs"
+                    variant={choices[index] === value ? "default" : "ghost"}
+                    onClick={() =>
+                      setChoices((current) =>
+                        current.map((choice, at) => (at === index ? value : choice)),
+                      )
+                    }
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div>
+            <Button size="xs" disabled={busy} onClick={() => void act("update")}>
+              Apply
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Lines Uno removed and added between two versions, in order (for "See changes"). */
+function lineChanges(
+  before: string,
+  after: string,
+): ReadonlyArray<{ readonly kind: "added" | "removed"; readonly text: string }> {
+  const out: Array<{ kind: "added" | "removed"; text: string }> = [];
+  const beforeLines = new Set(before.split("\n"));
+  const afterLines = new Set(after.split("\n"));
+  for (const line of before.split("\n")) {
+    if (!afterLines.has(line) && line.trim().length > 0) out.push({ kind: "removed", text: line });
+  }
+  for (const line of after.split("\n")) {
+    if (!beforeLines.has(line) && line.trim().length > 0) out.push({ kind: "added", text: line });
+  }
+  return out;
 }
 
 type AssistantFile = ReturnType<typeof useAssistantFile>;
@@ -398,11 +686,13 @@ const SOURCE_LABEL: Record<RoutingRule["source"], string> = {
 export function ModelsBlock({
   name,
   environmentId,
+  projectId = ASSISTANT_PROJECT_ID,
   waking,
   onWake,
 }: {
   name: string;
   environmentId: EnvironmentId | null;
+  projectId?: string;
   waking: boolean;
   onWake: () => void;
 }) {
@@ -413,16 +703,25 @@ export function ModelsBlock({
       </Block>
     );
   }
-  return <AwakeModels name={name} environmentId={environmentId} />;
+  return <AwakeModels name={name} environmentId={environmentId} projectId={projectId} />;
 }
 
-function AwakeModels({ name, environmentId }: { name: string; environmentId: EnvironmentId }) {
-  const routing = useAssistantFile(environmentId, "ROUTING.md");
+function AwakeModels({
+  name,
+  environmentId,
+  projectId,
+}: {
+  name: string;
+  environmentId: EnvironmentId;
+  projectId: string;
+}) {
+  const routing = useAssistantFile(environmentId, projectId, "ROUTING.md");
   const providers = useEnvironmentProviders(environmentId);
   const choices = useMemo(() => modelChoices(providers, name), [providers, name]);
   const [newTask, setNewTask] = useState("");
   const content = routing.file.data ?? "";
   const parsed = useMemo(() => parseRouting(content), [content]);
+  const proposals = useMemo(() => parseProposals(content), [content]);
 
   const saveRules = (rules: ReadonlyArray<RoutingRule>) =>
     void routing.save(writeRouting(content, rules), content);
@@ -454,8 +753,18 @@ function AwakeModels({ name, environmentId }: { name: string; environmentId: Env
             {parsed.rules.map((rule, index) => (
               <RuleRow
                 key={`${rule.taskType}|${rule.harness}|${rule.model}`}
+                name={name}
                 rule={rule}
                 choices={choices}
+                proposal={rule.source === "you" ? proposalFor(proposals, rule) : null}
+                onAnswer={(proposal, yes) =>
+                  void routing.save(
+                    yes
+                      ? acceptProposal(content, proposal)
+                      : declineProposal(content, proposal, today()),
+                    content,
+                  )
+                }
                 onChange={(patch) => updateRule(index, patch)}
                 onRemove={() => saveRules(parsed.rules.filter((_, at) => at !== index))}
               />
@@ -496,7 +805,8 @@ function AwakeModels({ name, environmentId }: { name: string; environmentId: Env
         </Button>
       </form>
       <p className="pt-1.5 text-xs text-muted-foreground">
-        Or tell {name} in chat: “remember: UI — Opus, high”. Rows you set stay as you set them.
+        Or tell {name} in chat: “remember: UI — Opus, high”. Rows you set stay as you set them:{" "}
+        {name} only suggests a change when one keeps failing, and changes it after your Yes.
       </p>
       {parsed.outcomes.length > 0 ? (
         <details className="mt-2">
@@ -528,13 +838,20 @@ function AwakeModels({ name, environmentId }: { name: string; environmentId: Env
 }
 
 function RuleRow({
+  name,
   rule,
   choices,
+  proposal,
+  onAnswer,
   onChange,
   onRemove,
 }: {
+  name: string;
   rule: RoutingRule;
   choices: ReadonlyArray<ModelChoice>;
+  /** The assistant's proposal to change this row of the person's. */
+  proposal: RoutingProposal | null;
+  onAnswer: (proposal: RoutingProposal, yes: boolean) => void;
   onChange: (patch: Partial<RoutingRule>) => void;
   onRemove: () => void;
 }) {
@@ -544,95 +861,122 @@ function RuleRow({
   const canThink = current
     ? current.driver === "claudeAgent" || current.driver === "codex"
     : rule.harness === "claudeAgent" || rule.harness === "codex";
+  const proposed = proposal
+    ? (choices.find(
+        (choice) => choice.harness === proposal.harness && choice.model === proposal.model,
+      )?.label ??
+      (proposal.model || proposal.harness))
+    : null;
   return (
-    <tr className="align-middle">
-      <td className="py-1.5 pr-2">
-        <input
-          defaultValue={rule.taskType}
-          aria-label="Kind of task"
-          className="w-full min-w-32 rounded bg-transparent px-1 py-0.5 outline-none focus:bg-muted/60"
-          onKeyDown={(event) => {
-            if (event.key === "Enter") event.currentTarget.blur();
-          }}
-          onBlur={(event) => {
-            const taskType = event.currentTarget.value.trim();
-            if (taskType.length > 0 && taskType !== rule.taskType) onChange({ taskType });
-          }}
-        />
-      </td>
-      <td className="py-1.5 pr-2">
-        <select
-          value={value}
-          aria-label="Model"
-          className="max-w-56 rounded-md border border-border bg-background px-1.5 py-1 text-xs"
-          onChange={(event) => {
-            const next = choices.find((choice) => choice.value === event.target.value);
-            if (!next) return;
-            onChange({
-              harness: next.harness,
-              model: next.model,
-              effort: next.harness === ROUTING_SELF_HARNESS ? "" : rule.effort,
-            });
-          }}
-        >
-          {current ? null : (
-            <option value={value}>{rule.model || rule.harness} (not on this computer)</option>
-          )}
-          {choices.map((choice) => (
-            <option key={choice.value} value={choice.value} disabled={choice.reason !== null}>
-              {choice.label}
-              {choice.reason ? ` — ${choice.reason}` : ""}
-            </option>
-          ))}
-        </select>
-      </td>
-      <td className="py-1.5 pr-2">
-        {canThink ? (
+    <>
+      <tr className="align-middle">
+        <td className="py-1.5 pr-2">
+          <input
+            defaultValue={rule.taskType}
+            aria-label="Kind of task"
+            className="w-full min-w-32 rounded bg-transparent px-1 py-0.5 outline-none focus:bg-muted/60"
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+            onBlur={(event) => {
+              const taskType = event.currentTarget.value.trim();
+              if (taskType.length > 0 && taskType !== rule.taskType) onChange({ taskType });
+            }}
+          />
+        </td>
+        <td className="py-1.5 pr-2">
           <select
-            value={thinking ?? ""}
-            aria-label="Thinking"
-            className="rounded-md border border-border bg-background px-1.5 py-1 text-xs"
-            onChange={(event) =>
-              onChange({ effort: (event.target.value as RoutingThinking | "") || "" })
-            }
+            value={value}
+            aria-label="Model"
+            className="max-w-56 rounded-md border border-border bg-background px-1.5 py-1 text-xs"
+            onChange={(event) => {
+              const next = choices.find((choice) => choice.value === event.target.value);
+              if (!next) return;
+              onChange({
+                harness: next.harness,
+                model: next.model,
+                effort: next.harness === ROUTING_SELF_HARNESS ? "" : rule.effort,
+              });
+            }}
           >
-            <option value="">default</option>
-            {ROUTING_THINKING.map((level) => (
-              <option key={level} value={level}>
-                {level}
+            {current ? null : (
+              <option value={value}>{rule.model || rule.harness} (not on this computer)</option>
+            )}
+            {choices.map((choice) => (
+              <option key={choice.value} value={choice.value} disabled={choice.reason !== null}>
+                {choice.label}
+                {choice.reason ? ` — ${choice.reason}` : ""}
               </option>
             ))}
           </select>
-        ) : (
-          <span className="text-xs text-muted-foreground">—</span>
-        )}
-      </td>
-      <td className="py-1.5 pr-1">
-        <span
-          className={cn(
-            "rounded-full px-2 py-0.5 text-[11px] whitespace-nowrap",
-            rule.source === "you"
-              ? "bg-primary/10 text-primary"
-              : rule.source === "learned"
-                ? "bg-success/12 text-success-foreground"
-                : "bg-muted text-muted-foreground",
+        </td>
+        <td className="py-1.5 pr-2">
+          {canThink ? (
+            <select
+              value={thinking ?? ""}
+              aria-label="Thinking"
+              className="rounded-md border border-border bg-background px-1.5 py-1 text-xs"
+              onChange={(event) =>
+                onChange({ effort: (event.target.value as RoutingThinking | "") || "" })
+              }
+            >
+              <option value="">default</option>
+              {ROUTING_THINKING.map((level) => (
+                <option key={level} value={level}>
+                  {level}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
           )}
-        >
-          {SOURCE_LABEL[rule.source]}
-        </span>
-      </td>
-      <td className="py-1.5">
-        <button
-          type="button"
-          aria-label="Remove this rule"
-          title="Remove this rule"
-          onClick={onRemove}
-          className="cursor-pointer rounded p-0.5 text-muted-foreground opacity-60 hover:bg-accent hover:text-foreground hover:opacity-100"
-        >
-          <XIcon className="size-3.5" />
-        </button>
-      </td>
-    </tr>
+        </td>
+        <td className="py-1.5 pr-1">
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[11px] whitespace-nowrap",
+              rule.source === "you"
+                ? "bg-primary/10 text-primary"
+                : rule.source === "learned"
+                  ? "bg-success/12 text-success-foreground"
+                  : "bg-muted text-muted-foreground",
+            )}
+          >
+            {SOURCE_LABEL[rule.source]}
+          </span>
+        </td>
+        <td className="py-1.5">
+          <button
+            type="button"
+            aria-label="Remove this rule"
+            title="Remove this rule"
+            onClick={onRemove}
+            className="cursor-pointer rounded p-0.5 text-muted-foreground opacity-60 hover:bg-accent hover:text-foreground hover:opacity-100"
+          >
+            <XIcon className="size-3.5" />
+          </button>
+        </td>
+      </tr>
+      {proposal ? (
+        <tr data-testid="assistant-models-proposal">
+          <td colSpan={5} className="pb-2">
+            <div className="flex flex-wrap items-center gap-2 rounded-lg bg-warning/10 px-2.5 py-1.5 text-xs">
+              <span className="min-w-0 flex-1">
+                {proposal.why ? `${proposal.why}. ` : ""}
+                {name} suggests {proposed}
+                {proposal.effort ? `, ${proposal.effort}` : ""}. Change your rule?
+              </span>
+              <Button size="xs" onClick={() => onAnswer(proposal, true)}>
+                Yes
+              </Button>
+              <Button size="xs" variant="ghost" onClick={() => onAnswer(proposal, false)}>
+                No
+              </Button>
+            </div>
+          </td>
+        </tr>
+      ) : null}
+    </>
   );
 }
 
@@ -646,31 +990,38 @@ const CHAT_STATUS: Record<AssistantChatSummary["status"], { label: string; tone:
 };
 
 /**
- * Tokens and price of each chat (decision 02.10: keep the code, hide it in
- * the UI for now). Flip to true to bring back the Tokens/Cost columns and the
- * "This week" line; the daemon and the console keep counting either way.
+ * The price in $ of each chat (decision 02.10: keep the code, hide the money
+ * in the UI). Tokens per chat are shown (and "in your Claude plan" for a
+ * subscription chat); flip to true to bring back the Cost column and the
+ * "This week" line. The daemon and the console keep counting either way.
  */
 export const SHOW_CHAT_COST = false;
 
 export function ChatsBlock({
   name,
   environmentId,
+  projectId = ASSISTANT_PROJECT_ID,
+  whereLabel,
   waking,
   onWake,
 }: {
   name: string;
   environmentId: EnvironmentId | null;
+  projectId?: string;
+  /** Where its chats run, e.g. "Ana's computer" or "This computer". */
+  whereLabel?: string;
   waking: boolean;
   onWake: () => void;
 }) {
   const navigate = useNavigate();
   const setActiveEnvironmentId = useStore((state) => state.setActiveEnvironmentId);
+  const where = whereLabel ?? `${name}'s computer`;
   const chats = useQuery({
-    queryKey: ["uno-assistant-chats", environmentId],
+    queryKey: ["uno-assistant-chats", environmentId, projectId],
     enabled: environmentId !== null,
     retry: false,
     refetchInterval: 20_000,
-    queryFn: () => listAssistantChats({ environmentId: environmentId! }),
+    queryFn: () => listAssistantChats({ environmentId: environmentId!, projectId }),
   });
 
   const open = async (threadId: AssistantChatSummary["threadId"]) => {
@@ -713,12 +1064,8 @@ export function ChatsBlock({
                 <th className="py-1.5 pr-2 font-normal">Where</th>
                 <th className="py-1.5 pr-2 font-normal">Model</th>
                 <th className="py-1.5 pr-2 font-normal">Status</th>
-                {SHOW_CHAT_COST ? (
-                  <>
-                    <th className="py-1.5 pr-2 text-right font-normal">Tokens</th>
-                    <th className="py-1.5 text-right font-normal">Cost</th>
-                  </>
-                ) : null}
+                <th className="py-1.5 pr-2 text-right font-normal">Tokens</th>
+                {SHOW_CHAT_COST ? <th className="py-1.5 text-right font-normal">Cost</th> : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
@@ -734,7 +1081,8 @@ export function ChatsBlock({
                     </button>
                   </td>
                   <td className="py-1.5 pr-2 text-xs whitespace-nowrap text-muted-foreground">
-                    {name}'s computer{chat.projectTitle ? ` · ${chat.projectTitle}` : ""}
+                    {where}
+                    {chat.projectTitle ? ` · ${chat.projectTitle}` : ""}
                   </td>
                   <td className="py-1.5 pr-2 text-xs whitespace-nowrap">
                     {chat.harness} · {chat.model}
@@ -748,15 +1096,21 @@ export function ChatsBlock({
                   >
                     {CHAT_STATUS[chat.status].label}
                   </td>
+                  <td
+                    className="py-1.5 pr-2 text-right text-xs whitespace-nowrap tabular-nums"
+                    data-testid="assistant-chat-tokens"
+                  >
+                    {formatTokens(chat.tokens)}
+                    {chatTokensNote(chat) ? (
+                      <span className="block text-[11px] text-muted-foreground">
+                        {chatTokensNote(chat)}
+                      </span>
+                    ) : null}
+                  </td>
                   {SHOW_CHAT_COST ? (
-                    <>
-                      <td className="py-1.5 pr-2 text-right text-xs tabular-nums">
-                        {formatTokens(chat.tokens)}
-                      </td>
-                      <td className="py-1.5 text-right text-xs whitespace-nowrap tabular-nums">
-                        {chatCostText(chat, data.gateway)}
-                      </td>
-                    </>
+                    <td className="py-1.5 text-right text-xs whitespace-nowrap tabular-nums">
+                      {chatCostText(chat, data.gateway)}
+                    </td>
                   ) : null}
                 </tr>
               ))}

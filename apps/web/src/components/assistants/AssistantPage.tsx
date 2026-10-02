@@ -53,6 +53,7 @@ import {
   CONNECTOR_PROVIDERS,
   describeCron,
   findTemplate,
+  workspaceFromCommand,
   type ConnectorLevel,
   type ConnectorPermissions,
   type ConnectorProvider,
@@ -295,7 +296,7 @@ export function AssistantPage({
 }
 
 /** One line about the app itself on the account: connected, not yet, or not offered yet. */
-function appState(connector: SetupConnector | undefined): {
+export function appState(connector: SetupConnector | undefined): {
   text: string;
   canConnect: boolean;
 } {
@@ -446,7 +447,16 @@ function AccessBlock({
   );
 }
 
-function ScheduleBlock({ boxId, name }: { boxId: number; name: string }) {
+export function ScheduleBlock({
+  boxId,
+  name,
+  workspaceRoot,
+}: {
+  boxId: number;
+  name: string;
+  /** An assistant that shares its computer: only the schedules for its folder. */
+  workspaceRoot?: string;
+}) {
   const queryClient = useQueryClient();
   const key = ["uno-assistant-schedule", boxId] as const;
   const schedules = useQuery({
@@ -472,7 +482,9 @@ function ScheduleBlock({ boxId, name }: { boxId: number; name: string }) {
     }
   };
 
-  const list = schedules.data ?? [];
+  const list = (schedules.data ?? []).filter(
+    (task) => workspaceRoot === undefined || workspaceFromCommand(task.command) === workspaceRoot,
+  );
   return (
     <Block title="Schedule" testId="assistant-schedule">
       {schedules.isLoading ? (

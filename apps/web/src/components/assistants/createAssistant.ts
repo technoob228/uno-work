@@ -1,5 +1,8 @@
 /**
- * "Create" of New assistant (assistants MVP): its own Work computer with the
+ * "Create" of New assistant. Since 02.10 evening the default is an assistant
+ * on THIS computer (`createLocalAssistant`, at the end: a folder in
+ * ~/UnoWork/Assistants, several per computer); "Give it its own computer" is
+ * the option below — its own Work computer with the
  * role `assistant`, the assistant on it with SOUL/USER/NOTES/AGENTS from the
  * person's sentence and answers, the template's connector permissions, and
  * the schedule if one was picked.
@@ -248,3 +251,123 @@ export const pendingAssistantSetup = {
     window.localStorage.setItem(PENDING_KEY, JSON.stringify(all));
   },
 };
+
+// ── On this computer (the default since 02.10 evening) ────────────────
+
+export type LocalCreateStage = "assistant" | "access" | "schedule" | "done";
+
+export const LOCAL_CREATE_STAGES: ReadonlyArray<{
+  stage: Exclude<LocalCreateStage, "done">;
+  label: string;
+}> = [
+  { stage: "assistant", label: "Writing who it is and what it knows" },
+  { stage: "access", label: "Setting what it can open" },
+  { stage: "schedule", label: "Adding its schedule" },
+];
+
+export interface LocalCreateDeps {
+  /** A new assistant folder in ~/UnoWork/Assistants on this computer. */
+  readonly createAssistant: (input: {
+    readonly name: string;
+    readonly emoji: string;
+    readonly template: string | null;
+  }) => Promise<{ readonly projectId: string; readonly workspaceRoot: string | null }>;
+  readonly readFile: (projectId: string, name: "AGENTS.md") => Promise<string>;
+  readonly writeFile: (
+    projectId: string,
+    name: "AGENTS.md" | "SOUL.md" | "USER.md" | "NOTES.md",
+    content: string,
+  ) => Promise<void>;
+  /** Apps it may open, stored and checked by Work on this computer. */
+  readonly putApps: (projectId: string, permissions: ConnectorPermissions) => Promise<void>;
+  /** Null: this computer can't be woken on a schedule (not an Uno cloud computer). */
+  readonly createSchedule:
+    | ((input: {
+        readonly name: string;
+        readonly cron: string;
+        readonly command: string;
+      }) => Promise<void>)
+    | null;
+  readonly onStage?: (stage: LocalCreateStage) => void;
+  readonly now?: () => string;
+}
+
+export interface LocalCreateResult {
+  readonly projectId: string;
+  readonly accessSet: boolean;
+  readonly scheduleCreated: boolean;
+  readonly notes: ReadonlyArray<string>;
+}
+
+/**
+ * "Create" for an assistant on this computer: its folder (the daemon), who
+ * it is (SOUL/USER/NOTES, and its name in AGENTS.md), the template's apps
+ * (checked by Work here), the schedule if one was picked. Only the folder is
+ * fatal; the rest becomes a note the person can act on.
+ */
+export async function createLocalAssistant(
+  plan: AssistantPlan,
+  deps: LocalCreateDeps,
+): Promise<LocalCreateResult> {
+  const now = deps.now?.() ?? new Date().toISOString();
+  const notes: string[] = [];
+
+  deps.onStage?.("assistant");
+  const { projectId, workspaceRoot } = await deps.createAssistant({
+    name: plan.name,
+    emoji: plan.emoji,
+    template: plan.template,
+  });
+  const files = assistantFiles(plan, now);
+  await deps.writeFile(projectId, "SOUL.md", files.soul);
+  await deps.writeFile(projectId, "USER.md", files.user);
+  await deps.writeFile(projectId, "NOTES.md", files.notes).catch(() => undefined);
+  const agents = await deps.readFile(projectId, "AGENTS.md").catch(() => "");
+  await deps
+    .writeFile(
+      projectId,
+      "AGENTS.md",
+      withAgentsProfile(agents, { name: plan.name, about: files.about }),
+    )
+    .catch(() => undefined);
+
+  deps.onStage?.("access");
+  const accessSet = await deps.putApps(projectId, plan.connectors).then(
+    () => true,
+    () => false,
+  );
+  if (!accessSet) {
+    notes.push(
+      `Uno couldn't set which apps ${plan.name} opens. Until it does, ${plan.name} reaches every app you connected. Check "Apps ${plan.name} can open" on its page.`,
+    );
+  }
+
+  deps.onStage?.("schedule");
+  let scheduleCreated = false;
+  if (plan.schedule) {
+    if (deps.createSchedule === null) {
+      notes.push(
+        `This computer can't wake ${plan.name} on a schedule. Ask ${plan.name} for reminders in the chat, or give it its own computer.`,
+      );
+    } else {
+      scheduleCreated = await deps
+        .createSchedule({
+          name: `${plan.name}: ${plan.schedule.label}`,
+          cron: plan.schedule.cron,
+          command: assistantTurnCommand(plan.job, workspaceRoot),
+        })
+        .then(
+          () => true,
+          () => false,
+        );
+      if (!scheduleCreated) {
+        notes.push(
+          `Uno couldn't add the schedule (${plan.schedule.label.toLowerCase()}). Ask ${plan.name} in the chat to set it up.`,
+        );
+      }
+    }
+  }
+
+  deps.onStage?.("done");
+  return { projectId, accessSet, scheduleCreated, notes };
+}
