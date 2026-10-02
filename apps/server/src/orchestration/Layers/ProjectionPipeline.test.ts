@@ -2436,4 +2436,60 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
       ]);
     }),
   );
+  it.effect("keeps the latest turn when the session goes idle or stops (Your turn, 0.0.105)", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const sql = yield* SqlClient.SqlClient;
+      const createdAt = new Date().toISOString();
+      const threadId = ThreadId.make("thread-idle-latest-turn");
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-idle-project"),
+        projectId: ProjectId.make("project-idle"),
+        title: "Home",
+        workspaceRoot: "/tmp/project-idle",
+        defaultModelSelection: null,
+        createdAt,
+      });
+      yield* engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-idle-thread"),
+        threadId,
+        projectId: ProjectId.make("project-idle"),
+        title: "Idle",
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      });
+      const sessionSet = (status: "running" | "ready" | "stopped", activeTurnId: string | null) =>
+        engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make(`cmd-idle-${status}`),
+          threadId,
+          createdAt: new Date().toISOString(),
+          session: {
+            threadId,
+            status,
+            providerName: "hermes",
+            runtimeMode: "full-access",
+            activeTurnId: activeTurnId === null ? null : TurnId.make(activeTurnId),
+            lastError: null,
+            updatedAt: new Date().toISOString(),
+          },
+        });
+      const latest = () =>
+        sql<{ readonly latestTurnId: string | null }>`
+          SELECT latest_turn_id AS "latestTurnId" FROM projection_threads WHERE thread_id = ${threadId}
+        `;
+      yield* sessionSet("running", "turn-idle-1");
+      assert.deepEqual(yield* latest(), [{ latestTurnId: "turn-idle-1" }]);
+      yield* sessionSet("ready", null);
+      assert.deepEqual(yield* latest(), [{ latestTurnId: "turn-idle-1" }]);
+      yield* sessionSet("stopped", null);
+      assert.deepEqual(yield* latest(), [{ latestTurnId: "turn-idle-1" }]);
+    }),
+  );
 });

@@ -802,7 +802,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           }
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
-            latestTurnId: event.payload.session.activeTurnId,
+            // A session between turns (ready, stopped, closed) has no active
+            // turn: the last turn stays the chat's latest. Clearing it made a
+            // finished chat lose its turn timing whenever no diff event came
+            // after it (a folder that isn't a git repo, the session's idle
+            // stop) — "Your turn" and Done never lit (0.0.105 smoke).
+            latestTurnId: event.payload.session.activeTurnId ?? existingRow.value.latestTurnId,
             updatedAt: event.occurredAt,
           });
           yield* refreshThreadShellSummary(event.payload.threadId);
