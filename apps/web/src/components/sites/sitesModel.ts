@@ -53,3 +53,10 @@ export function updatedAgo(iso: string | null, now = Date.now()): string | null 
 export function changeSitePrompt(row: Pick<SiteRow, "slug" | "url">): string {
   return `I want to change my site ${row.url} (slug ${row.slug}). Get its current code with curl, ask me what to change, then republish it under the same address.`;
 }
+
+export type AppsSitesTab = "apps" | "sites";
+
+/** `/sites?tab=apps|sites` — Apps first; anything else reads as no tab. */
+export function parseAppsSitesSearch(search: Record<string, unknown>): { tab?: AppsSitesTab } {
+  return search.tab === "apps" || search.tab === "sites" ? { tab: search.tab } : {};
+}

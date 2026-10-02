@@ -87,7 +87,7 @@ export const InboxBell = memo(function InboxBell() {
   );
 });
 
-function BellPanel({ onClose }: { onClose: () => void }) {
+export function BellPanel({ onClose }: { onClose: () => void }) {
   const entries = useInboxEntries();
   const [filter, setFilter] = useState<BellFilter>("all");
   const now = Date.now();

@@ -16,13 +16,18 @@ import {
   GlobeIcon,
   MonitorSmartphoneIcon,
   PanelRightIcon,
+  SquarePenIcon,
   TerminalSquareIcon,
 } from "lucide-react";
+import { selectEnvironmentState, useStore } from "../../store";
+import { useGoHome } from "../../navigation/useGoHome";
+import { UnoFace } from "../sidebar/SidebarDParts";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import { Toggle } from "../ui/toggle";
 import { SidebarTrigger, useSidebar } from "../ui/sidebar";
+import { useSidebarDRailVisible } from "../sidebar/sidebarDState";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { usePreviewPane } from "../preview/PreviewPaneContext";
@@ -41,6 +46,7 @@ import {
   ASSISTANT_CHAT_NAME,
   ASSISTANT_VALUE_LINE,
   assistantConversationLabel,
+  isFromAssistant,
 } from "../../assistant/assistantChat.logic";
 import { useAssistantConversations } from "../../assistant/useAssistantConversations";
 
@@ -117,7 +123,9 @@ export const ChatHeader = memo(function ChatHeader({
   const devMode = useDevMode();
   const browserCompanionEnabled = useFeatureFlag("browserCompanion");
   const { isMobile, open, openMobile } = useSidebar();
-  const sidebarVisible = isMobile ? openMobile : open;
+  // Sidebar D's rail counts as the sidebar: no extra "show sidebar" button.
+  const railD = useSidebarDRailVisible();
+  const sidebarVisible = isMobile ? openMobile : open || railD;
   const {
     open: previewOpen,
     files: previewFiles,
@@ -136,7 +144,15 @@ export const ChatHeader = memo(function ChatHeader({
   });
   // THE assistant chat: named "Uno" whatever its stored title, no project
   // badge (the assistant is the chat, not a project), Connect ▾ + settings.
-  const assistantChat = useAssistantChat().chat;
+  const { chat: assistantChat, open: openAssistantChat } = useAssistantChat();
+  const goHome = useGoHome();
+  // Sidebar D: a chat Uno started says so in its header, one click to Uno.
+  const startedByUno = useStore((state) => {
+    if (draftId) return false;
+    const summary = selectEnvironmentState(state, activeThreadEnvironmentId)
+      .sidebarThreadSummaryById[activeThreadId];
+    return summary ? isFromAssistant(summary, assistantChat?.id ?? null) : false;
+  });
   const assistantConversations = useAssistantConversations().conversations;
   const isMainAssistantChat =
     !draftId &&
@@ -219,6 +235,18 @@ export const ChatHeader = memo(function ChatHeader({
             <span className="min-w-0 truncate">{activeProjectName}</span>
           </Badge>
         ) : null}
+        {startedByUno && !isAssistantChat ? (
+          <button
+            type="button"
+            onClick={() => void openAssistantChat()}
+            title="Open Uno's chat"
+            data-testid="chat-started-by-uno"
+            className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-full bg-primary/10 py-0.5 pr-2 pl-0.5 text-xs font-medium text-primary hover:bg-primary/15"
+          >
+            <UnoFace className="size-4" />
+            Started by Uno
+          </button>
+        ) : null}
         <TooltipProvider delay={0} closeDelay={0}>
           <Tooltip>
             <TooltipTrigger
@@ -240,6 +268,18 @@ export const ChatHeader = memo(function ChatHeader({
         </TooltipProvider>
       </div>
       <div className="flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3">
+        {isMobile ? (
+          // Phone: the menu slides in from the left, the pencil sits on the right.
+          <button
+            type="button"
+            onClick={goHome}
+            aria-label="New chat"
+            data-testid="chat-header-new-chat"
+            className={HEADER_ICON_BUTTON_CLASS}
+          >
+            <SquarePenIcon className="size-3.5" />
+          </button>
+        ) : null}
         {draftId ? null : (
           <ChatDoneButton environmentId={activeThreadEnvironmentId} threadId={activeThreadId} />
         )}

@@ -34,6 +34,7 @@ import {
   CircleDashedIcon,
   CloudOffIcon,
   FolderGit2Icon,
+  ChevronRightIcon,
   FolderIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
@@ -57,6 +58,7 @@ import {
   type ReactNode,
   type SyntheticEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { useShallow } from "zustand/react/shallow";
 import { useLocation, useParams, useRouter } from "@tanstack/react-router";
 import {
@@ -184,11 +186,10 @@ import {
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
-import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import { SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarSetupRow } from "./sidebar/SidebarSetupRow";
 import { SidebarEmptyProjects } from "./sidebar/SidebarEmptyProjects";
 import { SidebarMyUnoRow } from "./sidebar/SidebarMyUnoRow";
-import { SidebarPrimaryNav } from "./sidebar/SidebarPrimaryNav";
 import { doneShelfLabel, threadContextMenuItems } from "./sidebar/simpleSidebar.logic";
 import { useDevMode } from "../devMode";
 import { usePins } from "../navigation/usePins";
@@ -211,6 +212,23 @@ import {
 } from "../assistant/assistantChat.logic";
 import { useAssistantChat } from "../assistant/useAssistantChat";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
+import {
+  SIDEBAR_D_RAIL_WIDTH,
+  SidebarDHeader,
+  SidebarDPlaces,
+  UnoFace,
+} from "./sidebar/SidebarDParts";
+import { sidebarDPanel, useSidebarDStore } from "./sidebar/sidebarDState";
+import {
+  type DRowMark,
+  dRowMark,
+  foldedProjectMark,
+  groupChatsForSidebarD,
+  isRunningStatus,
+  SIDEBAR_D_FOLDED_PROJECTS_KEY,
+  SIDEBAR_D_UNO_FOLDED_KEY,
+  unoRunningLabel,
+} from "./sidebar/sidebarD.logic";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import {
   useSidebarEnvironmentLabelResolver,
@@ -471,9 +489,176 @@ function SidebarSectionHeader(props: {
   );
 }
 
+/** Sidebar D: "Projects", "Recents" — quiet labels between the groups. */
+function SidebarDSectionLabel(props: { label: string }) {
+  return (
+    <li
+      aria-hidden
+      className="list-none px-2.5 pt-3 pb-1 text-xs font-medium text-sidebar-muted-foreground/70"
+    >
+      {props.label}
+    </li>
+  );
+}
+
+/**
+ * Sidebar D: Uno, pinned first among the chats. A click opens Uno's chat;
+ * "N running" folds open the chats it started and is watching.
+ */
+const SidebarDUnoRow = memo(function SidebarDUnoRow(props: {
+  runningCount: number;
+  folded: boolean;
+  onToggleFolded: () => void;
+  isActive: boolean;
+}) {
+  const { environmentId, opening, open } = useAssistantChat();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const running = unoRunningLabel(props.runningCount);
+  return (
+    <li className="list-none" data-testid="sidebar-uno-group">
+      <div
+        className={cn(
+          "group/uno flex h-8 w-full items-center rounded-md transition-colors",
+          props.isActive ? "bg-sidebar-row-active" : "hover:bg-sidebar-row-hover",
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            if (isMobile) setOpenMobile(false);
+            sidebarDPanel.closeNow();
+            void open();
+          }}
+          disabled={environmentId === null || opening}
+          aria-current={props.isActive ? "page" : undefined}
+          data-testid="sidebar-uno"
+          className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md pl-2 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+        >
+          <UnoFace className="size-5" online />
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+            {ASSISTANT_CHAT_NAME}
+          </span>
+        </button>
+        {running ? (
+          <button
+            type="button"
+            onClick={props.onToggleFolded}
+            aria-expanded={!props.folded}
+            data-testid="sidebar-uno-running"
+            className="flex h-full shrink-0 cursor-pointer items-center gap-1 rounded-md pr-2 pl-1 text-xs text-primary outline-hidden hover:text-primary/80 focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {running}
+            <ChevronDownIcon
+              aria-hidden
+              className={cn("size-3 transition-transform", props.folded && "-rotate-90")}
+            />
+          </button>
+        ) : null}
+      </div>
+    </li>
+  );
+});
+
+/** Sidebar D: a project — folds its chats away; folded, it shows its most urgent mark. */
+function SidebarDProjectRow(props: {
+  name: string;
+  folded: boolean;
+  mark: DRowMark;
+  onToggle: () => void;
+  onNewChat: (() => void) | null;
+}) {
+  return (
+    <li className="group/project list-none" data-testid="sidebar-project-row">
+      <div className="flex h-8 w-full items-center rounded-md transition-colors hover:bg-sidebar-row-hover">
+        <button
+          type="button"
+          onClick={props.onToggle}
+          aria-expanded={!props.folded}
+          className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md pl-2.5 text-left text-sm text-sidebar-foreground/90 outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <span className="relative flex size-4 shrink-0 items-center justify-center">
+            <FolderIcon className="size-4 text-muted-foreground transition-opacity group-hover/project:opacity-0" />
+            <ChevronRightIcon
+              aria-hidden
+              className={cn(
+                "absolute size-3.5 text-muted-foreground opacity-0 transition group-hover/project:opacity-100",
+                !props.folded && "rotate-90",
+              )}
+            />
+          </span>
+          <span className="min-w-0 flex-1 truncate">{props.name}</span>
+          {props.folded ? (
+            <span className="mr-1.5 inline-flex shrink-0 items-center">
+              <SidebarDMark mark={props.mark} />
+            </span>
+          ) : null}
+        </button>
+        {props.onNewChat ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={`New chat in ${props.name}`}
+                  onClick={props.onNewChat}
+                  className="mr-1 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover/project:opacity-100 hover:bg-accent hover:text-foreground focus-visible:opacity-100"
+                />
+              }
+            >
+              <PlusIcon className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipPopup side="top">New chat in {props.name}</TooltipPopup>
+          </Tooltip>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
+/** The one mark at the end of a D row: working, needs you, error, or Your turn. */
+function SidebarDMark(props: { mark: DRowMark }) {
+  switch (props.mark) {
+    case "working":
+      return (
+        <CircleDashedIcon
+          role="img"
+          aria-label="Working"
+          className="size-3.5 animate-spin text-sky-500 [animation-duration:2.4s]"
+        />
+      );
+    case "approval":
+      return (
+        <span role="img" aria-label="Needs your OK" className="size-2 rounded-full bg-amber-500" />
+      );
+    case "input":
+      return (
+        <span role="img" aria-label="Asks you" className="size-2 rounded-full bg-indigo-500" />
+      );
+    case "failed":
+      return <span role="img" aria-label="Failed" className="size-2 rounded-full bg-red-500" />;
+    case "your-turn":
+      return (
+        <span
+          role="status"
+          data-testid="sidebar-row-your-turn"
+          className="text-[11px] font-medium whitespace-nowrap text-emerald-700 dark:text-emerald-300"
+        >
+          Your turn
+        </span>
+      );
+    default:
+      return null;
+  }
+}
+
 interface SidebarThreadRowProps {
   thread: SidebarThreadSummary;
-  variant: "card" | "slim";
+  /** "d": sidebar D's one-line row (32 px, a mark at the end, Done on hover). */
+  variant: "card" | "slim" | "d";
+  /** Sidebar D: inside a group (Uno's running chats, a project). */
+  nested?: boolean;
+  /** Sidebar D: started by Uno — its small face before the title. */
+  fromUno?: boolean;
   section: SidebarSection;
   isActive: boolean;
   jumpLabel: string | null;
@@ -835,6 +1020,86 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     </span>
   ) : null;
 
+  if (variant === "d") {
+    const mark = dRowMark(status, yourTurn);
+    const showDone = canSettle && section !== "settled" && section !== "snoozed";
+    return (
+      <li data-thread-item className="list-none">
+        <div
+          role="button"
+          tabIndex={0}
+          data-testid="sidebar-row-d"
+          data-sidebar-section={section}
+          data-thread-mark={mark ?? undefined}
+          className={cn(
+            rowSurfaceClassName,
+            "flex h-8 items-center gap-2 pr-1.5",
+            props.nested ? "pl-8" : "pl-2.5",
+          )}
+          onClick={handleClick}
+          onDoubleClick={handleDoubleClick}
+          onKeyDown={handleKeyDown}
+          onContextMenu={handleContextMenu}
+        >
+          {props.fromUno ? <UnoFace className="size-3.5" title="Started by Uno" /> : null}
+          {isRenaming ? (
+            title
+          ) : (
+            <span
+              data-testid={`thread-title-${thread.id}`}
+              className={cn(
+                "min-w-0 flex-1 truncate text-sm",
+                props.isActive || mark === "your-turn" || mark === "input" || mark === "approval"
+                  ? "text-foreground"
+                  : shouldRecede
+                    ? "text-sidebar-foreground/70"
+                    : "text-sidebar-foreground/90",
+                (mark === "your-turn" || mark === "input" || mark === "approval") && "font-medium",
+              )}
+            >
+              {thread.title}
+            </span>
+          )}
+          {pinIndicator}
+          {machineMark}
+          <span className="relative ml-auto flex h-6 min-w-4 shrink-0 items-center justify-end">
+            <span
+              className={cn(
+                "inline-flex items-center transition-opacity",
+                showDone &&
+                  "group-hover/sidebar-row:opacity-0 group-focus-within/sidebar-row:opacity-0",
+              )}
+            >
+              <SidebarDMark mark={mark} />
+            </span>
+            {showDone ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label="Mark chat done"
+                      data-testid="sidebar-row-done"
+                      onClick={stopAnd(onSettle)}
+                      className="pointer-events-none absolute inset-y-0 right-0 inline-flex cursor-pointer items-center gap-1 rounded-md px-1 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100"
+                    />
+                  }
+                >
+                  <CheckIcon className="size-3.5" />
+                  Done
+                </TooltipTrigger>
+                <TooltipPopup side="top">
+                  Done: nothing more to answer — move it to Done
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
+          </span>
+          {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
+        </div>
+      </li>
+    );
+  }
+
   if (variant === "slim") {
     const isSnoozedRow = section === "snoozed";
     const slimActionClassName =
@@ -1160,8 +1425,6 @@ function useErrorToast() {
 
 export default function Sidebar() {
   const sidebarMode = useNavStore((state) => state.sidebarMode);
-  const lastListMode = useNavStore((state) => state.lastListMode);
-  const setSidebarMode = useNavStore((state) => state.setSidebarMode);
   // Rail layout: this sidebar is the panel next to the rail and shows one
   // section at a time. Standard layout: "Home" lives in the main area, so a
   // "home" left over from the rail reads as Chats.
@@ -1183,7 +1446,7 @@ export default function Sidebar() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const isOnSettings = pathname.startsWith("/settings");
   const router = useRouter();
-  const { isMobile, setOpenMobile } = useSidebar();
+  const { isMobile, setOpenMobile, open: sidebarOpen, setOpen } = useSidebar();
   const showErrorToast = useErrorToast();
 
   // ── Data: projects and chats in the machine scope ────────────────────
@@ -1325,9 +1588,13 @@ export default function Sidebar() {
     () => new Map(projectGroups.map((group) => [group.projectKey, group] as const)),
     [projectGroups],
   );
+  // Sidebar D groups chats by project itself: the project filter (and its
+  // stored choice) only applies in the Labs rail layout.
   const scopedProjectGroup: SidebarProjectSnapshot | null =
-    projectScopeKey !== null ? (projectGroupByScopeKey.get(projectScopeKey) ?? null) : null;
-  const isHelperScope = projectScopeKey === HELPER_SCOPE && hasHelperProjects;
+    railLayout && projectScopeKey !== null
+      ? (projectGroupByScopeKey.get(projectScopeKey) ?? null)
+      : null;
+  const isHelperScope = railLayout && projectScopeKey === HELPER_SCOPE && hasHelperProjects;
   const selectedProjectScopeItem =
     projectScopeItems.find((item) => item.value === (projectScopeKey ?? ALL_SCOPE)) ??
     projectScopeItems[0]!;
@@ -1360,11 +1627,18 @@ export default function Sidebar() {
   // A scope whose project is gone (removed, or on a machine now out of scope)
   // falls back to all projects once projects have loaded.
   useEffect(() => {
-    if (projectScopeKey === null || projects.length === 0) return;
+    if (!railLayout || projectScopeKey === null || projects.length === 0) return;
     if (projectScopeKey === HELPER_SCOPE ? !hasHelperProjects : scopedProjectGroup === null) {
       setProjectScopeKey(null);
     }
-  }, [hasHelperProjects, projectScopeKey, projects.length, scopedProjectGroup, setProjectScopeKey]);
+  }, [
+    hasHelperProjects,
+    projectScopeKey,
+    projects.length,
+    railLayout,
+    scopedProjectGroup,
+    setProjectScopeKey,
+  ]);
   const headerSearchRef = useRef<HTMLDivElement | null>(null);
 
   // ── Route and selection ───────────────────────────────────────────────
@@ -1472,14 +1746,127 @@ export default function Sidebar() {
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
   }, [routeThreadKey, settledShelfExpanded, simple, snoozedShelfExpanded, snoozedThreads]);
 
+  // ── Sidebar D: Uno's running chats, Projects, Recents ───────────────
+  const sidebarD = !railLayout;
+  const dHomeFolderPath = useHomeFolderPath(activeEnvironmentId ?? primaryEnvironmentId);
+  const [foldedProjectKeys, setFoldedProjectKeys] = useLocalStorage<
+    ReadonlyArray<string>,
+    ReadonlyArray<string>
+  >(SIDEBAR_D_FOLDED_PROJECTS_KEY, [], Schema.Array(Schema.String));
+  const [unoFolded, setUnoFolded] = useLocalStorage(
+    SIDEBAR_D_UNO_FOLDED_KEY,
+    false,
+    Schema.Boolean,
+  );
+  const dGroups = useMemo(() => {
+    const home = dHomeFolderPath?.replace(/\/+$/, "") ?? null;
+    const activeKeys = new Set(activeThreads.map(threadKeyOf));
+    // Uno's running chats may live in the assistant's own folder, which the
+    // main list keeps out: they still show under Uno while they run.
+    const unoRunningElsewhere = threads.filter(
+      (thread) =>
+        thread.archivedAt === null &&
+        thread.id !== assistantChatId &&
+        !activeKeys.has(threadKeyOf(thread)) &&
+        !pinnedThreads.some((pinned) => threadKeyOf(pinned) === threadKeyOf(thread)) &&
+        isFromAssistant(thread, assistantChatId) &&
+        isRunningStatus(resolveSidebarThreadStatus(thread)),
+    );
+    return groupChatsForSidebarD({
+      chats: [...activeThreads, ...unoRunningElsewhere],
+      isFromUno: (thread) => isFromAssistant(thread, assistantChatId),
+      isRunning: (thread) => isRunningStatus(resolveSidebarThreadStatus(thread)),
+      projectOf: (thread) => {
+        const key = projectKeyOf(thread);
+        const project = projectByKey.get(key);
+        if (!project || isAssistantProjectId(project.id)) return null;
+        if (home !== null && project.cwd.replace(/\/+$/, "") === home) return null;
+        return { key, name: projectDisplayNameByKey.get(key) ?? project.name };
+      },
+      activityMs: (thread) =>
+        resolveThreadActivityMs(thread) ?? toSortableTimestamp(thread.updatedAt ?? undefined) ?? 0,
+    });
+  }, [
+    activeThreads,
+    assistantChatId,
+    dHomeFolderPath,
+    pinnedThreads,
+    projectByKey,
+    projectDisplayNameByKey,
+    threads,
+  ]);
+  const foldedProjectKeySet = useMemo(() => new Set(foldedProjectKeys), [foldedProjectKeys]);
+  // A folded project with the open chat in it stays open, so the chat is seen.
+  const isProjectFolded = useCallback(
+    (project: { key: string; chats: ReadonlyArray<SidebarThreadSummary> }) =>
+      foldedProjectKeySet.has(project.key) &&
+      !project.chats.some((thread) => threadKeyOf(thread) === routeThreadKey),
+    [foldedProjectKeySet, routeThreadKey],
+  );
+  const unoChildrenFolded =
+    unoFolded && !dGroups.unoRunning.some((thread) => threadKeyOf(thread) === routeThreadKey);
+  // The collapsed rail's chats panel: hides on a click into the page or Esc.
+  const dRailShown = sidebarD && !sidebarOpen && !isMobile;
+  const dPanelOpen = useSidebarDStore((state) => state.panelOpen);
+  const dPanelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!dRailShown || !dPanelOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target) return;
+      if (dPanelRef.current?.contains(target)) return;
+      if (target.closest('[data-testid="sidebar-rail"]')) return;
+      // Menus and dialogs opened from the panel (a chat's menu) live in portals.
+      if (target.closest('[role="menu"], [role="dialog"], [data-slot="popover-popup"]')) return;
+      sidebarDPanel.closeNow();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") sidebarDPanel.closeNow();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [dPanelOpen, dRailShown]);
+  const toggleProjectFolded = useCallback(
+    (key: string) =>
+      setFoldedProjectKeys((keys) =>
+        keys.includes(key) ? keys.filter((entry) => entry !== key) : [...keys, key],
+      ),
+    [setFoldedProjectKeys],
+  );
+
   const orderedThreads = useMemo(
-    () => [
-      ...pinnedThreads,
-      ...activeThreads,
-      ...renderedSnoozedThreads,
-      ...renderedSettledThreads,
+    () =>
+      sidebarD
+        ? [
+            ...pinnedThreads,
+            ...(unoChildrenFolded ? [] : dGroups.unoRunning),
+            ...dGroups.projects.flatMap((project) =>
+              isProjectFolded(project) ? [] : project.chats,
+            ),
+            ...dGroups.recents,
+            ...renderedSnoozedThreads,
+            ...renderedSettledThreads,
+          ]
+        : [
+            ...pinnedThreads,
+            ...activeThreads,
+            ...renderedSnoozedThreads,
+            ...renderedSettledThreads,
+          ],
+    [
+      activeThreads,
+      dGroups,
+      isProjectFolded,
+      pinnedThreads,
+      renderedSettledThreads,
+      renderedSnoozedThreads,
+      sidebarD,
+      unoChildrenFolded,
     ],
-    [activeThreads, pinnedThreads, renderedSettledThreads, renderedSnoozedThreads],
   );
   const orderedThreadKeys = useMemo(() => orderedThreads.map(threadKeyOf), [orderedThreads]);
   const orderedThreadKeysRef = useRef(orderedThreadKeys);
@@ -1528,6 +1915,7 @@ export default function Sidebar() {
       if (useThreadSelectionStore.getState().selectedThreadKeys.size > 0) clearSelection();
       setSelectionAnchor(scopedThreadKey(threadRef));
       if (isMobile) setOpenMobile(false);
+      sidebarDPanel.closeNow();
       void router.navigate({
         to: "/$environmentId/$threadId",
         params: buildThreadRouteParams(threadRef),
@@ -2320,16 +2708,27 @@ export default function Sidebar() {
     );
   }
 
-  const renderRow = (thread: SidebarThreadSummary, section: SidebarSection) => {
+  const renderRow = (
+    thread: SidebarThreadSummary,
+    section: SidebarSection,
+    options?: { readonly d?: boolean; readonly nested?: boolean; readonly underUno?: boolean },
+  ) => {
     const threadKey = threadKeyOf(thread);
     // Pinned chats live in the compact Pinned group above every sidebar mode.
-    const variant = section === "active" ? "card" : "slim";
+    // Sidebar D: every live chat is one line.
+    const variant = options?.d ? "d" : section === "active" ? "card" : "slim";
     const projectKey = projectKeyOf(thread);
     return (
       <SidebarThreadRow
         key={`${threadKey}:${variant}`}
         thread={thread}
         variant={variant}
+        nested={options?.nested ?? false}
+        fromUno={
+          options?.d === true && !options.underUno
+            ? isFromAssistant(thread, assistantChatId)
+            : false
+        }
         section={section}
         isActive={routeThreadKey === threadKey}
         jumpLabel={showThreadJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null}
@@ -2469,34 +2868,280 @@ export default function Sidebar() {
     </SidebarGroup>
   );
 
+  const sharedDialogs = (
+    <>
+      <ContinueOnMachineDialog
+        threadRef={continueThreadTarget}
+        open={continueThreadTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setContinueThreadTarget(null);
+        }}
+      />
+      <Dialog
+        open={snoozePickerTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setSnoozePickerTarget(null);
+        }}
+      >
+        <DialogPopup className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Snooze until…</DialogTitle>
+            <DialogDescription>
+              The chat moves to Snoozed and comes back at this time, or sooner if the agent needs
+              you.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-2">
+            <Input
+              type="datetime-local"
+              aria-label="Wake up time"
+              value={snoozePickerValue}
+              min={formatSnoozePickerValue(new Date())}
+              onChange={(event) => setSnoozePickerValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  submitSnoozePicker();
+                }
+              }}
+            />
+            {snoozePickerValue !== "" && snoozePickerWake === null ? (
+              <p className="text-xs text-destructive">Pick a time in the future.</p>
+            ) : null}
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSnoozePickerTarget(null)}>
+              Cancel
+            </Button>
+            <Button disabled={snoozePickerWake === null} onClick={submitSnoozePicker}>
+              Snooze
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+    </>
+  );
+
+  // ── Sidebar D (the standard layout) ──────────────────────────────────
+  const dChatList = (inPanel: boolean) => (
+    <SidebarContent className="min-h-full gap-0">
+      <SidebarGroup className="min-h-full flex-1 px-[var(--sidebar-content-inset)] pt-1 pb-1">
+        <TooltipProvider delay={150} closeDelay={0} timeout={400}>
+          <ul
+            role="list"
+            className="relative flex flex-1 flex-col gap-px"
+            data-testid={inPanel ? "sidebar-panel-chats" : "sidebar-d-chats"}
+          >
+            <SidebarDUnoRow
+              runningCount={dGroups.unoRunning.length}
+              folded={unoChildrenFolded}
+              onToggleFolded={() => setUnoFolded((value) => !value)}
+              isActive={assistantChatId !== null && routeThreadRef?.threadId === assistantChatId}
+            />
+            {unoChildrenFolded
+              ? null
+              : dGroups.unoRunning.map((thread) =>
+                  renderRow(thread, "active", { d: true, nested: true, underUno: true }),
+                )}
+            {dGroups.projects.length > 0 ? <SidebarDSectionLabel label="Projects" /> : null}
+            {dGroups.projects.map((group) => {
+              const folded = isProjectFolded(group);
+              const project = projectByKey.get(group.key) ?? null;
+              return (
+                <li key={group.key} className="list-none">
+                  <ul role="list" className="flex flex-col gap-px">
+                    <SidebarDProjectRow
+                      name={group.name}
+                      folded={folded}
+                      mark={foldedProjectMark(
+                        group.chats.map((thread) =>
+                          dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
+                        ),
+                      )}
+                      onToggle={() => toggleProjectFolded(group.key)}
+                      onNewChat={
+                        project
+                          ? () => {
+                              if (isMobile) setOpenMobile(false);
+                              sidebarDPanel.closeNow();
+                              void newThreadContext.handleNewThread(
+                                scopeProjectRef(project.environmentId, project.id),
+                                {
+                                  envMode: resolveSidebarNewThreadEnvMode({
+                                    defaultEnvMode: defaultThreadEnvMode,
+                                  }),
+                                },
+                              );
+                            }
+                          : null
+                      }
+                    />
+                    {folded
+                      ? null
+                      : group.chats.map((thread) =>
+                          renderRow(thread, "active", { d: true, nested: true }),
+                        )}
+                  </ul>
+                </li>
+              );
+            })}
+            {dGroups.recents.length > 0 ? <SidebarDSectionLabel label="Recents" /> : null}
+            {dGroups.recents.map((thread) => renderRow(thread, "active", { d: true }))}
+            {simple && snoozedThreads.length + settledThreads.length > 0 ? (
+              <SidebarSectionHeader
+                kind="settled"
+                className="mt-auto pt-2"
+                label={doneShelfLabel(
+                  snoozedThreads.length + settledThreads.length,
+                  settledShelfExpanded,
+                )}
+                expanded={settledShelfExpanded}
+                onToggle={() => setSettledShelfExpanded((value) => !value)}
+              />
+            ) : null}
+            {!simple && snoozedThreads.length > 0 ? (
+              <SidebarSectionHeader
+                kind="snoozed"
+                className="mt-auto pt-2"
+                label={snoozedShelfExpanded ? "Snoozed" : `Snoozed (${snoozedThreads.length})`}
+                expanded={snoozedShelfExpanded}
+                onToggle={() => setSnoozedShelfExpanded((value) => !value)}
+              />
+            ) : null}
+            {renderedSnoozedThreads.map((thread) => renderRow(thread, "snoozed"))}
+            {!simple && settledThreads.length > 0 ? (
+              <SidebarSectionHeader
+                kind="settled"
+                className={cn(snoozedThreads.length === 0 && "mt-auto pt-2")}
+                label={settledShelfExpanded ? "Settled" : `Settled (${settledThreads.length})`}
+                expanded={settledShelfExpanded}
+                onToggle={() => setSettledShelfExpanded((value) => !value)}
+              />
+            ) : null}
+            {renderedSettledThreads.map((thread) => renderRow(thread, "settled"))}
+            {settledShelfExpanded && hiddenSettledCount > 0 ? (
+              <li className="list-none">
+                <button
+                  type="button"
+                  onClick={() => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT)}
+                  className="flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                >
+                  <PlusIcon aria-hidden className="size-4 shrink-0" />
+                  Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
+                </button>
+              </li>
+            ) : null}
+          </ul>
+        </TooltipProvider>
+        <SidebarUnoAiChats />
+        {totalThreadCount === 0 && pinnedThreads.length === 0 ? (
+          projects.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
+              <span>No chats yet</span>
+              <Button size="xs" variant="outline" onClick={() => handleNewThreadClick()}>
+                <PlusIcon className="-mx-0.5 size-3" />
+                New chat
+              </Button>
+            </div>
+          ) : (
+            <SidebarEmptyProjects
+              projects={projectGroups.map((group) => ({
+                key: group.projectKey,
+                name: group.displayName,
+              }))}
+              onOpen={(key) => {
+                const member = projectGroupByScopeKey.get(key)?.memberProjects[0];
+                if (!member) return;
+                if (isMobile) setOpenMobile(false);
+                sidebarDPanel.closeNow();
+                void newThreadContext.handleNewThread(
+                  scopeProjectRef(member.environmentId, member.id),
+                  {
+                    envMode: resolveSidebarNewThreadEnvMode({
+                      defaultEnvMode: defaultThreadEnvMode,
+                    }),
+                  },
+                );
+              }}
+            />
+          )
+        ) : null}
+      </SidebarGroup>
+    </SidebarContent>
+  );
+
+  if (sidebarD) {
+    const showPanel = dRailShown && dPanelOpen && typeof document !== "undefined";
+    return (
+      <MachineIdentityProvider identities={machineIdentities}>
+        <SidebarDHeader isElectron={isElectron} />
+        <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-0.5 pb-1">
+          {/* Sidebar D (0.0.105): Files, Apps & sites, Needs you when something
+              waits; the chats below with Uno pinned first. Settings and the
+              account live in the menu on top. */}
+          <SidebarSetupRow />
+          <SidebarDPlaces />
+        </SidebarGroup>
+        {pins.length > 0 || pinnedThreads.length > 0 ? pinnedGroup : null}
+        {dChatList(false)}
+        <SidebarFooter className="gap-1 px-[var(--sidebar-content-inset)] py-1 empty:hidden">
+          <SidebarUpdatePill />
+        </SidebarFooter>
+        {showPanel
+          ? createPortal(
+              <div
+                ref={dPanelRef}
+                role="dialog"
+                aria-label="Chats"
+                data-testid="sidebar-chats-panel"
+                onPointerEnter={() => sidebarDPanel.enterPanel()}
+                onPointerLeave={() => sidebarDPanel.leave()}
+                className="fixed inset-y-0 z-40 flex w-72 flex-col border-r border-border bg-sidebar text-sidebar-foreground shadow-xl animate-in slide-in-from-left-2 fade-in-0 duration-150"
+                style={{ left: SIDEBAR_D_RAIL_WIDTH }}
+              >
+                <div className="flex h-11 shrink-0 items-center gap-2 px-4 pt-1">
+                  <span className="flex-1 text-sm font-semibold">Chats</span>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          aria-label="Keep the sidebar open"
+                          data-testid="sidebar-panel-pin"
+                          onClick={() => setOpen(true)}
+                          className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+                        />
+                      }
+                    >
+                      <PinIcon className="size-4" />
+                    </TooltipTrigger>
+                    <TooltipPopup side="bottom">Keep the sidebar open · ⌘B</TooltipPopup>
+                  </Tooltip>
+                </div>
+                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                  {dChatList(true)}
+                </div>
+              </div>,
+              document.body,
+            )
+          : null}
+        {sharedDialogs}
+      </MachineIdentityProvider>
+    );
+  }
+
+  // Labs "Layout options" → rail: the panel next to the rail shows one
+  // section at a time (the standard layout is sidebar D above).
   return (
     <MachineIdentityProvider identities={machineIdentities}>
-      {railLayout ? (
-        <RailPanelHeader mode={listMode} isElectron={isElectron} />
-      ) : (
-        <SidebarChromeHeader isElectron={isElectron} showBell showNewChat />
-      )}
-      {railLayout ? (
-        listMode === "home" ? (
-          <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-0">
-            <SidebarSetupRow />
-            <SidebarMyUnoRow />
-          </SidebarGroup>
-        ) : null
-      ) : (
-        <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-1.5">
-          {/* 01.10: four places — Chats, Assistants, Files, Apps. Home is the
-              logo and "New chat"; the computer lives in the start screen's pill;
-              My Uno and the console are in the account menu at the bottom. */}
+      <RailPanelHeader mode={listMode} isElectron={isElectron} />
+      {listMode === "home" ? (
+        <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-1 pb-0">
           <SidebarSetupRow />
-          <SidebarPrimaryNav />
+          <SidebarMyUnoRow />
         </SidebarGroup>
-      )}
-      {(!railLayout || listMode === "home") &&
-      // "Pinned" appears with the first pin, not before.
-      (railLayout || pins.length > 0 || pinnedThreads.length > 0)
-        ? pinnedGroup
-        : null}
+      ) : null}
+      {listMode === "home" ? pinnedGroup : null}
       {listMode === "home" ? (
         <SidebarContent className="min-h-full gap-0 border-t border-border/50">
           <SidebarGroup className="px-[var(--sidebar-content-inset)] pt-1.5 pb-1">
@@ -2504,14 +3149,9 @@ export default function Sidebar() {
           </SidebarGroup>
         </SidebarContent>
       ) : listMode === "inbox" ? (
-        <SidebarContent
-          className={cn("min-h-full gap-0", !railLayout && "border-t border-border/50")}
-        >
+        <SidebarContent className="min-h-full gap-0">
           <SidebarGroup className="min-h-full flex-1 px-[var(--sidebar-content-inset)] pt-1 pb-1">
-            <InboxPanel
-              showTitle={!railLayout}
-              {...(railLayout ? {} : { onBack: () => setSidebarMode(lastListMode) })}
-            />
+            <InboxPanel showTitle={false} />
           </SidebarGroup>
         </SidebarContent>
       ) : listMode === "files" ? (
@@ -2704,63 +3344,11 @@ export default function Sidebar() {
           </SidebarContent>
         </>
       )}
-      {railLayout ? (
-        <SidebarFooter className="gap-1 px-[var(--sidebar-content-inset)] py-1.5">
-          <SidebarUpdatePill />
-        </SidebarFooter>
-      ) : (
-        <SidebarChromeFooter simple />
-      )}
+      <SidebarFooter className="gap-1 px-[var(--sidebar-content-inset)] py-1.5">
+        <SidebarUpdatePill />
+      </SidebarFooter>
 
-      <ContinueOnMachineDialog
-        threadRef={continueThreadTarget}
-        open={continueThreadTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setContinueThreadTarget(null);
-        }}
-      />
-      <Dialog
-        open={snoozePickerTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setSnoozePickerTarget(null);
-        }}
-      >
-        <DialogPopup className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Snooze until…</DialogTitle>
-            <DialogDescription>
-              The chat moves to Snoozed and comes back at this time, or sooner if the agent needs
-              you.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogPanel className="space-y-2">
-            <Input
-              type="datetime-local"
-              aria-label="Wake up time"
-              value={snoozePickerValue}
-              min={formatSnoozePickerValue(new Date())}
-              onChange={(event) => setSnoozePickerValue(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  submitSnoozePicker();
-                }
-              }}
-            />
-            {snoozePickerValue !== "" && snoozePickerWake === null ? (
-              <p className="text-xs text-destructive">Pick a time in the future.</p>
-            ) : null}
-          </DialogPanel>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSnoozePickerTarget(null)}>
-              Cancel
-            </Button>
-            <Button disabled={snoozePickerWake === null} onClick={submitSnoozePicker}>
-              Snooze
-            </Button>
-          </DialogFooter>
-        </DialogPopup>
-      </Dialog>
+      {sharedDialogs}
     </MachineIdentityProvider>
   );
 }

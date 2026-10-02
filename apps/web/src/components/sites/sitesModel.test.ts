@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { changeSitePrompt, siteRows, updatedAgo } from "./sitesModel";
+import { changeSitePrompt, parseAppsSitesSearch, siteRows, updatedAgo } from "./sitesModel";
 
 describe("sites screen model", () => {
   it("lists newest first with a readable address", () => {
@@ -36,5 +36,14 @@ describe("sites screen model", () => {
 
   it("asks Uno to change a site under the same address", () => {
     expect(changeSitePrompt({ slug: "a", url: "https://a.uno4.me/" })).toContain("same address");
+  });
+});
+
+describe("Apps & sites tabs", () => {
+  it("reads ?tab=apps|sites and ignores anything else", () => {
+    expect(parseAppsSitesSearch({ tab: "sites" })).toEqual({ tab: "sites" });
+    expect(parseAppsSitesSearch({ tab: "apps" })).toEqual({ tab: "apps" });
+    expect(parseAppsSitesSearch({ tab: "x" })).toEqual({});
+    expect(parseAppsSitesSearch({})).toEqual({});
   });
 });

@@ -5,23 +5,6 @@
  */
 import type { ContextMenuItem } from "@t3tools/contracts";
 
-import { SIDEBAR_MODES, type SidebarMode } from "../../navigation/navStore";
-
-/** The four places of the sidebar (SidebarPrimaryNav). */
-export type PrimaryNavItem = "chats" | "assistants" | "files" | "apps";
-
-/** Which row is lit: a screen of its own wins, else what the sidebar lists. */
-export function activePrimaryNavItem(input: {
-  readonly pathname: string;
-  readonly mode: SidebarMode;
-}): PrimaryNavItem {
-  if (input.pathname === "/assistants" || input.pathname.startsWith("/assistants/")) {
-    return "assistants";
-  }
-  const mode = SIDEBAR_MODES.includes(input.mode) ? input.mode : "chats";
-  return mode === "files" ? "files" : mode === "apps" ? "apps" : "chats";
-}
-
 /** The chat menu without Dev mode: four things a person does with a chat. */
 export const SIMPLE_THREAD_MENU_IDS = ["rename", "pin", "archive", "delete"] as const;
 

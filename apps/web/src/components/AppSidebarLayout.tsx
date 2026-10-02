@@ -12,6 +12,9 @@ import { useNavLayout } from "../navigation/useNavLayout";
 import { DesktopTabs } from "./DesktopTabs";
 import { NavRail, RAIL_WIDTH } from "./sidebar/NavRail";
 import { SidebarShortcutListener } from "./sidebar/SidebarShowButton";
+import { SidebarDRail } from "./sidebar/SidebarDParts";
+import { useSidebarDOpenState } from "./sidebar/sidebarDState";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { BrowserBridgeListener } from "./preview/BrowserBridgeListener";
 import { BrowserLiveListener } from "./preview/BrowserLiveListener";
 import { FileBrowser } from "./preview/FileBrowser";
@@ -36,6 +39,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   // Labs "Layout options": rail + panel, or tabs on top (desktop app).
   const layout = useNavLayout();
   const rail = layout === "rail";
+  // Sidebar D (0.0.105): the standard sidebar folds to a rail of icons, a
+  // choice remembered on this device; a narrow window shows the rail by itself.
+  const sidebarD = !legacySidebar && !rail;
+  const isMobile = useIsMobile();
+  const sidebarDState = useSidebarDOpenState({ enabled: sidebarD, isMobile });
   // В настройках правая панель предпросмотра не имеет смысла — прячем её
   // (webview внутри остаются жить, состояние вкладок сохраняется).
   const inSettings = useLocation({
@@ -106,9 +114,13 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       <SidebarProvider
         className="h-dvh! min-h-0!"
         defaultOpen
+        {...(sidebarD
+          ? { open: !sidebarDState.railShown, onOpenChange: sidebarDState.setOpen }
+          : {})}
         style={{ ["--nav-rail-width" as string]: RAIL_WIDTH }}
       >
         {rail ? <NavRail isElectron={isElectron} /> : null}
+        {sidebarD && sidebarDState.railShown ? <SidebarDRail isElectron={isElectron} /> : null}
         <Sidebar
           side="left"
           collapsible="offcanvas"

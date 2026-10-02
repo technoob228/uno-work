@@ -16,12 +16,15 @@ import { cn } from "../../lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useSidebar } from "../ui/sidebar";
 import { sidebarToggleLabel, withSidebarToggle } from "./sidebarShortcut";
+import { useSidebarDRailVisible } from "./sidebarDState";
 
 export function SidebarShowButton({ className }: { className?: string }) {
   const { open, isMobile, toggleSidebar } = useSidebar();
   const rail = useNavLayout() === "rail";
+  // Sidebar D folded to its rail: the rail is the way back.
+  const railD = useSidebarDRailVisible();
   const keybindings = useServerKeybindings();
-  if (!isMobile && (open || rail)) return null;
+  if (!isMobile && (open || rail || railD)) return null;
   const shortcut = isMobile ? null : sidebarToggleLabel(keybindings);
   return (
     <Tooltip>

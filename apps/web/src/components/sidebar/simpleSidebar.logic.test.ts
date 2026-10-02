@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  activePrimaryNavItem,
-  doneShelfLabel,
-  threadContextMenuItems,
-} from "./simpleSidebar.logic";
+import { doneShelfLabel, threadContextMenuItems } from "./simpleSidebar.logic";
 
 const ALL = [
   { id: "rename", label: "Rename chat" },
@@ -31,20 +27,6 @@ describe("threadContextMenuItems", () => {
 
   it("keeps everything in Dev mode", () => {
     expect(threadContextMenuItems(ALL, true)).toHaveLength(ALL.length);
-  });
-});
-
-describe("activePrimaryNavItem", () => {
-  it("lights Assistants on its screen, whatever the sidebar lists", () => {
-    expect(activePrimaryNavItem({ pathname: "/assistants", mode: "files" })).toBe("assistants");
-  });
-
-  it("follows the sidebar's list elsewhere", () => {
-    expect(activePrimaryNavItem({ pathname: "/computer", mode: "chats" })).toBe("chats");
-    expect(activePrimaryNavItem({ pathname: "/files", mode: "files" })).toBe("files");
-    expect(activePrimaryNavItem({ pathname: "/x/y", mode: "apps" })).toBe("apps");
-    // Rail-only modes read as the chat list.
-    expect(activePrimaryNavItem({ pathname: "/computer", mode: "inbox" })).toBe("chats");
   });
 });
 

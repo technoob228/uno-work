@@ -60,7 +60,7 @@ export const UnoAiHandoffCard = memo(function UnoAiHandoffCard(props: { text: st
                 type="button"
                 className="shrink-0 underline-offset-2 hover:text-foreground hover:underline"
                 title="See all your sites"
-                onClick={() => void navigate({ to: "/my-uno", search: { section: "sites" } })}
+                onClick={() => void navigate({ to: "/sites", search: { tab: "sites" } })}
               >
                 Saved to Sites
               </button>
