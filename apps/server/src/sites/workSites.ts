@@ -138,8 +138,7 @@ export async function unpublishWorkSite(
     if (reply.status === 401 || reply.status === 403) {
       return {
         ok: false,
-        message:
-          "This computer can't change your sites. Unpublish it in the Uno console, or reopen this computer from there.",
+        message: "A computer may not delete your sites. Unpublish it on the Sites page of the Uno console.",
       };
     }
     return { ok: false, message: "Uno didn't answer. Try again in a moment." };

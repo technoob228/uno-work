@@ -27,6 +27,9 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { consoleLinks } from "../../account/accountOverview";
+import { accountRequest, accountTransport } from "../../account/unoAccount";
+import { isElectron } from "../../env";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { ensureEnvironmentApi } from "../../environmentApi";
 import { cn } from "../../lib/utils";
@@ -53,6 +56,43 @@ import {
   updatedAgo,
   type SiteRow,
 } from "./sitesModel";
+
+/**
+ * Unpublish as the person: their own Uno session first (app.uno4.work or the
+ * desktop app — `DELETE /api/v1/deploys/{slug}` through /_account), then the
+ * computer's daemon. A computer's own token may not delete sites (by design),
+ * so where neither works the person gets the console's Sites screen.
+ */
+async function unpublishSite(
+  environmentId: EnvironmentId | null,
+  slug: string,
+): Promise<{ ok: boolean; message: string | null }> {
+  if (accountTransport() !== "none") {
+    try {
+      await accountRequest("DELETE", `/api/v1/deploys/${encodeURIComponent(slug)}`);
+      return { ok: true, message: null };
+    } catch {
+      // not allowed here yet: try the computer
+    }
+  }
+  if (environmentId !== null) {
+    try {
+      const result = await ensureEnvironmentApi(environmentId).unoComputer.workSiteUnpublish({
+        slug,
+      });
+      if (result.ok) return result;
+    } catch {
+      // an older computer without the call
+    }
+  }
+  return { ok: false, message: "Unpublish it on the Sites page of the Uno console." };
+}
+
+function openConsoleSites() {
+  const url = consoleLinks.sites;
+  if (isElectron) window.open(url, "_blank");
+  else window.open(url, "_blank", "noopener,noreferrer");
+}
 
 export function SitesListView() {
   const search = useSearch({ strict: false }) as { tab?: AppsSitesTab };
@@ -146,15 +186,15 @@ function SitesList({
   const rows = useMemo(() => siteRows(sites.data?.sites ?? []), [sites.data]);
   const [confirming, setConfirming] = useState<SiteRow | null>(null);
   const unpublish = useMutation({
-    mutationFn: (row: SiteRow) =>
-      ensureEnvironmentApi(environmentId!).unoComputer.workSiteUnpublish({ slug: row.slug }),
+    mutationFn: (row: SiteRow) => unpublishSite(environmentId, row.slug),
     onSuccess: (result, row) => {
       setConfirming(null);
       if (!result.ok) {
         toastManager.add({
-          type: "error",
-          title: "Couldn't unpublish",
+          type: "warning",
+          title: `Unpublish ${row.host} in the Uno console`,
           description: result.message ?? undefined,
+          actionProps: { children: "Open Sites", onClick: openConsoleSites },
         });
         return;
       }
@@ -166,12 +206,8 @@ function SitesList({
       toastManager.add({
         type: "error",
         title: "Couldn't unpublish",
-        description:
-          error instanceof Error && /unknown|not found|method/i.test(error.message)
-            ? "This computer needs the latest Uno Work for that. Unpublish it in the Uno console."
-            : error instanceof Error
-              ? error.message
-              : undefined,
+        description: error instanceof Error ? error.message : undefined,
+        actionProps: { children: "Open Sites", onClick: openConsoleSites },
       });
     },
   });
