@@ -300,6 +300,20 @@ export const OPENCODE_UNO_WORK_PERMISSION = `${UNO_WORK_MCP_SERVER_NAME}_*`;
 // ── ACP agents (Hermes, Cursor, custom harnesses) ──────────────────────
 
 /**
+ * Per-server tool-call timeouts (`toolTimeoutSec`) by name. ACP entries can't
+ * carry them; Hermes gets them through its per-thread config.yaml.
+ */
+export function mcpToolTimeoutsSec(
+  servers: ReadonlyArray<McpServerEntry>,
+): Readonly<Record<string, number>> {
+  return Object.fromEntries(
+    enabledMcpServers(servers)
+      .filter((server) => server.toolTimeoutSec !== undefined && server.toolTimeoutSec > 0)
+      .map((server) => [server.name, server.toolTimeoutSec!]),
+  );
+}
+
+/**
  * ACP `session/new` `mcpServers` entries (`type: "http"`): Hermes, Cursor
  * (advertises `mcpCapabilities.http`) and custom ACP harnesses, next to the
  * workspace's own `.mcp.json` servers.

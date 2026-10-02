@@ -48,6 +48,15 @@ import {
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { executeBridgeCommand, executeBridgeOpenUrl } from "./browserCommandRouter.ts";
 import { announceBrowserHelp } from "./browserHelpNotify.ts";
+import {
+  SECRET_REQUEST_HOLD_MS,
+  SECRET_REQUEST_SYNC_WAIT_MS,
+  announceSecretRequest,
+  deliverLateSecretOutcome,
+} from "./secretRequestNotify.ts";
+import { InboxService } from "./inbox/InboxService.ts";
+import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { UNTRUSTED_FILE_HEADERS } from "./untrustedFileHeaders.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
@@ -487,14 +496,6 @@ export const secretsRequestRouteLayer = HttpRouter.add(
       );
     }
 
-    const hasSubscribers = yield* browserBridge.hasSubscribers;
-    if (!hasSubscribers) {
-      return HttpServerResponse.jsonUnsafe(
-        { ok: false, error: "No connected app window to ask the user in." },
-        { status: 502 },
-      );
-    }
-
     // Папку называет токен треда: `.env` пишет сервер, и без этой сверки агент
     // мог положить файл в любой проект на машине.
     const target = resolveSecretTargetDirectory({
@@ -512,16 +513,51 @@ export const secretsRequestRouteLayer = HttpRouter.add(
       );
     }
 
+    // Nobody to ask right now (no window open), or nobody answers in time:
+    // the request stays open — the card waits in the chat, the person gets an
+    // Inbox item / messenger note — and the call returns `queued` instead of
+    // failing. Their later answer comes back to the chat as a message. The
+    // call itself never waits longer than SECRET_REQUEST_SYNC_WAIT_MS, below
+    // Hermes' fixed 300 s MCP read timeout.
+    const hasSubscribers = yield* browserBridge.hasSubscribers;
+    const description = typeof input.description === "string" ? input.description : undefined;
+    const announce = announceSecretRequest({
+      threadId: thread.threadId,
+      name: input.name,
+      ...(description !== undefined ? { description } : {}),
+    });
+    let inboxItemId: string | null = hasSubscribers ? null : yield* announce;
+    const lateServices = yield* Effect.context<
+      InboxService | OrchestrationEngineService | ProjectionSnapshotQuery
+    >();
+    const secretName = input.name;
     const outcome = yield* browserBridge.publishSecretRequest(
       {
         name: input.name,
-        ...(input.description !== undefined ? { description: input.description } : {}),
+        ...(description !== undefined ? { description } : {}),
         targetFile,
         cwd: target.cwd,
-        ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+        timeoutMs: hasSubscribers
+          ? Math.min(
+              SECRET_REQUEST_SYNC_WAIT_MS,
+              typeof input.timeoutMs === "number" ? input.timeoutMs : SECRET_REQUEST_SYNC_WAIT_MS,
+            )
+          : 0,
+        holdMs: SECRET_REQUEST_HOLD_MS,
+        onLateOutcome: (late) =>
+          deliverLateSecretOutcome({
+            threadId: thread.threadId,
+            name: secretName,
+            cwd: target.cwd,
+            outcome: late,
+            inboxItemId,
+          }).pipe(Effect.provideContext(lateServices)),
       },
       context,
     );
+    if (outcome.queued && hasSubscribers) {
+      inboxItemId = yield* announce;
+    }
     return HttpServerResponse.jsonUnsafe(outcome, { status: 200 });
   }),
 );

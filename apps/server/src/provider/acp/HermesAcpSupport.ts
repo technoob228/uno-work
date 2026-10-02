@@ -285,6 +285,12 @@ export function buildHermesConfigYaml(input: {
    * {@link HERMES_TITLE_GENERATION_TIMEOUT_SECONDS}.
    */
   readonly sideTaskModel?: string;
+  /**
+   * Seconds one tool call of a server may take (`mcp_servers.<name>.timeout`).
+   * ACP `session/new` can't carry it, and Hermes' default (300 s) cut the
+   * uno-work calls that wait for a person (approvals, request_secret).
+   */
+  readonly mcpToolTimeoutSec?: Readonly<Record<string, number>>;
 }): string {
   const quote = JSON.stringify;
   const lines: Array<string> = [
@@ -326,6 +332,10 @@ export function buildHermesConfigYaml(input: {
     lines.push("mcp_servers:");
     for (const server of input.mcpServers) {
       lines.push(`  ${quote(server.name)}:`);
+      const toolTimeoutSec = input.mcpToolTimeoutSec?.[server.name];
+      if (toolTimeoutSec !== undefined && Number.isFinite(toolTimeoutSec) && toolTimeoutSec > 0) {
+        lines.push(`    timeout: ${Math.round(toolTimeoutSec)}`);
+      }
       if ("url" in server) {
         lines.push(`    url: ${quote(server.url)}`);
         if (server.headers.length > 0) {

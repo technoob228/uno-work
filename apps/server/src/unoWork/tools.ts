@@ -1696,7 +1696,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "request_secret",
     group: "person",
     description:
-      "Ask the person for a secret (API key, token, password) through a masked field in Uno Work. The value is written to the project's .env (or .env.<x>), not the chat; read it from there, never print it. Waits until they answer (up to 15 min). Use this instead of ever asking for a secret in chat.",
+      "Ask the person for a secret (API key, token, password) through a masked field in Uno Work. The value is written to the project's .env (or .env.<x>), not the chat; read it from there, never print it. Waits up to 4 min for the answer; if the person isn't there it returns queued: true — the request stays open for them (Inbox + their messenger), so don't ask again or ask in chat: tell them in one line what to paste and where to get it, finish what you can without it, and end your turn — their answer arrives in this chat as a message. Use this instead of ever asking for a secret in chat.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1728,7 +1728,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             ...(str(args, "targetFile") ? { targetFile: str(args, "targetFile") } : {}),
             ...(deps.caller.cwd ? { cwd: deps.caller.cwd } : {}),
           },
-          timeoutMs: 16 * 60_000,
+          timeoutMs: 5 * 60_000,
         })
         .pipe(Effect.flatMap(bridgeOk)),
   },
