@@ -645,6 +645,13 @@ const CHAT_STATUS: Record<AssistantChatSummary["status"], { label: string; tone:
   failed: { label: "Failed", tone: "text-destructive" },
 };
 
+/**
+ * Tokens and price of each chat (decision 02.10: keep the code, hide it in
+ * the UI for now). Flip to true to bring back the Tokens/Cost columns and the
+ * "This week" line; the daemon and the console keep counting either way.
+ */
+export const SHOW_CHAT_COST = false;
+
 export function ChatsBlock({
   name,
   environmentId,
@@ -695,7 +702,7 @@ export function ChatsBlock({
     );
   } else {
     const data = chats.data!;
-    const totals = weekTotals(data.chats, Date.now());
+    const totals = SHOW_CHAT_COST ? weekTotals(data.chats, Date.now()) : null;
     body = (
       <>
         <div className="overflow-x-auto">
@@ -706,8 +713,12 @@ export function ChatsBlock({
                 <th className="py-1.5 pr-2 font-normal">Where</th>
                 <th className="py-1.5 pr-2 font-normal">Model</th>
                 <th className="py-1.5 pr-2 font-normal">Status</th>
-                <th className="py-1.5 pr-2 text-right font-normal">Tokens</th>
-                <th className="py-1.5 text-right font-normal">Cost</th>
+                {SHOW_CHAT_COST ? (
+                  <>
+                    <th className="py-1.5 pr-2 text-right font-normal">Tokens</th>
+                    <th className="py-1.5 text-right font-normal">Cost</th>
+                  </>
+                ) : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
@@ -737,23 +748,29 @@ export function ChatsBlock({
                   >
                     {CHAT_STATUS[chat.status].label}
                   </td>
-                  <td className="py-1.5 pr-2 text-right text-xs tabular-nums">
-                    {formatTokens(chat.tokens)}
-                  </td>
-                  <td className="py-1.5 text-right text-xs whitespace-nowrap tabular-nums">
-                    {chatCostText(chat, data.gateway)}
-                  </td>
+                  {SHOW_CHAT_COST ? (
+                    <>
+                      <td className="py-1.5 pr-2 text-right text-xs tabular-nums">
+                        {formatTokens(chat.tokens)}
+                      </td>
+                      <td className="py-1.5 text-right text-xs whitespace-nowrap tabular-nums">
+                        {chatCostText(chat, data.gateway)}
+                      </td>
+                    </>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <p className="pt-2 text-xs text-muted-foreground">
-          This week: {totals.count} chats · {formatUsd(totals.usd)} from your balance
-          {totals.aiHoursChats > 0 ? ` · ${totals.aiHoursChats} in AI hours` : ""}
-          {totals.planChats > 0 ? ` · ${totals.planChats} in your plan` : ""}
-        </p>
-        {data.gateway === "unavailable" ? (
+        {totals ? (
+          <p className="pt-2 text-xs text-muted-foreground">
+            This week: {totals.count} chats · {formatUsd(totals.usd)} from your balance
+            {totals.aiHoursChats > 0 ? ` · ${totals.aiHoursChats} in AI hours` : ""}
+            {totals.planChats > 0 ? ` · ${totals.planChats} in your plan` : ""}
+          </p>
+        ) : null}
+        {SHOW_CHAT_COST && data.gateway === "unavailable" ? (
           <p className="pt-1 text-xs text-muted-foreground">
             Prices of Uno AI chats aren't on for your account yet. Billing shows the computer's
             total.
