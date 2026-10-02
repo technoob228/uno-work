@@ -71,7 +71,9 @@ export const transcribeUnoAudio = (
       Effect.mapError(
         (cause) =>
           new UnoTranscriptionError({
-            message: `Transcription failed: ${cause.message}`,
+            // The gateway's own sentence (e.g. the daily free dictation limit)
+            // already says what happened and what to do — not "status 429".
+            message: cause.gatewayMessage ?? `Transcription failed: ${cause.message}`,
             reason: "gateway",
           }),
       ),

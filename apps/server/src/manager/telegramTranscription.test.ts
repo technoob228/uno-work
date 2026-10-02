@@ -99,6 +99,21 @@ describe("transcribeTelegramAudio", () => {
     }),
   );
 
+  it.effect("keeps the gateway's own error sentence", () =>
+    Effect.gen(function* () {
+      const fetchImpl: FetchLike = async () =>
+        new Response(
+          JSON.stringify({
+            error: { code: "dictation_limit_reached", message: "You've used today's free dictation." },
+          }),
+          { status: 429, headers: { "content-type": "application/json" } },
+        );
+      const error = yield* Effect.flip(request(fetchImpl));
+      expect(error.gatewayMessage).toBe("You've used today's free dictation.");
+      expect(error.message).toBe("transcription request failed with status 429");
+    }),
+  );
+
   it.effect("fails when the body carries no text", () =>
     Effect.gen(function* () {
       const fetchImpl: FetchLike = async () =>
