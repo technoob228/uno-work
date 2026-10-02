@@ -386,6 +386,11 @@ function GoalPicker() {
     const toHome = () => {
       if (decided.current) return;
       decided.current = true;
+      // The local flag first, synchronously (a client key — applied before any
+      // await): the root guard reads it, and Home opened while it was still
+      // false bounced back to /setup until the machine's config arrived —
+      // /computer ↔ /setup in one commit, React #185 (01.10).
+      void updateSettings({ onboardingCompleted: true });
       void persistWithRetry(async () => {
         await whenServerConfigReady();
         await updateSettings({ onboardingCompleted: true, machineOnboarded: true });

@@ -132,7 +132,10 @@ describe("ComputerPill — the one computer menu", () => {
         </div>
       </QueryClientProvider>,
     );
-    await expect.element(page.getByLabelText("Economy on")).toBeInTheDocument();
+    // The simple start screen (no Dev mode): name, on/asleep and "Details" —
+    // no meters or economy/boost marks on the pill; it's all in the menu.
+    await expect.element(page.getByText("Details")).toBeInTheDocument();
+    expect(page.getByLabelText("Economy on").elements()).toHaveLength(0);
     await page.getByTestId("home-computer-pill").click();
     await expect.element(page.getByText(/Economy: on · sleeps after 10 min/)).toBeVisible();
     await expect.element(page.getByText(/\+1\.8 h earned by economy/)).toBeVisible();

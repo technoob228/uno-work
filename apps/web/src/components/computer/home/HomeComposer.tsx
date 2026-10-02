@@ -344,8 +344,7 @@ export function HomeComposer({
               className={PILL}
               data-testid="home-upload-project"
             >
-              <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
-              I have a project
+              <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />I have a project
             </button>
           ) : null}
         </div>

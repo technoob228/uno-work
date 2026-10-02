@@ -108,7 +108,11 @@ export const FIRST_SCREEN_EXAMPLES = [
     label: "A site for my business",
     prompt: "A site for my business that takes orders and sends them to me",
   },
-  { id: "example-bot", label: "A Telegram bot", prompt: "A Telegram bot that answers my customers" },
+  {
+    id: "example-bot",
+    label: "A Telegram bot",
+    prompt: "A Telegram bot that answers my customers",
+  },
   {
     id: "example-assistant",
     label: "An AI assistant for my work",
