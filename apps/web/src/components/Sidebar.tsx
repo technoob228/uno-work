@@ -3096,7 +3096,12 @@ export default function Sidebar() {
                 data-testid="sidebar-chats-panel"
                 onPointerEnter={() => sidebarDPanel.enterPanel()}
                 onPointerLeave={() => sidebarDPanel.leave()}
-                className="fixed inset-y-0 z-40 flex w-72 flex-col border-r border-border bg-sidebar text-sidebar-foreground shadow-xl animate-in slide-in-from-left-2 fade-in-0 duration-150"
+                className={cn(
+                  // Opaque like the expanded sidebar (bg-card): the page header
+                  // must not show through.
+                  "fixed inset-y-0 z-40 flex w-72 flex-col border-r border-border bg-card text-foreground shadow-xl animate-in slide-in-from-left-2 fade-in-0 duration-150",
+                  isElectron && "pt-[44px] fullscreen:pt-0",
+                )}
                 style={{ left: SIDEBAR_D_RAIL_WIDTH }}
               >
                 <div className="flex h-11 shrink-0 items-center gap-2 px-4 pt-1">

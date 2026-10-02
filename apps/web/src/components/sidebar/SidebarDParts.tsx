@@ -506,7 +506,7 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
       data-testid="sidebar-rail"
       style={{ width: SIDEBAR_D_RAIL_WIDTH }}
       className={cn(
-        "relative z-20 flex h-dvh shrink-0 flex-col items-center gap-1 border-r border-border bg-sidebar pb-2",
+        "relative z-20 flex h-dvh shrink-0 flex-col items-center gap-1 border-r border-border bg-card pb-2",
         props.isElectron ? "drag-region pt-[52px] fullscreen:pt-2" : "pt-2",
       )}
     >
