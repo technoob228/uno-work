@@ -49,6 +49,11 @@ export interface ProgramTile {
   readonly aiNote?: string | null;
   /** "Anyone with the link can use this app's AI — add sign-in"; null = fine. */
   readonly aiWarning?: string | null;
+  /**
+   * A running web app this browser can't reach (it answers only inside a
+   * cloud computer) that "Show on the internet" can give an address.
+   */
+  readonly canShowOnInternet?: boolean;
 }
 
 /** The id an app has in Settings → Apps (`~/.uno/apps/<id>.json`, or its catalog id). */
@@ -207,8 +212,35 @@ const SOURCE_WORD: Record<UnoMachineApp["source"], string> = {
   port: "Program",
 };
 
+/**
+ * A running web app that answers only inside a cloud computer: this browser
+ * can't open `localhost` there, so its one button is "Show on the internet"
+ * (instead of "Set up with Uno", which used to start a chat for nothing).
+ */
+export function canShowOnInternet(
+  app: UnoMachineApp,
+  input: { readonly browserOnMachine: boolean; readonly publishBlockedReason?: string | null },
+): boolean {
+  return (
+    !input.browserOnMachine &&
+    (input.publishBlockedReason ?? null) === null &&
+    app.status === "running" &&
+    app.http &&
+    !app.loopbackOnly &&
+    app.port !== null &&
+    app.publication === null &&
+    app.url === null &&
+    !app.telegramBot
+  );
+}
+
 export function machineAppCaption(app: UnoMachineApp): string {
   if (app.status === "stopped") return "Stopped";
+  if (app.telegramBot) {
+    if (app.telegramBot.tokenReady === false) return "Waiting for token";
+    if (app.telegramBot.username) return `@${app.telegramBot.username}`;
+    return "Telegram bot";
+  }
   if (app.publication) return "On the internet";
   if (app.url) {
     try {
@@ -298,6 +330,8 @@ export function buildProgramTiles(input: {
   readonly installs: ReadonlyArray<AppInstall>;
   readonly browserOnMachine: boolean;
   readonly computerOn: boolean;
+  /** Why "Show on the internet" can't work on this machine; null/absent = it can. */
+  readonly publishBlockedReason?: string | null;
 }): ProgramTile[] {
   const tiles: ProgramTile[] = [];
   const tracked = new Set(input.installs.map((i) => i.deploymentId));
@@ -390,6 +424,7 @@ export function buildProgramTiles(input: {
       machineApp: app,
       storeApp: null,
       install: null,
+      canShowOnInternet: canShowOnInternet(app, input),
     });
   }
 

@@ -9,7 +9,10 @@
  * | the computer is asleep                             | Asleep (off)         |
  * | failed / didn't install / status unknown, no address | Fix with Uno       |
  * | stopped                                            | Start                |
+ * | a Telegram bot waiting for its token               | Add the token        |
+ * | a Telegram bot with a username                     | Open in Telegram     |
  * | running with a web address                         | Open                 |
+ * | a web app only the cloud computer can reach        | Show on the internet |
  * | running, no web address (CLI app, custom app, …)   | Set up with Uno      |
  *
  * "Start" starts it right here when this computer can (a container, an app
@@ -21,7 +24,16 @@
  */
 import type { ProgramTile } from "./programModel";
 
-export type AppPrimaryKind = "open" | "start" | "setup" | "fix" | "installing" | "asleep";
+export type AppPrimaryKind =
+  | "open"
+  | "telegram"
+  | "token"
+  | "publish"
+  | "start"
+  | "setup"
+  | "fix"
+  | "installing"
+  | "asleep";
 
 export interface AppPrimaryAction {
   readonly kind: AppPrimaryKind;
@@ -31,7 +43,7 @@ export interface AppPrimaryAction {
   readonly disabled: boolean;
   /** `open`: the address. */
   readonly url: string | null;
-  /** `start` on this computer: the program's id for `uno.computer.machineAppAction`. */
+  /** `start` / `publish` on this computer: the program's id for `uno.computer.machineAppAction`. */
   readonly machineAppId: string | null;
   /** `setup` / `fix` / a `start` this computer can't do itself: what Uno is asked. */
   readonly prompt: string | null;
@@ -39,6 +51,9 @@ export interface AppPrimaryAction {
 
 const LABEL: Record<AppPrimaryKind, string> = {
   open: "Open",
+  telegram: "Open in Telegram",
+  token: "Add the bot's token",
+  publish: "Show on the internet",
   start: "Start",
   setup: "Set up with Uno",
   fix: "Fix with Uno",
@@ -77,6 +92,10 @@ export function startPrompt(tile: ProgramTile): string {
   return `Start ${spokenName(tile)} on this computer and make sure it starts again after a restart.`;
 }
 
+export function tokenPrompt(tile: ProgramTile): string {
+  return `${spokenName(tile)} is waiting for its Telegram token. Ask me for it with the secure field (I'll copy it from @BotFather), then start the bot and check it answers.`;
+}
+
 export function appPrimaryAction(tile: ProgramTile): AppPrimaryAction {
   const app = tile.machineApp;
   switch (tile.status) {
@@ -94,7 +113,13 @@ export function appPrimaryAction(tile: ProgramTile): AppPrimaryAction {
     case "unknown":
       break;
   }
+  const bot = app?.telegramBot;
+  if (bot) {
+    if (bot.tokenReady === false) return action("token", { prompt: tokenPrompt(tile) });
+    if (bot.link) return action("telegram", { url: bot.link });
+  }
   if (tile.openUrl) return action("open", { url: tile.openUrl });
+  if (tile.canShowOnInternet && app) return action("publish", { machineAppId: app.id });
   if (tile.status === "unknown") {
     // A program that says it can start is simply not running; anything else isn't answering.
     return app?.canStart

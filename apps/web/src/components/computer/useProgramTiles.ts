@@ -52,6 +52,7 @@ export function useProgramTiles(): ProgramTilesState {
           installs: [],
           browserOnMachine,
           computerOn,
+          publishBlockedReason: machineAppsQuery.data?.publishBlockedReason ?? null,
         }),
         appAiQuery.data?.apps,
       ),

@@ -8,13 +8,23 @@ import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-q
 import type { EnvironmentId, UnoMachineAppActionInput } from "@t3tools/contracts";
 import { useCallback } from "react";
 
-import { useOpenApp } from "../../navigation/useOpenApp";
+import { openInNewTab, useOpenApp } from "../../navigation/useOpenApp";
 import { toastManager } from "../ui/toast";
 import { appPrimaryAction, type AppPrimaryAction } from "./appPrimaryAction";
 import { appSignInApi, machineAppActionMutationOptions } from "./computerQueries";
 import { openAppSignedIn } from "./openSignedIn";
 import type { ProgramTile } from "./programModel";
 import { useHomeLaunchers } from "./useHomeLaunchers";
+
+/**
+ * "Show on the internet" is the person's own click, but the address is
+ * public: say so before it happens.
+ */
+export function confirmShowOnInternet(name: string): boolean {
+  return window.confirm(
+    `Show ${name} on the internet?\n\nIt gets a public address you can open on any device. Anyone with the address can reach it, so do this for apps with their own sign-in or meant to be public. You can hide it again.`,
+  );
+}
 
 export interface AppPrimaryRunner {
   /** Do the tile's primary action. Returns the action it ran. */
@@ -72,6 +82,38 @@ export function useAppPrimaryAction(input: {
             void sendToUno(action.prompt);
           }
           break;
+        case "telegram":
+          if (action.url) openInNewTab(action.url);
+          break;
+        case "publish":
+          if (action.machineAppId && confirmShowOnInternet(tile.name)) {
+            const appId = action.machineAppId;
+            startMutate(
+              { appId, action: "publish" },
+              {
+                onSuccess: (apps) => {
+                  const url = apps.apps.find((entry) => entry.id === appId)?.publication?.url;
+                  // A new tab only from the person's own click (popup blockers).
+                  toastManager.add({
+                    type: "success",
+                    title: `${tile.name} is on the internet`,
+                    description: url ?? "Its address appears in a few seconds.",
+                    ...(url
+                      ? { actionProps: { children: "Open", onClick: () => openInNewTab(url) } }
+                      : {}),
+                  });
+                },
+                onError: (error) =>
+                  toastManager.add({
+                    type: "error",
+                    title: `${tile.name} isn't on the internet`,
+                    description: error instanceof Error ? error.message : String(error),
+                  }),
+              },
+            );
+          }
+          break;
+        case "token":
         case "setup":
         case "fix":
           if (action.prompt) void sendToUno(action.prompt);

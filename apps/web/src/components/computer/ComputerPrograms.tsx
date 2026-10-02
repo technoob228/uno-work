@@ -43,6 +43,12 @@ export function primaryActionTitle(tile: ProgramTile, action: AppPrimaryAction):
   switch (action.kind) {
     case "open":
       return `Open ${name}`;
+    case "telegram":
+      return `Open ${name} in Telegram`;
+    case "token":
+      return `${name} — waiting for its Telegram token`;
+    case "publish":
+      return `${name} answers only inside the computer — show it on the internet to open it`;
     case "start":
       return `Start ${name}`;
     case "setup":
@@ -159,6 +165,9 @@ export function ProgramIcon({
 /** Soft colours of the primary-action chip, by what it does. */
 const ACTION_CHIP: Record<AppPrimaryAction["kind"], string> = {
   open: "bg-primary/10 text-primary",
+  telegram: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  token: "bg-warning/10 text-warning-foreground",
+  publish: "bg-primary/10 text-primary",
   start: "bg-primary/10 text-primary",
   setup: "bg-primary/10 text-primary",
   fix: "bg-destructive/10 text-destructive-foreground",
