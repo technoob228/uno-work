@@ -5,7 +5,13 @@
  * site was one line. The whole message stays one click away.
  */
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon, GlobeIcon, SparklesIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ExternalLinkIcon,
+  GlobeIcon,
+  SparklesIcon,
+} from "lucide-react";
 import { memo, useState } from "react";
 
 import { openInNewTab } from "../../navigation/useOpenApp";
