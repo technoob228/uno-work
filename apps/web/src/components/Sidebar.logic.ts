@@ -14,6 +14,7 @@ import {
 import type { SidebarThreadSummary, Thread } from "../types";
 import { cn } from "../lib/utils";
 import { isLatestTurnSettled } from "../session-logic";
+import { isYourTurn, type YourTurnInput } from "./Sidebar.yourTurn";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
@@ -34,7 +35,7 @@ export interface ThreadStatusPill {
   label:
     | "Working"
     | "Connecting"
-    | "Completed"
+    | "Your turn"
     | "Pending Approval"
     | "Awaiting Input"
     | "Plan Ready";
@@ -49,7 +50,7 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   Working: 3,
   Connecting: 3,
   "Plan Ready": 2,
-  Completed: 1,
+  "Your turn": 1,
 };
 
 type ThreadStatusInput = Pick<
@@ -60,9 +61,10 @@ type ThreadStatusInput = Pick<
   | "interactionMode"
   | "latestTurn"
   | "session"
-> & {
-  lastVisitedAt?: string | undefined;
-};
+> &
+  YourTurnInput & {
+    lastVisitedAt?: string | undefined;
+  };
 
 export interface ThreadJumpHintVisibilityController {
   sync: (shouldShow: boolean) => void;
@@ -435,6 +437,7 @@ export function resolveThreadRowClassName(input: {
 
 export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
+  now?: string | undefined;
 }): ThreadStatusPill | null {
   const { thread } = input;
 
@@ -488,9 +491,9 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (hasUnseenCompletion(thread)) {
+  if (isYourTurn(thread, input.now ?? new Date().toISOString())) {
     return {
-      label: "Completed",
+      label: "Your turn",
       colorClass: "text-emerald-600 dark:text-emerald-300/90",
       dotClass: "bg-emerald-500 dark:bg-emerald-300/90",
       pulse: false,

@@ -15,7 +15,7 @@ import {
   type HomeThread,
 } from "./homeModel";
 
-const NOW = Date.parse("2026-09-24T12:00:00Z");
+const NOW = Date.parse("2026-10-05T12:00:00Z");
 const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString();
 
 function thread(id: string, patch: Partial<HomeThread> = {}): HomeThread {
@@ -96,7 +96,7 @@ describe("pickContinueThreads", () => {
     expect(pickContinueThreads(threads, { now: NOW }).map((t) => t.id)).toEqual(["b", "a", "c"]);
   });
 
-  it("a result already seen is just a recent chat", () => {
+  it("a result already looked at still waits for the person", () => {
     const seen = thread("seen", {
       latestTurn: doneTurn(30),
       lastVisitedAt: minutesAgo(10),
@@ -104,8 +104,8 @@ describe("pickContinueThreads", () => {
     });
     const newer = thread("newer", { updatedAt: minutesAgo(20) });
     expect(pickContinueThreads([seen, newer], { now: NOW }).map((t) => t.id)).toEqual([
-      "newer",
       "seen",
+      "newer",
     ]);
   });
 });
@@ -217,8 +217,13 @@ describe("words", () => {
     expect(label({ hasPendingUserInput: true })).toBe("Asks you");
     expect(label({ session: running })).toBe("Working");
     expect(label({ session: { status: "error" } as HomeThread["session"] })).toBe("Failed");
-    expect(label({ latestTurn: doneTurn(5) })).toBe("Done");
-    expect(label({ latestTurn: doneTurn(5), lastVisitedAt: minutesAgo(1) })).toBeUndefined();
+    expect(label({ latestTurn: doneTurn(5) })).toBe("Your turn");
+    // Looking at it doesn't end it: a reply or Done does.
+    expect(label({ latestTurn: doneTurn(5), lastVisitedAt: minutesAgo(1) })).toBe("Your turn");
+    expect(
+      label({ latestTurn: doneTurn(5), settledOverride: "settled", settledAt: minutesAgo(1) }),
+    ).toBeUndefined();
+    expect(label({ latestTurn: doneTurn(5), latestUserMessageAt: minutesAgo(1) })).toBeUndefined();
   });
 
   it("says how long ago, short", () => {

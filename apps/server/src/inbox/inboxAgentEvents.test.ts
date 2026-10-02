@@ -44,6 +44,13 @@ describe("agent events → inbox", () => {
     expect(actions).toContainEqual({ type: "resolve", threadId: "t1", kinds: ["agent.error"] });
   });
 
+  it("Done on a chat reads its finished/failed news", () => {
+    const actions = run([event("thread.settled", { threadId: "t1", settledAt: "x" })]);
+    expect(actions).toEqual([
+      { type: "resolve", threadId: "t1", kinds: ["agent.done", "agent.error"] },
+    ]);
+  });
+
   it("an error posts once with its text", () => {
     const actions = run([
       session("running", { activeTurnId: "turn1" }),
