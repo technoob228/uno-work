@@ -58,19 +58,19 @@ beforeEach(() => {
 });
 afterEach(() => {
   sidebarDPanel.closeNow();
-  document.body.innerHTML = "";
 });
 
 describe("sidebar D places", () => {
-  it("shows Files and Apps & sites, and Needs you only when something waits", async () => {
+  it("shows Files and Apps & sites, and no Needs you when nothing waits", async () => {
     const screen = await mount(<SidebarDPlaces />);
     await expect.element(screen.getByTestId("sidebar-nav-files")).toHaveTextContent("Files");
     await expect.element(screen.getByTestId("sidebar-nav-apps")).toHaveTextContent("Apps & sites");
     expect(screen.getByTestId("sidebar-needs-you").query()).toBeNull();
     // No Assistants and no Sites row of their own any more.
     expect(screen.getByText("Assistants").query()).toBeNull();
-    screen.unmount();
+  });
 
+  it("counts what waits on Needs you", async () => {
     unread = 2;
     needsYou = 2;
     const again = await mount(<SidebarDPlaces />);
