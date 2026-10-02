@@ -8,9 +8,12 @@
  *   - learns when the computer plans to sleep, and shortly before that — if
  *     the person is away — holds the reconnect gate (rpc/economyGate.ts), so
  *     the dropped socket does not wake the computer straight back up;
- *   - opens the gate when the person comes back (click, key, tab visible):
- *     the reconnect goes through the wake-on-request path and the computer is
- *     up in about a second;
+ *   - holds the gate as soon as the tab sits hidden and untouched (a
+ *     background tab never wakes the computer — a tab merely becoming visible
+ *     is not the person being back either);
+ *   - opens the gate when the person comes back (a click or a key): the
+ *     reconnect goes through the wake-on-request path and the computer is up
+ *     in about a second;
  *   - shows a small "Economy · sleeping / waking" pill while that happens.
  */
 import type { EnvironmentId, UnoEconomyPresence } from "@t3tools/contracts";
@@ -32,7 +35,9 @@ import {
   ECONOMY_HOLD_LEAD_MS,
   PRESENCE_INPUT_THROTTLE_MS,
   PRESENCE_POLL_MS,
+  canReleaseOnVisible,
   shouldHoldReconnect,
+  shouldHoldWhileHidden,
 } from "../computer/economyModel";
 
 const INPUT_EVENTS = ["pointerdown", "keydown", "wheel", "touchstart"] as const;
@@ -60,6 +65,7 @@ function subscribePill(listener: () => void): () => void {
 /** Last time the person did anything in this window (shared by all computers). */
 let lastInputAt: number | null = null;
 const inputListeners = new Set<() => void>();
+const visibilityListeners = new Set<() => void>();
 
 function noteInput(): void {
   lastInputAt = Date.now();
@@ -73,14 +79,19 @@ export function EconomyPresenceBootstrap() {
   );
 
   useEffect(() => {
-    const onVisible = () => {
+    // Only the person's own input counts: a tab becoming visible (a laptop
+    // lid opening, a tab switch) used to count as "here" and woke the computer.
+    const onInput = () => {
       if (document.visibilityState === "visible") noteInput();
     };
-    for (const name of INPUT_EVENTS) window.addEventListener(name, noteInput, { passive: true });
-    document.addEventListener("visibilitychange", onVisible);
+    const onVisibility = () => {
+      for (const listener of visibilityListeners) listener();
+    };
+    for (const name of INPUT_EVENTS) window.addEventListener(name, onInput, { passive: true });
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      for (const name of INPUT_EVENTS) window.removeEventListener(name, noteInput);
-      document.removeEventListener("visibilitychange", onVisible);
+      for (const name of INPUT_EVENTS) window.removeEventListener(name, onInput);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
@@ -133,10 +144,39 @@ function EconomyPresenceFor({
       }
     };
 
+    // Held because the tab sits hidden (no pill: the person isn't looking).
+    let heldWhileHidden = false;
+    const hidden = () => document.visibilityState === "hidden";
+
     const evaluate = () => {
       if (shouldHoldReconnect(presence.current, lastInputAt, Date.now())) {
         holdEconomyGate(gateKey);
+        heldWhileHidden = false;
         if (primary) setPill("sleeping");
+      }
+    };
+
+    const evaluateHidden = () => {
+      if (isEconomyGateHeld(gateKey)) return;
+      if (shouldHoldWhileHidden(presence.current, hidden(), lastInputAt, Date.now())) {
+        holdEconomyGate(gateKey);
+        heldWhileHidden = true;
+      }
+    };
+
+    const onVisibility = () => {
+      if (hidden()) {
+        evaluateHidden();
+        return;
+      }
+      if (!heldWhileHidden || !isEconomyGateHeld(gateKey)) return;
+      if (canReleaseOnVisible(presence.current, Date.now())) {
+        heldWhileHidden = false;
+        releaseEconomyGate(gateKey);
+      } else if (primary) {
+        // Asleep: "Wake it" (or any click) brings it back.
+        heldWhileHidden = false;
+        setPill("sleeping");
       }
     };
 
@@ -151,6 +191,7 @@ function EconomyPresenceFor({
     };
 
     const onInput = () => {
+      heldWhileHidden = false;
       if (isEconomyGateHeld(gateKey)) {
         // The person is back: let the reconnect wake the computer.
         releaseEconomyGate(gateKey);
@@ -165,11 +206,16 @@ function EconomyPresenceFor({
     };
 
     inputListeners.add(onInput);
+    visibilityListeners.add(onVisibility);
     void call(false);
-    const poll = setInterval(() => void call(false), PRESENCE_POLL_MS);
+    const poll = setInterval(() => {
+      evaluateHidden();
+      void call(false);
+    }, PRESENCE_POLL_MS);
     return () => {
       disposed = true;
       inputListeners.delete(onInput);
+      visibilityListeners.delete(onVisibility);
       clearInterval(poll);
       if (holdTimer) clearTimeout(holdTimer);
       releaseEconomyGate(gateKey);

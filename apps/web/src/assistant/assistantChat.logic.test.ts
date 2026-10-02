@@ -7,6 +7,7 @@ import {
   findAssistantChat,
   slackChannelState,
   telegramChannelState,
+  isEmptyAutoChat,
   isFromAssistant,
   isOlderAssistantChat,
   isRegularListChat,
@@ -71,6 +72,23 @@ describe("chat list membership", () => {
     expect(isOlderAssistantChat(older, "uno")).toBe(true);
     expect(isOlderAssistantChat(uno, "uno")).toBe(false);
     expect(isOlderAssistantChat(regular, "uno")).toBe(false);
+  });
+});
+
+describe("isEmptyAutoChat", () => {
+  it("hides a chat Uno opened by itself until someone writes in it", () => {
+    expect(isEmptyAutoChat(summary({ id: "uno", projectId: HOME, assistantRole: "chat" }))).toBe(
+      true,
+    );
+    expect(
+      isEmptyAutoChat(
+        summary({ id: "uno", projectId: HOME, latestUserMessageAt: "2026-10-02T00:00:00Z" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps an empty chat the person made", () => {
+    expect(isEmptyAutoChat(summary({ id: "mine" }))).toBe(false);
   });
 });
 

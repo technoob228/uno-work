@@ -151,6 +151,39 @@ export function shouldHoldReconnect(
   return lastInputAt === null || lastInputAt < windowStart;
 }
 
+/** A hidden tab untouched this long stops reconnecting on its own. */
+export const HIDDEN_IDLE_HOLD_MS = 60_000;
+
+/**
+ * A tab in the background that nobody touched for a while must never wake an
+ * economy computer: hold its reconnect gate now, before the computer sleeps
+ * (timers of hidden tabs are throttled, so the "about to sleep" hold may come
+ * too late — that is how a forgotten tab woke a trial computer ~14 times a
+ * night). Only the person's own click or key opens it again.
+ */
+export function shouldHoldWhileHidden(
+  presence: UnoEconomyPresence | null,
+  hidden: boolean,
+  lastInputAt: number | null,
+  now: number,
+): boolean {
+  if (!hidden || !presence?.enabled) return false;
+  return lastInputAt === null || now - lastInputAt >= HIDDEN_IDLE_HOLD_MS;
+}
+
+/**
+ * The tab became visible again with its gate held because it was hidden:
+ * open it only when the computer is known to be awake (reconnecting to an
+ * awake computer wakes nothing); a sleeping one waits for a click.
+ */
+export function canReleaseOnVisible(presence: UnoEconomyPresence | null, now: number): boolean {
+  if (!presence?.enabled) return true;
+  if (presence.state === "sleeping" || presence.state === "stopped") return false;
+  if (!presence.sleepAfter) return presence.busy.length > 0;
+  const sleepAt = Date.parse(presence.sleepAfter);
+  return Number.isFinite(sleepAt) && now < sleepAt - ECONOMY_HOLD_LEAD_MS;
+}
+
 /** How often a client says "the person is here" (at most). */
 export const PRESENCE_INPUT_THROTTLE_MS = 30_000;
 /** How often a client refreshes the picture without input. */
