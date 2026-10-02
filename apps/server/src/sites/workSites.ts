@@ -6,7 +6,12 @@
  * and the screen works on the computer's direct address, where the browser
  * has no account session.
  */
-import type { ServerSettings, UnoWorkSite, UnoWorkSites } from "@t3tools/contracts";
+import type {
+  ServerSettings,
+  UnoWorkSite,
+  UnoWorkSiteUnpublishResult,
+  UnoWorkSites,
+} from "@t3tools/contracts";
 
 import { liveSiteUrl } from "../files/sitePublish.ts";
 import { consoleRequest, consoleToken } from "../unoWork/consoleClient.ts";
@@ -99,5 +104,46 @@ export async function listWorkSites(
     return parseWorkSites(reply.body);
   } catch {
     return empty("unavailable", "Uno didn't answer. Try again in a moment.");
+  }
+}
+
+/**
+ * "Unpublish" on the Sites screen: `DELETE /api/v1/deploys/{slug}` with this
+ * computer's token. Only the person's click reaches it (the agent has no tool
+ * that deletes a site). Never throws.
+ */
+export async function unpublishWorkSite(
+  settings: Pick<ServerSettings, "uno">,
+  slug: string,
+  options: { readonly fetchImpl?: typeof fetch; readonly baseUrl?: string } = {},
+): Promise<UnoWorkSiteUnpublishResult> {
+  const clean = slug.trim();
+  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(clean)) {
+    return { ok: false, message: "That isn't a site name." };
+  }
+  const token = consoleToken(settings);
+  if (token.length === 0) {
+    return { ok: false, message: "Sign in to your Uno account to change your sites here." };
+  }
+  try {
+    const reply = await consoleRequest({
+      method: "DELETE",
+      path: `/api/v1/deploys/${encodeURIComponent(clean)}`,
+      baseUrl: options.baseUrl ?? controlPlaneBaseUrl(),
+      token,
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+    });
+    if (reply.status >= 200 && reply.status < 300) return { ok: true, message: null };
+    if (reply.status === 404) return { ok: true, message: null };
+    if (reply.status === 401 || reply.status === 403) {
+      return {
+        ok: false,
+        message:
+          "This computer can't change your sites. Unpublish it in the Uno console, or reopen this computer from there.",
+      };
+    }
+    return { ok: false, message: "Uno didn't answer. Try again in a moment." };
+  } catch {
+    return { ok: false, message: "Uno didn't answer. Try again in a moment." };
   }
 }

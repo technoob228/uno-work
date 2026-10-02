@@ -189,6 +189,8 @@ import type {
   UnoMachineAppActionInput,
   UnoMachineApps,
   UnoWorkSites,
+  UnoWorkSiteUnpublishInput,
+  UnoWorkSiteUnpublishResult,
 } from "./unoComputer.ts";
 import type {
   AppAiModels,
@@ -908,6 +910,8 @@ export interface EnvironmentApi {
     appAiStatus: () => Promise<UnoAiStatus>;
     /** The person's sites on Uno Hosting, read by this computer's daemon. */
     workSites: () => Promise<UnoWorkSites>;
+    /** Take one of the person's sites off the internet (their click, with a confirm). */
+    workSiteUnpublish: (input: UnoWorkSiteUnpublishInput) => Promise<UnoWorkSiteUnpublishResult>;
     localMetrics: () => Promise<UnoComputerLocalMetrics>;
     resizeOptions: (input?: UnoComputerTargetInput) => Promise<UnoComputerResizeOptions>;
     resize: (input: UnoComputerResizeInput) => Promise<UnoComputerResizeResult>;

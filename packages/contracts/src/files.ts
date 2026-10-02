@@ -204,6 +204,17 @@ export const FilesPublishSiteResult = Schema.Struct({
   url: Schema.String,
   filesCount: NonNegativeInt,
   sizeBytes: NonNegativeInt,
+  /**
+   * Files of the folder that did not go up, with the reason ("key file",
+   * "hidden", "packages"…): kept on the computer (keys and .env never leave
+   * it). At most 20; `skippedCount` is the full number.
+   */
+  skipped: Schema.optional(Schema.Array(Schema.String)),
+  skippedCount: Schema.optional(NonNegativeInt),
+  /** The folder of the upload that became the site (`dist`, `public`…), when hosting chose one. */
+  siteFolder: Schema.optional(Schema.String),
+  /** How many uploaded files hosting left out of the site (an app's source around its site folder). */
+  leftOut: Schema.optional(NonNegativeInt),
 });
 export type FilesPublishSiteResult = typeof FilesPublishSiteResult.Type;
 

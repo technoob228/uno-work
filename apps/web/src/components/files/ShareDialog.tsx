@@ -5,7 +5,13 @@
  * Hosting, which gives them their own address that stays up while the
  * computer sleeps. Plus "Shared links": every live link on this computer.
  */
-import type { EnvironmentId, FilesEntry, FilesShare, FilesShareAccess } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  FilesEntry,
+  FilesPublishSiteResult,
+  FilesShare,
+  FilesShareAccess,
+} from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckIcon,
@@ -261,6 +267,9 @@ function PublishSection({
             Copy
           </Button>
         </div>
+      ) : null}
+      {publish.data ? (
+        <PublishedLeftOut result={publish.data} />
       ) : (
         <div className="flex items-center gap-2">
           <div className="flex min-w-0 flex-1 items-center rounded-lg border border-input bg-background pr-2 text-sm">
@@ -271,7 +280,7 @@ function PublishSection({
               className="border-0 shadow-none"
               aria-label="Site name"
             />
-            <span className="shrink-0 text-muted-foreground">.uno4.dev</span>
+            <span className="shrink-0 text-muted-foreground">.uno4.me</span>
           </div>
           <Button size="sm" onClick={() => publish.mutate()} disabled={publish.isPending}>
             {publish.isPending ? <Loader2Icon className="animate-spin" /> : null}
@@ -283,6 +292,32 @@ function PublishSection({
         <p className="text-xs text-destructive">{errorText(publish.error)}</p>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * What did not go up with the site (keys, .env, packages; an app's source
+ * around its dist/), so nobody wonders where a file went.
+ */
+function PublishedLeftOut({ result }: { result: FilesPublishSiteResult }) {
+  const lines: string[] = [];
+  if (result.siteFolder) {
+    lines.push(
+      `Published the ${result.siteFolder}/ folder${result.leftOut ? ` — ${result.leftOut} other file${result.leftOut === 1 ? "" : "s"} stayed out` : ""}.`,
+    );
+  }
+  if (result.skipped && result.skipped.length > 0) {
+    const shown = result.skipped.slice(0, 5);
+    const rest = (result.skippedCount ?? result.skipped.length) - shown.length;
+    lines.push(
+      `Not uploaded: ${shown.join(", ")}${rest > 0 ? ` and ${rest} more` : ""}. They stay on this computer.`,
+    );
+  }
+  if (lines.length === 0) return null;
+  return (
+    <p className="text-xs text-muted-foreground" data-testid="publish-left-out">
+      {lines.join(" ")}
+    </p>
   );
 }
 

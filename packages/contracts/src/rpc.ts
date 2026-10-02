@@ -65,6 +65,8 @@ import {
   UnoMachineAppActionInput,
   UnoMachineApps,
   UnoWorkSites,
+  UnoWorkSiteUnpublishInput,
+  UnoWorkSiteUnpublishResult,
 } from "./unoComputer.ts";
 import {
   UnoComputerResources,
@@ -465,6 +467,7 @@ export const WS_METHODS = {
   appAiSpend: "uno.appAi.spend",
   appAiStatus: "uno.appAi.status",
   workSites: "uno.sites.list",
+  workSiteUnpublish: "uno.sites.unpublish",
   appAiModels: "uno.appAi.models",
 
   // Inbox: what wants the person (agents, apps) — kept by the daemon
@@ -1883,6 +1886,13 @@ export const WsWorkSitesRpc = Rpc.make(WS_METHODS.workSites, {
   error: UnoCloudRpcError,
 });
 
+/** Take a site off the internet — the person's click on the Sites screen. */
+export const WsWorkSiteUnpublishRpc = Rpc.make(WS_METHODS.workSiteUnpublish, {
+  payload: UnoWorkSiteUnpublishInput,
+  success: UnoWorkSiteUnpublishResult,
+  error: UnoCloudRpcError,
+});
+
 /** Uno AI hours right now: hours left, AI power, slowed down or not. */
 export const WsAppAiStatusRpc = Rpc.make(WS_METHODS.appAiStatus, {
   payload: Schema.Struct({}),
@@ -2063,6 +2073,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsAppAiSpendRpc,
   WsAppAiStatusRpc,
   WsWorkSitesRpc,
+  WsWorkSiteUnpublishRpc,
   WsAppAiModelsRpc,
   WsInboxUpdateRpc,
   WsSubscribeInboxRpc,

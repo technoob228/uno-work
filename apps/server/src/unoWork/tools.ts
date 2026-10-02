@@ -1888,7 +1888,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "site_publish",
     group: "sites",
     description:
-      "Publish a static website from a folder (with index.html) or a single HTML file (published with its folder) to a public https address on Uno. Anyone can open it — the person always approves. Republishing the same slug updates the site.",
+      "Publish a static website from a folder (with index.html) or a single HTML file (published with its folder) to a public https address on Uno. Anyone can open it. It runs without asking — just do it when the person wants a site (they can Unpublish it in Apps & sites). Only built pages go up (a dist/ or public/ folder of a project; keys and .env never do); the result lists files that were left out — tell the person in one line. Republishing the same slug updates the site.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1906,9 +1906,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       required: ["path"],
       additionalProperties: false,
     },
-    level: "sensitive",
-    approvalTitle: (args) => `Publish ${str(args, "path")} as a public website`,
-    approvalDetail: (args) => (str(args, "slug") ? `Site name: ${str(args, "slug")}` : undefined),
+    // Misha 02.10: a plain static site goes up without an Allow (Unpublish is
+    // one click in Apps & sites). Opening an app or a port to the internet,
+    // removing a password and sending forms to an outside URL still ask.
+    level: "safe",
     run: (deps, args) =>
       asToolError(
         deps.files.publishSite({
@@ -1942,7 +1943,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "site_set_password",
     group: "sites",
     description:
-      "Protect a published site with a password, or remove the password (remove: true; then anyone can open it). Do this yourself when the person wants a private site; never tell them to do it by hand. Without a password a readable one is generated. The result has the password: tell the person, visitors need it. The person always approves.",
+      "Protect a published site with a password, or remove the password (remove: true; then anyone can open it). Do this yourself when the person wants a private site; never tell them to do it by hand. Without a password a readable one is generated. The result has the password: tell the person, visitors need it. Setting a password runs right away; removing one waits for the person's Allow.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1961,7 +1962,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       required: ["slug"],
       additionalProperties: false,
     },
-    level: "sensitive",
+    level: (args) => (bool(args, "remove") === true ? "sensitive" : "safe"),
     approvalTitle: (args) =>
       bool(args, "remove") === true
         ? `Remove the password from site “${str(args, "slug")}”: anyone can open it`
@@ -2078,7 +2079,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       required: ["slug"],
       additionalProperties: false,
     },
-    level: "sensitive",
+    // Answers to the person's own email / Telegram (email confirms by link)
+    // run; an outside webhook URL waits for the person's Allow.
+    level: (args) => {
+      const webhook = str(args, "webhookUrl")?.trim();
+      return webhook ? "sensitive" : "safe";
+    },
     approvalTitle: (args) => `Send form answers of site “${str(args, "slug")}”`,
     approvalDetail: (args) => {
       const parts: string[] = [];

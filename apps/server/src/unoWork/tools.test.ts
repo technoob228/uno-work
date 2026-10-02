@@ -329,9 +329,6 @@ describe("uno-work tool catalogue", () => {
       "app_remove",
       "file_share_link",
       "drive_share_link",
-      "site_publish",
-      "site_set_password",
-      "site_forms_set",
       "db_create",
       "computer_create",
     ]) {
@@ -348,6 +345,7 @@ describe("uno-work tool catalogue", () => {
       "settings_read",
       "sites_list",
       "site_forms_get",
+      "site_publish",
       "db_list",
       "uno_guide",
       "notify",
@@ -366,6 +364,15 @@ describe("uno-work tool catalogue", () => {
     ]) {
       expect(toolLevel(tool(name), {}), name).toBe("change");
     }
+    // Misha 02.10: a plain site goes up without an Allow; the risky site
+    // changes still ask.
+    expect(toolLevel(tool("site_set_password"), { slug: "a" })).toBe("safe");
+    expect(toolLevel(tool("site_set_password"), { slug: "a", remove: true })).toBe("sensitive");
+    expect(toolLevel(tool("site_forms_set"), { slug: "a", email: "me@x.io" })).toBe("safe");
+    expect(toolLevel(tool("site_forms_set"), { slug: "a", webhookUrl: "https://x.io/h" })).toBe(
+      "sensitive",
+    );
+    expect(toolLevel(tool("site_forms_set"), { slug: "a", webhookUrl: "" })).toBe("safe");
     expect(toolLevel(tool("browser_command"), { command: "screenshot" })).toBe("safe");
     expect(toolLevel(tool("browser_command"), { command: "evaluate" })).toBe("change");
   });
@@ -380,7 +387,7 @@ describe("uno-work tool catalogue", () => {
         body: { result: { tools: Array<{ name: string; annotations: Record<string, boolean> }> } };
       }
     ).body.result.tools;
-    expect(tools.find((entry) => entry.name === "site_publish")?.annotations.destructiveHint).toBe(
+    expect(tools.find((entry) => entry.name === "app_remove")?.annotations.destructiveHint).toBe(
       true,
     );
     expect(tools.find((entry) => entry.name === "apps_list")?.annotations.readOnlyHint).toBe(true);
@@ -457,9 +464,15 @@ describe("approval gate", () => {
     expect(recorded.actions).toEqual([]);
   });
 
+  it("publishes a plain site without asking, even in Ask mode", async () => {
+    const { deps, recorded } = makeDeps({ runtimeMode: "approval-required", approval: "denied" });
+    await run("site_publish", deps, { path: "~/site" });
+    expect(recorded.approvals).toEqual([]);
+  });
+
   it("refuses when nobody can be asked", async () => {
     const { deps, recorded } = makeDeps({ approval: "no_client" });
-    const result = await run("site_publish", deps, { path: "~/site" });
+    const result = await run("app_show_on_internet", deps, { appId: "notes" });
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") expect(result.failure.message).toContain("isn't open");
     expect(recorded.bridge).toEqual([]);
@@ -814,18 +827,14 @@ describe("existing manifests", () => {
 });
 
 describe("sites: password and forms", () => {
-  it("sets a password only after the person allows it, and returns it to tell them", async () => {
-    const { deps, recorded } = makeDeps();
+  it("sets a password without asking (it only closes the site), and returns it to tell them", async () => {
+    const { deps, recorded } = makeDeps({ runtimeMode: "approval-required" });
     const result = await run("site_set_password", deps, {
       slug: "team-site",
       password: "correct-horse-battery",
     });
     expect(result._tag).toBe("Success");
-    expect(recorded.approvals[0]).toMatchObject({
-      tool: "site_set_password",
-      sensitive: true,
-      title: "Protect site “team-site” with a password",
-    });
+    expect(recorded.approvals).toEqual([]);
     expect(recorded.console).toEqual([
       {
         method: "PUT",
@@ -856,9 +865,9 @@ describe("sites: password and forms", () => {
     expect(removed.recorded.approvals[0]?.title).toContain("anyone can open it");
   });
 
-  it("does nothing when the person declines", async () => {
+  it("does nothing when the person declines removing a password", async () => {
     const { deps, recorded } = makeDeps({ approval: "denied" });
-    const result = await run("site_set_password", deps, { slug: "team-site" });
+    const result = await run("site_set_password", deps, { slug: "team-site", remove: true });
     expect(result._tag).toBe("Failure");
     expect(recorded.console).toEqual([]);
   });
@@ -904,10 +913,8 @@ describe("sites: password and forms", () => {
       telegram: true,
     });
     expect(result._tag).toBe("Success");
-    expect(recorded.approvals[0]).toMatchObject({ tool: "site_forms_set", sensitive: true });
-    expect(recorded.approvals[0]).toMatchObject({
-      detail: "to email me@example.com · to your Telegram (you open a link)",
-    });
+    // Email (confirmed by a link) and the person's own Telegram don't ask.
+    expect(recorded.approvals).toEqual([]);
     expect(recorded.console[1]).toEqual({
       method: "PUT",
       path: "/api/v1/deploys/team-site/forms",

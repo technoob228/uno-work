@@ -850,3 +850,16 @@ export const UnoWorkSites = Schema.Struct({
   message: Schema.NullOr(Schema.String),
 });
 export type UnoWorkSites = typeof UnoWorkSites.Type;
+
+/** "Unpublish" on the Sites screen: the person's own click (with a confirm), never the agent. */
+export const UnoWorkSiteUnpublishInput = Schema.Struct({
+  slug: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+});
+export type UnoWorkSiteUnpublishInput = typeof UnoWorkSiteUnpublishInput.Type;
+
+export const UnoWorkSiteUnpublishResult = Schema.Struct({
+  ok: Schema.Boolean,
+  /** Why it didn't work, in plain words; null when it did. */
+  message: Schema.NullOr(Schema.String),
+});
+export type UnoWorkSiteUnpublishResult = typeof UnoWorkSiteUnpublishResult.Type;

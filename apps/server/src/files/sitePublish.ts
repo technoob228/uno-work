@@ -26,6 +26,66 @@ const SITE_SKIP_DIRS = new Set(["node_modules", "__pycache__", "venv"]);
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/;
 const PUBLISH_TIMEOUT_MS = 120_000;
 
+/** What stayed on the computer, and why — shown to the person and the agent. */
+export interface SiteSkip {
+  readonly relativePath: string;
+  readonly reason: "key file" | "hidden" | "packages" | "link";
+}
+
+const PRIVATE_FILE_NAMES = new Set(["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"]);
+const PRIVATE_EXTENSIONS = new Set([
+  ".pem",
+  ".key",
+  ".p12",
+  ".pfx",
+  ".jks",
+  ".keystore",
+  ".kdbx",
+  ".tfstate",
+  ".tfvars",
+]);
+
+/**
+ * Credential files by name — a copy of Uno Hosting's rule
+ * (fishcode back/internal/sitefiles isSecretFileName; keep the three copies —
+ * there, the console's sitePlan.ts and here — in step). Hosting refuses to
+ * serve them anyway; this keeps them from leaving the computer at all.
+ */
+export function isSecretSiteFileName(base: string): boolean {
+  const b = base.toLowerCase();
+  if (PRIVATE_FILE_NAMES.has(b)) return true;
+  const ext = nodePath.extname(b);
+  if (PRIVATE_EXTENSIONS.has(ext)) return true;
+  if (b.endsWith(".tfstate.backup")) return true;
+  for (const k of PRIVATE_FILE_NAMES) {
+    if (b.startsWith(k) && ext !== ".pub") return true;
+  }
+  if ([".json", ".yaml", ".yml", ".toml", ".ini", ".txt", ".csv", ""].includes(ext)) {
+    const stem = ext ? b.slice(0, -ext.length) : b;
+    if (
+      stem.includes("service-account") ||
+      stem.includes("service_account") ||
+      stem.includes("serviceaccount") ||
+      stem.includes("firebase-adminsdk") ||
+      stem.startsWith("credentials") ||
+      stem.startsWith("client_secret") ||
+      stem === "secrets" ||
+      stem.startsWith("secrets.") ||
+      stem.startsWith("secret.")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** "service-account.json (key file), .env (hidden) and 3 more" — for a toast or the agent. */
+export function describeSiteSkips(skips: ReadonlyArray<SiteSkip>, max = 5): string {
+  const shown = skips.slice(0, max).map((skip) => `${skip.relativePath} (${skip.reason})`);
+  const rest = skips.length - shown.length;
+  return rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(", ");
+}
+
 export interface SiteFile {
   readonly relativePath: string;
   readonly absolutePath: string;
@@ -57,8 +117,12 @@ export function validateSiteSlug(slug: string): string {
   return normalized;
 }
 
-/** Non-hidden files under `folder`, in a stable order, within Uno Hosting limits. */
-export async function collectSiteFiles(folder: string): Promise<SiteFile[]> {
+/**
+ * Non-hidden files under `folder`, in a stable order, within Uno Hosting
+ * limits. What stays behind (hidden files, key files, package folders,
+ * links) goes into `skips` when given.
+ */
+export async function collectSiteFiles(folder: string, skips?: SiteSkip[]): Promise<SiteFile[]> {
   const files: SiteFile[] = [];
   let total = 0;
   const walk = async (directory: string, prefix: string): Promise<void> => {
@@ -70,15 +134,34 @@ export async function collectSiteFiles(folder: string): Promise<SiteFile[]> {
     }
     dirents.sort((left, right) => left.name.localeCompare(right.name));
     for (const dirent of dirents) {
-      // Dotfiles (.env, .git, …) never leave the computer.
-      if (dirent.name.startsWith(".")) continue;
       const absolutePath = nodePath.join(directory, dirent.name);
       const relativePath = prefix ? `${prefix}/${dirent.name}` : dirent.name;
-      if (dirent.isDirectory()) {
-        if (!SITE_SKIP_DIRS.has(dirent.name)) await walk(absolutePath, relativePath);
+      // Dotfiles (.env, .git, …) never leave the computer; .well-known is
+      // public on purpose (security.txt, app links).
+      if (dirent.name.startsWith(".") && dirent.name !== ".well-known") {
+        skips?.push({
+          relativePath: dirent.isDirectory() ? `${relativePath}/` : relativePath,
+          reason: "hidden",
+        });
         continue;
       }
-      if (!dirent.isFile()) continue; // symlinks are skipped: they could point anywhere
+      if (dirent.isDirectory()) {
+        if (SITE_SKIP_DIRS.has(dirent.name)) {
+          skips?.push({ relativePath: `${relativePath}/`, reason: "packages" });
+        } else {
+          await walk(absolutePath, relativePath);
+        }
+        continue;
+      }
+      if (!dirent.isFile()) {
+        // Symlinks are skipped: they could point anywhere.
+        if (dirent.isSymbolicLink()) skips?.push({ relativePath, reason: "link" });
+        continue;
+      }
+      if (isSecretSiteFileName(dirent.name)) {
+        skips?.push({ relativePath, reason: "key file" });
+        continue;
+      }
       const { size } = await fsPromises.stat(absolutePath);
       total += size;
       files.push({ relativePath, absolutePath, size });
@@ -105,6 +188,9 @@ interface DeployResponse {
   readonly url?: string;
   readonly files_count?: number;
   readonly size_bytes?: number;
+  readonly site_folder?: string;
+  readonly left_out?: number;
+  readonly tool?: string;
   readonly error?: string;
   readonly message?: string;
 }
@@ -125,6 +211,14 @@ function deployErrorMessage(status: number, body: DeployResponse | null): string
     return body?.message ?? "Your plan's hosting limit is reached. Remove an old site or upgrade.";
   }
   if (status === 429) return "Too many publishes in a row. Wait a minute and try again.";
+  // 02.10: hosting publishes a project's built site folder, never its source.
+  if (code === "BACKEND_NEEDS_COMPUTER") {
+    return "This folder is an app with a server side, not a website — Uno doesn't publish its code. Publish its built site folder (dist/, build/ or public/ with an index.html), or run it as an app on this computer.";
+  }
+  if (code === "BUILD_NEEDED") {
+    const tool = typeof body?.tool === "string" && body.tool.length > 0 ? `${body.tool} ` : "";
+    return `This folder is the source of a ${tool}project — build it first (npm run build), then publish the folder it makes (dist/ or build/ with an index.html).`;
+  }
   return body?.message ?? `Uno Hosting answered ${status}.`;
 }
 
@@ -151,8 +245,9 @@ export async function publishToUnoHosting(input: {
 }): Promise<FilesPublishSiteResult> {
   const stats = await fsPromises.stat(input.path);
   let files: SiteFile[];
+  const skips: SiteSkip[] = [];
   if (stats.isDirectory()) {
-    files = await collectSiteFiles(input.path);
+    files = await collectSiteFiles(input.path, skips);
     if (!files.some((file) => file.relativePath.toLowerCase() === "index.html")) {
       throw new FilesPathError(
         "not_found",
@@ -204,5 +299,15 @@ export async function publishToUnoHosting(input: {
     url: liveSiteUrl(body?.url, publishedSlug),
     filesCount: body?.files_count ?? files.length,
     sizeBytes: body?.size_bytes ?? files.reduce((sum, file) => sum + file.size, 0),
+    ...(skips.length > 0
+      ? {
+          skipped: skips.slice(0, 20).map((skip) => `${skip.relativePath} (${skip.reason})`),
+          skippedCount: skips.length,
+        }
+      : {}),
+    ...(typeof body?.site_folder === "string" && body.site_folder.length > 0
+      ? { siteFolder: body.site_folder }
+      : {}),
+    ...(typeof body?.left_out === "number" && body.left_out > 0 ? { leftOut: body.left_out } : {}),
   };
 }

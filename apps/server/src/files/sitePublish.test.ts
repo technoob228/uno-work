@@ -4,7 +4,12 @@ import nodePath from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { publishToUnoHosting, liveSiteUrl, suggestSiteSlug } from "./sitePublish.ts";
+import {
+  isSecretSiteFileName,
+  liveSiteUrl,
+  publishToUnoHosting,
+  suggestSiteSlug,
+} from "./sitePublish.ts";
 
 let dir: string;
 beforeEach(() => {
@@ -73,5 +78,74 @@ describe("publishToUnoHosting", () => {
   it("suggests readable site names", () => {
     expect(suggestSiteSlug("Q3 Report.html", "7f2a")).toBe("q3-report-7f2a");
     expect(suggestSiteSlug("Отчёт.html", "7f2a")).toBe("site-7f2a");
+  });
+});
+
+describe("what stays on the computer", () => {
+  it("keeps key files and .env home and says so in the result", async () => {
+    fs.writeFileSync(nodePath.join(dir, "site", "service-account.json"), "{}");
+    fs.writeFileSync(nodePath.join(dir, "site", "server.pem"), "k");
+    const { calls, fetchImpl } = recordingFetch(201, {
+      slug: "team-site",
+      site_folder: "public",
+      left_out: 3,
+    });
+    const result = await publishToUnoHosting({
+      path: nodePath.join(dir, "site"),
+      slug: "team-site",
+      apiKey: "uno_agt_machine",
+      baseUrl: "https://console.test",
+      fetchImpl,
+    });
+    expect(calls[0]?.names).toEqual(["css/a.css", "index.html"]);
+    expect(result.skipped).toEqual([
+      ".env (hidden)",
+      "server.pem (key file)",
+      "service-account.json (key file)",
+    ]);
+    expect(result.skippedCount).toBe(3);
+    expect(result.siteFolder).toBe("public");
+    expect(result.leftOut).toBe(3);
+  });
+
+  it("matches Uno Hosting's key-file names", () => {
+    for (const name of [
+      "id_rsa",
+      "id_ed25519_work",
+      "credentials.json",
+      "client_secret_123.json",
+      "secrets.yaml",
+      "my-firebase-adminsdk-x.json",
+      "terraform.tfstate",
+    ]) {
+      expect(isSecretSiteFileName(name), name).toBe(true);
+    }
+    for (const name of ["id_rsa.pub", "index.html", "app.js", "secret-santa.html", "data.json"]) {
+      expect(isSecretSiteFileName(name), name).toBe(false);
+    }
+  });
+
+  it("says plainly when the folder is an app or needs a build", async () => {
+    const backend = recordingFetch(422, {
+      error: "BACKEND_NEEDS_COMPUTER",
+      markers: ["server.js"],
+    });
+    await expect(
+      publishToUnoHosting({
+        path: nodePath.join(dir, "site"),
+        apiKey: "k",
+        baseUrl: "https://console.test",
+        fetchImpl: backend.fetchImpl,
+      }),
+    ).rejects.toThrow(/app with a server side/);
+    const build = recordingFetch(422, { error: "BUILD_NEEDED", tool: "Vite" });
+    await expect(
+      publishToUnoHosting({
+        path: nodePath.join(dir, "site"),
+        apiKey: "k",
+        baseUrl: "https://console.test",
+        fetchImpl: build.fetchImpl,
+      }),
+    ).rejects.toThrow(/source of a Vite project — build it first/);
   });
 });
