@@ -34,6 +34,7 @@ import {
   ProjectionPendingApprovalRepository,
 } from "../persistence/Services/ProjectionPendingApprovals.ts";
 import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurns.ts";
+import { ManagerAccountDefaultAi } from "./Layers/AccountDefaultAi.ts";
 import { ManagerApprovalServiceLive } from "./Layers/ManagerApprovalService.ts";
 import { ManagerBudgetServiceLive } from "./Layers/ManagerBudgetService.ts";
 import { ManagerTokenAuthServiceLive } from "./Layers/ManagerTokenAuth.ts";
@@ -309,6 +310,14 @@ const makeWaitLayer = (
 
   return Layer.mergeAll(ManagerToolServiceLive, ManagerTokenAuthServiceLive).pipe(
     Layer.provideMerge(ManagerApprovalServiceLive),
+    Layer.provide(
+      Layer.succeed(ManagerAccountDefaultAi, {
+        get: () => Effect.succeed(null),
+        set: () => Effect.void,
+        refreshFromAccount: () => Effect.void,
+        spawnModelSelection: () => Effect.succeed(null),
+      }),
+    ),
     Layer.provide(ManagerBudgetServiceLive),
     Layer.provideMerge(repositories),
     Layer.provide(approvalsMock),
