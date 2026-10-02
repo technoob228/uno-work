@@ -166,6 +166,8 @@ const BILLING_PATTERNS: ReadonlyArray<RegExp> = [
   /no_money/i,
   /llm (balance|credits)/i,
   /credits (are )?(empty|depleted)/i,
+  // Gateway 402 wording: old "Your AI credit is empty.", one-wallet "Your balance is empty."
+  /\b(ai credit|balance) is empty\b/i,
   /credits_depleted/i,
   /payment required/i,
 ];

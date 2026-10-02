@@ -23,11 +23,19 @@ export interface AiSpendSample {
 }
 
 export interface GatewayCredits {
+  /** `llm_balance` — with one wallet, the plan's premium credit only. */
   readonly balanceUsd: number;
   readonly totalSpentUsd: number;
+  /** `one_wallet`: AI is paid from the main balance (absent on older gateways). */
+  readonly oneWallet?: true;
+  /** `balance`: the main balance available for AI (one wallet only). */
+  readonly mainBalanceUsd?: number;
 }
 
-/** `{"llm_balance": n, "total_spent": n, …}` → numbers; null when it isn't that. */
+/**
+ * `{"llm_balance": n, "total_spent": n, …}` → numbers; null when it isn't that.
+ * With `one_wallet: true` the main `balance` comes along too.
+ */
 export function parseGatewayCredits(json: unknown): GatewayCredits | null {
   if (typeof json !== "object" || json === null) return null;
   const r = json as Record<string, unknown>;
@@ -35,7 +43,15 @@ export function parseGatewayCredits(json: unknown): GatewayCredits | null {
   const total = r["total_spent"];
   if (typeof balance !== "number" || !Number.isFinite(balance)) return null;
   if (typeof total !== "number" || !Number.isFinite(total)) return null;
-  return { balanceUsd: balance, totalSpentUsd: Math.max(0, total) };
+  const main = r["balance"];
+  return {
+    balanceUsd: balance,
+    totalSpentUsd: Math.max(0, total),
+    ...(r["one_wallet"] === true ? { oneWallet: true as const } : {}),
+    ...(r["one_wallet"] === true && typeof main === "number" && Number.isFinite(main)
+      ? { mainBalanceUsd: main }
+      : {}),
+  };
 }
 
 /** Samples closer than this to the one before the last replace the last one. */
@@ -87,6 +103,9 @@ export type AiSpendStatus = "ok" | "no-key" | "unavailable" | "unknown";
 export interface AiSpendSnapshot {
   readonly status: AiSpendStatus;
   readonly creditsUsd: number | null;
+  /** One wallet: AI is paid from the main balance, `mainBalanceUsd`. */
+  readonly oneWallet?: boolean;
+  readonly mainBalanceUsd?: number | null;
   readonly samples: ReadonlyArray<AiSpendSample>;
   readonly checkedAt: string | null;
 }
@@ -116,6 +135,8 @@ export async function openAiSpendLedger(deps: {
   }
   let status: AiSpendStatus = "unknown";
   let creditsUsd: number | null = null;
+  let oneWallet = false;
+  let mainBalanceUsd: number | null = null;
   let checkedAt = 0;
   let running: Promise<void> | null = null;
 
@@ -151,6 +172,8 @@ export async function openAiSpendLedger(deps: {
     }
     status = "ok";
     creditsUsd = credits.balanceUsd;
+    oneWallet = credits.oneWallet === true;
+    mainBalanceUsd = credits.mainBalanceUsd ?? null;
     samples = recordAiSpendSample(samples, {
       at: new Date(now()).toISOString(),
       totalUsd: credits.totalSpentUsd,
@@ -175,6 +198,7 @@ export async function openAiSpendLedger(deps: {
   const snapshot = (): AiSpendSnapshot => ({
     status,
     creditsUsd,
+    ...(oneWallet ? { oneWallet, mainBalanceUsd } : {}),
     samples: [...samples],
     checkedAt: checkedAt > 0 ? new Date(checkedAt).toISOString() : null,
   });

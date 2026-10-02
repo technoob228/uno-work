@@ -305,6 +305,9 @@ export type UnoAiSpendSample = typeof UnoAiSpendSample.Type;
 export const UnoAiSpend = Schema.Struct({
   status: Schema.Literals(["ok", "no-key", "unavailable", "unknown"]),
   creditsUsd: Schema.NullOr(Schema.Number),
+  /** One wallet: AI past the hours is paid from the main balance (`mainBalanceUsd`). */
+  oneWallet: Schema.optionalKey(Schema.Boolean),
+  mainBalanceUsd: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   samples: Schema.Array(UnoAiSpendSample),
   checkedAt: Schema.NullOr(Schema.String),
 });

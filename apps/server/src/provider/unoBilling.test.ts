@@ -21,6 +21,18 @@ const CREDITS_EMPTY =
 const CREDITS_EMPTY_SMART =
   "Your AI credit is empty. Pick the Smart model (it runs on your AI hours), top up at https://console.uno4.dev/billing, or switch to your own AI subscription (Claude or ChatGPT).";
 
+// One wallet: AI past the hours is paid from the main balance.
+const BALANCE_HOURS_EMPTY =
+  "Your AI hours are used up. New hours arrive on Oct 24, 2026; to keep going now, top up your balance at https://console.uno4.dev/billing?tab=payments or switch to your own AI subscription (Claude or ChatGPT).";
+const BALANCE_NOT_INCLUDED =
+  "Your plan doesn't include Uno AI hours, and your balance is empty. Add Uno AI to your plan or top up at https://console.uno4.dev/billing?tab=payments, or switch to your own AI subscription (Claude or ChatGPT).";
+const BALANCE_EMPTY =
+  "Your balance is empty. Top up at https://console.uno4.dev/billing?tab=payments, add Uno AI hours to your plan, or switch to your own AI subscription (Claude or ChatGPT).";
+const BALANCE_EMPTY_SMART =
+  "Your balance is empty, and this model is paid per token. Pick the Smart model (it runs on your AI hours), top up at https://console.uno4.dev/billing?tab=payments, or switch to your own AI subscription (Claude or ChatGPT).";
+const PREMIUM_MONTH_USED_UP =
+  'Your premium credit for this month is used up. Switch to Smart — it is included in your AI hours; new premium credit arrives on Nov 1. To keep using premium models from your balance, turn on "Continue premium from balance".';
+
 const gatewayBody = (code: string, message: string) =>
   JSON.stringify({
     error: { code, type: code, message, billing_url: "https://console.uno4.dev/billing" },
@@ -36,7 +48,7 @@ describe("Uno AI hours used up", () => {
       '402 {"error":{"code":"ai_hours_empty","message":"Your AI hours are used up. New hours arrive on 2026-10-24T02:39:00Z; or top up to keep going."}}';
     expect(classifyProviderErrorDetail(detail)).toBe("billing_error");
     expect(normalizeUnoBillingErrorMessage(detail)).toBe(
-      "Your AI hours are used up. New hours arrive on Oct 24. To keep going now, add AI credit at https://console.uno4.dev/billing or switch to your own AI subscription (Claude or ChatGPT).",
+      "Your AI hours are used up. New hours arrive on Oct 24. To keep going now, top up your balance at https://console.uno4.dev/billing?tab=payments or switch to your own AI subscription (Claude or ChatGPT).",
     );
   });
 
@@ -46,10 +58,10 @@ describe("Uno AI hours used up", () => {
         "ai_hours_empty: Your AI hours are used up. New hours arrive on October 24; or top up.",
       ),
     ).toBe(
-      "Your AI hours are used up. New hours arrive on October 24. To keep going now, add AI credit at https://console.uno4.dev/billing or switch to your own AI subscription (Claude or ChatGPT).",
+      "Your AI hours are used up. New hours arrive on October 24. To keep going now, top up your balance at https://console.uno4.dev/billing?tab=payments or switch to your own AI subscription (Claude or ChatGPT).",
     );
     expect(normalizeUnoBillingErrorMessage("402 ai_hours_empty")).toBe(
-      "Your AI hours are used up. To keep going now, add AI credit at https://console.uno4.dev/billing or switch to your own AI subscription (Claude or ChatGPT).",
+      "Your AI hours are used up. To keep going now, top up your balance at https://console.uno4.dev/billing?tab=payments or switch to your own AI subscription (Claude or ChatGPT).",
     );
   });
 });
@@ -60,6 +72,10 @@ describe("new gateway 402 contract", () => {
     ["ai_not_included", NOT_INCLUDED],
     ["insufficient_credits", CREDITS_EMPTY],
     ["insufficient_credits", CREDITS_EMPTY_SMART],
+    ["ai_hours_empty", BALANCE_HOURS_EMPTY],
+    ["ai_not_included", BALANCE_NOT_INCLUDED],
+    ["insufficient_credits", BALANCE_EMPTY],
+    ["insufficient_credits", BALANCE_EMPTY_SMART],
   ])("passes the %s human message through, whatever the wrapping", (code, message) => {
     for (const detail of [
       gatewayBody(code, message),
@@ -128,6 +144,28 @@ describe("premium limit reached (402 premium_limit_reached)", () => {
     ).toBe(UNO_PREMIUM_LIMIT_REACHED_MESSAGE);
     expect(isUnoBillingFailureReply(UNO_PREMIUM_LIMIT_REACHED_MESSAGE)).toBe(true);
   });
+
+  it("keeps the one-wallet monthly wording and adds the way out", () => {
+    const detail = `HTTP 402: ${gatewayBody("premium_limit_reached", PREMIUM_MONTH_USED_UP)}`;
+    expect(classifyProviderErrorDetail(detail)).toBe("billing_error");
+    const text = normalizeUnoBillingErrorMessage(detail);
+    expect(text).toBe(
+      `${PREMIUM_MONTH_USED_UP} Manage premium credit at https://console.uno4.dev/billing.`,
+    );
+    expectHuman(text);
+    expect(isUnoBillingFailureReply(text)).toBe(true);
+  });
+});
+
+describe("one-wallet fallbacks", () => {
+  it("speak of the balance and point at the payments tab", () => {
+    for (const message of [UNO_AI_CREDIT_EMPTY_MESSAGE, UNO_AI_NOT_INCLUDED_MESSAGE]) {
+      expect(message).toMatch(/balance is empty/);
+      expect(message).toContain("https://console.uno4.dev/billing?tab=payments");
+      expect(message).not.toMatch(/AI credit/);
+    }
+    expect(UNO_AI_CREDIT_EMPTY_MESSAGE.startsWith("Your balance is empty.")).toBe(true);
+  });
 });
 
 describe("old gateway wording", () => {
@@ -176,6 +214,10 @@ describe("billing failure relayed as an assistant reply", () => {
       `HTTP 402: ${NOT_INCLUDED}`,
       "Error: Error code: 402 - {'error': {'message': 'Insufficient LLM credits'}}",
       CREDITS_EMPTY,
+      BALANCE_EMPTY,
+      BALANCE_EMPTY_SMART,
+      `HTTP 402: ${BALANCE_HOURS_EMPTY}`,
+      BALANCE_NOT_INCLUDED,
     ]) {
       expect(isUnoBillingFailureReply(reply)).toBe(true);
     }
@@ -186,6 +228,7 @@ describe("billing failure relayed as an assistant reply", () => {
       "Sure! Here is your plan for today.",
       "An HTTP 402 status means Payment Required.",
       "Your AI credit is empty? Let me check the billing page for you.",
+      "Your balance is empty? Let me check the billing page for you.",
       "",
     ]) {
       expect(isUnoBillingFailureReply(reply)).toBe(false);

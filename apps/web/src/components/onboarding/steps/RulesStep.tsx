@@ -29,7 +29,7 @@ const RULES = [
   {
     n: 6,
     title: "The agent uses your AI quota",
-    body: "Every message costs tokens against your agent's subscription or your Uno LLM balance. Bigger context = bigger cost.",
+    body: "Every message costs tokens against your agent's subscription or your Uno balance. Bigger context = bigger cost.",
   },
 ];
 

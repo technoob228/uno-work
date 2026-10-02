@@ -1,6 +1,6 @@
 /**
  * "Plan & billing" inside Uno Work: the plan you're on, what it includes and
- * how much of it is used, the balance and Uno AI credits, the same plan ladder
+ * how much of it is used, the balance and Uno AI, the same plan ladder
  * the console sells, and the history of money in and out.
  *
  * Everything is shown here. Money moves in the console — "Add money" and
@@ -206,7 +206,11 @@ function MoneyCard({
           <span className="text-2xl font-semibold tabular-nums" data-testid="my-uno-balance">
             {balance ? formatUsd(balance.balanceUsd) : "…"}
           </span>
-          <span className="text-[11px] text-muted-foreground">Pays for the plan each month.</span>
+          <span className="text-[11px] text-muted-foreground">
+            {balance?.oneWallet
+              ? "Pays for the plan each month, and for AI past your hours."
+              : "Pays for the plan each month."}
+          </span>
           <div className="mt-1">
             <Button size="sm" onClick={() => openInNewTab(consoleLinks.addMoney)}>
               Add money
@@ -237,13 +241,26 @@ function MoneyCard({
             </span>
             <span className="text-[11px] text-muted-foreground">{AI_HOURS_TIME_NOTE}</span>
             <span className="text-[11px] text-muted-foreground">
-              Premium models ((Grok, GLM-5.3, Kimi K3)):{" "}
+              Premium models (Grok, GLM-5.3, Kimi K3):{" "}
               <span className="font-medium text-foreground tabular-nums">
                 {formatUsd(hours.premiumUsd)}
               </span>{" "}
               premium credit, per token.
             </span>
           </div>
+        ) : balance?.oneWallet ? (
+          balance.aiBalanceUsd > 0 ? (
+            <div className="flex flex-col gap-1 rounded-xl bg-muted/40 px-3.5 py-3">
+              <span className="text-xs text-muted-foreground">Premium credit</span>
+              <span className="text-2xl font-semibold tabular-nums" data-testid="my-uno-ai-balance">
+                {formatUsd(balance.aiBalanceUsd)}
+              </span>
+              <span className="text-[11px] text-muted-foreground">
+                Premium models spend this first, then your balance if you turn on Continue from
+                balance.
+              </span>
+            </div>
+          ) : null
         ) : (
           <div className="flex flex-col gap-1 rounded-xl bg-muted/40 px-3.5 py-3">
             <span className="text-xs text-muted-foreground">Uno AI credits</span>
@@ -381,7 +398,7 @@ function PlansCard({
         {hasAiOption
           ? hoursCatalog
             ? " With Uno AI, the plan adds AI hours every month, unlimited inside them — or bring your own Claude or ChatGPT subscription."
-            : " With Uno AI, the plan also tops up AI credits every month — or bring your own Claude or ChatGPT subscription."
+            : " With Uno AI, the plan includes AI hours every month — or bring your own Claude or ChatGPT subscription."
           : ""}
       </p>
       {loading ? (

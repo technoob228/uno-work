@@ -89,7 +89,7 @@ export function SimpleModelPickerContent(props: {
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium">{premiumLabel}</span>
               <span className="block truncate text-xs text-muted-foreground">
-                Claude, GPT and others · from premium credit
+                Claude, GPT and others · from premium credit, then your balance
               </span>
             </span>
             {premiumSelected ? <CheckIcon className="size-4 shrink-0 text-primary" /> : null}

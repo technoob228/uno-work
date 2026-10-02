@@ -568,8 +568,17 @@ export interface AccountBalance {
    */
   readonly name: string | null;
   readonly balanceUsd: number;
-  /** `llm_balance`: premium credit + top-ups (all Uno AI credits before AI hours). */
+  /**
+   * `llm_balance`: premium credit + top-ups (all Uno AI credits before AI
+   * hours). With one wallet: the plan's monthly premium credit only.
+   */
   readonly aiBalanceUsd: number;
+  /**
+   * `/auth/me` `one_wallet`: AI past the hours (and premium past the plan's
+   * credit) is paid from `balanceUsd`, there is no separate AI wallet. False
+   * on older backends that don't send it.
+   */
+  readonly oneWallet?: boolean;
   /** `ai_hours_minutes`; null when the console does not send it. */
   readonly aiHoursMinutes: number | null;
   /** `onboarding_path`: the goal picked on the console's /start (raw value). */
@@ -590,6 +599,7 @@ export async function fetchBalance(): Promise<AccountBalance> {
       strOrNull(me["display_name"]),
     balanceUsd: num(me["balance"]),
     aiBalanceUsd: num(me["llm_balance"]),
+    oneWallet: me["one_wallet"] === true,
     aiHoursMinutes: numOrNull(me["ai_hours_minutes"]),
     onboardingPath: strOrNull(me["onboarding_path"]),
     features: Array.isArray(me["features"])

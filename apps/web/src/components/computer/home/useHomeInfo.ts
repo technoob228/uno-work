@@ -62,7 +62,12 @@ export function useAiSpend(environmentId: EnvironmentId | null) {
   const spend = useQuery(aiSpendQueryOptions(environmentId));
   const account = useQuery({ ...balanceQuery(), enabled: accountReachable() });
   const creditsUsd = spend.data?.creditsUsd ?? account.data?.aiBalanceUsd ?? null;
-  return { spend, creditsUsd };
+  // One wallet: AI past the hours is paid from the main balance.
+  const oneWallet = spend.data?.oneWallet === true || account.data?.oneWallet === true;
+  const balanceUsd = oneWallet
+    ? (spend.data?.mainBalanceUsd ?? account.data?.balanceUsd ?? null)
+    : null;
+  return { spend, creditsUsd, oneWallet, balanceUsd };
 }
 
 /**

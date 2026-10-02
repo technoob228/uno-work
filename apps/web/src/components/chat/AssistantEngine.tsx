@@ -130,7 +130,7 @@ export function AssistantModelPicker(props: {
   const providerLabel = assistantProviderLabel(activeProvider);
   const byokNote =
     provider === "uno"
-      ? "Counts against this computer's AI limit and your Uno credits."
+      ? "Counts against this computer's AI limit and your Uno balance."
       : `Billed by ${AI_PROVIDER_LABELS[provider]} on your key — Uno spend limits don't apply.`;
 
   return (
