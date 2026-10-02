@@ -192,6 +192,7 @@ import { doneShelfLabel, threadContextMenuItems } from "./sidebar/simpleSidebar.
 import { useDevMode } from "../devMode";
 import { usePins } from "../navigation/usePins";
 import { SidebarAppsList } from "./sidebar/SidebarAppsList";
+import { SidebarUnoAiChats } from "../unoai/UnoAiChatsList";
 import { SidebarFilesTree } from "./sidebar/SidebarFilesTree";
 import { SidebarPinned } from "./sidebar/SidebarPinned";
 import { type SidebarMode, useNavStore } from "../navigation/navStore";
@@ -2636,6 +2637,7 @@ export default function Sidebar() {
                   </ul>
                 </TooltipProvider>
               )}
+              {!isSearchingThreads ? <SidebarUnoAiChats /> : null}
               {!isSearchingThreads &&
               totalThreadCount === 0 &&
               pinnedThreads.length === 0 &&

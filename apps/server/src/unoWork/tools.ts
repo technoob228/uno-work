@@ -49,6 +49,7 @@ import { liveSiteUrl } from "../files/sitePublish.ts";
 import { validateManifest } from "../machineApps/appManifest.ts";
 import { displayManifestDir } from "../machineApps/manifestDir.ts";
 import { computerSleepInfo } from "../workspaceRegistry/unoComputerEconomy.ts";
+import { WORK_SITES_PATH, parseWorkSites } from "../sites/workSites.ts";
 import type { InboxPost } from "../inbox/inboxModel.ts";
 import type { ToolApprovalOutcome } from "../browserBridge.ts";
 import { McpContent, type McpServerDefinition } from "../mcp/mcpJsonRpc.ts";
@@ -595,10 +596,9 @@ const siteSlugArg = {
   description: "The site's name (slug) from sites_list, e.g. q3-report-7f2a.",
 };
 const sitePath = (slug: string, rest = "") => `/api/v1/deploys/${encodeURIComponent(slug)}${rest}`;
-// The live address: hosting's own `url` when the answer has one (sites_list
-// does), else the production fallback `<slug>.uno4.me`.
-const siteUrl = (slug: string, fromHosting?: unknown) =>
-  liveSiteUrl(typeof fromHosting === "string" ? fromHosting : undefined, slug);
+// The production address `<slug>.uno4.me` when the answer has no url of its
+// own (sites_list reads hosting's — see sites/workSites.ts).
+const siteUrl = (slug: string) => liveSiteUrl(undefined, slug);
 
 /** A password a person can read out: `maple-river-4821-cloud`. */
 const PASSWORD_WORDS = [
@@ -1853,20 +1853,16 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     inputSchema: noArgs,
     level: "safe",
     run: (deps) =>
-      callConsole(deps, { method: "GET", path: "/api/v1/work/sites" }, "list the sites").pipe(
+      callConsole(deps, { method: "GET", path: WORK_SITES_PATH }, "list the sites").pipe(
         Effect.map((body) => ({
-          sites: (Array.isArray(body.deploys) ? body.deploys : []).map((raw) => {
-            const site = raw as Record<string, unknown>;
-            const slug = String(site.slug ?? "");
-            return {
-              slug,
-              url: siteUrl(slug, site.url),
-              hasPassword: site.has_password === true,
-              customDomain: site.custom_domain ?? null,
-              sizeBytes: site.size_bytes ?? null,
-              updatedAt: site.updated_at ?? null,
-            };
-          }),
+          sites: parseWorkSites(body).sites.map((site) => ({
+            slug: site.slug,
+            url: site.url,
+            hasPassword: site.hasPassword,
+            customDomain: site.customDomain,
+            sizeBytes: site.sizeBytes,
+            updatedAt: site.updatedAt,
+          })),
         })),
       ),
   },

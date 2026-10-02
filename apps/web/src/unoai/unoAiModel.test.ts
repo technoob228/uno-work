@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type { AiChatMessage } from "./unoAiApi";
-import { handoffPrompt, HANDOFF_TTL_MS, rememberHandoff, takeHandoff } from "./unoAiHandoff";
+import {
+  describeUnoAiHandoff,
+  handoffPrompt,
+  HANDOFF_TTL_MS,
+  isUnoAiHandoff,
+  rememberHandoff,
+  takeHandoff,
+} from "./unoAiHandoff";
 import {
   askQuestions,
   chatLanguage,
@@ -215,5 +222,24 @@ describe("hand-off", () => {
     expect(p).toContain("https://maya-yoga.sites.uno4.dev/");
     expect(p).toContain("Why I need this computer: A real bot lives on your computer.");
     expect(p).not.toContain("THINK-SECRET"); // the model's think never leaves
+  });
+  it("reads the goal and the live sites back for the chat's card", () => {
+    const p = handoffPrompt({
+      title: "cafe",
+      messages: transcript,
+      sites: [
+        { slug: "our-cafe-bot", url: "https://our-cafe-bot.uno4.me/", title: "Our Café: orders" },
+        { slug: "menu", url: "https://menu.uno4.me/", title: null },
+      ] as never,
+    });
+    expect(isUnoAiHandoff(p)).toBe(true);
+    expect(isUnoAiHandoff(`Hi\n${p}`)).toBe(false);
+    expect(describeUnoAiHandoff(p)).toEqual({
+      goal: "I teach yoga and want a booking site",
+      sites: [
+        { title: "Our Café: orders", url: "https://our-cafe-bot.uno4.me/" },
+        { title: null, url: "https://menu.uno4.me/" },
+      ],
+    });
   });
 });

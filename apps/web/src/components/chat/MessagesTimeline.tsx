@@ -14,6 +14,8 @@ import {
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
 import { describeHandoffSeed, isHandoffSeed } from "../../continueOnMachine";
+import { isUnoAiHandoff } from "../../unoai/unoAiHandoff";
+import { UnoAiHandoffCard } from "./UnoAiHandoffCard";
 import { CONTINUE_ON_MACHINE_COPY } from "../../continueOnMachineCopy";
 import {
   type ChatImageAttachment,
@@ -435,7 +437,9 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                     ))}
                   </div>
                 )}
-                {isHandoffSeed(displayedUserMessage.visibleText) ? (
+                {isUnoAiHandoff(displayedUserMessage.visibleText) ? (
+                  <UnoAiHandoffCard text={displayedUserMessage.visibleText} />
+                ) : isHandoffSeed(displayedUserMessage.visibleText) ? (
                   <HandoffSeedBody text={displayedUserMessage.visibleText} />
                 ) : (
                   (displayedUserMessage.visibleText.trim().length > 0 ||

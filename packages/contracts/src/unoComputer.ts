@@ -822,3 +822,31 @@ export const UnoComputerBoostResult = Schema.Struct({
   boost: Schema.NullOr(UnoComputerBoost),
 });
 export type UnoComputerBoostResult = typeof UnoComputerBoostResult.Type;
+
+/**
+ * One of the person's sites on Uno Hosting, as the computer's daemon reads it
+ * from the console (`GET /api/v1/work/sites` with the machine's own token) —
+ * so the list works on the computer's direct address too, where the browser
+ * has no account session.
+ */
+export const UnoWorkSite = Schema.Struct({
+  slug: Schema.String,
+  /** The live address hosting answers with (`https://<slug>.uno4.me/`), or the custom domain. */
+  url: Schema.String,
+  customDomain: Schema.NullOr(Schema.String),
+  hasPassword: Schema.Boolean,
+  sizeBytes: Schema.NullOr(Schema.Number),
+  updatedAt: Schema.NullOr(Schema.String),
+});
+export type UnoWorkSite = typeof UnoWorkSite.Type;
+
+export const UnoWorkSites = Schema.Struct({
+  /** `ok`; `not_linked` — this computer has no Uno account token; `unavailable` — the console didn't answer. */
+  availability: Schema.Literals(["ok", "not_linked", "unavailable"]),
+  sites: Schema.Array(UnoWorkSite),
+  storageUsedBytes: Schema.NullOr(Schema.Number),
+  storageLimitBytes: Schema.NullOr(Schema.Number),
+  /** Why the list is empty when it isn't `ok`, in plain words. */
+  message: Schema.NullOr(Schema.String),
+});
+export type UnoWorkSites = typeof UnoWorkSites.Type;

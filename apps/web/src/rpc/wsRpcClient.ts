@@ -281,6 +281,7 @@ export interface WsRpcClient {
     readonly appAiModels: RpcUnaryMethod<typeof WS_METHODS.appAiModels>;
     readonly appAiSpend: () => ReturnType<RpcUnaryMethod<typeof WS_METHODS.appAiSpend>>;
     readonly appAiStatus: () => ReturnType<RpcUnaryMethod<typeof WS_METHODS.appAiStatus>>;
+    readonly workSites: () => ReturnType<RpcUnaryMethod<typeof WS_METHODS.workSites>>;
     readonly resizeOptions: (
       input?: RpcInput<typeof WS_METHODS.unoComputerResizeOptions>,
     ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.unoComputerResizeOptions>>;
@@ -693,6 +694,7 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       appAiModels: (input) => transport.request((client) => client[WS_METHODS.appAiModels](input)),
       appAiSpend: () => transport.request((client) => client[WS_METHODS.appAiSpend]({})),
       appAiStatus: () => transport.request((client) => client[WS_METHODS.appAiStatus]({})),
+      workSites: () => transport.request((client) => client[WS_METHODS.workSites]({})),
       localMetrics: () =>
         transport.request((client) => client[WS_METHODS.unoComputerLocalMetrics]({})),
       resizeOptions: (input) =>

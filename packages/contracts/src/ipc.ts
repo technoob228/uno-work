@@ -186,6 +186,7 @@ import type {
   UnoEmbedCheckInput,
   UnoMachineAppActionInput,
   UnoMachineApps,
+  UnoWorkSites,
 } from "./unoComputer.ts";
 import type {
   AppAiModels,
@@ -901,6 +902,8 @@ export interface EnvironmentApi {
     appAiSpend: () => Promise<UnoAiSpend>;
     /** Uno AI hours right now — polled while a chat works (the busy notice). */
     appAiStatus: () => Promise<UnoAiStatus>;
+    /** The person's sites on Uno Hosting, read by this computer's daemon. */
+    workSites: () => Promise<UnoWorkSites>;
     localMetrics: () => Promise<UnoComputerLocalMetrics>;
     resizeOptions: (input?: UnoComputerTargetInput) => Promise<UnoComputerResizeOptions>;
     resize: (input: UnoComputerResizeInput) => Promise<UnoComputerResizeResult>;
