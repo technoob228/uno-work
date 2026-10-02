@@ -1,4 +1,5 @@
 import {
+  isAssistantProjectId,
   CHANNEL_NOTIFY_MAX_TEXT_CHARS,
   ManagerSlackConnectorConfig,
   ManagerTelegramConnectorConfig,
@@ -115,7 +116,7 @@ const makeConnectorNotifyService = Effect.gen(function* () {
       });
     });
 
-  const sendToChats: ConnectorNotifyServiceShape["sendToChats"] = (chats, text) =>
+  const sendToChats: ConnectorNotifyServiceShape["sendToChats"] = (chats, text, options) =>
     Effect.gen(function* () {
       const trimmed = text.slice(0, CHANNEL_NOTIFY_MAX_TEXT_CHARS);
       const results: Array<ChannelNotifyResult["chats"][number]> = [];
@@ -127,6 +128,7 @@ const makeConnectorNotifyService = Effect.gen(function* () {
                 projectId: chat.connectorProjectId,
                 channelId: slackTarget.channelId,
                 text: trimmed,
+                ...(options?.asAssistant ? { asAssistant: options.asAssistant } : {}),
                 ...(slackTarget.threadTs !== null ? { threadTs: slackTarget.threadTs } : {}),
               })
             : yield* telegram.sendText({
@@ -159,7 +161,9 @@ const makeConnectorNotifyService = Effect.gen(function* () {
         includeAssistantFallback: true,
         includeSlack: true,
       });
-      return yield* sendToChats(chats, formatChannelNotifyText(input.text, input.kind));
+      return yield* sendToChats(chats, formatChannelNotifyText(input.text, input.kind), {
+        asAssistant: projectId !== null && isAssistantProjectId(projectId) ? projectId : null,
+      });
     });
 
   return { resolveChats, sendToChats, notify } satisfies ConnectorNotifyServiceShape;

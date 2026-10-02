@@ -53,6 +53,7 @@ import { toastManager } from "../../ui/toast";
 import { SlackBrandMark, TelegramMark } from "../brandMarks";
 import { ConnectedBadge, SetupHeading, SetupNote, SetupShell, SoonBadge } from "../SetupShell";
 import { SlackGuide } from "../SlackGuide";
+import { SlackChannelsPicker } from "../../assistants/SlackChannelsPicker";
 import { useSetupNavigation } from "../useSetupNavigation";
 import { useSetupProgress } from "../useSetupProgress";
 
@@ -279,7 +280,7 @@ function TelegramCard({
               setMode("shared");
             }}
           >
-            Use Uno’s bot instead — no BotFather
+            Use the shared Uno bot instead
           </button>
         ) : null}
       </div>
@@ -577,6 +578,13 @@ function SlackCard({
           ]}
           caption="Slack · mention @Uno in a channel"
         />
+        {state?.installed ? (
+          <SlackChannelsPicker
+            environmentId={environmentId}
+            projectId={summary.projectId}
+            name={summary.projectId === ASSISTANT_PROJECT_ID ? "Uno" : summary.title}
+          />
+        ) : null}
         <Button size="sm" variant="ghost" className="self-start" onClick={() => void disconnect()}>
           Disconnect
         </Button>

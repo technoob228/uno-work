@@ -28,9 +28,12 @@ import {
   afterTelegramConfigSaved,
   connectSharedTelegram,
   readSlackInstall,
-  slackAppHeldByAnother,
+  assignSlackChannelsFor,
+  routeSlackThroughHolder,
+  slackRelayHolderFor,
   startSlackInstall,
   uninstallSlack,
+  verifyTelegramBotToken,
 } from "./channelSetup.ts";
 import { readWorkMachineIdentity, type WorkMachineIdentity } from "./workConsole.ts";
 
@@ -523,7 +526,7 @@ it.live("routes the second assistant through the holder's relay and links its ch
 );
 
 it.layer(NodeServices.layer)("Two assistants on one computer, one shared bot", (it) => {
-  it.effect("keeps Uno's Slack app with the assistant that added it", () =>
+  it.effect("one Uno Slack app: a second assistant routes through it, channels are split", () =>
     Effect.gen(function* () {
       const repository = yield* ManagerConnectorRepository;
       yield* repository.upsert({
@@ -532,15 +535,27 @@ it.layer(NodeServices.layer)("Two assistants on one computer, one shared bot", (
         config: {
           botToken: `unorelay:${SLR}`,
           appToken: "unorelay",
-          allowedChannelIds: [],
+          allowedChannelIds: ["DINSTALLER", "CGENERAL", "CSALES"],
           enabled: true,
         },
         updatedAt: new Date().toISOString(),
       });
-      expect(yield* slackAppHeldByAnother(projectId)).toBeNull();
-      expect(yield* slackAppHeldByAnother(ana)).toMatchObject({
-        status: 409,
-        error: "slack_app_in_use",
+      // The holder itself would re-mint; Ana writes through the holder.
+      expect(yield* slackRelayHolderFor(projectId)).toBeNull();
+      expect(yield* slackRelayHolderFor(ana)).toBe(projectId);
+      yield* routeSlackThroughHolder({ projectId: ana, holder: projectId });
+      const anaRow = yield* repository.get({ projectId: ana, kind: "slack" });
+      expect(
+        Option.isSome(anaRow) &&
+          Schema.decodeUnknownSync(ManagerSlackConnectorConfig)(anaRow.value.config),
+      ).toMatchObject({ botToken: `unoroute:${projectId}`, allowedChannelIds: [], enabled: true });
+      // "Channels Ana answers in": #sales moves to Ana; the installer DM stays.
+      expect(yield* assignSlackChannelsFor({ projectId: ana, channelIds: ["CSALES"] })).toEqual([
+        "CSALES",
+      ]);
+      expect(yield* readSlackRow).toMatchObject({
+        botToken: `unorelay:${SLR}`,
+        allowedChannelIds: ["DINSTALLER", "CGENERAL"],
       });
     }).pipe(Effect.provide(repositories)),
   );
@@ -766,3 +781,27 @@ it.layer(NodeServices.layer)("Slack via Uno's app", (it) => {
     }).pipe(Effect.provide(slackLayer(false))),
   );
 });
+
+const fetchOk = async () => Response.json({ ok: true, result: { username: "ana_helper_bot" } });
+const fetchRejected = async () =>
+  Response.json({ ok: false, error_code: 401, description: "Unauthorized" }, { status: 401 });
+const fetchDown = async () => {
+  throw new TypeError("fetch failed");
+};
+
+it.effect("checks an own bot token with getMe before it is kept", () =>
+  Effect.gen(function* () {
+    expect(yield* verifyTelegramBotToken("123:good", fetchOk)).toEqual({
+      ok: true,
+      username: "ana_helper_bot",
+    });
+    expect(yield* verifyTelegramBotToken("123:bad", fetchRejected)).toMatchObject({
+      ok: false,
+      rejected: true,
+    });
+    expect(yield* verifyTelegramBotToken("123:any", fetchDown)).toMatchObject({
+      ok: false,
+      rejected: false,
+    });
+  }),
+);

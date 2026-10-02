@@ -57,6 +57,7 @@ import { bindingTargetLabel } from "./connectorBindings.ts";
 import { resolveNotifyThreadId } from "./connectorNotify.ts";
 import { ManagerAssistantError, ManagerAssistantService } from "./Services/AssistantService.ts";
 import { ManagerTelegramService } from "./Layers/TelegramConnector.ts";
+import { ManagerSlackService } from "./Layers/SlackConnector.ts";
 import { telegramPairingLink } from "./telegramPairing.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { isRelayCredential, isRouteCredential } from "./channelRelay.ts";
@@ -64,8 +65,12 @@ import {
   afterTelegramConfigSaved,
   connectSharedTelegram,
   readSlackInstall,
-  slackAppHeldByAnother,
+  assignSlackChannelsFor,
+  isRoutedSlack,
+  routeSlackThroughHolder,
+  slackRelayHolderFor,
   startSlackInstall,
+  verifyTelegramBotToken,
   uninstallSlack,
   type ChannelSetupOutcome,
 } from "./channelSetup.ts";
@@ -508,8 +513,16 @@ export const managerAssistantSlackInstallStartRouteLayer = HttpRouter.add(
       Effect.mapError(() => new AuthError({ message: "Invalid payload.", status: 400 })),
     );
     yield* requireAssistantProject(input.projectId);
-    const inUse = yield* slackAppHeldByAnother(input.projectId);
-    if (inUse !== null) return respondChannelSetup({ ok: false, failure: inUse });
+    // One Uno app per workspace: a second assistant writes through it.
+    const holder = yield* slackRelayHolderFor(input.projectId);
+    if (holder !== null) {
+      return yield* routeSlackThroughHolder({ projectId: input.projectId, holder }).pipe(
+        Effect.map(() =>
+          respondChannelSetup({ ok: true, value: { available: true, authorizeUrl: null } }),
+        ),
+        Effect.catch(respondServerError("assistant:slack-install")),
+      );
+    }
     const identity = yield* currentWorkMachineIdentity;
     return respondChannelSetup(yield* startSlackInstall({ identity }));
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
@@ -527,10 +540,17 @@ export const managerAssistantSlackInstallStatusRouteLayer = HttpRouter.add(
     yield* authenticateOwnerSession;
     const projectId = yield* assistantProjectIdFromQuery;
     yield* requireAssistantProject(projectId);
-    // Reading mints the relay: never for a second assistant of this computer.
-    const inUse = yield* slackAppHeldByAnother(projectId);
-    if (inUse !== null) return respondChannelSetup({ ok: false, failure: inUse });
+    // Reading mints the relay: a second assistant of this computer routes
+    // through the holder and sees the holder's installation.
+    const holder = yield* slackRelayHolderFor(projectId);
     const identity = yield* currentWorkMachineIdentity;
+    if (holder !== null) {
+      return yield* routeSlackThroughHolder({ projectId, holder }).pipe(
+        Effect.andThen(readSlackInstall({ projectId: holder, identity })),
+        Effect.map(respondChannelSetup),
+        Effect.catch(respondServerError("assistant:slack-install")),
+      );
+    }
     return yield* readSlackInstall({ projectId, identity }).pipe(
       Effect.map(respondChannelSetup),
       Effect.catch(respondServerError("assistant:slack-install")),
@@ -549,6 +569,14 @@ export const managerAssistantSlackInstallDeleteRouteLayer = HttpRouter.add(
     yield* authenticateOwnerSession;
     const projectId = yield* assistantProjectIdFromQuery;
     yield* requireAssistantProject(projectId);
+    // A routed assistant leaves Slack; the app stays for the others.
+    if (yield* isRoutedSlack(projectId)) {
+      const repository = yield* ManagerConnectorRepository;
+      return yield* repository.remove({ projectId, kind: "slack" }).pipe(
+        Effect.map(() => HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 })),
+        Effect.catch(respondServerError("assistant:slack-uninstall")),
+      );
+    }
     const identity = yield* currentWorkMachineIdentity;
     return yield* uninstallSlack({ projectId, identity }).pipe(
       Effect.map(respondChannelSetup),
@@ -700,6 +728,14 @@ export const managerAssistantTelegramRouteLayer = HttpRouter.add(
           { error: "Bot token is required for the first setup." },
           { status: 400 },
         );
+      }
+      // A new own-bot token: Telegram must know it (getMe) before it is kept.
+      const typedToken = input.botToken?.trim() ?? "";
+      if (typedToken.length > 0 && typedToken !== previousToken) {
+        const verified = yield* verifyTelegramBotToken(typedToken);
+        if (!verified.ok && verified.rejected) {
+          return HttpServerResponse.jsonUnsafe({ error: verified.message }, { status: 400 });
+        }
       }
       const previousModelSelection =
         existingConfig !== null && existingConfig._tag === "Success"
@@ -1116,6 +1152,78 @@ export const managerAssistantInstructionsResolveRouteLayer = HttpRouter.add(
         Effect.map((result) => HttpServerResponse.jsonUnsafe(result, { status: 200 })),
         Effect.catch(respondAssistantError("assistant:instructions")),
       );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * `GET /api/manager/assistant/slack/channels?projectId=` — the workspace's
+ * channels through Uno's app, and which assistant of this computer answers
+ * in each ("Channels Ana answers in").
+ */
+export const managerAssistantSlackChannelsGetRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/assistant/slack/channels",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const projectId = yield* assistantProjectIdFromQuery;
+    yield* requireAssistantProject(projectId);
+    const slack = yield* ManagerSlackService;
+    const repository = yield* ManagerConnectorRepository;
+    const channels = yield* slack.listChannels(projectId);
+    if (channels === null) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: "Slack isn't connected on this computer." },
+        { status: 409 },
+      );
+    }
+    const owners = new Map<string, string>();
+    for (const row of yield* repository.listByKind("slack").pipe(Effect.orElseSucceed(() => []))) {
+      const decoded = Schema.decodeUnknownExit(ManagerSlackConnectorConfig)(row.config);
+      if (decoded._tag !== "Success") continue;
+      for (const id of decoded.value.allowedChannelIds) owners.set(id, row.projectId);
+    }
+    return HttpServerResponse.jsonUnsafe(
+      {
+        channels: channels.map((channel) => ({
+          id: channel.id,
+          name: channel.name,
+          isPrivate: channel.isPrivate,
+          isMember: channel.isMember,
+          assistantProjectId: owners.get(channel.id) ?? null,
+        })),
+      },
+      { status: 200 },
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+const SlackChannelsPayload = Schema.Struct({
+  projectId: ProjectId,
+  channelIds: Schema.Array(Schema.String),
+});
+
+/** `POST /api/manager/assistant/slack/channels` {projectId, channelIds} — owner only. */
+export const managerAssistantSlackChannelsPutRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/slack/channels",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(SlackChannelsPayload).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid payload.", status: 400 })),
+    );
+    yield* requireAssistantProject(input.projectId);
+    const slack = yield* ManagerSlackService;
+    return yield* Effect.gen(function* () {
+      const assigned = yield* assignSlackChannelsFor(input);
+      // The app has to be in a public channel to hear it (private: invite it).
+      const listed = (yield* slack.listChannels(input.projectId)) ?? [];
+      for (const channel of listed) {
+        if (assigned.includes(channel.id) && !channel.isMember && !channel.isPrivate) {
+          yield* slack.joinChannel(input.projectId, channel.id);
+        }
+      }
+      return HttpServerResponse.jsonUnsafe({ allowedChannelIds: assigned }, { status: 200 });
+    }).pipe(Effect.catch(respondServerError("assistant:slack-channels")));
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

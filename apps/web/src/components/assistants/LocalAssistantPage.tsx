@@ -371,6 +371,7 @@ export function LocalAssistantPage({
       </div>
 
       <ConnectChannelDialog
+          telegramMode="own"
         environmentId={environmentId}
         projectId={projectId as ProjectId}
         channel={connecting}

@@ -32,6 +32,8 @@ export interface ConnectorNotifyServiceShape {
   readonly sendToChats: (
     chats: ReadonlyArray<ResolvedNotifyChat>,
     text: string,
+    /** Slack: write as this assistant when several share Uno's app. */
+    options?: { readonly asAssistant?: ProjectId | null },
   ) => Effect.Effect<ChannelNotifyResult>;
   /** The HTTP endpoint's semantics: resolve (with assistant fallback) and send. */
   readonly notify: (input: ChannelNotifyInput) => Effect.Effect<ChannelNotifyResult>;

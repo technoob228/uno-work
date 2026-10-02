@@ -286,6 +286,7 @@ export function AssistantPage({
 
       {environmentId ? (
         <ConnectChannelDialog
+          telegramMode="own"
           environmentId={environmentId}
           channel={connecting}
           onClose={() => setConnecting(null)}

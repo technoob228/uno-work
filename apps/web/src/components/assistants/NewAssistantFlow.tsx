@@ -7,7 +7,7 @@
  * own computer" is the option, highlighted for templates that read other
  * people's emails and sites (see `createAssistant.ts`).
  */
-import type { AssistantDraftResult, EnvironmentId } from "@t3tools/contracts";
+import type { AssistantDraftResult, EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRightIcon,
@@ -27,6 +27,8 @@ import { isAssistantsDemo } from "../../lib/assistantsDemo";
 import { draftAssistant } from "../../lib/managerApi";
 import { cn } from "../../lib/utils";
 import { openInstallDocs } from "../onboarding/harnessInstallLinks";
+import { TelegramMark } from "../setup/brandMarks";
+import { AssistantTelegramPanel } from "../setup/steps/ChannelsStep";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
@@ -415,6 +417,9 @@ export function NewAssistantFlow({
             ))}
           </ul>
         ) : null}
+        {result.assistantReady && result.environmentId ? (
+          <TelegramNow name={plan.name} environmentId={result.environmentId} />
+        ) : null}
         <div className="flex justify-end">
           <Button onClick={() => onOpen(result.boxId)} data-testid="assistant-new-open">
             Open {plan.name}
@@ -446,6 +451,11 @@ export function NewAssistantFlow({
             ))}
           </ul>
         ) : null}
+        <TelegramNow
+          name={plan.name}
+          environmentId={environmentId}
+          projectId={result.projectId as ProjectId}
+        />
         <div className="flex justify-end">
           <Button
             onClick={() => onOpenHere(result.projectId)}
@@ -691,5 +701,50 @@ function HomeOption({
         <span className="block text-xs text-muted-foreground">{body}</span>
       </span>
     </button>
+  );
+}
+
+/**
+ * Telegram right after Create (decision 02.10): the assistant's own bot by
+ * default — @BotFather steps, the token in a protected field (it goes to the
+ * computer, never into a chat), getMe, then Start on the bot's link. Uno's
+ * shared bot is the fallback link inside.
+ */
+function TelegramNow({
+  name,
+  environmentId,
+  projectId,
+}: {
+  name: string;
+  environmentId: EnvironmentId;
+  projectId?: ProjectId;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      className="rounded-2xl border border-border/70 px-4 py-3"
+      data-testid="assistant-new-telegram"
+    >
+      <button
+        type="button"
+        className="flex w-full cursor-pointer items-center gap-2 text-left text-sm font-medium"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <TelegramMark className="size-4" />
+        <span className="flex-1">Give {name} its own Telegram bot</span>
+        <span className="text-xs font-normal text-muted-foreground">
+          {open ? "Hide" : "Optional · 1 min"}
+        </span>
+      </button>
+      {open ? (
+        <div className="pt-3">
+          <AssistantTelegramPanel
+            environmentId={environmentId}
+            initialMode="own"
+            {...(projectId !== undefined ? { projectId } : {})}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }

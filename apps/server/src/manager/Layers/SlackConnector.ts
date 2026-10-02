@@ -28,6 +28,7 @@
 import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
 import {
+  ASSISTANT_PROJECT_ID,
   CommandId,
   ManagerSlackConnectorConfig,
   MessageId,
@@ -80,12 +81,26 @@ import { resolveConnectorOutgoingFile } from "../connectorOutgoingFiles.ts";
 import { resolveTurnReply } from "./TelegramConnector.ts";
 import {
   parseRelayCredential,
+  parseRouteCredential,
   redactConnectorSecrets,
   slackFileRequest,
   slackRelayApiBase,
   slackUploadTarget,
 } from "../channelRelay.ts";
 import { runSlackRelayEventLoop, type SlackEventsApiPayload } from "../slackRelayEvents.ts";
+import {
+  assistantForSlackChannel,
+  defaultSlackAssistant,
+  isCustomizeRefused,
+  matchAssistantName,
+  slackIconEmoji,
+  slackNowAnswers,
+  slackWhoIsThisFor,
+  type SlackAssistantChoice,
+} from "../slackAssistants.ts";
+import { bindingOnConnector } from "../connectorBindings.ts";
+import { ManagerConnectorBindingRepository } from "../../persistence/Services/ManagerConnectorBindings.ts";
+import { readProfile } from "../../assistants/localAssistantStore.ts";
 
 export interface ManagerSlackRuntimeStatus {
   readonly botUserId: string | null;
@@ -107,7 +122,21 @@ export interface ManagerSlackServiceShape {
     readonly channelId: string;
     readonly text: string;
     readonly threadTs?: string;
+    /** Write as this assistant (name + emoji) when several share Uno's app. */
+    readonly asAssistant?: ProjectId;
   }) => Effect.Effect<boolean>;
+  /**
+   * Channels of the workspace, through the bot this assistant talks through
+   * (its own, or the holder's for a routed row). Null without a live bot.
+   */
+  readonly listChannels: (projectId: ProjectId) => Effect.Effect<ReadonlyArray<{
+    readonly id: string;
+    readonly name: string;
+    readonly isPrivate: boolean;
+    readonly isMember: boolean;
+  }> | null>;
+  /** Joins a public channel so the app hears it (best effort). */
+  readonly joinChannel: (projectId: ProjectId, channelId: string) => Effect.Effect<boolean>;
 }
 
 export class ManagerSlackService extends Context.Service<
@@ -212,6 +241,19 @@ interface SlackRuntime {
   stopRelay: (() => void) | null;
   /** Relay mode: whether the last poll reached the console. */
   relayConnected: boolean;
+  /**
+   * The bot may write under another name (`chat:write.customize`); null when
+   * Slack didn't say (an older relay drops the scopes header).
+   */
+  canCustomize?: boolean | null;
+}
+
+/** Who a message is written as: an assistant's name and Slack emoji. */
+interface SlackIdentity {
+  readonly username: string;
+  readonly iconEmoji: string;
+  /** Prefix the text with the name: the custom name may not show. */
+  readonly prefix: boolean;
 }
 
 /** Whether the runtime has a live (or retrying, for the relay) event source. */
@@ -330,6 +372,7 @@ async function uploadSlackFileViaRelay(input: {
 
 const makeSlackConnector = Effect.gen(function* () {
   const connectorRepository = yield* ManagerConnectorRepository;
+  const bindingRepository = yield* ManagerConnectorBindingRepository;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
@@ -371,16 +414,108 @@ const makeSlackConnector = Effect.gen(function* () {
     channel: string,
     text: string,
     threadTs: string | undefined,
+    identity: SlackIdentity | null = null,
   ) =>
     Effect.tryPromise({
-      try: () =>
-        web.chat.postMessage({
+      try: async () => {
+        const base = {
           channel,
           text: text.slice(0, SLACK_MESSAGE_LIMIT),
           ...(threadTs !== undefined ? { thread_ts: threadTs } : {}),
-        }),
+        };
+        if (identity === null) return web.chat.postMessage(base);
+        const named = identity.prefix
+          ? `*${identity.username}:* ${base.text}`.slice(0, SLACK_MESSAGE_LIMIT)
+          : base.text;
+        try {
+          return await web.chat.postMessage({
+            ...base,
+            text: named,
+            username: identity.username,
+            icon_emoji: identity.iconEmoji,
+          });
+        } catch (cause) {
+          // A workspace that added the app before chat:write.customize.
+          if (!isCustomizeRefused(cause)) throw cause;
+          return web.chat.postMessage({
+            ...base,
+            text: `*${identity.username}:* ${base.text}`.slice(0, SLACK_MESSAGE_LIMIT),
+          });
+        }
+      },
       catch: (cause) => new SlackConnectorError({ message: String(cause) }),
     });
+
+  // ── Several assistants through one Uno app (see slackAssistants.ts) ──
+
+  const decodeSlackRow = (config: unknown): ManagerSlackConnectorConfig | null => {
+    const decoded = Schema.decodeUnknownExit(ManagerSlackConnectorConfig)(config);
+    return decoded._tag === "Success" ? decoded.value : null;
+  };
+
+  const slackRows = connectorRepository.listByKind("slack").pipe(
+    Effect.map((records) =>
+      records.flatMap((record) => {
+        const config = decodeSlackRow(record.config);
+        return config === null ? [] : [{ projectId: record.projectId, config }];
+      }),
+    ),
+    Effect.orElseSucceed(
+      (): ReadonlyArray<{ projectId: ProjectId; config: ManagerSlackConnectorConfig }> => [],
+    ),
+  );
+
+  const routedSlackRowsOf = (holder: ProjectId) =>
+    slackRows.pipe(
+      Effect.map((rows) =>
+        rows.filter((row) => parseRouteCredential(row.config.botToken) === holder),
+      ),
+    );
+
+  /** The assistant whose live connection carries this one (itself, or its holder). */
+  const holderOf = (projectId: ProjectId) =>
+    connectorRepository.get({ projectId, kind: "slack" }).pipe(
+      Effect.map((row) => {
+        const config = Option.isSome(row) ? decodeSlackRow(row.value.config) : null;
+        const holder = config === null ? null : parseRouteCredential(config.botToken);
+        return holder === null ? projectId : ProjectId.make(holder);
+      }),
+      Effect.orElseSucceed(() => projectId),
+    );
+
+  const assistantTitle = (projectId: ProjectId) =>
+    projectionSnapshotQuery.getProjectShellById(projectId).pipe(
+      Effect.map((project) => (Option.isSome(project) ? project.value : null)),
+      Effect.orElseSucceed(() => null),
+    );
+
+  /** Name + emoji of an assistant, for a computer where several share one app. */
+  const identityOf = (projectId: ProjectId, runtime: SlackRuntime | undefined) =>
+    Effect.gen(function* () {
+      const project = yield* assistantTitle(projectId);
+      const profile =
+        project === null ? null : yield* Effect.promise(() => readProfile(project.workspaceRoot));
+      const title = project?.title ?? "Assistant";
+      return {
+        username: projectId === ASSISTANT_PROJECT_ID && title === "Assistant" ? "Uno" : title,
+        iconEmoji: slackIconEmoji(profile?.emoji ?? null),
+        prefix: runtime?.canCustomize !== true,
+      } satisfies SlackIdentity;
+    });
+
+  const choicesOf = (holder: ProjectId, routed: ReadonlyArray<{ readonly projectId: ProjectId }>) =>
+    Effect.forEach([holder, ...routed.map((row) => row.projectId)], (projectId) =>
+      identityOf(projectId, undefined).pipe(
+        Effect.map((identity): SlackAssistantChoice => ({ projectId, title: identity.username })),
+      ),
+    );
+
+  // A DM's first message while it waits for "who is this for?" (in memory:
+  // a restart just means the question is asked again).
+  const pendingDmRef = yield* Ref.make<
+    ReadonlyMap<string, { readonly event: SlackRawEvent; readonly at: number }>
+  >(new Map());
+  const PENDING_DM_MS = 10 * 60_000;
 
   // Download a Slack file (authenticated with the bot token) into raw bytes.
   const downloadSlackFile = (botToken: string, url: string) =>
@@ -524,6 +659,7 @@ const makeSlackConnector = Effect.gen(function* () {
     readonly channel: string;
     readonly threadTs: string | undefined;
     readonly filePath: string;
+    readonly identity?: SlackIdentity | null;
   }) =>
     Effect.gen(function* () {
       const failure = yield* Effect.tryPromise({
@@ -572,6 +708,7 @@ const makeSlackConnector = Effect.gen(function* () {
           input.channel,
           `Could not send ${input.filePath}: ${failure}`,
           input.threadTs,
+          input.identity ?? null,
         );
       }
     });
@@ -690,15 +827,18 @@ const makeSlackConnector = Effect.gen(function* () {
     readonly threadId: ThreadId;
     readonly requestedAtIso: string;
     readonly hotKey: string;
+    readonly identity: SlackIdentity | null;
   }) =>
     Effect.gen(function* () {
+      const say = (text: string) =>
+        postMessage(input.web, input.channel, text, input.threadTs, input.identity);
       const deadline = Date.now() + Duration.toMillis(REPLY_TIMEOUT);
       const ackAt = Date.now() + Duration.toMillis(ACK_DELAY);
       let acked = false;
       const maybeAck = Effect.gen(function* () {
         if (!acked && Date.now() >= ackAt) {
           acked = true;
-          yield* postMessage(input.web, input.channel, ACK_TEXT, input.threadTs);
+          yield* say(ACK_TEXT);
         }
       });
       while (Date.now() < deadline) {
@@ -725,9 +865,9 @@ const makeSlackConnector = Effect.gen(function* () {
           continue;
         }
         if (reply.text.trim().length > 0) {
-          yield* postMessage(input.web, input.channel, reply.text, input.threadTs);
+          yield* say(reply.text);
         } else if (reply.files.length === 0) {
-          yield* postMessage(input.web, input.channel, "Done.", input.threadTs);
+          yield* say("Done.");
         }
         const roots = yield* workspaceRootsForThread(input.threadId);
         for (const rawPath of reply.files) {
@@ -738,12 +878,7 @@ const makeSlackConnector = Effect.gen(function* () {
             yield* Effect.logWarning("slack send-file refused").pipe(
               Effect.annotateLogs({ channel: input.channel, filePath: rawPath }),
             );
-            yield* postMessage(
-              input.web,
-              input.channel,
-              `Could not send ${nodePath.basename(rawPath)}: ${resolved.reason}.`,
-              input.threadTs,
-            );
+            yield* say(`Could not send ${nodePath.basename(rawPath)}: ${resolved.reason}.`);
             continue;
           }
           yield* sendSlackFile({
@@ -752,17 +887,13 @@ const makeSlackConnector = Effect.gen(function* () {
             channel: input.channel,
             threadTs: input.threadTs,
             filePath: resolved.path,
+            identity: input.identity,
           });
         }
         yield* markHotWindow(input.hotKey);
         return;
       }
-      yield* postMessage(
-        input.web,
-        input.channel,
-        "The assistant is still working on it; check the app for progress.",
-        input.threadTs,
-      );
+      yield* say("The assistant is still working on it; check the app for progress.");
     }).pipe(
       Effect.catch((cause) =>
         Effect.logWarning("slack reply watcher failed").pipe(
@@ -771,13 +902,14 @@ const makeSlackConnector = Effect.gen(function* () {
       ),
     );
 
+  // Annotated: a DM waiting for "who is this for?" replays through it.
   const handleMessage = (
     projectId: ProjectId,
     config: ManagerSlackConnectorConfig,
     web: WebClient,
     botUserId: string,
     event: SlackRawEvent,
-  ) =>
+  ): Effect.Effect<void> =>
     Effect.gen(function* () {
       const channel = event.channel;
       const ts = event.ts;
@@ -787,7 +919,12 @@ const makeSlackConnector = Effect.gen(function* () {
       const rawText = typeof event.text === "string" ? event.text : "";
       const files = event.files ?? [];
       if (rawText.trim().length === 0 && files.length === 0) return;
-      if (!config.allowedChannelIds.includes(channel)) {
+      // Other assistants of this computer that write through this app.
+      const routed = yield* routedSlackRowsOf(projectId);
+      const allowedHere =
+        config.allowedChannelIds.includes(channel) ||
+        routed.some((row) => row.config.allowedChannelIds.includes(channel));
+      if (!allowedHere) {
         yield* Effect.logDebug("slack message from non-allowlisted channel ignored").pipe(
           Effect.annotateLogs({ projectId, channel }),
         );
@@ -802,7 +939,10 @@ const makeSlackConnector = Effect.gen(function* () {
         userId: event.user,
         senderIsBot,
         isDirectMessage: isDM,
-        ownerUserIds: config.ownerUserIds,
+        ownerUserIds: [
+          ...(config.ownerUserIds ?? []),
+          ...routed.flatMap((row) => row.config.ownerUserIds ?? []),
+        ],
         groupMembers: config.groupMembers,
       });
       if (senderRole === "ignore") {
@@ -814,19 +954,133 @@ const makeSlackConnector = Effect.gen(function* () {
       if (isDM && event.user !== undefined) {
         yield* rememberSlackOwner(projectId, event.user);
       }
+
+      // Which assistant answers: the channel's, or for a DM the one the
+      // person named ("who is this for?"); the holder alone answers all.
+      let assistantId: ProjectId = projectId;
+      let identity: SlackIdentity | null = null;
+      if (routed.length > 0) {
+        const runtime = runtimes.get(projectId);
+        if (!isDM) {
+          assistantId = ProjectId.make(
+            assistantForSlackChannel({
+              channel,
+              holder: projectId,
+              routed: routed.map((row) => ({
+                projectId: row.projectId,
+                allowedChannelIds: row.config.allowedChannelIds,
+              })),
+            }),
+          );
+        } else {
+          const choices = yield* choicesOf(projectId, routed);
+          const dmKey = { kind: "slack" as const, chatId: channel };
+          const pendingKey = `${projectId}:${channel}`;
+          const bind = (target: ProjectId) =>
+            bindingRepository.upsert({
+              ...dmKey,
+              connectorProjectId: projectId,
+              target: { kind: "assistant", projectId: target },
+              notifyOnComplete: false,
+              updatedAt: new Date().toISOString(),
+            });
+          const takePending = Ref.modify(pendingDmRef, (map) => {
+            const pending = map.get(pendingKey);
+            const next = new Map(map);
+            next.delete(pendingKey);
+            return [
+              pending !== undefined && Date.now() - pending.at < PENDING_DM_MS
+                ? pending.event
+                : null,
+              next,
+            ] as const;
+          });
+          const named = matchAssistantName(rawText, choices);
+          if (named !== null) {
+            yield* bind(ProjectId.make(named.projectId));
+            const namedRuntimeIdentity = yield* identityOf(
+              ProjectId.make(named.projectId),
+              runtime,
+            );
+            yield* postMessage(
+              web,
+              channel,
+              slackNowAnswers(named.title),
+              undefined,
+              namedRuntimeIdentity,
+            );
+            const pending = yield* takePending;
+            if (pending !== null) yield* handleMessage(projectId, config, web, botUserId, pending);
+            return;
+          }
+          const binding = bindingOnConnector(
+            Option.getOrNull(
+              yield* bindingRepository.get(dmKey).pipe(Effect.orElseSucceed(() => Option.none())),
+            ),
+            projectId,
+          );
+          const boundTarget =
+            binding?.target.kind === "assistant" ? binding.target.projectId : null;
+          const bound =
+            boundTarget !== null && choices.some((choice) => choice.projectId === boundTarget)
+              ? boundTarget
+              : null;
+          if (bound !== null) {
+            assistantId = bound;
+          } else {
+            const fallback = ProjectId.make(defaultSlackAssistant(choices, projectId));
+            const pending = yield* takePending;
+            if (pending === null) {
+              // First message of this DM: ask, keep the message.
+              yield* Ref.update(pendingDmRef, (map) =>
+                new Map(map).set(pendingKey, { event, at: Date.now() }),
+              );
+              const fallbackTitle =
+                choices.find((choice) => choice.projectId === fallback)?.title ?? "Uno";
+              yield* postMessage(
+                web,
+                channel,
+                slackWhoIsThisFor(choices, fallbackTitle),
+                undefined,
+              );
+              return;
+            }
+            // Not a name: the default assistant takes both messages.
+            yield* bind(fallback);
+            yield* handleMessage(projectId, config, web, botUserId, pending);
+            assistantId = fallback;
+          }
+        }
+        const routedRow = routed.find((row) => row.projectId === assistantId);
+        if (routedRow !== undefined && !routedRow.config.enabled) {
+          if (isDM) {
+            yield* postMessage(
+              web,
+              channel,
+              "This assistant is paused in Uno Work. Send another assistant's name to talk to it.",
+              undefined,
+            );
+          }
+          return;
+        }
+        identity = yield* identityOf(assistantId, runtime);
+      }
       const threadTs = typeof event.thread_ts === "string" ? event.thread_ts : null;
       const ownerChatKey = slackChatKey(channel, isDM ? null : (threadTs ?? ts));
       // Members never share (or widen) the owner's session.
       const chatKey = senderRole === "member" ? `${ownerChatKey}#members` : ownerChatKey;
       const runtimeMode = senderRole === "member" ? "approval-required" : "full-access";
-      const addressing = config.addressing ?? DEFAULT_ADDRESSING_CONFIG;
+      const addressing =
+        routed.find((row) => row.projectId === assistantId)?.config.addressing ??
+        config.addressing ??
+        DEFAULT_ADDRESSING_CONFIG;
       const mentionToken = `<@${botUserId}>`;
       const cleanedText = rawText.split(mentionToken).join(" ").replace(/\s+/g, " ").trim();
 
       const existing = yield* connectorRepository
-        .getThreadForChat({ projectId, kind: "slack", chatId: chatKey })
+        .getThreadForChat({ projectId: assistantId, kind: "slack", chatId: chatKey })
         .pipe(Effect.orElseSucceed(() => Option.none<ThreadId>()));
-      const hotKey = `${projectId}:${chatKey}`;
+      const hotKey = `${assistantId}:${chatKey}`;
       const withinHotWindow = yield* isWithinHotWindow(hotKey, addressing.hotWindowSec);
 
       const normalized = {
@@ -863,7 +1117,7 @@ const makeSlackConnector = Effect.gen(function* () {
 
       const title = isDM ? `Slack DM ${channel}` : `Slack: ${channel}`;
       const threadId = yield* ensureThreadForChat({
-        projectId,
+        projectId: assistantId,
         chatKey,
         title: senderRole === "member" ? `${title} (members)` : title,
         config,
@@ -924,6 +1178,7 @@ const makeSlackConnector = Effect.gen(function* () {
         threadId,
         requestedAtIso,
         hotKey,
+        identity,
       });
     }).pipe(
       Effect.catch((cause) =>
@@ -1047,6 +1302,10 @@ const makeSlackConnector = Effect.gen(function* () {
       }
       const botUserId = auth.user_id;
       const botUserName = typeof auth.user === "string" ? auth.user : null;
+      // X-OAuth-Scopes (the relay passes it on): may it write as an assistant?
+      const scopes = (auth as { response_metadata?: { scopes?: unknown } }).response_metadata
+        ?.scopes;
+      const canCustomize = Array.isArray(scopes) ? scopes.includes("chat:write.customize") : null;
       if (relayToken !== null) {
         const runtime: SlackRuntime = {
           appToken: config.appToken,
@@ -1059,6 +1318,7 @@ const makeSlackConnector = Effect.gen(function* () {
           web,
           stopRelay: null,
           relayConnected: false,
+          canCustomize,
         };
         runtimes.set(projectId, runtime);
         runtime.stopRelay = startRelayEvents({ projectId, relayToken, config, web, botUserId });
@@ -1088,6 +1348,7 @@ const makeSlackConnector = Effect.gen(function* () {
         web,
         stopRelay: null,
         relayConnected: false,
+        canCustomize,
       });
     });
 
@@ -1098,7 +1359,12 @@ const makeSlackConnector = Effect.gen(function* () {
     const enabled = new Map<ProjectId, ManagerSlackConnectorConfig>();
     for (const record of records) {
       const decoded = Schema.decodeUnknownExit(ManagerSlackConnectorConfig)(record.config);
-      if (decoded._tag === "Success" && decoded.value.enabled) {
+      // A routed row (`unoroute:`) has no connection: its holder's carries it.
+      if (
+        decoded._tag === "Success" &&
+        decoded.value.enabled &&
+        parseRouteCredential(decoded.value.botToken) === null
+      ) {
         enabled.set(record.projectId, decoded.value);
       }
     }
@@ -1133,22 +1399,34 @@ const makeSlackConnector = Effect.gen(function* () {
 
   const sendText: ManagerSlackServiceShape["sendText"] = (input) =>
     Effect.gen(function* () {
-      const runtime = runtimes.get(input.projectId);
+      // A routed assistant writes through its holder's connection, as itself.
+      const holder = yield* holderOf(input.projectId);
+      const runtime = runtimes.get(holder);
+      const as = input.asAssistant ?? (holder !== input.projectId ? input.projectId : undefined);
+      const shared =
+        as !== undefined && (as !== holder || (yield* routedSlackRowsOf(holder)).length > 0);
+      const identity = shared ? yield* identityOf(as, runtime) : null;
       if (runtime?.web == null) {
         yield* Effect.logWarning("slack push skipped: no live connection").pipe(
           Effect.annotateLogs({ projectId: input.projectId, channel: input.channelId }),
         );
         return false;
       }
-      return yield* postMessage(runtime.web, input.channelId, input.text, input.threadTs).pipe(
+      return yield* postMessage(
+        runtime.web,
+        input.channelId,
+        input.text,
+        input.threadTs,
+        identity,
+      ).pipe(
         Effect.map(() => true),
         Effect.catch(() => Effect.succeed(false)),
       );
     });
 
   return {
-    getRuntimeStatus: (projectId) =>
-      Effect.sync(() => {
+    getRuntimeStatus: (requested) =>
+      Effect.map(holderOf(requested), (projectId) => {
         const runtime = runtimes.get(projectId);
         return {
           botUserId: runtime?.botUserId ?? null,
@@ -1160,6 +1438,49 @@ const makeSlackConnector = Effect.gen(function* () {
         };
       }),
     sendText,
+    listChannels: (projectId) =>
+      Effect.gen(function* () {
+        const runtime = runtimes.get(yield* holderOf(projectId));
+        const web = runtime?.web ?? null;
+        if (web === null) return null;
+        const answer = yield* Effect.tryPromise(() =>
+          web.conversations.list({
+            types: "public_channel,private_channel",
+            exclude_archived: true,
+            limit: 500,
+          }),
+        ).pipe(Effect.orElseSucceed(() => null));
+        if (answer === null) return null;
+        return (
+          (answer.channels ?? []) as ReadonlyArray<{
+            id?: string;
+            name?: string;
+            is_private?: boolean;
+            is_member?: boolean;
+          }>
+        ).flatMap((channel) =>
+          typeof channel.id === "string"
+            ? [
+                {
+                  id: channel.id,
+                  name: channel.name ?? channel.id,
+                  isPrivate: channel.is_private === true,
+                  isMember: channel.is_member === true,
+                },
+              ]
+            : [],
+        );
+      }),
+    joinChannel: (projectId, channelId) =>
+      Effect.gen(function* () {
+        const runtime = runtimes.get(yield* holderOf(projectId));
+        const web = runtime?.web ?? null;
+        if (web === null) return false;
+        return yield* Effect.tryPromise(() => web.conversations.join({ channel: channelId })).pipe(
+          Effect.map(() => true),
+          Effect.orElseSucceed(() => false),
+        );
+      }),
   } satisfies ManagerSlackServiceShape;
 });
 

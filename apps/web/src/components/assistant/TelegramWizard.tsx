@@ -247,10 +247,19 @@ export function TelegramWizard(props: {
         {step === "bot" ? (
           <div className="flex flex-col gap-2 pl-7 text-sm">
             <p className="text-muted-foreground">
-              A bot that is entirely yours: in Telegram open @BotFather, send{" "}
-              <code className="rounded bg-muted px-1">/newbot</code> and pick any name. It replies
-              with a token.
+              Its own bot: its own name and chat in your Telegram. About a minute:
             </p>
+            <ol
+              className="flex list-decimal flex-col gap-0.5 pl-5 text-muted-foreground"
+              data-testid="uno-telegram-botfather-steps"
+            >
+              <li>Open @BotFather in Telegram.</li>
+              <li>
+                Send <code className="rounded bg-muted px-1">/newbot</code>.
+              </li>
+              <li>Pick a name, then a username ending in “bot”.</li>
+              <li>Copy the token BotFather sends and paste it below.</li>
+            </ol>
             <Button
               size="sm"
               variant="outline"
@@ -263,6 +272,7 @@ export function TelegramWizard(props: {
             <div className="flex flex-wrap gap-2">
               <Input
                 className="min-w-[220px] flex-1 font-mono"
+                type="password"
                 placeholder="123456789:AAE…"
                 value={token}
                 onChange={(event) => {
@@ -293,7 +303,8 @@ export function TelegramWizard(props: {
               </span>
             ) : (
               <span className="text-xs text-muted-foreground">
-                The token stays on this computer.
+                Paste it only here, never in a chat. It stays on this computer; Uno checks it with
+                Telegram first.
               </span>
             )}
           </div>

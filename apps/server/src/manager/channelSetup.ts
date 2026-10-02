@@ -30,6 +30,7 @@ import { Effect, Option, Schema } from "effect";
 
 import type { ManagerRepositoryError } from "../persistence/Errors.ts";
 import { ManagerConnectorRepository } from "../persistence/Services/ManagerConnectors.ts";
+import { assignSlackChannels } from "./slackAssistants.ts";
 import {
   callTelegramBotMethod,
   isRelayCredential,
@@ -262,6 +263,39 @@ const routeThroughHolder = (input: {
   });
 
 /**
+ * A bot of the assistant's own (the default since 02.10: every assistant its
+ * own bot, made by the person in @BotFather): ask Telegram `getMe` before the
+ * token is stored. A network failure is not the token's fault — saved, the
+ * poller reports it. The token never leaves the daemon.
+ */
+export const verifyTelegramBotToken = (
+  botToken: string,
+  fetchImpl?: FetchLike,
+): Effect.Effect<
+  | { readonly ok: true; readonly username: string | null }
+  | { readonly ok: false; readonly rejected: boolean; readonly message: string }
+> =>
+  Effect.promise(() =>
+    callTelegramBotMethod(botToken, "getMe", {}, fetchImpl).then((answer) => {
+      if (answer.ok) {
+        const result = (answer as { result?: { username?: unknown } }).result;
+        return {
+          ok: true as const,
+          username: typeof result?.username === "string" ? result.username : null,
+        };
+      }
+      const rejected = answer.error_code === 401 || answer.error_code === 404;
+      return {
+        ok: false as const,
+        rejected,
+        message: rejected
+          ? "Telegram didn't accept this token. Copy it again from @BotFather."
+          : "Couldn't reach Telegram to check the token.",
+      };
+    }),
+  );
+
+/**
  * Side effects of saving the Telegram connector through the ordinary
  * settings route, relay-aware: chats the owner removed from a shared-bot
  * connector are unlinked at the console (`unoUnlinkChat`), and switching
@@ -345,15 +379,17 @@ async function openSlackDm(
 }
 
 /**
- * Uno's Slack app has one relay per computer, like the shared Telegram bot,
- * and reading the installation for an assistant mints it (rotating the old
- * one away). Slack has no per-chat routing between assistants yet, so the
- * app stays with the assistant that added it; another assistant of this
- * computer gets 409 `slack_app_in_use` and uses a Slack app of its own.
+ * One Uno Slack app per workspace (decision 02.10): the assistant that added
+ * it holds this computer's relay; reading the installation for another
+ * assistant would mint a new relay and silence the holder. So every other
+ * assistant of this computer gets a routed row instead (`unoroute:<holder>`,
+ * channels of its own, its name and emoji on its messages — see
+ * `slackAssistants.ts`). Returns the holder, or null when there is none (or
+ * the asking assistant holds it itself).
  */
-export const slackAppHeldByAnother = (
+export const slackRelayHolderFor = (
   projectId: ProjectId,
-): Effect.Effect<ChannelSetupFailure | null, never, ManagerConnectorRepository> =>
+): Effect.Effect<ProjectId | null, never, ManagerConnectorRepository> =>
   Effect.gen(function* () {
     const repository = yield* ManagerConnectorRepository;
     const rows = yield* repository
@@ -361,19 +397,94 @@ export const slackAppHeldByAnother = (
       .pipe(
         Effect.orElseSucceed((): ReadonlyArray<{ projectId: ProjectId; config: unknown }> => []),
       );
-    const holder = rows.find((row) => {
-      if (row.projectId === projectId) return false;
-      const config = decodeSlackRow(row.config);
-      return config !== null && isRelayCredential(config.botToken);
+    return pickRelayHolder(
+      rows.flatMap((row) => {
+        const config = decodeSlackRow(row.config);
+        return config === null
+          ? []
+          : [{ projectId: row.projectId, isRelay: isRelayCredential(config.botToken) }];
+      }),
+      projectId,
+    );
+  });
+
+/** The routed row of an assistant that writes through `holder`'s Uno app (kept if there). */
+export const routeSlackThroughHolder = (input: {
+  readonly projectId: ProjectId;
+  readonly holder: ProjectId;
+}): Effect.Effect<void, ManagerRepositoryError, ManagerConnectorRepository> =>
+  Effect.gen(function* () {
+    const repository = yield* ManagerConnectorRepository;
+    const existing = yield* repository.get({ projectId: input.projectId, kind: "slack" });
+    const previous = Option.isSome(existing) ? decodeSlackRow(existing.value.config) : null;
+    const route = routeCredential(input.holder);
+    if (previous !== null && previous.botToken === route) return;
+    const keep = previous !== null && isRouteCredential(previous.botToken);
+    yield* repository.upsert({
+      projectId: input.projectId,
+      kind: "slack",
+      config: {
+        botToken: route,
+        appToken: SLACK_RELAY_APP_TOKEN,
+        allowedChannelIds: keep ? previous.allowedChannelIds : [],
+        enabled: true,
+        defaultModelSelection: previous?.defaultModelSelection ?? null,
+        ...(previous?.addressing !== undefined ? { addressing: previous.addressing } : {}),
+      } satisfies ManagerSlackConnectorConfig,
+      updatedAt: new Date().toISOString(),
     });
-    return holder === undefined
-      ? null
-      : {
-          status: 409,
-          error: "slack_app_in_use",
-          message:
-            "Uno's Slack app already answers for another assistant on this computer. Give this one a Slack app of its own, or move it to its own computer.",
-        };
+    yield* Effect.logInfo("slack connector routed through this computer's Uno app").pipe(
+      Effect.annotateLogs({ projectId: input.projectId, holder: input.holder }),
+    );
+  });
+
+/** Whether this assistant's Slack is a routed row (it never owns the app). */
+export const isRoutedSlack = (
+  projectId: ProjectId,
+): Effect.Effect<boolean, never, ManagerConnectorRepository> =>
+  Effect.gen(function* () {
+    const repository = yield* ManagerConnectorRepository;
+    const row = yield* repository
+      .get({ projectId, kind: "slack" })
+      .pipe(Effect.orElseSucceed(() => Option.none()));
+    const config = Option.isSome(row) ? decodeSlackRow(row.value.config) : null;
+    return config !== null && isRouteCredential(config.botToken);
+  });
+
+/**
+ * "Channels Ana answers in": Ana's row gets exactly these channels, every
+ * other assistant of this computer loses them (a channel has one assistant).
+ */
+export const assignSlackChannelsFor = (input: {
+  readonly projectId: ProjectId;
+  readonly channelIds: ReadonlyArray<string>;
+}): Effect.Effect<ReadonlyArray<string>, ManagerRepositoryError, ManagerConnectorRepository> =>
+  Effect.gen(function* () {
+    const repository = yield* ManagerConnectorRepository;
+    const rows = (yield* repository.listByKind("slack")).flatMap((row) => {
+      const config = decodeSlackRow(row.config);
+      return config === null ? [] : [{ projectId: row.projectId, config }];
+    });
+    const next = assignSlackChannels(
+      rows.map((row) => ({
+        projectId: row.projectId,
+        allowedChannelIds: row.config.allowedChannelIds,
+      })),
+      input.projectId,
+      input.channelIds,
+    );
+    const now = new Date().toISOString();
+    for (const row of rows) {
+      const allowed = next.get(row.projectId);
+      if (allowed === undefined) continue;
+      yield* repository.upsert({
+        projectId: row.projectId,
+        kind: "slack",
+        config: { ...row.config, allowedChannelIds: allowed },
+        updatedAt: now,
+      });
+    }
+    return next.get(input.projectId) ?? [];
   });
 
 /** Where to send the person to add Uno's app to their workspace. */

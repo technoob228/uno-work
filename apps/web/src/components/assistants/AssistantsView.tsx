@@ -1122,6 +1122,7 @@ function AssistantCard({
       </div>
 
       <ConnectChannelDialog
+          telegramMode="own"
         environmentId={environmentId}
         channel={connecting}
         onClose={() => {

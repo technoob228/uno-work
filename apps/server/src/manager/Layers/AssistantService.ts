@@ -750,7 +750,9 @@ const makeManagerAssistantService = Effect.gen(function* () {
             lastError: slackRuntime.lastError,
             defaultModelSelection: decoded.value.defaultModelSelection ?? null,
             addressing: decoded.value.addressing ?? DEFAULT_CONNECTOR_ADDRESSING,
-            shared: isRelayCredential(decoded.value.botToken),
+            shared:
+              isRelayCredential(decoded.value.botToken) ||
+              isRouteCredential(decoded.value.botToken),
           };
         } else {
           slack = {
@@ -1212,6 +1214,57 @@ const makeManagerAssistantService = Effect.gen(function* () {
       );
     });
 
+  /** Uno's Slack app moves to an assistant that wrote through the deleted one. */
+  const handOverSlackRelay = (holder: ProjectId, relayConfig: ManagerSlackConnectorConfig) =>
+    Effect.gen(function* () {
+      const rows = (yield* connectorRepository.listByKind("slack")).flatMap((row) => {
+        const decoded = Schema.decodeUnknownExit(ManagerSlackConnectorConfig)(row.config);
+        return decoded._tag === "Success" && parseRouteCredential(decoded.value.botToken) === holder
+          ? [{ projectId: row.projectId, config: decoded.value }]
+          : [];
+      });
+      if (rows.length === 0) return;
+      const successor = rows.find((row) => row.projectId === ASSISTANT_PROJECT_ID) ?? rows[0]!;
+      const now = new Date().toISOString();
+      yield* connectorRepository.upsert({
+        projectId: successor.projectId,
+        kind: "slack",
+        config: {
+          ...successor.config,
+          botToken: relayConfig.botToken,
+          appToken: relayConfig.appToken,
+          // The installer's DM was the holder's; the new holder keeps it.
+          allowedChannelIds: [
+            ...new Set([...successor.config.allowedChannelIds, ...relayConfig.allowedChannelIds]),
+          ],
+          ...(relayConfig.ownerUserIds !== undefined
+            ? { ownerUserIds: relayConfig.ownerUserIds }
+            : {}),
+        },
+        updatedAt: now,
+      });
+      for (const row of rows) {
+        if (row.projectId === successor.projectId) continue;
+        yield* connectorRepository.upsert({
+          projectId: row.projectId,
+          kind: "slack",
+          config: { ...row.config, botToken: routeCredential(successor.projectId) },
+          updatedAt: now,
+        });
+      }
+      for (const binding of yield* bindingRepository.listAll()) {
+        if (binding.kind !== "slack" || binding.connectorProjectId !== holder) continue;
+        yield* bindingRepository.upsert({
+          ...binding,
+          connectorProjectId: successor.projectId,
+          updatedAt: now,
+        });
+      }
+      yield* Effect.logInfo("Uno's Slack app handed over to another assistant").pipe(
+        Effect.annotateLogs({ from: holder, to: successor.projectId }),
+      );
+    });
+
   const deleteAssistant: ManagerAssistantServiceShape["deleteAssistant"] = (projectId) =>
     Effect.gen(function* () {
       if (projectId === ASSISTANT_PROJECT_ID || !isAssistantProjectId(projectId)) {
@@ -1239,6 +1292,11 @@ const makeManagerAssistantService = Effect.gen(function* () {
           );
           if (decoded._tag === "Success" && isRelayCredential(decoded.value.botToken)) {
             yield* handOverRelay(projectId, decoded.value);
+          }
+        } else {
+          const decoded = Schema.decodeUnknownExit(ManagerSlackConnectorConfig)(row.value.config);
+          if (decoded._tag === "Success" && isRelayCredential(decoded.value.botToken)) {
+            yield* handOverSlackRelay(projectId, decoded.value);
           }
         }
         yield* connectorRepository.remove({ projectId, kind });
@@ -1351,8 +1409,25 @@ const makeManagerAssistantService = Effect.gen(function* () {
         const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(row.config);
         return decoded._tag === "Success" && isRelayCredential(decoded.value.botToken);
       })?.projectId;
+      const slackHolder = (yield* connectorRepository.listByKind("slack")).find((row) => {
+        const decoded = Schema.decodeUnknownExit(ManagerSlackConnectorConfig)(row.config);
+        return decoded._tag === "Success" && isRelayCredential(decoded.value.botToken);
+      })?.projectId;
       for (const row of record.connectorRows) {
         let restored = row.config;
+        if (row.kind === "slack" && slackHolder !== undefined) {
+          const decoded = Schema.decodeUnknownExit(ManagerSlackConnectorConfig)(row.config);
+          if (
+            decoded._tag === "Success" &&
+            (isRelayCredential(decoded.value.botToken) || isRouteCredential(decoded.value.botToken))
+          ) {
+            restored = {
+              ...decoded.value,
+              botToken: routeCredential(slackHolder),
+              appToken: "unorelay",
+            };
+          }
+        }
         if (row.kind === "telegram") {
           const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(row.config);
           if (decoded._tag === "Success") {

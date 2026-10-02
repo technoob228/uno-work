@@ -552,3 +552,39 @@ export function listAssistantChats(
     ...(input.projectId ? { searchParams: { projectId: input.projectId } } : {}),
   });
 }
+
+export interface SlackChannelView {
+  readonly id: string;
+  readonly name: string;
+  readonly isPrivate: boolean;
+  readonly isMember: boolean;
+  /** The assistant of that computer that answers there; null = none yet. */
+  readonly assistantProjectId: string | null;
+}
+
+/** The workspace's channels through Uno's Slack app, and whose each one is. */
+export function listSlackChannels(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<{ readonly channels: ReadonlyArray<SlackChannelView> }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/slack/channels",
+    searchParams: { projectId: input.projectId },
+  });
+}
+
+/** "Channels Ana answers in": exactly these (taken from other assistants of that computer). */
+export function setSlackChannels(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    readonly channelIds: ReadonlyArray<string>;
+  },
+): Promise<{ readonly allowedChannelIds: ReadonlyArray<string> }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/slack/channels",
+    method: "POST",
+    body,
+  });
+}

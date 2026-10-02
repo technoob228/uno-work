@@ -52,8 +52,14 @@ export function ConnectChannelDialog(props: {
   readonly onClose: () => void;
   /** Another assistant of that computer (0.0.106); its default one when absent. */
   readonly projectId?: ProjectId;
+  /**
+   * "own" (assistants, decision 02.10): its own bot from @BotFather first,
+   * Uno's shared bot as the fallback link. Onboarding keeps the shared bot.
+   */
+  readonly telegramMode?: "own" | "shared";
 }) {
   const projectProps = props.projectId !== undefined ? { projectId: props.projectId } : {};
+  const ownBot = props.telegramMode === "own";
   const open = props.channel !== null;
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? undefined : props.onClose())}>
@@ -68,14 +74,20 @@ export function ConnectChannelDialog(props: {
           <DialogDescription>
             {props.channel === "slack"
               ? "Mention the assistant in a channel or write to it directly. Each Slack channel gets its own conversation; all of them share its memory."
-              : "Scan the code with your phone and press Start. Write to it like to a colleague — it answers there, in the same conversation you see in Uno Work."}
+              : ownBot
+                ? "It gets a Telegram bot of its own: its own name and chat. You make the bot in @BotFather, then press Start."
+                : "Scan the code with your phone and press Start. Write to it like to a colleague — it answers there, in the same conversation you see in Uno Work."}
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-4 px-4 pb-2 sm:px-6">
           {props.channel === "slack" ? (
             <AssistantSlackPanel environmentId={props.environmentId} {...projectProps} />
           ) : props.channel === "telegram" ? (
-            <AssistantTelegramPanel environmentId={props.environmentId} {...projectProps} />
+            <AssistantTelegramPanel
+              environmentId={props.environmentId}
+              {...projectProps}
+              {...(props.telegramMode ? { initialMode: props.telegramMode } : {})}
+            />
           ) : null}
         </div>
         <DialogFooter>
