@@ -1,5 +1,7 @@
 import { Layer } from "effect";
 
+import { AssistantScheduledTurnsLive } from "../assistants/scheduledTurn.ts";
+import { AssistantSchedulesLive } from "../assistants/schedules.ts";
 import { ManagerActionProposalRepositoryLive } from "../persistence/Layers/ManagerActionProposals.ts";
 import { ManagerCapabilityTokenRepositoryLive } from "../persistence/Layers/ManagerCapabilityTokens.ts";
 import { ManagerConnectorBindingRepositoryLive } from "../persistence/Layers/ManagerConnectorBindings.ts";
@@ -43,6 +45,10 @@ export const ManagerLayerLive = Layer.mergeAll(
   ConnectorEventsForwarderLive,
   // The assistant's engine: Hermes install + which LLM the Uno chat uses.
   ManagerAssistantLlmLive,
+  // schedule_* tools: the console's scheduled tasks on this computer.
+  AssistantSchedulesLive,
+  // `uno-work assistant-turn`: a scheduled turn, answered to the chats.
+  AssistantScheduledTurnsLive,
 ).pipe(
   // Order matters: each layer's requirements are satisfied by the layers
   // provided AFTER it in this pipe.

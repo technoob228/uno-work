@@ -5,6 +5,10 @@
  * every chat gets (`../unoWork/`).
  */
 import {
+  ASSISTANT_SCHEDULE_DEFAULT_MINUTES,
+  ASSISTANT_SCHEDULE_MAX_MINUTES,
+  ASSISTANT_SCHEDULE_NAME_MAX_CHARS,
+  ASSISTANT_SCHEDULE_PROMPT_MAX_CHARS,
   ManagerCancelReminderInput,
   ManagerCreateReminderInput,
   ManagerCreateThreadInput,
@@ -31,8 +35,16 @@ import {
   type McpHandleOutcome,
   type McpServerDefinition,
 } from "../mcp/mcpJsonRpc.ts";
+import type { AssistantScheduleError, AssistantSchedulesShape } from "../assistants/schedules.ts";
 import type { ManagerToolError } from "./Errors.ts";
 import type { ManagerCaller, ManagerToolServiceShape } from "./Services/ManagerToolService.ts";
+
+/** Optional services some tools need; absent → the tool explains it. */
+export interface ManagerMcpExtras {
+  readonly schedules?: AssistantSchedulesShape;
+}
+
+type ManagerMcpToolError = ManagerToolError | Schema.SchemaError | AssistantScheduleError;
 
 export const MANAGER_MCP_SERVER_INFO = {
   name: "uno-manager",
@@ -47,8 +59,18 @@ interface ToolDefinition {
     tools: ManagerToolServiceShape,
     caller: ManagerCaller,
     args: unknown,
-  ) => Effect.Effect<unknown, ManagerToolError | Schema.SchemaError>;
+    extras: ManagerMcpExtras,
+  ) => Effect.Effect<unknown, ManagerMcpToolError>;
 }
+
+const SCHEDULES_UNAVAILABLE =
+  "Schedules are not available in this Uno Work. Tell the person what you wanted to schedule; do NOT fall back to cron.";
+
+const withSchedules = <A>(
+  extras: ManagerMcpExtras,
+  run: (schedules: AssistantSchedulesShape) => Effect.Effect<A, AssistantScheduleError>,
+): Effect.Effect<A | { readonly error: string }, AssistantScheduleError> =>
+  extras.schedules ? run(extras.schedules) : Effect.succeed({ error: SCHEDULES_UNAVAILABLE });
 
 const decodeArgs = <S extends Schema.Top>(schema: S, args: unknown) =>
   Schema.decodeUnknownEffect(schema)(args ?? {});
@@ -350,9 +372,68 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
         Effect.flatMap((input) => tools.cancelReminder(caller, input)),
       ),
   },
+  {
+    name: "schedule_create",
+    description:
+      "Schedule recurring work for yourself (the ONLY way to do things on a schedule — never cron, systemd timers or sleep loops). " +
+      "At each cron time Uno wakes this computer and gives you `prompt` as a new message; your final answer is sent to the person's Telegram/Slack (answer exactly NO_REPLY when there is nothing worth telling). " +
+      "The person sees and can stop every schedule. Write `prompt` self-contained: future-you won't see this conversation. " +
+      `maxMinutes (default ${ASSISTANT_SCHEDULE_DEFAULT_MINUTES}, max ${ASSISTANT_SCHEDULE_MAX_MINUTES}) bounds one run.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          maxLength: ASSISTANT_SCHEDULE_NAME_MAX_CHARS,
+          description: 'Short name the person sees, e.g. "Monday mentions digest".',
+        },
+        cron: {
+          type: "string",
+          description:
+            'Five-field cron: minute hour day-of-month month day-of-week, e.g. "0 10 * * 1" = Mondays 10:00.',
+        },
+        prompt: {
+          type: "string",
+          maxLength: ASSISTANT_SCHEDULE_PROMPT_MAX_CHARS,
+          description: "The instruction future-you receives at run time.",
+        },
+        timezone: {
+          type: "string",
+          description:
+            'IANA time zone of the cron, e.g. "Europe/Berlin". Default UTC — ask the person if unsure.',
+        },
+        maxMinutes: { type: "integer", minimum: 1, maximum: ASSISTANT_SCHEDULE_MAX_MINUTES },
+      },
+      required: ["name", "cron", "prompt"],
+      additionalProperties: false,
+    },
+    run: (_tools, caller, args, extras) =>
+      withSchedules(extras, (schedules) => schedules.create(caller, args)),
+  },
+  {
+    name: "schedule_list",
+    description:
+      "List your schedules (id, name, cron, time zone, prompt, state, next and last run). Check it before creating one so you don't duplicate.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (_tools, caller, _args, extras) =>
+      withSchedules(extras, (schedules) => schedules.list(caller)),
+  },
+  {
+    name: "schedule_delete",
+    description:
+      "Delete one of your schedules by its scheduleId (from schedule_list). Do it when the person asks to stop something, or a schedule is no longer needed.",
+    inputSchema: {
+      type: "object",
+      properties: { scheduleId: { type: "integer", minimum: 1 } },
+      required: ["scheduleId"],
+      additionalProperties: false,
+    },
+    run: (_tools, caller, args, extras) =>
+      withSchedules(extras, (schedules) => schedules.remove(caller, args)),
+  },
 ];
 
-function toolErrorText(error: ManagerToolError | Schema.SchemaError): string {
+function toolErrorText(error: ManagerMcpToolError): string {
   if (Schema.isSchemaError(error)) {
     return `Invalid tool arguments: ${error.message}`;
   }
@@ -362,18 +443,17 @@ function toolErrorText(error: ManagerToolError | Schema.SchemaError): string {
 interface ManagerMcpContext {
   readonly tools: ManagerToolServiceShape;
   readonly caller: ManagerCaller;
+  readonly extras: ManagerMcpExtras;
 }
 
-const MANAGER_MCP_SERVER: McpServerDefinition<
-  ManagerMcpContext,
-  ManagerToolError | Schema.SchemaError
-> = {
+const MANAGER_MCP_SERVER: McpServerDefinition<ManagerMcpContext, ManagerMcpToolError> = {
   serverInfo: MANAGER_MCP_SERVER_INFO,
   tools: MANAGER_MCP_TOOLS.map((tool) => ({
     name: tool.name,
     description: tool.description,
     inputSchema: tool.inputSchema,
-    run: (ctx: ManagerMcpContext, args: unknown) => tool.run(ctx.tools, ctx.caller, args),
+    run: (ctx: ManagerMcpContext, args: unknown) =>
+      tool.run(ctx.tools, ctx.caller, args, ctx.extras),
   })),
   errorText: toolErrorText,
 };
@@ -387,6 +467,7 @@ export function handleManagerMcpMessage(
   tools: ManagerToolServiceShape,
   caller: ManagerCaller,
   message: unknown,
+  extras: ManagerMcpExtras = {},
 ): Effect.Effect<McpHandleOutcome> {
-  return handleMcpMessage(MANAGER_MCP_SERVER, { tools, caller }, message);
+  return handleMcpMessage(MANAGER_MCP_SERVER, { tools, caller, extras }, message);
 }

@@ -68,6 +68,7 @@ const makeManagerTokenAuthService = Effect.gen(function* () {
         projectAllowlist: record.value.projectAllowlist,
         budget: record.value.budget,
         autoApprove: record.value.autoApprove,
+        label: record.value.label,
       } satisfies ManagerCaller;
     });
 

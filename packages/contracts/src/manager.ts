@@ -946,3 +946,97 @@ export const ManagerCancelReminderResult = Schema.Struct({
   cancelled: Schema.Boolean,
 });
 export type ManagerCancelReminderResult = typeof ManagerCancelReminderResult.Type;
+
+// ===============================
+// Assistant schedules (assistants MVP)
+// ===============================
+//
+// An assistant's recurring work: a scheduled task of the Uno console
+// (`/api/v1/scheduled-tasks`) on the assistant's own computer whose command
+// is `uno-work assistant-turn …`. The console wakes the computer, the CLI
+// hands the instruction to the assistant as a new turn and the answer goes to
+// the person's Telegram/Slack. The daemon only proxies to the console with
+// the machine's token; the person sees and stops schedules in the app.
+
+export const ASSISTANT_SCHEDULE_NAME_MAX_CHARS = 80;
+export const ASSISTANT_SCHEDULE_PROMPT_MAX_CHARS = 2_000;
+export const ASSISTANT_SCHEDULE_DEFAULT_MINUTES = 15;
+export const ASSISTANT_SCHEDULE_MAX_MINUTES = 60;
+/** The final answer that means "nothing to tell the person" — not delivered. */
+export const ASSISTANT_TURN_NO_REPLY = "NO_REPLY";
+
+export const ManagerScheduleCreateInput = Schema.Struct({
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSISTANT_SCHEDULE_NAME_MAX_CHARS)),
+  /** Five-field cron (`min hour day month weekday`), validated by the console. */
+  cron: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
+  /** What future-you is asked to do; self-contained. */
+  prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSISTANT_SCHEDULE_PROMPT_MAX_CHARS)),
+  /** IANA zone, e.g. `Europe/Berlin`. Absent: the console's default (UTC). */
+  timezone: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))),
+  /** How long one run may take. Default {@link ASSISTANT_SCHEDULE_DEFAULT_MINUTES}. */
+  maxMinutes: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(ASSISTANT_SCHEDULE_MAX_MINUTES)),
+  ),
+});
+export type ManagerScheduleCreateInput = typeof ManagerScheduleCreateInput.Type;
+
+export const ManagerScheduleDeleteInput = Schema.Struct({
+  scheduleId: PositiveInt,
+});
+export type ManagerScheduleDeleteInput = typeof ManagerScheduleDeleteInput.Type;
+
+export const ManagerSchedule = Schema.Struct({
+  scheduleId: PositiveInt,
+  name: Schema.String,
+  cron: Schema.String,
+  timezone: Schema.NullOr(Schema.String),
+  prompt: Schema.String,
+  /** The console's state: `active`, `paused`, … */
+  state: Schema.NullOr(Schema.String),
+  nextRunAt: Schema.NullOr(Schema.String),
+  lastRunAt: Schema.NullOr(Schema.String),
+});
+export type ManagerSchedule = typeof ManagerSchedule.Type;
+
+export const ManagerScheduleListResult = Schema.Struct({
+  schedules: Schema.Array(ManagerSchedule),
+});
+export type ManagerScheduleListResult = typeof ManagerScheduleListResult.Type;
+
+export const ManagerScheduleDeleteResult = Schema.Struct({
+  deleted: Schema.Boolean,
+});
+export type ManagerScheduleDeleteResult = typeof ManagerScheduleDeleteResult.Type;
+
+/** Body of `POST /api/manager/assistant/scheduled-turn` (the CLI). */
+export const ManagerAssistantTurnInput = Schema.Struct({
+  prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSISTANT_SCHEDULE_PROMPT_MAX_CHARS)),
+  /** The schedule's name, shown to the assistant and the person. */
+  name: Schema.optional(
+    TrimmedNonEmptyString.check(Schema.isMaxLength(ASSISTANT_SCHEDULE_NAME_MAX_CHARS)),
+  ),
+  /** How long to wait for the answer. Default {@link ASSISTANT_SCHEDULE_DEFAULT_MINUTES} min. */
+  timeoutSec: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(ASSISTANT_SCHEDULE_MAX_MINUTES * 60)),
+  ),
+});
+export type ManagerAssistantTurnInput = typeof ManagerAssistantTurnInput.Type;
+
+export const ManagerAssistantTurnStatus = Schema.Literals([
+  /** The answer went to the person's chats. */
+  "delivered",
+  /** The assistant answered NO_REPLY: nothing to tell. */
+  "no_reply",
+  /** It answered, but no chat took the message (none linked / send failed). */
+  "undelivered",
+  /** Still running when the wait ran out. */
+  "timeout",
+]);
+export type ManagerAssistantTurnStatus = typeof ManagerAssistantTurnStatus.Type;
+
+export const ManagerAssistantTurnResult = Schema.Struct({
+  status: ManagerAssistantTurnStatus,
+  threadId: ThreadId,
+  delivered: NonNegativeInt,
+});
+export type ManagerAssistantTurnResult = typeof ManagerAssistantTurnResult.Type;

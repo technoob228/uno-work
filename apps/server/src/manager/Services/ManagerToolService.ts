@@ -54,6 +54,11 @@ export interface ManagerCaller {
   readonly budget: ManagerTokenBudget | null;
   /** Write tools execute immediately (still audited as auto-resolved proposals). */
   readonly autoApprove: boolean;
+  /**
+   * The token's label — `assistant:<projectId>` for an assistant's own token
+   * (see `assistantTokenLabel`). Absent in older call sites and tests.
+   */
+  readonly label?: string;
 }
 
 export interface ManagerToolServiceShape {
