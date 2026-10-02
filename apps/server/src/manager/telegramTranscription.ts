@@ -14,7 +14,32 @@ import type { TelegramMediaDescriptor } from "./telegramMedia.ts";
 
 export class TelegramTranscriptionError extends Data.TaggedError("TelegramTranscriptionError")<{
   readonly message: string;
+  /** Human sentence from the gateway's `{"error":{"message"}}`, shown as is. */
+  readonly gatewayMessage?: string;
 }> {}
+
+/** The gateway answers errors as `{"error":{"code","message"}}`; old ones as `{"error":"CODE"}`. */
+export const readGatewayErrorMessage = (body: unknown): string | null => {
+  if (typeof body !== "object" || body === null || !("error" in body)) {
+    return null;
+  }
+  const error = (body as { error?: unknown }).error;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim().length > 0) {
+      return message.trim();
+    }
+  }
+  return null;
+};
+
+class GatewayHttpError extends Error {
+  readonly gatewayMessage: string | null;
+  constructor(status: number, gatewayMessage: string | null) {
+    super(`transcription request failed with status ${status}`);
+    this.gatewayMessage = gatewayMessage;
+  }
+}
 
 /** Узкая сигнатура fetch — глобальный тип Bun несёт лишний `preconnect`. */
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -87,7 +112,8 @@ export const transcribeTelegramAudio = (input: {
           body: form,
         });
         if (!response.ok) {
-          throw new Error(`transcription request failed with status ${response.status}`);
+          const errorBody: unknown = await response.json().catch(() => null);
+          throw new GatewayHttpError(response.status, readGatewayErrorMessage(errorBody));
         }
         const contentType = response.headers.get("content-type") ?? "";
         return contentType.includes("application/json")
@@ -97,6 +123,9 @@ export const transcribeTelegramAudio = (input: {
       catch: (cause) =>
         new TelegramTranscriptionError({
           message: cause instanceof Error ? cause.message : String(cause),
+          ...(cause instanceof GatewayHttpError && cause.gatewayMessage !== null
+            ? { gatewayMessage: cause.gatewayMessage }
+            : {}),
         }),
     });
 
