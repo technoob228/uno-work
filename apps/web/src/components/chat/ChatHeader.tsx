@@ -122,7 +122,10 @@ export const ChatHeader = memo(function ChatHeader({
     files: previewFiles,
     toggleOpen: togglePreview,
     openBrowser,
+    unseenCount: previewUnseenCount,
   } = usePreviewPane();
+  // Агент открыл что-то, пока панель этого чата закрыта человеком.
+  const previewHasNew = !previewOpen && previewUnseenCount > 0;
   // Work в облаке: браузер агента на машине — кнопка открывает его.
   const { browsesOnMachine, openChatBrowser } = useChatBrowser();
   const showOpenInPicker = shouldShowOpenInPicker({
@@ -392,15 +395,29 @@ export const ChatHeader = memo(function ChatHeader({
                 <button
                   type="button"
                   onClick={togglePreview}
-                  aria-label="Toggle preview pane"
+                  aria-label={previewHasNew ? "Show panel: new in panel" : "Toggle preview pane"}
                   aria-pressed={previewOpen}
-                  className={HEADER_ICON_BUTTON_CLASS}
+                  data-testid="preview-panel-toggle"
+                  className={cn(HEADER_ICON_BUTTON_CLASS, "relative")}
                 >
                   <PanelRightIcon className="size-3" />
+                  {previewHasNew ? (
+                    <span
+                      aria-hidden
+                      data-testid="preview-panel-new-badge"
+                      className="absolute -right-1 -top-1 size-2 rounded-full bg-primary ring-2 ring-background"
+                    />
+                  ) : null}
                 </button>
               }
             />
-            <TooltipPopup side="bottom">Toggle preview panel</TooltipPopup>
+            <TooltipPopup side="bottom">
+              {previewHasNew
+                ? previewUnseenCount === 1
+                  ? "New in panel"
+                  : `${previewUnseenCount} new in panel`
+                : "Toggle preview panel"}
+            </TooltipPopup>
           </Tooltip>
         )}
       </div>

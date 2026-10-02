@@ -217,9 +217,13 @@ function ChatThreadRouteView() {
   }, [markDiffOpened, navigate, threadRef]);
 
   useEffect(() => {
-    if (diffOpen) {
+    // Закрываем только реально открытую панель: закрытие = «человек убрал
+    // панель», после него агент её сам не распахивает.
+    if (diffOpen && previewPaneOpen) {
       setPreviewPaneOpen(false);
     }
+    // Только при открытии diff — иначе оба эффекта могут закрыть друг друга.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diffOpen, setPreviewPaneOpen]);
 
   useEffect(() => {

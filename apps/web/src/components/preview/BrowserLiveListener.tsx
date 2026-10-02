@@ -93,6 +93,7 @@ export function BrowserLiveListener() {
             { projectKey, threadId: state.setup.context.threadId ?? null },
             "chat",
             makeBrowserSetupFile({ environmentId, projectKey }),
+            "agent",
           );
         }
         const previous = seen ?? new Map<string, number>();
@@ -132,6 +133,7 @@ export function BrowserLiveListener() {
             { projectKey, threadId: page.context?.threadId ?? null },
             "chat",
             makeLiveBrowserFile({ environmentId, page, projectKey }),
+            "agent",
           );
         }
 
