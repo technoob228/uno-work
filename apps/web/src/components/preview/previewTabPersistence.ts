@@ -109,3 +109,30 @@ export function writePersistedTabs(buckets: PersistedTabBuckets): void {
     // Приватный режим/переполненный storage — вкладки просто не переживут перезагрузку.
   }
 }
+
+/**
+ * Показаны ли закреплённые «везде» вкладки вне чатов. Ключ новый (v2): у
+ * клиентов до 0.0.105 было только `uno_preview_tabs_v1`, без флага — значит,
+ * после обновления закреплённые вкладки лежат на месте, но панель на стартовом
+ * экране сама не открывается, пока человек её не покажет.
+ */
+const PINNED_OPEN_STORAGE_KEY = "uno_preview_pinned_open_v2";
+
+export function readPinnedPanelOpen(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(PINNED_OPEN_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function writePinnedPanelOpen(open: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (open) window.localStorage.setItem(PINNED_OPEN_STORAGE_KEY, "1");
+    else window.localStorage.removeItem(PINNED_OPEN_STORAGE_KEY);
+  } catch {
+    // Приватный режим — закреплённая панель просто не переживёт перезагрузку.
+  }
+}

@@ -247,12 +247,14 @@ export function BrowserViews({ activeId }: { activeId: string | null }) {
   for (const [scopeKey, bucket] of Object.entries(statesByScopeKey)) {
     const tabs = bucket.files.filter(isBrowserTab);
     if (tabs.length === 0) continue;
-    // Таргет автоматизации бакета: активная браузерная вкладка (активная
-    // вкладка хранится в проектном бакете вида), иначе последняя открытая —
-    // команды работают, даже когда активен файл-превью.
+    // Таргет автоматизации бакета: активная браузерная вкладка, иначе
+    // последняя открытая — команды работают, даже когда активен файл-превью.
+    // У чата вид свой (и для чата не на экране тоже), у общих уровней — вид
+    // того, что сейчас на экране.
+    const bucketActiveId = scopeOfKey(scopeKey) === "chat" ? bucket.activeFileId : activeFileId;
     const automationTabId =
-      activeFileId && tabs.some((tab) => tab.id === activeFileId)
-        ? activeFileId
+      bucketActiveId && tabs.some((tab) => tab.id === bucketActiveId)
+        ? bucketActiveId
         : tabs[tabs.length - 1]!.id;
     for (const tab of tabs) {
       views.push(

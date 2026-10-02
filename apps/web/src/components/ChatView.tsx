@@ -103,7 +103,7 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
 import { useDevMode } from "../devMode";
-import { detectFileKind, usePreviewPane } from "./preview/PreviewPaneContext";
+import { detectFileKind, useChatPanelContext, usePreviewPane } from "./preview/PreviewPaneContext";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
@@ -674,7 +674,7 @@ export default function ChatView(props: ChatViewProps) {
   const { open: sidebarOpen, openMobile, isMobile } = useSidebar();
   const sidebarVisible = isMobile ? openMobile : sidebarOpen;
   const sidebarHidden = isElectron && !sidebarVisible;
-  const { openFile: openPreviewFile, previewLayoutMode, setCurrentChatContext } = usePreviewPane();
+  const { openFile: openPreviewFile, previewLayoutMode } = usePreviewPane();
   // Встроенный чат сам живёт внутри правой панели — фокус-режим к нему не
   // применяется (иначе композер уехал бы в fixed-оверлей поверх приложения).
   const isPreviewFocusMode = previewLayoutMode === "focus" && !isEmbedded;
@@ -1729,28 +1729,19 @@ export default function ChatView(props: ChatViewProps) {
         : null,
     [activeProject, projectGroupingSettings],
   );
-  useEffect(() => {
-    // Контекст правой панели проставляет ТОЛЬКО основной чат: встроенный
-    // экземпляр живёт внутри этой самой панели и затёр бы проект вкладки.
-    if (isEmbedded) return;
-    setCurrentChatContext({
-      projectKey: previewProjectKey,
-      projectCwd: activeProject?.cwd ?? null,
-      projectId: activeProject?.id ?? null,
-      environmentId,
-      // Тред нужен правой панели, чтобы держать вкладки этого чата отдельно от
-      // вкладок соседних чатов того же проекта.
-      threadId: activeThread?.id ?? null,
-    });
-  }, [
-    isEmbedded,
-    previewProjectKey,
-    activeProject?.cwd,
-    activeProject?.id,
-    activeThread?.id,
-    environmentId,
-    setCurrentChatContext,
-  ]);
+  // Контекст правой панели проставляет ТОЛЬКО основной чат: встроенный
+  // экземпляр живёт внутри этой самой панели и затёр бы проект вкладки.
+  useChatPanelContext(
+    isEmbedded
+      ? null
+      : {
+          projectKey: previewProjectKey,
+          projectCwd: activeProject?.cwd ?? null,
+          projectId: activeProject?.id ?? null,
+          environmentId,
+          threadId: activeThread?.id ?? null,
+        },
+  );
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();
   // Prefer an instance-id match so a custom Codex instance (e.g.

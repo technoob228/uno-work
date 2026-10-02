@@ -60,19 +60,24 @@ describe("visibleScopeKeys", () => {
     ]);
   });
 
-  it("omits the chat bucket without an active thread", () => {
-    expect(visibleScopeKeys({ projectKey: "proj-a", threadId: null })).toEqual([
-      GLOBAL_SCOPE_KEY,
-      projectScopeKey("proj-a"),
-    ]);
+  it("outside a chat shows only tabs pinned everywhere", () => {
+    expect(visibleScopeKeys({ projectKey: "proj-a", threadId: null })).toEqual([GLOBAL_SCOPE_KEY]);
   });
 
   it("automation prefers the chat bucket over project and global", () => {
     expect(automationScopeKeys(target)[0]).toBe(chatScopeKey("thread-1"));
   });
 
-  it("view state lives in the project bucket", () => {
-    expect(viewScopeKey(target)).toBe(projectScopeKey("proj-a"));
+  it("automation without a thread still reaches project tabs", () => {
+    expect(automationScopeKeys({ projectKey: "proj-a", threadId: null })).toEqual([
+      projectScopeKey("proj-a"),
+      GLOBAL_SCOPE_KEY,
+    ]);
+  });
+
+  it("view state lives in the chat's own bucket, outside a chat in the global one", () => {
+    expect(viewScopeKey(target)).toBe(chatScopeKey("thread-1"));
+    expect(viewScopeKey({ projectKey: "proj-a", threadId: null })).toBe(GLOBAL_SCOPE_KEY);
   });
 });
 

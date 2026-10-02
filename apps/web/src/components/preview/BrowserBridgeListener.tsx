@@ -190,7 +190,9 @@ export function BrowserBridgeListener() {
             groupingSettings: groupingSettingsRef.current,
           }) ?? currentProjectKeyRef.current;
         // Вкладка принадлежит треду-источнику, а не тому чату, что на экране:
-        // так вкладки, открытые агентом в одном чате, не засоряют другие.
+        // так вкладки, открытые агентом в одном чате, не засоряют другие, а
+        // панель, которую человек в этом чате закрыл, агент не распахивает
+        // (вкладка добавится, на кнопке панели загорится бейдж).
         // Тред неизвестен (легаси-токен) — деградируем до текущего.
         const target = {
           projectKey,
@@ -207,7 +209,7 @@ export function BrowserBridgeListener() {
               if (isWebApp) {
                 void runExtensionBrowserCommand({ command: "openUrl", url }).catch(() => undefined);
               } else {
-                openUrlForTargetRef.current(target, scope, url);
+                openUrlForTargetRef.current(target, scope, url, "person");
               }
             });
             return;
@@ -216,7 +218,7 @@ export function BrowserBridgeListener() {
             void runExtensionBrowserCommand({ command: "openUrl", url }).catch(() => undefined);
             return;
           }
-          openUrlForTargetRef.current(target, scope, url);
+          openUrlForTargetRef.current(target, scope, url, "agent");
           return;
         }
         if (event.type === "openFile") {
@@ -224,15 +226,20 @@ export function BrowserBridgeListener() {
           // для Electron и браузерного режима: контент подтянется лениво через
           // filesystem.readFile окружения-источника.
           const name = event.path.split(/[\\/]/).findLast(Boolean) ?? event.path;
-          openFileForTargetRef.current(target, scope, {
-            id: event.path,
-            name,
-            kind: detectFileKind(name),
-            content: "",
-            path: event.path,
-            environmentId: connection.environmentId,
-            projectKey,
-          });
+          openFileForTargetRef.current(
+            target,
+            scope,
+            {
+              id: event.path,
+              name,
+              kind: detectFileKind(name),
+              content: "",
+              path: event.path,
+              environmentId: connection.environmentId,
+              projectKey,
+            },
+            "agent",
+          );
           return;
         }
         void (async () => {
@@ -276,7 +283,7 @@ export function BrowserBridgeListener() {
                   ? void runExtensionBrowserCommand({ command: "openUrl", url: agentUrl }).catch(
                       () => undefined,
                     )
-                  : openUrlForTargetRef.current(target, scope, agentUrl),
+                  : openUrlForTargetRef.current(target, scope, agentUrl, "person"),
               );
               throw new Error(AGENT_PRIVATE_URL_MESSAGE);
             }
@@ -289,7 +296,7 @@ export function BrowserBridgeListener() {
               return;
             }
             if (event.input.command === "openUrl" && agentUrl) {
-              openUrlForTargetRef.current(target, scope, agentUrl);
+              openUrlForTargetRef.current(target, scope, agentUrl, "agent");
               await postCommandResult(event, { ok: true, data: { url: agentUrl } });
               return;
             }

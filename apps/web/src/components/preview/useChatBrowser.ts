@@ -23,6 +23,7 @@ export function useChatBrowser(): {
     currentProjectKey,
     openFileForTarget,
     openUrl,
+    setOpen,
   } = usePreviewPane();
   const liveState = useBrowserLiveState(currentChatEnvironmentId);
   const browsesOnMachine = liveState?.agentsBrowseHere === true;
@@ -50,7 +51,10 @@ export function useChatBrowser(): {
     }
     // Новую страницу вкладкой откроет BrowserLiveListener, когда она появится
     // в состоянии машины. Браузер ещё ставится (первое использование) —
-    // показываем установку; страница откроется сама.
+    // показываем установку; страница откроется сама. Панель открывает человек
+    // уже сейчас: иначе вкладка от слушателя (он открывает «как агент») в
+    // закрытой им панели легла бы бейджем.
+    setOpen(true);
     const environmentId = currentChatEnvironmentId;
     void readEnvironmentApi(environmentId)
       ?.browserLive.open({
@@ -84,6 +88,7 @@ export function useChatBrowser(): {
     liveState,
     openFileForTarget,
     openUrl,
+    setOpen,
   ]);
 
   return { browsesOnMachine, openChatBrowser };

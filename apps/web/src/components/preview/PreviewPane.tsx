@@ -1681,15 +1681,19 @@ function PathBar({
 async function showTabScopeMenu(input: {
   file: PreviewFile;
   scope: PreviewTabScope;
+  /** Вне чата видны только закреплённые вкладки, переносить их там некуда — только закрыть. */
+  inChat: boolean;
   position: { x: number; y: number };
   setTabScope: (id: string, scope: PreviewTabScope) => void;
   closeFile: (id: string) => void;
 }): Promise<void> {
   const items = [
-    ...PREVIEW_TAB_SCOPES.filter((scope) => scope !== input.scope).map((scope) => ({
-      id: `scope:${scope}`,
-      label: SCOPE_MENU_LABEL[scope],
-    })),
+    ...(input.inChat ? PREVIEW_TAB_SCOPES : [])
+      .filter((scope) => scope !== input.scope)
+      .map((scope) => ({
+        id: `scope:${scope}`,
+        label: SCOPE_MENU_LABEL[scope],
+      })),
     { id: "close", label: "Close tab" },
   ];
   const choice = await readLocalApi()?.contextMenu.show(items, input.position);
@@ -1720,6 +1724,9 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
     toggleSourceView,
     tabScopeById,
     setTabScope,
+    currentChatThreadId,
+    width: viewWidth,
+    setWidth: setViewWidth,
   } = usePreviewPane();
   const tabStripRef = useRef<HTMLDivElement | null>(null);
   // Агенты этого чата работают в браузере машины (Work в облаке): «Открыть
@@ -1744,7 +1751,12 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
   const { open: sidebarOpen, openMobile, isMobile, toggleSidebar } = useSidebar();
   const sidebarVisible = isMobile ? openMobile : sidebarOpen;
   const maxWidthRatio = sidebarVisible ? 0.6 : 0.8;
-  const [width, setWidth] = useState<number>(() => readStoredWidth());
+  // Ширина — у каждого чата своя (вид панели), по умолчанию — последняя
+  // выбранная где угодно. Во время перетаскивания — локальная, без перерисовки
+  // всего контекста на каждый пиксель.
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const [defaultWidth, setDefaultWidth] = useState<number>(() => readStoredWidth());
+  const width = dragWidth ?? viewWidth ?? defaultWidth;
   const [maxWidth, setMaxWidth] = useState<number>(() =>
     typeof window !== "undefined"
       ? Math.max(MIN_PREVIEW_WIDTH, window.innerWidth * maxWidthRatio)
@@ -1761,10 +1773,16 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
     return () => window.removeEventListener("resize", updateMaxWidth);
   }, [maxWidthRatio]);
 
-  const persistWidth = useCallback((next: number) => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(PREVIEW_WIDTH_STORAGE_KEY, String(Math.round(next)));
-  }, []);
+  const persistWidth = useCallback(
+    (next: number) => {
+      const rounded = Math.round(next);
+      setViewWidth(rounded);
+      setDefaultWidth(rounded);
+      if (typeof window === "undefined") return;
+      window.localStorage.setItem(PREVIEW_WIDTH_STORAGE_KEY, String(rounded));
+    },
+    [setViewWidth],
+  );
 
   const handleResizePointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -1785,7 +1803,7 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
       if (!state) return;
       const delta = state.startX - event.clientX;
       const next = Math.min(maxWidth, Math.max(MIN_PREVIEW_WIDTH, state.startWidth + delta));
-      setWidth(next);
+      setDragWidth(next);
     },
     [maxWidth],
   );
@@ -1802,6 +1820,7 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
       document.body.style.removeProperty("cursor");
       document.body.style.removeProperty("user-select");
       persistWidth(width);
+      setDragWidth(null);
     },
     [persistWidth, width],
   );
@@ -1917,6 +1936,7 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
                     void showTabScopeMenu({
                       file,
                       scope,
+                      inChat: currentChatThreadId !== null,
                       position: { x: event.clientX, y: event.clientY },
                       setTabScope,
                       closeFile,
