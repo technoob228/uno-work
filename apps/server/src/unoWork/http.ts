@@ -293,6 +293,13 @@ const makeDeps = (input: {
           yield* browserBridge.publishOpenInApp({ view, path: filePath }, context);
           return { ok: true };
         }),
+      openAppInPanel: ({ url, name }) =>
+        Effect.gen(function* () {
+          if (!(yield* browserBridge.hasSubscribers)) return { ok: false };
+          yield* browserBridge.publishOpenInApp({ view: "app", path: url, name }, context);
+          return { ok: true };
+        }),
+      hostedMachine: serverConfig.mode === "web",
       account: {
         cloudState: unoCloud.getState(),
         resizeOptions: unoComputer.resizeOptions(),

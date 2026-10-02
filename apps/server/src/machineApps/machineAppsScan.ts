@@ -189,6 +189,14 @@ export interface ScanInput {
    * half a second of processor — every few seconds while the screen is open.
    */
   readonly readUnits?: (probe: MachineProbe) => ReturnType<typeof readSystemd>;
+  /**
+   * Live processes the daemon started for each registered app (marked with
+   * the app's id in their environment), by manifest id. A bot or worker that
+   * listens on no port — or not yet (it waits for its token) — is running when
+   * it has one: without this it looked stopped, and Start / autostart ran a
+   * second copy next to it. Undefined = this machine can't tell (no /proc).
+   */
+  readonly markedPids?: ReadonlyMap<string, ReadonlyArray<number>>;
 }
 
 export interface ScannedApp extends Omit<
@@ -202,6 +210,8 @@ export interface ScannedApp extends Omit<
     | { readonly kind: "docker"; readonly container: string }
     | { readonly kind: "systemd"; readonly unit: string; readonly user: boolean }
     | { readonly kind: "process"; readonly pid: number }
+    /** Processes the daemon started for a registered app (no listener seen). */
+    | { readonly kind: "marked"; readonly pids: ReadonlyArray<number> }
     | { readonly kind: "none" };
   readonly manifest: AppManifest | null;
 }
@@ -224,7 +234,9 @@ export function pickAutostartApps(
     if (seen.has(app.manifest.id)) continue;
     seen.add(app.manifest.id);
     if (!app.manifest.autostart || !app.manifest.command) continue;
-    if (app.manifest.port === null || app.status !== "stopped") continue;
+    // "stopped" is only known for an app with a port or one the daemon can
+    // see its processes of (markedPids); "unknown" is never started twice.
+    if (app.status !== "stopped") continue;
     picked.push(app);
   }
   return picked;
@@ -404,13 +416,21 @@ export async function scanMachineApps(
     const listener = m.port !== null ? listeningByPort.get(m.port) : undefined;
     const http = m.port !== null ? (httpByPort.get(m.port)?.http ?? false) : false;
     const owner = m.port !== null ? owners.get(m.port) : null;
-    const running = m.port !== null ? listener !== undefined : null;
+    const marked = input.markedPids?.get(m.id) ?? [];
+    const running =
+      listener !== undefined || marked.length > 0
+        ? true
+        : m.port !== null || (m.command !== null && input.markedPids !== undefined)
+          ? false
+          : null;
     const control: ScannedApp["control"] =
       owner?.kind === "docker"
         ? { kind: "docker", container: owner.containerId }
         : listener?.pid != null
           ? { kind: "process", pid: listener.pid }
-          : { kind: "none" };
+          : marked.length > 0
+            ? { kind: "marked", pids: marked }
+            : { kind: "none" };
     if (m.port !== null) claimed.add(m.port);
     apps.push(
       withDefaults({
@@ -425,7 +445,11 @@ export async function scanMachineApps(
         udpPorts: [],
         http: http || (m.port === null && m.url !== null),
         loopbackOnly: listener?.loopbackOnly ?? false,
-        detail: m.port !== null ? `Registered · port ${m.port}` : "Registered",
+        detail: m.telegramBot
+          ? "Telegram bot"
+          : m.port !== null
+            ? `Registered · port ${m.port}`
+            : "Registered",
         url: m.url,
         localUrl: localUrlFor(m.port, http, m.path),
         canStart: running === false && m.command !== null,

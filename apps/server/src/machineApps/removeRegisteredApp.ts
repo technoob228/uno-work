@@ -251,6 +251,51 @@ export async function readProcessTable(): Promise<ProcessInfo[]> {
   return out;
 }
 
+/**
+ * Processes the daemon started for registered apps (the `UNO_WORK_APP` marker
+ * in their environment), cheaper than {@link readProcessTable}: only
+ * `environ` is read for every process, `status` only for marked ones. Runs on
+ * every scan of the apps screen.
+ */
+export async function readMarkedProcesses(): Promise<ProcessInfo[]> {
+  let names: string[];
+  try {
+    names = await readdir("/proc");
+  } catch {
+    return [];
+  }
+  const out: ProcessInfo[] = [];
+  await Promise.all(
+    names
+      .filter((name) => /^\d+$/.test(name))
+      .map(async (name) => {
+        const pid = Number(name);
+        try {
+          const environ = await readFile(`/proc/${pid}/environ`, "utf8");
+          const marker = environ
+            .split("\0")
+            .find((entry) => entry.startsWith(`${APP_MARKER_ENV}=`));
+          if (!marker) return;
+          const status = await readFile(`/proc/${pid}/status`, "utf8");
+          // A zombie is not running anything.
+          if (/^State:\s+Z/m.test(status)) return;
+          const uidMatch = /^Uid:\s+(\d+)/m.exec(status);
+          out.push({
+            pid,
+            ppid: Number(/^PPid:\s+(\d+)/m.exec(status)?.[1] ?? "0"),
+            uid: uidMatch ? Number(uidMatch[1]) : null,
+            comm: /^Name:\s+(.*)$/m.exec(status)?.[1]?.trim() ?? "",
+            cwd: null,
+            appMarker: marker.slice(APP_MARKER_ENV.length + 1),
+          });
+        } catch {
+          // Gone meanwhile, or not ours to read.
+        }
+      }),
+  );
+  return out;
+}
+
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);

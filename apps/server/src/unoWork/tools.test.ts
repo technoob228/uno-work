@@ -55,6 +55,7 @@ interface Recorded {
   bridge: Array<{ method: string; path: string; body?: unknown }>;
   console: ConsoleRequest[];
   createdBoxes: number;
+  appPanel: Array<{ url: string; name: string }>;
 }
 
 function makeDeps(
@@ -64,6 +65,9 @@ function makeDeps(
     agentAccess?: "off" | "read" | "manage";
     apiKey?: string;
     console?: (request: ConsoleRequest) => ConsoleReply;
+    apps?: UnoMachineApp[];
+    hostedMachine?: boolean;
+    windowOpen?: boolean;
   } = {},
 ): { deps: UnoWorkToolDeps; recorded: Recorded; home: string } {
   const home = mkdtempSync(path.join(os.tmpdir(), "uno-work-tools-"));
@@ -75,9 +79,10 @@ function makeDeps(
     bridge: [],
     console: [],
     createdBoxes: 0,
+    appPanel: [],
   };
   const apps = {
-    apps: [app()],
+    apps: options.apps ?? [app()],
     manifestDir: "~/.uno/apps",
     scannedAt: "",
     publishBlockedReason: null,
@@ -189,6 +194,13 @@ function makeDeps(
       }),
     messengerNotify: () => Effect.succeed({ delivered: 1 }),
     openInApp: () => Effect.succeed({ ok: true }),
+    openAppInPanel: (input) =>
+      Effect.sync(() => {
+        if (options.windowOpen === false) return { ok: false };
+        recorded.appPanel.push(input);
+        return { ok: true };
+      }),
+    hostedMachine: options.hostedMachine ?? false,
     account: {
       cloudState: Effect.succeed({
         connected: true,
@@ -620,6 +632,82 @@ describe("telling and showing", () => {
     expect(recorded.bridge[0]).toMatchObject({ body: { url: "http://localhost:3000/widget" } });
   });
 
+  it("shows an app with a public address as the app, not in the computer's browser", async () => {
+    const { deps, recorded } = makeDeps({
+      hostedMachine: true,
+      apps: [app({ publication: { url: "http://203.0.113.5:31080/", forwards: [] } as never })],
+    });
+    const result = await run("open_in_panel", deps, { appId: "notes" });
+    expect(result).toMatchObject({
+      _tag: "Success",
+      success: { opened: "http://203.0.113.5:31080/", where: "app panel" },
+    });
+    expect(recorded.appPanel).toEqual([{ url: "http://203.0.113.5:31080/", name: "Notes" }]);
+    expect(recorded.bridge).toEqual([]);
+  });
+
+  it("tells the agent the person can't open a localhost app on a cloud computer", async () => {
+    const { deps, recorded } = makeDeps({ hostedMachine: true });
+    const result = await run("open_in_panel", deps, { appId: "notes" });
+    if (result._tag !== "Success") throw new Error("open_in_panel failed");
+    expect((result.success as { note?: string }).note).toContain("app_show_on_internet");
+    expect(recorded.bridge[0]).toMatchObject({ body: { url: "http://localhost:3000/" } });
+  });
+
+  it("never opens a Telegram bot in the panel: it gives its t.me link", async () => {
+    const { deps, recorded } = makeDeps({
+      hostedMachine: true,
+      apps: [
+        app({
+          id: "manifest:cafe-bot",
+          name: "Café Bot",
+          port: null,
+          http: false,
+          localUrl: null,
+          telegramBot: {
+            username: "our_cafe_bot",
+            link: "https://t.me/our_cafe_bot",
+            tokenReady: false,
+          },
+        }),
+      ],
+    });
+    const result = await run("open_in_panel", deps, { appId: "cafe-bot" });
+    expect(result).toMatchObject({
+      _tag: "Success",
+      success: { telegram: "https://t.me/our_cafe_bot" },
+    });
+    if (result._tag === "Success") {
+      expect((result.success as { note: string }).note).toContain("waits for its token");
+    }
+    expect(recorded.bridge).toEqual([]);
+    expect(recorded.appPanel).toEqual([]);
+  });
+
+  it("registers a Telegram bot without a port", async () => {
+    const { deps, home } = makeDeps({ runtimeMode: "full-access" });
+    const result = await run("app_register", deps, {
+      id: "cafe-bot",
+      name: "Café Bot",
+      type: "telegram-bot",
+      telegram: "our_cafe_bot",
+      tokenEnv: "TELEGRAM_BOT_TOKEN",
+      command: "python3 bot.py",
+      cwd: "~/projects/cafe-bot",
+      runs: "always",
+    });
+    expect(result._tag).toBe("Success");
+    const written = JSON.parse(
+      readFileSync(path.join(home, ".uno", "apps", "cafe-bot.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(written).toMatchObject({
+      type: "telegram-bot",
+      telegram: "our_cafe_bot",
+      tokenEnv: "TELEGRAM_BOT_TOKEN",
+      runs: "always",
+    });
+  });
+
   it("starts chats through the threads bridge, in any folder", async () => {
     const { deps, recorded, home } = makeDeps();
     await run("chat_create", deps, { text: "Write tests", cwd: "~/projects/site" });
@@ -873,11 +961,16 @@ describe("sites: password and forms", () => {
     expect(recorded.console[1]?.path).toBe("/api/v1/deploys/team-site/forms/submissions?limit=5");
   });
 
-  it("lists sites with their live addresses", async () => {
+  it("lists sites with the address hosting answers with", async () => {
     const { deps } = makeDeps({
       console: () => ({
         status: 200,
-        body: { deploys: [{ slug: "team-site", has_password: true, url: "https://old.host" }] },
+        body: {
+          deploys: [
+            { slug: "team-site", has_password: true, url: "https://team-site.uno4.me" },
+            { slug: "no-url" },
+          ],
+        },
       }),
     });
     const result = await run("sites_list", deps);
@@ -886,8 +979,16 @@ describe("sites: password and forms", () => {
       sites: [
         {
           slug: "team-site",
-          url: "https://team-site.sites.uno4.dev/",
+          url: "https://team-site.uno4.me/",
           hasPassword: true,
+          customDomain: null,
+          sizeBytes: null,
+          updatedAt: null,
+        },
+        {
+          slug: "no-url",
+          url: "https://no-url.uno4.me/",
+          hasPassword: false,
           customDomain: null,
           sizeBytes: null,
           updatedAt: null,

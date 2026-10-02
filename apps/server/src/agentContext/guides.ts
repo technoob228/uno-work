@@ -124,7 +124,7 @@ export function buildUnoWorkGuide(
     case "sites":
       return [
         "## Sites",
-        "`site_publish` puts a folder with index.html (or one HTML file) on a public https address, `<slug>.uno4.dev`; republishing the same slug updates it. `sites_list` shows the person's sites with their slugs.",
+        "`site_publish` puts a folder with index.html (or one HTML file) on a public https address (`https://<slug>.uno4.me/`; use the exact address the result gives); republishing the same slug updates it. `sites_list` shows the person's sites with their slugs and real addresses.",
         "Password: `site_set_password` protects a site (pass `password`, or omit it and a readable one is generated) or removes protection (`remove: true`). Tell the person the password from the result; visitors type it. Never ask them to set it themselves.",
         'Forms work without a backend: the page posts to `/__forms` (`<form action="/__forms" method="POST">` with named inputs). `site_forms_set` chooses where answers go: `email` (the account\'s own address works at once; another address gets a confirmation link first), `telegram: true` (returns a link the person opens in Telegram and presses Start), `webhookUrl` (https, JSON). An empty string switches a channel off. `site_forms_get` shows the delivery and, with `submissions`, the latest answers.',
         "Changing a password or where answers go always asks the person first. Deleting a site or connecting a custom domain is done in the Uno console.",

@@ -599,6 +599,19 @@ export const UnoMachineAppWidget = Schema.Struct({
 });
 export type UnoMachineAppWidget = typeof UnoMachineAppWidget.Type;
 
+export const UnoMachineAppTelegramBot = Schema.Struct({
+  /** Username without @; null until the agent wrote it into the manifest. */
+  username: Schema.NullOr(Schema.String),
+  /** `https://t.me/<username>` — "Open in Telegram"; null without a username. */
+  link: Schema.NullOr(Schema.String),
+  /**
+   * Its token is in the project's `.env` (`tokenEnv`); false = "Waiting for
+   * token"; null = the manifest doesn't say where the token lives.
+   */
+  tokenReady: Schema.NullOr(Schema.Boolean),
+});
+export type UnoMachineAppTelegramBot = typeof UnoMachineAppTelegramBot.Type;
+
 export const UnoMachineApp = Schema.Struct({
   /** Stable key: `manifest:<id>`, `docker:<name>`, `systemd:<unit>`, `port:<n>`. */
   id: Schema.String,
@@ -650,6 +663,11 @@ export const UnoMachineApp = Schema.Struct({
   codeDirKeepReason: Schema.optional(Schema.NullOr(Schema.String)),
   /** A Home widget the app declares (registered apps only); null/absent = none. */
   widget: Schema.optional(Schema.NullOr(UnoMachineAppWidget)),
+  /**
+   * A Telegram bot (`"type": "telegram-bot"` in its manifest): no port, it is
+   * opened in Telegram. Absent for every other app.
+   */
+  telegramBot: Schema.optional(UnoMachineAppTelegramBot),
 });
 export type UnoMachineApp = typeof UnoMachineApp.Type;
 

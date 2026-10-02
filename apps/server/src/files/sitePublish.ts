@@ -128,12 +128,18 @@ function deployErrorMessage(status: number, body: DeployResponse | null): string
   return body?.message ?? `Uno Hosting answered ${status}.`;
 }
 
-/** Hosting's own `url` when it is an https address, else `<slug>.sites.uno4.dev`. */
+/**
+ * Where published sites live (Uno Hosting's SITES_BASE_DOMAIN in production,
+ * since 10.2026). Only a fallback: the address hosting answers with wins.
+ */
+export const SITES_BASE_DOMAIN = "uno4.me";
+
+/** Hosting's own `url` when it is an https address, else `<slug>.uno4.me`. */
 export function liveSiteUrl(fromHosting: string | undefined, slug: string): string {
   if (typeof fromHosting === "string" && /^https:\/\/[a-z0-9.-]+\//i.test(`${fromHosting}/`)) {
     return fromHosting.endsWith("/") ? fromHosting : `${fromHosting}/`;
   }
-  return `https://${slug}.sites.uno4.dev/`;
+  return `https://${slug}.${SITES_BASE_DOMAIN}/`;
 }
 
 export async function publishToUnoHosting(input: {
@@ -193,8 +199,8 @@ export async function publishToUnoHosting(input: {
   const publishedSlug = body?.slug ?? slug;
   return {
     slug: publishedSlug,
-    // The address Uno Hosting answers with is the live one (since 09.2026
-    // `<slug>.sites.uno4.dev`; the old hard-coded `<slug>.uno4.dev` gave 404).
+    // The address Uno Hosting answers with is the live one (`<slug>.uno4.me`
+    // in production); a hard-coded domain went stale twice.
     url: liveSiteUrl(body?.url, publishedSlug),
     filesCount: body?.files_count ?? files.length,
     sizeBytes: body?.size_bytes ?? files.reduce((sum, file) => sum + file.size, 0),

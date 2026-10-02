@@ -430,7 +430,11 @@ export interface BrowserBridgeShape {
   }) => Effect.Effect<boolean>;
   /** Show a file in the app's Office / Files view (see `BridgeOpenInAppEvent`). */
   readonly publishOpenInApp: (
-    input: { readonly view: "office" | "files"; readonly path: string },
+    input: {
+      readonly view: "office" | "files" | "app";
+      readonly path: string;
+      readonly name?: string;
+    },
     context?: BrowserBridgeRequestContext,
   ) => Effect.Effect<BrowserBridgeStreamEvent>;
   readonly stream: Stream.Stream<BrowserBridgeStreamEvent>;
@@ -834,6 +838,7 @@ export const makeBrowserBridge = (input: {
                 sequence,
                 view: input.view,
                 path: input.path,
+                ...(input.name !== undefined ? { name: input.name } : {}),
                 ...(context ? { context } : {}),
               }) satisfies BrowserBridgeStreamEvent,
           ),

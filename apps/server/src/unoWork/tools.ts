@@ -48,6 +48,7 @@ import { Data, Effect } from "effect";
 import { liveSiteUrl } from "../files/sitePublish.ts";
 import { validateManifest } from "../machineApps/appManifest.ts";
 import { displayManifestDir } from "../machineApps/manifestDir.ts";
+import { computerSleepInfo } from "../workspaceRegistry/unoComputerEconomy.ts";
 import type { InboxPost } from "../inbox/inboxModel.ts";
 import type { ToolApprovalOutcome } from "../browserBridge.ts";
 import { McpContent, type McpServerDefinition } from "../mcp/mcpJsonRpc.ts";
@@ -182,6 +183,17 @@ export interface UnoWorkToolDeps {
     readonly view: "office" | "files";
     readonly path: string;
   }) => Effect.Effect<{ readonly ok: boolean; readonly error?: string }>;
+  /**
+   * Show an app's public address in this chat's panel as the app itself (the
+   * client frames it, or offers it in a new tab) — not in the computer's own
+   * browser. ok: false when no window is open.
+   */
+  readonly openAppInPanel: (input: {
+    readonly url: string;
+    readonly name: string;
+  }) => Effect.Effect<{ readonly ok: boolean }>;
+  /** Uno Work runs on a cloud computer (the panel's browser is the machine's). */
+  readonly hostedMachine: boolean;
   readonly account: {
     readonly cloudState: Effect.Effect<UnoCloudState>;
     readonly resizeOptions: Effect.Effect<UnoComputerResizeOptions>;
@@ -297,6 +309,7 @@ function compactApp(app: UnoMachineApp) {
     ...(app.detail ? { detail: app.detail } : {}),
     ...(app.codeDir ? { codeDir: app.codeDir } : {}),
     ...(app.widget ? { widget: app.widget } : {}),
+    ...(app.telegramBot ? { telegramBot: app.telegramBot } : {}),
     ...(app.hidden ? { hidden: true } : {}),
     canStart: app.canStart,
     canStop: app.canStop,
@@ -582,8 +595,10 @@ const siteSlugArg = {
   description: "The site's name (slug) from sites_list, e.g. q3-report-7f2a.",
 };
 const sitePath = (slug: string, rest = "") => `/api/v1/deploys/${encodeURIComponent(slug)}${rest}`;
-// The live address (`<slug>.sites.uno4.dev`); the old `<slug>.uno4.dev` answers 404.
-const siteUrl = (slug: string) => liveSiteUrl(undefined, slug);
+// The live address: hosting's own `url` when the answer has one (sites_list
+// does), else the production fallback `<slug>.uno4.me`.
+const siteUrl = (slug: string, fromHosting?: unknown) =>
+  liveSiteUrl(typeof fromHosting === "string" ? fromHosting : undefined, slug);
 
 /** A password a person can read out: `maple-river-4821-cloud`. */
 const PASSWORD_WORDS = [
@@ -701,7 +716,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "computer_status",
     group: "computer",
     description:
-      "Where you are: this computer's name and system, whether it is an Uno cloud computer (and its address, size, plan boost), CPU/memory/disk use, the biggest things running, how many apps it has, and where the home folder, apps folder and SDK are. Call it first when you need to know the environment.",
+      "Where you are: this computer's name and system, whether it is an Uno cloud computer (and its address, size, plan boost), whether it sleeps when idle (sleep — check it before saying an app or bot runs 24/7), CPU/memory/disk use, the biggest things running, how many apps it has, and where the home folder, apps folder and SDK are. Call it first when you need to know the environment.",
     inputSchema: noArgs,
     level: "safe",
     run: (deps) =>
@@ -740,6 +755,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
               }
             : null,
           linkedToUnoAccount: computer?.linked ?? null,
+          // Before promising "24/7": does this computer (and its apps) sleep?
+          sleep: computerSleepInfo(box?.economy),
           cpu: { count: resources.cpuCount, usedPct: resources.cpuPct, load1: resources.load1 },
           memoryMb: {
             total: resources.memory.totalMb,
@@ -907,7 +924,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "app_register",
     group: "apps",
     description:
-      "Put an app you built on the person's Home: writes and validates ~/.uno/apps/<id>.json. With a command, Uno starts it within ~20 seconds and after every reboot (don't start a second copy), logging to ~/.uno/apps/<id>.log. Registering the same id again updates it. Ask for the machine's AI, cloud storage or Inbox notifications with ai / storage / notify (then use the Uno App SDK — uno_guide('app-sdk')). Never put secrets here.",
+      "Put an app you built on the person's Home: writes and validates ~/.uno/apps/<id>.json. With a command, Uno starts it within ~20 seconds and after every reboot — don't start it yourself or call app_start after (a second copy), logging to ~/.uno/apps/<id>.log. A Telegram bot: type telegram-bot + telegram (username) + tokenEnv, no port. Registering the same id again updates it. Ask for the machine's AI, cloud storage or Inbox notifications with ai / storage / notify (then use the Uno App SDK — uno_guide('app-sdk')). Never put secrets here.",
     inputSchema: {
       type: "object",
       properties: {
@@ -960,6 +977,30 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           additionalProperties: false,
         },
         notify: { type: "boolean", description: "May put notifications into the person's Inbox." },
+        type: {
+          type: "string",
+          enum: ["telegram-bot"],
+          description:
+            "telegram-bot: a Telegram bot — no port, opened in Telegram (give telegram and tokenEnv).",
+        },
+        telegram: {
+          type: "string",
+          maxLength: 64,
+          description: "The bot's username from BotFather, without @, e.g. our_cafe_bot.",
+        },
+        tokenEnv: {
+          type: "string",
+          pattern: "^[A-Za-z_][A-Za-z0-9_]*$",
+          maxLength: 128,
+          description:
+            "The variable in the project's .env with its token, e.g. TELEGRAM_BOT_TOKEN.",
+        },
+        runs: {
+          type: "string",
+          enum: ["always"],
+          description:
+            "always: keep an economy-mode computer awake for it (a bot on long polling). Ignored on the free trial — check sleep in computer_status.",
+        },
       },
       required: ["id", "name"],
       additionalProperties: false,
@@ -987,6 +1028,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           "autostart",
           "ai",
           "notify",
+          "type",
+          "telegram",
+          "tokenEnv",
+          "runs",
         ]) {
           if (args[key] !== undefined && args[key] !== null) record[key] = args[key];
         }
@@ -1588,14 +1633,40 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         if ([appId, url, file].filter((value) => value !== undefined).length !== 1) {
           return yield* toolError("Give exactly one of appId, url or file.");
         }
+        let localOnly = false;
         if (appId !== undefined) {
           const app = yield* findApp(deps, appId);
-          const base = app.publication?.url ?? app.url ?? app.localUrl;
+          // A bot is opened in Telegram, never in the panel.
+          if (app.telegramBot) {
+            return app.telegramBot.link
+              ? {
+                  ok: true,
+                  opened: null,
+                  telegram: app.telegramBot.link,
+                  note: `${app.name} is a Telegram bot: nothing to show in the panel. Give the person ${app.telegramBot.link} — they open it in Telegram and press Start.${app.telegramBot.tokenReady === false ? " It still waits for its token (request_secret)." : ""}`,
+                }
+              : {
+                  ok: true,
+                  opened: null,
+                  note: `${app.name} is a Telegram bot without a username in its manifest yet. Add telegram (the username from BotFather) with app_register, then give the person https://t.me/<username>.`,
+                };
+          }
+          const publicUrl = app.publication?.url ?? app.url;
+          // An address the person can open on their own device: show it as the
+          // app (the panel's app view has "Open in a new tab"), not inside the
+          // computer's own browser.
+          if (publicUrl) {
+            const target = joinUrlPath(publicUrl, str(args, "path"));
+            const shown = yield* deps.openAppInPanel({ url: target, name: app.name });
+            if (shown.ok) return { ok: true, opened: target, where: "app panel" };
+          }
+          const base = publicUrl ?? app.localUrl;
           if (!base) {
             return yield* toolError(
               `${app.name} has no web address (status: ${app.status}). Start it or give it a port first.`,
             );
           }
+          localOnly = publicUrl === null && deps.hostedMachine;
           url = joinUrlPath(base, str(args, "path"));
         }
         if (url !== undefined && !isCompleteHttpUrl(url)) {
@@ -1614,6 +1685,13 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             ...(url !== undefined ? { timeoutMs: 30_000 + BROWSER_FIRST_USE_MS + 10_000 } : {}),
           })
           .pipe(Effect.flatMap(bridgeOk));
+        if (url !== undefined && localOnly) {
+          return {
+            ok: true,
+            opened: url,
+            note: "This opened in the computer's own browser, shown live in the panel. The person can't open this localhost address on their own phone or laptop: if they want their own link, offer app_show_on_internet (they approve it).",
+          };
+        }
         return url !== undefined ? { ok: true, opened: url } : opened;
       }),
   },
@@ -1782,7 +1860,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             const slug = String(site.slug ?? "");
             return {
               slug,
-              url: siteUrl(slug),
+              url: siteUrl(slug, site.url),
               hasPassword: site.has_password === true,
               customDomain: site.custom_domain ?? null,
               sizeBytes: site.size_bytes ?? null,
