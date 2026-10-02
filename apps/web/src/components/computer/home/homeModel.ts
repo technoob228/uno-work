@@ -5,7 +5,8 @@
  */
 import { isAssistantProjectId } from "@t3tools/contracts";
 
-import { hasUnseenCompletion, resolveSidebarThreadStatus } from "../../Sidebar.logic";
+import { resolveSidebarThreadStatus } from "../../Sidebar.logic";
+import { isYourTurn } from "../../Sidebar.yourTurn";
 import type { SidebarThreadSummary } from "../../../types";
 
 // ------------------------------------------------------------------ chats --
@@ -50,7 +51,7 @@ export interface HomeThreadStatus {
 /**
  * The chat's status the way the sidebar reads it (same states, same hues:
  * amber approval, indigo input, sky working, red failed, emerald for a
- * result not seen yet), in Home's words. Null for a quiet, seen chat.
+ * finished chat waiting on the person), in Home's words. Null for a quiet chat.
  */
 export function homeThreadStatus(thread: HomeThread): HomeThreadStatus | null {
   switch (resolveSidebarThreadStatus(thread)) {
@@ -87,10 +88,10 @@ export function homeThreadStatus(thread: HomeThread): HomeThreadStatus | null {
         pulse: false,
       };
     case "ready":
-      return hasUnseenCompletion(thread)
+      return isYourTurn(thread, new Date().toISOString())
         ? {
             kind: "done",
-            label: "Done",
+            label: "Your turn",
             colorClass: "text-emerald-600 dark:text-emerald-300/90",
             dotClass: "bg-emerald-500 dark:bg-emerald-300/90",
             pulse: false,

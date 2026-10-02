@@ -6,6 +6,7 @@ import ThreadSidebar from "./Sidebar";
 import { isElectron } from "../env";
 import { useFeatureFlag } from "../hooks/useFeatureFlags";
 import { InboxListener } from "../inbox/InboxListener";
+import { DockBadgeListener } from "../inbox/DockBadgeListener";
 import { PaymentNoticeBanner } from "./billing/PaymentNoticeBanner";
 import { useNavLayout } from "../navigation/useNavLayout";
 import { DesktopTabs } from "./DesktopTabs";
@@ -138,6 +139,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <SidebarShortcutListener />
         {/* Inside the provider: opening an item may close the phone sidebar. */}
         <InboxListener />
+        <DockBadgeListener />
       </SidebarProvider>
       <FileBrowser />
       <BrowserBridgeListener />

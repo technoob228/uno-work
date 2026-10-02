@@ -211,6 +211,9 @@ import {
   snoozeWakeDescription,
   snoozeWakeLabel,
 } from "./Sidebar.snooze";
+import { isYourTurn } from "./Sidebar.yourTurn";
+import { readEnvironmentSupportsThreadSettlement } from "../environments/threadSettlementSupport";
+import { markChatDone } from "../inbox/inboxDone";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
@@ -2355,6 +2358,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         inboxSections && readEnvironmentSupportsThreadSnooze(thread.environmentId);
       const isSnoozed = snoozeAvailable && isThreadSnoozed(thread, nowIso);
       const snoozePresets = resolveSnoozePresets(nowDate);
+      const canMarkDone =
+        readEnvironmentSupportsThreadSettlement(thread.environmentId) && isYourTurn(thread, nowIso);
       const snoozeMenuItems: ContextMenuItem[] = !snoozeAvailable
         ? []
         : isSnoozed && thread.snoozedUntil != null
@@ -2380,6 +2385,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             ];
       const clicked = await api.contextMenu.show(
         [
+          ...(canMarkDone ? [{ id: "done", label: "Done" }] : []),
           { id: "rename", label: "Rename chat" },
           { id: "pin", label: isPinned ? "Unpin chat" : "Pin chat" },
           ...snoozeMenuItems,
@@ -2391,6 +2397,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         ],
         position,
       );
+
+      if (clicked === "done") {
+        await markChatDone(thread.environmentId, thread.id).catch(() => {
+          toastManager.add(
+            stackedThreadToast({ type: "error", title: "Couldn't mark the chat done" }),
+          );
+        });
+        return;
+      }
 
       if (clicked === "rename") {
         setRenamingThreadKey(threadKey);

@@ -96,6 +96,7 @@ import {
   type TurnDiffSummary,
 } from "../types";
 import { useTheme } from "../hooks/useTheme";
+import { useWindowInFront } from "../hooks/useWindowInFront";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
@@ -695,6 +696,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const setStoreThreadError = useStore((store) => store.setError);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
+  const windowInFront = useWindowInFront();
   const activeThreadLastVisitedAt = useUiStateStore((store) =>
     routeKind === "server" ? store.threadLastVisitedAtById[routeThreadKey] : undefined,
   );
@@ -1174,6 +1176,9 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     if (!serverThread?.id) return;
+    // A chat left open while the person is in another app or away hasn't
+    // been seen: it is marked when the window comes back in front.
+    if (!windowInFront) return;
     if (!latestTurnSettled) return;
     if (!activeLatestTurn?.completedAt) return;
     const turnCompletedAt = Date.parse(activeLatestTurn.completedAt);
@@ -1192,6 +1197,7 @@ export default function ChatView(props: ChatViewProps) {
     markThreadVisited,
     serverThread?.environmentId,
     serverThread?.id,
+    windowInFront,
   ]);
 
   const selectedProviderByThreadId = composerActiveProvider ?? null;

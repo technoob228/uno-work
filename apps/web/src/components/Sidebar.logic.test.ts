@@ -558,33 +558,41 @@ describe("resolveThreadStatusPill", () => {
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
-          latestTurn: makeLatestTurn(),
+          latestTurn: makeLatestTurn({
+            startedAt: "2026-10-01T10:00:00.000Z",
+            completedAt: "2026-10-01T10:05:00.000Z",
+          }),
           session: {
             ...baseThread.session,
             status: "ready",
             orchestrationStatus: "ready",
           },
         },
+        now: "2026-10-01T11:00:00.000Z",
       }),
-    ).toMatchObject({ label: "Completed", pulse: false });
+    ).toMatchObject({ label: "Your turn", pulse: false });
   });
 
-  it("shows completed when there is an unseen completion and no active blocker", () => {
+  it("shows your turn for a finished chat even after it was looked at", () => {
     expect(
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
           interactionMode: "default",
-          latestTurn: makeLatestTurn(),
-          lastVisitedAt: "2026-03-09T10:04:00.000Z",
+          latestTurn: makeLatestTurn({
+            startedAt: "2026-10-01T10:00:00.000Z",
+            completedAt: "2026-10-01T10:05:00.000Z",
+          }),
+          lastVisitedAt: "2026-10-01T10:30:00.000Z",
           session: {
             ...baseThread.session,
             status: "ready",
             orchestrationStatus: "ready",
           },
         },
+        now: "2026-10-01T11:00:00.000Z",
       }),
-    ).toMatchObject({ label: "Completed", pulse: false });
+    ).toMatchObject({ label: "Your turn", pulse: false });
   });
 });
 
@@ -621,7 +629,7 @@ describe("resolveProjectStatusIndicator", () => {
     expect(
       resolveProjectStatusIndicator([
         {
-          label: "Completed",
+          label: "Your turn",
           colorClass: "text-emerald-600",
           dotClass: "bg-emerald-500",
           pulse: false,
@@ -646,7 +654,7 @@ describe("resolveProjectStatusIndicator", () => {
     expect(
       resolveProjectStatusIndicator([
         {
-          label: "Completed",
+          label: "Your turn",
           colorClass: "text-emerald-600",
           dotClass: "bg-emerald-500",
           pulse: false,

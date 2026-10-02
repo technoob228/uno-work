@@ -559,6 +559,8 @@ export interface DesktopBridge {
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;
+  /** The number on the app's Dock icon (chats waiting on the person); 0 clears it. Absent before 0.0.105. */
+  setBadgeCount?: (count: number) => Promise<void>;
   showContextMenu: <T extends string>(
     items: readonly ContextMenuItem<T>[],
     position?: { x: number; y: number },

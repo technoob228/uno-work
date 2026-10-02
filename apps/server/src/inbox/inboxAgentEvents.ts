@@ -133,6 +133,14 @@ export function trackInboxAgentEvent(
         kinds: ["agent.done", "agent.error"],
       });
       break;
+    case "thread.settled":
+      // Done from the sidebar, the chat header or Home: its news is dealt with.
+      actions.push({
+        type: "resolve",
+        threadId: event.payload.threadId,
+        kinds: ["agent.done", "agent.error"],
+      });
+      break;
     default:
       break;
   }

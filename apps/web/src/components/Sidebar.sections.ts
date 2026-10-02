@@ -19,6 +19,7 @@ import { sortThreadsPinnedFirst, sortThreads, toSortableTimestamp } from "../lib
 import { isLatestTurnSettled } from "../session-logic";
 import type { SidebarThreadSummary } from "../types";
 import { hasQueuedTurnStart, isThreadSnoozed, threadNeedsUser } from "./Sidebar.snooze";
+import { isYourTurn } from "./Sidebar.yourTurn";
 
 export type SidebarSection = "pinned" | "active" | "snoozed" | "settled";
 
@@ -48,7 +49,8 @@ export type SidebarSectionThread = Pick<
   | "latestUserMessageAt"
   | "latestTurn"
   | "session"
->;
+> &
+  Partial<Pick<SidebarThreadSummary, "projectId" | "spawnedByThreadId">>;
 
 function latestTimestampMs(values: ReadonlyArray<string | null | undefined>): number | null {
   let latest: number | null = null;
@@ -105,6 +107,8 @@ export function resolveThreadActivityMs(thread: SidebarSectionThread): number | 
  */
 export function isThreadSettled(thread: SidebarSectionThread, now: string): boolean {
   if (threadNeedsUser(thread)) return false;
+  // Waiting on the person never ages out: only a reply or Done ends it.
+  if (isYourTurn(thread, now)) return false;
   const orchestrationStatus = thread.session?.orchestrationStatus;
   if (orchestrationStatus === "starting" || orchestrationStatus === "running") return false;
   if (thread.session?.status === "running" || thread.session?.status === "connecting") {
@@ -126,7 +130,7 @@ export function resolveSidebarThreadSection(
   if (threadNeedsUser(thread)) return pinned ? "pinned" : "active";
   if (isThreadSnoozed(thread, now)) return "snoozed";
   // An explicit settle outranks the pin (the server clears the pin as well).
-  if (thread.settledOverride === "settled") return "settled";
+  if (thread.settledOverride === "settled" && !isYourTurn(thread, now)) return "settled";
   if (pinned) return "pinned";
   if (thread.settledOverride === "active") return "active";
   if (isThreadSettled(thread, now)) return "settled";

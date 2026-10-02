@@ -171,6 +171,7 @@ import {
   resolveThreadActivityMs,
   type SidebarSection,
 } from "./Sidebar.sections";
+import { isYourTurn } from "./Sidebar.yourTurn";
 import { toSortableTimestamp } from "../lib/threadSort";
 import {
   canSnoozeThread,
@@ -578,18 +579,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
 
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
   const status = resolveSidebarThreadStatus(thread);
+  // Finished and waiting on the person until they reply or press Done;
+  // opening the chat doesn't clear it (unlike isUnread).
+  const yourTurn = status === "ready" && isYourTurn(thread, props.now);
   // Pinned chats sit with the other pins and never recede like history.
   const isPinnedRow = section === "pinned";
   const shouldRecede =
     !isPinnedRow &&
     shouldRecedeSidebarThread({
       status,
-      isUnread,
+      isUnread: isUnread || yourTurn,
       isActive: props.isActive,
       isSelected,
     });
   // Status hues follow the system-wide convention: amber approval, indigo
-  // input, sky working, red failed, emerald for an unread completion.
+  // input, sky working, red failed, emerald for a chat waiting on the person.
   const topStatus =
     status === "working"
       ? { label: "Working", icon: "working" as const, className: "text-sky-600 dark:text-sky-400" }
@@ -611,10 +615,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 icon: "failed" as const,
                 className: "text-red-700 dark:text-red-300",
               }
-            : isUnread
+            : yourTurn
               ? {
-                  label: "Done",
-                  icon: "done" as const,
+                  label: "Your turn",
+                  icon: "your-turn" as const,
                   className: "text-emerald-700 dark:text-emerald-300",
                 }
               : null;
@@ -733,7 +737,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         variant === "card"
           ? shouldRecede
             ? "text-secondary-label"
-            : isUnread || status === "input"
+            : isUnread || yourTurn || status === "input"
               ? "text-foreground"
               : "text-foreground/90"
           : cn(
@@ -742,7 +746,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 ? "text-foreground"
                 : isPinnedRow
                   ? "text-sidebar-foreground/90"
-                  : isUnread
+                  : isUnread || yourTurn
                     ? "text-muted-foreground"
                     : "text-secondary-label/70",
             ),
@@ -1028,19 +1032,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         render={
                           <button
                             type="button"
-                            aria-label={props.simple ? "Mark chat done" : "Settle chat"}
+                            aria-label={props.simple || yourTurn ? "Mark chat done" : "Settle chat"}
                             onClick={stopAnd(onSettle)}
                             className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
                           />
                         }
                       >
                         <CheckIcon className="size-3.5" />
-                        {props.simple ? "Done" : "Settle"}
+                        {props.simple || yourTurn ? "Done" : "Settle"}
                       </TooltipTrigger>
                       <TooltipPopup>
                         {props.simple
                           ? "Done: move it to the Done list"
-                          : "Settle chat: move it to the settled list"}
+                          : yourTurn
+                            ? "Done: nothing more to answer — move it to the settled list"
+                            : "Settle chat: move it to the settled list"}
                       </TooltipPopup>
                     </Tooltip>
                   ) : null}

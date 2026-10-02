@@ -139,6 +139,7 @@ installStdIoBrokenPipeGuards();
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
 const SET_THEME_CHANNEL = "desktop:set-theme";
+const SET_BADGE_COUNT_CHANNEL = "desktop:set-badge-count";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
 const FOCUS_WINDOW_CHANNEL = "desktop:focus-window";
@@ -2281,6 +2282,15 @@ function registerIpcHandlers(): void {
     }
 
     nativeTheme.themeSource = theme;
+  });
+
+  ipcMain.removeHandler(SET_BADGE_COUNT_CHANNEL);
+  handleTrustedIpc(SET_BADGE_COUNT_CHANNEL, async (_event, rawCount: unknown) => {
+    const count =
+      typeof rawCount === "number" && Number.isFinite(rawCount)
+        ? Math.min(Math.max(Math.trunc(rawCount), 0), 999)
+        : 0;
+    app.setBadgeCount(count);
   });
 
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
