@@ -225,6 +225,7 @@ const SERVER_ORDER: Record<ComputerRole, number> = {
   staging: 2,
   sandbox: 3,
   workspace: 4,
+  assistant: 5,
 };
 
 /**
