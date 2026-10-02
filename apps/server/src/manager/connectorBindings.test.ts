@@ -8,11 +8,14 @@ import {
 
 import {
   ASSISTANT_THREAD_RUNTIME_MODE,
+  bindingOnConnector,
   decideThreadRouting,
   effectiveBindingTarget,
   isPrivateTelegramChat,
   isPrivateTelegramChatId,
   matchByTitleOrId,
+  mergeRoutedAccess,
+  pickRelayHolder,
   planPrivateChatMigration,
   resolveChatTarget,
   resolveNotifyChats,
@@ -575,5 +578,145 @@ describe("decideThreadRouting for non-owner senders", () => {
       forcedRuntimeMode: "approval-required",
     });
     expect(routing).toMatchObject({ kind: "reuse", runtimeMode: "approval-required" });
+  });
+});
+
+describe("several assistants on one computer (assistants MVP, 02.10)", () => {
+  const ana = ProjectId.make("assistant-ana");
+  const bob = ProjectId.make("assistant-bob");
+  const mainThreadId = ThreadId.make("thread-main");
+
+  it("a binding counts only on the bot that made it", () => {
+    const made = binding({ connectorProjectId: assistantId });
+    expect(bindingOnConnector(made, assistantId)).toBe(made);
+    expect(bindingOnConnector(made, ana)).toBeNull();
+    expect(bindingOnConnector(null, ana)).toBeNull();
+  });
+
+  it("Ana's own bot ignores the main conversation binding of the same private chat", () => {
+    // The person's private chat id is the same with Uno's bot and Ana's bot.
+    const toMain = binding({
+      connectorProjectId: assistantId,
+      target: { kind: "thread", threadId: mainThreadId },
+    });
+    expect(
+      resolveChatTarget({
+        connectorProjectId: ana,
+        binding: bindingOnConnector(toMain, ana),
+        isPrivateChat: true,
+        mainThreadId,
+      }),
+    ).toEqual({ kind: "assistant", projectId: ana });
+  });
+
+  it("routes a chat of the shared bot to the assistant it is linked to", () => {
+    // Ana holds the relay; the person linked the chat to Bob, then to Uno.
+    const toBob = binding({
+      connectorProjectId: ana,
+      target: { kind: "assistant", projectId: bob },
+    });
+    expect(
+      resolveChatTarget({
+        connectorProjectId: ana,
+        binding: toBob,
+        isPrivateChat: true,
+        mainThreadId,
+      }),
+    ).toEqual({ kind: "assistant", projectId: bob });
+    // The default assistant's private chat on another assistant's bot still
+    // lands in the pinned main conversation.
+    const toUno = binding({
+      connectorProjectId: ana,
+      target: { kind: "assistant", projectId: assistantId },
+    });
+    expect(
+      resolveChatTarget({
+        connectorProjectId: ana,
+        binding: toUno,
+        isPrivateChat: true,
+        mainThreadId,
+      }),
+    ).toEqual({ kind: "thread", threadId: mainThreadId });
+    // Unbound chats of Ana's bot stay Ana's.
+    expect(
+      resolveChatTarget({
+        connectorProjectId: ana,
+        binding: null,
+        isPrivateChat: true,
+        mainThreadId,
+      }),
+    ).toEqual({ kind: "assistant", projectId: ana });
+  });
+
+  it("chats linked to routed assistants are allowed on the holder's bot", () => {
+    expect(
+      mergeRoutedAccess({ allowedChatIds: ["1"], ownerUserIds: ["1"] }, [
+        { allowedChatIds: ["1", "2"], ownerUserIds: ["2"] },
+        { allowedChatIds: ["-300"] },
+      ]),
+    ).toEqual({ allowedChatIds: ["1", "2", "-300"], ownerUserIds: ["1", "2"] });
+  });
+
+  it("picks who holds this computer's relay", () => {
+    const rows = [
+      { projectId: ana, isRelay: true },
+      { projectId: bob, isRelay: false },
+    ];
+    expect(pickRelayHolder(rows, bob)).toBe(ana);
+    // The holder itself re-links: the console mints (rotates) as before.
+    expect(pickRelayHolder(rows, ana)).toBeNull();
+    expect(pickRelayHolder([], bob)).toBeNull();
+    // Two holders from before routing: the default assistant wins.
+    expect(
+      pickRelayHolder(
+        [
+          { projectId: ana, isRelay: true },
+          { projectId: assistantId, isRelay: true },
+        ],
+        bob,
+      ),
+    ).toBe(assistantId);
+  });
+
+  it("notifies the same private chat id on two bots as two chats", () => {
+    // Uno's bot: the person's chat is bound to the main conversation.
+    // Ana's own bot: the same chat id, unbound.
+    const chats = resolveNotifyChats({
+      bindings: [
+        binding({
+          chatId: "100",
+          connectorProjectId: assistantId,
+          target: { kind: "thread", threadId: mainThreadId },
+        }),
+      ],
+      connectors: [
+        { kind: "telegram", projectId: assistantId, allowedChatIds: ["100"] },
+        { kind: "telegram", projectId: ana, allowedChatIds: ["100"] },
+      ],
+      threadId: null,
+      projectId: ana,
+      includeAssistantFallback: true,
+      mainConversationThreadId: mainThreadId,
+    });
+    expect(chats.map((chat) => [chat.connectorProjectId, chat.chatId])).toEqual([[ana, "100"]]);
+  });
+
+  it("a routed assistant's notifications go through the holder's bot", () => {
+    const chats = resolveNotifyChats({
+      bindings: [
+        binding({
+          chatId: "100",
+          connectorProjectId: ana,
+          target: { kind: "assistant", projectId: bob },
+        }),
+      ],
+      connectors: [{ kind: "telegram", projectId: ana, allowedChatIds: ["100"] }],
+      threadId: null,
+      projectId: bob,
+      includeAssistantFallback: true,
+    });
+    expect(chats.map((chat) => [chat.connectorProjectId, chat.chatId, chat.via])).toEqual([
+      [ana, "100", "assistant"],
+    ]);
   });
 });

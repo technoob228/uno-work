@@ -13,6 +13,7 @@ import { ProjectionSnapshotQuery } from "../../orchestration/Services/Projection
 import { ManagerConnectorBindingRepository } from "../../persistence/Services/ManagerConnectorBindings.ts";
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
 import { resolveNotifyChats, type NotifyConnector } from "../connectorBindings.ts";
+import { isRouteCredential } from "../channelRelay.ts";
 import { formatChannelNotifyText } from "../connectorNotify.ts";
 import {
   ConnectorNotifyService,
@@ -30,7 +31,12 @@ const makeConnectorNotifyService = Effect.gen(function* () {
 
   // Enabled Telegram connectors and their allowlists — the pool the assistant
   // fallback draws unbound chats from.
-  const listTelegramConnectors = (): Effect.Effect<ReadonlyArray<NotifyConnector>> =>
+  // `routed`: an assistant that talks through another assistant's bot
+  // (Uno's shared bot, `unoroute:`). Its chats are reached through their
+  // bindings on the holder's bot, never as a connector of its own.
+  const listTelegramConnectors = (): Effect.Effect<
+    ReadonlyArray<NotifyConnector & { readonly routed: boolean }>
+  > =>
     connectorRepository.listByKind("telegram").pipe(
       Effect.map((records) =>
         records.flatMap((record) => {
@@ -41,6 +47,7 @@ const makeConnectorNotifyService = Effect.gen(function* () {
                   kind: "telegram" as const,
                   projectId: record.projectId,
                   allowedChatIds: decoded.value.allowedChatIds,
+                  routed: isRouteCredential(decoded.value.botToken),
                 },
               ]
             : [];
@@ -73,15 +80,18 @@ const makeConnectorNotifyService = Effect.gen(function* () {
   const resolveChats: ConnectorNotifyServiceShape["resolveChats"] = (input) =>
     Effect.gen(function* () {
       const bindings = yield* bindingRepository.listAll().pipe(Effect.orElseSucceed(() => []));
-      const connectors = [
-        ...(yield* listTelegramConnectors()),
+      const telegramRows = yield* listTelegramConnectors();
+      const connectors: ReadonlyArray<NotifyConnector> = [
+        ...telegramRows
+          .filter((row) => !row.routed)
+          .map(({ kind, projectId, allowedChatIds }) => ({ kind, projectId, allowedChatIds })),
         ...(input.includeSlack === true ? yield* listSlackConnectors() : []),
       ];
       // Only chats a connector still allows: a binding outlives an allowlist
       // edit, and a removed chat must not keep receiving pushes. A Slack chat
       // key may carry a thread (`channel:thread_ts`): the channel decides.
       const allowed = new Set(
-        connectors.flatMap((connector) =>
+        [...connectors, ...telegramRows.filter((row) => row.routed)].flatMap((connector) =>
           connector.allowedChatIds.map((chatId) => `${connector.kind}:${chatId}`),
         ),
       );

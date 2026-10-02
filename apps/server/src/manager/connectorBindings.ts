@@ -46,6 +46,69 @@ export const effectiveBindingTarget = (
   connectorProjectId: ProjectId,
 ): ManagerConnectorBindingTarget => binding?.target ?? defaultBindingTarget(connectorProjectId);
 
+/**
+ * A binding speaks for a chat only on the bot (connector) that made it.
+ * Bindings are stored per chat id, and a person's private chat has the same
+ * id with every bot: with two assistants on one computer, each on a bot of
+ * its own, the binding one bot's chat made must not steer the other bot's
+ * chat (assistants MVP, 02.10).
+ */
+export const bindingOnConnector = (
+  binding: ManagerConnectorBinding | null | undefined,
+  connectorProjectId: ProjectId,
+): ManagerConnectorBinding | null =>
+  binding !== null && binding !== undefined && binding.connectorProjectId === connectorProjectId
+    ? binding
+    : null;
+
+/** Who may write through a bot: its own row plus the rows routed through it. */
+export interface ChatAccessRow {
+  readonly allowedChatIds: ReadonlyArray<string>;
+  readonly ownerUserIds?: ReadonlyArray<string> | undefined;
+}
+
+/**
+ * Uno's shared bot on a computer with several assistants: one relay, held by
+ * one assistant's row; the others' rows route through it (`unoroute:`). A chat
+ * linked to any of them is allowed on the holder's bot, and whoever linked it
+ * is an owner there.
+ */
+export const mergeRoutedAccess = (
+  holder: ChatAccessRow,
+  routed: ReadonlyArray<ChatAccessRow>,
+): {
+  readonly allowedChatIds: ReadonlyArray<string>;
+  readonly ownerUserIds: ReadonlyArray<string>;
+} => {
+  const allowed = new Set(holder.allowedChatIds);
+  const owners = new Set(holder.ownerUserIds ?? []);
+  for (const row of routed) {
+    for (const chatId of row.allowedChatIds) allowed.add(chatId);
+    for (const userId of row.ownerUserIds ?? []) owners.add(userId);
+  }
+  return { allowedChatIds: [...allowed], ownerUserIds: [...owners] };
+};
+
+/**
+ * Which assistant row holds this computer's relay for another assistant that
+ * wants Uno's shared bot: another row with a relay credential. Null when the
+ * requester holds it itself or nobody does — then the console mints one.
+ * Two holders (a state from before routing existed) → the default assistant
+ * first, so its chats keep working.
+ */
+export const pickRelayHolder = (
+  rows: ReadonlyArray<{ readonly projectId: ProjectId; readonly isRelay: boolean }>,
+  requester: ProjectId,
+): ProjectId | null => {
+  if (rows.some((row) => row.projectId === requester && row.isRelay)) return null;
+  const holders = rows.filter((row) => row.isRelay && row.projectId !== requester);
+  return (
+    holders.find((row) => row.projectId === ASSISTANT_PROJECT_ID)?.projectId ??
+    holders[0]?.projectId ??
+    null
+  );
+};
+
 export const bindingTargetId = (target: ManagerConnectorBindingTarget): string =>
   target.kind === "thread" ? target.threadId : target.projectId;
 
@@ -99,12 +162,11 @@ export const routesToMainConversation = (input: {
   readonly binding: ManagerConnectorBinding | null | undefined;
   readonly isPrivateChat: boolean;
 }): boolean => {
-  if (!input.isPrivateChat || input.connectorProjectId !== ASSISTANT_PROJECT_ID) return false;
-  const target = input.binding?.target;
-  return (
-    target === undefined ||
-    (target.kind === "assistant" && target.projectId === ASSISTANT_PROJECT_ID)
-  );
+  if (!input.isPrivateChat) return false;
+  // The default assistant's private chat — on its own bot, or on the bot of
+  // another assistant of this computer that holds Uno's shared bot.
+  const target = effectiveBindingTarget(input.binding, input.connectorProjectId);
+  return target.kind === "assistant" && target.projectId === ASSISTANT_PROJECT_ID;
 };
 
 /**
@@ -430,7 +492,15 @@ export interface ResolveNotifyChatsInput {
   readonly mainConversationThreadId?: ThreadId | null;
 }
 
-const chatKey = (kind: ManagerConnectorBindingKind, chatId: string): string => `${kind}:${chatId}`;
+/**
+ * A chat as one bot sees it: the same private chat id with two bots is two
+ * conversations (two assistants of one computer, each with a bot of its own).
+ */
+const chatKey = (
+  connectorProjectId: ProjectId,
+  kind: ManagerConnectorBindingKind,
+  chatId: string,
+): string => `${connectorProjectId}|${kind}:${chatId}`;
 
 /** Slack DM conversation ids start with `D` (channels `C`, private groups `G`). */
 export const isSlackDirectMessageId = (channelId: string): boolean =>
@@ -453,7 +523,7 @@ export const resolveNotifyChats = (
   const seen = new Set<string>();
   const result: Array<ResolvedNotifyChat> = [];
   const push = (chat: ResolvedNotifyChat) => {
-    const key = chatKey(chat.kind, chat.chatId);
+    const key = chatKey(chat.connectorProjectId, chat.kind, chat.chatId);
     if (seen.has(key)) {
       return;
     }
@@ -483,7 +553,11 @@ export const resolveNotifyChats = (
   // assistant. Scoped to one assistant when the subject lives in it.
   const assistantScope =
     input.projectId !== null && isAssistantProjectId(input.projectId) ? input.projectId : null;
-  const bound = new Set(input.bindings.map((binding) => chatKey(binding.kind, binding.chatId)));
+  const bound = new Set(
+    input.bindings.map((binding) =>
+      chatKey(binding.connectorProjectId, binding.kind, binding.chatId),
+    ),
+  );
   const mainThreadId = input.mainConversationThreadId ?? null;
   for (const binding of input.bindings) {
     const talksToAssistant =
@@ -507,7 +581,7 @@ export const resolveNotifyChats = (
       if (connector.kind === "slack" && !isSlackDirectMessageId(chatId)) {
         continue;
       }
-      if (!bound.has(chatKey(connector.kind, chatId))) {
+      if (!bound.has(chatKey(connector.projectId, connector.kind, chatId))) {
         push({
           kind: connector.kind,
           connectorProjectId: connector.projectId,

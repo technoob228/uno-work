@@ -107,8 +107,10 @@ import {
 } from "../../persistence/Services/ManagerConnectors.ts";
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
 import {
+  bindingOnConnector,
   decideThreadRouting,
   isPrivateTelegramChat,
+  mergeRoutedAccess,
   resolveChatTarget,
   routesToMainConversation,
   type RoutingThreadShell,
@@ -145,6 +147,7 @@ import {
   shouldReplyToStranger,
   TELEGRAM_PAIRING_TTL_MS,
   telegramLinkedReply,
+  telegramRoutedLinkedReply,
   telegramStrangerReply,
   type TelegramPairing,
 } from "../telegramPairing.ts";
@@ -157,6 +160,7 @@ import { resolveConnectorOutgoingFile } from "../connectorOutgoingFiles.ts";
 import {
   callTelegramBotMethod,
   isRelayCredential,
+  parseRouteCredential,
   redactConnectorSecrets,
   RELAY_CREDENTIAL_PREFIX,
   telegramApiUrl,
@@ -483,6 +487,59 @@ const makeTelegramConnector = Effect.gen(function* () {
     projectId,
     kind: "telegram",
   });
+
+  const decodeRow = (config: unknown): ManagerTelegramConnectorConfig | null => {
+    const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(config);
+    return decoded._tag === "Success" ? decoded.value : null;
+  };
+
+  /** Every stored Telegram row that decodes. */
+  const listRows = connectorRepository.listByKind("telegram").pipe(
+    Effect.map((records) =>
+      records.flatMap((record) => {
+        const config = decodeRow(record.config);
+        return config === null ? [] : [{ projectId: record.projectId, config }];
+      }),
+    ),
+    Effect.orElseSucceed(
+      (): ReadonlyArray<{
+        readonly projectId: ProjectId;
+        readonly config: ManagerTelegramConnectorConfig;
+      }> => [],
+    ),
+  );
+
+  const readRow = (projectId: ProjectId) =>
+    connectorRepository.get({ projectId, kind: "telegram" }).pipe(
+      Effect.map((row) => (Option.isSome(row) ? decodeRow(row.value.config) : null)),
+      Effect.orElseSucceed(() => null),
+    );
+
+  /**
+   * Rows of other assistants of this computer that talk through `holder`'s
+   * bot (`unoroute:<holder>`, see `channelRelay.ts`).
+   */
+  const routedRowsOf = (holder: ProjectId) =>
+    listRows.pipe(
+      Effect.map((rows) =>
+        rows.filter((row) => parseRouteCredential(row.config.botToken) === holder),
+      ),
+    );
+
+  /**
+   * The bot a row actually talks through: its own token, or — for a routed
+   * row — its holder's. Null when the holder is gone or no longer holds a bot.
+   */
+  const resolveSendRow = (projectId: ProjectId, config: ManagerTelegramConnectorConfig) =>
+    Effect.gen(function* () {
+      const holder = parseRouteCredential(config.botToken);
+      if (holder === null) return { projectId, botToken: config.botToken };
+      const holderConfig = yield* readRow(ProjectId.make(holder));
+      if (holderConfig === null || parseRouteCredential(holderConfig.botToken) !== null) {
+        return null;
+      }
+      return { projectId: ProjectId.make(holder), botToken: holderConfig.botToken };
+    });
 
   // Apply a health transition: in-memory runtime, persisted state row, and a
   // warning line — the latter only when the transition says one is due
@@ -1248,6 +1305,75 @@ const makeTelegramConnector = Effect.gen(function* () {
       );
     });
 
+  /**
+   * `/start <code>` of another assistant of this computer, arriving through
+   * the bot this connector holds (Uno's shared bot, one relay per computer):
+   * the chat is allowlisted on THAT assistant's routed row, and bound to it —
+   * the default assistant's private chat to its main conversation, any other
+   * assistant as a target of its own. The code is spent.
+   */
+  const linkRoutedChat = (
+    holder: ProjectId,
+    holderConfig: ManagerTelegramConnectorConfig,
+    assistantId: ProjectId,
+    message: TelegramIncomingMessage,
+  ) =>
+    Effect.gen(function* () {
+      const chatId = String(message.chat?.id);
+      yield* Ref.update(pairingsRef, (map) => {
+        const next = new Map(map);
+        next.delete(assistantId);
+        return next;
+      });
+      const routed = yield* readRow(assistantId);
+      if (routed !== null) {
+        const ownerUserIds = withOwnerUserId(
+          routed.ownerUserIds,
+          String(message.from?.id ?? chatId),
+        );
+        yield* connectorRepository.upsert({
+          projectId: assistantId,
+          kind: "telegram",
+          config: {
+            ...routed,
+            allowedChatIds: routed.allowedChatIds.includes(chatId)
+              ? routed.allowedChatIds
+              : [...routed.allowedChatIds, chatId],
+            ownerUserIds,
+          },
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      let target: ManagerConnectorBindingTarget = { kind: "assistant", projectId: assistantId };
+      if (assistantId === ASSISTANT_PROJECT_ID) {
+        const snapshot = yield* projectionSnapshotQuery.getShellSnapshot();
+        const main = findMarkedAssistantChat(snapshot.threads);
+        if (main !== null) target = { kind: "thread", threadId: main.id };
+      }
+      const existing = yield* bindingRepository.get({ kind: "telegram", chatId });
+      yield* bindingRepository.upsert({
+        kind: "telegram",
+        chatId,
+        connectorProjectId: holder,
+        target,
+        notifyOnComplete: Option.isSome(existing) ? existing.value.notifyOnComplete : false,
+        updatedAt: new Date().toISOString(),
+      });
+      const project = yield* projectionSnapshotQuery
+        .getProjectShellById(assistantId)
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      const name = Option.isSome(project) ? project.value.title : null;
+      yield* Effect.logInfo("telegram chat linked by code to a routed assistant").pipe(
+        Effect.annotateLogs({ holder, assistantId, chatId, target: target.kind }),
+      );
+      yield* sendTelegramText(
+        holder,
+        holderConfig.botToken,
+        chatId,
+        telegramRoutedLinkedReply({ name }),
+      );
+    });
+
   const handleUpdate = (
     projectId: ProjectId,
     config: ManagerTelegramConnectorConfig,
@@ -1266,10 +1392,19 @@ const makeTelegramConnector = Effect.gen(function* () {
         return;
       }
       const chatId = String(chatIdNumber);
+      // Other assistants of this computer that talk through this bot (Uno's
+      // shared bot: one relay per computer, see `channelRelay.ts`).
+      const routedRows = yield* routedRowsOf(projectId);
       const startPayload = parseTelegramStartPayload(text);
       if (startPayload !== null) {
-        const pairing = (yield* Ref.get(pairingsRef)).get(projectId);
-        if (matchesTelegramPairing(pairing, startPayload, Date.now())) {
+        const pairings = yield* Ref.get(pairingsRef);
+        const nowMs = Date.now();
+        const linkFor = matchesTelegramPairing(pairings.get(projectId), startPayload, nowMs)
+          ? projectId
+          : (routedRows.find((row) =>
+              matchesTelegramPairing(pairings.get(row.projectId), startPayload, nowMs),
+            )?.projectId ?? null);
+        if (linkFor !== null) {
           // Only a person, in a private chat with the bot, can link: a group
           // would hand every member of it the owner's assistant.
           const fromId = message.from?.id === undefined ? null : String(message.from.id);
@@ -1291,11 +1426,20 @@ const makeTelegramConnector = Effect.gen(function* () {
             }
             return;
           }
-          yield* linkChat(projectId, config, message);
+          if (linkFor === projectId) {
+            yield* linkChat(projectId, config, message);
+          } else {
+            yield* linkRoutedChat(projectId, config, linkFor, message);
+          }
           return;
         }
       }
-      if (!config.allowedChatIds.includes(chatId)) {
+      // Chats linked to the routed assistants are this bot's chats too.
+      const access = mergeRoutedAccess(
+        config,
+        routedRows.map((row) => row.config),
+      );
+      if (!access.allowedChatIds.includes(chatId)) {
         yield* Effect.logDebug("telegram message from non-allowlisted chat ignored").pipe(
           Effect.annotateLogs({ projectId, chatId }),
         );
@@ -1325,8 +1469,8 @@ const makeTelegramConnector = Effect.gen(function* () {
       const senderRole: ConnectorSenderRole = classifyTelegramSender({
         chat: message.chat,
         from: message.from,
-        allowedChatIds: config.allowedChatIds,
-        ownerUserIds: config.ownerUserIds,
+        allowedChatIds: access.allowedChatIds,
+        ownerUserIds: access.ownerUserIds,
         groupMembers: config.groupMembers,
       });
       if (senderRole === "ignore") {
@@ -1437,10 +1581,15 @@ const makeTelegramConnector = Effect.gen(function* () {
       // owns the bot when it has none — except that a personal (private)
       // chat of the default assistant talks to its main conversation, the
       // pinned "Uno" chat (0.0.86). Groups keep a thread of their own.
-      const binding = Option.getOrNull(
-        yield* bindingRepository
-          .get({ kind: "telegram", chatId })
-          .pipe(Effect.orElseSucceed(() => Option.none())),
+      // Only this bot's binding counts: a private chat has the same id with
+      // every bot (two assistants, each with a bot of its own).
+      const binding = bindingOnConnector(
+        Option.getOrNull(
+          yield* bindingRepository
+            .get({ kind: "telegram", chatId })
+            .pipe(Effect.orElseSucceed(() => Option.none())),
+        ),
+        projectId,
       );
       const isPrivateChat = isPrivateTelegramChat(message.chat);
       const mainThreadId = routesToMainConversation({
@@ -1456,6 +1605,31 @@ const makeTelegramConnector = Effect.gen(function* () {
         isPrivateChat,
         mainThreadId,
       });
+      // An assistant routed through this bot that the person paused.
+      const targetAssistant =
+        target.kind === "assistant"
+          ? target.projectId
+          : mainThreadId !== null && target.kind === "thread" && target.threadId === mainThreadId
+            ? ASSISTANT_PROJECT_ID
+            : null;
+      const pausedRoute =
+        targetAssistant !== null && targetAssistant !== projectId
+          ? routedRows.find((row) => row.projectId === targetAssistant && !row.config.enabled)
+          : undefined;
+      if (pausedRoute !== undefined) {
+        yield* Effect.logInfo("telegram message for a paused assistant").pipe(
+          Effect.annotateLogs({ projectId, chatId, assistant: pausedRoute.projectId }),
+        );
+        if (isPrivateChat) {
+          yield* sendTelegramText(
+            projectId,
+            config.botToken,
+            chatId,
+            "This assistant is paused in Uno Work. Turn it back on there, or send /assistant to talk to another one.",
+          );
+        }
+        return;
+      }
       const { threadId, handoffContext, runtimeMode, interactionMode } = yield* ensureThreadForChat(
         {
           target,
@@ -1741,7 +1915,10 @@ const makeTelegramConnector = Effect.gen(function* () {
       .pipe(Effect.orElseSucceed(() => []));
     const enabled = records.flatMap((record) => {
       const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(record.config);
-      return decoded._tag === "Success" && decoded.value.enabled
+      // A routed row (`unoroute:`) is no poll source: its holder polls.
+      return decoded._tag === "Success" &&
+        decoded.value.enabled &&
+        parseRouteCredential(decoded.value.botToken) === null
         ? [{ projectId: record.projectId, config: decoded.value }]
         : [];
     });
@@ -1784,9 +1961,16 @@ const makeTelegramConnector = Effect.gen(function* () {
         );
         return false;
       }
+      const via = yield* resolveSendRow(input.projectId, decoded.value);
+      if (via === null) {
+        yield* Effect.logWarning("telegram push skipped: the shared bot's holder is gone").pipe(
+          Effect.annotateLogs({ projectId: input.projectId }),
+        );
+        return false;
+      }
       return yield* sendTelegramText(
-        input.projectId,
-        decoded.value.botToken,
+        via.projectId,
+        via.botToken,
         input.chatId,
         input.text.slice(0, TELEGRAM_MESSAGE_LIMIT),
       ).pipe(Effect.map((resp) => resp.ok));
@@ -1794,8 +1978,12 @@ const makeTelegramConnector = Effect.gen(function* () {
 
   yield* Effect.forkScoped(Effect.forever(pollCycle));
 
-  const getRuntimeStatus: ManagerTelegramServiceShape["getRuntimeStatus"] = (projectId) =>
+  const getRuntimeStatus: ManagerTelegramServiceShape["getRuntimeStatus"] = (requested) =>
     Effect.gen(function* () {
+      // A routed row has no poller of its own: it shows the holder's bot.
+      const row = yield* readRow(requested);
+      const holder = row === null ? null : parseRouteCredential(row.botToken);
+      const projectId = holder === null ? requested : ProjectId.make(holder);
       const runtime = yield* getRuntime(projectId);
       const state = yield* connectorRepository
         .getState(connectorKey(projectId))
@@ -1816,8 +2004,15 @@ const makeTelegramConnector = Effect.gen(function* () {
       const decoded = Option.isSome(record)
         ? Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(record.value.config)
         : null;
-      const botToken =
+      const ownToken =
         decoded !== null && decoded._tag === "Success" ? decoded.value.botToken : null;
+      // A routed row's code goes through its holder's relay: the holder's
+      // poller sees `/start <code>` and links the chat to this assistant.
+      const via =
+        decoded !== null && decoded._tag === "Success"
+          ? yield* resolveSendRow(projectId, decoded.value)
+          : null;
+      const botToken = via?.botToken ?? ownToken;
       if (botToken !== null && isRelayCredential(botToken)) {
         const answer = yield* Effect.promise(() =>
           callTelegramBotMethod(botToken, "unoRegisterStartCode", {
@@ -1835,7 +2030,7 @@ const makeTelegramConnector = Effect.gen(function* () {
         }
       }
       yield* Ref.update(pairingsRef, (map) => new Map(map).set(projectId, pairing));
-      const runtime = yield* getRuntime(projectId);
+      const runtime = yield* getRuntime(via?.projectId ?? projectId);
       return {
         code: pairing.code,
         expiresAt: new Date(pairing.expiresAtMs).toISOString(),
@@ -1852,10 +2047,12 @@ const makeTelegramConnector = Effect.gen(function* () {
       const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(record.value.config);
       if (decoded._tag !== "Success") return [];
       const config = decoded.value;
+      const via = yield* resolveSendRow(input.projectId, config);
+      if (via === null) return [];
       return yield* Effect.forEach(
         config.allowedChatIds,
         (chatId) =>
-          sendTelegramText(input.projectId, config.botToken, chatId, input.text).pipe(
+          sendTelegramText(via.projectId, via.botToken, chatId, input.text).pipe(
             Effect.map((result) => ({
               chatId,
               ok: result.ok,

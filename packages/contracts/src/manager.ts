@@ -424,6 +424,8 @@ export const ManagerChannelSetupErrorCode = Schema.Literals([
   "shared_bot_unavailable",
   "slack_app_unavailable",
   "slack_not_installed",
+  /** Uno's Slack app already answers for another assistant of this computer. */
+  "slack_app_in_use",
   "console_unreachable",
   "console_error",
 ]);

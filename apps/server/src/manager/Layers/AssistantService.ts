@@ -61,7 +61,7 @@ import { ManagerAccountDefaultAi } from "./AccountDefaultAi.ts";
 import { ManagerTelegramService } from "./TelegramConnector.ts";
 import { ManagerSlackService } from "./SlackConnector.ts";
 import { ASSISTANT_THREAD_RUNTIME_MODE } from "../connectorBindings.ts";
-import { isRelayCredential } from "../channelRelay.ts";
+import { isRelayCredential, isRouteCredential } from "../channelRelay.ts";
 
 /** Title of a fresh assistant chat; clients show "Uno" whatever the title. */
 export const ASSISTANT_CHAT_TITLE = "Uno";
@@ -289,7 +289,8 @@ export const telegramConnectorStatus = (
   health: runtime.health,
   defaultModelSelection: config.defaultModelSelection ?? null,
   addressing: config.addressing ?? DEFAULT_CONNECTOR_ADDRESSING,
-  shared: isRelayCredential(config.botToken),
+  // Uno's shared bot: held by this assistant, or routed through another one.
+  shared: isRelayCredential(config.botToken) || isRouteCredential(config.botToken),
 });
 
 const makeManagerAssistantService = Effect.gen(function* () {

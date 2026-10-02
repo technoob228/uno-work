@@ -33,14 +33,17 @@ import { ManagerConnectorRepository } from "../persistence/Services/ManagerConne
 import {
   callTelegramBotMethod,
   isRelayCredential,
+  isRouteCredential,
   parseRelayCredential,
   relayCredential,
+  routeCredential,
   SLACK_RELAY_APP_TOKEN,
   slackRelayApiBase,
 } from "./channelRelay.ts";
 import { ManagerSlackService } from "./Layers/SlackConnector.ts";
 import { ManagerTelegramService } from "./Layers/TelegramConnector.ts";
 import { telegramPairingLink } from "./telegramPairing.ts";
+import { pickRelayHolder } from "./connectorBindings.ts";
 import { withOwnerUserId } from "./connectorSenders.ts";
 import {
   callWorkConsole,
@@ -127,6 +130,23 @@ export const connectSharedTelegram = (input: {
     const repository = yield* ManagerConnectorRepository;
     const telegram = yield* ManagerTelegramService;
 
+    // One relay per computer: when another assistant of this computer holds
+    // Uno's bot already, this one routes through it instead of minting a new
+    // relay (which would rotate the holder's token away and silence it).
+    const rows = yield* repository.listByKind("telegram");
+    const holder = pickRelayHolder(
+      rows.flatMap((row) => {
+        const config = decodeTelegramRow(row.config);
+        return config === null
+          ? []
+          : [{ projectId: row.projectId, isRelay: isRelayCredential(config.botToken) }];
+      }),
+      input.projectId,
+    );
+    if (holder !== null) {
+      return yield* routeThroughHolder({ projectId: input.projectId, holder });
+    }
+
     const minted = yield* askConsole({
       identity: input.identity,
       method: "POST",
@@ -180,6 +200,64 @@ export const connectSharedTelegram = (input: {
       expiresAt: pairing.value.expiresAt,
       botUsername: username,
       link: telegramPairingLink(username, pairing.value.code),
+    });
+  });
+
+/**
+ * `connectSharedTelegram` for the second (third…) assistant of a computer:
+ * its row becomes `unoroute:<holder>` (allowlist, addressing and harness
+ * choice kept, switched on), and the link code is registered through the
+ * holder's relay — the holder's poller sees `/start <code>` and links the
+ * chat to this assistant.
+ */
+const routeThroughHolder = (input: {
+  readonly projectId: ProjectId;
+  readonly holder: ProjectId;
+}): Effect.Effect<
+  ChannelSetupOutcome<ManagerTelegramSharedResult>,
+  ManagerRepositoryError,
+  ManagerConnectorRepository | ManagerTelegramService
+> =>
+  Effect.gen(function* () {
+    const repository = yield* ManagerConnectorRepository;
+    const telegram = yield* ManagerTelegramService;
+    const existing = yield* repository.get({ projectId: input.projectId, kind: "telegram" });
+    const previous = Option.isSome(existing) ? decodeTelegramRow(existing.value.config) : null;
+    // An own bot this assistant had stops here; its chats were that bot's.
+    const keepChats = previous !== null && isRouteCredential(previous.botToken);
+    const config = {
+      botToken: routeCredential(input.holder),
+      allowedChatIds: keepChats ? previous.allowedChatIds : [],
+      enabled: true,
+      defaultModelSelection: previous?.defaultModelSelection ?? null,
+      ...(previous?.addressing !== undefined ? { addressing: previous.addressing } : {}),
+      ...(keepChats && previous.ownerUserIds !== undefined
+        ? { ownerUserIds: previous.ownerUserIds }
+        : {}),
+    } satisfies ManagerTelegramConnectorConfig;
+    yield* repository.upsert({
+      projectId: input.projectId,
+      kind: "telegram",
+      config,
+      updatedAt: new Date().toISOString(),
+    });
+    yield* Effect.logInfo("telegram connector routed through this computer's shared bot").pipe(
+      Effect.annotateLogs({ projectId: input.projectId, holder: input.holder }),
+    );
+    const pairing = yield* telegram.startPairing(input.projectId).pipe(
+      Effect.map((value) => ({ ok: true as const, value })),
+      Effect.catchTag("TelegramPairingError", (error) =>
+        Effect.succeed({ ok: false as const, message: error.message }),
+      ),
+    );
+    if (!pairing.ok) {
+      return fail(502, "console_error", `Uno did not accept the link code: ${pairing.message}`);
+    }
+    return succeed({
+      code: pairing.value.code,
+      expiresAt: pairing.value.expiresAt,
+      botUsername: pairing.value.botUsername,
+      link: telegramPairingLink(pairing.value.botUsername, pairing.value.code),
     });
   });
 
@@ -265,6 +343,38 @@ async function openSlackDm(
     return null;
   }
 }
+
+/**
+ * Uno's Slack app has one relay per computer, like the shared Telegram bot,
+ * and reading the installation for an assistant mints it (rotating the old
+ * one away). Slack has no per-chat routing between assistants yet, so the
+ * app stays with the assistant that added it; another assistant of this
+ * computer gets 409 `slack_app_in_use` and uses a Slack app of its own.
+ */
+export const slackAppHeldByAnother = (
+  projectId: ProjectId,
+): Effect.Effect<ChannelSetupFailure | null, never, ManagerConnectorRepository> =>
+  Effect.gen(function* () {
+    const repository = yield* ManagerConnectorRepository;
+    const rows = yield* repository
+      .listByKind("slack")
+      .pipe(
+        Effect.orElseSucceed((): ReadonlyArray<{ projectId: ProjectId; config: unknown }> => []),
+      );
+    const holder = rows.find((row) => {
+      if (row.projectId === projectId) return false;
+      const config = decodeSlackRow(row.config);
+      return config !== null && isRelayCredential(config.botToken);
+    });
+    return holder === undefined
+      ? null
+      : {
+          status: 409,
+          error: "slack_app_in_use",
+          message:
+            "Uno's Slack app already answers for another assistant on this computer. Give this one a Slack app of its own, or move it to its own computer.",
+        };
+  });
 
 /** Where to send the person to add Uno's app to their workspace. */
 export const startSlackInstall = (input: {

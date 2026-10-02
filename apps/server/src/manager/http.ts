@@ -56,11 +56,12 @@ import { ManagerAssistantError, ManagerAssistantService } from "./Services/Assis
 import { ManagerTelegramService } from "./Layers/TelegramConnector.ts";
 import { telegramPairingLink } from "./telegramPairing.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
-import { isRelayCredential } from "./channelRelay.ts";
+import { isRelayCredential, isRouteCredential } from "./channelRelay.ts";
 import {
   afterTelegramConfigSaved,
   connectSharedTelegram,
   readSlackInstall,
+  slackAppHeldByAnother,
   startSlackInstall,
   uninstallSlack,
   type ChannelSetupOutcome,
@@ -469,6 +470,8 @@ export const managerAssistantSlackInstallStartRouteLayer = HttpRouter.add(
       Effect.mapError(() => new AuthError({ message: "Invalid payload.", status: 400 })),
     );
     yield* requireAssistantProject(input.projectId);
+    const inUse = yield* slackAppHeldByAnother(input.projectId);
+    if (inUse !== null) return respondChannelSetup({ ok: false, failure: inUse });
     const identity = yield* currentWorkMachineIdentity;
     return respondChannelSetup(yield* startSlackInstall({ identity }));
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
@@ -486,6 +489,9 @@ export const managerAssistantSlackInstallStatusRouteLayer = HttpRouter.add(
     yield* authenticateOwnerSession;
     const projectId = yield* assistantProjectIdFromQuery;
     yield* requireAssistantProject(projectId);
+    // Reading mints the relay: never for a second assistant of this computer.
+    const inUse = yield* slackAppHeldByAnother(projectId);
+    if (inUse !== null) return respondChannelSetup({ ok: false, failure: inUse });
     const identity = yield* currentWorkMachineIdentity;
     return yield* readSlackInstall({ projectId, identity }).pipe(
       Effect.map(respondChannelSetup),
@@ -641,7 +647,10 @@ export const managerAssistantTelegramRouteLayer = HttpRouter.add(
           ? existingConfig.value.botToken
           : undefined;
       // Relay credentials are minted by `/telegram/shared`, never typed in.
-      if (input.botToken !== undefined && isRelayCredential(input.botToken.trim())) {
+      if (
+        input.botToken !== undefined &&
+        (isRelayCredential(input.botToken.trim()) || isRouteCredential(input.botToken.trim()))
+      ) {
         return HttpServerResponse.jsonUnsafe(
           { error: "Paste the token @BotFather gave you." },
           { status: 400 },
