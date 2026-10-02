@@ -7,11 +7,19 @@
  * panel with everything else. Filters: All · Uno Work · Servers · Asleep, and
  * a search by name, app or address.
  */
-import { Loader2Icon, PlusIcon, SquareArrowOutUpRightIcon, SunIcon } from "lucide-react";
+import {
+  ExternalLinkIcon,
+  Loader2Icon,
+  PlusIcon,
+  SquareArrowOutUpRightIcon,
+  SunIcon,
+} from "lucide-react";
 import { useState } from "react";
 
-import type { AccountSubscription } from "../../account/accountOverview";
+import { CONSOLE_URL, type AccountSubscription } from "../../account/accountOverview";
 import { formatRam, formatUsd } from "../../account/billingModel";
+import { isElectron as runningInElectron } from "../../env";
+import { openInstallDocs } from "../onboarding/harnessInstallLinks";
 import { ROLE_LABEL } from "../../account/computerRoles";
 import { cn } from "../../lib/utils";
 import { isWebLite, liteEmptyComputersCopy } from "../../lite/webLite";
@@ -168,6 +176,15 @@ export function ComputersTab(props: ComputersTabProps) {
   );
 }
 
+/** The console has settings (Access/SSH keys, networking, snapshots…) that
+ * this row's side panel doesn't — a straight link there, same tab as the
+ * sidebar's "Open console" uses. */
+function openConsoleBox(boxId: number) {
+  const url = `${CONSOLE_URL}/boxes/${boxId}`;
+  if (runningInElectron) openInstallDocs(url);
+  else window.open(url, "_blank", "noopener,noreferrer");
+}
+
 function ComputerRow({
   entry,
   subscription,
@@ -185,6 +202,18 @@ function ComputerRow({
   const paused = entry.state !== "on";
 
   const restarting = entry.box ? actions.restarting(entry.box.id) : false;
+
+  const consoleButton = entry.box ? (
+    <Button
+      size="xs"
+      variant="ghost"
+      className={HOVER_ONLY}
+      title="Open this computer's page in the console"
+      onClick={() => openConsoleBox(entry.box!.id)}
+    >
+      <ExternalLinkIcon />
+    </Button>
+  ) : null;
 
   const button =
     pending === "wake" || pending === "start" ? (
@@ -269,7 +298,12 @@ function ComputerRow({
       bad={hasProblem(entry)}
       onSelect={() => onSelect(entry)}
       label={`${entry.name}, ${stateLabel(entry)}`}
-      action={<span className="flex w-24 justify-end sm:w-28">{button}</span>}
+      action={
+        <span className="flex w-28 items-center justify-end gap-0.5 sm:w-36">
+          {consoleButton}
+          {button}
+        </span>
+      }
       testId="my-uno-computer"
     >
       <Dot tone={tone} />
