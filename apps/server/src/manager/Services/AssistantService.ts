@@ -31,6 +31,36 @@ export class ManagerAssistantError extends Schema.TaggedErrorClass<ManagerAssist
 }
 
 export interface ManagerAssistantServiceShape {
+  /**
+   * AGENTS.md against Uno's newer instructions (`assistantInstructions.ts`):
+   * an untouched file is updated on the way; an edited one reports
+   * `update-available` with the texts the page diffs and merges.
+   */
+  readonly instructionsStatus: (projectId: ProjectId) => Effect.Effect<
+    {
+      readonly state: "current" | "edited" | "update-available";
+      readonly current: string;
+      readonly base: string;
+      readonly next: string;
+      readonly conflicts: number;
+    },
+    ManagerAssistantError
+  >;
+  /**
+   * The person's answer to "Uno has newer instructions": `update` (keep my
+   * edits — three-way merge, conflicts by `choices`), `replace` (take Uno's),
+   * `keep` (keep mine; asked again on the next version).
+   */
+  readonly resolveInstructions: (input: {
+    readonly projectId: ProjectId;
+    readonly action: "update" | "replace" | "keep";
+    readonly choices?: ReadonlyArray<"mine" | "theirs" | "both"> | undefined;
+  }) => Effect.Effect<
+    { readonly state: "current" | "edited"; readonly content: string },
+    ManagerAssistantError
+  >;
+  /** Start-up: newer instructions for every assistant that didn't edit them. */
+  readonly syncAllInstructions: () => Effect.Effect<void, ManagerAssistantError>;
   /** Idempotently create workspace, token, and project for an assistant. */
   readonly ensureAssistant: (input: {
     readonly projectId: ProjectId;

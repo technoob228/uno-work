@@ -124,6 +124,10 @@
       "types": "./src/assistantMemory.ts",
       "import": "./src/assistantMemory.ts"
     },
+    "./assistantInstructions": {
+      "types": "./src/assistantInstructions.ts",
+      "import": "./src/assistantInstructions.ts"
+    },
     "./unoFinalAnswer": {
       "types": "./src/unoFinalAnswer.ts",
       "import": "./src/unoFinalAnswer.ts"

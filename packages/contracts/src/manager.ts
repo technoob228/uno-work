@@ -214,6 +214,30 @@ export const ManagerAssistantProfile = Schema.Struct({
 });
 export type ManagerAssistantProfile = typeof ManagerAssistantProfile.Type;
 
+/**
+ * AGENTS.md against the instructions this Uno Work ships (decision 02.10:
+ * the person edits all of it; Uno's updates don't overwrite their edits).
+ */
+export const AssistantInstructionsStatus = Schema.Struct({
+  state: Schema.Literals(["current", "edited", "update-available"]),
+  current: Schema.String,
+  /** What Uno put there last (`.uno/AGENTS.base.md`). */
+  base: Schema.String,
+  /** Uno's newer version. */
+  next: Schema.String,
+  /** Places both the person and Uno changed ("Update and keep my edits"). */
+  conflicts: NonNegativeInt,
+});
+export type AssistantInstructionsStatus = typeof AssistantInstructionsStatus.Type;
+
+export const AssistantInstructionsResolveInput = Schema.Struct({
+  projectId: ProjectId,
+  action: Schema.Literals(["update", "replace", "keep"]),
+  /** Per conflict, in order: the person's text, Uno's, or both. */
+  choices: Schema.optional(Schema.Array(Schema.Literals(["mine", "theirs", "both"]))),
+});
+export type AssistantInstructionsResolveInput = typeof AssistantInstructionsResolveInput.Type;
+
 /** A deleted assistant of this computer, kept 7 days with Restore. */
 export const ManagerDeletedAssistant = Schema.Struct({
   projectId: ProjectId,

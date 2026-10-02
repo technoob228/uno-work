@@ -20,6 +20,7 @@ import {
   ASSISTANT_PROJECT_ID,
   AssistantAppAccessInput,
   AssistantEditableFileName,
+  AssistantInstructionsResolveInput,
   assistantTokenLabel,
   CHANNEL_NOTIFY_PATH,
   ChannelNotifyInput,
@@ -1072,6 +1073,49 @@ export const managerAssistantAppsPutRouteLayer = HttpRouter.add(
       Effect.annotateLogs({ projectId: input.projectId, permissions: access.permissions }),
     );
     return HttpServerResponse.jsonUnsafe({ ...access, enforcedBy: "computer" }, { status: 200 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * `GET /api/manager/assistant/instructions?projectId=` — AGENTS.md against
+ * Uno's newer instructions (an untouched file is updated on the way).
+ */
+export const managerAssistantInstructionsGetRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/assistant/instructions",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const projectId = yield* assistantProjectIdFromQuery;
+    yield* requireAssistantProject(projectId);
+    const assistants = yield* ManagerAssistantService;
+    return yield* assistants.instructionsStatus(projectId).pipe(
+      Effect.map((status) => HttpServerResponse.jsonUnsafe(status, { status: 200 })),
+      Effect.catch(respondAssistantError("assistant:instructions")),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/** `POST /api/manager/assistant/instructions` {projectId, action, choices?}. */
+export const managerAssistantInstructionsResolveRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/instructions",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(AssistantInstructionsResolveInput).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid payload.", status: 400 })),
+    );
+    yield* requireAssistantProject(input.projectId);
+    const assistants = yield* ManagerAssistantService;
+    return yield* assistants
+      .resolveInstructions({
+        projectId: input.projectId,
+        action: input.action,
+        choices: input.choices,
+      })
+      .pipe(
+        Effect.map((result) => HttpServerResponse.jsonUnsafe(result, { status: 200 })),
+        Effect.catch(respondAssistantError("assistant:instructions")),
+      );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

@@ -25,6 +25,15 @@ import {
 } from "@t3tools/shared/assistantChat";
 import { rebaseEdit, ROUTING_PERSON_RULE } from "@t3tools/shared/assistantMemory";
 import {
+  mergeInstructions,
+  planInstructions,
+  sameInstructions,
+  splitAgentsProfile,
+  joinAgentsProfile,
+  type InstructionsState,
+} from "@t3tools/shared/assistantInstructions";
+import { SHIPPED_ASSISTANT_INSTRUCTIONS } from "../assistantInstructionsHistory.ts";
+import {
   coerceAssistantModelSelection,
   DEFAULT_ASSISTANT_MODEL_SELECTION,
   readAssistantLlmProvider,
@@ -88,7 +97,13 @@ export const ASSISTANT_CHAT_TITLE = "Uno";
 /** Title of a conversation started with "New conversation" until it is renamed. */
 export const ASSISTANT_CONVERSATION_TITLE = "New conversation";
 
-const ASSISTANT_INSTRUCTIONS_TEMPLATE = `# Uno Assistant (dispatcher)
+/**
+ * The instructions this version ships. Bump the version line on every change:
+ * untouched files get it silently, edited ones see "Uno has newer
+ * instructions" on the assistant's page (`assistantInstructions.ts`).
+ */
+export const ASSISTANT_INSTRUCTIONS_TEMPLATE = `<!-- uno-instructions: 2026-10-02.2 -->
+# Uno Assistant (dispatcher)
 
 You are an assistant of this Uno Work environment. You are a lightweight
 dispatcher: your main job is to SPAWN and STEER work in other projects, do
@@ -173,15 +188,23 @@ threads you spawn, and even there — matched to the task. Before every
 harness + model + effort. Follow it, and evolve it:
 
 - \`create_thread\` accepts \`modelSelection.options\` for effort control,
-  e.g. \`{"instanceId":"claudeAgent","model":"claude-haiku-4-5","options":{"effort":"low"}}\`
-  or \`{"instanceId":"codex","model":"gpt-5.4","options":{"reasoningEffort":"low"}}\`.
+  e.g. \`{"instanceId":"claudeAgent","model":"claude-opus-5-5","options":{"effort":"high"}}\`;
+  a ChatGPT (codex) row takes \`options.reasoningEffort\` instead.
 - AFTER a spawned thread finishes (or fails), append one line to the
   "Outcomes log" in ROUTING.md: date, task type, model used, verdict (judged
   by evidence — tests, diff, checks — not by the thread's own claim). When a
   pattern emerges (a cheap model keeps handling a task type well — or keeps
   failing), update the routing table itself. This is your learning loop.
 - Rows with Source \`you\` are the person's rules: follow them, NEVER change
-  or remove them. Rows you change get Source \`learned\`.
+  or remove them yourself. Rows you change get Source \`learned\`.
+- If a \`you\` row keeps failing (say 2 of the last 3 tasks of that type
+  failed or had to be redone on a stronger model), PROPOSE a change instead:
+  add one line under "## Proposals" in ROUTING.md —
+  \`- <task type> → <harness> <model> <effort> | <why, one sentence> | YYYY-MM-DD\`
+  — and ask in chat: "<why>. Change the rule to <model>, <thinking>? Yes / No".
+  Change the row only after the person's yes (then delete the proposal line;
+  the page's Yes does both). On no, the line moves under "## Declined": do
+  not propose that change again for 14 days.
 - The table has six columns: Task type | Harness | Model | Effort | Source |
   Why. Keep that shape: the person edits it on your page.
 
@@ -202,6 +225,14 @@ harness + model + effort. Follow it, and evolve it:
 - \`create_thread\` and \`chat_create\` take an optional \`computerId\`.
   For now only this computer is allowed: leave it out. Another id answers
   "not allowed yet" — tell the person, don't retry.
+- You may be one of several assistants on this computer. This folder is
+  yours (instructions, notes, skills); other assistants' folders are not.
+
+## Apps the person connected
+
+- The person decides on your page which apps you may open (none / read /
+  write). A refusal like "isn't allowed to open Gmail" is final: tell the
+  person, never work around it (another chat, the browser, a script).
 
 ## Style & safety
 
@@ -240,6 +271,14 @@ Notes:
 ## Outcomes log
 
 <!-- date | task type | harness/model/effort | ok/failed/escalated | evidence/note -->
+
+## Proposals
+
+<!-- - task type → harness model effort | why | YYYY-MM-DD — waits for the person's yes -->
+
+## Declined
+
+<!-- - YYYY-MM-DD task type → harness model effort — not again for 14 days -->
 `;
 
 function slugifyAssistantName(name: string): string {
@@ -376,6 +415,36 @@ const makeManagerAssistantService = Effect.gen(function* () {
       }
     });
 
+  const agentsPath = (root: string) => path.join(root, "AGENTS.md");
+  const basePath = (root: string) => path.join(root, ".uno", "AGENTS.base.md");
+  const readOptional = (file: string) =>
+    fs.readFileString(file).pipe(
+      Effect.map((text): string | null => text),
+      Effect.orElseSucceed((): string | null => null),
+    );
+  const writeBase = (root: string, content: string) =>
+    Effect.gen(function* () {
+      yield* fs.makeDirectory(path.join(root, ".uno"), { recursive: true });
+      yield* fs.writeFileString(basePath(root), content);
+    });
+
+  /**
+   * AGENTS.md against its base (`.uno/AGENTS.base.md`): seeded, silently
+   * updated when untouched, left alone when edited (see `planInstructions`).
+   */
+  const syncInstructions = (root: string) =>
+    Effect.gen(function* () {
+      const plan = planInstructions({
+        current: yield* readOptional(agentsPath(root)),
+        base: yield* readOptional(basePath(root)),
+        next: ASSISTANT_INSTRUCTIONS_TEMPLATE,
+        known: SHIPPED_ASSISTANT_INSTRUCTIONS,
+      });
+      if (plan.write !== null) yield* fs.writeFileString(agentsPath(root), plan.write);
+      if (plan.base !== null) yield* writeBase(root, plan.base);
+      return plan.state;
+    });
+
   const ensureAssistant: ManagerAssistantServiceShape["ensureAssistant"] = ({
     projectId,
     title,
@@ -396,11 +465,9 @@ const makeManagerAssistantService = Effect.gen(function* () {
         path.join(workspaceRoot, ".uno-assistant.json"),
         `${JSON.stringify({ projectId, stateDir: config.stateDir }, null, 2)}\n`,
       );
-      // Instructions are user-editable: seed once, never overwrite.
-      yield* writeFileIfMissing(
-        path.join(workspaceRoot, "AGENTS.md"),
-        ASSISTANT_INSTRUCTIONS_TEMPLATE,
-      );
+      // Instructions are the person's to edit; Uno's newer versions reach
+      // untouched files silently and edited ones through the page.
+      yield* syncInstructions(workspaceRoot);
       yield* writeFileIfMissing(
         path.join(workspaceRoot, "CLAUDE.md"),
         "See AGENTS.md — it is the single source of instructions for this assistant.\n",
@@ -1398,7 +1465,93 @@ const makeManagerAssistantService = Effect.gen(function* () {
       return { purged };
     });
 
+  const workspaceOf = (projectId: ProjectId) =>
+    projectionSnapshotQuery.getProjectShellById(projectId).pipe(
+      Effect.mapError(toAssistantError("Failed to load assistant project.")),
+      Effect.flatMap((project) =>
+        Option.isSome(project) && isAssistantProjectId(projectId)
+          ? Effect.succeed(project.value.workspaceRoot)
+          : Effect.fail(new ManagerAssistantError({ detail: `Unknown assistant: ${projectId}.` })),
+      ),
+    );
+
+  const instructionsStatus: ManagerAssistantServiceShape["instructionsStatus"] = (projectId) =>
+    Effect.gen(function* () {
+      const root = yield* workspaceOf(projectId);
+      const state: InstructionsState = yield* syncInstructions(root);
+      const current = (yield* readOptional(agentsPath(root))) ?? "";
+      const base = (yield* readOptional(basePath(root))) ?? ASSISTANT_INSTRUCTIONS_TEMPLATE;
+      const conflicts =
+        state === "update-available"
+          ? mergeInstructions({ current, base, next: ASSISTANT_INSTRUCTIONS_TEMPLATE }).conflicts
+          : 0;
+      return { state, current, base, next: ASSISTANT_INSTRUCTIONS_TEMPLATE, conflicts };
+    }).pipe(
+      Effect.catch((cause) =>
+        Schema.is(ManagerAssistantError)(cause)
+          ? Effect.fail(cause)
+          : Effect.fail(toAssistantError("Failed to read the instructions.")(cause)),
+      ),
+    );
+
+  const resolveInstructions: ManagerAssistantServiceShape["resolveInstructions"] = (input) =>
+    fileWriteSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const root = yield* workspaceOf(input.projectId);
+        const current = (yield* readOptional(agentsPath(root))) ?? "";
+        const base = (yield* readOptional(basePath(root))) ?? ASSISTANT_INSTRUCTIONS_TEMPLATE;
+        const next = ASSISTANT_INSTRUCTIONS_TEMPLATE;
+        const { profile } = splitAgentsProfile(current);
+        let content = current;
+        if (input.action === "update") {
+          content = mergeInstructions({
+            current,
+            base,
+            next,
+            ...(input.choices !== undefined ? { choices: input.choices } : {}),
+          }).content;
+        } else if (input.action === "replace") {
+          content = joinAgentsProfile(next, profile);
+        }
+        if (content !== current) yield* fs.writeFileString(agentsPath(root), content);
+        // Every answer settles this version: the banner is gone until the next one.
+        yield* writeBase(root, next);
+        const { body } = splitAgentsProfile(content);
+        return {
+          state: sameInstructions(body, next) ? ("current" as const) : ("edited" as const),
+          content,
+        };
+      }).pipe(
+        Effect.catch((cause) =>
+          Schema.is(ManagerAssistantError)(cause)
+            ? Effect.fail(cause)
+            : Effect.fail(toAssistantError("Failed to update the instructions.")(cause)),
+        ),
+      ),
+    );
+
+  /** Start-up: every assistant of this computer gets Uno's newer instructions. */
+  const syncAllInstructions: ManagerAssistantServiceShape["syncAllInstructions"] = () =>
+    Effect.gen(function* () {
+      const snapshot = yield* projectionSnapshotQuery
+        .getShellSnapshot()
+        .pipe(Effect.mapError(toAssistantError("Failed to load projects.")));
+      for (const project of snapshot.projects) {
+        if (!isAssistantProjectId(project.id)) continue;
+        yield* syncInstructions(project.workspaceRoot).pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("assistant instructions sync failed").pipe(
+              Effect.annotateLogs({ projectId: project.id, cause }),
+            ),
+          ),
+        );
+      }
+    });
+
   return {
+    instructionsStatus,
+    resolveInstructions,
+    syncAllInstructions,
     ensureAssistant,
     ensureAssistantChat,
     createConversation,
@@ -1462,6 +1615,16 @@ export const AssistantBootstrapLive = Layer.effectDiscard(
         ),
       );
     yield* assistants.scanWorkspaceFolders();
+    // Uno's newer instructions reach every assistant that didn't edit them.
+    yield* assistants
+      .syncAllInstructions()
+      .pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("assistant instructions sync failed").pipe(
+            Effect.annotateLogs({ cause }),
+          ),
+        ),
+      );
     // Deleted assistants of this computer are kept 7 days, then removed.
     yield* assistants
       .purgeDeletedAssistants()

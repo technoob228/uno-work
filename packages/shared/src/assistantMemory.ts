@@ -377,3 +377,123 @@ export function thinkingOption(
   }
   return null;
 }
+
+// ── Proposals to change the person's rules ───────────────────────────
+
+/**
+ * A change the assistant proposes to a `you` row (decision 02.10: it never
+ * changes the person's rules itself; it may propose, and changes only on
+ * their yes). Written under "## Proposals" in ROUTING.md as
+ * `- <task type> → <harness> <model> <effort> | <why> | YYYY-MM-DD`.
+ */
+export interface RoutingProposal {
+  /** The exact line, to find it again after other edits. */
+  readonly raw: string;
+  readonly taskType: string;
+  readonly harness: string;
+  readonly model: string;
+  readonly effort: string;
+  readonly why: string;
+  readonly date: string | null;
+}
+
+const PROPOSALS_HEADING_RE = /^#{1,6}\s+proposals\b/i;
+const DECLINED_HEADING_RE = /^#{1,6}\s+declined\b/i;
+const PROPOSAL_RE = /^\s*[-*]\s+(.+?)\s*(?:→|->)\s*(.+)$/;
+
+function sectionLines(lines: ReadonlyArray<string>, heading: RegExp): number[] {
+  const at = lines.findIndex((line) => heading.test(line.trim()));
+  if (at === -1) return [];
+  const out: number[] = [];
+  for (let i = at + 1; i < lines.length; i += 1) {
+    if (/^#{1,6}\s/.test(lines[i]!.trim())) break;
+    out.push(i);
+  }
+  return out;
+}
+
+export function parseProposals(content: string): ReadonlyArray<RoutingProposal> {
+  const lines = content.split("\n");
+  const proposals: RoutingProposal[] = [];
+  for (const index of sectionLines(lines, PROPOSALS_HEADING_RE)) {
+    const raw = lines[index]!;
+    const match = PROPOSAL_RE.exec(raw);
+    if (!match) continue;
+    const [target = "", why = "", date = ""] = match[2]!.split("|").map((part) => part.trim());
+    const [harness = "", model = "", ...effortWords] = target.split(/\s+/).filter(Boolean);
+    if (harness.length === 0) continue;
+    proposals.push({
+      raw,
+      taskType: match[1]!.trim(),
+      harness,
+      model,
+      effort: effortWords.join(" "),
+      why,
+      date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
+    });
+  }
+  return proposals;
+}
+
+const sameTask = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** The proposal for this rule's kind of task, if the assistant made one. */
+export function proposalFor(
+  proposals: ReadonlyArray<RoutingProposal>,
+  rule: Pick<RoutingRule, "taskType">,
+): RoutingProposal | null {
+  return proposals.find((proposal) => sameTask(proposal.taskType, rule.taskType)) ?? null;
+}
+
+function withoutLine(content: string, raw: string): string {
+  const lines = content.split("\n");
+  const at = lines.indexOf(raw);
+  if (at === -1) return content;
+  lines.splice(at, 1);
+  return lines.join("\n");
+}
+
+/** "Yes": the row becomes the proposed one (still the person's), the proposal goes. */
+export function acceptProposal(content: string, proposal: RoutingProposal): string {
+  const { rules } = parseRouting(content);
+  const patch = {
+    harness: proposal.harness,
+    model: proposal.model,
+    effort: proposal.effort,
+    source: "you" as const,
+  };
+  const exists = rules.some((rule) => sameTask(rule.taskType, proposal.taskType));
+  const next = exists
+    ? rules.map((rule) =>
+        sameTask(rule.taskType, proposal.taskType) ? { ...rule, ...patch } : rule,
+      )
+    : [...rules, { taskType: proposal.taskType, note: proposal.why, ...patch }];
+  return withoutLine(writeRouting(content, next), proposal.raw);
+}
+
+/** "No": the proposal moves under "## Declined" with today's date (not again for 14 days). */
+export function declineProposal(content: string, proposal: RoutingProposal, today: string): string {
+  const removed = withoutLine(content, proposal.raw);
+  const line = `- ${today} ${proposal.taskType} → ${[
+    proposal.harness,
+    proposal.model,
+    proposal.effort,
+  ]
+    .filter(Boolean)
+    .join(" ")}`;
+  const lines = removed.split("\n");
+  const at = lines.findIndex((entry) => DECLINED_HEADING_RE.test(entry.trim()));
+  if (at === -1) {
+    const base = removed.replace(/\s+$/, "");
+    return `${base}\n\n## Declined\n\n${line}\n`;
+  }
+  const section = sectionLines(lines, DECLINED_HEADING_RE);
+  let insertAt = at + 1;
+  for (const index of section) if (lines[index]!.trim().length > 0) insertAt = index + 1;
+  if (insertAt === at + 1) {
+    lines.splice(insertAt, 0, "", line);
+  } else {
+    lines.splice(insertAt, 0, line);
+  }
+  return lines.join("\n");
+}

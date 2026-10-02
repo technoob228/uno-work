@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  acceptProposal,
   addNote,
+  declineProposal,
   editNote,
   parseNotes,
+  parseProposals,
   parseRouting,
+  proposalFor,
   rebaseEdit,
   removeLine,
   ROUTING_PERSON_RULE,
@@ -175,5 +179,72 @@ describe("routing", () => {
     expect(thinkingOption("claudeAgent", "max")).toEqual({ id: "effort", value: "max" });
     expect(thinkingOption("codex", "max")).toEqual({ id: "reasoningEffort", value: "xhigh" });
     expect(thinkingOption("uno", "high")).toBeNull();
+  });
+});
+
+describe("proposals to change the person's rules", () => {
+  const file = [
+    "# Routing table",
+    "",
+    "| Task type | Harness | Model | Effort | Source | Why |",
+    "|---|---|---|---|---|---|",
+    "| Anything with UI | claudeAgent | claude-sonnet-5-5 | medium | you | my rule |",
+    "| Simple tasks | claudeAgent | claude-sonnet-5-5 | medium | default | cheap |",
+    "",
+    "## Outcomes log",
+    "",
+    "## Proposals",
+    "",
+    "<!-- comment -->",
+    "- Anything with UI → claudeAgent claude-opus-5-5 high | redone on Opus twice | 2026-10-02",
+    "",
+    "## Declined",
+    "",
+  ].join("\n");
+
+  it("reads a proposal for a rule", () => {
+    const [proposal] = parseProposals(file);
+    expect(proposal).toMatchObject({
+      taskType: "Anything with UI",
+      harness: "claudeAgent",
+      model: "claude-opus-5-5",
+      effort: "high",
+      why: "redone on Opus twice",
+      date: "2026-10-02",
+    });
+    const rules = parseRouting(file).rules;
+    expect(proposalFor(parseProposals(file), rules[0]!)).toEqual(proposal);
+    expect(proposalFor(parseProposals(file), rules[1]!)).toBeNull();
+  });
+
+  it("Yes changes the row, keeps it the person's, and drops the proposal", () => {
+    const next = acceptProposal(file, parseProposals(file)[0]!);
+    expect(parseRouting(next).rules[0]).toMatchObject({
+      model: "claude-opus-5-5",
+      effort: "high",
+      source: "you",
+    });
+    expect(parseProposals(next)).toEqual([]);
+  });
+
+  it("No keeps the row and records the decline with a date", () => {
+    const next = declineProposal(file, parseProposals(file)[0]!, "2026-10-03");
+    expect(parseRouting(next).rules[0]).toMatchObject({
+      model: "claude-sonnet-5-5",
+      source: "you",
+    });
+    expect(parseProposals(next)).toEqual([]);
+    expect(next).toContain(
+      "## Declined\n\n- 2026-10-03 Anything with UI → claudeAgent claude-opus-5-5 high",
+    );
+    // A file without the section gets one.
+    const bare = declineProposal(
+      file.replace("## Declined\n", ""),
+      parseProposals(file)[0]!,
+      "2026-10-03",
+    );
+    expect(
+      bare.trimEnd().endsWith("- 2026-10-03 Anything with UI → claudeAgent claude-opus-5-5 high"),
+    ).toBe(true);
   });
 });
