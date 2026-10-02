@@ -24,6 +24,7 @@ import {
 } from "./baseSchemas.ts";
 import {
   ModelSelection,
+  OrchestrationCheckpointFile,
   OrchestrationLatestTurn,
   OrchestrationMessageRole,
   OrchestrationSessionStatus,
@@ -732,6 +733,95 @@ export const ManagerReadThreadDetailResult = Schema.Struct({
 });
 export type ManagerReadThreadDetailResult = typeof ManagerReadThreadDetailResult.Type;
 
+// ===============================
+// wait_for_thread / wait_for_threads
+// ===============================
+
+export const MANAGER_WAIT_DEFAULT_TIMEOUT_SEC = 900;
+export const MANAGER_WAIT_MAX_TIMEOUT_SEC = 3_600;
+export const MANAGER_WAIT_MAX_THREADS = 20;
+export const MANAGER_WAIT_REPLY_MAX_CHARS = 4_000;
+export const MANAGER_WAIT_MAX_CHANGED_FILES = 50;
+
+const ManagerWaitTimeoutSec = PositiveInt.check(
+  Schema.isLessThanOrEqualTo(MANAGER_WAIT_MAX_TIMEOUT_SEC),
+);
+
+export const ManagerWaitForThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  /** Default {@link MANAGER_WAIT_DEFAULT_TIMEOUT_SEC}. */
+  timeoutSec: Schema.optional(ManagerWaitTimeoutSec),
+});
+export type ManagerWaitForThreadInput = typeof ManagerWaitForThreadInput.Type;
+
+export const ManagerWaitMode = Schema.Literals(["any", "all"]);
+export type ManagerWaitMode = typeof ManagerWaitMode.Type;
+
+export const ManagerWaitForThreadsInput = Schema.Struct({
+  threadIds: Schema.Array(ThreadId).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MANAGER_WAIT_MAX_THREADS),
+  ),
+  /** `any` returns once one thread settles, `all` once every thread did. Default `all`. */
+  mode: Schema.optional(ManagerWaitMode),
+  timeoutSec: Schema.optional(ManagerWaitTimeoutSec),
+});
+export type ManagerWaitForThreadsInput = typeof ManagerWaitForThreadsInput.Type;
+
+/**
+ * - `completed` / `error` / `interrupted` — the thread's latest turn ended so.
+ * - `needs_user` — the thread waits for a human: an approval or a question.
+ * - `idle` — nothing ran and nothing is queued (no turn to wait for).
+ * - `timeout` — still busy when the wait ran out.
+ * - `running` — still busy; another thread settled first (`mode: "any"`).
+ */
+export const ManagerWaitStatus = Schema.Literals([
+  "completed",
+  "error",
+  "interrupted",
+  "needs_user",
+  "idle",
+  "timeout",
+  "running",
+]);
+export type ManagerWaitStatus = typeof ManagerWaitStatus.Type;
+
+export const ManagerWaitThreadResult = Schema.Struct({
+  threadId: ThreadId,
+  status: ManagerWaitStatus,
+  /** The thread was already settled when the wait began (no new turn seen). */
+  settledImmediately: Schema.Boolean,
+  turnId: Schema.NullOr(Schema.String),
+  turnStartedAt: Schema.NullOr(IsoDateTime),
+  turnCompletedAt: Schema.NullOr(IsoDateTime),
+  turnDurationMs: Schema.NullOr(NonNegativeInt),
+  /** Untrusted agent output, wrapped in <untrusted_thread_output>. */
+  lastAssistantMessage: Schema.NullOr(Schema.String),
+  lastAssistantMessageTruncated: Schema.Boolean,
+  /** Files the turn changed (checkpoint diff); null when no checkpoint exists (yet). */
+  changedFiles: Schema.NullOr(Schema.Array(OrchestrationCheckpointFile)),
+  changedFilesTotal: NonNegativeInt,
+  pendingApprovals: Schema.Array(ManagerPendingApprovalSummary),
+  /** For `needs_user`: what the thread asks (untrusted, wrapped). */
+  pendingRequest: Schema.NullOr(Schema.String),
+  error: Schema.NullOr(Schema.String),
+});
+export type ManagerWaitThreadResult = typeof ManagerWaitThreadResult.Type;
+
+export const ManagerWaitForThreadResult = Schema.Struct({
+  ...ManagerWaitThreadResult.fields,
+  waitedMs: NonNegativeInt,
+});
+export type ManagerWaitForThreadResult = typeof ManagerWaitForThreadResult.Type;
+
+export const ManagerWaitForThreadsResult = Schema.Struct({
+  mode: ManagerWaitMode,
+  waitedMs: NonNegativeInt,
+  timedOut: Schema.Boolean,
+  results: Schema.Array(ManagerWaitThreadResult),
+});
+export type ManagerWaitForThreadsResult = typeof ManagerWaitForThreadsResult.Type;
+
 export const ManagerListPendingApprovalsResult = Schema.Struct({
   approvals: Schema.Array(ManagerPendingApprovalSummary),
 });
@@ -905,3 +995,97 @@ export const ManagerCancelReminderResult = Schema.Struct({
   cancelled: Schema.Boolean,
 });
 export type ManagerCancelReminderResult = typeof ManagerCancelReminderResult.Type;
+
+// ===============================
+// Assistant schedules (assistants MVP)
+// ===============================
+//
+// An assistant's recurring work: a scheduled task of the Uno console
+// (`/api/v1/scheduled-tasks`) on the assistant's own computer whose command
+// is `uno-work assistant-turn …`. The console wakes the computer, the CLI
+// hands the instruction to the assistant as a new turn and the answer goes to
+// the person's Telegram/Slack. The daemon only proxies to the console with
+// the machine's token; the person sees and stops schedules in the app.
+
+export const ASSISTANT_SCHEDULE_NAME_MAX_CHARS = 80;
+export const ASSISTANT_SCHEDULE_PROMPT_MAX_CHARS = 2_000;
+export const ASSISTANT_SCHEDULE_DEFAULT_MINUTES = 15;
+export const ASSISTANT_SCHEDULE_MAX_MINUTES = 60;
+/** The final answer that means "nothing to tell the person" — not delivered. */
+export const ASSISTANT_TURN_NO_REPLY = "NO_REPLY";
+
+export const ManagerScheduleCreateInput = Schema.Struct({
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSISTANT_SCHEDULE_NAME_MAX_CHARS)),
+  /** Five-field cron (`min hour day month weekday`), validated by the console. */
+  cron: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
+  /** What future-you is asked to do; self-contained. */
+  prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSISTANT_SCHEDULE_PROMPT_MAX_CHARS)),
+  /** IANA zone, e.g. `Europe/Berlin`. Absent: the console's default (UTC). */
+  timezone: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))),
+  /** How long one run may take. Default {@link ASSISTANT_SCHEDULE_DEFAULT_MINUTES}. */
+  maxMinutes: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(ASSISTANT_SCHEDULE_MAX_MINUTES)),
+  ),
+});
+export type ManagerScheduleCreateInput = typeof ManagerScheduleCreateInput.Type;
+
+export const ManagerScheduleDeleteInput = Schema.Struct({
+  scheduleId: PositiveInt,
+});
+export type ManagerScheduleDeleteInput = typeof ManagerScheduleDeleteInput.Type;
+
+export const ManagerSchedule = Schema.Struct({
+  scheduleId: PositiveInt,
+  name: Schema.String,
+  cron: Schema.String,
+  timezone: Schema.NullOr(Schema.String),
+  prompt: Schema.String,
+  /** The console's state: `active`, `paused`, … */
+  state: Schema.NullOr(Schema.String),
+  nextRunAt: Schema.NullOr(Schema.String),
+  lastRunAt: Schema.NullOr(Schema.String),
+});
+export type ManagerSchedule = typeof ManagerSchedule.Type;
+
+export const ManagerScheduleListResult = Schema.Struct({
+  schedules: Schema.Array(ManagerSchedule),
+});
+export type ManagerScheduleListResult = typeof ManagerScheduleListResult.Type;
+
+export const ManagerScheduleDeleteResult = Schema.Struct({
+  deleted: Schema.Boolean,
+});
+export type ManagerScheduleDeleteResult = typeof ManagerScheduleDeleteResult.Type;
+
+/** Body of `POST /api/manager/assistant/scheduled-turn` (the CLI). */
+export const ManagerAssistantTurnInput = Schema.Struct({
+  prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSISTANT_SCHEDULE_PROMPT_MAX_CHARS)),
+  /** The schedule's name, shown to the assistant and the person. */
+  name: Schema.optional(
+    TrimmedNonEmptyString.check(Schema.isMaxLength(ASSISTANT_SCHEDULE_NAME_MAX_CHARS)),
+  ),
+  /** How long to wait for the answer. Default {@link ASSISTANT_SCHEDULE_DEFAULT_MINUTES} min. */
+  timeoutSec: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(ASSISTANT_SCHEDULE_MAX_MINUTES * 60)),
+  ),
+});
+export type ManagerAssistantTurnInput = typeof ManagerAssistantTurnInput.Type;
+
+export const ManagerAssistantTurnStatus = Schema.Literals([
+  /** The answer went to the person's chats. */
+  "delivered",
+  /** The assistant answered NO_REPLY: nothing to tell. */
+  "no_reply",
+  /** It answered, but no chat took the message (none linked / send failed). */
+  "undelivered",
+  /** Still running when the wait ran out. */
+  "timeout",
+]);
+export type ManagerAssistantTurnStatus = typeof ManagerAssistantTurnStatus.Type;
+
+export const ManagerAssistantTurnResult = Schema.Struct({
+  status: ManagerAssistantTurnStatus,
+  threadId: ThreadId,
+  delivered: NonNegativeInt,
+});
+export type ManagerAssistantTurnResult = typeof ManagerAssistantTurnResult.Type;

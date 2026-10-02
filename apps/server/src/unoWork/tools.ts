@@ -45,6 +45,12 @@ import type {
 import { clampUnoAgentAccessLevel } from "@t3tools/contracts";
 import { Data, Effect } from "effect";
 
+import {
+  IMAGE_PROMPT_MAX_CHARS,
+  IMAGE_SIZES,
+  saveGeneratedImage,
+  type GeneratedImage,
+} from "../assistants/imageGenerate.ts";
 import { liveSiteUrl } from "../files/sitePublish.ts";
 import { validateManifest } from "../machineApps/appManifest.ts";
 import { displayManifestDir } from "../machineApps/manifestDir.ts";
@@ -208,6 +214,16 @@ export interface UnoWorkToolDeps {
    */
   readonly console?: {
     readonly request: (input: ConsoleRequest) => Effect.Effect<ConsoleReply, UnoWorkToolError>;
+  };
+  /**
+   * Pictures from the Uno gateway (`POST /v1/images/generations`) with the
+   * harness key. Absent (tests, older wiring): `image_generate` says so.
+   */
+  readonly images?: {
+    readonly generate: (input: {
+      readonly prompt: string;
+      readonly size?: string;
+    }) => Effect.Effect<GeneratedImage, UnoWorkToolError>;
   };
   /**
    * The person's connected tools (Google Drive, Gmail & Calendar, Notion,
@@ -1618,13 +1634,72 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       }),
   },
   {
-    name: "browser_command",
-    group: "person",
+    name: "image_generate",
+    group: "files",
     description:
-      "Drive the page open in this chat's right panel: state (URL, title, visible text), screenshot, click, clickText, type, press, navigate, reload, back, forward, evaluate. Prefer precise selectors/text; never print passwords or private fields. requestHelp (with `text`: what the person should do — sign in, captcha, 2FA code, a payment or a choice only they can make) hands the browser to the person and waits until they hand it back (default 10 min). On a new cloud computer the browser is set up on first use (~30–60 s): a reply saying it is being set up means do something else and retry after the given seconds.",
+      "Make a picture from a text description with Uno AI (works in any chat). Saves it in the chat's folder under images/ and shows it in the right panel; returns the file path to use next (e.g. in a site, a document, a post). Costs a little from the person's balance per picture: make one, look, then refine — no batches.",
     inputSchema: {
       type: "object",
       properties: {
+        prompt: {
+          type: "string",
+          maxLength: IMAGE_PROMPT_MAX_CHARS,
+          description: "What to draw: subject, style, colours, text on it (if any).",
+        },
+        size: { type: "string", enum: [...IMAGE_SIZES] },
+      },
+      required: ["prompt"],
+      additionalProperties: false,
+    },
+    level: "change",
+    approvalTitle: (args) => `Make a picture: ${(str(args, "prompt") ?? "").slice(0, 80)}`,
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        if (!deps.images) {
+          return yield* toolError("Picture generation isn't available in this Uno Work.");
+        }
+        const prompt = (str(args, "prompt") ?? "").trim();
+        if (prompt.length === 0) return yield* toolError("Describe the picture in prompt.");
+        const size = str(args, "size");
+        const image = yield* deps.images.generate({ prompt, ...(size ? { size } : {}) });
+        const folder = deps.caller.cwd ?? deps.home;
+        const file = yield* Effect.tryPromise({
+          try: () => saveGeneratedImage({ folder, prompt, image }),
+          catch: (cause) =>
+            toolError(
+              `The picture was made but could not be saved: ${cause instanceof Error ? cause.message : String(cause)}`,
+            ),
+        });
+        const opened = yield* deps
+          .bridge({ method: "POST", path: "/api/browser/open", body: { file } })
+          .pipe(
+            Effect.map((reply) => reply.status >= 200 && reply.status < 300),
+            Effect.orElseSucceed(() => false),
+          );
+        return {
+          ok: true,
+          path: file,
+          displayPath: displayPath(file, deps.home),
+          shownInPanel: opened,
+          ...(image.model ? { model: image.model } : {}),
+          ...(image.costUsd !== null ? { costUsd: image.costUsd } : {}),
+        };
+      }),
+  },
+  {
+    name: "browser_command",
+    group: "person",
+    description:
+      'Drive the page open in this chat\'s right panel: state (URL, title, visible text), screenshot, click, clickText, type, press, navigate, reload, back, forward, evaluate. Prefer precise selectors/text; never print passwords or private fields. requestHelp (with `text`: what the person should do — sign in, captcha, 2FA code, a payment or a choice only they can make) hands the browser to the person and waits until they hand it back (default 10 min). On a new cloud computer the browser is set up on first use (~30–60 s): a reply saying it is being set up means do something else and retry after the given seconds. To sign in to a site, pass only {"login": "<domain>"} (e.g. "x.com"): Uno fills the password the person saved in Uno Work itself — you never see it — and answers signed_in / not_signed_in / needs_help; with no saved password or a 2FA code the person is asked to finish. Never type passwords yourself.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        login: {
+          type: "string",
+          maxLength: 300,
+          description:
+            'Sign in to this site with the saved password, e.g. "x.com". Use alone, without command.',
+        },
         command: {
           type: "string",
           enum: [
@@ -1656,7 +1731,6 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         // requestHelp waits for a person; the harness gives a tool call 15 min.
         timeoutMs: { type: "integer", minimum: 0, maximum: 840000 },
       },
-      required: ["command"],
       additionalProperties: false,
     },
     // requestHelp only asks the person — it is its own approval.
@@ -1665,9 +1739,29 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         ? "safe"
         : "change",
     approvalTitle: (args) =>
-      `Browser: ${str(args, "command")} ${str(args, "url") ?? str(args, "selector") ?? str(args, "text") ?? ""}`.trim(),
-    run: (deps, args) =>
-      deps
+      str(args, "login") !== undefined
+        ? `Sign in to ${str(args, "login")} with your saved password`
+        : `Browser: ${str(args, "command")} ${str(args, "url") ?? str(args, "selector") ?? str(args, "text") ?? ""}`.trim(),
+    run: (deps, args) => {
+      const login = str(args, "login");
+      if (login !== undefined) {
+        if (Object.keys(args).some((key) => key !== "login" && key !== "timeoutMs")) {
+          return Effect.fail(toolError('Use {"login": "<domain>"} alone, without command.'));
+        }
+        return deps
+          .bridge({
+            method: "POST",
+            path: "/api/browser/login",
+            body: { site: login },
+            // Two fills + the person's help (10 min) + first browser setup.
+            timeoutMs: 600_000 + 60_000 + BROWSER_FIRST_USE_MS + 10_000,
+          })
+          .pipe(Effect.flatMap(bridgeOk));
+      }
+      if (str(args, "command") === undefined) {
+        return Effect.fail(toolError('Give a command, or {"login": "<domain>"} to sign in.'));
+      }
+      return deps
         .bridge({
           method: "POST",
           path: "/api/browser/command",
@@ -1690,7 +1784,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
               { type: "text", text: JSON.stringify({ ...(result as object), data: meta }) },
             ]);
           }),
-        ),
+        );
+    },
   },
   {
     name: "request_secret",

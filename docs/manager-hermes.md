@@ -84,8 +84,8 @@ WantedBy=multi-user.target
 Ко-локация = loopback, наружу MCP не торчит. Для удалённого демона — существующие
 SSH-туннели/`AdvertisedEndpoint`, не открывать порт в интернет.
 
-Доступные тулы: `list_threads`, `get_thread_status`, `read_thread_detail`,
-`list_pending_approvals`, `create_thread`, `send_turn`, `interrupt_turn`,
+Доступные тулы: `list_threads`, `get_thread_status`, `wait_for_thread`,
+`wait_for_threads`, `read_thread_detail`, `list_pending_approvals`, `create_thread`, `send_turn`, `interrupt_turn`,
 `respond_to_request`, `list_proposals`, `resolve_proposal`.
 
 ## 4. Telegram + голос

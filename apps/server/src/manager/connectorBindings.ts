@@ -432,6 +432,10 @@ export interface ResolveNotifyChatsInput {
 
 const chatKey = (kind: ManagerConnectorBindingKind, chatId: string): string => `${kind}:${chatId}`;
 
+/** Slack DM conversation ids start with `D` (channels `C`, private groups `G`). */
+export const isSlackDirectMessageId = (channelId: string): boolean =>
+  /^D[A-Z0-9]+$/.test(channelId);
+
 const chatFromBinding = (
   binding: ManagerConnectorBinding,
   via: ResolvedNotifyChat["via"],
@@ -498,6 +502,11 @@ export const resolveNotifyChats = (
       continue;
     }
     for (const chatId of connector.allowedChatIds) {
+      // Slack: only the owner's direct messages count as "their own chat";
+      // an allowlisted channel is shared with other people.
+      if (connector.kind === "slack" && !isSlackDirectMessageId(chatId)) {
+        continue;
+      }
       if (!bound.has(chatKey(connector.kind, chatId))) {
         push({
           kind: connector.kind,

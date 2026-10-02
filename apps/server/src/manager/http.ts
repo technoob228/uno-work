@@ -22,6 +22,7 @@ import {
   ChannelNotifyInput,
   isAssistantProjectId,
   ManagerAssistantAccessInput,
+  ManagerAssistantTurnInput,
   ManagerConnectorBindingRemoveInput,
   ManagerConnectorBindingUpsertInput,
   ManagerCreateAssistantInput,
@@ -65,6 +66,8 @@ import {
 } from "./channelSetup.ts";
 import { readWorkMachineIdentity } from "./workConsole.ts";
 import { ConnectorNotifyService } from "./Services/ConnectorNotify.ts";
+import { AssistantScheduledTurns } from "../assistants/scheduledTurn.ts";
+import { AssistantSchedules } from "../assistants/schedules.ts";
 import { handleManagerMcpMessage } from "./mcp.ts";
 import { ManagerApprovalService } from "./Services/ManagerApprovalService.ts";
 import { ManagerTokenAuthService } from "./Services/ManagerTokenAuth.ts";
@@ -131,11 +134,62 @@ export const managerMcpRouteLayer = HttpRouter.add(
       );
     }
 
-    const outcome = yield* handleManagerMcpMessage(toolService, caller, body);
+    const schedules = Option.getOrUndefined(yield* Effect.serviceOption(AssistantSchedules));
+    const outcome = yield* handleManagerMcpMessage(
+      toolService,
+      caller,
+      body,
+      schedules ? { schedules } : {},
+    );
     if (outcome.kind === "accepted") {
       return HttpServerResponse.empty({ status: 202 });
     }
     return HttpServerResponse.jsonUnsafe(outcome.body, { status: 200 });
+  }),
+);
+
+/**
+ * `uno-work assistant-turn` (the CLI a console schedule runs after waking the
+ * computer): one turn of the token's assistant, answered to its chats. The
+ * assistant comes from the token (`assistant:<projectId>`), never the body.
+ * Blocks until the answer (or the timeout): the console puts the computer
+ * back to sleep as soon as the command exits.
+ */
+export const managerAssistantScheduledTurnRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/scheduled-turn",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const tokenAuth = yield* ManagerTokenAuthService;
+    const caller = yield* tokenAuth
+      .authenticate(request.headers["authorization"])
+      .pipe(Effect.option);
+    if (Option.isNone(caller)) {
+      return yield* respondUnauthorized;
+    }
+    const turns = yield* Effect.serviceOption(AssistantScheduledTurns);
+    if (Option.isNone(turns)) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: "Scheduled turns are not available in this Uno Work." },
+        { status: 501 },
+      );
+    }
+    const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
+    const input = Schema.decodeUnknownOption(ManagerAssistantTurnInput)(body);
+    if (Option.isNone(input)) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: "Expected {prompt, name?, timeoutSec?}." },
+        { status: 400 },
+      );
+    }
+    return yield* turns.value.run(caller.value, input.value).pipe(
+      Effect.map((result) => HttpServerResponse.jsonUnsafe(result, { status: 200 })),
+      Effect.catch((error) =>
+        Effect.succeed(
+          HttpServerResponse.jsonUnsafe({ error: error.message }, { status: error.status }),
+        ),
+      ),
+    );
   }),
 );
 

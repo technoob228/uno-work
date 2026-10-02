@@ -60,6 +60,10 @@ import {
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { withUserLocalBinOnPath } from "../setup/harnessProcess.ts";
+import {
+  ASSISTANT_COMPUTER_ROLE,
+  makeOwnComputerRoleReader,
+} from "../../assistants/computerRole.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("hermes");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
@@ -223,6 +227,11 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
                 : {}),
             };
 
+      // An assistant's own computer: every Hermes on it stays off the public
+      // skill hubs (assistants/skillHubLock.ts). The role is read once from
+      // the console and cached; unknown reads as "not an assistant".
+      const readComputerRole = makeOwnComputerRoleReader();
+
       const adapter = yield* makeHermesAdapter(effectiveConfig, {
         environment: processEnv,
         bridgeEnvironment: (context) => ({
@@ -241,6 +250,13 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
               bridgeEnvironment: browserBridge.scopedEnvironment(context),
               custom: customMcpServers(),
             }),
+          ),
+        lockSkillHub: () =>
+          serverSettingsService.getSettings.pipe(
+            Effect.map((settings) => settings.uno),
+            Effect.orElseSucceed(() => null),
+            Effect.flatMap((uno) => Effect.promise(() => readComputerRole(uno))),
+            Effect.map((role) => role === ASSISTANT_COMPUTER_ROLE),
           ),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,

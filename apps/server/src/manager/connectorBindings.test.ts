@@ -315,6 +315,25 @@ describe("resolveNotifyChats", () => {
     ]);
   });
 
+  it("falls back to the owner's Slack DMs only, never to shared Slack channels", () => {
+    const chats = resolveNotifyChats({
+      bindings: [],
+      connectors: [
+        {
+          kind: "slack" as const,
+          projectId: assistantId,
+          allowedChatIds: ["C0CHANNEL", "D0OWNERDM", "G0PRIVATE"],
+        },
+      ],
+      threadId: null,
+      projectId: assistantId,
+      includeAssistantFallback: true,
+    });
+    expect(chats.map((chat) => [chat.kind, chat.chatId, chat.via])).toEqual([
+      ["slack", "D0OWNERDM", "assistant"],
+    ]);
+  });
+
   it("scopes the fallback to the assistant the subject lives in", () => {
     const otherAssistant = ProjectId.make("assistant-other");
     const chats = resolveNotifyChats({
