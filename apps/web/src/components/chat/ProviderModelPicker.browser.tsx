@@ -1,3 +1,6 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import { setDevMode } from "../../devMode";
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { EnvironmentId } from "@t3tools/contracts";
 import { createModelCapabilities } from "@t3tools/shared/model";
@@ -260,6 +263,15 @@ function buildOpenCodeProvider(models: ServerProvider["models"]): ServerProvider
   };
 }
 
+/**
+ * The picker reads the account's AI status through react-query (useAiStatus).
+ * A fresh client per mount, no retries: the status simply stays unknown here.
+ */
+function withQueryClient(node: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return <QueryClientProvider client={client}>{node}</QueryClientProvider>;
+}
+
 async function mountPicker(props: {
   activeInstanceId?: ProviderInstanceId;
   model: string;
@@ -274,22 +286,27 @@ async function mountPicker(props: {
   const onInstanceModelChange = vi.fn();
   const providers = props.providers ?? TEST_PROVIDERS;
   const activeInstanceId = props.activeInstanceId ?? CODEX_INSTANCE_ID;
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const renderPicker = (currentProviders: ReadonlyArray<ServerProvider>) => (
-    <ProviderModelPicker
-      activeInstanceId={activeInstanceId}
-      model={props.model}
-      lockedProvider={props.lockedProvider}
-      lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
-      instanceEntries={sortProviderInstanceEntries(deriveProviderInstanceEntries(currentProviders))}
-      modelOptionsByInstance={getCustomModelOptionsByInstance(
-        props.settings ?? DEFAULT_UNIFIED_SETTINGS,
-        currentProviders,
-        activeInstanceId,
-        props.model,
-      )}
-      triggerVariant={props.triggerVariant}
-      onInstanceModelChange={onInstanceModelChange}
-    />
+    <QueryClientProvider client={queryClient}>
+      <ProviderModelPicker
+        activeInstanceId={activeInstanceId}
+        model={props.model}
+        lockedProvider={props.lockedProvider}
+        lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
+        instanceEntries={sortProviderInstanceEntries(
+          deriveProviderInstanceEntries(currentProviders),
+        )}
+        modelOptionsByInstance={getCustomModelOptionsByInstance(
+          props.settings ?? DEFAULT_UNIFIED_SETTINGS,
+          currentProviders,
+          activeInstanceId,
+          props.model,
+        )}
+        triggerVariant={props.triggerVariant}
+        onInstanceModelChange={onInstanceModelChange}
+      />
+    </QueryClientProvider>
   );
   const screen = await render(renderPicker(providers), { container: host });
 
@@ -362,6 +379,10 @@ function getSidebarProviderOrder() {
 
 describe("ProviderModelPicker", () => {
   beforeEach(async () => {
+    // These tests drive the full picker (provider sidebar, search, favorites,
+    // install and sign-in panes). Since the simple picker (Smart / Fast /
+    // Premium) became the default, the full one opens only in Dev mode.
+    setDevMode(true);
     // Reset test environment before each test
     resetModelPickerFilterStoreForTests();
     await __resetLocalApiForTests();
@@ -372,6 +393,7 @@ describe("ProviderModelPicker", () => {
 
   afterEach(async () => {
     document.body.innerHTML = "";
+    setDevMode(false);
     resetModelPickerFilterStoreForTests();
     await __resetLocalApiForTests();
   });
@@ -647,14 +669,16 @@ describe("ProviderModelPicker", () => {
       deriveProviderInstanceEntries(TEST_PROVIDERS),
     );
     const screen = await render(
-      <ProviderModelPicker
-        activeInstanceId={"claudeAgent" as ProviderInstanceId}
-        model="gpt-5-codex"
-        lockedProvider={null}
-        instanceEntries={instanceEntries}
-        modelOptionsByInstance={modelOptionsByInstance}
-        onInstanceModelChange={onInstanceModelChange}
-      />,
+      withQueryClient(
+        <ProviderModelPicker
+          activeInstanceId={"claudeAgent" as ProviderInstanceId}
+          model="gpt-5-codex"
+          lockedProvider={null}
+          instanceEntries={instanceEntries}
+          modelOptionsByInstance={modelOptionsByInstance}
+          onInstanceModelChange={onInstanceModelChange}
+        />,
+      ),
       { container: host },
     );
 
