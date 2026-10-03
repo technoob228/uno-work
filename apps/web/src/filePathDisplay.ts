@@ -21,6 +21,9 @@ function stripRelativePrefixes(path: string): string {
   return path.replace(/^\.\/+/, "").replace(/^\/+/, "");
 }
 
+/** `/home/<user>` or `/Users/<user>` at the start of an absolute path. */
+const UNIX_HOME_PREFIX = /^\/(?:home|Users)\/[^/]+(?=\/|$)/;
+
 export function formatWorkspaceRelativePath(
   pathWithPosition: string,
   workspaceRoot: string | undefined,
@@ -50,6 +53,14 @@ export function formatWorkspaceRelativePath(
         ? normalizedPath
         : `${workspaceLabel}/${relativePath}`;
     }
+  }
+
+  // Not inside the workspace (or the chat has none): a path in the person's
+  // home reads `~/projects/site/index.html`, the way Files and the agent's
+  // own words spell it — not `/home/unowork/projects/…` in one row and
+  // `~/projects/…` in the next.
+  if (displayPath === normalizedPath) {
+    displayPath = displayPath.replace(UNIX_HOME_PREFIX, "~");
   }
 
   if (!line) return displayPath;
