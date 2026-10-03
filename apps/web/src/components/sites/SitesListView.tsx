@@ -7,8 +7,8 @@
  * - Sites: the person's sites on Uno Hosting, read by this computer's daemon
  *   (`uno.sites.list`, the console's `/api/v1/work/sites` with the machine's
  *   token), so it works on the computer's direct address too. Each site: its
- *   address, "Live", Open, Copy link, "Change with Uno", a lock when it has a
- *   password, "Made in chat …" (one click back to the chat that published
+ *   address, who can open it ("Live" or "Password" with a lock), Open, Copy
+ *   link, "Change with Uno", "Made in chat …" (one click back to the chat that published
  *   it, when it was made on this computer) and Unpublish (asks first; the
  *   person's own Uno session takes it down — `unpublishSite.ts`).
  *
@@ -61,6 +61,7 @@ import {
   changeSitePrompt,
   siteRows,
   updatedAgo,
+  siteStatus,
   type SiteRow,
 } from "./sitesModel";
 
@@ -331,6 +332,7 @@ function SiteItem({
   onUnpublish: () => void;
 }) {
   const ago = updatedAgo(row.updatedAt);
+  const status = siteStatus(row);
   return (
     <li
       className="flex min-w-0 items-center gap-3 rounded-xl border border-border/80 bg-card px-3 py-2.5"
@@ -340,9 +342,6 @@ function SiteItem({
       <div className="min-w-0 flex-1 leading-tight">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="truncate text-sm font-medium">{row.host}</span>
-          {row.hasPassword ? (
-            <LockIcon className="size-3 shrink-0 text-muted-foreground" aria-label="Password" />
-          ) : null}
         </div>
         <div className="truncate text-[11px] text-muted-foreground">
           {[row.hasPassword ? "Password-protected" : "Public", ago ? `updated ${ago}` : null]
@@ -374,9 +373,16 @@ function SiteItem({
       </div>
       <span
         data-testid="site-status"
-        className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400"
+        title={status.locked ? "Opens only with its password" : "Anyone with the link can open it"}
+        className={cn(
+          "flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+          status.locked
+            ? "bg-muted text-muted-foreground"
+            : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+        )}
       >
-        Live
+        {status.locked ? <LockIcon className="size-3 shrink-0" /> : null}
+        {status.label}
       </span>
       <Button size="xs" variant="ghost" onClick={onChange} title="Change it with Uno">
         <SparklesIcon />

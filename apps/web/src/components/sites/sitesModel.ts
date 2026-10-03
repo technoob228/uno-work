@@ -38,6 +38,18 @@ export function siteRows(sites: ReadonlyArray<UnoWorkSite>): SiteRow[] {
     .toSorted((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
 }
 
+/**
+ * The pill on a site's row. Every listed site is on the internet, so one
+ * "Live" on each row said nothing: the pill tells who can open it — anyone
+ * ("Live") or only people with the password ("Password").
+ */
+export function siteStatus(row: Pick<SiteRow, "hasPassword">): {
+  readonly label: "Live" | "Password";
+  readonly locked: boolean;
+} {
+  return row.hasPassword ? { label: "Password", locked: true } : { label: "Live", locked: false };
+}
+
 /** "2 hours ago", "3 days ago", "just now"; null when unknown. */
 export function updatedAgo(iso: string | null, now = Date.now()): string | null {
   if (!iso) return null;

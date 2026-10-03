@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { changeSitePrompt, parseAppsSitesSearch, siteRows, updatedAgo } from "./sitesModel";
+import {
+  changeSitePrompt,
+  parseAppsSitesSearch,
+  siteRows,
+  siteStatus,
+  updatedAgo,
+} from "./sitesModel";
 
 describe("sites screen model", () => {
+  it("the status pill says who can open the site, not the same word on every row", () => {
+    expect(siteStatus({ hasPassword: false })).toEqual({ label: "Live", locked: false });
+    expect(siteStatus({ hasPassword: true })).toEqual({ label: "Password", locked: true });
+  });
+
   it("lists newest first with a readable address", () => {
     const rows = siteRows([
       {
