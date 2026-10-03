@@ -82,6 +82,15 @@ export function HarnessSignInPanel({
   const succeeded = job?.state === "succeeded";
   const failed = job?.state === "failed";
 
+  const [linkCopied, setLinkCopied] = useState(false);
+  const copyLink = () => {
+    if (!job?.verificationUrl) return;
+    void navigator.clipboard
+      ?.writeText(job.verificationUrl)
+      .then(() => setLinkCopied(true))
+      .catch(() => setLinkCopied(false));
+  };
+
   const copyCode = () => {
     if (!job?.userCode) return;
     void navigator.clipboard
@@ -100,14 +109,28 @@ export function HarnessSignInPanel({
       ) : job?.method === "oauth" && (active || failed) ? (
         <div className="flex flex-col gap-3">
           {job.verificationUrl ? (
-            <button
-              type="button"
-              onClick={() => openInstallDocs(job.verificationUrl!)}
-              className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-left text-sm font-medium text-primary hover:bg-primary/10"
-            >
-              <ExternalLink className="size-4 shrink-0" />
-              <span className="min-w-0 break-all">{job.verificationUrl}</span>
-            </button>
+            // The link itself is six lines of OAuth parameters: a button to
+            // open it and one to copy it, the address stays folded away.
+            <div className="flex flex-col gap-1.5" data-testid="harness-sign-in-link">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" onClick={() => openInstallDocs(job.verificationUrl!)}>
+                  <ExternalLink className="mr-1 size-3.5" />
+                  Open sign-in page
+                </Button>
+                <Button size="sm" variant="outline" onClick={copyLink}>
+                  <Copy className="mr-1 size-3" />
+                  {linkCopied ? "Copied" : "Copy link"}
+                </Button>
+              </div>
+              <details className="text-[11px] text-muted-foreground">
+                <summary className="cursor-pointer select-none hover:text-foreground">
+                  Show the link
+                </summary>
+                <p className="mt-1 break-all font-mono text-[10px] leading-4">
+                  {job.verificationUrl}
+                </p>
+              </details>
+            </div>
           ) : null}
 
           {job.userCode ? (
