@@ -22,6 +22,7 @@ import type {
 } from "@t3tools/contracts";
 import { Context, Data, Effect, Layer } from "effect";
 
+import { retryWhileWorkMachineStarts } from "@t3tools/shared/unoCloud";
 import { ServerSettingsService } from "../serverSettings.ts";
 import {
   isTerminalUnoBoxCreateJobState,
@@ -245,9 +246,20 @@ const makeUnoCloudService = Effect.gen(function* () {
       if (apiKey.length === 0) {
         return yield* new UnoCloudFetchError({ message: NOT_LINKED_MESSAGE });
       }
-      const raw = yield* fetchJson(`/api/v1/boxes/${input.boxId}/work/session`, apiKey, {
-        method: "POST",
-        body: "{}",
+      // A computer that was just created or woken answers "still starting":
+      // wait for it instead of failing the person's click.
+      const raw = yield* Effect.tryPromise({
+        try: () =>
+          retryWhileWorkMachineStarts(() =>
+            fetchControlPlaneJson(apiKey, `/api/v1/boxes/${input.boxId}/work/session`, {
+              method: "POST",
+              body: "{}",
+            }),
+          ),
+        catch: (cause) =>
+          new UnoCloudFetchError({
+            message: cause instanceof Error ? cause.message : String(cause),
+          }),
       });
       const connection = parseUnoBoxConnection(raw, input.boxId);
       if (!connection) {

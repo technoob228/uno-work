@@ -111,3 +111,48 @@ export class ControlPlaneHttpError extends Error {
     this.status = status;
   }
 }
+
+/**
+ * What the console answers while a computer boots or wakes:
+ * `409 WORK_MACHINE_STARTING` with `Retry-After: 3`.
+ */
+export const WORK_MACHINE_STARTING_CODE = "WORK_MACHINE_STARTING";
+export const WORK_MACHINE_STARTING_RETRY_MS = 3_000;
+/** How long a "connect" waits for the computer before it gives up. */
+export const WORK_MACHINE_STARTING_WAIT_MS = 60_000;
+export const WORK_MACHINE_STILL_STARTING_MESSAGE =
+  "The computer is still starting. Try again in a moment.";
+
+export function isWorkMachineStartingError(cause: unknown): boolean {
+  const message = cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "";
+  return message.includes(WORK_MACHINE_STARTING_CODE);
+}
+
+/**
+ * Connecting to a computer that was just created or woken: the console says
+ * "still starting, retry shortly", so wait and ask again instead of showing
+ * the person an error they would fix by pressing the same button. Any other
+ * failure goes out at once; after the wait the person gets plain words.
+ */
+export async function retryWhileWorkMachineStarts<T>(
+  call: () => Promise<T>,
+  deps: {
+    readonly sleep?: (ms: number) => Promise<void>;
+    readonly now?: () => number;
+  } = {},
+): Promise<T> {
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
+  const now = deps.now ?? Date.now;
+  const deadline = now() + WORK_MACHINE_STARTING_WAIT_MS;
+  for (;;) {
+    try {
+      return await call();
+    } catch (cause) {
+      if (!isWorkMachineStartingError(cause)) throw cause;
+      if (now() + WORK_MACHINE_STARTING_RETRY_MS > deadline) {
+        throw new Error(WORK_MACHINE_STILL_STARTING_MESSAGE, { cause });
+      }
+      await sleep(WORK_MACHINE_STARTING_RETRY_MS);
+    }
+  }
+}

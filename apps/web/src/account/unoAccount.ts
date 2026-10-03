@@ -31,6 +31,7 @@ import {
   asString,
   parseUnoBoxConnection,
   parseUnoBoxList,
+  retryWhileWorkMachineStarts,
 } from "@t3tools/shared/unoCloud";
 import {
   isTerminalUnoBoxCreateJobState,
@@ -191,7 +192,11 @@ export const interfaceUnoCloud = {
     return loadState();
   },
   connectBox: async (input: UnoCloudConnectBoxInput): Promise<UnoBoxConnection> => {
-    const raw = await accountRequest("POST", `/api/v1/boxes/${input.boxId}/work/session`, {});
+    // A computer that was just created or woken answers "still starting":
+    // wait for it instead of failing the person's click.
+    const raw = await retryWhileWorkMachineStarts(() =>
+      accountRequest("POST", `/api/v1/boxes/${input.boxId}/work/session`, {}),
+    );
     const connection = parseUnoBoxConnection(raw, input.boxId);
     if (!connection) throw new Error("Uno did not return a link to this computer.");
     return connection;
