@@ -13,6 +13,7 @@ import {
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
+import { useDevMode } from "../../devMode";
 import { describeHandoffSeed, isHandoffSeed } from "../../continueOnMachine";
 import { isUnoAiHandoff } from "../../unoai/unoAiHandoff";
 import { UnoAiHandoffCard } from "./UnoAiHandoffCard";
@@ -1121,6 +1122,10 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       : rawPreview;
   const rawCommand = workEntryRawCommand(workEntry);
   const displayText = preview ? `${heading} - ${preview}` : heading;
+  // What the tool got and returned: for people who asked to see it (Dev mode).
+  const devMode = useDevMode();
+  const [rawOpen, setRawOpen] = useState(false);
+  const hasRaw = devMode && Boolean(workEntry.rawInput || workEntry.rawResult);
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
 
@@ -1199,7 +1204,31 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
             </Tooltip>
           )}
         </div>
+        {hasRaw && (
+          <button
+            type="button"
+            className="shrink-0 rounded px-1 text-[10px] text-muted-foreground/55 transition-colors hover:bg-accent hover:text-foreground"
+            aria-expanded={rawOpen}
+            data-testid="work-entry-raw-toggle"
+            onClick={() => setRawOpen((open) => !open)}
+          >
+            {rawOpen ? "Hide raw" : "Raw"}
+          </button>
+        )}
       </div>
+      {hasRaw && rawOpen && (
+        <pre
+          className="mt-1 ml-6 max-h-64 overflow-auto rounded-md border border-border/55 bg-background/75 px-2 py-1.5 font-mono text-[10px] leading-4 whitespace-pre-wrap wrap-break-word text-muted-foreground"
+          data-testid="work-entry-raw"
+        >
+          {[
+            workEntry.rawInput ? `Input\n${workEntry.rawInput}` : null,
+            workEntry.rawResult ? `Result\n${workEntry.rawResult}` : null,
+          ]
+            .filter((part) => part !== null)
+            .join("\n\n")}
+        </pre>
+      )}
       {hasChangedFiles && !previewIsChangedFiles && (
         <div className="mt-1 flex flex-wrap gap-1 pl-6">
           {workEntry.changedFiles?.slice(0, 4).map((filePath) => {

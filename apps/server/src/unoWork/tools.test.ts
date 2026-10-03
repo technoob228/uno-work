@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type { RuntimeMode, ServerSettings, UnoMachineApp } from "@t3tools/contracts";
+import { describeToolActivity } from "@t3tools/shared/toolResultPresentation";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -1349,5 +1350,45 @@ describe("browser_command login", () => {
     );
     expect((await run("browser_command", deps, {}))._tag).toBe("Failure");
     expect(recorded.bridge).toEqual([]);
+  });
+});
+
+describe("the chat feed tells every uno-work tool in plain words", () => {
+  // The harnesses name the tool differently; the feed never shows these ids.
+  const ids = (name: string) => [
+    `uno-work_${name}`,
+    `mcp__uno-work__${name}`,
+    `mcp__uno_work__${name}`,
+    `mcp_uno_work_${name}`,
+  ];
+
+  it("has a line for each tool while it runs, when it is done and when it failed", () => {
+    for (const tool of UNO_WORK_TOOLS) {
+      for (const id of ids(tool.name)) {
+        const running = describeToolActivity({
+          summary: id,
+          kind: "tool.updated",
+          payload: { status: "inProgress" },
+        });
+        const done = describeToolActivity({
+          summary: id,
+          kind: "tool.completed",
+          payload: { status: "completed", detail: "{}" },
+        });
+        const failed = describeToolActivity({
+          summary: id,
+          kind: "tool.completed",
+          payload: { status: "failed", detail: "Something went wrong." },
+        });
+        for (const human of [running, done, failed]) {
+          expect(human, `${id} has no line`).toBeDefined();
+          expect(human!.label, id).not.toMatch(/_|[{}<>]|\bmcp\b/i);
+          // Its own wording, not the tool id turned into words.
+          expect(human!.label.toLowerCase(), id).not.toBe(tool.name.replace(/_/g, " "));
+        }
+        expect(running!.label, id).toMatch(/…$/);
+        expect(failed!.failed, id).toBe(true);
+      }
+    }
   });
 });

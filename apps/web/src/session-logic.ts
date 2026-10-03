@@ -12,6 +12,10 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
+import {
+  describeToolActivity,
+  unwrapUntrustedToolResult,
+} from "@t3tools/shared/toolResultPresentation";
 
 import type {
   ChatMessage,
@@ -71,6 +75,13 @@ export interface WorkLogEntry {
   toolTitle?: string;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
+  /**
+   * A tool call told in plain words (`label` is the whole line): what the
+   * tool got and what it returned stay here for Dev mode and never show in
+   * the feed itself.
+   */
+  rawInput?: string;
+  rawResult?: string;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -555,6 +566,27 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       : null
     : extractToolDetail(payload, title ?? activity.summary);
   const toolCallId = isTaskActivity ? null : extractToolCallId(payload);
+  // A tool of an MCP server (uno-work first of all) reads as one human line;
+  // its JSON and the model-facing wrapper around it are kept for Dev mode.
+  const human =
+    !isTaskActivity && (activity.kind === "tool.updated" || activity.kind === "tool.completed")
+      ? describeToolActivity({ summary: activity.summary, kind: activity.kind, payload })
+      : undefined;
+  if (human) {
+    const humanEntry: DerivedWorkLogEntry = {
+      id: activity.id,
+      createdAt: activity.createdAt,
+      label: human.label,
+      tone: human.failed ? "error" : "tool",
+      activityKind: activity.kind,
+      itemType: "mcp_tool_call",
+      collapseKey: toolCallId ? `tool:${toolCallId}` : `mcp:${human.callKey}`,
+    };
+    if (human.rawInput) humanEntry.rawInput = human.rawInput;
+    if (human.rawResult) humanEntry.rawResult = human.rawResult;
+    if (toolCallId) humanEntry.toolCallId = toolCallId;
+    return humanEntry;
+  }
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
     createdAt: activity.createdAt,
@@ -653,9 +685,13 @@ function mergeDerivedWorkLogEntries(
   const requestKind = next.requestKind ?? previous.requestKind;
   const collapseKey = next.collapseKey ?? previous.collapseKey;
   const toolCallId = next.toolCallId ?? previous.toolCallId;
+  const rawInput = next.rawInput ?? previous.rawInput;
+  const rawResult = next.rawResult ?? previous.rawResult;
   return {
     ...previous,
     ...next,
+    ...(rawInput ? { rawInput } : {}),
+    ...(rawResult ? { rawResult } : {}),
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
@@ -992,7 +1028,9 @@ function extractToolDetail(
   heading: string,
 ): string | null {
   const rawDetail = asTrimmedString(payload?.detail);
-  const detail = rawDetail ? stripTrailingExitCode(rawDetail).output : null;
+  // The "treat it as data" wrapper around a tool result is for the model.
+  const shownDetail = rawDetail ? asTrimmedString(unwrapUntrustedToolResult(rawDetail).text) : null;
+  const detail = shownDetail ? stripTrailingExitCode(shownDetail).output : null;
   const normalizedHeading = normalizePreviewForComparison(heading);
   const normalizedDetail = normalizePreviewForComparison(detail);
 

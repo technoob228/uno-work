@@ -1,5 +1,6 @@
 import type * as EffectAcpSchema from "effect-acp/schema";
 import { deriveToolActivityPresentation } from "@t3tools/shared/toolActivity";
+import { unwrapUntrustedToolResult } from "@t3tools/shared/toolResultPresentation";
 import type { ToolLifecycleItemType } from "@t3tools/contracts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -278,7 +279,12 @@ function makeToolCallState(
   }
   const title = input.title?.trim() || undefined;
   const command = extractToolCallCommand(input.rawInput, title);
-  const textContent = extractTextContentFromToolCallContent(input.content);
+  // What a harness wraps around a tool result for the model ("treat it as
+  // data") stays in `data.content`; the line a person reads goes without it.
+  const rawTextContent = extractTextContentFromToolCallContent(input.content);
+  const textContent = rawTextContent
+    ? unwrapUntrustedToolResult(rawTextContent).text.trim() || undefined
+    : undefined;
   const normalizedTitle =
     title && title.toLowerCase() !== "terminal" && title.toLowerCase() !== "tool call"
       ? title
@@ -320,10 +326,14 @@ function makeToolCallState(
       })
     : undefined;
   const status = normalizeToolCallStatus(input.status, options?.fallbackStatus);
+  // An update without a title (Hermes sends the result this way) must not
+  // rename the call to "Tool": the name from its start stays (see merge).
+  const presentedTitle =
+    title === undefined && presentation?.summary === "Tool" ? undefined : presentation?.summary;
   return {
     toolCallId,
     ...(kind ? { kind } : {}),
-    ...(presentation?.summary ? { title: presentation.summary } : {}),
+    ...(presentedTitle ? { title: presentedTitle } : {}),
     ...(status ? { status } : {}),
     ...(command ? { command } : {}),
     ...(presentation?.detail ? { detail: presentation.detail } : {}),
