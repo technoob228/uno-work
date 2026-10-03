@@ -158,6 +158,7 @@ describe("buildHermesConfigYaml", () => {
         "agent:",
         "  api_max_retries: 8",
         "  intent_ack_continuation: true",
+        "  verify_on_stop: false",
         "model:",
         '  provider: "openai-api"',
         '  default: "anthropic/claude-haiku-4.5"',
@@ -203,6 +204,9 @@ describe("buildHermesConfigYaml", () => {
     const yaml = buildHermesConfigYaml({ model: "openai/gpt-5.5", mcpServers: [] });
     expect(yaml).toContain("api_max_retries: 8");
     expect(yaml).toContain("intent_ack_continuation: true");
+    // Hermes' verify-before-stop guard is what made a bot turn 7–9 minutes
+    // and leaked "hermes-verify-" / "fresh evidence" to the person.
+    expect(yaml).toContain("verify_on_stop: false");
   });
 });
 

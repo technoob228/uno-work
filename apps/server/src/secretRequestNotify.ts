@@ -19,8 +19,14 @@ import { ConnectorNotifyService } from "./manager/Services/ConnectorNotify.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 
-/** How long the call waits while a window is open (below Hermes' 300 s HTTP read limit). */
-export const SECRET_REQUEST_SYNC_WAIT_MS = 240_000;
+/**
+ * How long the call waits while a window is open (below Hermes' 300 s HTTP
+ * read limit). It was 4 min: a person who said "I'll give the token later"
+ * watched a chat that stood still for all of it (validator, 0.0.106). The
+ * request stays open after that and the answer comes back as a message, so a
+ * shorter wait loses nothing; `wait: false` of `request_secret` skips it.
+ */
+export const SECRET_REQUEST_SYNC_WAIT_MS = 90_000;
 /** How long an unanswered request stays open for the person. */
 export const SECRET_REQUEST_HOLD_MS = 7 * 24 * 3_600_000;
 

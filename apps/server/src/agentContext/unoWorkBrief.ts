@@ -33,7 +33,11 @@ export const UNO_WORK_TASK_RULES = `## Doing the task
 - Finish every task (not a quick answer) with a short summary for the person, in their language and plain words, never a raw log, diff or test output:
   - **Done:** what you did and the result.
   - **Checked:** how you know it works.
-  - **Your call:** what they need to decide or do, or "nothing".`;
+  - **Your call:** what they need to decide or do, or "nothing".
+- Check your result once, the simplest way that shows it works (one command, or one tool call: after \`app_register\`, \`apps_list\` shows the app). One check is enough: don't repeat it "to be sure", don't write a test script for a small job.
+- Before a step that takes a while, say what you are doing in one short line ("Checking the bot starts…"). Never end a turn on a promise ("Let me verify…"): do it, then answer.
+- How you check is your business: never mention temporary files, checking scripts, system messages or what the workspace "wants" to the person.
+- If the person will give a key or token later, call \`request_secret\` with \`wait: false\`, finish everything else and end the turn; their answer comes back to this chat.`;
 
 /** The brief plus {@link UNO_WORK_TASK_RULES}. */
 export function buildUnoWorkBriefWithTaskRules(): string {

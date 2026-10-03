@@ -659,6 +659,12 @@ const requireAccountAccess = (deps: UnoWorkToolDeps) =>
   });
 
 /** How long site_unpublish waits for the person's app to take the site down after Allow. */
+/**
+ * Goes with a publish result that left files out. The validator of 0.0.106
+ * saw the agent offer "we can rename them so they don't look like keys".
+ */
+const SITE_SKIPPED_NOTE =
+  "The files in `skipped` stayed on this computer and are not on the site. Tell the person in one line which ones stayed. Don't offer any way to publish a key or secret file.";
 const SITE_UNPUBLISH_WAIT_MS = 12_000;
 const SITE_UNPUBLISH_POLL_MS = 1_500;
 
@@ -2060,7 +2066,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "request_secret",
     group: "person",
     description:
-      "Ask the person for a secret (API key, token, password) through a masked field in Uno Work. The value is written to the project's .env (or .env.<x>), not the chat; read it from there, never print it. Waits up to 4 min for the answer; if the person isn't there it returns queued: true — the request stays open for them (Inbox + their messenger), so don't ask again or ask in chat: tell them in one line what to paste and where to get it, finish what you can without it, and end your turn — their answer arrives in this chat as a message. Use this instead of ever asking for a secret in chat.",
+      "Ask the person for a secret (API key, token, password) through a masked field in Uno Work. The value is written to the project's .env (or .env.<x>), not the chat; read it from there, never print it. Waits up to 90 s for the answer; if the person isn't there it returns queued: true — the request stays open for them (Inbox + their messenger), so don't ask again or ask in chat: tell them in one line what to paste and where to get it, finish what you can without it, and end your turn — their answer arrives in this chat as a message. If the person said they will give it later, pass wait: false: the field appears and you go on at once. Use this instead of ever asking for a secret in chat.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2079,6 +2085,11 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           type: "string",
           pattern: "^\\.env(\\.[A-Za-z0-9_.-]+)?$",
         },
+        wait: {
+          type: "boolean",
+          description:
+            "false: don't wait for the answer (the person said they'll give it later). Default true.",
+        },
       },
       required: ["name"],
       additionalProperties: false,
@@ -2094,6 +2105,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             ...(str(args, "description") ? { description: str(args, "description") } : {}),
             ...(str(args, "targetFile") ? { targetFile: str(args, "targetFile") } : {}),
             ...(deps.caller.cwd ? { cwd: deps.caller.cwd } : {}),
+            // "I'll give the token later": the field appears, the turn goes on.
+            ...(args.wait === false ? { timeoutMs: 0 } : {}),
           },
           timeoutMs: 5 * 60_000,
         })
@@ -2105,7 +2118,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "site_publish",
     group: "sites",
     description:
-      "Publish a static website from a folder (with index.html) or a single HTML file (published with its folder) to a public https address on Uno. Anyone can open it. It runs without asking — just do it when the person wants a site (they can Unpublish it in Apps & sites; you can with site_unpublish). Only built pages go up (a dist/ or public/ folder of a project; keys and .env never do); the result lists files that were left out — tell the person in one line. Republishing the same slug updates the site.",
+      "Publish a static website from a folder (with index.html) or a single HTML file (published with its folder) to a public https address on Uno. Anyone can open it. It runs without asking — just do it when the person wants a site (they can Unpublish it in Apps & sites; you can with site_unpublish). Only built pages go up (a dist/ or public/ folder of a project; keys and .env never do); the result lists files that were left out — tell the person in one line which stayed on the computer, and stop there: never suggest a way to get a key or secret file published (renaming, moving, packing it). Only if the person says on their own that such a file holds no secrets, help with it. Republishing the same slug updates the site.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2134,6 +2147,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           ...(str(args, "slug") ? { slug: str(args, "slug")! } : {}),
         }),
       ).pipe(
+        // The moment the agent decides what to say about the files left out.
+        Effect.map((site) =>
+          (site.skippedCount ?? 0) > 0 ? { ...site, note: SITE_SKIPPED_NOTE } : site,
+        ),
         // Sites shows "Made in chat …": one click back to where it was made.
         Effect.tap((site) =>
           Effect.promise(() =>

@@ -66,6 +66,36 @@ describe("Uno Work environment brief", () => {
     );
   });
 
+  it("keys and secrets: never published, no workaround offered, help only when the person says the file is clean", () => {
+    const brief = buildUnoWorkBrief();
+    expect(brief).toMatch(/Never publish keys or secrets/);
+    expect(brief).toMatch(/never suggest a way around that \(renaming, moving\)/);
+    expect(brief).toMatch(/Only if the person says on their own that such a file holds no secrets/);
+    const publish = UNO_WORK_TOOLS.find((tool) => tool.name === "site_publish")!;
+    expect(publish.description).toMatch(
+      /never suggest a way to get a key or secret file published/,
+    );
+    expect(buildUnoWorkGuide("sites")).toMatch(
+      /never suggest a way to get a key or secret file published/,
+    );
+    // Nothing the agent reads proposes the workaround itself.
+    for (const text of [brief, publish.description, buildUnoWorkGuide("sites")]) {
+      expect(text).not.toMatch(/so (they|it) (don't|doesn't) look like/i);
+      expect(text).not.toMatch(/you can rename|we can rename|rename (it|them) (to|so)/i);
+    }
+  });
+
+  it("task rules: one check, progress in a line, no service words, no promise at the end", () => {
+    expect(UNO_WORK_TASK_RULES).toMatch(/Check your result once/);
+    expect(UNO_WORK_TASK_RULES).toMatch(/One check is enough/);
+    expect(UNO_WORK_TASK_RULES).toMatch(/say what you are doing in one short line/);
+    expect(UNO_WORK_TASK_RULES).toMatch(/Never end a turn on a promise/);
+    expect(UNO_WORK_TASK_RULES).toMatch(
+      /never mention temporary files, checking scripts, system messages/,
+    );
+    expect(UNO_WORK_TASK_RULES).toMatch(/`request_secret` with `wait: false`/);
+  });
+
   it("the instructions file of OpenCode / Uno Code carries the task rules", () => {
     const filePath = writeUnoWorkBriefFile(mkdtempSync(path.join(tmpdir(), "uno-brief-")));
     expect(filePath).toBeDefined();

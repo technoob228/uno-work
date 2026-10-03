@@ -477,6 +477,47 @@ describe("approval gate", () => {
     expect(recorded.approvals).toEqual([]);
   });
 
+  it("a publish that left key files out says so and never hints at a workaround", async () => {
+    const { deps } = makeDeps();
+    const withKeys: UnoWorkToolDeps = {
+      ...deps,
+      files: {
+        ...deps.files,
+        publishSite: () =>
+          Effect.succeed({
+            slug: "keys-test",
+            url: "https://keys-test.uno4.me/",
+            filesCount: 1,
+            sizeBytes: 10,
+            skipped: ["service-account.json (key file)", ".env (hidden)"],
+            skippedCount: 2,
+          }),
+      },
+    };
+    const result = await run("site_publish", withKeys, { path: "~/site" });
+    expect(result._tag).toBe("Success");
+    if (result._tag !== "Success") return;
+    const text = JSON.stringify(result.success);
+    expect(text).toMatch(/stayed on this computer/);
+    expect(text).toMatch(/Don't offer any way to publish a key or secret file/);
+    expect(text).not.toMatch(/rename|look like/i);
+
+    // A clean publish carries no note at all.
+    const clean = await run("site_publish", deps, { path: "~/site" });
+    expect(clean._tag === "Success" && JSON.stringify(clean.success)).not.toMatch(/note/);
+  });
+
+  it("request_secret: wait false asks the bridge not to hold the turn", async () => {
+    const { deps, recorded } = makeDeps();
+    await run("request_secret", deps, { name: "TELEGRAM_BOT_TOKEN", wait: false });
+    await run("request_secret", deps, { name: "TELEGRAM_BOT_TOKEN" });
+    expect(recorded.bridge.map((call) => call.body)).toMatchObject([
+      { name: "TELEGRAM_BOT_TOKEN", timeoutMs: 0 },
+      { name: "TELEGRAM_BOT_TOKEN" },
+    ]);
+    expect((recorded.bridge[1]!.body as Record<string, unknown>).timeoutMs).toBeUndefined();
+  });
+
   it("notes which chat made the site, for Made in chat on the Sites screen", async () => {
     const { deps, home } = makeDeps();
     await run("site_publish", deps, { path: "~/site" });

@@ -257,6 +257,19 @@ export const HERMES_AGENT_API_MAX_RETRIES = 8;
 export const HERMES_AGENT_INTENT_ACK_CONTINUATION = true;
 
 /**
+ * Hermes' own "verify before you stop" guard. After any edit of a code file
+ * it refuses the final answer up to two times with a synthetic message ("the
+ * workspace does not have fresh passing verification evidence… create a
+ * `hermes-verify-` script…"). In Uno Work that was a bot turn of 7–9 minutes
+ * with two re-checks and those service words retold to the person (validator,
+ * 0.0.105 and 0.0.106). Upstream switched it off by default in its config
+ * migration 30 → 31; our per-chat HERMES_HOME starts from the built-in
+ * default ("auto" = on for ACP), so it is switched off here. One check per
+ * task is asked for in the task rules instead (unoWorkBrief.ts).
+ */
+export const HERMES_AGENT_VERIFY_ON_STOP = false;
+
+/**
  * Hermes titles its own session after the first two exchanges
  * (`agent/title_generator.py`, a background thread started right after the
  * reply). Without an `auxiliary.title_generation` model it calls the CHAT
@@ -297,6 +310,7 @@ export function buildHermesConfigYaml(input: {
     "agent:",
     `  api_max_retries: ${HERMES_AGENT_API_MAX_RETRIES}`,
     `  intent_ack_continuation: ${HERMES_AGENT_INTENT_ACK_CONTINUATION}`,
+    `  verify_on_stop: ${HERMES_AGENT_VERIFY_ON_STOP}`,
     "model:",
     `  provider: ${quote(HERMES_GATEWAY_PROVIDER)}`,
     `  default: ${quote(input.model)}`,
