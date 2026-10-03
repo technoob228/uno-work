@@ -20,10 +20,14 @@ describe("sites screen model", () => {
         hasPassword: true,
         sizeBytes: 1200,
         updatedAt: "2026-10-02T01:21:10Z",
+        madeIn: { threadId: "t1", title: "A bot for our cafe" },
       },
     ]);
     expect(rows.map((row) => row.host)).toEqual(["our-cafe-bot.uno4.me", "old.uno4.me"]);
     expect(rows[0]?.hasPassword).toBe(true);
+    // "Made in chat …": the chat that published it; a site made elsewhere has none.
+    expect(rows[0]?.madeIn).toEqual({ threadId: "t1", title: "A bot for our cafe" });
+    expect(rows[1]?.madeIn).toBeNull();
   });
 
   it("says when it changed in plain words", () => {

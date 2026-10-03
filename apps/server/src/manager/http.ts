@@ -82,6 +82,7 @@ import {
   readStartedChats,
   writeAppAccess,
 } from "../assistants/localAssistantStore.ts";
+import { assistantsMvpEnabled } from "../assistants/assistantsFeature.ts";
 import { ServerConfig } from "../config.ts";
 import { AssistantSchedules } from "../assistants/schedules.ts";
 import {
@@ -159,11 +160,23 @@ export const managerMcpRouteLayer = HttpRouter.add(
     }
 
     const schedules = Option.getOrUndefined(yield* Effect.serviceOption(AssistantSchedules));
+    // Schedules live in the console's assistants: offered only where the
+    // account has them (unit wiring without settings: offered).
+    const settingsService = Option.getOrUndefined(
+      yield* Effect.serviceOption(ServerSettingsService),
+    );
+    const assistantsEnabled = settingsService
+      ? yield* settingsService.getSettings.pipe(
+          Effect.flatMap((settings) => Effect.promise(() => assistantsMvpEnabled(settings))),
+          Effect.orElseSucceed(() => false),
+        )
+      : true;
     const outcome = yield* handleManagerMcpMessage(
       toolService,
       caller,
       body,
       schedules ? { schedules } : {},
+      { assistantsEnabled },
     );
     if (outcome.kind === "accepted") {
       return HttpServerResponse.empty({ status: 202 });

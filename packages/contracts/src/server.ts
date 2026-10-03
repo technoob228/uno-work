@@ -471,6 +471,18 @@ export const BridgeToolApprovalRequestEvent = Schema.Struct({
   detail: Schema.optional(Schema.String),
   /** Always asks (exposes, deletes or costs something) — not only in Ask mode. */
   sensitive: Schema.Boolean,
+  /**
+   * What the app does itself when the person presses Allow, before it
+   * answers: `site-unpublish` takes the site down with the person's own Uno
+   * session (a computer's token may not delete sites). The tool then checks
+   * the result; an app that doesn't know the action just answers.
+   */
+  clientAction: Schema.optional(
+    Schema.Struct({
+      kind: Schema.Literal("site-unpublish"),
+      slug: Schema.String,
+    }),
+  ),
   context: Schema.optional(BrowserBridgeRequestContext),
 });
 export type BridgeToolApprovalRequestEvent = typeof BridgeToolApprovalRequestEvent.Type;

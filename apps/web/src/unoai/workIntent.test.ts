@@ -10,10 +10,13 @@ describe("workIntent", () => {
     expect(parseWorkIntent(undefined)).toBeNull();
   });
 
-  it("asks Uno to offer publishing, not to publish", () => {
+  it("has Uno publish a plain site at once and never asks first", () => {
     const prompt = uploadedProjectPrompt("my-site", "/home/uno/projects/my-site");
     expect(prompt).toContain("/home/uno/projects/my-site");
-    expect(prompt).toContain("offer to put it online");
-    expect(prompt).toContain("Ask me before you publish");
+    expect(prompt).toContain("publish it right away");
+    expect(prompt).toContain("don't ask first");
+    expect(prompt).not.toMatch(/ask me before/i);
+    // A backend is not a site: it is offered as an app, not published.
+    expect(prompt).toContain("don't publish it");
   });
 });

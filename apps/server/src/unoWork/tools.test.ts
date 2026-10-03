@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -49,7 +49,12 @@ function app(overrides: Partial<UnoMachineApp> = {}): UnoMachineApp {
 }
 
 interface Recorded {
-  approvals: Array<{ tool: string; title: string; sensitive: boolean }>;
+  approvals: Array<{
+    tool: string;
+    title: string;
+    sensitive: boolean;
+    clientAction?: { kind: string; slug: string };
+  }>;
   actions: Array<{ appId: string; action: string }>;
   inbox: InboxPost[];
   bridge: Array<{ method: string; path: string; body?: unknown }>;
@@ -308,6 +313,7 @@ describe("uno-work tool catalogue", () => {
       "notify",
       "open_in_panel",
       "site_publish",
+      "site_unpublish",
       "sites_list",
       "site_set_password",
       "site_forms_get",
@@ -468,6 +474,13 @@ describe("approval gate", () => {
     const { deps, recorded } = makeDeps({ runtimeMode: "approval-required", approval: "denied" });
     await run("site_publish", deps, { path: "~/site" });
     expect(recorded.approvals).toEqual([]);
+  });
+
+  it("notes which chat made the site, for Made in chat on the Sites screen", async () => {
+    const { deps, home } = makeDeps();
+    await run("site_publish", deps, { path: "~/site" });
+    const chats = JSON.parse(readFileSync(path.join(home, ".uno", "site-chats.json"), "utf8"));
+    expect(chats.site).toMatchObject({ threadId: "thread-1", title: "Build notes" });
   });
 
   it("refuses when nobody can be asked", async () => {
@@ -823,6 +836,175 @@ describe("existing manifests", () => {
       port: 4000,
       widget: { path: "/w" },
     });
+  });
+});
+
+describe("a Telegram bot is never registered as a plain app", () => {
+  const botFolder = (home: string, files: Record<string, string>) => {
+    const dir = path.join(home, "projects", "cafe-bot");
+    mkdirSync(dir, { recursive: true });
+    for (const [name, text] of Object.entries(files)) writeFileSync(path.join(dir, name), text);
+    return dir;
+  };
+  const manifest = (home: string, id: string) =>
+    JSON.parse(readFileSync(path.join(home, ".uno", "apps", `${id}.json`), "utf8"));
+
+  it("sees the bot in the folder's code and finds its token variable", async () => {
+    const { deps, home } = makeDeps();
+    botFolder(home, {
+      "bot.py":
+        'import os\nfrom aiogram import Bot\nbot = Bot(token=os.environ["CAFE_BOT_TOKEN"])\n',
+    });
+    const result = await run("app_register", deps, {
+      id: "cafe-bot",
+      name: "Cafe helper",
+      command: "python3 bot.py",
+      cwd: "~/projects/cafe-bot",
+    });
+    expect(result._tag).toBe("Success");
+    expect(manifest(home, "cafe-bot")).toMatchObject({
+      type: "telegram-bot",
+      tokenEnv: "CAFE_BOT_TOKEN",
+    });
+    if (result._tag === "Success") {
+      expect(JSON.stringify(result.success)).toContain("Waiting for token");
+    }
+  });
+
+  it("asks for the token variable when it can't tell which one", async () => {
+    const { deps, home } = makeDeps();
+    botFolder(home, { "bot.js": "// nothing to see\n" });
+    const result = await run("app_register", deps, {
+      id: "orders",
+      name: "Orders Telegram bot",
+      command: "node bot.js",
+      cwd: "~/projects/cafe-bot",
+    });
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure.message).toContain('type "telegram-bot"');
+      expect(result.failure.message).toContain("tokenEnv");
+    }
+  });
+
+  it("fills the type when only the bot's fields were given", async () => {
+    const { deps, home } = makeDeps();
+    botFolder(home, {});
+    const result = await run("app_register", deps, {
+      id: "orders",
+      name: "Orders",
+      command: "node bot.js",
+      cwd: "~/projects/cafe-bot",
+      telegram: "our_cafe_bot",
+      tokenEnv: "TELEGRAM_BOT_TOKEN",
+    });
+    expect(result._tag).toBe("Success");
+    expect(manifest(home, "orders")).toMatchObject({
+      type: "telegram-bot",
+      telegram: "our_cafe_bot",
+      tokenEnv: "TELEGRAM_BOT_TOKEN",
+    });
+  });
+
+  it("leaves a worker without a port alone when nothing says Telegram", async () => {
+    const { deps, home } = makeDeps();
+    botFolder(home, { "worker.py": 'import os\nKEY = os.environ["API_TOKEN"]\n' });
+    const result = await run("app_register", deps, {
+      id: "worker",
+      name: "Nightly export",
+      command: "python3 worker.py",
+      cwd: "~/projects/cafe-bot",
+    });
+    expect(result._tag).toBe("Success");
+    expect(manifest(home, "worker").type).toBeUndefined();
+  });
+
+  it("leaves a web app alone even when its code talks to Telegram", async () => {
+    const { deps, home } = makeDeps();
+    botFolder(home, { "app.js": 'fetch("https://api.telegram.org/bot" + process.env.TG_TOKEN)\n' });
+    const result = await run("app_register", deps, {
+      id: "shop",
+      name: "Shop",
+      port: 4000,
+      command: "node app.js",
+      cwd: "~/projects/cafe-bot",
+    });
+    expect(result._tag).toBe("Success");
+    expect(manifest(home, "shop").type).toBeUndefined();
+  });
+});
+
+describe("site_unpublish", () => {
+  const sitesReply = (slugs: string[]): ConsoleReply => ({
+    status: 200,
+    body: { deploys: slugs.map((slug) => ({ slug, url: `https://${slug}.uno4.me/` })) },
+  });
+
+  it("always asks, and tells the person's Uno Work to take the site down on Allow", async () => {
+    let live = ["team-site"];
+    const { deps, recorded } = makeDeps({
+      runtimeMode: "full-access",
+      console: (request) => {
+        if (request.method === "GET") return sitesReply(live);
+        return { status: 403, body: { error: "FORBIDDEN" } };
+      },
+    });
+    // The person's Allow: their own session deletes the site before the tool runs.
+    const requestApproval = deps.requestApproval;
+    const withAllow: UnoWorkToolDeps = {
+      ...deps,
+      requestApproval: (input) =>
+        requestApproval(input).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              if (input.clientAction?.kind === "site-unpublish") live = [];
+            }),
+          ),
+        ),
+    };
+    const result = await run("site_unpublish", withAllow, { slug: "team-site" });
+    expect(result._tag).toBe("Success");
+    expect(recorded.approvals[0]).toMatchObject({
+      tool: "site_unpublish",
+      sensitive: true,
+      clientAction: { kind: "site-unpublish", slug: "team-site" },
+    });
+    // The computer's own token never had to delete anything.
+    expect(recorded.console.some((request) => request.method === "DELETE")).toBe(false);
+  });
+
+  it("does nothing when declined", async () => {
+    const { deps, recorded } = makeDeps({
+      approval: "denied",
+      console: () => sitesReply(["team-site"]),
+    });
+    const result = await run("site_unpublish", deps, { slug: "team-site" });
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") expect(result.failure.message).toContain("declined");
+    expect(recorded.console.some((request) => request.method === "DELETE")).toBe(false);
+  });
+
+  it("doesn't ask about a site that isn't there", async () => {
+    const { deps, recorded } = makeDeps({ console: () => sitesReply(["other"]) });
+    const result = await run("site_unpublish", deps, { slug: "team-site" });
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") expect(result.failure.message).toContain("no site");
+    expect(recorded.approvals).toEqual([]);
+  });
+
+  it("says so plainly when the site is still up after Allow", async () => {
+    const { deps } = makeDeps({
+      console: (request) =>
+        request.method === "GET"
+          ? sitesReply(["team-site"])
+          : { status: 403, body: { error: "FORBIDDEN" } },
+    });
+    const result = await run("site_unpublish", deps, { slug: "team-site" });
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure.message).toContain("still online");
+      expect(result.failure.message).toContain("Apps & sites");
+    }
   });
 });
 

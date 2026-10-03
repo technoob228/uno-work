@@ -32,6 +32,7 @@ import { ConnectorNotifyService } from "../manager/Services/ConnectorNotify.ts";
 import { handleMcpMessage } from "../mcp/mcpJsonRpc.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../config.ts";
+import { assistantsMvpEnabled } from "../assistants/assistantsFeature.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { openCodeSessionEnvDir, readOpenCodeSessionEnv } from "../provider/opencodeSessionEnv.ts";
 import { UnoGatewayKey } from "../unoGatewayKey.ts";
@@ -200,6 +201,11 @@ const makeDeps = (input: {
     const manifestDir = resolveManifestDir(home);
     const context = { threadId: input.threadId, ...(input.cwd ? { cwd: input.cwd } : {}) };
 
+    const assistantsEnabled = yield* serverSettings.getSettings.pipe(
+      Effect.flatMap((settings) => Effect.promise(() => assistantsMvpEnabled(settings))),
+      Effect.orElseSucceed(() => false),
+    );
+
     const deps: UnoWorkToolDeps = {
       caller: {
         threadId: input.threadId,
@@ -336,7 +342,9 @@ const makeDeps = (input: {
       },
       readLogTail: ({ app, lines }) =>
         Effect.promise(() => readAppLogTail(app, lines, manifestDir)),
-      ...(gatewayKey
+      // Pictures come with the console's assistants (ASSISTANTS_MVP): where the
+      // account doesn't have them the gateway has no such route.
+      ...(gatewayKey && assistantsEnabled
         ? {
             images: {
               generate: ({ prompt, size }) =>

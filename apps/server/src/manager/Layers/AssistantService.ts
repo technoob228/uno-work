@@ -32,7 +32,10 @@ import {
   joinAgentsProfile,
   type InstructionsState,
 } from "@t3tools/shared/assistantInstructions";
-import { SHIPPED_ASSISTANT_INSTRUCTIONS } from "../assistantInstructionsHistory.ts";
+import {
+  RELEASED_0070_0105,
+  SHIPPED_ASSISTANT_INSTRUCTIONS,
+} from "../assistantInstructionsHistory.ts";
 import {
   coerceAssistantModelSelection,
   DEFAULT_ASSISTANT_MODEL_SELECTION,
@@ -45,7 +48,9 @@ import * as crypto from "node:crypto";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 
+import { assistantsMvpEnabled } from "../../assistants/assistantsFeature.ts";
 import { ServerConfig } from "../../config.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
 import { assistantCommandOrigin } from "../../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
@@ -429,11 +434,38 @@ const makeManagerAssistantService = Effect.gen(function* () {
     });
 
   /**
+   * The account has the new assistants (the console's ASSISTANTS_MVP, see
+   * `assistantsFeature.ts`). Without the settings service (unit wiring) the
+   * full set is on.
+   */
+  const assistantsOn: Effect.Effect<boolean> = Effect.serviceOption(ServerSettingsService).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.succeed(true),
+        onSome: (settings) =>
+          settings.getSettings.pipe(
+            Effect.flatMap((value) => Effect.promise(() => assistantsMvpEnabled(value))),
+            Effect.orElseSucceed(() => false),
+          ),
+      }),
+    ),
+  );
+
+  /**
    * AGENTS.md against its base (`.uno/AGENTS.base.md`): seeded, silently
    * updated when untouched, left alone when edited (see `planInstructions`).
+   *
+   * Where the account has no new assistants the file stays as 0.0.105 left
+   * it (a new one gets the 0.0.105 text): the new instructions name tools
+   * and pages that aren't there yet. It catches up silently once the
+   * account is switched on.
    */
   const syncInstructions = (root: string) =>
     Effect.gen(function* () {
+      if (!(yield* assistantsOn)) {
+        yield* writeFileIfMissing(agentsPath(root), RELEASED_0070_0105);
+        return "current" as const;
+      }
       const plan = planInstructions({
         current: yield* readOptional(agentsPath(root)),
         base: yield* readOptional(basePath(root)),
@@ -467,7 +499,14 @@ const makeManagerAssistantService = Effect.gen(function* () {
       );
       // Instructions are the person's to edit; Uno's newer versions reach
       // untouched files silently and edited ones through the page.
-      yield* syncInstructions(workspaceRoot);
+      yield* syncInstructions(workspaceRoot).pipe(
+        // An unwritable file must not stop the rest of the assistant's setup.
+        Effect.catch((cause) =>
+          Effect.logWarning("assistant instructions sync failed").pipe(
+            Effect.annotateLogs({ projectId, cause: String(cause) }),
+          ),
+        ),
+      );
       yield* writeFileIfMissing(
         path.join(workspaceRoot, "CLAUDE.md"),
         "See AGENTS.md — it is the single source of instructions for this assistant.\n",

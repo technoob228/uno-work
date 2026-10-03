@@ -10,12 +10,15 @@
 import { memo, useState } from "react";
 import { ShieldQuestionIcon } from "lucide-react";
 
+import { useQueryClient } from "@tanstack/react-query";
+
 import { environmentFetchJson, isEnvironmentHttpError } from "../../environments/http/target";
 import {
   type ActiveToolApproval,
   removeToolApproval,
   useToolApprovals,
 } from "../../toolApprovalStore";
+import { unpublishSiteAsPerson } from "../sites/unpublishSite";
 import { Button } from "../ui/button";
 
 const APPROVAL_RESULT_PATH = "/api/uno-work/approval/result";
@@ -50,6 +53,7 @@ const ToolApprovalCard = memo(function ToolApprovalCard({
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const { event } = approval;
 
   const answer = async (approved: boolean) => {
@@ -57,6 +61,13 @@ const ToolApprovalCard = memo(function ToolApprovalCard({
     setIsSubmitting(true);
     setError(null);
     try {
+      // Allow of the agent's site_unpublish: the person's own Uno session
+      // takes the site down (a computer's token may not), then the tool
+      // checks the result. Without a session here the tool says so itself.
+      if (approved && event.clientAction?.kind === "site-unpublish") {
+        await unpublishSiteAsPerson(event.clientAction.slug);
+        void queryClient.invalidateQueries({ queryKey: ["uno-sites"] });
+      }
       await environmentFetchJson<{ ok: boolean }>({
         environmentId: approval.environmentId,
         pathname: APPROVAL_RESULT_PATH,

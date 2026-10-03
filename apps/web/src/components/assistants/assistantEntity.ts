@@ -47,6 +47,9 @@ export type AssistantWhere = (typeof ASSISTANT_WHERE)[number];
 /** The name when the person gave none (the assistant has always been "Uno"). */
 export const DEFAULT_ASSISTANT_NAME = "Uno";
 
+/** Shown where the account has no new assistants yet (console ASSISTANTS_MVP off). */
+export const ONE_ASSISTANT_NOTE = "One assistant per computer for now.";
+
 export const ASSISTANT_NAME_MAX = 40;
 export const ASSISTANT_ABOUT_MAX = 300;
 

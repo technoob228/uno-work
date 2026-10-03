@@ -54,6 +54,7 @@ import { SlackBrandMark, TelegramMark } from "../brandMarks";
 import { ConnectedBadge, SetupHeading, SetupNote, SetupShell, SoonBadge } from "../SetupShell";
 import { SlackGuide } from "../SlackGuide";
 import { SlackChannelsPicker } from "../../assistants/SlackChannelsPicker";
+import { useAssistantsAvailability } from "../../assistants/useAssistants";
 import { useSetupNavigation } from "../useSetupNavigation";
 import { useSetupProgress } from "../useSetupProgress";
 
@@ -498,6 +499,8 @@ function SlackCard({
   onChanged: () => void;
 }) {
   const queryClient = useQueryClient();
+  // Choosing channels came with the new assistants: only where the account has them.
+  const assistantsOn = useAssistantsAvailability() === "on";
   const [installing, setInstalling] = useState(false);
   const [ownApp, setOwnApp] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -578,7 +581,7 @@ function SlackCard({
           ]}
           caption="Slack · mention @Uno in a channel"
         />
-        {state?.installed ? (
+        {state?.installed && assistantsOn ? (
           <SlackChannelsPicker
             environmentId={environmentId}
             projectId={summary.projectId}

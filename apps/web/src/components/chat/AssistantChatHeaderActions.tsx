@@ -1,21 +1,33 @@
 /**
- * The header of a conversation with Uno: "New conversation", "Connect ▾"
- * (Telegram by Uno's bot with a QR, Slack — see ConnectChannelDialog) and the
- * settings gear. In Dev mode also Uno's engine: the model picker (a copy of
- * the composer's) and "Runs on Hermes".
+ * The header of a conversation with Uno.
+ *
+ * Compact (sidebar D, 0.0.106): Uno's face, "Online · answers in Telegram",
+ * and its settings as three chips — Telegram (Connect ▾: Telegram by Uno's
+ * bot with a QR, Slack — see ConnectChannelDialog), Memory (what it
+ * remembers) and the model — plus "+" for another conversation. No settings
+ * page to hunt for.
+ *
+ * Dev mode keeps the 0.0.105 header: the model picker, "Runs on Hermes",
+ * "New conversation", Connect and the settings gear.
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDownIcon, PlugIcon, PlusIcon, SendIcon, Settings2Icon } from "lucide-react";
 import { useState } from "react";
 
-import { ASSISTANT_HARNESS_NOTE, type ChannelState } from "../../assistant/assistantChat.logic";
+import {
+  ASSISTANT_HARNESS_NOTE,
+  assistantStatusLine,
+  type ChannelState,
+} from "../../assistant/assistantChat.logic";
 import { useAssistantChannels } from "../../assistant/useAssistantChannels";
 import { useAssistantConversations } from "../../assistant/useAssistantConversations";
 import { useDevMode } from "../../devMode";
 import { useEnvironmentSupportsAssistantLlm } from "../../environments/assistantChatSupport";
 import { ConnectChannelDialog, type ConnectChannel } from "../assistant/ConnectChannelDialog";
+import { UnoFace } from "../sidebar/SidebarDParts";
 import { AssistantModelPicker } from "./AssistantEngine";
+import { AssistantMemoryChip } from "./AssistantMemoryChip";
 import { cn } from "../../lib/utils";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -34,6 +46,36 @@ function SlackMark(props: { className?: string }) {
       <path fill="#2EB67D" d="M18 9a2 2 0 1 1 2 2h-2V9Zm-1 0a2 2 0 1 1-4 0V4a2 2 0 1 1 4 0v5Z" />
       <path fill="#ECB22E" d="M15 18a2 2 0 1 1-2 2v-2h2Zm0-1a2 2 0 1 1 0-4h5a2 2 0 1 1 0 4h-5Z" />
     </svg>
+  );
+}
+
+/** The left of the compact header: Uno's face, its name and where it answers. */
+export function AssistantChatHeadline({
+  environmentId,
+  title,
+}: {
+  environmentId: EnvironmentId;
+  title: string;
+}) {
+  const channels = useAssistantChannels(environmentId);
+  return (
+    <div className="flex min-w-0 items-center gap-2.5" data-testid="uno-headline">
+      <span className="relative shrink-0">
+        <UnoFace className="size-7" />
+        <span
+          className="absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full bg-success ring-2 ring-background"
+          aria-hidden
+        />
+      </span>
+      <div className="min-w-0 leading-tight">
+        <h2 className="truncate text-sm font-medium text-foreground" title={title}>
+          {title}
+        </h2>
+        <p className="truncate text-[11px] text-muted-foreground" data-testid="uno-status-line">
+          {assistantStatusLine(channels)}
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -76,7 +118,7 @@ export function AssistantChatHeaderActions({ environmentId }: { environmentId: E
           </TooltipPopup>
         </Tooltip>
       ) : null}
-      {conversations.supported ? (
+      {conversations.supported && devMode ? (
         <Tooltip>
           <TooltipTrigger
             render={
@@ -144,24 +186,54 @@ export function AssistantChatHeaderActions({ environmentId }: { environmentId: E
           </p>
         </MenuPopup>
       </Menu>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              aria-label="Uno settings"
-              onClick={openSettings}
-              data-testid="uno-settings"
-              className="inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-md border border-input text-muted-foreground shadow-xs/5 hover:bg-accent hover:text-foreground sm:h-6 sm:min-w-6"
-            />
-          }
-        >
-          <Settings2Icon className="size-3.5" />
-        </TooltipTrigger>
-        <TooltipPopup side="bottom">
-          Uno settings: what it can see and manage, Telegram, Slack
-        </TooltipPopup>
-      </Tooltip>
+      {devMode ? null : (
+        <>
+          <AssistantMemoryChip environmentId={environmentId} onOpenSettings={openSettings} />
+          <AssistantModelPicker environmentId={environmentId} compact testId="uno-header-engine" />
+          {conversations.supported ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label="New conversation with Uno"
+                    onClick={() => void conversations.createConversation()}
+                    disabled={conversations.creating}
+                    data-testid="uno-new-conversation"
+                    className="inline-flex h-7 min-w-7 shrink-0 cursor-pointer items-center justify-center rounded-md border border-input text-muted-foreground shadow-xs/5 hover:bg-accent hover:text-foreground disabled:opacity-60 sm:h-6 sm:min-w-6"
+                  />
+                }
+              >
+                <PlusIcon className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipPopup side="bottom" className="max-w-64">
+                Another conversation with Uno. Same memory; Telegram and Slack keep talking to the
+                main one.
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
+        </>
+      )}
+      {devMode ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-label="Uno settings"
+                onClick={openSettings}
+                data-testid="uno-settings"
+                className="inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-md border border-input text-muted-foreground shadow-xs/5 hover:bg-accent hover:text-foreground sm:h-6 sm:min-w-6"
+              />
+            }
+          >
+            <Settings2Icon className="size-3.5" />
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">
+            Uno settings: what it can see and manage, Telegram, Slack
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
       <ConnectChannelDialog
         environmentId={environmentId}
         channel={connecting}

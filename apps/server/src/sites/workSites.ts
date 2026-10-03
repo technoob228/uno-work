@@ -15,6 +15,7 @@ import type {
 
 import { liveSiteUrl } from "../files/sitePublish.ts";
 import { consoleRequest, consoleToken } from "../unoWork/consoleClient.ts";
+import { forgetSiteChat, readSiteChats, type SiteChats } from "./siteChats.ts";
 import { controlPlaneBaseUrl } from "../workspaceRegistry/unoCloudParse.ts";
 
 export const WORK_SITES_PATH = "/api/v1/work/sites";
@@ -75,10 +76,27 @@ const empty = (availability: UnoWorkSites["availability"], message: string): Uno
   message,
 });
 
+/** Adds "Made in chat …" (this computer's record, `siteChats.ts`) to the console's list. */
+export function withSiteChats(sites: UnoWorkSites, chats: SiteChats): UnoWorkSites {
+  if (Object.keys(chats).length === 0) return sites;
+  return {
+    ...sites,
+    sites: sites.sites.map((site) => {
+      const chat = chats[site.slug];
+      return chat ? { ...site, madeIn: { threadId: chat.threadId, title: chat.title } } : site;
+    }),
+  };
+}
+
 /** Never throws: an unlinked computer or a silent console come back as `availability`. */
 export async function listWorkSites(
   settings: Pick<ServerSettings, "uno">,
-  options: { readonly fetchImpl?: typeof fetch; readonly baseUrl?: string } = {},
+  options: {
+    readonly fetchImpl?: typeof fetch;
+    readonly baseUrl?: string;
+    /** Home of this computer's person: where "Made in chat …" is kept. */
+    readonly home?: string;
+  } = {},
 ): Promise<UnoWorkSites> {
   const token = consoleToken(settings);
   if (token.length === 0) {
@@ -101,21 +119,27 @@ export async function listWorkSites(
     if (reply.status < 200 || reply.status >= 300) {
       return empty("unavailable", "Uno didn't answer. Try again in a moment.");
     }
-    return parseWorkSites(reply.body);
+    const sites = parseWorkSites(reply.body);
+    return options.home ? withSiteChats(sites, await readSiteChats(options.home)) : sites;
   } catch {
     return empty("unavailable", "Uno didn't answer. Try again in a moment.");
   }
 }
 
 /**
- * "Unpublish" on the Sites screen: `DELETE /api/v1/deploys/{slug}` with this
- * computer's token. Only the person's click reaches it (the agent has no tool
- * that deletes a site). Never throws.
+ * "Unpublish" on the Sites screen where the app has no Uno session of the
+ * person: `DELETE /api/v1/deploys/{slug}` with this computer's token (the
+ * console refuses it by design — then the screen points to the console).
+ * The agent's `site_unpublish` has its own path with an Allow. Never throws.
  */
 export async function unpublishWorkSite(
   settings: Pick<ServerSettings, "uno">,
   slug: string,
-  options: { readonly fetchImpl?: typeof fetch; readonly baseUrl?: string } = {},
+  options: {
+    readonly fetchImpl?: typeof fetch;
+    readonly baseUrl?: string;
+    readonly home?: string;
+  } = {},
 ): Promise<UnoWorkSiteUnpublishResult> {
   const clean = slug.trim();
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(clean)) {
@@ -133,12 +157,15 @@ export async function unpublishWorkSite(
       token,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     });
-    if (reply.status >= 200 && reply.status < 300) return { ok: true, message: null };
-    if (reply.status === 404) return { ok: true, message: null };
+    if ((reply.status >= 200 && reply.status < 300) || reply.status === 404) {
+      if (options.home) await forgetSiteChat(options.home, clean);
+      return { ok: true, message: null };
+    }
     if (reply.status === 401 || reply.status === 403) {
       return {
         ok: false,
-        message: "A computer may not delete your sites. Unpublish it on the Sites page of the Uno console.",
+        message:
+          "A computer may not delete your sites. Unpublish it on the Sites page of the Uno console.",
       };
     }
     return { ok: false, message: "Uno didn't answer. Try again in a moment." };

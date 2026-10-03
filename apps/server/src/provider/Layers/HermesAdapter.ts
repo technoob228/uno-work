@@ -149,10 +149,20 @@ export interface HermesAdapterLiveOptions {
     readonly threadId: string;
     readonly cwd: string;
   }) => Effect.Effect<boolean>;
+  /**
+   * The account has the new assistants (console ASSISTANTS_MVP): only then is
+   * an assistant workspace's hub closed. Without it the computer's assistant
+   * keeps its 0.0.105 behaviour. Absent (tests): on.
+   */
+  readonly assistantsEnabled?: Effect.Effect<boolean>;
 }
 
 /** Marker of an assistant workspace (AssistantService): its NOTES.md is the assistant's memory. */
 const ASSISTANT_WORKSPACE_MARKER = ".uno-assistant.json";
+/** The assistant's own MCP server in its workspace `.mcp.json` (manager/mcp.ts). */
+const MANAGER_MCP_SERVER_NAME = "uno-manager";
+/** `MANAGER_WAIT_MAX_TIMEOUT_SEC` (contracts/manager.ts): the longest wait_for_thread. */
+const MANAGER_WAIT_MAX_TIMEOUT_SEC = 3_600;
 const ASSISTANT_NOTES_FILE = "NOTES.md";
 
 interface PendingApproval {
@@ -584,8 +594,14 @@ export function makeHermesAdapter(
                 buildHermesConfigYaml({
                   model: configuredModel,
                   mcpServers,
-                  mcpToolTimeoutSec:
-                    options?.extraMcpToolTimeoutsSec?.({ threadId: input.threadId, cwd }) ?? {},
+                  mcpToolTimeoutSec: {
+                    // The assistant's wait_for_thread blocks for up to an hour;
+                    // Hermes' own default would cut it at 300 s.
+                    ...(workspaceMcpNames.has(MANAGER_MCP_SERVER_NAME)
+                      ? { [MANAGER_MCP_SERVER_NAME]: MANAGER_WAIT_MAX_TIMEOUT_SEC + 60 }
+                      : {}),
+                    ...options?.extraMcpToolTimeoutsSec?.({ threadId: input.threadId, cwd }),
+                  },
                   skillsExternalDirs: [sharedSkillsRoot()],
                   speechToText: llmProvider === "uno",
                   // Hermes' own session titles off the chat model (see
@@ -612,7 +628,8 @@ export function makeHermesAdapter(
             .exists(nodePath.join(cwd, ASSISTANT_WORKSPACE_MARKER))
             .pipe(Effect.orElseSucceed(() => false));
           const lockHub =
-            inAssistantWorkspace ||
+            (inAssistantWorkspace &&
+              (options?.assistantsEnabled ? yield* options.assistantsEnabled : true)) ||
             (options?.lockSkillHub
               ? yield* options.lockSkillHub({ threadId: input.threadId, cwd })
               : false);

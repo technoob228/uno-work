@@ -1,3 +1,5 @@
+import os from "node:os";
+
 import { Cause, Duration, Effect, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
 import {
   type AuthAccessStreamEvent,
@@ -1666,7 +1668,9 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.workSites,
             serverSettings.getSettings.pipe(
-              Effect.flatMap((settings) => Effect.promise(() => listWorkSites(settings))),
+              Effect.flatMap((settings) =>
+                Effect.promise(() => listWorkSites(settings, { home: os.homedir() })),
+              ),
               Effect.mapError((cause) => new UnoCloudRpcError({ message: String(cause) })),
             ),
             { "rpc.aggregate": "uno-cloud" },
@@ -1676,7 +1680,9 @@ const makeWsRpcLayer = (
             WS_METHODS.workSiteUnpublish,
             serverSettings.getSettings.pipe(
               Effect.flatMap((settings) =>
-                Effect.promise(() => unpublishWorkSite(settings, input.slug)),
+                Effect.promise(() =>
+                  unpublishWorkSite(settings, input.slug, { home: os.homedir() }),
+                ),
               ),
               Effect.mapError((cause) => new UnoCloudRpcError({ message: String(cause) })),
             ),

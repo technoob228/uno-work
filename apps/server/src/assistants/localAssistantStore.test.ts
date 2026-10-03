@@ -168,7 +168,9 @@ describe("Work refuses an app the assistant may not open", () => {
 
   it("never reaches the console for a forbidden app", async () => {
     const calls: string[] = [];
-    const error = await Effect.runPromise(Effect.flip(gmailSend.run(depsWith("none", calls), {}).pipe(Effect.asVoid)));
+    const error = await Effect.runPromise(
+      Effect.flip(gmailSend.run(depsWith("none", calls), {}).pipe(Effect.asVoid)),
+    );
     expect(error.message).toContain("Ana isn't allowed to open Gmail & Calendar");
     expect(calls).toEqual([]);
   });

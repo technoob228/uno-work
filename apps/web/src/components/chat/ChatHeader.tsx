@@ -38,7 +38,7 @@ import { CONTINUE_ON_MACHINE_COPY } from "../../continueOnMachineCopy";
 import { ContinueOnMachineDialog } from "../ContinueOnMachineDialog";
 import { DraftFolderChip } from "./DraftFolderChip";
 import { cn } from "../../lib/utils";
-import { AssistantChatHeaderActions } from "./AssistantChatHeaderActions";
+import { AssistantChatHeaderActions, AssistantChatHeadline } from "./AssistantChatHeaderActions";
 import { ComputerChip } from "../computer/home/ComputerChip";
 import { ChatDoneButton } from "./ChatDoneButton";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
@@ -188,17 +188,23 @@ export const ChatHeader = memo(function ChatHeader({
             </Tooltip>
           </TooltipProvider>
         )}
-        <h2
-          className={cn(
-            "min-w-0 truncate text-sm font-medium text-foreground",
-            // Uno's name never gives way to the value line next to it.
-            isAssistantChat ? "max-w-[45%] shrink-0" : "shrink",
-          )}
-          title={title}
-        >
-          {title}
-        </h2>
-        {isAssistantChat ? (
+        {isAssistantChat && !devMode ? (
+          // Sidebar D: Uno's face, name and where it answers; its settings are
+          // the chips on the right (AssistantChatHeaderActions).
+          <AssistantChatHeadline environmentId={activeThreadEnvironmentId} title={title} />
+        ) : (
+          <h2
+            className={cn(
+              "min-w-0 truncate text-sm font-medium text-foreground",
+              // Uno's name never gives way to the value line next to it.
+              isAssistantChat ? "max-w-[45%] shrink-0" : "shrink",
+            )}
+            title={title}
+          >
+            {title}
+          </h2>
+        )}
+        {isAssistantChat && !devMode ? null : isAssistantChat ? (
           <>
             <Tooltip>
               <TooltipTrigger

@@ -61,6 +61,7 @@ import {
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { withUserLocalBinOnPath } from "../setup/harnessProcess.ts";
+import { assistantsMvpEnabled } from "../../assistants/assistantsFeature.ts";
 import {
   ASSISTANT_COMPUTER_ROLE,
   makeOwnComputerRoleReader,
@@ -261,6 +262,10 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
               custom: customMcpServers(),
             }),
           ),
+        assistantsEnabled: serverSettingsService.getSettings.pipe(
+          Effect.flatMap((settings) => Effect.promise(() => assistantsMvpEnabled(settings))),
+          Effect.orElseSucceed(() => false),
+        ),
         lockSkillHub: () =>
           serverSettingsService.getSettings.pipe(
             Effect.map((settings) => settings.uno),

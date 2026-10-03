@@ -420,6 +420,8 @@ export interface BrowserBridgeShape {
       readonly title: string;
       readonly detail?: string;
       readonly sensitive: boolean;
+      /** Done by the person's Uno Work on Allow, before it answers (see the contract). */
+      readonly clientAction?: BridgeToolApprovalRequestEvent["clientAction"];
       readonly timeoutMs?: number;
     },
     context?: BrowserBridgeRequestContext,
@@ -794,6 +796,7 @@ export const makeBrowserBridge = (input: {
             title: input.title,
             ...(input.detail !== undefined ? { detail: input.detail } : {}),
             sensitive: input.sensitive,
+            ...(input.clientAction ? { clientAction: input.clientAction } : {}),
             ...(context ? { context } : {}),
           } satisfies BridgeToolApprovalRequestEvent;
           pendingToolApprovals.set(requestId, { responseToken, deferred, event });

@@ -8,10 +8,16 @@
  *                 write a manifest, start a chat). Follows the chat's mode
  *                 like any other tool: in Ask mode ("approval-required") the
  *                 person allows it first; in the other modes it runs.
- * - `sensitive` — exposes something to the internet, deletes, or creates
+ * - `sensitive` — exposes something beyond a plain site, deletes, or creates
  *                 something billable (show an app on the internet, share
- *                 link, publish a site, remove an app, create a computer).
- *                 Always asks, whatever the mode.
+ *                 link, remove a site's password, form answers to an outside
+ *                 URL, unpublish a site, remove an app, create a computer or
+ *                 a database). Always asks, whatever the mode.
+ *
+ * Publishing a plain static site is `safe` (decision 02.10): it goes up
+ * without an Allow, and Unpublish is one click in Apps & sites. Setting a
+ * site's password and sending form answers to email or Telegram are `safe`
+ * too.
  *
  * The gate lives in the daemon, not in each harness, so Claude, Codex,
  * OpenCode, Uno, Cursor, Hermes and any custom ACP harness behave the same.

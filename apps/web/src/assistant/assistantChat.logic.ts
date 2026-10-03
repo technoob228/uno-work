@@ -102,6 +102,39 @@ export function slackChannelState(
 }
 
 /** The one line that says what Uno is, wherever it introduces itself. */
+/**
+ * The line under "Uno" in the compact header of its chat (sidebar D):
+ * "Online · answers in Telegram". Uno's chat is open on a computer that is
+ * on, so it is online; the rest says where else it answers.
+ */
+export function assistantStatusLine(channels: {
+  readonly telegram: ChannelState;
+  readonly slack: ChannelState;
+}): string {
+  const where = [
+    channels.telegram === "on" ? "Telegram" : null,
+    channels.slack === "on" ? "Slack" : null,
+  ].filter((entry): entry is string => entry !== null);
+  if (where.length > 0) return `Online · answers in ${where.join(" and ")}`;
+  if (channels.telegram === "problem" || channels.slack === "problem") {
+    return "Online · a channel needs a look";
+  }
+  return "Online · starts and watches chats for you";
+}
+
+/**
+ * How many things Uno remembers: the entries of its NOTES.md (list items;
+ * a file written as plain lines counts those). Headings and blanks don't count.
+ */
+export function countMemoryEntries(notes: string): number {
+  const lines = notes
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"));
+  const items = lines.filter((line) => /^([-*+]|\d+[.)])\s+\S/.test(line));
+  return items.length > 0 ? items.length : lines.length;
+}
+
 export const ASSISTANT_VALUE_LINE =
   "Always on. Talks to you in Telegram or Slack, starts and watches other chats for you.";
 

@@ -13,6 +13,8 @@ export interface SiteRow {
   readonly hasPassword: boolean;
   /** "Updated 3 days ago"-ready ISO time; null = unknown. */
   readonly updatedAt: string | null;
+  /** The chat on this computer that published it; null = made elsewhere. */
+  readonly madeIn: { readonly threadId: string; readonly title: string } | null;
 }
 
 export function hostOfSite(url: string): string {
@@ -31,6 +33,7 @@ export function siteRows(sites: ReadonlyArray<UnoWorkSite>): SiteRow[] {
       host: hostOfSite(site.url),
       hasPassword: site.hasPassword,
       updatedAt: site.updatedAt,
+      madeIn: site.madeIn ?? null,
     }))
     .toSorted((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
 }

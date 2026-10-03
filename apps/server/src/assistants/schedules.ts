@@ -203,7 +203,7 @@ export function scheduleConsoleProblem(response: WorkConsoleResponse): string {
     case 403:
     case 404:
     case 405:
-      return `Schedules for assistants aren't switched on for this computer yet (the Uno console answered ${response.status}${said ? `, ${said}` : ""}). Tell the person what you wanted to schedule; do NOT fall back to cron or a sleep loop.`;
+      return `Schedules for assistants aren't switched on for this computer yet (the Uno console answered ${response.status}${said ? `, ${said}` : ""}). Tell the person in one line, then do recurring work the way you did before schedules (a reminder, or a user systemd timer); never a sleep loop.`;
     default:
       return `The Uno console answered ${response.status}${said ? ` (${said})` : ""}. Try again later.`;
   }

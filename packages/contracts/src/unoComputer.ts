@@ -837,6 +837,8 @@ export const UnoWorkSite = Schema.Struct({
   hasPassword: Schema.Boolean,
   sizeBytes: Schema.NullOr(Schema.Number),
   updatedAt: Schema.NullOr(Schema.String),
+  /** The chat on this computer that published it ("Made in chat …"); absent when unknown. */
+  madeIn: Schema.optional(Schema.Struct({ threadId: Schema.String, title: Schema.String })),
 });
 export type UnoWorkSite = typeof UnoWorkSite.Type;
 
@@ -851,7 +853,7 @@ export const UnoWorkSites = Schema.Struct({
 });
 export type UnoWorkSites = typeof UnoWorkSites.Type;
 
-/** "Unpublish" on the Sites screen: the person's own click (with a confirm), never the agent. */
+/** "Unpublish" on the Sites screen: the person's own click (with a confirm). The agent's `site_unpublish` asks for an Allow. */
 export const UnoWorkSiteUnpublishInput = Schema.Struct({
   slug: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
 });

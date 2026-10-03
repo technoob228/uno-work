@@ -55,8 +55,10 @@ export function uploadedProjectPrompt(name: string, folder: string): string {
   return [
     `I've just uploaded my project "${name}" to ${folder}.`,
     "Look at what's inside and tell me in two or three plain sentences what it is.",
-    "Then offer to put it online: a static site goes to Uno Hosting (site_publish);",
-    "anything that needs a server runs on this computer as an app and is shown on the internet.",
-    "Ask me before you publish anything.",
+    "If it is a plain static site (HTML pages, or a built dist/ or public/ folder), publish it right away",
+    "with site_publish and give me the address; don't ask first, I can unpublish it in Apps & sites.",
+    "Keys and .env files stay on this computer: tell me in one line what was left out.",
+    "If it needs a server (a backend, a bot, a database), don't publish it:",
+    "say what it needs and offer to run it on this computer as an app.",
   ].join(" ");
 }

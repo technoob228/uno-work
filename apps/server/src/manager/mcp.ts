@@ -468,11 +468,28 @@ const MANAGER_MCP_SERVER: McpServerDefinition<ManagerMcpContext, ManagerMcpToolE
  * Returns `accepted` for notifications (HTTP 202, no body). The protocol
  * plumbing is shared with the `uno-work` server (`../mcp/mcpJsonRpc.ts`).
  */
+/** Tools that need the console's assistants (ASSISTANTS_MVP): the schedules. */
+export const isAssistantsOnlyManagerTool = (name: string) => name.startsWith("schedule_");
+
+/** The same server where the account has no new assistants: without their tools. */
+const MANAGER_MCP_SERVER_BASIC: McpServerDefinition<ManagerMcpContext, ManagerMcpToolError> = {
+  ...MANAGER_MCP_SERVER,
+  tools: MANAGER_MCP_SERVER.tools.filter((tool) => !isAssistantsOnlyManagerTool(tool.name)),
+};
+
 export function handleManagerMcpMessage(
   tools: ManagerToolServiceShape,
   caller: ManagerCaller,
   message: unknown,
   extras: ManagerMcpExtras = {},
+  options: {
+    /** false: the account has no new assistants — schedule tools are not offered. */
+    readonly assistantsEnabled?: boolean;
+  } = {},
 ): Effect.Effect<McpHandleOutcome> {
-  return handleMcpMessage(MANAGER_MCP_SERVER, { tools, caller, extras }, message);
+  return handleMcpMessage(
+    options.assistantsEnabled === false ? MANAGER_MCP_SERVER_BASIC : MANAGER_MCP_SERVER,
+    { tools, caller, extras },
+    message,
+  );
 }

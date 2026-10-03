@@ -178,3 +178,32 @@ describe("ensureAssistantChatWhenReady", () => {
     expect(calls).toBe(6);
   });
 });
+
+describe("the compact header of Uno's chat", () => {
+  it("says where Uno answers", async () => {
+    const { assistantStatusLine } = await import("./assistantChat.logic");
+    expect(assistantStatusLine({ telegram: "on", slack: "off" })).toBe(
+      "Online · answers in Telegram",
+    );
+    expect(assistantStatusLine({ telegram: "on", slack: "on" })).toBe(
+      "Online · answers in Telegram and Slack",
+    );
+    expect(assistantStatusLine({ telegram: "off", slack: "off" })).toBe(
+      "Online · starts and watches chats for you",
+    );
+    expect(assistantStatusLine({ telegram: "problem", slack: "off" })).toBe(
+      "Online · a channel needs a look",
+    );
+  });
+
+  it("counts what Uno remembers", async () => {
+    const { countMemoryEntries } = await import("./assistantChat.logic");
+    expect(countMemoryEntries("# Assistant notes\n")).toBe(0);
+    expect(
+      countMemoryEntries("# Assistant notes\n\n- likes short answers\n- shop opens at 9\n"),
+    ).toBe(2);
+    expect(
+      countMemoryEntries("# Notes\n2026-10-02: asked for a site\nflour runs out on Fridays\n"),
+    ).toBe(2);
+  });
+});

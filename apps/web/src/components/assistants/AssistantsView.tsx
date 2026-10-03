@@ -80,6 +80,7 @@ import {
   LOCAL_ASSISTANTS_KEY,
   useAssistantComputers,
   useAssistantList,
+  useAssistantsAvailability,
   useDeletedAssistants,
   useDeletedLocalAssistants,
   useBoxIdOfEnvironment,
@@ -97,6 +98,7 @@ import {
   ASSISTANT_ABOUT_KEY,
   ASSISTANT_NAME_MAX,
   DEFAULT_ASSISTANT_NAME,
+  ONE_ASSISTANT_NOTE,
   assistantEntity,
   assistantWhereLine,
   withAgentsProfile,
@@ -155,7 +157,134 @@ function useMachineLabel(environmentId: EnvironmentId | null): string {
   return rows.find((row) => row.environmentId === environmentId)?.label ?? "this computer";
 }
 
+/**
+ * The new assistants (New assistant, several per computer, their own
+ * computers, Memory & models) show only where the account has them switched
+ * on (the console's ASSISTANTS_MVP, `/auth/me` features). Everywhere else —
+ * the flag is off, or there is no account session here — the screen stays
+ * exactly the 0.0.105 one: this computer's one assistant.
+ */
 export function AssistantsView() {
+  const availability = useAssistantsAvailability();
+  if (availability === "on") return <AssistantsViewMvp />;
+  return <AssistantsViewClassic checking={availability === "loading"} />;
+}
+
+function AssistantsViewClassic({ checking }: { checking: boolean }) {
+  const search = useSearch({ strict: false }) as AssistantsRouteSearch;
+  const navigate = useNavigate();
+  const { environmentId } = useActiveMachine();
+  const model = useAssistantModel(environmentId);
+  const machineLabel = useMachineLabel(environmentId);
+  const setView = (view: AssistantsRouteSearch["view"]) =>
+    void navigate({ to: "/assistants", search: view ? { view } : {} });
+
+  const creating = search.view === "new" || search.view === "here";
+  const showCard = search.view === "card" && model.entity !== null;
+
+  return (
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+        <header className="border-b border-border px-3 py-2 sm:px-5 sm:py-3">
+          <div className="flex min-h-8 items-center gap-2">
+            <SidebarShowButton />
+            {creating || showCard ? (
+              <Button size="xs" variant="ghost" onClick={() => setView(undefined)}>
+                <ArrowLeftIcon className="size-3.5" />
+                <span className="hidden sm:inline">Assistants</span>
+              </Button>
+            ) : (
+              <>
+                <BotIcon className="size-4 text-muted-foreground" />
+                <span className="text-sm font-medium text-foreground">Assistants</span>
+              </>
+            )}
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+          <div
+            className="mx-auto flex w-full max-w-2xl flex-col gap-5 pt-2 sm:pt-6"
+            data-testid="assistants-classic"
+          >
+            {environmentId === null ? (
+              <p className="text-sm text-muted-foreground">No computer is connected.</p>
+            ) : checking ? null : creating && model.loading ? null : creating ? (
+              <CreateAssistant
+                environmentId={environmentId}
+                machineLabel={machineLabel}
+                model={model}
+                onDone={() => setView("card")}
+              />
+            ) : showCard ? (
+              <AssistantCard
+                classic
+                environmentId={environmentId}
+                machineLabel={machineLabel}
+                entity={model.entity!}
+                model={model}
+                onDeleted={() => setView(undefined)}
+              />
+            ) : model.entity ? (
+              <>
+                <AssistantRow
+                  entity={model.entity}
+                  machineLabel={machineLabel}
+                  onOpen={() => setView("card")}
+                />
+                <p className="px-1 text-xs text-muted-foreground" data-testid="assistants-one-note">
+                  {ONE_ASSISTANT_NOTE}
+                </p>
+              </>
+            ) : (
+              <ClassicEmptyAssistants
+                machineLabel={machineLabel}
+                loading={model.loading}
+                onCreate={() => setView("new")}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+    </SidebarInset>
+  );
+}
+
+function ClassicEmptyAssistants({
+  machineLabel,
+  loading,
+  onCreate,
+}: {
+  machineLabel: string;
+  loading: boolean;
+  onCreate: () => void;
+}) {
+  return (
+    <section
+      className="flex flex-col items-center gap-4 rounded-3xl border border-dashed border-border px-6 py-12 text-center"
+      data-testid="assistants-empty"
+    >
+      <span className="flex size-14 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-500">
+        <TelegramMark className="size-7" />
+      </span>
+      <div className="flex max-w-md flex-col gap-1.5">
+        <h1 className="text-xl font-semibold tracking-tight">
+          Create an assistant that answers in Telegram 24/7
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          Write to it like to a colleague: it answers questions, does tasks on {machineLabel} and
+          remembers what you told it.
+        </p>
+      </div>
+      <Button onClick={onCreate} disabled={loading} data-testid="assistants-empty-create">
+        <PlusIcon className="size-4" />
+        Create an assistant
+      </Button>
+    </section>
+  );
+}
+
+function AssistantsViewMvp() {
   const search = useSearch({ strict: false }) as AssistantsRouteSearch;
   const navigate = useNavigate();
   const { environmentId } = useActiveMachine();
@@ -858,12 +987,15 @@ function CreateAssistant({
 // ── The assistant's card ─────────────────────────────────────────────
 
 function AssistantCard({
+  classic = false,
   environmentId,
   machineLabel,
   entity,
   model,
   onDeleted,
 }: {
+  /** The 0.0.105 card: the account has no new assistants (see AssistantsView). */
+  classic?: boolean;
   environmentId: EnvironmentId;
   machineLabel: string;
   entity: AssistantEntity;
@@ -1053,6 +1185,9 @@ function AssistantCard({
         <div className="flex items-center gap-3 py-1">
           <MonitorIcon className="size-4 text-muted-foreground" />
           <span className="text-sm">{machineLabel}</span>
+          {classic ? (
+            <span className="ml-auto text-xs text-muted-foreground">{ONE_ASSISTANT_NOTE}</span>
+          ) : null}
         </div>
       </Block>
 
@@ -1122,7 +1257,7 @@ function AssistantCard({
       </div>
 
       <ConnectChannelDialog
-          telegramMode="own"
+        {...(classic ? {} : { telegramMode: "own" as const })}
         environmentId={environmentId}
         channel={connecting}
         onClose={() => {

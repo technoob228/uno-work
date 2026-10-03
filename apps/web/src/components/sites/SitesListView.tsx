@@ -7,13 +7,15 @@
  * - Sites: the person's sites on Uno Hosting, read by this computer's daemon
  *   (`uno.sites.list`, the console's `/api/v1/work/sites` with the machine's
  *   token), so it works on the computer's direct address too. Each site: its
- *   address, Open, Copy link, "Change with Uno", a lock when it has a
- *   password, and Unpublish (asks first; `uno.sites.unpublish`).
+ *   address, "Live", Open, Copy link, "Change with Uno", a lock when it has a
+ *   password, "Made in chat …" (one click back to the chat that published
+ *   it, when it was made on this computer) and Unpublish (asks first; the
+ *   person's own Uno session takes it down — `unpublishSite.ts`).
  *
  * A plain site goes up without an Allow (Misha 02.10); taking it down is the
- * person's own click here.
+ * person's own click here, or their Allow of the agent's `site_unpublish`.
  */
-import type { EnvironmentId, UnoWorkSites } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId, UnoWorkSites } from "@t3tools/contracts";
 import { type UseQueryResult, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
@@ -22,18 +24,21 @@ import {
   GlobeIcon,
   LayoutGridIcon,
   LockIcon,
+  MessageSquareIcon,
   SparklesIcon,
+  SquarePenIcon,
   Trash2Icon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 
 import { consoleLinks } from "../../account/accountOverview";
-import { accountRequest, accountTransport } from "../../account/unoAccount";
 import { isElectron } from "../../env";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { ensureEnvironmentApi } from "../../environmentApi";
 import { cn } from "../../lib/utils";
 import { openInNewTab } from "../../navigation/useOpenApp";
+import { selectEnvironmentState, useStore } from "../../store";
 import { useHomeLaunchers } from "../computer/useHomeLaunchers";
 import { SidebarAppsList } from "../sidebar/SidebarAppsList";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
@@ -49,6 +54,7 @@ import {
 import { SidebarInset } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
+import { unpublishSite } from "./unpublishSite";
 import {
   type AppsSitesTab,
   changeSitePrompt,
@@ -57,36 +63,7 @@ import {
   type SiteRow,
 } from "./sitesModel";
 
-/**
- * Unpublish as the person: their own Uno session first (app.uno4.work or the
- * desktop app — `DELETE /api/v1/deploys/{slug}` through /_account), then the
- * computer's daemon. A computer's own token may not delete sites (by design),
- * so where neither works the person gets the console's Sites screen.
- */
-async function unpublishSite(
-  environmentId: EnvironmentId | null,
-  slug: string,
-): Promise<{ ok: boolean; message: string | null }> {
-  if (accountTransport() !== "none") {
-    try {
-      await accountRequest("DELETE", `/api/v1/deploys/${encodeURIComponent(slug)}`);
-      return { ok: true, message: null };
-    } catch {
-      // not allowed here yet: try the computer
-    }
-  }
-  if (environmentId !== null) {
-    try {
-      const result = await ensureEnvironmentApi(environmentId).unoComputer.workSiteUnpublish({
-        slug,
-      });
-      if (result.ok) return result;
-    } catch {
-      // an older computer without the call
-    }
-  }
-  return { ok: false, message: "Unpublish it on the Sites page of the Uno console." };
-}
+const NEW_SITE_PROMPT = "Make me a website. Ask me what it's for.";
 
 function openConsoleSites() {
   const url = consoleLinks.sites;
@@ -183,7 +160,28 @@ function SitesList({
 }) {
   const launchers = useHomeLaunchers(environmentId);
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const rows = useMemo(() => siteRows(sites.data?.sites ?? []), [sites.data]);
+  // The chats of "Made in chat …" as the sidebar names them now (a chat can
+  // be renamed after it published; a deleted one is no link any more).
+  const madeInIds = useMemo(
+    () => rows.flatMap((row) => (row.madeIn ? [row.madeIn.threadId] : [])),
+    [rows],
+  );
+  const threadTitles = useStore(
+    useShallow((state) => {
+      const out: Record<string, string> = {};
+      if (environmentId === null) return out;
+      const summaries = selectEnvironmentState(state, environmentId).sidebarThreadSummaryById;
+      for (const id of madeInIds) {
+        const summary = summaries[id as ThreadId];
+        if (summary) out[id] = summary.title;
+      }
+      return out;
+    }),
+  );
+  const madeInTitle = (row: SiteRow): string | null =>
+    row.madeIn ? threadTitles[row.madeIn.threadId] || row.madeIn.title || "Chat" : null;
   const [confirming, setConfirming] = useState<SiteRow | null>(null);
   const unpublish = useMutation({
     mutationFn: (row: SiteRow) => unpublishSite(environmentId, row.slug),
@@ -235,10 +233,7 @@ function SitesList({
     return (
       <div className="flex flex-col items-center gap-3 py-12 text-center">
         <p className="text-sm text-muted-foreground">No sites yet.</p>
-        <Button
-          size="sm"
-          onClick={() => void launchers.sendToUno("Make me a website. Ask me what it's for.")}
-        >
+        <Button size="sm" onClick={() => void launchers.sendToUno(NEW_SITE_PROMPT)}>
           <SparklesIcon />
           Make a site with Uno
         </Button>
@@ -247,11 +242,34 @@ function SitesList({
   }
   return (
     <>
+      <div className="mb-2 flex justify-end">
+        <Button
+          size="xs"
+          variant="outline"
+          data-testid="sites-new"
+          onClick={() => void launchers.sendToUno(NEW_SITE_PROMPT)}
+        >
+          <SquarePenIcon />
+          New site
+        </Button>
+      </div>
       <ul className="flex flex-col gap-2" data-testid="sites-list">
         {rows.map((row) => (
           <SiteItem
             key={row.slug}
             row={row}
+            madeInTitle={madeInTitle(row)}
+            onOpenChat={
+              row.madeIn &&
+              environmentId !== null &&
+              threadTitles[row.madeIn.threadId] !== undefined
+                ? () =>
+                    void navigate({
+                      to: "/$environmentId/$threadId",
+                      params: { environmentId, threadId: row.madeIn!.threadId as ThreadId },
+                    })
+                : null
+            }
             onChange={() => void launchers.sendToUno(changeSitePrompt(row))}
             onUnpublish={() => setConfirming(row)}
           />
@@ -298,10 +316,16 @@ function SitesList({
 
 function SiteItem({
   row,
+  madeInTitle,
+  onOpenChat,
   onChange,
   onUnpublish,
 }: {
   row: SiteRow;
+  /** The chat that published it, by its current name; null = made elsewhere. */
+  madeInTitle: string | null;
+  /** Opens that chat; null when the chat is gone (the line stays as text). */
+  onOpenChat: (() => void) | null;
   onChange: () => void;
   onUnpublish: () => void;
 }) {
@@ -324,7 +348,35 @@ function SiteItem({
             .filter(Boolean)
             .join(" · ")}
         </div>
+        {madeInTitle !== null ? (
+          onOpenChat ? (
+            <button
+              type="button"
+              onClick={onOpenChat}
+              data-testid="site-made-in"
+              title="Open the chat that made this site"
+              className="mt-0.5 flex max-w-full cursor-pointer items-center gap-1 text-[11px] text-primary hover:underline"
+            >
+              <MessageSquareIcon className="size-3 shrink-0" />
+              <span className="truncate">Made in chat “{madeInTitle}”</span>
+            </button>
+          ) : (
+            <div
+              data-testid="site-made-in"
+              className="mt-0.5 flex max-w-full items-center gap-1 text-[11px] text-muted-foreground"
+            >
+              <MessageSquareIcon className="size-3 shrink-0" />
+              <span className="truncate">Made in chat “{madeInTitle}”</span>
+            </div>
+          )
+        ) : null}
       </div>
+      <span
+        data-testid="site-status"
+        className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400"
+      >
+        Live
+      </span>
       <Button size="xs" variant="ghost" onClick={onChange} title="Change it with Uno">
         <SparklesIcon />
         <span className="max-sm:hidden">Change with Uno</span>

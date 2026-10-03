@@ -52,7 +52,7 @@ import {
   type GeneratedImage,
 } from "../assistants/imageGenerate.ts";
 import { liveSiteUrl } from "../files/sitePublish.ts";
-import { validateManifest } from "../machineApps/appManifest.ts";
+import { APP_TYPE_TELEGRAM_BOT, validateManifest } from "../machineApps/appManifest.ts";
 import { displayManifestDir } from "../machineApps/manifestDir.ts";
 import { computerSleepInfo } from "../workspaceRegistry/unoComputerEconomy.ts";
 import { WORK_SITES_PATH, parseWorkSites } from "../sites/workSites.ts";
@@ -71,6 +71,8 @@ import {
   secretNameProblem,
   upsertEnvContent,
 } from "../secretsEnv.ts";
+import { saysTelegramBot, scanFolderForTelegramBot } from "../machineApps/telegramBotHint.ts";
+import { forgetSiteChat, recordSiteChat } from "../sites/siteChats.ts";
 import { validateArgs, type ObjectSchema } from "./argsSchema.ts";
 import { appServerTools } from "./appServerTools.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
@@ -98,6 +100,12 @@ const asToolError = <A, E extends { readonly message: string }, R>(
   effect.pipe(Effect.mapError((cause) => toolError(cause.message)));
 
 // ── Dependencies ───────────────────────────────────────────────────────
+
+/** Done by the person's Uno Work on Allow (their own Uno session), before the tool runs. */
+export type ToolApprovalClientAction = {
+  readonly kind: "site-unpublish";
+  readonly slug: string;
+};
 
 export interface UnoWorkCaller {
   readonly threadId: string;
@@ -131,6 +139,7 @@ export interface UnoWorkToolDeps {
     readonly title: string;
     readonly detail?: string;
     readonly sensitive: boolean;
+    readonly clientAction?: ToolApprovalClientAction;
   }) => Effect.Effect<ToolApprovalOutcome>;
   readonly machineApps: {
     readonly list: Effect.Effect<UnoMachineApps>;
@@ -290,6 +299,17 @@ export interface UnoWorkTool {
   /** The approval card's line, e.g. `Show “Notes” on the internet`. */
   readonly approvalTitle?: (args: Record<string, unknown>) => string;
   readonly approvalDetail?: (args: Record<string, unknown>) => string | undefined;
+  /**
+   * What the person's own Uno Work does when they press Allow, before the
+   * tool runs (taking a site down needs the person's session: a computer's
+   * token may not delete sites).
+   */
+  readonly approvalClientAction?: (args: Record<string, unknown>) => ToolApprovalClientAction;
+  /** Checked before the person is asked: no card for a call that can't work. */
+  readonly prepare?: (
+    deps: UnoWorkToolDeps,
+    args: Record<string, unknown>,
+  ) => Effect.Effect<void, UnoWorkToolError>;
   readonly run: (
     deps: UnoWorkToolDeps,
     args: Record<string, unknown>,
@@ -631,6 +651,9 @@ const requireAccountAccess = (deps: UnoWorkToolDeps) =>
     }
   });
 
+const NO_PICTURES_MESSAGE =
+  "Pictures aren't switched on for this Uno account yet. Tell the person in one line; don't try another way.";
+
 const SITE_SLUG_PATTERN = "^[a-z0-9][a-z0-9-]{0,62}$";
 const siteSlugArg = {
   type: "string" as const,
@@ -641,6 +664,15 @@ const sitePath = (slug: string, rest = "") => `/api/v1/deploys/${encodeURICompon
 // The production address `<slug>.uno4.me` when the answer has no url of its
 // own (sites_list reads hosting's — see sites/workSites.ts).
 const siteUrl = (slug: string) => liveSiteUrl(undefined, slug);
+
+/** The site is on the person's account right now (the console's list, this computer's token). */
+const siteIsListed = (
+  deps: UnoWorkToolDeps,
+  slug: string,
+): Effect.Effect<boolean, UnoWorkToolError> =>
+  callConsole(deps, { method: "GET", path: WORK_SITES_PATH }, "list the sites").pipe(
+    Effect.map((body) => parseWorkSites(body).sites.some((site) => site.slug === slug)),
+  );
 
 /** A password a person can read out: `maple-river-4821-cloud`. */
 const PASSWORD_WORDS = [
@@ -984,7 +1016,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "app_register",
     group: "apps",
     description:
-      "Put an app you built on the person's Home: writes and validates ~/.uno/apps/<id>.json. With a command, Uno starts it within ~20 seconds and after every reboot — don't start it yourself or call app_start after (a second copy), logging to ~/.uno/apps/<id>.log. A Telegram bot: type telegram-bot + telegram (username) + tokenEnv, no port. Registering the same id again updates it. Ask for the machine's AI, cloud storage or Inbox notifications with ai / storage / notify (then use the Uno App SDK — uno_guide('app-sdk')). Never put secrets here.",
+      "Put an app you built on the person's Home: writes and validates ~/.uno/apps/<id>.json. With a command, Uno starts it within ~20 seconds and after every reboot — don't start it yourself or call app_start after (a second copy), logging to ~/.uno/apps/<id>.log. A Telegram bot is never a plain app: always type telegram-bot + tokenEnv + telegram (username), no port. Registering the same id again updates it. Ask for the machine's AI, cloud storage or Inbox notifications with ai / storage / notify (then use the Uno App SDK — uno_guide('app-sdk')). Never put secrets here.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1133,6 +1165,45 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             return yield* toolError(
               `url "${rawUrl}" is not an address. url is only for an app hosted somewhere else (https://…); for an app on this computer leave url out and give port + command.`,
             );
+          }
+        }
+        // A Telegram bot registered as a plain app shows "Stopped / Start"
+        // instead of "Waiting for token / Open in Telegram": see for
+        // ourselves (what the agent wrote, the folder's code) and fix it.
+        if (record.port === undefined && record.url === undefined) {
+          const declared = record.type === APP_TYPE_TELEGRAM_BOT;
+          const cwd = typeof record.cwd === "string" ? resolveUserPath(record.cwd, deps) : null;
+          const scan =
+            cwd !== null && (!declared || record.tokenEnv === undefined)
+              ? yield* Effect.promise(() => scanFolderForTelegramBot(cwd))
+              : { isBot: false, tokenEnv: null };
+          const isBot =
+            declared ||
+            record.telegram !== undefined ||
+            record.tokenEnv !== undefined ||
+            scan.isBot ||
+            saysTelegramBot(record);
+          if (isBot) {
+            if (record.tokenEnv === undefined && scan.tokenEnv !== null) {
+              record.tokenEnv = scan.tokenEnv;
+              notes.push(`tokenEnv was read from the code: ${scan.tokenEnv}.`);
+            }
+            if (record.tokenEnv === undefined) {
+              return yield* toolError(
+                'This is a Telegram bot: register it with type "telegram-bot", tokenEnv (the variable in the project\'s .env its code reads the token from, e.g. TELEGRAM_BOT_TOKEN), telegram (its username, when you know it) and no port. Call app_register again with those.',
+              );
+            }
+            if (!declared) {
+              record.type = APP_TYPE_TELEGRAM_BOT;
+              notes.push(
+                'Registered as a Telegram bot (type "telegram-bot"): Home shows "Waiting for token" until its token is in .env — ask for it with request_secret — and then "Open in Telegram".',
+              );
+            }
+            if (record.telegram === undefined) {
+              notes.push(
+                "Its username is missing: once the token is in, read it with getMe and call app_register again with telegram so the person gets Open in Telegram.",
+              );
+            }
           }
         }
         const written = yield* writeManifestRecord(deps, id, record);
@@ -1818,10 +1889,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     },
     level: "change",
     approvalTitle: (args) => `Make a picture: ${(str(args, "prompt") ?? "").slice(0, 80)}`,
+    // No card for a call that can't work (pictures aren't on for this account).
+    prepare: (deps) => (deps.images ? Effect.void : Effect.fail(toolError(NO_PICTURES_MESSAGE))),
     run: (deps, args) =>
       Effect.gen(function* () {
         if (!deps.images) {
-          return yield* toolError("Picture generation isn't available in this Uno Work.");
+          return yield* toolError(NO_PICTURES_MESSAGE);
         }
         const prompt = (str(args, "prompt") ?? "").trim();
         if (prompt.length === 0) return yield* toolError("Describe the picture in prompt.");
@@ -2004,7 +2077,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "site_publish",
     group: "sites",
     description:
-      "Publish a static website from a folder (with index.html) or a single HTML file (published with its folder) to a public https address on Uno. Anyone can open it. It runs without asking — just do it when the person wants a site (they can Unpublish it in Apps & sites). Only built pages go up (a dist/ or public/ folder of a project; keys and .env never do); the result lists files that were left out — tell the person in one line. Republishing the same slug updates the site.",
+      "Publish a static website from a folder (with index.html) or a single HTML file (published with its folder) to a public https address on Uno. Anyone can open it. It runs without asking — just do it when the person wants a site (they can Unpublish it in Apps & sites; you can with site_unpublish). Only built pages go up (a dist/ or public/ folder of a project; keys and .env never do); the result lists files that were left out — tell the person in one line. Republishing the same slug updates the site.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2032,13 +2105,82 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           path: resolveUserPath(str(args, "path")!, deps),
           ...(str(args, "slug") ? { slug: str(args, "slug")! } : {}),
         }),
+      ).pipe(
+        // Sites shows "Made in chat …": one click back to where it was made.
+        Effect.tap((site) =>
+          Effect.promise(() =>
+            recordSiteChat(deps.home, site.slug, {
+              threadId: deps.caller.threadId,
+              title: deps.caller.threadTitle,
+            }),
+          ),
+        ),
       ),
+  },
+  {
+    name: "site_unpublish",
+    group: "sites",
+    description:
+      "Take a published site off the internet: its address stops working and its files are removed from Uno (the folder on this computer stays; site_publish puts it back). Use it when the person asks to unpublish, remove or take down a site. The person always approves; their Allow takes it down. Find the slug with sites_list.",
+    inputSchema: {
+      type: "object",
+      properties: { slug: siteSlugArg },
+      required: ["slug"],
+      additionalProperties: false,
+    },
+    level: "sensitive",
+    approvalTitle: (args) => `Unpublish ${siteUrl(str(args, "slug") ?? "")}`,
+    approvalDetail: () =>
+      "The address stops working for everyone and the site's files are removed from Uno. The folder on your computer stays.",
+    approvalClientAction: (args) => ({ kind: "site-unpublish", slug: str(args, "slug")! }),
+    prepare: (deps, args) =>
+      siteIsListed(deps, str(args, "slug")!).pipe(
+        Effect.flatMap((listed) =>
+          listed
+            ? Effect.void
+            : Effect.fail(
+                toolError(
+                  `There is no site “${str(args, "slug")}” on this account (see sites_list): nothing to unpublish.`,
+                ),
+              ),
+        ),
+      ),
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const slug = str(args, "slug")!;
+        // The person's Allow already took it down with their own Uno session
+        // (a computer's token may not delete sites). Check, then try as the
+        // computer for the case their Uno Work couldn't.
+        let listed = yield* siteIsListed(deps, slug);
+        if (listed && deps.console) {
+          const reply = yield* deps.console
+            .request({ method: "DELETE", path: sitePath(slug) })
+            .pipe(Effect.orElseSucceed(() => null));
+          if (
+            reply !== null &&
+            ((reply.status >= 200 && reply.status < 300) || reply.status === 404)
+          ) {
+            listed = false;
+          }
+        }
+        if (listed) {
+          return yield* toolError(
+            `${siteUrl(slug)} is still online: the person allowed it, but a computer may not take sites down and their Uno Work couldn't do it from where they answered. Tell them to press Unpublish next to the site in Apps & sites → Sites (or on the Sites page of the Uno console). Don't retry.`,
+          );
+        }
+        yield* Effect.promise(() => forgetSiteChat(deps.home, slug));
+        return {
+          ok: true,
+          slug,
+          note: `${siteUrl(slug)} is off the internet. The folder on this computer is untouched; site_publish puts it back.`,
+        };
+      }),
   },
   {
     name: "sites_list",
     group: "sites",
     description:
-      "The person's published websites on Uno: name (slug), address, whether a password protects it, size. Use it to find the slug for site_set_password and site_forms_set.",
+      "The person's published websites on Uno: name (slug), address, whether a password protects it, size. Use it to find the slug for site_set_password, site_forms_set and site_unpublish.",
     inputSchema: noArgs,
     level: "safe",
     run: (deps) =>
@@ -2172,7 +2314,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "site_forms_set",
     group: "sites",
     description:
-      "Choose where a site's form answers go: email (the account's own email works at once, another address gets a confirmation link first), telegram: true (returns a link the person opens in Telegram and presses Start), webhookUrl (https, receives JSON). An empty string switches that channel off; an omitted field stays as it is. Set this up yourself when a site has a form; never tell the person to do it by hand. The person always approves.",
+      "Choose where a site's form answers go: email (the account's own email works at once, another address gets a confirmation link first), telegram: true (returns a link the person opens in Telegram and presses Start), webhookUrl (https, receives JSON). An empty string switches that channel off; an omitted field stays as it is. Set this up yourself when a site has a form; never tell the person to do it by hand. Email and Telegram run right away; a webhookUrl (answers leave Uno for an outside address) waits for the person's Allow.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2643,6 +2785,7 @@ export function runUnoWorkTool(
       return yield* toolError(`Invalid arguments for ${tool.name}: ${problem}`);
     }
     const level = toolLevel(tool, args);
+    if (tool.prepare) yield* tool.prepare(deps, args);
     if (decideUnoWorkGate(level, deps.caller.runtimeMode) === "ask") {
       // The person reads the app's name, not its id ("Stop Notes", not
       // "Stop manifest:notes").
@@ -2656,7 +2799,14 @@ export function runUnoWorkTool(
       const described = appName ? { ...args, appId: appName } : args;
       const title = tool.approvalTitle?.(described) ?? tool.name;
       const detail = tool.approvalDetail?.(described);
-      yield* askPerson(deps, { tool: tool.name, level, title, detail });
+      const clientAction = tool.approvalClientAction?.(args);
+      yield* askPerson(deps, {
+        tool: tool.name,
+        level,
+        title,
+        detail,
+        ...(clientAction ? { clientAction } : {}),
+      });
     }
     return yield* tool.run(deps, args);
   });
@@ -2670,6 +2820,7 @@ function askPerson(
     readonly level: UnoWorkToolLevel;
     readonly title: string;
     readonly detail: string | undefined;
+    readonly clientAction?: ToolApprovalClientAction;
   },
 ): Effect.Effect<void, UnoWorkToolError> {
   return Effect.gen(function* () {
@@ -2678,6 +2829,7 @@ function askPerson(
       title: input.title,
       ...(input.detail ? { detail: input.detail } : {}),
       sensitive: input.level === "sensitive",
+      ...(input.clientAction ? { clientAction: input.clientAction } : {}),
     });
     if (outcome !== "approved") {
       return yield* toolError(refusalMessage(outcome, input.title));

@@ -2032,14 +2032,21 @@ export function makeOpenCodeAdapter(
               // подмешиваем его серверы в OPENCODE_CONFIG_CONTENT. Так
               // диспетчер-ассистент получает свой uno-manager. Внешний
               // `serverUrl` живёт со своим env — ему не передаём.
-              const mcpOverlay = serverUrl?.trim()
-                ? {}
-                : yield* projectMcpConfigOverlay({
-                    cwd: directory,
-                    existingConfigContent:
-                      bridgeOverlay.OPENCODE_CONFIG_CONTENT ??
-                      (options?.environment ?? process.env).OPENCODE_CONFIG_CONTENT,
-                  }).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
+              // Only an assistant's own workspace (AssistantService writes the
+              // marker): a cloned repo's `.mcp.json` must not start its
+              // servers in an ordinary chat without anyone asking.
+              const inAssistantWorkspace = yield* fileSystem
+                .exists(path.join(directory, ".uno-assistant.json"))
+                .pipe(Effect.orElseSucceed(() => false));
+              const mcpOverlay =
+                serverUrl?.trim() || !inAssistantWorkspace
+                  ? {}
+                  : yield* projectMcpConfigOverlay({
+                      cwd: directory,
+                      existingConfigContent:
+                        bridgeOverlay.OPENCODE_CONFIG_CONTENT ??
+                        (options?.environment ?? process.env).OPENCODE_CONFIG_CONTENT,
+                    }).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
               const sessionOverlay: Record<string, string> = { ...bridgeOverlay, ...mcpOverlay };
               let server: OpenCodeServerConnection;
               let events: SessionEventHub<OpenCodeSubscribedEvent>;
