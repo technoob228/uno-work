@@ -55,6 +55,7 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  workingReassurance,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
 } from "./MessagesTimeline.logic";
@@ -572,10 +573,10 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
             <span>
               {row.createdAt ? (
                 <>
-                  Working for <WorkingTimer createdAt={row.createdAt} />
+                  Thinking · <WorkingTimer createdAt={row.createdAt} />
                 </>
               ) : (
-                "Working..."
+                "Thinking…"
               )}
             </span>
           </div>
@@ -591,14 +592,23 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
 // React Compiler cannot elide the re-render as a no-op.
 // ---------------------------------------------------------------------------
 
-/** Live "Working for Xs" label. */
+/** Live "28s" of the wait line, and past ~15 s the words that nothing is stuck. */
 function WorkingTimer({ createdAt }: { createdAt: string }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, [createdAt]);
-  return <>{formatWorkingTimer(createdAt, new Date(nowMs).toISOString()) ?? "0s"}</>;
+  const startedAtMs = Date.parse(createdAt);
+  const reassurance = Number.isFinite(startedAtMs)
+    ? workingReassurance(Math.max(0, Math.floor((nowMs - startedAtMs) / 1000)))
+    : null;
+  return (
+    <>
+      {formatWorkingTimer(createdAt, new Date(nowMs).toISOString()) ?? "0s"}
+      {reassurance ? ` · ${reassurance}` : null}
+    </>
+  );
 }
 
 /** Live timestamp + elapsed duration for a streaming assistant message. */

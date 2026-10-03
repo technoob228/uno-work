@@ -42,6 +42,20 @@ export interface StableMessagesTimelineRowsState {
   result: MessagesTimelineRow[];
 }
 
+/** After this many seconds the wait line adds that nothing is stuck. */
+export const WORKING_REASSURE_AFTER_SECONDS = 15;
+
+/**
+ * The words after the timer on the wait line ("Thinking · 28s"): nothing at
+ * first, and past ~15 s a plain reassurance — the model's reasoning is not
+ * shown, so a long quiet stretch otherwise reads as a hang.
+ */
+export function workingReassurance(elapsedSeconds: number): string | null {
+  return elapsedSeconds >= WORKING_REASSURE_AFTER_SECONDS
+    ? "still working, nothing is stuck"
+    : null;
+}
+
 export function computeMessageDurationStart(
   messages: ReadonlyArray<TimelineDurationMessage>,
 ): Map<string, string> {

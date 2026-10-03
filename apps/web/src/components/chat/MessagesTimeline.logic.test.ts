@@ -5,7 +5,17 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  workingReassurance,
 } from "./MessagesTimeline.logic";
+
+describe("workingReassurance", () => {
+  it("says nothing at first and that nothing is stuck once the wait is long", () => {
+    expect(workingReassurance(0)).toBeNull();
+    expect(workingReassurance(14)).toBeNull();
+    expect(workingReassurance(15)).toBe("still working, nothing is stuck");
+    expect(workingReassurance(600)).toBe("still working, nothing is stuck");
+  });
+});
 
 describe("computeMessageDurationStart", () => {
   it("returns message createdAt when there is no preceding user message", () => {
