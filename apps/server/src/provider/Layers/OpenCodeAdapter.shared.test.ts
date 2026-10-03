@@ -238,6 +238,8 @@ it.effect("an assistant workspace's .mcp.json servers reach its shared server co
     fake.reset();
     const adapter = yield* SharedAdapter;
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-shared-mcp-"));
+    // The marker AssistantService writes into an assistant's workspace.
+    fs.writeFileSync(path.join(workspace, ".uno-assistant.json"), "{}\n");
     fs.writeFileSync(
       path.join(workspace, ".mcp.json"),
       JSON.stringify({

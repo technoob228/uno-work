@@ -1094,64 +1094,125 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       assert.deepEqual(closeCallsDuringRun, []);
     }),
   );
-  it.effect("merges project .mcp.json servers into a spawned server config", () => {
-    const workspace = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), "opencode-mcp-"));
-    nodeFs.writeFileSync(
-      nodePath.join(workspace, ".mcp.json"),
-      JSON.stringify({
-        mcpServers: {
-          "uno-manager": {
-            type: "http",
-            url: "http://127.0.0.1:13776/api/manager/mcp",
-            headers: { Authorization: "Bearer uwm_test" },
+  it.effect(
+    "merges an assistant workspace's .mcp.json servers into a spawned server config",
+    () => {
+      const workspace = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), "opencode-mcp-"));
+      // The marker AssistantService writes: only an assistant's own workspace
+      // gets its .mcp.json servers.
+      nodeFs.writeFileSync(nodePath.join(workspace, ".uno-assistant.json"), "{}\n");
+      nodeFs.writeFileSync(
+        nodePath.join(workspace, ".mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            "uno-manager": {
+              type: "http",
+              url: "http://127.0.0.1:13776/api/manager/mcp",
+              headers: { Authorization: "Bearer uwm_test" },
+            },
           },
-        },
-      }),
-    );
-    const spawnedSettings = Schema.decodeSync(OpenCodeSettings)({ binaryPath: "fake-opencode" });
-    const adapterLayer = Layer.effect(
-      OpenCodeAdapter,
-      makeOpenCodeAdapter(spawnedSettings, {
-        environment: {
-          PATH: "/usr/bin",
-          OPENCODE_CONFIG_CONTENT: JSON.stringify({ instructions: ["/tmp/browser.md"] }),
-        },
-      }),
-    ).pipe(
-      Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
-      Layer.provideMerge(ServerSettingsService.layerTest()),
-      Layer.provideMerge(providerSessionDirectoryTestLayer),
-      Layer.provideMerge(NodeServices.layer),
-    );
-
-    return Effect.gen(function* () {
-      const adapter = yield* OpenCodeAdapter;
-      yield* adapter.startSession({
-        provider: ProviderDriverKind.make("opencode"),
-        threadId: asThreadId("thread-assistant-mcp"),
-        cwd: workspace,
-        runtimeMode: "full-access",
-      });
-
-      const environment = runtimeMock.state.connectEnvironments.at(-1);
-      assert.equal(environment?.PATH, "/usr/bin");
-      assert.deepEqual(JSON.parse(environment?.OPENCODE_CONFIG_CONTENT ?? "{}"), {
-        instructions: ["/tmp/browser.md"],
-        mcp: {
-          "uno-manager": {
-            type: "remote",
-            url: "http://127.0.0.1:13776/api/manager/mcp",
-            headers: { Authorization: "Bearer uwm_test" },
-            enabled: true,
+        }),
+      );
+      const spawnedSettings = Schema.decodeSync(OpenCodeSettings)({ binaryPath: "fake-opencode" });
+      const adapterLayer = Layer.effect(
+        OpenCodeAdapter,
+        makeOpenCodeAdapter(spawnedSettings, {
+          environment: {
+            PATH: "/usr/bin",
+            OPENCODE_CONFIG_CONTENT: JSON.stringify({ instructions: ["/tmp/browser.md"] }),
           },
-        },
-      });
-    }).pipe(
-      Effect.provide(adapterLayer),
-      Effect.ensuring(
-        Effect.sync(() => nodeFs.rmSync(workspace, { recursive: true, force: true })),
-      ),
-    );
-  });
+        }),
+      ).pipe(
+        Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Layer.provideMerge(ServerSettingsService.layerTest()),
+        Layer.provideMerge(providerSessionDirectoryTestLayer),
+        Layer.provideMerge(NodeServices.layer),
+      );
+
+      return Effect.gen(function* () {
+        const adapter = yield* OpenCodeAdapter;
+        yield* adapter.startSession({
+          provider: ProviderDriverKind.make("opencode"),
+          threadId: asThreadId("thread-assistant-mcp"),
+          cwd: workspace,
+          runtimeMode: "full-access",
+        });
+
+        const environment = runtimeMock.state.connectEnvironments.at(-1);
+        assert.equal(environment?.PATH, "/usr/bin");
+        assert.deepEqual(JSON.parse(environment?.OPENCODE_CONFIG_CONTENT ?? "{}"), {
+          instructions: ["/tmp/browser.md"],
+          mcp: {
+            "uno-manager": {
+              type: "remote",
+              url: "http://127.0.0.1:13776/api/manager/mcp",
+              headers: { Authorization: "Bearer uwm_test" },
+              enabled: true,
+            },
+          },
+        });
+      }).pipe(
+        Effect.provide(adapterLayer),
+        Effect.ensuring(
+          Effect.sync(() => nodeFs.rmSync(workspace, { recursive: true, force: true })),
+        ),
+      );
+    },
+  );
+  it.effect(
+    "leaves an ordinary project's .mcp.json alone (a cloned repo must not start servers unasked)",
+    () => {
+      const workspace = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), "opencode-mcp-"));
+      nodeFs.writeFileSync(
+        nodePath.join(workspace, ".mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            "uno-manager": {
+              type: "http",
+              url: "http://127.0.0.1:13776/api/manager/mcp",
+              headers: { Authorization: "Bearer uwm_test" },
+            },
+          },
+        }),
+      );
+      const spawnedSettings = Schema.decodeSync(OpenCodeSettings)({ binaryPath: "fake-opencode" });
+      const adapterLayer = Layer.effect(
+        OpenCodeAdapter,
+        makeOpenCodeAdapter(spawnedSettings, {
+          environment: {
+            PATH: "/usr/bin",
+            OPENCODE_CONFIG_CONTENT: JSON.stringify({ instructions: ["/tmp/browser.md"] }),
+          },
+        }),
+      ).pipe(
+        Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Layer.provideMerge(ServerSettingsService.layerTest()),
+        Layer.provideMerge(providerSessionDirectoryTestLayer),
+        Layer.provideMerge(NodeServices.layer),
+      );
+
+      return Effect.gen(function* () {
+        const adapter = yield* OpenCodeAdapter;
+        yield* adapter.startSession({
+          provider: ProviderDriverKind.make("opencode"),
+          threadId: asThreadId("thread-project-mcp"),
+          cwd: workspace,
+          runtimeMode: "full-access",
+        });
+
+        const environment = runtimeMock.state.connectEnvironments.at(-1);
+        assert.equal(environment?.PATH, "/usr/bin");
+        assert.deepEqual(JSON.parse(environment?.OPENCODE_CONFIG_CONTENT ?? "{}"), {
+          instructions: ["/tmp/browser.md"],
+        });
+      }).pipe(
+        Effect.provide(adapterLayer),
+        Effect.ensuring(
+          Effect.sync(() => nodeFs.rmSync(workspace, { recursive: true, force: true })),
+        ),
+      );
+    },
+  );
 });
