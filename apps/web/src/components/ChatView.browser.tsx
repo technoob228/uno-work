@@ -29,6 +29,8 @@ import { page } from "vitest/browser";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
+import { writeBrowserClientSettings } from "../clientPersistenceStorage";
+import { setDevMode } from "../devMode";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { useComposerDraftStore, DraftId } from "../composerDraftStore";
 import {
@@ -1596,6 +1598,12 @@ async function mountChatView(options: {
   host.style.overflow = "hidden";
   document.body.append(host);
 
+  // These tests drive the chat screen of someone who already set Uno Work up:
+  // without this a fresh browser goes to the setup wizard, then Home.
+  writeBrowserClientSettings({ ...DEFAULT_CLIENT_SETTINGS, onboardingCompleted: true });
+  // ...and drive the full developer chat (branches, run actions, Open in
+  // editor, command palette): Uno Work shows those only in Dev mode.
+  setDevMode(true);
   const router = getRouter(
     createMemoryHistory({
       initialEntries: [options.initialPath ?? `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}`],
