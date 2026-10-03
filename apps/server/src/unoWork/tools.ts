@@ -52,7 +52,11 @@ import {
   type GeneratedImage,
 } from "../assistants/imageGenerate.ts";
 import { liveSiteUrl } from "../files/sitePublish.ts";
-import { APP_TYPE_TELEGRAM_BOT, validateManifest } from "../machineApps/appManifest.ts";
+import {
+  APP_TYPE_TELEGRAM_BOT,
+  envFileHasValue,
+  validateManifest,
+} from "../machineApps/appManifest.ts";
 import { displayManifestDir } from "../machineApps/manifestDir.ts";
 import { computerSleepInfo } from "../workspaceRegistry/unoComputerEconomy.ts";
 import { WORK_SITES_PATH, parseWorkSites } from "../sites/workSites.ts";
@@ -438,6 +442,17 @@ const readManifestRecord = (deps: UnoWorkToolDeps, id: string) =>
         : Effect.fail(toolError(`The manifest of "${id}" is not a JSON object.`)),
     ),
   );
+
+/**
+ * What to do and say after registering a bot whose token isn't in `.env`:
+ * Home calls that state "Waiting for token", and so must the agent.
+ */
+export const BOT_WAITING_FOR_TOKEN_NEXT =
+  'Its token is not in .env yet, so it is not running: Home shows it as "Waiting for token". Ask for the token with request_secret. When you tell the person, say the bot is on Home and waiting for its token — don\'t say it is running.';
+
+/** After registering a bot whose token is in: there is no page to open. */
+export const BOT_STARTING_NEXT =
+  "Uno starts it within ~20 seconds; check with apps_list / app_logs. A bot has no page for the panel: tell the person it is on Home and give them its Open in Telegram link.";
 
 const writeManifestRecord = (deps: UnoWorkToolDeps, id: string, record: Record<string, unknown>) =>
   Effect.gen(function* () {
@@ -1237,13 +1252,43 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           }
         }
         const written = yield* writeManifestRecord(deps, id, record);
+        // What Home shows for a bot right now, in Home's own words: an agent
+        // told only "Uno starts it" reported a bot without a token as running.
+        const botTokenEnv =
+          record.type === APP_TYPE_TELEGRAM_BOT && typeof record.tokenEnv === "string"
+            ? record.tokenEnv
+            : null;
+        const botTokenIn =
+          botTokenEnv === null
+            ? null
+            : yield* Effect.promise(() =>
+                fsp
+                  .readFile(
+                    path.join(
+                      typeof record.cwd === "string"
+                        ? resolveUserPath(record.cwd, deps)
+                        : deps.home,
+                      ".env",
+                    ),
+                    "utf8",
+                  )
+                  .then(
+                    (text) => envFileHasValue(text, botTokenEnv),
+                    () => false,
+                  ),
+              );
         return {
           ok: true,
           appId: `manifest:${id}`,
           file: written.file,
-          next: written.manifest.command
-            ? "Uno starts it within ~20 seconds; check with apps_list / app_logs. Then open it with open_in_panel (appId) and tell the person it is on Home."
-            : 'It shows on Home, but without a command it has no Start button and won\'t come back after a reboot. Call app_register again with command (e.g. "python3 app.py") and cwd.',
+          next:
+            botTokenIn === false
+              ? BOT_WAITING_FOR_TOKEN_NEXT
+              : record.type === APP_TYPE_TELEGRAM_BOT && written.manifest.command
+                ? BOT_STARTING_NEXT
+                : written.manifest.command
+                  ? "Uno starts it within ~20 seconds; check with apps_list / app_logs. Then open it with open_in_panel (appId) and tell the person it is on Home."
+                  : 'It shows on Home, but without a command it has no Start button and won\'t come back after a reboot. Call app_register again with command (e.g. "python3 app.py") and cwd.',
           ...(notes.length > 0 ? { notes } : {}),
         };
       }),

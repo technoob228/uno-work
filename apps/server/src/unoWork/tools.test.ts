@@ -13,6 +13,8 @@ import { validateArgs, type JsonSchema } from "./argsSchema.ts";
 import { consoleToken, type ConsoleReply, type ConsoleRequest } from "./consoleClient.ts";
 import { decideUnoWorkGate } from "./policy.ts";
 import {
+  BOT_STARTING_NEXT,
+  BOT_WAITING_FOR_TOKEN_NEXT,
   UNO_WORK_MCP_SERVER,
   UNO_WORK_TOOLS,
   runUnoWorkTool,
@@ -774,6 +776,29 @@ describe("telling and showing", () => {
       tokenEnv: "TELEGRAM_BOT_TOKEN",
       runs: "always",
     });
+  });
+
+  it("tells the agent a bot without its token is waiting, in Home's words", async () => {
+    const { deps, home } = makeDeps({ runtimeMode: "full-access" });
+    const bot = {
+      id: "cafe-bot",
+      name: "Café Bot",
+      type: "telegram-bot",
+      tokenEnv: "TELEGRAM_BOT_TOKEN",
+      command: "python3 bot.py",
+      cwd: "~/projects/cafe-bot",
+    };
+    const waiting = await run("app_register", deps, bot);
+    expect(waiting).toMatchObject({
+      _tag: "Success",
+      success: { next: BOT_WAITING_FOR_TOKEN_NEXT },
+    });
+    expect(BOT_WAITING_FOR_TOKEN_NEXT).toContain('"Waiting for token"');
+
+    mkdirSync(path.join(home, "projects", "cafe-bot"), { recursive: true });
+    writeFileSync(path.join(home, "projects", "cafe-bot", ".env"), "TELEGRAM_BOT_TOKEN=123:abc\n");
+    const ready = await run("app_register", deps, bot);
+    expect(ready).toMatchObject({ _tag: "Success", success: { next: BOT_STARTING_NEXT } });
   });
 
   it("starts chats through the threads bridge, in any folder", async () => {
