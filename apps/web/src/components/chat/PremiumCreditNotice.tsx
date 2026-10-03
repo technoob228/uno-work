@@ -108,7 +108,7 @@ export function premiumFallbackNotice(
   const date = formatRenewDate(premium.renewsAt ?? status?.renewsAt);
   const renew = date ? `New credit on ${date}.` : "New credit arrives when your plan renews.";
   return {
-    text: `Premium credit used up — answering with Smart. ${renew}`,
+    text: `Answered by Smart: no Premium credit. ${renew}`,
     actionLabel: UNO_PREMIUM_CONTINUE_LABEL,
     actionUrl: UNO_PREMIUM_BILLING_URL,
   };

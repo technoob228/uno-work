@@ -164,7 +164,7 @@ describe("premium credit", () => {
       true,
     );
     expect(notice).toEqual({
-      text: "Premium credit used up — answering with Smart. New credit on Oct 24.",
+      text: "Answered by Smart: no Premium credit. New credit on Oct 24.",
       actionLabel: "Continue from balance",
       actionUrl: "https://console.uno4.dev/billing#premium",
     });
@@ -173,9 +173,7 @@ describe("premium credit", () => {
         status({ premium: premium({ exhausted: true, renewsAt: null }), renewsAt: null }),
         true,
       )?.text,
-    ).toBe(
-      "Premium credit used up — answering with Smart. New credit arrives when your plan renews.",
-    );
+    ).toBe("Answered by Smart: no Premium credit. New credit arrives when your plan renews.");
   });
 
   it("says nothing on Smart / Fast, with credit left, or without the premium field", () => {
