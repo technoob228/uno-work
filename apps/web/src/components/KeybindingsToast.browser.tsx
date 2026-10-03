@@ -1,6 +1,7 @@
 import "../index.css";
 
 import {
+  DEFAULT_CLIENT_SETTINGS,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   ORCHESTRATION_WS_METHODS,
@@ -20,6 +21,7 @@ import { setupWorker } from "msw/browser";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
+import { writeBrowserClientSettings } from "../clientPersistenceStorage";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { __resetLocalApiForTests } from "../localApi";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
@@ -425,6 +427,9 @@ async function waitForServerConfigStreamReady(): Promise<void> {
 }
 
 async function mountApp(): Promise<{ cleanup: () => Promise<void> }> {
+  // This suite tests the chat screen of someone who already set Uno Work up:
+  // without this a fresh browser goes to the setup wizard, then Home.
+  writeBrowserClientSettings({ ...DEFAULT_CLIENT_SETTINGS, onboardingCompleted: true });
   const host = document.createElement("div");
   host.style.position = "fixed";
   host.style.inset = "0";
