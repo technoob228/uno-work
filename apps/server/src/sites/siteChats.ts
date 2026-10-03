@@ -8,7 +8,8 @@
  * has no chat. Never throws: the record is a convenience, not a source of
  * truth.
  */
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export interface SiteChat {
@@ -66,9 +67,22 @@ export async function readSiteChats(home: string): Promise<SiteChats> {
 async function write(home: string, chats: Record<string, SiteChat>): Promise<void> {
   const file = siteChatsFile(home);
   await mkdir(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(chats, null, 2)}\n`, { mode: 0o600 });
-  await rename(tmp, file);
+  const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmp, `${JSON.stringify(chats, null, 2)}\n`, { mode: 0o600 });
+    await rename(tmp, file);
+  } catch (cause) {
+    await rm(tmp, { force: true }).catch(() => undefined);
+    throw cause;
+  }
+}
+
+/** One change at a time: two publishes at once must not lose each other's line. */
+let queue: Promise<void> = Promise.resolve();
+function inTurn(change: () => Promise<void>): Promise<void> {
+  const next = queue.then(change, change);
+  queue = next.catch(() => undefined);
+  return next;
 }
 
 /** The newest MAX_SITES entries stay; the oldest fall off. */
@@ -87,7 +101,7 @@ export async function recordSiteChat(
   now: () => Date = () => new Date(),
 ): Promise<void> {
   if (!SLUG.test(slug)) return;
-  try {
+  await inTurn(async () => {
     const chats = { ...(await readSiteChats(home)) };
     chats[slug] = {
       threadId: chat.threadId,
@@ -95,18 +109,18 @@ export async function recordSiteChat(
       at: now().toISOString(),
     };
     await write(home, trimSiteChats(chats));
-  } catch {
+  }).catch(() => {
     // a convenience record: publishing already worked
-  }
+  });
 }
 
 export async function forgetSiteChat(home: string, slug: string): Promise<void> {
-  try {
+  await inTurn(async () => {
     const chats = { ...(await readSiteChats(home)) };
-    if (!(slug in chats)) return;
+    if (!Object.hasOwn(chats, slug)) return;
     delete chats[slug];
     await write(home, chats);
-  } catch {
+  }).catch(() => {
     // nothing to forget
-  }
+  });
 }

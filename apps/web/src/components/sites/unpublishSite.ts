@@ -12,8 +12,12 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { accountRequest, accountTransport } from "../../account/unoAccount";
 import { ensureEnvironmentApi } from "../../environmentApi";
 
+/** A site name as hosting spells it: one path segment, nothing else. */
+const SITE_SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
 /** With the person's own Uno session; false where there is none or the console said no. */
 export async function unpublishSiteAsPerson(slug: string): Promise<boolean> {
+  if (!SITE_SLUG.test(slug)) return false;
   if (accountTransport() === "none") return false;
   try {
     await accountRequest("DELETE", `/api/v1/deploys/${encodeURIComponent(slug)}`);

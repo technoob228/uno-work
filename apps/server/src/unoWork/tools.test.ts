@@ -871,19 +871,19 @@ describe("a Telegram bot is never registered as a plain app", () => {
     }
   });
 
-  it("asks for the token variable when it can't tell which one", async () => {
+  it("only hints when it merely looks like a bot — a notifier script still registers", async () => {
     const { deps, home } = makeDeps();
-    botFolder(home, { "bot.js": "// nothing to see\n" });
+    botFolder(home, { "notify.js": 'fetch("https://api.telegram.org/bot123/sendMessage")\n' });
     const result = await run("app_register", deps, {
       id: "orders",
-      name: "Orders Telegram bot",
-      command: "node bot.js",
+      name: "Orders to Telegram",
+      command: "node notify.js",
       cwd: "~/projects/cafe-bot",
     });
-    expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure.message).toContain('type "telegram-bot"');
-      expect(result.failure.message).toContain("tokenEnv");
+    expect(result._tag).toBe("Success");
+    expect(manifest(home, "orders").type).toBeUndefined();
+    if (result._tag === "Success") {
+      expect(JSON.stringify(result.success)).toContain('type \\"telegram-bot\\"');
     }
   });
 
@@ -953,11 +953,17 @@ describe("site_unpublish", () => {
     const requestApproval = deps.requestApproval;
     const withAllow: UnoWorkToolDeps = {
       ...deps,
+      clientActionWaitMs: 3_000,
       requestApproval: (input) =>
         requestApproval(input).pipe(
           Effect.tap(() =>
             Effect.sync(() => {
-              if (input.clientAction?.kind === "site-unpublish") live = [];
+              // Their app answers the approval first and deletes right after.
+              if (input.clientAction?.kind === "site-unpublish") {
+                setTimeout(() => {
+                  live = [];
+                }, 200);
+              }
             }),
           ),
         ),
@@ -999,7 +1005,13 @@ describe("site_unpublish", () => {
           ? sitesReply(["team-site"])
           : { status: 403, body: { error: "FORBIDDEN" } },
     });
-    const result = await run("site_unpublish", deps, { slug: "team-site" });
+    const result = await run(
+      "site_unpublish",
+      { ...deps, clientActionWaitMs: 0 },
+      {
+        slug: "team-site",
+      },
+    );
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
       expect(result.failure.message).toContain("still online");

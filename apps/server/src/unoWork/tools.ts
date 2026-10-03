@@ -43,7 +43,7 @@ import type {
   UnoMachineApps,
 } from "@t3tools/contracts";
 import { clampUnoAgentAccessLevel } from "@t3tools/contracts";
-import { Data, Effect } from "effect";
+import { Data, Duration, Effect } from "effect";
 
 import {
   IMAGE_PROMPT_MAX_CHARS,
@@ -134,6 +134,8 @@ export interface UnoWorkToolDeps {
     readonly body?: unknown;
     readonly timeoutMs?: number;
   }) => Effect.Effect<BridgeReply, UnoWorkToolError>;
+  /** Tests: how long to wait for the person's app after an Allow with a client action. */
+  readonly clientActionWaitMs?: number;
   readonly requestApproval: (input: {
     readonly tool: string;
     readonly title: string;
@@ -243,6 +245,11 @@ export interface UnoWorkToolDeps {
    * harness key. Absent (tests, older wiring): `image_generate` says so.
    */
   readonly images?: {
+    /**
+     * Pictures are on for this account (the console's assistants flag).
+     * Asked only when a picture is wanted. Absent: on.
+     */
+    readonly available?: Effect.Effect<boolean>;
     readonly generate: (input: {
       readonly prompt: string;
       readonly size?: string;
@@ -650,6 +657,10 @@ const requireAccountAccess = (deps: UnoWorkToolDeps) =>
       return yield* toolError(ACCESS_OFF_MESSAGE);
     }
   });
+
+/** How long site_unpublish waits for the person's app to take the site down after Allow. */
+const SITE_UNPUBLISH_WAIT_MS = 12_000;
+const SITE_UNPUBLISH_POLL_MS = 1_500;
 
 const NO_PICTURES_MESSAGE =
   "Pictures aren't switched on for this Uno account yet. Tell the person in one line; don't try another way.";
@@ -1185,21 +1196,16 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             cwd !== null && (!declared || record.tokenEnv === undefined)
               ? yield* Effect.promise(() => scanFolderForTelegramBot(cwd))
               : { isBot: false, tokenEnv: null };
-          const isBot =
-            declared ||
-            record.telegram !== undefined ||
-            record.tokenEnv !== undefined ||
-            scan.isBot ||
-            saysTelegramBot(record);
+          // Sure: the agent said so (type / telegram / tokenEnv), or the code
+          // talks to Telegram AND names its token variable. A mere mention of
+          // Telegram is a guess: such an app registers as it was asked, with a
+          // note (a notifier script is not a bot, and there is no "not a bot").
+          const stated = declared || record.telegram !== undefined || record.tokenEnv !== undefined;
+          const isBot = stated || (scan.isBot && scan.tokenEnv !== null);
           if (isBot) {
             if (record.tokenEnv === undefined && scan.tokenEnv !== null) {
               record.tokenEnv = scan.tokenEnv;
               notes.push(`tokenEnv was read from the code: ${scan.tokenEnv}.`);
-            }
-            if (record.tokenEnv === undefined) {
-              return yield* toolError(
-                'This is a Telegram bot: register it with type "telegram-bot", tokenEnv (the variable in the project\'s .env its code reads the token from, e.g. TELEGRAM_BOT_TOKEN), telegram (its username, when you know it) and no port. Call app_register again with those.',
-              );
             }
             if (!declared) {
               record.type = APP_TYPE_TELEGRAM_BOT;
@@ -1207,11 +1213,20 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
                 'Registered as a Telegram bot (type "telegram-bot"): Home shows "Waiting for token" until its token is in .env — ask for it with request_secret — and then "Open in Telegram".',
               );
             }
+            if (record.tokenEnv === undefined) {
+              notes.push(
+                "tokenEnv is missing: call app_register again with the variable in .env its code reads the token from, so Home can tell when the token is in.",
+              );
+            }
             if (record.telegram === undefined) {
               notes.push(
                 "Its username is missing: once the token is in, read it with getMe and call app_register again with telegram so the person gets Open in Telegram.",
               );
             }
+          } else if (scan.isBot || saysTelegramBot(record)) {
+            notes.push(
+              'If this is a Telegram bot, register it again with type "telegram-bot", tokenEnv (the variable in .env with its token) and telegram (its username): Home then shows "Waiting for token" and "Open in Telegram" instead of Start.',
+            );
           }
         }
         const written = yield* writeManifestRecord(deps, id, record);
@@ -1898,7 +1913,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     level: "change",
     approvalTitle: (args) => `Make a picture: ${(str(args, "prompt") ?? "").slice(0, 80)}`,
     // No card for a call that can't work (pictures aren't on for this account).
-    prepare: (deps) => (deps.images ? Effect.void : Effect.fail(toolError(NO_PICTURES_MESSAGE))),
+    prepare: (deps) =>
+      (deps.images?.available ?? Effect.succeed(deps.images !== undefined)).pipe(
+        Effect.flatMap((available) =>
+          available ? Effect.void : Effect.fail(toolError(NO_PICTURES_MESSAGE)),
+        ),
+      ),
     run: (deps, args) =>
       Effect.gen(function* () {
         if (!deps.images) {
@@ -2156,10 +2176,16 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     run: (deps, args) =>
       Effect.gen(function* () {
         const slug = str(args, "slug")!;
-        // The person's Allow already took it down with their own Uno session
-        // (a computer's token may not delete sites). Check, then try as the
-        // computer for the case their Uno Work couldn't.
+        // On Allow the person's Uno Work takes the site down with their own
+        // Uno session (a computer's token may not delete sites): it answers
+        // the approval first and deletes right after, so give it a moment.
+        // Then try as the computer for the case their Uno Work couldn't.
         let listed = yield* siteIsListed(deps, slug);
+        const waitMs = deps.clientActionWaitMs ?? SITE_UNPUBLISH_WAIT_MS;
+        for (let waited = 0; listed && waited < waitMs; waited += SITE_UNPUBLISH_POLL_MS) {
+          yield* Effect.sleep(Duration.millis(SITE_UNPUBLISH_POLL_MS));
+          listed = yield* siteIsListed(deps, slug);
+        }
         if (listed && deps.console) {
           const reply = yield* deps.console
             .request({ method: "DELETE", path: sitePath(slug) })

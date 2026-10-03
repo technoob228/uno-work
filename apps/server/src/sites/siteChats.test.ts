@@ -38,6 +38,38 @@ describe("which chat made a site", () => {
     expect(readFileSync(siteChatsFile(dir), "utf8")).toContain("menu");
   });
 
+  it("keeps every line when sites are published at the same moment", async () => {
+    const dir = home();
+    await Promise.all(
+      Array.from({ length: 12 }, (_, i) =>
+        recordSiteChat(dir, `site-${i}`, { threadId: `t${i}`, title: `Chat ${i}` }),
+      ),
+    );
+    expect(Object.keys(await readSiteChats(dir))).toHaveLength(12);
+  });
+
+  it("a site called constructor is just a site", async () => {
+    const dir = home();
+    await recordSiteChat(dir, "bakery", { threadId: "t1", title: "Bakery" });
+    const sites = {
+      availability: "ok" as const,
+      sites: [
+        {
+          slug: "constructor",
+          url: "https://constructor.uno4.me/",
+          customDomain: null,
+          hasPassword: false,
+          sizeBytes: null,
+          updatedAt: null,
+        },
+      ],
+      storageUsedBytes: null,
+      storageLimitBytes: null,
+      message: null,
+    };
+    expect(withSiteChats(sites, await readSiteChats(dir)).sites[0]?.madeIn).toBeUndefined();
+  });
+
   it("reads nothing from a missing or broken file", async () => {
     const dir = home();
     expect(await readSiteChats(dir)).toEqual({});

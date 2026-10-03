@@ -201,7 +201,8 @@ const makeDeps = (input: {
     const manifestDir = resolveManifestDir(home);
     const context = { threadId: input.threadId, ...(input.cwd ? { cwd: input.cwd } : {}) };
 
-    const assistantsEnabled = yield* serverSettings.getSettings.pipe(
+    // Asked only when a picture is wanted (cached; see assistantsFeature.ts).
+    const assistantsEnabled = serverSettings.getSettings.pipe(
       Effect.flatMap((settings) => Effect.promise(() => assistantsMvpEnabled(settings))),
       Effect.orElseSucceed(() => false),
     );
@@ -344,9 +345,10 @@ const makeDeps = (input: {
         Effect.promise(() => readAppLogTail(app, lines, manifestDir)),
       // Pictures come with the console's assistants (ASSISTANTS_MVP): where the
       // account doesn't have them the gateway has no such route.
-      ...(gatewayKey && assistantsEnabled
+      ...(gatewayKey
         ? {
             images: {
+              available: assistantsEnabled,
               generate: ({ prompt, size }) =>
                 gatewayKey.harnessKey().pipe(
                   Effect.flatMap((apiKey) =>

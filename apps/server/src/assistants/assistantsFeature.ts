@@ -74,6 +74,7 @@ export async function assistantsMvpEnabled(
   const promise = (async () => {
     let enabled = false;
     let ttl = FAILED_TTL_MS;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const reply = await Promise.race([
         consoleRequest({
@@ -83,9 +84,9 @@ export async function assistantsMvpEnabled(
           token,
           ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
         }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("timeout")), PROBE_TIMEOUT_MS),
-        ),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("timeout")), PROBE_TIMEOUT_MS);
+        }),
       ]);
       if (reply.status >= 200 && reply.status < 300) {
         enabled = featuresHaveAssistants(reply.body);
@@ -93,6 +94,8 @@ export async function assistantsMvpEnabled(
       }
     } catch {
       // the console didn't answer: off for a minute
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
     cached = { token, enabled, until: now() + ttl };
     return enabled;

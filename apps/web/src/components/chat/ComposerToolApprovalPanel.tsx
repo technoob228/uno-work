@@ -69,13 +69,6 @@ const ToolApprovalCard = memo(function ToolApprovalCard({
     setIsSubmitting(true);
     setError(null);
     try {
-      // Allow of the agent's site_unpublish: the person's own Uno session
-      // takes the site down (a computer's token may not), then the tool
-      // checks the result. Without a session here the tool says so itself.
-      if (approved && unpublishSlug !== null) {
-        await unpublishSiteAsPerson(unpublishSlug);
-        void queryClient.invalidateQueries({ queryKey: ["uno-sites"] });
-      }
       await environmentFetchJson<{ ok: boolean }>({
         environmentId: approval.environmentId,
         pathname: APPROVAL_RESULT_PATH,
@@ -83,6 +76,16 @@ const ToolApprovalCard = memo(function ToolApprovalCard({
         body: { requestId: event.requestId, responseToken: event.responseToken, approved },
       });
       removeToolApproval(event.requestId);
+      // Allow of the agent's site_unpublish, accepted by the computer (a card
+      // answered elsewhere or timed out never gets here): the person's own
+      // Uno session takes the site down — a computer's token may not. The
+      // tool waits a few seconds and checks; without a session here it says
+      // so itself.
+      if (approved && unpublishSlug !== null) {
+        void unpublishSiteAsPerson(unpublishSlug).finally(
+          () => void queryClient.invalidateQueries({ queryKey: ["uno-sites"] }),
+        );
+      }
     } catch (cause) {
       if (isEnvironmentHttpError(cause) && cause.status === 404) {
         // Already answered elsewhere or timed out — nothing waits on it.

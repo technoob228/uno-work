@@ -82,7 +82,8 @@ export function withSiteChats(sites: UnoWorkSites, chats: SiteChats): UnoWorkSit
   return {
     ...sites,
     sites: sites.sites.map((site) => {
-      const chat = chats[site.slug];
+      // Own keys only: a site may be called "constructor".
+      const chat = Object.hasOwn(chats, site.slug) ? chats[site.slug] : undefined;
       return chat ? { ...site, madeIn: { threadId: chat.threadId, title: chat.title } } : site;
     }),
   };

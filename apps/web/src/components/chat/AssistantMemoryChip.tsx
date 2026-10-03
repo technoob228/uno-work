@@ -23,16 +23,12 @@ export function AssistantMemoryChip({
   const notes = useQuery({
     queryKey: ["uno-assistant", "memory", environmentId],
     queryFn: async () => {
-      try {
-        const file = await readAssistantFile({
-          environmentId,
-          projectId: ASSISTANT_PROJECT_ID,
-          name: "NOTES.md",
-        });
-        return file.content;
-      } catch {
-        return ""; // no assistant yet, or an older computer
-      }
+      const file = await readAssistantFile({
+        environmentId,
+        projectId: ASSISTANT_PROJECT_ID,
+        name: "NOTES.md",
+      });
+      return file.content;
     },
     staleTime: open ? 0 : 60_000,
     refetchOnWindowFocus: false,
@@ -71,7 +67,11 @@ export function AssistantMemoryChip({
       <PopoverPopup align="end" className="w-[22rem]" data-testid="uno-memory-popup">
         <div className="flex flex-col gap-2">
           <div className="text-sm font-semibold">What Uno remembers</div>
-          {body.length > 0 ? (
+          {notes.isError && notes.data === undefined ? (
+            <p className="text-xs text-muted-foreground" data-testid="uno-memory-unavailable">
+              Couldn't read Uno's notes right now. Try again in a moment.
+            </p>
+          ) : body.length > 0 ? (
             <div className="max-h-64 overflow-y-auto rounded-md border border-border/70 bg-muted/20 px-2.5 py-2 text-xs leading-relaxed whitespace-pre-wrap text-foreground/90">
               {body}
             </div>
