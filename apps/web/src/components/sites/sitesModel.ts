@@ -64,6 +64,28 @@ export function updatedAgo(iso: string | null, now = Date.now()): string | null 
   return days === 1 ? "yesterday" : `${days} days ago`;
 }
 
+/**
+ * The right-panel tabs that show a site: after Unpublish they would keep the
+ * picture of a page that is no longer on the internet, so the caller closes
+ * them. Only browser tabs count, matched by the site's host.
+ */
+export function tabsShowingSite(
+  tabs: ReadonlyArray<{ readonly id: string; readonly kind: string; readonly url?: string }>,
+  siteUrl: string,
+): string[] {
+  const host = hostOfSite(siteUrl);
+  if (host === "" || host === siteUrl) return [];
+  return tabs
+    .filter(
+      (tab) =>
+        (tab.kind === "browser" || tab.kind === "live-browser") &&
+        typeof tab.url === "string" &&
+        tab.url !== "" &&
+        hostOfSite(tab.url) === host,
+    )
+    .map((tab) => tab.id);
+}
+
 /** What "Change with Uno" asks the chat. */
 export function changeSitePrompt(row: Pick<SiteRow, "slug" | "url">): string {
   return `I want to change my site ${row.url} (slug ${row.slug}). Get its current code with curl, ask me what to change, then republish it under the same address.`;

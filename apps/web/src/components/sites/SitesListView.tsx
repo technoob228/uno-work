@@ -37,6 +37,7 @@ import { isElectron } from "../../env";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { ensureEnvironmentApi } from "../../environmentApi";
 import { cn } from "../../lib/utils";
+import { usePreviewPane } from "../preview/PreviewPaneContext";
 import { openInNewTab } from "../../navigation/useOpenApp";
 import { selectEnvironmentState, useStore } from "../../store";
 import { useHomeLaunchers } from "../computer/useHomeLaunchers";
@@ -62,6 +63,7 @@ import {
   siteRows,
   updatedAgo,
   siteStatus,
+  tabsShowingSite,
   type SiteRow,
 } from "./sitesModel";
 
@@ -162,6 +164,7 @@ function SitesList({
 }) {
   const launchers = useHomeLaunchers(environmentId);
   const queryClient = useQueryClient();
+  const { files: previewFiles, closeFile: closePreviewFile } = usePreviewPane();
   const navigate = useNavigate();
   const rows = useMemo(() => siteRows(sites.data?.sites ?? []), [sites.data]);
   // The chats of "Made in chat …" as the sidebar names them now (a chat can
@@ -199,6 +202,8 @@ function SitesList({
         return;
       }
       toastManager.add({ type: "success", title: `${row.host} is off the internet` });
+      // A tab that still shows the site would show a page that is gone.
+      for (const tabId of tabsShowingSite(previewFiles, row.url)) closePreviewFile(tabId);
       void queryClient.invalidateQueries({ queryKey: ["uno-sites", environmentId] });
     },
     onError: (error) => {

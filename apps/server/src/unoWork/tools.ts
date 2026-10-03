@@ -109,6 +109,8 @@ const asToolError = <A, E extends { readonly message: string }, R>(
 export type ToolApprovalClientAction = {
   readonly kind: "site-unpublish";
   readonly slug: string;
+  /** The site's address: the app closes the panel tabs still showing it. */
+  readonly url?: string;
 };
 
 export interface UnoWorkCaller {
@@ -2223,7 +2225,11 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     approvalTitle: (args) => `Unpublish ${siteUrl(str(args, "slug") ?? "")}`,
     approvalDetail: () =>
       "The address stops working for everyone and the site's files are removed from Uno. The folder on your computer stays.",
-    approvalClientAction: (args) => ({ kind: "site-unpublish", slug: str(args, "slug")! }),
+    approvalClientAction: (args) => ({
+      kind: "site-unpublish",
+      slug: str(args, "slug")!,
+      url: siteUrl(str(args, "slug")!),
+    }),
     prepare: (deps, args) =>
       siteIsListed(deps, str(args, "slug")!).pipe(
         Effect.flatMap((listed) =>

@@ -481,6 +481,8 @@ export const BridgeToolApprovalRequestEvent = Schema.Struct({
     Schema.Struct({
       kind: Schema.Literal("site-unpublish"),
       slug: Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,62}$/)),
+      /** The site's address, so the app can close the panel tabs still showing it. */
+      url: Schema.optional(Schema.String),
     }),
   ),
   context: Schema.optional(BrowserBridgeRequestContext),

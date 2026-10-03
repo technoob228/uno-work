@@ -18,6 +18,8 @@ import {
   removeToolApproval,
   useToolApprovals,
 } from "../../toolApprovalStore";
+import { usePreviewPane } from "../preview/PreviewPaneContext";
+import { tabsShowingSite } from "../sites/sitesModel";
 import { unpublishSiteAsPerson } from "../sites/unpublishSite";
 import { Button } from "../ui/button";
 
@@ -56,6 +58,7 @@ const ToolApprovalCard = memo(function ToolApprovalCard({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const { files: previewFiles, closeFile: closePreviewFile } = usePreviewPane();
   const { event } = approval;
   // What this app itself does on Allow comes from the computer: say it in the
   // app's own words, so the card can't name one site and take down another.
@@ -82,9 +85,14 @@ const ToolApprovalCard = memo(function ToolApprovalCard({
       // tool waits a few seconds and checks; without a session here it says
       // so itself.
       if (approved && unpublishSlug !== null) {
-        void unpublishSiteAsPerson(unpublishSlug).finally(
-          () => void queryClient.invalidateQueries({ queryKey: ["uno-sites"] }),
-        );
+        const siteUrl = event.clientAction?.url;
+        void unpublishSiteAsPerson(unpublishSlug)
+          .then((done) => {
+            // The tab the agent opened would keep showing a page that is gone.
+            if (!done || !siteUrl) return;
+            for (const tabId of tabsShowingSite(previewFiles, siteUrl)) closePreviewFile(tabId);
+          })
+          .finally(() => void queryClient.invalidateQueries({ queryKey: ["uno-sites"] }));
       }
     } catch (cause) {
       if (isEnvironmentHttpError(cause) && cause.status === 404) {

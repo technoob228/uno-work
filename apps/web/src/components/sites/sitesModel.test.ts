@@ -5,10 +5,24 @@ import {
   parseAppsSitesSearch,
   siteRows,
   siteStatus,
+  tabsShowingSite,
   updatedAgo,
 } from "./sitesModel";
 
 describe("sites screen model", () => {
+  it("finds the panel tabs that show an unpublished site, and only those", () => {
+    const tabs = [
+      { id: "live", kind: "live-browser", url: "https://cafe.uno4.me/menu" },
+      { id: "web", kind: "browser", url: "https://cafe.uno4.me/" },
+      { id: "other", kind: "browser", url: "https://cafe.example.com/" },
+      { id: "file", kind: "html", url: "https://cafe.uno4.me/" },
+      { id: "blank", kind: "browser", url: "" },
+      { id: "app", kind: "app" },
+    ];
+    expect(tabsShowingSite(tabs, "https://cafe.uno4.me/")).toEqual(["live", "web"]);
+    expect(tabsShowingSite(tabs, "not an address")).toEqual([]);
+  });
+
   it("the status pill says who can open the site, not the same word on every row", () => {
     expect(siteStatus({ hasPassword: false })).toEqual({ label: "Live", locked: false });
     expect(siteStatus({ hasPassword: true })).toEqual({ label: "Password", locked: true });

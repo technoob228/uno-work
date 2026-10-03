@@ -1040,7 +1040,12 @@ describe("site_unpublish", () => {
     expect(recorded.approvals[0]).toMatchObject({
       tool: "site_unpublish",
       sensitive: true,
-      clientAction: { kind: "site-unpublish", slug: "team-site" },
+      clientAction: {
+        kind: "site-unpublish",
+        slug: "team-site",
+        // The address goes along: the app closes the panel tabs still showing the site.
+        url: expect.stringMatching(/^https:\/\/team-site\.[a-z0-9.-]+\/?$/),
+      },
     });
     // The computer's own token never had to delete anything.
     expect(recorded.console.some((request) => request.method === "DELETE")).toBe(false);
