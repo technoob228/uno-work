@@ -4,14 +4,17 @@ import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
-const { openInPreferredEditorMock, openUrlMock, readLocalApiMock } = vi.hoisted(() => ({
-  openInPreferredEditorMock: vi.fn(async () => "vscode"),
-  openUrlMock: vi.fn(),
-  readLocalApiMock: vi.fn(() => ({
-    server: { getConfig: vi.fn(async () => ({ availableEditors: ["vscode"] })) },
-    shell: { openInEditor: vi.fn(async () => undefined) },
-  })),
-}));
+const { openInPreferredEditorMock, openUrlMock, readLocalApiMock, openFileMock } = vi.hoisted(
+  () => ({
+    openInPreferredEditorMock: vi.fn(async () => "vscode"),
+    openUrlMock: vi.fn(),
+    openFileMock: vi.fn(),
+    readLocalApiMock: vi.fn(() => ({
+      server: { getConfig: vi.fn(async () => ({ availableEditors: ["vscode"] })) },
+      shell: { openInEditor: vi.fn(async () => undefined) },
+    })),
+  }),
+);
 
 vi.mock("../editorPreferences", () => ({
   openInPreferredEditor: openInPreferredEditorMock,
@@ -24,9 +27,13 @@ vi.mock("../localApi", () => ({
   readLocalApi: readLocalApiMock,
 }));
 
-vi.mock("./preview/PreviewPaneContext", () => ({
+// Only the panel hook is faked: ChatMarkdown also imports the module's pure
+// helpers (detectFileKind), which a bare mock would drop.
+vi.mock("./preview/PreviewPaneContext", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./preview/PreviewPaneContext")>()),
   usePreviewPane: () => ({
     openUrl: openUrlMock,
+    openFile: openFileMock,
   }),
 }));
 
@@ -36,6 +43,7 @@ describe("ChatMarkdown", () => {
   afterEach(() => {
     openInPreferredEditorMock.mockClear();
     openUrlMock.mockClear();
+    openFileMock.mockClear();
     readLocalApiMock.mockClear();
     localStorage.clear();
     document.body.innerHTML = "";
@@ -56,7 +64,9 @@ describe("ChatMarkdown", () => {
       await link.click();
 
       await vi.waitFor(() => {
-        expect(openInPreferredEditorMock).toHaveBeenCalledWith(expect.anything(), filePath);
+        expect(openFileMock).toHaveBeenCalledWith(
+          expect.objectContaining({ name: "PermissionRule.ts", path: filePath }),
+        );
       });
     } finally {
       await screen.unmount();
@@ -78,7 +88,9 @@ describe("ChatMarkdown", () => {
       await link.click();
 
       await vi.waitFor(() => {
-        expect(openInPreferredEditorMock).toHaveBeenCalledWith(expect.anything(), `${filePath}:1`);
+        expect(openFileMock).toHaveBeenCalledWith(
+          expect.objectContaining({ name: "PermissionRule.ts", path: `${filePath}:1` }),
+        );
       });
     } finally {
       await screen.unmount();
@@ -100,9 +112,8 @@ describe("ChatMarkdown", () => {
       await link.click();
 
       await vi.waitFor(() => {
-        expect(openInPreferredEditorMock).toHaveBeenCalledWith(
-          expect.anything(),
-          `${filePath}:1:7`,
+        expect(openFileMock).toHaveBeenCalledWith(
+          expect.objectContaining({ name: "PermissionRule.ts", path: `${filePath}:1:7` }),
         );
       });
     } finally {
@@ -175,7 +186,8 @@ describe("ChatMarkdown", () => {
     try {
       const link = page.getByRole("link", { name: "App.tsx · L12:C3" });
       await expect.element(link).toBeInTheDocument();
-      await expect.element(link).toHaveAttribute("href", "/repo/project/src/App.tsx#L12C3");
+      // A plain path is linked as written (`path:line:column`); the label carries the position.
+      await expect.element(link).toHaveAttribute("href", "/repo/project/src/App.tsx:12:3");
       await expect
         .element(page.getByRole("link", { name: "Hidden.tsx · L4" }))
         .not.toBeInTheDocument();

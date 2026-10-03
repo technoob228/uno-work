@@ -92,6 +92,8 @@ function renderDialog(input: {
   );
 }
 
+// An App Store app is shown by what it does ("Quick notes"), not by the
+// program's own name ("Memos") — appTaskNames.ts.
 describe("ProgramDialog — Remove and AI limit", () => {
   afterEach(() => {
     document.body.innerHTML = "";
@@ -107,17 +109,17 @@ describe("ProgramDialog — Remove and AI limit", () => {
       await expect.element(page.getByText("of $10 limit")).toBeInTheDocument();
 
       await page.getByRole("button", { name: "Remove" }).click();
-      await expect.element(page.getByText("Remove Memos?")).toBeInTheDocument();
+      await expect.element(page.getByText("Remove Quick notes?")).toBeInTheDocument();
       await expect
-        .element(page.getByText(/Memos will stop and disappear from this computer/))
+        .element(page.getByText(/Quick notes will stop and disappear from this computer/))
         .toBeInTheDocument();
 
-      await page.getByRole("checkbox", { name: /Also delete Memos's data/ }).click();
+      await page.getByRole("checkbox", { name: /Also delete Quick notes's data/ }).click();
       const confirm = page.getByRole("button", { name: "Remove and delete data" });
       await expect.element(confirm).toBeInTheDocument();
       await confirm.click();
       expect(onRemove).toHaveBeenCalledWith(
-        { kind: "store", deploymentId: 77, name: "Memos", templateId: "memos" },
+        { kind: "store", deploymentId: 77, name: "Quick notes", templateId: "memos" },
         true,
         false,
         false,
@@ -160,12 +162,12 @@ describe("ProgramDialog — Remove and AI limit", () => {
       await expect.element(box).not.toBeChecked();
       await expect.element(page.getByText(/\(120 MB\)/)).toBeInTheDocument();
       await expect
-        .element(page.getByText(/this folder is shared\. Memos on your other computers/))
+        .element(page.getByText(/this folder is shared\. Quick notes on your other computers/))
         .toBeInTheDocument();
       await box.click();
       await page.getByRole("button", { name: "Remove and delete files" }).click();
       expect(onRemove).toHaveBeenCalledWith(
-        { kind: "store", deploymentId: 77, name: "Memos", templateId: "memos" },
+        { kind: "store", deploymentId: 77, name: "Quick notes", templateId: "memos" },
         false,
         true,
         false,

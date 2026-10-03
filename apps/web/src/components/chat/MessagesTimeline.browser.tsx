@@ -1,7 +1,7 @@
 import "../../index.css";
 
 import { EnvironmentId } from "@t3tools/contracts";
-import { createRef } from "react";
+import { createRef, type ReactNode } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
 import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -47,6 +47,12 @@ vi.mock("@legendapp/list/react", async () => {
 });
 
 import { MessagesTimeline } from "./MessagesTimeline";
+import { PreviewPaneProvider } from "../preview/PreviewPaneContext";
+
+/** The timeline opens files and links in the right panel, so it lives inside its provider. */
+function inPanel(node: ReactNode) {
+  return <PreviewPaneProvider>{node}</PreviewPaneProvider>;
+}
 
 function buildProps() {
   return {
@@ -83,23 +89,25 @@ describe("MessagesTimeline", () => {
 
   it("renders activity rows instead of the empty placeholder when a thread has non-message timeline data", async () => {
     const screen = await render(
-      <MessagesTimeline
-        {...buildProps()}
-        timelineEntries={[
-          {
-            id: "work-1",
-            kind: "work",
-            createdAt: "2026-04-13T12:00:00.000Z",
-            entry: {
+      inPanel(
+        <MessagesTimeline
+          {...buildProps()}
+          timelineEntries={[
+            {
               id: "work-1",
+              kind: "work",
               createdAt: "2026-04-13T12:00:00.000Z",
-              label: "thinking",
-              detail: "Inspecting repository state",
-              tone: "thinking",
+              entry: {
+                id: "work-1",
+                createdAt: "2026-04-13T12:00:00.000Z",
+                label: "thinking",
+                detail: "Inspecting repository state",
+                tone: "thinking",
+              },
             },
-          },
-        ]}
-      />,
+          ]}
+        />,
+      ),
     );
 
     try {
@@ -122,7 +130,7 @@ describe("MessagesTimeline", () => {
     vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
 
     const props = buildProps();
-    const screen = await render(<MessagesTimeline {...props} timelineEntries={[]} />);
+    const screen = await render(inPanel(<MessagesTimeline {...props} timelineEntries={[]} />));
 
     try {
       await expect
@@ -130,23 +138,25 @@ describe("MessagesTimeline", () => {
         .toBeVisible();
 
       await screen.rerender(
-        <MessagesTimeline
-          {...props}
-          timelineEntries={[
-            {
-              id: "work-1",
-              kind: "work",
-              createdAt: "2026-04-13T12:00:00.000Z",
-              entry: {
+        inPanel(
+          <MessagesTimeline
+            {...props}
+            timelineEntries={[
+              {
                 id: "work-1",
+                kind: "work",
                 createdAt: "2026-04-13T12:00:00.000Z",
-                label: "thinking",
-                detail: "Inspecting repository state",
-                tone: "thinking",
+                entry: {
+                  id: "work-1",
+                  createdAt: "2026-04-13T12:00:00.000Z",
+                  label: "thinking",
+                  detail: "Inspecting repository state",
+                  tone: "thinking",
+                },
               },
-            },
-          ]}
-        />,
+            ]}
+          />,
+        ),
       );
 
       await expect.element(page.getByText("Thinking - Inspecting repository state")).toBeVisible();
