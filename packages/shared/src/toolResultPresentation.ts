@@ -262,17 +262,20 @@ function collectFacts(input: ToolActivityInput): ToolCallFacts {
     finished && !detailIsInput ? detailUnwrapped?.text : undefined,
   );
 
+  // A call that left something open for the person (`queued: true`) or says
+  // `ok: true` did what it could: that is not a failure, whatever the harness
+  // made of an `ok: false` beside it.
+  const resultRecord = resultText !== undefined ? asRecord(parseResultData(resultText)) : undefined;
+  const settled = resultRecord?.queued === true || resultRecord?.ok === true;
   const failed =
-    status === "failed" ||
-    status === "error" ||
-    claudeResult?.is_error === true ||
-    (resultText !== undefined &&
-      (/^[A-Za-z0-9_.-]+ failed: /.test(resultText) ||
-        resultText.startsWith("Error executing tool ") ||
-        (() => {
-          const record = asRecord(parseResultData(resultText));
-          return record !== undefined && asText(record.error) !== undefined;
-        })()));
+    !settled &&
+    (status === "failed" ||
+      status === "error" ||
+      claudeResult?.is_error === true ||
+      (resultText !== undefined &&
+        (/^[A-Za-z0-9_.-]+ failed: /.test(resultText) ||
+          resultText.startsWith("Error executing tool ") ||
+          (resultRecord !== undefined && asText(resultRecord.error) !== undefined))));
 
   return {
     ...(name ? { name } : {}),
@@ -445,13 +448,16 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
   open_in_panel: [
     "Opening it in the panel…",
     (c) =>
-      named(
-        "Opened in the panel:",
-        hostOf(text(c.args, "url")) ??
-          baseName(text(c.args, "path", "file")) ??
-          text(c.args, "appId"),
-        "Opened it in the panel",
-      ),
+      // `opened: null` — there was nothing to show yet (a bot without its link).
+      "opened" in c.result && !c.result.opened
+        ? "Nothing to open in the panel yet"
+        : named(
+            "Opened in the panel:",
+            hostOf(text(c.args, "url")) ??
+              baseName(text(c.args, "path", "file")) ??
+              text(c.args, "appId"),
+            "Opened it in the panel",
+          ),
     "Couldn't open it in the panel",
   ],
   image_generate: ["Making an image…", "Made an image", "Couldn't make the image"],

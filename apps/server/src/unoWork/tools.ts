@@ -1033,7 +1033,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "app_register",
     group: "apps",
     description:
-      "Put an app you built on the person's Home: writes and validates ~/.uno/apps/<id>.json. With a command, Uno starts it within ~20 seconds and after every reboot — don't start it yourself or call app_start after (a second copy), logging to ~/.uno/apps/<id>.log. A Telegram bot is never a plain app: always type telegram-bot + tokenEnv + telegram (username), no port. Registering the same id again updates it. Ask for the machine's AI, cloud storage or Inbox notifications with ai / storage / notify (then use the Uno App SDK — uno_guide('app-sdk')). Never put secrets here.",
+      "Put an app you built on the person's Home: writes and validates ~/.uno/apps/<id>.json. With a command, Uno starts it within ~20 seconds and after every reboot — don't start it yourself or call app_start after (a second copy), logging to ~/.uno/apps/<id>.log. A Telegram bot is never a plain app: always type telegram-bot + tokenEnv, no port; add telegram (its username) when you know it. No token yet is fine: register it now, it shows as waiting for its token and starts once the token is in. Registering the same id again updates it. Ask for the machine's AI, cloud storage or Inbox notifications with ai / storage / notify (then use the Uno App SDK — uno_guide('app-sdk')). Never put secrets here.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1104,12 +1104,13 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           type: "string",
           enum: ["telegram-bot"],
           description:
-            "telegram-bot: a Telegram bot — no port, opened in Telegram (give telegram and tokenEnv).",
+            "telegram-bot: a Telegram bot — no port, opened in Telegram (give tokenEnv; telegram once you know the username).",
         },
         telegram: {
           type: "string",
           maxLength: 64,
-          description: "The bot's username from BotFather, without @, e.g. our_cafe_bot.",
+          description:
+            "The bot's username from BotFather, without @, e.g. our_cafe_bot. Optional: register again to add it later.",
         },
         tokenEnv: {
           type: "string",

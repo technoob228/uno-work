@@ -287,6 +287,47 @@ describe("describeToolActivity", () => {
     expect(run('{"ok":false,"name":"BOT_TOKEN"}')).toBe("Not given: BOT_TOKEN");
   });
 
+  it('Hermes: a secret left open for the person is "asked", not a failure, even when the harness marks the call failed', () => {
+    const body = JSON.stringify({
+      result:
+        '{"ok":false,"queued":true,"name":"TELEGRAM_BOT_TOKEN","requestId":"95742cc7","error":"No answer yet."}',
+    });
+    const human = describeToolActivity({
+      summary: "mcp__uno_work__request_secret",
+      kind: "tool.completed",
+      payload: {
+        itemType: "dynamic_tool_call",
+        status: "failed",
+        data: {
+          toolCallId: "tc-4",
+          rawInput: { name: "TELEGRAM_BOT_TOKEN" },
+          rawOutput: wrapped("mcp__uno_work__request_secret", body),
+        },
+      },
+    });
+    expect(human?.label).toBe("Asked you for TELEGRAM_BOT_TOKEN");
+    expect(human?.failed).toBe(false);
+  });
+
+  it("open_in_panel that had nothing to open says so", () => {
+    const run = (output: string, input: Record<string, unknown>) =>
+      describeToolActivity({
+        summary: "uno-work_open_in_panel",
+        kind: "tool.completed",
+        payload: {
+          data: { tool: "uno-work_open_in_panel", state: { status: "completed", input, output } },
+        },
+      })?.label;
+    expect(
+      run('{"ok":true,"opened":null,"note":"Echo Bot is a Telegram bot without a username"}', {
+        appId: "echo-bot",
+      }),
+    ).toBe("Nothing to open in the panel yet");
+    expect(
+      run('{"ok":true,"opened":"https://hello.uno4.me/"}', { url: "https://hello.uno4.me/" }),
+    ).toBe("Opened in the panel: hello.uno4.me");
+  });
+
   it("a tool of another MCP server gets its name in words, never its JSON", () => {
     const human = describeToolActivity({
       summary: "MCP tool call",
