@@ -54,9 +54,7 @@ import {
   executeBridgeOpenUrl,
 } from "./browserCommandRouter.ts";
 import { CredentialsVaultService } from "./credentialsVault.ts";
-import { InboxService } from "./inbox/InboxService.ts";
 import { ConnectorNotifyService } from "./manager/Services/ConnectorNotify.ts";
-import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { registerKnownSecret } from "./secretRedaction.ts";
 import { ServerBrowser } from "./serverBrowser.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
