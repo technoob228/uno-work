@@ -10,7 +10,12 @@ export function readDevMode(): boolean {
 
 function readStoredDevMode(): boolean {
   if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(DEV_MODE_STORAGE_KEY) === "1";
+  try {
+    // No storage (a locked-down browser, a test window) reads as "off".
+    return window.localStorage?.getItem(DEV_MODE_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
 }
 
 export function useDevMode(): boolean {

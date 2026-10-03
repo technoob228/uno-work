@@ -268,7 +268,7 @@ function collectFacts(input: ToolActivityInput): ToolCallFacts {
     claudeResult?.is_error === true ||
     (resultText !== undefined &&
       (/^[A-Za-z0-9_.-]+ failed: /.test(resultText) ||
-        /^Error executing tool /.test(resultText) ||
+        resultText.startsWith("Error executing tool ") ||
         (() => {
           const record = asRecord(parseResultData(resultText));
           return record !== undefined && asText(record.error) !== undefined;

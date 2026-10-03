@@ -1394,18 +1394,18 @@ describe("browser_command login", () => {
   });
 });
 
-describe("the chat feed tells every uno-work tool in plain words", () => {
-  // The harnesses name the tool differently; the feed never shows these ids.
-  const ids = (name: string) => [
-    `uno-work_${name}`,
-    `mcp__uno-work__${name}`,
-    `mcp__uno_work__${name}`,
-    `mcp_uno_work_${name}`,
-  ];
+// The harnesses name the tool differently; the feed never shows these ids.
+const harnessToolIds = (name: string) => [
+  `uno-work_${name}`,
+  `mcp__uno-work__${name}`,
+  `mcp__uno_work__${name}`,
+  `mcp_uno_work_${name}`,
+];
 
+describe("the chat feed tells every uno-work tool in plain words", () => {
   it("has a line for each tool while it runs, when it is done and when it failed", () => {
     for (const tool of UNO_WORK_TOOLS) {
-      for (const id of ids(tool.name)) {
+      for (const id of harnessToolIds(tool.name)) {
         const running = describeToolActivity({
           summary: id,
           kind: "tool.updated",
