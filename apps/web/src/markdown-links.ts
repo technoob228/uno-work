@@ -159,6 +159,15 @@ function basenameOfPath(path: string): string {
   return separatorIndex >= 0 ? path.slice(separatorIndex + 1) : path;
 }
 
+/**
+ * `24/7`, `1/2`, `50/50`, `10/03/2026`: numbers with slashes are words of an
+ * answer, not a path to a file. Linked as a path, "the bot answers 24/7"
+ * showed a file chip named "7".
+ */
+export function isNumberRatio(text: string): boolean {
+  return /^\d+(?:\/\d+)+$/.test(text.trim());
+}
+
 export function resolveMarkdownFileLinkMeta(
   href: string | undefined,
   cwd?: string,

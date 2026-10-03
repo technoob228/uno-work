@@ -642,9 +642,34 @@ function collapseDerivedWorkLogEntries(
       collapsed[collapsed.length - 1] = mergeDerivedWorkLogEntries(previous, entry);
       continue;
     }
+    // Tools called side by side report out of order ("looking at sites…",
+    // "looking at apps…", then both results): a result joins its own
+    // still-running row instead of leaving that row behind.
+    const runningIndex = findRunningRowOfSameCall(collapsed, entry);
+    if (runningIndex >= 0) {
+      collapsed[runningIndex] = mergeDerivedWorkLogEntries(collapsed[runningIndex]!, entry);
+      continue;
+    }
     collapsed.push(entry);
   }
   return collapsed;
+}
+
+const SAME_CALL_LOOKBACK = 12;
+
+function findRunningRowOfSameCall(
+  collapsed: ReadonlyArray<DerivedWorkLogEntry>,
+  entry: DerivedWorkLogEntry,
+): number {
+  const key = entry.collapseKey;
+  if (!key || !(key.startsWith("tool:") || key.startsWith("mcp:"))) return -1;
+  if (entry.activityKind !== "tool.updated" && entry.activityKind !== "tool.completed") return -1;
+  const from = Math.max(0, collapsed.length - SAME_CALL_LOOKBACK);
+  for (let index = collapsed.length - 1; index >= from; index -= 1) {
+    const candidate = collapsed[index]!;
+    if (candidate.collapseKey === key && candidate.activityKind === "tool.updated") return index;
+  }
+  return -1;
 }
 
 function shouldCollapseToolLifecycleEntries(

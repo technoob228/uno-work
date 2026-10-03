@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isNumberRatio,
   resolveMarkdownFileLinkMeta,
   resolveMarkdownFileLinkTarget,
   rewriteMarkdownFileUriHref,
@@ -86,5 +87,19 @@ describe("resolveMarkdownFileLinkTarget", () => {
 
   it("does not treat app routes as file links", () => {
     expect(resolveMarkdownFileLinkTarget("/chat/settings")).toBeNull();
+  });
+});
+
+describe("isNumberRatio", () => {
+  it("numbers with slashes are words, not files", () => {
+    for (const text of ["24/7", "1/2", "50/50", "10/03/2026"]) {
+      expect(isNumberRatio(text), text).toBe(true);
+    }
+  });
+
+  it("a path is still a path", () => {
+    for (const text of ["src/7", "24/7.md", "a/b", "2026/notes.txt", "7"]) {
+      expect(isNumberRatio(text), text).toBe(false);
+    }
   });
 });

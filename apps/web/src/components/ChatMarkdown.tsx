@@ -27,7 +27,11 @@ import { fnv1a32 } from "../lib/diffRendering";
 import { getCodeHighlighterPromise } from "../lib/codeHighlighter";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
-import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from "../markdown-links";
+import {
+  isNumberRatio,
+  resolveMarkdownFileLinkMeta,
+  rewriteMarkdownFileUriHref,
+} from "../markdown-links";
 import { extractTerminalLinks } from "../terminal-links";
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
@@ -378,6 +382,7 @@ function autolinkPlainFilePaths(text: string, cwd: string | undefined): string {
       if (inFence) return line;
       const matches = extractTerminalLinks(line).filter((match) => {
         if (match.kind !== "path") return false;
+        if (isNumberRatio(match.text)) return false;
         if (isInsideInlineCode(line, match.start)) return false;
         if (isInsideExistingMarkdownLink(line, match.start, match.end)) return false;
         return resolveMarkdownFileLinkMeta(match.text, cwd) !== null;

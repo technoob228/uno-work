@@ -1505,6 +1505,38 @@ describe("deriveWorkLogEntries: tools of an MCP server read as one human line", 
     expect(entries[0]?.detail).toBeUndefined();
   });
 
+  it("Uno / OpenCode: two tools called side by side leave two rows, not four", () => {
+    const tool = (name: string, at: number, done: boolean, output?: string) =>
+      makeActivity({
+        createdAt: `2026-10-03T00:00:0${at}.000Z`,
+        kind: done ? "tool.completed" : "tool.updated",
+        summary: `uno-work_${name}`,
+        payload: {
+          itemType: "dynamic_tool_call",
+          status: done ? "completed" : "inProgress",
+          ...(output ? { detail: output } : {}),
+          data: {
+            tool: `uno-work_${name}`,
+            state: {
+              status: done ? "completed" : "running",
+              input: {},
+              ...(output ? { output } : {}),
+            },
+          },
+        },
+      });
+    const entries = deriveWorkLogEntries(
+      [
+        tool("sites_list", 1, false),
+        tool("apps_list", 2, false),
+        tool("sites_list", 3, true, '{"sites":[]}'),
+        tool("apps_list", 4, true, '{"apps":[{"name":"Echo Bot"}]}'),
+      ],
+      undefined,
+    );
+    expect(entries.map((entry) => entry.label)).toEqual(["Sites: none yet", "Apps: Echo Bot"]);
+  });
+
   it('Claude and Codex: "MCP tool call" with the arguments as JSON becomes the action', () => {
     const entries = deriveWorkLogEntries(
       [
