@@ -335,6 +335,26 @@ function countOf(
   return `${title}: ${list.length}`;
 }
 
+/** How many left-out files a feed line names before it says "and N more". */
+const LEFT_OUT_NAMES_SHOWN = 3;
+
+/**
+ * ".env, service-account.json and 2 more" from the publisher's `skipped`
+ * list ("service-account.json (key file)"): the person sees which files stayed
+ * on the computer, not only how many. Undefined when the list has no names.
+ */
+function leftOutNames(skipped: unknown, total: number): string | undefined {
+  if (!Array.isArray(skipped)) return undefined;
+  const names = skipped
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.replace(/\s*\([^()]*\)\s*$/, "").trim())
+    .filter((name) => name.length > 0);
+  if (names.length === 0) return undefined;
+  const shown = names.slice(0, LEFT_OUT_NAMES_SHOWN);
+  const more = Math.max(total, names.length) - shown.length;
+  return more > 0 ? `${shown.join(", ")} and ${more} more` : shown.join(", ");
+}
+
 function named(prefix: string, name: string | undefined, fallback: string): string {
   return name ? `${prefix} ${name}` : fallback;
 }
@@ -482,7 +502,11 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
     (c) => {
       const published = named("Published site", siteName(c), "Published the site");
       const left = typeof c.result.skippedCount === "number" ? c.result.skippedCount : 0;
-      return left > 0 ? `${published} · ${left} file${left === 1 ? "" : "s"} left out` : published;
+      if (left <= 0) return published;
+      const names = leftOutNames(c.result.skipped, left);
+      return names
+        ? `${published} · left out: ${names}`
+        : `${published} · ${left} file${left === 1 ? "" : "s"} left out`;
     },
     "The site wasn't published",
   ],

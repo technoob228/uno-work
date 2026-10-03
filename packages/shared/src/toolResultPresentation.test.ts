@@ -255,7 +255,7 @@ describe("describeToolActivity", () => {
     expect(human?.rawResult).toMatch(/There is no site/);
   });
 
-  it("site_publish names how many files stayed on the computer", () => {
+  it("site_publish names the files that stayed on the computer", () => {
     const output = JSON.stringify({
       slug: "keys-test",
       url: "https://keys-test.uno4.me/",
@@ -267,7 +267,30 @@ describe("describeToolActivity", () => {
       kind: "tool.completed",
       payload: { data: { tool: "uno-work_site_publish", state: { status: "completed", output } } },
     });
-    expect(human?.label).toBe("Published site keys-test.uno4.me · 2 files left out");
+    expect(human?.label).toBe(
+      "Published site keys-test.uno4.me · left out: service-account.json, .env",
+    );
+  });
+
+  it("site_publish: a long list names three files and counts the rest; no list keeps the count", () => {
+    const run = (result: Record<string, unknown>) =>
+      describeToolActivity({
+        summary: "uno-work_site_publish",
+        kind: "tool.completed",
+        payload: {
+          data: {
+            tool: "uno-work_site_publish",
+            state: { status: "completed", output: JSON.stringify({ slug: "big", ...result }) },
+          },
+        },
+      })?.label;
+    expect(
+      run({
+        skipped: ["a.pem (key file)", ".env (hidden)", "id_rsa (key file)", "b.key (key file)"],
+        skippedCount: 6,
+      }),
+    ).toBe("Published site big · left out: a.pem, .env, id_rsa and 3 more");
+    expect(run({ skippedCount: 1 })).toBe("Published site big · 1 file left out");
   });
 
   it("request_secret: asked and left open, saved, not given", () => {
