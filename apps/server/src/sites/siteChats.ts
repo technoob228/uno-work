@@ -28,6 +28,8 @@ export function siteChatsFile(home: string): string {
   return path.join(home, ".uno", FILE_NAME);
 }
 
+const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
 function parse(text: string): Record<string, SiteChat> {
   const out: Record<string, SiteChat> = {};
   let raw: unknown;
@@ -38,7 +40,7 @@ function parse(text: string): Record<string, SiteChat> {
   }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return out;
   for (const [slug, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value !== "object" || value === null) continue;
+    if (!SLUG.test(slug) || typeof value !== "object" || value === null) continue;
     const entry = value as Record<string, unknown>;
     const threadId = entry["threadId"];
     const title = entry["title"];
@@ -84,6 +86,7 @@ export async function recordSiteChat(
   chat: { readonly threadId: string; readonly title: string },
   now: () => Date = () => new Date(),
 ): Promise<void> {
+  if (!SLUG.test(slug)) return;
   try {
     const chats = { ...(await readSiteChats(home)) };
     chats[slug] = {

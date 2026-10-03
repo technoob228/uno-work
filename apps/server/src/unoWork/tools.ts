@@ -1172,7 +1172,15 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         // ourselves (what the agent wrote, the folder's code) and fix it.
         if (record.port === undefined && record.url === undefined) {
           const declared = record.type === APP_TYPE_TELEGRAM_BOT;
-          const cwd = typeof record.cwd === "string" ? resolveUserPath(record.cwd, deps) : null;
+          const resolvedCwd =
+            typeof record.cwd === "string" ? resolveUserPath(record.cwd, deps) : null;
+          // Only the person's own folders are looked at (the manifest check
+          // below refuses a cwd outside home anyway).
+          const cwd =
+            resolvedCwd !== null &&
+            (resolvedCwd === deps.home || resolvedCwd.startsWith(`${deps.home}${path.sep}`))
+              ? resolvedCwd
+              : null;
           const scan =
             cwd !== null && (!declared || record.tokenEnv === undefined)
               ? yield* Effect.promise(() => scanFolderForTelegramBot(cwd))

@@ -22,6 +22,8 @@ import { unpublishSiteAsPerson } from "../sites/unpublishSite";
 import { Button } from "../ui/button";
 
 const APPROVAL_RESULT_PATH = "/api/uno-work/approval/result";
+/** A site name as hosting spells it; anything else is not acted on. */
+const SITE_SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 export const ComposerToolApprovalPanel = memo(function ComposerToolApprovalPanel({
   threadId,
@@ -55,6 +57,12 @@ const ToolApprovalCard = memo(function ToolApprovalCard({
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { event } = approval;
+  // What this app itself does on Allow comes from the computer: say it in the
+  // app's own words, so the card can't name one site and take down another.
+  const unpublishSlug =
+    event.clientAction?.kind === "site-unpublish" && SITE_SLUG.test(event.clientAction.slug)
+      ? event.clientAction.slug
+      : null;
 
   const answer = async (approved: boolean) => {
     if (isSubmitting) return;
@@ -64,8 +72,8 @@ const ToolApprovalCard = memo(function ToolApprovalCard({
       // Allow of the agent's site_unpublish: the person's own Uno session
       // takes the site down (a computer's token may not), then the tool
       // checks the result. Without a session here the tool says so itself.
-      if (approved && event.clientAction?.kind === "site-unpublish") {
-        await unpublishSiteAsPerson(event.clientAction.slug);
+      if (approved && unpublishSlug !== null) {
+        await unpublishSiteAsPerson(unpublishSlug);
         void queryClient.invalidateQueries({ queryKey: ["uno-sites"] });
       }
       await environmentFetchJson<{ ok: boolean }>({
@@ -100,6 +108,11 @@ const ToolApprovalCard = memo(function ToolApprovalCard({
         ) : null}
       </div>
       <p className="mt-1.5 text-sm text-foreground/90">{event.title}</p>
+      {unpublishSlug !== null ? (
+        <p className="mt-1 text-xs font-medium text-foreground/80" data-testid="approval-unpublish">
+          Allow takes your site “{unpublishSlug}” off the internet.
+        </p>
+      ) : null}
       {event.detail ? (
         <p className="mt-1 text-xs text-muted-foreground/65">{event.detail}</p>
       ) : null}
