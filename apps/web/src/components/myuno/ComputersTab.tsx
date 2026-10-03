@@ -209,7 +209,13 @@ function ComputerRow({
       variant="ghost"
       className={HOVER_ONLY}
       title="Open this computer's page in the console"
-      onClick={() => openConsoleBox(entry.box!.id)}
+      aria-label={`Open ${entry.name} in the console`}
+      data-testid="my-uno-open-console"
+      onClick={(event) => {
+        // The row itself opens the side panel: this button only opens the console.
+        event.stopPropagation();
+        openConsoleBox(entry.box!.id);
+      }}
     >
       <ExternalLinkIcon />
     </Button>

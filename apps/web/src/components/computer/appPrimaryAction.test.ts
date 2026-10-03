@@ -229,6 +229,22 @@ describe("appPrimaryAction", () => {
       expect(action.prompt).toContain("Telegram token");
     });
 
+    it("asks for the token even when the bot has exited without it", () => {
+      // Most bots quit at once when the token isn't set: not "Stopped / Start".
+      for (const status of ["stopped", "unknown"] as const) {
+        const exited = machineApp({
+          ...bot,
+          status,
+          canStart: true,
+          canStop: false,
+          telegramBot: { username: null, link: null, tokenReady: false },
+        });
+        const tile = tileOf({ machineApps: [exited] });
+        expect(tile.caption, status).toBe("Waiting for token");
+        expect(appPrimaryAction(tile).kind, status).toBe("token");
+      }
+    });
+
     it("starts a stopped bot first", () => {
       const stopped = machineApp({ ...bot, status: "stopped", canStart: true, canStop: false });
       expect(appPrimaryAction(tileOf({ machineApps: [stopped] })).kind).toBe("start");

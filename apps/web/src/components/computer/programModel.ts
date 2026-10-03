@@ -235,9 +235,11 @@ export function canShowOnInternet(
 }
 
 export function machineAppCaption(app: UnoMachineApp): string {
+  // A bot without its token can't run: most exit at once ("token is not
+  // set"), and "Stopped" would hide the one thing the person has to do.
+  if (app.telegramBot?.tokenReady === false) return "Waiting for token";
   if (app.status === "stopped") return "Stopped";
   if (app.telegramBot) {
-    if (app.telegramBot.tokenReady === false) return "Waiting for token";
     if (app.telegramBot.username) return `@${app.telegramBot.username}`;
     return "Telegram bot";
   }

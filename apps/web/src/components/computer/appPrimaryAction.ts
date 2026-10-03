@@ -8,8 +8,8 @@
  * | installing                                         | Installing… (off)    |
  * | the computer is asleep                             | Asleep (off)         |
  * | failed / didn't install / status unknown, no address | Fix with Uno       |
+ * | a Telegram bot waiting for its token (even stopped) | Add the token       |
  * | stopped                                            | Start                |
- * | a Telegram bot waiting for its token               | Add the token        |
  * | a Telegram bot with a username                     | Open in Telegram     |
  * | running with a web address                         | Open                 |
  * | a web app only the cloud computer can reach        | Show on the internet |
@@ -98,6 +98,16 @@ export function tokenPrompt(tile: ProgramTile): string {
 
 export function appPrimaryAction(tile: ProgramTile): AppPrimaryAction {
   const app = tile.machineApp;
+  // A Telegram bot that waits for its token needs the token, whatever its
+  // process does meanwhile: most bots exit without one, and "Start" (or "Fix")
+  // would only crash it again (0.0.105 showed "Stopped / Start" here).
+  if (
+    app?.telegramBot?.tokenReady === false &&
+    tile.status !== "installing" &&
+    tile.status !== "asleep"
+  ) {
+    return action("token", { prompt: tokenPrompt(tile) });
+  }
   switch (tile.status) {
     case "installing":
       return action("installing");
