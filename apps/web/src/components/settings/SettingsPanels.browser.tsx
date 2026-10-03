@@ -17,6 +17,14 @@ import { DateTime, Option } from "effect";
 import { page } from "vitest/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  RouterProvider,
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+} from "@tanstack/react-router";
+import type { ReactNode } from "react";
 
 import { writePrimaryEnvironmentDescriptor } from "../../environments/primary/context";
 import { __resetLocalApiForTests } from "../../localApi";
@@ -418,6 +426,23 @@ const createDesktopBridgeStub = (overrides?: {
   };
 };
 
+/** Some panels read account data through react-query; a fresh client per mount, no retries. */
+function testQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+/**
+ * Settings panels link to other settings pages and read the URL hash, so they
+ * render inside a router: a one-route memory router that shows just the panel.
+ */
+function inRouter(node: ReactNode) {
+  const router = createRouter({
+    routeTree: createRootRoute({ component: () => node }),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  return <RouterProvider router={router} />;
+}
+
 describe("GeneralSettingsPanel observability", () => {
   let mounted:
     | (Awaited<ReturnType<typeof render>> & {
@@ -501,9 +526,11 @@ describe("GeneralSettingsPanel observability", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     mounted = await render(
-      <AppAtomRegistryProvider>
-        <ConnectionsSettings />
-      </AppAtomRegistryProvider>,
+      <QueryClientProvider client={testQueryClient()}>
+        <AppAtomRegistryProvider>
+          <ConnectionsSettings />
+        </AppAtomRegistryProvider>
+      </QueryClientProvider>,
     );
 
     await expect.element(page.getByText("Manage local backend")).toBeInTheDocument();
@@ -580,9 +607,11 @@ describe("GeneralSettingsPanel observability", () => {
     setServerConfigSnapshot(createBaseServerConfig());
 
     mounted = await render(
-      <AppAtomRegistryProvider>
-        <ConnectionsSettings />
-      </AppAtomRegistryProvider>,
+      <QueryClientProvider client={testQueryClient()}>
+        <AppAtomRegistryProvider>
+          <ConnectionsSettings />
+        </AppAtomRegistryProvider>
+      </QueryClientProvider>,
     );
 
     await expect.element(page.getByText("Limited to this machine.")).toBeInTheDocument();
@@ -671,9 +700,11 @@ describe("GeneralSettingsPanel observability", () => {
     setServerConfigSnapshot(createBaseServerConfig());
 
     mounted = await render(
-      <AppAtomRegistryProvider>
-        <ConnectionsSettings />
-      </AppAtomRegistryProvider>,
+      <QueryClientProvider client={testQueryClient()}>
+        <AppAtomRegistryProvider>
+          <ConnectionsSettings />
+        </AppAtomRegistryProvider>
+      </QueryClientProvider>,
     );
 
     await expect.element(page.getByText("http://192.168.86.39:3773/")).toBeInTheDocument();
@@ -696,12 +727,14 @@ describe("GeneralSettingsPanel observability", () => {
     setServerConfigSnapshot(createBaseServerConfig());
 
     mounted = await render(
-      <AppAtomRegistryProvider>
-        <EnvironmentGeneralSettings environmentId={EnvironmentId.make("environment-local")} />
-      </AppAtomRegistryProvider>,
+      <QueryClientProvider client={testQueryClient()}>
+        <AppAtomRegistryProvider>
+          <EnvironmentGeneralSettings environmentId={EnvironmentId.make("environment-local")} />
+        </AppAtomRegistryProvider>
+      </QueryClientProvider>,
     );
 
-    await expect.element(page.getByText("Files on this environment")).toBeInTheDocument();
+    await expect.element(page.getByText("Files on this machine")).toBeInTheDocument();
     await expect.element(page.getByText("Diagnostics")).toBeInTheDocument();
     await expect.element(page.getByText("Open logs folder")).toBeInTheDocument();
     await expect
@@ -812,17 +845,23 @@ describe("GeneralSettingsPanel observability", () => {
     setServerConfigSnapshot(createBaseServerConfig());
 
     mounted = await render(
-      <AppAtomRegistryProvider>
-        <ConnectionsSettings />
-      </AppAtomRegistryProvider>,
+      inRouter(
+        <QueryClientProvider client={testQueryClient()}>
+          <AppAtomRegistryProvider>
+            <ConnectionsSettings />
+          </AppAtomRegistryProvider>
+        </QueryClientProvider>,
+      ),
     );
 
     await expect.element(page.getByText("Authorized clients")).toBeInTheDocument();
     await expect.element(page.getByText("Revoke others")).toBeInTheDocument();
     await expect.element(page.getByText("This Mac")).toBeInTheDocument();
-    await page.getByRole("button", { name: "Create link", exact: true }).click();
-    await expect.element(page.getByText("Create pairing link")).toBeInTheDocument();
-    await page.getByRole("button", { name: "Create link", exact: true }).click();
+    await page.getByRole("button", { name: "Open on another device", exact: true }).click();
+    await expect
+      .element(page.getByText("Open Work on another device (browser)"))
+      .toBeInTheDocument();
+    await page.getByRole("button", { name: "Make link", exact: true }).click();
     authAccessHarness.emitPairingLinkUpserted(pairingLinks[0]!);
     authAccessHarness.emitClientUpserted(clientSessions[1]!);
     await expect
@@ -907,9 +946,11 @@ describe("GeneralSettingsPanel observability", () => {
     setServerConfigSnapshot(createBaseServerConfig());
 
     mounted = await render(
-      <AppAtomRegistryProvider>
-        <ConnectionsSettings />
-      </AppAtomRegistryProvider>,
+      <QueryClientProvider client={testQueryClient()}>
+        <AppAtomRegistryProvider>
+          <ConnectionsSettings />
+        </AppAtomRegistryProvider>
+      </QueryClientProvider>,
     );
 
     await expect.element(page.getByText("Julius iPhone")).toBeInTheDocument();
@@ -926,9 +967,11 @@ describe("GeneralSettingsPanel observability", () => {
     setServerConfigSnapshot(createBaseServerConfig());
 
     mounted = await render(
-      <AppAtomRegistryProvider>
-        <ConnectionsSettings />
-      </AppAtomRegistryProvider>,
+      <QueryClientProvider client={testQueryClient()}>
+        <AppAtomRegistryProvider>
+          <ConnectionsSettings />
+        </AppAtomRegistryProvider>
+      </QueryClientProvider>,
     );
 
     const networkAccessToggle = page.getByLabelText("Enable network access");
@@ -936,7 +979,9 @@ describe("GeneralSettingsPanel observability", () => {
     await networkAccessToggle.click();
     await expect.element(page.getByText("Enable network access?")).toBeInTheDocument();
     await expect
-      .element(page.getByText("Uno Work will restart to expose this environment over the network."))
+      .element(
+        page.getByText("Uno Work will restart to make this machine reachable over the network."),
+      )
       .toBeInTheDocument();
     await page.getByRole("button", { name: "Restart and enable", exact: true }).click();
     await vi.waitFor(() => {
@@ -976,9 +1021,11 @@ describe("GeneralSettingsPanel observability", () => {
     setServerConfigSnapshot(createBaseServerConfig());
 
     mounted = await render(
-      <AppAtomRegistryProvider>
-        <ConnectionsSettings />
-      </AppAtomRegistryProvider>,
+      <QueryClientProvider client={testQueryClient()}>
+        <AppAtomRegistryProvider>
+          <ConnectionsSettings />
+        </AppAtomRegistryProvider>
+      </QueryClientProvider>,
     );
 
     await page.getByRole("button", { name: "Add machine", exact: true }).click();
@@ -1028,9 +1075,11 @@ describe("GeneralSettingsPanel observability", () => {
     setServerConfigSnapshot(createBaseServerConfig());
 
     mounted = await render(
-      <AppAtomRegistryProvider>
-        <EnvironmentGeneralSettings environmentId={EnvironmentId.make("environment-local")} />
-      </AppAtomRegistryProvider>,
+      <QueryClientProvider client={testQueryClient()}>
+        <AppAtomRegistryProvider>
+          <EnvironmentGeneralSettings environmentId={EnvironmentId.make("environment-local")} />
+        </AppAtomRegistryProvider>
+      </QueryClientProvider>,
     );
 
     const openLogsButton = page.getByText("Open logs folder");
@@ -1043,9 +1092,13 @@ describe("GeneralSettingsPanel observability", () => {
     setServerConfigSnapshot(createBaseServerConfig());
 
     mounted = await render(
-      <AppAtomRegistryProvider>
-        <EnvironmentProvidersPanel environmentId={EnvironmentId.make("environment-local")} />
-      </AppAtomRegistryProvider>,
+      inRouter(
+        <QueryClientProvider client={testQueryClient()}>
+          <AppAtomRegistryProvider>
+            <EnvironmentProvidersPanel environmentId={EnvironmentId.make("environment-local")} />
+          </AppAtomRegistryProvider>
+        </QueryClientProvider>,
+      ),
     );
 
     await page.getByLabelText("Toggle OpenCode details").click();
@@ -1101,16 +1154,16 @@ describe("SourceControlSettingsPanel discovery states", () => {
     setSourceControlDiscoveryStub(() => new Promise(() => {}));
 
     mounted = await render(
-      <AppAtomRegistryProvider>
-        <SourceControlSettingsPanel environmentId={EnvironmentId.make("environment-local")} />
-      </AppAtomRegistryProvider>,
+      <QueryClientProvider client={testQueryClient()}>
+        <AppAtomRegistryProvider>
+          <SourceControlSettingsPanel environmentId={EnvironmentId.make("environment-local")} />
+        </AppAtomRegistryProvider>
+      </QueryClientProvider>,
     );
 
     await expect.element(page.getByText("Version Control")).toBeInTheDocument();
     await expect.element(page.getByText("Source Control Providers")).toBeInTheDocument();
-    await expect
-      .element(page.getByRole("button", { name: "Rescan server environment" }))
-      .toBeDisabled();
+    await expect.element(page.getByRole("button", { name: "Rescan this machine" })).toBeDisabled();
     await expect.element(page.getByText("Nothing detected yet")).not.toBeInTheDocument();
   });
 
@@ -1121,16 +1174,18 @@ describe("SourceControlSettingsPanel discovery states", () => {
     }));
 
     mounted = await render(
-      <AppAtomRegistryProvider>
-        <SourceControlSettingsPanel environmentId={EnvironmentId.make("environment-local")} />
-      </AppAtomRegistryProvider>,
+      <QueryClientProvider client={testQueryClient()}>
+        <AppAtomRegistryProvider>
+          <SourceControlSettingsPanel environmentId={EnvironmentId.make("environment-local")} />
+        </AppAtomRegistryProvider>
+      </QueryClientProvider>,
     );
 
     await expect.element(page.getByText("Nothing detected yet")).toBeInTheDocument();
     await expect
       .element(
         page.getByText(
-          "Install Git on the server, add optional hosting integrations or credentials your workspace needs, then rescan.",
+          "Install Git on the machine, add optional hosting integrations or credentials your projects need, then rescan.",
         ),
       )
       .toBeInTheDocument();
@@ -1155,9 +1210,11 @@ describe("SourceControlSettingsPanel discovery states", () => {
     }));
 
     mounted = await render(
-      <AppAtomRegistryProvider>
-        <SourceControlSettingsPanel environmentId={EnvironmentId.make("environment-local")} />
-      </AppAtomRegistryProvider>,
+      <QueryClientProvider client={testQueryClient()}>
+        <AppAtomRegistryProvider>
+          <SourceControlSettingsPanel environmentId={EnvironmentId.make("environment-local")} />
+        </AppAtomRegistryProvider>
+      </QueryClientProvider>,
     );
 
     await expect.element(page.getByRole("heading", { name: "Git" })).toBeInTheDocument();
@@ -1186,9 +1243,11 @@ describe("SourceControlSettingsPanel discovery states", () => {
     });
 
     mounted = await render(
-      <AppAtomRegistryProvider>
-        <SourceControlSettingsPanel environmentId={EnvironmentId.make("environment-local")} />
-      </AppAtomRegistryProvider>,
+      <QueryClientProvider client={testQueryClient()}>
+        <AppAtomRegistryProvider>
+          <SourceControlSettingsPanel environmentId={EnvironmentId.make("environment-local")} />
+        </AppAtomRegistryProvider>
+      </QueryClientProvider>,
     );
 
     await expect.element(page.getByRole("heading", { name: "Git" })).toBeInTheDocument();
@@ -1200,9 +1259,11 @@ describe("SourceControlSettingsPanel discovery states", () => {
     document.body.innerHTML = "";
 
     mounted = await render(
-      <AppAtomRegistryProvider>
-        <SourceControlSettingsPanel environmentId={EnvironmentId.make("environment-local")} />
-      </AppAtomRegistryProvider>,
+      <QueryClientProvider client={testQueryClient()}>
+        <AppAtomRegistryProvider>
+          <SourceControlSettingsPanel environmentId={EnvironmentId.make("environment-local")} />
+        </AppAtomRegistryProvider>
+      </QueryClientProvider>,
     );
 
     await expect.element(page.getByRole("heading", { name: "Git" })).toBeInTheDocument();
