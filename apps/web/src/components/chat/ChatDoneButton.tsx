@@ -18,6 +18,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 export function ChatDoneButton(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
+  /** Phone: the check mark alone, so the chat's title keeps its room. */
+  readonly compact?: boolean;
 }) {
   const ref = useMemo(
     () => scopeThreadRef(props.environmentId, props.threadId),
@@ -52,11 +54,12 @@ export function ChatDoneButton(props: {
             disabled={pending}
             onClick={onClick}
             data-testid="chat-done-button"
+            aria-label="Done"
           />
         }
       >
         <CheckIcon className="size-3" />
-        Done
+        {props.compact ? null : "Done"}
       </TooltipTrigger>
       <TooltipPopup side="bottom" className="max-w-64">
         This chat finished and waits for you. Reply to keep going, or press Done when there's

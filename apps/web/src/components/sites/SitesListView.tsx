@@ -54,6 +54,7 @@ import {
 import { SidebarInset } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { unpublishSite } from "./unpublishSite";
 import {
   type AppsSitesTab,
@@ -395,16 +396,23 @@ function SiteItem({
       >
         <CopyIcon />
       </Button>
-      <Button
-        size="icon-xs"
-        variant="ghost"
-        aria-label={`Unpublish ${row.host}`}
-        title="Unpublish"
-        data-testid="site-unpublish"
-        onClick={onUnpublish}
-      >
-        <Trash2Icon />
-      </Button>
+      {/* The bin said nothing until pressed: a label a person sees at once. */}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              aria-label={`Unpublish ${row.host}`}
+              data-testid="site-unpublish"
+              onClick={onUnpublish}
+            />
+          }
+        >
+          <Trash2Icon />
+        </TooltipTrigger>
+        <TooltipPopup side="top">Unpublish</TooltipPopup>
+      </Tooltip>
       <Button size="xs" variant="outline" onClick={() => openInNewTab(row.url)}>
         <ExternalLinkIcon />
         Open

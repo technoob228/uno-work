@@ -145,7 +145,7 @@ function parseKeyValueLines(value: string): Record<string, unknown> | undefined 
  */
 function parseResultData(text: string | undefined): unknown {
   if (!text) return undefined;
-  let data = parseJson(text) ?? parseKeyValueLines(text);
+  let data: unknown = parseJson(text) ?? parseKeyValueLines(text);
   for (let depth = 0; depth < 2; depth += 1) {
     const record = asRecord(data);
     if (!record) break;

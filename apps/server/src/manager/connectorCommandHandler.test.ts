@@ -27,7 +27,7 @@ import {
   type ConnectorCommandContext,
   type ConnectorCommandDeps,
 } from "./connectorCommandHandler.ts";
-import type { ConnectorCommand } from "./connectorCommands.ts";
+import { connectorCommandsHelp, type ConnectorCommand } from "./connectorCommands.ts";
 
 const assistantId = ProjectId.make("assistant-home");
 const anaId = ProjectId.make("assistant-ana");
@@ -267,6 +267,16 @@ describe("executeConnectorCommand", () => {
     expect(await run(harness, { name: "assistant", query: "Uno API" })).toContain(
       'No assistant matches "Uno API"',
     );
+  });
+
+  it("names /assistant <name> in the help only on a computer with several assistants", async () => {
+    // The harness has two assistants (Assistant and Ana).
+    expect(await run(makeHarness(), { name: "where" })).toContain("/assistant <name>");
+    expect(connectorCommandsHelp({ severalAssistants: true })).toContain("/assistant <name>");
+    // One assistant (the new assistants are off): the line points at nothing.
+    const single = connectorCommandsHelp({ severalAssistants: false });
+    expect(single).not.toContain("/assistant <name>");
+    expect(single).toContain("/assistant - talk to the assistant again (default)");
   });
 
   it("ignores a binding another bot made for the same chat id", async () => {

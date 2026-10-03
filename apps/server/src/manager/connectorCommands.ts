@@ -36,15 +36,23 @@ export const CONNECTOR_COMMAND_NAMES: ReadonlyArray<ConnectorCommand["name"]> = 
   "deny",
 ];
 
-export const CONNECTOR_COMMANDS_HELP = [
-  "/use <project title or id> - send this chat's messages to a project",
-  "/thread <thread id or title> - send them into one specific thread",
-  "/assistant - talk to the assistant again (default)",
-  "/assistant <name> - talk to another assistant of this computer",
-  "/where - show what this chat is bound to",
-  "/threads - list live threads of the bound project",
-  "/approve, /deny - resolve the oldest pending approval of the bound thread",
-].join("\n");
+/**
+ * The commands a chat is told about. `/assistant <name>` is named only on a
+ * computer that has more than one assistant: with the new assistants off
+ * (the usual case) there is exactly one, and the line pointed at nothing.
+ */
+export const connectorCommandsHelp = (input: { readonly severalAssistants: boolean }): string =>
+  [
+    "/use <project title or id> - send this chat's messages to a project",
+    "/thread <thread id or title> - send them into one specific thread",
+    "/assistant - talk to the assistant again (default)",
+    ...(input.severalAssistants
+      ? ["/assistant <name> - talk to another assistant of this computer"]
+      : []),
+    "/where - show what this chat is bound to",
+    "/threads - list live threads of the bound project",
+    "/approve, /deny - resolve the oldest pending approval of the bound thread",
+  ].join("\n");
 
 const COMMAND_PATTERN = /^\/([a-z]+)(?:@([A-Za-z0-9_]+))?(?:\s+([\s\S]*))?$/i;
 

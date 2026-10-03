@@ -35,7 +35,15 @@ vi.mock("../../inbox/inboxStore", async (importOriginal) => ({
 const { SidebarProvider } = await import("../ui/sidebar");
 const { SidebarDAccountMenu, SidebarDPlaces, SidebarDRail, UnoFace } =
   await import("./SidebarDParts");
-const { sidebarDPanel, useSidebarDStore } = await import("./sidebarDState");
+const { sidebarDPanel, useSidebarDPanelDismiss, useSidebarDStore } =
+  await import("./sidebarDState");
+
+/** What Sidebar.tsx does around the rail: Esc and a click into the page hide the panel. */
+function PanelDismiss() {
+  const open = useSidebarDStore((state) => state.panelOpen);
+  useSidebarDPanelDismiss({ active: open, panelRef: { current: null } });
+  return null;
+}
 
 function mount(children: React.ReactNode, onOpenChange = vi.fn()) {
   const client = new QueryClient();
@@ -108,6 +116,22 @@ describe("sidebar D collapsed rail", () => {
     await vi.waitFor(() => expect(useSidebarDStore.getState().panelOpen).toBe(false), {
       timeout: 1500,
     });
+  });
+
+  it("Esc hides the panel while the pointer still rests on the icon that opened it", async () => {
+    const screen = await mount(
+      <>
+        <SidebarDRail isElectron={false} />
+        <PanelDismiss />
+      </>,
+    );
+    const uno = screen.getByTestId("sidebar-rail-uno");
+    await uno.hover();
+    await vi.waitFor(() => expect(useSidebarDStore.getState().panelOpen).toBe(true));
+    // The icon's tooltip is open now: it used to swallow Esc.
+    await expect.element(page.getByText("Uno and its chats")).toBeVisible();
+    await userEvent.keyboard("{Escape}");
+    await vi.waitFor(() => expect(useSidebarDStore.getState().panelOpen).toBe(false));
   });
 
   it("opens the panel at once on a click on Chats; files just open", async () => {

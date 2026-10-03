@@ -12,7 +12,9 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "../components/ui/sidebar";
+import { sidebarDPanel } from "../components/sidebar/sidebarDState";
 import { listAiChats, unoAiAvailable, type AiChatSummary } from "./unoAiApi";
 import { chatTitle } from "./unoAiModel";
 import { unoAiKeys } from "./useUnoAiChat";
@@ -37,9 +39,22 @@ function ago(iso: string, now = Date.now()): string {
 }
 
 /** Lite sidebar: "Uno" — a new chat and the recent chats. */
+/**
+ * A chat was picked: on a phone the sidebar is a full-screen sheet over the
+ * chat, so it has to go; the collapsed rail's slide-out panel hides too.
+ */
+function useCloseSidebarOnPick(): () => void {
+  const { isMobile, setOpenMobile } = useSidebar();
+  return () => {
+    sidebarDPanel.closeNow();
+    if (isMobile) setOpenMobile(false);
+  };
+}
+
 export function UnoAiSidebarGroup({ active }: { active: boolean }) {
   const chats = useQuery(aiChatsQuery());
   const search = useSearch({ strict: false }) as { chat?: string };
+  const closeOnPick = useCloseSidebarOnPick();
   const list = (chats.data?.chats ?? []).slice(0, 12);
   return (
     <SidebarGroup>
@@ -48,7 +63,9 @@ export function UnoAiSidebarGroup({ active }: { active: boolean }) {
         <SidebarMenuItem>
           <SidebarMenuButton
             isActive={active && !search.chat}
-            render={<Link to="/ai" search={{}} data-testid="lite-nav-uno-new" />}
+            render={
+              <Link to="/ai" search={{}} data-testid="lite-nav-uno-new" onClick={closeOnPick} />
+            }
           >
             <PlusIcon />
             <span>New chat</span>
@@ -58,7 +75,7 @@ export function UnoAiSidebarGroup({ active }: { active: boolean }) {
           <SidebarMenuItem key={c.id}>
             <SidebarMenuButton
               isActive={active && search.chat === c.id}
-              render={<Link to="/ai" search={{ chat: c.id }} />}
+              render={<Link to="/ai" search={{ chat: c.id }} onClick={closeOnPick} />}
               title={chatTitle(c.title)}
             >
               <MessageSquareIcon />
@@ -125,6 +142,7 @@ export function UnoAiChatsCard() {
 export function SidebarUnoAiChats() {
   const chats = useQuery(aiChatsQuery());
   const search = useSearch({ strict: false }) as { chat?: string };
+  const closeOnPick = useCloseSidebarOnPick();
   const list: ReadonlyArray<AiChatSummary> = (chats.data?.chats ?? []).slice(0, 5);
   if (list.length === 0) return null;
   return (
@@ -139,6 +157,8 @@ export function SidebarUnoAiChats() {
           to="/ai"
           search={{ chat: c.id }}
           title={chatTitle(c.title)}
+          onClick={closeOnPick}
+          data-testid="sidebar-uno-ai-chat"
           className={
             "flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-sm text-sidebar-foreground/85 hover:bg-sidebar-row-hover" +
             (search.chat === c.id ? " bg-sidebar-row-active" : "")

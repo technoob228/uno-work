@@ -34,7 +34,7 @@ import {
 } from "./connectorBindings.ts";
 import {
   approvalDecisionForCommand,
-  CONNECTOR_COMMANDS_HELP,
+  connectorCommandsHelp,
   decideApprovalAction,
   type ConnectorCommand,
   type PendingApprovalCandidate,
@@ -95,13 +95,14 @@ const describeBinding = (
   target: ManagerConnectorBindingTarget,
   binding: ManagerConnectorBinding | null,
   labels: BindingTargetLabels,
+  help: string,
 ): string => {
   const label = bindingTargetLabel(target, labels);
   const notify = `Completion notifications: ${binding?.notifyOnComplete ? "on" : "off"}.`;
   switch (target.kind) {
     case "assistant":
       return binding === null
-        ? `Bound to the assistant (default). ${notify}\n\n${CONNECTOR_COMMANDS_HELP}`
+        ? `Bound to the assistant (default). ${notify}\n\n${help}`
         : `Bound to assistant "${label ?? target.projectId}". ${notify}`;
     case "project":
       return label === null
@@ -136,6 +137,10 @@ export const executeConnectorCommand = (
       context.connectorProjectId,
     );
     const target = effectiveBindingTarget(currentBinding, context.connectorProjectId);
+    const help = connectorCommandsHelp({
+      severalAssistants:
+        snapshot.projects.filter((project) => isAssistantProjectId(project.id)).length > 1,
+    });
 
     const bind = (nextTarget: ManagerConnectorBindingTarget) =>
       deps.bindings.upsert({
@@ -157,7 +162,7 @@ export const executeConnectorCommand = (
     switch (command.name) {
       case "use": {
         if (command.query.length === 0) {
-          return `Usage: /use <project title or id>\n\n${CONNECTOR_COMMANDS_HELP}`;
+          return `Usage: /use <project title or id>\n\n${help}`;
         }
         const projects = snapshot.projects.filter((project) => !isAssistantProjectId(project.id));
         const result = matchByTitleOrId(projects, command.query);
@@ -169,7 +174,7 @@ export const executeConnectorCommand = (
       }
       case "thread": {
         if (command.query.length === 0) {
-          return `Usage: /thread <thread id or title>\n\n${CONNECTOR_COMMANDS_HELP}`;
+          return `Usage: /thread <thread id or title>\n\n${help}`;
         }
         const threads = snapshot.threads.filter((thread) => thread.archivedAt === null);
         const result = matchByTitleOrId(threads, command.query);
@@ -205,7 +210,7 @@ export const executeConnectorCommand = (
         return "This chat talks to the assistant again (default).";
       }
       case "where":
-        return describeBinding(target, currentBinding, labels);
+        return describeBinding(target, currentBinding, labels, help);
       case "threads": {
         const projectId = targetProjectId();
         if (projectId === null) {

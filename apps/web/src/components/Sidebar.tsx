@@ -218,7 +218,7 @@ import {
   SidebarDPlaces,
   UnoFace,
 } from "./sidebar/SidebarDParts";
-import { sidebarDPanel, useSidebarDStore } from "./sidebar/sidebarDState";
+import { sidebarDPanel, useSidebarDPanelDismiss, useSidebarDStore } from "./sidebar/sidebarDState";
 import {
   type DRowMark,
   dRowMark,
@@ -1809,27 +1809,7 @@ export default function Sidebar() {
   const dRailShown = sidebarD && !sidebarOpen && !isMobile;
   const dPanelOpen = useSidebarDStore((state) => state.panelOpen);
   const dPanelRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!dRailShown || !dPanelOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target instanceof Element ? event.target : null;
-      if (!target) return;
-      if (dPanelRef.current?.contains(target)) return;
-      if (target.closest('[data-testid="sidebar-rail"]')) return;
-      // Menus and dialogs opened from the panel (a chat's menu) live in portals.
-      if (target.closest('[role="menu"], [role="dialog"], [data-slot="popover-popup"]')) return;
-      sidebarDPanel.closeNow();
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") sidebarDPanel.closeNow();
-    };
-    document.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [dPanelOpen, dRailShown]);
+  useSidebarDPanelDismiss({ active: dRailShown && dPanelOpen, panelRef: dPanelRef });
   const toggleProjectFolded = useCallback(
     (key: string) =>
       setFoldedProjectKeys((keys) =>

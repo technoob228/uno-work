@@ -12,10 +12,10 @@ import { resolveShortcutCommand } from "../../keybindings";
 import { isTerminalFocused } from "../../lib/terminalFocus";
 import { useServerKeybindings } from "../../rpc/serverState";
 import { useNavLayout } from "../../navigation/useNavLayout";
-import { cn } from "../../lib/utils";
+import { cn, isMacPlatform } from "../../lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useSidebar } from "../ui/sidebar";
-import { sidebarToggleLabel, withSidebarToggle } from "./sidebarShortcut";
+import { isMacCtrlBSidebarToggle, sidebarToggleLabel, withSidebarToggle } from "./sidebarShortcut";
 import { useSidebarDRailVisible } from "./sidebarDState";
 
 export function SidebarShowButton({ className }: { className?: string }) {
@@ -60,10 +60,21 @@ export function SidebarShortcutListener() {
     const resolved = withSidebarToggle(keybindings);
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      const terminalFocus = isTerminalFocused();
       const command = resolveShortcutCommand(event, resolved, {
-        context: { terminalFocus: isTerminalFocused(), terminalOpen: false },
+        context: { terminalFocus, terminalOpen: false },
       });
-      if (command !== "sidebar.toggle") return;
+      if (
+        command !== "sidebar.toggle" &&
+        !isMacCtrlBSidebarToggle({
+          event,
+          isMac: isMacPlatform(navigator.platform),
+          terminalFocus,
+          keybindings: resolved,
+        })
+      ) {
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       toggleSidebar();

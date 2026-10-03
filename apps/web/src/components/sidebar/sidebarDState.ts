@@ -55,6 +55,43 @@ export const sidebarDPanel = new HoverPanelController((open) =>
   useSidebarDStore.setState({ panelOpen: open }),
 );
 
+/**
+ * While the rail's chats panel is out: a click into the page or Esc hides it.
+ *
+ * Esc is caught in the capture phase. The pointer usually still rests on the
+ * rail icon that opened the panel, its tooltip is open, and an open tooltip
+ * takes Esc for itself and stops it there: a listener in the bubble phase
+ * never heard the key (validator, 0.0.105: "Esc doesn't close the panel
+ * while the pointer is on the icon").
+ */
+export function useSidebarDPanelDismiss(input: {
+  readonly active: boolean;
+  readonly panelRef: { readonly current: HTMLElement | null };
+}): void {
+  const { active, panelRef } = input;
+  useEffect(() => {
+    if (!active) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target) return;
+      if (panelRef.current?.contains(target)) return;
+      if (target.closest('[data-testid="sidebar-rail"]')) return;
+      // Menus and dialogs opened from the panel (a chat's menu) live in portals.
+      if (target.closest('[role="menu"], [role="dialog"], [data-slot="popover-popup"]')) return;
+      sidebarDPanel.closeNow();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") sidebarDPanel.closeNow();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [active, panelRef]);
+}
+
 export function useSidebarDNarrow(): boolean {
   return useMediaQuery({ max: SIDEBAR_D_NARROW_PX });
 }

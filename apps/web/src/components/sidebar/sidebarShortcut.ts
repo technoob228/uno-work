@@ -22,3 +22,30 @@ export function withSidebarToggle(
 export function sidebarToggleLabel(keybindings: ResolvedKeybindingsConfig): string | null {
   return shortcutLabelForCommand(withSidebarToggle(keybindings), "sidebar.toggle");
 }
+
+/**
+ * Ctrl+B on a Mac. The rule is `mod+b`, and `mod` on a Mac is ⌘, so Ctrl+B
+ * did nothing there (validator, 0.0.105). It toggles the sidebar too, in the
+ * same places ⌘B does (not while a terminal has focus: there Ctrl+B belongs
+ * to the program inside), as long as the default rule is in force.
+ */
+export function isMacCtrlBSidebarToggle(input: {
+  readonly event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">;
+  readonly isMac: boolean;
+  readonly terminalFocus: boolean;
+  readonly keybindings: ResolvedKeybindingsConfig;
+}): boolean {
+  const { event } = input;
+  if (!input.isMac || input.terminalFocus) return false;
+  if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return false;
+  if (event.key.toLowerCase() !== "b") return false;
+  // A person who moved the shortcut elsewhere keeps their own choice.
+  return withSidebarToggle(input.keybindings).some(
+    (binding) =>
+      binding.command === "sidebar.toggle" &&
+      binding.shortcut.key === "b" &&
+      binding.shortcut.modKey &&
+      !binding.shortcut.shiftKey &&
+      !binding.shortcut.altKey,
+  );
+}

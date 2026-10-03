@@ -195,9 +195,11 @@ export const ChatHeader = memo(function ChatHeader({
         ) : (
           <h2
             className={cn(
-              "min-w-0 truncate text-sm font-medium text-foreground",
-              // Uno's name never gives way to the value line next to it.
-              isAssistantChat ? "max-w-[45%] shrink-0" : "shrink",
+              "truncate text-sm font-medium text-foreground",
+              // Uno's name never gives way to the value line next to it. A
+              // chat's title keeps room for a few words even on a phone: it
+              // used to shrink into an empty pill next to the buttons.
+              isAssistantChat ? "min-w-0 max-w-[45%] shrink-0" : "min-w-16 shrink",
             )}
             title={title}
           >
@@ -236,8 +238,9 @@ export const ChatHeader = memo(function ChatHeader({
             projectName={activeProjectName}
             projectCwd={activeProjectCwd}
           />
-        ) : activeProjectName ? (
-          <Badge variant="outline" className="min-w-0 shrink overflow-hidden">
+        ) : activeProjectName && !isMobile ? (
+          // A phone has no room for it: squeezed, it was an empty pill.
+          <Badge variant="outline" className="max-w-[40%] min-w-12 shrink overflow-hidden">
             <span className="min-w-0 truncate">{activeProjectName}</span>
           </Badge>
         ) : null}
@@ -253,25 +256,29 @@ export const ChatHeader = memo(function ChatHeader({
             Started by Uno
           </button>
         ) : null}
-        <TooltipProvider delay={0} closeDelay={0}>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Toggle
-                  className="shrink-0 data-[pressed]:border-primary/40 data-[pressed]:bg-primary/15 data-[pressed]:text-primary"
-                  pressed={devMode}
-                  onPressedChange={() => toggleDevMode()}
-                  aria-label="Toggle dev mode"
-                  variant="outline"
-                  size="xs"
-                >
-                  <CodeIcon className="size-3" />
-                </Toggle>
-              }
-            />
-            <TooltipPopup side="bottom">{devMode ? "Dev mode: on" : "Dev mode: off"}</TooltipPopup>
-          </Tooltip>
-        </TooltipProvider>
+        {isMobile ? null : (
+          <TooltipProvider delay={0} closeDelay={0}>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Toggle
+                    className="shrink-0 data-[pressed]:border-primary/40 data-[pressed]:bg-primary/15 data-[pressed]:text-primary"
+                    pressed={devMode}
+                    onPressedChange={() => toggleDevMode()}
+                    aria-label="Toggle dev mode"
+                    variant="outline"
+                    size="xs"
+                  >
+                    <CodeIcon className="size-3" />
+                  </Toggle>
+                }
+              />
+              <TooltipPopup side="bottom">
+                {devMode ? "Dev mode: on" : "Dev mode: off"}
+              </TooltipPopup>
+            </Tooltip>
+          </TooltipProvider>
+        )}
       </div>
       <div className="flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3">
         {isMobile ? (
@@ -287,7 +294,11 @@ export const ChatHeader = memo(function ChatHeader({
           </button>
         ) : null}
         {draftId ? null : (
-          <ChatDoneButton environmentId={activeThreadEnvironmentId} threadId={activeThreadId} />
+          <ChatDoneButton
+            environmentId={activeThreadEnvironmentId}
+            threadId={activeThreadId}
+            compact={isMobile}
+          />
         )}
         {/* Which computer, and switching to another, from any chat (0.0.96). */}
         <ComputerChip />
@@ -324,8 +335,9 @@ export const ChatHeader = memo(function ChatHeader({
             {...(draftId ? { draftId } : {})}
           />
         )}
-        {/* Terminal is always one click away (it's not a developer-only tool). */}
-        {
+        {/* Terminal is always one click away (it's not a developer-only tool);
+            a phone keeps the room for the chat's title instead. */}
+        {isMobile ? null : (
           <Tooltip>
             <TooltipTrigger
               render={
@@ -350,7 +362,7 @@ export const ChatHeader = memo(function ChatHeader({
                   : "Toggle terminal drawer"}
             </TooltipPopup>
           </Tooltip>
-        }
+        )}
         {devMode && (
           <Tooltip>
             <TooltipTrigger
@@ -414,7 +426,7 @@ export const ChatHeader = memo(function ChatHeader({
             <TooltipPopup side="bottom">Open browser</TooltipPopup>
           </Tooltip>
         )}
-        {canContinueOnMachine && (
+        {canContinueOnMachine && !isMobile && (
           <Tooltip>
             <TooltipTrigger
               render={
