@@ -35,7 +35,7 @@ import { ensureAssistantChatWhenReady, findAssistantChat } from "./assistantChat
 const ASSISTANT_CHAT_ARRIVAL_WAIT_MS = 5_000;
 
 /** Resolves once the thread is in the client store (or after `timeoutMs`). */
-function waitForThreadInStore(
+export function waitForThreadInStore(
   environmentId: EnvironmentId,
   threadId: ThreadId,
   timeoutMs: number,

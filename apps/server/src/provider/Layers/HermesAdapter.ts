@@ -88,6 +88,7 @@ import {
 import { buildHermesHandoffPrompt } from "../acp/hermesHandoff.ts";
 import { repairHermesSessionHistory } from "../acp/hermesSessionRepair.ts";
 import { sharedSkillsRoot } from "../../skills/skillInstaller.ts";
+import { lockHermesSkillHub } from "../../assistants/skillHubLock.ts";
 import { type HermesAdapterShape } from "../Services/HermesAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
@@ -139,6 +140,15 @@ export interface HermesAdapterLiveOptions {
     readonly threadId: ThreadId;
     readonly provider: AssistantLlmProvider;
   }) => Effect.Effect<HermesLlmRoute, string>;
+  /**
+   * Whether this session's Hermes must not install skills from its public
+   * hubs (ClawHub & co.). An assistant workspace is always locked; this adds
+   * whole computers (an assistant's own computer). Absent: workspace only.
+   */
+  readonly lockSkillHub?: (context: {
+    readonly threadId: string;
+    readonly cwd: string;
+  }) => Effect.Effect<boolean>;
 }
 
 /** Marker of an assistant workspace (AssistantService): its NOTES.md is the assistant's memory. */
@@ -595,6 +605,33 @@ export function makeHermesAdapter(
                 }),
             ),
           );
+
+          // Skills for assistants come only from the Uno catalog: close
+          // Hermes' own hub (ClawHub & co.) in this HERMES_HOME.
+          const inAssistantWorkspace = yield* fileSystem
+            .exists(nodePath.join(cwd, ASSISTANT_WORKSPACE_MARKER))
+            .pipe(Effect.orElseSucceed(() => false));
+          const lockHub =
+            inAssistantWorkspace ||
+            (options?.lockSkillHub
+              ? yield* options.lockSkillHub({ threadId: input.threadId, cwd })
+              : false);
+          if (lockHub) {
+            yield* Effect.tryPromise(() => lockHermesSkillHub(threadHermesHome)).pipe(
+              Effect.tap((outcome) =>
+                outcome === "already-locked"
+                  ? Effect.void
+                  : Effect.logInfo("hermes skills hub locked for an assistant").pipe(
+                      Effect.annotateLogs({ threadId: input.threadId, outcome }),
+                    ),
+              ),
+              Effect.catch((cause) =>
+                Effect.logWarning("hermes skills hub lock failed").pipe(
+                  Effect.annotateLogs({ threadId: input.threadId, cause: String(cause) }),
+                ),
+              ),
+            );
+          }
 
           // A turn that died mid-API-call can leave a duplicated tool-call row
           // behind; replaying it bricks the thread on `400 assistant message

@@ -3,6 +3,7 @@
  * the small badge. An Uno Work computer reads as "Uno Work".
  */
 import {
+  BotIcon,
   BriefcaseIcon,
   FlaskConicalIcon,
   RocketIcon,
@@ -20,6 +21,7 @@ export const ROLE_ICON: Record<ComputerRole, ReactNode> = {
   production: <RocketIcon />,
   staging: <TestTubeDiagonalIcon />,
   sandbox: <FlaskConicalIcon />,
+  assistant: <BotIcon />,
 };
 
 export const ROLE_TINT: Record<ComputerRole, string> = {
@@ -28,6 +30,7 @@ export const ROLE_TINT: Record<ComputerRole, string> = {
   production: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
   staging: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   sandbox: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+  assistant: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
 };
 
 /** Text-only tint for a role word inside a row. */
@@ -37,6 +40,7 @@ export const ROLE_TEXT: Record<ComputerRole, string> = {
   production: "text-emerald-600 dark:text-emerald-400",
   staging: "text-amber-600 dark:text-amber-400",
   sandbox: "text-violet-600 dark:text-violet-400",
+  assistant: "text-rose-600 dark:text-rose-400",
 };
 
 export function RoleBadge({ role }: { role: ComputerRole }) {

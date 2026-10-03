@@ -24,6 +24,7 @@ import {
 } from "./baseSchemas.ts";
 import {
   ModelSelection,
+  OrchestrationCheckpointFile,
   OrchestrationLatestTurn,
   OrchestrationMessageRole,
   OrchestrationSessionStatus,
@@ -119,15 +120,133 @@ export const isAssistantProjectId = (projectId: string): boolean =>
 /** Every assistant owns one capability token, identified by this label. */
 export const assistantTokenLabel = (projectId: string): string => `assistant:${projectId}`;
 
-/** Workspace files the settings UI may read/write for an assistant. */
-export const ASSISTANT_EDITABLE_FILES = ["AGENTS.md", "NOTES.md", "ROUTING.md"] as const;
+/**
+ * Workspace files the settings UI may read/write for an assistant. SOUL.md
+ * (who it is, its rules) and USER.md (about the person) come with "New
+ * assistant" (assistants MVP, 02.10); NOTES.md stays the running memory.
+ */
+export const ASSISTANT_EDITABLE_FILES = [
+  "AGENTS.md",
+  "NOTES.md",
+  "ROUTING.md",
+  "SOUL.md",
+  "USER.md",
+] as const;
 export const AssistantEditableFileName = Schema.Literals(ASSISTANT_EDITABLE_FILES);
 export type AssistantEditableFileName = typeof AssistantEditableFileName.Type;
 
+/** Role templates of "New assistant" (assistants MVP). */
+export const ASSISTANT_TEMPLATE_IDS = ["personal", "marketing", "security", "support"] as const;
+export const AssistantTemplateId = Schema.Literals(ASSISTANT_TEMPLATE_IDS);
+export type AssistantTemplateId = typeof AssistantTemplateId.Type;
+
+/**
+ * `POST /api/manager/assistant/draft` — Uno AI reads the person's one
+ * sentence and proposes a name, an emoji, a one-line job, a schedule if the
+ * sentence names one, and at most three questions with options.
+ */
+export const AssistantDraftInput = Schema.Struct({
+  phrase: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1000)),
+  template: Schema.optional(Schema.NullOr(AssistantTemplateId)),
+});
+export type AssistantDraftInput = typeof AssistantDraftInput.Type;
+
+export const AssistantDraftOption = Schema.Struct({
+  label: Schema.String,
+  /** 5-field cron when picking this option sets how often the assistant works. */
+  cron: Schema.optional(Schema.NullOr(Schema.String)),
+});
+export type AssistantDraftOption = typeof AssistantDraftOption.Type;
+
+export const AssistantDraftQuestion = Schema.Struct({
+  id: Schema.String,
+  text: Schema.String,
+  options: Schema.Array(AssistantDraftOption),
+});
+export type AssistantDraftQuestion = typeof AssistantDraftQuestion.Type;
+
+export const AssistantDraftResult = Schema.Struct({
+  name: Schema.String,
+  emoji: Schema.String,
+  job: Schema.String,
+  schedule: Schema.NullOr(Schema.Struct({ label: Schema.String, cron: Schema.String })),
+  questions: Schema.Array(AssistantDraftQuestion),
+});
+export type AssistantDraftResult = typeof AssistantDraftResult.Type;
+
 export const ManagerCreateAssistantInput = Schema.Struct({
   name: TrimmedNonEmptyString,
+  /** "New assistant" (0.0.106): its picture and role template, kept in `.uno/profile.json`. */
+  emoji: Schema.optional(Schema.String.check(Schema.isMaxLength(16))),
+  template: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(40)))),
 });
 export type ManagerCreateAssistantInput = typeof ManagerCreateAssistantInput.Type;
+
+/**
+ * Apps (connectors) an assistant on THIS computer may open (0.0.106, "by
+ * default — right here"). Stored and checked by Work on this computer: the
+ * console sees one machine token for every assistant of a computer, so only
+ * an assistant on its own computer gets the console's check.
+ */
+export const AssistantAppLevel = Schema.Literals(["none", "read", "write"]);
+export type AssistantAppLevel = typeof AssistantAppLevel.Type;
+
+export const AssistantAppAccess = Schema.Struct({
+  permissions: Schema.Record(Schema.String, AssistantAppLevel),
+  /** False: nothing set yet, every app is allowed (full access by default). */
+  restricted: Schema.Boolean,
+  /** Who checks it: `computer` — Work on this computer (not the console). */
+  enforcedBy: Schema.Literal("computer"),
+});
+export type AssistantAppAccess = typeof AssistantAppAccess.Type;
+
+export const AssistantAppAccessInput = Schema.Struct({
+  projectId: ProjectId,
+  permissions: Schema.Record(Schema.String, AssistantAppLevel),
+});
+export type AssistantAppAccessInput = typeof AssistantAppAccessInput.Type;
+
+/** What "New assistant" picked for an assistant on this computer. */
+export const ManagerAssistantProfile = Schema.Struct({
+  emoji: Schema.NullOr(Schema.String),
+  template: Schema.NullOr(Schema.String),
+  createdAt: Schema.NullOr(Schema.String),
+});
+export type ManagerAssistantProfile = typeof ManagerAssistantProfile.Type;
+
+/**
+ * AGENTS.md against the instructions this Uno Work ships (decision 02.10:
+ * the person edits all of it; Uno's updates don't overwrite their edits).
+ */
+export const AssistantInstructionsStatus = Schema.Struct({
+  state: Schema.Literals(["current", "edited", "update-available"]),
+  current: Schema.String,
+  /** What Uno put there last (`.uno/AGENTS.base.md`). */
+  base: Schema.String,
+  /** Uno's newer version. */
+  next: Schema.String,
+  /** Places both the person and Uno changed ("Update and keep my edits"). */
+  conflicts: NonNegativeInt,
+});
+export type AssistantInstructionsStatus = typeof AssistantInstructionsStatus.Type;
+
+export const AssistantInstructionsResolveInput = Schema.Struct({
+  projectId: ProjectId,
+  action: Schema.Literals(["update", "replace", "keep"]),
+  /** Per conflict, in order: the person's text, Uno's, or both. */
+  choices: Schema.optional(Schema.Array(Schema.Literals(["mine", "theirs", "both"]))),
+});
+export type AssistantInstructionsResolveInput = typeof AssistantInstructionsResolveInput.Type;
+
+/** A deleted assistant of this computer, kept 7 days with Restore. */
+export const ManagerDeletedAssistant = Schema.Struct({
+  projectId: ProjectId,
+  title: Schema.String,
+  emoji: Schema.NullOr(Schema.String),
+  deletedAt: IsoDateTime,
+  keepUntil: IsoDateTime,
+});
+export type ManagerDeletedAssistant = typeof ManagerDeletedAssistant.Type;
 
 /** Owner-editable access profile of the in-app assistant. */
 export const ManagerAssistantAccessInput = Schema.Struct({
@@ -374,6 +493,8 @@ export const ManagerChannelSetupErrorCode = Schema.Literals([
   "shared_bot_unavailable",
   "slack_app_unavailable",
   "slack_not_installed",
+  /** Uno's Slack app already answers for another assistant of this computer. */
+  "slack_app_in_use",
   "console_unreachable",
   "console_error",
 ]);
@@ -513,6 +634,8 @@ export const ManagerAssistantSummary = Schema.Struct({
   slack: ManagerSlackConnectorStatus,
   /** Names of skill files under the workspace `skills/` directory. */
   skills: Schema.Array(Schema.String),
+  /** Emoji / template from "New assistant"; absent on older daemons. */
+  profile: Schema.optional(Schema.NullOr(ManagerAssistantProfile)),
 });
 export type ManagerAssistantSummary = typeof ManagerAssistantSummary.Type;
 
@@ -683,6 +806,95 @@ export const ManagerReadThreadDetailResult = Schema.Struct({
 });
 export type ManagerReadThreadDetailResult = typeof ManagerReadThreadDetailResult.Type;
 
+// ===============================
+// wait_for_thread / wait_for_threads
+// ===============================
+
+export const MANAGER_WAIT_DEFAULT_TIMEOUT_SEC = 900;
+export const MANAGER_WAIT_MAX_TIMEOUT_SEC = 3_600;
+export const MANAGER_WAIT_MAX_THREADS = 20;
+export const MANAGER_WAIT_REPLY_MAX_CHARS = 4_000;
+export const MANAGER_WAIT_MAX_CHANGED_FILES = 50;
+
+const ManagerWaitTimeoutSec = PositiveInt.check(
+  Schema.isLessThanOrEqualTo(MANAGER_WAIT_MAX_TIMEOUT_SEC),
+);
+
+export const ManagerWaitForThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  /** Default {@link MANAGER_WAIT_DEFAULT_TIMEOUT_SEC}. */
+  timeoutSec: Schema.optional(ManagerWaitTimeoutSec),
+});
+export type ManagerWaitForThreadInput = typeof ManagerWaitForThreadInput.Type;
+
+export const ManagerWaitMode = Schema.Literals(["any", "all"]);
+export type ManagerWaitMode = typeof ManagerWaitMode.Type;
+
+export const ManagerWaitForThreadsInput = Schema.Struct({
+  threadIds: Schema.Array(ThreadId).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MANAGER_WAIT_MAX_THREADS),
+  ),
+  /** `any` returns once one thread settles, `all` once every thread did. Default `all`. */
+  mode: Schema.optional(ManagerWaitMode),
+  timeoutSec: Schema.optional(ManagerWaitTimeoutSec),
+});
+export type ManagerWaitForThreadsInput = typeof ManagerWaitForThreadsInput.Type;
+
+/**
+ * - `completed` / `error` / `interrupted` — the thread's latest turn ended so.
+ * - `needs_user` — the thread waits for a human: an approval or a question.
+ * - `idle` — nothing ran and nothing is queued (no turn to wait for).
+ * - `timeout` — still busy when the wait ran out.
+ * - `running` — still busy; another thread settled first (`mode: "any"`).
+ */
+export const ManagerWaitStatus = Schema.Literals([
+  "completed",
+  "error",
+  "interrupted",
+  "needs_user",
+  "idle",
+  "timeout",
+  "running",
+]);
+export type ManagerWaitStatus = typeof ManagerWaitStatus.Type;
+
+export const ManagerWaitThreadResult = Schema.Struct({
+  threadId: ThreadId,
+  status: ManagerWaitStatus,
+  /** The thread was already settled when the wait began (no new turn seen). */
+  settledImmediately: Schema.Boolean,
+  turnId: Schema.NullOr(Schema.String),
+  turnStartedAt: Schema.NullOr(IsoDateTime),
+  turnCompletedAt: Schema.NullOr(IsoDateTime),
+  turnDurationMs: Schema.NullOr(NonNegativeInt),
+  /** Untrusted agent output, wrapped in <untrusted_thread_output>. */
+  lastAssistantMessage: Schema.NullOr(Schema.String),
+  lastAssistantMessageTruncated: Schema.Boolean,
+  /** Files the turn changed (checkpoint diff); null when no checkpoint exists (yet). */
+  changedFiles: Schema.NullOr(Schema.Array(OrchestrationCheckpointFile)),
+  changedFilesTotal: NonNegativeInt,
+  pendingApprovals: Schema.Array(ManagerPendingApprovalSummary),
+  /** For `needs_user`: what the thread asks (untrusted, wrapped). */
+  pendingRequest: Schema.NullOr(Schema.String),
+  error: Schema.NullOr(Schema.String),
+});
+export type ManagerWaitThreadResult = typeof ManagerWaitThreadResult.Type;
+
+export const ManagerWaitForThreadResult = Schema.Struct({
+  ...ManagerWaitThreadResult.fields,
+  waitedMs: NonNegativeInt,
+});
+export type ManagerWaitForThreadResult = typeof ManagerWaitForThreadResult.Type;
+
+export const ManagerWaitForThreadsResult = Schema.Struct({
+  mode: ManagerWaitMode,
+  waitedMs: NonNegativeInt,
+  timedOut: Schema.Boolean,
+  results: Schema.Array(ManagerWaitThreadResult),
+});
+export type ManagerWaitForThreadsResult = typeof ManagerWaitForThreadsResult.Type;
+
 export const ManagerListPendingApprovalsResult = Schema.Struct({
   approvals: Schema.Array(ManagerPendingApprovalSummary),
 });
@@ -696,6 +908,12 @@ export const ManagerCreateThreadInput = Schema.Struct({
   prompt: TrimmedNonEmptyString,
   modelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   runtimeMode: Schema.optional(RuntimeMode),
+  /**
+   * The computer the chat runs on (box id, or `"this"`). Absent = this
+   * computer. Only this computer is allowed for now (assistants MVP); the
+   * cross-machine Allow comes with the next wave.
+   */
+  computerId: Schema.optional(Schema.NullOr(Schema.Union([Schema.Number, Schema.String]))),
 });
 export type ManagerCreateThreadInput = typeof ManagerCreateThreadInput.Type;
 
@@ -856,3 +1074,161 @@ export const ManagerCancelReminderResult = Schema.Struct({
   cancelled: Schema.Boolean,
 });
 export type ManagerCancelReminderResult = typeof ManagerCancelReminderResult.Type;
+
+// ===============================
+// Assistant schedules (assistants MVP)
+// ===============================
+//
+// An assistant's recurring work: a scheduled task of the Uno console
+// (`/api/v1/scheduled-tasks`) on the assistant's own computer whose command
+// is `uno-work assistant-turn …`. The console wakes the computer, the CLI
+// hands the instruction to the assistant as a new turn and the answer goes to
+// the person's Telegram/Slack. The daemon only proxies to the console with
+// the machine's token; the person sees and stops schedules in the app.
+
+export const ASSISTANT_SCHEDULE_NAME_MAX_CHARS = 80;
+export const ASSISTANT_SCHEDULE_PROMPT_MAX_CHARS = 2_000;
+export const ASSISTANT_SCHEDULE_DEFAULT_MINUTES = 15;
+export const ASSISTANT_SCHEDULE_MAX_MINUTES = 60;
+/** The final answer that means "nothing to tell the person" — not delivered. */
+export const ASSISTANT_TURN_NO_REPLY = "NO_REPLY";
+
+export const ManagerScheduleCreateInput = Schema.Struct({
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSISTANT_SCHEDULE_NAME_MAX_CHARS)),
+  /** Five-field cron (`min hour day month weekday`), validated by the console. */
+  cron: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
+  /** What future-you is asked to do; self-contained. */
+  prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSISTANT_SCHEDULE_PROMPT_MAX_CHARS)),
+  /** IANA zone, e.g. `Europe/Berlin`. Absent: the console's default (UTC). */
+  timezone: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))),
+  /** How long one run may take. Default {@link ASSISTANT_SCHEDULE_DEFAULT_MINUTES}. */
+  maxMinutes: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(ASSISTANT_SCHEDULE_MAX_MINUTES)),
+  ),
+});
+export type ManagerScheduleCreateInput = typeof ManagerScheduleCreateInput.Type;
+
+export const ManagerScheduleDeleteInput = Schema.Struct({
+  scheduleId: PositiveInt,
+});
+export type ManagerScheduleDeleteInput = typeof ManagerScheduleDeleteInput.Type;
+
+export const ManagerSchedule = Schema.Struct({
+  scheduleId: PositiveInt,
+  name: Schema.String,
+  cron: Schema.String,
+  timezone: Schema.NullOr(Schema.String),
+  prompt: Schema.String,
+  /** The console's state: `active`, `paused`, … */
+  state: Schema.NullOr(Schema.String),
+  nextRunAt: Schema.NullOr(Schema.String),
+  lastRunAt: Schema.NullOr(Schema.String),
+});
+export type ManagerSchedule = typeof ManagerSchedule.Type;
+
+export const ManagerScheduleListResult = Schema.Struct({
+  schedules: Schema.Array(ManagerSchedule),
+});
+export type ManagerScheduleListResult = typeof ManagerScheduleListResult.Type;
+
+export const ManagerScheduleDeleteResult = Schema.Struct({
+  deleted: Schema.Boolean,
+});
+export type ManagerScheduleDeleteResult = typeof ManagerScheduleDeleteResult.Type;
+
+/** Body of `POST /api/manager/assistant/scheduled-turn` (the CLI). */
+export const ManagerAssistantTurnInput = Schema.Struct({
+  prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSISTANT_SCHEDULE_PROMPT_MAX_CHARS)),
+  /** The schedule's name, shown to the assistant and the person. */
+  name: Schema.optional(
+    TrimmedNonEmptyString.check(Schema.isMaxLength(ASSISTANT_SCHEDULE_NAME_MAX_CHARS)),
+  ),
+  /** How long to wait for the answer. Default {@link ASSISTANT_SCHEDULE_DEFAULT_MINUTES} min. */
+  timeoutSec: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(ASSISTANT_SCHEDULE_MAX_MINUTES * 60)),
+  ),
+});
+export type ManagerAssistantTurnInput = typeof ManagerAssistantTurnInput.Type;
+
+export const ManagerAssistantTurnStatus = Schema.Literals([
+  /** The answer went to the person's chats. */
+  "delivered",
+  /** The assistant answered NO_REPLY: nothing to tell. */
+  "no_reply",
+  /** It answered, but no chat took the message (none linked / send failed). */
+  "undelivered",
+  /** Still running when the wait ran out. */
+  "timeout",
+]);
+export type ManagerAssistantTurnStatus = typeof ManagerAssistantTurnStatus.Type;
+
+export const ManagerAssistantTurnResult = Schema.Struct({
+  status: ManagerAssistantTurnStatus,
+  threadId: ThreadId,
+  delivered: NonNegativeInt,
+});
+export type ManagerAssistantTurnResult = typeof ManagerAssistantTurnResult.Type;
+
+// ===============================
+// Chats an assistant started (assistants MVP, "Memory & models")
+// ===============================
+//
+// `GET /api/manager/assistant/chats` — the chats this computer's assistant
+// started (`create_thread` / `chat_create`), with what each one cost. Uno AI
+// chats are priced by the gateway (`X-Uno-Thread` label, behind the
+// console's ASSISTANTS_MVP); chats on the person's Claude / ChatGPT plan cost
+// Uno nothing and show tokens only.
+
+export const AssistantChatStatus = Schema.Literals(["working", "waiting", "done", "failed"]);
+export type AssistantChatStatus = typeof AssistantChatStatus.Type;
+
+/**
+ * - `uno-ai` — priced by the gateway (`costUsd`, `aiHoursRequests`);
+ * - `uno-ai-unlabelled` — on Uno AI, but this harness can't label its calls
+ *   (Hermes): the cost is only in the computer's total;
+ * - `plan` — the person's own subscription (Claude, ChatGPT, Cursor);
+ * - `other` — own API keys or unknown.
+ */
+export const AssistantChatBilling = Schema.Literals([
+  "uno-ai",
+  "uno-ai-unlabelled",
+  "plan",
+  "other",
+]);
+export type AssistantChatBilling = typeof AssistantChatBilling.Type;
+
+export const AssistantChatSummary = Schema.Struct({
+  threadId: ThreadId,
+  title: Schema.String,
+  projectId: ProjectId,
+  projectTitle: Schema.String,
+  instanceId: Schema.String,
+  /** Harness display name ("Claude", "Uno", …). */
+  harness: Schema.String,
+  model: Schema.String,
+  /** Effort / reasoning option of the chat, if any. */
+  effort: Schema.NullOr(Schema.String),
+  status: AssistantChatStatus,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  billing: AssistantChatBilling,
+  /** Tokens: from the gateway for Uno AI, else from the chat's own usage reports. */
+  tokens: Schema.NullOr(NonNegativeInt),
+  /** What the wallet paid (plan credit or balance); null = not priced here. */
+  costUsd: Schema.NullOr(Schema.Number),
+  /** Gateway requests of this chat that ran on AI hours. */
+  aiHoursRequests: Schema.NullOr(NonNegativeInt),
+});
+export type AssistantChatSummary = typeof AssistantChatSummary.Type;
+
+export const AssistantChatsResult = Schema.Struct({
+  chats: Schema.Array(AssistantChatSummary),
+  /**
+   * `metered` — the gateway priced the Uno AI chats; `unavailable` — the
+   * account's console doesn't price chats yet (flag off / older backend);
+   * `no-key` — no Uno AI key on this computer; `unknown` — the gateway
+   * didn't answer.
+   */
+  gateway: Schema.Literals(["metered", "unavailable", "no-key", "unknown"]),
+});
+export type AssistantChatsResult = typeof AssistantChatsResult.Type;

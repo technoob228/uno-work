@@ -9,6 +9,8 @@ interface ImportMetaEnv {
   readonly APP_VERSION: string;
   /** "1" in the web lite build (apps/web/src/lite). */
   readonly VITE_UNO_WORK_LITE?: string;
+  /** "1" on a local stand: assistants run against an in-memory account (lib/assistantsDemo.ts). */
+  readonly VITE_ASSISTANTS_DEMO?: string;
 }
 
 interface ImportMeta {

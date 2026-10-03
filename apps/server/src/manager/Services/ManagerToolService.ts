@@ -35,6 +35,10 @@ import type {
   ManagerSendTurnInput,
   ManagerTokenBudget,
   ManagerTokenId,
+  ManagerWaitForThreadInput,
+  ManagerWaitForThreadResult,
+  ManagerWaitForThreadsInput,
+  ManagerWaitForThreadsResult,
   ManagerWriteReceipt,
 } from "@t3tools/contracts";
 import { Context } from "effect";
@@ -50,6 +54,11 @@ export interface ManagerCaller {
   readonly budget: ManagerTokenBudget | null;
   /** Write tools execute immediately (still audited as auto-resolved proposals). */
   readonly autoApprove: boolean;
+  /**
+   * The token's label — `assistant:<projectId>` for an assistant's own token
+   * (see `assistantTokenLabel`). Absent in older call sites and tests.
+   */
+  readonly label?: string;
 }
 
 export interface ManagerToolServiceShape {
@@ -61,6 +70,19 @@ export interface ManagerToolServiceShape {
     caller: ManagerCaller,
     input: ManagerGetThreadStatusInput,
   ) => Effect.Effect<ManagerGetThreadStatusResult, ManagerToolError>;
+  /**
+   * Block until the thread's current turn settles (completed / error /
+   * interrupted / needs a human) or the timeout passes. Event-driven, with a
+   * rare fallback poll; replaces `get_thread_status` polling loops.
+   */
+  readonly waitForThread: (
+    caller: ManagerCaller,
+    input: ManagerWaitForThreadInput,
+  ) => Effect.Effect<ManagerWaitForThreadResult, ManagerToolError>;
+  readonly waitForThreads: (
+    caller: ManagerCaller,
+    input: ManagerWaitForThreadsInput,
+  ) => Effect.Effect<ManagerWaitForThreadsResult, ManagerToolError>;
   readonly readThreadDetail: (
     caller: ManagerCaller,
     input: ManagerReadThreadDetailInput,

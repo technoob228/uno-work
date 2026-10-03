@@ -63,21 +63,39 @@ export const callWorkConsole = (input: {
   readonly body?: unknown;
   readonly fetchImpl?: FetchLike;
 }): Effect.Effect<WorkConsoleResponse, WorkConsoleUnreachable> =>
+  callMachineConsole({
+    identity: input.identity,
+    method: input.method,
+    path: `/api/v1/boxes/${input.identity.boxId}/work/${input.subpath}`,
+    ...(input.body !== undefined ? { body: input.body } : {}),
+    ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+  });
+
+/**
+ * One call to any console path (`/api/v1/…`) as the machine itself — e.g.
+ * `/api/v1/scheduled-tasks`. Same answer/failure contract as
+ * {@link callWorkConsole}; what the machine token may reach is the console's
+ * call (`auth_work_machine.go`).
+ */
+export const callMachineConsole = (input: {
+  readonly identity: WorkMachineIdentity;
+  readonly method: "GET" | "POST" | "PUT" | "DELETE";
+  readonly path: string;
+  readonly body?: unknown;
+  readonly fetchImpl?: FetchLike;
+}): Effect.Effect<WorkConsoleResponse, WorkConsoleUnreachable> =>
   Effect.tryPromise({
     try: async () => {
       const fetchImpl = input.fetchImpl ?? globalThis.fetch;
-      const response = await fetchImpl(
-        `${controlPlaneBaseUrl()}/api/v1/boxes/${input.identity.boxId}/work/${input.subpath}`,
-        {
-          method: input.method,
-          headers: {
-            authorization: `Bearer ${input.identity.boxToken}`,
-            ...(input.body !== undefined ? { "content-type": "application/json" } : {}),
-          },
-          ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
-          signal: AbortSignal.timeout(CONSOLE_TIMEOUT_MS),
+      const response = await fetchImpl(`${controlPlaneBaseUrl()}${input.path}`, {
+        method: input.method,
+        headers: {
+          authorization: `Bearer ${input.identity.boxToken}`,
+          ...(input.body !== undefined ? { "content-type": "application/json" } : {}),
         },
-      );
+        ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
+        signal: AbortSignal.timeout(CONSOLE_TIMEOUT_MS),
+      });
       const text = await response.text().catch(() => "");
       let body: unknown = null;
       if (text.trim().length > 0) {

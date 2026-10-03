@@ -1,17 +1,21 @@
 /**
- * Assistants (simplification 01.10) — bots that answer in Telegram or Slack
- * 24/7. Empty until the person creates one; creating is two steps:
+ * Assistants — every assistant on the account.
+ *
+ * "New assistant" is one sentence → up to three questions → "Will do / Won't
+ * do" → Create (`NewAssistantFlow.tsx`). By default (decision 02.10 evening)
+ * it lives on THIS computer, next to the others (`LocalAssistantPage.tsx`);
+ * "Give it its own computer" makes it a Work computer of role `assistant`
+ * (`AssistantPage.tsx`). Both pages have access, schedule, memory, models,
+ * channels and chat.
+ *
+ * The assistant of the computer the app is looking at (the 01.10 one: the
+ * computer's Hermes assistant, see `assistantEntity.ts`) stays in the list
+ * with its card; "here" is the old two-step setup for it, used where there
+ * is no Uno account to make computers with:
  *
  *   1. a name and "what it does" (one line, can be skipped);
- *   2. where it answers: Telegram by Uno's bot with a QR (default, the
- *      goal-first flow people like), "My own Telegram bot" (BotFather),
- *      Slack, or "Only here".
- *
- * The card of an assistant says where it answers, which computer it lives on,
- * its last conversations, and has Pause and Delete.
- *
- * v1: one assistant per computer — the computer's Hermes assistant, see
- * `assistantEntity.ts` for why and where its name lives.
+ *   2. where it answers: Telegram by Uno's bot with a QR, "My own Telegram
+ *      bot" (BotFather), Slack, or "Only here".
  */
 import { ASSISTANT_PROJECT_ID, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,6 +25,7 @@ import {
   BotIcon,
   CheckIcon,
   ChevronRightIcon,
+  LoaderCircleIcon,
   MessageSquareIcon,
   MonitorIcon,
   PauseIcon,
@@ -48,6 +53,13 @@ import {
   saveAssistantTelegram,
   writeAssistantFile,
 } from "../../lib/managerApi";
+import {
+  keptUntilText,
+  restoreAssistantComputer,
+  type AssistantComputer,
+} from "../../lib/assistantsConsoleApi";
+import { restoreLocalAssistant } from "../../lib/managerApi";
+import type { ManagerAssistantSummary, ManagerDeletedAssistant } from "@t3tools/contracts";
 import { getSlackInstall, removeSlackInstall } from "../../lib/setupApi";
 import { cn } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
@@ -58,6 +70,22 @@ import { SlackBrandMark, TelegramMark } from "../setup/brandMarks";
 import { EMPTY_SETUP_PROGRESS } from "../setup/setupModel";
 import { AssistantSlackPanel, AssistantTelegramPanel } from "../setup/steps/ChannelsStep";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
+import { EmojiAvatar, StatusPill } from "./AssistantBits";
+import { AssistantPage } from "./AssistantPage";
+import { findTemplate } from "./assistantTemplates";
+import { LocalAssistantPage } from "./LocalAssistantPage";
+import { NewAssistantFlow } from "./NewAssistantFlow";
+import {
+  ASSISTANT_COMPUTERS_KEY,
+  LOCAL_ASSISTANTS_KEY,
+  useAssistantComputers,
+  useAssistantList,
+  useDeletedAssistants,
+  useDeletedLocalAssistants,
+  useBoxIdOfEnvironment,
+  useLocalAssistants,
+  type AssistantListItem,
+} from "./useAssistants";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { SidebarInset } from "../ui/sidebar";
@@ -69,7 +97,6 @@ import {
   ASSISTANT_ABOUT_KEY,
   ASSISTANT_NAME_MAX,
   DEFAULT_ASSISTANT_NAME,
-  ONE_ASSISTANT_NOTE,
   assistantEntity,
   assistantWhereLine,
   withAgentsProfile,
@@ -81,8 +108,15 @@ import {
 } from "./assistantEntity";
 
 export interface AssistantsRouteSearch {
-  /** "new" — the two-step Create; "card" — the assistant's card. */
-  readonly view?: "new" | "card";
+  /**
+   * "new" — New assistant; "here" — the two-step setup of this computer's
+   * default assistant; "card" — that assistant's card; "assistant" — the
+   * page of the assistant on its own computer `box`; "local" — the page of
+   * assistant `project` that lives on this computer.
+   */
+  readonly view?: "new" | "here" | "card" | "assistant" | "local";
+  readonly box?: number;
+  readonly project?: string;
 }
 
 const SUMMARY_KEY = ["uno-assistant", "summary"] as const;
@@ -127,11 +161,44 @@ export function AssistantsView() {
   const { environmentId } = useActiveMachine();
   const model = useAssistantModel(environmentId);
   const machineLabel = useMachineLabel(environmentId);
-  const setView = (view: AssistantsRouteSearch["view"]) =>
-    void navigate({ to: "/assistants", search: view ? { view } : {} });
+  const assistants = useAssistantList(environmentId);
+  const deleted = useDeletedAssistants();
+  const computers = useAssistantComputers();
+  const activeBoxId = useBoxIdOfEnvironment(environmentId);
+  const localAssistants = useLocalAssistants(environmentId);
+  const deletedLocal = useDeletedLocalAssistants(environmentId).data ?? [];
+  const local = localAssistants.data ?? [];
+  const setView = (view: AssistantsRouteSearch["view"], box?: number, project?: string) =>
+    void navigate({
+      to: "/assistants",
+      search: view
+        ? {
+            view,
+            ...(box !== undefined ? { box } : {}),
+            ...(project !== undefined ? { project } : {}),
+          }
+        : {},
+    });
+
+  // The assistant of the computer the app is looking at — unless that
+  // computer is itself one of the assistants' own (then it is listed there).
+  const activeIsAssistantComputer =
+    activeBoxId !== null && assistants.some((item) => item.computer.boxId === activeBoxId);
+  const localEntity = activeIsAssistantComputer ? null : model.entity;
 
   const creating = search.view === "new";
+  const settingUpHere = search.view === "here";
   const showCard = search.view === "card" && model.entity !== null;
+  const pageItem =
+    search.view === "assistant"
+      ? (assistants.find((item) => item.computer.boxId === search.box) ?? null)
+      : null;
+  const localItem =
+    search.view === "local"
+      ? (local.find((item) => item.projectId === search.project) ?? null)
+      : null;
+  const inside =
+    creating || settingUpHere || showCard || search.view === "assistant" || search.view === "local";
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -139,7 +206,7 @@ export function AssistantsView() {
         <header className="border-b border-border px-3 py-2 sm:px-5 sm:py-3">
           <div className="flex min-h-8 items-center gap-2">
             <SidebarShowButton />
-            {creating || showCard ? (
+            {inside ? (
               <Button size="xs" variant="ghost" onClick={() => setView(undefined)}>
                 <ArrowLeftIcon className="size-3.5" />
                 <span className="hidden sm:inline">Assistants</span>
@@ -157,7 +224,15 @@ export function AssistantsView() {
           <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 pt-2 sm:pt-6">
             {environmentId === null ? (
               <p className="text-sm text-muted-foreground">No computer is connected.</p>
-            ) : creating && model.loading ? null : creating ? (
+            ) : creating ? (
+              <NewAssistantFlow
+                environmentId={environmentId}
+                boxId={activeBoxId}
+                machineLabel={machineLabel}
+                onOpen={(box) => setView("assistant", box)}
+                onOpenHere={(project) => setView("local", undefined, project)}
+              />
+            ) : settingUpHere && model.loading ? null : settingUpHere ? (
               <CreateAssistant
                 environmentId={environmentId}
                 machineLabel={machineLabel}
@@ -172,21 +247,93 @@ export function AssistantsView() {
                 model={model}
                 onDeleted={() => setView(undefined)}
               />
-            ) : model.entity ? (
-              <>
-                <AssistantRow
-                  entity={model.entity}
+            ) : search.view === "local" ? (
+              localItem ? (
+                <LocalAssistantPage
+                  key={localItem.projectId}
+                  summary={localItem}
+                  environmentId={environmentId}
                   machineLabel={machineLabel}
-                  onOpen={() => setView("card")}
+                  boxId={activeBoxId}
+                  onDeleted={() => setView(undefined)}
+                  onMoved={(box) => setView("assistant", box)}
                 />
-                <p className="px-1 text-xs text-muted-foreground" data-testid="assistants-one-note">
-                  {ONE_ASSISTANT_NOTE}
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {localAssistants.isLoading
+                    ? "Loading…"
+                    : "This assistant isn't on this computer any more."}
                 </p>
+              )
+            ) : search.view === "assistant" ? (
+              pageItem ? (
+                <AssistantPage
+                  key={pageItem.computer.boxId}
+                  item={pageItem}
+                  accountEnvironmentId={environmentId}
+                  onDeleted={() => setView(undefined)}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {computers.isLoading
+                    ? "Loading…"
+                    : "This assistant isn't on your account any more."}
+                </p>
+              )
+            ) : localEntity ||
+              assistants.length > 0 ||
+              local.length > 0 ||
+              deleted.length > 0 ||
+              deletedLocal.length > 0 ? (
+              <>
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="min-w-0 flex-1">
+                    <h1 className="text-xl font-semibold tracking-tight">Assistants</h1>
+                    <p className="text-sm text-muted-foreground">
+                      They live on this computer and open only the apps you allow. Give one its own
+                      computer when it reads other people's emails or sites.
+                    </p>
+                  </div>
+                  <Button onClick={() => setView("new")} data-testid="assistants-new">
+                    <PlusIcon className="size-4" />
+                    New assistant
+                  </Button>
+                </div>
+                <div className="flex flex-col gap-2" data-testid="assistants-list">
+                  {assistants.map((item) => (
+                    <MachineAssistantRow
+                      key={item.computer.boxId}
+                      item={item}
+                      onOpen={() => setView("assistant", item.computer.boxId)}
+                    />
+                  ))}
+                  {localEntity ? (
+                    <AssistantRow
+                      entity={localEntity}
+                      machineLabel={machineLabel}
+                      onOpen={() => setView("card")}
+                    />
+                  ) : null}
+                  {local.map((item) => (
+                    <LocalAssistantRow
+                      key={item.projectId}
+                      summary={item}
+                      machineLabel={machineLabel}
+                      onOpen={() => setView("local", undefined, item.projectId)}
+                    />
+                  ))}
+                </div>
+                {deleted.length > 0 || deletedLocal.length > 0 ? (
+                  <DeletedAssistants
+                    computers={deleted}
+                    local={deletedLocal}
+                    environmentId={environmentId}
+                  />
+                ) : null}
               </>
             ) : (
               <EmptyAssistants
-                machineLabel={machineLabel}
-                loading={model.loading}
+                loading={model.loading || computers.isLoading}
                 onCreate={() => setView("new")}
               />
             )}
@@ -197,37 +344,205 @@ export function AssistantsView() {
   );
 }
 
-function EmptyAssistants({
-  machineLabel,
-  loading,
-  onCreate,
-}: {
-  machineLabel: string;
-  loading: boolean;
-  onCreate: () => void;
-}) {
+function EmptyAssistants({ loading, onCreate }: { loading: boolean; onCreate: () => void }) {
   return (
     <section
       className="flex flex-col items-center gap-4 rounded-3xl border border-dashed border-border px-6 py-12 text-center"
       data-testid="assistants-empty"
     >
-      <span className="flex size-14 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-500">
-        <TelegramMark className="size-7" />
+      <span className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-2xl">
+        🤖
       </span>
       <div className="flex max-w-md flex-col gap-1.5">
         <h1 className="text-xl font-semibold tracking-tight">
-          Create an assistant that answers in Telegram 24/7
+          An assistant that works while you don't
         </h1>
         <p className="text-sm text-muted-foreground">
-          Write to it like to a colleague: it answers questions, does tasks on {machineLabel} and
-          remembers what you told it.
+          Describe it in one sentence: it answers your customers, keeps your inbox in order or
+          prepares posts. It lives on this computer, or on its own, and opens only the apps you
+          allow.
         </p>
       </div>
       <Button onClick={onCreate} disabled={loading} data-testid="assistants-empty-create">
         <PlusIcon className="size-4" />
-        Create an assistant
+        New assistant
       </Button>
     </section>
+  );
+}
+
+/** Deleted assistants kept for 7 days (by the console, or by this computer), with Restore. */
+function DeletedAssistants({
+  computers,
+  local,
+  environmentId,
+}: {
+  computers: ReadonlyArray<AssistantComputer>;
+  local: ReadonlyArray<ManagerDeletedAssistant>;
+  environmentId: EnvironmentId;
+}) {
+  const queryClient = useQueryClient();
+  const [restoring, setRestoring] = useState<number | string | null>(null);
+  const restoreHere = async (assistant: ManagerDeletedAssistant) => {
+    setRestoring(assistant.projectId);
+    try {
+      await restoreLocalAssistant({ environmentId, projectId: assistant.projectId });
+      toastManager.add({ type: "success", title: `${assistant.title} is back` });
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: `Couldn't restore ${assistant.title}`,
+        description: errorText(cause, "This computer didn't answer."),
+      });
+    } finally {
+      setRestoring(null);
+      void queryClient.invalidateQueries({ queryKey: LOCAL_ASSISTANTS_KEY });
+    }
+  };
+  const restore = async (computer: AssistantComputer) => {
+    setRestoring(computer.boxId);
+    try {
+      await restoreAssistantComputer(computer.boxId);
+      toastManager.add({ type: "success", title: `${computer.label.name} is back` });
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: `Couldn't restore ${computer.label.name}`,
+        description: errorText(cause, "Uno didn't answer. Try again in a minute."),
+      });
+    } finally {
+      setRestoring(null);
+      void queryClient.invalidateQueries({ queryKey: ASSISTANT_COMPUTERS_KEY });
+    }
+  };
+  return (
+    <section className="flex flex-col gap-2" data-testid="assistants-deleted">
+      <h2 className="text-sm font-medium text-muted-foreground">Recently deleted</h2>
+      {computers.map((computer) => (
+        <div
+          key={computer.boxId}
+          data-testid="assistants-deleted-row"
+          className="flex items-center gap-3 rounded-2xl border border-dashed border-border px-4 py-3"
+        >
+          <EmojiAvatar emoji={computer.label.emoji} className="opacity-60" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-muted-foreground">
+              {computer.label.name}
+            </span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {keptUntilText(computer.purgeAt)}
+            </span>
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={restoring !== null}
+            onClick={() => void restore(computer)}
+            data-testid="assistants-restore"
+          >
+            {restoring === computer.boxId ? (
+              <LoaderCircleIcon className="size-3.5 animate-spin" />
+            ) : null}
+            Restore
+          </Button>
+        </div>
+      ))}
+      {local.map((assistant) => (
+        <div
+          key={assistant.projectId}
+          data-testid="assistants-deleted-local-row"
+          className="flex items-center gap-3 rounded-2xl border border-dashed border-border px-4 py-3"
+        >
+          <EmojiAvatar emoji={assistant.emoji ?? "🤖"} className="opacity-60" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-muted-foreground">
+              {assistant.title}
+            </span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {keptUntilText(assistant.keepUntil)}
+            </span>
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={restoring !== null}
+            onClick={() => void restoreHere(assistant)}
+            data-testid="assistants-restore-local"
+          >
+            {restoring === assistant.projectId ? (
+              <LoaderCircleIcon className="size-3.5 animate-spin" />
+            ) : null}
+            Restore
+          </Button>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function LocalAssistantRow({
+  summary,
+  machineLabel,
+  onOpen,
+}: {
+  summary: ManagerAssistantSummary;
+  machineLabel: string;
+  onOpen: () => void;
+}) {
+  const template = findTemplate(summary.profile?.template ?? null);
+  const channels = [
+    summary.telegram.configured && summary.telegram.allowedChatIds.length > 0 ? "Telegram" : null,
+    summary.slack.configured && summary.slack.allowedChannelIds.length > 0 ? "Slack" : null,
+  ].filter((entry): entry is string => entry !== null);
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      data-testid="assistants-local-row"
+      className="flex w-full cursor-pointer items-center gap-3 rounded-2xl border border-border/70 bg-card/40 px-4 py-3.5 text-left transition-colors hover:bg-accent/40"
+    >
+      <EmojiAvatar emoji={summary.profile?.emoji ?? template?.emoji ?? "🤖"} />
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="truncate text-sm font-semibold">{summary.title}</span>
+          {template ? (
+            <span className="text-xs text-muted-foreground">{template.title}</span>
+          ) : null}
+        </span>
+        <span className="block truncate text-xs text-muted-foreground">
+          {channels.length > 0 ? `${channels.join(" · ")} · ` : ""}On this computer · {machineLabel}
+        </span>
+      </span>
+      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+    </button>
+  );
+}
+
+function MachineAssistantRow({ item, onOpen }: { item: AssistantListItem; onOpen: () => void }) {
+  const { label } = item.computer;
+  const template = findTemplate(label.template);
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      data-testid="assistants-machine-row"
+      className="flex w-full cursor-pointer items-center gap-3 rounded-2xl border border-border/70 bg-card/40 px-4 py-3.5 text-left transition-colors hover:bg-accent/40"
+    >
+      <EmojiAvatar emoji={label.emoji} />
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="truncate text-sm font-semibold">{label.name}</span>
+          {template ? (
+            <span className="text-xs text-muted-foreground">{template.title}</span>
+          ) : null}
+          <StatusPill status={item.status} />
+        </span>
+        <span className="block truncate text-xs text-muted-foreground">
+          Its own computer · {item.computer.boxName}
+        </span>
+      </span>
+      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+    </button>
   );
 }
 
@@ -738,7 +1053,6 @@ function AssistantCard({
         <div className="flex items-center gap-3 py-1">
           <MonitorIcon className="size-4 text-muted-foreground" />
           <span className="text-sm">{machineLabel}</span>
-          <span className="ml-auto text-xs text-muted-foreground">{ONE_ASSISTANT_NOTE}</span>
         </div>
       </Block>
 
@@ -808,6 +1122,7 @@ function AssistantCard({
       </div>
 
       <ConnectChannelDialog
+          telegramMode="own"
         environmentId={environmentId}
         channel={connecting}
         onClose={() => {

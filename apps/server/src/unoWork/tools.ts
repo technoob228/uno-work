@@ -45,6 +45,12 @@ import type {
 import { clampUnoAgentAccessLevel } from "@t3tools/contracts";
 import { Data, Effect } from "effect";
 
+import {
+  IMAGE_PROMPT_MAX_CHARS,
+  IMAGE_SIZES,
+  saveGeneratedImage,
+  type GeneratedImage,
+} from "../assistants/imageGenerate.ts";
 import { liveSiteUrl } from "../files/sitePublish.ts";
 import { validateManifest } from "../machineApps/appManifest.ts";
 import { displayManifestDir } from "../machineApps/manifestDir.ts";
@@ -224,6 +230,16 @@ export interface UnoWorkToolDeps {
     readonly request: (input: ConsoleRequest) => Effect.Effect<ConsoleReply, UnoWorkToolError>;
   };
   /**
+   * Pictures from the Uno gateway (`POST /v1/images/generations`) with the
+   * harness key. Absent (tests, older wiring): `image_generate` says so.
+   */
+  readonly images?: {
+    readonly generate: (input: {
+      readonly prompt: string;
+      readonly size?: string;
+    }) => Effect.Effect<GeneratedImage, UnoWorkToolError>;
+  };
+  /**
    * The person's connected tools (Google Drive, Gmail & Calendar, Notion,
    * GitHub): calls go to the console with this computer's machine token.
    * Absent where there is no console (tests, a laptop without Uno).
@@ -234,6 +250,19 @@ export interface UnoWorkToolDeps {
       readonly tool: string;
       readonly arguments: Record<string, unknown>;
     }) => Effect.Effect<ConnectorCallResult, UnoWorkToolError>;
+    /**
+     * Apps an assistant of this computer may open (0.0.106): the calling
+     * chat's assistant and the person's choice for this provider. Work
+     * checks it here because the console sees one machine token for every
+     * assistant of a computer. Absent = no assistant rules (allowed).
+     */
+    readonly access?: (input: {
+      readonly provider: string;
+      readonly changesThings: boolean;
+    }) => Effect.Effect<{
+      readonly decision: "allow" | "none" | "read-only";
+      readonly assistant: string | null;
+    }>;
   };
 }
 
@@ -1520,6 +1549,11 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         projectId: { type: "string" },
         provider: { type: "string" },
         model: { type: "string" },
+        computerId: {
+          type: "string",
+          description:
+            'Computer the chat runs on (box id or "this"). Leave it out: for now only this computer is allowed.',
+        },
       },
       required: ["text"],
       additionalProperties: false,
@@ -1539,6 +1573,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             ...(str(args, "projectId") ? { projectId: str(args, "projectId") } : {}),
             ...(str(args, "provider") ? { provider: str(args, "provider") } : {}),
             ...(str(args, "model") ? { model: str(args, "model") } : {}),
+            ...(args["computerId"] !== undefined && args["computerId"] !== null
+              ? { computerId: args["computerId"] }
+              : {}),
           },
         })
         .pipe(Effect.flatMap(bridgeOk)),
@@ -1762,13 +1799,72 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       }),
   },
   {
-    name: "browser_command",
-    group: "person",
+    name: "image_generate",
+    group: "files",
     description:
-      "Drive the page open in this chat's right panel: state (URL, title, visible text), screenshot, click, clickText, type, press, navigate, reload, back, forward, evaluate. Prefer precise selectors/text; never print passwords or private fields. requestHelp (with `text`: what the person should do — sign in, captcha, 2FA code, a payment or a choice only they can make) hands the browser to the person and waits until they hand it back (default 10 min). On a new cloud computer the browser is set up on first use (~30–60 s): a reply saying it is being set up means do something else and retry after the given seconds.",
+      "Make a picture from a text description with Uno AI (works in any chat). Saves it in the chat's folder under images/ and shows it in the right panel; returns the file path to use next (e.g. in a site, a document, a post). Paid from the person's AI hours (or a few cents of balance when hours run out), up to 20 pictures a day: make one, look, then refine — no batches.",
     inputSchema: {
       type: "object",
       properties: {
+        prompt: {
+          type: "string",
+          maxLength: IMAGE_PROMPT_MAX_CHARS,
+          description: "What to draw: subject, style, colours, text on it (if any).",
+        },
+        size: { type: "string", enum: [...IMAGE_SIZES] },
+      },
+      required: ["prompt"],
+      additionalProperties: false,
+    },
+    level: "change",
+    approvalTitle: (args) => `Make a picture: ${(str(args, "prompt") ?? "").slice(0, 80)}`,
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        if (!deps.images) {
+          return yield* toolError("Picture generation isn't available in this Uno Work.");
+        }
+        const prompt = (str(args, "prompt") ?? "").trim();
+        if (prompt.length === 0) return yield* toolError("Describe the picture in prompt.");
+        const size = str(args, "size");
+        const image = yield* deps.images.generate({ prompt, ...(size ? { size } : {}) });
+        const folder = deps.caller.cwd ?? deps.home;
+        const file = yield* Effect.tryPromise({
+          try: () => saveGeneratedImage({ folder, prompt, image }),
+          catch: (cause) =>
+            toolError(
+              `The picture was made but could not be saved: ${cause instanceof Error ? cause.message : String(cause)}`,
+            ),
+        });
+        const opened = yield* deps
+          .bridge({ method: "POST", path: "/api/browser/open", body: { file } })
+          .pipe(
+            Effect.map((reply) => reply.status >= 200 && reply.status < 300),
+            Effect.orElseSucceed(() => false),
+          );
+        return {
+          ok: true,
+          path: file,
+          displayPath: displayPath(file, deps.home),
+          shownInPanel: opened,
+          ...(image.model ? { model: image.model } : {}),
+          ...(image.costUsd !== null ? { costUsd: image.costUsd } : {}),
+        };
+      }),
+  },
+  {
+    name: "browser_command",
+    group: "person",
+    description:
+      'Drive the page open in this chat\'s right panel: state (URL, title, visible text), screenshot, click, clickText, type, press, navigate, reload, back, forward, evaluate. Prefer precise selectors/text; never print passwords or private fields. requestHelp (with `text`: what the person should do — sign in, captcha, 2FA code, a payment or a choice only they can make) hands the browser to the person and waits until they hand it back (default 10 min). On a new cloud computer the browser is set up on first use (~30–60 s): a reply saying it is being set up means do something else and retry after the given seconds. To sign in to a site, pass only {"login": "<domain>"} (e.g. "x.com"): Uno fills the password the person saved in Uno Work itself — you never see it — and answers signed_in / not_signed_in / needs_help; with no saved password or a 2FA code the person is asked to finish. Never type passwords yourself.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        login: {
+          type: "string",
+          maxLength: 300,
+          description:
+            'Sign in to this site with the saved password, e.g. "x.com". Use alone, without command.',
+        },
         command: {
           type: "string",
           enum: [
@@ -1800,7 +1896,6 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         // requestHelp waits for a person; the harness gives a tool call 15 min.
         timeoutMs: { type: "integer", minimum: 0, maximum: 840000 },
       },
-      required: ["command"],
       additionalProperties: false,
     },
     // requestHelp only asks the person — it is its own approval.
@@ -1809,9 +1904,29 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         ? "safe"
         : "change",
     approvalTitle: (args) =>
-      `Browser: ${str(args, "command")} ${str(args, "url") ?? str(args, "selector") ?? str(args, "text") ?? ""}`.trim(),
-    run: (deps, args) =>
-      deps
+      str(args, "login") !== undefined
+        ? `Sign in to ${str(args, "login")} with your saved password`
+        : `Browser: ${str(args, "command")} ${str(args, "url") ?? str(args, "selector") ?? str(args, "text") ?? ""}`.trim(),
+    run: (deps, args) => {
+      const login = str(args, "login");
+      if (login !== undefined) {
+        if (Object.keys(args).some((key) => key !== "login" && key !== "timeoutMs")) {
+          return Effect.fail(toolError('Use {"login": "<domain>"} alone, without command.'));
+        }
+        return deps
+          .bridge({
+            method: "POST",
+            path: "/api/browser/login",
+            body: { site: login },
+            // Two fills + the person's help (10 min) + first browser setup.
+            timeoutMs: 600_000 + 60_000 + BROWSER_FIRST_USE_MS + 10_000,
+          })
+          .pipe(Effect.flatMap(bridgeOk));
+      }
+      if (str(args, "command") === undefined) {
+        return Effect.fail(toolError('Give a command, or {"login": "<domain>"} to sign in.'));
+      }
+      return deps
         .bridge({
           method: "POST",
           path: "/api/browser/command",
@@ -1837,7 +1952,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
               },
             ]);
           }),
-        ),
+        );
+    },
   },
   {
     name: "request_secret",
@@ -2633,6 +2749,20 @@ export function connectorMcpTool(
         if (!deps.connectors) {
           return yield* toolError(
             `${tool.providerName} isn't reachable from this computer right now.`,
+          );
+        }
+        const access = deps.connectors.access
+          ? yield* deps.connectors.access({
+              provider: tool.provider,
+              changesThings: level !== "safe",
+            })
+          : null;
+        if (access !== null && access.decision !== "allow") {
+          const who = access.assistant ?? "This assistant";
+          return yield* toolError(
+            access.decision === "none"
+              ? `${who} isn't allowed to open ${tool.providerName}. The person can change that on ${who}'s page in Uno Work (Apps it can open). Tell them; don't retry or work around it.`
+              : `${who} may only read ${tool.providerName}; ${tool.name} would change something. The person can allow changes on ${who}'s page in Uno Work. Tell them; don't retry.`,
           );
         }
         if (decideUnoWorkGate(level, deps.caller.runtimeMode) === "ask") {

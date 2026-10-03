@@ -19,7 +19,8 @@ import type {
 export type ConnectorCommand =
   | { readonly name: "use"; readonly query: string }
   | { readonly name: "thread"; readonly query: string }
-  | { readonly name: "assistant" }
+  /** `/assistant` — back to the bot's own assistant; `/assistant <name>` — another one of this computer. */
+  | { readonly name: "assistant"; readonly query: string }
   | { readonly name: "where" }
   | { readonly name: "threads" }
   | { readonly name: "approve" }
@@ -39,6 +40,7 @@ export const CONNECTOR_COMMANDS_HELP = [
   "/use <project title or id> - send this chat's messages to a project",
   "/thread <thread id or title> - send them into one specific thread",
   "/assistant - talk to the assistant again (default)",
+  "/assistant <name> - talk to another assistant of this computer",
   "/where - show what this chat is bound to",
   "/threads - list live threads of the bound project",
   "/approve, /deny - resolve the oldest pending approval of the bound thread",
@@ -75,7 +77,7 @@ export const parseConnectorCommand = (
     case "thread":
       return { name: "thread", query: argument };
     case "assistant":
-      return { name: "assistant" };
+      return { name: "assistant", query: argument };
     case "where":
       return { name: "where" };
     case "threads":

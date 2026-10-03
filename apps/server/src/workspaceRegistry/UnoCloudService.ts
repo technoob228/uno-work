@@ -308,6 +308,8 @@ const makeUnoCloudService = Effect.gen(function* () {
           vcpu: input.vcpu,
           diskGb: input.diskGb,
           goldenImageId,
+          computerRole: input.computerRole,
+          assistant: input.assistant,
         },
         {
           client: makeProvisionClient(apiKey),

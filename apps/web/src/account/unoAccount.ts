@@ -208,7 +208,15 @@ export const interfaceUnoCloud = {
     const record: CreateJobRecord = { name, status: { jobId, state: "creating" } };
     createJobs.set(jobId, record);
     void runUnoBoxProvisionJob(
-      { jobId, name, ramMb: input.ramMb, vcpu: input.vcpu, diskGb: input.diskGb },
+      {
+        jobId,
+        name,
+        ramMb: input.ramMb,
+        vcpu: input.vcpu,
+        diskGb: input.diskGb,
+        computerRole: input.computerRole,
+        assistant: input.assistant,
+      },
       {
         client: provisionClient,
         sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),

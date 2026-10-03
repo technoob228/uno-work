@@ -17,7 +17,19 @@ import {
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { Cause, Deferred, Effect, Exit, Option, Queue, Random, Ref, Scope, Stream } from "effect";
+import {
+  Cause,
+  Deferred,
+  Effect,
+  Exit,
+  FileSystem,
+  Option,
+  Queue,
+  Random,
+  Ref,
+  Scope,
+  Stream,
+} from "effect";
 import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { cleanUnoFinalAnswerText } from "@t3tools/shared/unoFinalAnswer";
@@ -35,6 +47,7 @@ import {
 } from "../Errors.ts";
 import { classifyProviderErrorDetail, normalizeUnoBillingErrorMessage } from "../unoBilling.ts";
 import { type OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
+import { projectMcpConfigOverlay } from "../opencodeMcpConfig.ts";
 import {
   buildOpenCodePermissionRules,
   OpenCodeRuntime,
@@ -55,6 +68,7 @@ import {
   removeOpenCodeSessionEnv,
   withOpenCodeSessionEnvPlugin,
   writeOpenCodeSessionEnv,
+  OPENCODE_SESSION_THREAD_ENV,
 } from "../opencodeSessionEnv.ts";
 import { makeSessionEventHub, type SessionEventHub } from "../sessionEventHub.ts";
 import { makeSharedProcessPool } from "../sharedProcessPool.ts";
@@ -1046,6 +1060,7 @@ export function makeOpenCodeAdapter(
     const eventSource = options?.eventSource ?? "instance";
     const serverConfig = yield* ServerConfig;
     const openCodeRuntime = yield* OpenCodeRuntime;
+    const fileSystem = yield* FileSystem.FileSystem;
     const nativeEventLogger =
       options?.nativeEventLogger ??
       (options?.nativeEventLogPath !== undefined
@@ -2013,13 +2028,26 @@ export function makeOpenCodeAdapter(
             Effect.gen(function* () {
               const bridgeOverlay =
                 options?.bridgeEnvironment?.({ threadId: input.threadId, cwd: directory }) ?? {};
+              // opencode не читает `.mcp.json` из cwd (формат Claude Code) —
+              // подмешиваем его серверы в OPENCODE_CONFIG_CONTENT. Так
+              // диспетчер-ассистент получает свой uno-manager. Внешний
+              // `serverUrl` живёт со своим env — ему не передаём.
+              const mcpOverlay = serverUrl?.trim()
+                ? {}
+                : yield* projectMcpConfigOverlay({
+                    cwd: directory,
+                    existingConfigContent:
+                      bridgeOverlay.OPENCODE_CONFIG_CONTENT ??
+                      (options?.environment ?? process.env).OPENCODE_CONFIG_CONTENT,
+                  }).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
+              const sessionOverlay: Record<string, string> = { ...bridgeOverlay, ...mcpOverlay };
               let server: OpenCodeServerConnection;
               let events: SessionEventHub<OpenCodeSubscribedEvent>;
               let sessionShellEnv: Record<string, string> | undefined;
               if (serverPool !== undefined && sessionEnvPaths !== undefined && !serverUrl?.trim()) {
                 // Shared server: the thread-specific variables go to the
                 // session-env plugin, everything else keys the pool.
-                const { configContent, shellEnv } = splitOpenCodeSessionOverlay(bridgeOverlay);
+                const { configContent, shellEnv } = splitOpenCodeSessionOverlay(sessionOverlay);
                 const baseEnvironment = options?.environment ?? process.env;
                 const serverEnvironment: NodeJS.ProcessEnv = {
                   ...baseEnvironment,
@@ -2043,14 +2071,16 @@ export function makeOpenCodeAdapter(
                 yield* Scope.addFinalizer(sessionScope, lease.release);
                 server = { url: lease.value.url, exitCode: lease.value.exitCode, external: false };
                 events = lease.value.events;
-                sessionShellEnv = shellEnv;
+                // The chat's id travels with it: its shells see it and the
+                // plugin labels its Uno AI gateway calls (`X-Uno-Thread`).
+                sessionShellEnv = { ...shellEnv, [OPENCODE_SESSION_THREAD_ENV]: input.threadId };
               } else {
                 // The runtime binds the server's lifetime to the Scope.Scope
                 // we provide below — closing `sessionScope` kills the child
                 // process automatically. No manual `server.close()` needed.
                 const sessionEnvironment =
-                  options?.environment || Object.keys(bridgeOverlay).length > 0
-                    ? { ...(options?.environment ?? process.env), ...bridgeOverlay }
+                  options?.environment || Object.keys(sessionOverlay).length > 0
+                    ? { ...(options?.environment ?? process.env), ...sessionOverlay }
                     : undefined;
                 server = yield* openCodeRuntime.connectToOpenCodeServer({
                   binaryPath,

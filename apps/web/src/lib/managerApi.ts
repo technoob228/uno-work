@@ -10,6 +10,12 @@
  * fails rather than falling back.
  */
 import type {
+  AssistantAppAccess,
+  AssistantAppLevel,
+  AssistantInstructionsStatus,
+  AssistantDraftInput,
+  AssistantDraftResult,
+  AssistantChatsResult,
   AssistantEditableFileName,
   EnvironmentId,
   ManagerActionProposal,
@@ -20,6 +26,7 @@ import type {
   ManagerConnectorBindingView,
   ManagerCreateTokenInput,
   ManagerCreateTokenResult,
+  ManagerDeletedAssistant,
   ManagerProposalDecision,
   ManagerProposalId,
   ManagerSlackConnectorStatus,
@@ -113,19 +120,31 @@ export function listAssistants(input: EnvironmentScoped): Promise<{
   });
 }
 
+/** A new assistant on that computer (its folder in ~/UnoWork/Assistants). */
 export function createAssistant(
-  input: EnvironmentScoped & { readonly name: string },
+  input: EnvironmentScoped & {
+    readonly name: string;
+    readonly emoji?: string;
+    readonly template?: string | null;
+  },
 ): Promise<{ projectId: ProjectId }> {
+  const { environmentId, ...body } = input;
   return environmentFetchJson({
-    environmentId: input.environmentId,
+    environmentId,
     pathname: "/api/manager/assistants",
     method: "POST",
-    body: { name: input.name },
+    body,
   });
 }
 
-/** THE assistant chat ("Uno"): found, or set up now by the daemon. */
-export function ensureAssistantChat(input: EnvironmentScoped): Promise<{
+/**
+ * THE assistant chat ("Uno"): found, or set up now by the daemon. With the
+ * `projectId` of another assistant of that computer: its latest conversation
+ * (daemons from 0.0.106; older ones answer with the "Uno" chat).
+ */
+export function ensureAssistantChat(
+  input: EnvironmentScoped & { readonly projectId?: ProjectId | string },
+): Promise<{
   readonly threadId: ThreadId;
   readonly outcome: "existing" | "migrated" | "created";
 }> {
@@ -133,7 +152,95 @@ export function ensureAssistantChat(input: EnvironmentScoped): Promise<{
     environmentId: input.environmentId,
     pathname: "/api/manager/assistant/chat",
     method: "POST",
-    body: {},
+    body:
+      input.projectId && input.projectId !== ASSISTANT_PROJECT_ID
+        ? { projectId: input.projectId }
+        : {},
+  });
+}
+
+/** Delete an assistant of that computer: kept 7 days with Restore. */
+export function deleteLocalAssistant(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<{ ok: boolean }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistants",
+    method: "DELETE",
+    searchParams: { projectId: input.projectId },
+  });
+}
+
+export function listDeletedLocalAssistants(input: EnvironmentScoped): Promise<{
+  readonly deleted: ReadonlyArray<ManagerDeletedAssistant>;
+}> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistants/deleted",
+  });
+}
+
+export function restoreLocalAssistant(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<{ ok: boolean }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistants/restore",
+    method: "POST",
+    body: { projectId: input.projectId },
+  });
+}
+
+/** Apps an assistant of that computer may open (checked by Work there). */
+export function getAssistantApps(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<AssistantAppAccess> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/apps",
+    searchParams: { projectId: input.projectId },
+  });
+}
+
+export function putAssistantApps(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    readonly permissions: Readonly<Record<string, AssistantAppLevel>>;
+  },
+): Promise<AssistantAppAccess> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/apps",
+    method: "POST",
+    body,
+  });
+}
+
+/** AGENTS.md against Uno's newer instructions (0.0.106 daemons). */
+export function getAssistantInstructions(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<AssistantInstructionsStatus> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/instructions",
+    searchParams: { projectId: input.projectId },
+  });
+}
+
+export function resolveAssistantInstructions(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    readonly action: "update" | "replace" | "keep";
+    readonly choices?: ReadonlyArray<"mine" | "theirs" | "both">;
+  },
+): Promise<{ readonly state: "current" | "edited"; readonly content: string }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/instructions",
+    method: "POST",
+    body,
   });
 }
 
@@ -263,17 +370,41 @@ export function readAssistantFile(
   });
 }
 
+/**
+ * Writes an assistant file. Pass `base` (what the editor started from): if
+ * the assistant wrote the file meanwhile, the daemon replays this edit onto
+ * its version instead of overwriting it, and answers with what it wrote
+ * (older daemons answer only `saved`).
+ */
 export function writeAssistantFile(
   input: EnvironmentScoped & {
     readonly projectId: string;
     readonly name: AssistantEditableFileName;
     readonly content: string;
+    readonly base?: string;
   },
-): Promise<{ saved: boolean }> {
+): Promise<{ saved: boolean; content?: string; merged?: boolean }> {
   const { environmentId, ...body } = input;
   return environmentFetchJson({
     environmentId,
     pathname: "/api/manager/assistant/file",
+    method: "POST",
+    body,
+  });
+}
+
+/**
+ * "New assistant": Uno AI drafts a name, a job and ≤3 questions from one
+ * sentence (assistants MVP). Fails on an older computer (404), without Uno AI
+ * (503) or on a bad answer (502) — callers fall back to built-in questions.
+ */
+export function draftAssistant(
+  input: EnvironmentScoped & AssistantDraftInput,
+): Promise<AssistantDraftResult> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/draft",
     method: "POST",
     body,
   });
@@ -409,4 +540,51 @@ export async function listThreadsForBindingPicker(
     .filter((thread) => thread.archivedAt === null)
     .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .map((thread) => ({ id: thread.id, projectId: thread.projectId, title: thread.title }));
+}
+
+/** The chats an assistant of that computer started, with model, status and tokens. */
+export function listAssistantChats(
+  input: EnvironmentScoped & { readonly projectId?: string },
+): Promise<AssistantChatsResult> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/chats",
+    ...(input.projectId ? { searchParams: { projectId: input.projectId } } : {}),
+  });
+}
+
+export interface SlackChannelView {
+  readonly id: string;
+  readonly name: string;
+  readonly isPrivate: boolean;
+  readonly isMember: boolean;
+  /** The assistant of that computer that answers there; null = none yet. */
+  readonly assistantProjectId: string | null;
+}
+
+/** The workspace's channels through Uno's Slack app, and whose each one is. */
+export function listSlackChannels(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<{ readonly channels: ReadonlyArray<SlackChannelView> }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/slack/channels",
+    searchParams: { projectId: input.projectId },
+  });
+}
+
+/** "Channels Ana answers in": exactly these (taken from other assistants of that computer). */
+export function setSlackChannels(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    readonly channelIds: ReadonlyArray<string>;
+  },
+): Promise<{ readonly allowedChannelIds: ReadonlyArray<string> }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/slack/channels",
+    method: "POST",
+    body,
+  });
 }

@@ -17,10 +17,11 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fsp } from "node:fs";
 
-import { ThreadId, type UnoMachineApp } from "@t3tools/contracts";
+import { ThreadId, UNO_GATEWAY_BASE_URL, type UnoMachineApp } from "@t3tools/contracts";
 import { Effect, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
+import { requestGatewayImage } from "../assistants/imageGenerate.ts";
 import { BROWSER_BRIDGE_TOKEN_ENV, BrowserBridge, requireBridgeThread } from "../browserBridge.ts";
 import { ComputerResourcesService } from "../computerResources/ComputerResourcesService.ts";
 import { FilesService } from "../files/FilesService.ts";
@@ -33,9 +34,16 @@ import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSna
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { openCodeSessionEnvDir, readOpenCodeSessionEnv } from "../provider/opencodeSessionEnv.ts";
+import { UnoGatewayKey } from "../unoGatewayKey.ts";
 import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "../workspaceRegistry/UnoComputerService.ts";
 import { ConnectorsService } from "../setupTools/ConnectorsService.ts";
+import {
+  connectorAccessDecision,
+  owningAssistant,
+  readAppAccess,
+  readStartedChats,
+} from "../assistants/localAssistantStore.ts";
 import {
   buildUnoWorkGuide,
   isUnoWorkGuideTopic,
@@ -182,6 +190,7 @@ const makeDeps = (input: {
     const serverSettings = yield* ServerSettingsService;
     const serverConfig = yield* ServerConfig;
     const connectors = Option.getOrNull(yield* Effect.serviceOption(ConnectorsService));
+    const gatewayKey = Option.getOrNull(yield* Effect.serviceOption(UnoGatewayKey));
 
     const shell = yield* projections
       .getThreadShellById(ThreadId.make(input.threadId))
@@ -327,6 +336,30 @@ const makeDeps = (input: {
       },
       readLogTail: ({ app, lines }) =>
         Effect.promise(() => readAppLogTail(app, lines, manifestDir)),
+      ...(gatewayKey
+        ? {
+            images: {
+              generate: ({ prompt, size }) =>
+                gatewayKey.harnessKey().pipe(
+                  Effect.flatMap((apiKey) =>
+                    Effect.tryPromise({
+                      try: () =>
+                        requestGatewayImage({
+                          baseUrl: UNO_GATEWAY_BASE_URL,
+                          apiKey,
+                          prompt,
+                          ...(size ? { size } : {}),
+                        }),
+                      catch: (cause) =>
+                        new UnoWorkToolError({
+                          message: cause instanceof Error ? cause.message : String(cause),
+                        }),
+                    }),
+                  ),
+                ),
+            },
+          }
+        : {}),
       ...(connectors
         ? {
             connectors: {
@@ -336,6 +369,34 @@ const makeDeps = (input: {
                   .pipe(
                     Effect.mapError((error) => new UnoWorkToolError({ message: error.message })),
                   ),
+              access: ({ provider, changesThings }) =>
+                Effect.gen(function* () {
+                  // Whose chat is this: an assistant's (its workspace, a chat
+                  // it started, a chat one of those started) or the person's.
+                  const snapshot = yield* projections.getShellSnapshot();
+                  const byId = new Map(
+                    snapshot.threads.map((entry) => [entry.id as string, entry]),
+                  );
+                  const self = byId.get(input.threadId);
+                  if (self === undefined) return { decision: "allow" as const, assistant: null };
+                  const startedBy = yield* Effect.promise(() =>
+                    readStartedChats(serverConfig.stateDir),
+                  );
+                  const owner = owningAssistant(self, (id) => byId.get(id), startedBy);
+                  if (owner === null) return { decision: "allow" as const, assistant: null };
+                  const access = yield* Effect.promise(() =>
+                    readAppAccess(serverConfig.stateDir, owner),
+                  );
+                  const title =
+                    snapshot.projects.find((project) => project.id === owner)?.title ?? null;
+                  return {
+                    decision: connectorAccessDecision(access, provider, changesThings),
+                    assistant: title,
+                  };
+                }).pipe(
+                  // Can't tell: the person's own chat rules apply (Ask / Allow).
+                  Effect.orElseSucceed(() => ({ decision: "allow" as const, assistant: null })),
+                ),
             },
           }
         : {}),

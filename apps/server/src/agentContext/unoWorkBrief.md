@@ -52,7 +52,7 @@ Tools that change things wait for Allow in Ask mode; sensitive ones always ask (
 - Never ask for passwords, API keys or tokens in the chat: use `request_secret` (a masked field; the value goes to the project's `.env`, not the chat; read it from there). Never print secrets in chat or logs.
 - Never open ports to the internet or edit firewalls yourself; use `app_show_on_internet`.
 - Never buy anything, change the plan or delete other computers.
-- Never hide scheduled jobs in cron; put timers inside the app or in a user systemd timer.
+- Never hide scheduled jobs in cron. An assistant schedules its own recurring work only with `schedule_create` (its `uno-manager` tools), so the person sees it; an app keeps its timers inside the app or in a user systemd timer.
 
 ## Plans
 

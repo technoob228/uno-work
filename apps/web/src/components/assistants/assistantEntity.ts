@@ -3,15 +3,15 @@
  * answers in Telegram or Slack 24/7, created on purpose, with a name and a
  * line about what it does.
  *
- * Under the hood (v1) it is the computer's one assistant — the Hermes
- * "manager" in the `assistant` project, whose Telegram / Slack connectors and
- * memory already exist on every computer. The daemon can register more
- * assistant projects (`POST /api/manager/assistants`), but routing is not
- * ready for them: a private Telegram chat links only to the main assistant
- * (`connectorBindings.ts`, `TelegramConnector.linkChat`), and Uno's shared
- * bot has one relay per computer (connecting a second assistant would rotate
- * it away from the first). So: one assistant per computer for now, said in
- * the UI.
+ * Under the hood it is the computer's default assistant — the Hermes
+ * "manager" in the `assistant-home` project, whose Telegram / Slack
+ * connectors and memory exist on every computer. Since 02.10 evening a
+ * computer holds more assistants (`assistant-<name>` folders in
+ * ~/UnoWork/Assistants, `LocalAssistantPage.tsx`): New assistant makes them
+ * here by default, a computer of its own is the option. Uno's shared
+ * Telegram bot then has one relay per computer and the daemon routes each
+ * chat to its assistant (`channelRelay.ts`, `unoroute:`). This entity is the
+ * default assistant of the computer the app is looking at.
  *
  * What makes the assistant "exist" for the person is kept on the computer in
  * `settings.setup.answers` (plain strings, like the goal-first start — an
@@ -46,8 +46,6 @@ export type AssistantWhere = (typeof ASSISTANT_WHERE)[number];
 
 /** The name when the person gave none (the assistant has always been "Uno"). */
 export const DEFAULT_ASSISTANT_NAME = "Uno";
-
-export const ONE_ASSISTANT_NOTE = "One assistant per computer for now.";
 
 export const ASSISTANT_NAME_MAX = 40;
 export const ASSISTANT_ABOUT_MAX = 300;

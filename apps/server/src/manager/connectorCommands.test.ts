@@ -18,7 +18,11 @@ describe("parseConnectorCommand", () => {
       query: "thread-1",
     });
     expect(parseConnectorCommand("/use", null)).toEqual({ name: "use", query: "" });
-    expect(parseConnectorCommand("/assistant", null)).toEqual({ name: "assistant" });
+    expect(parseConnectorCommand("/assistant", null)).toEqual({ name: "assistant", query: "" });
+    expect(parseConnectorCommand("/assistant  Ana ", null)).toEqual({
+      name: "assistant",
+      query: "Ana",
+    });
     expect(parseConnectorCommand("/where", null)).toEqual({ name: "where" });
     expect(parseConnectorCommand("/threads", null)).toEqual({ name: "threads" });
     expect(parseConnectorCommand("/approve", null)).toEqual({ name: "approve" });

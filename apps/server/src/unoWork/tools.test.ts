@@ -1095,3 +1095,65 @@ describe("console credential", () => {
     expect(consoleToken(settings({ apiKey: "unollm_x" }))).toBe("");
   });
 });
+
+describe("image_generate", () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7]);
+
+  it("saves the picture in the chat's folder, shows it and returns the path", async () => {
+    const { deps, recorded, home } = makeDeps();
+    const prompts: string[] = [];
+    const withImages: UnoWorkToolDeps = {
+      ...deps,
+      images: {
+        generate: ({ prompt }) =>
+          Effect.sync(() => {
+            prompts.push(prompt);
+            return { bytes: PNG, model: "img-model", costUsd: 0.05 };
+          }),
+      },
+    };
+    const result = await run("image_generate", withImages, { prompt: "Red fox logo" });
+    expect(result._tag).toBe("Success");
+    const value = (result as { success: { path: string; displayPath: string; costUsd: number } })
+      .success;
+    expect(value.path.startsWith(path.join(home, "projects", "notes", "images"))).toBe(true);
+    expect(value.path.endsWith(".png")).toBe(true);
+    expect(value.costUsd).toBe(0.05);
+    expect(readFileSync(value.path)).toEqual(Buffer.from(PNG));
+    expect(prompts).toEqual(["Red fox logo"]);
+    expect(recorded.bridge.at(-1)).toMatchObject({
+      method: "POST",
+      path: "/api/browser/open",
+      body: { file: value.path },
+    });
+  });
+
+  it("asks in Ask mode (it spends money) and explains a missing gateway", async () => {
+    expect(toolLevel(tool("image_generate"), { prompt: "x" })).toBe("change");
+    const { deps } = makeDeps();
+    const result = await run("image_generate", deps, { prompt: "x" });
+    expect(result._tag).toBe("Failure");
+  });
+});
+
+describe("browser_command login", () => {
+  it("goes to the daemon's login route with only the site", async () => {
+    const { deps, recorded } = makeDeps();
+    const result = await run("browser_command", deps, { login: "x.com" });
+    expect(result._tag).toBe("Success");
+    expect(recorded.bridge.at(-1)).toMatchObject({
+      method: "POST",
+      path: "/api/browser/login",
+      body: { site: "x.com" },
+    });
+  });
+
+  it("refuses login mixed with a command, and a call with neither", async () => {
+    const { deps, recorded } = makeDeps();
+    expect((await run("browser_command", deps, { login: "x.com", command: "type" }))._tag).toBe(
+      "Failure",
+    );
+    expect((await run("browser_command", deps, {}))._tag).toBe("Failure");
+    expect(recorded.bridge).toEqual([]);
+  });
+});

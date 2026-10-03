@@ -9,6 +9,7 @@ import {
   officeEngineInstallRouteLayer,
   browserBridgeCommandResultRouteLayer,
   browserBridgeCommandRouteLayer,
+  browserBridgeLoginRouteLayer,
   browserBridgeOpenRouteLayer,
   healthRouteLayer,
   otlpTracesProxyRouteLayer,
@@ -34,6 +35,7 @@ import { warmStatusRouteLayer } from "./warmStatus.ts";
 import { AssistantPrewarmLive } from "./manager/assistantPrewarm.ts";
 import { localPairingRouteLayer } from "./auth/localPairing.ts";
 import { setupToolsRouteLayers } from "./setupTools/http.ts";
+import { AssistantDraftServiceLive } from "./setupTools/AssistantDraftService.ts";
 import { ConnectorsServiceLive } from "./setupTools/ConnectorsService.ts";
 import { MaterialsServiceLive } from "./setupTools/MaterialsService.ts";
 import {
@@ -172,6 +174,17 @@ import {
   managerMcpDeleteRouteLayer,
   managerMcpGetRouteLayer,
   managerMcpRouteLayer,
+  managerAssistantScheduledTurnRouteLayer,
+  managerAssistantChatsRouteLayer,
+  managerAssistantDeleteRouteLayer,
+  managerAssistantsDeletedRouteLayer,
+  managerAssistantRestoreRouteLayer,
+  managerAssistantAppsGetRouteLayer,
+  managerAssistantAppsPutRouteLayer,
+  managerAssistantInstructionsGetRouteLayer,
+  managerAssistantInstructionsResolveRouteLayer,
+  managerAssistantSlackChannelsGetRouteLayer,
+  managerAssistantSlackChannelsPutRouteLayer,
   managerProposalResolveRouteLayer,
   managerProposalsRouteLayer,
   managerTokensCreateRouteLayer,
@@ -432,6 +445,8 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // "Give it your material" (reading jobs, gateway key + Cloud storage).
       ConnectorsServiceLive,
       MaterialsServiceLive,
+      // "New assistant": Uno AI drafts the assistant from one sentence.
+      AssistantDraftServiceLive,
     ),
   ),
   // Manager tool layer (MCP surface for the manager brain). Sits above the
@@ -577,6 +592,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   officeEngineStatusRouteLayer,
   officeEngineInstallRouteLayer,
   browserBridgeCommandRouteLayer,
+  browserBridgeLoginRouteLayer,
   browserBridgeCommandResultRouteLayer,
   browserBridgeOpenRouteLayer,
   channelsNotifyRouteLayer,
@@ -611,6 +627,17 @@ export const makeRoutesLayer = Layer.mergeAll(
   managerMcpDeleteRouteLayer,
   managerMcpGetRouteLayer,
   managerMcpRouteLayer,
+  managerAssistantScheduledTurnRouteLayer,
+  managerAssistantChatsRouteLayer,
+  managerAssistantDeleteRouteLayer,
+  managerAssistantsDeletedRouteLayer,
+  managerAssistantRestoreRouteLayer,
+  managerAssistantAppsGetRouteLayer,
+  managerAssistantAppsPutRouteLayer,
+  managerAssistantInstructionsGetRouteLayer,
+  managerAssistantInstructionsResolveRouteLayer,
+  managerAssistantSlackChannelsGetRouteLayer,
+  managerAssistantSlackChannelsPutRouteLayer,
   managerProposalResolveRouteLayer,
   managerProposalsRouteLayer,
   managerTokensCreateRouteLayer,

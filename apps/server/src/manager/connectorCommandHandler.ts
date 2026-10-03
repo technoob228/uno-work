@@ -25,6 +25,7 @@ import type { ProjectionSnapshotQueryShape } from "../orchestration/Services/Pro
 import type { ManagerConnectorBindingRepositoryShape } from "../persistence/Services/ManagerConnectorBindings.ts";
 import type { ProjectionPendingApprovalRepositoryShape } from "../persistence/Services/ProjectionPendingApprovals.ts";
 import {
+  bindingOnConnector,
   bindingTargetLabel,
   effectiveBindingTarget,
   matchByTitleOrId,
@@ -129,7 +130,11 @@ export const executeConnectorCommand = (
       projectTitleById: new Map(snapshot.projects.map((project) => [project.id, project.title])),
       threadTitleById: new Map(snapshot.threads.map((thread) => [thread.id, thread.title])),
     };
-    const currentBinding = Option.getOrNull(yield* deps.bindings.get(key));
+    // Only this bot's binding counts (see `bindingOnConnector`).
+    const currentBinding = bindingOnConnector(
+      Option.getOrNull(yield* deps.bindings.get(key)),
+      context.connectorProjectId,
+    );
     const target = effectiveBindingTarget(currentBinding, context.connectorProjectId);
 
     const bind = (nextTarget: ManagerConnectorBindingTarget) =>
@@ -177,6 +182,23 @@ export const executeConnectorCommand = (
         return `This chat is now bound to thread "${result.item.title}" [${result.item.id}] in project "${projectTitle}". Messages go straight into it; its runtime mode stays as set in the app.`;
       }
       case "assistant": {
+        if (command.query.length > 0) {
+          // Another assistant of this computer, by name: several assistants
+          // share one bot (Uno's shared bot has one relay per computer).
+          const assistants = snapshot.projects.filter((project) =>
+            isAssistantProjectId(project.id),
+          );
+          const result = matchByTitleOrId(assistants, command.query);
+          if (result.kind !== "match") {
+            return describeMatchFailure("assistant", command.query, result, assistants);
+          }
+          if (result.item.id === context.connectorProjectId) {
+            if (currentBinding !== null) yield* deps.bindings.remove(key);
+            return `This chat talks to ${result.item.title} again.`;
+          }
+          yield* bind({ kind: "assistant", projectId: result.item.id });
+          return `This chat talks to ${result.item.title} now. /assistant switches back.`;
+        }
         if (currentBinding !== null) {
           yield* deps.bindings.remove(key);
         }

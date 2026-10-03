@@ -30,6 +30,7 @@ import {
 import type { ConnectorCommand } from "./connectorCommands.ts";
 
 const assistantId = ProjectId.make("assistant-home");
+const anaId = ProjectId.make("assistant-ana");
 const apiProjectId = ProjectId.make("project-api");
 const webProjectId = ProjectId.make("project-web");
 const apiThreadId = ThreadId.make("thread-api-1");
@@ -138,6 +139,7 @@ const makeHarness = (input?: {
           snapshotSequence: 1,
           projects: [
             project(assistantId, "Assistant"),
+            project(anaId, "Ana"),
             project(apiProjectId, "Uno API"),
             project(webProjectId, "Uno Web"),
           ],
@@ -241,9 +243,50 @@ describe("executeConnectorCommand", () => {
         },
       ],
     });
-    expect(await run(harness, { name: "assistant" })).toContain("assistant again");
+    expect(await run(harness, { name: "assistant", query: "" })).toContain("assistant again");
     expect(harness.bindings.size).toBe(0);
     expect(await run(harness, { name: "where" })).toContain("Bound to the assistant (default)");
+  });
+
+  it("/assistant <name> talks to another assistant of this computer, and back", async () => {
+    const harness = makeHarness();
+    expect(await run(harness, { name: "assistant", query: "ana" })).toBe(
+      "This chat talks to Ana now. /assistant switches back.",
+    );
+    expect(harness.bindings.get("telegram:100")).toMatchObject({
+      connectorProjectId: assistantId,
+      target: { kind: "assistant", projectId: anaId },
+    });
+    expect(await run(harness, { name: "where" })).toContain('Bound to assistant "Ana"');
+    // Its own assistant by name = the default again.
+    expect(await run(harness, { name: "assistant", query: "Assistant" })).toBe(
+      "This chat talks to Assistant again.",
+    );
+    expect(harness.bindings.size).toBe(0);
+    // Projects are not assistants.
+    expect(await run(harness, { name: "assistant", query: "Uno API" })).toContain(
+      'No assistant matches "Uno API"',
+    );
+  });
+
+  it("ignores a binding another bot made for the same chat id", async () => {
+    // A private chat has the same id with every bot: Ana's own bot bound it.
+    const harness = makeHarness({
+      bindings: [
+        {
+          kind: "telegram",
+          chatId: "100",
+          connectorProjectId: anaId,
+          target: { kind: "project", projectId: apiProjectId },
+          notifyOnComplete: false,
+          updatedAt: nowIso,
+        },
+      ],
+    });
+    expect(await run(harness, { name: "where" })).toContain("Bound to the assistant (default)");
+    // `/assistant` here must not delete the other bot's binding.
+    await run(harness, { name: "assistant", query: "" });
+    expect(harness.bindings.size).toBe(1);
   });
 
   it("/threads lists live threads of the bound project, newest first, with their state", async () => {
@@ -256,7 +299,7 @@ describe("executeConnectorCommand", () => {
       `- Fix billing [${apiThreadId}] - idle`,
     ]);
     // For the assistant target it lists the assistant project's threads.
-    await run(harness, { name: "assistant" });
+    await run(harness, { name: "assistant", query: "" });
     expect(await run(harness, { name: "threads" })).toBe('No live threads in "Assistant".');
   });
 

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -229,6 +230,48 @@ it.effect("a thread with its own OpenCode config gets its own server", () =>
     assert.ok(appServer);
     assert.match(appServer.env.OPENCODE_CONFIG_CONTENT ?? "", /"label":"app"/);
     yield* adapter.stopAll();
+  }).pipe(Effect.provide(makeLayer())),
+);
+
+it.effect("an assistant workspace's .mcp.json servers reach its shared server config", () =>
+  Effect.gen(function* () {
+    fake.reset();
+    const adapter = yield* SharedAdapter;
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-shared-mcp-"));
+    fs.writeFileSync(
+      path.join(workspace, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          "uno-manager": {
+            type: "http",
+            url: "http://127.0.0.1:13776/api/manager/mcp",
+            headers: { Authorization: "Bearer uwm_test" },
+          },
+        },
+      }),
+    );
+    yield* start(adapter, "thread-1");
+    yield* adapter.startSession({
+      provider: ProviderDriverKind.make("opencode"),
+      threadId: ThreadId.make("thread-assistant"),
+      cwd: workspace,
+      runtimeMode: "full-access",
+    });
+    assert.equal(fake.servers.length, 2, "assistant config keys its own server");
+    const plain = JSON.parse(fake.servers[0]?.env.OPENCODE_CONFIG_CONTENT ?? "{}") as {
+      mcp?: Record<string, unknown>;
+    };
+    assert.equal(plain.mcp?.["uno-manager"], undefined);
+    const assistant = JSON.parse(fake.servers[1]?.env.OPENCODE_CONFIG_CONTENT ?? "{}") as {
+      a?: number;
+      mcp?: Record<string, { url?: string }>;
+      plugin?: string[];
+    };
+    assert.equal(assistant.a, 1);
+    assert.equal(assistant.mcp?.["uno-manager"]?.url, "http://127.0.0.1:13776/api/manager/mcp");
+    assert.ok(assistant.plugin?.some((entry) => entry.endsWith("uno-work-session-env.mjs")));
+    yield* adapter.stopAll();
+    fs.rmSync(workspace, { recursive: true, force: true });
   }).pipe(Effect.provide(makeLayer())),
 );
 

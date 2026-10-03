@@ -14,7 +14,13 @@
  * Kept free of React so the parsing is unit-tested.
  */
 
-export type ComputerRole = "workspace" | "server" | "production" | "staging" | "sandbox";
+export type ComputerRole =
+  | "workspace"
+  | "server"
+  | "production"
+  | "staging"
+  | "sandbox"
+  | "assistant";
 
 /** Roles a person can give a computer that is not an Uno Work one. */
 export const ASSIGNABLE_ROLES: ReadonlyArray<Exclude<ComputerRole, "workspace">> = [
@@ -27,12 +33,19 @@ export const ASSIGNABLE_ROLES: ReadonlyArray<Exclude<ComputerRole, "workspace">>
 /** Every role in the order "Add computer" offers them. */
 export const ALL_ROLES: ReadonlyArray<ComputerRole> = ["workspace", ...ASSIGNABLE_ROLES];
 
+/**
+ * Roles a computer can carry without being offered by "Add computer": an
+ * assistant's own Work computer (assistants MVP) is made by "New assistant".
+ */
+const KNOWN_ROLES: ReadonlyArray<ComputerRole> = [...ALL_ROLES, "assistant"];
+
 export const ROLE_LABEL: Record<ComputerRole, string> = {
   workspace: "Uno Work",
   server: "Server",
   production: "Production",
   staging: "Staging",
   sandbox: "Sandbox",
+  assistant: "Assistant",
 };
 
 export const ROLE_BLURB: Record<ComputerRole, string> = {
@@ -41,9 +54,10 @@ export const ROLE_BLURB: Record<ComputerRole, string> = {
   production: "The live version your customers use. Changes land here last.",
   staging: "A copy to try changes on before they go to production.",
   sandbox: "For experiments. Safe to break, easy to throw away.",
+  assistant: "Home of one assistant. Sleeps when idle, wakes up for its work.",
 };
 
-const TAG = /^\s*\[(server|production|staging|sandbox|workspace)\]\s*/i;
+const TAG = /^\s*\[(server|production|staging|sandbox|workspace|assistant)\]\s*/i;
 
 export interface ParsedComment {
   /** The tagged role, or null when the comment carries none. */
@@ -72,11 +86,12 @@ export function withRole(comment: string | null | undefined, role: ComputerRole)
 export function parseRoleField(value: unknown): ComputerRole | null {
   if (typeof value !== "string") return null;
   const role = value.trim().toLowerCase();
-  return (ALL_ROLES as ReadonlyArray<string>).includes(role) ? (role as ComputerRole) : null;
+  return (KNOWN_ROLES as ReadonlyArray<string>).includes(role) ? (role as ComputerRole) : null;
 }
 
 /**
- * The role a computer plays: an Uno Work computer is the workspace; otherwise
+ * The role a computer plays: an assistant's computer is the assistant (it is a
+ * Work computer as well); an Uno Work computer is the workspace; otherwise
  * the console's `computer_role` field; failing that (an older console) the tag
  * in its comment; with neither, a plain server.
  */
@@ -85,7 +100,9 @@ export function computerRole(input: {
   readonly roleField?: unknown;
   readonly comment: string | null | undefined;
 }): ComputerRole {
-  if (input.workMachine) return "workspace";
   const role = parseRoleField(input.roleField) ?? parseRoleComment(input.comment).role;
+  // An assistant's home is a Work computer too, but it is not where you work.
+  if (role === "assistant") return "assistant";
+  if (input.workMachine) return "workspace";
   return role && role !== "workspace" ? role : "server";
 }

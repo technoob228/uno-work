@@ -22,6 +22,7 @@ import { ManagerCapabilityTokenRepository } from "../persistence/Services/Manage
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { AGENT_THREADS_PATH } from "./logic.ts";
+import { ownBoxIdFromSettings } from "../assistants/targetComputer.ts";
 import { type AgentThreadsReply, makeAgentThreadsHandlers } from "./service.ts";
 
 const makeRequestContext = Effect.gen(function* () {
@@ -52,6 +53,10 @@ const makeRequestContext = Effect.gen(function* () {
         Effect.orElseSucceed((): ReadonlyArray<string> => []),
       ),
     getProviders: providerRegistry.getProviders,
+    getOwnBoxId: serverSettings.getSettings.pipe(
+      Effect.map((settings) => ownBoxIdFromSettings(settings.uno)),
+      Effect.orElseSucceed(() => null),
+    ),
   });
   return {
     request,

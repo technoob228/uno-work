@@ -24,6 +24,7 @@ import {
 import {
   BROWSER_BRIDGE_COMMAND_PATH,
   BROWSER_BRIDGE_COMMAND_RESULT_PATH,
+  BROWSER_BRIDGE_LOGIN_PATH,
   BROWSER_BRIDGE_OPEN_PATH,
   BrowserBridge,
   isAllowedBridgeCommand,
@@ -46,7 +47,19 @@ import {
   upsertEnvContent,
 } from "./secretsEnv.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
-import { executeBridgeCommand, executeBridgeOpenUrl } from "./browserCommandRouter.ts";
+import { BROWSER_LOGIN_HELP_TIMEOUT_MS, runBrowserLogin } from "./assistants/browserLogin.ts";
+import {
+  decideBrowserExecutorTarget,
+  executeBridgeCommand,
+  executeBridgeOpenUrl,
+} from "./browserCommandRouter.ts";
+import { CredentialsVaultService } from "./credentialsVault.ts";
+import { InboxService } from "./inbox/InboxService.ts";
+import { ConnectorNotifyService } from "./manager/Services/ConnectorNotify.ts";
+import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import { registerKnownSecret } from "./secretRedaction.ts";
+import { ServerBrowser } from "./serverBrowser.ts";
+import { ServerSettingsService } from "./serverSettings.ts";
 import { announceBrowserHelp } from "./browserHelpNotify.ts";
 import {
   SECRET_REQUEST_HOLD_MS,
@@ -402,6 +415,96 @@ export const browserBridgeCommandRouteLayer = HttpRouter.add(
           })
         : yield* execution;
     return HttpServerResponse.jsonUnsafe(result, { status: result.ok ? 200 : 502 });
+  }),
+);
+
+/**
+ * `browser_command {login: "<site>"}`: sign the computer's own browser in
+ * with the person's saved password. The password goes vault → page inside
+ * the daemon; the agent gets only the outcome (assistants/browserLogin.ts).
+ */
+export const browserBridgeLoginRouteLayer = HttpRouter.add(
+  "POST",
+  BROWSER_BRIDGE_LOGIN_PATH,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const browserBridge = yield* BrowserBridge;
+    const thread = requireBridgeThread(browserBridge.authorize(request.headers["authorization"]));
+    if (!thread.ok) {
+      return bridgeRefusalText(thread);
+    }
+    const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
+    const site =
+      body && typeof body === "object" ? (body as { site?: unknown; login?: unknown }) : null;
+    const rawSite =
+      typeof site?.site === "string"
+        ? site.site
+        : typeof site?.login === "string"
+          ? site.login
+          : "";
+    if (rawSite.trim().length === 0 || rawSite.length > 300) {
+      return HttpServerResponse.jsonUnsafe(
+        { ok: false, error: 'Expected {"site": "<domain>"}.' },
+        { status: 400 },
+      );
+    }
+    const context = resolveBridgeRequestContext(thread.context, body);
+    const settingsService = yield* ServerSettingsService;
+    const browserSettings = yield* settingsService.getSettings.pipe(
+      Effect.map((settings) => settings.browser),
+      Effect.orElseSucceed(() => null),
+    );
+    const config = yield* ServerConfig;
+    const target =
+      browserSettings === null || browserSettings.serverAutomationLevel === "off"
+        ? "client"
+        : decideBrowserExecutorTarget({
+            executor: browserSettings.executor,
+            hasSubscribers: yield* browserBridge.hasSubscribers,
+            hostedMachine: config.mode === "web",
+          });
+    if (target === "client") {
+      return HttpServerResponse.jsonUnsafe(
+        {
+          ok: false,
+          status: "needs_help",
+          site: rawSite,
+          detail:
+            "Signing in by Uno works in a cloud computer's own browser. Here the browser is on the person's screen: ask them in chat to sign in.",
+        },
+        { status: 200 },
+      );
+    }
+    const serverBrowser = yield* ServerBrowser;
+    const vault = yield* CredentialsVaultService;
+    const inbox = yield* InboxService;
+    const notifyService = yield* ConnectorNotifyService;
+    const projections = yield* ProjectionSnapshotQuery;
+    const result = yield* runBrowserLogin(rawSite, {
+      listCredentials: vault.list.pipe(Effect.orElseSucceed(() => [])),
+      revealPassword: (id) => vault.reveal(id).pipe(Effect.orElseSucceed(() => null)),
+      exec: (input) => serverBrowser.execute(input, context),
+      askHuman: (text) =>
+        Effect.gen(function* () {
+          yield* announceBrowserHelp({ threadId: thread.threadId, reason: text }).pipe(
+            Effect.provideService(InboxService, inbox),
+            Effect.provideService(ConnectorNotifyService, notifyService),
+            Effect.provideService(ProjectionSnapshotQuery, projections),
+            Effect.forkDetach,
+            Effect.asVoid,
+          );
+          return yield* serverBrowser.execute(
+            { command: "requestHelp", text, timeoutMs: BROWSER_LOGIN_HELP_TIMEOUT_MS },
+            context,
+          );
+        }),
+      registerSecret: registerKnownSecret,
+      sleep: (ms) => Effect.sleep(ms),
+    });
+    yield* Effect.logInfo("browser login attempted").pipe(
+      Effect.annotateLogs({ threadId: thread.threadId, site: result.site, status: result.status }),
+    );
+    return HttpServerResponse.jsonUnsafe(result, { status: 200 });
   }),
 );
 

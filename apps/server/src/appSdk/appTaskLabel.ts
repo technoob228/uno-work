@@ -61,7 +61,21 @@ export function withAppLabelHeaders(
   appId: string,
   gatewayProviderIds: ReadonlyArray<string>,
 ): string | undefined {
-  if (!configContent || !isAppLabel(appId)) return configContent;
+  if (!isAppLabel(appId)) return configContent;
+  return withGatewayHeaders(configContent, { [APP_LABEL_HEADER]: appId }, gatewayProviderIds);
+}
+
+/**
+ * The OpenCode config with `headers` added to every provider that talks to
+ * the Uno gateway (app label, chat label). Returns the input unchanged when
+ * it isn't JSON, has none of those providers, or `headers` is empty.
+ */
+export function withGatewayHeaders(
+  configContent: string | undefined,
+  headersToAdd: Readonly<Record<string, string>>,
+  gatewayProviderIds: ReadonlyArray<string>,
+): string | undefined {
+  if (!configContent || Object.keys(headersToAdd).length === 0) return configContent;
   let config: Record<string, unknown>;
   try {
     config = JSON.parse(configContent) as Record<string, unknown>;
@@ -86,7 +100,7 @@ export function withAppLabelHeaders(
     ) as Record<string, unknown>;
     next[id] = {
       ...p,
-      options: { ...options, headers: { ...headers, [APP_LABEL_HEADER]: appId } },
+      options: { ...options, headers: { ...headers, ...headersToAdd } },
     };
     changed = true;
   }

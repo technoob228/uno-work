@@ -7,9 +7,11 @@ import {
   DEFAULT_CONNECTOR_ADDRESSING,
   DEFAULT_SLACK_CONNECTOR_STATUS,
   isAssistantProjectId,
+  ManagerConnectorBinding,
   ManagerSlackConnectorConfig,
   ManagerTelegramConnectorConfig,
   type ManagerAssistantSummary,
+  type ManagerDeletedAssistant,
   type ManagerConnectorHealth,
   type ManagerTelegramConnectorStatus,
   type ModelSelection,
@@ -21,6 +23,16 @@ import {
   listAssistantConversations,
   pickAssistantChatToMigrate,
 } from "@t3tools/shared/assistantChat";
+import { rebaseEdit, ROUTING_PERSON_RULE } from "@t3tools/shared/assistantMemory";
+import {
+  mergeInstructions,
+  planInstructions,
+  sameInstructions,
+  splitAgentsProfile,
+  joinAgentsProfile,
+  type InstructionsState,
+} from "@t3tools/shared/assistantInstructions";
+import { SHIPPED_ASSISTANT_INSTRUCTIONS } from "../assistantInstructionsHistory.ts";
 import {
   coerceAssistantModelSelection,
   DEFAULT_ASSISTANT_MODEL_SELECTION,
@@ -30,6 +42,7 @@ import {
 import { Effect, Layer, Option, Path, FileSystem, Schema } from "effect";
 import * as Semaphore from "effect/Semaphore";
 import * as crypto from "node:crypto";
+import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 
 import { ServerConfig } from "../../config.ts";
@@ -39,6 +52,18 @@ import { OrchestrationEngineService } from "../../orchestration/Services/Orchest
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerCapabilityTokenRepository } from "../../persistence/Services/ManagerCapabilityTokens.ts";
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
+import { ManagerConnectorBindingRepository } from "../../persistence/Services/ManagerConnectorBindings.ts";
+import {
+  dropDeletedAssistant,
+  freeTrashPath,
+  isPastKeep,
+  keepUntil,
+  putDeletedAssistant,
+  readDeletedAssistants,
+  readProfile,
+  writeProfile,
+  type DeletedAssistantRecord,
+} from "../../assistants/localAssistantStore.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import {
   awaitUsableBootDefault,
@@ -60,14 +85,25 @@ import { ManagerAccountDefaultAi } from "./AccountDefaultAi.ts";
 import { ManagerTelegramService } from "./TelegramConnector.ts";
 import { ManagerSlackService } from "./SlackConnector.ts";
 import { ASSISTANT_THREAD_RUNTIME_MODE } from "../connectorBindings.ts";
-import { isRelayCredential } from "../channelRelay.ts";
+import {
+  isRelayCredential,
+  isRouteCredential,
+  parseRouteCredential,
+  routeCredential,
+} from "../channelRelay.ts";
 
 /** Title of a fresh assistant chat; clients show "Uno" whatever the title. */
 export const ASSISTANT_CHAT_TITLE = "Uno";
 /** Title of a conversation started with "New conversation" until it is renamed. */
 export const ASSISTANT_CONVERSATION_TITLE = "New conversation";
 
-const ASSISTANT_INSTRUCTIONS_TEMPLATE = `# Uno Assistant (dispatcher)
+/**
+ * The instructions this version ships. Bump the version line on every change:
+ * untouched files get it silently, edited ones see "Uno has newer
+ * instructions" on the assistant's page (`assistantInstructions.ts`).
+ */
+export const ASSISTANT_INSTRUCTIONS_TEMPLATE = `<!-- uno-instructions: 2026-10-02.2 -->
+# Uno Assistant (dispatcher)
 
 You are an assistant of this Uno Work environment. You are a lightweight
 dispatcher: your main job is to SPAWN and STEER work in other projects, do
@@ -77,7 +113,8 @@ small tasks yourself, and remember what matters.
 
 - Use the \`uno-manager\` MCP tools to observe and steer coding threads:
   \`list_threads\`, \`get_thread_status\`, \`read_thread_detail\`,
-  \`create_thread\`, \`send_turn\`, \`interrupt_turn\`, \`respond_to_request\`.
+  \`create_thread\`, \`send_turn\`, \`interrupt_turn\`, \`respond_to_request\`,
+  \`wait_for_thread\` / \`wait_for_threads\`.
 - When the user asks for work in a project, spawn or steer a thread there via
   those tools instead of doing it in this workspace. This workspace is your
   own context: notes, preferences, skills.
@@ -86,6 +123,45 @@ small tasks yourself, and remember what matters.
   daemon pushes the message to the user's Telegram itself at the due time — do
   NOT try to sleep or keep the turn open. \`list_reminders\` / \`cancel_reminder\`
   manage them.
+
+## Schedules — recurring work on your own
+
+- For recurring work ("every Monday at 10 collect…", "each morning check…")
+  call \`schedule_create\` (a cron, the instruction for future-you, an
+  optional time zone). At that time Uno wakes this computer and you get the
+  instruction as a new message; your answer goes to the person's Telegram or
+  Slack. If there is nothing worth telling them, answer exactly NO_REPLY.
+- Schedules ONLY through \`schedule_create\` / \`schedule_list\` /
+  \`schedule_delete\`: the person sees and can stop them on your card. Never
+  use cron, systemd timers, \`sleep\` loops or Hermes' own cron for this.
+- Keep the instruction self-contained: future-you starts without this
+  conversation. Tell the person what you scheduled, in plain words.
+
+## Sites that need a sign-in
+
+- \`browser_command\` with \`{"login": "<site>"}\` signs in with the password
+  the person saved in Uno Work (Settings → Passwords). You only learn whether
+  it worked. With no saved password, or a 2FA code / captcha, the person is
+  asked to finish in the live browser. Never ask for passwords in chat.
+
+## Skills
+
+- Skills come only from the Uno catalog (already installed for you). Never
+  install skills from ClawHub or other hubs (\`hermes skills install\`,
+  \`npx skills\`, copying SKILL.md from the web): ask the person instead.
+
+## Waiting for work and accepting it
+
+- After \`create_thread\` / \`send_turn\` executed, call \`wait_for_thread\`
+  (several threads: \`wait_for_threads\`). It blocks until the turn is done,
+  errored, or needs the user. NEVER poll \`get_thread_status\` in a loop —
+  every poll burns your limits and context.
+- \`needs_user\` → relay the question/approval to the user; \`timeout\` →
+  tell the user it is still running, or wait again.
+- Accept work on EVIDENCE, not on the executor's words: passing tests, the
+  diff / changed files, the result of a check, a screenshot. "Done, all
+  works" without proof is not done — send it back with a \`send_turn\`
+  asking for the proof (run the tests, show the diff).
 
 ## Continuity — you are ONE assistant across MANY chats
 
@@ -112,12 +188,51 @@ threads you spawn, and even there — matched to the task. Before every
 harness + model + effort. Follow it, and evolve it:
 
 - \`create_thread\` accepts \`modelSelection.options\` for effort control,
-  e.g. \`{"instanceId":"claudeAgent","model":"claude-haiku-4-5","options":{"effort":"low"}}\`
-  or \`{"instanceId":"codex","model":"gpt-5.4","options":{"reasoningEffort":"low"}}\`.
+  e.g. \`{"instanceId":"claudeAgent","model":"claude-opus-5-5","options":{"effort":"high"}}\`;
+  a ChatGPT (codex) row takes \`options.reasoningEffort\` instead.
 - AFTER a spawned thread finishes (or fails), append one line to the
-  "Outcomes log" in ROUTING.md: date, task type, model used, verdict. When a
+  "Outcomes log" in ROUTING.md: date, task type, model used, verdict (judged
+  by evidence — tests, diff, checks — not by the thread's own claim). When a
   pattern emerges (a cheap model keeps handling a task type well — or keeps
   failing), update the routing table itself. This is your learning loop.
+- Rows with Source \`you\` are the person's rules: follow them, NEVER change
+  or remove them yourself. Rows you change get Source \`learned\`.
+- If a \`you\` row keeps failing (say 2 of the last 3 tasks of that type
+  failed or had to be redone on a stronger model), PROPOSE a change instead:
+  add one line under "## Proposals" in ROUTING.md —
+  \`- <task type> → <harness> <model> <effort> | <why, one sentence> | YYYY-MM-DD\`
+  — and ask in chat: "<why>. Change the rule to <model>, <thinking>? Yes / No".
+  Change the row only after the person's yes (then delete the proposal line;
+  the page's Yes does both). On no, the line moves under "## Declined": do
+  not propose that change again for 14 days.
+- The table has six columns: Task type | Harness | Model | Effort | Source |
+  Why. Keep that shape: the person edits it on your page.
+
+## "Remember …" — the person's rules and facts
+
+- "remember: UI — Opus high" / "запомни: …" about WHICH AI does WHAT:
+  add or replace that row in ROUTING.md with Source \`you\` (harness id,
+  model id, effort word), then confirm in one short line.
+- Any other "remember that …" / "запомни, что …": append to NOTES.md as
+  \`- YYYY-MM-DD <the fact> (you)\`. Lines ending in \`(you)\` are the
+  person's: keep them, never rewrite them.
+- USER.md (about the person) and SOUL.md (who you are, your rules) are
+  edited by the person on your page; read them at the start of every
+  conversation and follow them.
+
+## Where chats run
+
+- \`create_thread\` and \`chat_create\` take an optional \`computerId\`.
+  For now only this computer is allowed: leave it out. Another id answers
+  "not allowed yet" — tell the person, don't retry.
+- You may be one of several assistants on this computer. This folder is
+  yours (instructions, notes, skills); other assistants' folders are not.
+
+## Apps the person connected
+
+- The person decides on your page which apps you may open (none / read /
+  write). A refusal like "isn't allowed to open Gmail" is final: tell the
+  person, never work around it (another chat, the browser, a script).
 
 ## Style & safety
 
@@ -130,27 +245,40 @@ harness + model + effort. Follow it, and evolve it:
 
 const ROUTING_TEMPLATE = `# Routing table — which harness/model for which task
 
-Starting point, hand-tuned; the assistant updates it from real outcomes.
-Cheapest thing that reliably does the job wins.
+Starting point by Uno; the person edits it on your page, you tune it from
+real outcomes. Cheapest thing that reliably does the job wins.
 
-| Task type | Harness (instanceId) | Model | Effort | Why |
-|---|---|---|---|---|
-| Architecture, planning, tricky debugging | claudeAgent | claude-opus-5-5 | high | strongest reasoning |
-| Complex multi-file implementation | claudeAgent | claude-sonnet-5 | default | reliable executor |
-| Routine implementation, small fixes, tests | codex | gpt-5.4 | reasoningEffort: low | cheap and fast |
-| Docs reading, codebase exploration, summaries | opencode | (cheap default) | — | grunt work |
-| Long-form text / prose | (best available writing model) | — | — | quality of prose over code skill |
-| Trivia, quick factual lookups | (cheapest available) | — | low | do not burn smart tokens |
+${ROUTING_PERSON_RULE}
+
+| Task type | Harness | Model | Effort | Source | Why |
+|---|---|---|---|---|---|
+| Quick questions, status | self | — | — | default | answer yourself, no chat |
+| Simple tasks, small fixes | claudeAgent | claude-sonnet-5-5 | medium | default | reliable and cheap |
+| Anything with UI | claudeAgent | claude-opus-5-5 | high | default | taste and detail |
+| Hard bugs, architecture | claudeAgent | claude-opus-5-5 | max | default | strongest reasoning |
+| Reading code, summaries | claudeAgent | claude-haiku-4-5 | low | default | grunt work |
 
 Notes:
-- Effort keys differ per harness: claude → options.effort, codex →
-  options.reasoningEffort, cursor → options.fastMode.
-- If unsure between two tiers, try the cheaper one first; escalate on failure
-  and record the outcome below.
+- Harness \`self\` = answer in this chat, do not start a thread.
+- No Claude on this computer (no subscription)? Use Uno AI instead: harness
+  \`uno\`, model \`uno/uno/smart\` where the table says Sonnet or Haiku, the
+  newest Premium Opus-class model of the Uno model list where it says Opus.
+- A model this computer doesn't offer: take the newest one of the same
+  family (opus / sonnet / haiku).
+- Effort → harness option: claude → options.effort (low, medium, high, max),
+  codex → options.reasoningEffort (low, medium, high, xhigh for max).
 
 ## Outcomes log
 
-<!-- date | task type | harness/model/effort | ok/failed/escalated | note -->
+<!-- date | task type | harness/model/effort | ok/failed/escalated | evidence/note -->
+
+## Proposals
+
+<!-- - task type → harness model effort | why | YYYY-MM-DD — waits for the person's yes -->
+
+## Declined
+
+<!-- - YYYY-MM-DD task type → harness model effort — not again for 14 days -->
 `;
 
 function slugifyAssistantName(name: string): string {
@@ -220,7 +348,8 @@ export const telegramConnectorStatus = (
   health: runtime.health,
   defaultModelSelection: config.defaultModelSelection ?? null,
   addressing: config.addressing ?? DEFAULT_CONNECTOR_ADDRESSING,
-  shared: isRelayCredential(config.botToken),
+  // Uno's shared bot: held by this assistant, or routed through another one.
+  shared: isRelayCredential(config.botToken) || isRouteCredential(config.botToken),
 });
 
 const makeManagerAssistantService = Effect.gen(function* () {
@@ -232,6 +361,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const connectorRepository = yield* ManagerConnectorRepository;
+  const bindingRepository = yield* ManagerConnectorBindingRepository;
   const telegramService = yield* ManagerTelegramService;
   const slackService = yield* ManagerSlackService;
   const providerRegistry = yield* ProviderRegistry;
@@ -285,6 +415,36 @@ const makeManagerAssistantService = Effect.gen(function* () {
       }
     });
 
+  const agentsPath = (root: string) => path.join(root, "AGENTS.md");
+  const basePath = (root: string) => path.join(root, ".uno", "AGENTS.base.md");
+  const readOptional = (file: string) =>
+    fs.readFileString(file).pipe(
+      Effect.map((text): string | null => text),
+      Effect.orElseSucceed((): string | null => null),
+    );
+  const writeBase = (root: string, content: string) =>
+    Effect.gen(function* () {
+      yield* fs.makeDirectory(path.join(root, ".uno"), { recursive: true });
+      yield* fs.writeFileString(basePath(root), content);
+    });
+
+  /**
+   * AGENTS.md against its base (`.uno/AGENTS.base.md`): seeded, silently
+   * updated when untouched, left alone when edited (see `planInstructions`).
+   */
+  const syncInstructions = (root: string) =>
+    Effect.gen(function* () {
+      const plan = planInstructions({
+        current: yield* readOptional(agentsPath(root)),
+        base: yield* readOptional(basePath(root)),
+        next: ASSISTANT_INSTRUCTIONS_TEMPLATE,
+        known: SHIPPED_ASSISTANT_INSTRUCTIONS,
+      });
+      if (plan.write !== null) yield* fs.writeFileString(agentsPath(root), plan.write);
+      if (plan.base !== null) yield* writeBase(root, plan.base);
+      return plan.state;
+    });
+
   const ensureAssistant: ManagerAssistantServiceShape["ensureAssistant"] = ({
     projectId,
     title,
@@ -305,16 +465,18 @@ const makeManagerAssistantService = Effect.gen(function* () {
         path.join(workspaceRoot, ".uno-assistant.json"),
         `${JSON.stringify({ projectId, stateDir: config.stateDir }, null, 2)}\n`,
       );
-      // Instructions are user-editable: seed once, never overwrite.
-      yield* writeFileIfMissing(
-        path.join(workspaceRoot, "AGENTS.md"),
-        ASSISTANT_INSTRUCTIONS_TEMPLATE,
-      );
+      // Instructions are the person's to edit; Uno's newer versions reach
+      // untouched files silently and edited ones through the page.
+      yield* syncInstructions(workspaceRoot);
       yield* writeFileIfMissing(
         path.join(workspaceRoot, "CLAUDE.md"),
         "See AGENTS.md — it is the single source of instructions for this assistant.\n",
       );
       yield* writeFileIfMissing(path.join(workspaceRoot, "NOTES.md"), "# Assistant notes\n");
+      // Assistants MVP: who it is (SOUL.md) and what it knows about the person
+      // (USER.md). "New assistant" fills them; seeded empty so the files exist.
+      yield* writeFileIfMissing(path.join(workspaceRoot, "SOUL.md"), "# Who I am\n");
+      yield* writeFileIfMissing(path.join(workspaceRoot, "USER.md"), "# About the person\n");
       yield* writeFileIfMissing(path.join(workspaceRoot, "ROUTING.md"), ROUTING_TEMPLATE);
 
       const label = assistantTokenLabel(projectId);
@@ -416,7 +578,11 @@ const makeManagerAssistantService = Effect.gen(function* () {
       ),
     );
 
-  const createAssistant: ManagerAssistantServiceShape["createAssistant"] = ({ name }) =>
+  const createAssistant: ManagerAssistantServiceShape["createAssistant"] = ({
+    name,
+    emoji,
+    template,
+  }) =>
     Effect.gen(function* () {
       const base = slugifyAssistantName(name);
       let candidate = ProjectId.make(`${ASSISTANT_PROJECT_ID_PREFIX}${base}`);
@@ -429,6 +595,20 @@ const makeManagerAssistantService = Effect.gen(function* () {
         );
       }
       yield* ensureAssistant({ projectId: candidate, title: name });
+      if (emoji !== undefined || template !== undefined) {
+        const project = yield* projectionSnapshotQuery
+          .getProjectShellById(candidate)
+          .pipe(Effect.mapError(toAssistantError("Failed to read the new assistant.")));
+        if (Option.isSome(project)) {
+          yield* Effect.promise(() =>
+            writeProfile(project.value.workspaceRoot, {
+              emoji: emoji?.trim() || null,
+              template: template ?? null,
+              createdAt: new Date().toISOString(),
+            }),
+          );
+        }
+      }
       return { projectId: candidate };
     });
 
@@ -570,7 +750,9 @@ const makeManagerAssistantService = Effect.gen(function* () {
             lastError: slackRuntime.lastError,
             defaultModelSelection: decoded.value.defaultModelSelection ?? null,
             addressing: decoded.value.addressing ?? DEFAULT_CONNECTOR_ADDRESSING,
-            shared: isRelayCredential(decoded.value.botToken),
+            shared:
+              isRelayCredential(decoded.value.botToken) ||
+              isRouteCredential(decoded.value.botToken),
           };
         } else {
           slack = {
@@ -583,6 +765,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
       const skills = yield* fs
         .readDirectory(skillsDir)
         .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
+      const profile = yield* Effect.promise(() => readProfile(input.workspaceRoot));
       return {
         projectId: input.projectId,
         title: input.title,
@@ -590,7 +773,8 @@ const makeManagerAssistantService = Effect.gen(function* () {
         token: Option.getOrNull(token),
         telegram,
         slack,
-        skills: [...skills].filter((entry) => !entry.startsWith(".")).sort(),
+        skills: [...skills].filter((entry) => !entry.startsWith(".")).toSorted(),
+        profile,
       };
     });
 
@@ -607,8 +791,14 @@ const makeManagerAssistantService = Effect.gen(function* () {
       const snapshot = yield* projectionSnapshotQuery
         .getShellSnapshot()
         .pipe(Effect.mapError(toAssistantError("Failed to load projects.")));
-      const assistantProjects = snapshot.projects.filter((project) =>
-        isAssistantProjectId(project.id),
+      // Deleted assistants of this computer are kept 7 days, but not listed.
+      const deleted = new Set(
+        (yield* Effect.promise(() => readDeletedAssistants(config.stateDir))).map(
+          (record) => record.projectId,
+        ),
+      );
+      const assistantProjects = snapshot.projects.filter(
+        (project) => isAssistantProjectId(project.id) && !deleted.has(project.id),
       );
       const summaries: ManagerAssistantSummary[] = [];
       for (const project of assistantProjects) {
@@ -659,17 +849,34 @@ const makeManagerAssistantService = Effect.gen(function* () {
       return { content };
     });
 
+  // One writer at a time per file content check + write (the page; the
+  // assistant writes with its own tools and is reconciled through `base`).
+  const fileWriteSemaphore = yield* Semaphore.make(1);
+
   const writeWorkspaceFile: ManagerAssistantServiceShape["writeWorkspaceFile"] = ({
     projectId,
     name,
     content,
+    base,
   }) =>
-    Effect.gen(function* () {
-      const filePath = yield* resolveEditablePath(projectId, name);
-      yield* fs
-        .writeFileString(filePath, content)
-        .pipe(Effect.mapError(toAssistantError(`Failed to write ${name}.`)));
-    });
+    fileWriteSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const filePath = yield* resolveEditablePath(projectId, name);
+        let next = content;
+        let merged = false;
+        if (base !== undefined) {
+          const current = yield* fs.readFileString(filePath).pipe(Effect.orElseSucceed(() => base));
+          if (current !== base) {
+            next = rebaseEdit(base, content, current);
+            merged = true;
+          }
+        }
+        yield* fs
+          .writeFileString(filePath, next)
+          .pipe(Effect.mapError(toAssistantError(`Failed to write ${name}.`)));
+        return { content: next, merged };
+      }),
+    );
 
   const chatSemaphore = yield* Semaphore.make(1);
 
@@ -757,15 +964,20 @@ const makeManagerAssistantService = Effect.gen(function* () {
 
   const createConversation: ManagerAssistantServiceShape["createConversation"] = (input) =>
     Effect.gen(function* () {
-      const origin = assistantCommandOrigin({ assistantKey: ASSISTANT_PROJECT_ID });
+      const projectId = input.projectId ?? ASSISTANT_PROJECT_ID;
+      if (!isAssistantProjectId(projectId)) {
+        return yield* new ManagerAssistantError({ detail: `Unknown assistant: ${projectId}.` });
+      }
+      const origin = assistantCommandOrigin({ assistantKey: projectId });
       const snapshot = yield* projectionSnapshotQuery
         .getShellSnapshot()
         .pipe(Effect.mapError(toAssistantError("Failed to load chats.")));
-      if (!snapshot.projects.some((project) => project.id === ASSISTANT_PROJECT_ID)) {
+      if (!snapshot.projects.some((project) => project.id === projectId)) {
         return yield* new ManagerAssistantError({
           detail: "The assistant is not set up on this computer yet.",
         });
       }
+      // Every assistant of this computer runs on what the Uno chat runs on.
       const main = findMarkedAssistantChat(snapshot.threads);
       const threadId = ThreadId.make(crypto.randomUUID());
       gatewayKey.labelThread(threadId, ASSISTANT_GATEWAY_LABEL);
@@ -776,7 +988,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
             type: "thread.create",
             commandId: CommandId.make(`assistant-conversation-create:${crypto.randomUUID()}`),
             threadId,
-            projectId: ASSISTANT_PROJECT_ID,
+            projectId,
             title,
             modelSelection: coerceAssistantModelSelection(main?.modelSelection),
             runtimeMode: ASSISTANT_THREAD_RUNTIME_MODE,
@@ -897,10 +1109,532 @@ const makeManagerAssistantService = Effect.gen(function* () {
       ),
     );
 
+  const ensureConversation: ManagerAssistantServiceShape["ensureConversation"] = (projectId) =>
+    Effect.gen(function* () {
+      if (projectId === ASSISTANT_PROJECT_ID) {
+        const chat = yield* ensureAssistantChat();
+        return {
+          threadId: chat.threadId,
+          outcome: chat.outcome === "created" ? "created" : "existing",
+        };
+      }
+      const snapshot = yield* projectionSnapshotQuery
+        .getShellSnapshot()
+        .pipe(Effect.mapError(toAssistantError("Failed to load chats.")));
+      const project = snapshot.projects.find((entry) => entry.id === projectId);
+      if (project === undefined || !isAssistantProjectId(projectId)) {
+        return yield* new ManagerAssistantError({ detail: `Unknown assistant: ${projectId}.` });
+      }
+      // Its Telegram / Slack chats are threads of its workspace too: "Chat"
+      // opens a conversation of the app, never a group chat.
+      const connectorThreadIds = new Set(
+        yield* connectorRepository
+          .listChatThreadIds()
+          .pipe(Effect.mapError(toAssistantError("Failed to read connector chats."))),
+      );
+      const latest = snapshot.threads
+        .filter(
+          (thread) =>
+            thread.projectId === projectId &&
+            thread.archivedAt === null &&
+            ((thread as { readonly deletedAt?: string | null }).deletedAt ?? null) === null &&
+            !connectorThreadIds.has(thread.id),
+        )
+        .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+      if (latest !== undefined) return { threadId: latest.id, outcome: "existing" as const };
+      const created = yield* createConversation({ projectId, title: project.title });
+      return { threadId: created.threadId, outcome: "created" as const };
+    });
+
+  // ── Deleted assistants of this computer (kept 7 days) ─────────────
+
+  const trashDir = path.join(assistantsBaseDir, ".trash");
+
+  /**
+   * The rows routed through `holder` (Uno's shared bot, `unoroute:`) and a
+   * successor among them: the default assistant first.
+   */
+  const routedThrough = (holder: ProjectId) =>
+    connectorRepository.listByKind("telegram").pipe(
+      Effect.map((rows) =>
+        rows.flatMap((row) => {
+          const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(row.config);
+          return decoded._tag === "Success" &&
+            parseRouteCredential(decoded.value.botToken) === holder
+            ? [{ projectId: row.projectId, config: decoded.value }]
+            : [];
+        }),
+      ),
+    );
+
+  /**
+   * The deleted assistant held this computer's shared bot: hand the relay to
+   * one of the assistants routed through it (and re-point the others and the
+   * chats' bindings), so they keep answering.
+   */
+  const handOverRelay = (holder: ProjectId, relayConfig: ManagerTelegramConnectorConfig) =>
+    Effect.gen(function* () {
+      const routed = yield* routedThrough(holder);
+      if (routed.length === 0) return;
+      const successor = routed.find((row) => row.projectId === ASSISTANT_PROJECT_ID) ?? routed[0]!;
+      const now = new Date().toISOString();
+      yield* connectorRepository.upsert({
+        projectId: successor.projectId,
+        kind: "telegram",
+        config: {
+          ...successor.config,
+          botToken: relayConfig.botToken,
+          // The holder's own chats were the shared bot's chats too.
+          allowedChatIds: [
+            ...new Set([...successor.config.allowedChatIds, ...relayConfig.allowedChatIds]),
+          ],
+        },
+        updatedAt: now,
+      });
+      for (const row of routed) {
+        if (row.projectId === successor.projectId) continue;
+        yield* connectorRepository.upsert({
+          projectId: row.projectId,
+          kind: "telegram",
+          config: { ...row.config, botToken: routeCredential(successor.projectId) },
+          updatedAt: now,
+        });
+      }
+      const bindings = yield* bindingRepository.listAll();
+      for (const binding of bindings) {
+        if (binding.connectorProjectId !== holder) continue;
+        yield* bindingRepository.upsert({
+          ...binding,
+          connectorProjectId: successor.projectId,
+          updatedAt: now,
+        });
+      }
+      yield* Effect.logInfo("shared Telegram bot handed over to another assistant").pipe(
+        Effect.annotateLogs({ from: holder, to: successor.projectId }),
+      );
+    });
+
+  /** Uno's Slack app moves to an assistant that wrote through the deleted one. */
+  const handOverSlackRelay = (holder: ProjectId, relayConfig: ManagerSlackConnectorConfig) =>
+    Effect.gen(function* () {
+      const rows = (yield* connectorRepository.listByKind("slack")).flatMap((row) => {
+        const decoded = Schema.decodeUnknownExit(ManagerSlackConnectorConfig)(row.config);
+        return decoded._tag === "Success" && parseRouteCredential(decoded.value.botToken) === holder
+          ? [{ projectId: row.projectId, config: decoded.value }]
+          : [];
+      });
+      if (rows.length === 0) return;
+      const successor = rows.find((row) => row.projectId === ASSISTANT_PROJECT_ID) ?? rows[0]!;
+      const now = new Date().toISOString();
+      yield* connectorRepository.upsert({
+        projectId: successor.projectId,
+        kind: "slack",
+        config: {
+          ...successor.config,
+          botToken: relayConfig.botToken,
+          appToken: relayConfig.appToken,
+          // The installer's DM was the holder's; the new holder keeps it.
+          allowedChannelIds: [
+            ...new Set([...successor.config.allowedChannelIds, ...relayConfig.allowedChannelIds]),
+          ],
+          ...(relayConfig.ownerUserIds !== undefined
+            ? { ownerUserIds: relayConfig.ownerUserIds }
+            : {}),
+        },
+        updatedAt: now,
+      });
+      for (const row of rows) {
+        if (row.projectId === successor.projectId) continue;
+        yield* connectorRepository.upsert({
+          projectId: row.projectId,
+          kind: "slack",
+          config: { ...row.config, botToken: routeCredential(successor.projectId) },
+          updatedAt: now,
+        });
+      }
+      for (const binding of yield* bindingRepository.listAll()) {
+        if (binding.kind !== "slack" || binding.connectorProjectId !== holder) continue;
+        yield* bindingRepository.upsert({
+          ...binding,
+          connectorProjectId: successor.projectId,
+          updatedAt: now,
+        });
+      }
+      yield* Effect.logInfo("Uno's Slack app handed over to another assistant").pipe(
+        Effect.annotateLogs({ from: holder, to: successor.projectId }),
+      );
+    });
+
+  const deleteAssistant: ManagerAssistantServiceShape["deleteAssistant"] = (projectId) =>
+    Effect.gen(function* () {
+      if (projectId === ASSISTANT_PROJECT_ID || !isAssistantProjectId(projectId)) {
+        return yield* new ManagerAssistantError({
+          detail: "The computer's own assistant can't be deleted, only paused.",
+        });
+      }
+      const snapshot = yield* projectionSnapshotQuery.getShellSnapshot();
+      const project = snapshot.projects.find((entry) => entry.id === projectId);
+      if (project === undefined) {
+        return yield* new ManagerAssistantError({ detail: `Unknown assistant: ${projectId}.` });
+      }
+      const now = new Date();
+      const profile = yield* Effect.promise(() => readProfile(project.workspaceRoot));
+
+      // 1. It stops answering: its connectors and the chats bound to it.
+      const connectorRows: Array<{ kind: string; config: unknown }> = [];
+      for (const kind of ["telegram", "slack"] as const) {
+        const row = yield* connectorRepository.get({ projectId, kind });
+        if (Option.isNone(row)) continue;
+        connectorRows.push({ kind, config: row.value.config });
+        if (kind === "telegram") {
+          const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(
+            row.value.config,
+          );
+          if (decoded._tag === "Success" && isRelayCredential(decoded.value.botToken)) {
+            yield* handOverRelay(projectId, decoded.value);
+          }
+        } else {
+          const decoded = Schema.decodeUnknownExit(ManagerSlackConnectorConfig)(row.value.config);
+          if (decoded._tag === "Success" && isRelayCredential(decoded.value.botToken)) {
+            yield* handOverSlackRelay(projectId, decoded.value);
+          }
+        }
+        yield* connectorRepository.remove({ projectId, kind });
+      }
+      const threadProject = new Map(
+        snapshot.threads.map((thread) => [thread.id, thread.projectId]),
+      );
+      const bindings = (yield* bindingRepository.listAll()).filter(
+        (binding) =>
+          (binding.target.kind !== "thread" && binding.target.projectId === projectId) ||
+          (binding.target.kind === "thread" &&
+            threadProject.get(binding.target.threadId) === projectId),
+      );
+      for (const binding of bindings) {
+        yield* bindingRepository.remove({ kind: binding.kind, chatId: binding.chatId });
+      }
+
+      // 2. Its chats leave the lists; its token stops working.
+      const archivedThreadIds: Array<string> = [];
+      for (const thread of snapshot.threads) {
+        if (thread.projectId !== projectId || thread.archivedAt !== null) continue;
+        if (((thread as { readonly deletedAt?: string | null }).deletedAt ?? null) !== null)
+          continue;
+        yield* orchestrationEngine.dispatch(
+          {
+            type: "thread.archive",
+            commandId: CommandId.make(`assistant-delete:${crypto.randomUUID()}`),
+            threadId: thread.id,
+          },
+          { origin: assistantCommandOrigin({ assistantKey: projectId }) },
+        );
+        archivedThreadIds.push(thread.id);
+      }
+      const token = yield* tokenRepository.getActiveByLabel(assistantTokenLabel(projectId));
+      if (Option.isSome(token)) {
+        yield* tokenRepository.revoke({
+          tokenId: token.value.tokenId,
+          revokedAt: now.toISOString(),
+        });
+      }
+
+      // 3. Its folder is kept aside (a dot folder: the scan never adopts it).
+      const trashPath = yield* Effect.promise(() =>
+        freeTrashPath(trashDir, path.basename(project.workspaceRoot), now),
+      );
+      yield* Effect.tryPromise({
+        try: async () => {
+          await fsp.mkdir(trashDir, { recursive: true });
+          await fsp
+            .rename(project.workspaceRoot, trashPath)
+            .catch((cause: NodeJS.ErrnoException) => {
+              if (cause.code !== "ENOENT") throw cause;
+            });
+        },
+        catch: toAssistantError("Failed to put the assistant's folder aside."),
+      });
+      const record: DeletedAssistantRecord = {
+        projectId,
+        title: project.title,
+        emoji: profile?.emoji ?? null,
+        deletedAt: now.toISOString(),
+        workspaceRoot: project.workspaceRoot,
+        trashPath,
+        connectorRows,
+        bindings,
+        archivedThreadIds,
+      };
+      yield* Effect.promise(() => putDeletedAssistant(config.stateDir, record));
+      yield* Effect.logInfo("assistant deleted (kept 7 days)").pipe(
+        Effect.annotateLogs({ projectId, trashPath }),
+      );
+    }).pipe(
+      Effect.catch((cause) =>
+        Schema.is(ManagerAssistantError)(cause)
+          ? Effect.fail(cause)
+          : Effect.fail(toAssistantError(`Failed to delete assistant ${projectId}.`)(cause)),
+      ),
+    );
+
+  const restoreAssistant: ManagerAssistantServiceShape["restoreAssistant"] = (projectId) =>
+    Effect.gen(function* () {
+      const records = yield* Effect.promise(() => readDeletedAssistants(config.stateDir));
+      const record = records.find((entry) => entry.projectId === projectId);
+      if (record === undefined) {
+        return yield* new ManagerAssistantError({ detail: "This assistant isn't kept any more." });
+      }
+      yield* Effect.tryPromise({
+        try: async () => {
+          const taken = await fsp
+            .access(record.workspaceRoot)
+            .then(() => true)
+            .catch(() => false);
+          if (taken) throw new Error(`${record.workspaceRoot} exists again; move it away first.`);
+          await fsp
+            .rename(record.trashPath, record.workspaceRoot)
+            .catch((cause: NodeJS.ErrnoException) => {
+              if (cause.code !== "ENOENT") throw cause;
+            });
+        },
+        catch: (cause) =>
+          new ManagerAssistantError({
+            detail: cause instanceof Error ? cause.message : "Failed to bring its folder back.",
+          }),
+      });
+      const now = new Date().toISOString();
+      // Uno's shared bot may have moved to another assistant meanwhile: a
+      // relay row comes back routed through whoever holds it now.
+      const telegramRows = yield* connectorRepository.listByKind("telegram");
+      const currentHolder = telegramRows.find((row) => {
+        const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(row.config);
+        return decoded._tag === "Success" && isRelayCredential(decoded.value.botToken);
+      })?.projectId;
+      const slackHolder = (yield* connectorRepository.listByKind("slack")).find((row) => {
+        const decoded = Schema.decodeUnknownExit(ManagerSlackConnectorConfig)(row.config);
+        return decoded._tag === "Success" && isRelayCredential(decoded.value.botToken);
+      })?.projectId;
+      for (const row of record.connectorRows) {
+        let restored = row.config;
+        if (row.kind === "slack" && slackHolder !== undefined) {
+          const decoded = Schema.decodeUnknownExit(ManagerSlackConnectorConfig)(row.config);
+          if (
+            decoded._tag === "Success" &&
+            (isRelayCredential(decoded.value.botToken) || isRouteCredential(decoded.value.botToken))
+          ) {
+            restored = {
+              ...decoded.value,
+              botToken: routeCredential(slackHolder),
+              appToken: "unorelay",
+            };
+          }
+        }
+        if (row.kind === "telegram") {
+          const decoded = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(row.config);
+          if (decoded._tag === "Success") {
+            const value = decoded.value;
+            const holder = parseRouteCredential(value.botToken);
+            if (isRelayCredential(value.botToken) && currentHolder !== undefined) {
+              restored = { ...value, botToken: routeCredential(currentHolder) };
+            } else if (holder !== null && currentHolder !== undefined && holder !== currentHolder) {
+              restored = { ...value, botToken: routeCredential(currentHolder) };
+            }
+          }
+        }
+        if (row.kind !== "telegram" && row.kind !== "slack") continue;
+        yield* connectorRepository.upsert({
+          projectId,
+          kind: row.kind,
+          config: restored,
+          updatedAt: now,
+        });
+      }
+      for (const raw of record.bindings) {
+        const decoded = Schema.decodeUnknownExit(ManagerConnectorBinding)(raw);
+        if (decoded._tag !== "Success") continue;
+        const binding = decoded.value;
+        const connectorProjectId =
+          binding.kind === "telegram" &&
+          currentHolder !== undefined &&
+          binding.connectorProjectId === projectId
+            ? currentHolder
+            : binding.connectorProjectId;
+        yield* bindingRepository.upsert({ ...binding, connectorProjectId, updatedAt: now });
+      }
+      for (const threadId of record.archivedThreadIds) {
+        yield* orchestrationEngine
+          .dispatch(
+            {
+              type: "thread.unarchive",
+              commandId: CommandId.make(`assistant-restore:${crypto.randomUUID()}`),
+              threadId: ThreadId.make(threadId),
+            },
+            { origin: assistantCommandOrigin({ assistantKey: projectId }) },
+          )
+          .pipe(Effect.catch(() => Effect.void));
+      }
+      // A fresh token and `.mcp.json` (the old token was revoked).
+      yield* ensureAssistant({ projectId, title: record.title });
+      yield* Effect.promise(() => dropDeletedAssistant(config.stateDir, projectId));
+      yield* Effect.logInfo("assistant restored").pipe(Effect.annotateLogs({ projectId }));
+    }).pipe(
+      Effect.catch((cause) =>
+        Schema.is(ManagerAssistantError)(cause)
+          ? Effect.fail(cause)
+          : Effect.fail(toAssistantError(`Failed to restore assistant ${projectId}.`)(cause)),
+      ),
+    );
+
+  const listDeletedAssistants: ManagerAssistantServiceShape["listDeletedAssistants"] = () =>
+    Effect.promise(() => readDeletedAssistants(config.stateDir)).pipe(
+      Effect.map((records) =>
+        records
+          .map(
+            (record): ManagerDeletedAssistant => ({
+              projectId: ProjectId.make(record.projectId),
+              title: record.title,
+              emoji: record.emoji,
+              deletedAt: record.deletedAt,
+              keepUntil: keepUntil(record.deletedAt),
+            }),
+          )
+          .toSorted((a, b) => b.deletedAt.localeCompare(a.deletedAt)),
+      ),
+    );
+
+  const purgeDeletedAssistants: ManagerAssistantServiceShape["purgeDeletedAssistants"] = () =>
+    Effect.gen(function* () {
+      const now = new Date();
+      const records = yield* Effect.promise(() => readDeletedAssistants(config.stateDir));
+      const purged: Array<ProjectId> = [];
+      for (const record of records) {
+        if (!isPastKeep(record, now)) continue;
+        const projectId = ProjectId.make(record.projectId);
+        yield* orchestrationEngine
+          .dispatch(
+            {
+              type: "project.delete",
+              commandId: CommandId.make(`assistant-purge:${crypto.randomUUID()}`),
+              projectId,
+              force: true,
+            },
+            { origin: assistantCommandOrigin({ assistantKey: projectId }) },
+          )
+          .pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("deleted assistant project purge failed").pipe(
+                Effect.annotateLogs({ projectId, cause }),
+              ),
+            ),
+          );
+        yield* Effect.promise(() =>
+          fsp.rm(record.trashPath, { recursive: true, force: true }).catch(() => undefined),
+        );
+        yield* Effect.promise(() => dropDeletedAssistant(config.stateDir, projectId));
+        purged.push(projectId);
+      }
+      if (purged.length > 0) {
+        yield* Effect.logInfo("deleted assistants purged after 7 days").pipe(
+          Effect.annotateLogs({ purged }),
+        );
+      }
+      return { purged };
+    });
+
+  const workspaceOf = (projectId: ProjectId) =>
+    projectionSnapshotQuery.getProjectShellById(projectId).pipe(
+      Effect.mapError(toAssistantError("Failed to load assistant project.")),
+      Effect.flatMap((project) =>
+        Option.isSome(project) && isAssistantProjectId(projectId)
+          ? Effect.succeed(project.value.workspaceRoot)
+          : Effect.fail(new ManagerAssistantError({ detail: `Unknown assistant: ${projectId}.` })),
+      ),
+    );
+
+  const instructionsStatus: ManagerAssistantServiceShape["instructionsStatus"] = (projectId) =>
+    Effect.gen(function* () {
+      const root = yield* workspaceOf(projectId);
+      const state: InstructionsState = yield* syncInstructions(root);
+      const current = (yield* readOptional(agentsPath(root))) ?? "";
+      const base = (yield* readOptional(basePath(root))) ?? ASSISTANT_INSTRUCTIONS_TEMPLATE;
+      const conflicts =
+        state === "update-available"
+          ? mergeInstructions({ current, base, next: ASSISTANT_INSTRUCTIONS_TEMPLATE }).conflicts
+          : 0;
+      return { state, current, base, next: ASSISTANT_INSTRUCTIONS_TEMPLATE, conflicts };
+    }).pipe(
+      Effect.catch((cause) =>
+        Schema.is(ManagerAssistantError)(cause)
+          ? Effect.fail(cause)
+          : Effect.fail(toAssistantError("Failed to read the instructions.")(cause)),
+      ),
+    );
+
+  const resolveInstructions: ManagerAssistantServiceShape["resolveInstructions"] = (input) =>
+    fileWriteSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const root = yield* workspaceOf(input.projectId);
+        const current = (yield* readOptional(agentsPath(root))) ?? "";
+        const base = (yield* readOptional(basePath(root))) ?? ASSISTANT_INSTRUCTIONS_TEMPLATE;
+        const next = ASSISTANT_INSTRUCTIONS_TEMPLATE;
+        const { profile } = splitAgentsProfile(current);
+        let content = current;
+        if (input.action === "update") {
+          content = mergeInstructions({
+            current,
+            base,
+            next,
+            ...(input.choices !== undefined ? { choices: input.choices } : {}),
+          }).content;
+        } else if (input.action === "replace") {
+          content = joinAgentsProfile(next, profile);
+        }
+        if (content !== current) yield* fs.writeFileString(agentsPath(root), content);
+        // Every answer settles this version: the banner is gone until the next one.
+        yield* writeBase(root, next);
+        const { body } = splitAgentsProfile(content);
+        return {
+          state: sameInstructions(body, next) ? ("current" as const) : ("edited" as const),
+          content,
+        };
+      }).pipe(
+        Effect.catch((cause) =>
+          Schema.is(ManagerAssistantError)(cause)
+            ? Effect.fail(cause)
+            : Effect.fail(toAssistantError("Failed to update the instructions.")(cause)),
+        ),
+      ),
+    );
+
+  /** Start-up: every assistant of this computer gets Uno's newer instructions. */
+  const syncAllInstructions: ManagerAssistantServiceShape["syncAllInstructions"] = () =>
+    Effect.gen(function* () {
+      const snapshot = yield* projectionSnapshotQuery
+        .getShellSnapshot()
+        .pipe(Effect.mapError(toAssistantError("Failed to load projects.")));
+      for (const project of snapshot.projects) {
+        if (!isAssistantProjectId(project.id)) continue;
+        yield* syncInstructions(project.workspaceRoot).pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("assistant instructions sync failed").pipe(
+              Effect.annotateLogs({ projectId: project.id, cause }),
+            ),
+          ),
+        );
+      }
+    });
+
   return {
+    instructionsStatus,
+    resolveInstructions,
+    syncAllInstructions,
     ensureAssistant,
     ensureAssistantChat,
     createConversation,
+    ensureConversation,
+    deleteAssistant,
+    restoreAssistant,
+    listDeletedAssistants,
+    purgeDeletedAssistants,
     createAssistant,
     scanWorkspaceFolders,
     listAssistants,
@@ -956,6 +1690,24 @@ export const AssistantBootstrapLive = Layer.effectDiscard(
         ),
       );
     yield* assistants.scanWorkspaceFolders();
+    // Uno's newer instructions reach every assistant that didn't edit them.
+    yield* assistants
+      .syncAllInstructions()
+      .pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("assistant instructions sync failed").pipe(
+            Effect.annotateLogs({ cause }),
+          ),
+        ),
+      );
+    // Deleted assistants of this computer are kept 7 days, then removed.
+    yield* assistants
+      .purgeDeletedAssistants()
+      .pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("deleted assistants purge failed").pipe(Effect.annotateLogs({ cause })),
+        ),
+      );
     // Legacy single-assistant token label from before per-assistant scoping.
     const tokenRepository = yield* ManagerCapabilityTokenRepository;
     const legacy = yield* tokenRepository.getActiveByLabel("assistant-inapp");

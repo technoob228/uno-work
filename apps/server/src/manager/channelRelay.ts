@@ -44,6 +44,32 @@ export function relayCredential(relayToken: string): string {
   return `${RELAY_CREDENTIAL_PREFIX}${relayToken}`;
 }
 
+/**
+ * Several assistants on one computer, one relay (assistants MVP, 02.10):
+ * the console keeps ONE relay per computer, and minting a new one rotates
+ * the old token away. The first assistant that connects Uno's bot holds the
+ * relay (`unorelay:<token>` in its row); every other assistant of this
+ * computer stores `unoroute:<holder projectId>` instead. A route row is not
+ * a poll source — the holder polls, and the daemon sends each chat to the
+ * assistant it is linked to (a binding `chat → {assistant, projectId}`).
+ */
+export const ROUTE_CREDENTIAL_PREFIX = "unoroute:";
+
+/** The holder's project id inside `unoroute:<projectId>`, or null. */
+export function parseRouteCredential(credential: string): string | null {
+  if (!credential.startsWith(ROUTE_CREDENTIAL_PREFIX)) return null;
+  const holder = credential.slice(ROUTE_CREDENTIAL_PREFIX.length).trim();
+  return holder.length > 0 ? holder : null;
+}
+
+export function isRouteCredential(credential: string): boolean {
+  return parseRouteCredential(credential) !== null;
+}
+
+export function routeCredential(holderProjectId: string): string {
+  return `${ROUTE_CREDENTIAL_PREFIX}${holderProjectId}`;
+}
+
 const TELEGRAM_API_BASE = "https://api.telegram.org";
 
 function telegramRelayBase(baseUrl: string): string {

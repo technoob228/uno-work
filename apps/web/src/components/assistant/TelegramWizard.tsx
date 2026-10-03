@@ -83,7 +83,11 @@ export function TelegramWizard(props: {
   const telegram = summary.telegram;
   const navigate = useNavigate();
   const supportsPairing = useEnvironmentSupportsAssistantConversations(environmentId);
-  const mainChat = useAssistantChat().chat;
+  // The assistant this wizard sets up (several per computer since 0.0.106);
+  // only the computer's default one has the pinned main conversation.
+  const projectId = summary.projectId;
+  const defaultChat = useAssistantChat().chat;
+  const mainChat = projectId === ASSISTANT_PROJECT_ID ? defaultChat : null;
   const [linkingAnother, setLinkingAnother] = useState(false);
   const step = telegramWizardStep(telegram, { linkingAnother });
   const status = describeTelegramStatus(telegram);
@@ -99,8 +103,8 @@ export function TelegramWizard(props: {
   const [linkedCount, setLinkedCount] = useState(telegram.allowedChatIds.length);
 
   const bindings = useQuery({
-    queryKey: ["uno-assistant", "telegram-bindings", environmentId],
-    queryFn: () => listConnectorBindings({ environmentId, projectId: ASSISTANT_PROJECT_ID }),
+    queryKey: ["uno-assistant", "telegram-bindings", environmentId, projectId],
+    queryFn: () => listConnectorBindings({ environmentId, projectId }),
     enabled: step === "done",
     retry: false,
   });
@@ -111,13 +115,13 @@ export function TelegramWizard(props: {
     try {
       const pairing = await startTelegramPairing({
         environmentId,
-        projectId: ASSISTANT_PROJECT_ID,
+        projectId,
       });
       setCode(pairing.code);
     } catch (cause) {
       setError(errorText(cause, "Couldn't make a link."));
     }
-  }, [environmentId, supportsPairing]);
+  }, [environmentId, projectId, supportsPairing]);
   useEffect(() => {
     if (step === "link" && code === null) void requestCode();
   }, [code, requestCode, step]);
@@ -135,7 +139,7 @@ export function TelegramWizard(props: {
     try {
       await saveAssistantTelegram({
         environmentId,
-        projectId: ASSISTANT_PROJECT_ID,
+        projectId,
         ...(input.botToken ? { botToken: input.botToken } : {}),
         allowedChatIds: input.allowedChatIds ?? telegram.allowedChatIds,
         enabled: true,
@@ -174,7 +178,7 @@ export function TelegramWizard(props: {
         environmentId,
         kind: "telegram",
         chatId: id,
-        connectorProjectId: ASSISTANT_PROJECT_ID,
+        connectorProjectId: projectId,
         target: { kind: "thread", threadId: mainChat.id },
       }).catch(() => undefined);
     }
@@ -188,7 +192,7 @@ export function TelegramWizard(props: {
         environmentId,
         kind: "telegram",
         chatId,
-        connectorProjectId: ASSISTANT_PROJECT_ID,
+        connectorProjectId: projectId,
         target: { kind: "thread", threadId: mainChat.id },
       });
       void bindings.refetch();
@@ -203,7 +207,7 @@ export function TelegramWizard(props: {
     try {
       const { results } = await sendTelegramTestMessage({
         environmentId,
-        projectId: ASSISTANT_PROJECT_ID,
+        projectId,
       });
       setTestResult(describeTestResults(results));
     } catch (cause) {
@@ -243,10 +247,19 @@ export function TelegramWizard(props: {
         {step === "bot" ? (
           <div className="flex flex-col gap-2 pl-7 text-sm">
             <p className="text-muted-foreground">
-              A bot that is entirely yours: in Telegram open @BotFather, send{" "}
-              <code className="rounded bg-muted px-1">/newbot</code> and pick any name. It replies
-              with a token.
+              Its own bot: its own name and chat in your Telegram. About a minute:
             </p>
+            <ol
+              className="flex list-decimal flex-col gap-0.5 pl-5 text-muted-foreground"
+              data-testid="uno-telegram-botfather-steps"
+            >
+              <li>Open @BotFather in Telegram.</li>
+              <li>
+                Send <code className="rounded bg-muted px-1">/newbot</code>.
+              </li>
+              <li>Pick a name, then a username ending in “bot”.</li>
+              <li>Copy the token BotFather sends and paste it below.</li>
+            </ol>
             <Button
               size="sm"
               variant="outline"
@@ -259,6 +272,7 @@ export function TelegramWizard(props: {
             <div className="flex flex-wrap gap-2">
               <Input
                 className="min-w-[220px] flex-1 font-mono"
+                type="password"
                 placeholder="123456789:AAE…"
                 value={token}
                 onChange={(event) => {
@@ -289,7 +303,8 @@ export function TelegramWizard(props: {
               </span>
             ) : (
               <span className="text-xs text-muted-foreground">
-                The token stays on this computer.
+                Paste it only here, never in a chat. It stays on this computer; Uno checks it with
+                Telegram first.
               </span>
             )}
           </div>

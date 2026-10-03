@@ -19,6 +19,12 @@
  * The files hold nothing a per-thread process didn't already expose: the same
  * user could read another harness's environment from `/proc/<pid>/environ`.
  *
+ * The same plugin labels each chat's Uno AI gateway calls with the chat's id
+ * (`chat.headers` hook → `X-Uno-Thread`, from the session's
+ * {@link OPENCODE_SESSION_THREAD_ENV}), so the gateway can tell what each chat
+ * cost (assistants MVP: "Chats Ana started"). Only for the Uno gateway
+ * providers; an OpenCode without the hook simply sends no label.
+ *
  * @module opencodeSessionEnv
  */
 import * as fs from "node:fs";
@@ -29,6 +35,15 @@ import { UNO_WORK_MCP_SERVER_NAME, UNO_WORK_MCP_SESSION_ARG } from "../unoWork/c
 
 /** Env var through which the plugin finds the per-session files. */
 export const OPENCODE_SESSION_ENV_DIR_ENV = "UNO_WORK_SESSION_ENV_DIR";
+
+/** The chat's id in its session file (also visible to its shells, like a custom harness's). */
+export const OPENCODE_SESSION_THREAD_ENV = "UNO_WORK_THREAD_ID";
+
+/** Gateway header with the chat's id (fishcode llm/thread_label.go). */
+export const GATEWAY_THREAD_HEADER = "X-Uno-Thread";
+
+/** OpenCode provider ids that talk to the Uno AI gateway (UnoDriver). */
+export const GATEWAY_PROVIDER_IDS: ReadonlyArray<string> = ["uno", "uno-russia"];
 
 /** OpenCode names MCP tools `<server>_<tool>`. */
 const UNO_WORK_TOOL_PREFIX = `${UNO_WORK_MCP_SERVER_NAME}_`;
@@ -113,6 +128,20 @@ export const UnoWorkSessionEnv = async (input) => {
       if (!dir || !sessionID) return;
       const found = await resolveSession(dir, sessionID, undefined);
       if (found) output.args[${JSON.stringify(UNO_WORK_MCP_SESSION_ARG)}] = found.id;
+    },
+    // The chat's id on its Uno AI gateway calls: what each chat cost.
+    "chat.headers": async (hookInput, output) => {
+      const provider = hookInput && hookInput.provider && hookInput.provider.info ? hookInput.provider.info.id : "";
+      if (!${JSON.stringify(GATEWAY_PROVIDER_IDS)}.includes(provider)) return;
+      if (!output || !output.headers || typeof output.headers !== "object") return;
+      const dir = process.env.${OPENCODE_SESSION_ENV_DIR_ENV};
+      const sessionID = typeof hookInput.sessionID === "string" ? hookInput.sessionID : "";
+      if (!dir || !sessionID) return;
+      const found = await resolveSession(dir, sessionID, undefined);
+      const threadId = found && found.env[${JSON.stringify(OPENCODE_SESSION_THREAD_ENV)}];
+      if (typeof threadId === "string" && SAFE_ID.test(threadId)) {
+        output.headers[${JSON.stringify(GATEWAY_THREAD_HEADER)}] = threadId;
+      }
     },
     // Best effort: the stored call input may already carry the tag (a session id, not a secret).
     "tool.execute.after": async (hookInput) => {

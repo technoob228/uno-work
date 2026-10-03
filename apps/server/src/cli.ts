@@ -41,6 +41,11 @@ import {
   type ServerConfigShape,
   type StartupPresentation,
 } from "./config.ts";
+import {
+  nodeAssistantTurnCliDeps,
+  rerunAsDaemonUser,
+  runAssistantTurnCli,
+} from "./assistants/assistantTurnCli.ts";
 import { readBootstrapEnvelope } from "./bootstrap.ts";
 import { renderTerminalQrCode } from "./startupAccess.ts";
 import { expandHomePath, resolveBaseDir } from "./os-jank.ts";
@@ -1171,8 +1176,59 @@ const serveCommand = Command.make("serve", { ...sharedServerCommandFlags }).pipe
   ),
 );
 
+const assistantTurnCommand = Command.make("assistant-turn", {
+  prompt: Flag.string("prompt").pipe(
+    Flag.withDescription("What the assistant should do now (its schedule's instruction)."),
+  ),
+  name: Flag.string("name").pipe(Flag.withDescription("The schedule's name."), Flag.optional),
+  workspace: Flag.string("workspace").pipe(
+    Flag.withDescription("The assistant's folder (default: the one assistant on this computer)."),
+    Flag.optional,
+  ),
+  timeoutSec: Flag.integer("timeout-sec").pipe(
+    Flag.withDescription("How long to wait for the assistant's answer (default 900)."),
+    Flag.optional,
+  ),
+}).pipe(
+  Command.withDescription(
+    "Give the assistant one turn and wait until it is over (used by its schedules).",
+  ),
+  Command.withHandler((flags) =>
+    Effect.gen(function* () {
+      const input = {
+        prompt: flags.prompt,
+        name: Option.getOrUndefined(flags.name),
+        workspace: Option.getOrUndefined(flags.workspace),
+        timeoutSec: Option.getOrUndefined(flags.timeoutSec),
+      };
+      const outcome = yield* Effect.promise(() =>
+        runAssistantTurnCli(input, nodeAssistantTurnCliDeps()),
+      );
+      if (outcome.permissionDenied === true) {
+        const rerun = rerunAsDaemonUser(process.argv);
+        if (rerun !== null) {
+          process.exitCode = rerun;
+          return;
+        }
+      }
+      if (outcome.exitCode === 0) {
+        yield* Console.log(outcome.output);
+      } else {
+        yield* Console.error(outcome.output);
+      }
+      process.exitCode = outcome.exitCode;
+    }),
+  ),
+);
+
 export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription("Run the T3 Code server."),
   Command.withHandler((flags) => runServerCommand(flags)),
-  Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand]),
+  Command.withSubcommands([
+    startCommand,
+    serveCommand,
+    authCommand,
+    projectCommand,
+    assistantTurnCommand,
+  ]),
 );

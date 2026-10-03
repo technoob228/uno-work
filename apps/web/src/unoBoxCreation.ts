@@ -186,6 +186,9 @@ const ADDRESS_NOT_READY_CONNECT_BUDGET_MS = 30_000;
 export interface CreateUnoBoxInput {
   readonly name: string;
   readonly preset: UnoBoxSizePreset;
+  /** Assistants MVP: the computer is one assistant's home (`computer_role`). */
+  readonly computerRole?: "assistant";
+  readonly assistant?: { readonly name: string; readonly emoji: string; readonly template: string };
   readonly onStatus?: (status: UnoBoxCreateJobStatus) => void;
   readonly onStage?: (stage: UnoBoxCreateStage) => void;
   readonly signal?: AbortSignal;
@@ -219,10 +222,12 @@ export async function createUnoBoxAndConnect(
   input.onStage?.("creating");
   const { jobId } = await api.unoCloud.createBox({
     name,
-    ramMb: size.ramMb,
-    vcpu: size.vcpu,
-    diskGb: size.diskGb,
+    // An assistant's computer: the console picks the shape (contract §1).
+    ...(input.computerRole === "assistant"
+      ? { computerRole: input.computerRole }
+      : { ramMb: size.ramMb, vcpu: size.vcpu, diskGb: size.diskGb }),
     purpose: "work",
+    ...(input.assistant ? { assistant: input.assistant } : {}),
   });
 
   const status = await waitForUnoBoxCreateJob(

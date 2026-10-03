@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "@effect/vitest";
 import {
   ASSISTANT_PROJECT_ID,
   DEFAULT_CONNECTOR_ADDRESSING,
+  ProjectId,
   ManagerSlackConnectorConfig,
   ManagerTelegramConnectorConfig,
   ManagerTelegramConnectorStatus,
@@ -15,6 +16,7 @@ import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSna
 import { ManagerConnectorBindingRepositoryLive } from "../persistence/Layers/ManagerConnectorBindings.ts";
 import { ManagerConnectorRepositoryLive } from "../persistence/Layers/ManagerConnectors.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import { ManagerConnectorBindingRepository } from "../persistence/Services/ManagerConnectorBindings.ts";
 import { ManagerConnectorRepository } from "../persistence/Services/ManagerConnectors.ts";
 import { ProjectionPendingApprovalRepository } from "../persistence/Services/ProjectionPendingApprovals.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
@@ -26,8 +28,12 @@ import {
   afterTelegramConfigSaved,
   connectSharedTelegram,
   readSlackInstall,
+  assignSlackChannelsFor,
+  routeSlackThroughHolder,
+  slackRelayHolderFor,
   startSlackInstall,
   uninstallSlack,
+  verifyTelegramBotToken,
 } from "./channelSetup.ts";
 import { readWorkMachineIdentity, type WorkMachineIdentity } from "./workConsole.ts";
 
@@ -372,6 +378,189 @@ it.layer(NodeServices.layer)("Telegram via Uno's shared bot", (it) => {
   );
 });
 
+/**
+ * Two assistants on one computer, Uno's shared bot (assistants MVP, 02.10):
+ * the default assistant holds the relay, Ana routes through it.
+ */
+const ana = ProjectId.make("assistant-ana");
+/** A Telegram update: the person writes in their private chat (id 777). */
+const privateMessage = (text: string, id: number) => ({
+  update_id: id,
+  message: {
+    message_id: id,
+    chat: { id: 777, type: "private" },
+    from: { id: 777, is_bot: false },
+    text,
+  },
+});
+
+const routedDispatched: Array<{ readonly type: string; readonly projectId?: string }> = [];
+const routedTelegramLayer = ManagerTelegramServiceLive.pipe(
+  Layer.provideMerge(repositories),
+  Layer.provide(
+    Layer.mergeAll(
+      Layer.mock(OrchestrationEngineService)({
+        readEvents: () => Stream.empty,
+        streamDomainEvents: Stream.empty,
+        dispatch: (command) =>
+          Effect.sync(() => {
+            routedDispatched.push({
+              type: command.type,
+              ...("projectId" in command ? { projectId: command.projectId } : {}),
+            });
+            return { sequence: routedDispatched.length };
+          }),
+      }),
+      Layer.mock(ProjectionSnapshotQuery)({
+        getShellSnapshot: () =>
+          Effect.succeed({
+            snapshotSequence: 1,
+            projects: [],
+            threads: [],
+            updatedAt: "2026-10-02T00:00:00.000Z",
+          }),
+        getThreadShellById: () => Effect.succeed(Option.none()),
+        getThreadDetailById: () => Effect.succeed(Option.none()),
+        getProjectShellById: (id) =>
+          Effect.succeed(
+            id === ana
+              ? Option.some({
+                  id: ana,
+                  title: "Ana",
+                  workspaceRoot: "/tmp/Ana",
+                  defaultModelSelection: null,
+                  scripts: [],
+                  createdAt: "2026-10-02T00:00:00.000Z",
+                  updatedAt: "2026-10-02T00:00:00.000Z",
+                })
+              : Option.none(),
+          ),
+      }),
+      Layer.mock(ProjectionPendingApprovalRepository)({
+        listByThreadId: () => Effect.succeed([]),
+      }),
+      ServerSettingsService.layerTest({}),
+      ServerConfig.layerTest(process.cwd(), { prefix: "uno-channel-routed-test-" }),
+    ),
+  ),
+);
+
+// Live clock: the connector's real poller has to run.
+it.live("routes the second assistant through the holder's relay and links its chat by code", () =>
+  Effect.gen(function* () {
+    yield* saveTelegramRow({
+      botToken: `unorelay:${TGR}`,
+      allowedChatIds: ["111"],
+      enabled: true,
+    });
+    const queued: Array<unknown> = [];
+    const calls = installFetch([
+      route("POST", `/bot${TGR}/unoRegisterStartCode`, () => json({ ok: true, result: true })),
+      route("POST", `/bot${TGR}/sendMessage`, () => json({ ok: true, result: { message_id: 1 } })),
+      (request) => {
+        if (queued.length === 0 || !request.url.includes(`/bot${TGR}/getUpdates`)) {
+          return undefined;
+        }
+        return json({ ok: true, result: [queued.shift()] });
+      },
+    ]);
+
+    const outcome = yield* connectSharedTelegram({ projectId: ana, identity });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const linkCode = outcome.value.code;
+    // No second relay: minting would rotate the holder's token away.
+    expect(calls.some((call) => call.url.endsWith("/work/telegram/relay"))).toBe(false);
+    const register = calls.find((call) => call.url.endsWith("/unoRegisterStartCode"));
+    expect(register?.url).toBe(
+      `${CONSOLE}/api/v1/work-relay/telegram/bot${TGR}/unoRegisterStartCode`,
+    );
+    const repository = yield* ManagerConnectorRepository;
+    const anaRow = yield* repository.get({ projectId: ana, kind: "telegram" });
+    expect(
+      Option.isSome(anaRow) &&
+        Schema.decodeUnknownSync(ManagerTelegramConnectorConfig)(anaRow.value.config),
+    ).toMatchObject({ botToken: `unoroute:${projectId}`, enabled: true, allowedChatIds: [] });
+    // The holder's own row is untouched.
+    expect(yield* readTelegramRow).toMatchObject({
+      botToken: `unorelay:${TGR}`,
+      allowedChatIds: ["111"],
+    });
+
+    // The person presses Start: the holder's poller sees the code.
+    queued.push(privateMessage(`/start ${linkCode}`, 9001));
+    const bindings = yield* ManagerConnectorBindingRepository;
+    let linked = Option.none<{ readonly connectorProjectId: string; readonly target: unknown }>();
+    for (let attempt = 0; attempt < 60 && Option.isNone(linked); attempt += 1) {
+      yield* Effect.sleep("100 millis");
+      linked = yield* bindings.get({ kind: "telegram", chatId: "777" });
+    }
+    expect(Option.getOrNull(linked)).toMatchObject({
+      connectorProjectId: projectId,
+      target: { kind: "assistant", projectId: ana },
+    });
+    const anaAfter = yield* repository.get({ projectId: ana, kind: "telegram" });
+    expect(
+      Option.isSome(anaAfter) &&
+        Schema.decodeUnknownSync(ManagerTelegramConnectorConfig)(anaAfter.value.config),
+    ).toMatchObject({ allowedChatIds: ["777"], ownerUserIds: ["777"] });
+    const reply = calls.find((call) => call.url.endsWith(`/bot${TGR}/sendMessage`));
+    expect(JSON.stringify(reply?.body)).toContain("talks to Ana");
+
+    // The next message from that chat lands in Ana's workspace.
+    queued.push(privateMessage("hello Ana", 9002));
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      if (routedDispatched.some((command) => command.type === "thread.turn.start")) break;
+      yield* Effect.sleep("100 millis");
+    }
+    expect(routedDispatched.find((command) => command.type === "thread.create")).toEqual({
+      type: "thread.create",
+      projectId: ana,
+    });
+
+    // Ana's pushes (reminders, schedules) go through the holder's bot.
+    const telegram = yield* ManagerTelegramService;
+    const pushed = yield* telegram.sendText({ projectId: ana, chatId: "777", text: "hi" });
+    expect(pushed).toBe(true);
+  }).pipe(Effect.provide(routedTelegramLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
+);
+
+it.layer(NodeServices.layer)("Two assistants on one computer, one shared bot", (it) => {
+  it.effect("one Uno Slack app: a second assistant routes through it, channels are split", () =>
+    Effect.gen(function* () {
+      const repository = yield* ManagerConnectorRepository;
+      yield* repository.upsert({
+        projectId,
+        kind: "slack",
+        config: {
+          botToken: `unorelay:${SLR}`,
+          appToken: "unorelay",
+          allowedChannelIds: ["DINSTALLER", "CGENERAL", "CSALES"],
+          enabled: true,
+        },
+        updatedAt: new Date().toISOString(),
+      });
+      // The holder itself would re-mint; Ana writes through the holder.
+      expect(yield* slackRelayHolderFor(projectId)).toBeNull();
+      expect(yield* slackRelayHolderFor(ana)).toBe(projectId);
+      yield* routeSlackThroughHolder({ projectId: ana, holder: projectId });
+      const anaRow = yield* repository.get({ projectId: ana, kind: "slack" });
+      expect(
+        Option.isSome(anaRow) &&
+          Schema.decodeUnknownSync(ManagerSlackConnectorConfig)(anaRow.value.config),
+      ).toMatchObject({ botToken: `unoroute:${projectId}`, allowedChannelIds: [], enabled: true });
+      // "Channels Ana answers in": #sales moves to Ana; the installer DM stays.
+      expect(yield* assignSlackChannelsFor({ projectId: ana, channelIds: ["CSALES"] })).toEqual([
+        "CSALES",
+      ]);
+      expect(yield* readSlackRow).toMatchObject({
+        botToken: `unorelay:${SLR}`,
+        allowedChannelIds: ["DINSTALLER", "CGENERAL"],
+      });
+    }).pipe(Effect.provide(repositories)),
+  );
+});
+
 it.layer(NodeServices.layer)("Slack via Uno's app", (it) => {
   it.effect("returns the authorize URL, or available:false when the console has no app", () =>
     Effect.gen(function* () {
@@ -592,3 +781,27 @@ it.layer(NodeServices.layer)("Slack via Uno's app", (it) => {
     }).pipe(Effect.provide(slackLayer(false))),
   );
 });
+
+const fetchOk = async () => Response.json({ ok: true, result: { username: "ana_helper_bot" } });
+const fetchRejected = async () =>
+  Response.json({ ok: false, error_code: 401, description: "Unauthorized" }, { status: 401 });
+const fetchDown = async () => {
+  throw new TypeError("fetch failed");
+};
+
+it.effect("checks an own bot token with getMe before it is kept", () =>
+  Effect.gen(function* () {
+    expect(yield* verifyTelegramBotToken("123:good", fetchOk)).toEqual({
+      ok: true,
+      username: "ana_helper_bot",
+    });
+    expect(yield* verifyTelegramBotToken("123:bad", fetchRejected)).toMatchObject({
+      ok: false,
+      rejected: true,
+    });
+    expect(yield* verifyTelegramBotToken("123:any", fetchDown)).toMatchObject({
+      ok: false,
+      rejected: false,
+    });
+  }),
+);

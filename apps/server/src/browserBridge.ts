@@ -36,6 +36,8 @@ export const BROWSER_BRIDGE_TOKEN_ENV = "UNO_WORK_BRIDGE_TOKEN";
 export const BROWSER_BRIDGE_OPEN_PATH = "/api/browser/open";
 export const BROWSER_BRIDGE_COMMAND_PATH = "/api/browser/command";
 export const BROWSER_BRIDGE_COMMAND_RESULT_PATH = "/api/browser/command/result";
+/** `browser_command {login}`: the daemon signs in from the vault (assistants/browserLogin.ts). */
+export const BROWSER_BRIDGE_LOGIN_PATH = "/api/browser/login";
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 const MAX_COMMAND_TIMEOUT_MS = 120_000;

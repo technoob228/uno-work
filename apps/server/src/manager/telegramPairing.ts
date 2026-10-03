@@ -69,6 +69,16 @@ export function telegramLinkedReply(input: { readonly toMainConversation: boolea
 }
 
 /**
+ * The reply when the chat was linked to another assistant of this computer
+ * that talks through the same bot (Uno's shared bot): the chat now talks to
+ * it, and `/assistant` switches.
+ */
+export function telegramRoutedLinkedReply(input: { readonly name: string | null }): string {
+  const name = input.name?.trim() || "your assistant";
+  return `Connected. This chat now talks to ${name}. Several assistants of your computer share this bot: send /assistant <name> to talk to another one.`;
+}
+
+/**
  * What the bot says to a private chat that is not linked (a stranger, or the
  * owner before linking): how to link, plus the chat id for the manual path.
  */
