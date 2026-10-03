@@ -5,6 +5,7 @@
  * legacy sidebar, lifted into a hook for the chat-list sidebar.
  */
 import type { EnvironmentId } from "@t3tools/contracts";
+import { personMachineName } from "@t3tools/shared/machineName";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import {
@@ -25,7 +26,12 @@ export function useSidebarEnvironmentLabelResolver(): (
     (environmentId: EnvironmentId): string | null => {
       const runtime = savedEnvironmentRuntimeById[environmentId];
       const saved = savedEnvironmentRegistry[environmentId];
-      return machineLabels.get(environmentId) ?? runtime?.descriptor?.label ?? saved?.label ?? null;
+      // Never an image's service name (`img-208-warm`): see machineName.ts.
+      return (
+        personMachineName(machineLabels.get(environmentId)) ??
+        personMachineName(runtime?.descriptor?.label) ??
+        personMachineName(saved?.label)
+      );
     },
     [machineLabels, savedEnvironmentRegistry, savedEnvironmentRuntimeById],
   );

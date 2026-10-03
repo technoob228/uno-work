@@ -29,6 +29,18 @@ describe("resolveServerEnvironmentLabel", () => {
     }),
   );
 
+  it.effect("never names a computer by its image's warm-VM hostname (img-208-warm)", () =>
+    Effect.gen(function* () {
+      const result = yield* resolveServerEnvironmentLabel({
+        cwdBaseName: "unowork",
+        platform: "win32",
+        hostname: "img-208-warm",
+      }).pipe(Effect.provide(NoopFileSystemLayer));
+
+      expect(result).toBe("Uno computer");
+    }),
+  );
+
   it.effect("prefers the macOS ComputerName", () =>
     Effect.gen(function* () {
       mockedRunProcess.mockResolvedValueOnce({

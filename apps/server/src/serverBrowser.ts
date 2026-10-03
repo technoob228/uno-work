@@ -21,6 +21,7 @@ import type {
   BrowserLiveState,
 } from "@t3tools/contracts";
 import { BROWSER_LIVE_SETUP_PAGE_ID, BrowserLiveError } from "@t3tools/contracts";
+import { personMachineName } from "@t3tools/shared/machineName";
 import {
   buildClickSelectorScript,
   buildClickTextScript,
@@ -451,7 +452,10 @@ const IGNORED_KEYS = new Set(["Unidentified", "Dead", "Process", "Compose"]);
 export const makeServerBrowser = Effect.gen(function* () {
   const config = yield* ServerConfig;
   const profileDir = join(config.stateDir, "browser-profile");
-  const machine = hostname();
+  // Read on every snapshot, not once: a computer restored from its image's
+  // memory snapshot starts with the image's hostname (`img-208-warm`) and
+  // gets its own a moment later. A service name never reaches the person.
+  const machineName = () => personMachineName(hostname()) ?? "this computer";
 
   // Ленивый запуск под мьютексом. Не Effect.cached: он навсегда мемоизировал
   // бы неудачный запуск, а нужен ретрай на следующей команде.
@@ -528,7 +532,7 @@ export const makeServerBrowser = Effect.gen(function* () {
   const snapshot = (): BrowserLiveState => ({
     agentsBrowseHere,
     location: {
-      machine,
+      machine: machineName(),
       publicIp: exit?.ip ?? null,
       display: displayMode,
       running: pagesById.size > 0,

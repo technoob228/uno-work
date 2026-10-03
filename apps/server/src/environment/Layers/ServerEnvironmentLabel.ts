@@ -2,7 +2,12 @@ import * as OS from "node:os";
 
 import { Effect, FileSystem } from "effect";
 
+import { isServiceMachineName } from "@t3tools/shared/machineName";
+
 import { runProcess } from "../../processRunner.ts";
+
+/** What a computer is called until it has its own name. */
+export const UNNAMED_UNO_COMPUTER_LABEL = "Uno computer";
 
 interface ResolveServerEnvironmentLabelInput {
   readonly cwdBaseName: string;
@@ -93,13 +98,15 @@ export const resolveServerEnvironmentLabel = Effect.fn("resolveServerEnvironment
 ) {
   const platform = input.platform ?? process.platform;
   const friendlyHostLabel = yield* resolveFriendlyHostLabel(platform);
-  if (friendlyHostLabel) {
+  if (friendlyHostLabel && !isServiceMachineName(friendlyHostLabel)) {
     return friendlyHostLabel;
   }
 
   const hostname = normalizeLabel(input.hostname ?? OS.hostname());
   if (hostname) {
-    return hostname;
+    // A computer just restored from its image's snapshot still carries the
+    // image's hostname (`img-208-warm`) for a moment: never show that.
+    return isServiceMachineName(hostname) ? UNNAMED_UNO_COMPUTER_LABEL : hostname;
   }
 
   return normalizeLabel(input.cwdBaseName) ?? "T3 environment";

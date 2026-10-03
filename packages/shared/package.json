@@ -56,6 +56,10 @@
       "types": "./src/toolActivity.ts",
       "import": "./src/toolActivity.ts"
     },
+    "./machineName": {
+      "types": "./src/machineName.ts",
+      "import": "./src/machineName.ts"
+    },
     "./toolResultPresentation": {
       "types": "./src/toolResultPresentation.ts",
       "import": "./src/toolResultPresentation.ts"

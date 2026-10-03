@@ -18,6 +18,7 @@ import type {
   EnvironmentId,
 } from "@t3tools/contracts";
 import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
+import { personMachineName } from "@t3tools/shared/machineName";
 import { useQuery } from "@tanstack/react-query";
 
 import { readEnvironmentApi } from "../../environmentApi";
@@ -26,6 +27,7 @@ import { readLocalApi } from "../../localApi";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
+import { useSidebarEnvironmentLabelResolver } from "../sidebar/useSidebarMachineIdentities";
 import { matchCredentialsForOrigin } from "./BrowserPane";
 import { LiveBrowserOpenOutside } from "./LiveBrowserOpenOutside";
 import { useBrowserLivePage, useBrowserLiveState } from "./browserLiveStore";
@@ -155,6 +157,14 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
   );
 }
 
+/** "Runs on …": the sidebar's name of the computer, else the daemon's own, never a service name. */
+export function browserMachineName(
+  environmentLabel: string | null | undefined,
+  daemonMachine: string | null | undefined,
+): string {
+  return personMachineName(environmentLabel) ?? personMachineName(daemonMachine) ?? "this computer";
+}
+
 function hostOf(server: string): string {
   try {
     return new URL(server).host;
@@ -207,12 +217,16 @@ function LocationStrip({
   const address = location.publicIp
     ? `IP ${location.publicIp}${location.country ? ` (${location.country})` : ""}`
     : null;
+  // The computer by the name the person knows it by (the one in the sidebar),
+  // never the host or image name the daemon happens to run under.
+  const resolveEnvironmentLabel = useSidebarEnvironmentLabelResolver();
+  const machine = browserMachineName(resolveEnvironmentLabel(environmentId), location.machine);
   return (
     <div className="border-b border-border px-2 py-1 text-[11px] text-muted-foreground">
       <div className="flex items-center gap-1.5">
         <MonitorIcon className="size-3 shrink-0" />
         <span className="min-w-0 flex-1 truncate">
-          Runs on {location.machine}
+          Runs on {machine}
           {address ? ` · ${address}` : ""}
           {location.proxy ? ` · via ${hostOf(location.proxy.server)}` : ""} · keeps working when you
           close Uno Work
