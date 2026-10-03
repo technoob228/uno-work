@@ -135,6 +135,49 @@ export function countMemoryEntries(notes: string): number {
   return items.length > 0 ? items.length : lines.length;
 }
 
+/** One thing Uno remembers: its lines in NOTES.md (`start` … `end`, exclusive). */
+export interface MemoryEntry {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+}
+
+/**
+ * The notes as separate things the person can forget one by one: each list
+ * item with its indented continuation lines, or — in notes without a list —
+ * each non-empty line. Headings are not entries.
+ */
+export function memoryEntries(notes: string): MemoryEntry[] {
+  const lines = notes.split("\n");
+  const isItem = (line: string) => /^\s{0,3}([-*+]|\d+[.)])\s+\S/.test(line);
+  const hasList = lines.some(isItem);
+  const entries: MemoryEntry[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
+    if (hasList && !isItem(line)) continue;
+    let end = i + 1;
+    if (hasList) {
+      while (end < lines.length && /^\s{2,}\S/.test(lines[end]!) && !isItem(lines[end]!)) end += 1;
+    }
+    const text = lines
+      .slice(i, end)
+      .map((part) => part.trim())
+      .join(" ")
+      .replace(/^([-*+]|\d+[.)])\s+/, "");
+    entries.push({ start: i, end, text });
+    i = end - 1;
+  }
+  return entries;
+}
+
+/** The notes without one entry ("Forget this"); everything else stays as written. */
+export function forgetMemoryEntry(notes: string, entry: MemoryEntry): string {
+  const lines = notes.split("\n");
+  return [...lines.slice(0, entry.start), ...lines.slice(entry.end)].join("\n");
+}
+
 export const ASSISTANT_VALUE_LINE =
   "Always on. Talks to you in Telegram or Slack, starts and watches other chats for you.";
 

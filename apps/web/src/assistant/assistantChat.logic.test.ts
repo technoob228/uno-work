@@ -207,3 +207,29 @@ describe("the compact header of Uno's chat", () => {
     ).toBe(2);
   });
 });
+
+describe("memory entries", () => {
+  it("lists each remembered thing once, with its continuation, and forgets just that one", async () => {
+    const { memoryEntries, forgetMemoryEntry } = await import("./assistantChat.logic");
+    const notes =
+      "# Assistant notes\n\n- likes short answers\n- shop opens at 9\n  on weekdays only\n- dog is called Rex\n";
+    const entries = memoryEntries(notes);
+    expect(entries.map((entry) => entry.text)).toEqual([
+      "likes short answers",
+      "shop opens at 9 on weekdays only",
+      "dog is called Rex",
+    ]);
+    expect(forgetMemoryEntry(notes, entries[1]!)).toBe(
+      "# Assistant notes\n\n- likes short answers\n- dog is called Rex\n",
+    );
+  });
+
+  it("treats plain lines as entries when the notes have no list, and headings never", async () => {
+    const { memoryEntries } = await import("./assistantChat.logic");
+    expect(memoryEntries("# Notes\nlikes tea\n\nworks nights\n").map((e) => e.text)).toEqual([
+      "likes tea",
+      "works nights",
+    ]);
+    expect(memoryEntries("# Assistant notes\n")).toEqual([]);
+  });
+});
