@@ -15,15 +15,21 @@ export function ComputerChip() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
   const navigate = useNavigate();
+  // The computer Home shows: the one picked in the switcher.
+  const environmentId = activeEnvironmentId ?? primaryEnvironmentId;
   const home = useHomeComputer({
-    // The computer Home shows: the one picked in the switcher.
-    environmentId: activeEnvironmentId ?? primaryEnvironmentId,
+    environmentId,
     boxId: null,
     onOpenLook: (look) => void navigate({ to: "/computer", search: { look } }),
   });
   return (
     <>
-      <ComputerPill computer={home.homeComputer} loading={home.stateQuery.isLoading} fit="chat" />
+      <ComputerPill
+        computer={home.homeComputer}
+        loading={home.stateQuery.isLoading}
+        fit="chat"
+        environmentId={environmentId}
+      />
       {home.dialogs}
     </>
   );

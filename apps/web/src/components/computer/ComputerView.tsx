@@ -68,6 +68,7 @@ import {
 import { ProgramDialog, type ProgramRemoveControls } from "./ProgramDialog";
 import { openAppSignedIn } from "./openSignedIn";
 import { ComputerPill } from "./home/ComputerPill";
+import { useComputerLinkDown } from "./home/useComputerConnection";
 import { useHomeComputer } from "./home/useHomeComputer";
 import { HomeStart, useHomeLayout } from "./home/HomeStart";
 import { ResourcesView } from "./resources/ResourcesView";
@@ -108,6 +109,7 @@ export function ComputerView() {
   /** Only set when the daemon is not an Uno computer and the user picked one. */
   const [pickedBoxId, setPickedBoxId] = useState<number | null>(null);
   const thisMachine = pickedBoxId === null;
+  const linkDown = useComputerLinkDown(environmentId);
 
   const routeSearch = routeApi.useSearch();
   const navigate = useNavigate();
@@ -341,11 +343,18 @@ export function ComputerView() {
     void queryClient.invalidateQueries({ queryKey: computerQueryKeys.all });
   };
 
-  const pill = <ComputerPill computer={homeComputer} loading={stateQuery.isPending} />;
+  const pill = (
+    <ComputerPill
+      computer={homeComputer}
+      loading={stateQuery.isPending}
+      environmentId={environmentId}
+    />
+  );
 
   const notices = (
     <>
-      {stateQuery.isError ? (
+      {/* While the link is down the chip in the header says so — no big notice for a reconnect. */}
+      {stateQuery.isError && !linkDown ? (
         <Notice title="This screen can't reach your computer right now">
           {stateQuery.error instanceof Error ? stateQuery.error.message : null} It will try again by
           itself.
