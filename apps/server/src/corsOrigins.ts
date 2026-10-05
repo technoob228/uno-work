@@ -22,7 +22,11 @@ const UNO_WEB_APP_ORIGINS = new Set(["https://app.uno4.work"]);
 const UNO_WORK_ACCOUNT_HOST = /^[a-z0-9-]{1,63}\.uno4\.work$/;
 
 function isUnoWorkAccountOrigin(parsed: URL): boolean {
-  return parsed.protocol === "https:" && parsed.port === "" && UNO_WORK_ACCOUNT_HOST.test(parsed.hostname);
+  return (
+    parsed.protocol === "https:" &&
+    parsed.port === "" &&
+    UNO_WORK_ACCOUNT_HOST.test(parsed.hostname)
+  );
 }
 
 export function isLoopbackHostname(hostname: string): boolean {

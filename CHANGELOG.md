@@ -8,6 +8,17 @@
 
 ---
 
+## v0.0.109 — 2026-10-05
+
+- Personal assistant lives in the person's own Telegram bot: a "Create your assistant's bot" card (Open @BotFather, three steps, token check), greeting in the person's language; service notifications from the computer go through Uno's bot under "💻 From your Uno computer".
+- Asking for a bot or an assistant: the token is the first step, before any work; a bot token card with Open @BotFather; skipping the token is a grey line, not a bubble.
+- Uno suggests the assistant it already has instead of building a new bot; "Changed N files" folded under an answer, paths with `~`; agent rules for saving context (subagents, ranged reads).
+- Connection status said quietly in the computer chip and menu, no reconnect toasts.
+- Light mode sidebar matches the full app (Uno Work ▾, ✎, chats, account menu).
+- Assistant quiz on Home and in light Uno AI; "Skip for now" carries the brief into the chat.
+- Client side of a per-account Uno Work address (`<label>.uno4.work`), off until the backend flag.
+- Hermes retries 3 times (the Uno AI gateway retries on a fallback model itself).
+
 ## v0.0.28 — 2026-05-23
 
 Веб-поиск в Uno-харнессе, инлайн-редактор в preview-панели, синхронизация
