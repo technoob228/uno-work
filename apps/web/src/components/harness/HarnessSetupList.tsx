@@ -17,7 +17,6 @@ import { getDriverOption } from "../settings/providerDriverMeta";
 import { HarnessSignInDialog } from "./HarnessSignInDialog";
 import { SetupLogDetails } from "./SetupLogDetails";
 import {
-  COMING_SOON_HARNESSES,
   HARNESS_ROW_DRIVERS,
   HARNESS_STATUS_LABEL,
   isAuthableDriver,
@@ -108,11 +107,6 @@ export interface HarnessSetupListProps {
   readonly environmentId?: EnvironmentId | null;
   /** Extra content rendered inside a row (docs links on desktop). */
   readonly renderRowExtra?: (driver: ProviderDriverKind) => ReactNode;
-  /**
-   * Disabled "coming soon" rows appended to the list. Defaults to the shared
-   * roadmap list; shells that already advertise more can pass their own.
-   */
-  readonly comingSoon?: ReadonlyArray<{ readonly label: string; readonly icon?: ReactNode }>;
 }
 
 function lowerFirst(text: string): string {
@@ -123,10 +117,7 @@ export function HarnessSetupList({
   providers,
   environmentId,
   renderRowExtra,
-  comingSoon,
 }: HarnessSetupListProps) {
-  const comingSoonRows: ReadonlyArray<{ readonly label: string; readonly icon?: ReactNode }> =
-    comingSoon ?? COMING_SOON_HARNESSES.map((label) => ({ label }));
   const setup = useHarnessSetup(environmentId ?? null);
   const [signInDriver, setSignInDriver] = useState<ProviderAuthDriver | null>(null);
   const providersLoaded = providers.length > 0;
@@ -239,26 +230,6 @@ export function HarnessSetupList({
           />
         );
       })}
-
-      {comingSoonRows.map((harness) => (
-        <HarnessRowShell
-          key={harness.label}
-          muted
-          icon={
-            harness.icon ?? (
-              <span className="text-[11px] font-semibold text-muted-foreground">
-                {harness.label.slice(0, 2)}
-              </span>
-            )
-          }
-          title={harness.label}
-          right={
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
-              Coming soon
-            </span>
-          }
-        />
-      ))}
 
       {signInDriver ? (
         <HarnessSignInDialog
