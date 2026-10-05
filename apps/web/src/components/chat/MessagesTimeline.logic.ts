@@ -252,3 +252,17 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     }
   }
 }
+
+/** The folded "Changed files" line under an answer: "Changed 1 file" / "Changed 3 files". */
+export function changedFilesSummaryLabel(count: number): string {
+  return `Changed ${count} ${count === 1 ? "file" : "files"}`;
+}
+
+/**
+ * A changed-files path as the person reads it: their home folder is `~`, never
+ * `/home/unowork/…` (the tree's directory names are compacted, so a whole
+ * "home/unowork/projects/bot" can be one node).
+ */
+export function displayChangedFilePath(path: string): string {
+  return path.replace(/^\/?home\/[^/]+(?=\/|$)/u, "~");
+}

@@ -1,5 +1,6 @@
 import { type EnvironmentId, type MessageId, type ThreadId, type TurnId } from "@t3tools/contracts";
 import { cleanUnoFinalAnswerText } from "@t3tools/shared/unoFinalAnswer";
+import { parseUnoWorkNote, type UnoWorkNote } from "@t3tools/shared/secretRequestCopy";
 import {
   createContext,
   memo,
@@ -53,6 +54,7 @@ import {
   computeStableMessagesTimelineRows,
   MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
+  changedFilesSummaryLabel,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
   workingReassurance,
@@ -360,6 +362,10 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
       {row.kind === "message" &&
         row.message.role === "user" &&
         (() => {
+          // A note the computer wrote for the agent (a late secret answer):
+          // one quiet line, not the person's own bubble.
+          const note = parseUnoWorkNote(row.message.text);
+          if (note) return <UnoWorkNoteLine note={note} raw={row.message.text} />;
           const userAttachments = row.message.attachments ?? [];
           const userImages = userAttachments.filter(
             (attachment): attachment is ChatImageAttachment => attachment.type === "image",
@@ -736,6 +742,25 @@ function AssistantChangedFilesSectionInner({
   const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
   const summaryStat = summarizeTurnDiffStats(checkpointFiles);
   const changedFileCountLabel = String(checkpointFiles.length);
+  // Most people never read a file tree: one quiet line they can open; the
+  // full tree right away only in Dev mode (live walkthrough 05.10.2026).
+  const devMode = useDevMode();
+  const [shown, setShown] = useState(devMode);
+
+  if (!shown) {
+    return (
+      <button
+        type="button"
+        data-scroll-anchor-ignore
+        data-testid="changed-files-summary"
+        className="mt-2 inline-flex items-center gap-1 rounded-md text-xs text-muted-foreground hover:text-foreground"
+        onClick={() => setShown(true)}
+      >
+        <ChevronRightIcon className="size-3" />
+        {changedFilesSummaryLabel(checkpointFiles.length)}
+      </button>
+    );
+  }
 
   return (
     <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
@@ -839,6 +864,30 @@ const HandoffSeedBody = memo(function HandoffSeedBody(props: { text: string }) {
           {summary.tail}
         </div>
       ) : null}
+    </div>
+  );
+});
+
+/**
+ * A message Uno Work put into the chat for the agent ("(Uno Work) The person
+ * entered TELEGRAM_BOT_TOKEN — it is saved in /home/…"): the person reads one
+ * centred line in their words; Dev mode shows what the agent got.
+ */
+const UnoWorkNoteLine = memo(function UnoWorkNoteLine(props: { note: UnoWorkNote; raw: string }) {
+  const devMode = useDevMode();
+  return (
+    <div className="flex justify-center px-4" data-testid="uno-work-note">
+      <p
+        className="max-w-[80%] text-center text-xs text-muted-foreground"
+        title={devMode ? props.raw : undefined}
+      >
+        {props.note.text}
+        {devMode ? (
+          <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground/60 wrap-break-word">
+            {props.raw}
+          </span>
+        ) : null}
+      </p>
     </div>
   );
 });
