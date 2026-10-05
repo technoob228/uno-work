@@ -70,16 +70,18 @@ export function AccountSignInCta({ className }: { readonly className?: string })
   return (
     <div className={className}>
       <p className="mb-3 text-sm text-muted-foreground">
-        Your computers live in your Uno account. Open Uno Work at app.uno4.work (or the desktop app)
-        to see, add and switch computers.
+        This address can't reach your Uno account, so your computers, sites, cloud and plan aren't
+        shown here. Sign in at app.uno4.work (or in the desktop app) to see, add and switch
+        computers.
       </p>
       <Button
         size="sm"
         variant="outline"
+        data-testid="uno-sign-in-elsewhere"
         render={<a href={UNO_WORK_URL} target="_blank" rel="noreferrer" />}
       >
         <ExternalLinkIcon className="size-3.5" />
-        Open app.uno4.work
+        Sign in at app.uno4.work
       </Button>
     </div>
   );
