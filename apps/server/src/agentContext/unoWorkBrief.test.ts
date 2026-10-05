@@ -23,9 +23,38 @@ describe("Uno Work environment brief", () => {
     expect(readFileSync(path.join(root, TARGET), "utf8")).toBe(renderBrief(markdown));
   });
 
-  it("stays under ~1.5k tokens", () => {
-    // ~4 characters per token for English prose.
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(1500);
+  it("stays under ~1.6k tokens", () => {
+    // ~4 characters per token for English prose. 1.5k until 05.10.2026; +100
+    // for "Their assistant" (a Plus computer's Uno spent 20 minutes writing a
+    // bot of its own instead of pointing at the built-in assistant).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(1600);
+  });
+
+  it("their assistant: point at the built-in Uno, never build one, no mail passwords", () => {
+    const brief = buildUnoWorkBrief();
+    expect(brief).toMatch(/already has one: \*\*Uno\*\*, the pinned chat/);
+    expect(brief).toMatch(/never build a bot or app/);
+    expect(brief).toContain("`assistant_connect`");
+    expect(brief).toMatch(/never mail or app passwords/);
+  });
+
+  it("a Telegram bot: the token is asked first, before any code", () => {
+    expect(buildUnoWorkBrief()).toMatch(
+      /FIRST, before any code: `request_secret` for its token, `wait: false`/,
+    );
+  });
+
+  it("plans: what keeps a bot or the assistant on is Plus, not Small", () => {
+    const brief = buildUnoWorkBrief();
+    expect(brief).toMatch(/offer Plus \(always on\)/);
+    expect(brief).not.toMatch(/always-on plan \(Small and up\)/);
+  });
+
+  it("task rules: ask early, no raw output, computer notes are not the person", () => {
+    expect(UNO_WORK_TASK_RULES).toMatch(/Ask first for what only the person can give/);
+    expect(UNO_WORK_TASK_RULES).toMatch(/"SELFTEST OK"/);
+    expect(UNO_WORK_TASK_RULES).toMatch(/starts with "\(Uno Work\)" comes from the computer/);
+    expect(UNO_WORK_TASK_RULES).toMatch(/check Uno doesn't already have it/);
   });
 
   it("names every uno-work tool, and only tools that exist", () => {
