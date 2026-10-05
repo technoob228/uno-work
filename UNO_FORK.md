@@ -161,6 +161,7 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 
 ### 10. Прочее
 
+- **Сайдбар web lite = сайдбар D** (`lite/LiteShell.tsx`, 05.10): кнопка аккаунта «Uno Work ▾» + New chat + Hide сверху, ниже чаты Uno AI строками D (`UnoAiSidebarChats`). Всё прочее — в меню аккаунта: Plan & billing, Computers, Sites, Cloud storage, Download Uno Work, Connect your own AI, Uno console, Help, Sign out; «Open Uno Work in the cloud» первым пунктом только у плана с облаком без машины. Групп «My Uno»/«Free with Uno», бейджа «in the browser» и плашки «Get it — from Plus» больше нет. Кнопка аккаунта и иконки шапки общие с полным приложением — `sidebar/SidebarDAccountButton.tsx` (лёгкий модуль без стора/инбокса).
 - `apps/web/src/components/AddEnvModal.tsx`, `SidebarEnvSwitcher.tsx` — кастомные обёртки над свитчером сред (варианты `card` для legacy-сайдбара и `compact` для футера списка чатов).
 - `apps/web/src/index.css` — кастомные стили (Uno-палитра / акценты).
 - `apps/web/src/components/ChatMarkdown.tsx`, `ChatView.browser.tsx` — мелкие правки рендера.

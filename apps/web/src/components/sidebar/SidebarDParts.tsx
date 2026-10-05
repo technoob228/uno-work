@@ -10,11 +10,10 @@
  *   bottom;
  * - Uno's face, used on the rail, the pinned Uno row and chats Uno started.
  */
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ArrowUpRightIcon,
-  ChevronDownIcon,
   CircleHelpIcon,
   CreditCardIcon,
   FolderIcon,
@@ -43,14 +42,18 @@ import { cn, isMacPlatform } from "../../lib/utils";
 import { useGoHome } from "../../navigation/useGoHome";
 import { isWebApp } from "../../webMode";
 import { BellPanel } from "../inbox/InboxBell";
-import { balanceQuery } from "../myuno/myUnoQueries";
-import { openInstallDocs } from "../onboarding/harnessInstallLinks";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuSeparator } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { SidebarHeader, useSidebar } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InboxCountBadge } from "./SidebarInboxRow";
+import {
+  SidebarDAccountTrigger,
+  SidebarDHeaderIcon,
+  openExternal,
+  useAccountWho,
+} from "./SidebarDAccountButton";
 import { accountMenuLines } from "./sidebarD.logic";
 import { sidebarDPanel } from "./sidebarDState";
 import { useSidebarEnvironmentLabelResolver } from "./useSidebarMachineIdentities";
@@ -107,40 +110,6 @@ export function UnoFace({
 const searchShortcut = () =>
   typeof navigator !== "undefined" && isMacPlatform(navigator.platform) ? "⌘K" : "Ctrl+K";
 
-function openExternal(url: string) {
-  if (isWebApp) window.open(url, "_blank", "noopener,noreferrer");
-  else openInstallDocs(url);
-}
-
-function initialsOf(who: string | null): string {
-  if (!who) return "";
-  const name = who.split("@")[0] ?? who;
-  const parts = name.split(/[._\-\s]+/).filter(Boolean);
-  const letters = parts.length >= 2 ? `${parts[0]![0]}${parts[1]![0]}` : name.slice(0, 2);
-  return letters.toUpperCase();
-}
-
-function useAccountWho(): string | null {
-  const hasAccount = accountTransport() !== "none";
-  const balance = useQuery({ ...balanceQuery(), enabled: hasAccount });
-  return balance.data?.email ?? balance.data?.username ?? null;
-}
-
-function Avatar({ who, className }: { who: string | null; className?: string }) {
-  const initials = initialsOf(who);
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "grid size-6 shrink-0 place-items-center rounded-full bg-primary/85 text-[10px] font-semibold text-primary-foreground",
-        className,
-      )}
-    >
-      {initials || "U"}
-    </span>
-  );
-}
-
 /** The account + computer menu: one place for what used to be the footer. */
 export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
   computerName: string;
@@ -170,28 +139,9 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
     if (isMobile) setOpenMobile(false);
     sidebarDPanel.closeNow();
   };
-  const trigger =
-    props.variant === "header" ? (
-      <MenuTrigger
-        className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-1.5 text-left outline-hidden transition-colors hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-row-hover no-drag"
-        data-testid="sidebar-account"
-        aria-label={`${props.computerName}: account and settings`}
-      >
-        <Avatar who={who} />
-        <span className="min-w-0 truncate text-sm font-semibold text-foreground">
-          {props.computerName}
-        </span>
-        <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
-      </MenuTrigger>
-    ) : (
-      <MenuTrigger
-        className="grid size-9 cursor-pointer place-items-center rounded-lg outline-hidden hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-row-hover"
-        data-testid="sidebar-rail-account"
-        aria-label={`${props.computerName}: account and settings`}
-      >
-        <Avatar who={who} className="size-7" />
-      </MenuTrigger>
-    );
+  const trigger = (
+    <SidebarDAccountTrigger label={props.computerName} who={who} variant={props.variant} />
+  );
   return (
     <Menu>
       {trigger}
@@ -287,33 +237,6 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
   );
 });
 
-function HeaderIcon(props: {
-  label: string;
-  hint?: string;
-  onClick: () => void;
-  testId: string;
-  children: ReactNode;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            aria-label={props.label}
-            onClick={props.onClick}
-            data-testid={props.testId}
-            className="no-drag inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-hidden transition-colors hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-4"
-          />
-        }
-      >
-        {props.children}
-      </TooltipTrigger>
-      <TooltipPopup side="bottom">{props.hint ?? props.label}</TooltipPopup>
-    </Tooltip>
-  );
-}
-
 /** Account and computer on top, Search ⌘K and New chat as icons. No footer. */
 export const SidebarDHeader = memo(function SidebarDHeader(props: { isElectron: boolean }) {
   const computerName = useSidebarDComputerName();
@@ -323,26 +246,26 @@ export const SidebarDHeader = memo(function SidebarDHeader(props: { isElectron: 
   const row = (
     <>
       <SidebarDAccountMenu computerName={computerName} variant="header" />
-      <HeaderIcon
+      <SidebarDHeaderIcon
         label="Search"
         hint={`Search commands, projects and chats · ${searchShortcut()}`}
         onClick={() => openPalette(true)}
         testId="sidebar-search"
       >
         <SearchIcon />
-      </HeaderIcon>
-      <HeaderIcon label="New chat" onClick={goHome} testId="sidebar-header-new-chat">
+      </SidebarDHeaderIcon>
+      <SidebarDHeaderIcon label="New chat" onClick={goHome} testId="sidebar-header-new-chat">
         <SquarePenIcon />
-      </HeaderIcon>
+      </SidebarDHeaderIcon>
       {isMobile ? null : (
-        <HeaderIcon
+        <SidebarDHeaderIcon
           label="Collapse sidebar"
           hint="Collapse to icons · ⌘B"
           onClick={() => setOpen(false)}
           testId="sidebar-collapse"
         >
           <PanelLeftCloseIcon />
-        </HeaderIcon>
+        </SidebarDHeaderIcon>
       )}
     </>
   );

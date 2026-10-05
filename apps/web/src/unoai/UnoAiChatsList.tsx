@@ -1,19 +1,14 @@
 /**
  * The Uno AI chats (server-side — the same list as the console's /ask): in
- * lite's sidebar, and as a card on Home of the full app ("one history").
+ * lite's sidebar (sidebar D rows), and as a card on Home of the full app ("one history").
  */
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearch } from "@tanstack/react-router";
 import { MessageSquareIcon, PlusIcon, SparklesIcon } from "lucide-react";
 
-import {
-  SidebarGroup,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  useSidebar,
-} from "../components/ui/sidebar";
+import { Button } from "../components/ui/button";
+import { useSidebar } from "../components/ui/sidebar";
+import { cn } from "../lib/utils";
 import { sidebarDPanel } from "../components/sidebar/sidebarDState";
 import { listAiChats, unoAiAvailable, type AiChatSummary } from "./unoAiApi";
 import { chatTitle } from "./unoAiModel";
@@ -38,7 +33,6 @@ function ago(iso: string, now = Date.now()): string {
   return `${Math.round(h / 24)} d`;
 }
 
-/** Lite sidebar: "Uno" — a new chat and the recent chats. */
 /**
  * A chat was picked: on a phone the sidebar is a full-screen sheet over the
  * chat, so it has to go; the collapsed rail's slide-out panel hides too.
@@ -51,40 +45,61 @@ function useCloseSidebarOnPick(): () => void {
   };
 }
 
-export function UnoAiSidebarGroup({ active }: { active: boolean }) {
+/**
+ * Lite sidebar: the Uno AI chats as sidebar D lists chats — plain 32 px rows,
+ * the open one highlighted. New chat is the icon in the header, as in the full
+ * app; with no chats yet, one quiet "New chat" button (also as there).
+ */
+export function UnoAiSidebarChats({ active }: { active: boolean }) {
   const chats = useQuery(aiChatsQuery());
   const search = useSearch({ strict: false }) as { chat?: string };
   const closeOnPick = useCloseSidebarOnPick();
-  const list = (chats.data?.chats ?? []).slice(0, 12);
+  const list = (chats.data?.chats ?? []).slice(0, 30);
+  if (chats.isPending && chats.fetchStatus !== "idle") return null;
+  if (list.length === 0) {
+    return (
+      <div
+        className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60"
+        data-testid="lite-chats-empty"
+      >
+        <span>No chats yet</span>
+        <Button
+          size="xs"
+          variant="outline"
+          render={<Link to="/ai" search={{}} onClick={closeOnPick} />}
+        >
+          <PlusIcon className="-mx-0.5 size-3" />
+          New chat
+        </Button>
+      </div>
+    );
+  }
   return (
-    <SidebarGroup>
-      <SidebarGroupLabel>Uno</SidebarGroupLabel>
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            isActive={active && !search.chat}
-            render={
-              <Link to="/ai" search={{}} data-testid="lite-nav-uno-new" onClick={closeOnPick} />
-            }
-          >
-            <PlusIcon />
-            <span>New chat</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-        {list.map((c) => (
-          <SidebarMenuItem key={c.id}>
-            <SidebarMenuButton
-              isActive={active && search.chat === c.id}
-              render={<Link to="/ai" search={{ chat: c.id }} onClick={closeOnPick} />}
+    <ul role="list" className="flex flex-col gap-px" data-testid="lite-chats">
+      {list.map((c) => {
+        const current = active && search.chat === c.id;
+        return (
+          <li key={c.id} className="list-none">
+            <Link
+              to="/ai"
+              search={{ chat: c.id }}
+              onClick={closeOnPick}
               title={chatTitle(c.title)}
+              aria-current={current ? "page" : undefined}
+              data-testid="lite-chat-row"
+              className={cn(
+                "flex h-8 w-full min-w-0 items-center rounded-md pr-1.5 pl-2.5 text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                current
+                  ? "bg-sidebar-row-active text-foreground"
+                  : "text-sidebar-foreground/90 hover:bg-sidebar-row-hover",
+              )}
             >
-              <MessageSquareIcon />
-              <span className="truncate">{chatTitle(c.title)}</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        ))}
-      </SidebarMenu>
-    </SidebarGroup>
+              <span className="min-w-0 flex-1 truncate">{chatTitle(c.title)}</span>
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
