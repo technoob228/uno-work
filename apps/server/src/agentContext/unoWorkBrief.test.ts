@@ -23,11 +23,22 @@ describe("Uno Work environment brief", () => {
     expect(readFileSync(path.join(root, TARGET), "utf8")).toBe(renderBrief(markdown));
   });
 
-  it("stays under ~1.6k tokens", () => {
+  it("stays under ~1.7k tokens", () => {
     // ~4 characters per token for English prose. 1.5k until 05.10.2026; +100
     // for "Their assistant" (a Plus computer's Uno spent 20 minutes writing a
-    // bot of its own instead of pointing at the built-in assistant).
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(1600);
+    // bot of its own instead of pointing at the built-in assistant); +100
+    // for "token first" (model bench 05.10: no model asked for the token
+    // first, because the brief opened with "computer_status first").
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(1700);
+  });
+
+  it("a Telegram bot or an assistant: the token is asked before looking at the machine", () => {
+    const brief = buildUnoWorkBrief();
+    expect(brief).toMatch(
+      /Exception: a Telegram bot or a personal assistant needs a token from the person, so ask for it FIRST/,
+    );
+    expect(brief).toMatch(/FIRST, before looking at the machine, `assistant_connect`/);
+    expect(brief).toMatch(/A bot for their customers is not this/);
   });
 
   it("their assistant: point at the built-in Uno, never build one, no mail passwords", () => {
