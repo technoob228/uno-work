@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { parseAccountPlan, parsePlanCatalog, parseSubscription } from "../account/accountOverview";
+import {
+  CONSOLE_URL,
+  checkoutHref,
+  consoleLinks,
+  parseAccountPlan,
+  parsePlanCatalog,
+  parseSubscription,
+} from "../account/accountOverview";
 import {
   LITE_AI_PATH,
   cheapestCloudPlan,
@@ -9,6 +16,7 @@ import {
   liteLadder,
   liteRedirectHref,
   liteRedirectPath,
+  liteLinks,
   liteStanding,
 } from "./webLite";
 
@@ -142,5 +150,22 @@ describe("liteEmptyComputersCopy", () => {
   });
   it("keeps the usual copy when the plan has Uno Work in the cloud", () => {
     expect(liteEmptyComputersCopy(subscribed(plan("plus", "plus", "Plus", 20, 8, 4)))).toBeNull();
+  });
+});
+
+describe("checkoutHref", () => {
+  it("builds one buy-plan link shape that opens Checkout", () => {
+    expect(checkoutHref("plus")).toBe(`${CONSOLE_URL}/billing?tab=plan&plan=plus&checkout=1`);
+    expect(checkoutHref("plus-ai")).toBe(`${CONSOLE_URL}/billing?tab=plan&plan=plus-ai&checkout=1`);
+  });
+
+  it("encodes the slug and is the only shape used by the other links", () => {
+    expect(checkoutHref("a b")).toContain("plan=a%20b&checkout=1");
+    expect(liteLinks.plus).toBe(checkoutHref("plus"));
+    expect(consoleLinks.plan("small")).toBe(checkoutHref("small"));
+  });
+
+  it("points at the current console host", () => {
+    expect(CONSOLE_URL).toBe("https://console.uno.place");
   });
 });

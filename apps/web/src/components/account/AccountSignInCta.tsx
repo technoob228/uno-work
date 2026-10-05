@@ -11,7 +11,7 @@ import { UNO_WORK_URL, accountTransport } from "../../account/unoAccount";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 
-const CONSOLE_WORK_URL = "https://console.uno4.dev/work";
+const CONSOLE_WORK_URL = "https://console.uno.place/work";
 
 export function AccountSignInCta({ className }: { readonly className?: string }) {
   const queryClient = useQueryClient();

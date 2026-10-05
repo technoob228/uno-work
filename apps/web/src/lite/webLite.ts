@@ -14,7 +14,7 @@
  * tested.
  */
 import type { AccountPlan, AccountSubscription, PlanCatalog } from "../account/accountOverview";
-import { CONSOLE_URL } from "../account/accountOverview";
+import { CONSOLE_URL, checkoutHref } from "../account/accountOverview";
 import { planHasUnoAi } from "../account/aiHours";
 
 /** True in the lite build only (VITE_UNO_WORK_LITE=1 / `vite build --mode lite`). */
@@ -49,7 +49,7 @@ export function liteRedirectHref(pathname: string, search: string): string | nul
 
 export const liteLinks = {
   /** Upgrade to Plus in the console (it opens the plan step with Plus picked). */
-  plus: `${CONSOLE_URL}/billing?tab=plan&plan=plus`,
+  plus: checkoutHref("plus"),
   download: "https://uno4.work/download/",
   connectAi: `${CONSOLE_URL}/start?path=agent`,
   publishSite: `${CONSOLE_URL}/sites`,

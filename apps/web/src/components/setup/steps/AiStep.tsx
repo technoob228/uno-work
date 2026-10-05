@@ -75,7 +75,7 @@ const AI_ROWS: ReadonlyArray<AiRow> = [
 ];
 
 /** Console → Settings, where the account's default AI (`default_ai`) is changed. */
-export const CONSOLE_SETTINGS_URL = "https://console.uno4.dev/settings";
+export const CONSOLE_SETTINGS_URL = "https://console.uno.place/settings";
 
 /** Account `default_ai` (GET /auth/me) → the harness it means here. */
 export function aiFromAccountDefault(

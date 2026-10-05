@@ -31,7 +31,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { CONSOLE_URL } from "../account/accountOverview";
+import { CONSOLE_URL, checkoutHref } from "../account/accountOverview";
 import { formatAiMinutes } from "../account/aiHours";
 import { isElectron } from "../env";
 import { isWebLite } from "../lite/flag";
@@ -905,13 +905,7 @@ function ComputerOffer({ reason, chatId }: { reason: string; chatId: string }) {
           <Button
             size="sm"
             variant="outline"
-            render={
-              <a
-                href={`${CONSOLE_URL}/billing?tab=plan&plan=plus`}
-                target="_blank"
-                rel="noreferrer"
-              />
-            }
+            render={<a href={checkoutHref("plus")} target="_blank" rel="noreferrer" />}
           >
             {copy.upgradeLabel}
             <ExternalLinkIcon />

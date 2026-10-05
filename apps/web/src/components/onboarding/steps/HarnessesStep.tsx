@@ -7,11 +7,9 @@ import { useServerProviders } from "~/rpc/serverState";
 import { useDesktopUnoCodeInstallState } from "~/lib/desktopUnoCodeReactQuery";
 import { plainExplanation } from "../../../plainLanguage";
 import { Explain } from "../../Explain";
-import { Gemini, GithubCopilotIcon } from "../../Icons";
 import { Button } from "../../ui/button";
 import { toastManager } from "../../ui/toast";
 import { HarnessSetupList } from "../../harness/HarnessSetupList";
-import { COMING_SOON_HARNESSES } from "../../harness/harnessSetupState";
 import { HARNESS_INSTALL_LINKS, openInstallDocs } from "../harnessInstallLinks";
 import { StepEyebrow, StepLead, StepTitle } from "./stepShared";
 
@@ -63,11 +61,6 @@ export function HarnessesStep() {
       <div className="mt-6 max-w-2xl">
         <HarnessSetupList
           providers={providers}
-          comingSoon={[
-            ...COMING_SOON_HARNESSES.map((label) => ({ label })),
-            { label: "Gemini CLI", icon: <Gemini className="size-5" /> },
-            { label: "GitHub Copilot CLI", icon: <GithubCopilotIcon className="size-5" /> },
-          ]}
           renderRowExtra={(driver) => {
             // Uno Code is bundled: the desktop shell installs it, so the row
             // offers a retry rather than the generic Install button.

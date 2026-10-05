@@ -64,7 +64,7 @@ describe("My Uno: open a computer in the console", () => {
       .getByRole("button", { name: "Open shop-db in the console" })
       .click({ force: true });
     expect(opened).toHaveBeenCalledWith(
-      "https://console.uno4.dev/boxes/77",
+      "https://console.uno.place/boxes/77",
       "_blank",
       "noopener,noreferrer",
     );

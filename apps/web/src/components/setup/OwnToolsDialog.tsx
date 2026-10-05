@@ -48,9 +48,9 @@ import { Skeleton } from "../ui/skeleton";
 export type OwnToolsTab = "agent" | "ssh";
 
 /** Console → Secrets → API keys / SSH keys; the console's start flow for a clean SSH computer. */
-export const CONSOLE_API_KEYS_URL = "https://console.uno4.dev/secrets?tab=tokens";
-export const CONSOLE_SSH_KEYS_URL = "https://console.uno4.dev/secrets?tab=sshkeys";
-export const CONSOLE_START_SSH_URL = "https://console.uno4.dev/start?path=ssh";
+export const CONSOLE_API_KEYS_URL = "https://console.uno.place/secrets?tab=tokens";
+export const CONSOLE_SSH_KEYS_URL = "https://console.uno.place/secrets?tab=sshkeys";
+export const CONSOLE_START_SSH_URL = "https://console.uno.place/start?path=ssh";
 /**
  * The console's remote MCP server (OAuth for connectors, bearer key for CLIs).
  * Under /api/v1: console.uno4.dev/mcp is the old @uno4/mcp node server.
