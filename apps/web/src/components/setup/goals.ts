@@ -57,7 +57,7 @@ export const GOAL_COPY: Readonly<Record<GoalId, GoalCopy>> = {
   bot: {
     id: "bot",
     title: "A Telegram bot",
-    sub: "Tell Uno what the bot does. It runs 24/7.",
+    sub: "Tell Uno what the bot does. It stays online while your computer is on.",
     button: "A Telegram bot",
   },
   own_agent: {
