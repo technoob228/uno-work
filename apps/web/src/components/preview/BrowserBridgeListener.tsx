@@ -1,6 +1,8 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import type { BrowserBridgeCommandEvent } from "@t3tools/contracts";
+import type { BrowserBridgeCommandEvent, EnvironmentId } from "@t3tools/contracts";
+
+import { ConnectChannelDialog } from "../assistant/ConnectChannelDialog";
 
 import { readEnvironmentApi } from "../../environmentApi";
 import {
@@ -123,6 +125,9 @@ export function BrowserBridgeListener() {
   const navigate = useNavigate();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
+  // assistant_connect: the built-in assistant's Connect Telegram window,
+  // shown over whatever is on screen (QR + Open Telegram → Start).
+  const [connectTelegramIn, setConnectTelegramIn] = useState<EnvironmentId | null>(null);
 
   // Ask the companion extension to announce itself early, so the first bridge
   // command does not pay for the handshake.
@@ -183,6 +188,22 @@ export function BrowserBridgeListener() {
                 onClick: () =>
                   frameable ? openAppTabRef.current(makeAppFile({ url, name })) : openInNewTab(url),
               },
+            }),
+          );
+          return;
+        }
+        if (event.type === "openInApp" && event.view === "connect-telegram") {
+          const open = () => setConnectTelegramIn(connection.environmentId);
+          if (!event.context?.threadId || event.context.threadId === currentThreadIdRef.current) {
+            open();
+            return;
+          }
+          toastManager.add(
+            stackedThreadToast({
+              type: "info",
+              title: "Connect your assistant to Telegram",
+              description: "Press Start in Telegram and Uno answers you there.",
+              actionProps: { children: "Open", onClick: open },
             }),
           );
           return;
@@ -360,5 +381,11 @@ export function BrowserBridgeListener() {
     return window.desktopBridge.onBrowserOpenUrlRequest((url) => openUrl(url));
   }, [openUrl]);
 
-  return null;
+  return connectTelegramIn ? (
+    <ConnectChannelDialog
+      environmentId={connectTelegramIn}
+      channel="telegram"
+      onClose={() => setConnectTelegramIn(null)}
+    />
+  ) : null;
 }

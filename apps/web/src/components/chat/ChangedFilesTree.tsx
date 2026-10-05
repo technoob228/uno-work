@@ -5,6 +5,7 @@ import { buildTurnDiffTree, type TurnDiffTreeNode } from "../../lib/turnDiffTree
 import { ChevronRightIcon, FolderIcon, FolderClosedIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
+import { displayChangedFilePath } from "./MessagesTimeline.logic";
 import { VscodeEntryIcon } from "./VscodeEntryIcon";
 
 const EMPTY_DIRECTORY_OVERRIDES: Record<string, boolean> = {};
@@ -77,7 +78,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
               <FolderClosedIcon className="size-3.5 shrink-0 text-muted-foreground/75" />
             )}
             <span className="truncate font-mono text-[11px] text-muted-foreground/90 group-hover:text-foreground/90">
-              {node.name}
+              {depth === 0 ? displayChangedFilePath(node.name) : node.name}
             </span>
             {hasNonZeroStat(node.stat) && (
               <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums">

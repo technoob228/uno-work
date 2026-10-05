@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  changedFilesSummaryLabel,
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
+  displayChangedFilePath,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
   workingReassurance,
@@ -441,5 +443,19 @@ describe("computeStableMessagesTimelineRows", () => {
 
     expect(reordered).not.toBe(initial);
     expect(reordered.result).toEqual([initial.result[1], initial.result[0]]);
+  });
+});
+
+describe("changed files for people", () => {
+  it("folds into one line", () => {
+    expect(changedFilesSummaryLabel(1)).toBe("Changed 1 file");
+    expect(changedFilesSummaryLabel(3)).toBe("Changed 3 files");
+  });
+
+  it("names the home folder ~", () => {
+    expect(displayChangedFilePath("home/unowork/projects/bot")).toBe("~/projects/bot");
+    expect(displayChangedFilePath("/home/unowork")).toBe("~");
+    expect(displayChangedFilePath("src/app")).toBe("src/app");
+    expect(displayChangedFilePath("homework/x")).toBe("homework/x");
   });
 });

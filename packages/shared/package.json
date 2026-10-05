@@ -139,6 +139,10 @@
     "./unoFinalAnswer": {
       "types": "./src/unoFinalAnswer.ts",
       "import": "./src/unoFinalAnswer.ts"
+    },
+    "./secretRequestCopy": {
+      "types": "./src/secretRequestCopy.ts",
+      "import": "./src/secretRequestCopy.ts"
     }
   },
   "scripts": {

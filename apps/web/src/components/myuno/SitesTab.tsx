@@ -1,25 +1,30 @@
 /**
  * "Sites" on My Uno — one row per site on Uno Hosting. No computer needed:
  * they stay up while every computer sleeps. On hover: copy the address,
- * update it from a folder, open it inside Uno. A click opens the side panel.
+ * update it from a folder, open it (a browser tab: a site is not an app of
+ * this computer, so it can't be framed inside Uno). A click opens the side
+ * panel. Name and status read as on Apps & sites (`sitesModel`).
  */
 import { Link } from "@tanstack/react-router";
-import { CheckIcon, CopyIcon, GlobeIcon, LockIcon, UploadIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, GlobeIcon, UploadIcon } from "lucide-react";
 import { useState } from "react";
 
 import { type HostedSite, type SitesState, consoleLinks } from "../../account/accountOverview";
 import { formatBytes } from "../../account/billingModel";
 import { isWebLite } from "../../lite/flag";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
-import { openInNewTab, useOpenApp } from "../../navigation/useOpenApp";
+import { openInNewTab } from "../../navigation/useOpenApp";
 import { formatElapsedAgoLabel } from "../../timestampFormat";
+import { SiteStatusPill } from "../sites/SiteStatusPill";
+import { siteLabel } from "../sites/sitesModel";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import { matchesSite } from "./myUnoModel";
 import { GroupTitle, HOVER_ONLY, Row, RowList, SearchBox } from "./rowsUi";
 
+/** The site's name as everywhere: its address host (`sitesModel.siteLabel`). */
 export function siteHost(site: HostedSite): string {
-  return site.url.replace(/^https?:\/\//, "");
+  return siteLabel(site);
 }
 
 export function SiteCopyButton({ site, withLabel }: { site: HostedSite; withLabel?: boolean }) {
@@ -52,7 +57,6 @@ export function SitesTab({
   onSelect: (site: HostedSite) => void;
   onUpdate: (site: HostedSite) => void;
 }) {
-  const { openHere } = useOpenApp();
   const [query, setQuery] = useState("");
   const sites = (data?.sites ?? []).filter((site) => matchesSite(site, query));
   const usage =
@@ -107,8 +111,9 @@ export function SitesTab({
         </p>
       ) : !data || data.sites.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-border/80 px-4 py-5 text-center text-xs text-muted-foreground">
-          No sites yet. In Files, pick a page or a folder and choose Share → Publish as a website —
-          it gets its own address and stays up even when your computers sleep.
+          {isWebLite
+            ? "No sites yet. Publish one in the Uno console — it gets its own address and stays up even when your computers sleep."
+            : "No sites yet. In Files, pick a page or a folder and choose Share → Publish as a website — it gets its own address and stays up even when your computers sleep."}
         </p>
       ) : (
         <>
@@ -122,7 +127,7 @@ export function SitesTab({
                   key={site.slug}
                   selected={selectedSlug === site.slug}
                   onSelect={() => onSelect(site)}
-                  label={site.slug}
+                  label={siteHost(site)}
                   testId="my-uno-site"
                   action={
                     <span className={`flex items-center gap-0.5 ${HOVER_ONLY}`}>
@@ -131,29 +136,15 @@ export function SitesTab({
                         <UploadIcon />
                         Update
                       </Button>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        onClick={() => openHere({ url: site.url, name: site.slug })}
-                      >
+                      <Button size="xs" variant="outline" onClick={() => openInNewTab(site.url)}>
                         Open
                       </Button>
                     </span>
                   }
                 >
                   <GlobeIcon className="size-4 shrink-0 text-orange-500" />
-                  <span className="flex w-36 shrink-0 items-center gap-1 font-medium sm:w-44">
-                    <span className="truncate">{site.slug}</span>
-                    {site.hasPassword ? (
-                      <LockIcon
-                        className="size-3 shrink-0 text-muted-foreground"
-                        aria-label="Password protected"
-                      />
-                    ) : null}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                    {siteHost(site)}
-                  </span>
+                  <span className="min-w-0 flex-1 truncate font-medium">{siteHost(site)}</span>
+                  <SiteStatusPill site={site} />
                   <span className="hidden w-16 shrink-0 text-right text-xs tabular-nums text-muted-foreground sm:block">
                     {formatBytes(site.sizeBytes)}
                   </span>

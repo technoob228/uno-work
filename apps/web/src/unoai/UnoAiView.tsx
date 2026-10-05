@@ -31,11 +31,12 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { CONSOLE_URL } from "../account/accountOverview";
+import { CONSOLE_URL, checkoutHref } from "../account/accountOverview";
 import { formatAiMinutes } from "../account/aiHours";
 import { isElectron } from "../env";
 import { isWebLite } from "../lite/flag";
-import { liteStanding } from "../lite/webLite";
+import { liteLinks, liteStanding } from "../lite/webLite";
+import { computerOfferCopy } from "./computerOffer";
 import { cn } from "../lib/utils";
 import { SidebarShowButton } from "../components/sidebar/SidebarShowButton";
 import { subscriptionQuery } from "../components/myuno/myUnoQueries";
@@ -859,8 +860,10 @@ function ComputerOffer({ reason, chatId }: { reason: string; chatId: string }) {
     }
   };
 
+  const copy = computerOfferCopy(standing);
+
   return (
-    <OfferFrame reason={reason} title="This needs your own computer">
+    <OfferFrame reason={reason} title={copy.title}>
       {standing === "cloud" ? (
         <Button size="sm" onClick={create} data-testid="uno-ai-create-computer">
           Create my computer
@@ -902,22 +905,27 @@ function ComputerOffer({ reason, chatId }: { reason: string; chatId: string }) {
           <Button
             size="sm"
             variant="outline"
-            render={
-              <a
-                href={`${CONSOLE_URL}/billing?tab=plan&plan=plus`}
-                target="_blank"
-                rel="noreferrer"
-              />
-            }
+            render={<a href={checkoutHref("plus")} target="_blank" rel="noreferrer" />}
           >
-            See plans
+            {copy.upgradeLabel}
             <ExternalLinkIcon />
           </Button>
+          {copy.ownAgent ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              data-testid="uno-ai-own-agent"
+              render={<a href={liteLinks.connectAi} target="_blank" rel="noreferrer" />}
+            >
+              Use my own agent
+              <ExternalLinkIcon />
+            </Button>
+          ) : null}
         </>
       )}
       <p className="w-full text-xs text-muted-foreground">
-        When it's ready, this conversation continues there — Uno on your computer gets everything
-        from here.
+        {copy.note ??
+          "When it's ready, this conversation continues there — Uno on your computer gets everything from here."}
         {standing !== "cloud" && !codeOpen ? (
           <>
             {" "}

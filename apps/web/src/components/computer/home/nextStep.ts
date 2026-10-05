@@ -23,7 +23,7 @@ export interface NextStepItem {
   readonly title: string;
   readonly hint: string | null;
   readonly done: boolean;
-  /** Where the console does it (relative path on console.uno4.dev). */
+  /** Where the console does it (relative path on console.uno.place). */
   readonly consolePath: string | null;
 }
 

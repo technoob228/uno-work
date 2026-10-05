@@ -17,7 +17,7 @@ import { ControlPlaneHttpError, controlPlaneErrorStatus } from "@t3tools/shared/
 import { accountRequest } from "./unoAccount";
 import { type ComputerRole, computerRole, parseRoleComment, withRole } from "./computerRoles";
 
-export const CONSOLE_URL = "https://console.uno4.dev";
+export const CONSOLE_URL = "https://console.uno.place";
 
 // ---- small readers ----
 
@@ -783,10 +783,19 @@ export async function fetchPayments(): Promise<ReadonlyArray<PaymentRow>> {
 
 // ---- console links (money moves there) ----
 
+/**
+ * "Buy this plan" link: the console's plan step with the plan picked, and
+ * `checkout=1` so Billing opens Checkout right away (only for accounts
+ * without a subscription — everyone else lands on the ladder).
+ */
+export function checkoutHref(slug: string): string {
+  return `${CONSOLE_URL}/billing?tab=plan&plan=${encodeURIComponent(slug)}&checkout=1`;
+}
+
 export const consoleLinks = {
   addMoney: `${CONSOLE_URL}/billing?tab=payments`,
   plans: `${CONSOLE_URL}/billing`,
-  plan: (slug: string) => `${CONSOLE_URL}/billing?plan=${encodeURIComponent(slug)}`,
+  plan: (slug: string) => checkoutHref(slug),
   sites: `${CONSOLE_URL}/sites`,
   apiKeys: `${CONSOLE_URL}/settings`,
   computer: (id: number) => `${CONSOLE_URL}/boxes/${id}`,

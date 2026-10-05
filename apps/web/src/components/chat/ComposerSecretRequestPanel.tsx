@@ -9,8 +9,9 @@
  */
 
 import type { ThreadId } from "@t3tools/contracts";
+import { humanSecretLabel, secretHelp } from "@t3tools/shared/secretRequestCopy";
 import { memo, useState } from "react";
-import { LockIcon } from "lucide-react";
+import { ExternalLinkIcon, LockIcon } from "lucide-react";
 
 import { environmentFetchJson, isEnvironmentHttpError } from "../../environments/http/target";
 import { useThreadTitle } from "../../hooks/useThreadTitle";
@@ -62,7 +63,10 @@ const SecretRequestCard = memo(function SecretRequestCard({
   );
   const requester =
     requesterTitle ?? (requesterThreadId ? `chat ${requesterThreadId}` : "an unidentified session");
-  const targetPath = secretTargetPath(event.cwd, event.targetFile);
+  const targetPath = homeRelativePath(secretTargetPath(event.cwd, event.targetFile));
+  const label = humanSecretLabel(event.name);
+  // A Telegram bot token: the one step only the person can do, with its button.
+  const help = secretHelp(event.name);
 
   const submit = async (decline: boolean) => {
     if (isSubmitting) return;
@@ -113,9 +117,34 @@ const SecretRequestCard = memo(function SecretRequestCard({
         ) : null}
       </div>
       <p className="mt-1.5 text-sm text-foreground/90">
-        The agent needs <code className="rounded bg-muted/50 px-1 font-mono">{event.name}</code>
+        {label === event.name ? (
+          <>
+            The agent needs <code className="rounded bg-muted/50 px-1 font-mono">{event.name}</code>
+          </>
+        ) : (
+          <>Uno needs your {label}</>
+        )}
         {event.description ? <> — {event.description}</> : null}
       </p>
+      {help ? (
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
+          <a
+            href={help.url}
+            target="_blank"
+            rel="noreferrer"
+            data-testid="secret-help-link"
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground hover:bg-accent"
+          >
+            {help.label}
+            <ExternalLinkIcon className="size-3.5 text-muted-foreground" />
+          </a>
+          <ol className="list-decimal pl-4 text-xs leading-relaxed text-muted-foreground">
+            {help.steps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
       <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-xs">
         <dt className="text-muted-foreground/65">Asked by</dt>
         <dd className="min-w-0 truncate font-medium text-foreground/90" title={requester}>
@@ -150,7 +179,9 @@ const SecretRequestCard = memo(function SecretRequestCard({
             keyEvent.stopPropagation();
             void submit(false);
           }}
-          placeholder={`Paste ${event.name} here`}
+          placeholder={
+            label === event.name ? `Paste ${event.name} here` : `Paste the ${label} here`
+          }
           className="h-9 min-w-0 flex-1 rounded-lg border border-border/60 bg-muted/20 px-3 font-mono text-sm outline-none placeholder:font-sans placeholder:text-muted-foreground/45 focus:border-blue-500/40"
         />
         <Button
@@ -180,4 +211,9 @@ const SecretRequestCard = memo(function SecretRequestCard({
 export function secretTargetPath(cwd: string, targetFile: string): string {
   const folder = cwd.replace(/[/\\]+$/, "");
   return folder.length > 0 ? `${folder}/${targetFile}` : targetFile;
+}
+
+/** The home folder as `~` ("~/projects/bot/.env"), never `/home/unowork/…`. */
+export function homeRelativePath(path: string): string {
+  return path.replace(/^\/home\/[^/]+(?=\/|$)/u, "~").replace(/^\/Users\/[^/]+(?=\/|$)/u, "~");
 }

@@ -26,7 +26,8 @@ import {
   useInboxNeedsYouCount,
   useInboxUnreadCount,
 } from "../../inbox/inboxStore";
-import { usePendingApproval } from "../../inbox/usePendingApproval";
+import { canDismissInboxItem } from "../../inbox/openRequests.logic";
+import { useChatOpenRequests, usePendingApproval } from "../../inbox/usePendingApproval";
 import {
   setSystemNotifications,
   useSystemNotificationsState,
@@ -219,6 +220,9 @@ const BellItem = memo(function BellItem({
   const unread = item.readAt === null;
   const threadId = item.open?.kind === "thread" ? item.open.threadId : null;
   const isApproval = item.kind === "agent.approval" && threadId !== null;
+  // A question the chat still waits on is answered in the chat, not cleared here.
+  const openRequests = useChatOpenRequests(item.environmentId, threadId);
+  const canDismiss = canDismissInboxItem(item.kind, openRequests);
   const open = () => {
     onNavigate();
     void openItem(item);
@@ -280,7 +284,7 @@ const BellItem = memo(function BellItem({
                 Open
               </Button>
             )}
-            {isApproval ? null : <DoneButton item={item} />}
+            {isApproval || !canDismiss ? null : <DoneButton item={item} />}
             <SnoozeMenu item={item} />
           </div>
         </div>
@@ -310,8 +314,19 @@ function ApprovalActions(props: {
   body: string | null;
   onOpen: () => void;
 }) {
-  const { approval, responding, respond } = usePendingApproval(props.environmentId, props.threadId);
+  const { approval, phase, responding, respond } = usePendingApproval(
+    props.environmentId,
+    props.threadId,
+  );
   if (!approval) {
+    // Still waits, details on their way: Open only — Done would drop the request.
+    if (phase === "loading") {
+      return (
+        <Button size="xs" variant="outline" onClick={props.onOpen}>
+          Open
+        </Button>
+      );
+    }
     // Answered (or gone): nothing to approve any more — open it or clear it.
     return (
       <>

@@ -61,8 +61,21 @@ export function telegramPairingLink(botUsername: string | null, code: string): s
   return botUsername ? `https://t.me/${botUsername}?start=${encodeURIComponent(code)}` : null;
 }
 
-/** What the bot says in the chat it was just linked to. */
-export function telegramLinkedReply(input: { readonly toMainConversation: boolean }): string {
+/**
+ * What the bot says in the chat it was just linked to. Through Uno's shared
+ * bot the console has already said "Linked to your Uno computer. It will
+ * answer here in a moment." (fishcode A-04), so the computer's own line is
+ * that answer — a hello, not a second "Connected" (two in a row, 05.10.2026).
+ */
+export function telegramLinkedReply(input: {
+  readonly toMainConversation: boolean;
+  readonly viaSharedBot?: boolean;
+}): string {
+  if (input.viaSharedBot) {
+    return input.toMainConversation
+      ? "Hi, it's Uno, your assistant. This is the same conversation you see pinned in Uno Work: write here any time, for example “Every morning at 8, send me a plan for the day”."
+      : "Hi, it's Uno, your assistant. Write here any time, for example “Every morning at 8, send me a plan for the day”.";
+  }
   return input.toMainConversation
     ? "Connected. This chat now talks to Uno, your assistant: the same conversation you see pinned in Uno Work. Write here any time."
     : "Connected. This chat now talks to Uno, your assistant. Write here any time.";
@@ -75,7 +88,7 @@ export function telegramLinkedReply(input: { readonly toMainConversation: boolea
  */
 export function telegramRoutedLinkedReply(input: { readonly name: string | null }): string {
   const name = input.name?.trim() || "your assistant";
-  return `Connected. This chat now talks to ${name}. Several assistants of your computer share this bot: send /assistant <name> to talk to another one.`;
+  return `This chat now talks to ${name}. Several assistants of your computer share this bot: send /assistant <name> to talk to another one.`;
 }
 
 /**

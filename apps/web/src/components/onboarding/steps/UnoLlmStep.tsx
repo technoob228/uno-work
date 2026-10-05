@@ -140,7 +140,7 @@ export function UnoLlmStep() {
             <p className="text-xs text-muted-foreground">
               Paste your Uno API key.{" "}
               <a
-                href="https://getuno.xyz"
+                href="https://console.uno.place/secrets?tab=tokens"
                 target="_blank"
                 rel="noreferrer noopener"
                 className="text-primary hover:underline"
@@ -188,7 +188,7 @@ export function UnoLlmStep() {
             <p className="text-xs text-muted-foreground">
               No account yet?{" "}
               <a
-                href="https://getuno.xyz"
+                href="https://console.uno.place"
                 target="_blank"
                 rel="noreferrer noopener"
                 className="text-primary hover:underline"

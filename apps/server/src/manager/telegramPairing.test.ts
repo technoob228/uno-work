@@ -7,7 +7,9 @@ import {
   shouldReplyToStranger,
   TELEGRAM_PAIRING_TTL_MS,
   TELEGRAM_STRANGER_REPLY_INTERVAL_MS,
+  telegramLinkedReply,
   telegramPairingLink,
+  telegramRoutedLinkedReply,
   telegramStrangerReply,
 } from "./telegramPairing.ts";
 
@@ -49,5 +51,20 @@ describe("telegramPairing", () => {
     expect(shouldReplyToStranger(undefined, 10)).toBe(true);
     expect(shouldReplyToStranger(0, TELEGRAM_STRANGER_REPLY_INTERVAL_MS - 1)).toBe(false);
     expect(shouldReplyToStranger(0, TELEGRAM_STRANGER_REPLY_INTERVAL_MS)).toBe(true);
+  });
+});
+
+describe("linked replies", () => {
+  it("own bot: says Connected", () => {
+    expect(telegramLinkedReply({ toMainConversation: true })).toMatch(/^Connected\./);
+  });
+
+  it("Uno's shared bot: the console already said Linked, so a hello, not a second Connected", () => {
+    for (const toMainConversation of [true, false]) {
+      const text = telegramLinkedReply({ toMainConversation, viaSharedBot: true });
+      expect(text).toMatch(/^Hi, it's Uno, your assistant\./);
+      expect(text).not.toMatch(/Connected|Linked/);
+    }
+    expect(telegramRoutedLinkedReply({ name: "Nova" })).toMatch(/^This chat now talks to Nova\./);
   });
 });

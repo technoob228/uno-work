@@ -16,11 +16,13 @@ import {
 import { useState } from "react";
 
 import { cn } from "~/lib/utils";
-import { useOpenApp } from "../../../navigation/useOpenApp";
+import { openInNewTab } from "../../../navigation/useOpenApp";
 import { CloudUsageBar, formatQuota } from "../../files/CloudBrowser";
 import { cloudStateQueryOptions, filesListQueryOptions } from "../../files/filesApi";
 import { FILE_KIND_ICON, FILE_KIND_TINT, fileKindOf, formatModified } from "../../files/fileTypes";
 import { sitesQuery } from "../../myuno/myUnoQueries";
+import { SiteStatusPill } from "../../sites/SiteStatusPill";
+import { siteLabel } from "../../sites/sitesModel";
 import { Skeleton } from "../../ui/skeleton";
 import {
   BuiltInIcon,
@@ -183,10 +185,13 @@ export function CloudWidget({ environmentId }: { environmentId: EnvironmentId | 
   );
 }
 
-/** Sites on Uno Hosting; a click opens one inside Uno Work. */
+/**
+ * Sites on Uno Hosting; a click opens one in a browser tab — a site is not
+ * an app of this computer, so /app can't frame it. Name and status read as
+ * on Apps & sites.
+ */
 export function SitesWidget() {
   const query = useQuery(sitesQuery());
-  const { openHere } = useOpenApp();
   const sites = query.data?.sites ?? [];
   if (query.isPending) return <Skeleton className="h-16 rounded-xl" />;
   if (query.isError) {
@@ -203,12 +208,12 @@ export function SitesWidget() {
         <button
           key={site.slug}
           type="button"
-          onClick={() => openHere({ url: site.url, name: site.slug })}
+          onClick={() => openInNewTab(site.url)}
           className="-mx-2 flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-accent/50"
           title={site.url}
         >
-          <span className="size-1.5 shrink-0 rounded-full bg-success" aria-hidden />
-          <span className="min-w-0 flex-1 truncate">{site.customDomain ?? site.slug}</span>
+          <span className="min-w-0 flex-1 truncate">{siteLabel(site)}</span>
+          <SiteStatusPill site={site} />
         </button>
       ))}
       {sites.length > 5 ? (

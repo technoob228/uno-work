@@ -1301,7 +1301,10 @@ const makeTelegramConnector = Effect.gen(function* () {
         projectId,
         config.botToken,
         chatId,
-        telegramLinkedReply({ toMainConversation }),
+        telegramLinkedReply({
+          toMainConversation,
+          viaSharedBot: isRelayCredential(config.botToken),
+        }),
       );
     });
 

@@ -41,6 +41,7 @@ import {
   formatMemory,
   percent,
 } from "./computerFormat";
+import { boxSleepConfirmCopy } from "../machines/boxSleepCopy";
 import { CopyButton, Meter } from "./computerUi";
 import { EconomyChip } from "./EconomyControl";
 import type { UnoComputerEconomy } from "@t3tools/contracts";
@@ -68,14 +69,15 @@ export interface ComputerLoad {
 
 function confirmCopy(action: "sleep" | "stop", own: boolean) {
   if (action === "sleep") {
+    const sleep = boxSleepConfirmCopy({
+      label: "your computer",
+      isThisScreen: own,
+      isConnectedHere: false,
+    });
     return {
-      title: "Put your computer to sleep?",
-      body:
-        "Your files and apps stay exactly where they are, and you don't pay for running time while it sleeps." +
-        (own
-          ? " This screen runs on the computer itself, so it will disconnect. Wake it up again from the Uno console."
-          : ""),
-      confirm: "Sleep",
+      title: sleep.title,
+      body: sleep.warning ? `${sleep.body} ${sleep.warning}` : sleep.body,
+      confirm: sleep.confirm,
     };
   }
   return {

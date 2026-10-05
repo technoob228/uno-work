@@ -112,7 +112,7 @@ const UNO_GROUP_LABEL: Record<UnoPickerGroup, string> = {
   custom: "Custom models",
 };
 /** Console → GPU → My models: import / upload / deploy the person's own model. */
-export const UNO_UPLOAD_MODEL_URL = "https://console.uno4.dev/gpu/models";
+export const UNO_UPLOAD_MODEL_URL = "https://console.uno.place/gpu/models";
 
 function unoPickerGroup(model: Pick<ModelPickerItem, "capabilities">): UnoPickerGroup | null {
   const group = model.capabilities?.metadata?.unoGroup;

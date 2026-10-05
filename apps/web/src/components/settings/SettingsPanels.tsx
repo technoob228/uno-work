@@ -339,7 +339,9 @@ export function UnoGatewayBalance({ apiKey }: { readonly apiKey: string }) {
   const topUpLink = (
     <a
       href={
-        oneWallet ? "https://console.uno4.dev/billing?tab=payments" : "https://console.uno4.dev/llm"
+        oneWallet
+          ? "https://console.uno.place/billing?tab=payments"
+          : "https://console.uno.place/llm"
       }
       target="_blank"
       rel="noopener noreferrer"

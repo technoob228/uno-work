@@ -34,6 +34,7 @@ import { toastManager } from "../../ui/toast";
 import {
   approvalQuestion,
   attentionThreads,
+  canMarkHomeChatDone,
   homeThreadStatus,
   pickContinueItems,
   recentThreads,
@@ -149,9 +150,9 @@ const CARD_CLASS =
 
 /**
  * What needs the person or is worth picking up: chats and unread app
- * notifications (the same items as the Inbox), most urgent first. Every card
- * has Done — for a chat it settles it, for a notification it dismisses it —
- * so Continue, the sidebar and the Inbox stay in agreement.
+ * notifications (the same items as the Inbox), most urgent first. Done
+ * settles a chat (not while it works or waits for an answer) or dismisses a
+ * notification — so Continue, the sidebar and the Inbox stay in agreement.
  */
 export function ContinueCards({
   threads,
@@ -246,10 +247,12 @@ export function ContinueCards({
               <span className="ml-auto text-[11px] text-muted-foreground">
                 {shortAgo(threadActivityAt(thread), now)}
               </span>
-              <DoneButton
-                label="Done: settle this chat"
-                onDone={() => markChatDone(thread.environmentId, thread.id)}
-              />
+              {canMarkHomeChatDone(thread) ? (
+                <DoneButton
+                  label="Done: settle this chat"
+                  onDone={() => markChatDone(thread.environmentId, thread.id)}
+                />
+              ) : null}
             </div>
             <div className="truncate text-sm font-medium">{thread.title}</div>
             {line ? (

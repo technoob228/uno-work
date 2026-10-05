@@ -130,9 +130,3 @@ export const HARNESS_ROW_DRIVERS: ReadonlyArray<ProviderDriverKind> = [
   "hermes",
   "cursor",
 ].map((value) => ProviderDriverKind.make(value));
-
-/**
- * Harnesses we intend to support but have no driver for yet. Listed as
- * disabled rows so the roadmap is visible without pretending they work.
- */
-export const COMING_SOON_HARNESSES: ReadonlyArray<string> = ["Grok"];
