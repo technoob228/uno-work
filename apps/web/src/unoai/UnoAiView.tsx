@@ -52,9 +52,12 @@ import {
   type AiStop,
 } from "./unoAiApi";
 import { rememberHandoff } from "./unoAiHandoff";
+import { BotChatItem } from "./BotCard";
+import { looksLikeBotToken } from "./freeBot";
 import {
   chatLanguage,
   chatTitle,
+  latestBotKey,
   latestSite,
   liveActivity,
   pendingQuestion,
@@ -141,7 +144,9 @@ function UnoAiChat({
   const items = useMemo(() => transcriptItems(state.messages), [state.messages]);
   const question = state.running ? null : pendingQuestion(items);
   const site = latestSite(items, state.sites);
+  const botKey = latestBotKey(items);
   const [draft, setDraft] = useState("");
+  const [tokenHint, setTokenHint] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewKey, setPreviewKey] = useState(0);
   const lastSiteUrl = useRef<string | null>(null);
@@ -152,6 +157,13 @@ function UnoAiChat({
   const submit = async (text: string) => {
     const t = text.trim();
     if (!t || state.running) return;
+    // A bot token never goes to the chat (Uno and the history would keep it).
+    if (looksLikeBotToken(t)) {
+      setDraft("");
+      setTokenHint(true);
+      return;
+    }
+    setTokenHint(false);
     setDraft("");
     if (state.messages.length === 0) onFirstSend();
     const failed = await send(t);
@@ -233,6 +245,7 @@ function UnoAiChat({
                 <ChatItem
                   key={item.key}
                   item={item}
+                  interactiveBot={item.key === botKey}
                   chatId={chatId}
                   onView={() => {
                     setPreviewOpen(true);
@@ -247,6 +260,17 @@ function UnoAiChat({
               ) : null}
               {!state.running && state.stop ? (
                 <StopCard stop={state.stop} onResume={() => void resume()} />
+              ) : null}
+              {tokenHint ? (
+                <p
+                  className="text-sm text-muted-foreground"
+                  role="alert"
+                  data-testid="uno-ai-token-hint"
+                >
+                  {botKey
+                    ? "That looks like your bot's token — paste it on the bot card above. It wasn't sent to the chat."
+                    : "That looks like a bot token — it wasn't sent to the chat."}
+                </p>
               ) : null}
               {state.sendError ? (
                 <p className="text-sm text-destructive" role="alert">
@@ -474,11 +498,13 @@ function Markdown({ text }: { text: string }) {
 
 function ChatItem({
   item,
+  interactiveBot,
   chatId,
   onView,
   continueHere,
 }: {
   item: AiItem;
+  interactiveBot: boolean;
   chatId: string;
   onView: () => void;
   continueHere: ReactNode;
@@ -582,6 +608,8 @@ function ChatItem({
           continueHere={continueHere}
         />
       );
+    case "bot":
+      return <BotChatItem item={item} interactive={interactiveBot} />;
   }
 }
 

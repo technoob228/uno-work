@@ -45,6 +45,7 @@ import {
 import { SidebarShortcutListener } from "../components/sidebar/SidebarShowButton";
 import { PaymentNoticeBanner } from "../components/billing/PaymentNoticeBanner";
 import { UnoAiSidebarGroup } from "../unoai/UnoAiChatsList";
+import { LiveBotTile } from "../unoai/BotCard";
 import { WORK_AI_FEATURE } from "../unoai/unoAiApi";
 
 /** The root of the lite app (rendered by routes/__root.tsx in the lite build). */
@@ -176,6 +177,7 @@ function LiteSidebar() {
         </div>
       </SidebarHeader>
       <SidebarContent>
+        {workAi ? <LiveBotTile /> : null}
         {workAi ? <UnoAiSidebarGroup active={!onMyUno} /> : null}
         <SidebarGroup>
           <SidebarGroupLabel>My Uno</SidebarGroupLabel>
