@@ -14,6 +14,7 @@
     {
       "matches": [
         "https://app.uno4.work/*",
+        "https://*.uno4.work/*",
         "https://*.uno4.dev/*",
         "http://localhost/*",
         "http://127.0.0.1/*"

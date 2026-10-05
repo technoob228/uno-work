@@ -36,4 +36,12 @@ describe("resolveDirectMachineBaseUrl", () => {
     expect(isWorkProxyHost("https://app.uno4.work/pair")).toBe(true);
     expect(isWorkProxyHost("https://work-85.app.uno4.dev")).toBe(false);
   });
+
+  it("recognises an account's own Work address", () => {
+    expect(isWorkProxyHost("https://bcdfghjkmn.uno4.work/")).toBe(true);
+    expect(isWorkProxyHost("bcdfghjkmn.uno4.work")).toBe(true);
+    expect(isWorkProxyHost("https://uno4.work/")).toBe(false);
+    expect(isWorkProxyHost("https://a.b.uno4.work/")).toBe(false);
+    expect(isWorkProxyHost("https://bcdfghjkmn.uno4.work.evil.example/")).toBe(false);
+  });
 });

@@ -362,7 +362,7 @@ function ReachNotice({ reach }: { reach: PhoneHostReach | "proxy" }) {
       <Alert variant="warning" data-testid="phone-reach-notice">
         <TriangleAlertIcon />
         <AlertDescription>
-          You opened Work through app.uno4.work, and the phone app can't sign in that way. Wait a
+          You opened Work in the browser through Uno's sign-in, and the phone app can't sign in that way. Wait a
           moment while we look up your computer's own address, or reopen this page after linking
           your Uno account.
         </AlertDescription>

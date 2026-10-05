@@ -18,7 +18,11 @@ import { useMemo } from "react";
 import { usePrimaryEnvironmentDescriptor } from "../environments/primary";
 import { unoCloudStateQueryOptions } from "../lib/workspaceReactQuery";
 
-/** Hosts that proxy Uno Work behind the console login (no direct daemon access). */
+/**
+ * Hosts that proxy Uno Work behind the console login (no direct daemon access):
+ * the shared entry app.uno4.work and every account's own address
+ * `<label>.uno4.work` (one label; the apex uno4.work is the marketing site).
+ */
 export function isWorkProxyHost(urlOrHost: string): boolean {
   let host = urlOrHost;
   try {
@@ -26,7 +30,8 @@ export function isWorkProxyHost(urlOrHost: string): boolean {
   } catch {
     // already a hostname
   }
-  return /(^|\.)app\.uno4\.work$/i.test(host.trim());
+  host = host.trim();
+  return /(^|\.)app\.uno4\.work$/i.test(host) || /^[a-z0-9-]{1,63}\.uno4\.work$/i.test(host);
 }
 
 /** The box's own https origin, or null when it has no published address. */
