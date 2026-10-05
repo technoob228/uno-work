@@ -17,6 +17,7 @@ import {
 import { useState } from "react";
 
 import { CONSOLE_URL, type AccountSubscription } from "../../account/accountOverview";
+import { ON_BOOSTS_LABEL, boostsComputerTag } from "../../account/alwaysOn";
 import { formatRam, formatUsd } from "../../account/billingModel";
 import { isElectron as runningInElectron } from "../../env";
 import { openInstallDocs } from "../onboarding/harnessInstallLinks";
@@ -265,7 +266,9 @@ function ComputerRow({
       {entry.apps.map((app) => (
         <AppChip key={app.id} app={app} paused={paused} />
       ))}
-      {entry.state !== "on" ? <span className="shrink-0 text-xs">{stateLabel(entry)}</span> : null}
+      {entry.state !== "on" ? (
+        <span className="shrink-0 text-xs">{stateLabel(entry, subscription?.boosts ?? null)}</span>
+      ) : null}
     </span>
   ) : (
     <>
@@ -284,7 +287,7 @@ function ComputerRow({
         ))}
         {entry.state !== "on" ? (
           <span className={cn("shrink-0 text-xs", entry.broken && "text-destructive-foreground")}>
-            {stateLabel(entry)}
+            {stateLabel(entry, subscription?.boosts ?? null)}
           </span>
         ) : entry.apps.length === 0 ? (
           <span className="truncate text-xs text-muted-foreground">
@@ -303,7 +306,7 @@ function ComputerRow({
       dim={asleep}
       bad={hasProblem(entry)}
       onSelect={() => onSelect(entry)}
-      label={`${entry.name}, ${stateLabel(entry)}`}
+      label={`${entry.name}, ${stateLabel(entry, subscription?.boosts ?? null)}`}
       action={
         <span className="flex w-28 items-center justify-end gap-0.5 sm:w-36">
           {consoleButton}
@@ -316,6 +319,15 @@ function ComputerRow({
       <span className="w-32 shrink-0 truncate font-medium sm:w-40" title={entry.name}>
         {entry.name}
       </span>
+      {entry.box && boostsComputerTag(entry.box, subscription?.boosts) === "on-boosts" ? (
+        <span
+          className="shrink-0 rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning-foreground"
+          title="Runs past your always-on memory, paid with boosts. When boosts run out, it goes to sleep."
+          data-testid="my-uno-on-boosts"
+        >
+          ⚡ {ON_BOOSTS_LABEL}
+        </span>
+      ) : null}
       {middle}
       <span className="hidden w-28 shrink-0 text-right text-xs tabular-nums text-muted-foreground sm:block">
         {sizeAndCost(entry, subscription)}

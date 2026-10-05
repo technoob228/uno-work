@@ -488,6 +488,7 @@ export function MyUnoView() {
         onOpenChange={setAddOpen}
         subscription={sub}
         computers={boxes}
+        catalog={plans.data}
         onSeePlans={seePlans}
       />
       {actions.confirmSleep}
