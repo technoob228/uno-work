@@ -15,6 +15,17 @@ import type { AccountBalance, AccountPlan, AccountSubscription } from "./account
 export const AI_HOURS_TIME_NOTE =
   "Time counts only while AI is working. Reading, thinking and typing don't use hours.";
 
+/** "AI time" — the unit of Uno AI on plans "always on" and Fast-unlimited plans. */
+export const AI_TIME_NOTE =
+  "Only the minutes the AI is working for you count. Ten chats in the same minute count as one minute.";
+
+/** One line for a plan where Fast has no limit (`ai_fast_unlimited`). */
+export const AI_FAST_UNLIMITED_LINE = "Uno AI: Fast is unlimited. Smart comes in hours.";
+
+/** The same plan once the Smart hours are gone. */
+export const AI_SMART_USED_UP_LINE =
+  "Your Smart hours are used up. Fast keeps going at standard speed.";
+
 /** 5220 → "87 h", 47 → "47 min", 90 → "1 h 30 min". */
 export function formatAiMinutes(minutes: number): string {
   const whole = Math.max(0, Math.floor(minutes));
@@ -38,6 +49,12 @@ export interface AiHoursSummary {
   readonly premiumUsd: number;
   /** AI power ×N, when known. */
   readonly power: number | null;
+  /** Fast has no limit on this plan; the hours are Smart's. */
+  readonly fastUnlimited?: boolean;
+  /** The hours are gone and Fast runs at standard speed. */
+  readonly fastStandardSpeed?: boolean;
+  /** Say "AI time" (plans "always on", Fast-unlimited plans), not "AI hours". */
+  readonly aiTime?: boolean;
 }
 
 /**
@@ -50,36 +67,83 @@ export function aiHoursSummary(input: {
   readonly balance?: AccountBalance | null | undefined;
   /** Today's minutes from `/v1/ai/status`, when the machine has read it. */
   readonly usedTodayMinutes?: number | null | undefined;
+  /** `/v1/ai/status` `fast_unlimited` / `fast_standard_speed`, when read. */
+  readonly fastUnlimited?: boolean | null | undefined;
+  readonly fastStandardSpeed?: boolean | null | undefined;
 }): AiHoursSummary | null {
   const hours = input.subscription?.aiHours ?? null;
   const premiumUsd = Math.max(0, input.balance?.aiBalanceUsd ?? 0);
   const power = input.subscription?.aiPower?.multiplier ?? null;
   const usedToday = hours?.usedTodayMinutes ?? input.usedTodayMinutes ?? null;
+  const fastUnlimited =
+    input.fastUnlimited === true || input.subscription?.limits?.aiFastUnlimited === true;
+  const fast = (leftMinutes: number | null, unlimited: boolean) => {
+    if (unlimited || !fastUnlimited) return {};
+    return {
+      fastUnlimited: true,
+      fastStandardSpeed:
+        input.fastStandardSpeed === true || (leftMinutes !== null && leftMinutes <= 0),
+    };
+  };
+  const aiTime = fastUnlimited || input.subscription?.planView === "always_on";
   if (hours) {
+    const leftMinutes = hours.unlimited ? null : hours.balanceMinutes;
     return {
       unlimited: hours.unlimited,
-      leftMinutes: hours.unlimited ? null : hours.balanceMinutes,
+      leftMinutes,
       monthlyHours: hours.monthlyHours,
       usedTodayMinutes: usedToday,
       premiumUsd,
       power,
+      ...fast(leftMinutes, hours.unlimited),
+      ...(aiTime ? { aiTime: true } : {}),
     };
   }
   const fromMe = input.balance?.aiHoursMinutes ?? null;
-  if (fromMe === null || fromMe <= 0) return null;
+  // Fast-unlimited plan with the hours gone: still a plan with Uno AI.
+  if (fromMe === null || (fromMe <= 0 && !fastUnlimited)) return null;
   return {
     unlimited: false,
-    leftMinutes: fromMe,
+    leftMinutes: Math.max(0, fromMe),
     monthlyHours: 0,
     usedTodayMinutes: usedToday,
     premiumUsd,
     power,
+    ...fast(Math.max(0, fromMe), false),
+    ...(aiTime ? { aiTime: true } : {}),
   };
+}
+
+/**
+ * The Uno AI lines of a Fast-unlimited plan: "Uno AI: Fast is unlimited.
+ * Smart comes in hours.", or — the hours gone — "Your Smart hours are used
+ * up. Fast keeps going at standard speed." Null on other plans.
+ */
+export function aiFastLine(summary: AiHoursSummary): string | null {
+  if (!summary.fastUnlimited) return null;
+  return summary.fastStandardSpeed ? AI_SMART_USED_UP_LINE : AI_FAST_UNLIMITED_LINE;
+}
+
+/** The note next to the hours: "AI time" words, or the older ones. */
+export function aiTimeNote(summary: AiHoursSummary): string {
+  return summary.aiTime ? AI_TIME_NOTE : AI_HOURS_TIME_NOTE;
+}
+
+/**
+ * The small words after the headline: "Smart left · Fast is unlimited",
+ * "AI time · never expire", "AI hours · never expire", "full speed, then standard".
+ */
+export function aiHoursCaption(summary: AiHoursSummary): string {
+  if (summary.unlimited) return "full speed, then standard";
+  if (summary.fastUnlimited) return "Smart left · Fast is unlimited";
+  return summary.aiTime ? "AI time · never expire" : "AI hours · never expire";
 }
 
 /** "87 h left" / "Unlimited AI". */
 export function aiHoursHeadline(summary: AiHoursSummary): string {
   if (summary.unlimited || summary.leftMinutes === null) return "Unlimited AI";
+  // "3 h 25 min" + the caption "Smart left · Fast is unlimited".
+  if (summary.fastUnlimited) return formatAiMinutes(summary.leftMinutes);
   return `${formatAiMinutes(summary.leftMinutes)} left`;
 }
 

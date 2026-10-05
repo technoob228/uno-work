@@ -84,8 +84,17 @@ export function useAiHours(environmentId: EnvironmentId | null): AiHoursSummary 
     subscription,
     balance,
     usedTodayMinutes: status?.usedTodayMinutes ?? null,
+    fastUnlimited: status?.fastUnlimited ?? null,
+    fastStandardSpeed: status?.fastStandardSpeed ?? null,
   });
   if (summary || !status) return summary;
+  const fast = status.fastUnlimited
+    ? {
+        fastUnlimited: true,
+        fastStandardSpeed: status.fastStandardSpeed === true || (status.hoursLeftMinutes ?? 1) <= 0,
+        aiTime: true,
+      }
+    : {};
   // No account reachable (desktop without sign-in): the machine's own reading.
   if (status.unlimited) {
     return {
@@ -105,6 +114,7 @@ export function useAiHours(environmentId: EnvironmentId | null): AiHoursSummary 
         usedTodayMinutes: status.usedTodayMinutes,
         premiumUsd: 0,
         power: status.power,
+        ...fast,
       }
     : null;
 }

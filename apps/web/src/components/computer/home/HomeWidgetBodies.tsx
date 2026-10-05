@@ -38,9 +38,11 @@ import { aiSpendDays, formatUsdShort, type SpendDay } from "./homeInfo";
 import { recentHomeEntries } from "./homeModel";
 import { useAiHours, useAiSpend } from "./useHomeInfo";
 import {
-  AI_HOURS_TIME_NOTE,
+  aiFastLine,
+  aiHoursCaption,
   aiHoursHeadline,
   aiHoursTodayLine,
+  aiTimeNote,
   type AiHoursSummary,
 } from "../../../account/aiHours";
 
@@ -419,14 +421,15 @@ export function AiHoursBody({
   const today = aiHoursTodayLine(hours);
   const premiumUsd = creditsUsd ?? hours.premiumUsd;
   const spentLately = days.some((day) => (day.usd ?? 0) > 0);
+  const note = aiTimeNote(hours);
+  const fast = aiFastLine(hours);
   return (
     <div className="flex flex-col gap-2" data-testid="home-ai-hours">
-      <div className="text-2xl font-semibold tabular-nums" title={AI_HOURS_TIME_NOTE}>
+      <div className="text-2xl font-semibold tabular-nums" title={note}>
         {aiHoursHeadline(hours)}{" "}
-        <span className="text-sm font-normal text-muted-foreground">
-          {hours.unlimited ? "full speed, then standard" : "AI hours · never expire"}
-        </span>
+        <span className="text-sm font-normal text-muted-foreground">{aiHoursCaption(hours)}</span>
       </div>
+      {fast ? <div className="text-xs">{fast}</div> : null}
       {today ? <div className="text-xs font-medium">{today}</div> : null}
       {spentLately && days.filter((day) => day.usd !== null).length > 1 ? (
         <SpendBars days={days} />
@@ -435,7 +438,7 @@ export function AiHoursBody({
         {premiumUsd > 0 ? (
           <span className="block">{formatUsdShort(premiumUsd)} premium credit</span>
         ) : null}
-        <span className="block">{AI_HOURS_TIME_NOTE}</span>
+        <span className="block">{note}</span>
       </div>
     </div>
   );

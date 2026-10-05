@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { parsePlanCatalog, parseSubscription, type AccountBalance } from "./accountOverview";
 import {
+  aiFastLine,
+  aiHoursCaption,
+  aiHoursHeadline,
   aiHoursLine,
   aiHoursSummary,
+  aiTimeNote,
   aiHoursTodayLine,
   formatAiMinutes,
   planAiHoursLine,
@@ -134,5 +138,67 @@ describe("plans with AI hours", () => {
     const old = parsePlanCatalog({ plans: [{ slug: "pro", ai_credits_usd: 30 }] }).plans[0]!;
     expect(planAiHoursLine(old)).toBeNull();
     expect(planHasUnoAi(old)).toBe(true);
+  });
+});
+
+describe("Fast unlimited, Smart in hours (plans always on)", () => {
+  const fastPlan = (minutes: number) =>
+    parseSubscription({
+      plan: "plus-ai",
+      plan_view: "always_on",
+      plan_limits: {
+        slug: "plus-ai",
+        base_slug: "plus",
+        generation: 2,
+        ai_hours_monthly: 40,
+        ai_fast_unlimited: true,
+      },
+      ai_hours: { balance_minutes: minutes, monthly_hours: 40, never_expire: true },
+    });
+
+  it("one line while Smart hours are left; AI time words", () => {
+    const summary = aiHoursSummary({ subscription: fastPlan(205), balance: balance() })!;
+    expect(summary.fastUnlimited).toBe(true);
+    expect(summary.fastStandardSpeed).toBe(false);
+    expect(aiHoursHeadline(summary)).toBe("3 h 25 min");
+    expect(aiHoursCaption(summary)).toBe("Smart left · Fast is unlimited");
+    expect(aiFastLine(summary)).toBe("Uno AI: Fast is unlimited. Smart comes in hours.");
+    expect(aiTimeNote(summary)).toBe(
+      "Only the minutes the AI is working for you count. Ten chats in the same minute count as one minute.",
+    );
+  });
+
+  it("the hours gone: Fast keeps going at standard speed", () => {
+    const summary = aiHoursSummary({ subscription: fastPlan(0), balance: balance() })!;
+    expect(aiFastLine(summary)).toBe(
+      "Your Smart hours are used up. Fast keeps going at standard speed.",
+    );
+    // The gateway can say it before the subscription does.
+    const fromStatus = aiHoursSummary({
+      subscription: fastPlan(30),
+      balance: balance(),
+      fastStandardSpeed: true,
+    })!;
+    expect(fromStatus.fastStandardSpeed).toBe(true);
+  });
+
+  it("from /auth/me alone, a Fast-unlimited plan at 0 minutes still has Uno AI", () => {
+    const summary = aiHoursSummary({
+      balance: balance({ aiHoursMinutes: 0 }),
+      fastUnlimited: true,
+    });
+    expect(summary && aiFastLine(summary)).toBe(
+      "Your Smart hours are used up. Fast keeps going at standard speed.",
+    );
+    // Without Fast unlimited, 0 still means "no AI hours".
+    expect(aiHoursSummary({ balance: balance({ aiHoursMinutes: 0 }) })).toBeNull();
+  });
+
+  it("other plans keep their words", () => {
+    const summary = aiHoursSummary({ subscription: subscriptionWithHours, balance: balance() })!;
+    expect(summary.fastUnlimited).toBeUndefined();
+    expect(aiFastLine(summary)).toBeNull();
+    expect(aiHoursCaption(summary)).toBe("AI hours · never expire");
+    expect(aiHoursHeadline(summary)).toBe("87 h left");
   });
 });

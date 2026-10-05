@@ -8,6 +8,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { memo } from "react";
 
 import { consoleLinks } from "../../account/accountOverview";
+import { AI_SMART_USED_UP_LINE } from "../../account/aiHours";
 import { aiBusyNotice, useAiStatus } from "../../lib/aiStatusReactQuery";
 import { openInNewTab } from "../../navigation/useOpenApp";
 
@@ -17,6 +18,7 @@ export function aiBusyNoticeText(notice: NonNullable<ReturnType<typeof aiBusyNot
   readonly text: string;
   readonly link: string | null;
 } {
+  if (notice.kind === "fast-standard") return { text: AI_SMART_USED_UP_LINE, link: null };
   if (notice.kind === "standard-speed") {
     const at = notice.renewsAt ? Date.parse(notice.renewsAt) : Number.NaN;
     const until = Number.isFinite(at)

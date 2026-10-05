@@ -14,6 +14,7 @@ import {
   CheckIcon,
   CreditCardIcon,
   ExternalLinkIcon,
+  InfoIcon,
   SparklesIcon,
   WalletIcon,
 } from "lucide-react";
@@ -39,13 +40,26 @@ import {
   usageLines,
 } from "../../account/billingModel";
 import {
-  AI_HOURS_TIME_NOTE,
+  aiFastLine,
   aiHoursHeadline,
   aiHoursSummary,
   aiHoursTodayLine,
+  aiTimeNote,
   planAiHoursLine,
   planHasUnoAi,
 } from "../../account/aiHours";
+import {
+  ALWAYS_ON_EXPLAINER,
+  SLEEPING_DONT_COUNT,
+  alwaysOnCard,
+  alwaysOnLadder,
+  boostUnitSentence,
+  boostsBreakdown,
+  boostsBurningLine,
+  needMoreSentence,
+  runningNowLine,
+  showsAlwaysOn,
+} from "../../account/alwaysOn";
 import { cn } from "../../lib/utils";
 import { openInNewTab } from "../../navigation/useOpenApp";
 import { formatElapsedAgoLabel } from "../../timestampFormat";
@@ -53,6 +67,7 @@ import { Meter, SectionCard } from "../computer/computerUi";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import { Switch } from "../ui/switch";
+import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import { paymentsQuery } from "./myUnoQueries";
 
 function formatDate(iso: string | null): string | null {
@@ -142,7 +157,9 @@ function CurrentPlanCard({
         {pending ? ` Switches to ${planTitle(pending)} then.` : ""}
       </p>
 
-      {plan ? (
+      {showsAlwaysOn(subscription) ? (
+        <AlwaysOnTiles subscription={subscription} lines={lines} />
+      ) : plan ? (
         <ul className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
           <li className="rounded-xl bg-muted/40 px-3 py-2">
             <div className="text-muted-foreground">Computer</div>
@@ -168,22 +185,123 @@ function CurrentPlanCard({
         </ul>
       ) : null}
 
-      <ul className="flex flex-col gap-3" data-testid="my-uno-usage">
-        {lines.map((line) => (
-          <li key={line.key} className="flex flex-col gap-1">
-            <div className="flex items-baseline gap-2 text-xs">
-              <span className="font-medium">{line.label}</span>
-              <span className="ml-auto tabular-nums text-muted-foreground">{line.value}</span>
-            </div>
-            {line.pct !== null ? <Meter value={line.pct} /> : null}
+      {showsAlwaysOn(subscription) ? null : (
+        <ul className="flex flex-col gap-3" data-testid="my-uno-usage">
+          {lines.map((line) => (
+            <li key={line.key} className="flex flex-col gap-1">
+              <div className="flex items-baseline gap-2 text-xs">
+                <span className="font-medium">{line.label}</span>
+                <span className="ml-auto tabular-nums text-muted-foreground">{line.value}</span>
+              </div>
+              {line.pct !== null ? <Meter value={line.pct} /> : null}
+              {line.hint ? (
+                <span className="text-[11px] text-muted-foreground">{line.hint}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </SectionCard>
+  );
+}
+
+/**
+ * Plans "always on": what is bought ("Always on 4 GB"), what runs now and the
+ * boosts — no computer hours anywhere. Disk and Cloud storage as tiles.
+ */
+function AlwaysOnTiles({
+  subscription,
+  lines,
+}: {
+  subscription: AccountSubscription & { alwaysOn: NonNullable<AccountSubscription["alwaysOn"]> };
+  lines: ReturnType<typeof usageLines>;
+}) {
+  const always = subscription.alwaysOn;
+  const boosts = subscription.boosts;
+  const burning = boosts ? boostsBurningLine(boosts) : null;
+  const others = lines.filter((line) => line.key !== "compute");
+  return (
+    <div className="flex flex-col gap-2">
+      <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2" data-testid="my-uno-always-on">
+        <li className="flex flex-col gap-1 rounded-xl bg-muted/40 px-3.5 py-3">
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            Always on
+            <TooltipProvider delay={0} closeDelay={0}>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label="What always on means"
+                      className="inline-flex rounded-sm text-muted-foreground hover:text-foreground"
+                    />
+                  }
+                >
+                  <InfoIcon className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipPopup side="top" className="max-w-64">
+                  {ALWAYS_ON_EXPLAINER}
+                </TooltipPopup>
+              </Tooltip>
+            </TooltipProvider>
+          </span>
+          <span className="flex items-baseline gap-1.5">
+            <span className="text-2xl font-semibold tabular-nums">
+              {formatRamShort(always.ramMb)}
+            </span>
+            {always.vcpu > 0 ? (
+              <span className="text-xs text-muted-foreground">
+                · {always.vcpu} {always.vcpu === 1 ? "core" : "cores"}
+              </span>
+            ) : null}
+          </span>
+          <span className="text-xs font-medium tabular-nums" data-testid="my-uno-running-now">
+            {runningNowLine(always)}
+          </span>
+          <span className="text-[11px] text-muted-foreground">{SLEEPING_DONT_COUNT}</span>
+        </li>
+        {boosts ? (
+          <li
+            className="flex flex-col gap-1 rounded-xl bg-muted/40 px-3.5 py-3"
+            data-testid="my-uno-boosts"
+          >
+            <span className="text-xs text-muted-foreground">⚡ Boosts</span>
+            <span className="flex items-baseline gap-1.5">
+              <span className="text-2xl font-semibold tabular-nums">{boosts.left}</span>
+              <span className="text-xs text-muted-foreground">left</span>
+            </span>
+            <span className="text-xs">{boostsBreakdown(boosts)}</span>
+            <span className="text-[11px] text-muted-foreground">
+              {boostUnitSentence(boosts, always.ramMb)}
+            </span>
+            {burning ? <span className="text-[11px] font-medium">{burning}</span> : null}
+          </li>
+        ) : null}
+        {others.map((line) => (
+          <li key={line.key} className="flex flex-col gap-1 rounded-xl bg-muted/40 px-3.5 py-3">
+            <span className="text-xs text-muted-foreground">
+              {line.key === "cloud" ? "Cloud storage" : line.label}
+            </span>
+            <span className="text-base font-semibold tabular-nums">{line.value}</span>
             {line.hint ? (
               <span className="text-[11px] text-muted-foreground">{line.hint}</span>
             ) : null}
           </li>
         ))}
       </ul>
-    </SectionCard>
+      {boosts?.runOnBoosts ? (
+        <p className="text-[11px] text-muted-foreground">
+          <span className="font-medium text-foreground">What if I need more?</span>{" "}
+          {needMoreSentence(always.ramMb)}
+        </p>
+      ) : null}
+    </div>
   );
+}
+
+/** "4 GB" without the decimals noise. */
+function formatRamShort(mb: number): string {
+  return computerSize(mb, 1).replace(/ · .*$/, "");
 }
 
 function MoneyCard({
@@ -224,22 +342,38 @@ function MoneyCard({
             data-testid="my-uno-ai-hours"
           >
             <span className="text-xs text-muted-foreground">
-              {hours.unlimited ? "Uno AI" : "AI hours · never expire"}
+              {hours.unlimited
+                ? "Uno AI"
+                : hours.aiTime
+                  ? "Uno AI · AI time"
+                  : "AI hours · never expire"}
             </span>
-            <span className="text-2xl font-semibold tabular-nums">{aiHoursHeadline(hours)}</span>
+            <span className="flex items-baseline gap-1.5">
+              <span className="text-2xl font-semibold tabular-nums">{aiHoursHeadline(hours)}</span>
+              {hours.fastUnlimited ? (
+                <span className="text-xs text-muted-foreground">of Smart left</span>
+              ) : null}
+            </span>
+            {aiFastLine(hours) ? (
+              <span className="text-xs" data-testid="my-uno-ai-fast">
+                {aiFastLine(hours)}
+              </span>
+            ) : null}
             <span className="text-[11px] text-muted-foreground">
               {[
                 today,
                 hours.unlimited
                   ? "Full speed for the month's hours, then standard speed."
                   : hours.monthlyHours > 0
-                    ? `Your plan adds ${hours.monthlyHours} h every month; unused hours roll over.`
+                    ? hours.fastUnlimited
+                      ? `Your plan adds ${hours.monthlyHours} h of Smart every month; unused hours roll over.`
+                      : `Your plan adds ${hours.monthlyHours} h every month; unused hours roll over.`
                     : "Unused hours roll over.",
               ]
                 .filter(Boolean)
                 .join(" · ")}
             </span>
-            <span className="text-[11px] text-muted-foreground">{AI_HOURS_TIME_NOTE}</span>
+            <span className="text-[11px] text-muted-foreground">{aiTimeNote(hours)}</span>
             <span className="text-[11px] text-muted-foreground">
               Premium models (Grok, GLM-5.3, Kimi K3):{" "}
               <span className="font-medium text-foreground tabular-nums">
@@ -287,15 +421,19 @@ function PlanCard({
   rung,
   withAi,
   subscription,
+  alwaysOn,
 }: {
   rung: PlanRung;
   withAi: boolean;
   subscription: AccountSubscription | null;
+  /** The ladder reads "always on" (price, GB, boosts — three numbers at most). */
+  alwaysOn: boolean;
 }) {
   const plan: AccountPlan | null = (withAi ? rung.withAi : rung.plain) ?? rung.plain ?? rung.withAi;
   if (!plan) return null;
   const direction = planDirection(subscription, plan);
   const current = direction === "current";
+  const card = alwaysOn ? alwaysOnCard(plan) : null;
   return (
     <li
       className={cn(
@@ -314,35 +452,51 @@ function PlanCard({
       </div>
       <div className="flex items-baseline gap-1">
         <span className="text-2xl font-semibold tabular-nums">{formatUsd(plan.priceUsd)}</span>
-        <span className="text-xs text-muted-foreground">/ month</span>
+        <span className="text-xs text-muted-foreground">{card ? "/mo" : "/ month"}</span>
       </div>
-      <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
-        <li>
-          <span className="font-medium text-foreground">
-            {computerSize(plan.peakRamMb, plan.peakVcpu)}
-          </span>{" "}
-          {plan.cloudWork ? "· Uno Work in the cloud" : "· a small server"}
-        </li>
-        <li>{plan.diskGb} GB working disk</li>
-        {plan.cloudGb > 0 ? <li>{plan.cloudGb} GB cloud</li> : null}
-        {plan.boostHours > 0 ? <li>{plan.boostHours} boost hours a month</li> : null}
-        {planHasUnoAi(plan) && planAiHoursLine(plan) !== null ? (
-          <>
+      {card ? (
+        <ul
+          className="flex flex-col gap-1 text-xs text-muted-foreground"
+          data-testid="plan-card-always-on"
+        >
+          <li className="text-sm font-medium text-foreground">{card.alwaysOn}</li>
+          {card.boosts ? <li>{card.boosts}</li> : null}
+          <li className="text-foreground">
+            <span className="mr-1 text-primary" aria-hidden>
+              ✦
+            </span>
+            {card.ai}
+          </li>
+        </ul>
+      ) : (
+        <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
+          <li>
+            <span className="font-medium text-foreground">
+              {computerSize(plan.peakRamMb, plan.peakVcpu)}
+            </span>{" "}
+            {plan.cloudWork ? "· Uno Work in the cloud" : "· a small server"}
+          </li>
+          <li>{plan.diskGb} GB working disk</li>
+          {plan.cloudGb > 0 ? <li>{plan.cloudGb} GB cloud</li> : null}
+          {plan.boostHours > 0 ? <li>{plan.boostHours} boost hours a month</li> : null}
+          {planHasUnoAi(plan) && planAiHoursLine(plan) !== null ? (
+            <>
+              <li className="text-foreground">
+                <SparklesIcon className="mr-1 inline size-3 text-primary" />
+                {planAiHoursLine(plan)}
+              </li>
+              {(plan.aiPremiumUsd ?? plan.aiCreditsUsd) > 0 ? (
+                <li>{formatUsd(plan.aiPremiumUsd ?? plan.aiCreditsUsd)} premium credit a month</li>
+              ) : null}
+            </>
+          ) : plan.aiCreditsUsd > 0 ? (
             <li className="text-foreground">
               <SparklesIcon className="mr-1 inline size-3 text-primary" />
-              {planAiHoursLine(plan)}
+              {formatUsd(plan.aiCreditsUsd)} of Uno AI a month
             </li>
-            {(plan.aiPremiumUsd ?? plan.aiCreditsUsd) > 0 ? (
-              <li>{formatUsd(plan.aiPremiumUsd ?? plan.aiCreditsUsd)} premium credit a month</li>
-            ) : null}
-          </>
-        ) : plan.aiCreditsUsd > 0 ? (
-          <li className="text-foreground">
-            <SparklesIcon className="mr-1 inline size-3 text-primary" />
-            {formatUsd(plan.aiCreditsUsd)} of Uno AI a month
-          </li>
-        ) : null}
-      </ul>
+          ) : null}
+        </ul>
+      )}
       <div className="mt-auto">
         {current ? (
           <Button size="sm" variant="outline" disabled className="w-full">
@@ -368,10 +522,12 @@ function PlansCard({
   catalog,
   loading,
   subscription,
+  alwaysOn,
 }: {
   catalog: PlanCatalog | undefined;
   loading: boolean;
   subscription: AccountSubscription | null;
+  alwaysOn: boolean;
 }) {
   const rungs = useMemo(() => (catalog ? planLadder(catalog) : []), [catalog]);
   const hasAiOption = rungs.some((rung) => rung.withAi !== null && rung.plain !== null);
@@ -393,13 +549,16 @@ function PlansCard({
       }
     >
       <p className="-mt-2 text-xs text-muted-foreground">
-        A plan is your computer in the cloud: split it into a workspace and a couple of servers if
-        you like.
-        {hasAiOption
-          ? hoursCatalog
-            ? " With Uno AI, the plan adds AI hours every month, unlimited inside them — or bring your own Claude or ChatGPT subscription."
-            : " With Uno AI, the plan includes AI hours every month — or bring your own Claude or ChatGPT subscription."
-          : ""}
+        {alwaysOn
+          ? "A plan is your computer in the cloud, always on. Split it into a workspace and a couple of servers if you like."
+          : "A plan is your computer in the cloud: split it into a workspace and a couple of servers if you like."}
+        {hasAiOption && alwaysOn
+          ? " With Uno AI, Fast is unlimited and Smart comes in hours — or bring your own Claude or ChatGPT subscription."
+          : hasAiOption
+            ? hoursCatalog
+              ? " With Uno AI, the plan adds AI hours every month, unlimited inside them — or bring your own Claude or ChatGPT subscription."
+              : " With Uno AI, the plan includes AI hours every month — or bring your own Claude or ChatGPT subscription."
+            : ""}
       </p>
       {loading ? (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -410,7 +569,13 @@ function PlansCard({
       ) : (
         <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" id="my-uno-plans">
           {rungs.map((rung) => (
-            <PlanCard key={rung.key} rung={rung} withAi={withAi} subscription={subscription} />
+            <PlanCard
+              key={rung.key}
+              rung={rung}
+              withAi={withAi}
+              subscription={subscription}
+              alwaysOn={alwaysOn}
+            />
           ))}
         </ul>
       )}
@@ -517,6 +682,7 @@ export function BillingView(props: {
         catalog={props.catalog}
         loading={props.catalogLoading}
         subscription={props.subscription}
+        alwaysOn={alwaysOnLadder(props.subscription, props.balance?.features)}
       />
       <HistoryCard />
     </div>
