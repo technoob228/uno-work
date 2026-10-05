@@ -56,7 +56,9 @@ import {
   readDroppedUploadFiles,
 } from "../../../projectUploadPickers";
 import type { ProjectUploadFile } from "../../../projectUpload";
-import { useServerConfig, whenServerConfigReady } from "../../../rpc/serverState";
+import { getServerConfig, useServerConfig, whenServerConfigReady } from "../../../rpc/serverState";
+import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../../store";
+import { listAiChats } from "../../../unoai/unoAiApi";
 import { useAssistantChat } from "../../../assistant/useAssistantChat";
 import { useHomeLaunchers } from "../../computer/useHomeLaunchers";
 import { openInstallDocs } from "../../onboarding/harnessInstallLinks";
@@ -74,6 +76,7 @@ import {
   goalAsksHow,
   goalFirstPrompt,
   goalFromOnboardingPath,
+  consoleGoalApplies,
   impliedConnectPath,
   withAnswer,
   withFirstResult,
@@ -370,6 +373,33 @@ function NextStepCard({ goal, onClick }: { goal: GoalId; onClick?: () => void })
 
 // ── screen 1 ───────────────────────────────────────────────────────────
 
+/**
+ * Is the account's goal from the console still the person's current ask?
+ * Reads what this computer and the account already have (consoleGoalApplies):
+ * the machine's own "set up" flag once its config arrives (the hook value is
+ * null on first render — 05.10 a used computer still got the old goal), its
+ * chats, and the Uno AI chats. Bounded: a slow answer counts as "nothing".
+ */
+async function consoleGoalStillApplies(): Promise<boolean> {
+  const within = <T,>(promise: Promise<T>, fallback: T, ms = 2500): Promise<T> =>
+    Promise.race([
+      promise.catch(() => fallback),
+      new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+    ]);
+  const [config, unoAiChats] = await Promise.all([
+    within(whenServerConfigReady(), null),
+    within(
+      listAiChats().then((r) => r.chats.length),
+      0,
+    ),
+  ]);
+  return consoleGoalApplies({
+    machineOnboarded: (config ?? getServerConfig())?.settings.machineOnboarded === true,
+    machineChats: selectSidebarThreadsAcrossEnvironments(useStore.getState()).length,
+    unoAiChats,
+  });
+}
+
 function GoalPicker() {
   const { goHome } = useSetupNavigation();
   const { updateSettings } = useUpdateSettings();
@@ -409,6 +439,13 @@ function GoalPicker() {
           (me as { readonly onboarding_path?: unknown } | null)?.onboarding_path,
         );
         if (!picked) {
+          toHome();
+          return;
+        }
+        // An old goal on a start that is already in use: Home, not its screen.
+        const applies = await consoleGoalStillApplies();
+        if (cancelled || decided.current) return;
+        if (!applies) {
           toHome();
           return;
         }
