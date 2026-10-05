@@ -902,13 +902,7 @@ function ComputerOffer({ reason, chatId }: { reason: string; chatId: string }) {
           <Button
             size="sm"
             variant="outline"
-            render={
-              <a
-                href={checkoutHref("plus")}
-                target="_blank"
-                rel="noreferrer"
-              />
-            }
+            render={<a href={checkoutHref("plus")} target="_blank" rel="noreferrer" />}
           >
             See plans
             <ExternalLinkIcon />

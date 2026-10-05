@@ -156,9 +156,7 @@ describe("liteEmptyComputersCopy", () => {
 describe("checkoutHref", () => {
   it("builds one buy-plan link shape that opens Checkout", () => {
     expect(checkoutHref("plus")).toBe(`${CONSOLE_URL}/billing?tab=plan&plan=plus&checkout=1`);
-    expect(checkoutHref("plus-ai")).toBe(
-      `${CONSOLE_URL}/billing?tab=plan&plan=plus-ai&checkout=1`,
-    );
+    expect(checkoutHref("plus-ai")).toBe(`${CONSOLE_URL}/billing?tab=plan&plan=plus-ai&checkout=1`);
   });
 
   it("encodes the slug and is the only shape used by the other links", () => {
