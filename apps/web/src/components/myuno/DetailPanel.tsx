@@ -12,7 +12,6 @@ import {
   GlobeIcon,
   LaptopIcon,
   Loader2Icon,
-  LockIcon,
   MoonIcon,
   RefreshCwIcon,
   RotateCwIcon,
@@ -55,6 +54,8 @@ import {
 } from "./myUnoQueries";
 import { ROLE_ICON, ROLE_TINT, RoleBadge } from "./roleUi";
 import { AppGlyph, Dot } from "./rowsUi";
+import { SiteStatusPill } from "../sites/SiteStatusPill";
+import { siteSubline } from "../sites/sitesModel";
 import { SiteCopyButton, siteHost } from "./SitesTab";
 import type { ComputerActions } from "./useComputerActions";
 
@@ -556,7 +557,7 @@ function ComputerLive({
 // ---- site ----
 
 export function SiteDetail({ site, onUpdate }: { site: HostedSite; onUpdate: () => void }) {
-  const { openHere } = useOpenApp();
+  const subline = siteSubline(site);
   return (
     <>
       <div className="flex flex-col gap-3 px-4 pt-4 pb-3.5">
@@ -566,19 +567,20 @@ export function SiteDetail({ site, onUpdate }: { site: HostedSite; onUpdate: () 
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
-              <span className="truncate text-base font-semibold">{site.slug}</span>
-              {site.hasPassword ? (
-                <LockIcon className="size-3.5 shrink-0 text-muted-foreground" />
-              ) : null}
+              <span className="truncate text-base font-semibold">{siteHost(site)}</span>
+              <SiteStatusPill site={site} />
             </div>
-            <div className="mt-0.5 truncate text-xs text-muted-foreground">{siteHost(site)}</div>
+            {subline ? (
+              <div className="mt-0.5 truncate text-xs text-muted-foreground">{subline}</div>
+            ) : null}
           </div>
         </div>
         <p className="text-xs leading-relaxed text-muted-foreground">
           On Uno Hosting — it stays up even when every computer sleeps.
         </p>
         <div className="flex flex-wrap items-center gap-1.5">
-          <Button size="sm" onClick={() => openHere({ url: site.url, name: site.slug })}>
+          {/* A site is not an app of this computer: /app can't frame it, so a tab. */}
+          <Button size="sm" onClick={() => openInNewTab(site.url)}>
             <SquareArrowOutUpRightIcon />
             Open
           </Button>

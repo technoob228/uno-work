@@ -25,12 +25,20 @@ export function hostOfSite(url: string): string {
   }
 }
 
+/**
+ * The one name a site goes by everywhere (Apps & sites, My Uno, Home's
+ * widget): its address host — `our-cafe-bot.uno4.me` or the own domain.
+ */
+export function siteLabel(site: { readonly url: string }): string {
+  return hostOfSite(site.url);
+}
+
 export function siteRows(sites: ReadonlyArray<UnoWorkSite>): SiteRow[] {
   return sites
     .map((site) => ({
       slug: site.slug,
       url: site.url,
-      host: hostOfSite(site.url),
+      host: siteLabel(site),
       hasPassword: site.hasPassword,
       updatedAt: site.updatedAt,
       madeIn: site.madeIn ?? null,
@@ -48,6 +56,20 @@ export function siteStatus(row: Pick<SiteRow, "hasPassword">): {
   readonly locked: boolean;
 } {
   return row.hasPassword ? { label: "Password", locked: true } : { label: "Live", locked: false };
+}
+
+/** The status pill's tooltip: who can open the site. */
+export function siteStatusTitle(row: Pick<SiteRow, "hasPassword">): string {
+  return row.hasPassword ? "Opens only with its password" : "Anyone with the link can open it";
+}
+
+/**
+ * The line under a site's name: when it changed. Who can open it is the
+ * pill's job — the line used to repeat it ("Public · …" next to "Live").
+ */
+export function siteSubline(row: Pick<SiteRow, "updatedAt">, now = Date.now()): string | null {
+  const ago = updatedAgo(row.updatedAt, now);
+  return ago ? `Updated ${ago}` : null;
 }
 
 /** "2 hours ago", "3 days ago", "just now"; null when unknown. */

@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   changeSitePrompt,
   parseAppsSitesSearch,
+  siteLabel,
   siteRows,
   siteStatus,
+  siteStatusTitle,
+  siteSubline,
   tabsShowingSite,
   updatedAgo,
 } from "./sitesModel";
@@ -74,5 +77,21 @@ describe("Apps & sites tabs", () => {
     expect(parseAppsSitesSearch({ tab: "apps" })).toEqual({ tab: "apps" });
     expect(parseAppsSitesSearch({ tab: "x" })).toEqual({});
     expect(parseAppsSitesSearch({})).toEqual({});
+  });
+});
+
+describe("one name and one status for a site everywhere", () => {
+  it("names a site by its address host, own domain included, without a path", () => {
+    expect(siteLabel({ url: "https://our-cafe.uno4.me/" })).toBe("our-cafe.uno4.me");
+    expect(siteLabel({ url: "https://cafe.example.com" })).toBe("cafe.example.com");
+    expect(siteLabel({ url: "https://our-cafe.uno4.me/menu/" })).toBe("our-cafe.uno4.me");
+  });
+
+  it("keeps who-can-open on the pill and only the time on the line under the name", () => {
+    const now = Date.parse("2026-10-05T12:00:00Z");
+    expect(siteSubline({ updatedAt: "2026-10-05T10:00:00Z" }, now)).toBe("Updated 2 hours ago");
+    expect(siteSubline({ updatedAt: null }, now)).toBeNull();
+    expect(siteStatus({ hasPassword: false }).label).toBe("Live");
+    expect(siteStatusTitle({ hasPassword: true })).toBe("Opens only with its password");
   });
 });
