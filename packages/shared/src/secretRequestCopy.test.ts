@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ASSISTANT_BOT_TOKEN_NAME,
+  humanSecretLabel,
   isTelegramBotTokenName,
   lateSecretMessage,
   parseUnoWorkNote,
@@ -55,5 +57,38 @@ describe("parseUnoWorkNote", () => {
 
   it("hides any other computer note behind a neutral line", () => {
     expect(parseUnoWorkNote("(Uno Work) Something new.")?.kind).toBe("other");
+  });
+});
+
+describe("the assistant's own bot", () => {
+  it("asks in three short steps with Open @BotFather", () => {
+    const help = secretHelp(ASSISTANT_BOT_TOKEN_NAME);
+    expect(help?.label).toBe("Open @BotFather");
+    expect(help?.steps).toEqual(["Send /newbot.", "Name it.", "Paste the token here."]);
+    expect(humanSecretLabel(ASSISTANT_BOT_TOKEN_NAME)).toBe("assistant's Telegram bot token");
+  });
+
+  it("tells the agent the bot is connected (no file), and the person one quiet line", () => {
+    const message = lateSecretMessage({
+      name: ASSISTANT_BOT_TOKEN_NAME,
+      cwd: "~",
+      outcome: { ok: true, name: ASSISTANT_BOT_TOKEN_NAME, botUsername: "nova_helper_bot" },
+    });
+    expect(message).toContain("@nova_helper_bot");
+    expect(message).not.toContain(".env");
+    expect(parseUnoWorkNote(message)).toEqual({
+      kind: "assistant-bot-connected",
+      text: "You connected @nova_helper_bot. Press Start in Telegram: your assistant says hi there.",
+    });
+    const declined = parseUnoWorkNote(
+      lateSecretMessage({
+        name: ASSISTANT_BOT_TOKEN_NAME,
+        cwd: "~",
+        outcome: { ok: false, error: "declined" },
+      }),
+    );
+    expect(declined?.text).toBe(
+      "You skipped the assistant's Telegram bot token. You can add it later.",
+    );
   });
 });

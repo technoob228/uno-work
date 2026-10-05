@@ -47,6 +47,9 @@ import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "../workspaceRegistry/UnoComputerService.ts";
 import { ConnectorsService } from "../setupTools/ConnectorsService.ts";
 import { ManagerConnectorRepository } from "../persistence/Services/ManagerConnectors.ts";
+import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { openAssistantBotTokenRequest } from "../secretRequestNotify.ts";
+import { isRelayCredential, isRouteCredential } from "../manager/channelRelay.ts";
 import {
   connectorAccessDecision,
   owningAssistant,
@@ -64,6 +67,7 @@ import {
   UNO_WORK_MCP_PATH,
   buildUnoWorkMcpServer,
   UnoWorkToolError,
+  type AssistantConnectStatus,
   type BridgeReply,
   type UnoWorkToolDeps,
 } from "./tools.ts";
@@ -201,6 +205,14 @@ const makeDeps = (input: {
     const connectors = Option.getOrNull(yield* Effect.serviceOption(ConnectorsService));
     const connectorRows = Option.getOrNull(yield* Effect.serviceOption(ManagerConnectorRepository));
     const gatewayKey = Option.getOrNull(yield* Effect.serviceOption(UnoGatewayKey));
+    // What the assistant's bot-token card needs (Inbox, messenger, the late answer).
+    const secretServices = yield* Effect.context<
+      | BrowserBridge
+      | InboxService
+      | ConnectorNotifyService
+      | ProjectionSnapshotQuery
+      | OrchestrationEngineService
+    >();
 
     const shell = yield* projections
       .getThreadShellById(ThreadId.make(input.threadId))
@@ -341,6 +353,7 @@ const makeDeps = (input: {
             .pipe(Effect.orElseSucceed(() => null));
           const main = snapshot ? findMarkedAssistantChat(snapshot.threads) : null;
           let telegramLinked = false;
+          let telegramBot: AssistantConnectStatus["telegramBot"] = "none";
           if (connectorRows) {
             const row = yield* connectorRows
               .get({ projectId: ASSISTANT_PROJECT_ID, kind: "telegram" })
@@ -349,10 +362,14 @@ const makeDeps = (input: {
               const config = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(
                 row.value.config,
               );
-              telegramLinked =
-                config._tag === "Success" &&
-                config.value.enabled &&
-                config.value.allowedChatIds.length > 0;
+              if (config._tag === "Success" && config.value.enabled) {
+                telegramLinked = config.value.allowedChatIds.length > 0;
+                telegramBot =
+                  isRelayCredential(config.value.botToken) ||
+                  isRouteCredential(config.value.botToken)
+                    ? "shared"
+                    : "own";
+              }
             }
           }
           const tools = connectors
@@ -373,6 +390,7 @@ const makeDeps = (input: {
           return {
             chat: main ? { id: main.id as string, title: main.title } : null,
             telegramLinked,
+            telegramBot,
             tools,
           };
         }),
@@ -381,6 +399,16 @@ const makeDeps = (input: {
           yield* browserBridge.publishOpenInApp({ view: "connect-telegram", path: "" }, context);
           return { ok: true };
         }),
+        // "Create your assistant's bot" in this chat (decision 05.10: its own
+        // bot from @BotFather, not Uno's shared one). Returns at once.
+        requestBotToken: openAssistantBotTokenRequest({
+          threadId: input.threadId,
+          projectId: ASSISTANT_PROJECT_ID,
+          context,
+        }).pipe(
+          Effect.provideContext(secretServices),
+          Effect.map((outcome) => ({ opened: outcome.queued === true || outcome.ok })),
+        ),
       },
       console: {
         request: (request) =>

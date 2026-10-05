@@ -295,6 +295,74 @@ export const verifyTelegramBotToken = (
     }),
   );
 
+const BOT_TOKEN_SHAPE = /^\d+:[\w-]{20,}$/;
+
+/**
+ * The assistant's own bot from the chat (assistant_connect → the "Create your
+ * assistant's bot" card, decision 05.10): check the token with Telegram,
+ * store it as the assistant's Telegram bot and leave the linking (Start) to
+ * the Connect Telegram window. A new bot starts with no linked chats: the
+ * person has not pressed Start on it yet, so it could not write to them.
+ * Switching away from Uno's shared bot drops this computer's relay.
+ */
+export const saveAssistantOwnBot = (input: {
+  readonly projectId: ProjectId;
+  readonly botToken: string;
+  readonly identity: WorkMachineIdentity | null;
+  readonly fetchImpl?: FetchLike;
+}): Effect.Effect<
+  | { readonly ok: true; readonly botUsername: string | null }
+  | { readonly ok: false; readonly message: string },
+  ManagerRepositoryError,
+  ManagerConnectorRepository
+> =>
+  Effect.gen(function* () {
+    const botToken = input.botToken.trim();
+    if (!BOT_TOKEN_SHAPE.test(botToken)) {
+      return {
+        ok: false as const,
+        message: "A bot token looks like 123456789:AAE… — copy the whole line BotFather sent.",
+      };
+    }
+    const verified = yield* verifyTelegramBotToken(botToken, input.fetchImpl);
+    if (!verified.ok && verified.rejected) {
+      return { ok: false as const, message: verified.message };
+    }
+    const repository = yield* ManagerConnectorRepository;
+    const existing = yield* repository.get({ projectId: input.projectId, kind: "telegram" });
+    const previous = Option.isSome(existing) ? decodeTelegramRow(existing.value.config) : null;
+    const sameBot = previous !== null && previous.botToken === botToken;
+    const config = {
+      botToken,
+      allowedChatIds: sameBot ? previous.allowedChatIds : [],
+      enabled: true,
+      defaultModelSelection: previous?.defaultModelSelection ?? null,
+      ...(previous?.addressing !== undefined ? { addressing: previous.addressing } : {}),
+      ...(sameBot && previous.ownerUserIds !== undefined
+        ? { ownerUserIds: previous.ownerUserIds }
+        : {}),
+      ...(sameBot && previous.groupMembers !== undefined
+        ? { groupMembers: previous.groupMembers }
+        : {}),
+    } satisfies ManagerTelegramConnectorConfig;
+    yield* repository.upsert({
+      projectId: input.projectId,
+      kind: "telegram",
+      config,
+      updatedAt: new Date().toISOString(),
+    });
+    yield* afterTelegramConfigSaved({
+      previous,
+      next: config,
+      identity: input.identity,
+      ...(input.fetchImpl !== undefined ? { fetchImpl: input.fetchImpl } : {}),
+    });
+    yield* Effect.logInfo("assistant's own Telegram bot saved from the chat").pipe(
+      Effect.annotateLogs({ projectId: input.projectId, sameBot }),
+    );
+    return { ok: true as const, botUsername: verified.ok ? verified.username : null };
+  });
+
 /**
  * Side effects of saving the Telegram connector through the ordinary
  * settings route, relay-aware: chats the owner removed from a shared-bot

@@ -7,6 +7,7 @@ import {
   shouldReplyToStranger,
   TELEGRAM_PAIRING_TTL_MS,
   TELEGRAM_STRANGER_REPLY_INTERVAL_MS,
+  helloLanguage,
   telegramLinkedReply,
   telegramPairingLink,
   telegramRoutedLinkedReply,
@@ -55,8 +56,25 @@ describe("telegramPairing", () => {
 });
 
 describe("linked replies", () => {
-  it("own bot: says Connected", () => {
-    expect(telegramLinkedReply({ toMainConversation: true })).toMatch(/^Connected\./);
+  it("own bot: the assistant says hello by its name, in the person's language", () => {
+    expect(telegramLinkedReply({ toMainConversation: true, name: "Nova" })).toBe(
+      "Hi, it's Nova, your assistant. This is the same conversation you see pinned in Uno Work: write here any time, for example “Every morning at 8, send me a plan for the day”.",
+    );
+    expect(
+      telegramLinkedReply({ toMainConversation: true, name: "Nova", languageCode: "ru" }),
+    ).toBe(
+      "Привет, это Nova, твой ассистент. Это тот же разговор, что закреплён в Uno Work: пиши сюда когда угодно, например «Каждое утро в 8 присылай план на день».",
+    );
+    expect(telegramLinkedReply({ toMainConversation: false, languageCode: "pt-br" })).toBe(
+      "Olá, é Uno, seu assistente. Escreva aqui quando quiser, por exemplo “Toda manhã às 8, me mande um plano do dia”.",
+    );
+    expect(helloLanguage("zh-hans")).toBe("en");
+    expect(helloLanguage(undefined)).toBe("en");
+    for (const languageCode of ["en", "ru", "uk", "es", "pt", "de", "fr", "it"]) {
+      expect(
+        telegramLinkedReply({ toMainConversation: true, name: "Nova", languageCode }),
+      ).not.toMatch(/Connected|Linked/);
+    }
   });
 
   it("Uno's shared bot: the console already said Linked, so a hello, not a second Connected", () => {

@@ -29,7 +29,7 @@ Without the tools: `GET $UNO_WORK_BRIDGE_URL/api/uno-work/guide/<topic>`, `Autho
 
 ## Their assistant
 
-This computer already has one: **Uno**, the pinned chat (memory, schedules, Telegram). For a personal assistant, reminders, a morning plan, "like OpenClaw": never build a bot or app. `assistant_connect` opens Telegram (they press Start); then 2–3 lines on what to tell Uno. Email only via Gmail in connected tools, never mail or app passwords.
+This computer already has one: **Uno**, the pinned chat (memory, schedules, Telegram). For a personal assistant, reminders, a morning plan, "like OpenClaw": never build a bot or app. FIRST `assistant_connect` with `open: "telegram"`: a card asks for its own bot's token (@BotFather, not Uno's bot); set the rest up meanwhile, then 2–3 lines on what to tell Uno. Email only via Gmail in connected tools, never mail or app passwords.
 
 ## Making an app or a widget
 

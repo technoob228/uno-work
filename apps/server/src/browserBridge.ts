@@ -194,6 +194,8 @@ export interface SecretRequestOutcome {
   readonly name?: string;
   readonly file?: string;
   readonly error?: string;
+  /** `assistant-telegram-bot`: the username of the bot the token belongs to. */
+  readonly botUsername?: string;
   /**
    * The person hasn't answered yet, but the request stays open (the card in
    * their window, replayed when a window connects) — see `holdMs`.
@@ -207,7 +209,15 @@ export interface PendingSecretRequestMeta {
   readonly name: string;
   readonly targetFile: string;
   readonly cwd: string;
+  /** Where the value goes when it isn't an env file (see BridgeSecretRequestEvent). */
+  readonly purpose?: SecretRequestPurpose;
+  /** `assistant-telegram-bot`: the assistant whose Telegram gets the token. */
+  readonly projectId?: string;
+  /** The asking chat (where the Connect Telegram window opens next). */
+  readonly context?: BrowserBridgeRequestContext;
 }
+
+export type SecretRequestPurpose = NonNullable<BridgeSecretRequestEvent["purpose"]>;
 
 interface PendingSecretRequest extends PendingSecretRequestMeta {
   readonly responseToken: string;
@@ -395,6 +405,9 @@ export interface BrowserBridgeShape {
       readonly holdMs?: number;
       /** A queued request's answer — runs when the person answers later. */
       readonly onLateOutcome?: (outcome: SecretRequestOutcome) => Effect.Effect<void>;
+      /** Not an env file: see {@link PendingSecretRequestMeta.purpose}. */
+      readonly purpose?: SecretRequestPurpose;
+      readonly projectId?: string;
     },
     context?: BrowserBridgeRequestContext,
   ) => Effect.Effect<SecretRequestOutcome>;
@@ -664,6 +677,7 @@ export const makeBrowserBridge = (input: {
             ...(input.description !== undefined ? { description: input.description } : {}),
             targetFile: input.targetFile,
             cwd: input.cwd,
+            ...(input.purpose !== undefined ? { purpose: input.purpose } : {}),
             ...(context ? { context } : {}),
           } satisfies BridgeSecretRequestEvent;
           pendingSecretRequests.set(requestId, {
@@ -672,6 +686,9 @@ export const makeBrowserBridge = (input: {
             name: input.name,
             targetFile: input.targetFile,
             cwd: input.cwd,
+            ...(input.purpose !== undefined ? { purpose: input.purpose } : {}),
+            ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+            ...(context ? { context } : {}),
             event,
           });
           yield* PubSub.publish(pubsub, event);
@@ -750,7 +767,14 @@ export const makeBrowserBridge = (input: {
           if (!pending || !tokensEqual(pending.responseToken, input.responseToken)) {
             return null;
           }
-          return { name: pending.name, targetFile: pending.targetFile, cwd: pending.cwd };
+          return {
+            name: pending.name,
+            targetFile: pending.targetFile,
+            cwd: pending.cwd,
+            ...(pending.purpose !== undefined ? { purpose: pending.purpose } : {}),
+            ...(pending.projectId !== undefined ? { projectId: pending.projectId } : {}),
+            ...(pending.context !== undefined ? { context: pending.context } : {}),
+          };
         }),
       completeSecretRequest: (input) =>
         Effect.gen(function* () {

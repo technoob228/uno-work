@@ -6,11 +6,15 @@ import {
   parseSlackChatKey,
   type ChannelNotifyResult,
   type ProjectId,
+  type ThreadId,
 } from "@t3tools/contracts";
 import { findMarkedAssistantChat } from "@t3tools/shared/assistantChat";
 import { Effect, Layer, Option, Schema } from "effect";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
+import { sendUnoServiceNotification, UNO_SERVICE_CHAT_ID } from "../unoServiceNotify.ts";
+import { readWorkMachineIdentity } from "../workConsole.ts";
 import { ManagerConnectorBindingRepository } from "../../persistence/Services/ManagerConnectorBindings.ts";
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
 import { resolveNotifyChats, type NotifyConnector } from "../connectorBindings.ts";
@@ -144,6 +148,40 @@ const makeConnectorNotifyService = Effect.gen(function* () {
       };
     });
 
+  // Uno's own bot for service notifications (unoServiceNotify.ts): the
+  // console sends them as this machine. Absent in tests and on a laptop.
+  const serverSettings = Option.getOrNull(yield* Effect.serviceOption(ServerSettingsService));
+  const sendToUnoBot = (text: string): Effect.Effect<ChannelNotifyResult> =>
+    Effect.gen(function* () {
+      const settings = serverSettings
+        ? yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null))
+        : null;
+      const { delivered } = yield* sendUnoServiceNotification({
+        identity: readWorkMachineIdentity(settings?.uno),
+        text,
+      });
+      return {
+        delivered: delivered ? 1 : 0,
+        chats: delivered ? [{ kind: "telegram", chatId: UNO_SERVICE_CHAT_ID, delivered }] : [],
+      };
+    });
+
+  /**
+   * Who speaks: the assistant (its chats and schedules — they go to its own
+   * bot, the person's conversation with it) or Uno itself (another chat's
+   * agent, an app, a token or browser request — service notifications).
+   */
+  const isAssistantSubject = (threadId: ThreadId | null, projectId: ProjectId | null) =>
+    Effect.gen(function* () {
+      if (projectId !== null && isAssistantProjectId(projectId)) return true;
+      if (threadId === null) return false;
+      const main = yield* projectionSnapshotQuery.getShellSnapshot().pipe(
+        Effect.map((snapshot) => findMarkedAssistantChat(snapshot.threads)?.id ?? null),
+        Effect.orElseSucceed(() => null),
+      );
+      return main !== null && main === threadId;
+    });
+
   const notify: ConnectorNotifyServiceShape["notify"] = (input) =>
     Effect.gen(function* () {
       let projectId: ProjectId | null = input.projectId ?? null;
@@ -155,15 +193,25 @@ const makeConnectorNotifyService = Effect.gen(function* () {
           projectId = shell.value.projectId;
         }
       }
+      const threadId = input.threadId ?? null;
+      const fromAssistant = yield* isAssistantSubject(threadId, projectId);
+      const text = formatChannelNotifyText(input.text, input.kind);
+      // A chat the person bound to this thread / project gets it either way;
+      // the "the person's own chats" fallback is the assistant's alone.
       const chats = yield* resolveChats({
-        threadId: input.threadId ?? null,
+        threadId,
         projectId,
-        includeAssistantFallback: true,
+        includeAssistantFallback: fromAssistant,
         includeSlack: true,
       });
-      return yield* sendToChats(chats, formatChannelNotifyText(input.text, input.kind), {
-        asAssistant: projectId !== null && isAssistantProjectId(projectId) ? projectId : null,
-      });
+      if (chats.length > 0) {
+        return yield* sendToChats(chats, text, {
+          asAssistant: projectId !== null && isAssistantProjectId(projectId) ? projectId : null,
+        });
+      }
+      // Uno's service notification (or the assistant before it has a bot):
+      // Uno's own bot, never the assistant's; not linked → the Inbox only.
+      return yield* sendToUnoBot(text);
     });
 
   return { resolveChats, sendToChats, notify } satisfies ConnectorNotifyServiceShape;

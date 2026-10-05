@@ -13,9 +13,15 @@
 import { CommandId, MessageId, ThreadId, type OrchestrationThreadShell } from "@t3tools/contracts";
 import { Effect, Option } from "effect";
 
-import { humanSecretLabel, lateSecretMessage } from "@t3tools/shared/secretRequestCopy";
+import {
+  ASSISTANT_BOT_CARD,
+  ASSISTANT_BOT_TOKEN_NAME,
+  humanSecretLabel,
+  lateSecretMessage,
+} from "@t3tools/shared/secretRequestCopy";
+import type { BrowserBridgeRequestContext } from "@t3tools/contracts";
 
-import type { SecretRequestOutcome } from "./browserBridge.ts";
+import { BrowserBridge, type SecretRequestOutcome } from "./browserBridge.ts";
 import { InboxService } from "./inbox/InboxService.ts";
 import { ConnectorNotifyService } from "./manager/Services/ConnectorNotify.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
@@ -34,6 +40,7 @@ export const SECRET_REQUEST_HOLD_MS = 7 * 24 * 3_600_000;
 
 /** Inbox title: "Uno needs your Telegram bot token". */
 export function secretRequestTitle(name: string): string {
+  if (name === ASSISTANT_BOT_TOKEN_NAME) return ASSISTANT_BOT_CARD.title;
   const label = humanSecretLabel(name);
   return label === name ? `Uno needs a secret (${name})` : `Uno needs your ${label}`;
 }
@@ -68,20 +75,25 @@ export const announceSecretRequest = (input: {
     const chatTitle = shell?.title ?? "Uno";
     const title = secretRequestTitle(input.name);
     const why = input.description?.trim();
+    const ownBot = input.name === ASSISTANT_BOT_TOKEN_NAME;
 
     const inbox = yield* InboxService;
     const item = yield* inbox.post({
       kind: "agent.input",
       source: { kind: "agent", id: threadId, name: chatTitle, icon: null },
       title,
-      body: `${why ? `${why} ` : ""}Open the chat to paste it — it's saved privately on your computer, not in the chat.`,
+      body: ownBot
+        ? "Make a bot in @BotFather (/newbot, a name) and paste its token in the chat. Your assistant talks to you there."
+        : `${why ? `${why} ` : ""}Open the chat to paste it — it's saved privately on your computer, not in the chat.`,
       open: { kind: "thread", threadId },
       groupKey: groupKeyOf(input.threadId, input.name),
     });
 
     const notify = yield* ConnectorNotifyService;
     yield* notify.notify({
-      text: `${title}. Open “${chatTitle}” in Uno Work to paste it — it stays on your computer.`,
+      text: ownBot
+        ? `${title}: open “${chatTitle}” in Uno Work and paste the token from @BotFather there.`
+        : `${title}. Open “${chatTitle}” in Uno Work to paste it — it stays on your computer.`,
       threadId,
       kind: "warning",
     });
@@ -130,3 +142,59 @@ export const deliverLateSecretOutcome = (input: {
       createdAt: new Date().toISOString(),
     });
   }).pipe(Effect.ignoreCause({ log: true }));
+
+/**
+ * assistant_connect: the "Create your assistant's bot" card in the asking
+ * chat — the token of the assistant's own bot from @BotFather (decision
+ * 05.10). Returns at once (the agent goes on preparing the assistant); the
+ * card waits up to a week, the Inbox (and, with no window open, Uno's bot)
+ * says so, and the answer comes back to the chat as a "(Uno Work)" message.
+ * The token is saved by the result route into the assistant's Telegram
+ * settings (http.ts, `purpose: "assistant-telegram-bot"`).
+ */
+export const openAssistantBotTokenRequest = (input: {
+  readonly threadId: string;
+  readonly projectId: string;
+  readonly context: BrowserBridgeRequestContext | undefined;
+}): Effect.Effect<
+  SecretRequestOutcome,
+  never,
+  | BrowserBridge
+  | InboxService
+  | ConnectorNotifyService
+  | ProjectionSnapshotQuery
+  | OrchestrationEngineService
+> =>
+  Effect.gen(function* () {
+    const browserBridge = yield* BrowserBridge;
+    const hasSubscribers = yield* browserBridge.hasSubscribers;
+    const announce = announceSecretRequest({
+      threadId: input.threadId,
+      name: ASSISTANT_BOT_TOKEN_NAME,
+    });
+    // Nobody looking: Inbox + messenger now. Someone looking sees the card.
+    const inboxItemId = hasSubscribers ? null : yield* announce;
+    const lateServices = yield* Effect.context<
+      InboxService | OrchestrationEngineService | ProjectionSnapshotQuery
+    >();
+    return yield* browserBridge.publishSecretRequest(
+      {
+        name: ASSISTANT_BOT_TOKEN_NAME,
+        targetFile: ".env",
+        cwd: "~",
+        purpose: "assistant-telegram-bot",
+        projectId: input.projectId,
+        timeoutMs: 0,
+        holdMs: SECRET_REQUEST_HOLD_MS,
+        onLateOutcome: (late) =>
+          deliverLateSecretOutcome({
+            threadId: input.threadId,
+            name: ASSISTANT_BOT_TOKEN_NAME,
+            cwd: "~",
+            outcome: late,
+            inboxItemId,
+          }).pipe(Effect.provideContext(lateServices)),
+      },
+      input.context,
+    );
+  });

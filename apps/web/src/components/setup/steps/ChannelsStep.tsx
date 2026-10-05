@@ -171,11 +171,10 @@ function TelegramCard({
   const telegram = summary.telegram;
   const connected = telegramConnected(telegram);
   const shared = isSharedTelegram(telegram);
-  // Uno's bot is the default unless a bot of the person's own is set up.
-  const ownBotConfigured = telegram.configured && !shared;
-  const [mode, setMode] = useState<"shared" | "own">(
-    initialMode ?? (ownBotConfigured ? "own" : "shared"),
-  );
+  // Its own bot from @BotFather is the default (decision 05.10: Uno's shared
+  // bot also carries payments, the course and support, and the assistant's
+  // messages got lost among them). Uno's bot stays only where it is in use.
+  const [mode, setMode] = useState<"shared" | "own">(initialMode ?? (shared ? "shared" : "own"));
   const [link, setLink] = useState<SharedTelegramLink | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [waiting, setWaiting] = useState(false);
@@ -272,18 +271,6 @@ function TelegramCard({
       <div className="flex flex-col gap-3">
         {problem ? <p className="text-sm text-muted-foreground">{problem}</p> : null}
         <TelegramWizard environmentId={environmentId} summary={summary} onChanged={onChanged} />
-        {!problem ? (
-          <button
-            type="button"
-            className="self-start text-xs text-primary hover:underline"
-            onClick={() => {
-              requested.current = false;
-              setMode("shared");
-            }}
-          >
-            Use the shared Uno bot instead
-          </button>
-        ) : null}
       </div>
     );
   }

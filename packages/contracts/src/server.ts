@@ -438,6 +438,13 @@ export const BridgeSecretRequestEvent = Schema.Struct({
   targetFile: Schema.String,
   /** Корень проекта, в чей env-файл сервер запишет значение. */
   cwd: Schema.String,
+  /**
+   * `assistant-telegram-bot` (assistant_connect, 05.10): the token of the
+   * assistant's own bot from @BotFather. It goes into the assistant's Telegram
+   * settings, not into an env file (`targetFile`/`cwd` unused); the card says
+   * "Create your assistant's bot" with Open @BotFather.
+   */
+  purpose: Schema.optional(Schema.Literal("assistant-telegram-bot")),
   context: Schema.optional(BrowserBridgeRequestContext),
 });
 export type BridgeSecretRequestEvent = typeof BridgeSecretRequestEvent.Type;
