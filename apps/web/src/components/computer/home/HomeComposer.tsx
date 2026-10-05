@@ -118,6 +118,7 @@ export function HomeComposer({
   onDropProject,
   minimal = false,
   ariaLabel = "What should we do?",
+  onStarter,
 }: {
   environmentId: EnvironmentId | null;
   /** The folder the chip starts on (the setup's project); null = the home folder. */
@@ -134,6 +135,8 @@ export function HomeComposer({
   /** Only the box, the arrow and the pills (a newcomer's first screen; pills centred). */
   minimal?: boolean;
   ariaLabel?: string;
+  /** A pill with its own action (the assistant opens its quiz): true — handled, don't pre-fill. */
+  onStarter?: (id: string) => boolean;
 }) {
   // A first task handed over by the setup's last step is typed in, once.
   const [handoff] = useState(() => useSetupHandoff.getState().take());
@@ -320,6 +323,7 @@ export function HomeComposer({
               type="button"
               title={starter.prompt}
               onClick={() => {
+                if (onStarter?.(starter.id)) return;
                 setText(starter.prompt);
                 if (starter.folder) setFolder(starter.folder);
                 const input = ref.current;

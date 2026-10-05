@@ -91,11 +91,17 @@ import { useSetupHome, type SetupHome } from "../../setup/useSetupHome";
 import { OwnToolsDialog, type OwnToolsTab } from "../../setup/OwnToolsDialog";
 import type { ProjectUploadFile } from "../../../projectUpload";
 import { readDroppedUploadFiles } from "../../../projectUploadPickers";
+import { AssistantQuiz } from "../../assistants/AssistantQuiz";
+import { planFromHermes, quizPlanHandoff } from "../../assistants/assistantQuizApi";
+import { useAssistantsAvailability } from "../../assistants/useAssistants";
 import { openUploadAndAsk } from "../../newProject/uploadAndAsk";
 
 const LAYOUT_SCHEMA = Schema.Array(Schema.String);
 /** "Everything else on Home" opened by the person (remembered per device). */
 const HOME_MORE_KEY = "uno-work:home:more-open";
+
+/** The pill that opens the assistant quiz instead of pre-filling a prompt. */
+export const ASSISTANT_STARTER_ID = "example-assistant";
 
 /**
  * The hint pills under a simple Home's box (Misha 01.10: "simple hint
@@ -114,9 +120,11 @@ export const FIRST_SCREEN_EXAMPLES = [
     prompt: "A Telegram bot that answers my customers",
   },
   {
-    id: "example-assistant",
-    label: "An AI assistant for my work",
-    prompt: "An AI assistant that sorts my email and reminds me of tasks",
+    // No ready-made prompt (Misha 05.10: "maybe my assistant isn't about
+    // email"): the pill opens "What should your assistant do?" (AssistantQuiz).
+    id: ASSISTANT_STARTER_ID,
+    label: "An AI assistant",
+    prompt: "",
   },
 ] as const;
 
@@ -225,6 +233,19 @@ export function HomeStart({
     [openUpload],
   );
   const [ownTools, setOwnTools] = useState<OwnToolsTab | null>(null);
+  // "An AI assistant": the quiz → the "Your assistant" card → "Set it up"
+  // sends the answers to Uno on this computer ("set yourself up from these").
+  const [assistantQuiz, setAssistantQuiz] = useState(false);
+  const goTo = useNavigate();
+  // With the assistants flow on, the card's plan opens there (files, app
+  // access and the schedule are written by createLocalAssistant); without it,
+  // Uno on this computer gets the answers as a message and sets itself up.
+  const assistants = useAssistantsAvailability();
+  const onStarter = (id: string) => {
+    if (id !== ASSISTANT_STARTER_ID) return false;
+    setAssistantQuiz(true);
+    return true;
+  };
   const firstName = usePersonFirstName(environmentId);
   const homeStarters = useHomeStarters({ environmentId, threads, now, tiles });
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
@@ -474,6 +495,39 @@ export function HomeStart({
         }}
       />
     );
+    if (assistantQuiz) {
+      return (
+        <div
+          className="mx-auto flex w-full max-w-3xl flex-col gap-4 pt-6 pb-16 sm:pt-12"
+          data-testid="home-assistant-quiz"
+        >
+          <button
+            type="button"
+            onClick={() => setAssistantQuiz(false)}
+            className="w-fit text-sm font-medium text-muted-foreground hover:text-foreground"
+          >
+            ← Back
+          </button>
+          <AssistantQuiz
+            onSetUp={(turn) => {
+              setAssistantQuiz(false);
+              if (assistants === "on" && turn.hermes) {
+                quizPlanHandoff.set(planFromHermes(turn.hermes));
+                void goTo({ to: "/assistants", search: { view: "new" } });
+                return;
+              }
+              const message = turn.hermes?.setup_message?.trim();
+              if (message) void onAskUno(message);
+            }}
+            onOwnAgent={() => {
+              setAssistantQuiz(false);
+              setOwnTools("agent");
+            }}
+          />
+          {ownToolsDialog}
+        </div>
+      );
+    }
     if (firstScreen) {
       return (
         <div
@@ -491,6 +545,7 @@ export function HomeStart({
           <HomeComposer
             environmentId={environmentId}
             starters={FIRST_SCREEN_EXAMPLES}
+            onStarter={onStarter}
             defaultFolder={setupHome.project}
             onStart={onStartTask}
             minimal
@@ -539,6 +594,7 @@ export function HomeStart({
           <HomeComposer
             environmentId={environmentId}
             starters={simpleStarters}
+            onStarter={onStarter}
             defaultFolder={setupHome.project}
             onStart={onStartTask}
             placeholder="What do you want to build?"
