@@ -93,7 +93,8 @@ function seededClient() {
         hoursPerMonth: 5,
         hoursLeft: 7,
         hoursEarnedEconomy: 1.8,
-        economyEarn: { enabled: true, hoursPerSleepHour: 0.1, monthlyCapHours: 10 },
+        // The rule as it is in prod (05.10): 1 boost hour per hour asleep, up to 20 a month.
+        economyEarn: { enabled: true, hoursPerSleepHour: 1, monthlyCapHours: 20 },
       },
     },
   } as unknown as UnoComputerState);
@@ -149,7 +150,9 @@ describe("ComputerPill — the one computer menu", () => {
     // "How it works" unfolds the explanation, including what sleeping earns.
     await page.getByRole("button", { name: "How economy works" }).click();
     await expect
-      .element(page.getByText(/Every 10 hours asleep earn you 1 extra Boost hour/))
+      .element(
+        page.getByText(/Every hour asleep earns you 1 extra Boost hour \(up to 20 h a month\)/),
+      )
       .toBeVisible();
     if (import.meta.env.VITE_PILL_SCREENSHOT) {
       await page.screenshot({ path: "computer-menu-economy-open.png" });

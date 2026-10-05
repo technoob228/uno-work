@@ -18,6 +18,7 @@ import { useId, useState } from "react";
 import { cn } from "~/lib/utils";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
+import { useBoostWording } from "../myuno/usePlanView";
 import { economyEarnSentence } from "./boostModel";
 import { computerEconomyMutationOptions, computerStateQueryOptions } from "./computerQueries";
 import {
@@ -60,7 +61,8 @@ export function useComputerEconomy(environmentId: EnvironmentId | null, boxId: n
   const mutation = useMutation(computerEconomyMutationOptions(environmentId, boxId, queryClient));
   const economy = state.data?.box?.economy;
   const boost = state.data?.linked ? state.data?.box?.boost : undefined;
-  return { economy, boost, mutation };
+  const wording = useBoostWording();
+  return { economy, boost, wording, mutation };
 }
 
 /** "Sleep after [10 minutes] without use". */
@@ -109,12 +111,12 @@ export function EconomyLine({
   readonly environmentId: EnvironmentId | null;
   readonly boxId: number | null;
 }) {
-  const { economy, boost, mutation } = useComputerEconomy(environmentId, boxId);
+  const { economy, boost, wording, mutation } = useComputerEconomy(environmentId, boxId);
   const [open, setOpen] = useState(false);
   const detailsId = useId();
   const summary = economySummary(economy);
   if (!economy || !summary) return null;
-  const earn = economyEarnSentence(boost);
+  const earn = economyEarnSentence(boost, wording);
   const status = economyStatusLine(economy);
   return (
     <div className="flex flex-col gap-1.5" data-testid="economy-line">
@@ -171,10 +173,10 @@ export function EconomyCard({
   readonly boxId: number | null;
   readonly className?: string;
 }) {
-  const { economy, boost, mutation } = useComputerEconomy(environmentId, boxId);
+  const { economy, boost, wording, mutation } = useComputerEconomy(environmentId, boxId);
   if (!economy) return null;
   const status = economyStatusLine(economy);
-  const earn = economyEarnSentence(boost);
+  const earn = economyEarnSentence(boost, wording);
   return (
     <section
       className={cn("rounded-2xl border border-border/60 bg-card/40 p-4 sm:p-5", className)}

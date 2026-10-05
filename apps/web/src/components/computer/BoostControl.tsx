@@ -20,12 +20,13 @@ import {
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
+import { useBoostWording } from "../myuno/usePlanView";
 import {
-  BOOST_NO_HOURS_REASON,
   BOOST_RESTART_WARNING,
   boostConfirmCopy,
   boostDisabledReason,
   boostPillLabel,
+  isNoBoostsReason,
 } from "./boostModel";
 import type { ComputerBoostControls } from "./useComputerBoost";
 
@@ -44,28 +45,31 @@ function useNow(active: boolean, everyMs = 5_000): number {
 export function BoostControl({
   controls,
   size = "sm",
+  computerName,
 }: {
   controls: ComputerBoostControls;
   size?: "sm" | "xs";
+  /** "Boost uno-work for 1 hour?" on plans "always on". */
+  computerName?: string | null;
 }) {
   const { boost, state } = controls;
   const [confirm, setConfirm] = useState<"start" | "end" | null>(null);
   const now = useNow(state === "active");
-  const copy = boostConfirmCopy(boost);
-  const disabledReason = state === "off" ? boostDisabledReason(boost) : null;
+  const wording = useBoostWording();
+  const copy = boostConfirmCopy(boost, wording, computerName);
+  const disabledReason = state === "off" ? boostDisabledReason(boost, wording) : null;
   const navigate = useNavigate();
   // A plan without boost hours: the button stays (greyed) as a pointer to a bigger plan.
-  const seePlans =
-    disabledReason === BOOST_NO_HOURS_REASON ? (
-      <Button
-        size={size}
-        variant="link"
-        className="px-1"
-        onClick={() => void navigate({ to: "/my-uno", search: { tab: "billing" } })}
-      >
-        See plans
-      </Button>
-    ) : null;
+  const seePlans = isNoBoostsReason(disabledReason) ? (
+    <Button
+      size={size}
+      variant="link"
+      className="px-1"
+      onClick={() => void navigate({ to: "/my-uno", search: { tab: "billing" } })}
+    >
+      See plans
+    </Button>
+  ) : null;
 
   const body =
     state === "off" ? (

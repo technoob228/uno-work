@@ -29,6 +29,7 @@ import {
 import { LOW_DISK_PCT, LOW_MEMORY_PCT, isSustained } from "../resizeModel";
 import type { ResourceLook } from "../resources/resourceModel";
 import { useComputerBoost } from "../useComputerBoost";
+import { useBoostWording } from "../../myuno/usePlanView";
 import type { HomeComputer } from "./ComputerPill";
 
 const PLATFORM_WORD: Record<string, string> = {
@@ -99,6 +100,7 @@ export function useHomeComputer({
       ? `${PLATFORM_WORD[local.platform] ?? local.platform} · ${local.cpuCount} cores · awake ${humanDuration(local.uptimeS)}`
       : null;
 
+  const boostWording = useBoostWording();
   const boostControls = useComputerBoost({
     environmentId,
     boxId,
@@ -128,7 +130,9 @@ export function useHomeComputer({
           address: box?.address ?? null,
           load,
           boosted: boosting,
-          boost: boostControls ? <BoostControl controls={boostControls} size="xs" /> : null,
+          boost: boostControls ? (
+            <BoostControl controls={boostControls} size="xs" computerName={name} />
+          ) : null,
           onResize: openResize,
           power: powerControls
             ? {
@@ -149,7 +153,7 @@ export function useHomeComputer({
           economy: box?.economy ? (
             <EconomyLine environmentId={environmentId} boxId={boxId} />
           ) : null,
-          boostSummary: computer?.linked ? boostSummaryLine(box?.boost) : null,
+          boostSummary: computer?.linked ? boostSummaryLine(box?.boost, boostWording) : null,
         };
 
   const dialogs: ReactNode = (

@@ -326,7 +326,7 @@ export function ComputerView() {
 
   const boostNode =
     boostControls && (home.power === "on" || boosting) ? (
-      <BoostControl controls={boostControls} />
+      <BoostControl controls={boostControls} computerName={home.name} />
     ) : null;
 
   const refresh = () => {
