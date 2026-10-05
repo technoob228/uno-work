@@ -10,7 +10,7 @@
  *   bottom;
  * - Uno's face, used on the rail, the pinned Uno row and chats Uno started.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ArrowUpRightIcon,
@@ -20,6 +20,7 @@ import {
   FolderIcon,
   InboxIcon,
   LayoutGridIcon,
+  LogInIcon,
   LogOutIcon,
   MessagesSquareIcon,
   PanelLeftCloseIcon,
@@ -32,7 +33,7 @@ import {
 import { memo, useState, type ReactNode } from "react";
 
 import { CONSOLE_URL, consoleLinks } from "../../account/accountOverview";
-import { accountTransport } from "../../account/unoAccount";
+import { UNO_WORK_URL, accountTransport } from "../../account/unoAccount";
 import { useCommandPaletteStore } from "../../commandPaletteStore";
 import { isLoopbackHostname } from "../../environments/primary";
 import { useInboxNeedsYouCount, useInboxUnreadCount } from "../../inbox/inboxStore";
@@ -47,8 +48,10 @@ import { openInstallDocs } from "../onboarding/harnessInstallLinks";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { SidebarHeader, useSidebar } from "../ui/sidebar";
+import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InboxCountBadge } from "./SidebarInboxRow";
+import { accountMenuLines } from "./sidebarD.logic";
 import { sidebarDPanel } from "./sidebarDState";
 import { useSidebarEnvironmentLabelResolver } from "./useSidebarMachineIdentities";
 
@@ -147,8 +150,22 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
   const who = useAccountWho();
-  const hasAccount = accountTransport() !== "none";
+  const queryClient = useQueryClient();
+  const lines = accountMenuLines(accountTransport(), who !== null);
   const canSignOut = isWebApp && !isLoopbackHostname(window.location.hostname);
+  const signOutOfDesktop = async () => {
+    try {
+      await window.desktopBridge?.unoAccount?.signOut();
+      // Drop the account's cached answers: the menus fall back to "Sign in with Uno".
+      await queryClient.resetQueries({ queryKey: ["workspace"] });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Couldn't sign out",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
   const close = () => {
     if (isMobile) setOpenMobile(false);
     sidebarDPanel.closeNow();
@@ -198,7 +215,18 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
           <SettingsIcon />
           Settings
         </MenuItem>
-        {hasAccount ? (
+        {lines.signInElsewhere ? (
+          // This address can't reach the Uno account: say where it works.
+          <MenuItem
+            onClick={() => openExternal(UNO_WORK_URL)}
+            data-testid="sidebar-sign-in-elsewhere"
+          >
+            <LogInIcon />
+            <span className="flex-1">Sign in at app.uno4.work</span>
+            <ArrowUpRightIcon className="opacity-60" />
+          </MenuItem>
+        ) : null}
+        {lines.accountItems ? (
           <>
             <MenuItem
               onClick={() => {
@@ -225,6 +253,21 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
           <span className="flex-1">Help</span>
           <ArrowUpRightIcon className="opacity-60" />
         </MenuItem>
+        {lines.desktopSignOut ? (
+          <>
+            <MenuSeparator />
+            <MenuItem
+              onClick={() => {
+                close();
+                void signOutOfDesktop();
+              }}
+              data-testid="sidebar-desktop-sign-out"
+            >
+              <LogOutIcon />
+              Sign out of Uno
+            </MenuItem>
+          </>
+        ) : null}
         {canSignOut ? (
           <>
             <MenuSeparator />
