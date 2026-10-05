@@ -5,6 +5,7 @@
  */
 import { isAssistantProjectId } from "@t3tools/contracts";
 
+import { canOfferChatDone } from "../../../inbox/openRequests.logic";
 import { resolveSidebarThreadStatus } from "../../Sidebar.logic";
 import { isYourTurn } from "../../Sidebar.yourTurn";
 import type { SidebarThreadSummary } from "../../../types";
@@ -98,6 +99,14 @@ export function homeThreadStatus(thread: HomeThread): HomeThreadStatus | null {
           }
         : null;
   }
+}
+
+/**
+ * Done on a Continue card: not while the chat works or waits for an Allow /
+ * an answer — the request card in the chat would stay unanswered (WG-13).
+ */
+export function canMarkHomeChatDone(thread: HomeThread): boolean {
+  return canOfferChatDone(resolveSidebarThreadStatus(thread));
 }
 
 const CONTINUE_RANK: Record<HomeThreadStatus["kind"], number> = {

@@ -3,7 +3,8 @@
  * keeps the chat's details subscribed while mounted (only the chat's own
  * events name the request) and sends the same `thread.approval.respond` the
  * chat's Approve / Decline buttons send. `approval` stays null until the
- * request is known, or when it is gone — callers then just offer Open.
+ * request is known, or when it is gone; `phase` tells the two apart (the
+ * chat's summary still says it waits → "loading": offer Open, never Done).
  */
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, ProviderApprovalDecision, ThreadId } from "@t3tools/contracts";
@@ -15,12 +16,32 @@ import { retainThreadDetailSubscription } from "../environments/runtime/service"
 import { newCommandId } from "../lib/utils";
 import { derivePendingApprovals, type PendingApproval } from "../session-logic";
 import { createThreadSelectorByRef } from "../storeSelectors";
-import { useStore } from "../store";
+import { selectEnvironmentState, useStore } from "../store";
+import {
+  approvalPhase,
+  chatOpenRequests,
+  type ApprovalPhase,
+  type ChatOpenRequests,
+} from "./openRequests.logic";
 
 export interface PendingApprovalState {
   readonly approval: PendingApproval | null;
+  readonly phase: ApprovalPhase;
   readonly responding: boolean;
   readonly respond: (decision: ProviderApprovalDecision) => Promise<void>;
+}
+
+/** What the chat's summary says waits for the person (undefined: chat not known here). */
+export function useChatOpenRequests(
+  environmentId: EnvironmentId,
+  threadId: ThreadId | string | null,
+): ChatOpenRequests | undefined {
+  const summary = useStore((state) =>
+    threadId === null
+      ? undefined
+      : selectEnvironmentState(state, environmentId).sidebarThreadSummaryById[threadId as ThreadId],
+  );
+  return useMemo(() => chatOpenRequests(summary), [summary]);
 }
 
 export function usePendingApproval(
@@ -37,6 +58,8 @@ export function usePendingApproval(
     () => (detail ? (derivePendingApprovals(detail.activities)[0] ?? null) : null),
     [detail],
   );
+  const open = useChatOpenRequests(environmentId, threadId);
+  const phase = approvalPhase({ requestKnown: approval !== null, open });
   const [responding, setResponding] = useState(false);
   const respond = async (decision: ProviderApprovalDecision) => {
     if (!approval) return;
@@ -62,5 +85,5 @@ export function usePendingApproval(
       setResponding(false);
     }
   };
-  return { approval, responding, respond };
+  return { approval, phase, responding, respond };
 }

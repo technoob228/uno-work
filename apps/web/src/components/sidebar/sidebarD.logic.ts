@@ -151,3 +151,27 @@ export function parseFoldedProjects(raw: string | null): ReadonlySet<string> {
     return new Set();
   }
 }
+
+/**
+ * The account lines of the account menu, by how this window reaches the Uno
+ * account (`accountTransport()`):
+ * - "none" (the computer's direct address, self-host, localhost, an own
+ *   domain): the account items can't work here — say so with one explicit
+ *   "Sign in at app.uno4.work" instead of silently leaving them out (WG-27);
+ * - "desktop" and signed in: "Sign out of Uno" (the app keeps the token in
+ *   the OS keychain; there was no way to drop it — WG-14).
+ */
+export function accountMenuLines(
+  transport: "work-proxy" | "desktop" | "none",
+  signedIn: boolean,
+): {
+  readonly accountItems: boolean;
+  readonly signInElsewhere: boolean;
+  readonly desktopSignOut: boolean;
+} {
+  return {
+    accountItems: transport !== "none",
+    signInElsewhere: transport === "none",
+    desktopSignOut: transport === "desktop" && signedIn,
+  };
+}

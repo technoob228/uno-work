@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HoverPanelController } from "./sidebarD.hover";
 import {
+  accountMenuLines,
   dRowMark,
   foldedProjectMark,
   groupChatsForSidebarD,
@@ -149,5 +150,25 @@ describe("sidebar D: the slide-out chats panel", () => {
     panel.closeNow();
     vi.advanceTimersByTime(500);
     expect(panel.open).toBe(false);
+  });
+});
+
+describe("accountMenuLines", () => {
+  it("says where to sign in when this address can't reach the account", () => {
+    expect(accountMenuLines("none", false)).toEqual({
+      accountItems: false,
+      signInElsewhere: true,
+      desktopSignOut: false,
+    });
+  });
+
+  it("offers Sign out of Uno only in the desktop app, once signed in", () => {
+    expect(accountMenuLines("desktop", true).desktopSignOut).toBe(true);
+    expect(accountMenuLines("desktop", false).desktopSignOut).toBe(false);
+    expect(accountMenuLines("work-proxy", true)).toEqual({
+      accountItems: true,
+      signInElsewhere: false,
+      desktopSignOut: false,
+    });
   });
 });

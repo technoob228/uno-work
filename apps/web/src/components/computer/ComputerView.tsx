@@ -23,7 +23,8 @@
  */
 import type { UnoMachineAppAction } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, getRouteApi, useCanGoBack, useNavigate, useRouter } from "@tanstack/react-router";
+import { Link, getRouteApi, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
+import { isUsefulBackTarget, previousEntryPath } from "../../navigation/inAppBack";
 import {
   ArrowLeftIcon,
   HardDriveIcon,
@@ -95,7 +96,14 @@ export function ComputerView() {
   const environmentId = activeEnvironmentId ?? primaryEnvironmentId;
   const queryClient = useQueryClient();
   const router = useRouter();
-  const canGoBack = useCanGoBack();
+  // Back only to a screen inside Work — never to /setup, the landing or the console (WG-22).
+  const canGoBack = useRouterState({
+    select: (state) =>
+      isUsefulBackTarget(
+        previousEntryPath(state.location.state.__TSR_index),
+        state.location.pathname,
+      ),
+  });
   const devMode = useDevMode();
   /** Only set when the daemon is not an Uno computer and the user picked one. */
   const [pickedBoxId, setPickedBoxId] = useState<number | null>(null);

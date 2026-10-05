@@ -23,7 +23,6 @@ import {
   ExternalLinkIcon,
   GlobeIcon,
   LayoutGridIcon,
-  LockIcon,
   MessageSquareIcon,
   SparklesIcon,
   SquarePenIcon,
@@ -56,13 +55,13 @@ import { SidebarInset } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { SiteStatusPill } from "./SiteStatusPill";
 import { unpublishSite } from "./unpublishSite";
 import {
   type AppsSitesTab,
   changeSitePrompt,
   siteRows,
-  updatedAgo,
-  siteStatus,
+  siteSubline,
   tabsShowingSite,
   type SiteRow,
 } from "./sitesModel";
@@ -336,8 +335,7 @@ function SiteItem({
   onChange: () => void;
   onUnpublish: () => void;
 }) {
-  const ago = updatedAgo(row.updatedAt);
-  const status = siteStatus(row);
+  const subline = siteSubline(row);
   return (
     <li
       className="flex min-w-0 items-center gap-3 rounded-xl border border-border/80 bg-card px-3 py-2.5"
@@ -348,11 +346,9 @@ function SiteItem({
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="truncate text-sm font-medium">{row.host}</span>
         </div>
-        <div className="truncate text-[11px] text-muted-foreground">
-          {[row.hasPassword ? "Password-protected" : "Public", ago ? `updated ${ago}` : null]
-            .filter(Boolean)
-            .join(" · ")}
-        </div>
+        {subline ? (
+          <div className="truncate text-[11px] text-muted-foreground">{subline}</div>
+        ) : null}
         {madeInTitle !== null ? (
           onOpenChat ? (
             <button
@@ -376,19 +372,7 @@ function SiteItem({
           )
         ) : null}
       </div>
-      <span
-        data-testid="site-status"
-        title={status.locked ? "Opens only with its password" : "Anyone with the link can open it"}
-        className={cn(
-          "flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
-          status.locked
-            ? "bg-muted text-muted-foreground"
-            : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-        )}
-      >
-        {status.locked ? <LockIcon className="size-3 shrink-0" /> : null}
-        {status.label}
-      </span>
+      <SiteStatusPill site={row} />
       <Button size="xs" variant="ghost" onClick={onChange} title="Change it with Uno">
         <SparklesIcon />
         <span className="max-sm:hidden">Change with Uno</span>
