@@ -282,7 +282,7 @@ export const SidebarDHeader = memo(function SidebarDHeader(props: { isElectron: 
       <SidebarDAccountMenu computerName={computerName} variant="header" />
       <HeaderIcon
         label="Search"
-        hint={`Search chats, files and apps · ${searchShortcut()}`}
+        hint={`Search commands, projects and chats · ${searchShortcut()}`}
         onClick={() => openPalette(true)}
         testId="sidebar-search"
       >

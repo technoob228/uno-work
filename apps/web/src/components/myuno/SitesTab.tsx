@@ -107,8 +107,9 @@ export function SitesTab({
         </p>
       ) : !data || data.sites.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-border/80 px-4 py-5 text-center text-xs text-muted-foreground">
-          No sites yet. In Files, pick a page or a folder and choose Share → Publish as a website —
-          it gets its own address and stays up even when your computers sleep.
+          {isWebLite
+            ? "No sites yet. Publish one in the Uno console — it gets its own address and stays up even when your computers sleep."
+            : "No sites yet. In Files, pick a page or a folder and choose Share → Publish as a website — it gets its own address and stays up even when your computers sleep."}
         </p>
       ) : (
         <>
