@@ -81,11 +81,11 @@ export function UnoLlmStep() {
     <TwoColumn>
       <div>
         <StepEyebrow>Or use Uno LLM</StepEyebrow>
-        <StepTitle>AI hours every month. Unlimited inside them.</StepTitle>
+        <StepTitle>AI time every month. Unlimited inside it.</StepTitle>
         <StepLead>
-          Uno AI: AI hours every month, unlimited inside them. Hours never expire. Work in as many
-          chats and agents at once as you like. Time counts only while AI is working. Reading,
-          thinking and typing don&apos;t use hours.
+          Uno AI: AI time every month, unlimited inside it. It never expires. Work in as many chats
+          and agents at once as you like. Only the minutes the AI is working for you count. Ten
+          chats in the same minute count as one minute.
         </StepLead>
         <ul className="mt-6 grid gap-3">
           <FeatureBullet icon={<Zap className="size-3.5" />}>

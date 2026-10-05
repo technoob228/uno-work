@@ -62,7 +62,7 @@ describe("aiHoursSummary", () => {
       power: 1,
     });
     expect(aiHoursLine(summary, formatUsd)).toBe(
-      "AI hours: 87 h left · never expire · $12.40 premium credit",
+      "AI time: 87 h left · never expires · $12.40 premium credit",
     );
     expect(aiHoursTodayLine(summary)).toBe("Today: 47 min");
   });
@@ -129,7 +129,7 @@ describe("plans with AI hours", () => {
     const rung = planLadder(catalog).find((r) => r.key === "small")!;
     expect(rung.plain?.slug).toBe("small");
     expect(rung.withAi?.slug).toBe("small-ai");
-    expect(planAiHoursLine(smallAi)).toBe("40 AI hours a month · AI power ×1");
+    expect(planAiHoursLine(smallAi)).toBe("40 h of AI time a month · AI power ×1");
   });
 
   it("describes unlimited and older plans", () => {
@@ -198,7 +198,7 @@ describe("Fast unlimited, Smart in hours (plans always on)", () => {
     const summary = aiHoursSummary({ subscription: subscriptionWithHours, balance: balance() })!;
     expect(summary.fastUnlimited).toBeUndefined();
     expect(aiFastLine(summary)).toBeNull();
-    expect(aiHoursCaption(summary)).toBe("AI hours · never expire");
+    expect(aiHoursCaption(summary)).toBe("AI time · never expires");
     expect(aiHoursHeadline(summary)).toBe("87 h left");
   });
 });

@@ -68,7 +68,7 @@ describe("chat cost", () => {
   it("says where the money came from", () => {
     expect(chatCostText(chat({ costUsd: 1.234 }), "metered")).toBe("$1.23");
     expect(chatCostText(chat({ costUsd: 0.004 }), "metered")).toBe("<$0.01");
-    expect(chatCostText(chat({ costUsd: 0, aiHoursRequests: 4 }), "metered")).toBe("In AI hours");
+    expect(chatCostText(chat({ costUsd: 0, aiHoursRequests: 4 }), "metered")).toBe("In AI time");
     expect(chatCostText(chat({ costUsd: 0 }), "metered")).toBe("$0.00");
     expect(chatCostText(chat({ costUsd: null }), "unavailable")).toBe("—");
     expect(chatCostText(chat({ billing: "plan", costUsd: null }), "metered")).toBe("In your plan");

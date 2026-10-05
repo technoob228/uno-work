@@ -52,7 +52,7 @@ const AI_ROWS: ReadonlyArray<AiRow> = [
     icon: UnoIcon,
     // Uno AI hours (fishcode back/knowledge/ai-hours.md).
     description: () =>
-      "Built in. AI hours every month, unlimited inside them. Hours never expire. Work in as many chats and agents at once as you like. Time counts only while AI is working. Reading, thinking and typing don't use hours.",
+      "Built in. AI time every month, unlimited inside it. It never expires. Work in as many chats and agents at once as you like. Only the minutes the AI is working for you count. Ten chats in the same minute count as one minute.",
   },
   {
     id: "claudeAgent",

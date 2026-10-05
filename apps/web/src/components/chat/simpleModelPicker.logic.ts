@@ -104,7 +104,7 @@ export function buildSimpleModelChoices<E extends SimplePickerEntry>(input: {
         label: displayName(model),
         description:
           group === "included"
-            ? "Included in your AI hours"
+            ? "Included in your AI time"
             : "From premium credit, then your balance",
       };
       (group === "included" ? included : premium).push(choice);

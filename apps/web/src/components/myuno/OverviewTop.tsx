@@ -109,19 +109,13 @@ export function PlanLine({
           title={aiTimeNote(hours)}
           data-testid="my-uno-ai-hours-strip"
         >
-          {hours.unlimited
-            ? ""
-            : hours.fastUnlimited
-              ? "Smart "
-              : hours.aiTime
-                ? "AI time "
-                : "AI hours "}
+          {hours.unlimited ? "" : hours.fastUnlimited ? "Smart " : "AI time "}
           <span className="font-medium text-foreground tabular-nums">{aiHoursHeadline(hours)}</span>
           {hours.unlimited
             ? ""
             : hours.fastUnlimited
               ? " left · Fast is unlimited"
-              : " · never expire"}
+              : " · never expires"}
           {today ? ` · ${today}` : ""}
           {hours.premiumUsd > 0 ? (
             <>

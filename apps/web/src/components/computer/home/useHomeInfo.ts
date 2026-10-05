@@ -92,7 +92,6 @@ export function useAiHours(environmentId: EnvironmentId | null): AiHoursSummary 
     ? {
         fastUnlimited: true,
         fastStandardSpeed: status.fastStandardSpeed === true || (status.hoursLeftMinutes ?? 1) <= 0,
-        aiTime: true,
       }
     : {};
   // No account reachable (desktop without sign-in): the machine's own reading.

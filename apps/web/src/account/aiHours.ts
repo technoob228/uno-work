@@ -11,13 +11,11 @@
  */
 import type { AccountBalance, AccountPlan, AccountSubscription } from "./accountOverview";
 
-/** Next to every place hours are shown. */
-export const AI_HOURS_TIME_NOTE =
-  "Time counts only while AI is working. Reading, thinking and typing don't use hours.";
-
-/** "AI time" — the unit of Uno AI on plans "always on" and Fast-unlimited plans. */
+/** "AI time" — the unit of Uno AI everywhere (decision 05.10); next to every place it's shown. */
 export const AI_TIME_NOTE =
   "Only the minutes the AI is working for you count. Ten chats in the same minute count as one minute.";
+/** The older name of the same note. */
+export const AI_HOURS_TIME_NOTE = AI_TIME_NOTE;
 
 /** One line for a plan where Fast has no limit (`ai_fast_unlimited`). */
 export const AI_FAST_UNLIMITED_LINE = "Uno AI: Fast is unlimited. Smart comes in hours.";
@@ -53,8 +51,6 @@ export interface AiHoursSummary {
   readonly fastUnlimited?: boolean;
   /** The hours are gone and Fast runs at standard speed. */
   readonly fastStandardSpeed?: boolean;
-  /** Say "AI time" (plans "always on", Fast-unlimited plans), not "AI hours". */
-  readonly aiTime?: boolean;
 }
 
 /**
@@ -85,7 +81,6 @@ export function aiHoursSummary(input: {
         input.fastStandardSpeed === true || (leftMinutes !== null && leftMinutes <= 0),
     };
   };
-  const aiTime = fastUnlimited || input.subscription?.planView === "always_on";
   if (hours) {
     const leftMinutes = hours.unlimited ? null : hours.balanceMinutes;
     return {
@@ -96,7 +91,6 @@ export function aiHoursSummary(input: {
       premiumUsd,
       power,
       ...fast(leftMinutes, hours.unlimited),
-      ...(aiTime ? { aiTime: true } : {}),
     };
   }
   const fromMe = input.balance?.aiHoursMinutes ?? null;
@@ -110,7 +104,6 @@ export function aiHoursSummary(input: {
     premiumUsd,
     power,
     ...fast(Math.max(0, fromMe), false),
-    ...(aiTime ? { aiTime: true } : {}),
   };
 }
 
@@ -124,19 +117,19 @@ export function aiFastLine(summary: AiHoursSummary): string | null {
   return summary.fastStandardSpeed ? AI_SMART_USED_UP_LINE : AI_FAST_UNLIMITED_LINE;
 }
 
-/** The note next to the hours: "AI time" words, or the older ones. */
-export function aiTimeNote(summary: AiHoursSummary): string {
-  return summary.aiTime ? AI_TIME_NOTE : AI_HOURS_TIME_NOTE;
+/** The note next to AI time. */
+export function aiTimeNote(_summary?: AiHoursSummary): string {
+  return AI_TIME_NOTE;
 }
 
 /**
  * The small words after the headline: "Smart left · Fast is unlimited",
- * "AI time · never expire", "AI hours · never expire", "full speed, then standard".
+ * "AI time · never expires", "full speed, then standard".
  */
 export function aiHoursCaption(summary: AiHoursSummary): string {
   if (summary.unlimited) return "full speed, then standard";
   if (summary.fastUnlimited) return "Smart left · Fast is unlimited";
-  return summary.aiTime ? "AI time · never expire" : "AI hours · never expire";
+  return "AI time · never expires";
 }
 
 /** "87 h left" / "Unlimited AI". */
@@ -147,11 +140,11 @@ export function aiHoursHeadline(summary: AiHoursSummary): string {
   return `${formatAiMinutes(summary.leftMinutes)} left`;
 }
 
-/** "AI hours: 87 h left · never expire" (+ " · $12.40 premium credit"). */
+/** "AI time: 87 h left · never expires" (+ " · $12.40 premium credit"). */
 export function aiHoursLine(summary: AiHoursSummary, formatUsd: (usd: number) => string): string {
   const head = summary.unlimited
     ? "Unlimited AI"
-    : `AI hours: ${aiHoursHeadline(summary)} · never expire`;
+    : `AI time: ${aiHoursHeadline(summary)} · never expires`;
   return summary.premiumUsd > 0
     ? `${head} · ${formatUsd(summary.premiumUsd)} premium credit`
     : head;
@@ -177,7 +170,7 @@ export function planHasUnoAi(
   return plan.slug.endsWith("-ai");
 }
 
-/** What the plan's Uno AI is, in one line: "40 AI hours a month · AI power ×1". */
+/** What the plan's Uno AI is, in one line: "40 h of AI time a month · AI power ×1". */
 export function planAiHoursLine(
   plan: Pick<AccountPlan, "aiHoursMonthly" | "aiHoursUnlimited" | "aiFullSpeedHours" | "aiPower">,
 ): string | null {
@@ -187,6 +180,6 @@ export function planAiHoursLine(
     return `Unlimited AI${fullSpeed}`;
   }
   if (plan.aiHoursMonthly === null) return null;
-  const hours = `${plan.aiHoursMonthly} AI hours a month`;
+  const hours = `${plan.aiHoursMonthly} h of AI time a month`;
   return plan.aiPower ? `${hours} · AI power ×${plan.aiPower}` : hours;
 }

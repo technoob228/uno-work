@@ -786,7 +786,7 @@ export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId:
             className="px-4 pt-3 text-xs text-muted-foreground sm:px-5"
             data-testid="apps-ai-hours-note"
           >
-            Included models (Smart, Fast) run on your AI hours. The limits below are for premium
+            Included models (Smart, Fast) run on your AI time. The limits below are for premium
             models, paid per token.
           </p>
         ) : null}

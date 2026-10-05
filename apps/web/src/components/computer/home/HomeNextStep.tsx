@@ -92,7 +92,7 @@ const WORK_COPY: Readonly<Record<string, { title: string; hint: string; button: 
   },
   get_ai_hours: {
     title: "Turn on AI first",
-    hint: "Uno AI is out of hours. Add hours, or use your own ChatGPT or Claude subscription.",
+    hint: "Uno AI is out of AI time. Add AI time, or use your own ChatGPT or Claude subscription.",
     button: "Turn on AI",
   },
   talk_to_uno: {

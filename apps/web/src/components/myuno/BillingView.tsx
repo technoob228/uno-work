@@ -342,11 +342,7 @@ function MoneyCard({
             data-testid="my-uno-ai-hours"
           >
             <span className="text-xs text-muted-foreground">
-              {hours.unlimited
-                ? "Uno AI"
-                : hours.aiTime
-                  ? "Uno AI · AI time"
-                  : "AI hours · never expire"}
+              {hours.unlimited ? "Uno AI" : "Uno AI · AI time"}
             </span>
             <span className="flex items-baseline gap-1.5">
               <span className="text-2xl font-semibold tabular-nums">{aiHoursHeadline(hours)}</span>
@@ -556,8 +552,8 @@ function PlansCard({
           ? " With Uno AI, Fast is unlimited and Smart comes in hours — or bring your own Claude or ChatGPT subscription."
           : hasAiOption
             ? hoursCatalog
-              ? " With Uno AI, the plan adds AI hours every month, unlimited inside them — or bring your own Claude or ChatGPT subscription."
-              : " With Uno AI, the plan includes AI hours every month — or bring your own Claude or ChatGPT subscription."
+              ? " With Uno AI, the plan adds AI time every month, unlimited inside it — or bring your own Claude or ChatGPT subscription."
+              : " With Uno AI, the plan includes AI time every month — or bring your own Claude or ChatGPT subscription."
             : ""}
       </p>
       {loading ? (

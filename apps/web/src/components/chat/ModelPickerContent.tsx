@@ -106,7 +106,7 @@ const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>();
 const UNO_GROUP_ORDER = ["included", "premium", "personal", "custom"] as const;
 type UnoPickerGroup = (typeof UNO_GROUP_ORDER)[number];
 const UNO_GROUP_LABEL: Record<UnoPickerGroup, string> = {
-  included: "Included in your AI hours",
+  included: "Included in your AI time",
   premium: "Premium · from premium credit",
   personal: "Private GPU",
   custom: "Custom models",
