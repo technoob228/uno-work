@@ -50,8 +50,9 @@ export function accountTransport(): AccountTransport {
   if (typeof window === "undefined") return "none";
   if (window.desktopBridge?.unoAccount) return "desktop";
   if (isWorkProxyHost(window.location.hostname)) return "work-proxy";
-  // The lite build is only ever served by app.uno4.work itself (same origin as
-  // /_account), whatever name the host goes by.
+  // The lite build is only ever served by the Work proxy itself (same origin as
+  // /_account: app.uno4.work or the account's own <label>.uno4.work), whatever
+  // name the host goes by.
   if (isWebLite) return "work-proxy";
   return "none";
 }

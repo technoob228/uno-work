@@ -3,7 +3,8 @@
  * the person's computer once it exists.
  *
  * Before the computer is created, the chat id is remembered here (the browser
- * app and the computer's Uno Work share app.uno4.work, so one localStorage);
+ * app and the computer's Uno Work share one origin — the account's own
+ * <label>.uno4.work, or app.uno4.work — so one localStorage);
  * the computer's Home picks it up on its first load, reads the chat from the
  * account and starts a chat with Uno there whose first message carries the
  * whole context: the goal, the answers, the plan, the live site, what the
