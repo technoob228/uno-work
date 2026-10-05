@@ -38,6 +38,7 @@ import { isWebLite } from "../lite/flag";
 import { liteLinks, liteStanding } from "../lite/webLite";
 import { computerOfferCopy } from "./computerOffer";
 import { cn } from "../lib/utils";
+import { AssistantQuiz } from "../components/assistants/AssistantQuiz";
 import { SidebarShowButton } from "../components/sidebar/SidebarShowButton";
 import { subscriptionQuery } from "../components/myuno/myUnoQueries";
 import { Button } from "../components/ui/button";
@@ -68,16 +69,14 @@ import { unoAiKeys, useUnoAiChat } from "./useUnoAiChat";
 /** Where AI spending is managed (the console, next to Billing). */
 export const AI_USAGE_URL = `${CONSOLE_URL}/ai-usage`;
 
-const STARTERS: ReadonlyArray<{ label: string; q: string }> = [
+const STARTERS: ReadonlyArray<{ label: string; q: string; quiz?: boolean }> = [
   {
     label: "A site for my business",
     q: "I want a website for my business where customers can book or contact me",
   },
   { label: "A Telegram bot", q: "I want a Telegram bot" },
-  {
-    label: "An AI assistant for my work",
-    q: "I want an AI assistant that helps me run my business",
-  },
+  // No ready-made prompt (Misha 05.10): the quiz "What should your assistant do?".
+  { label: "An AI assistant", q: "", quiz: true },
   { label: "I have an idea for an app", q: "I have an idea for an app" },
 ];
 
@@ -307,6 +306,35 @@ function EmptyChat({
   draft: string;
   setDraft: (v: string) => void;
 }) {
+  const [quiz, setQuiz] = useState(false);
+  if (quiz) {
+    // Light Work has no computer: "Set it up" goes to the console's plan step
+    // with the answers (?as=), and Uno on the new computer sets itself up from them.
+    return (
+      <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-center gap-4 px-4 py-10">
+        <button
+          type="button"
+          onClick={() => setQuiz(false)}
+          className="w-fit text-sm font-medium text-muted-foreground hover:text-foreground"
+        >
+          ← Back
+        </button>
+        <AssistantQuiz
+          sample={draft}
+          onSetUp={(turn) => {
+            const next =
+              turn.next && /^\/start\?[A-Za-z0-9_=&%.-]*$/.test(turn.next)
+                ? turn.next
+                : "/start?goal=assistant";
+            window.open(`${CONSOLE_URL}${next}`, "_blank", "noopener");
+          }}
+          onOwnAgent={() =>
+            window.open(`${CONSOLE_URL}/start?goal=assistant&via=agent`, "_blank", "noopener")
+          }
+        />
+      </div>
+    );
+  }
   return (
     <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-center gap-6 px-4 py-10">
       <div>
@@ -330,7 +358,7 @@ function EmptyChat({
           <button
             key={s.label}
             type="button"
-            onClick={() => onPick(s.q)}
+            onClick={() => (s.quiz ? setQuiz(true) : onPick(s.q))}
             className="rounded-full border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
             data-testid="uno-ai-starter"
           >

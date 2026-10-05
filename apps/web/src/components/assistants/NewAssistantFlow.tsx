@@ -59,6 +59,7 @@ import {
   type LocalCreateResult,
   type LocalCreateStage,
 } from "./createAssistant";
+import { quizPlanHandoff } from "./assistantQuizApi";
 import { OWN_COMPUTER_CAPTION, suggestsOwnComputer } from "./LocalAssistantPage";
 import {
   ASSISTANT_COMPUTERS_KEY,
@@ -109,10 +110,13 @@ export function NewAssistantFlow({
   onOpenHere: (projectId: string) => void;
 }) {
   const queryClient = useQueryClient();
-  const [phrase, setPhrase] = useState("");
+  // A plan from the assistant quiz on Home ("What should your assistant do?"):
+  // straight to the review card, no describe / questions again.
+  const [fromQuiz] = useState(() => quizPlanHandoff.take());
+  const [phrase, setPhrase] = useState(fromQuiz?.phrase ?? "");
   const [template, setTemplate] = useState<AssistantTemplate | null>(null);
-  const [step, setStep] = useState<Step>({ kind: "describe" });
-  const [plan, setPlan] = useState<AssistantPlan | null>(null);
+  const [step, setStep] = useState<Step>(fromQuiz ? { kind: "review" } : { kind: "describe" });
+  const [plan, setPlan] = useState<AssistantPlan | null>(fromQuiz);
   const [home, setHome] = useState<AssistantHome>("here");
   const creating = useRef(false);
   const availability = useAssistantsAvailability();

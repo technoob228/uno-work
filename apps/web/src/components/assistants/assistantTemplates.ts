@@ -341,6 +341,12 @@ export interface AssistantPlan {
   readonly schedule: { readonly label: string; readonly cron: string } | null;
   readonly answers: ReadonlyArray<AssistantAnswer>;
   readonly never: ReadonlyArray<string>;
+  /**
+   * "How I work" from the assistant interview (fishcode assistantspec
+   * `hermes.instructions`: language, tone, autonomy, writing first, channel,
+   * what isn't connected yet) — appended to SOUL.md as is.
+   */
+  readonly howIWork?: string;
 }
 
 export const ASSISTANT_NAME_MAX = 40;
@@ -442,6 +448,7 @@ export function assistantFiles(plan: AssistantPlan, now: string): AssistantFiles
     ...(plan.schedule
       ? ["", "## Schedule", `${plan.schedule.label} (cron \`${plan.schedule.cron}\`).`]
       : []),
+    ...(plan.howIWork?.trim() ? ["", plan.howIWork.trim()] : []),
     "",
   ].join("\n");
   const user = [
