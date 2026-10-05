@@ -13,6 +13,8 @@
 import { CommandId, MessageId, ThreadId, type OrchestrationThreadShell } from "@t3tools/contracts";
 import { Effect, Option } from "effect";
 
+import { humanSecretLabel, lateSecretMessage } from "@t3tools/shared/secretRequestCopy";
+
 import type { SecretRequestOutcome } from "./browserBridge.ts";
 import { InboxService } from "./inbox/InboxService.ts";
 import { ConnectorNotifyService } from "./manager/Services/ConnectorNotify.ts";
@@ -30,61 +32,14 @@ export const SECRET_REQUEST_SYNC_WAIT_MS = 90_000;
 /** How long an unanswered request stays open for the person. */
 export const SECRET_REQUEST_HOLD_MS = 7 * 24 * 3_600_000;
 
-const KNOWN_WORDS: Readonly<Record<string, string>> = {
-  API: "API",
-  AI: "AI",
-  ID: "ID",
-  URL: "URL",
-  OPENAI: "OpenAI",
-  OPENROUTER: "OpenRouter",
-  ANTHROPIC: "Anthropic",
-  TELEGRAM: "Telegram",
-  TG: "Telegram",
-  GITHUB: "GitHub",
-  STRIPE: "Stripe",
-  SLACK: "Slack",
-  DISCORD: "Discord",
-  GOOGLE: "Google",
-  NOTION: "Notion",
-  WHATSAPP: "WhatsApp",
-};
-
-/**
- * Plain words for an env name: `TELEGRAM_BOT_TOKEN` → "Telegram bot token",
- * `OPENAI_API_KEY` → "OpenAI API key". Unknown shapes keep the name.
- */
-export function humanSecretLabel(name: string): string {
-  const parts = name
-    .split("_")
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0);
-  if (parts.length === 0) return name;
-  const tail = parts[parts.length - 1]!.toUpperCase();
-  if (!["TOKEN", "KEY", "SECRET", "PASSWORD", "PASS", "PWD"].includes(tail)) return name;
-  return parts
-    .map((part) => KNOWN_WORDS[part.toUpperCase()] ?? part.toLowerCase())
-    .map((word) => (word === "pwd" || word === "pass" ? "password" : word))
-    .join(" ");
-}
-
 /** Inbox title: "Uno needs your Telegram bot token". */
 export function secretRequestTitle(name: string): string {
   const label = humanSecretLabel(name);
   return label === name ? `Uno needs a secret (${name})` : `Uno needs your ${label}`;
 }
 
-/** The message the chat gets when the person answers a queued request. */
-export function lateSecretMessage(input: {
-  readonly name: string;
-  readonly cwd: string;
-  readonly outcome: SecretRequestOutcome;
-}): string {
-  if (input.outcome.ok) {
-    const file = input.outcome.file ?? ".env";
-    return `(Uno Work) The person entered ${input.name} — it is saved in ${input.cwd}/${file}. Read it from there (never print it) and continue where you stopped.`;
-  }
-  return `(Uno Work) The person didn't give ${input.name} (${input.outcome.error ?? "declined"}). Don't ask again right away — tell them what it is needed for and how to add it later.`;
-}
+// Shared with the client, which shows the late answer as one quiet line.
+export { humanSecretLabel, lateSecretMessage };
 
 const groupKeyOf = (threadId: string, name: string) => `secret:${threadId}:${name}`;
 
