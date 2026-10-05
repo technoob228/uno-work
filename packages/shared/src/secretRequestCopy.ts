@@ -32,10 +32,26 @@ const KNOWN_WORDS: Readonly<Record<string, string>> = {
 };
 
 /**
+ * The assistant's own Telegram bot (assistant_connect, decision 05.10: the
+ * assistant lives in the person's own bot from @BotFather, not in Uno's shared
+ * bot, which also carries payments, the course and support). The value goes
+ * into the assistant's Telegram settings, never into an env file.
+ */
+export const ASSISTANT_BOT_TOKEN_NAME = "ASSISTANT_TELEGRAM_BOT_TOKEN";
+
+/** The card over the composer for {@link ASSISTANT_BOT_TOKEN_NAME}. */
+export const ASSISTANT_BOT_CARD = {
+  title: "Create your assistant's bot",
+  note: "It stays on your computer: only your assistant uses it.",
+  placeholder: "Paste the token here",
+} as const;
+
+/**
  * Plain words for an env name: `TELEGRAM_BOT_TOKEN` → "Telegram bot token",
  * `OPENAI_API_KEY` → "OpenAI API key". Unknown shapes keep the name.
  */
 export function humanSecretLabel(name: string): string {
+  if (name === ASSISTANT_BOT_TOKEN_NAME) return "assistant's Telegram bot token";
   const parts = name
     .split("_")
     .map((part) => part.trim())
@@ -68,6 +84,13 @@ export function isTelegramBotTokenName(name: string): boolean {
  * comes from @BotFather — the one step Telegram never lets anyone do for them.
  */
 export function secretHelp(name: string): SecretHelp | null {
+  if (name === ASSISTANT_BOT_TOKEN_NAME) {
+    return {
+      label: "Open @BotFather",
+      url: "https://t.me/BotFather",
+      steps: ["Send /newbot.", "Name it.", "Paste the token here."],
+    };
+  }
   if (isTelegramBotTokenName(name)) {
     return {
       label: "Open @BotFather",
@@ -91,8 +114,13 @@ export function lateSecretMessage(input: {
     readonly name?: string;
     readonly file?: string;
     readonly error?: string;
+    readonly botUsername?: string;
   };
 }): string {
+  if (input.outcome.ok && input.name === ASSISTANT_BOT_TOKEN_NAME) {
+    const bot = input.outcome.botUsername ? `@${input.outcome.botUsername}` : "its bot";
+    return `${UNO_WORK_NOTE_PREFIX}The person connected the assistant's own Telegram bot ${bot}. The token is in the assistant's settings, not in a file. The Connect Telegram window shows them Open ${bot} → Start; when they press Start, the bot says hello there. Don't ask for the token again: tell them in one line to press Start, and finish setting up what they asked.`;
+  }
   if (input.outcome.ok) {
     const file = input.outcome.file ?? ".env";
     return `${UNO_WORK_NOTE_PREFIX}The person entered ${input.name} — it is saved in ${input.cwd}/${file}. Read it from there (never print it) and continue where you stopped.`;
@@ -101,6 +129,7 @@ export function lateSecretMessage(input: {
 }
 
 export type UnoWorkNote =
+  | { readonly kind: "assistant-bot-connected"; readonly text: string }
   | { readonly kind: "secret-saved"; readonly name: string; readonly text: string }
   | { readonly kind: "secret-declined"; readonly name: string; readonly text: string }
   | { readonly kind: "other"; readonly text: string };
@@ -112,6 +141,15 @@ export type UnoWorkNote =
 export function parseUnoWorkNote(text: string): UnoWorkNote | null {
   if (!text.startsWith(UNO_WORK_NOTE_PREFIX)) return null;
   const body = text.slice(UNO_WORK_NOTE_PREFIX.length);
+  const bot =
+    /^The person connected the assistant's own Telegram bot (@[A-Za-z0-9_]+|its bot)\./.exec(body);
+  if (bot) {
+    const name = bot[1] === "its bot" ? "your assistant's bot" : bot[1]!;
+    return {
+      kind: "assistant-bot-connected",
+      text: `You connected ${name}. Press Start in Telegram: your assistant says hi there.`,
+    };
+  }
   const saved = /^The person entered ([A-Za-z_][A-Za-z0-9_]*) —/.exec(body);
   if (saved) {
     const name = saved[1]!;

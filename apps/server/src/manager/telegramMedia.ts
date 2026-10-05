@@ -41,6 +41,8 @@ export interface TelegramIncomingMessage {
     readonly is_bot?: boolean;
     readonly username?: string;
     readonly first_name?: string;
+    /** The person's Telegram language ("ru", "pt-br"): the assistant's hello. */
+    readonly language_code?: string;
   };
   /** Formatting spans of `text` — how @mentions and /commands are detected. */
   readonly entities?: ReadonlyArray<TelegramMessageEntity>;

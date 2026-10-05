@@ -1464,22 +1464,25 @@ describe("the chat feed tells every uno-work tool in plain words", () => {
   });
 });
 
-describe("assistant_connect: the built-in assistant instead of a new bot", () => {
+describe("assistant_connect: the built-in assistant, in a bot of its own", () => {
   const withAssistant = (
     deps: UnoWorkToolDeps,
     status: {
       telegramLinked: boolean;
+      telegramBot?: "own" | "shared" | "none";
       gmail?: { available: boolean; connected: boolean };
       windowOpen?: boolean;
     },
   ) => {
     let opened = 0;
+    let cards = 0;
     const next: UnoWorkToolDeps = {
       ...deps,
       assistant: {
         status: Effect.succeed({
           chat: { id: "thread-uno", title: "Uno" },
           telegramLinked: status.telegramLinked,
+          telegramBot: status.telegramBot ?? "none",
           tools: status.gmail
             ? [{ provider: "gmail", name: "Gmail & Calendar", ...status.gmail }]
             : null,
@@ -1488,50 +1491,91 @@ describe("assistant_connect: the built-in assistant instead of a new bot", () =>
           opened += 1;
           return { ok: status.windowOpen ?? true };
         }),
+        requestBotToken: Effect.sync(() => {
+          cards += 1;
+          return { opened: true };
+        }),
       },
     };
-    return { deps: next, opened: () => opened };
+    return { deps: next, opened: () => opened, cards: () => cards };
   };
 
-  it("runs without asking, even in Ask mode (it only reads and shows a window)", () => {
+  const adviceOf = (result: unknown) =>
+    ((result as { success: Record<string, unknown> }).success.tellThePerson as string[]).join("\n");
+
+  it("runs without asking, even in Ask mode (it only reads and shows a card)", () => {
     expect(toolLevel(tool("assistant_connect"), {})).toBe("safe");
   });
 
-  it("opens Connect Telegram when it isn't linked, and says no BotFather", async () => {
+  it("no bot yet: the token card for its own bot in this chat, first", async () => {
     const { deps } = makeDeps({ runtimeMode: "approval-required" });
     const assistant = withAssistant(deps, { telegramLinked: false });
     const result = await run("assistant_connect", assistant.deps, { open: "telegram" });
     expect(result._tag).toBe("Success");
     const value = (result as { success: Record<string, unknown> }).success;
-    expect(assistant.opened()).toBe(1);
+    expect(assistant.cards()).toBe(1);
+    expect(assistant.opened()).toBe(0);
     expect(value.assistant).toBe("Uno");
-    expect(value.telegram).toEqual({ linked: false, windowOpened: true });
-    const advice = (value.tellThePerson as string[]).join("\n");
+    expect(value.telegram).toEqual({ linked: false, bot: "none", step: "token-card" });
+    const advice = adviceOf(result);
     expect(advice).toMatch(/Don't build a bot or app/);
-    expect(advice).toMatch(/no BotFather and no token/);
+    expect(advice).toMatch(/Open @BotFather → \/newbot → name it → paste the token/);
+    expect(advice).toMatch(/never offer Uno's shared bot/);
     expect(advice).toMatch(/Never ask for a mail password or an app password/);
   });
 
-  it("doesn't open the window again once Telegram is linked", async () => {
+  it("Uno's shared bot with no chat linked: its own bot instead", async () => {
+    const { deps } = makeDeps();
+    const assistant = withAssistant(deps, { telegramLinked: false, telegramBot: "shared" });
+    const result = await run("assistant_connect", assistant.deps, { open: "telegram" });
+    expect(assistant.cards()).toBe(1);
+    expect((result as { success: Record<string, unknown> }).success.telegram).toMatchObject({
+      step: "token-card",
+    });
+  });
+
+  it("its own bot is there but no chat yet: the Start step, no second card", async () => {
+    const { deps } = makeDeps();
+    const assistant = withAssistant(deps, { telegramLinked: false, telegramBot: "own" });
+    const result = await run("assistant_connect", assistant.deps, { open: "telegram" });
+    expect(assistant.cards()).toBe(0);
+    expect(assistant.opened()).toBe(1);
+    expect(adviceOf(result)).toMatch(/Open in Telegram, then Start/);
+  });
+
+  it("doesn't open anything once Telegram is linked", async () => {
     const { deps } = makeDeps();
     const assistant = withAssistant(deps, {
       telegramLinked: true,
+      telegramBot: "own",
       gmail: { available: true, connected: true },
     });
     const result = await run("assistant_connect", assistant.deps, { open: "telegram" });
     const value = (result as { success: Record<string, unknown> }).success;
     expect(assistant.opened()).toBe(0);
+    expect(assistant.cards()).toBe(0);
     expect(value.gmail).toBe("connected");
   });
 
-  it("no window open: tells the way by hand", async () => {
+  it("own bot, no window open: tells the way by hand", async () => {
     const { deps } = makeDeps();
-    const assistant = withAssistant(deps, { telegramLinked: false, windowOpen: false });
+    const assistant = withAssistant(deps, {
+      telegramLinked: false,
+      telegramBot: "own",
+      windowOpen: false,
+    });
     const result = await run("assistant_connect", assistant.deps, { open: "telegram" });
-    const advice = (
-      (result as { success: Record<string, unknown> }).success.tellThePerson as string[]
-    ).join("\n");
-    expect(advice).toMatch(/open Uno in the sidebar, then Connect, Telegram/);
+    expect(adviceOf(result)).toMatch(/open Uno in the sidebar, then Connect, Telegram/);
+  });
+
+  it("without arguments: points at open: telegram and the card, never at Uno's shared bot", async () => {
+    const { deps } = makeDeps();
+    const assistant = withAssistant(deps, { telegramLinked: false });
+    const result = await run("assistant_connect", assistant.deps, {});
+    expect(assistant.cards()).toBe(0);
+    const advice = adviceOf(result);
+    expect(advice).toMatch(/Create your assistant's bot/);
+    expect(advice).not.toMatch(/no BotFather/);
   });
 
   it("without the wiring: an error that still points at the sidebar", async () => {

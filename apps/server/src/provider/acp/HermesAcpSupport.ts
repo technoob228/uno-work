@@ -241,13 +241,15 @@ export const HERMES_GATEWAY_REQUEST_TIMEOUT_SECONDS = 180;
 /** Неймспейснутый id — голый `whisper-large-v3` hermes подменяет на whisper-1. */
 export const HERMES_STT_MODEL = "openai/whisper-large-v3";
 /**
- * Ретраи hermes на уровне агента. Дефолт (3) сгорает за ~секунду на upstream
- * 429 из общего пула провайдера: hermes игнорирует `Retry-After` и уходит в
- * `max_retries_exhausted`, а наружу через ACP отдаёт чистый `end_turn` — turn
- * выглядит успешным, а пользователь получает обрывок. Больше попыток = шанс
- * пережить всплеск лимита вместо тихой потери хода.
+ * Ретраи hermes на уровне агента. Было 8 (против upstream 429 общего пула:
+ * hermes игнорирует `Retry-After` и на дефолтных 3 уходил в
+ * `max_retries_exhausted`). С 05.10 шлюз Uno AI сам повторяет запрос на
+ * запасной модели (fishcode 5790a41: 45 с до первого токена → повтор → SSE
+ * error «Uno AI didn't answer in time — try again.»), и 8 повторов hermes с
+ * паузами до 60 с превращали одну такую ошибку в минуты тишины. 3 — хватает
+ * на короткий всплеск, а ошибка шлюза доходит до человека быстро.
  */
-export const HERMES_AGENT_API_MAX_RETRIES = 8;
+export const HERMES_AGENT_API_MAX_RETRIES = 3;
 /**
  * Догоняющий nudge, когда модель объявила действие («сейчас посмотрю логи»),
  * но не позвала ни одного инструмента и закрыла turn. Дефолт `"auto"` ловит

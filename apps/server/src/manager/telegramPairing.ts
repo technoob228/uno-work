@@ -61,24 +61,93 @@ export function telegramPairingLink(botUsername: string | null, code: string): s
   return botUsername ? `https://t.me/${botUsername}?start=${encodeURIComponent(code)}` : null;
 }
 
+/** Languages the assistant's first hello is written in (else English). */
+const OWN_BOT_HELLO: Readonly<
+  Record<
+    string,
+    { readonly hello: (name: string) => string; readonly same: string; readonly example: string }
+  >
+> = {
+  en: {
+    hello: (name) => `Hi, it's ${name}, your assistant.`,
+    same: "This is the same conversation you see pinned in Uno Work: write here any time,",
+    example: "for example “Every morning at 8, send me a plan for the day”.",
+  },
+  ru: {
+    hello: (name) => `Привет, это ${name}, твой ассистент.`,
+    same: "Это тот же разговор, что закреплён в Uno Work: пиши сюда когда угодно,",
+    example: "например «Каждое утро в 8 присылай план на день».",
+  },
+  uk: {
+    hello: (name) => `Привіт, це ${name}, твій асистент.`,
+    same: "Це та сама розмова, що закріплена в Uno Work: пиши сюди будь-коли,",
+    example: "наприклад «Щоранку о 8 надсилай план на день».",
+  },
+  es: {
+    hello: (name) => `Hola, soy ${name}, tu asistente.`,
+    same: "Es la misma conversación que ves fijada en Uno Work: escríbeme aquí cuando quieras,",
+    example: "por ejemplo «Cada mañana a las 8, mándame un plan del día».",
+  },
+  pt: {
+    hello: (name) => `Olá, é ${name}, seu assistente.`,
+    same: "Esta é a mesma conversa fixada no Uno Work: escreva aqui quando quiser,",
+    example: "por exemplo “Toda manhã às 8, me mande um plano do dia”.",
+  },
+  de: {
+    hello: (name) => `Hallo, hier ist ${name}, dein Assistent.`,
+    same: "Das ist dasselbe Gespräch, das in Uno Work angeheftet ist: schreib hier jederzeit,",
+    example: "zum Beispiel „Schick mir jeden Morgen um 8 einen Plan für den Tag“.",
+  },
+  fr: {
+    hello: (name) => `Bonjour, c'est ${name}, votre assistant.`,
+    same: "C'est la même conversation que celle épinglée dans Uno Work : écrivez ici quand vous voulez,",
+    example: "par exemple « Chaque matin à 8 h, envoie-moi le plan de la journée ».",
+  },
+  it: {
+    hello: (name) => `Ciao, sono ${name}, il tuo assistente.`,
+    same: "È la stessa conversazione fissata in Uno Work: scrivimi qui quando vuoi,",
+    example: "per esempio «Ogni mattina alle 8 mandami il piano della giornata».",
+  },
+};
+
+/** `language_code` of Telegram ("ru", "pt-br") → a language we have, else "en". */
+export function helloLanguage(languageCode: string | null | undefined): string {
+  const base = (languageCode ?? "").toLowerCase().split(/[-_]/)[0] ?? "";
+  return base in OWN_BOT_HELLO ? base : "en";
+}
+
 /**
- * What the bot says in the chat it was just linked to. Through Uno's shared
- * bot the console has already said "Linked to your Uno computer. It will
- * answer here in a moment." (fishcode A-04), so the computer's own line is
- * that answer — a hello, not a second "Connected" (two in a row, 05.10.2026).
+ * What the bot says in the chat it was just linked to.
+ *
+ * - Its own bot (the default since 05.10: the person made it in @BotFather):
+ *   the assistant's hello, by its name, in the person's Telegram language —
+ *   it is the first message of that bot, nothing came before it.
+ * - Uno's shared bot (older setups): the console has already said "Linked to
+ *   your Uno computer. It will answer here in a moment." (fishcode A-04), so
+ *   the computer's own line is that answer — a hello, not a second
+ *   "Connected" (two in a row, 05.10.2026).
  */
 export function telegramLinkedReply(input: {
   readonly toMainConversation: boolean;
   readonly viaSharedBot?: boolean;
+  /** The assistant's name (its pinned chat's title); "Uno" when unknown. */
+  readonly name?: string | null;
+  /** The person's Telegram `language_code`. */
+  readonly languageCode?: string | null;
 }): string {
   if (input.viaSharedBot) {
     return input.toMainConversation
       ? "Hi, it's Uno, your assistant. This is the same conversation you see pinned in Uno Work: write here any time, for example “Every morning at 8, send me a plan for the day”."
       : "Hi, it's Uno, your assistant. Write here any time, for example “Every morning at 8, send me a plan for the day”.";
   }
-  return input.toMainConversation
-    ? "Connected. This chat now talks to Uno, your assistant: the same conversation you see pinned in Uno Work. Write here any time."
-    : "Connected. This chat now talks to Uno, your assistant. Write here any time.";
+  const copy = OWN_BOT_HELLO[helloLanguage(input.languageCode)]!;
+  const name = input.name?.trim() || "Uno";
+  if (input.toMainConversation) {
+    return `${copy.hello(name)} ${copy.same} ${copy.example}`;
+  }
+  // No pinned conversation behind it: just "write here any time".
+  const anyTime = copy.same.slice(copy.same.lastIndexOf(":") + 1).trim();
+  return `${copy.hello(name)} ${anyTime.charAt(0).toUpperCase()}${anyTime.slice(1)} ${copy.example}`;
 }
 
 /**

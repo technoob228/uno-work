@@ -541,7 +541,7 @@ function AssistantResult() {
   return (
     <Page
       title="Your assistant is already on"
-      lead="Its name is Uno. Open Telegram, press Start and say hi. It answers there, day and night, even when your laptop is closed."
+      lead="Its name is Uno. Give it a Telegram bot of its own (a minute in @BotFather), press Start and say hi. It answers there, day and night, even when your laptop is closed."
       footer={
         <>
           <span className="flex-1" />

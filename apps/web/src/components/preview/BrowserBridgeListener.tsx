@@ -125,8 +125,8 @@ export function BrowserBridgeListener() {
   const navigate = useNavigate();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
-  // assistant_connect: the built-in assistant's Connect Telegram window,
-  // shown over whatever is on screen (QR + Open Telegram → Start).
+  // The assistant's Connect Telegram window over whatever is on screen: its
+  // own bot's Start step (after the token card) or the BotFather steps.
   const [connectTelegramIn, setConnectTelegramIn] = useState<EnvironmentId | null>(null);
 
   // Ask the companion extension to announce itself early, so the first bridge
@@ -201,8 +201,8 @@ export function BrowserBridgeListener() {
           toastManager.add(
             stackedThreadToast({
               type: "info",
-              title: "Connect your assistant to Telegram",
-              description: "Press Start in Telegram and Uno answers you there.",
+              title: "Your assistant's bot is ready",
+              description: "Open it in Telegram and press Start: your assistant says hi there.",
               actionProps: { children: "Open", onClick: open },
             }),
           );

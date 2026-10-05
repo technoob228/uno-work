@@ -271,6 +271,12 @@ export interface UnoWorkToolDeps {
     readonly status: Effect.Effect<AssistantConnectStatus, UnoWorkToolError>;
     /** Opens Connect Telegram in the person's window; ok: false when none is open. */
     readonly openTelegram: Effect.Effect<{ readonly ok: boolean }>;
+    /**
+     * The "Create your assistant's bot" card in this chat: the token of its
+     * own bot from @BotFather (decision 05.10), saved into the assistant's
+     * Telegram, never a file. Returns at once; the answer comes as a message.
+     */
+    readonly requestBotToken?: Effect.Effect<{ readonly opened: boolean }>;
   };
   /**
    * The person's connected tools (Google Drive, Gmail & Calendar, Notion,
@@ -304,6 +310,11 @@ export interface AssistantConnectStatus {
   /** Its pinned chat; null while it is still being set up. */
   readonly chat: { readonly id: string; readonly title: string } | null;
   readonly telegramLinked: boolean;
+  /**
+   * Which bot its Telegram uses: `own` (from @BotFather — the default since
+   * 05.10), `shared` (Uno's bot, older setups; keeps working), `none`.
+   */
+  readonly telegramBot: "own" | "shared" | "none";
   /** The console's connectors (null: no console here, e.g. a laptop). */
   readonly tools: ReadonlyArray<{
     readonly provider: string;
@@ -313,35 +324,51 @@ export interface AssistantConnectStatus {
   }> | null;
 }
 
+/** What `assistant_connect` did about Telegram when asked to open it. */
+export type AssistantTelegramStep =
+  /** The "Create your assistant's bot" card is in this chat. */
+  | "token-card"
+  /** Its own bot is set; the Connect Telegram window (Open @bot → Start) is open. */
+  | "start-window"
+  /** Its own bot is set, but no Uno Work window is open to show the Start step. */
+  | "no-window";
+
 /**
  * What the agent tells the person after `assistant_connect` — the built-in
  * assistant in a minute instead of a new bot in twenty (live walkthrough
  * 05.10.2026: a Plus computer's Uno wrote "Daymate" with a BotFather token and
- * a Gmail app password while "Uno · Online" sat in the sidebar).
+ * a Gmail app password while "Uno · Online" sat in the sidebar). Since the
+ * evening of 05.10 the assistant talks in a bot of the person's own
+ * (@BotFather), not in Uno's shared bot: that one also carries payments, the
+ * course and support, and the assistant's messages got lost among them.
  */
 export function assistantConnectAdvice(input: {
   readonly status: AssistantConnectStatus;
   readonly asked: "telegram" | null;
-  readonly opened: boolean;
+  readonly step: AssistantTelegramStep | null;
 }): ReadonlyArray<string> {
   const { status } = input;
   const name = status.chat?.title?.trim() || "Uno";
   const lines: string[] = [
-    `Their assistant is already on: ${name}, the pinned chat in the sidebar. It remembers, keeps a schedule (reminders, a plan every morning) and answers in Telegram. Don't build a bot or app for this.`,
+    `Their assistant is already on: ${name}, the pinned chat in the sidebar. It remembers, keeps a schedule (reminders, a plan every morning) and answers in Telegram, in a bot of its own. Don't build a bot or app for this.`,
   ];
   if (status.telegramLinked) {
     lines.push(`Telegram is linked: they can write to ${name} there now.`);
-  } else if (input.asked === "telegram" && input.opened) {
+  } else if (input.step === "token-card") {
     lines.push(
-      "The Connect Telegram window is open on their screen: they scan the code or press Open Telegram, then Start. Say so in one line; no BotFather and no token.",
+      `A card in this chat asks for the token of ${name}'s own Telegram bot: Open @BotFather → /newbot → name it → paste the token there. Tell them so in one line, then go on setting up what they asked (schedule, what to remember) without waiting. When they paste it, this chat gets a message and the Connect Telegram window shows Open @<bot> → Start; the bot says hello there. Never ask for the token in the chat, never offer Uno's shared bot for the assistant.`,
     );
-  } else if (input.asked === "telegram") {
+  } else if (input.step === "start-window") {
     lines.push(
-      `Uno Work isn't open anywhere to show the window: tell them to open ${name} in the sidebar, then Connect, Telegram, and press Start.`,
+      `${name}'s bot is set up and the Connect Telegram window is open on their screen: they press Open in Telegram, then Start, and the bot says hello. Say so in one line.`,
+    );
+  } else if (input.step === "no-window") {
+    lines.push(
+      `${name}'s bot is set up, but Uno Work isn't open anywhere to show the last step: tell them to open ${name} in the sidebar, then Connect, Telegram, and press Start.`,
     );
   } else {
     lines.push(
-      'Telegram isn\'t linked yet: call assistant_connect with open: "telegram" to show them the Connect Telegram window.',
+      `Telegram isn't linked yet: call assistant_connect with open: "telegram" — it puts the "Create your assistant's bot" card in this chat (their own bot from @BotFather, about a minute).`,
     );
   }
   const gmail = status.tools?.find((tool) => tool.provider === "gmail") ?? null;
@@ -2239,14 +2266,15 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "assistant_connect",
     group: "person",
     description:
-      'The person\'s own assistant: this computer already has one, "Uno" (the pinned chat: memory, schedules, Telegram). Use this whenever they want a personal assistant, secretary, reminders, a morning plan or "something like OpenClaw" — instead of building a bot or app. Without arguments: is its Telegram linked, are Gmail & Calendar connected, and what to tell the person. open: "telegram" also shows the Connect Telegram window (QR + Open Telegram) on their screen: they press Start, no BotFather, no token.',
+      'The person\'s own assistant: this computer already has one, "Uno" (the pinned chat: memory, schedules, Telegram). Use this whenever they want a personal assistant, secretary, reminders, a morning plan or "something like OpenClaw" — instead of building a bot or app. Without arguments: is its Telegram linked, are Gmail & Calendar connected, and what to tell the person. open: "telegram" connects its Telegram: FIRST call for a new assistant — it puts a "Create your assistant\'s bot" card in this chat (Open @BotFather → /newbot → name it → paste the token; the token goes into the assistant\'s settings, never a file) and returns at once, so you set the rest up meanwhile; when its bot is already there it shows the Start step instead.',
     inputSchema: {
       type: "object",
       properties: {
         open: {
           type: "string",
           enum: ["telegram"],
-          description: "telegram: show the Connect Telegram window to the person now.",
+          description:
+            "telegram: the assistant's own bot — the token card in this chat, or the Start step once the bot is there.",
         },
       },
       additionalProperties: false,
@@ -2261,16 +2289,23 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         }
         const status = yield* deps.assistant.status;
         const asked = str(args, "open") === "telegram" ? "telegram" : null;
-        const opened =
-          asked === "telegram" && !status.telegramLinked
-            ? (yield* deps.assistant.openTelegram).ok
-            : false;
+        let step: AssistantTelegramStep | null = null;
+        if (asked === "telegram" && !status.telegramLinked) {
+          if (status.telegramBot === "own" || !deps.assistant.requestBotToken) {
+            step = (yield* deps.assistant.openTelegram).ok ? "start-window" : "no-window";
+          } else {
+            // No bot yet, or Uno's shared one with no chat: its own bot first.
+            yield* deps.assistant.requestBotToken;
+            step = "token-card";
+          }
+        }
         return {
           assistant: status.chat?.title?.trim() || "Uno",
           chatId: status.chat?.id ?? null,
           telegram: {
             linked: status.telegramLinked,
-            ...(asked === "telegram" ? { windowOpened: opened } : {}),
+            bot: status.telegramBot,
+            ...(step !== null ? { step } : {}),
           },
           gmail: (() => {
             const gmail = status.tools?.find((tool) => tool.provider === "gmail");
@@ -2282,7 +2317,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
                   : "not available yet"
               : "not available yet";
           })(),
-          tellThePerson: assistantConnectAdvice({ status, asked, opened }),
+          tellThePerson: assistantConnectAdvice({ status, asked, step }),
         };
       }),
   },

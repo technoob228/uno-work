@@ -8,8 +8,8 @@
  *      links that chat and points it at Uno's main conversation.
  *   3. Done: where each linked chat's messages go, "Send test message".
  *
- * Since 01.10 this is the small "use your own bot" path; the default is Uno's
- * shared bot with a QR (`setup/steps/ChannelsStep.tsx`, AssistantTelegramPanel).
+ * The default since 05.10 (the assistant lives in a bot of its own); Uno's
+ * shared bot (`setup/steps/ChannelsStep.tsx`) stays only where it is in use.
  * Moved out of ConnectChannelDialog so both can use it without a cycle.
  */
 import {
@@ -253,12 +253,11 @@ export function TelegramWizard(props: {
               className="flex list-decimal flex-col gap-0.5 pl-5 text-muted-foreground"
               data-testid="uno-telegram-botfather-steps"
             >
-              <li>Open @BotFather in Telegram.</li>
               <li>
-                Send <code className="rounded bg-muted px-1">/newbot</code>.
+                Send <code className="rounded bg-muted px-1">/newbot</code> to @BotFather.
               </li>
-              <li>Pick a name, then a username ending in “bot”.</li>
-              <li>Copy the token BotFather sends and paste it below.</li>
+              <li>Name it.</li>
+              <li>Paste the token here.</li>
             </ol>
             <Button
               size="sm"

@@ -14,7 +14,11 @@ import {
 } from "effect/unstable/http";
 import { OtlpTracer } from "effect/unstable/observability";
 
-import type { BrowserBridgeRequestContext } from "@t3tools/contracts";
+import {
+  ASSISTANT_PROJECT_ID,
+  ProjectId,
+  type BrowserBridgeRequestContext,
+} from "@t3tools/contracts";
 
 import {
   ATTACHMENTS_ROUTE_PREFIX,
@@ -58,6 +62,8 @@ import { ConnectorNotifyService } from "./manager/Services/ConnectorNotify.ts";
 import { registerKnownSecret } from "./secretRedaction.ts";
 import { ServerBrowser } from "./serverBrowser.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
+import { saveAssistantOwnBot } from "./manager/channelSetup.ts";
+import { readWorkMachineIdentity } from "./manager/workConsole.ts";
 import { announceBrowserHelp } from "./browserHelpNotify.ts";
 import {
   SECRET_REQUEST_HOLD_MS,
@@ -712,6 +718,43 @@ export const secretsResultRouteLayer = HttpRouter.add(
         },
       });
       return HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 });
+    }
+
+    // The assistant's own bot (assistant_connect): the token goes into the
+    // assistant's Telegram settings, not a file; then the Connect Telegram
+    // window opens on the step "Open @bot → Start".
+    if (pending.purpose === "assistant-telegram-bot") {
+      const settings = yield* ServerSettingsService;
+      const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
+      const saved = yield* saveAssistantOwnBot({
+        projectId: ProjectId.make(pending.projectId ?? ASSISTANT_PROJECT_ID),
+        botToken: value,
+        identity: readWorkMachineIdentity(current?.uno),
+      }).pipe(
+        Effect.catch(() =>
+          Effect.succeed({ ok: false as const, message: "Couldn't save the bot. Try again." }),
+        ),
+      );
+      if (!saved.ok) {
+        // The card stays open: the person pastes the token again.
+        return HttpServerResponse.jsonUnsafe({ ok: false, error: saved.message }, { status: 400 });
+      }
+      yield* browserBridge.completeSecretRequest({
+        ...credentials,
+        outcome: {
+          ok: true,
+          name: pending.name,
+          ...(saved.botUsername ? { botUsername: saved.botUsername } : {}),
+        },
+      });
+      yield* browserBridge.publishOpenInApp(
+        { view: "connect-telegram", path: "" },
+        pending.context,
+      );
+      return HttpServerResponse.jsonUnsafe(
+        { ok: true, name: pending.name, botUsername: saved.botUsername },
+        { status: 200 },
+      );
     }
 
     const fs = yield* FileSystem.FileSystem;

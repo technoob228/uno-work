@@ -2,11 +2,10 @@
  * "Connect Telegram" / "Connect Slack" for the assistant, opened from the
  * assistant chat's Connect ▾ menu, the Assistants screen and Settings.
  *
- * Telegram (since 01.10): Uno's shared bot with a QR — the flow of the
- * goal-first start (`AssistantTelegramPanel`): nothing to type, scan and press
- * Start, "Connected" on both screens. A bot of your own (@BotFather,
- * `TelegramWizard`) is the small "Use your own bot instead" link inside it,
- * and what shows when the shared bot isn't available on this computer.
+ * Telegram (since 05.10): a bot of the assistant's own (@BotFather,
+ * `TelegramWizard`): make it, paste its token, press Start. Uno's shared bot
+ * (QR, nothing to type) stays only for assistants already on it — it also
+ * carries Uno's payments, course and support.
  *
  * Slack: "Add to Slack" (Uno's app) when the console has it, else the setup
  * guide for your own Slack app (manifest + two tokens).
@@ -59,7 +58,8 @@ export function ConnectChannelDialog(props: {
   readonly telegramMode?: "own" | "shared";
 }) {
   const projectProps = props.projectId !== undefined ? { projectId: props.projectId } : {};
-  const ownBot = props.telegramMode === "own";
+  // Its own bot unless Uno's shared one was asked for (decision 05.10).
+  const ownBot = props.telegramMode !== "shared";
   const open = props.channel !== null;
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? undefined : props.onClose())}>

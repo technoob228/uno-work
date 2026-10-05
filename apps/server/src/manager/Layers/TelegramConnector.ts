@@ -1278,10 +1278,13 @@ const makeTelegramConnector = Effect.gen(function* () {
         });
       }
       let toMainConversation = false;
+      // Its name in the hello: the pinned chat's title, else the assistant's.
+      let assistantName: string | null = null;
       if (projectId === ASSISTANT_PROJECT_ID && isPrivateTelegramChat(message.chat)) {
         const snapshot = yield* projectionSnapshotQuery.getShellSnapshot();
         const main = findMarkedAssistantChat(snapshot.threads);
         if (main !== null) {
+          assistantName = main.title;
           const existing = yield* bindingRepository.get({ kind: "telegram", chatId });
           yield* bindingRepository.upsert({
             kind: "telegram",
@@ -1304,6 +1307,13 @@ const makeTelegramConnector = Effect.gen(function* () {
         telegramLinkedReply({
           toMainConversation,
           viaSharedBot: isRelayCredential(config.botToken),
+          name:
+            assistantName ??
+            (yield* projectionSnapshotQuery.getProjectShellById(projectId).pipe(
+              Effect.map((project) => (Option.isSome(project) ? project.value.title : null)),
+              Effect.orElseSucceed(() => null),
+            )),
+          languageCode: message.from?.language_code ?? null,
         }),
       );
     });

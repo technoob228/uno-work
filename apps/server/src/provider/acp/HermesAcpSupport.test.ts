@@ -156,7 +156,7 @@ describe("buildHermesConfigYaml", () => {
     expect(yaml).toBe(
       [
         "agent:",
-        "  api_max_retries: 8",
+        "  api_max_retries: 3",
         "  intent_ack_continuation: true",
         "  verify_on_stop: false",
         "model:",
@@ -202,7 +202,7 @@ describe("buildHermesConfigYaml", () => {
 
   it("raises agent retries above the default so a provider 429 does not eat the turn", () => {
     const yaml = buildHermesConfigYaml({ model: "openai/gpt-5.5", mcpServers: [] });
-    expect(yaml).toContain("api_max_retries: 8");
+    expect(yaml).toContain("api_max_retries: 3");
     expect(yaml).toContain("intent_ack_continuation: true");
     // Hermes' verify-before-stop guard is what made a bot turn 7–9 minutes
     // and leaked "hermes-verify-" / "fresh evidence" to the person.

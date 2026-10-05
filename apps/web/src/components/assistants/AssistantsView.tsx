@@ -14,8 +14,8 @@
  * is no Uno account to make computers with:
  *
  *   1. a name and "what it does" (one line, can be skipped);
- *   2. where it answers: Telegram by Uno's bot with a QR, "My own Telegram
- *      bot" (BotFather), Slack, or "Only here".
+ *   2. where it answers: Telegram (a bot of its own, BotFather), Slack, or
+ *      "Only here".
  */
 import { ASSISTANT_PROJECT_ID, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -31,7 +31,6 @@ import {
   PauseIcon,
   PlayIcon,
   PlusIcon,
-  SendIcon,
   Settings2Icon,
   Trash2Icon,
 } from "lucide-react";
@@ -749,17 +748,13 @@ const WHERE_OPTIONS: ReadonlyArray<{
   readonly body: string;
   readonly icon: ReactNode;
 }> = [
+  // One Telegram: a bot of its own from @BotFather (decision 05.10 — Uno's
+  // shared bot also carries payments, the course and support).
   {
     id: "telegram",
     title: "Telegram",
-    body: "Scan a QR code with your phone. Nothing to set up.",
+    body: "Its own bot: about a minute in @BotFather.",
     icon: <TelegramMark className="size-5" />,
-  },
-  {
-    id: "own_bot",
-    title: "My own Telegram bot",
-    body: "Your bot's name and picture. Made with @BotFather.",
-    icon: <SendIcon className="size-4 text-sky-500" />,
   },
   {
     id: "slack",
@@ -943,8 +938,6 @@ function CreateAssistant({
             data-testid="assistants-where-panel"
           >
             {where === "telegram" ? (
-              <AssistantTelegramPanel key="shared" environmentId={environmentId} />
-            ) : where === "own_bot" ? (
               <AssistantTelegramPanel key="own" environmentId={environmentId} initialMode="own" />
             ) : where === "slack" ? (
               <AssistantSlackPanel environmentId={environmentId} />

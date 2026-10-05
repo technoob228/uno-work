@@ -30,6 +30,7 @@ import {
   readSlackInstall,
   assignSlackChannelsFor,
   routeSlackThroughHolder,
+  saveAssistantOwnBot,
   slackRelayHolderFor,
   startSlackInstall,
   uninstallSlack,
@@ -804,4 +805,68 @@ it.effect("checks an own bot token with getMe before it is kept", () =>
       rejected: false,
     });
   }),
+);
+
+const OWN_TOKEN = "7123456789:AAE" + "x".repeat(32);
+
+it.effect("the assistant's own bot from the chat card: checked, stored, Uno's relay dropped", () =>
+  Effect.gen(function* () {
+    const calls = installFetch([
+      (request) =>
+        request.url.includes(`/bot${OWN_TOKEN}/getMe`)
+          ? json({ ok: true, result: { username: "nova_helper_bot" } })
+          : undefined,
+      route("DELETE", "/work/telegram/relay", () => new Response(null, { status: 204 })),
+    ]);
+    const repository = yield* ManagerConnectorRepository;
+    // It was on Uno's shared bot, with a chat linked there.
+    yield* repository.upsert({
+      projectId,
+      kind: "telegram",
+      config: {
+        botToken: `unorelay:${TGR}`,
+        allowedChatIds: ["128841517"],
+        enabled: true,
+        defaultModelSelection: null,
+        ownerUserIds: ["128841517"],
+      },
+      updatedAt: new Date().toISOString(),
+    });
+
+    expect(yield* saveAssistantOwnBot({ projectId, botToken: "nope", identity })).toMatchObject({
+      ok: false,
+      message: expect.stringContaining("123456789:AAE"),
+    });
+    expect(yield* saveAssistantOwnBot({ projectId, botToken: ` ${OWN_TOKEN} `, identity })).toEqual(
+      { ok: true, botUsername: "nova_helper_bot" },
+    );
+
+    const row = yield* repository.get({ projectId, kind: "telegram" });
+    const config = Option.isSome(row)
+      ? Schema.decodeUnknownSync(ManagerTelegramConnectorConfig)(row.value.config)
+      : null;
+    // A new bot: nobody pressed Start on it yet.
+    expect(config).toMatchObject({ botToken: OWN_TOKEN, allowedChatIds: [], enabled: true });
+    expect(config?.ownerUserIds).toBeUndefined();
+    expect(
+      calls.some((call) => call.method === "DELETE" && call.url.endsWith("/work/telegram/relay")),
+    ).toBe(true);
+  }).pipe(Effect.provide(repositories)),
+);
+
+it.effect("a token Telegram refuses is not kept", () =>
+  Effect.gen(function* () {
+    installFetch([
+      (request) =>
+        request.url.includes("/getMe")
+          ? json({ ok: false, error_code: 401, description: "Unauthorized" }, 401)
+          : undefined,
+    ]);
+    expect(yield* saveAssistantOwnBot({ projectId, botToken: OWN_TOKEN, identity: null })).toEqual({
+      ok: false,
+      message: "Telegram didn't accept this token. Copy it again from @BotFather.",
+    });
+    const repository = yield* ManagerConnectorRepository;
+    expect(Option.isNone(yield* repository.get({ projectId, kind: "telegram" }))).toBe(true);
+  }).pipe(Effect.provide(repositories)),
 );
