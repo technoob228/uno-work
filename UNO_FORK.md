@@ -165,6 +165,7 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 - `apps/web/src/index.css` — кастомные стили (Uno-палитра / акценты).
 - `apps/web/src/components/ChatMarkdown.tsx`, `ChatView.browser.tsx` — мелкие правки рендера.
 - `apps/server/src/ws.ts` — расширен для нового RPC.
+- Связь с компьютером — без тостов (05.10): апстримные тосты `WebSocketConnectionCoordinator` («Disconnected from… / Reconnected to… / Retries exhausted») и плавающая плашка «Economy · sleeping / waking» убраны; координатор только переподключает. Статус говорит чип компьютера в хедере (`components/computer/home/connectionStatus.ts` — правило и тексты, `useComputerConnection.ts` — откуда факты): разрыв < 5 с не виден, затем «Reconnecting…», через минуту «Offline — retrying», через 3 мин «No connection» + Retry (янтарная точка), «Asleep» / «Waking…» для экономного режима, «Sign in». При мердже апстрима не возвращать тосты в `WebSocketConnectionSurface.tsx`.
 
 ## Мердж апстрима
 

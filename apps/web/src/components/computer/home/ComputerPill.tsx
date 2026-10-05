@@ -16,6 +16,13 @@
  * The chat header shows the same chip (`fit="chat"`, via `ComputerChip`) so the
  * computer can be switched from any screen; there it folds to a monitor icon
  * and the dot when the header is narrow, and the menu still opens.
+ *
+ * The chip is also where the connection is said — quietly (05.10, instead of
+ * a toast on every reconnect): nothing while it's fine or for a short drop,
+ * then "Reconnecting…" / "Offline — retrying" / "Asleep" in place of "On";
+ * an amber dot and one action in the menu only when the person is needed
+ * ("No connection" → Retry, "Sign in"). The menu's first line is always the
+ * truth: "Connected", "Reconnecting…", "Offline — retrying · synced 2 min ago".
  */
 import {
   ChevronDownIcon,
@@ -34,6 +41,7 @@ import {
   TriangleAlertIcon,
   ZapIcon,
 } from "lucide-react";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useState, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
@@ -59,6 +67,8 @@ import {
 } from "../computerFormat";
 import { Meter } from "../computerUi";
 import type { ResourceLook } from "../resources/resourceModel";
+import { CONNECTION_ACTION_LABEL, CONNECTION_DOT } from "./connectionStatus";
+import { type ComputerConnection, useComputerConnection } from "./useComputerConnection";
 
 export interface HomeComputer {
   readonly name: string;
@@ -151,15 +161,37 @@ function MiniMeter({
   );
 }
 
-export function ComputerPill({
-  computer,
-  loading,
-  fit = "home",
-}: {
+interface ComputerPillProps {
   computer: HomeComputer | null;
   loading: boolean;
   fit?: ComputerPillFit;
-}) {
+  /**
+   * Whose connection the chip tells (`null` — the browser's own computer).
+   * Left out, the chip says nothing about the connection.
+   */
+  environmentId?: EnvironmentId | null;
+  /** A fixed connection instead of the live one (tests, previews). */
+  connection?: ComputerConnection | null;
+}
+
+export function ComputerPill(props: ComputerPillProps) {
+  if (props.connection !== undefined || props.environmentId === undefined) {
+    return <ComputerPillView {...props} connection={props.connection ?? null} />;
+  }
+  return <LiveComputerPill {...props} environmentId={props.environmentId} />;
+}
+
+function LiveComputerPill(props: ComputerPillProps & { environmentId: EnvironmentId | null }) {
+  const connection = useComputerConnection(props.environmentId);
+  return <ComputerPillView {...props} connection={connection} />;
+}
+
+function ComputerPillView({
+  computer,
+  loading,
+  fit = "home",
+  connection,
+}: ComputerPillProps & { connection: ComputerConnection | null }) {
   const [open, setOpen] = useState(false);
   const switcher = useComputerSwitcher(() => setOpen(false));
   const look = FIT[fit];
@@ -211,6 +243,22 @@ export function ComputerPill({
       }
     : null;
   const name = computer?.name ?? switcher.current?.name ?? "This computer";
+  // The connection, when it has something to say (null — it's fine).
+  const talking = connection && connection.status.kind !== "connected" ? connection.status : null;
+  const said = talking?.chip ?? null;
+  const saidNode = said ? (
+    <span
+      className={cn(
+        "truncate",
+        talking?.attention ? "font-medium text-warning-foreground" : "text-muted-foreground",
+        // Folded in a narrow chat header, only what needs the person still speaks.
+        talking?.attention ? "" : look.detail,
+      )}
+      data-testid="computer-connection-chip"
+    >
+      {said}
+    </span>
+  ) : null;
   return (
     <>
       <Popover open={open} onOpenChange={setOpen}>
@@ -219,8 +267,8 @@ export function ComputerPill({
             <button
               type="button"
               data-testid={fit === "home" ? "home-computer-pill" : "chat-computer-chip"}
-              aria-label={`${name} — computer menu`}
-              title={fit === "chat" ? name : undefined}
+              aria-label={`${name} — ${said ? `${said}, ` : ""}computer menu`}
+              title={fit === "chat" ? (talking ? `${name} · ${talking.line}` : name) : undefined}
               className={cn(
                 "flex min-w-0 shrink-0 items-center rounded-full border border-border/70 bg-card/60 text-xs transition-colors outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring",
                 look.button,
@@ -233,7 +281,9 @@ export function ComputerPill({
               <span
                 className={cn(
                   "size-2 shrink-0 rounded-full",
-                  computer?.lowResource && state === "on" ? "bg-warning" : POWER_DOT[state],
+                  // A drop inside the grace period changes nothing on the chip, the dot included.
+                  (talking && said ? CONNECTION_DOT[talking.kind] : undefined) ??
+                    (computer?.lowResource && state === "on" ? "bg-warning" : POWER_DOT[state]),
                 )}
                 aria-hidden
               />
@@ -259,11 +309,13 @@ export function ComputerPill({
                 />
               ) : null}
               {simple ? (
-                <span className="flex items-center gap-1 text-muted-foreground">
-                  {computer ? <span>{POWER_STATE_LABEL[state]}</span> : null}
-                  {computer ? <span aria-hidden>·</span> : null}
+                <span className="flex min-w-0 items-center gap-1 text-muted-foreground">
+                  {saidNode ?? (computer ? <span>{POWER_STATE_LABEL[state]}</span> : null)}
+                  {saidNode || computer ? <span aria-hidden>·</span> : null}
                   <span className="text-foreground/80">Details</span>
                 </span>
+              ) : saidNode ? (
+                saidNode
               ) : !computer ? null : state === "on" ? (
                 <>
                   <MiniMeter label="CPU" pct={pct.cpu} className={look.meter} />
@@ -286,6 +338,7 @@ export function ComputerPill({
           className="max-h-[min(85vh,720px)] w-[min(380px,calc(100vw-1.5rem))] overflow-y-auto"
         >
           <div className="flex flex-col gap-3">
+            {connection ? <ConnectionLine connection={connection} /> : null}
             {folded ? <ComputerDetails computer={folded} /> : null}
             <section
               aria-label="Switch computer"
@@ -298,6 +351,40 @@ export function ComputerPill({
       </Popover>
       <ComputerSwitcherDialogs switcher={switcher} />
     </>
+  );
+}
+
+/** The menu's first line: how the connection is, and its one action when there is one. */
+function ConnectionLine({ connection }: { connection: ComputerConnection }) {
+  const { status, act, acting } = connection;
+  return (
+    <div
+      className="flex min-h-6 items-center gap-2 text-xs text-muted-foreground"
+      role="status"
+      data-testid="computer-connection-line"
+    >
+      <span
+        className={cn(
+          "size-1.5 shrink-0 rounded-full",
+          CONNECTION_DOT[status.kind] ?? "bg-success",
+        )}
+        aria-hidden
+      />
+      <span className={cn("min-w-0 flex-1", status.attention && "text-foreground")}>
+        {status.line}
+      </span>
+      {act && status.action ? (
+        <Button
+          size="xs"
+          variant={status.attention ? "default" : "outline"}
+          disabled={acting}
+          onClick={act}
+        >
+          {acting ? <Spinner className="size-3" /> : null}
+          {CONNECTION_ACTION_LABEL[status.action]}
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
