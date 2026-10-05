@@ -40,6 +40,8 @@ import { useOpenInboxItem } from "../../inbox/useOpenInboxItem";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
 import { markInboxItemDone } from "../../inbox/inboxDone";
+import { canDismissInboxItem } from "../../inbox/openRequests.logic";
+import { useChatOpenRequests } from "../../inbox/usePendingApproval";
 import { resolveSnoozePresets, snoozeWakeDescription } from "../Sidebar.snooze";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -304,6 +306,12 @@ const InboxRow = memo(function InboxRow({ item }: { item: InboxEntry }) {
   const snoozed = isSnoozed(item);
   const time = formatRelativeTime(item.updatedAt).value;
   const presets = useMemo(() => (snoozeOpen ? resolveSnoozePresets(new Date()) : []), [snoozeOpen]);
+  // An Allow or a question the chat still waits on is answered there, not dismissed here.
+  const openRequests = useChatOpenRequests(
+    item.environmentId,
+    item.open?.kind === "thread" ? item.open.threadId : null,
+  );
+  const canDismiss = canDismissInboxItem(item.kind, openRequests);
 
   return (
     <li className="group/inbox relative list-none" data-testid="inbox-item">
@@ -399,14 +407,20 @@ const InboxRow = memo(function InboxRow({ item }: { item: InboxEntry }) {
                   </span>
                 </MenuItem>
               ))}
-              <MenuSeparator />
-              <MenuItem onClick={() => void markInboxItemDone(item)}>Dismiss</MenuItem>
+              {canDismiss ? (
+                <>
+                  <MenuSeparator />
+                  <MenuItem onClick={() => void markInboxItemDone(item)}>Dismiss</MenuItem>
+                </>
+              ) : null}
             </MenuPopup>
           </Menu>
         )}
-        <RowAction label="Dismiss" onClick={() => void markInboxItemDone(item)}>
-          <XIcon className="size-3.5" />
-        </RowAction>
+        {canDismiss ? (
+          <RowAction label="Dismiss" onClick={() => void markInboxItemDone(item)}>
+            <XIcon className="size-3.5" />
+          </RowAction>
+        ) : null}
       </div>
     </li>
   );

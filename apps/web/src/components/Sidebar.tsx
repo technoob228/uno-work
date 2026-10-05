@@ -200,6 +200,7 @@ import { SidebarPinned } from "./sidebar/SidebarPinned";
 import { type SidebarMode, useNavStore } from "../navigation/navStore";
 import { useNavLayout } from "../navigation/useNavLayout";
 import { InboxNeedsYouList, InboxPanel } from "./inbox/InboxPanel";
+import { canOfferChatDone } from "../inbox/openRequests.logic";
 import { RailPanelHeader } from "./sidebar/NavRail";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 import { SidebarAddMenu } from "./sidebar/SidebarNewButton";
@@ -817,7 +818,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   useEffect(() => {
     if (!showSnoozeButton) setSnoozeMenuOpen(false);
   }, [showSnoozeButton]);
-  const canSettle = settlementSupported && status !== "working" && status !== "approval";
+  // Never Done while it works or waits for an Allow / an answer (WG-13).
+  const canSettle = settlementSupported && canOfferChatDone(status);
 
   const handleClick = useCallback(
     (event: ReactMouseEvent) => onThreadClick(event, threadRef),

@@ -14,7 +14,9 @@ import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { readEnvironmentApi } from "../environmentApi";
 import { readEnvironmentSupportsThreadSettlement } from "../environments/threadSettlementSupport";
 import { newCommandId } from "../lib/utils";
+import { selectEnvironmentState, useStore } from "../store";
 import { type InboxEntry, updateInbox, useInboxStore } from "./inboxStore";
+import { chatOpenRequests, inboxIdsClearedByChatDone } from "./openRequests.logic";
 
 /** Inbox item kinds whose chat is settled when the item is dismissed. */
 const SETTLE_ON_DISMISS = new Set(["agent.done", "agent.error"]);
@@ -30,12 +32,15 @@ export async function settleChat(environmentId: EnvironmentId, threadId: string)
   });
 }
 
-/** Done on a chat card: settle it and clear its Inbox items. */
+/**
+ * Done on a chat card: settle it and clear its Inbox items — but never an
+ * open Allow / question (the chat would keep waiting with nothing in the Inbox).
+ */
 export async function markChatDone(environmentId: EnvironmentId, threadId: string): Promise<void> {
   const items = useInboxStore.getState().byEnvironment[environmentId]?.items ?? [];
-  const ids = items
-    .filter((item) => item.open?.kind === "thread" && item.open.threadId === threadId)
-    .map((item) => item.id);
+  const summary = selectEnvironmentState(useStore.getState(), environmentId)
+    .sidebarThreadSummaryById[threadId as ThreadId];
+  const ids = inboxIdsClearedByChatDone(items, threadId, chatOpenRequests(summary));
   await Promise.all([
     settleChat(environmentId, threadId),
     ids.length > 0 ? updateInbox(environmentId, { action: "dismiss", ids }) : Promise.resolve(),

@@ -4,6 +4,7 @@ import {
   DEFAULT_HOME_WIDGETS,
   approvalQuestion,
   attentionThreads,
+  canMarkHomeChatDone,
   greeting,
   homeThreadStatus,
   normalizeHomeWidgets,
@@ -299,5 +300,13 @@ describe("approvalQuestion", () => {
       lead: "Go on",
       subject: null,
     });
+  });
+});
+
+describe("canMarkHomeChatDone", () => {
+  it("hides Done on a chat that waits for an Allow or an answer", () => {
+    expect(canMarkHomeChatDone(thread("a", { hasPendingApprovals: true }))).toBe(false);
+    expect(canMarkHomeChatDone(thread("q", { hasPendingUserInput: true }))).toBe(false);
+    expect(canMarkHomeChatDone(thread("r"))).toBe(true);
   });
 });
