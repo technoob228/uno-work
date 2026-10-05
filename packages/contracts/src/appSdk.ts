@@ -355,6 +355,10 @@ export const UnoAiStatus = Schema.Struct({
   plan: Schema.NullOr(Schema.String),
   /** Premium credit; absent on older daemons and when no premium limit applies. */
   premium: Schema.optional(Schema.NullOr(UnoAiPremiumStatus)),
+  /** Fast has no limit on the plan (`fast_unlimited`); absent on older daemons/gateways. */
+  fastUnlimited: Schema.optional(Schema.Boolean),
+  /** The hours are gone and Fast runs at standard speed (`fast_standard_speed`). */
+  fastStandardSpeed: Schema.optional(Schema.Boolean),
   checkedAt: Schema.NullOr(Schema.String),
 });
 export type UnoAiStatus = typeof UnoAiStatus.Type;

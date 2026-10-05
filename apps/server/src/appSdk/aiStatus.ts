@@ -86,6 +86,8 @@ export function parseGatewayAiStatus(json: unknown): StatusFields | null {
     renewsAt: str(r["renews_at"]),
     plan: str(r["plan"]),
     premium: parseGatewayPremiumStatus(r["premium"]),
+    ...(r["fast_unlimited"] === true ? { fastUnlimited: true } : {}),
+    ...(r["fast_standard_speed"] === true ? { fastStandardSpeed: true } : {}),
   };
 }
 
