@@ -166,7 +166,7 @@ describe("premium credit", () => {
     expect(notice).toEqual({
       text: "Answered by Smart: no Premium credit. New credit on Oct 24.",
       actionLabel: "Continue from balance",
-      actionUrl: "https://console.uno4.dev/billing#premium",
+      actionUrl: "https://console.uno.place/billing#premium",
     });
     expect(
       premiumFallbackNotice(
@@ -235,7 +235,7 @@ describe("top-up banner", () => {
 
   it("shows the one-wallet balance sentences as they are", () => {
     expect(UNO_LLM_CREDITS_EMPTY_MESSAGE).toContain(
-      "https://console.uno4.dev/billing?tab=payments",
+      "https://console.uno.place/billing?tab=payments",
     );
     for (const message of [
       "Your balance is empty. Top up at https://console.uno4.dev/billing?tab=payments, add Uno AI hours to your plan, or switch to your own AI subscription (Claude or ChatGPT).",
@@ -243,6 +243,7 @@ describe("top-up banner", () => {
       "Your plan doesn't include Uno AI hours, and your balance is empty. Add Uno AI to your plan or top up at https://console.uno4.dev/billing?tab=payments, or switch to your own AI subscription (Claude or ChatGPT).",
       "Your AI hours are used up. New hours arrive on Oct 24, 2026; to keep going now, top up your balance at https://console.uno4.dev/billing?tab=payments or switch to your own AI subscription (Claude or ChatGPT).",
       'Your premium credit for this month is used up. Switch to Smart — it is included in your AI hours; new premium credit arrives on Nov 1. To keep using premium models from your balance, turn on "Continue premium from balance".',
+      "Your balance is empty. Top up at https://console.uno.place/billing?tab=payments, add Uno AI hours to your plan, or switch to your own AI subscription (Claude or ChatGPT).",
     ]) {
       expect(unoBillingBannerText(message)).toBe(message);
     }
@@ -252,6 +253,8 @@ describe("top-up banner", () => {
     const premiumLimit =
       "Premium credit is used up and no AI hours are left for Smart. Manage premium credit at https://console.uno4.dev/billing.";
     expect(unoBillingBannerText(premiumLimit)).toBe(premiumLimit);
+    const premiumLimitNewHost = premiumLimit.replace("console.uno4.dev", "console.uno.place");
+    expect(unoBillingBannerText(premiumLimitNewHost)).toBe(premiumLimitNewHost);
     expect(unoBillingBannerText('HTTP 402: {"error":{"code":"premium_limit_reached"}}')).toBe(
       UNO_LLM_CREDITS_EMPTY_MESSAGE,
     );

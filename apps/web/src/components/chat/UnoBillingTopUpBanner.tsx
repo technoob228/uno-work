@@ -10,6 +10,11 @@ import { toastManager } from "../ui/toast";
 
 /** Where AI hours are added to the plan on the console. */
 export const UNO_BILLING_URL = `${CONSOLE_URL}/billing`;
+/** Both console hosts a gateway sentence may name. */
+const CONSOLE_BILLING_HOSTS = [
+  "https://console.uno.place/billing",
+  "https://console.uno4.dev/billing",
+];
 /** Where the one Uno balance is topped up (AI past the hours is paid from it). */
 export const UNO_TOP_UP_URL = `${UNO_BILLING_URL}?tab=payments`;
 
@@ -42,7 +47,9 @@ function isHumanBillingSentence(text: string): boolean {
     !/[{}]/.test(text) &&
     !/\bhttp\s+\d{3}\b|\b402\b/i.test(text) &&
     !/insufficient llm credits|premium_limit_reached/i.test(text) &&
-    text.includes(UNO_BILLING_URL)
+    // The gateway names the console by its own env: the old host or the new
+    // one (console.uno.place since 02.10), whichever this app was built with.
+    (text.includes(UNO_BILLING_URL) || CONSOLE_BILLING_HOSTS.some((url) => text.includes(url)))
   );
 }
 
