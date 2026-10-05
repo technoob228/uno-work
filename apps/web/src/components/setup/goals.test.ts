@@ -15,6 +15,7 @@ import {
   impliedConnectPath,
   parseConnectPath,
   goalFromOnboardingPath,
+  consoleGoalApplies,
   parseGoal,
   siteSlugFrom,
   stripSharedTopFolder,
@@ -153,5 +154,14 @@ describe("goal-first start", () => {
     expect(goalFromOnboardingPath("server")).toEqual({ goal: "server", via: "ssh" });
     expect(goalFromOnboardingPath("work")).toBeNull();
     expect(goalFromOnboardingPath(null)).toBeNull();
+  });
+
+  it("opens the console's goal only on a start nobody has used yet", () => {
+    const fresh = { machineOnboarded: false, machineChats: 0, unoAiChats: 0 };
+    expect(consoleGoalApplies(fresh)).toBe(true);
+    // l-02 (05.10): an old "site" goal on a computer already in use → Home.
+    expect(consoleGoalApplies({ ...fresh, machineChats: 1 })).toBe(false);
+    expect(consoleGoalApplies({ ...fresh, unoAiChats: 2 })).toBe(false);
+    expect(consoleGoalApplies({ ...fresh, machineOnboarded: true })).toBe(false);
   });
 });

@@ -364,6 +364,24 @@ export function withFirstResult(progress: UnoSetupProgress, goal: GoalId): UnoSe
 }
 
 /**
+ * May the console's goal (`onboarding_path`) still open its result screen?
+ * Only on a start nobody has used yet. The account keeps that value forever,
+ * so on a computer that is already in use it is an old answer: walkthrough
+ * 05.10 (l-02) — a paid Plus computer opened "Put your site online" from a
+ * site goal picked weeks before, while the person had come for a bot. Once
+ * this computer was set up, or there are chats on it or with Uno AI, the
+ * person is past the first screen: Home opens instead (its one box and next
+ * step), and nothing asks again.
+ */
+export function consoleGoalApplies(input: {
+  readonly machineOnboarded: boolean;
+  readonly machineChats: number;
+  readonly unoAiChats: number;
+}): boolean {
+  return !input.machineOnboarded && input.machineChats === 0 && input.unoAiChats === 0;
+}
+
+/**
  * The goal picked on the console's /start (`onboarding_path` on the account):
  * Uno Work opens that goal's result instead of asking again. The console
  * already asked "how": Uno AI for the goals it sends here.
