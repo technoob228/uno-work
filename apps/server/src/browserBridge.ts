@@ -435,7 +435,7 @@ export interface BrowserBridgeShape {
   /** Show a file in the app's Office / Files view (see `BridgeOpenInAppEvent`). */
   readonly publishOpenInApp: (
     input: {
-      readonly view: "office" | "files" | "app";
+      readonly view: "office" | "files" | "app" | "connect-telegram";
       readonly path: string;
       readonly name?: string;
     },

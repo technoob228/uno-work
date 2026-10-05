@@ -262,6 +262,17 @@ export interface UnoWorkToolDeps {
     }) => Effect.Effect<GeneratedImage, UnoWorkToolError>;
   };
   /**
+   * The computer's built-in assistant ("Uno", the pinned Hermes chat):
+   * whether its Telegram is linked and which tools are connected, and the
+   * Connect Telegram window on the person's screen. Absent (tests, older
+   * wiring): `assistant_connect` says the assistant isn't reachable.
+   */
+  readonly assistant?: {
+    readonly status: Effect.Effect<AssistantConnectStatus, UnoWorkToolError>;
+    /** Opens Connect Telegram in the person's window; ok: false when none is open. */
+    readonly openTelegram: Effect.Effect<{ readonly ok: boolean }>;
+  };
+  /**
    * The person's connected tools (Google Drive, Gmail & Calendar, Notion,
    * GitHub): calls go to the console with this computer's machine token.
    * Absent where there is no console (tests, a laptop without Uno).
@@ -286,6 +297,69 @@ export interface UnoWorkToolDeps {
       readonly assistant: string | null;
     }>;
   };
+}
+
+/** What `assistant_connect` reads about the computer's built-in assistant. */
+export interface AssistantConnectStatus {
+  /** Its pinned chat; null while it is still being set up. */
+  readonly chat: { readonly id: string; readonly title: string } | null;
+  readonly telegramLinked: boolean;
+  /** The console's connectors (null: no console here, e.g. a laptop). */
+  readonly tools: ReadonlyArray<{
+    readonly provider: string;
+    readonly name: string;
+    readonly available: boolean;
+    readonly connected: boolean;
+  }> | null;
+}
+
+/**
+ * What the agent tells the person after `assistant_connect` — the built-in
+ * assistant in a minute instead of a new bot in twenty (live walkthrough
+ * 05.10.2026: a Plus computer's Uno wrote "Daymate" with a BotFather token and
+ * a Gmail app password while "Uno · Online" sat in the sidebar).
+ */
+export function assistantConnectAdvice(input: {
+  readonly status: AssistantConnectStatus;
+  readonly asked: "telegram" | null;
+  readonly opened: boolean;
+}): ReadonlyArray<string> {
+  const { status } = input;
+  const name = status.chat?.title?.trim() || "Uno";
+  const lines: string[] = [
+    `Their assistant is already on: ${name}, the pinned chat in the sidebar. It remembers, keeps a schedule (reminders, a plan every morning) and answers in Telegram. Don't build a bot or app for this.`,
+  ];
+  if (status.telegramLinked) {
+    lines.push(`Telegram is linked: they can write to ${name} there now.`);
+  } else if (input.asked === "telegram" && input.opened) {
+    lines.push(
+      "The Connect Telegram window is open on their screen: they scan the code or press Open Telegram, then Start. Say so in one line; no BotFather and no token.",
+    );
+  } else if (input.asked === "telegram") {
+    lines.push(
+      `Uno Work isn't open anywhere to show the window: tell them to open ${name} in the sidebar, then Connect, Telegram, and press Start.`,
+    );
+  } else {
+    lines.push(
+      'Telegram isn\'t linked yet: call assistant_connect with open: "telegram" to show them the Connect Telegram window.',
+    );
+  }
+  const gmail = status.tools?.find((tool) => tool.provider === "gmail") ?? null;
+  if (gmail?.connected) {
+    lines.push(`Gmail & Calendar are connected: ${name} can read mail and the calendar.`);
+  } else if (gmail?.available) {
+    lines.push(
+      `For mail: they connect Gmail & Calendar in ${name}'s settings (the gear in its chat, Apps ${name} can open). Never ask for a mail password or an app password.`,
+    );
+  } else {
+    lines.push(
+      "Reading their mail isn't available yet: say it comes later, in one line. Never ask for a mail password or an app password, never wire mail up by hand.",
+    );
+  }
+  lines.push(
+    `What they want it to do (a plan at 8:00, reminders): they tell ${name} in its chat or in Telegram, in their own words; give them that sentence to send.`,
+  );
+  return lines;
 }
 
 // ── Tool definition ────────────────────────────────────────────────────
@@ -2159,6 +2233,58 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           timeoutMs: 5 * 60_000,
         })
         .pipe(Effect.flatMap(bridgeOk)),
+  },
+
+  {
+    name: "assistant_connect",
+    group: "person",
+    description:
+      'The person\'s own assistant: this computer already has one, "Uno" (the pinned chat: memory, schedules, Telegram). Use this whenever they want a personal assistant, secretary, reminders, a morning plan or "something like OpenClaw" — instead of building a bot or app. Without arguments: is its Telegram linked, are Gmail & Calendar connected, and what to tell the person. open: "telegram" also shows the Connect Telegram window (QR + Open Telegram) on their screen: they press Start, no BotFather, no token.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        open: {
+          type: "string",
+          enum: ["telegram"],
+          description: "telegram: show the Connect Telegram window to the person now.",
+        },
+      },
+      additionalProperties: false,
+    },
+    level: "safe",
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        if (!deps.assistant) {
+          return yield* toolError(
+            "The assistant isn't reachable from this chat. Tell the person to open Uno in the sidebar, then Connect, Telegram.",
+          );
+        }
+        const status = yield* deps.assistant.status;
+        const asked = str(args, "open") === "telegram" ? "telegram" : null;
+        const opened =
+          asked === "telegram" && !status.telegramLinked
+            ? (yield* deps.assistant.openTelegram).ok
+            : false;
+        return {
+          assistant: status.chat?.title?.trim() || "Uno",
+          chatId: status.chat?.id ?? null,
+          telegram: {
+            linked: status.telegramLinked,
+            ...(asked === "telegram" ? { windowOpened: opened } : {}),
+          },
+          gmail: (() => {
+            const gmail = status.tools?.find((tool) => tool.provider === "gmail");
+            return gmail
+              ? gmail.connected
+                ? "connected"
+                : gmail.available
+                  ? "not connected"
+                  : "not available yet"
+              : "not available yet";
+          })(),
+          tellThePerson: assistantConnectAdvice({ status, asked, opened }),
+        };
+      }),
   },
 
   // Sites

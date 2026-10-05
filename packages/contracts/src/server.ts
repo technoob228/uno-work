@@ -507,8 +507,11 @@ export const BridgeOpenInAppEvent = Schema.Struct({
   version: Schema.Literal(1),
   type: Schema.Literal("openInApp"),
   sequence: NonNegativeInt,
-  /** `app`: `path` is the public address of an app of the computer (open_in_panel). */
-  view: Schema.Literals(["office", "files", "app"]),
+  /**
+   * `app`: `path` is the public address of an app of the computer (open_in_panel).
+   * `connect-telegram`: the assistant's Connect Telegram window (assistant_connect); `path` is empty.
+   */
+  view: Schema.Literals(["office", "files", "app", "connect-telegram"]),
   path: Schema.String,
   /** `app`: its name for the panel tab. */
   name: Schema.optional(Schema.String),

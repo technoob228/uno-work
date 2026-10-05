@@ -1463,3 +1463,80 @@ describe("the chat feed tells every uno-work tool in plain words", () => {
     }
   });
 });
+
+describe("assistant_connect: the built-in assistant instead of a new bot", () => {
+  const withAssistant = (
+    deps: UnoWorkToolDeps,
+    status: {
+      telegramLinked: boolean;
+      gmail?: { available: boolean; connected: boolean };
+      windowOpen?: boolean;
+    },
+  ) => {
+    let opened = 0;
+    const next: UnoWorkToolDeps = {
+      ...deps,
+      assistant: {
+        status: Effect.succeed({
+          chat: { id: "thread-uno", title: "Uno" },
+          telegramLinked: status.telegramLinked,
+          tools: status.gmail
+            ? [{ provider: "gmail", name: "Gmail & Calendar", ...status.gmail }]
+            : null,
+        }),
+        openTelegram: Effect.sync(() => {
+          opened += 1;
+          return { ok: status.windowOpen ?? true };
+        }),
+      },
+    };
+    return { deps: next, opened: () => opened };
+  };
+
+  it("runs without asking, even in Ask mode (it only reads and shows a window)", () => {
+    expect(toolLevel(tool("assistant_connect"), {})).toBe("safe");
+  });
+
+  it("opens Connect Telegram when it isn't linked, and says no BotFather", async () => {
+    const { deps } = makeDeps({ runtimeMode: "approval-required" });
+    const assistant = withAssistant(deps, { telegramLinked: false });
+    const result = await run("assistant_connect", assistant.deps, { open: "telegram" });
+    expect(result._tag).toBe("Success");
+    const value = (result as { success: Record<string, unknown> }).success;
+    expect(assistant.opened()).toBe(1);
+    expect(value.assistant).toBe("Uno");
+    expect(value.telegram).toEqual({ linked: false, windowOpened: true });
+    const advice = (value.tellThePerson as string[]).join("\n");
+    expect(advice).toMatch(/Don't build a bot or app/);
+    expect(advice).toMatch(/no BotFather and no token/);
+    expect(advice).toMatch(/Never ask for a mail password or an app password/);
+  });
+
+  it("doesn't open the window again once Telegram is linked", async () => {
+    const { deps } = makeDeps();
+    const assistant = withAssistant(deps, {
+      telegramLinked: true,
+      gmail: { available: true, connected: true },
+    });
+    const result = await run("assistant_connect", assistant.deps, { open: "telegram" });
+    const value = (result as { success: Record<string, unknown> }).success;
+    expect(assistant.opened()).toBe(0);
+    expect(value.gmail).toBe("connected");
+  });
+
+  it("no window open: tells the way by hand", async () => {
+    const { deps } = makeDeps();
+    const assistant = withAssistant(deps, { telegramLinked: false, windowOpen: false });
+    const result = await run("assistant_connect", assistant.deps, { open: "telegram" });
+    const advice = (
+      (result as { success: Record<string, unknown> }).success.tellThePerson as string[]
+    ).join("\n");
+    expect(advice).toMatch(/open Uno in the sidebar, then Connect, Telegram/);
+  });
+
+  it("without the wiring: an error that still points at the sidebar", async () => {
+    const { deps } = makeDeps();
+    const result = await run("assistant_connect", deps, {});
+    expect(result._tag).toBe("Failure");
+  });
+});

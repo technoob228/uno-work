@@ -17,8 +17,15 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fsp } from "node:fs";
 
-import { ThreadId, UNO_GATEWAY_BASE_URL, type UnoMachineApp } from "@t3tools/contracts";
-import { Effect, Option } from "effect";
+import {
+  ASSISTANT_PROJECT_ID,
+  ManagerTelegramConnectorConfig,
+  ThreadId,
+  UNO_GATEWAY_BASE_URL,
+  type UnoMachineApp,
+} from "@t3tools/contracts";
+import { findMarkedAssistantChat } from "@t3tools/shared/assistantChat";
+import { Effect, Option, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { requestGatewayImage } from "../assistants/imageGenerate.ts";
@@ -39,6 +46,7 @@ import { UnoGatewayKey } from "../unoGatewayKey.ts";
 import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "../workspaceRegistry/UnoComputerService.ts";
 import { ConnectorsService } from "../setupTools/ConnectorsService.ts";
+import { ManagerConnectorRepository } from "../persistence/Services/ManagerConnectors.ts";
 import {
   connectorAccessDecision,
   owningAssistant,
@@ -191,6 +199,7 @@ const makeDeps = (input: {
     const serverSettings = yield* ServerSettingsService;
     const serverConfig = yield* ServerConfig;
     const connectors = Option.getOrNull(yield* Effect.serviceOption(ConnectorsService));
+    const connectorRows = Option.getOrNull(yield* Effect.serviceOption(ManagerConnectorRepository));
     const gatewayKey = Option.getOrNull(yield* Effect.serviceOption(UnoGatewayKey));
 
     const shell = yield* projections
@@ -323,6 +332,56 @@ const makeDeps = (input: {
         createBoxStatus: (args) => unoCloud.createBoxStatus(args),
       },
       settings: serverSettings.getSettings,
+      // The built-in assistant (assistant_connect): its pinned chat, its
+      // Telegram, the connected tools — read-only; the window is the person's.
+      assistant: {
+        status: Effect.gen(function* () {
+          const snapshot = yield* projections
+            .getShellSnapshot()
+            .pipe(Effect.orElseSucceed(() => null));
+          const main = snapshot ? findMarkedAssistantChat(snapshot.threads) : null;
+          let telegramLinked = false;
+          if (connectorRows) {
+            const row = yield* connectorRows
+              .get({ projectId: ASSISTANT_PROJECT_ID, kind: "telegram" })
+              .pipe(Effect.orElseSucceed(() => Option.none()));
+            if (Option.isSome(row)) {
+              const config = Schema.decodeUnknownExit(ManagerTelegramConnectorConfig)(
+                row.value.config,
+              );
+              telegramLinked =
+                config._tag === "Success" &&
+                config.value.enabled &&
+                config.value.allowedChatIds.length > 0;
+            }
+          }
+          const tools = connectors
+            ? yield* connectors.list().pipe(
+                Effect.map((list) =>
+                  list.available
+                    ? list.connectors.map((entry) => ({
+                        provider: entry.provider,
+                        name: entry.name,
+                        available: entry.available,
+                        connected: entry.connected,
+                      }))
+                    : null,
+                ),
+                Effect.orElseSucceed(() => null),
+              )
+            : null;
+          return {
+            chat: main ? { id: main.id as string, title: main.title } : null,
+            telegramLinked,
+            tools,
+          };
+        }),
+        openTelegram: Effect.gen(function* () {
+          if (!(yield* browserBridge.hasSubscribers)) return { ok: false };
+          yield* browserBridge.publishOpenInApp({ view: "connect-telegram", path: "" }, context);
+          return { ok: true };
+        }),
+      },
       console: {
         request: (request) =>
           Effect.gen(function* () {

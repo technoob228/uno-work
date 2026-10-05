@@ -487,6 +487,14 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
       named("Browser:", hostOf(text(c.args, "url")) ?? text(c.args, "command"), "Used the browser"),
     "The browser step didn't work",
   ],
+  assistant_connect: [
+    "Checking your assistant…",
+    (c) =>
+      c.result.telegram && (c.result.telegram as { windowOpened?: unknown }).windowOpened === true
+        ? "Opened Connect Telegram"
+        : "Checked your assistant",
+    "Couldn't reach your assistant",
+  ],
   request_secret: [
     "Waiting for you to paste it…",
     (c) => {
