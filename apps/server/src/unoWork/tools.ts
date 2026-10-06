@@ -1759,7 +1759,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "chats_list",
     group: "chats",
     description:
-      'List chats: scope "children" (default — chats you started), "project" (every chat in this project; relation self/parent/child/peer) or "all" (every project, only if the person allowed it). Shows status (running, waiting, error, idle), who is in control and the last answer.',
+      'List chats: scope "children" (default — chats you started), "project" (every chat in this project; relation self/parent/child/peer) or "all" (every project, only when the person turned on "Chats can work with other projects" in Settings). Shows status (running, waiting, error, idle), who is in control and the last answer.',
     inputSchema: {
       type: "object",
       properties: {
@@ -1864,7 +1864,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "chat_status",
     group: "chats",
     description:
-      "Status and last messages of a chat. waitMs holds the call while it is running — use it to wait for a result instead of polling. Each message says who wrote it (you, assistant, human).",
+      'Status and last messages of a chat. waitMs holds the call while it is running — use it to wait for a result instead of polling. Each message says who wrote it (you, assistant, human). A chat of another project needs "Chats can work with other projects" on in Settings.',
     inputSchema: {
       type: "object",
       properties: {

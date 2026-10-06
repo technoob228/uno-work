@@ -195,7 +195,8 @@ curl -sS -X POST "${url}/<threadId>/messages" \\
 \`\`\`bash
 # все чаты проекта: relation (self — это ты, parent, child, peer), provider, status, lastAssistantText
 curl -sS "${url}?scope=project" ${auth}
-# все проекты — только если пользователь разрешил другие проекты в настройках
+# все проекты — только если в Settings включено "Chats can work with other projects";
+# иначе 403 project_not_allowed (так же и GET чата из другого проекта) — скажи об этом пользователю
 curl -sS "${url}?scope=all" ${auth}
 \`\`\`
 

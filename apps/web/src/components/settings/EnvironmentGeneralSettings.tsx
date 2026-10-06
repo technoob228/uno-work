@@ -349,8 +349,8 @@ export function EnvironmentGeneralSettings({
 
         {supportsAgentThreads ? (
           <SettingsRow
-            title="Chats can create chats in other projects"
-            description="An agent in a chat can start new chats and hand work to them. Off: only in its own project. On: in any project on this machine."
+            title="Chats can work with other projects"
+            description="An agent in a chat can read other chats, start new chats and hand work to them. Off: only in its own project. On: in any project on this machine."
             resetAction={
               settings.agentThreadsScope !== DEFAULT_UNIFIED_SETTINGS.agentThreadsScope ? (
                 <SettingResetButton
@@ -373,7 +373,7 @@ export function EnvironmentGeneralSettings({
                     "Could not save cross-project chats",
                   )
                 }
-                aria-label="Let chats create chats in other projects"
+                aria-label="Let chats work with other projects"
               />
             }
           />

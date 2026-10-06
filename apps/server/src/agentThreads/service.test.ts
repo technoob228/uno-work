@@ -20,7 +20,11 @@ import type { BridgeAuthorization } from "../browserBridge.ts";
 import { OrchestrationCommandInvariantError } from "../orchestration/Errors.ts";
 import type { OrchestrationDispatchError } from "../orchestration/Errors.ts";
 import { HUMAN_ACTIVE_MESSAGE, HUMAN_IN_CONTROL_MESSAGE, TARGET_BUSY_MESSAGE } from "./logic.ts";
-import { type AgentThreadsScope, makeAgentThreadsHandlers } from "./service.ts";
+import {
+  type AgentThreadsScope,
+  makeAgentThreadsHandlers,
+  READ_OTHER_PROJECTS_OFF_MESSAGE,
+} from "./service.ts";
 
 const OWN_PROJECT = "project-own" as ProjectId;
 const OTHER_PROJECT = "project-other" as ProjectId;
@@ -376,7 +380,7 @@ describe("agent threads bridge: reading children", () => {
     }),
   );
 
-  it.effect("404 for missing, archived and out-of-scope threads; release stays parent-only", () =>
+  it.effect("404 for missing, archived and unwritable threads; release stays parent-only", () =>
     Effect.gen(function* () {
       const threads = [
         threadShell(CALLER),
@@ -390,11 +394,20 @@ describe("agent threads bridge: reading children", () => {
       ];
       const { handlers, dispatched } = makeFixture({ threads });
       const params = { limit: null, waitMs: null };
-      for (const threadId of ["missing", "thread-archived", "thread-elsewhere"]) {
+      for (const threadId of ["missing", "thread-archived"]) {
         assert.strictEqual(
           (yield* handlers.getThread(scoped(), { threadId, ...params })).status,
           404,
         );
+      }
+      // Reading another project with the setting off says which setting.
+      const readElsewhere = yield* handlers.getThread(scoped(), {
+        threadId: "thread-elsewhere",
+        ...params,
+      });
+      assert.strictEqual(readElsewhere.status, 403);
+      assert.strictEqual(body(readElsewhere).message, READ_OTHER_PROJECTS_OFF_MESSAGE);
+      for (const threadId of ["missing", "thread-archived", "thread-elsewhere"]) {
         assert.strictEqual(
           (yield* handlers.sendMessage(scoped(), { threadId, body: { text: "hi" } })).status,
           404,
@@ -648,6 +661,7 @@ describe("agent threads bridge: peers (plan 22)", () => {
       const all = yield* handlers.listThreads(scoped(), { scope: "all" });
       assert.strictEqual(all.status, 403);
       assert.strictEqual(body(all).error, "project_not_allowed");
+      assert.strictEqual(body(all).message, READ_OTHER_PROJECTS_OFF_MESSAGE);
       const bad = yield* handlers.listThreads(scoped(), { scope: "everyone" });
       assert.strictEqual(bad.status, 400);
 
@@ -886,6 +900,113 @@ describe("agent threads bridge: the assistant's project scope (0.0.85)", () => {
       const { handlers } = makeFixture({ scope: "own-project", assistantAllowlist: "all" });
       const list = yield* handlers.listThreads(scoped(), { scope: "all" });
       assert.strictEqual(list.status, 403);
+      assert.strictEqual(body(list).message, READ_OTHER_PROJECTS_OFF_MESSAGE);
+    }),
+  );
+});
+
+describe("agent threads bridge: reading other projects follows the setting (06.10)", () => {
+  const ELSEWHERE = "thread-elsewhere" as ThreadId;
+  const ELSEWHERE_CHILD = "thread-elsewhere-child" as ThreadId;
+  const threads = [
+    threadShell(CALLER),
+    threadShell(FOREIGN, { title: "peer in own project" }),
+    threadShell(ELSEWHERE, { projectId: OTHER_PROJECT }),
+    threadShell(ELSEWHERE_CHILD, {
+      projectId: OTHER_PROJECT,
+      spawnedByThreadId: CALLER,
+      controller: "agent",
+    }),
+  ];
+  const messages = [message({ role: "assistant", text: "done" })];
+  const read = (handlers: Fixture["handlers"], threadId: string) =>
+    handlers.getThread(scoped(), { threadId, limit: null, waitMs: null });
+
+  it.effect("off: list scope=all and get of another project say what to turn on", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = makeFixture({ threads, messages, scope: "own-project" });
+      for (const reply of [
+        yield* handlers.listThreads(scoped(), { scope: "all" }),
+        yield* read(handlers, ELSEWHERE),
+      ]) {
+        assert.strictEqual(reply.status, 403);
+        assert.strictEqual(body(reply).error, "project_not_allowed");
+        const text = String(body(reply).message);
+        assert.strictEqual(
+          text,
+          'Reading other projects is off — turn on "Chats can work with other projects" in Settings',
+        );
+        assert.notMatch(text, /create (threads|chats)/i);
+        assert.notMatch(text, /Создавать треды/);
+      }
+      // A chat this caller started there earlier is not listed while off.
+      const children = yield* handlers.listThreads(scoped(), { scope: "children" });
+      assert.strictEqual(children.status, 200);
+      assert.deepStrictEqual(body(children).threads, []);
+      assert.strictEqual(dispatched.length, 0);
+    }),
+  );
+
+  it.effect("off: writing into another project keeps its own answers", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = makeFixture({ threads, scope: "own-project" });
+      const sent = yield* handlers.sendMessage(scoped(), {
+        threadId: ELSEWHERE,
+        body: { text: "hi" },
+      });
+      assert.strictEqual(sent.status, 404);
+      const created = yield* handlers.createThread(scoped(), {
+        text: "hi",
+        projectId: OTHER_PROJECT,
+      });
+      assert.strictEqual(created.status, 403);
+      assert.strictEqual(body(created).error, "project_not_allowed");
+      assert.notStrictEqual(body(created).message, READ_OTHER_PROJECTS_OFF_MESSAGE);
+      assert.strictEqual(dispatched.length, 0);
+    }),
+  );
+
+  it.effect("on: list scope=all and get reach another project", () =>
+    Effect.gen(function* () {
+      const { handlers } = makeFixture({ threads, messages, scope: "any-project" });
+      const all = yield* handlers.listThreads(scoped(), { scope: "all" });
+      assert.strictEqual(all.status, 200);
+      assert.deepStrictEqual(
+        (body(all).threads as ReadonlyArray<{ id: string }>).map((thread) => thread.id).toSorted(),
+        [CALLER, ELSEWHERE, ELSEWHERE_CHILD, FOREIGN].toSorted(),
+      );
+      const got = yield* read(handlers, ELSEWHERE);
+      assert.strictEqual(got.status, 200);
+      assert.strictEqual(body(got).relation, "peer");
+      assert.strictEqual(body(got).projectId, OTHER_PROJECT);
+      assert.deepStrictEqual(
+        (body(got).messages as ReadonlyArray<{ text: string }>).map((m) => m.text),
+        ["done"],
+      );
+      const children = yield* handlers.listThreads(scoped(), { scope: "children" });
+      assert.deepStrictEqual(
+        (body(children).threads as ReadonlyArray<{ id: string }>).map((thread) => thread.id),
+        [ELSEWHERE_CHILD],
+      );
+    }),
+  );
+
+  it.effect("own project is readable with the setting off or on", () =>
+    Effect.gen(function* () {
+      for (const scope of ["own-project", "any-project"] as const) {
+        const { handlers } = makeFixture({ threads, messages, scope });
+        const project = yield* handlers.listThreads(scoped(), { scope: "project" });
+        assert.strictEqual(project.status, 200);
+        assert.deepStrictEqual(
+          (body(project).threads as ReadonlyArray<{ id: string }>)
+            .map((thread) => thread.id)
+            .toSorted(),
+          [CALLER, FOREIGN].toSorted(),
+        );
+        const got = yield* read(handlers, FOREIGN);
+        assert.strictEqual(got.status, 200);
+        assert.strictEqual(body(got).relation, "peer");
+      }
     }),
   );
 });

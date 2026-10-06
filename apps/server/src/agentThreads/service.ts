@@ -12,8 +12,13 @@
  *   the decider enforces parentage/controller and the event store records who
  *   did it;
  * - read/write reaches any live thread of the caller's project, other projects
- *   only with `agentThreadsScope: "any-project"` (anything else is 404, not
- *   403 — no probing of foreign threads); release stays parent-only;
+ *   only with `agentThreadsScope: "any-project"` (Settings → "Chats can work
+ *   with other projects", off by default). Reading another project with the
+ *   setting off is a 403 that names the setting, so the agent can tell the
+ *   person what to turn on; writing there stays 404, not 403 (no probing);
+ *   release stays parent-only;
+ * - a conversation with the assistant uses its own allowlist instead
+ *   (Settings → Assistant), unreachable threads stay 404;
  * - an agent never writes into a thread that waits for the human or that the
  *   human took over (plan 22);
  * - an agent never widens its own permissions: a spawned thread runs in at
@@ -123,6 +128,13 @@ const ok = (body: Record<string, unknown>, status = 200): AgentThreadsReply => (
 });
 
 const commandId = (tag: string) => CommandId.make(`agent:${tag}:${crypto.randomUUID()}`);
+
+/**
+ * Reading chats of another project with "Chats can work with other projects"
+ * off. Plain words for the person and the agent; never about creating chats.
+ */
+export const READ_OTHER_PROJECTS_OFF_MESSAGE =
+  'Reading other projects is off — turn on "Chats can work with other projects" in Settings';
 
 const THREAD_NOT_FOUND_BODY = {
   ok: false,
@@ -295,17 +307,28 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
     });
 
   /**
-   * Any live thread the caller may talk to: its own project, or any project
-   * when the user allowed it. Archived and out-of-scope threads are 404.
+   * Any live thread the caller may read or talk to: its own project, or any
+   * project when the user allowed it. Archived threads are 404. Out of scope:
+   * a regular chat reading gets 403 naming the setting; writing, and the
+   * assistant either way, get 404.
    */
-  const loadReachable = (caller: OrchestrationThreadShell, rawThreadId: string | undefined) =>
+  const loadReachable = (
+    caller: OrchestrationThreadShell,
+    rawThreadId: string | undefined,
+    access: "read" | "write",
+  ) =>
     Effect.gen(function* () {
       const trimmed = rawThreadId?.trim() ?? "";
       const notFound = Effect.fail(new Reply({ status: 404, body: THREAD_NOT_FOUND_BODY }));
       if (trimmed.length === 0) return yield* notFound;
       const shell = yield* deps.projections.getThreadShellById(ThreadId.make(trimmed));
       if (Option.isNone(shell) || shell.value.archivedAt !== null) return yield* notFound;
-      if (!(yield* projectAccess(caller))(shell.value.projectId)) return yield* notFound;
+      if (!(yield* projectAccess(caller))(shell.value.projectId)) {
+        if (access === "read" && !isAssistantConversation(caller)) {
+          return yield* fail(403, "project_not_allowed", READ_OTHER_PROJECTS_OFF_MESSAGE);
+        }
+        return yield* notFound;
+      }
       return shell.value;
     });
 
@@ -501,18 +524,14 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
           );
         }
         const allowed = yield* projectAccess(caller);
-        // The assistant lists whatever it may see; any other chat needs the
-        // person's "any project" setting for "all".
+        // The assistant lists whatever its allowlist lets it see; any other
+        // chat needs "Chats can work with other projects" for "all".
         if (
           scope === "all" &&
           !isAssistantConversation(caller) &&
           (yield* deps.getAgentThreadsScope) !== "any-project"
         ) {
-          return yield* fail(
-            403,
-            "project_not_allowed",
-            "Создавать треды можно только в проекте этого чата. Другие проекты разрешает пользователь в Settings.",
-          );
+          return yield* fail(403, "project_not_allowed", READ_OTHER_PROJECTS_OFF_MESSAGE);
         }
         const snapshot = yield* deps.projections.getShellSnapshot();
         const selected = snapshot.threads
@@ -560,7 +579,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
   ) =>
     run("get", authorization, (caller) =>
       Effect.gen(function* () {
-        let shell = yield* loadReachable(caller, input.threadId);
+        let shell = yield* loadReachable(caller, input.threadId, "read");
         const limit = clampInteger(input.limit, {
           fallback: AGENT_THREAD_DEFAULT_MESSAGE_LIMIT,
           min: 1,
@@ -574,7 +593,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         const deadline = nowMs() + waitMs;
         while (deriveAgentThreadStatus(shell) === "running" && nowMs() < deadline) {
           yield* sleep(Math.max(1, Math.min(pollIntervalMs, deadline - nowMs())));
-          shell = yield* loadReachable(caller, shell.id);
+          shell = yield* loadReachable(caller, shell.id, "read");
         }
 
         const detail = yield* deps.projections.getThreadDetailById(shell.id);
@@ -638,7 +657,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
   ) =>
     run("send", authorization, (caller) =>
       Effect.gen(function* () {
-        let target = yield* loadReachable(caller, input.threadId);
+        let target = yield* loadReachable(caller, input.threadId, "write");
         if (target.id === caller.id) {
           return yield* fail(400, "cannot_message_self", "Нельзя написать самому себе.");
         }
@@ -654,7 +673,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         let block = deliveryBlock(caller, target);
         while (block?.error === "target_busy" && nowMs() < deadline) {
           yield* sleep(Math.max(1, Math.min(pollIntervalMs, deadline - nowMs())));
-          target = yield* loadReachable(caller, target.id);
+          target = yield* loadReachable(caller, target.id, "write");
           block = deliveryBlock(caller, target);
         }
         if (block !== null) return yield* fail(block.status, block.error, block.message);
