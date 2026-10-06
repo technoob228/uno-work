@@ -37,6 +37,19 @@ describe("parseGatewayAiStatus", () => {
     expect(parseGatewayAiStatus({ enabled: false, hours_left_minutes: 0, power: 0 })).toBeNull();
     expect(parseGatewayAiStatus(null)).toBeNull();
   });
+
+  it("Fast unlimited and Fast at standard speed (plans always on); absent on older gateways", () => {
+    expect(
+      parseGatewayAiStatus({
+        hours_left_minutes: 0,
+        fast_unlimited: true,
+        fast_standard_speed: true,
+      }),
+    ).toMatchObject({ fastUnlimited: true, fastStandardSpeed: true });
+    const old = parseGatewayAiStatus({ hours_left_minutes: 10 })!;
+    expect("fastUnlimited" in old).toBe(false);
+    expect("fastStandardSpeed" in old).toBe(false);
+  });
 });
 
 describe("premium credit in the status", () => {

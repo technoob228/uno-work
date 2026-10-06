@@ -1120,7 +1120,7 @@ export function ChatsBlock({
         {totals ? (
           <p className="pt-2 text-xs text-muted-foreground">
             This week: {totals.count} chats · {formatUsd(totals.usd)} from your balance
-            {totals.aiHoursChats > 0 ? ` · ${totals.aiHoursChats} in AI hours` : ""}
+            {totals.aiHoursChats > 0 ? ` · ${totals.aiHoursChats} in AI time` : ""}
             {totals.planChats > 0 ? ` · ${totals.planChats} in your plan` : ""}
           </p>
         ) : null}

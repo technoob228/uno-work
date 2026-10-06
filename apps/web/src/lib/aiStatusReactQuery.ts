@@ -50,7 +50,9 @@ export function useAiStatus(
 
 export type AiBusyNotice =
   | { readonly kind: "throttled" }
-  | { readonly kind: "standard-speed"; readonly renewsAt: string | null };
+  | { readonly kind: "standard-speed"; readonly renewsAt: string | null }
+  /** A Fast-unlimited plan past its Smart hours: Fast keeps going at standard speed. */
+  | { readonly kind: "fast-standard" };
 
 /**
  * What the composer says, or null (the usual case: full speed says nothing).
@@ -58,7 +60,9 @@ export type AiBusyNotice =
  * until renewal — a different, calmer line.
  */
 export function aiBusyNotice(status: UnoAiStatus | null): AiBusyNotice | null {
-  if (!status || !status.throttled) return null;
+  if (!status) return null;
+  if (status.fastStandardSpeed === true) return { kind: "fast-standard" };
+  if (!status.throttled) return null;
   if (status.unlimited && status.fullSpeedHoursLeft !== null && status.fullSpeedHoursLeft <= 0) {
     return { kind: "standard-speed", renewsAt: status.renewsAt };
   }

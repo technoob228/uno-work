@@ -357,7 +357,7 @@ export function UnoGatewayBalance({ apiKey }: { readonly apiKey: string }) {
   const hoursLabel = hours
     ? hours.unlimited || hours.leftMinutes === null
       ? "Unlimited AI"
-      : `${formatAiMinutes(hours.leftMinutes)} left · never expire`
+      : `AI time ${formatAiMinutes(hours.leftMinutes)} left · never expires`
     : null;
   if (oneWallet && typeof query.data?.balance === "number") {
     return (

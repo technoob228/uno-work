@@ -93,7 +93,7 @@ export function chatCostText(
     case "uno-ai":
       if (gateway !== "metered" || chat.costUsd === null) return "—";
       if (chat.costUsd > 0) return formatUsd(chat.costUsd);
-      return (chat.aiHoursRequests ?? 0) > 0 ? "In AI hours" : "$0.00";
+      return (chat.aiHoursRequests ?? 0) > 0 ? "In AI time" : "$0.00";
   }
 }
 

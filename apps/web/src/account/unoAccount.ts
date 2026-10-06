@@ -73,13 +73,29 @@ export class AccountUnavailableError extends Error {
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
+/**
+ * A refusal from the console with its whole answer: the message keeps the
+ * first 200 characters (what older callers match codes in), `body` keeps all
+ * of it for answers that carry more than a code (409 PEAK_EXCEEDED with
+ * `run_on_boosts`).
+ */
+export class AccountHttpError extends ControlPlaneHttpError {
+  readonly body: unknown;
+  constructor(status: number, message: string, body: unknown) {
+    super(status, message);
+    this.name = "AccountHttpError";
+    this.body = body;
+  }
+}
+
 function errorFrom(status: number, body: unknown): Error {
   if (status === 401) return new AccountSignInRequiredError();
   const detail =
     typeof body === "string" ? body : body && typeof body === "object" ? JSON.stringify(body) : "";
-  return new ControlPlaneHttpError(
+  return new AccountHttpError(
     status,
     detail ? `${status}: ${detail.slice(0, 200)}` : `HTTP ${status}`,
+    body,
   );
 }
 

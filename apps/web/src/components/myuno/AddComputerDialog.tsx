@@ -5,17 +5,37 @@
  * production, staging or sandbox computer is a plain computer with docker for
  * apps, created in one call. Nothing here works around the plan: when the plan
  * is too small the dialog says so and points at the plans.
+ *
+ * Plans "always on": when the new computer doesn't fit in the always-on
+ * memory and the console offers it (`409 PEAK_EXCEEDED` with
+ * `run_on_boosts`), the dialog asks how to run it — on boosts, by putting a
+ * running computer to sleep, or on the next plan. An older console answers
+ * without `run_on_boosts`: the plain error, as before.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeftIcon, SparklesIcon } from "lucide-react";
+import { ArrowLeftIcon, ExternalLinkIcon, SparklesIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import {
   type AccountComputer,
   type AccountSubscription,
+  type PlanCatalog,
+  consoleLinks,
   createServerComputer,
   describeCreateError,
 } from "../../account/accountOverview";
+import {
+  type RunPastPlanChoices,
+  SLEEPING_DONT_COUNT,
+  alwaysOnTitle,
+  nextAlwaysOnPlan,
+  parsePeakExceeded,
+  runPastPlanChoices,
+  runningNowLine,
+  showsAlwaysOn,
+} from "../../account/alwaysOn";
+import { accountRequest } from "../../account/unoAccount";
+import { openInNewTab } from "../../navigation/useOpenApp";
 import { computerSize, formatRam, planTitle } from "../../account/billingModel";
 import { ALL_ROLES, ROLE_BLURB, ROLE_LABEL, type ComputerRole } from "../../account/computerRoles";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
@@ -65,17 +85,94 @@ function defaultName(role: ComputerRole, taken: ReadonlySet<string>): string {
   return base;
 }
 
+type PastPlanPick = "boosts" | "sleep" | "plan";
+
+/** After the sleep call the console frees the memory within seconds: ask again a few times. */
+const SLEEP_RETRY_MS = 3_000;
+const SLEEP_RETRIES = 5;
+
+function firstPick(choices: RunPastPlanChoices): PastPlanPick {
+  if (choices.boosts.possible) return "boosts";
+  if (choices.sleep) return "sleep";
+  return "plan";
+}
+
+/** "Start “scraper” — 4 GB?" and the three ways to run it. */
+function RunPastPlanPanel({
+  choices,
+  pick,
+  onPick,
+}: {
+  choices: RunPastPlanChoices;
+  pick: PastPlanPick;
+  onPick: (pick: PastPlanPick) => void;
+}) {
+  const options: Array<{ key: PastPlanPick; title: string; detail: string | null; on: boolean }> = [
+    {
+      key: "boosts",
+      title: choices.boosts.title,
+      detail: choices.boosts.detail,
+      on: choices.boosts.possible,
+    },
+    ...(choices.sleep
+      ? [
+          {
+            key: "sleep" as const,
+            title: choices.sleep.title,
+            detail: `${choices.sleep.computer.name} wakes in about a second when you open it.`,
+            on: true,
+          },
+        ]
+      : []),
+    ...(choices.nextPlan
+      ? [{ key: "plan" as const, title: choices.nextPlan.title, detail: null, on: true }]
+      : []),
+  ];
+  return (
+    <div className="flex flex-col gap-2" role="radiogroup" aria-label="How to run it">
+      {options.map((option) => {
+        const active = option.on && pick === option.key;
+        return (
+          <button
+            key={option.key}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            disabled={!option.on}
+            onClick={() => onPick(option.key)}
+            className={cn(
+              "flex flex-col gap-0.5 rounded-xl border px-3.5 py-3 text-left text-sm transition-colors",
+              active
+                ? "border-primary bg-primary/5"
+                : "border-border/60 hover:bg-accent/40 disabled:opacity-60 disabled:hover:bg-transparent",
+            )}
+            data-testid={`run-past-plan-${option.key}`}
+          >
+            <span className="font-medium">{option.title}</span>
+            {option.detail ? (
+              <span className="text-xs text-muted-foreground">{option.detail}</span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function AddComputerDialog({
   open,
   onOpenChange,
   subscription,
   computers,
+  catalog,
   onSeePlans,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   subscription: AccountSubscription | null;
   computers: ReadonlyArray<AccountComputer>;
+  /** For "Get Pro — always on 16 GB, $70/mo" when the new computer doesn't fit. */
+  catalog?: PlanCatalog | undefined;
   onSeePlans: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -95,6 +192,7 @@ export function AddComputerDialog({
   useEffect(() => {
     if (!open) {
       setRole(null);
+      setPick(null);
       create.reset();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -106,27 +204,78 @@ export function AddComputerDialog({
     setSize(sizes[0] ?? SERVER_SIZES[0]!);
   };
 
+  const createOnce = (runOnBoosts: boolean) =>
+    createServerComputer({
+      name: normalizeUnoBoxName(name),
+      role: role ?? "server",
+      ramMb: size.ramMb,
+      vcpu: size.vcpu,
+      diskGb: size.diskGb,
+      ...(runOnBoosts ? { runOnBoosts: true } : {}),
+    });
+
   const create = useMutation({
-    mutationFn: () =>
-      createServerComputer({
-        name: normalizeUnoBoxName(name),
-        role: role ?? "server",
-        ramMb: size.ramMb,
-        vcpu: size.vcpu,
-        diskGb: size.diskGb,
-      }),
-    onSuccess: () => {
+    mutationFn: async (how: { runOnBoosts?: boolean; sleepFirst?: AccountComputer } = {}) => {
+      if (!how.sleepFirst) return createOnce(how.runOnBoosts === true);
+      await accountRequest("POST", `/api/v1/boxes/${how.sleepFirst.id}/sleep`, {});
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          return await createOnce(false);
+        } catch (error) {
+          if (attempt >= SLEEP_RETRIES || !parsePeakExceeded(error)) throw error;
+          await new Promise((resolve) => setTimeout(resolve, SLEEP_RETRY_MS));
+        }
+      }
+    },
+    onSuccess: (_box, how) => {
       toastManager.add({
         type: "success",
         title: `${normalizeUnoBoxName(name)} is starting`,
-        description: "It shows up in My Uno and is ready in about a minute.",
+        description: how?.runOnBoosts
+          ? "It runs on boosts. When they run out, it goes to sleep — your main computer stays on."
+          : "It shows up in My Uno and is ready in about a minute.",
       });
       refreshMyUno(queryClient);
       onOpenChange(false);
     },
   });
 
-  const createError = create.error ? describeCreateError(create.error) : null;
+  // Doesn't fit in the always-on memory, and the console offers ways out.
+  const peak = create.error ? parsePeakExceeded(create.error) : null;
+  const choices: RunPastPlanChoices | null =
+    peak?.runOnBoosts && role && role !== "workspace"
+      ? runPastPlanChoices({
+          name: normalizeUnoBoxName(name),
+          ramMb: size.ramMb,
+          peak,
+          computers,
+          nextPlan: nextAlwaysOnPlan(catalog, subscription),
+        })
+      : null;
+  const [pickState, setPick] = useState<PastPlanPick | null>(null);
+  const pick: PastPlanPick | null = choices
+    ? pickState &&
+      (pickState === "boosts"
+        ? choices.boosts.possible
+        : pickState === "sleep"
+          ? choices.sleep !== null
+          : choices.nextPlan !== null)
+      ? pickState
+      : firstPick(choices)
+    : null;
+  const runPick = () => {
+    if (!choices || !pick) return;
+    if (pick === "boosts") create.mutate({ runOnBoosts: true });
+    else if (pick === "sleep" && choices.sleep)
+      create.mutate({ sleepFirst: choices.sleep.computer });
+    else if (choices.nextPlan) openInNewTab(consoleLinks.plan(choices.nextPlan.plan.slug));
+    else {
+      onOpenChange(false);
+      onSeePlans();
+    }
+  };
+
+  const createError = create.error && !choices ? describeCreateError(create.error) : null;
   const planWord = subscription ? planTitle(limits, subscription.plan) : null;
 
   return (
@@ -258,6 +407,42 @@ export function AddComputerDialog({
               )}
             </DialogPanel>
           </>
+        ) : choices && pick ? (
+          <>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label="Back"
+                  onClick={() => create.reset()}
+                >
+                  <ArrowLeftIcon />
+                </Button>
+                {choices.title}
+              </DialogTitle>
+              <DialogDescription>{choices.lead}</DialogDescription>
+            </DialogHeader>
+            <DialogPanel>
+              <RunPastPlanPanel choices={choices} pick={pick} onPick={setPick} />
+            </DialogPanel>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button disabled={create.isPending} onClick={runPick} data-testid="run-past-plan-go">
+                {create.isPending ? <Spinner className="size-3.5" /> : null}
+                {pick === "boosts"
+                  ? "Start on boosts"
+                  : pick === "sleep" && choices.sleep
+                    ? `Sleep ${choices.sleep.computer.name} and start`
+                    : choices.nextPlan
+                      ? `Get ${choices.nextPlan.plan.name}`
+                      : "See plans"}
+                {pick === "plan" && choices.nextPlan ? <ExternalLinkIcon /> : null}
+              </Button>
+            </DialogFooter>
+          </>
         ) : (
           <>
             <DialogHeader>
@@ -317,7 +502,14 @@ export function AddComputerDialog({
                     })}
                   </div>
                 )}
-                {limits ? (
+                {showsAlwaysOn(subscription) ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    {alwaysOnTitle(subscription.alwaysOn.ramMb)} ·{" "}
+                    {runningNowLine(subscription.alwaysOn).replace(/^Running now/, "running now")}.{" "}
+                    {SLEEPING_DONT_COUNT} It comes with docker, so apps like a VPN or a bot install
+                    in a click.
+                  </p>
+                ) : limits ? (
                   <p className="text-[11px] text-muted-foreground">
                     {planWord} runs {formatRam(limits.peakRamMb)} at once; right now{" "}
                     {formatRam(subscription?.usage.runningRamMb ?? 0)} is running. Sleeping
@@ -354,7 +546,7 @@ export function AddComputerDialog({
                 disabled={
                   create.isPending || sizes.length === 0 || normalizeUnoBoxName(name).length === 0
                 }
-                onClick={() => create.mutate()}
+                onClick={() => create.mutate({})}
               >
                 {create.isPending ? <Spinner className="size-3.5" /> : null}
                 Create {ROLE_LABEL[role].toLowerCase()}

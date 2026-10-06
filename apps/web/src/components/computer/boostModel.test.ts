@@ -13,6 +13,7 @@ import {
   boostSummaryLine,
   economyEarnSentence,
   isConnectionDrop,
+  isNoBoostsReason,
   minutesLeft,
   pendingSettled,
   shownBoostState,
@@ -138,5 +139,57 @@ describe("waiting for the restart", () => {
     expect(boostRefetchMs({ ...OFF, state: "active", endsAt: at(0.5) }, NOW, 15_000)).toBe(
       BOOST_SWITCHING_REFETCH_MS,
     );
+  });
+});
+
+describe("boost copy on plans always on", () => {
+  const plus: UnoComputerBoost = {
+    ...OFF,
+    hoursPerMonth: 10,
+    hoursLeft: 23,
+    hoursEarnedEconomy: 13.4,
+    economyEarn: { enabled: true, hoursPerSleepHour: 1, monthlyCapHours: 20 },
+  };
+
+  it("the confirm: name, size, boosts before and after, the honest restart", () => {
+    const copy = boostConfirmCopy(plus, "boosts", "uno-work");
+    expect(copy.title).toBe("Boost uno-work for 1 hour?");
+    expect(copy.body).toBe("4 GB → 8 GB. Uses 1 boost · 23 → 22 left.");
+    expect(copy.allowance).toMatch(/^Your computer restarts for about 15 seconds/);
+    expect(copy.confirm).toBe("Boost for 1 hour");
+    expect(boostConfirmCopy(plus, "boosts").title).toBe("Boost this computer for 1 hour?");
+  });
+
+  it("the menu line counts boosts, not hours", () => {
+    expect(boostSummaryLine(plus, "boosts")).toBe("⚡ Boosts · 23 left · 13 earned while asleep");
+    expect(boostSummaryLine({ ...plus, hoursEarnedEconomy: 0 }, "boosts")).toBe(
+      "⚡ Boosts · 23 left",
+    );
+    // Old plans keep their line.
+    expect(boostSummaryLine(plus)).toBe("Boost: 23 h left this month (+13.4 h earned by economy)");
+  });
+
+  it("what sleeping earns comes from the console's rule (prod: 1 per hour, up to 20)", () => {
+    expect(economyEarnSentence(plus, "boosts")).toBe(
+      "Every hour it sleeps earns 1 boost (up to 20 a month).",
+    );
+    expect(economyEarnSentence(plus)).toBe(
+      "Every hour asleep earns you 1 extra Boost hour (up to 20 h a month).",
+    );
+  });
+
+  it("why the button is grey, in boosts — matching the console's own words", () => {
+    expect(boostDisabledReason({ ...plus, available: false, hoursPerMonth: 0 }, "boosts")).toBe(
+      "Your plan has no boosts.",
+    );
+    expect(
+      boostDisabledReason(
+        { ...plus, available: false, hoursLeft: 0, periodResetsAt: "2026-11-01T00:00:00Z" },
+        "boosts",
+      ),
+    ).toBe("No boosts left until Nov 1. Every hour a computer sleeps earns one.");
+    expect(isNoBoostsReason("Your plan has no boosts.")).toBe(true);
+    expect(isNoBoostsReason("Your plan has no boost hours.")).toBe(true);
+    expect(isNoBoostsReason(null)).toBe(false);
   });
 });

@@ -27,6 +27,7 @@ import {
   type HostedSite,
   consoleLinks,
 } from "../../account/accountOverview";
+import { boostsComputerTag, outOfBoostsDetail } from "../../account/alwaysOn";
 import { computerSize, formatBytes, formatRam, formatUsd } from "../../account/billingModel";
 import { ASSIGNABLE_ROLES, ROLE_BLURB, ROLE_LABEL } from "../../account/computerRoles";
 import { cn } from "../../lib/utils";
@@ -231,11 +232,18 @@ export function ComputerDetail({
               )}
               <span className="inline-flex items-center gap-1.5 text-xs">
                 <Dot tone={restarting ? "busy" : stateTone(entry)} />
-                {restarting ? "Restarting · back in about 15 s" : stateLabel(entry)}
+                {restarting
+                  ? "Restarting · back in about 15 s"
+                  : stateLabel(entry, subscription?.boosts ?? null)}
                 {awake && entry.state === "on" && !restarting ? (
                   <span className="text-muted-foreground">· {awake}</span>
                 ) : null}
               </span>
+              {box && boostsComputerTag(box, subscription?.boosts) === "out-of-boosts" ? (
+                <span className="text-xs text-muted-foreground" data-testid="my-uno-out-of-boosts">
+                  {outOfBoostsDetail(subscription?.boosts?.resetsAt)}
+                </span>
+              ) : null}
             </div>
           </div>
         </div>

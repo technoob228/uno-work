@@ -15,6 +15,7 @@ import {
   isTransportConnectionErrorMessage,
   isTransportInterruptErrorMessage,
 } from "../../rpc/transportError";
+import { boostResetDay, boostsCount, boostsTitle } from "../../account/alwaysOn";
 import { formatMemory } from "./computerFormat";
 
 /** How often the computer's state is read while a boost is switching. */
@@ -98,28 +99,46 @@ export const BOOST_START_RESTART_WARNING =
   "Your computer restarts for about 15 seconds now and again when the hour ends. " +
   "A reply the AI is writing at that moment will stop; chats, files and apps come back on their own.";
 
-export function boostConfirmCopy(boost: UnoComputerBoost) {
+/**
+ * How boosts read: "boosts" on plans "always on" (one boost = one hour of a
+ * boost, counted in pieces: "23 left"), "hours" on the older plans and
+ * whenever the account's plan view isn't known.
+ */
+export type BoostWording = "boosts" | "hours";
+
+function forHours(hours: number): string {
+  return hours === 1 ? "1 hour" : `${hours} hours`;
+}
+
+export function boostConfirmCopy(
+  boost: UnoComputerBoost,
+  wording: BoostWording = "hours",
+  computerName?: string | null,
+) {
+  if (wording === "boosts") {
+    const left = Math.max(0, Math.floor(boost.hoursLeft));
+    const after = Math.max(0, left - boost.hours);
+    return {
+      title: `Boost ${computerName?.trim() || "this computer"} for ${forHours(boost.hours)}?`,
+      body:
+        `${formatMemory(boost.baseRamMb)} → ${formatMemory(boost.ramMb)}. ` +
+        `Uses ${boostsCount(boost.hours)} · ${left} → ${after} left.`,
+      allowance: BOOST_START_RESTART_WARNING,
+      confirm: `Boost for ${forHours(boost.hours)}`,
+    };
+  }
   return {
-    title: `Boost this computer ×2 for ${boost.hours === 1 ? "1 hour" : `${boost.hours} hours`}?`,
+    title: `Boost this computer ×2 for ${forHours(boost.hours)}?`,
     body:
       `${formatMemory(boost.baseRamMb)} → ${formatMemory(boost.ramMb)} memory and ` +
       `${boost.baseVcpu} → ${cores(boost.vcpu)}. ${BOOST_START_RESTART_WARNING}`,
     allowance: boostAllowance(boost),
-    confirm: `Boost for ${boost.hours === 1 ? "1 hour" : `${boost.hours} hours`}`,
+    confirm: `Boost for ${forHours(boost.hours)}`,
   };
 }
 
 /** "Oct 1" — the calendar day the month's hours come back (the reset is 00:00 UTC). */
-export function boostResetDay(periodResetsAt: string | null): string | null {
-  if (!periodResetsAt) return null;
-  const at = Date.parse(periodResetsAt);
-  if (Number.isNaN(at)) return null;
-  return new Date(at).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
-}
+export { boostResetDay };
 
 /** Whole boost hours economy mode added to this month (already in `hoursLeft`). */
 function earnedWholeHours(boost: UnoComputerBoost): number {
@@ -141,25 +160,45 @@ export function formatHours(hours: number): string {
 
 /**
  * The quiet line in the computer menu: "Boost: 7 h left this month (+1.8 h
- * earned by economy)". Null when the plan has no boost hours (the Boost button
+ * earned by economy)", on plans "always on" "⚡ Boosts · 23 left · 13 earned
+ * while asleep". Null when the plan has no boost hours (the Boost button
  * already points to plans then).
  */
-export function boostSummaryLine(boost: UnoComputerBoost | null | undefined): string | null {
+export function boostSummaryLine(
+  boost: UnoComputerBoost | null | undefined,
+  wording: BoostWording = "hours",
+): string | null {
   if (!boost || boost.hoursPerMonth <= 0) return null;
+  if (wording === "boosts") {
+    const head = boostsTitle({ left: Math.max(0, Math.floor(boost.hoursLeft)) });
+    const earned = earnedWholeHours(boost);
+    return earned > 0 ? `${head} · ${earned} earned while asleep` : head;
+  }
   const base = `Boost: ${formatHours(Math.max(0, boost.hoursLeft))} left this month`;
   const earned = boost.hoursEarnedEconomy ?? 0;
   return earned > 0 ? `${base} (+${formatHours(earned)} earned by economy)` : base;
 }
 
 /**
- * How economy pays back in Boost, for the "How it works" text: "Every 10
- * hours asleep earn you 1 extra Boost hour (up to 10 h a month)." Null when
- * Uno doesn't reward economy for this account.
+ * How economy pays back in Boost, for the "How it works" text — from the
+ * console's rule (`economy_earn`), never a number of our own: "Every hour
+ * asleep earns you 1 extra Boost hour (up to 20 h a month)."; on plans
+ * "always on" "Every hour it sleeps earns 1 boost (up to 20 a month)." Null
+ * when Uno doesn't reward economy for this account.
  */
-export function economyEarnSentence(boost: UnoComputerBoost | null | undefined): string | null {
+export function economyEarnSentence(
+  boost: UnoComputerBoost | null | undefined,
+  wording: BoostWording = "hours",
+): string | null {
   const earn = boost?.economyEarn;
   if (!earn?.enabled || earn.hoursPerSleepHour <= 0 || boost!.hoursPerMonth <= 0) return null;
   const perBoostHour = Math.max(1, Math.round(1 / earn.hoursPerSleepHour));
+  if (wording === "boosts") {
+    const cap = earn.monthlyCapHours > 0 ? ` (up to ${earn.monthlyCapHours} a month)` : "";
+    return perBoostHour === 1
+      ? `Every hour it sleeps earns 1 boost${cap}.`
+      : `Every ${perBoostHour} hours it sleeps earn 1 boost${cap}.`;
+  }
   const cap =
     earn.monthlyCapHours > 0 ? ` (up to ${formatHours(earn.monthlyCapHours)} a month)` : "";
   return perBoostHour === 1
@@ -168,14 +207,33 @@ export function economyEarnSentence(boost: UnoComputerBoost | null | undefined):
 }
 
 export const BOOST_NO_HOURS_REASON = "Your plan has no boost hours.";
+/** The same on plans "always on" — and the console's own words since 05.10. */
+export const BOOST_NO_BOOSTS_REASON = "Your plan has no boosts.";
+
+/** The reason means "a bigger plan has boosts" — the button then points to plans. */
+export function isNoBoostsReason(reason: string | null): boolean {
+  return reason === BOOST_NO_HOURS_REASON || reason === BOOST_NO_BOOSTS_REASON;
+}
 
 /** Why the button is greyed out; null when it can be pressed. */
-export function boostDisabledReason(boost: UnoComputerBoost): string | null {
+export function boostDisabledReason(
+  boost: UnoComputerBoost,
+  wording: BoostWording = "hours",
+): string | null {
   if (boost.available) return null;
+  const day = boostResetDay(boost.periodResetsAt);
   // The hours come first: they are what the person can do something about.
+  if (wording === "boosts") {
+    if (boost.hoursPerMonth <= 0) return BOOST_NO_BOOSTS_REASON;
+    if (boost.hoursLeft < 1) {
+      return day
+        ? `No boosts left until ${day}. Every hour a computer sleeps earns one.`
+        : "No boosts left this month. Every hour a computer sleeps earns one.";
+    }
+    return boost.reason ?? "Boost isn't available for this computer right now.";
+  }
   if (boost.hoursPerMonth <= 0) return BOOST_NO_HOURS_REASON;
   if (boost.hoursLeft < 1) {
-    const day = boostResetDay(boost.periodResetsAt);
     return day ? `Boost hours are used up until ${day}.` : "This month's boost hours are used up.";
   }
   return boost.reason ?? "Boost isn't available for this computer right now.";

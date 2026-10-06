@@ -57,6 +57,19 @@ describe("AI busy notice", () => {
     );
     expect(link).toBeNull();
   });
+
+  it("Fast-unlimited plans past the Smart hours: Fast keeps going at standard speed", () => {
+    const notice = aiBusyNotice(
+      status({ hoursLeftMinutes: 0, fastUnlimited: true, fastStandardSpeed: true }),
+    )!;
+    expect(notice.kind).toBe("fast-standard");
+    expect(aiBusyNoticeText(notice)).toEqual({
+      text: "Your Smart hours are used up. Fast keeps going at standard speed.",
+      link: null,
+    });
+    // An older daemon doesn't send the flag: as before.
+    expect(aiBusyNotice(status({ hoursLeftMinutes: 0 }))).toBeNull();
+  });
 });
 
 const meta = (unoGroup?: "included" | "premium" | "personal") => ({

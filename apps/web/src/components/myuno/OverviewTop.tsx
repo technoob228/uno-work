@@ -9,11 +9,19 @@ import { useState } from "react";
 
 import type { AccountBalance, AccountSubscription } from "../../account/accountOverview";
 import {
-  AI_HOURS_TIME_NOTE,
   aiHoursHeadline,
   aiHoursSummary,
   aiHoursTodayLine,
+  aiTimeNote,
 } from "../../account/aiHours";
+import {
+  ALWAYS_ON_EXPLAINER,
+  SLEEPING_DONT_COUNT,
+  alwaysOnTitle,
+  boostsTitle,
+  ofGb,
+  showsAlwaysOn,
+} from "../../account/alwaysOn";
 import { formatRam, formatUsd, planTitle } from "../../account/billingModel";
 import { Meter } from "../computer/computerUi";
 import { Button } from "../ui/button";
@@ -58,7 +66,26 @@ export function PlanLine({
           </span>
         ) : null}
       </span>
-      {running ? (
+      {showsAlwaysOn(subscription) ? (
+        <>
+          <span
+            className="text-xs tabular-nums"
+            title={`${ALWAYS_ON_EXPLAINER} ${SLEEPING_DONT_COUNT}`}
+            data-testid="my-uno-always-on-strip"
+          >
+            <span className="font-medium">{alwaysOnTitle(subscription.alwaysOn.ramMb)}</span>
+            <span className="text-muted-foreground">
+              {" "}
+              · running now {ofGb(subscription.alwaysOn.runningRamMb, subscription.alwaysOn.ramMb)}
+            </span>
+          </span>
+          {subscription.boosts ? (
+            <span className="text-xs font-medium tabular-nums" data-testid="my-uno-boosts-strip">
+              {boostsTitle(subscription.boosts)}
+            </span>
+          ) : null}
+        </>
+      ) : running ? (
         <span
           className="flex items-center gap-2 text-xs"
           title="Computers running at once, out of what the plan allows. Sleeping computers don't count."
@@ -79,12 +106,16 @@ export function PlanLine({
       {hours ? (
         <span
           className="text-xs text-muted-foreground"
-          title={AI_HOURS_TIME_NOTE}
+          title={aiTimeNote(hours)}
           data-testid="my-uno-ai-hours-strip"
         >
-          {hours.unlimited ? "" : "AI hours "}
+          {hours.unlimited ? "" : hours.fastUnlimited ? "Smart " : "AI time "}
           <span className="font-medium text-foreground tabular-nums">{aiHoursHeadline(hours)}</span>
-          {hours.unlimited ? "" : " · never expire"}
+          {hours.unlimited
+            ? ""
+            : hours.fastUnlimited
+              ? " left · Fast is unlimited"
+              : " · never expires"}
           {today ? ` · ${today}` : ""}
           {hours.premiumUsd > 0 ? (
             <>

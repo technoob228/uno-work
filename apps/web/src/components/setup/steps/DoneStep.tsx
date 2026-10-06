@@ -230,7 +230,7 @@ export function DoneStep() {
           first
           step="ai"
           label="AI"
-          value={aiId === "uno" ? `${aiName} · AI hours every month` : aiName}
+          value={aiId === "uno" ? `${aiName} · AI time every month` : aiName}
           sub="Default for new chats"
           empty={false}
           skipped={skipped("ai")}

@@ -12,7 +12,9 @@ import type {
   AccountComputer,
   AccountSubscription,
   ComputerApp,
+  SubscriptionBoosts,
 } from "../../account/accountOverview";
+import { ON_BOOSTS_LABEL, OUT_OF_BOOSTS_LABEL, boostsComputerTag } from "../../account/alwaysOn";
 import { computerMonthlyShare } from "../../account/billingModel";
 import { ROLE_LABEL, type ComputerRole } from "../../account/computerRoles";
 import { computerPowerState, type ComputerPowerState } from "../computer/computerFormat";
@@ -137,13 +139,22 @@ export function bringBackAction(status: string): "wake" | "start" | null {
   }
 }
 
-/** What a computer's state reads as, in a word. */
-export function stateLabel(entry: ComputerEntry): string {
+/**
+ * What a computer's state reads as, in a word. With the account's boosts
+ * (plans "always on"): "On · on boosts" for a computer running past the plan,
+ * "Asleep — boosts ran out" for one that slept because the boosts did.
+ */
+export function stateLabel(
+  entry: ComputerEntry,
+  boosts?: Pick<SubscriptionBoosts, "left"> | null,
+): string {
   if (entry.broken) return "Not responding";
   if (entry.box?.status === "archived") return "Archived";
+  const tag = entry.box && boosts !== undefined ? boostsComputerTag(entry.box, boosts) : null;
+  if (tag === "out-of-boosts") return OUT_OF_BOOSTS_LABEL;
   switch (entry.state) {
     case "on":
-      return "On";
+      return tag === "on-boosts" ? `On · ${ON_BOOSTS_LABEL}` : "On";
     case "asleep":
       return "Asleep";
     case "off":

@@ -284,3 +284,24 @@ describe("restart", () => {
     );
   });
 });
+
+describe("computers on boosts (plans always on)", () => {
+  it("reads 'On · on boosts' and 'Asleep — boosts ran out'", () => {
+    const running = computerEntry(
+      box({ id: 9, name: "scraper", status: "running", run_on_boosts: true }),
+      [],
+      false,
+    );
+    const slept = computerEntry(
+      box({ id: 9, name: "scraper", status: "sleeping", run_on_boosts: true }),
+      [],
+      false,
+    );
+    expect(stateLabel(running, { left: 3 })).toBe("On · on boosts");
+    expect(stateLabel(slept, { left: 0 })).toBe("Asleep — boosts ran out");
+    expect(stateLabel(slept, { left: 3 })).toBe("Asleep");
+    // Without the account's boosts (older console): as before.
+    expect(stateLabel(running)).toBe("On");
+    expect(stateLabel(slept)).toBe("Asleep");
+  });
+});

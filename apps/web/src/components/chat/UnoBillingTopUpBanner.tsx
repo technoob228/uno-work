@@ -8,7 +8,7 @@ import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 
-/** Where AI hours are added to the plan on the console. */
+/** Where AI time is added to the plan on the console. */
 export const UNO_BILLING_URL = `${CONSOLE_URL}/billing`;
 /** Both console hosts a gateway sentence may name. */
 const CONSOLE_BILLING_HOSTS = [
@@ -19,7 +19,7 @@ const CONSOLE_BILLING_HOSTS = [
 export const UNO_TOP_UP_URL = `${UNO_BILLING_URL}?tab=payments`;
 
 /** Mirrors apps/server provider/unoBilling.ts UNO_AI_CREDIT_EMPTY_MESSAGE. */
-export const UNO_LLM_CREDITS_EMPTY_MESSAGE = `Your balance is empty. Top up at ${UNO_TOP_UP_URL}, add Uno AI hours to your plan, or switch to your own AI subscription (Claude or ChatGPT).`;
+export const UNO_LLM_CREDITS_EMPTY_MESSAGE = `Your balance is empty. Top up at ${UNO_TOP_UP_URL}, add Uno AI time to your plan, or switch to your own AI subscription (Claude or ChatGPT).`;
 
 /**
  * Openings of the server's human billing messages (apps/server
@@ -152,7 +152,7 @@ export const UnoBillingTopUpBanner = memo(function UnoBillingTopUpBanner({
             {isLoading ? "Opening..." : "Top up"}
           </Button>
           <Button size="sm" type="button" variant="outline" onClick={() => void addAiHours()}>
-            Add AI hours
+            Add AI time
           </Button>
           {environmentId ? (
             <Button size="sm" type="button" variant="outline" onClick={openOwnSubscriptionSettings}>

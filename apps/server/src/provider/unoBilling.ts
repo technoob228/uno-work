@@ -20,7 +20,7 @@ const OWN_SUBSCRIPTION = "switch to your own AI subscription (Claude or ChatGPT)
  * gateways (a separate AI wallet) said "Your AI credit is empty." — still
  * recognised below.
  */
-export const UNO_AI_CREDIT_EMPTY_MESSAGE = `Your balance is empty. Top up at ${UNO_TOP_UP_URL}, add Uno AI hours to your plan, or ${OWN_SUBSCRIPTION}.`;
+export const UNO_AI_CREDIT_EMPTY_MESSAGE = `Your balance is empty. Top up at ${UNO_TOP_UP_URL}, add Uno AI time to your plan, or ${OWN_SUBSCRIPTION}.`;
 /** Kept under its old name: the generic "out of credit" message. */
 export const UNO_LLM_CREDITS_EMPTY_MESSAGE = UNO_AI_CREDIT_EMPTY_MESSAGE;
 /** The gateway's `ai_not_included`: the plan has no Uno AI hours and the balance is empty. */
@@ -35,7 +35,7 @@ const UNO_AI_HOURS_TOP_UP_TAIL = `To keep going now, top up your balance at ${UN
  * "continue from balance" is off and there are no AI hours left for Smart
  * to answer instead.
  */
-export const UNO_PREMIUM_LIMIT_REACHED_MESSAGE = `Your premium credit is used up, and there are no AI hours left to answer with Smart. Turn on "Continue from balance" or add AI hours at ${UNO_BILLING_URL}.`;
+export const UNO_PREMIUM_LIMIT_REACHED_MESSAGE = `Your premium credit is used up, and there's no AI time left to answer with Smart. Turn on "Continue from balance" or add AI time at ${UNO_BILLING_URL}.`;
 
 type UnoBillingKind =
   | "ai_hours_empty"

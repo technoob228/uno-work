@@ -101,8 +101,8 @@ export function AccountPlanSettings() {
         <SettingsSection title="Plan and AI">
           {apiKey ? (
             <SettingsRow
-              title="AI hours and balance"
-              description="Smart and Fast come from your AI hours; Premium models from premium credit, then your balance."
+              title="AI time and balance"
+              description="Smart and Fast come from your AI time; Premium models from premium credit, then your balance."
               control={<UnoGatewayBalance apiKey={apiKey} />}
             />
           ) : null}
@@ -188,7 +188,7 @@ export function AiSettings() {
         {apiKey ? (
           <SettingsRow
             title="Uno AI"
-            description="AI hours this month, premium credit and your balance."
+            description="AI time this month, premium credit and your balance."
             control={<UnoGatewayBalance apiKey={apiKey} />}
           />
         ) : null}

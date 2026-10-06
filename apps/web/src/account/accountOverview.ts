@@ -14,6 +14,7 @@
  */
 import { ControlPlaneHttpError, controlPlaneErrorStatus } from "@t3tools/shared/unoCloud";
 
+import { parsePeakExceeded } from "./alwaysOn";
 import { accountRequest } from "./unoAccount";
 import { type ComputerRole, computerRole, parseRoleComment, withRole } from "./computerRoles";
 
@@ -72,6 +73,11 @@ export interface AccountComputer {
   readonly url: string | null;
   /** The last Restart (for ~10 minutes after it); null = none lately. */
   readonly restart: ComputerRestart | null;
+  /**
+   * Runs past the always-on memory of the plan, paid with boosts
+   * (`run_on_boosts`, plans "always on"). False on older consoles.
+   */
+  readonly runOnBoosts: boolean;
 }
 
 export function parseAccountComputer(raw: unknown): AccountComputer | null {
@@ -102,6 +108,7 @@ export function parseAccountComputer(raw: unknown): AccountComputer | null {
     createdAt: strOrNull(r["created_at"]),
     url: strOrNull(r["url"]),
     restart: parseComputerRestart(r["restart"]),
+    runOnBoosts: r["run_on_boosts"] === true,
   };
 }
 
@@ -180,6 +187,8 @@ export async function createServerComputer(input: {
   readonly ramMb: number;
   readonly vcpu: number;
   readonly diskGb: number;
+  /** Start it past the always-on memory, on boosts (only after the person chose that). */
+  readonly runOnBoosts?: boolean;
 }): Promise<AccountComputer | null> {
   const raw = await accountRequest("POST", "/api/v1/work/servers", {
     name: input.name,
@@ -190,6 +199,7 @@ export async function createServerComputer(input: {
     // from the comment); an older one ignores the field and keeps the tag.
     computer_role: input.role,
     comment: withRole("", input.role),
+    ...(input.runOnBoosts ? { run_on_boosts: true } : {}),
   });
   return parseAccountComputer(raw);
 }
@@ -204,6 +214,11 @@ export function describeCreateError(error: unknown): { message: string; plan: bo
   const has = (code: string) => raw.includes(code);
   if (has("SHAPE_TOO_LARGE")) {
     return { message: "That's bigger than one computer on your plan can be.", plan: true };
+  }
+  // Plans "always on": the console's own sentence ("Your always-on 4 GB is in use.").
+  const peakMessage = parsePeakExceeded(error)?.message;
+  if (peakMessage) {
+    return { message: `${peakMessage} Put a computer to sleep or pick a bigger plan.`, plan: true };
   }
   if (has("PEAK_EXCEEDED") || has("POOL_EXHAUSTED")) {
     return {
@@ -345,6 +360,39 @@ export interface AccountPlan {
   /** Uno Work can run in the cloud on this plan (≥ 4 GB computers). */
   readonly cloudWork: boolean;
   readonly legacy: boolean;
+  /**
+   * Plans "always on" (generation 2): the memory always on, what a boost
+   * takes it to, and boosts a month. Null on an older console — the plan
+   * card then reads as before.
+   */
+  readonly alwaysOn: PlanAlwaysOn | null;
+  /** Uno AI: Fast without a limit, Smart in hours (`ai_fast_unlimited`). */
+  readonly aiFastUnlimited: boolean;
+}
+
+export interface PlanAlwaysOn {
+  readonly ramMb: number;
+  readonly vcpu: number;
+  readonly boostToRamMb: number;
+  readonly boostToVcpu: number;
+  readonly boostsPerMonth: number;
+  /** 1 boost = this much memory past the plan for an hour. */
+  readonly boostUnitRamMb: number;
+}
+
+function parsePlanAlwaysOn(r: Rec): PlanAlwaysOn | null {
+  const on = rec(r["always_on"]);
+  const ramMb = num(on?.["ram_mb"]);
+  if (!on || ramMb <= 0) return null;
+  const to = rec(r["boost_to"]);
+  return {
+    ramMb,
+    vcpu: num(on["vcpu"]),
+    boostToRamMb: num(to?.["ram_mb"], ramMb),
+    boostToVcpu: num(to?.["vcpu"], num(on["vcpu"])),
+    boostsPerMonth: num(r["boosts_per_month"], num(r["boost_hours"])),
+    boostUnitRamMb: num(r["boost_unit_ram_mb"], ramMb),
+  };
 }
 
 export function parseAccountPlan(raw: unknown): AccountPlan | null {
@@ -379,6 +427,8 @@ export function parseAccountPlan(raw: unknown): AccountPlan | null {
     // field, and there a 4 GB computer was the line.
     cloudWork: "cloud_work" in r ? r["cloud_work"] === true : maxBoxRamMb >= 4096,
     legacy: r["legacy"] === true,
+    alwaysOn: parsePlanAlwaysOn(r),
+    aiFastUnlimited: r["ai_fast_unlimited"] === true,
   };
 }
 
@@ -436,6 +486,99 @@ export interface AccountSubscription {
   };
   /** Overdue payment the console wants shown; null when all is paid. */
   readonly paymentNotice: PaymentNotice | null;
+  /**
+   * How the plan reads (`plan_view`): "always_on" — memory always on plus
+   * boosts, no computer hours; "hours" — the screens as before; "trial".
+   * Null on a console that doesn't send it: the screens as before.
+   */
+  readonly planView: PlanView | null;
+  /** Always-on memory and what runs now; only with `planView` "always_on". */
+  readonly alwaysOn: SubscriptionAlwaysOn | null;
+  /** The account's boosts this month; null when the console doesn't send them. */
+  readonly boosts: SubscriptionBoosts | null;
+}
+
+export type PlanView = "always_on" | "hours" | "trial";
+
+export interface SubscriptionAlwaysOn {
+  readonly ramMb: number;
+  readonly vcpu: number;
+  readonly runningRamMb: number;
+  readonly runningVcpu: number;
+  /** How much of `runningRamMb` is past the plan, on boosts. */
+  readonly onBoostsRamMb: number;
+  readonly computers: number;
+  readonly computersRunning: number;
+  readonly computersAsleep: number;
+}
+
+export interface SubscriptionBoosts {
+  /** Whole boosts left. */
+  readonly left: number;
+  readonly leftExact: number;
+  readonly perMonth: number;
+  /** Earned by sleeping this month (whole). */
+  readonly earned: number;
+  readonly used: number;
+  readonly resetsAt: string | null;
+  readonly earn: {
+    readonly enabled: boolean;
+    readonly perSleepHour: number;
+    readonly monthlyCap: number;
+  } | null;
+  /** 1 boost = this much memory past the plan for an hour. */
+  readonly unitRamMb: number;
+  /** Boosts an hour going right now (computers running past the plan). */
+  readonly burningPerHour: number;
+  readonly hoursLeftAtThisRate: number | null;
+  /** Starting a computer past the plan on boosts is on for the account. */
+  readonly runOnBoosts: boolean;
+}
+
+function parsePlanView(value: unknown): PlanView | null {
+  return value === "always_on" || value === "hours" || value === "trial" ? value : null;
+}
+
+export function parseSubscriptionAlwaysOn(raw: unknown): SubscriptionAlwaysOn | null {
+  const r = rec(raw);
+  const ramMb = num(r?.["ram_mb"]);
+  if (!r || ramMb <= 0) return null;
+  return {
+    ramMb,
+    vcpu: num(r["vcpu"]),
+    runningRamMb: Math.max(0, num(r["running_ram_mb"])),
+    runningVcpu: Math.max(0, num(r["running_vcpu"])),
+    onBoostsRamMb: Math.max(0, num(r["on_boosts_ram_mb"])),
+    computers: num(r["computers"]),
+    computersRunning: num(r["computers_running"]),
+    computersAsleep: num(r["computers_asleep"]),
+  };
+}
+
+export function parseSubscriptionBoosts(raw: unknown): SubscriptionBoosts | null {
+  const r = rec(raw);
+  if (!r || numOrNull(r["left"]) === null) return null;
+  const earn = rec(r["earn"]);
+  const leftExact = num(r["left_exact"], num(r["left"]));
+  return {
+    left: Math.max(0, Math.floor(num(r["left"]))),
+    leftExact: Math.max(0, leftExact),
+    perMonth: num(r["per_month"]),
+    earned: Math.max(0, Math.floor(num(r["earned"]))),
+    used: num(r["used"]),
+    resetsAt: strOrNull(r["resets_at"]),
+    earn: earn
+      ? {
+          enabled: earn["enabled"] === true,
+          perSleepHour: num(earn["per_sleep_hour"]),
+          monthlyCap: num(earn["monthly_cap"]),
+        }
+      : null,
+    unitRamMb: num(r["unit_ram_mb"]),
+    burningPerHour: Math.max(0, num(r["burning_per_hour"])),
+    hoursLeftAtThisRate: numOrNull(r["hours_left_at_this_rate"]),
+    runOnBoosts: r["run_on_boosts"] === true,
+  };
 }
 
 /**
@@ -544,6 +687,9 @@ export function parseSubscription(raw: unknown): AccountSubscription | null {
       boxCount: num(usage?.["box_count"]),
     },
     paymentNotice: parsePaymentNotice(r["payment_notice"]),
+    planView: parsePlanView(r["plan_view"]),
+    alwaysOn: parseSubscriptionAlwaysOn(r["always_on"]),
+    boosts: parseSubscriptionBoosts(r["boosts"]),
   };
 }
 
