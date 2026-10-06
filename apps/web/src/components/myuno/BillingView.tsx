@@ -326,7 +326,7 @@ function MoneyCard({
           </span>
           <span className="text-[11px] text-muted-foreground">
             {balance?.oneWallet
-              ? "Pays for the plan each month, and for AI past your hours."
+              ? "Pays for the plan each month, and for AI after your AI time runs out."
               : "Pays for the plan each month."}
           </span>
           <div className="mt-1">
@@ -359,12 +359,12 @@ function MoneyCard({
               {[
                 today,
                 hours.unlimited
-                  ? "Full speed for the month's hours, then standard speed."
+                  ? "Full speed for the month's AI time, then standard speed."
                   : hours.monthlyHours > 0
                     ? hours.fastUnlimited
-                      ? `Your plan adds ${hours.monthlyHours} h of Smart every month; unused hours roll over.`
-                      : `Your plan adds ${hours.monthlyHours} h every month; unused hours roll over.`
-                    : "Unused hours roll over.",
+                      ? `Your plan adds ${hours.monthlyHours} h of AI time for Smart every month; unused time rolls over.`
+                      : `Your plan adds ${hours.monthlyHours} h of AI time every month; unused time rolls over.`
+                    : "Unused AI time rolls over.",
               ]
                 .filter(Boolean)
                 .join(" · ")}
@@ -549,7 +549,7 @@ function PlansCard({
           ? "A plan is your computer in the cloud, always on. Split it into a workspace and a couple of servers if you like."
           : "A plan is your computer in the cloud: split it into a workspace and a couple of servers if you like."}
         {hasAiOption && alwaysOn
-          ? " With Uno AI, Fast is unlimited and Smart comes in hours — or bring your own Claude or ChatGPT subscription."
+          ? " With Uno AI, Fast is unlimited and Smart uses AI time — or bring your own Claude or ChatGPT subscription."
           : hasAiOption
             ? hoursCatalog
               ? " With Uno AI, the plan adds AI time every month, unlimited inside it — or bring your own Claude or ChatGPT subscription."

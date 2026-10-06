@@ -64,7 +64,7 @@ describe("AI busy notice", () => {
     )!;
     expect(notice.kind).toBe("fast-standard");
     expect(aiBusyNoticeText(notice)).toEqual({
-      text: "Your Smart hours are used up. Fast keeps going at standard speed.",
+      text: "Your AI time is used up. Fast keeps going at standard speed.",
       link: null,
     });
     // An older daemon doesn't send the flag: as before.

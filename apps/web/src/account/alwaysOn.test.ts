@@ -186,7 +186,7 @@ describe("plan cards", () => {
       boosts: "⚡ 10 boosts a month",
       ai: "Works with Uno AI",
     });
-    expect(alwaysOnCard(plusAi)?.ai).toBe("Uno AI: Fast is unlimited. Smart comes in hours.");
+    expect(alwaysOnCard(plusAi)?.ai).toBe("Uno AI: Fast is unlimited. Smart uses your AI time.");
   });
 
   it("no always-on figures (older console): the old card", () => {

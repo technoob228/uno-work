@@ -18,11 +18,10 @@ export const AI_TIME_NOTE =
 export const AI_HOURS_TIME_NOTE = AI_TIME_NOTE;
 
 /** One line for a plan where Fast has no limit (`ai_fast_unlimited`). */
-export const AI_FAST_UNLIMITED_LINE = "Uno AI: Fast is unlimited. Smart comes in hours.";
+export const AI_FAST_UNLIMITED_LINE = "Uno AI: Fast is unlimited. Smart uses your AI time.";
 
 /** The same plan once the Smart hours are gone. */
-export const AI_SMART_USED_UP_LINE =
-  "Your Smart hours are used up. Fast keeps going at standard speed.";
+export const AI_SMART_USED_UP_LINE = "Your AI time is used up. Fast keeps going at standard speed.";
 
 /** 5220 → "87 h", 47 → "47 min", 90 → "1 h 30 min". */
 export function formatAiMinutes(minutes: number): string {
@@ -109,7 +108,7 @@ export function aiHoursSummary(input: {
 
 /**
  * The Uno AI lines of a Fast-unlimited plan: "Uno AI: Fast is unlimited.
- * Smart comes in hours.", or — the hours gone — "Your Smart hours are used
+ * Smart uses your AI time.", or — the time used up — "Your AI time is used
  * up. Fast keeps going at standard speed." Null on other plans.
  */
 export function aiFastLine(summary: AiHoursSummary): string | null {
