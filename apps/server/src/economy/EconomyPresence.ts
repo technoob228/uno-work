@@ -71,6 +71,8 @@ interface State {
   appsWhileUnavailable: boolean;
   lastAppsSentAt: number | null;
   lastAppsSignature: string | null;
+  /** The box the list was last sent for: a clone from a memory snapshot sends its own at once. */
+  lastAppsBoxId: number | null;
   /** The console refused a report with apps (an older console, a body too big): leave them out until then. */
   appsRefusedUntil: number;
 }
@@ -100,6 +102,7 @@ export const EconomyPresenceLive = Layer.effect(
       appsWhileUnavailable: false,
       lastAppsSentAt: null,
       lastAppsSignature: null,
+      lastAppsBoxId: null,
       appsRefusedUntil: 0,
     };
 
@@ -169,6 +172,11 @@ export const EconomyPresenceLive = Layer.effect(
       if (id === null) {
         state.presence = PRESENCE_OFF;
         return;
+      }
+      if (state.lastAppsBoxId !== id.boxId) {
+        state.lastAppsSentAt = null;
+        state.lastAppsSignature = null;
+        state.lastAppsBoxId = id.boxId;
       }
       const backedOff = !woke && now < state.unavailableUntil;
       if (backedOff && !state.appsWhileUnavailable) return;
