@@ -8,6 +8,13 @@
 
 ---
 
+## v0.0.110 — 2026-10-06
+
+- Free Telegram bot in the Uno AI chat: when Uno saves the bot (bot_setup), a card with Open @BotFather and a safe field for the token appears right in the chat; a pasted token never goes into the chat; "Live" tile in the light sidebar with the bot's answers and "Keep it on".
+- My Uno → Plan & billing for "Always on + boosts" plans: Always on, boosts and AI time instead of RAM hours; Add computer over the plan explains running on boosts.
+- "AI time" is the Uno AI unit everywhere (no more visible "AI hours").
+- Assistant quiz in the light Work: on a plan that already has cloud Uno Work, "Set it up" opens Uno Work with the answers right away, without the plan step.
+
 ## v0.0.109 — 2026-10-05
 
 - Personal assistant lives in the person's own Telegram bot: a "Create your assistant's bot" card (Open @BotFather, three steps, token check), greeting in the person's language; service notifications from the computer go through Uno's bot under "💻 From your Uno computer".

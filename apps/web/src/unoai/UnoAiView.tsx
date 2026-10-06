@@ -39,6 +39,7 @@ import { liteLinks, liteStanding } from "../lite/webLite";
 import { computerOfferCopy } from "./computerOffer";
 import { cn } from "../lib/utils";
 import { AssistantQuiz } from "../components/assistants/AssistantQuiz";
+import { quizConsoleNext } from "../components/assistants/assistantQuizApi";
 import { SidebarShowButton } from "../components/sidebar/SidebarShowButton";
 import { subscriptionQuery } from "../components/myuno/myUnoQueries";
 import { Button } from "../components/ui/button";
@@ -333,7 +334,8 @@ function EmptyChat({
   const [quiz, setQuiz] = useState(false);
   if (quiz) {
     // Light Work has no computer: "Set it up" goes to the console's plan step
-    // with the answers (?as=), and Uno on the new computer sets itself up from them.
+    // with the answers (?as=), and Uno on the new computer sets itself up from
+    // them — or, when the plan already has cloud Work, straight to /work.
     return (
       <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-center gap-4 px-4 py-10">
         <button
@@ -346,11 +348,7 @@ function EmptyChat({
         <AssistantQuiz
           sample={draft}
           onSetUp={(turn) => {
-            const next =
-              turn.next && /^\/start\?[A-Za-z0-9_=&%.-]*$/.test(turn.next)
-                ? turn.next
-                : "/start?goal=assistant";
-            window.open(`${CONSOLE_URL}${next}`, "_blank", "noopener");
+            window.open(`${CONSOLE_URL}${quizConsoleNext(turn.next)}`, "_blank", "noopener");
           }}
           onOwnAgent={() =>
             window.open(`${CONSOLE_URL}/start?goal=assistant&via=agent`, "_blank", "noopener")

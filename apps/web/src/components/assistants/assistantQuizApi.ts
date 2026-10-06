@@ -125,6 +125,19 @@ export interface QuizTurn {
   readonly next?: string;
 }
 
+/**
+ * The console path "Set it up" opens from the light Work (no computer here):
+ * the backend's `next`. Usually the plan step (/start?…&as=…); an account
+ * whose plan already has cloud Uno Work gets /work?do=assistant&as=… — straight
+ * into Work, no plan step (fishcode train 06.10-E). Anything else falls back to
+ * the console's assistant start.
+ */
+export function quizConsoleNext(next: string | undefined): string {
+  if (next && /^\/start\?[A-Za-z0-9_=&%.-]*$/.test(next)) return next;
+  if (next && /^\/work\?do=assistant&as=[A-Za-z0-9_-]{8,1200}$/.test(next)) return next;
+  return "/start?goal=assistant";
+}
+
 export async function assistantInterview(
   state: QuizState,
   sample = "",

@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { assistantFiles } from "./assistantTemplates";
-import { planFromHermes, toggleQuizPick, withQuizAnswer, type QuizStep } from "./assistantQuizApi";
+import {
+  planFromHermes,
+  quizConsoleNext,
+  toggleQuizPick,
+  withQuizAnswer,
+  type QuizStep,
+} from "./assistantQuizApi";
 
 describe("assistant quiz", () => {
   it("an answer goes into a copy of the state, with the follow-up topic", () => {
@@ -11,6 +17,18 @@ describe("assistant quiz", () => {
     expect(next.answers?.["follow"]).toEqual({ picks: ["telegram"], for: "reply" });
     expect(next.edit).toBe("");
     expect(state.answers).not.toHaveProperty("follow");
+  });
+
+  it("Set it up from the light Work: plan step, or straight to Work on a cloud-Work plan", () => {
+    const as = "eyJsYW5nIjoiZW4ifQ";
+    expect(quizConsoleNext(`/start?path=work&step=plan&goal=assistant&via=uno&as=${as}`)).toBe(
+      `/start?path=work&step=plan&goal=assistant&via=uno&as=${as}`,
+    );
+    expect(quizConsoleNext(`/work?do=assistant&as=${as}`)).toBe(`/work?do=assistant&as=${as}`);
+    expect(quizConsoleNext("/work?do=upload")).toBe("/start?goal=assistant");
+    expect(quizConsoleNext("https://evil.example/start?x=1")).toBe("/start?goal=assistant");
+    expect(quizConsoleNext(`/work?do=assistant&as=${as}&q=<script>`)).toBe("/start?goal=assistant");
+    expect(quizConsoleNext(undefined)).toBe("/start?goal=assistant");
   });
 
   it("tiles toggle, never past max", () => {
