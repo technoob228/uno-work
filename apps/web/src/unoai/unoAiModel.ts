@@ -1,9 +1,10 @@
 /**
  * The Uno AI transcript as the chat shows it. The server keeps OpenAI-style
  * messages (the same as the console's /ask: ask_user, show_plan, write_file,
- * publish_site, site_password, telegram_link, suggest_next); this turns them
- * into what a person sees — their messages, Uno's words, one question with
- * tappable answers, the plan, "your site is live", the next-step offer.
+ * publish_site, site_password, telegram_link, suggest_next, bot_setup); this
+ * turns them into what a person sees — their messages, Uno's words, one
+ * question with tappable answers, the plan, "your site is live", the next-step
+ * offer, the free bot's card.
  * Pure and unit-tested.
  */
 import type { AiChatMessage, AiSite, AiToolCall } from "./unoAiApi";
@@ -57,7 +58,43 @@ export type AiItem =
       readonly reason: string;
       /** Still the latest word in the chat (no message of the person after it). */
       readonly current: boolean;
+    }
+  | {
+      /** bot_setup: the free Telegram bot (fishcode feat/free-bot-days). */
+      readonly kind: "bot";
+      readonly key: string;
+      readonly name: string;
+      /** The bot's state when Uno saved the settings — only a first guess; the card asks the account. */
+      readonly state: BotState;
+      /** Still the latest word in the chat (no message of the person after it). */
+      readonly current: boolean;
+      /** The bot was already live: these are new settings for it, not a new bot. */
+      readonly update: boolean;
+      /** What the tool result already knew (shown until the account answers). */
+      readonly username: string | null;
+      readonly url: string | null;
+      readonly freeUntil: string | null;
+      readonly freeDays: number | null;
     };
+
+export type BotState = "none" | "draft" | "starting" | "live" | "failed" | "ended";
+
+const BOT_STATES: ReadonlySet<string> = new Set<BotState>([
+  "none",
+  "draft",
+  "starting",
+  "live",
+  "failed",
+  "ended",
+]);
+
+export function botState(raw: unknown): BotState {
+  return typeof raw === "string" && BOT_STATES.has(raw) ? (raw as BotState) : "draft";
+}
+
+function optString(raw: unknown): string | null {
+  return typeof raw === "string" && raw.trim() ? raw.trim() : null;
+}
 
 function parseArgs(call: AiToolCall): Record<string, unknown> {
   try {
@@ -243,11 +280,38 @@ export function transcriptItems(messages: ReadonlyArray<AiChatMessage>): Readonl
           }
           break;
         }
+        case "bot_setup": {
+          flushBuilding();
+          const state = botState(result["state"]);
+          const days = Number(result["free_days"]);
+          items.push({
+            kind: "bot",
+            key,
+            name: String(args["name"] ?? "").trim(),
+            state,
+            current: lastUser < i,
+            update: state === "live",
+            username: optString(result["bot_username"])?.replace(/^@/, "") ?? null,
+            url: optString(result["bot_url"]),
+            freeUntil: optString(result["free_until"]),
+            freeDays: Number.isFinite(days) && days > 0 ? days : null,
+          });
+          break;
+        }
       }
     }
   });
   flushBuilding();
   return items;
+}
+
+/** The bot card that stays interactive: the latest one in the chat (older ones are one quiet line). */
+export function latestBotKey(items: ReadonlyArray<AiItem>): string | null {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]!;
+    if (item.kind === "bot") return item.key;
+  }
+  return null;
 }
 
 /** The question waiting for an answer right now, if any. */
@@ -329,6 +393,8 @@ export function liveActivity(tool: string, chars: number): string | null {
       return "Setting the password…";
     case "telegram_link":
       return "Connecting Telegram…";
+    case "bot_setup":
+      return "Setting up your bot…";
     default:
       return "Working…";
   }

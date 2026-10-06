@@ -12,6 +12,7 @@ import {
 import {
   askQuestions,
   chatLanguage,
+  latestBotKey,
   latestSite,
   liveActivity,
   pendingQuestion,
@@ -140,6 +141,86 @@ describe("transcriptItems", () => {
       options: ["Group", "Private", "Both"],
       recommended: "Both",
     });
+  });
+});
+
+describe("bot_setup", () => {
+  const args = {
+    name: "Crumb Bakery",
+    purpose: "Take orders",
+    knowledge: "Menu",
+    orders: true,
+    greeting: "Hi!",
+    fallback: "I'll pass it on",
+    text_only: true,
+  };
+  const draft: AiChatMessage[] = [
+    { role: "user", content: "A bot for my bakery" },
+    {
+      role: "assistant",
+      content: "Here it is.",
+      tool_calls: [call("b1", "bot_setup", args)],
+    },
+    tool("b1", { ok: true, state: "draft", token_card: true, free_days: 7, note: "…" }),
+  ];
+  it("becomes the bot card, current until the person writes", () => {
+    const items = transcriptItems(draft);
+    const bot = items.at(-1);
+    expect(bot).toEqual({
+      kind: "bot",
+      key: "bot_setup:b1",
+      name: "Crumb Bakery",
+      state: "draft",
+      current: true,
+      update: false,
+      username: null,
+      url: null,
+      freeUntil: null,
+      freeDays: 7,
+    });
+    const later = transcriptItems([...draft, { role: "user", content: "ok" }]);
+    const old = later.find((i) => i.kind === "bot");
+    expect(old?.kind === "bot" && old.current).toBe(false);
+  });
+  it("knows a settings update of a live bot, and the latest card", () => {
+    const items = transcriptItems([
+      ...draft,
+      { role: "user", content: "Change the greeting" },
+      { role: "assistant", content: null, tool_calls: [call("b2", "bot_setup", args)] },
+      tool("b2", {
+        ok: true,
+        state: "live",
+        keep_on: true,
+        bot_username: "@crumb_bakery_bot",
+        bot_url: "https://t.me/crumb_bakery_bot",
+        free_until: "Oct 12",
+        free_days: 7,
+      }),
+    ]);
+    const bots = items.filter((i) => i.kind === "bot");
+    expect(bots.map((b) => b.kind === "bot" && b.update)).toEqual([false, true]);
+    const last = bots.at(-1);
+    expect(last?.kind === "bot" && [last.username, last.url, last.freeUntil]).toEqual([
+      "crumb_bakery_bot",
+      "https://t.me/crumb_bakery_bot",
+      "Oct 12",
+    ]);
+    expect(latestBotKey(items)).toBe("bot_setup:b2");
+    expect(latestBotKey(transcriptItems(transcript))).toBeNull();
+  });
+  it("shows nothing for a refused call, and a first guess while it runs", () => {
+    const refused = transcriptItems([
+      { role: "assistant", content: null, tool_calls: [call("b3", "bot_setup", args)] },
+      tool("b3", { ok: false, error: "Not now" }),
+    ]);
+    expect(refused).toEqual([]);
+    const running = transcriptItems([
+      { role: "assistant", content: null, tool_calls: [call("b4", "bot_setup", args)] },
+    ]);
+    expect(running[0]?.kind === "bot" && running[0].state).toBe("draft");
+  });
+  it("says what Uno is doing", () => {
+    expect(liveActivity("bot_setup", 0)).toBe("Setting up your bot…");
   });
 });
 
