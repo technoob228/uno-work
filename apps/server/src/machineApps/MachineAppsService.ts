@@ -122,6 +122,14 @@ export interface MachineAppsServiceShape {
    * never sent to the browser as is. At most a few seconds old.
    */
   readonly scanned: Effect.Effect<ReadonlyArray<ScannedApp>>;
+  /**
+   * The last scan as it is, without starting a new one (the background pass
+   * keeps it ≤ 20 s old); null before the first. For the minute report to the
+   * console (economy/EconomyPresence.ts), which must not add scans of its own.
+   */
+  readonly lastScanned: Effect.Effect<ReadonlyArray<
+    ScannedApp & { readonly hidden: boolean }
+  > | null>;
 }
 
 export class MachineAppsService extends Context.Service<
@@ -1056,7 +1064,11 @@ export const makeMachineAppsService = (
       Effect.map((result) => result.apps),
     );
 
-    return { list, action, localMetrics, scanned } satisfies MachineAppsServiceShape;
+    const lastScanned: MachineAppsServiceShape["lastScanned"] = Effect.sync(
+      () => lastScan?.apps ?? null,
+    );
+
+    return { list, action, localMetrics, scanned, lastScanned } satisfies MachineAppsServiceShape;
   });
 
 export const MachineAppsServiceLive = Layer.effect(MachineAppsService, makeMachineAppsService());

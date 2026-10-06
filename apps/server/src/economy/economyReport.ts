@@ -19,6 +19,7 @@ import path from "node:path";
 
 import type { UnoComputerEconomy, UnoEconomyPresence } from "@t3tools/contracts";
 
+import { cleanText } from "../machineApps/appManifest.ts";
 import { parseComputerEconomy } from "../workspaceRegistry/unoComputerEconomy.ts";
 
 /** How often the probe runs. */
@@ -54,11 +55,17 @@ export interface EconomyReportBody {
   readonly running_terminals: number;
   readonly keep_awake: ReadonlyArray<string>;
   readonly next_wake_at?: string;
+  /**
+   * The apps on this computer, for the console's "On this computer" list.
+   * Absent = not sent this time (unchanged, or not known yet) — never "none".
+   */
+  readonly apps?: ReadonlyArray<ReportedApp>;
 }
 
 export function buildReportBody(
   probe: EconomyProbe,
   lastInputAt: number | null,
+  apps: ReadonlyArray<ReportedApp> | null = null,
 ): EconomyReportBody {
   return {
     clients: Math.max(0, probe.clients),
@@ -67,7 +74,133 @@ export function buildReportBody(
     running_terminals: Math.max(0, probe.runningTerminals),
     keep_awake: probe.keepAwake.slice(0, 16),
     ...(probe.nextWakeAt ? { next_wake_at: probe.nextWakeAt } : {}),
+    ...(apps !== null ? { apps: apps.slice(0, REPORT_APPS_MAX) } : {}),
   };
+}
+
+// ---- Apps on this computer, for the console ----
+//
+// The console shows what an agent (or the person) built on the computer:
+// apps registered in `~/.uno/apps` and programs the scan found listening on a
+// port. Only what a list needs travels — id, name, icon, port, running, kind.
+// Never a command, a working directory, env or logs: a command line can hold
+// a token. Whether an app is on the internet the console knows itself (its own
+// port forwards), so the daemon does not ask.
+
+/** At most this many apps in one report. */
+export const REPORT_APPS_MAX = 32;
+export const REPORT_APP_ID_MAX = 64;
+export const REPORT_APP_NAME_MAX = 64;
+export const REPORT_APP_ICON_MAX = 16;
+/**
+ * An unchanged list is sent again this often, so the console's copy has a
+ * fresh "reported at". A changed one goes with the next report (≤ a minute).
+ */
+export const APPS_RESEND_MS = 10 * 60_000;
+
+export type ReportedAppKind = "web" | "bot" | "service";
+
+export interface ReportedApp {
+  /** Manifest id (`notes`) or, for a found program, the scan's key (`docker:wiki`, `port:8080`). */
+  readonly id: string;
+  readonly name: string;
+  /** Emoji or a couple of letters; icon files are not sent. */
+  readonly icon?: string;
+  readonly port?: number;
+  /** `"always"` — the manifest asks to keep the computer awake for it. */
+  readonly runs?: "always";
+  /** Absent — the scan can't tell (a portless app it didn't start). */
+  readonly running?: boolean;
+  readonly kind: ReportedAppKind;
+  /** Found running on the computer, not registered in `~/.uno/apps`. */
+  readonly found?: true;
+}
+
+/** What the report needs of a scanned app (`ScannedApp` + the service's `hidden`). */
+export interface AppForReport {
+  readonly id: string;
+  readonly source: "manifest" | "docker" | "systemd" | "port";
+  readonly name: string;
+  readonly icon: string | null;
+  readonly port: number | null;
+  readonly status: "running" | "stopped" | "unknown";
+  readonly http: boolean;
+  readonly canRemove?: boolean;
+  readonly hidden?: boolean;
+  readonly manifest: { readonly id: string; readonly telegramBot?: unknown } | null;
+}
+
+function byId(a: ReportedApp, b: ReportedApp): number {
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+function clip(value: string, max: number): string {
+  return Array.from(value).slice(0, max).join("");
+}
+
+/**
+ * The apps list for the console, from the last scan. Registered apps first,
+ * then found programs; the person's hidden ones, Uno's own containers and
+ * App Store containers (removed from their own cards, listed there) are left out.
+ */
+export function buildReportedApps(
+  apps: ReadonlyArray<AppForReport>,
+  keepAwake: ReadonlyArray<string>,
+): ReportedApp[] {
+  const always = new Set(keepAwake);
+  const registered: ReportedApp[] = [];
+  const found: ReportedApp[] = [];
+  for (const app of apps) {
+    if (app.hidden) continue;
+    const manifest = app.source === "manifest" ? app.manifest : null;
+    if (!manifest && app.source === "docker" && app.canRemove === false) continue;
+    const id = clip(manifest ? manifest.id : app.id, REPORT_APP_ID_MAX);
+    if (id.length === 0) continue;
+    const name = cleanText(app.name, REPORT_APP_NAME_MAX) ?? id;
+    const icon = app.icon ? cleanText(app.icon, REPORT_APP_ICON_MAX) : null;
+    const port =
+      app.port !== null && Number.isInteger(app.port) && app.port > 0 && app.port < 65536
+        ? app.port
+        : null;
+    const kind: ReportedAppKind = manifest?.telegramBot
+      ? "bot"
+      : port !== null && (app.http || manifest !== null)
+        ? "web"
+        : "service";
+    const entry: ReportedApp = {
+      id,
+      name,
+      ...(icon ? { icon } : {}),
+      ...(port !== null ? { port } : {}),
+      ...(manifest && always.has(`app:${manifest.id}`.slice(0, 64))
+        ? { runs: MANIFEST_RUNS_ALWAYS }
+        : {}),
+      ...(app.status === "unknown" ? {} : { running: app.status === "running" }),
+      kind,
+      ...(manifest ? {} : { found: true as const }),
+    };
+    (manifest ? registered : found).push(entry);
+  }
+  return [...registered.toSorted(byId), ...found.toSorted(byId)].slice(0, REPORT_APPS_MAX);
+}
+
+/** Same list → same string; any field that the console shows changes it. */
+export function appsSignature(apps: ReadonlyArray<ReportedApp>): string {
+  return JSON.stringify(apps);
+}
+
+export interface AppsDecisionInput {
+  readonly now: number;
+  readonly lastAppsSentAt: number | null;
+  readonly lastAppsSignature: string | null;
+  readonly signature: string;
+}
+
+/** Put the apps list into this report? First time, when it changed, and every APPS_RESEND_MS. */
+export function shouldSendApps(input: AppsDecisionInput): boolean {
+  if (input.lastAppsSentAt === null || input.lastAppsSignature === null) return true;
+  if (input.signature !== input.lastAppsSignature) return true;
+  return input.now - input.lastAppsSentAt >= APPS_RESEND_MS;
 }
 
 /**

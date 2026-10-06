@@ -5,9 +5,13 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  APPS_RESEND_MS,
   ECONOMY_REPORT_INTERVAL_MS,
   ECONOMY_TICK_MS,
+  REPORT_APPS_MAX,
+  appsSignature,
   buildReportBody,
+  buildReportedApps,
   countRunningTurns,
   detectWake,
   earliestFuture,
@@ -15,6 +19,8 @@ import {
   probeSignature,
   readKeepAwakeApps,
   shouldReport,
+  shouldSendApps,
+  type AppForReport,
   type EconomyProbe,
 } from "./economyReport.ts";
 
@@ -143,5 +149,109 @@ describe("countRunningTurns", () => {
   it("ignores running rows left over from a daemon restart", () => {
     expect(countRunningTurns([], ["a", "b"])).toBe(0);
     expect(countRunningTurns(["b"], ["a"])).toBe(0);
+  });
+});
+
+const app = (over: Partial<AppForReport>): AppForReport => ({
+  id: "manifest:notes",
+  source: "manifest",
+  name: "Notes",
+  icon: "📝",
+  port: 3000,
+  status: "running",
+  http: true,
+  manifest: { id: "notes" },
+  ...over,
+});
+
+describe("apps in the report", () => {
+  it("sends registered apps first, then found ones, with only the listed fields", () => {
+    const scanned = [
+      app({
+        id: "port:8080",
+        source: "port",
+        name: "node",
+        icon: null,
+        port: 8080,
+        manifest: null,
+        // Whatever else a scanned app carries must not leak into the report.
+        ...({
+          detail: "node server.js --token=sk-secret",
+          localUrl: "http://localhost:8080/",
+        } as {}),
+      }),
+      app({}),
+      app({
+        id: "manifest:bot",
+        name: "Café Bot",
+        icon: null,
+        port: null,
+        status: "unknown",
+        http: false,
+        manifest: { id: "bot", telegramBot: { username: "cafe_bot", tokenEnv: null } },
+      }),
+      app({
+        id: "manifest:worker",
+        name: "Queue",
+        port: null,
+        status: "stopped",
+        http: false,
+        manifest: { id: "worker" },
+      }),
+    ];
+    const out = buildReportedApps(scanned, ["app:bot"]);
+    expect(out).toEqual([
+      { id: "bot", name: "Café Bot", runs: "always", kind: "bot" },
+      { id: "notes", name: "Notes", icon: "📝", port: 3000, running: true, kind: "web" },
+      { id: "worker", name: "Queue", icon: "📝", running: false, kind: "service" },
+      { id: "port:8080", name: "node", port: 8080, running: true, kind: "web", found: true },
+    ]);
+    expect(JSON.stringify(out)).not.toContain("secret");
+    expect(JSON.stringify(out)).not.toContain("localhost");
+  });
+
+  it("leaves out hidden programs and Uno's own / App Store containers", () => {
+    const out = buildReportedApps(
+      [
+        app({ id: "docker:uno-wiki", source: "docker", manifest: null, canRemove: false }),
+        app({ id: "docker:mine", source: "docker", name: "Mine", manifest: null, canRemove: true }),
+        app({ id: "port:9000", source: "port", manifest: null, hidden: true }),
+      ],
+      [],
+    );
+    expect(out.map((a) => a.id)).toEqual(["docker:mine"]);
+  });
+
+  it("caps the list and clips names and icons, stripping control characters", () => {
+    const many = Array.from({ length: 50 }, (_, i) =>
+      app({ id: `manifest:a${i}`, manifest: { id: `a${String(i).padStart(2, "0")}` } }),
+    );
+    expect(buildReportedApps(many, [])).toHaveLength(REPORT_APPS_MAX);
+    const [long] = buildReportedApps(
+      [app({ name: `\u202e${"x".repeat(200)}\u0000`, icon: "🙂".repeat(40), port: 70000 })],
+      [],
+    );
+    expect(long?.name).toBe("x".repeat(64));
+    expect(Array.from(long?.icon ?? "")).toHaveLength(16);
+    expect(long?.port).toBeUndefined();
+  });
+
+  it("puts apps into the body only when given; absent is not an empty list", () => {
+    expect(buildReportBody(idle, null)).not.toHaveProperty("apps");
+    expect(buildReportBody(idle, null, []).apps).toEqual([]);
+  });
+
+  it("sends the list first, on change, and every few minutes", () => {
+    const sig = appsSignature([{ id: "notes", name: "Notes", kind: "web" }]);
+    const base = {
+      now: 1_000_000,
+      lastAppsSentAt: 1_000_000 - 60_000,
+      lastAppsSignature: sig,
+      signature: sig,
+    };
+    expect(shouldSendApps({ ...base, lastAppsSentAt: null, lastAppsSignature: null })).toBe(true);
+    expect(shouldSendApps(base)).toBe(false);
+    expect(shouldSendApps({ ...base, signature: appsSignature([]) })).toBe(true);
+    expect(shouldSendApps({ ...base, lastAppsSentAt: base.now - APPS_RESEND_MS })).toBe(true);
   });
 });
