@@ -10,6 +10,7 @@ import {
   ChevronDownIcon,
   ExternalLinkIcon,
   GlobeIcon,
+  InboxIcon,
   LaptopIcon,
   Loader2Icon,
   MoonIcon,
@@ -593,6 +594,15 @@ export function SiteDetail({ site, onUpdate }: { site: HostedSite; onUpdate: () 
             Open
           </Button>
           <SiteCopyButton site={site} withLabel />
+          <Button
+            size="sm"
+            variant="ghost"
+            data-testid="site-detail-entries"
+            onClick={() => openInNewTab(consoleLinks.siteEntries(site.slug))}
+          >
+            <InboxIcon />
+            Entries
+          </Button>
           <Button size="sm" variant="ghost" onClick={onUpdate}>
             <UploadIcon />
             Update
@@ -622,7 +632,7 @@ export function SiteDetail({ site, onUpdate }: { site: HostedSite; onUpdate: () 
       </Block>
       <p className="px-4 pt-1 text-[11px] leading-relaxed text-muted-foreground">
         A password, your own domain and deleting the site are in the console.{" "}
-        <ConsoleLink href={consoleLinks.sites}>Open in console</ConsoleLink>
+        <ConsoleLink href={consoleLinks.site(site.slug)}>Open in console</ConsoleLink>
       </p>
     </>
   );

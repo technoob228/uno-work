@@ -35,6 +35,7 @@ import {
 import { extractTerminalLinks } from "../terminal-links";
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
+import { chatLinkTarget, openUntrustedLinkExternally } from "../lib/externalLinks";
 import { detectFileKind, usePreviewPane } from "./preview/PreviewPaneContext";
 
 class CodeHighlightErrorBoundary extends React.Component<
@@ -632,7 +633,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false, environmentId }: ChatMar
         const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
         const fileLinkMeta = normalizedHref ? markdownFileLinkMetaByHref.get(normalizedHref) : null;
         if (!fileLinkMeta) {
-          const isHttpUrl = !!href && /^https?:\/\//i.test(href);
+          const linkTarget = chatLinkTarget(href);
           return (
             <a
               {...props}
@@ -643,7 +644,8 @@ function ChatMarkdown({ text, cwd, isStreaming = false, environmentId }: ChatMar
                 props.onClick?.(event);
                 if (
                   event.defaultPrevented ||
-                  !isHttpUrl ||
+                  !linkTarget ||
+                  !href ||
                   event.metaKey ||
                   event.ctrlKey ||
                   event.shiftKey ||
@@ -653,7 +655,11 @@ function ChatMarkdown({ text, cwd, isStreaming = false, environmentId }: ChatMar
                   return;
                 }
                 event.preventDefault();
-                openUrl(href);
+                // Own site / app / preview — the right panel at once; the
+                // console and the rest of the web — a new tab (system browser
+                // on desktop). Rule of 07.10 (flows v2, section 1).
+                if (linkTarget === "own") openUrl(href);
+                else openUntrustedLinkExternally(href);
               }}
             />
           );

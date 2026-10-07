@@ -19,7 +19,7 @@ import {
   standardAnswers,
   transcriptItems,
 } from "./unoAiModel";
-import { meterLine } from "./UnoAiView";
+import { consoleManageLink, meterLine } from "./UnoAiView";
 
 const call = (id: string, name: string, args: unknown) => ({
   id,
@@ -322,5 +322,19 @@ describe("hand-off", () => {
         { title: null, url: "https://menu.uno4.me/" },
       ],
     });
+  });
+});
+
+describe("consoleManageLink", () => {
+  it("a chat with a site → that site's page in the console", () => {
+    expect(consoleManageLink({ slug: "sun-salute-yoga" }, true)).toEqual({
+      href: "https://console.uno.place/sites/sun-salute-yoga",
+      label: "Manage site in console",
+    });
+  });
+  it("a bot chat → console Home (the bot's card); otherwise Uno AI", () => {
+    expect(consoleManageLink(null, true).href).toBe("https://console.uno.place/");
+    expect(consoleManageLink(null, false).href).toBe("https://console.uno.place/ai-usage");
+    expect(consoleManageLink({ slug: "" }, false).href).toBe("https://console.uno.place/ai-usage");
   });
 });

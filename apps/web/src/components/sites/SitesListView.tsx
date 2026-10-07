@@ -22,6 +22,7 @@ import {
   CopyIcon,
   ExternalLinkIcon,
   GlobeIcon,
+  InboxIcon,
   LayoutGridIcon,
   MessageSquareIcon,
   SparklesIcon,
@@ -373,6 +374,17 @@ function SiteItem({
         ) : null}
       </div>
       <SiteStatusPill site={row} />
+      {/* C5: where the site's form entries are — the console's Forms tab, a new tab. */}
+      <Button
+        size="xs"
+        variant="ghost"
+        data-testid="site-entries"
+        title="Form entries from this site, in the console"
+        onClick={() => openInNewTab(consoleLinks.siteEntries(row.slug))}
+      >
+        <InboxIcon />
+        <span className="max-sm:hidden">Entries</span>
+      </Button>
       <Button size="xs" variant="ghost" onClick={onChange} title="Change it with Uno">
         <SparklesIcon />
         <span className="max-sm:hidden">Change with Uno</span>

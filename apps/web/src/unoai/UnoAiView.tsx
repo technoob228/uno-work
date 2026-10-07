@@ -17,6 +17,7 @@ import {
   CheckIcon,
   ExternalLinkIcon,
   GlobeIcon,
+  InboxIcon,
   KeyRoundIcon,
   ListChecksIcon,
   LoaderIcon,
@@ -31,7 +32,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { CONSOLE_URL, checkoutHref } from "../account/accountOverview";
+import { CONSOLE_URL, checkoutHref, consoleLinks } from "../account/accountOverview";
 import { formatAiMinutes } from "../account/aiHours";
 import { isElectron } from "../env";
 import { isWebLite } from "../lite/flag";
@@ -290,6 +291,7 @@ function UnoAiChat({
             busy={state.running}
             onSend={() => void submit(draft)}
             placeholder={question ? "Or type your own answer…" : "Message Uno…"}
+            manage={consoleManageLink(site, botKey !== null)}
           />
         )}
       </div>
@@ -298,6 +300,7 @@ function UnoAiChat({
         <SitePreview
           url={site.url}
           title={site.title ?? site.slug}
+          slug={site.slug}
           reloadKey={previewKey}
           overlay={!wide}
           onClose={() => setPreviewOpen(false)}
@@ -403,6 +406,7 @@ function Composer({
   onSend,
   placeholder,
   big = false,
+  manage,
 }: {
   draft: string;
   setDraft: (v: string) => void;
@@ -410,6 +414,8 @@ function Composer({
   onSend: () => void;
   placeholder: string;
   big?: boolean;
+  /** Where "Manage in console" leads from this chat (default: Uno AI). */
+  manage?: ConsoleManageLink;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -454,10 +460,30 @@ function Composer({
             {busy ? <LoaderIcon className="animate-spin" /> : <ArrowUpIcon />}
           </Button>
         </form>
-        <MeterChip />
+        <MeterChip manage={manage} />
       </div>
     </div>
   );
+}
+
+export interface ConsoleManageLink {
+  readonly href: string;
+  readonly label: string;
+}
+
+/**
+ * "Manage in console" from a chat goes where this chat's things live
+ * (flows v2 C6, [entry-landing-site/22] [onboard-bot/16]): the site's page
+ * when the chat made a site, Home (the bot's card) for a bot, else Uno AI.
+ * Always a new tab (the console and Work open each other in new tabs).
+ */
+export function consoleManageLink(
+  site: { readonly slug: string } | null,
+  hasBot: boolean,
+): ConsoleManageLink {
+  if (site?.slug) return { href: consoleLinks.site(site.slug), label: "Manage site in console" };
+  if (hasBot) return { href: `${CONSOLE_URL}/`, label: "Manage in console" };
+  return { href: AI_USAGE_URL, label: "Manage in console" };
 }
 
 /** "Free Uno AI · 52 min left" → Manage in console. Spending itself lives in the console. */
@@ -477,7 +503,7 @@ export function meterLine(m: AiMeter | undefined): string | null {
   return premium ? premium.slice(3) : null;
 }
 
-function MeterChip() {
+function MeterChip({ manage }: { manage?: ConsoleManageLink | undefined }) {
   const meter = useQuery({
     queryKey: unoAiKeys.meter,
     queryFn: fetchAiMeter,
@@ -485,19 +511,24 @@ function MeterChip() {
     retry: false,
   });
   const line = meterLine(meter.data);
-  if (!line) return null;
+  // In a chat the way to its things stays even without a meter line.
+  if (!line && !manage) return null;
   return (
     <div className="mt-1.5 flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
-      <span data-testid="uno-ai-meter">{line}</span>
-      <span aria-hidden>·</span>
+      {line ? (
+        <>
+          <span data-testid="uno-ai-meter">{line}</span>
+          <span aria-hidden>·</span>
+        </>
+      ) : null}
       <a
-        href={AI_USAGE_URL}
+        href={manage?.href ?? AI_USAGE_URL}
         target="_blank"
         rel="noreferrer"
         className="underline-offset-2 hover:text-foreground hover:underline"
         data-testid="uno-ai-manage"
       >
-        Manage in console
+        {manage?.label ?? "Manage in console"}
       </a>
     </div>
   );
@@ -596,6 +627,20 @@ function ChatItem({
               {item.url.replace(/^https:\/\//, "").replace(/\/$/, "")}
             </a>
           </div>
+          {item.slug ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              data-testid="uno-ai-site-entries"
+              title="Form entries from this site, in the console"
+              render={
+                <a href={consoleLinks.siteEntries(item.slug)} target="_blank" rel="noreferrer" />
+              }
+            >
+              <InboxIcon />
+              Entries
+            </Button>
+          ) : null}
           <Button size="xs" variant="outline" onClick={onView}>
             View
           </Button>
@@ -1021,6 +1066,7 @@ function SitePreview({
   overlay,
   onClose,
   onReload,
+  slug,
 }: {
   url: string;
   title: string;
@@ -1028,6 +1074,8 @@ function SitePreview({
   overlay: boolean;
   onClose: () => void;
   onReload: () => void;
+  /** The site's slug: "Entries" opens its form entries in the console. */
+  slug: string;
 }) {
   return (
     <aside
@@ -1040,6 +1088,18 @@ function SitePreview({
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <GlobeIcon className="size-4 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{title}</span>
+        {slug ? (
+          <Button
+            size="xs"
+            variant="ghost"
+            data-testid="uno-ai-preview-entries"
+            title="Form entries from this site, in the console"
+            render={<a href={consoleLinks.siteEntries(slug)} target="_blank" rel="noreferrer" />}
+          >
+            <InboxIcon />
+            Entries
+          </Button>
+        ) : null}
         <Button size="icon-xs" variant="ghost" onClick={onReload} aria-label="Reload">
           <RotateCwIcon />
         </Button>

@@ -4,17 +4,25 @@ import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
-const { openInPreferredEditorMock, openUrlMock, readLocalApiMock, openFileMock } = vi.hoisted(
-  () => ({
+const {
+  openInPreferredEditorMock,
+  openUrlMock,
+  readLocalApiMock,
+  openFileMock,
+  openExternalMock,
+} = vi.hoisted(() => {
+  const openExternalMock = vi.fn(async () => undefined);
+  return {
     openInPreferredEditorMock: vi.fn(async () => "vscode"),
     openUrlMock: vi.fn(),
     openFileMock: vi.fn(),
+    openExternalMock,
     readLocalApiMock: vi.fn(() => ({
       server: { getConfig: vi.fn(async () => ({ availableEditors: ["vscode"] })) },
-      shell: { openInEditor: vi.fn(async () => undefined) },
+      shell: { openInEditor: vi.fn(async () => undefined), openExternal: openExternalMock },
     })),
-  }),
-);
+  };
+});
 
 vi.mock("../editorPreferences", () => ({
   openInPreferredEditor: openInPreferredEditorMock,
@@ -44,6 +52,7 @@ describe("ChatMarkdown", () => {
     openInPreferredEditorMock.mockClear();
     openUrlMock.mockClear();
     openFileMock.mockClear();
+    openExternalMock.mockClear();
     readLocalApiMock.mockClear();
     localStorage.clear();
     document.body.innerHTML = "";
@@ -158,18 +167,39 @@ describe("ChatMarkdown", () => {
     }
   });
 
-  it("opens normal web links in the preview browser on left click", async () => {
+  it("opens the person's own site in the right panel on left click", async () => {
     const screen = await render(
-      <ChatMarkdown text="[OpenAI](https://openai.com/docs)" cwd="/repo/project" />,
+      <ChatMarkdown text="[My site](https://sun-salute-yoga.uno4.me/)" cwd="/repo/project" />,
     );
 
     try {
-      const link = page.getByRole("link", { name: "OpenAI" });
-      await link.click();
-
+      await page.getByRole("link", { name: "My site" }).click();
       await vi.waitFor(() => {
-        expect(openUrlMock).toHaveBeenCalledWith("https://openai.com/docs");
+        expect(openUrlMock).toHaveBeenCalledWith("https://sun-salute-yoga.uno4.me/");
       });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("opens the console and other web links in a new tab, not the panel", async () => {
+    const screen = await render(
+      <ChatMarkdown
+        text="[OpenAI](https://openai.com/docs) and [entries](https://console.uno.place/sites/yoga?tab=forms)"
+        cwd="/repo/project"
+      />,
+    );
+
+    try {
+      await page.getByRole("link", { name: "OpenAI" }).click();
+      await page.getByRole("link", { name: "entries" }).click();
+      await vi.waitFor(() => {
+        expect(openExternalMock).toHaveBeenCalledWith("https://openai.com/docs");
+        expect(openExternalMock).toHaveBeenCalledWith(
+          "https://console.uno.place/sites/yoga?tab=forms",
+        );
+      });
+      expect(openUrlMock).not.toHaveBeenCalled();
     } finally {
       await screen.unmount();
     }

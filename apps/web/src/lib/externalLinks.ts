@@ -27,3 +27,36 @@ export function openUntrustedLinkExternally(href: string | null | undefined): bo
   }
   return true;
 }
+
+/**
+ * Where a link from a chat opens (flows v2, Misha's rule 07.10):
+ * - `console` — the Uno console: always a new tab (the console and Uno Work
+ *   open each other in new tabs; desktop: the system browser);
+ * - `own` — the person's own things: a published site (`*.uno4.me`), an app
+ *   or preview of their Work computer (`*.uno4.work`), a local dev server —
+ *   the right panel, at once;
+ * - `external` — everything else: a new tab (desktop: the system browser).
+ * null — not an http(s) link.
+ */
+export type ChatLinkTarget = "console" | "own" | "external";
+
+const CONSOLE_HOSTS: ReadonlySet<string> = new Set(["console.uno.place", "console.uno4.dev"]);
+const LOCAL_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
+
+export function chatLinkTarget(href: string | null | undefined): ChatLinkTarget | null {
+  const url = toExternalHttpUrl(href);
+  if (!url) return null;
+  const host = new URL(url).hostname.toLowerCase();
+  if (CONSOLE_HOSTS.has(host)) return "console";
+  if (
+    host === "uno4.me" ||
+    host.endsWith(".uno4.me") ||
+    host.endsWith(".uno4.work") ||
+    LOCAL_HOSTS.has(host) ||
+    host.endsWith(".localhost")
+  ) {
+    return "own";
+  }
+  return "external";
+}
+

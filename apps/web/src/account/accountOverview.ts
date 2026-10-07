@@ -943,6 +943,10 @@ export const consoleLinks = {
   plans: `${CONSOLE_URL}/billing`,
   plan: (slug: string) => checkoutHref(slug),
   sites: `${CONSOLE_URL}/sites`,
+  /** One site's page in the console (password, domain, data, forms). */
+  site: (slug: string) => `${CONSOLE_URL}/sites/${encodeURIComponent(slug)}`,
+  /** The site's form entries ("Заявки"): the Forms tab of its console page. */
+  siteEntries: (slug: string) => `${CONSOLE_URL}/sites/${encodeURIComponent(slug)}?tab=forms`,
   apiKeys: `${CONSOLE_URL}/settings`,
   computer: (id: number) => `${CONSOLE_URL}/boxes/${id}`,
 };
