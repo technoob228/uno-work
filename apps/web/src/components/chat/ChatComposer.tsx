@@ -68,6 +68,7 @@ import {
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { isUnoPremiumModelSelected, PremiumCreditNotice } from "./PremiumCreditNotice";
+import { SmartPausedNotice } from "./SmartPausedNotice";
 import { AssistantModelPicker } from "./AssistantEngine";
 import { assistantEngineSendBlock } from "../../assistant/assistantEngine.logic";
 import { useAssistantLlm } from "../../assistant/useAssistantLlm";
@@ -2885,6 +2886,13 @@ export const ChatComposer = memo(
             <PremiumCreditNotice
               environmentId={environmentId}
               premiumSelected={unoPremiumSelected}
+            />
+            <SmartPausedNotice
+              environmentId={environmentId}
+              unoSelected={
+                (selectedProvider === "uno" || selectedProvider === "hermes") &&
+                personalAiId === null
+              }
             />
             {personalAiId !== null ? (
               <PersonalAiPanel

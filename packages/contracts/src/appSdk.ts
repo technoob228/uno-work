@@ -359,6 +359,16 @@ export const UnoAiStatus = Schema.Struct({
   fastUnlimited: Schema.optional(Schema.Boolean),
   /** The hours are gone and Fast runs at standard speed (`fast_standard_speed`). */
   fastStandardSpeed: Schema.optional(Schema.Boolean),
+  /**
+   * The hours are gone and Smart is paused (`smart_paused`, fishcode
+   * AI_SMART_STOP): Smart requests are answered by Fast, nothing is charged
+   * per use; the way on is the AI time pack. Absent on older gateways.
+   */
+  smartPaused: Schema.optional(Schema.Boolean),
+  /** The AI time pack on offer (`ai_pack`): "+15 h for $10". */
+  aiPack: Schema.optional(
+    Schema.NullOr(Schema.Struct({ hours: Schema.Number, priceUsd: Schema.Number })),
+  ),
   checkedAt: Schema.NullOr(Schema.String),
 });
 export type UnoAiStatus = typeof UnoAiStatus.Type;

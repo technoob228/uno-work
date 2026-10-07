@@ -17,6 +17,12 @@ const CONSOLE_BILLING_HOSTS = [
 ];
 /** Where the one Uno balance is topped up (AI past the hours is paid from it). */
 export const UNO_TOP_UP_URL = `${UNO_BILLING_URL}?tab=payments`;
+/**
+ * "Add AI time" goes straight to the AI time pack checkout (flows v2: the pack
+ * is the way to more AI time; the console falls back to the plans when the
+ * pack is not on sale for the account).
+ */
+export const UNO_ADD_AI_TIME_URL = `${UNO_BILLING_URL}?ai_pack=1`;
 
 /** Mirrors apps/server provider/unoBilling.ts UNO_AI_CREDIT_EMPTY_MESSAGE. */
 export const UNO_LLM_CREDITS_EMPTY_MESSAGE = `Your balance is empty. Top up at ${UNO_TOP_UP_URL}, add Uno AI time to your plan, or switch to your own AI subscription (Claude or ChatGPT).`;
@@ -125,13 +131,13 @@ export const UnoBillingTopUpBanner = memo(function UnoBillingTopUpBanner({
     const api = readLocalApi();
     if (api) {
       try {
-        await api.shell.openExternal(UNO_BILLING_URL);
+        await api.shell.openExternal(UNO_ADD_AI_TIME_URL);
         return;
       } catch {
         // Fall through to a plain browser tab.
       }
     }
-    window.open(UNO_BILLING_URL, "_blank", "noopener,noreferrer");
+    window.open(UNO_ADD_AI_TIME_URL, "_blank", "noopener,noreferrer");
   };
 
   const openOwnSubscriptionSettings = () => {

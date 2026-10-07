@@ -86,12 +86,14 @@ export function useAiHours(environmentId: EnvironmentId | null): AiHoursSummary 
     usedTodayMinutes: status?.usedTodayMinutes ?? null,
     fastUnlimited: status?.fastUnlimited ?? null,
     fastStandardSpeed: status?.fastStandardSpeed ?? null,
+    smartPaused: status?.smartPaused ?? null,
   });
   if (summary || !status) return summary;
   const fast = status.fastUnlimited
     ? {
         fastUnlimited: true,
         fastStandardSpeed: status.fastStandardSpeed === true || (status.hoursLeftMinutes ?? 1) <= 0,
+        ...(status.smartPaused === true ? { smartPaused: true } : {}),
       }
     : {};
   // No account reachable (desktop without sign-in): the machine's own reading.

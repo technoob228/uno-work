@@ -23,6 +23,13 @@ export const AI_FAST_UNLIMITED_LINE = "Uno AI: Fast is unlimited. Smart uses you
 /** The same plan once the Smart hours are gone. */
 export const AI_SMART_USED_UP_LINE = "Your AI time is used up. Fast keeps going at standard speed.";
 
+/**
+ * The same plan once the hours are gone and Smart is paused (fishcode
+ * AI_SMART_STOP, Misha 07.10): Smart waits for the AI time pack, Fast goes on.
+ * The console and the gateway's notice say the same words.
+ */
+export const AI_SMART_PAUSED_LINE = "Smart is paused until you add AI time. Fast keeps working.";
+
 /** 5220 → "87 h", 47 → "47 min", 90 → "1 h 30 min". */
 export function formatAiMinutes(minutes: number): string {
   const whole = Math.max(0, Math.floor(minutes));
@@ -50,6 +57,8 @@ export interface AiHoursSummary {
   readonly fastUnlimited?: boolean;
   /** The hours are gone and Fast runs at standard speed. */
   readonly fastStandardSpeed?: boolean;
+  /** The hours are gone and Smart is paused until AI time is added (`smart_paused`). */
+  readonly smartPaused?: boolean;
 }
 
 /**
@@ -65,6 +74,8 @@ export function aiHoursSummary(input: {
   /** `/v1/ai/status` `fast_unlimited` / `fast_standard_speed`, when read. */
   readonly fastUnlimited?: boolean | null | undefined;
   readonly fastStandardSpeed?: boolean | null | undefined;
+  /** `/v1/ai/status` `smart_paused`, when read. */
+  readonly smartPaused?: boolean | null | undefined;
 }): AiHoursSummary | null {
   const hours = input.subscription?.aiHours ?? null;
   const premiumUsd = Math.max(0, input.balance?.aiBalanceUsd ?? 0);
@@ -74,10 +85,12 @@ export function aiHoursSummary(input: {
     input.fastUnlimited === true || input.subscription?.limits?.aiFastUnlimited === true;
   const fast = (leftMinutes: number | null, unlimited: boolean) => {
     if (unlimited || !fastUnlimited) return {};
+    const standard =
+      input.fastStandardSpeed === true || (leftMinutes !== null && leftMinutes <= 0);
     return {
       fastUnlimited: true,
-      fastStandardSpeed:
-        input.fastStandardSpeed === true || (leftMinutes !== null && leftMinutes <= 0),
+      fastStandardSpeed: standard,
+      ...(standard && input.smartPaused === true ? { smartPaused: true } : {}),
     };
   };
   if (hours) {
@@ -113,6 +126,7 @@ export function aiHoursSummary(input: {
  */
 export function aiFastLine(summary: AiHoursSummary): string | null {
   if (!summary.fastUnlimited) return null;
+  if (summary.fastStandardSpeed && summary.smartPaused) return AI_SMART_PAUSED_LINE;
   return summary.fastStandardSpeed ? AI_SMART_USED_UP_LINE : AI_FAST_UNLIMITED_LINE;
 }
 

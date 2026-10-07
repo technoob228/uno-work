@@ -88,7 +88,23 @@ export function parseGatewayAiStatus(json: unknown): StatusFields | null {
     premium: parseGatewayPremiumStatus(r["premium"]),
     ...(r["fast_unlimited"] === true ? { fastUnlimited: true } : {}),
     ...(r["fast_standard_speed"] === true ? { fastStandardSpeed: true } : {}),
+    ...(r["smart_paused"] === true
+      ? { smartPaused: true, aiPack: parseGatewayAiPack(r["ai_pack"]) }
+      : {}),
   };
+}
+
+/**
+ * `ai_pack` of the gateway's status → "+N h for $X"; null without a usable
+ * size. The link is not taken from the gateway: the interface opens its own
+ * console page.
+ */
+export function parseGatewayAiPack(value: unknown): { hours: number; priceUsd: number } | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const r = value as Record<string, unknown>;
+  const hours = num(r["pack_hours"]);
+  const priceUsd = num(r["pack_price_usd"]);
+  return hours !== null && hours > 0 && priceUsd !== null && priceUsd > 0 ? { hours, priceUsd } : null;
 }
 
 export function openAiStatusReader(deps: {

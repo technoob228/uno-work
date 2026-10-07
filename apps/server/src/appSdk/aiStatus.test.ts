@@ -50,6 +50,24 @@ describe("parseGatewayAiStatus", () => {
     expect("fastUnlimited" in old).toBe(false);
     expect("fastStandardSpeed" in old).toBe(false);
   });
+
+  it("Smart paused after the hours (smart stop) with the pack's size; absent on older gateways", () => {
+    expect(
+      parseGatewayAiStatus({
+        hours_left_minutes: 0,
+        fast_unlimited: true,
+        fast_standard_speed: true,
+        smart_paused: true,
+        ai_pack: { pack_hours: 15, pack_price_usd: 10, pack_url: "https://evil.example/x" },
+      }),
+    ).toMatchObject({ smartPaused: true, aiPack: { hours: 15, priceUsd: 10 } });
+    expect(
+      parseGatewayAiStatus({ hours_left_minutes: 0, smart_paused: true, ai_pack: { pack_url: "x" } }),
+    ).toMatchObject({ smartPaused: true, aiPack: null });
+    const old = parseGatewayAiStatus({ hours_left_minutes: 0, fast_standard_speed: true })!;
+    expect("smartPaused" in old).toBe(false);
+    expect("aiPack" in old).toBe(false);
+  });
 });
 
 describe("premium credit in the status", () => {

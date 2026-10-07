@@ -61,6 +61,8 @@ export type AiBusyNotice =
  */
 export function aiBusyNotice(status: UnoAiStatus | null): AiBusyNotice | null {
   if (!status) return null;
+  // Smart paused (smart stop): the strip with "Add AI time" says it instead.
+  if (status.smartPaused === true) return null;
   if (status.fastStandardSpeed === true) return { kind: "fast-standard" };
   if (!status.throttled) return null;
   if (status.unlimited && status.fullSpeedHoursLeft !== null && status.fullSpeedHoursLeft <= 0) {

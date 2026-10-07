@@ -10,6 +10,7 @@ import {
 } from "./ModelPickerContent";
 import { unoGatewayModelId } from "./unoModelIds";
 import { UNO_LLM_CREDITS_EMPTY_MESSAGE, unoBillingBannerText } from "./UnoBillingTopUpBanner";
+import { addAiTimeLabel, smartPausedNotice, UNO_AI_PACK_URL } from "./SmartPausedNotice";
 import {
   isUnoPremiumModelSelected,
   premiumCreditHeading,
@@ -279,5 +280,45 @@ describe("top-up banner", () => {
       expect(text).toBe(UNO_LLM_CREDITS_EMPTY_MESSAGE);
       expect(text).not.toMatch(/HTTP 402|Insufficient LLM credits/);
     }
+  });
+});
+
+describe("Smart paused after the AI time (smart stop, Misha 07.10)", () => {
+  const paused = status({
+    hoursLeftMinutes: 0,
+    fastUnlimited: true,
+    fastStandardSpeed: true,
+    smartPaused: true,
+    aiPack: { hours: 15, priceUsd: 10 },
+  });
+
+  it("one strip with the pack button that opens the console checkout", () => {
+    expect(smartPausedNotice(paused, true)).toEqual({
+      text: "Smart is paused until you add AI time. Fast keeps working.",
+      actionLabel: "Add AI time — +15 h for $10",
+      actionUrl: "https://console.uno.place/billing?ai_pack=1",
+    });
+    expect(UNO_AI_PACK_URL).toBe("https://console.uno.place/billing?ai_pack=1");
+  });
+
+  it("the busy line steps aside — the strip says it", () => {
+    expect(aiBusyNotice(paused)).toBeNull();
+  });
+
+  it("nothing on other chats, with hours left or on an older gateway", () => {
+    expect(smartPausedNotice(paused, false)).toBeNull();
+    expect(smartPausedNotice(status(), true)).toBeNull();
+    expect(
+      smartPausedNotice(status({ hoursLeftMinutes: 0, fastStandardSpeed: true }), true),
+    ).toBeNull();
+    expect(aiBusyNotice(status({ hoursLeftMinutes: 0, fastStandardSpeed: true }))?.kind).toBe(
+      "fast-standard",
+    );
+  });
+
+  it("the button says what it does even without the pack's size", () => {
+    expect(addAiTimeLabel(null)).toBe("Add AI time");
+    expect(addAiTimeLabel(undefined)).toBe("Add AI time");
+    expect(addAiTimeLabel({ hours: 15, priceUsd: 12.5 })).toBe("Add AI time — +15 h for $12.50");
   });
 });
