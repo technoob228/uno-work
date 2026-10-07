@@ -126,6 +126,7 @@ import {
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import {
+  selectBootstrapCompleteForActiveEnvironment,
   selectEnvironmentState,
   selectProjectsAcrossEnvironments,
   selectProjectsForEnvironment,
@@ -137,6 +138,7 @@ import { selectThreadTerminalState, useTerminalStateStore } from "../terminalSta
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
 import { formatRelativeTimeLabel } from "../timestampFormat";
+import { Skeleton } from "./ui/skeleton";
 import type { Project, SidebarThreadSummary } from "../types";
 import { useUiStateStore } from "../uiStateStore";
 import { formatWorktreePathForDisplay } from "../worktreeCleanup";
@@ -1425,6 +1427,24 @@ function useErrorToast() {
   }, []);
 }
 
+/** How long the sidebar waits for the computer's first snapshot before "No chats yet". */
+const CHATS_LOADING_MAX_MS = 8_000;
+
+function SidebarChatsLoading() {
+  return (
+    <div
+      className="flex flex-col gap-2 px-2.5 py-3"
+      aria-busy="true"
+      aria-label="Loading chats"
+      data-testid="sidebar-chats-loading"
+    >
+      <Skeleton className="h-4 w-4/5 rounded" />
+      <Skeleton className="h-4 w-3/5 rounded" />
+      <Skeleton className="h-4 w-2/3 rounded" />
+    </div>
+  );
+}
+
 export default function Sidebar() {
   const sidebarMode = useNavStore((state) => state.sidebarMode);
   // Rail layout: this sidebar is the panel next to the rail and shows one
@@ -1453,6 +1473,18 @@ export default function Sidebar() {
 
   // ── Data: projects and chats in the machine scope ────────────────────
   const activeEnvironmentId = useStore((store) => store.activeEnvironmentId);
+  // E1 (flows v2, [life-work-full/2]): until the computer's first snapshot
+  // arrives the list is unknown, not empty — grey rows instead of a flash of
+  // "No chats yet". Capped, so a computer that never answers still ends on
+  // the empty state with its "New chat" button.
+  const activeBootstrapComplete = useStore(selectBootstrapCompleteForActiveEnvironment);
+  const [chatsLoadGraceOver, setChatsLoadGraceOver] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setChatsLoadGraceOver(true), CHATS_LOADING_MAX_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const chatsLoading =
+    activeEnvironmentId !== null && !activeBootstrapComplete && !chatsLoadGraceOver;
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const allMachinesSidebar = useFeatureFlag("allMachinesSidebar");
   const environmentScopeSetting = useSettings((s) => s.sidebarEnvironmentScope);
@@ -3017,7 +3049,9 @@ export default function Sidebar() {
         </TooltipProvider>
         <SidebarUnoAiChats />
         {totalThreadCount === 0 && pinnedThreads.length === 0 ? (
-          projects.length === 0 ? (
+          chatsLoading ? (
+            <SidebarChatsLoading />
+          ) : projects.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
               <span>No chats yet</span>
               <Button size="xs" variant="outline" onClick={() => handleNewThreadClick()}>
@@ -3278,6 +3312,7 @@ export default function Sidebar() {
               )}
               {!isSearchingThreads ? <SidebarUnoAiChats /> : null}
               {!isSearchingThreads &&
+              !chatsLoading &&
               totalThreadCount === 0 &&
               pinnedThreads.length === 0 &&
               !scopedProjectGroup &&
@@ -3303,6 +3338,13 @@ export default function Sidebar() {
                 />
               ) : null}
               {!isSearchingThreads &&
+              totalThreadCount === 0 &&
+              pinnedThreads.length === 0 &&
+              chatsLoading ? (
+                <SidebarChatsLoading />
+              ) : null}
+              {!isSearchingThreads &&
+              !chatsLoading &&
               totalThreadCount === 0 &&
               pinnedThreads.length === 0 &&
               (projects.length === 0 || scopedProjectGroup || isHelperScope) ? (
