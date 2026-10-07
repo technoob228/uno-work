@@ -68,6 +68,19 @@ export function unoBillingBannerText(sessionError: string | null | undefined): s
     : UNO_LLM_CREDITS_EMPTY_MESSAGE;
 }
 
+/**
+ * The stop is about used-up AI time (not an empty balance): the AI time pack
+ * is the way on (Misha 07.10: more AI time = the pack), so "Add AI time" leads
+ * and "Top up" steps back.
+ */
+export function unoBillingWantsPack(sessionError: string | null | undefined): boolean {
+  const text = sessionError?.trim() ?? "";
+  return (
+    text.startsWith("Your AI hours are used up.") ||
+    /\bAI time is used up\b|\bai_pack=1\b/i.test(text)
+  );
+}
+
 export const UnoBillingTopUpBanner = memo(function UnoBillingTopUpBanner({
   active,
   sessionUpdatedAt,
@@ -92,6 +105,7 @@ export const UnoBillingTopUpBanner = memo(function UnoBillingTopUpBanner({
   if (!active || bannerKey === null || dismissedKey === bannerKey) {
     return null;
   }
+  const wantsPack = unoBillingWantsPack(sessionError);
 
   const topUp = async () => {
     const api = readLocalApi();
@@ -154,12 +168,25 @@ export const UnoBillingTopUpBanner = memo(function UnoBillingTopUpBanner({
         <CreditCardIcon />
         <AlertDescription>{unoBillingBannerText(sessionError)}</AlertDescription>
         <AlertAction className="flex-wrap">
-          <Button size="sm" type="button" onClick={() => void topUp()} disabled={isLoading}>
+          {wantsPack ? (
+            <Button size="sm" type="button" onClick={() => void addAiHours()}>
+              Add AI time
+            </Button>
+          ) : null}
+          <Button
+            size="sm"
+            type="button"
+            variant={wantsPack ? "outline" : "default"}
+            onClick={() => void topUp()}
+            disabled={isLoading}
+          >
             {isLoading ? "Opening..." : "Top up"}
           </Button>
-          <Button size="sm" type="button" variant="outline" onClick={() => void addAiHours()}>
-            Add AI time
-          </Button>
+          {wantsPack ? null : (
+            <Button size="sm" type="button" variant="outline" onClick={() => void addAiHours()}>
+              Add AI time
+            </Button>
+          )}
           {environmentId ? (
             <Button size="sm" type="button" variant="outline" onClick={openOwnSubscriptionSettings}>
               Use my own subscription
