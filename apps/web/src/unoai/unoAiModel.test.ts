@@ -19,7 +19,7 @@ import {
   standardAnswers,
   transcriptItems,
 } from "./unoAiModel";
-import { consoleManageLink, meterLine } from "./UnoAiView";
+import { consoleManageLink, isSameSite, meterLine } from "./UnoAiView";
 
 const call = (id: string, name: string, args: unknown) => ({
   id,
@@ -338,3 +338,15 @@ describe("consoleManageLink", () => {
     expect(consoleManageLink({ slug: "" }, false).href).toBe("https://console.uno.place/ai-usage");
   });
 });
+
+describe("isSameSite", () => {
+  it("a link to the chat's own site (any path) opens on the right", () => {
+    const site = "https://sun-salute-yoga.uno4.me/";
+    expect(isSameSite("https://sun-salute-yoga.uno4.me/", site)).toBe(true);
+    expect(isSameSite("https://SUN-SALUTE-YOGA.uno4.me/#schedule", site)).toBe(true);
+    expect(isSameSite("https://other.uno4.me/", site)).toBe(false);
+    expect(isSameSite("https://console.uno.place/sites/sun-salute-yoga", site)).toBe(false);
+    expect(isSameSite(undefined, site)).toBe(false);
+  });
+});
+

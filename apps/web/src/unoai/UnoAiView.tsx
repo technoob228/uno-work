@@ -254,6 +254,12 @@ function UnoAiChat({
                     setPreviewOpen(true);
                     setPreviewKey((k) => k + 1);
                   }}
+                  onOpenSite={(href) => {
+                    if (!site || !isSameSite(href, site.url)) return false;
+                    setPreviewOpen(true);
+                    setPreviewKey((k) => k + 1);
+                    return true;
+                  }}
                   continueHere={continueHere}
                 />
               ))}
@@ -536,14 +542,44 @@ function MeterChip({ manage }: { manage?: ConsoleManageLink | undefined }) {
 
 // ---- the transcript ----
 
-function Markdown({ text }: { text: string }) {
+/** Same host, any path: a link to this chat's site. */
+export function isSameSite(href: string | undefined, siteUrl: string | undefined): boolean {
+  if (!href || !siteUrl) return false;
+  try {
+    return new URL(href).host.toLowerCase() === new URL(siteUrl).host.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+function Markdown({ text, onOpenSite }: { text: string; onOpenSite?: (href: string) => boolean }) {
   return (
     <div className="prose-sm max-w-none text-sm leading-relaxed [&_a]:text-primary [&_a]:underline [&_li]:ml-4 [&_ol]:list-decimal [&_p+p]:mt-2 [&_ul]:list-disc">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
+          // The chat's own site opens on the right at once (rule 07.10);
+          // the console and the rest of the web — a new tab.
           a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noreferrer">
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => {
+                if (
+                  !href ||
+                  !onOpenSite ||
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.shiftKey ||
+                  event.altKey ||
+                  event.button !== 0
+                ) {
+                  return;
+                }
+                if (onOpenSite(href)) event.preventDefault();
+              }}
+            >
               {children}
             </a>
           ),
@@ -560,12 +596,15 @@ function ChatItem({
   interactiveBot,
   chatId,
   onView,
+  onOpenSite,
   continueHere,
 }: {
   item: AiItem;
   interactiveBot: boolean;
   chatId: string;
   onView: () => void;
+  /** A link in the text points at this chat's site: open it on the right; false = not ours. */
+  onOpenSite: (href: string) => boolean;
   continueHere: ReactNode;
 }) {
   switch (item.kind) {
@@ -578,7 +617,7 @@ function ChatItem({
         </div>
       );
     case "text":
-      return <Markdown text={item.text} />;
+      return <Markdown text={item.text} onOpenSite={onOpenSite} />;
     case "ask":
       return (
         <div className="text-sm font-medium" data-testid="uno-ai-question">
