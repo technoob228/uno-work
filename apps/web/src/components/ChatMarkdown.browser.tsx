@@ -4,25 +4,20 @@ import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
-const {
-  openInPreferredEditorMock,
-  openUrlMock,
-  readLocalApiMock,
-  openFileMock,
-  openExternalMock,
-} = vi.hoisted(() => {
-  const openExternalMock = vi.fn(async () => undefined);
-  return {
-    openInPreferredEditorMock: vi.fn(async () => "vscode"),
-    openUrlMock: vi.fn(),
-    openFileMock: vi.fn(),
-    openExternalMock,
-    readLocalApiMock: vi.fn(() => ({
-      server: { getConfig: vi.fn(async () => ({ availableEditors: ["vscode"] })) },
-      shell: { openInEditor: vi.fn(async () => undefined), openExternal: openExternalMock },
-    })),
-  };
-});
+const { openInPreferredEditorMock, openUrlMock, readLocalApiMock, openFileMock, openExternalMock } =
+  vi.hoisted(() => {
+    const openExternalMock = vi.fn(async () => undefined);
+    return {
+      openInPreferredEditorMock: vi.fn(async () => "vscode"),
+      openUrlMock: vi.fn(),
+      openFileMock: vi.fn(),
+      openExternalMock,
+      readLocalApiMock: vi.fn(() => ({
+        server: { getConfig: vi.fn(async () => ({ availableEditors: ["vscode"] })) },
+        shell: { openInEditor: vi.fn(async () => undefined), openExternal: openExternalMock },
+      })),
+    };
+  });
 
 vi.mock("../editorPreferences", () => ({
   openInPreferredEditor: openInPreferredEditorMock,

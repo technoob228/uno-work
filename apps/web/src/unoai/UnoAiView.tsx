@@ -811,9 +811,7 @@ function StopCard({ stop, onResume }: { stop: AiStop; onResume: () => void }) {
           <Button
             size="sm"
             data-testid={pack ? "uno-ai-stop-pack" : undefined}
-            render={
-              <a href={pack ? AI_PACK_URL : AI_USAGE_URL} target="_blank" rel="noreferrer" />
-            }
+            render={<a href={pack ? AI_PACK_URL : AI_USAGE_URL} target="_blank" rel="noreferrer" />}
           >
             {pack ? "Add AI time" : "Get more Uno AI"}
             <ExternalLinkIcon />

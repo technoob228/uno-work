@@ -266,7 +266,11 @@ describe("top-up banner", () => {
         "Your AI hours are used up. New hours arrive on Oct 24, 2026; to keep going now, top up your balance at https://console.uno4.dev/billing?tab=payments or switch to your own AI subscription (Claude or ChatGPT).",
       ),
     ).toBe(true);
-    expect(unoBillingWantsPack("Your AI time is used up. Add AI time: https://console.uno.place/billing?ai_pack=1")).toBe(true);
+    expect(
+      unoBillingWantsPack(
+        "Your AI time is used up. Add AI time: https://console.uno.place/billing?ai_pack=1",
+      ),
+    ).toBe(true);
     expect(unoBillingWantsPack(UNO_LLM_CREDITS_EMPTY_MESSAGE)).toBe(false);
     expect(unoBillingWantsPack(null)).toBe(false);
   });

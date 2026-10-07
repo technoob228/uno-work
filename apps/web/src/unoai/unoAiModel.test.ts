@@ -349,4 +349,3 @@ describe("isSameSite", () => {
     expect(isSameSite(undefined, site)).toBe(false);
   });
 });
-

@@ -59,4 +59,3 @@ export function chatLinkTarget(href: string | null | undefined): ChatLinkTarget 
   }
   return "external";
 }
-
