@@ -36,7 +36,7 @@ import { formatAiMinutes } from "../account/aiHours";
 import { isElectron } from "../env";
 import { isWebLite } from "../lite/flag";
 import { liteLinks, liteStanding } from "../lite/webLite";
-import { computerOfferCopy } from "./computerOffer";
+import { computerOfferCopy, workTrialOpenQuery } from "./computerOffer";
 import { cn } from "../lib/utils";
 import { AssistantQuiz } from "../components/assistants/AssistantQuiz";
 import { quizConsoleNext } from "../components/assistants/assistantQuizApi";
@@ -889,6 +889,8 @@ function OfferFrame({
 function ComputerOffer({ reason, chatId }: { reason: string; chatId: string }) {
   const subscription = useQuery(subscriptionQuery());
   const standing = subscription.isPending ? null : liteStanding(subscription.data ?? null);
+  // Like the console: the trial button only when there is a free place.
+  const trialOpen = useQuery(workTrialOpenQuery()).data === true;
   const [codeOpen, setCodeOpen] = useState(false);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -914,7 +916,7 @@ function ComputerOffer({ reason, chatId }: { reason: string; chatId: string }) {
     }
   };
 
-  const copy = computerOfferCopy(standing);
+  const copy = computerOfferCopy(standing, trialOpen);
 
   return (
     <OfferFrame reason={reason} title={copy.title}>
@@ -945,7 +947,7 @@ function ComputerOffer({ reason, chatId }: { reason: string; chatId: string }) {
                 Start free trial
               </Button>
             </form>
-          ) : standing === "free" || standing === null ? (
+          ) : copy.trial && (standing === "free" || standing === null) ? (
             <Button
               size="sm"
               onClick={() => void redeem("")}
@@ -980,7 +982,7 @@ function ComputerOffer({ reason, chatId }: { reason: string; chatId: string }) {
       <p className="w-full text-xs text-muted-foreground">
         {copy.note ??
           "When it's ready, this conversation continues there — Uno on your computer gets everything from here."}
-        {standing !== "cloud" && !codeOpen ? (
+        {copy.trial && !codeOpen ? (
           <>
             {" "}
             <button
