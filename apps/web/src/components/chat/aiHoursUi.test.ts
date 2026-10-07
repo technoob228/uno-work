@@ -199,6 +199,15 @@ describe("premium credit", () => {
     expect(premiumFallbackNotice(null, true)).toBeNull();
   });
 
+  it("steps aside when Smart is paused: Fast answers premium, the pack strip says so", () => {
+    expect(
+      premiumFallbackNotice(
+        status({ premium: premium({ exhausted: true, leftUsd: 0 }), smartPaused: true }),
+        true,
+      ),
+    ).toBeNull();
+  });
+
   it("puts the credit left into the Premium heading", () => {
     expect(premiumCreditHeading(premium())).toBe("Premium · $23.40 of $30 left");
     expect(premiumCreditHeading(premium({ monthlyUsd: null, limitUsd: null, leftUsd: 5 }))).toBe(

@@ -72,6 +72,8 @@ import { unoAiKeys, useUnoAiChat } from "./useUnoAiChat";
 
 /** Where AI spending is managed (the console, next to Billing). */
 export const AI_USAGE_URL = `${CONSOLE_URL}/ai-usage`;
+/** The AI time pack checkout (the console shows the plans when the pack is not on sale). */
+const AI_PACK_URL = `${CONSOLE_URL}/billing?ai_pack=1`;
 
 const STARTERS: ReadonlyArray<{ label: string; q: string; quiz?: boolean }> = [
   {
@@ -711,6 +713,9 @@ function QuestionAnswers({
 function StopCard({ stop, onResume }: { stop: AiStop; onResume: () => void }) {
   if (stop.code === "verify") return <VerifyCard onVerified={onResume} />;
   const out = stop.code === "free_empty" || stop.code === "hours_empty";
+  // The plan's AI time is used up: straight to the pack checkout (flows v2,
+  // "any payment → the checkout"), not to the Uno AI page to figure it out.
+  const pack = stop.code === "hours_empty";
   return (
     <div
       className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3.5 text-sm"
@@ -719,8 +724,14 @@ function StopCard({ stop, onResume }: { stop: AiStop; onResume: () => void }) {
       <p>{stop.message}</p>
       <div className="mt-2.5 flex flex-wrap gap-2">
         {out ? (
-          <Button size="sm" render={<a href={AI_USAGE_URL} target="_blank" rel="noreferrer" />}>
-            Get more Uno AI
+          <Button
+            size="sm"
+            data-testid={pack ? "uno-ai-stop-pack" : undefined}
+            render={
+              <a href={pack ? AI_PACK_URL : AI_USAGE_URL} target="_blank" rel="noreferrer" />
+            }
+          >
+            {pack ? "Add AI time" : "Get more Uno AI"}
             <ExternalLinkIcon />
           </Button>
         ) : (

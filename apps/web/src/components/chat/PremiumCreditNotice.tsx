@@ -100,11 +100,14 @@ export interface PremiumFallbackNotice {
  * Smart; null otherwise (the usual case).
  */
 export function premiumFallbackNotice(
-  status: Pick<UnoAiStatus, "premium" | "renewsAt"> | null | undefined,
+  status: Pick<UnoAiStatus, "premium" | "renewsAt" | "smartPaused"> | null | undefined,
   premiumSelected: boolean,
 ): PremiumFallbackNotice | null {
   const premium = status?.premium;
   if (!premiumSelected || !premium?.exhausted) return null;
+  // No AI time either and Smart is paused (smart stop): the gateway answers
+  // premium with Fast, and the "Smart is paused… Add AI time" strip says so.
+  if (status?.smartPaused === true) return null;
   const date = formatRenewDate(premium.renewsAt ?? status?.renewsAt);
   const renew = date ? `New credit on ${date}.` : "New credit arrives when your plan renews.";
   return {
