@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.111 — 2026-10-07
+
+- The console sees what is built on a Uno Work computer: the computer reports its apps (name, port, running or not — no commands, paths or env) to the console, where they show up in the computer's Apps tab under "Built on this computer". Sent when the list changes or every 10 minutes; a computer cloned from a memory snapshot sends it at once.
+- My Uno → Plan & billing says "AI time" instead of "hours" ("Smart uses your AI time", "after your AI time runs out").
+
 ## v0.0.110 — 2026-10-06
 
 - Free Telegram bot in the Uno AI chat: when Uno saves the bot (bot_setup), a card with Open @BotFather and a safe field for the token appears right in the chat; a pasted token never goes into the chat; "Live" tile in the light sidebar with the bot's answers and "Keep it on".
