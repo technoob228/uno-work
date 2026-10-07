@@ -8,6 +8,15 @@
 
 ---
 
+## v0.0.112 — 2026-10-07
+
+- Smart paused after the AI time (plans with unlimited Fast, console flag `AI_SMART_STOP`): a strip above the composer of Uno Code / Hermes chats says "Smart is paused until you add AI time. Fast keeps working." with "Add AI time — +15 h for $10" (the pack checkout in the console, new tab); Home and My Uno say the same; the premium line steps aside (Fast answers premium then too).
+- AI time used up: the billing banner and the light chat's stop card lead with "Add AI time" — straight to the pack checkout.
+- Light Uno Work: "Start free — 3 days" only while the console has free trial places; otherwise "Get Plus — $20/mo" and "Free trials are paused right now."
+- Sites: "Entries" at every site (chat card, site panel, Apps & sites, My Uno) opens the site's form entries in the console; "Manage in console" from a chat goes to that site's page (a bot chat → Home), not to Uno AI.
+- Links in chats: your own sites, apps and previews open in the right panel; the console and other web links open in a new tab (the system browser on desktop).
+- Sidebar: grey rows while the computer's chats load, instead of a flash of "No chats yet".
+
 ## v0.0.111 — 2026-10-07
 
 - The console sees what is built on a Uno Work computer: the computer reports its apps (name, port, running or not — no commands, paths or env) to the console, where they show up in the computer's Apps tab under "Built on this computer". Sent when the list changes or every 10 minutes; a computer cloned from a memory snapshot sends it at once.
