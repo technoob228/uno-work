@@ -85,8 +85,7 @@ export function aiHoursSummary(input: {
     input.fastUnlimited === true || input.subscription?.limits?.aiFastUnlimited === true;
   const fast = (leftMinutes: number | null, unlimited: boolean) => {
     if (unlimited || !fastUnlimited) return {};
-    const standard =
-      input.fastStandardSpeed === true || (leftMinutes !== null && leftMinutes <= 0);
+    const standard = input.fastStandardSpeed === true || (leftMinutes !== null && leftMinutes <= 0);
     return {
       fastUnlimited: true,
       fastStandardSpeed: standard,

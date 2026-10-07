@@ -104,7 +104,9 @@ export function parseGatewayAiPack(value: unknown): { hours: number; priceUsd: n
   const r = value as Record<string, unknown>;
   const hours = num(r["pack_hours"]);
   const priceUsd = num(r["pack_price_usd"]);
-  return hours !== null && hours > 0 && priceUsd !== null && priceUsd > 0 ? { hours, priceUsd } : null;
+  return hours !== null && hours > 0 && priceUsd !== null && priceUsd > 0
+    ? { hours, priceUsd }
+    : null;
 }
 
 export function openAiStatusReader(deps: {

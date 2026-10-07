@@ -191,7 +191,11 @@ describe("Fast unlimited, Smart in hours (plans always on)", () => {
     expect(summary.smartPaused).toBe(true);
     expect(aiFastLine(summary)).toBe("Smart is paused until you add AI time. Fast keeps working.");
     // With hours left a stale "paused" reading changes nothing.
-    const live = aiHoursSummary({ subscription: fastPlan(30), balance: balance(), smartPaused: true })!;
+    const live = aiHoursSummary({
+      subscription: fastPlan(30),
+      balance: balance(),
+      smartPaused: true,
+    })!;
     expect(live.smartPaused).toBeUndefined();
     expect(aiFastLine(live)).toBe("Uno AI: Fast is unlimited. Smart uses your AI time.");
   });

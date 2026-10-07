@@ -62,7 +62,11 @@ describe("parseGatewayAiStatus", () => {
       }),
     ).toMatchObject({ smartPaused: true, aiPack: { hours: 15, priceUsd: 10 } });
     expect(
-      parseGatewayAiStatus({ hours_left_minutes: 0, smart_paused: true, ai_pack: { pack_url: "x" } }),
+      parseGatewayAiStatus({
+        hours_left_minutes: 0,
+        smart_paused: true,
+        ai_pack: { pack_url: "x" },
+      }),
     ).toMatchObject({ smartPaused: true, aiPack: null });
     const old = parseGatewayAiStatus({ hours_left_minutes: 0, fast_standard_speed: true })!;
     expect("smartPaused" in old).toBe(false);
