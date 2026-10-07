@@ -140,7 +140,7 @@ describe("Plan & billing on a plan always on", () => {
       .toBeVisible();
     await expect
       .element(screen.getByTestId("my-uno-ai-fast"))
-      .toHaveTextContent("Uno AI: Fast is unlimited. Smart comes in hours.");
+      .toHaveTextContent("Uno AI: Fast is unlimited. Smart uses your AI time.");
     await expect.element(screen.getByText("⚡ 10 boosts a month").first()).toBeVisible();
     // The old usage list (and its hours) is not there.
     expect(screen.container.querySelector('[data-testid="my-uno-usage"]')).toBeNull();

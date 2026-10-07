@@ -162,7 +162,7 @@ describe("Fast unlimited, Smart in hours (plans always on)", () => {
     expect(summary.fastStandardSpeed).toBe(false);
     expect(aiHoursHeadline(summary)).toBe("3 h 25 min");
     expect(aiHoursCaption(summary)).toBe("Smart left · Fast is unlimited");
-    expect(aiFastLine(summary)).toBe("Uno AI: Fast is unlimited. Smart comes in hours.");
+    expect(aiFastLine(summary)).toBe("Uno AI: Fast is unlimited. Smart uses your AI time.");
     expect(aiTimeNote(summary)).toBe(
       "Only the minutes the AI is working for you count. Ten chats in the same minute count as one minute.",
     );
@@ -171,7 +171,7 @@ describe("Fast unlimited, Smart in hours (plans always on)", () => {
   it("the hours gone: Fast keeps going at standard speed", () => {
     const summary = aiHoursSummary({ subscription: fastPlan(0), balance: balance() })!;
     expect(aiFastLine(summary)).toBe(
-      "Your Smart hours are used up. Fast keeps going at standard speed.",
+      "Your AI time is used up. Fast keeps going at standard speed.",
     );
     // The gateway can say it before the subscription does.
     const fromStatus = aiHoursSummary({
@@ -188,7 +188,7 @@ describe("Fast unlimited, Smart in hours (plans always on)", () => {
       fastUnlimited: true,
     });
     expect(summary && aiFastLine(summary)).toBe(
-      "Your Smart hours are used up. Fast keeps going at standard speed.",
+      "Your AI time is used up. Fast keeps going at standard speed.",
     );
     // Without Fast unlimited, 0 still means "no AI hours".
     expect(aiHoursSummary({ balance: balance({ aiHoursMinutes: 0 }) })).toBeNull();

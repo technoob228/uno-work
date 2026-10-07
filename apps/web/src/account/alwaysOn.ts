@@ -181,7 +181,7 @@ export interface AlwaysOnCard {
   readonly alwaysOn: string;
   /** "⚡ 10 boosts a month"; null for a plan without boosts. */
   readonly boosts: string | null;
-  /** "Works with Uno AI" / "Uno AI: Fast is unlimited. Smart comes in hours." (shown after ✦). */
+  /** "Works with Uno AI" / "Uno AI: Fast is unlimited. Smart uses your AI time." (shown after ✦). */
   readonly ai: string;
 }
 
@@ -199,7 +199,7 @@ export function alwaysOnCard(plan: AccountPlan): AlwaysOnCard | null {
   };
 }
 
-export const FAST_UNLIMITED_LINE = "Uno AI: Fast is unlimited. Smart comes in hours.";
+export const FAST_UNLIMITED_LINE = "Uno AI: Fast is unlimited. Smart uses your AI time.";
 
 function planAiOneLine(plan: AccountPlan): string {
   if (!planHasUnoAi(plan)) return WORKS_WITH_UNO_AI;

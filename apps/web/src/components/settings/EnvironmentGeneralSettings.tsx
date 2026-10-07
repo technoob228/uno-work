@@ -179,7 +179,7 @@ export function EnvironmentGeneralSettings({
             description={
               gatewayAiHours
                 ? "Uno AI time: Smart and Fast are unlimited inside it, web search too. Premium models are paid per token from premium credit, then your balance."
-                : "AI past your hours and premium past the plan's credit are paid from your Uno balance."
+                : "AI after your AI time runs out and premium past the plan's credit are paid from your Uno balance."
             }
             control={<UnoGatewayBalance apiKey={unoApiKey} />}
           />
