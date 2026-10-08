@@ -8,6 +8,16 @@
 
 ---
 
+## v0.0.113 — 2026-10-08
+
+- Uno Work updates itself on a cloud computer: "A new version of Uno Work is ready · Update" (above the chat, on Home, in My Uno). The owner presses Update, the computer downloads the release from the Uno console over HTTPS, checks it against the console's checksum list, installs it and restarts Uno Work once (about two minutes); if the new version doesn't start, the computer goes back to the previous one by itself. Chats and files are not touched. Only an owner session can start it; agents have no tool for it. The update shows up in Security ("You updated Uno Work to …"). Computers get the button with 0.0.113 — older ones need one last manual update.
+- Chat: "AI is busy" and "the model didn't answer" are calm lines with "Try again" (it sends your last message again); "busy" counts down and retries once by itself. Other failed turns get "Try again" too. "AI time is used up" says the date and keeps addresses in the buttons.
+- My Uno → Plan & billing matches the console: a cancelled plan says "Ends on …, no more charges" with "Keep my plan" (opens the console in a new tab); the Always on tile shows memory only, so cores read the same as on the computer.
+- Home: "Describe your site / bot" opens the chat where you already described it, not a new one. "Connect with SSH" is no longer the first advice unless you picked the server goal or use Dev mode — it sits under the card as "For developers".
+- Light chat: when Uno didn't finish in one go the button says "Continue". The agent asks "open to everyone or by password?" before publishing a personal page and gives the link to form entries after publishing a site with a form.
+- Files: one line says what "This computer" and "Cloud storage" are (the computer's files go with it; Cloud storage stays and keeps copies of computers); project and app folders carry a small tag.
+- Computer menu: the Economy switch explains itself in one line. Browser panel: "The agent is using this browser" goes away when the agent's turn ends. Phone (390): the chips under Home's input no longer run past its edge.
+
 ## v0.0.112 — 2026-10-07
 
 - Smart paused after the AI time (plans with unlimited Fast, console flag `AI_SMART_STOP`): a strip above the composer of Uno Code / Hermes chats says "Smart is paused until you add AI time. Fast keeps working." with "Add AI time — +15 h for $10" (the pack checkout in the console, new tab); Home and My Uno say the same; the premium line steps aside (Fast answers premium then too).
