@@ -38,15 +38,13 @@ export const DraftFolderChip = memo(function DraftFolderChip({
       testId="draft-folder-chip"
       onPick={(next, projectRef) => {
         if (next === null ? inHome : next.cwd === projectCwd) return;
-        return moveDraftToFolder(draftId, next?.cwd ?? null, projectRef).catch(
-          (error: unknown) => {
-            toastManager.add({
-              type: "error",
-              title: "Couldn't switch the folder",
-              description: error instanceof Error ? error.message : String(error),
-            });
-          },
-        );
+        return moveDraftToFolder(draftId, next?.cwd ?? null, projectRef).catch((error: unknown) => {
+          toastManager.add({
+            type: "error",
+            title: "Couldn't switch the folder",
+            description: error instanceof Error ? error.message : String(error),
+          });
+        });
       }}
     />
   );
