@@ -196,7 +196,7 @@ export function isSelfUpdateNoticeDismissed(
 
 export function dismissSelfUpdateNotice(environmentId: EnvironmentId | null, key: string): void {
   try {
-    const next = [...readDismissed().filter((item) => item !== `${environmentId}:${key}`)];
+    const next = readDismissed().filter((item) => item !== `${environmentId}:${key}`);
     next.push(`${environmentId}:${key}`);
     window.localStorage.setItem(DISMISSED_STORAGE_KEY, JSON.stringify(next.slice(-20)));
   } catch {

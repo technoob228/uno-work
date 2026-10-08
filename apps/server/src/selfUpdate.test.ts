@@ -357,9 +357,8 @@ describe("security journal report", () => {
       outcome: "updated",
       by_owner: true,
     });
-    expect((requests[0]!.init?.headers as Record<string, string>).authorization).toBe(
-      "Bearer uno_agt_test",
-    );
+    const headers = (requests[0]!.init?.headers ?? {}) as Record<string, string>;
+    expect(headers.authorization).toBe("Bearer uno_agt_test");
   });
 
   it("does nothing off a cloud computer and retries later after a console error", async () => {
