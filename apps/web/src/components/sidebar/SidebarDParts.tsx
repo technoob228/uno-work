@@ -17,8 +17,8 @@ import {
   CircleHelpIcon,
   CreditCardIcon,
   FolderIcon,
+  HomeIcon,
   InboxIcon,
-  FolderKanbanIcon,
   LayoutGridIcon,
   LogInIcon,
   LogOutIcon,
@@ -58,7 +58,7 @@ import {
 import { accountMenuLines } from "./sidebarD.logic";
 import { sidebarDPanel } from "./sidebarDState";
 import { useSidebarEnvironmentLabelResolver } from "./useSidebarMachineIdentities";
-import { useProtoVariant } from "../../proto/protoState";
+import { PROTO } from "../../proto/protoState";
 
 /** The computer this window works on, by the name the person knows it by. */
 export function useSidebarDComputerName(): string {
@@ -323,7 +323,7 @@ function PlaceRow(props: {
 function useOpenPlace() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
-  return (to: "/files" | "/sites" | "/projects") => {
+  return (to: "/files" | "/sites") => {
     if (isMobile) setOpenMobile(false);
     sidebarDPanel.closeNow();
     void navigate({ to });
@@ -334,6 +334,9 @@ function useOpenPlace() {
 export function useNeedsYouBadge() {
   const unread = useInboxUnreadCount();
   const needsYou = useInboxNeedsYouCount();
+  // Sidebar prototype (w0115, iteration 2): "Needs you" only when a question or an OK
+  // waits — never "Needs you" with nothing in it; its number is those questions.
+  if (PROTO) return { unread: needsYou, needsYou, shown: needsYou > 0 };
   return { unread, needsYou, shown: unread > 0 || needsYou > 0 };
 }
 
@@ -369,10 +372,22 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const open = useOpenPlace();
   const { shown } = useNeedsYouBadge();
-  // Sidebar prototype (w0115): variant E puts Projects next to Files.
-  const protoVariant = useProtoVariant();
+  const goHome = useGoHome();
   return (
     <nav aria-label="Uno Work" className="flex flex-col gap-px" data-testid="sidebar-places">
+      {/* Sidebar prototype (w0115, iteration 2): Home is a place you can always go back to. */}
+      {PROTO ? (
+        <PlaceRow
+          icon={<HomeIcon />}
+          label="Home"
+          active={pathname === "/computer" || pathname === "/"}
+          onClick={() => {
+            sidebarDPanel.closeNow();
+            goHome();
+          }}
+          testId="sidebar-nav-home"
+        />
+      ) : null}
       <PlaceRow
         icon={<FolderIcon />}
         label="Files"
@@ -381,15 +396,6 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
         testId="sidebar-nav-files"
         tour="files"
       />
-      {protoVariant === "E" ? (
-        <PlaceRow
-          icon={<FolderKanbanIcon />}
-          label="Projects"
-          active={pathname.startsWith("/projects")}
-          onClick={() => open("/projects")}
-          testId="sidebar-nav-projects"
-        />
-      ) : null}
       <PlaceRow
         icon={<LayoutGridIcon />}
         label="Apps & sites"
@@ -409,12 +415,7 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
               <InboxIcon />
               <span className="min-w-0 flex-1 truncate">Needs you</span>
               <InboxCountBadge
-                unread={
-                  // Sidebar prototype (w0115): the number is the questions waiting, not all news.
-                  protoVariant !== "off" && badge.needsYou > 0
-                    ? badge.needsYou
-                    : Math.max(badge.unread, badge.needsYou)
-                }
+                unread={Math.max(badge.unread, badge.needsYou)}
                 needsYou={badge.needsYou}
               />
             </PopoverTrigger>
@@ -495,6 +496,16 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
       )}
     >
       <div className="no-drag flex flex-col items-center gap-1">
+        {PROTO ? (
+          <RailButton
+            label="Home"
+            active={pathname === "/computer" || pathname === "/"}
+            onClick={goHome}
+            testId="sidebar-rail-home"
+          >
+            <HomeIcon />
+          </RailButton>
+        ) : null}
         <RailButton label="New chat" onClick={goHome} testId="sidebar-rail-new-chat">
           <SquarePenIcon />
         </RailButton>

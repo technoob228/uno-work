@@ -1,7 +1,13 @@
 /**
- * Sidebar prototype (w0115, NOT FOR MERGE): "where is this chat" — the folder
- * (only when it isn't the Home folder) and, with computers joined (Б), the
- * computer. One wording for the sidebar, the Inbox and Home.
+ * Sidebar prototype (w0115, NOT FOR MERGE): "where is this chat" — the
+ * project (only when it isn't the Home folder) and, with 2+ computers in view,
+ * the computer. One wording for the sidebar, the Inbox and Home:
+ * "brand-kit · MacBook".
+ *
+ * One project on several computers: two folders are the same project when
+ * they are the same git repository (the daemon's repositoryIdentity — same
+ * remote; a shared Uno folder is a repository on our git, so it matches the
+ * same way). Then the project key is the repository's, not the computer's.
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 
@@ -10,9 +16,20 @@ import type { Project } from "../types";
 import { MACHINES } from "./fixtures";
 import { PROTO, useProtoStore, type ProtoMode } from "./protoState";
 
+export const NO_PROJECT = "No project";
+/** Logical key of the Home folders of every computer. */
+export const NO_PROJECT_KEY = "none";
+
 export function machineLabel(environmentId: string): string {
   return MACHINES[environmentId]?.label ?? "Computer";
 }
+
+export function machineKind(environmentId: string): "uno_box" | "computer" {
+  return MACHINES[environmentId]?.machineKind ?? "computer";
+}
+
+/** Computers in a fixed order (cloud first), for menus and groups. */
+export const MACHINE_ORDER: ReadonlyArray<string> = Object.keys(MACHINES);
 
 export function isHomeProject(project: Pick<Project, "name" | "cwd" | "environmentId">): boolean {
   const home = MACHINES[project.environmentId]?.home;
@@ -26,7 +43,37 @@ export function projectKeyOf(project: Pick<Project, "environmentId" | "id">): st
   return `${project.environmentId}:${project.id}`;
 }
 
-/** "yoga-site", "MacBook · brand-kit", "MacBook" — or null when there is nothing to add. */
+/** One key for one project across computers (same repository = same project). */
+export function logicalKeyOf(
+  project: Pick<Project, "environmentId" | "id" | "name" | "cwd" | "repositoryIdentity">,
+): string {
+  if (isHomeProject(project)) return NO_PROJECT_KEY;
+  const canonical = project.repositoryIdentity?.canonicalKey;
+  return canonical ? `repo:${canonical}` : projectKeyOf(project);
+}
+
+export interface PlaceParts {
+  readonly project: string | null;
+  readonly computer: string | null;
+  readonly computerKind: "uno_box" | "computer" | null;
+}
+
+/** What to say about a chat's place, leaving out what the list already says. */
+export function placeParts(input: {
+  environmentId: string;
+  project: Pick<Project, "name" | "cwd" | "environmentId"> | null | undefined;
+  showProject: boolean;
+  showComputer: boolean;
+}): PlaceParts {
+  const home = !input.project || isHomeProject(input.project);
+  return {
+    project: input.showProject && !home ? input.project!.name : null,
+    computer: input.showComputer ? machineLabel(input.environmentId) : null,
+    computerKind: input.showComputer ? machineKind(input.environmentId) : null,
+  };
+}
+
+/** "yoga-site", "brand-kit · MacBook", "MacBook" — or null when there is nothing to add. */
 export function placeLabel(input: {
   mode: ProtoMode;
   environmentId: string;
@@ -34,11 +81,14 @@ export function placeLabel(input: {
   /** The list is already narrowed to this project: the folder goes without saying. */
   hideFolder?: boolean;
 }): string | null {
-  const home = !input.project || isHomeProject(input.project);
-  const folder = home || input.hideFolder ? null : input.project!.name;
-  if (input.mode === "one") return folder;
-  const machine = machineLabel(input.environmentId);
-  return folder ? `${machine} · ${folder}` : machine;
+  const parts = placeParts({
+    environmentId: input.environmentId,
+    project: input.project,
+    showProject: !input.hideFolder,
+    showComputer: input.mode === "all",
+  });
+  const text = [parts.project, parts.computer].filter(Boolean).join(" · ");
+  return text || null;
 }
 
 /** The place label of a chat by its ids (Inbox, Home); null outside the prototype. */

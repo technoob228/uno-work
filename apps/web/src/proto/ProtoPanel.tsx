@@ -98,7 +98,7 @@ export default function ProtoPanel({ router }: { router: ProtoRouter }) {
       </div>
 
       <p className="mb-1.5 text-xs font-medium">Sidebar</p>
-      <div className="grid grid-cols-5 gap-1" role="radiogroup" aria-label="Sidebar variant">
+      <div className="grid grid-cols-3 gap-1" role="radiogroup" aria-label="Sidebar variant">
         {VARIANTS.map((item) => (
           <button
             key={item.id}

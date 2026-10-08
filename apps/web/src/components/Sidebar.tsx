@@ -103,7 +103,7 @@ import { ProtoSidebarList } from "../proto/ProtoSidebarList";
 import {
   PROTO,
   useProtoAllMachines,
-  useProtoStore,
+  useProtoDoneInsideList,
   useProtoVariant,
 } from "../proto/protoState";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
@@ -699,8 +699,8 @@ interface SidebarThreadRowProps {
   onOpenPrLink: (event: ReactMouseEvent<HTMLElement>, url: string) => void;
   /** Without Dev mode: no snooze, and "Settle" reads "Done". */
   simple: boolean;
-  /** Sidebar prototype (w0115): "computer · folder" under the title of a D row. */
-  subtitle?: string | null;
+  /** Sidebar prototype (w0115): "project · computer" under the title of a D row. */
+  subtitle?: ReactNode;
 }
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
@@ -1079,10 +1079,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               >
                 {thread.title}
               </span>
-              <span
-                className="min-w-0 truncate text-[11px] leading-4 text-muted-foreground"
-                data-testid="proto-row-place"
-              >
+              <span className="flex min-w-0" data-testid="proto-row-place">
                 {props.subtitle}
               </span>
             </span>
@@ -1531,15 +1528,8 @@ export default function Sidebar() {
   // Sidebar prototype (w0115): (Б) "all together" lists every computer's chats.
   const protoVariant = useProtoVariant();
   const protoAllMachines = useProtoAllMachines();
-  // Looking at one project (or B grouped): its Done chats fold inside it, not in the shelf below.
-  const protoDoneInProjects = useProtoStore(
-    (state) =>
-      PROTO &&
-      state.variant !== "D" &&
-      (state.filter !== null ||
-        state.machineFilter !== null ||
-        (state.variant === "B" && state.grouped)),
-  );
+  // Grouped or filtered: Done chats fold inside the list, not in the shelf below.
+  const protoDoneInProjects = useProtoDoneInsideList();
   const machineScope = useMemo(
     () =>
       resolveSidebarProjectScope({
@@ -2808,7 +2798,7 @@ export default function Sidebar() {
       readonly d?: boolean;
       readonly nested?: boolean;
       readonly underUno?: boolean;
-      readonly subtitle?: string | null;
+      readonly subtitle?: ReactNode;
     },
   ) => {
     const threadKey = threadKeyOf(thread);

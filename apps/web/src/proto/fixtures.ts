@@ -58,7 +58,7 @@ export function descriptorFor(machine: ProtoMachine): ExecutionEnvironmentDescri
     environmentId: machine.environmentId,
     label: machine.label,
     platform: { os: machine.os, arch: machine.os === "darwin" ? "arm64" : "x64" },
-    serverVersion: "0.0.114",
+    serverVersion: "0.0.115",
     capabilities: {
       repositoryIdentity: true,
       threadSnooze: true,
@@ -92,7 +92,7 @@ export function serverConfigFor(machine: ProtoMachine): ServerConfig {
         displayName: "Uno",
         enabled: true,
         installed: true,
-        version: "0.0.114",
+        version: "0.0.115",
         status: "ready",
         auth: { status: "authenticated" },
         checkedAt: new Date(NOW).toISOString(),
@@ -131,6 +131,22 @@ interface ProjectSpec {
   id: string;
   title: string;
   root: string;
+  /** Same repository on several computers = one project (shared Uno folder on our git). */
+  repo?: string;
+}
+
+/** brand-kit lives on both computers: a shared Uno folder, i.e. one repository on our git. */
+const BRAND_KIT_REPO = "git.uno4.me/anna/brand-kit";
+
+function repositoryIdentityOf(project: ProjectSpec) {
+  if (!project.repo) return null;
+  return {
+    canonicalKey: project.repo,
+    locator: { source: "git-remote" as const, remoteName: "uno", remoteUrl: `https://${project.repo}.git` },
+    rootPath: project.root,
+    displayName: project.title,
+    name: project.title,
+  };
 }
 
 const CLOUD_PROJECTS: ProjectSpec[] = [
@@ -138,11 +154,22 @@ const CLOUD_PROJECTS: ProjectSpec[] = [
   { id: "p-yoga-site", title: "yoga-site", root: "/home/anna/projects/yoga-site" },
   { id: "p-studio-bot", title: "studio-bot", root: "/home/anna/projects/studio-bot" },
   { id: "p-newsletter", title: "newsletter", root: "/home/anna/projects/newsletter" },
+  {
+    id: "p-cloud-brand-kit",
+    title: "brand-kit",
+    root: "/home/anna/projects/brand-kit",
+    repo: BRAND_KIT_REPO,
+  },
 ];
 
 const MAC_PROJECTS: ProjectSpec[] = [
   { id: "p-mac-home", title: "Home folder", root: "/Users/anna" },
-  { id: "p-brand-kit", title: "brand-kit", root: "/Users/anna/projects/brand-kit" },
+  {
+    id: "p-brand-kit",
+    title: "brand-kit",
+    root: "/Users/anna/projects/brand-kit",
+    repo: BRAND_KIT_REPO,
+  },
 ];
 
 const CLOUD_CHATS: ChatSpec[] = [
@@ -180,6 +207,14 @@ const CLOUD_CHATS: ChatSpec[] = [
     minutesAgo: 95,
     ask: "Make a one-page price list for autumn: drop-in, 10 classes, monthly.",
     answer: "Done — autumn-prices.pdf is in your Home folder.",
+  },
+  {
+    id: "t-print-files",
+    project: "p-cloud-brand-kit",
+    title: "Print-ready files for the printer",
+    minutesAgo: 55,
+    ask: "Make print-ready PDFs of the business cards for the print shop.",
+    answer: "cards-print.pdf is in brand-kit — CMYK, 3 mm bleed, as the shop asked.",
   },
   {
     id: "t-teachers",
@@ -234,6 +269,16 @@ const CLOUD_CHATS: ChatSpec[] = [
     answer: "Draft is in newsletter-october.md.",
   },
 ];
+
+CLOUD_CHATS.push({
+  id: "t-flyer",
+  project: "p-cloud-brand-kit",
+  title: "Autumn flyer with the new logo",
+  minutesAgo: 60 * 50,
+  state: "done",
+  ask: "Make an A5 flyer for autumn classes with the new logo.",
+  answer: "flyer-autumn.pdf is in brand-kit.",
+});
 
 const MAC_CHATS: ChatSpec[] = [
   {
@@ -388,7 +433,7 @@ function buildProject(project: ProjectSpec) {
     id: project.id,
     title: project.title,
     workspaceRoot: project.root,
-    repositoryIdentity: null,
+    repositoryIdentity: repositoryIdentityOf(project),
     defaultModelSelection: MODEL,
     scripts: [],
     createdAt: at,
@@ -418,7 +463,7 @@ export function toShellSnapshot(model: OrchestrationReadModel) {
       id: project.id,
       title: project.title,
       workspaceRoot: project.workspaceRoot,
-      repositoryIdentity: null,
+      repositoryIdentity: project.repositoryIdentity ?? null,
       defaultModelSelection: project.defaultModelSelection,
       scripts: project.scripts,
       createdAt: project.createdAt,
