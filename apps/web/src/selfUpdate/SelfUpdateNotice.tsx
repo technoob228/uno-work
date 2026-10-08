@@ -25,6 +25,7 @@ import { Spinner } from "../components/ui/spinner";
 import { isElectron } from "../env";
 import { cn } from "../lib/utils";
 import {
+  PAGE_LOADED_AT,
   dismissSelfUpdateNotice,
   isSelfUpdateNoticeDismissed,
   requestSelfUpdate,
@@ -80,7 +81,12 @@ export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateCo
 
   const view = useMemo(
     () =>
-      resolveSelfUpdateView({ status: query.data, clientVersion: APP_VERSION, now: Date.now() }),
+      resolveSelfUpdateView({
+        status: query.data,
+        clientVersion: APP_VERSION,
+        now: Date.now(),
+        pageLoadedAt: PAGE_LOADED_AT,
+      }),
     [query.data],
   );
   const key = view && "key" in view ? view.key : null;

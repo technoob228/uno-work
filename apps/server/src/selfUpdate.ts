@@ -8,8 +8,9 @@ import { compareCliVersions } from "@t3tools/contracts";
  *
  * The daemon runs unprivileged (NoNewPrivileges, no sudo) and the app directory
  * belongs to root, so the daemon cannot — and must not be able to — replace its
- * own code. It only drops an EMPTY request file. install.sh sets up
- * `uno-work-update.path`: systemd sees the file and starts the root oneshot
+ * own code. It only drops a request file into a directory that is root's
+ * (the daemon's group may create files there, nothing else). install.sh sets
+ * up `uno-work-update.path`: systemd sees the file and starts the root oneshot
  * `uno-work-update` (deploy/install.sh writes it), which
  *
  *   1. reads the release list `SHA256SUMS` from the console over HTTPS,
@@ -53,7 +54,7 @@ const STALE_UPDATE_MS = 40 * 60_000;
 export const SELF_UPDATE_TYPICAL_SECONDS = 120;
 
 export interface SelfUpdatePaths {
-  /** Empty request file in the daemon's directory; the .path unit watches it. */
+  /** The request file (in root's directory); the .path unit watches it. */
   readonly requestFile: string;
   /** Progress of the root updater (root writes, the daemon reads). */
   readonly statusFile: string;
@@ -367,7 +368,8 @@ export function makeSelfUpdateController(deps: SelfUpdateDeps): SelfUpdateContro
       throw new SelfUpdateUnavailableError("Uno Work is already up to date.");
     }
     // The file carries nothing the updater reads — only its existence matters.
-    await mkdir(dirname(paths.requestFile), { recursive: true });
+    // The directory is root's (install.sh): it is not ours to create.
+    await mkdir(dirname(paths.requestFile), { recursive: true }).catch(() => undefined);
     const temp = `${paths.requestFile}.tmp`;
     await writeFile(temp, `${new Date(now()).toISOString()}\n`);
     await rename(temp, paths.requestFile);

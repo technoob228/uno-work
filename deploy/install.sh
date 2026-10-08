@@ -278,9 +278,9 @@ UNIT
 
 # --- Self-update by the owner's button -----------------------------------------
 # The owner presses "Update" in Uno Work. The daemon is unprivileged and cannot
-# touch ${INSTALL_DIR} (root's), so — like the browser above — it only drops an
-# EMPTY request file; uno-work-update.path sees it and starts the root oneshot
-# below. Rules the updater keeps:
+# touch ${INSTALL_DIR} (root's), so — like the browser above — it only drops a
+# request file (in a directory that is root's, see below); uno-work-update.path
+# sees it and starts the root oneshot below. Rules the updater keeps:
 #   * It takes NO input from the request file or from the daemon: where to
 #     download from is fixed here (the console, HTTPS), which version is "latest"
 #     and its sha256 come from the console's SHA256SUMS. So anything running as
@@ -293,11 +293,19 @@ UNIT
 #   * Chats and files (${STATE_DIR}, /home/${SERVICE_USER}) are never touched.
 # /etc/uno-work/update.conf (root-owned, optional) may point it at another
 # release directory — for our own tests and staging.
-UPDATE_REQUEST_DIR="${STATE_DIR}/update"
+# The request directory belongs to ROOT; the service user may only create files
+# in it (group write). Were it the daemon's own directory, anything running as
+# ${SERVICE_USER} could swap it for a symlink: the updater would refuse to
+# follow it, the request would never go away, and systemd would start the unit
+# in a loop until it gives up on it for good.
 UPDATE_STATUS_DIR="/var/lib/uno-work-update"
+UPDATE_REQUEST_DIR="${UPDATE_STATUS_DIR}/ask"
 UPDATE_BASE_URL_DEFAULT="https://console.uno.place/cli/work"
-install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${UPDATE_REQUEST_DIR}"
-install -d -m 0755 "${UPDATE_STATUS_DIR}"
+install -d -m 0755 -o root -g root "${UPDATE_STATUS_DIR}"
+if [ -L "${UPDATE_REQUEST_DIR}" ] || { [ -e "${UPDATE_REQUEST_DIR}" ] && [ ! -d "${UPDATE_REQUEST_DIR}" ]; }; then
+  rm -f -- "${UPDATE_REQUEST_DIR}"
+fi
+install -d -m 0770 -o root -g "${SERVICE_USER}" "${UPDATE_REQUEST_DIR}"
 
 # Written to a temp file and renamed: during a self-update this very script is
 # being run by bash from the old file, which must stay intact until it exits.
@@ -333,15 +341,18 @@ main() {
 
   install -d -m 0755 "${STATUS_DIR}"
 
-  # The request lives in the daemon's directory: never follow a link it planted,
-  # never read the file.
+  # The request: a file the daemon's user created in root's directory. It is
+  # removed first — whatever else happens, the .path unit must not see it again
+  # — and never read. `rm` unlinks a planted symlink itself, not its target.
+  local ASK_DIR="${STATUS_DIR}/ask"
+  if [ -d "${ASK_DIR}" ] && [ ! -L "${ASK_DIR}" ]; then
+    rm -rf -- "${ASK_DIR}/request" "${ASK_DIR}/request.tmp"
+  fi
   local state_dir port
   state_dir="$(sed -n 's/^UNO_WORK_STATE_DIR=//p' "${ENV_FILE}" 2>/dev/null | tail -n 1)"
   state_dir="${state_dir:-/var/lib/uno-work}"
   port="$(sed -n 's/^UNO_WORK_PORT=//p' "${ENV_FILE}" 2>/dev/null | tail -n 1)"
   case "${port}" in ''|*[!0-9]*) port=80 ;; esac
-  local request_file="${state_dir}/update/request"
-  [ -L "${state_dir}/update" ] || rm -f -- "${request_file}" "${request_file}.tmp"
 
   exec 9>"${LOCK_FILE}"
   if ! flock -n 9; then
@@ -612,6 +623,10 @@ TimeoutStopSec=5min
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
+# Every run lasts at least 3 s, so requests written in a tight loop (a stray
+# script running as the daemon's user) cannot hit systemd's start limit —
+# which would switch the Update button off until the next boot.
+ExecStopPost=/bin/sleep 3
 SyslogIdentifier=uno-work-update
 UNIT
 

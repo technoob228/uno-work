@@ -18,11 +18,16 @@ const base: SelfUpdateStatus = {
   startedAt: null,
   finishedAt: null,
 };
-const view = (status: Partial<SelfUpdateStatus> | null, clientVersion = "0.0.113") =>
+const view = (
+  status: Partial<SelfUpdateStatus> | null,
+  clientVersion = "0.0.113",
+  pageLoadedAt = Date.parse("2026-10-08T11:00:00Z"),
+) =>
   resolveSelfUpdateView({
     status: status ? { ...base, ...status } : null,
     clientVersion,
     now: NOW,
+    pageLoadedAt,
   });
 
 describe("resolveSelfUpdateView", () => {
@@ -65,6 +70,11 @@ describe("resolveSelfUpdateView", () => {
       needsReload: true,
     });
     expect(view(done, "0.0.114")).toMatchObject({ kind: "done", needsReload: false });
+    // Loaded after the update: whatever version this interface serves, no reload loop.
+    expect(view(done, "0.0.113", Date.parse("2026-10-08T11:59:00Z"))).toMatchObject({
+      kind: "done",
+      needsReload: false,
+    });
     expect(view({ ...done, finishedAt: "2026-10-06T11:58:00Z" }, "0.0.114")).toBeNull();
   });
 

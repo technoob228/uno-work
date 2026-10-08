@@ -89,6 +89,9 @@ export function selfUpdateQueryOptions(environmentId: EnvironmentId | null) {
   });
 }
 
+/** When this bundle started in this tab. */
+export const PAGE_LOADED_AT = Date.now();
+
 /** A finished run is news for a day, not forever. */
 const RESULT_FRESH_MS = 24 * 60 * 60_000;
 
@@ -127,6 +130,8 @@ export function resolveSelfUpdateView(input: {
   readonly status: SelfUpdateStatus | null | undefined;
   readonly clientVersion: string;
   readonly now: number;
+  /** When this page was loaded: a page loaded after the update is already the new one. */
+  readonly pageLoadedAt: number;
 }): SelfUpdateView | null {
   const status = input.status;
   if (!status?.supported) return null;
@@ -161,8 +166,12 @@ export function resolveSelfUpdateView(input: {
     return {
       kind: "done",
       version: status.toVersion,
-      // The page was loaded from the previous version: it needs the new one.
-      needsReload: input.clientVersion !== status.currentVersion,
+      // The page was loaded from the previous version, before the update
+      // finished: it needs the new one. A page loaded after it has whatever
+      // this interface serves — asking to reload again would never end.
+      needsReload:
+        input.clientVersion !== status.currentVersion &&
+        input.pageLoadedAt < Date.parse(status.finishedAt ?? ""),
       key: `done:${status.finishedAt}`,
     };
   }
