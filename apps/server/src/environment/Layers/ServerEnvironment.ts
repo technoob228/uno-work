@@ -2,6 +2,7 @@ import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/con
 import { Effect, FileSystem, Layer, Path, Random, Ref } from "effect";
 import * as OS from "node:os";
 
+import { kernelRandomBytes, uuidV4FromBytes } from "../../cloneEntropy.ts";
 import { ServerConfig } from "../../config.ts";
 import { UnoBoxIdentity } from "../../unoBoxIdentity.ts";
 import { ServerEnvironment, type ServerEnvironmentShape } from "../Services/ServerEnvironment.ts";
@@ -139,7 +140,8 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
   });
 
   const rotateEnvironmentId = Effect.gen(function* () {
-    const generated = yield* Random.nextUUIDv4;
+    // From the kernel, not the process generator (the snapshot's copy) — cloneEntropy.ts.
+    const generated = uuidV4FromBytes(kernelRandomBytes(16));
     yield* persistEnvironmentId(generated).pipe(
       Effect.catch((cause) =>
         Effect.logWarning("environment id not persisted").pipe(Effect.annotateLogs({ cause })),
