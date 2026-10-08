@@ -36,6 +36,8 @@ type Mark = "approval" | "input" | "your-turn" | "failed" | "working" | null;
 export interface ProtoRowOptions {
   readonly nested?: boolean;
   readonly subtitle?: string | null;
+  /** A Done / Snoozed chat: the sidebar's own history row. */
+  readonly section?: "settled" | "snoozed";
 }
 
 interface ProtoSidebarListProps {
@@ -43,6 +45,8 @@ interface ProtoSidebarListProps {
   readonly threads: ReadonlyArray<SidebarThreadSummary>;
   /** Projects in scope (every computer in (Б)), the assistant's left out. */
   readonly projects: ReadonlyArray<Project>;
+  /** Done and Snoozed chats (one "Done" shelf without Dev mode). */
+  readonly doneThreads: ReadonlyArray<SidebarThreadSummary>;
   readonly renderRow: (thread: SidebarThreadSummary, options: ProtoRowOptions) => ReactNode;
   readonly markOf: (thread: SidebarThreadSummary) => Mark;
   readonly renderMark: (mark: Mark) => ReactNode;
@@ -112,10 +116,10 @@ function filterLabel(
   joined = false,
 ) {
   if (machineFilter) return `Everything on ${machineLabel(machineFilter)}`;
-  if (filter === null) return "All chats";
+  if (filter === null) return "All projects";
   if (filter === "home") return "Home folder";
   const entry = entries.find((candidate) => candidate.key === filter);
-  if (!entry) return "All chats";
+  if (!entry) return "All projects";
   const name = entry.home ? "Home folder" : entry.project.name;
   return joined ? `${name} · ${machineLabel(entry.project.environmentId)}` : name;
 }
@@ -222,7 +226,7 @@ function FilterMenu(props: {
           </MenuTrigger>
           <MenuPopup align="start" className="min-w-64" data-testid="proto-filter-menu">
             <MenuItem onClick={() => setFilter(null)}>
-              <span className="min-w-0 flex-1">All chats</span>
+              <span className="min-w-0 flex-1">All projects</span>
               <span className="ml-3 text-xs text-muted-foreground tabular-nums">{props.total}</span>
               {!narrowed ? <CheckIcon className="text-foreground" /> : null}
             </MenuItem>
@@ -285,6 +289,43 @@ function FilterMenu(props: {
 }
 
 // ── Shared bits ──────────────────────────────────────────────────────────
+
+/** 0.0.114: Done chats fold into one "Done · N" row — here, inside the project in view. */
+function DoneFold(props: {
+  chats: ReadonlyArray<SidebarThreadSummary>;
+  nested?: boolean;
+  renderRow: ProtoSidebarListProps["renderRow"];
+}) {
+  const [open, setOpen] = useState(false);
+  if (props.chats.length === 0) return null;
+  return (
+    <>
+      <li className="list-none">
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          aria-expanded={open}
+          data-testid="proto-done-fold"
+          className={cn(
+            "flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-md pr-2 text-left text-xs text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground",
+            props.nested ? "pl-8" : "pl-2.5",
+          )}
+        >
+          <CheckIcon className="size-3.5" />
+          Done · {props.chats.length}
+          <ChevronDownIcon className={cn("size-3 transition-transform", !open && "-rotate-90")} />
+        </button>
+      </li>
+      {open
+        ? props.chats.map((thread) =>
+            props.renderRow(thread, {
+              section: thread.settledOverride === "settled" ? "settled" : "snoozed",
+            }),
+          )
+        : null}
+    </>
+  );
+}
 
 function SectionLabel(props: { label: string; action?: ReactNode }) {
   return (
@@ -395,6 +436,16 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
       }),
     );
 
+  const doneInView = applyFilter(props.doneThreads, entries, filter, machineFilter);
+  const doneFold =
+    filter !== null || machineFilter !== null ? (
+      <DoneFold chats={doneInView} renderRow={props.renderRow} />
+    ) : null;
+  const doneOf = (entry: ProjectEntry) =>
+    props.doneThreads.filter(
+      (thread) => `${thread.environmentId}:${thread.projectId}` === entry.key,
+    );
+
   const emptyFiltered =
     filteredEntry && visible.length === 0 ? (
       <EmptyProject entry={filteredEntry} onNewChat={() => props.onNewChatIn(filteredEntry.project)} />
@@ -437,7 +488,7 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
                 />
                 {folded
                   ? null
-                  : entry.chats.length === 0
+                  : entry.chats.length === 0 && doneOf(entry).length === 0
                     ? (
                         <EmptyProject
                           entry={entry}
@@ -448,6 +499,9 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
                     : entry.chats.map((thread) =>
                         props.renderRow(thread, { nested: true, subtitle: null }),
                       )}
+                {folded ? null : (
+                  <DoneFold chats={doneOf(entry)} nested renderRow={props.renderRow} />
+                )}
               </ul>
             </li>
           );
@@ -458,6 +512,10 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
             subtitle: joined ? machineLabel(thread.environmentId) : null,
           }),
         )}
+        <DoneFold
+          chats={entries.filter((entry) => entry.home).flatMap(doneOf)}
+          renderRow={props.renderRow}
+        />
       </>
     );
   }
@@ -469,6 +527,7 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
         <FilterMenu entries={entries} total={props.threads.length} withGroupToggle={variant === "B"} />
         {emptyFiltered}
         {flatRows(visible)}
+        {doneFold}
       </>
     );
   }
@@ -478,20 +537,7 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
     const shown = entries.filter((entry) => !entry.home).slice(0, 5);
     return (
       <>
-        <SectionLabel
-          label="Projects"
-          action={
-            <button
-              type="button"
-              aria-label="New project"
-              title="New project"
-              onClick={() => openNewProject()}
-              className="-my-1 inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
-            >
-              <PlusIcon className="size-3.5" />
-            </button>
-          }
-        />
+        <SectionLabel label="Projects" />
         {shown.map((entry) => (
           <ProjectRow
             key={entry.key}
@@ -503,18 +549,17 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
             onClick={() => setFilter(filter === entry.key ? null : entry.key)}
           />
         ))}
-        {shown.length === 0 ? (
-          <li className="list-none">
-            <button
-              type="button"
-              onClick={() => openNewProject()}
-              className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md pl-2.5 text-left text-sm text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
-            >
-              <PlusIcon className="size-4" />
-              New project
-            </button>
-          </li>
-        ) : null}
+        <li className="list-none">
+          <button
+            type="button"
+            onClick={() => openNewProject()}
+            data-testid="proto-new-project-row"
+            className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md pl-2.5 text-left text-sm text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+          >
+            <PlusIcon className="size-4" />
+            New project
+          </button>
+        </li>
         <SectionLabel
           label={filteredEntry ? `Chats in ${filteredEntry.project.name}` : "Chats"}
           action={
@@ -532,6 +577,7 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
         />
         {emptyFiltered}
         {flatRows(visible)}
+        {doneFold}
       </>
     );
   }
@@ -557,6 +603,7 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
       )}
       {emptyFiltered}
       {flatRows(visible)}
+      {doneFold}
     </>
   );
 }

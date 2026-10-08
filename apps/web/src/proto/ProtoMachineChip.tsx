@@ -21,7 +21,13 @@ function MachineIcon({ kind, className }: { kind: string; className?: string }) 
   );
 }
 
-export function ProtoMachineChip({ environmentId }: { environmentId: EnvironmentId | null }) {
+export function ProtoMachineChip({
+  environmentId,
+  title = "Start this chat on",
+}: {
+  environmentId: EnvironmentId | null;
+  title?: string;
+}) {
   const joined = useProtoAllMachines();
   const setActive = useStore((state) => state.setActiveEnvironmentId);
   if (!joined || environmentId === null) return null;
@@ -42,7 +48,7 @@ export function ProtoMachineChip({ environmentId }: { environmentId: Environment
       </MenuTrigger>
       <MenuPopup align="start" className="min-w-56">
         <MenuGroup>
-        <MenuGroupLabel>Start this chat on</MenuGroupLabel>
+        <MenuGroupLabel>{title}</MenuGroupLabel>
         {Object.values(MACHINES).map((machine) => (
           <MenuItem key={machine.environmentId} onClick={() => setActive(machine.environmentId)}>
             <MachineIcon kind={machine.machineKind} />

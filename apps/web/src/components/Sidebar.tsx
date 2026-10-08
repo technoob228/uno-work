@@ -99,7 +99,12 @@ import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useFeatureFlag } from "../hooks/useFeatureFlags";
 import { useFolderChats, useHomeFolderPath } from "../hooks/useFolderChats";
 import { ProtoSidebarList } from "../proto/ProtoSidebarList";
-import { PROTO, useProtoAllMachines, useProtoVariant } from "../proto/protoState";
+import {
+  PROTO,
+  useProtoAllMachines,
+  useProtoStore,
+  useProtoVariant,
+} from "../proto/protoState";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useMinuteClock } from "../hooks/useMinuteClock";
@@ -1520,6 +1525,15 @@ export default function Sidebar() {
   // Sidebar prototype (w0115): (Б) "all together" lists every computer's chats.
   const protoVariant = useProtoVariant();
   const protoAllMachines = useProtoAllMachines();
+  // Looking at one project (or B grouped): its Done chats fold inside it, not in the shelf below.
+  const protoDoneInProjects = useProtoStore(
+    (state) =>
+      PROTO &&
+      state.variant !== "D" &&
+      (state.filter !== null ||
+        state.machineFilter !== null ||
+        (state.variant === "B" && state.grouped)),
+  );
   const machineScope = useMemo(
     () =>
       resolveSidebarProjectScope({
@@ -3014,12 +3028,15 @@ export default function Sidebar() {
                     ),
                 )}
                 projects={projects.filter((project) => !isAssistantProjectId(project.id))}
+                doneThreads={[...snoozedThreads, ...settledThreads]}
                 renderRow={(thread, rowOptions) =>
-                  renderRow(thread, "active", {
-                    d: true,
-                    nested: rowOptions.nested ?? false,
-                    subtitle: rowOptions.subtitle ?? null,
-                  })
+                  rowOptions.section
+                    ? renderRow(thread, rowOptions.section)
+                    : renderRow(thread, "active", {
+                        d: true,
+                        nested: rowOptions.nested ?? false,
+                        subtitle: rowOptions.subtitle ?? null,
+                      })
                 }
                 markOf={(thread) =>
                   dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now))
@@ -3087,7 +3104,7 @@ export default function Sidebar() {
             {dGroups.recents.map((thread) => renderRow(thread, "active", { d: true }))}
               </>
             )}
-            {simple && snoozedThreads.length + settledThreads.length > 0 ? (
+            {simple && !protoDoneInProjects && snoozedThreads.length + settledThreads.length > 0 ? (
               <SidebarSectionHeader
                 kind="settled"
                 className="mt-auto pt-2"
@@ -3108,7 +3125,9 @@ export default function Sidebar() {
                 onToggle={() => setSnoozedShelfExpanded((value) => !value)}
               />
             ) : null}
-            {renderedSnoozedThreads.map((thread) => renderRow(thread, "snoozed"))}
+            {protoDoneInProjects
+              ? null
+              : renderedSnoozedThreads.map((thread) => renderRow(thread, "snoozed"))}
             {!simple && settledThreads.length > 0 ? (
               <SidebarSectionHeader
                 kind="settled"
@@ -3118,7 +3137,9 @@ export default function Sidebar() {
                 onToggle={() => setSettledShelfExpanded((value) => !value)}
               />
             ) : null}
-            {renderedSettledThreads.map((thread) => renderRow(thread, "settled"))}
+            {protoDoneInProjects
+              ? null
+              : renderedSettledThreads.map((thread) => renderRow(thread, "settled"))}
             {settledShelfExpanded && hiddenSettledCount > 0 ? (
               <li className="list-none">
                 <button

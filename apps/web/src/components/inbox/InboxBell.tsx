@@ -19,11 +19,13 @@ import { memo, useMemo, useState } from "react";
 import { markInboxItemDone } from "../../inbox/inboxDone";
 import {
   type InboxEntry,
+  isNeedsYou,
   isSnoozed,
   updateInbox,
   updateInboxEverywhere,
   useInboxEntries,
   useInboxNeedsYouCount,
+  useInboxStore,
   useInboxUnreadCount,
 } from "../../inbox/inboxStore";
 import { canDismissInboxItem } from "../../inbox/openRequests.logic";
@@ -46,7 +48,10 @@ import { InboxCountBadge } from "../sidebar/SidebarInboxRow";
 import { type BellFilter, BELL_FILTERS, bellSections } from "./inboxBell.logic";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
 import { ASSISTANT_CHAT_NAME } from "../../assistant/assistantChat.logic";
-import { useProtoChatPlace } from "../../proto/protoPlace";
+import { machineLabel as protoMachineLabel, useProtoChatPlace } from "../../proto/protoPlace";
+import { useProtoOneMachine } from "../../proto/protoState";
+import { useStore } from "../../store";
+import { useSwitchEnvironment } from "../../hooks/useSwitchEnvironment";
 
 export const InboxBell = memo(function InboxBell() {
   const [open, setOpen] = useState(false);
@@ -203,7 +208,51 @@ export function BellPanel({ onClose }: { onClose: () => void }) {
           )
         )}
       </div>
+      <ProtoOtherComputersWaiting onSwitch={onClose} />
     </section>
+  );
+}
+
+/**
+ * Sidebar prototype (w0115), (А) one computer: the Inbox stays about this
+ * computer, but one quiet line says another computer waits for you.
+ */
+function ProtoOtherComputersWaiting({ onSwitch }: { onSwitch: () => void }) {
+  const oneMachine = useProtoOneMachine();
+  const byEnvironment = useInboxStore((state) => state.byEnvironment);
+  const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
+  const switchEnvironment = useSwitchEnvironment();
+  if (!oneMachine) return null;
+  const others = Object.entries(byEnvironment)
+    .filter(([environmentId]) => environmentId !== activeEnvironmentId)
+    .map(([environmentId, snapshot]) => ({
+      environmentId,
+      waiting: snapshot.items.filter(
+        (item) => item.readAt === null && !isSnoozed(item) && isNeedsYou(item),
+      ).length,
+    }))
+    .filter((entry) => entry.waiting > 0);
+  if (others.length === 0) return null;
+  return (
+    <div className="border-t border-border/60 px-3 py-2" data-testid="proto-other-computers">
+      {others.map((entry) => (
+        <button
+          key={entry.environmentId}
+          type="button"
+          onClick={() => {
+            onSwitch();
+            switchEnvironment(entry.environmentId as EnvironmentId);
+          }}
+          className="flex w-full cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-left text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+        >
+          <span className="size-1.5 rounded-full bg-amber-500" aria-hidden />
+          <span className="min-w-0 flex-1 truncate">
+            {protoMachineLabel(entry.environmentId)}: {entry.waiting} waiting for you
+          </span>
+          <span className="shrink-0 font-medium text-foreground">Switch</span>
+        </button>
+      ))}
+    </div>
   );
 }
 

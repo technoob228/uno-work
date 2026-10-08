@@ -83,6 +83,8 @@ import {
   recentHomeFolders,
   tildePath,
 } from "./newProject.logic";
+import { ProtoMachineChip } from "../../proto/ProtoMachineChip";
+import { useProtoAllMachines } from "../../proto/protoState";
 
 const SOURCE_COPY: Record<
   Exclude<NewProjectSource, "template">,
@@ -123,6 +125,8 @@ export function NewProjectDialog() {
   const home = useHomeFolderPath(environmentId);
   const devMode = useDevMode();
   const machineLabel = useMachineLabel(environmentId);
+  // Sidebar prototype (w0115): with computers joined (Б) the project's computer is a choice.
+  const protoJoined = useProtoAllMachines();
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? undefined : close())}>
@@ -137,7 +141,12 @@ export function NewProjectDialog() {
             data-testid="new-project-machine"
           >
             <MonitorIcon className="size-3.5" />
-            On computer <b className="font-medium text-foreground">{machineLabel}</b>
+            On computer{" "}
+            {protoJoined ? (
+              <ProtoMachineChip environmentId={environmentId} title="Make the project on" />
+            ) : (
+              <b className="font-medium text-foreground">{machineLabel}</b>
+            )}
           </p>
         </DialogHeader>
         {step === "choose" ? (

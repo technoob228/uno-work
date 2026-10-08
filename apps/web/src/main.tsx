@@ -40,6 +40,6 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement, {
 }).render(
   <React.StrictMode>
     <RouterProvider router={router} />
-    {PROTO ? <ProtoPanelLazy /> : null}
+    {PROTO ? <ProtoPanelLazy router={router} /> : null}
   </React.StrictMode>,
 );

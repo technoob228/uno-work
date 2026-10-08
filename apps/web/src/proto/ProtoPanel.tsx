@@ -6,10 +6,38 @@
 import { ChevronDownIcon, ChevronUpIcon, SlidersHorizontalIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import type { EnvironmentId } from "@t3tools/contracts";
+
 import { cn } from "~/lib/utils";
+import type { getRouter } from "../router";
+import { useStore } from "../store";
+import { MACHINES } from "./fixtures";
 import { MODES, VARIANTS, useProtoStore } from "./protoState";
 
-export default function ProtoPanel() {
+/**
+ * (Б): a chat opened from the joined list makes its computer the active one,
+ * so the chat's header, Files and the computer pill agree with the chat.
+ */
+function useActiveFollowsOpenChat(router: ProtoRouter) {
+  const mode = useProtoStore((state) => state.mode);
+  useEffect(() => {
+    if (mode !== "all") return;
+    const sync = () => {
+      const environmentId = router.state.location.pathname.split("/")[1] ?? "";
+      if (!MACHINES[environmentId]) return;
+      if (useStore.getState().activeEnvironmentId !== environmentId) {
+        useStore.getState().setActiveEnvironmentId(environmentId as EnvironmentId);
+      }
+    };
+    sync();
+    return router.subscribe("onResolved", sync);
+  }, [mode, router]);
+}
+
+type ProtoRouter = ReturnType<typeof getRouter>;
+
+export default function ProtoPanel({ router }: { router: ProtoRouter }) {
+  useActiveFollowsOpenChat(router);
   const variant = useProtoStore((state) => state.variant);
   const mode = useProtoStore((state) => state.mode);
   const setVariant = useProtoStore((state) => state.setVariant);
