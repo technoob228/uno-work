@@ -16,6 +16,7 @@
 - Home: "Describe your site / bot" opens the chat where you already described it, not a new one. "Connect with SSH" is no longer the first advice unless you picked the server goal or use Dev mode — it sits under the card as "For developers".
 - Light chat: when Uno didn't finish in one go the button says "Continue". The agent asks "open to everyone or by password?" before publishing a personal page and gives the link to form entries after publishing a site with a form.
 - Files: one line says what "This computer" and "Cloud storage" are (the computer's files go with it; Cloud storage stays and keeps copies of computers); project and app folders carry a small tag.
+- Economy: a command your agent left running (a build, a script under nohup, a background shell) keeps the computer awake until it ends; the computer's status names it ("python3 is still running").
 - Computer menu: the Economy switch explains itself in one line. Browser panel: "The agent is using this browser" goes away when the agent's turn ends. Phone (390): the chips under Home's input no longer run past its edge.
 
 ## v0.0.112 — 2026-10-07
