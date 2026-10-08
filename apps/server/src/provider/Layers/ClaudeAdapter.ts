@@ -2197,6 +2197,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             taskId: RuntimeTaskId.make(message.task_id),
             description: message.description,
             ...(message.task_type ? { taskType: message.task_type } : {}),
+            ...((message as { is_backgrounded?: boolean }).is_backgrounded === true
+              ? { isBackgrounded: true }
+              : {}),
           },
         });
         return;

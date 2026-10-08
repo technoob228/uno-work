@@ -19,6 +19,7 @@ import { ProviderValidationError } from "../Errors.ts";
 import { ProviderSessionReaper } from "../Services/ProviderSessionReaper.ts";
 import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
+import { recordRuntimeEvent, resetSessionActivity } from "../sessionActivity.ts";
 import { makeProviderSessionReaperLive } from "./ProviderSessionReaper.ts";
 
 const defaultModelSelection = {
@@ -117,6 +118,7 @@ describe("ProviderSessionReaper", () => {
   let scope: Scope.Closeable | null = null;
 
   afterEach(async () => {
+    resetSessionActivity();
     if (scope) {
       await Effect.runPromise(Scope.close(scope, Exit.void));
     }
@@ -274,6 +276,106 @@ describe("ProviderSessionReaper", () => {
 
     expect(harness.stopSession.mock.calls[0]?.[0]).toEqual({ threadId });
     expect(harness.stoppedThreadIds.has(threadId)).toBe(true);
+  });
+
+  async function seedStaleBinding(threadId: ThreadId) {
+    const repository = await runtime!.runPromise(Effect.service(ProviderSessionRuntimeRepository));
+    await runtime!.runPromise(
+      repository.upsert({
+        threadId,
+        providerName: "claudeAgent",
+        providerInstanceId: null,
+        adapterKey: "claudeAgent",
+        runtimeMode: "full-access",
+        status: "running",
+        lastSeenAt: "2026-04-14T00:00:00.000Z",
+        resumeCursor: { opaque: "resume-seeded" },
+        runtimePayload: null,
+      }),
+    );
+  }
+
+  async function runOneSweep() {
+    const reaper = await runtime!.runPromise(Effect.service(ProviderSessionReaper));
+    scope = await Effect.runPromise(Scope.make("sequential"));
+    await Effect.runPromise(reaper.start().pipe(Scope.provide(scope)));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  function readyThread(threadId: ThreadId, activeTurnId: TurnId | null = null) {
+    return {
+      id: threadId,
+      session: {
+        threadId,
+        status: activeTurnId ? ("running" as const) : ("ready" as const),
+        providerName: "claudeAgent" as const,
+        runtimeMode: "full-access" as const,
+        activeTurnId,
+        lastError: null,
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  it("keeps a stale session whose background task is still running", async () => {
+    const threadId = ThreadId.make("thread-reaper-background-task");
+    const harness = await createHarness({ readModel: makeReadModel([readyThread(threadId)]) });
+    await seedStaleBinding(threadId);
+    // The agent started a background task an hour ago and has been quiet since.
+    recordRuntimeEvent(
+      { threadId, type: "task.started", payload: { taskId: "bg-1", isBackgrounded: true } },
+      Date.now() - 3_600_000,
+    );
+
+    await runOneSweep();
+
+    expect(harness.stopSession).not.toHaveBeenCalled();
+  });
+
+  it("reaps the session once its background task has completed and it went quiet", async () => {
+    const threadId = ThreadId.make("thread-reaper-background-done");
+    const harness = await createHarness({ readModel: makeReadModel([readyThread(threadId)]) });
+    await seedStaleBinding(threadId);
+    const longAgo = Date.now() - 3_600_000;
+    recordRuntimeEvent(
+      { threadId, type: "task.started", payload: { taskId: "bg-2", isBackgrounded: true } },
+      longAgo,
+    );
+    recordRuntimeEvent(
+      { threadId, type: "task.completed", payload: { taskId: "bg-2", status: "completed" } },
+      longAgo,
+    );
+
+    await runOneSweep();
+
+    expect(harness.stopSession.mock.calls[0]?.[0]).toEqual({ threadId });
+  });
+
+  it("counts the agent's own recent events as activity", async () => {
+    const threadId = ThreadId.make("thread-reaper-agent-event");
+    const harness = await createHarness({ readModel: makeReadModel([readyThread(threadId)]) });
+    await seedStaleBinding(threadId);
+    recordRuntimeEvent({ threadId, type: "turn.completed" });
+
+    await runOneSweep();
+
+    expect(harness.stopSession).not.toHaveBeenCalled();
+  });
+
+  it("does not time out a long active turn that is still producing events", async () => {
+    const threadId = ThreadId.make("thread-reaper-long-turn");
+    const turnId = TurnId.make("turn-reaper-long");
+    const harness = await createHarness({
+      readModel: makeReadModel([readyThread(threadId, turnId)]),
+      activeTurnThresholdMs: 5_000,
+    });
+    await seedStaleBinding(threadId);
+    recordRuntimeEvent({ threadId, type: "item.completed" });
+
+    await runOneSweep();
+
+    expect(harness.stopSession).not.toHaveBeenCalled();
+    expect(harness.dispatchedCommands).toHaveLength(0);
   });
 
   it("skips stale sessions when the active turn is still within its threshold", async () => {

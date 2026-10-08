@@ -12,6 +12,7 @@ import {
 } from "../Services/ProviderSessionReaper.ts";
 import { ProviderService } from "../Services/ProviderService.ts";
 import { currentHarnessBudget } from "../harnessBudget.ts";
+import { getSessionActivity, lastActivityMs } from "../sessionActivity.ts";
 
 const DEFAULT_INACTIVITY_THRESHOLD_MS = 30 * 60 * 1000;
 const DEFAULT_ACTIVE_TURN_THRESHOLD_MS = 2 * 60 * 60 * 1000;
@@ -63,8 +64,24 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
           continue;
         }
 
-        const idleDurationMs = now - lastSeenMs;
+        // Idle time counts from the later of the person's last message and
+        // the agent's last event: a turn that ran for an hour is not idle the
+        // moment it ends, and the 2-hour limit below is for silence, not for
+        // a long piece of work.
+        const activity = getSessionActivity(binding.threadId, now);
+        const idleDurationMs = now - lastActivityMs(lastSeenMs, activity);
         if (idleDurationMs < inactivityThresholdMs) {
+          continue;
+        }
+
+        // Stopping the harness kills its background tasks (`run_in_background`,
+        // `Monitor`) and nothing would wake the agent when they finish.
+        if (activity.backgroundTaskCount > 0) {
+          yield* Effect.logDebug("provider.session.reaper.skipped-background-tasks", {
+            threadId: binding.threadId,
+            backgroundTaskCount: activity.backgroundTaskCount,
+            idleDurationMs,
+          });
           continue;
         }
 

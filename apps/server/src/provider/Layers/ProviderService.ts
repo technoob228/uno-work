@@ -50,6 +50,12 @@ import { ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { redactSecretsDeep } from "../../secretRedaction.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
 import { type LiveHarnessSession, selectSessionsToEvict } from "../harnessBudget.ts";
+import {
+  forgetSessionActivity,
+  getSessionActivity,
+  lastActivityMs,
+  recordRuntimeEvent,
+} from "../sessionActivity.ts";
 
 /**
  * Hook for tests that want to override the canonical event logger pulled
@@ -215,7 +221,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   // канонического лога, истории треда и UI (агент мог прочитать settings.json
   // или env и вывести ключ в шаге).
   const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-    Effect.sync(() => redactSecretsDeep(event)).pipe(
+    Effect.sync(() => {
+      recordRuntimeEvent(event);
+      return redactSecretsDeep(event);
+    }).pipe(
       Effect.tap((canonicalEvent) =>
         canonicalEventLogger
           ? canonicalEventLogger.write(canonicalEvent, canonicalEvent.threadId)
@@ -528,7 +537,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     for (const [instanceId, adapter] of yield* getAdapterEntries) {
       const sessions = yield* adapter.listSessions();
       for (const session of sessions) {
-        const lastSeen = lastSeenByThread.get(session.threadId);
+        const lastSeenStored = lastSeenByThread.get(session.threadId);
+        const activity = getSessionActivity(session.threadId);
+        const lastSeen =
+          lastSeenStored !== undefined && !Number.isNaN(lastSeenStored)
+            ? lastActivityMs(lastSeenStored, activity)
+            : activity.lastEventMs;
         const updated = Date.parse(session.updatedAt);
         live.push({
           threadId: session.threadId,
@@ -537,7 +551,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           busy:
             session.status === "running" ||
             session.status === "connecting" ||
-            session.activeTurnId !== undefined,
+            session.activeTurnId !== undefined ||
+            activity.backgroundTaskCount > 0,
           lastActivityMs:
             lastSeen !== undefined && !Number.isNaN(lastSeen)
               ? lastSeen
@@ -903,6 +918,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         if (routed.isActive) {
           yield* routed.adapter.stopSession(routed.threadId);
         }
+        forgetSessionActivity(input.threadId);
         yield* directory.upsert({
           threadId: input.threadId,
           provider: routed.adapter.provider,
