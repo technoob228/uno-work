@@ -41,6 +41,7 @@ import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKeyFromPath,
 } from "../logicalProject";
+import { startStaleBundleReload } from "../staleBundle";
 import {
   getServerConfigUpdatedNotification,
   ServerConfigUpdatedNotification,
@@ -345,7 +346,13 @@ function ServerStateBootstrap() {
       return;
     }
 
-    return startServerStateSync(getPrimaryEnvironmentConnection().client.server);
+    const stopSync = startServerStateSync(getPrimaryEnvironmentConnection().client.server);
+    // After this computer's Uno Work updates, a tab on the old bundle reloads.
+    const stopStaleReload = startStaleBundleReload();
+    return () => {
+      stopStaleReload();
+      stopSync();
+    };
   }, []);
 
   return null;

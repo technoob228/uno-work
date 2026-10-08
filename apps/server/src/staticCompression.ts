@@ -21,6 +21,26 @@ const gzip = promisify(zlib.gzip);
 
 export const STATIC_IMMUTABLE_CACHE = "public, max-age=31536000, immutable";
 export const STATIC_REVALIDATE_CACHE = "no-cache";
+/**
+ * The app's HTML is never kept (08.10): with `no-cache` a restored tab or
+ * back/forward still brought back the old page, which then ran the old bundle
+ * from the year-long asset cache after Uno Work had updated.
+ */
+export const STATIC_HTML_CACHE = "no-store";
+
+export function staticCacheControl(pathname: string, contentType: string): string {
+  if (isHashedStaticAsset(pathname)) return STATIC_IMMUTABLE_CACHE;
+  return contentType.startsWith("text/html") ? STATIC_HTML_CACHE : STATIC_REVALIDATE_CACHE;
+}
+
+/**
+ * Build output that isn't there: answer 404, not the app's page. An old tab
+ * asking for a chunk of the previous version must see the import fail (and
+ * reload), not get HTML with 200.
+ */
+export function isMissingBuildAsset(pathname: string): boolean {
+  return pathname.startsWith("/assets/");
+}
 
 /** Vite's hashed build output: safe to cache forever. */
 export function isHashedStaticAsset(pathname: string): boolean {

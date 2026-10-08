@@ -93,10 +93,10 @@ import {
 import { getOfficeEngineStatus, startOfficeEngineInstall } from "./officeEngineInstall.ts";
 import {
   compressStaticBody,
-  isHashedStaticAsset,
+  isMissingBuildAsset,
   isStaticCompressible,
-  STATIC_IMMUTABLE_CACHE,
-  STATIC_REVALIDATE_CACHE,
+  STATIC_HTML_CACHE,
+  staticCacheControl,
 } from "./staticCompression.ts";
 import { isAllowedCorsOrigin, isLoopbackHostname } from "./corsOrigins.ts";
 import { HealthCheck } from "./health.ts";
@@ -1087,6 +1087,12 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       .stat(filePath)
       .pipe(Effect.catch(() => Effect.succeed(null)));
     if (!fileInfo || fileInfo.type !== "File") {
+      if (isMissingBuildAsset(url.value.pathname)) {
+        return HttpServerResponse.text("Not Found", {
+          status: 404,
+          headers: { "Cache-Control": "no-store" },
+        });
+      }
       const indexPath = path.resolve(staticRoot, "index.html");
       const indexData = yield* fileSystem
         .readFile(indexPath)
@@ -1097,6 +1103,7 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       return HttpServerResponse.uint8Array(indexData, {
         status: 200,
         contentType: "text/html; charset=utf-8",
+        headers: { "Cache-Control": STATIC_HTML_CACHE },
       });
     }
 
@@ -1108,11 +1115,9 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Internal Server Error", { status: 500 });
     }
 
-    // Hashed build output is cached for a year; everything else revalidates
-    // (staticCompression.ts). Text files go compressed when the browser can.
-    const cacheControl = isHashedStaticAsset(url.value.pathname)
-      ? STATIC_IMMUTABLE_CACHE
-      : STATIC_REVALIDATE_CACHE;
+    // Hashed build output is cached for a year, HTML never, everything else
+    // revalidates (staticCompression.ts). Text files go compressed when the browser can.
+    const cacheControl = staticCacheControl(url.value.pathname, contentType);
     const encoding = isStaticCompressible(contentType, data.length)
       ? negotiateOfficeEncoding(request.headers["accept-encoding"])
       : null;

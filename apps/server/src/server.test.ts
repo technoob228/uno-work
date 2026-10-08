@@ -1066,6 +1066,39 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect(
+    "never lets the browser keep the app's page; a missing chunk is 404, not the page",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-router-static-",
+        });
+        yield* fileSystem.writeFileString(path.join(staticDir, "index.html"), "<html>app</html>");
+        yield* fileSystem.makeDirectory(path.join(staticDir, "assets"));
+        yield* fileSystem.writeFileString(
+          path.join(staticDir, "assets", "main-EYqxfu69.js"),
+          "console.log(1)",
+        );
+
+        yield* buildAppUnderTest({ config: { staticDir } });
+
+        const root = yield* HttpClient.get("/");
+        assert.equal(root.headers["cache-control"], "no-store");
+        const deepLink = yield* HttpClient.get("/chat/some-thread");
+        assert.equal(deepLink.status, 200);
+        assert.include(yield* deepLink.text, "<html>app</html>");
+        assert.equal(deepLink.headers["cache-control"], "no-store");
+
+        const chunk = yield* HttpClient.get("/assets/main-EYqxfu69.js");
+        assert.equal(chunk.status, 200);
+        assert.equal(chunk.headers["cache-control"], "public, max-age=31536000, immutable");
+        const oldChunk = yield* HttpClient.get("/assets/Chat-OLDhash1.js");
+        assert.equal(oldChunk.status, 404);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("redirects to dev URL when configured", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest({
