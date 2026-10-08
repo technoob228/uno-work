@@ -1289,4 +1289,32 @@ describe("agent-spawned threads", () => {
     expect(updated?.spawnedByThreadId).toBe(ThreadId.make("thread-parent"));
     expect(updated?.messages[0]?.sentByThreadId).toBe(ThreadId.make("thread-parent"));
   });
+
+  it("applies Don't let agents write here from thread.meta-updated", () => {
+    const thread = makeThread({});
+    const closed = applyOrchestrationEvent(
+      makeState(thread),
+      makeEvent("thread.meta-updated", {
+        threadId: thread.id,
+        agentsClosedAt: "2026-10-08T12:00:00.000Z",
+        updatedAt: "2026-02-27T00:00:00.000Z",
+      }),
+      localEnvironmentId,
+    );
+    expect(
+      selectThreadByRef(closed, scopeThreadRef(localEnvironmentId, thread.id))?.agentsClosedAt,
+    ).toBe("2026-10-08T12:00:00.000Z");
+    const opened = applyOrchestrationEvent(
+      closed,
+      makeEvent(
+        "thread.meta-updated",
+        { threadId: thread.id, agentsClosedAt: null, updatedAt: "2026-02-27T00:00:00.000Z" },
+        { sequence: 2 },
+      ),
+      localEnvironmentId,
+    );
+    expect(
+      selectThreadByRef(opened, scopeThreadRef(localEnvironmentId, thread.id))?.agentsClosedAt,
+    ).toBeNull();
+  });
 });

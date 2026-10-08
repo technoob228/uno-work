@@ -583,6 +583,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             spawnedByThreadId: event.payload.spawnedByThreadId ?? null,
             controller: event.payload.spawnedByThreadId !== undefined ? "agent" : "human",
             controlChangedAt: null,
+            agentsClosedAt: null,
             assistantRole: event.payload.assistantRole ?? null,
             latestUserMessageAt: null,
             pendingApprovalCount: 0,
@@ -642,6 +643,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.pinnedAt !== undefined ? { pinnedAt: event.payload.pinnedAt } : {}),
             ...(event.payload.assistantRole !== undefined
               ? { assistantRole: event.payload.assistantRole }
+              : {}),
+            ...(event.payload.agentsClosedAt !== undefined
+              ? { agentsClosedAt: event.payload.agentsClosedAt }
               : {}),
             updatedAt: event.payload.updatedAt,
           });

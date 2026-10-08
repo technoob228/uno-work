@@ -98,6 +98,7 @@ describe("orchestration projector", () => {
         spawnedByThreadId: null,
         controller: "human",
         controlChangedAt: null,
+        agentsClosedAt: null,
         assistantRole: null,
         messages: [],
         proposedPlans: [],
@@ -171,6 +172,52 @@ describe("orchestration projector", () => {
       controlChangedAt: later,
       updatedAt: later,
     });
+  });
+
+  it("applies Don't let agents write here from thread.meta-updated and leaves it otherwise", async () => {
+    const now = "2026-10-08T10:00:00.000Z";
+    const later = "2026-10-08T10:05:00.000Z";
+    const created = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-thread-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "chat",
+            modelSelection: { provider: ProviderDriverKind.make("codex"), model: "gpt-5-codex" },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+    expect(created.threads[0]?.agentsClosedAt).toBeNull();
+    const meta = (sequence: number, payload: Record<string, unknown>) =>
+      makeEvent({
+        sequence,
+        type: "thread.meta-updated",
+        aggregateKind: "thread",
+        aggregateId: "thread-1",
+        occurredAt: later,
+        commandId: `cmd-meta-${sequence}`,
+        payload: { threadId: "thread-1", updatedAt: now, ...payload },
+      });
+    const closed = await Effect.runPromise(projectEvent(created, meta(2, { agentsClosedAt: later })));
+    expect(closed.threads[0]?.agentsClosedAt).toBe(later);
+    const renamed = await Effect.runPromise(projectEvent(closed, meta(3, { title: "renamed" })));
+    expect(renamed.threads[0]?.agentsClosedAt).toBe(later);
+    const opened = await Effect.runPromise(projectEvent(renamed, meta(4, { agentsClosedAt: null })));
+    expect(opened.threads[0]?.agentsClosedAt).toBeNull();
   });
 
   it("fails when event payload cannot be decoded by runtime schema", async () => {

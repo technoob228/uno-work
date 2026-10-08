@@ -232,12 +232,28 @@ function unsettledByActivityEvent(input: {
 }
 
 /** A human writing into a thread the spawning agent drives takes control in
-    the same batch, so the agent sees `human_in_control` on its next send.
-    Only human-originated sends count: the UI (no origin) and connectors
-    (Telegram/Slack relay a human). Manager/assistant/plugin/peer/system
-    sends leave control alone. */
+    the same batch: from then on the spawning agent may write only when the
+    chat is free, like any other agent. Only human-originated sends count:
+    the UI (no origin) and connectors (Telegram/Slack relay a human).
+    Manager/assistant/plugin/peer/system sends leave control alone. Also who
+    may open/close a chat to agents ("Don't let agents write here"). */
 function isHumanOrigin(origin: OrchestrationCommandOrigin | undefined): boolean {
   return origin === undefined || origin.kind === "connector";
+}
+
+/** A thread.meta.update that only opens/closes the chat to agents. */
+function isAgentsAccessOnlyUpdate(
+  command: Extract<OrchestrationCommand, { type: "thread.meta.update" }>,
+): boolean {
+  return (
+    command.agentsClosedAt !== undefined &&
+    command.title === undefined &&
+    command.modelSelection === undefined &&
+    command.branch === undefined &&
+    command.worktreePath === undefined &&
+    command.pinnedAt === undefined &&
+    command.assistantRole === undefined
+  );
 }
 
 function controlChangedEvent(input: {
@@ -579,6 +595,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       const metaModelSelection = modelSelectionForThread(metaThread, command.modelSelection);
+      // "Don't let agents write here" is the person's switch: an agent must
+      // not open (or close) a chat to agents for itself.
+      if (command.agentsClosedAt !== undefined && !isHumanOrigin(origin)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `agents_access_human_only: Only the person may open or close thread '${command.threadId}' to agents.`,
+        });
+      }
       if (command.assistantRole !== undefined) {
         const violation = assistantRoleViolation({
           readModel,
@@ -610,7 +634,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.worktreePath !== undefined ? { worktreePath: command.worktreePath } : {}),
           ...(command.pinnedAt !== undefined ? { pinnedAt: command.pinnedAt } : {}),
           ...(command.assistantRole !== undefined ? { assistantRole: command.assistantRole } : {}),
-          updatedAt: occurredAt,
+          ...(command.agentsClosedAt !== undefined
+            ? { agentsClosedAt: command.agentsClosedAt }
+            : {}),
+          // Opening/closing a chat to agents alone is not activity: it must
+          // not move the chat up the list.
+          updatedAt: isAgentsAccessOnlyUpdate(command) ? metaThread.updatedAt : occurredAt,
         },
       };
     }
@@ -920,22 +949,27 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       const targetController = targetThread.controller ?? "human";
       if (origin?.kind === "agent") {
-        // Any agent may message any other thread (plan 22) — its own child or a
-        // peer. What it may not do is write into an agent thread a human took
-        // over. Project scope and "waiting for the human" are the bridge's
-        // checks (they need settings); the bridge maps these prefixes to 4xx.
+        // Any agent may message any other thread (plan 22) — its own child, its
+        // parent or a peer — even one the person wrote in (0.0.115). Project
+        // scope, "busy" and "waiting for the human" are the bridge's checks
+        // (they need settings / waitMs); the bridge maps these prefixes to 4xx.
         if (command.threadId === origin.threadId) {
           return yield* new OrchestrationCommandInvariantError({
             commandType: command.type,
             detail: `cannot_message_self: Thread '${command.threadId}' cannot message itself.`,
           });
         }
-        if (targetThread.spawnedByThreadId != null && targetController !== "agent") {
-          return yield* new OrchestrationCommandInvariantError({
-            commandType: command.type,
-            detail: `human_in_control: A human has taken control of thread '${command.threadId}'.`,
-          });
-        }
+      }
+      // The person's "Don't let agents write here" holds for every agent: a
+      // chat's agent through the bridge and the manager / assistant tools.
+      if (
+        (origin?.kind === "agent" || origin?.kind === "manager") &&
+        (targetThread.agentsClosedAt ?? null) !== null
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `agents_closed: The person closed thread '${command.threadId}' to agents.`,
+        });
       }
       const userMessageEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...withEventBase({

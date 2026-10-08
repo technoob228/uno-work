@@ -288,14 +288,18 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       assert.strictEqual(plain?.spawnedByThreadId, null);
       assert.strictEqual(plain?.controller, null);
       assert.strictEqual(plain?.controlChangedAt, null);
+      assert.strictEqual(plain?.agentsClosedAt, null);
 
       yield* threads.upsert({
         ...row,
         spawnedByThreadId: parentThreadId,
         controller: "agent",
         controlChangedAt: "2026-09-14T01:00:00.000Z",
+        agentsClosedAt: "2026-09-14T02:00:00.000Z",
       });
       const spawned = Option.getOrNull(yield* threads.getById({ threadId }));
+      // "Don't let agents write here" (migration 049).
+      assert.strictEqual(spawned?.agentsClosedAt, "2026-09-14T02:00:00.000Z");
       assert.strictEqual(spawned?.spawnedByThreadId, parentThreadId);
       assert.strictEqual(spawned?.controller, "agent");
       assert.strictEqual(spawned?.controlChangedAt, "2026-09-14T01:00:00.000Z");

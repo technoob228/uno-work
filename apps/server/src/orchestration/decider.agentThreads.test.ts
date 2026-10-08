@@ -112,6 +112,19 @@ const controlSet = (
   createdAt: new Date().toISOString(),
 });
 
+const CLOSED_AT = "2026-10-08T12:00:00.000Z";
+
+const agentsAccess = (
+  threadId: ThreadId,
+  agentsClosedAt: string | null,
+  id = "cmd-agents-access",
+): OrchestrationCommand => ({
+  type: "thread.meta.update",
+  commandId: CommandId.make(id),
+  threadId,
+  agentsClosedAt,
+});
+
 async function seedParents(): Promise<OrchestrationReadModel> {
   const now = new Date().toISOString();
   let readModel = await apply(createEmptyReadModel(now), [
@@ -249,14 +262,66 @@ describe("decider agent-spawned threads: thread.turn.start", () => {
     ).rejects.toThrow("cannot_message_self:");
   });
 
-  it("rejects every agent once a human holds control of an agent thread", async () => {
+  it("lets every agent, the parent too, write into a thread a human took over (0.0.115)", async () => {
+    // The person wrote into the child: it is theirs now, but not closed.
+    const tookOver = await decideAndApply(await seedChild(), turnStart(CHILD_ID, "cmd-human"));
+    expect(threadOf(tookOver.readModel, CHILD_ID).controller).toBe("human");
+    for (const sender of [PARENT_ID, OTHER_ID]) {
+      const events = await decide(
+        tookOver.readModel,
+        turnStart(CHILD_ID, `cmd-from-${sender}`),
+        agentOrigin(sender),
+      );
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.message-sent",
+        "thread.turn-start-requested",
+      ]);
+      expect(events[0]?.payload).toMatchObject({ sentByThreadId: sender });
+    }
+    // An explicit handoff (older clients' button) does not lock agents out either.
     const handedOff = await decideAndApply(await seedChild(), controlSet(CHILD_ID, "human"));
     await expect(
       decide(handedOff.readModel, turnStart(CHILD_ID), agentOrigin(PARENT_ID)),
-    ).rejects.toThrow("human_in_control:");
+    ).resolves.toHaveLength(2);
+  });
+
+  it("rejects every agent and the manager in a chat the person closed to agents", async () => {
+    const closed = await decideAndApply(await seedChild(), agentsAccess(CHILD_ID, CLOSED_AT));
+    const closedParent = await decideAndApply(
+      closed.readModel,
+      agentsAccess(PARENT_ID, CLOSED_AT, "cmd-close-parent"),
+    );
+    const readModel = closedParent.readModel;
+    // The parent into its own child, a peer into it, a child into its parent.
+    await expect(decide(readModel, turnStart(CHILD_ID), agentOrigin(PARENT_ID))).rejects.toThrow(
+      "agents_closed:",
+    );
+    await expect(decide(readModel, turnStart(CHILD_ID), agentOrigin(OTHER_ID))).rejects.toThrow(
+      "agents_closed:",
+    );
+    await expect(decide(readModel, turnStart(PARENT_ID), agentOrigin(CHILD_ID))).rejects.toThrow(
+      "agents_closed:",
+    );
     await expect(
-      decide(handedOff.readModel, turnStart(CHILD_ID), agentOrigin(OTHER_ID)),
-    ).rejects.toThrow("human_in_control:");
+      decide(readModel, turnStart(CHILD_ID), { kind: "manager", tokenId: "token-1" }),
+    ).rejects.toThrow("agents_closed:");
+    // The person still writes (UI and connectors).
+    await expect(decide(readModel, turnStart(CHILD_ID))).resolves.toHaveLength(3);
+    await expect(decide(readModel, turnStart(PARENT_ID), CONNECTOR_ORIGIN)).resolves.toHaveLength(
+      2,
+    );
+  });
+
+  it("delivers again once the person opens the chat to agents", async () => {
+    const closed = await decideAndApply(await seedChild(), agentsAccess(OTHER_ID, CLOSED_AT));
+    const opened = await decideAndApply(
+      closed.readModel,
+      agentsAccess(OTHER_ID, null, "cmd-open"),
+    );
+    expect(threadOf(opened.readModel, OTHER_ID).agentsClosedAt).toBeNull();
+    await expect(
+      decide(opened.readModel, turnStart(OTHER_ID), agentOrigin(CHILD_ID)),
+    ).resolves.toHaveLength(2);
   });
 
   it("takes control for a human writing from the UI, before the message", async () => {
@@ -353,5 +418,60 @@ describe("decider agent-spawned threads: thread.control.set", () => {
     await expect(
       decide(await seedChild(), controlSet(CHILD_ID, "human"), agentOrigin(OTHER_ID)),
     ).rejects.toThrow("not_your_thread:");
+  });
+});
+
+describe("decider: Don't let agents write here (thread.meta.update agentsClosedAt)", () => {
+  it("closes and opens a chat for the person, without moving it up the list", async () => {
+    const readModel = await seedChild();
+    const before = threadOf(readModel, OTHER_ID).updatedAt;
+    const closed = await decideAndApply(readModel, agentsAccess(OTHER_ID, CLOSED_AT));
+    expect(closed.events.map((event) => event.type)).toEqual(["thread.meta-updated"]);
+    expect(closed.events[0]?.payload).toMatchObject({
+      agentsClosedAt: CLOSED_AT,
+      updatedAt: before,
+    });
+    expect(threadOf(closed.readModel, OTHER_ID).agentsClosedAt).toBe(CLOSED_AT);
+
+    const opened = await decideAndApply(
+      closed.readModel,
+      agentsAccess(OTHER_ID, null, "cmd-open"),
+      CONNECTOR_ORIGIN,
+    );
+    expect(threadOf(opened.readModel, OTHER_ID).agentsClosedAt).toBeNull();
+  });
+
+  it("starts every new chat open to agents", async () => {
+    const readModel = await seedChild();
+    expect(threadOf(readModel, PARENT_ID).agentsClosedAt).toBeNull();
+    expect(threadOf(readModel, CHILD_ID).agentsClosedAt).toBeNull();
+  });
+
+  it("rejects an agent or the manager opening or closing a chat", async () => {
+    const closed = await decideAndApply(await seedChild(), agentsAccess(CHILD_ID, CLOSED_AT));
+    await expect(
+      decide(closed.readModel, agentsAccess(CHILD_ID, null), agentOrigin(PARENT_ID)),
+    ).rejects.toThrow("agents_access_human_only:");
+    await expect(
+      decide(await seedChild(), agentsAccess(OTHER_ID, CLOSED_AT), agentOrigin(CHILD_ID)),
+    ).rejects.toThrow("agents_access_human_only:");
+    await expect(
+      decide(closed.readModel, agentsAccess(CHILD_ID, null), {
+        kind: "manager",
+        tokenId: "token-1",
+      }),
+    ).rejects.toThrow("agents_access_human_only:");
+  });
+
+  it("carries agentsClosedAt along with other meta updates", async () => {
+    const readModel = await seedChild();
+    const events = await decide(readModel, {
+      type: "thread.meta.update",
+      commandId: CommandId.make("cmd-rename"),
+      threadId: OTHER_ID,
+      title: "Renamed",
+      agentsClosedAt: CLOSED_AT,
+    });
+    expect(events[0]?.payload).toMatchObject({ title: "Renamed", agentsClosedAt: CLOSED_AT });
   });
 });

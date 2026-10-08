@@ -19,7 +19,7 @@ import { describe } from "vitest";
 import type { BridgeAuthorization } from "../browserBridge.ts";
 import { OrchestrationCommandInvariantError } from "../orchestration/Errors.ts";
 import type { OrchestrationDispatchError } from "../orchestration/Errors.ts";
-import { HUMAN_ACTIVE_MESSAGE, HUMAN_IN_CONTROL_MESSAGE, TARGET_BUSY_MESSAGE } from "./logic.ts";
+import { AGENTS_CLOSED_MESSAGE, HUMAN_ACTIVE_MESSAGE, TARGET_BUSY_MESSAGE } from "./logic.ts";
 import { type AgentThreadsScope, makeAgentThreadsHandlers } from "./service.ts";
 
 const OWN_PROJECT = "project-own" as ProjectId;
@@ -529,31 +529,90 @@ describe("agent threads bridge: driving children", () => {
     }),
   );
 
-  it.effect("409 human_in_control before dispatch when a human took over", () =>
+  it.effect("a parent writes into a child the person took over once it is free (0.0.115)", () =>
+    Effect.gen(function* () {
+      const running = { status: "running", updatedAt: T0 } as OrchestrationThreadShell["session"];
+      const idle = { status: "ready", updatedAt: T0 } as OrchestrationThreadShell["session"];
+      // Free: delivered, though the person wrote there (controller "human").
+      const free = makeFixture({
+        threads: [
+          threadShell(CALLER),
+          threadShell(CHILD, { spawnedByThreadId: CALLER, controller: "human", session: idle }),
+        ],
+      });
+      const delivered = yield* free.handlers.sendMessage(scoped(), {
+        threadId: CHILD,
+        body: { text: "next" },
+      });
+      assert.deepStrictEqual(delivered, {
+        status: 200,
+        body: { ok: true, threadId: CHILD, relation: "child" },
+      });
+      assert.strictEqual(free.dispatched.length, 1);
+
+      // Mid-turn: the parent no longer barges in, it waits like a peer.
+      const busy = makeFixture({
+        threads: [
+          threadShell(CALLER),
+          threadShell(CHILD, { spawnedByThreadId: CALLER, controller: "human", session: running }),
+        ],
+      });
+      const refused = yield* busy.handlers.sendMessage(scoped(), {
+        threadId: CHILD,
+        body: { text: "next" },
+      });
+      assert.strictEqual(refused.status, 409);
+      assert.strictEqual(body(refused).error, "target_busy");
+      assert.strictEqual(busy.dispatched.length, 0);
+
+      // Still driving its own child (no human wrote): mid-turn is fine.
+      const driving = makeFixture({
+        threads: [
+          threadShell(CALLER),
+          threadShell(CHILD, { spawnedByThreadId: CALLER, controller: "agent", session: running }),
+        ],
+      });
+      const midTurn = yield* driving.handlers.sendMessage(scoped(), {
+        threadId: CHILD,
+        body: { text: "next" },
+      });
+      assert.strictEqual(midTurn.status, 200);
+    }),
+  );
+
+  it.effect("409 agents_closed for everyone, the parent too, when the person closed the chat", () =>
     Effect.gen(function* () {
       const { handlers, dispatched } = makeFixture({
         threads: [
           threadShell(CALLER),
-          threadShell(CHILD, { spawnedByThreadId: CALLER, controller: "human" }),
+          threadShell(CHILD, {
+            spawnedByThreadId: CALLER,
+            controller: "agent",
+            agentsClosedAt: T0,
+          }),
         ],
       });
       const reply = yield* handlers.sendMessage(scoped(), {
         threadId: CHILD,
-        body: { text: "next" },
+        body: { text: "next", waitMs: 60_000 },
       });
       assert.deepStrictEqual(reply, {
         status: 409,
-        body: { ok: false, error: "human_in_control", message: HUMAN_IN_CONTROL_MESSAGE },
+        body: { ok: false, error: "agents_closed", message: AGENTS_CLOSED_MESSAGE },
       });
+      assert.match(AGENTS_CLOSED_MESSAGE, /The person closed this chat to agents/);
       assert.strictEqual(dispatched.length, 0);
-      // Reading is still allowed.
+      // Reading is still allowed and says so.
       const read = yield* handlers.getThread(scoped(), {
         threadId: CHILD,
         limit: null,
         waitMs: null,
       });
       assert.strictEqual(read.status, 200);
-      assert.strictEqual(body(read).controller, "human");
+      assert.strictEqual(body(read).agentsClosed, true);
+      const list = yield* handlers.listThreads(scoped(), { scope: "children" });
+      const rows = body(list).threads as Array<Record<string, unknown>>;
+      assert.strictEqual(rows[0]?.agentsClosed, true);
     }),
   );
 
@@ -562,15 +621,17 @@ describe("agent threads bridge: driving children", () => {
       const race = makeFixture({
         dispatchError: new OrchestrationCommandInvariantError({
           commandType: "thread.turn.start",
-          detail: "human_in_control: A human has taken control of thread 'thread-child'.",
+          detail: "agents_closed: The person closed thread 'thread-child' to agents.",
         }),
       });
       const raced = yield* race.handlers.sendMessage(scoped(), {
         threadId: CHILD,
         body: { text: "x" },
       });
-      assert.strictEqual(raced.status, 409);
-      assert.strictEqual(body(raced).error, "human_in_control");
+      assert.deepStrictEqual(raced, {
+        status: 409,
+        body: { ok: false, error: "agents_closed", message: AGENTS_CLOSED_MESSAGE },
+      });
 
       const notYours = makeFixture({
         dispatchError: new OrchestrationCommandInvariantError({
@@ -700,13 +761,14 @@ describe("agent threads bridge: peers (plan 22)", () => {
     }),
   );
 
-  it.effect("refuses threads that wait for the human or that a human took over", () =>
+  it.effect("refuses threads that wait for the human or that the person closed", () =>
     Effect.gen(function* () {
       const { handlers, dispatched } = makeFixture({
         threads: [
           threadShell(CALLER),
           threadShell("thread-asking" as ThreadId, { hasPendingApprovals: true }),
-          threadShell(FOREIGN, {
+          threadShell(FOREIGN, { agentsClosedAt: T0 }),
+          threadShell("thread-taken" as ThreadId, {
             spawnedByThreadId: "someone-else" as ThreadId,
             controller: "human",
           }),
@@ -720,13 +782,21 @@ describe("agent threads bridge: peers (plan 22)", () => {
         status: 409,
         body: { ok: false, error: "human_active", message: HUMAN_ACTIVE_MESSAGE },
       });
-      const takenOver = yield* handlers.sendMessage(scoped(), {
+      const closed = yield* handlers.sendMessage(scoped(), {
         threadId: FOREIGN,
         body: { text: "x" },
       });
-      assert.strictEqual(takenOver.status, 409);
-      assert.strictEqual(body(takenOver).error, "human_in_control");
+      assert.strictEqual(closed.status, 409);
+      assert.strictEqual(body(closed).error, "agents_closed");
       assert.strictEqual(dispatched.length, 0);
+      // Someone else's agent chat the person wrote in: open to a free peer.
+      const takenOver = yield* handlers.sendMessage(scoped(), {
+        threadId: "thread-taken",
+        body: { text: "x" },
+      });
+      assert.strictEqual(takenOver.status, 200);
+      assert.strictEqual(body(takenOver).relation, "peer");
+      assert.strictEqual(dispatched.length, 1);
     }),
   );
 

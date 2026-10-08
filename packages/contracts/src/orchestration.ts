@@ -246,9 +246,12 @@ export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
 
 /**
  * Who drives a thread right now. A thread another thread's agent spawned
- * starts as "agent" (the spawning agent may send turns into it); a human
- * message or the handoff button flips it to "human", which locks the agent
- * out until the human hands it back. Absent on the wire means "human".
+ * starts as "agent": the spawning agent may write into it even mid-turn. A
+ * human message flips it to "human"; from then on the spawning agent writes
+ * like any other agent — only when the chat is free (not running, not
+ * waiting for the person). It never locks agents out: only the person's
+ * "Don't let agents write here" (`agentsClosedAt`) does. Absent on the wire
+ * means "human".
  */
 export const ThreadController = Schema.Literals(["human", "agent"]);
 export type ThreadController = typeof ThreadController.Type;
@@ -436,6 +439,10 @@ export const OrchestrationThread = Schema.Struct({
   // See ThreadController. Absent means "human".
   controller: Schema.optional(ThreadController),
   controlChangedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // Set when the person turned on "Don't let agents write here" for this
+  // chat: every agent's message is refused (409 agents_closed) until they
+  // turn it off. Null / absent: agents may write when the chat is free.
+  agentsClosedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // See ThreadAssistantRole. Optional so pre-assistant-chat servers decode.
   assistantRole: Schema.optional(Schema.NullOr(ThreadAssistantRole)),
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -497,6 +504,8 @@ export const OrchestrationThreadShell = Schema.Struct({
   spawnedByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   controller: Schema.optional(ThreadController),
   controlChangedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // See OrchestrationThread.agentsClosedAt.
+  agentsClosedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // See ThreadAssistantRole.
   assistantRole: Schema.optional(Schema.NullOr(ThreadAssistantRole)),
   session: Schema.NullOr(OrchestrationSession),
@@ -642,6 +651,10 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   // Daemon-only (see ThreadCreateCommand.assistantRole): makes a chat THE
   // assistant chat (the assistant-chat migration) or clears the role.
   assistantRole: Schema.optional(Schema.NullOr(ThreadAssistantRole)),
+  // "Don't let agents write here": an ISO timestamp closes the chat to every
+  // agent, null opens it again. Only the person may change it (an agent or
+  // manager origin is rejected). Omitted leaves it unchanged.
+  agentsClosedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
 });
 
 // Wire-compatible with upstream T3 Code's thread.snooze / thread.unsnooze.
@@ -681,6 +694,8 @@ const ThreadUnsettleCommand = Schema.Struct({
 
 // Handoff between the human and the spawning agent. A human may set either
 // value; an agent (origin kind "agent") may only release control to "human".
+// The app no longer offers "Hand back to agent" (0.0.115): the command stays
+// for the agents' `/release` and for older clients.
 const ThreadControlSetCommand = Schema.Struct({
   type: Schema.Literal("thread.control.set"),
   commandId: CommandId,
@@ -1066,6 +1081,8 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   assistantRole: Schema.optional(Schema.NullOr(ThreadAssistantRole)),
+  // See ThreadMetaUpdateCommand.agentsClosedAt.
+  agentsClosedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   updatedAt: IsoDateTime,
 });
 

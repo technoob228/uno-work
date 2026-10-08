@@ -4175,12 +4175,14 @@ export default function ChatView(props: ChatViewProps) {
               }
             >
               <div className={cn("relative isolate", isPreviewFocusMode && "pointer-events-auto")}>
-                {isServerThread && activeThread?.spawnedByThreadId ? (
+                {isServerThread &&
+                (activeThread?.spawnedByThreadId || activeThread?.agentsClosedAt) ? (
                   <ThreadControlBar
                     environmentId={activeThread.environmentId}
                     threadId={activeThread.id}
                     spawnedByThreadId={activeThread.spawnedByThreadId}
                     controller={activeThread.controller}
+                    agentsClosedAt={activeThread.agentsClosedAt}
                   />
                 ) : null}
                 {activeThread && isAssistantConversation(activeThread) ? (
