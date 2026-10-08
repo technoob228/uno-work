@@ -346,7 +346,9 @@ export function MyUnoView() {
               {!needsSignIn && sub?.paymentNotice ? (
                 <PaymentNoticeCard notice={sub.paymentNotice} />
               ) : null}
-              {!isWebLite ? <SelfUpdateCard environmentId={currentEnvironmentId} persistent /> : null}
+              {!isWebLite ? (
+                <SelfUpdateCard environmentId={currentEnvironmentId} persistent />
+              ) : null}
               {needsSignIn ? (
                 <section className="rounded-2xl border border-border/60 bg-card/40 p-6">
                   <h1 className="mb-1 text-lg font-semibold">Everything in one place</h1>

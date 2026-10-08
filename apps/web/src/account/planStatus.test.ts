@@ -39,7 +39,9 @@ describe("planStatusLine", () => {
       text: "Ends on 2026-11-02, no more charges.",
       action: { label: "Keep my plan" },
     });
-    expect(cancelled?.kind === "cancelled" && cancelled.action.href).toMatch(/\/billing\?resume=1$/);
+    expect(cancelled?.kind === "cancelled" && cancelled.action.href).toMatch(
+      /\/billing\?resume=1$/,
+    );
     expect(cancelled?.text).not.toMatch(/renew|add \$/i);
   });
 

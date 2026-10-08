@@ -151,9 +151,7 @@ export function withoutSshFirst(
       .slice(from + 1)
       .find(
         (entry) =>
-          !entry.done &&
-          !answers[nextStepDoneKey(entry.id)] &&
-          !answers[nextStepSkipKey(entry.id)],
+          !entry.done && !answers[nextStepDoneKey(entry.id)] && !answers[nextStepSkipKey(entry.id)],
       ) ?? null;
   return { step: after, developerStep: step };
 }

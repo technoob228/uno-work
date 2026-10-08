@@ -11,7 +11,7 @@ import {
 } from "./MessagesTimeline.logic";
 
 describe("workingReassurance", () => {
-  it("says nothing at first and \"still working\" once the wait is long", () => {
+  it('says nothing at first and "still working" once the wait is long', () => {
     expect(workingReassurance(0)).toBeNull();
     expect(workingReassurance(14)).toBeNull();
     expect(workingReassurance(15)).toBe("still working");

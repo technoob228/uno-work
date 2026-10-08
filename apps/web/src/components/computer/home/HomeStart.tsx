@@ -540,7 +540,7 @@ export function HomeStart({
           data-first-screen=""
         >
           {notices}
-{updateNotice}
+          {updateNotice}
           <h1
             className="mb-2 text-center text-[28px] font-semibold tracking-tight"
             data-testid="home-greeting"
@@ -570,7 +570,7 @@ export function HomeStart({
         data-testid="home-simple"
       >
         {notices}
-{updateNotice}
+        {updateNotice}
         {setupHome.banner ? <SetupDoneBanner setup={setupHome} /> : null}
         <div className="flex flex-col gap-1">
           <h1 className="text-[28px] font-semibold tracking-tight" data-testid="home-greeting">
@@ -689,7 +689,7 @@ export function HomeStart({
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 pt-6 pb-16 sm:pt-12">
       {notices}
-{updateNotice}
+      {updateNotice}
       {setupHome.banner ? <SetupDoneBanner setup={setupHome} /> : null}
 
       {layout.editing ? (

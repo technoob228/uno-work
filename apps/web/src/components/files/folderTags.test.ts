@@ -4,7 +4,11 @@ import { expandHome, folderTagOf, folderTags } from "./folderTags";
 
 describe("folderTags", () => {
   const tags = folderTags({
-    projectFolders: ["/home/unowork/projects/schedule/", "/home/unowork", "/home/unowork/projects/notes"],
+    projectFolders: [
+      "/home/unowork/projects/schedule/",
+      "/home/unowork",
+      "/home/unowork/projects/notes",
+    ],
     appFolders: ["~/projects/notes", null, "~"],
     home: "/home/unowork/",
   });

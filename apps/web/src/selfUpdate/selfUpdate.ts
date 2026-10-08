@@ -118,7 +118,10 @@ export function resolveSelfUpdateView(input: {
       step: status.step ?? "Updating",
     };
   }
-  if (status.state === "failed" && (status.finishedAt === null || isFresh(status.finishedAt, input.now))) {
+  if (
+    status.state === "failed" &&
+    (status.finishedAt === null || isFresh(status.finishedAt, input.now))
+  ) {
     return {
       kind: "failed",
       message: status.error ?? "The update didn't finish.",

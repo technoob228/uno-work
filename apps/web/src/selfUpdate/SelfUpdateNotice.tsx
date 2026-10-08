@@ -159,8 +159,7 @@ function noticeParts(update: SelfUpdateController, size: "xs" | "sm"): NoticePar
         icon: <DownloadIcon />,
         title: COPY.availableTitle,
         description:
-          update.startError ??
-          (view.canUpdate ? COPY.availableBody(view.version) : COPY.notOwner),
+          update.startError ?? (view.canUpdate ? COPY.availableBody(view.version) : COPY.notOwner),
         actions: view.canUpdate ? (
           <Button
             size={size}

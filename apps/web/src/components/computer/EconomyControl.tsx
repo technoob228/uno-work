@@ -144,7 +144,10 @@ export function EconomyLine({
       </div>
       {/* Always visible: what the switch does (the full story is behind "i"). */}
       {open ? null : (
-        <p className="pl-5.5 text-[11px] leading-snug text-muted-foreground" data-testid="economy-explain">
+        <p
+          className="pl-5.5 text-[11px] leading-snug text-muted-foreground"
+          data-testid="economy-explain"
+        >
           {economyShortExplain(economy)}
         </p>
       )}

@@ -25,12 +25,7 @@ export type PlanStatusLine =
 export function planStatusLine(input: {
   readonly subscription: Pick<
     AccountSubscription,
-    | "status"
-    | "nextBillingAt"
-    | "trialExpiresAt"
-    | "cancelledAt"
-    | "planEndedAt"
-    | "keepUntil"
+    "status" | "nextBillingAt" | "trialExpiresAt" | "cancelledAt" | "planEndedAt" | "keepUntil"
   >;
   /** How much the balance is short of the next charge, in dollars. */
   readonly shortUsd: number;

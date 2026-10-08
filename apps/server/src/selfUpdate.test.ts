@@ -105,7 +105,10 @@ describe("selfUpdatePathsFromEnv", () => {
   it("is off unless both paths are set and absolute", () => {
     expect(selfUpdatePathsFromEnv({})).toBeNull();
     expect(
-      selfUpdatePathsFromEnv({ [SELF_UPDATE_REQUEST_ENV]: "request", [SELF_UPDATE_STATUS_ENV]: "/s" }),
+      selfUpdatePathsFromEnv({
+        [SELF_UPDATE_REQUEST_ENV]: "request",
+        [SELF_UPDATE_STATUS_ENV]: "/s",
+      }),
     ).toBeNull();
     expect(
       selfUpdatePathsFromEnv({
@@ -242,7 +245,8 @@ describe("self-update controller", () => {
       paths.statusFile,
       JSON.stringify({
         state: "failed",
-        error: "Uno Work 0.0.113 didn't start within 120 seconds. This computer is back on Uno Work 0.0.112.",
+        error:
+          "Uno Work 0.0.113 didn't start within 120 seconds. This computer is back on Uno Work 0.0.112.",
         rolledBack: true,
         fromVersion: "0.0.112",
         toVersion: "0.0.113",
@@ -258,7 +262,13 @@ describe("self-update controller", () => {
     });
     writeFileSync(
       paths.statusFile,
-      JSON.stringify({ state: "done", fromVersion: "0.0.111", toVersion: "0.0.112", finishedAt: now, updatedAt: now }),
+      JSON.stringify({
+        state: "done",
+        fromVersion: "0.0.111",
+        toVersion: "0.0.112",
+        finishedAt: now,
+        updatedAt: now,
+      }),
     );
     expect(await controller.status({ canUpdate: true })).toMatchObject({
       state: "done",
@@ -313,9 +323,10 @@ describe("security journal report", () => {
       outcome: "updated",
       by_owner: true,
     });
-    expect(
-      selfUpdateReportFor({ ...run, state: "failed", rolledBack: true }, null),
-    ).toMatchObject({ outcome: "rolled_back", by_owner: false });
+    expect(selfUpdateReportFor({ ...run, state: "failed", rolledBack: true }, null)).toMatchObject({
+      outcome: "rolled_back",
+      by_owner: false,
+    });
     expect(selfUpdateReportFor({ ...run, state: "failed", rolledBack: false }, null)).toBeNull();
     expect(selfUpdateReportFor({ ...run, state: "current" }, null)).toBeNull();
     expect(selfUpdateReportFor(null, null)).toBeNull();

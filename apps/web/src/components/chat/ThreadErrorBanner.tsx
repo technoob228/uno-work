@@ -77,7 +77,10 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
       onRetryRef.current();
       return;
     }
-    const timer = setTimeout(() => setCountdown((value) => (value === null ? null : value - 1)), 1_000);
+    const timer = setTimeout(
+      () => setCountdown((value) => (value === null ? null : value - 1)),
+      1_000,
+    );
     return () => clearTimeout(timer);
   }, [countdown, retryDisabled, threadKey]);
 
