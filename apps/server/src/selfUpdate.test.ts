@@ -20,6 +20,7 @@ import {
 import {
   noteSelfUpdateIntent,
   reportSelfUpdate,
+  reportSelfUpdateAfterStart,
   resetSelfUpdateReportState,
   selfUpdateReportFor,
   startedByOwner,
@@ -385,5 +386,84 @@ describe("security journal report", () => {
     await reportSelfUpdate({ ...base, identity });
     await reportSelfUpdate({ ...base, identity });
     expect(calls).toBe(2);
+  });
+
+  it("at daemon start, waits for the updater to finish checking it, then reports once", async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "uno-self-update-journal-"));
+    await noteSelfUpdateIntent(stateDir, Date.parse("2026-10-08T10:00:04Z"));
+    // 08.10: the new daemon started at :49, the updater wrote finishedAt at :55.
+    const checking = { ...run, state: "updating" as const, finishedAt: null };
+    let reads = 0;
+    let clock = 1_000_000;
+    const slept: number[] = [];
+    const requests: string[] = [];
+    await reportSelfUpdateAfterStart({
+      stateDir,
+      lastRun: async () => {
+        reads += 1;
+        return reads <= 2 ? checking : run;
+      },
+      identity: { boxToken: "uno_agt_test", boxId: 2535 },
+      consoleBaseUrl: "https://console.example",
+      now: () => clock,
+      sleep: async (ms) => {
+        slept.push(ms);
+        clock += ms;
+      },
+      fetchImpl: async (url, init) => {
+        requests.push(String(init?.body));
+        return new Response("{}", { status: 201 });
+      },
+    });
+    expect(slept).toEqual([3_000, 3_000]);
+    expect(requests).toHaveLength(1);
+    expect(JSON.parse(requests[0]!)).toEqual({
+      from_version: "0.0.113",
+      to_version: "0.0.114",
+      outcome: "updated",
+      by_owner: true,
+    });
+    // A later start (or the status route) does not post it again.
+    await reportSelfUpdateAfterStart({
+      stateDir,
+      lastRun: async () => run,
+      identity: { boxToken: "uno_agt_test", boxId: 2535 },
+      consoleBaseUrl: "https://console.example",
+      now: () => clock + 10 * 60_000,
+      fetchImpl: async () => {
+        requests.push("again");
+        return new Response("{}", { status: 201 });
+      },
+    });
+    expect(requests).toHaveLength(1);
+  });
+
+  it("at daemon start, gives up on an updater that never finishes and skips machines off the cloud", async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "uno-self-update-journal-"));
+    const stuck = { ...run, state: "updating" as const, finishedAt: null };
+    let clock = 1_000_000;
+    let posts = 0;
+    let reads = 0;
+    const base = {
+      stateDir,
+      lastRun: async () => {
+        reads += 1;
+        return stuck;
+      },
+      consoleBaseUrl: "https://console.example",
+      now: () => clock,
+      sleep: async (ms: number) => {
+        clock += ms;
+      },
+      fetchImpl: async () => {
+        posts += 1;
+        return new Response("{}", { status: 201 });
+      },
+    };
+    await reportSelfUpdateAfterStart({ ...base, identity: null });
+    expect(reads).toBe(0);
+    await reportSelfUpdateAfterStart({ ...base, identity: { boxToken: "t", boxId: 1 } });
+    expect(posts).toBe(0);
+    expect(clock - 1_000_000).toBe(10 * 60_000);
   });
 });

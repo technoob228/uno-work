@@ -35,7 +35,7 @@ import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { UnoBoxIdentity } from "./unoBoxIdentity.ts";
-import { reportSelfUpdateToConsole } from "./selfUpdateHttp.ts";
+import { reportSelfUpdateAfterStartToConsole } from "./selfUpdateHttp.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { PluginRegistry } from "./plugins/PluginRegistry.ts";
@@ -485,9 +485,13 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
     // and upgrades to "Uno box" when the control plane confirms the box id.
     yield* Effect.forkScoped(runStartupPhase("machine-kind.probe", unoBoxIdentity.probe));
     // Uno Work has just updated itself (selfUpdate.ts): one line for the
-    // owner's Security journal. Forked — the console must not hold the start.
+    // owner's Security journal, once the updater has finished checking this
+    // daemon. Forked — neither the console nor the updater may hold the start.
     yield* Effect.forkScoped(
-      runStartupPhase("self-update.report", reportSelfUpdateToConsole.pipe(Effect.ignore)),
+      runStartupPhase(
+        "self-update.report",
+        reportSelfUpdateAfterStartToConsole.pipe(Effect.ignore),
+      ),
     );
 
     const welcomeBase = yield* resolveWelcomeBase;
