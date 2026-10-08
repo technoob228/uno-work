@@ -13,8 +13,10 @@ export type NewProjectSource = "upload" | "folder" | "empty" | "github" | "templ
 
 /**
  * Sources the dialog offers, in order (01.10): your own files first, then
- * GitHub, then an empty folder. "A folder on this computer" (one already on
- * the computer) is for Dev mode. "From a template" stays out until the
+ * GitHub, then an empty folder, then "A folder on this computer" (one already
+ * on the computer — what an agent cloned or made). The folder is offered
+ * without Dev mode too (08.10): a project the agent made in `~/projects` is
+ * the person's, not a developer's. "From a template" stays out until the
  * product has project templates (today there is only the onboarding tutorial).
  */
 export const NEW_PROJECT_SOURCES: ReadonlyArray<NewProjectSource> = [
@@ -23,12 +25,6 @@ export const NEW_PROJECT_SOURCES: ReadonlyArray<NewProjectSource> = [
   "empty",
   "folder",
 ];
-
-export function newProjectSources(devMode: boolean): ReadonlyArray<NewProjectSource> {
-  return devMode
-    ? NEW_PROJECT_SOURCES
-    : NEW_PROJECT_SOURCES.filter((source) => source !== "folder");
-}
 
 /** Uploaded projects land in `~/projects/<name>`, like the legacy upload and Move. */
 export const UPLOADED_PROJECTS_FOLDER = "projects";

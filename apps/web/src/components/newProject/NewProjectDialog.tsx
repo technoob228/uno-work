@@ -9,7 +9,7 @@
  *   task instead of an empty chat (store `files` / `afterUpload`).
  * - From GitHub: clone a repository into `~/<repo>`.
  * - Empty project: a new folder `~/<name>`.
- * - A folder on this computer (Dev mode): click through the home folder
+ * - A folder on this computer: click through the home folder
  *   (recent folders first). No typed paths, nothing outside the home folder.
  *
  * The dialog always says which computer the project goes to.
@@ -36,7 +36,6 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import { useDevMode } from "../../devMode";
 import { ensureEnvironmentApi } from "../../environmentApi";
 import { useMachineRows } from "../../hooks/useMachineRows";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
@@ -72,7 +71,7 @@ import {
   type NewProjectSource,
   checkNewFolderName,
   freeProjectName,
-  newProjectSources,
+  NEW_PROJECT_SOURCES,
   uploadProjectName,
   uploadedProjectPath,
   checkRepositoryInput,
@@ -121,7 +120,6 @@ export function NewProjectDialog() {
   const close = useNewProjectStore((state) => state.close);
   const { environmentId } = useActiveMachine();
   const home = useHomeFolderPath(environmentId);
-  const devMode = useDevMode();
   const machineLabel = useMachineLabel(environmentId);
 
   return (
@@ -143,7 +141,7 @@ export function NewProjectDialog() {
         {step === "choose" ? (
           <DialogPanel>
             <div className="flex flex-col gap-2">
-              {newProjectSources(devMode).map((source) =>
+              {NEW_PROJECT_SOURCES.map((source) =>
                 source === "template" ? null : (
                   <SourceCard
                     key={source}

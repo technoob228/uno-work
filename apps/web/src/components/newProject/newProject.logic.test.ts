@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   NEW_PROJECT_SOURCES,
   freeProjectName,
-  newProjectSources,
   uploadProjectName,
   uploadedProjectPath,
   checkNewFolderName,
@@ -104,9 +103,8 @@ it("does not offer templates until there are project templates", () => {
 });
 
 describe("upload as a new project", () => {
-  it("offers upload first, then GitHub, then empty; a folder on the computer in Dev mode", () => {
-    expect(newProjectSources(false)).toEqual(["upload", "github", "empty"]);
-    expect(newProjectSources(true)).toEqual(["upload", "github", "empty", "folder"]);
+  it("offers upload first, then GitHub, then empty, then a folder on the computer — no Dev mode needed", () => {
+    expect(NEW_PROJECT_SOURCES).toEqual(["upload", "github", "empty", "folder"]);
   });
 
   it("names the project after the folder or the zip", () => {
