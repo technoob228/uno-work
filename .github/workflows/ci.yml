@@ -15,8 +15,10 @@ on:
       - "release/**"
       - "ci/**"
 
+# A PR keeps only its newest run. A push never waits for an older run (a
+# pending group would hold the gate back behind a slow browser job).
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
