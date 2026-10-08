@@ -6,19 +6,25 @@
  *   person's laptop goes to `~/projects/<name>` on the computer (zips are
  *   unpacked in the browser), with progress; then a chat opens in it. From
  *   the start screen the dropped files come in already and Uno gets a first
- *   task instead of an empty chat (store `files` / `afterUpload`).
- * - From GitHub: clone a repository into `~/<repo>`.
- * - Empty project: a new folder `~/<name>`.
- * - A folder on this computer (Dev mode): click through the home folder
- *   (recent folders first). No typed paths, nothing outside the home folder.
+ *   task instead of an empty chat (store `files` / `afterCreate`).
+ * - From GitHub: clone a repository into `~/projects/<repo>`.
+ * - Empty project: a new folder `~/projects/<name>`.
+ * - A folder on this computer: click through the home folder (recent folders
+ *   first). No typed paths, nothing outside the home folder.
  *
  * The dialog always says which computer the project goes to.
  *
  * Every path ends the same way: the folder becomes a project and a new chat
- * opens in it. ("From a template" is not offered: there are no project
- * templates yet.)
+ * opens in it — unless the opener passed `afterCreate` (the start screen's
+ * first task; a new chat's folder chip, which moves that chat there with what
+ * was typed and words the dialog as "folder", never "project"). ("From a
+ * template" is not offered: there are no project templates yet.)
  */
-import { isAssistantProjectId, type FilesystemBrowseEntry } from "@t3tools/contracts";
+import {
+  isAssistantProjectId,
+  type FilesystemBrowseEntry,
+  type ScopedProjectRef,
+} from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeftIcon,
@@ -33,10 +39,9 @@ import {
   MonitorIcon,
   PlusIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import { useDevMode } from "../../devMode";
 import { ensureEnvironmentApi } from "../../environmentApi";
 import { useMachineRows } from "../../hooks/useMachineRows";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
@@ -53,7 +58,11 @@ import { GitHubIcon } from "../Icons";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { folderDisplayName, useFolderChats, useHomeFolderPath } from "../../hooks/useFolderChats";
 import { cn } from "../../lib/utils";
-import { type NewProjectStep, useNewProjectStore } from "../../navigation/newProjectStore";
+import {
+  type NewProjectStep,
+  type NewProjectWording,
+  useNewProjectStore,
+} from "../../navigation/newProjectStore";
 import { selectProjectsForEnvironment, useStore } from "../../store";
 import { Button } from "../ui/button";
 import {
@@ -73,6 +82,7 @@ import {
   checkNewFolderName,
   freeProjectName,
   newProjectSources,
+  projectsFolderPath,
   uploadProjectName,
   uploadedProjectPath,
   checkRepositoryInput,
@@ -100,7 +110,7 @@ const SOURCE_COPY: Record<
   },
   empty: {
     title: "Empty project",
-    body: "A new folder in your home folder, named for you",
+    body: "A new folder in ~/projects, named by you",
     Icon: PlusIcon,
   },
   github: {
@@ -119,19 +129,18 @@ export function NewProjectDialog() {
   const step = useNewProjectStore((state) => state.step);
   const setStep = useNewProjectStore((state) => state.setStep);
   const close = useNewProjectStore((state) => state.close);
+  const wording = useNewProjectStore((state) => state.wording);
   const { environmentId } = useActiveMachine();
   const home = useHomeFolderPath(environmentId);
-  const devMode = useDevMode();
   const machineLabel = useMachineLabel(environmentId);
+  const copy = dialogCopy(wording, step);
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? undefined : close())}>
       <DialogPopup className="max-w-xl" data-testid="new-project-dialog">
         <DialogHeader>
-          <DialogTitle>New project</DialogTitle>
-          <DialogDescription>
-            A project is a folder with its chats. Everything the agent makes stays in it.
-          </DialogDescription>
+          <DialogTitle>{copy.title}</DialogTitle>
+          <DialogDescription>{copy.description}</DialogDescription>
           <p
             className="flex items-center gap-1.5 text-xs text-muted-foreground"
             data-testid="new-project-machine"
@@ -143,7 +152,7 @@ export function NewProjectDialog() {
         {step === "choose" ? (
           <DialogPanel>
             <div className="flex flex-col gap-2">
-              {newProjectSources(devMode).map((source) =>
+              {newProjectSources().map((source) =>
                 source === "template" ? null : (
                   <SourceCard
                     key={source}
@@ -154,6 +163,10 @@ export function NewProjectDialog() {
                 ),
               )}
             </div>
+            <p className="mt-3 text-xs text-muted-foreground" data-testid="new-project-where">
+              New folders go to <span className="font-mono text-foreground">~/projects</span> on
+              this computer.
+            </p>
           </DialogPanel>
         ) : environmentId === null || home === null ? (
           <DialogPanel>
@@ -183,6 +196,7 @@ export function NewProjectDialog() {
           <EmptyStep
             environmentId={environmentId}
             home={home}
+            wording={wording}
             onBack={() => setStep("choose")}
             onDone={close}
           />
@@ -197,6 +211,68 @@ export function NewProjectDialog() {
       </DialogPopup>
     </Dialog>
   );
+}
+
+/** The dialog's title and line: "project" from the sidebar, "folder" from a chat's chip. */
+function dialogCopy(
+  wording: NewProjectWording,
+  step: NewProjectStep,
+): { title: string; description: string } {
+  if (wording === "project") {
+    return {
+      title: "New project",
+      description: "A project is a folder with its chats. Everything the agent makes stays in it.",
+    };
+  }
+  const title =
+    step === "empty"
+      ? "New folder"
+      : step === "upload"
+        ? "Upload a folder"
+        : step === "github"
+          ? "Clone from GitHub"
+          : "Add a folder";
+  return { title, description: "Your chat will work in it. What you typed stays." };
+}
+
+/**
+ * The last step of every path: the opener's `afterCreate` (the start screen's
+ * first task, a chat's folder chip) — or, without one or when it fails, a new
+ * chat in the folder.
+ */
+function useFinishNewProject() {
+  const afterCreate = useNewProjectStore((state) => state.afterCreate);
+  const { handleNewThread } = useNewThreadHandler();
+  return useCallback(
+    async (projectRef: ScopedProjectRef, name: string, folder: string): Promise<void> => {
+      if (afterCreate) {
+        const done = await afterCreate({ name, folder, projectRef }).then(
+          () => true,
+          () => false,
+        );
+        if (done) return;
+      }
+      await handleNewThread(projectRef, { envMode: "local" });
+    },
+    [afterCreate, handleNewThread],
+  );
+}
+
+/** Names already used in `~/projects` (none yet when the folder isn't there). */
+function useProjectsEntryNames(
+  environmentId: NonNullable<ReturnType<typeof useActiveMachine>["environmentId"]>,
+  home: string,
+): ReadonlySet<string> | null {
+  const partialPath = `${projectsFolderPath(home)}/`;
+  const listing = useQuery({
+    queryKey: ["uno-computer", "browse-folder", environmentId, partialPath],
+    queryFn: () => ensureEnvironmentApi(environmentId).filesystem.browse({ partialPath }),
+    retry: false,
+  });
+  return useMemo(() => {
+    if (listing.isError) return new Set<string>();
+    return listing.data ? new Set(listing.data.entries.map((entry) => entry.name)) : null;
+  }, [listing.data, listing.isError]);
 }
 
 function useMachineLabel(environmentId: ReturnType<typeof useActiveMachine>["environmentId"]) {
@@ -269,19 +345,11 @@ function UploadStep({
   const [error, setError] = useState<string | null>(null);
   const zipInput = useRef<HTMLInputElement>(null);
   const { ensureFolderProject } = useFolderChats(environmentId);
-  const { handleNewThread } = useNewThreadHandler();
+  const finish = useFinishNewProject();
+  const wording = useNewProjectStore((state) => state.wording);
   const takeFiles = useNewProjectStore((state) => state.takeFiles);
-  const afterUpload = useNewProjectStore((state) => state.afterUpload);
-  const projectsListing = useQuery({
-    queryKey: ["uno-computer", "browse-folder", environmentId, `${home}/projects/`],
-    queryFn: () =>
-      ensureEnvironmentApi(environmentId).filesystem.browse({ partialPath: `${home}/projects/` }),
-    retry: false,
-  });
-  const taken = useMemo(
-    () => new Set((projectsListing.data?.entries ?? []).map((entry) => entry.name)),
-    [projectsListing.data],
-  );
+  const takenOrNull = useProjectsEntryNames(environmentId, home);
+  const taken = useMemo(() => takenOrNull ?? new Set<string>(), [takenOrNull]);
   const name = picked ? freeProjectName(picked.name, taken) : null;
   const target = name ? uploadedProjectPath(home, name) : null;
   const plan = useMemo(
@@ -336,14 +404,7 @@ function UploadStep({
             }),
         },
       );
-      let started = false;
-      if (afterUpload) {
-        started = await afterUpload({ name, folder: target }).then(
-          () => true,
-          () => false,
-        );
-      }
-      if (!started) await handleNewThread(projectRef, { envMode: "local" });
+      await finish(projectRef, name, target);
       onDone();
     } catch (cause) {
       setError(errorMessage(cause, "The upload stopped. Try again."));
@@ -468,7 +529,7 @@ function UploadStep({
         error={error}
         busy={busy}
         disabled={picked === null || plan === null || plan.accepted.length === 0 || reading}
-        label={busy ? "Uploading…" : "Upload and open"}
+        label={busy ? "Uploading…" : wording === "folder" ? "Upload" : "Upload and open"}
         icon={<FolderUpIcon />}
         onSubmit={() => void submit()}
         onCancel={onDone}
@@ -487,22 +548,6 @@ function BackToOptions({ onBack }: { onBack: () => void }) {
       <ChevronLeftIcon className="size-3.5" />
       All options
     </button>
-  );
-}
-
-/** Names already used directly inside the home folder. */
-function useHomeEntryNames(
-  environmentId: NonNullable<ReturnType<typeof useActiveMachine>["environmentId"]>,
-  home: string,
-): ReadonlySet<string> | null {
-  const listing = useQuery({
-    queryKey: ["uno-computer", "browse-folder", environmentId, `${home}/`],
-    queryFn: () =>
-      ensureEnvironmentApi(environmentId).filesystem.browse({ partialPath: `${home}/` }),
-  });
-  return useMemo(
-    () => (listing.data ? new Set(listing.data.entries.map((entry) => entry.name)) : null),
-    [listing.data],
   );
 }
 
@@ -556,7 +601,8 @@ function FolderStep({ environmentId, home, onBack, onDone }: StepProps) {
   const [folder, setFolder] = useState(home);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { chatInFolder } = useFolderChats(environmentId);
+  const { ensureFolderProject } = useFolderChats(environmentId);
+  const finish = useFinishNewProject();
   const current = clampToHome(folder, home);
   const atHome = current === home;
   const projects = useStore(
@@ -589,7 +635,8 @@ function FolderStep({ environmentId, home, onBack, onDone }: StepProps) {
     setBusy(true);
     setError(null);
     try {
-      await chatInFolder(current);
+      const name = folderDisplayName(current);
+      await finish(await ensureFolderProject(current), name, current);
       onDone();
     } catch (cause) {
       setError(errorMessage(cause, "Couldn't make this folder a project."));
@@ -712,12 +759,19 @@ function FolderRow(props: { name: string; isProject: boolean; onClick: () => voi
   );
 }
 
-function EmptyStep({ environmentId, home, onBack, onDone }: StepProps) {
+function EmptyStep({
+  environmentId,
+  home,
+  wording,
+  onBack,
+  onDone,
+}: StepProps & { readonly wording: NewProjectWording }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const taken = useHomeEntryNames(environmentId, home);
-  const { chatInFolder } = useFolderChats(environmentId);
+  const taken = useProjectsEntryNames(environmentId, home);
+  const { ensureFolderProject } = useFolderChats(environmentId);
+  const finish = useFinishNewProject();
   const check = checkNewFolderName(name, taken ?? new Set());
 
   const submit = async () => {
@@ -728,10 +782,17 @@ function EmptyStep({ environmentId, home, onBack, onDone }: StepProps) {
     setBusy(true);
     setError(null);
     try {
-      await chatInFolder(`${home}/${check.name}`, check.name, { createFolder: true });
+      const folder = uploadedProjectPath(home, check.name);
+      const projectRef = await ensureFolderProject(folder, check.name, { createFolder: true });
+      await finish(projectRef, check.name, folder);
       onDone();
     } catch (cause) {
-      setError(errorMessage(cause, "Couldn't create the project."));
+      setError(
+        errorMessage(
+          cause,
+          wording === "folder" ? "Couldn't create the folder." : "Couldn't create the project.",
+        ),
+      );
     } finally {
       setBusy(false);
     }
@@ -747,7 +808,7 @@ function EmptyStep({ environmentId, home, onBack, onDone }: StepProps) {
         <Input
           id="new-project-name"
           autoFocus
-          placeholder="my-project"
+          placeholder={wording === "folder" ? "my-folder" : "my-project"}
           value={name}
           onChange={(event) => setName(event.currentTarget.value)}
           onKeyDown={(event) => {
@@ -758,15 +819,17 @@ function EmptyStep({ environmentId, home, onBack, onDone }: StepProps) {
           }}
         />
         <p className="text-xs text-muted-foreground">
-          {check.ok ? `Creates ${tildePath(`${home}/${check.name}`, home)}` : "Creates ~/<name>"} on
-          this computer.
+          {check.ok
+            ? `Creates ${tildePath(uploadedProjectPath(home, check.name), home)}`
+            : "Creates ~/projects/<name>"}{" "}
+          on this computer.
         </p>
       </DialogPanel>
       <StepFooter
         error={error ?? (name.trim().length > 0 && !check.ok ? check.error : null)}
         busy={busy}
         disabled={!check.ok || taken === null}
-        label="Create project"
+        label={wording === "folder" ? "Create folder" : "Create project"}
         icon={<PlusIcon />}
         onSubmit={() => void submit()}
         onCancel={onDone}
@@ -779,8 +842,10 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const taken = useHomeEntryNames(environmentId, home);
-  const { chatInFolder } = useFolderChats(environmentId);
+  const taken = useProjectsEntryNames(environmentId, home);
+  const { ensureFolderProject } = useFolderChats(environmentId);
+  const finish = useFinishNewProject();
+  const wording = useNewProjectStore((state) => state.wording);
   const check = checkRepositoryInput(input, taken ?? new Set());
   useEffect(() => setError(null), [input]);
 
@@ -792,12 +857,13 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
     setBusy(true);
     setError(null);
     try {
-      const destinationPath = `${home}/${check.name}`;
+      const destinationPath = uploadedProjectPath(home, check.name);
       const result = await ensureEnvironmentApi(environmentId).sourceControl.cloneRepository({
         remoteUrl: check.remoteUrl,
         destinationPath,
       });
-      await chatInFolder(result.cwd || destinationPath, check.name);
+      const folder = result.cwd || destinationPath;
+      await finish(await ensureFolderProject(folder, check.name), check.name, folder);
       onDone();
     } catch (cause) {
       setError(
@@ -833,15 +899,15 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
         />
         <p className="text-xs text-muted-foreground">
           {check.ok
-            ? `Clones into ${tildePath(`${home}/${check.name}`, home)}`
-            : "Clones into ~/<repo>"}
+            ? `Clones into ${tildePath(uploadedProjectPath(home, check.name), home)}`
+            : "Clones into ~/projects/<repo>"}
         </p>
       </DialogPanel>
       <StepFooter
         error={error ?? (input.trim().length > 0 && !check.ok ? check.error : null)}
         busy={busy}
         disabled={!check.ok || taken === null}
-        label={busy ? "Cloning…" : "Clone and open"}
+        label={busy ? "Cloning…" : wording === "folder" ? "Clone" : "Clone and open"}
         icon={<GitHubIcon />}
         onSubmit={() => void submit()}
         onCancel={onDone}

@@ -21,7 +21,7 @@ export function openUploadAndAsk(
 ): void {
   openNewProject("upload", {
     ...(files ? { files } : {}),
-    afterUpload: ({ name, folder }) =>
+    afterCreate: ({ name, folder }) =>
       startTask(uploadedProjectPrompt(name, folder), {
         folder,
         modelSelection: null,
