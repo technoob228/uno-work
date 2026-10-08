@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { kernelRandomBytes, uuidV4FromBytes } from "./cloneEntropy.ts";
 
+// Two clones of one memory snapshot: OpenSSL hands both the same bytes.
+const snapshotCopy = (size: number) => new Uint8Array(size).fill(7);
+
 describe("clone entropy", () => {
   it("differs between clones even when the process generator is the snapshot's copy", () => {
-    // Two clones of one memory snapshot: OpenSSL hands both the same bytes.
-    const snapshotCopy = (size: number) => new Uint8Array(size).fill(7);
     const cloneA = kernelRandomBytes(32, snapshotCopy);
     const cloneB = kernelRandomBytes(32, snapshotCopy);
     expect(cloneA).toHaveLength(32);
