@@ -25,7 +25,13 @@ set -euo pipefail
 
 TARBALL_URL="${UNO_WORK_TARBALL_URL:-https://console.uno4.dev/cli/work/uno-work-server-latest.tar.gz}"
 HOST="${UNO_WORK_HOST:-0.0.0.0}"
-PORT="${UNO_WORK_PORT:-80}"
+PORT="${UNO_WORK_PORT:-}"
+if [ -z "${PORT}" ]; then
+  # An upgrade keeps the machine's own settings file (below), so the daemon
+  # stays on the port it already has: wait for it there, not on the default.
+  PORT="$(sed -n 's/^UNO_WORK_PORT=//p' /etc/uno-work/uno-work.env 2>/dev/null | tail -n 1)"
+  case "${PORT}" in ''|*[!0-9]*) PORT=80 ;; esac
+fi
 API_KEY="${UNO_WORK_API_KEY:-}"
 SERVICE_USER="unowork"
 INSTALL_DIR="/opt/uno-work"
@@ -360,9 +366,13 @@ process.stdout.write(JSON.stringify({ state, step: step || null, error: error ||
     node -p 'try { require(process.argv[1]).version } catch { "" }' "$1/package.json" 2>/dev/null
   }
   # 0 when the daemon answers /api/health three times in a row and (when it
-  # says its version) runs the version we expect.
+  # says its version) runs the version we expect. Gives up before the timeout
+  # when the daemon keeps exiting (systemd restarted it 6 times since our
+  # `reset-failed`): a release that dies at start will not get better, and
+  # every extra second is the person's computer without Uno Work. A slow first
+  # start (migrations on a small machine) is one long-lived process, not this.
   wait_healthy() { # expected_version timeout_seconds
-    local deadline=$(( $(date +%s) + $2 )) ok=0 body
+    local deadline=$(( $(date +%s) + $2 )) ok=0 body restarts
     while [ "$(date +%s)" -lt "${deadline}" ]; do
       if body="$(curl -fsS --max-time 5 "http://127.0.0.1:${port}/api/health" 2>/dev/null)"; then
         case "${body}" in
@@ -372,6 +382,12 @@ process.stdout.write(JSON.stringify({ state, step: step || null, error: error ||
         esac
       else
         ok=0
+        restarts="$(systemctl show -p NRestarts --value uno-work 2>/dev/null)"
+        case "${restarts}" in ''|*[!0-9]*) restarts=0 ;; esac
+        if [ "${restarts}" -ge 6 ]; then
+          echo "uno-work kept exiting at start (${restarts} restarts)" >>"${LOG_FILE}"
+          return 2
+        fi
       fi
       [ "${ok}" -ge 3 ] && return 0
       sleep 2
@@ -399,6 +415,9 @@ process.stdout.write(JSON.stringify({ state, step: step || null, error: error ||
   }
 
   fail() { # message
+    # One way out: a signal that arrives while we are putting things back must
+    # not start a second rollback in the middle of the first.
+    trap '' TERM INT
     local detail="" rolled=0 message="$1"
     if [ "${PHASE}" = "install" ] && [ "$(installed_version "${APP_DIR}")" = "${FROM_VERSION}" ] \
       && cmp -s "${APP_DIR}/dist/bin.mjs" "${PREV_DIR}/dist/bin.mjs"; then
@@ -551,10 +570,16 @@ process.stdout.write(JSON.stringify({ state, step: step || null, error: error ||
   systemctl start uno-work >>"${LOG_FILE}" 2>&1 || true
 
   step "Making sure it works"
-  if ! wait_healthy "${TO_VERSION}" "${HEALTH_TIMEOUT}"; then
-    journalctl -u uno-work -n 30 --no-pager >>"${LOG_FILE}" 2>&1 || true
-    fail "Uno Work ${TO_VERSION} didn't start within ${HEALTH_TIMEOUT} seconds."
-  fi
+  wait_healthy "${TO_VERSION}" "${HEALTH_TIMEOUT}"
+  case "$?" in
+    0) ;;
+    2)
+      journalctl -u uno-work -n 30 --no-pager >>"${LOG_FILE}" 2>&1 || true
+      fail "Uno Work ${TO_VERSION} didn't start." ;;
+    *)
+      journalctl -u uno-work -n 30 --no-pager >>"${LOG_FILE}" 2>&1 || true
+      fail "Uno Work ${TO_VERSION} didn't start within ${HEALTH_TIMEOUT} seconds." ;;
+  esac
 
   PHASE="done"
   rm -rf "${PREV_DIR}" "${STATUS_DIR}/state-before-update"
@@ -580,8 +605,13 @@ Wants=network-online.target
 Type=oneshot
 ExecStart=/opt/uno-work/bin/uno-work-update
 TimeoutStartSec=30min
-# Restarting uno-work must not take this unit down with it.
-KillMode=process
+# Stopped or timed out mid-way, the script still has to put the previous
+# version back (stop, swap, start, wait for health) before it is killed.
+TimeoutStopSec=5min
+# The person keeps working while it installs: stay behind their processes.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
 SyslogIdentifier=uno-work-update
 UNIT
 

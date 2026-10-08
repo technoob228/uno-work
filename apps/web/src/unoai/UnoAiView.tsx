@@ -801,6 +801,13 @@ export function stopResumeLabel(code: string): "Continue" | "Try again" {
   return code === "steps" ? "Continue" : "Try again";
 }
 
+/** The server's words; for "steps" they name the button, so they follow its label. */
+export function stopMessage(stop: Pick<AiStop, "code" | "message">): string {
+  return stop.code === "steps"
+    ? stop.message.replace(/\bTap Try again\b/, "Tap Continue")
+    : stop.message;
+}
+
 function StopCard({ stop, onResume }: { stop: AiStop; onResume: () => void }) {
   if (stop.code === "verify") return <VerifyCard onVerified={onResume} />;
   const out = stop.code === "free_empty" || stop.code === "hours_empty";
@@ -812,7 +819,7 @@ function StopCard({ stop, onResume }: { stop: AiStop; onResume: () => void }) {
       className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3.5 text-sm"
       data-testid="uno-ai-stop"
     >
-      <p>{stop.message}</p>
+      <p>{stopMessage(stop)}</p>
       <div className="mt-2.5 flex flex-wrap gap-2">
         {out ? (
           <Button

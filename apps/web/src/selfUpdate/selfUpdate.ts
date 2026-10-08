@@ -6,7 +6,11 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { queryOptions } from "@tanstack/react-query";
 
-import { environmentFetchJson, isEnvironmentHttpError } from "../environments/http/target";
+import {
+  environmentFetchJson,
+  environmentFetchResponse,
+  isEnvironmentHttpError,
+} from "../environments/http/target";
 
 /** Mirrors `SelfUpdateStatus` in apps/server/src/selfUpdate.ts. */
 export interface SelfUpdateStatus {
@@ -28,16 +32,31 @@ export interface SelfUpdateStatus {
 export async function fetchSelfUpdateStatus(
   environmentId: EnvironmentId,
 ): Promise<SelfUpdateStatus | null> {
+  // A computer on Uno Work before 0.0.113 has no such route: it answers 404 or
+  // the app's own index.html. Either way there is nothing to show.
+  let response: Response;
   try {
-    return await environmentFetchJson<SelfUpdateStatus>({
+    response = await environmentFetchResponse({
       environmentId,
       pathname: "/api/self-update/status",
     });
   } catch (error) {
-    // A computer on Uno Work before 0.0.113 has no such route: nothing to show.
     if (isEnvironmentHttpError(error) && error.status === 404) return null;
     throw error;
   }
+  if (!(response.headers.get("content-type") ?? "").includes("application/json")) return null;
+  const body: unknown = await response.json().catch(() => null);
+  return isSelfUpdateStatus(body) ? body : null;
+}
+
+function isSelfUpdateStatus(value: unknown): value is SelfUpdateStatus {
+  if (typeof value !== "object" || value === null) return false;
+  const status = value as Record<string, unknown>;
+  return (
+    typeof status["supported"] === "boolean" &&
+    typeof status["currentVersion"] === "string" &&
+    typeof status["state"] === "string"
+  );
 }
 
 export function requestSelfUpdate(environmentId: EnvironmentId): Promise<SelfUpdateStatus> {
