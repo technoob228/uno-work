@@ -42,18 +42,18 @@ export interface StableMessagesTimelineRowsState {
   result: MessagesTimelineRow[];
 }
 
-/** After this many seconds the wait line adds that nothing is stuck. */
+/** After this many seconds the wait line adds that the work goes on. */
 export const WORKING_REASSURE_AFTER_SECONDS = 15;
 
 /**
  * The words after the timer on the wait line ("Thinking · 28s"): nothing at
- * first, and past ~15 s a plain reassurance — the model's reasoning is not
- * shown, so a long quiet stretch otherwise reads as a hang.
+ * first, and past ~15 s a plain "still working" — the model's reasoning is not
+ * shown, so a long quiet stretch otherwise reads as a hang. No promise that
+ * "nothing is stuck": the turn can still end with "Uno AI didn't answer"
+ * (flows v2, errors-catalog/3).
  */
 export function workingReassurance(elapsedSeconds: number): string | null {
-  return elapsedSeconds >= WORKING_REASSURE_AFTER_SECONDS
-    ? "still working, nothing is stuck"
-    : null;
+  return elapsedSeconds >= WORKING_REASSURE_AFTER_SECONDS ? "still working" : null;
 }
 
 export function computeMessageDurationStart(

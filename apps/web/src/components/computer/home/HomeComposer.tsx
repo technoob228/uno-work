@@ -230,7 +230,14 @@ export function HomeComposer({
         />
         <div className="flex items-center gap-1 px-2.5 pt-1 pb-2.5">
           {minimal ? null : (
-            <>
+            // The chips never push past the box: on a phone (390) they used to
+            // run over its right edge and shove the send button out. They
+            // shrink, the permission chip keeps only its icon, and anything
+            // still too wide scrolls inside the row (same as the chat composer).
+            <div
+              className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              data-testid="home-composer-chips"
+            >
               <FolderChipMenu
                 environmentId={environmentId}
                 folder={folder}
@@ -272,7 +279,9 @@ export function HomeComposer({
                     const Icon = RUNTIME_MODE_ICON[runtimeMode];
                     return <Icon className="size-3.5" />;
                   })()}
-                  <SelectValue>{PERMISSION_MODES[runtimeMode].label}</SelectValue>
+                  <span className="hidden min-[440px]:inline">
+                    <SelectValue>{PERMISSION_MODES[runtimeMode].label}</SelectValue>
+                  </span>
                 </SelectTrigger>
                 <SelectPopup alignItemWithTrigger={false}>
                   {PERMISSION_MODE_ORDER.map((mode) => {
@@ -293,7 +302,7 @@ export function HomeComposer({
                   })}
                 </SelectPopup>
               </Select>
-            </>
+            </div>
           )}
           <button
             type="button"
@@ -301,7 +310,7 @@ export function HomeComposer({
             aria-label="Start"
             disabled={starting}
             className={cn(
-              "ml-auto flex size-8 items-center justify-center rounded-full transition-colors",
+              "ml-auto flex size-8 shrink-0 items-center justify-center rounded-full transition-colors",
               text.trim()
                 ? "bg-primary text-primary-foreground hover:bg-primary/90"
                 : "bg-muted text-muted-foreground",

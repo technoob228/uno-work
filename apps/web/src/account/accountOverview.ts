@@ -466,6 +466,15 @@ export interface AccountSubscription {
   readonly nextBillingAt: string | null;
   readonly pendingPlan: string | null;
   readonly trialExpiresAt: string | null;
+  /**
+   * The plan was cancelled and lives out its paid period: `nextBillingAt` is
+   * the day it ends, not a charge.
+   */
+  readonly cancelledAt: string | null;
+  /** The cancelled plan reached its end; the computers are in storage. */
+  readonly planEndedAt: string | null;
+  /** Until when paused computers are kept. */
+  readonly keepUntil: string | null;
   readonly limits: AccountPlan | null;
   /** Disk granted by hand over the plan's, when set. */
   readonly diskGbOverride: number | null;
@@ -668,6 +677,9 @@ export function parseSubscription(raw: unknown): AccountSubscription | null {
     nextBillingAt: strOrNull(r["next_billing_at"]),
     pendingPlan: strOrNull(r["pending_plan"]),
     trialExpiresAt: strOrNull(r["trial_expires_at"]),
+    cancelledAt: strOrNull(r["cancelled_at"]),
+    planEndedAt: strOrNull(r["plan_ended_at"]),
+    keepUntil: strOrNull(r["keep_until"]),
     limits: parseAccountPlan(r["plan_limits"]),
     diskGbOverride: typeof override === "number" && override > 0 ? override : null,
     aiCredits: {
@@ -759,6 +771,40 @@ export async function fetchBalance(): Promise<AccountBalance> {
 /** `GET /api/v1/account/next-step` — raw; parse with parseNextStepPlan. A 404 = older backend. */
 export async function fetchNextStep(): Promise<unknown> {
   return accountRequest("GET", "/api/v1/account/next-step");
+}
+
+/**
+ * What the person already started (`GET /api/v1/account/resume`, the same
+ * answer the console's Home uses): the Uno AI chats to continue instead of
+ * opening a new one. Only the chat ids are read here.
+ */
+export interface AccountResume {
+  /** The chat the free bot was described in. */
+  readonly botChatId: string | null;
+  /** The chat with a live site. */
+  readonly siteChatId: string | null;
+  /** The newest Uno AI chat. */
+  readonly lastChatId: string | null;
+}
+
+const RESUME_CHAT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+export function parseAccountResume(raw: unknown): AccountResume {
+  const r = rec(raw);
+  const chatId = (key: string): string | null => {
+    const id = strOrNull(rec(r?.[key])?.["id"]);
+    return id && RESUME_CHAT_ID.test(id) ? id : null;
+  };
+  return {
+    botChatId: chatId("bot_chat"),
+    siteChatId: chatId("site_chat"),
+    lastChatId: chatId("last_chat"),
+  };
+}
+
+/** A 404 = older backend: nothing to continue. */
+export async function fetchAccountResume(): Promise<AccountResume> {
+  return parseAccountResume(await accountRequest("GET", "/api/v1/account/resume"));
 }
 
 /** The goal picked in Uno Work goes to the account too, so the console shows the same next step. */

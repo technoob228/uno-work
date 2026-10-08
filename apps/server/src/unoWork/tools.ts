@@ -799,6 +799,9 @@ const sitePath = (slug: string, rest = "") => `/api/v1/deploys/${encodeURICompon
 // The production address `<slug>.uno4.me` when the answer has no url of its
 // own (sites_list reads hosting's — see sites/workSites.ts).
 const siteUrl = (slug: string) => liveSiteUrl(undefined, slug);
+/** Where the person sees every form entry of a site: its Forms tab in the console. */
+const siteEntriesUrl = (slug: string) =>
+  `https://console.uno.place/sites/${encodeURIComponent(slug)}?tab=forms`;
 
 /** The site is on the person's account right now (the console's list, this computer's token). */
 const siteIsListed = (
@@ -2327,7 +2330,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "site_publish",
     group: "sites",
     description:
-      "Publish a static website from a folder (with index.html) or a single HTML file (published with its folder) to a public https address on Uno. Anyone can open it. It runs without asking — just do it when the person wants a site (they can Unpublish it in Apps & sites; you can with site_unpublish). Only built pages go up (a dist/ or public/ folder of a project; keys and .env never do); the result lists files that were left out — tell the person in one line which stayed on the computer, and stop there: never suggest a way to get a key or secret file published (renaming, moving, packing it). Only if the person says on their own that such a file holds no secrets, help with it. Republishing the same slug updates the site.",
+      "Publish a static website from a folder (with index.html) or a single HTML file (published with its folder) to a public https address on Uno. Anyone can open it. It runs without asking — just do it when the person wants a site (they can Unpublish it in Apps & sites; you can with site_unpublish). Only built pages go up (a dist/ or public/ folder of a project; keys and .env never do); the result lists files that were left out — tell the person in one line which stayed on the computer, and stop there: never suggest a way to get a key or secret file published (renaming, moving, packing it). Only if the person says on their own that such a file holds no secrets, help with it. Republishing the same slug updates the site. A page that is personal by nature (a schedule, notes, family or client details) is the one case to ask first, once: open to everyone or only with a password (then site_set_password right after publishing); a landing page, a business site or a menu goes up open without the question, and a password is never set silently. After publishing a site with a form, say that new entries arrive at the person's email and give them `entriesUrl` from the result.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2360,6 +2363,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         Effect.map((site) =>
           (site.skippedCount ?? 0) > 0 ? { ...site, note: SITE_SKIPPED_NOTE } : site,
         ),
+        // Where the person sees every form entry of this site (flows v2, C5).
+        Effect.map((site) => ({ ...site, entriesUrl: siteEntriesUrl(site.slug) })),
         // Sites shows "Made in chat …": one click back to where it was made.
         Effect.tap((site) =>
           Effect.promise(() =>

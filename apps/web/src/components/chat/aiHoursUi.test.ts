@@ -58,7 +58,7 @@ describe("AI busy notice", () => {
     expect(notice.kind).toBe("standard-speed");
     const { text, link } = aiBusyNoticeText(notice);
     expect(text).toMatch(
-      /^You've used this month's full-speed hours — AI keeps working at standard speed until .+\.$/,
+      /^You've used this month's full-speed AI time — AI keeps working at standard speed until .+\.$/,
     );
     expect(link).toBeNull();
   });
@@ -252,7 +252,15 @@ describe("top-up banner", () => {
   it("shows the server's billing sentence, the credit message otherwise", () => {
     const hours =
       "Your AI hours are used up. New hours arrive on Oct 24, 2026; to keep going now, add AI credit at https://console.uno4.dev/billing or switch to your own AI subscription (Claude or ChatGPT).";
-    expect(unoBillingBannerText(hours)).toBe(hours);
+    // AI time used up: our own words, the date kept, no bare addresses.
+    expect(unoBillingBannerText(hours)).toBe(
+      "Your AI time is used up. New AI time arrives on Oct 24.",
+    );
+    expect(
+      unoBillingBannerText(
+        "Your AI hours are used up. To keep going, top up your balance at https://console.uno.place/billing?tab=payments.",
+      ),
+    ).toBe("Your AI time is used up.");
     const notIncluded =
       "Your plan doesn't include Uno AI hours, and your AI credit is empty. Add Uno AI to your plan or top up at https://console.uno4.dev/billing, or switch to your own AI subscription (Claude or ChatGPT).";
     expect(unoBillingBannerText(notIncluded)).toBe(notIncluded);
@@ -283,7 +291,6 @@ describe("top-up banner", () => {
       "Your balance is empty. Top up at https://console.uno4.dev/billing?tab=payments, add Uno AI hours to your plan, or switch to your own AI subscription (Claude or ChatGPT).",
       "Your balance is empty, and this model is paid per token. Pick the Smart model (it runs on your AI hours), top up at https://console.uno4.dev/billing?tab=payments, or switch to your own AI subscription (Claude or ChatGPT).",
       "Your plan doesn't include Uno AI hours, and your balance is empty. Add Uno AI to your plan or top up at https://console.uno4.dev/billing?tab=payments, or switch to your own AI subscription (Claude or ChatGPT).",
-      "Your AI hours are used up. New hours arrive on Oct 24, 2026; to keep going now, top up your balance at https://console.uno4.dev/billing?tab=payments or switch to your own AI subscription (Claude or ChatGPT).",
       'Your premium credit for this month is used up. Switch to Smart — it is included in your AI hours; new premium credit arrives on Nov 1. To keep using premium models from your balance, turn on "Continue premium from balance".',
       "Your balance is empty. Top up at https://console.uno.place/billing?tab=payments, add Uno AI hours to your plan, or switch to your own AI subscription (Claude or ChatGPT).",
     ]) {

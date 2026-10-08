@@ -13,7 +13,9 @@ import { useEffect, useMemo } from "react";
 import { CONSOLE_URL } from "../../../account/accountOverview";
 import { useAssistantChat } from "../../../assistant/useAssistantChat";
 import { trackFunnel } from "../../../lib/funnel";
-import { nextStepQuery } from "../../myuno/myUnoQueries";
+import { useDevMode } from "../../../devMode";
+import { isWebLite } from "../../../lite/webLite";
+import { accountResumeQuery, nextStepQuery } from "../../myuno/myUnoQueries";
 import { openInstallDocs } from "../../onboarding/harnessInstallLinks";
 import { NEXT_STEP, goalState, withAnswer, type GoalId } from "../../setup/goals";
 import { useSetupProgress, useUpdateSetupProgress } from "../../setup/useSetupProgress";
@@ -22,9 +24,11 @@ import { toastManager } from "../../ui/toast";
 import { HomeGoalButtons } from "./HomeGoals";
 import {
   parseNextStepPlan,
+  nextStepChatId,
   nextStepDoneKey,
   nextStepSkipKey,
   visibleNextStep,
+  withoutSshFirst,
   type NextStepItem,
   type NextStepPlan,
 } from "./nextStep";
@@ -32,6 +36,8 @@ import {
 export interface HomeNextStepState {
   readonly plan: NextStepPlan | null;
   readonly step: NextStepItem | null;
+  /** "Connect with SSH", when it was moved under the card for a non-developer. */
+  readonly developerStep?: NextStepItem | null;
 }
 
 /** The account's answer (null while loading or when the account can't be read). */
@@ -39,8 +45,15 @@ export function useNextStep(): HomeNextStepState {
   const progress = useSetupProgress();
   const backend = useQuery(nextStepQuery());
   const plan = useMemo(() => parseNextStepPlan(backend.data), [backend.data]);
-  const step = visibleNextStep(plan, progress.answers ?? {});
-  return { plan, step };
+  const devMode = useDevMode();
+  const answers = progress.answers ?? {};
+  const { step, developerStep } = withoutSshFirst(
+    plan,
+    visibleNextStep(plan, answers),
+    answers,
+    devMode,
+  );
+  return { plan, step, developerStep };
 }
 
 /** Work's own words and button per step; the backend's title is the fallback. */
@@ -142,6 +155,7 @@ export function HomeNextStepCard({
   const progress = useSetupProgress();
   const update = useUpdateSetupProgress();
   const assistant = useAssistantChat();
+  const resume = useQuery(accountResumeQuery());
   const { plan, step } = state;
   const goal = plan?.goal ?? null;
   const projectPath = goalState(progress).projectPath;
@@ -170,8 +184,17 @@ export function HomeNextStepCard({
       `${CONSOLE_URL}${step.consolePath && step.consolePath.startsWith("/") ? step.consolePath : "/"}`,
     );
 
+  // The chat where the person already described this (B2): open it, not a new one.
+  // "Talk to Uno" on a computer is the assistant's own chat, already one and the same.
+  const sameChatId =
+    step.id === "talk_to_uno" && !isWebLite ? null : nextStepChatId(step.id, resume.data);
+
   const act = () => {
-    trackFunnel("next_step_clicked", { goal, props: { step_id: step.id } });
+    trackFunnel("next_step_clicked", {
+      goal,
+      props: { step_id: step.id, ...(sameChatId ? { same_chat: "1" } : {}) },
+    });
+    if (sameChatId) return void navigate({ to: "/ai", search: { chat: sameChatId } });
     switch (step.id) {
       case "connect_agent":
         return setup("own_agent", "own_agent");
@@ -245,6 +268,18 @@ export function HomeNextStepCard({
           </button>
         </div>
       )}
+      {state.developerStep ? (
+        <p className="ps-11 text-xs text-muted-foreground" data-testid="home-next-step-developers">
+          For developers:{" "}
+          <button
+            type="button"
+            onClick={() => setup("server", "ssh")}
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            connect with SSH or your own agent
+          </button>
+        </p>
+      ) : null}
     </div>
   );
 }

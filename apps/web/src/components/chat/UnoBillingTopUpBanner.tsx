@@ -59,9 +59,28 @@ function isHumanBillingSentence(text: string): boolean {
   );
 }
 
+const AI_HOURS_USED_UP_OPENING = "Your AI hours are used up.";
+
+/**
+ * "AI time is used up" in our own words: the server's sentence is written for
+ * agents too and carries bare console addresses ("…top up your balance at
+ * https://…"). The person gets the fact and the date; the ways on are the
+ * buttons (flows v2, errors-catalog/5).
+ */
+export function aiHoursUsedUpText(serverText: string): string {
+  const date = /new hours arrive on\s+([^;\n"']+?)(?:[;"'\n]|\.\s|\.$|$)/i.exec(serverText)?.[1];
+  // "Oct 24, 2026" → "Oct 24": the year is noise for a date within a month.
+  const day = date?.trim().replace(/,\s*\d{4}$/, "");
+  // "AI time", not "hours": the one word the app uses for it everywhere.
+  return day
+    ? `Your AI time is used up. New AI time arrives on ${day}.`
+    : "Your AI time is used up.";
+}
+
 /** What the banner says: the server's own billing sentence when it has one. */
 export function unoBillingBannerText(sessionError: string | null | undefined): string {
   const text = sessionError?.trim() ?? "";
+  if (text.startsWith(AI_HOURS_USED_UP_OPENING)) return aiHoursUsedUpText(text);
   return UNO_BILLING_MESSAGE_OPENINGS.some((opening) => text.startsWith(opening)) ||
     isHumanBillingSentence(text)
     ? text
@@ -97,6 +116,7 @@ export const UnoBillingTopUpBanner = memo(function UnoBillingTopUpBanner({
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
+  const [topUpFailed, setTopUpFailed] = useState(false);
   const bannerKey = useMemo(
     () => (active ? `uno-billing:${sessionUpdatedAt ?? "unknown"}` : null),
     [active, sessionUpdatedAt],
@@ -118,6 +138,7 @@ export const UnoBillingTopUpBanner = memo(function UnoBillingTopUpBanner({
     }
 
     setIsLoading(true);
+    setTopUpFailed(false);
     try {
       const result = await api.server.createUnoLlmTopUpAction({});
       if (result.kind === "credits_bought") {
@@ -130,12 +151,9 @@ export const UnoBillingTopUpBanner = memo(function UnoBillingTopUpBanner({
       }
 
       await api.shell.openExternal(result.paymentUrl);
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Could not start Uno top-up.",
-        description: error instanceof Error ? error.message : String(error),
-      });
+    } catch {
+      // The raw error is for us, not for the person: say what to do instead.
+      setTopUpFailed(true);
     } finally {
       setIsLoading(false);
     }
@@ -166,7 +184,14 @@ export const UnoBillingTopUpBanner = memo(function UnoBillingTopUpBanner({
     <div className="mx-auto max-w-3xl pt-3">
       <Alert variant="warning">
         <CreditCardIcon />
-        <AlertDescription>{unoBillingBannerText(sessionError)}</AlertDescription>
+        <AlertDescription>
+          {unoBillingBannerText(sessionError)}
+          {topUpFailed ? (
+            <span data-testid="uno-billing-topup-failed">
+              Couldn't open the payment page. Try again, or top up in the console.
+            </span>
+          ) : null}
+        </AlertDescription>
         <AlertAction className="flex-wrap">
           {wantsPack ? (
             <Button size="sm" type="button" onClick={() => void addAiHours()}>
@@ -187,6 +212,16 @@ export const UnoBillingTopUpBanner = memo(function UnoBillingTopUpBanner({
               Add AI time
             </Button>
           )}
+          {topUpFailed ? (
+            <Button
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={() => window.open(UNO_TOP_UP_URL, "_blank", "noopener,noreferrer")}
+            >
+              Open console
+            </Button>
+          ) : null}
           {environmentId ? (
             <Button size="sm" type="button" variant="outline" onClick={openOwnSubscriptionSettings}>
               Use my own subscription

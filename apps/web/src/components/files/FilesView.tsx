@@ -46,7 +46,10 @@ import {
   pickFolderForProjectUpload,
   readDroppedUploadFiles,
 } from "../../projectUploadPickers";
-import { useStore } from "../../store";
+import { useShallow } from "zustand/react/shallow";
+
+import { selectProjectsAcrossEnvironments, useStore } from "../../store";
+import { machineAppsQueryOptions } from "../computer/computerQueries";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
@@ -81,7 +84,8 @@ import { ShareDialog, SharedLinksDialog } from "./ShareDialog";
 import { blankExtensionFor, blankOfficeFile } from "../office/officeBlank";
 import { CloudBrowser } from "./CloudBrowser";
 import { CopyToCloudDialog } from "./CopyToCloudDialog";
-import { FilesLocationSwitch } from "./FilesLocationSwitch";
+import { FilesLocationNote, FilesLocationSwitch } from "./FilesLocationSwitch";
+import { folderTagOf, folderTags, type FolderTag } from "./folderTags";
 import { prewarmOfficeEngine, readUsedKinds } from "../office/officePrewarm";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 
@@ -435,6 +439,25 @@ function FolderBrowser({
   const trimmedQuery = query.trim();
   const searchResults = useQuery(filesSearchQueryOptions(environmentId, currentPath, trimmedQuery));
   const shares = useQuery(filesSharesQueryOptions(environmentId, null));
+  // What a folder is beyond a folder: a project the agents work in, an app's code.
+  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const machineApps = useQuery({
+    ...machineAppsQueryOptions(environmentId),
+    // Files only needs the folders once in a while, not Home's live poll.
+    refetchInterval: false as const,
+    staleTime: 60_000,
+  });
+  const tags = useMemo(
+    () =>
+      folderTags({
+        projectFolders: projects
+          .filter((project) => project.environmentId === environmentId)
+          .map((project) => project.cwd),
+        appFolders: (machineApps.data?.apps ?? []).map((app) => app.codeDir),
+        home: rootPath,
+      }),
+    [environmentId, machineApps.data, projects, rootPath],
+  );
   const sharedPaths = useMemo(
     () => new Set((shares.data?.shares ?? []).map((share) => share.path)),
     [shares.data],
@@ -682,6 +705,7 @@ function FolderBrowser({
             className="h-8 w-full rounded-lg border border-input bg-background pl-8 text-sm outline-none"
           />
         </div>
+        <FilesLocationNote location="computer" />
       </header>
 
       {selectedEntries.length > 0 ? (
@@ -817,6 +841,7 @@ function FolderBrowser({
                   key={entry.path}
                   entry={entry}
                   shared={sharedPaths.has(entry.path)}
+                  tag={entry.kind === "directory" ? folderTagOf(tags, entry.path) : null}
                   selected={selected.has(entry.path)}
                   dropTarget={dropTarget === entry.path}
                   locationHint={
@@ -925,6 +950,7 @@ function SortHeader({
 function FileRow({
   entry,
   shared,
+  tag,
   selected,
   dropTarget,
   locationHint,
@@ -944,6 +970,8 @@ function FileRow({
 }: {
   entry: FilesEntry;
   shared: boolean;
+  /** "Project" / "App" for the folders that are one. */
+  tag: FolderTag | null;
   selected: boolean;
   dropTarget: boolean;
   locationHint: string | null;
@@ -1000,6 +1028,19 @@ function FileRow({
               <span className="truncate font-medium text-foreground group-hover:underline">
                 {entry.name}
               </span>
+              {tag ? (
+                <span
+                  className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground"
+                  title={
+                    tag === "Project"
+                      ? "A project folder: chats and agents work here"
+                      : "The code of an app on your Home"
+                  }
+                  data-testid="files-folder-tag"
+                >
+                  {tag}
+                </span>
+              ) : null}
               {shared ? (
                 <span title="Shared by link" className="shrink-0 text-primary">
                   <LinkIcon className="size-3.5" />

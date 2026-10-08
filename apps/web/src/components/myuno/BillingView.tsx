@@ -62,6 +62,7 @@ import {
 } from "../../account/alwaysOn";
 import { cn } from "../../lib/utils";
 import { openInNewTab } from "../../navigation/useOpenApp";
+import { planStatusLine } from "../../account/planStatus";
 import { formatElapsedAgoLabel } from "../../timestampFormat";
 import { Meter, SectionCard } from "../computer/computerUi";
 import { Button } from "../ui/button";
@@ -113,8 +114,6 @@ function CurrentPlanCard({
   }
   const plan = subscription.limits ?? findPlan(catalog, subscription.plan);
   const pending = findPlan(catalog, subscription.pendingPlan);
-  const renews = formatDate(subscription.nextBillingAt);
-  const trialEnds = formatDate(subscription.trialExpiresAt);
   const lines = usageLines({
     subscription,
     cloudUsedBytes: cloud?.usedBytes ?? null,
@@ -124,6 +123,14 @@ function CurrentPlanCard({
     computers,
   });
   const short = balance ? Math.max(0, subscription.priceUsd - balance.balanceUsd) : 0;
+  // Same facts as the console's Billing: a cancelled plan "ends", it doesn't "renew".
+  const status = planStatusLine({
+    subscription,
+    shortUsd: short,
+    pendingPlanTitle: pending ? planTitle(pending) : null,
+    formatDate,
+    formatUsd,
+  });
 
   return (
     <SectionCard
@@ -142,20 +149,32 @@ function CurrentPlanCard({
         <span className="text-sm text-muted-foreground">
           {subscription.priceUsd > 0 ? `${formatUsd(subscription.priceUsd)} a month` : "Free"}
         </span>
-        {subscription.status !== "active" ? (
+        {subscription.status !== "active" && status?.kind !== "ended" ? (
           <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning-foreground">
             {subscription.status}
           </span>
         ) : null}
       </div>
-      <p className="-mt-2 text-xs text-muted-foreground">
-        {trialEnds
-          ? `Free course until ${trialEnds}.`
-          : renews
-            ? `Renews on ${renews} from your balance${short > 0 ? ` — add ${formatUsd(short)} before then` : ""}.`
-            : null}
-        {pending ? ` Switches to ${planTitle(pending)} then.` : ""}
-      </p>
+      {status ? (
+        <p
+          className="-mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+          data-testid="my-uno-plan-status"
+          data-kind={status.kind}
+        >
+          <span>{status.text}</span>
+          {status.kind === "cancelled" || status.kind === "ended" ? (
+            // The console does it (and shows what is charged): new tab, rule 4.
+            <Button
+              size="xs"
+              variant="outline"
+              data-testid="my-uno-plan-status-action"
+              onClick={() => openInNewTab(status.action.href)}
+            >
+              {status.action.label}
+            </Button>
+          ) : null}
+        </p>
+      ) : null}
 
       {showsAlwaysOn(subscription) ? (
         <AlwaysOnTiles subscription={subscription} lines={lines} />
@@ -249,11 +268,10 @@ function AlwaysOnTiles({
             <span className="text-2xl font-semibold tabular-nums">
               {formatRamShort(always.ramMb)}
             </span>
-            {always.vcpu > 0 ? (
-              <span className="text-xs text-muted-foreground">
-                · {always.vcpu} {always.vcpu === 1 ? "core" : "cores"}
-              </span>
-            ) : null}
+            {/* No cores here: the plan's core allowance next to a computer's own
+                "2 cores" read as a contradiction (flows v2, life-work-full/14).
+                Always on is counted in memory; each computer shows its own cores. */}
+            <span className="text-xs text-muted-foreground">of memory</span>
           </span>
           <span className="text-xs font-medium tabular-nums" data-testid="my-uno-running-now">
             {runningNowLine(always)}

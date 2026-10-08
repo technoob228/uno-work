@@ -16,12 +16,14 @@ import type {
   BrowserLiveSetup,
   CredentialMetadata,
   EnvironmentId,
+  ThreadId,
 } from "@t3tools/contracts";
 import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
 import { personMachineName } from "@t3tools/shared/machineName";
 import { useQuery } from "@tanstack/react-query";
 
 import { readEnvironmentApi } from "../../environmentApi";
+import { selectThreadByRef, useStore } from "../../store";
 import { cn, isMacPlatform } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
 import { Button } from "../ui/button";
@@ -37,6 +39,19 @@ import type { PreviewFile } from "./PreviewPaneContext";
 const IS_MAC = typeof navigator !== "undefined" && isMacPlatform(navigator.platform);
 /** Без нажатой кнопки движение мыши шлём не чаще, чем раз в столько мс. */
 const HOVER_MOVE_INTERVAL_MS = 40;
+
+/**
+ * Is the agent at the browser right now? Only while the chat that opened the
+ * page is working. A page with no known chat (older daemon, another client's
+ * chat not loaded here) keeps the old answer — "yes".
+ */
+export function agentUsesBrowser(
+  ownerThreadId: string | null,
+  ownerOrchestrationStatus: string | null,
+): boolean {
+  if (!ownerThreadId || ownerOrchestrationStatus === null) return true;
+  return ownerOrchestrationStatus === "running" || ownerOrchestrationStatus === "starting";
+}
 
 /**
  * Вкладка браузера самой машины (Work в облаке). Браузер работает на машине —
@@ -64,6 +79,16 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
   }, [api, pageId]);
 
   const human = page?.control === "human";
+  // "The agent is using this browser" only while its chat is actually working:
+  // after the turn the line used to stay forever (flows v2, life-work-full/6).
+  const ownerThreadId = page?.context?.threadId ?? null;
+  const ownerStatus = useStore((store) =>
+    environmentId && ownerThreadId
+      ? (selectThreadByRef(store, { environmentId, threadId: ownerThreadId as ThreadId })?.session
+          ?.orchestrationStatus ?? null)
+      : null,
+  );
+  const agentBusy = agentUsesBrowser(ownerThreadId, ownerStatus);
 
   const setControl = useCallback(
     async (control: "agent" | "human") => {
@@ -126,6 +151,7 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
         environmentId={environmentId}
         frame={frame}
         human={human}
+        agentBusy={agentBusy}
         onTakeControl={() => void setControl("human")}
       />
       <div
@@ -139,7 +165,9 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
             ? page.agentWaiting
               ? "You're in control. The agent is waiting for the browser."
               : "You're in control. The agent waits until you hand back."
-            : "The agent is using this browser."}
+            : agentBusy
+              ? "The agent is using this browser."
+              : "The agent is done here. Take control to use this browser yourself."}
         </span>
         {human ? (
           <Button size="xs" variant="outline" onClick={() => void setControl("agent")}>
@@ -575,12 +603,15 @@ function Screen({
   pageId,
   frame,
   human,
+  agentBusy,
   onTakeControl,
 }: {
   environmentId: EnvironmentId;
   pageId: string;
   frame: BrowserLiveFrame | null;
   human: boolean;
+  /** The chat that opened the page is working right now. */
+  agentBusy: boolean;
   onTakeControl: () => void;
 }) {
   const imageRef = useRef<HTMLImageElement | null>(null);
@@ -776,7 +807,9 @@ function Screen({
       {hint && !human ? (
         <div className="absolute inset-x-0 bottom-3 flex justify-center">
           <div className="flex items-center gap-2 rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md">
-            <span>The agent is using this browser.</span>
+            <span>
+              {agentBusy ? "The agent is using this browser." : "Take control to use this browser."}
+            </span>
             <Button
               size="xs"
               onClick={(event) => {

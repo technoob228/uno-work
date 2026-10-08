@@ -25,7 +25,7 @@ export function aiBusyNoticeText(notice: NonNullable<ReturnType<typeof aiBusyNot
       ? ` until ${RENEW_DATE.format(at)}`
       : " until your plan renews";
     return {
-      text: `You've used this month's full-speed hours — AI keeps working at standard speed${until}.`,
+      text: `You've used this month's full-speed AI time — AI keeps working at standard speed${until}.`,
       link: null,
     };
   }

@@ -51,3 +51,25 @@ export function FilesLocationSwitch({
     </div>
   );
 }
+
+/** One line on what this location is and what happens to it (flows v2, E5). */
+export const FILES_LOCATION_NOTE = {
+  computer:
+    "Files on this computer. They live with it: if the computer is deleted, they go too. Keep what must stay in Cloud storage.",
+  cloud:
+    "Shared by all your computers. It stays when a computer is deleted, and copies of your computers are kept here too.",
+} as const;
+
+export function FilesLocationNote({ location }: { location: "computer" | "cloud" }) {
+  return (
+    <p
+      className="mt-1.5 text-xs leading-snug text-muted-foreground"
+      data-testid="files-location-note"
+    >
+      <span className="font-medium text-foreground sm:hidden">
+        {location === "computer" ? "This computer. " : "Cloud storage. "}
+      </span>
+      {FILES_LOCATION_NOTE[location]}
+    </p>
+  );
+}

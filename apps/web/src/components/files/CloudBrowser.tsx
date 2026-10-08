@@ -47,7 +47,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
 import { MoveDialog, NameDialog } from "./FilesDialogs";
-import { FilesLocationSwitch } from "./FilesLocationSwitch";
+import { FilesLocationNote, FilesLocationSwitch } from "./FilesLocationSwitch";
 import type { useFilesUploads } from "./FilesUploads";
 import {
   FILE_KIND_ICON,
@@ -297,6 +297,7 @@ export function CloudBrowser({
           </Menu>
         )}
       </div>
+      {embedded ? null : <FilesLocationNote location="cloud" />}
     </header>
   );
 

@@ -61,6 +61,22 @@ export function economySummary(
   return `Economy: on · sleeps after ${idleShort(economy.idleTimeoutS)} idle, wakes in ~1 s`;
 }
 
+/**
+ * One always-visible line under the switch in the computer menu: what economy
+ * does for the person, without opening "How it works" (flows v2, rule 7: the
+ * switch is not hidden, it is explained on the spot).
+ */
+export function economyShortExplain(
+  economy: Pick<UnoComputerEconomy, "enabled" | "idleTimeoutS" | "locked"> | null | undefined,
+): string | null {
+  if (!economy) return null;
+  if (!economy.enabled) {
+    return "Off: this computer never sleeps by itself. Turn it on and it sleeps when nothing is happening, wakes in about a second, and you don't pay while it sleeps.";
+  }
+  const tail = economy.locked ? " The free computer always works this way." : "";
+  return `Sleeps after ${idleLabel(economy.idleTimeoutS)} with nothing to do and wakes in about a second. You don't pay while it sleeps.${tail}`;
+}
+
 /** The idle timers the person can pick. */
 export const ECONOMY_IDLE_CHOICES: ReadonlyArray<number> = [300, 600, 1800, 3600, 3 * 3600];
 

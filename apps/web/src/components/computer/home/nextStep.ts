@@ -128,3 +128,61 @@ export function visibleNextStep(
   }
   return candidate && !answers[nextStepSkipKey(candidate.id)] ? candidate : null;
 }
+
+/**
+ * SSH is not a first advice for someone who did not ask for a server
+ * (flows v2, E7 / life-home/5): when the account's goal was only guessed from
+ * what it has, and Dev mode is off, the card leads with the step after
+ * "Connect with SSH" and SSH stays one small "For developers" link under it.
+ * A person who picked the server goal, or has Dev mode on, sees it as before.
+ */
+export function withoutSshFirst(
+  plan: NextStepPlan | null,
+  step: NextStepItem | null,
+  answers: Readonly<Record<string, string>>,
+  devMode: boolean,
+): { readonly step: NextStepItem | null; readonly developerStep: NextStepItem | null } {
+  if (!plan || !step || step.id !== "connect_ssh" || devMode || plan.goalSource === "console") {
+    return { step, developerStep: null };
+  }
+  const from = plan.steps.findIndex((entry) => entry.id === step.id);
+  const after =
+    plan.steps
+      .slice(from + 1)
+      .find(
+        (entry) =>
+          !entry.done &&
+          !answers[nextStepDoneKey(entry.id)] &&
+          !answers[nextStepSkipKey(entry.id)],
+      ) ?? null;
+  return { step: after, developerStep: step };
+}
+
+/**
+ * The chat a "describe it to Uno" step continues (flows v2, B2 — the same rule
+ * as the console's `stepChatHref`): the chat about the same thing when there is
+ * one, else the newest chat; null → start a new one.
+ */
+export function nextStepChatId(
+  stepId: string,
+  resume:
+    | {
+        readonly botChatId: string | null;
+        readonly siteChatId: string | null;
+        readonly lastChatId: string | null;
+      }
+    | null
+    | undefined,
+): string | null {
+  if (!resume) return null;
+  switch (stepId) {
+    case "describe_bot":
+      return resume.botChatId ?? resume.lastChatId;
+    case "describe_site":
+      return resume.siteChatId ?? resume.lastChatId;
+    case "talk_to_uno":
+      return resume.lastChatId;
+    default:
+      return null;
+  }
+}

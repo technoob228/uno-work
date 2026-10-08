@@ -52,10 +52,10 @@ function dirs() {
 }
 
 function sumsFetch(body: string, calls: string[] = []): typeof fetch {
-  return (async (input: RequestInfo | URL) => {
+  return (async (input: unknown) => {
     calls.push(String(input));
     return new Response(body, { status: 200 });
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 }
 
 describe("parseLatestRelease", () => {

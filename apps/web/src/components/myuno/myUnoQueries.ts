@@ -11,6 +11,7 @@ import {
   fetchComputerApps,
   fetchComputerLogs,
   fetchComputerMetrics,
+  fetchAccountResume,
   fetchNextStep,
   fetchPayments,
   fetchPlanCatalog,
@@ -94,6 +95,19 @@ export const nextStepQuery = () =>
     enabled: enabled(),
     staleTime: 30_000,
     refetchInterval: 60_000,
+    retry: false,
+  });
+
+/**
+ * The chats the person already started (Home's next step opens the same chat,
+ * not a new one). An error or an older backend means "nothing to continue".
+ */
+export const accountResumeQuery = () =>
+  queryOptions({
+    queryKey: [...myUnoKeys.nextStep, "resume"] as const,
+    queryFn: fetchAccountResume,
+    enabled: enabled(),
+    staleTime: 30_000,
     retry: false,
   });
 

@@ -25,6 +25,7 @@ import {
   ECONOMY_IDLE_CHOICES,
   economyChip,
   economyDescription,
+  economyShortExplain,
   economyStatusLine,
   economySummary,
   idleLabel,
@@ -141,6 +142,12 @@ export function EconomyLine({
           onCheckedChange={(checked: boolean) => mutation.mutate({ enabled: checked })}
         />
       </div>
+      {/* Always visible: what the switch does (the full story is behind "i"). */}
+      {open ? null : (
+        <p className="pl-5.5 text-[11px] leading-snug text-muted-foreground" data-testid="economy-explain">
+          {economyShortExplain(economy)}
+        </p>
+      )}
       {open ? (
         <div id={detailsId} className="flex flex-col gap-1.5 pl-5.5 text-xs text-muted-foreground">
           <p>{economyDescription(economy)}</p>

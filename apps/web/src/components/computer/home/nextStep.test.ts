@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   goalFromAccountPath,
+  nextStepChatId,
   nextStepDoneKey,
   nextStepSkipKey,
   parseNextStepPlan,
   visibleNextStep,
+  withoutSshFirst,
 } from "./nextStep";
 
 describe("goalFromAccountPath", () => {
@@ -108,5 +110,74 @@ describe("visibleNextStep", () => {
 
   it("an idea taken here moves on before the account catches up", () => {
     expect(visibleNextStep(assistant, { [nextStepDoneKey("morning_plan")]: "x" })).toBeNull();
+  });
+});
+
+describe("nextStepChatId", () => {
+  const resume = { botChatId: "bot1", siteChatId: "site1", lastChatId: "last1" };
+
+  it("opens the chat about the same thing, else the newest one", () => {
+    expect(nextStepChatId("describe_bot", resume)).toBe("bot1");
+    expect(nextStepChatId("describe_site", resume)).toBe("site1");
+    expect(nextStepChatId("talk_to_uno", resume)).toBe("last1");
+    expect(nextStepChatId("describe_bot", { ...resume, botChatId: null })).toBe("last1");
+    expect(nextStepChatId("describe_site", { ...resume, siteChatId: null })).toBe("last1");
+  });
+
+  it("a new chat when nothing was started, and for steps that are not a chat", () => {
+    expect(
+      nextStepChatId("describe_bot", { botChatId: null, siteChatId: null, lastChatId: null }),
+    ).toBeNull();
+    expect(nextStepChatId("describe_bot", null)).toBeNull();
+    expect(nextStepChatId("get_computer", resume)).toBeNull();
+    expect(nextStepChatId("connect_ssh", resume)).toBeNull();
+  });
+});
+
+describe("withoutSshFirst", () => {
+  const server = (source: string) =>
+    parseNextStepPlan({
+      version: 1,
+      goal: "server",
+      goal_source: source,
+      next: { id: "connect_ssh", title: "Connect with SSH or your agent" },
+      steps: [
+        { id: "create_computer", title: "Start your server", done: true },
+        { id: "connect_ssh", title: "Connect with SSH or your agent", done: false },
+        { id: "install_app", title: "Put your first app on it", done: false },
+      ],
+      signals: {},
+    });
+
+  it("a guessed goal: SSH goes under the card, the next step leads", () => {
+    const plan = server("guessed");
+    const result = withoutSshFirst(plan, visibleNextStep(plan, {}), {}, false);
+    expect(result.step?.id).toBe("install_app");
+    expect(result.developerStep?.id).toBe("connect_ssh");
+  });
+
+  it("a person who picked the server goal, or has Dev mode on, sees SSH first", () => {
+    const picked = server("console");
+    expect(withoutSshFirst(picked, visibleNextStep(picked, {}), {}, false)).toMatchObject({
+      step: { id: "connect_ssh" },
+      developerStep: null,
+    });
+    const guessed = server("guessed");
+    expect(withoutSshFirst(guessed, visibleNextStep(guessed, {}), {}, true)).toMatchObject({
+      step: { id: "connect_ssh" },
+      developerStep: null,
+    });
+  });
+
+  it("nothing after SSH, or the next one put off: no card", () => {
+    const plan = server("guessed");
+    const answers = { [nextStepSkipKey("install_app")]: "x" };
+    expect(withoutSshFirst(plan, visibleNextStep(plan, answers), answers, false).step).toBeNull();
+  });
+
+  it("other steps are left alone", () => {
+    const plan = server("guessed");
+    const other = { id: "install_app", title: "", hint: null, done: false, consolePath: null };
+    expect(withoutSshFirst(plan, other, {}, false)).toEqual({ step: other, developerStep: null });
   });
 });

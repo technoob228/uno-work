@@ -15,6 +15,7 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   ArrowUpIcon,
   CheckIcon,
+  ArrowRightIcon,
   ExternalLinkIcon,
   GlobeIcon,
   InboxIcon,
@@ -520,7 +521,8 @@ function MeterChip({ manage }: { manage?: ConsoleManageLink | undefined }) {
   // In a chat the way to its things stays even without a meter line.
   if (!line && !manage) return null;
   return (
-    <div className="mt-1.5 flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
+    // Wraps on a phone: a long meter line plus the link used to run past the edge at 390.
+    <div className="mt-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-center text-[11px] text-muted-foreground">
       {line ? (
         <>
           <span data-testid="uno-ai-meter">{line}</span>
@@ -794,6 +796,11 @@ function QuestionAnswers({
 
 // ---- when the turn stopped ----
 
+/** "Continue" when Uno stopped mid-way and resumes from there; "Try again" for a hiccup. */
+export function stopResumeLabel(code: string): "Continue" | "Try again" {
+  return code === "steps" ? "Continue" : "Try again";
+}
+
 function StopCard({ stop, onResume }: { stop: AiStop; onResume: () => void }) {
   if (stop.code === "verify") return <VerifyCard onVerified={onResume} />;
   const out = stop.code === "free_empty" || stop.code === "hours_empty";
@@ -817,9 +824,11 @@ function StopCard({ stop, onResume }: { stop: AiStop; onResume: () => void }) {
             <ExternalLinkIcon />
           </Button>
         ) : (
-          <Button size="sm" variant="outline" onClick={onResume}>
-            <RotateCwIcon />
-            Try again
+          <Button size="sm" variant="outline" onClick={onResume} data-testid="uno-ai-stop-resume">
+            {/* "steps": Uno ran out of steps mid-way — it picks up where it stopped,
+                so the button says what happens (flows v2, builder). */}
+            {stop.code === "steps" ? <ArrowRightIcon /> : <RotateCwIcon />}
+            {stopResumeLabel(stop.code)}
           </Button>
         )}
       </div>

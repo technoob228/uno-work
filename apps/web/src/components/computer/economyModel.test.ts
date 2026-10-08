@@ -5,6 +5,7 @@ import {
   ECONOMY_HOLD_LEAD_MS,
   economyChip,
   economyDescription,
+  economyShortExplain,
   economyStatusLine,
   economySummary,
   idleLabel,
@@ -140,5 +141,20 @@ describe("background tabs never wake an economy computer", () => {
     expect(
       canReleaseOnVisible({ ...awake, sleepAfter: new Date(now - 60_000).toISOString() }, now),
     ).toBe(false);
+  });
+});
+
+describe("economyShortExplain", () => {
+  it("says what the switch does, on and off, without opening anything", () => {
+    expect(economyShortExplain({ enabled: true, idleTimeoutS: 600, locked: false })).toBe(
+      "Sleeps after 10 minutes with nothing to do and wakes in about a second. You don't pay while it sleeps.",
+    );
+    expect(economyShortExplain({ enabled: false, idleTimeoutS: 600, locked: false })).toMatch(
+      /^Off: this computer never sleeps by itself\. Turn it on/,
+    );
+    expect(economyShortExplain({ enabled: true, idleTimeoutS: 600, locked: true })).toMatch(
+      /The free computer always works this way\.$/,
+    );
+    expect(economyShortExplain(null)).toBeNull();
   });
 });

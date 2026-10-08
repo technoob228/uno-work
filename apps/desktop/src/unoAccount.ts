@@ -81,6 +81,8 @@ const ALLOWED: ReadonlyArray<{ method: string; pattern: RegExp; query?: RegExp }
   // Home's one next step, the same answer the console's Overview shows, and
   // the goal picked in Uno Work written to the account (27.09).
   { method: "GET", pattern: /^\/api\/v1\/account\/next-step$/ },
+  // What the person already started: Home's next step opens the same chat (B2).
+  { method: "GET", pattern: /^\/api\/v1\/account\/resume$/ },
   { method: "PUT", pattern: /^\/api\/v1\/account\/goal$/ },
   { method: "GET", pattern: /^\/api\/v1\/boxes\/\d+\/(metrics|apps)$/ },
   // "Use your own tools" (onboarding v3): a key for an agent pinned to this

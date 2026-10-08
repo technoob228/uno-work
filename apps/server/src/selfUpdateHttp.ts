@@ -102,26 +102,20 @@ export const selfUpdateStartRouteLayer = HttpRouter.add(
     }
     const config = yield* ServerConfig;
     const update = selfUpdateController();
-    const started = yield* Effect.tryPromise({
-      try: async () => {
+    const started = yield* Effect.promise(async () => {
+      try {
         // The note first: the updater may start before `start()` returns.
         await noteSelfUpdateIntent(config.stateDir).catch(() => undefined);
-        return await update.start();
-      },
-      catch: (cause) => cause,
-    }).pipe(
-      Effect.map((status) => ({ ok: true as const, status })),
-      Effect.catch((cause) =>
-        Effect.succeed({
+        return { ok: true as const, status: await update.start() };
+      } catch (cause) {
+        const conflict = cause instanceof SelfUpdateUnavailableError;
+        return {
           ok: false as const,
-          message:
-            cause instanceof SelfUpdateUnavailableError
-              ? cause.message
-              : "Couldn't start the update. Try again in a minute.",
-          conflict: cause instanceof SelfUpdateUnavailableError,
-        }),
-      ),
-    );
+          message: conflict ? cause.message : "Couldn't start the update. Try again in a minute.",
+          conflict,
+        };
+      }
+    });
     if (!started.ok) {
       if (!started.conflict) {
         yield* Effect.logError("self-update: could not write the request");
