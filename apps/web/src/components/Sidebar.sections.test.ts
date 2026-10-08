@@ -361,11 +361,7 @@ describe("Done shelf folds like Snoozed (0.0.114)", () => {
       settledAt: ago((index + 1) * HOUR_MS),
     }),
   );
-  const threads = [
-    makeThread("active"),
-    makeThread("snoozed-a", snoozed(HOUR_MS)),
-    ...done,
-  ];
+  const threads = [makeThread("active"), makeThread("snoozed-a", snoozed(HOUR_MS)), ...done];
   const collapsed = (extra: { forceVisibleKey?: string; settledExpanded?: boolean } = {}) =>
     buildSidebarInboxLayout(threads, {
       now: NOW,
@@ -410,7 +406,11 @@ describe("Done shelf folds like Snoozed (0.0.114)", () => {
     expect(
       layout.visibleThreads.filter((thread) => thread.id.startsWith("done-")).map((t) => t.id),
     ).toEqual(["done-0", "done-1", "done-2", "done-3", "done-4"]);
-    expect(layout.items.at(-1)).toEqual({ kind: "settled-toggle", hiddenCount: 7, expanded: false });
+    expect(layout.items.at(-1)).toEqual({
+      kind: "settled-toggle",
+      hiddenCount: 7,
+      expanded: false,
+    });
   });
 });
 

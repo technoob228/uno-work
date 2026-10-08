@@ -349,7 +349,9 @@ export function dropChatBuckets(
     if (keys.has(key)) removed.push(...bucket.files);
     else next[key] = bucket;
   }
-  const remainingIds = new Set(Object.values(next).flatMap((bucket) => bucket.files.map((f) => f.id)));
+  const remainingIds = new Set(
+    Object.values(next).flatMap((bucket) => bucket.files.map((f) => f.id)),
+  );
   const dropped = removed.filter((file) => !remainingIds.has(file.id));
   return { states: next, dropped };
 }
