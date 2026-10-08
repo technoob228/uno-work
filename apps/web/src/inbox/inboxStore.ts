@@ -15,6 +15,8 @@ import { useMemo } from "react";
 import { create } from "zustand";
 
 import { readEnvironmentConnection } from "../environments/runtime";
+import { useProtoOneMachine } from "../proto/protoState";
+import { useStore } from "../store";
 
 export interface InboxEntry extends InboxItem {
   readonly environmentId: EnvironmentId;
@@ -58,16 +60,30 @@ export function mergeInbox(
   return out.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-export function useInboxEntries(): ReadonlyArray<InboxEntry> {
+/**
+ * Sidebar prototype (w0115): with "one computer, one space" (А) the Inbox,
+ * Needs you and their counts are only about the computer picked on top.
+ */
+function useScopedInbox(): Readonly<Record<string, InboxSnapshot>> {
   const byEnvironment = useInboxStore((state) => state.byEnvironment);
+  const oneMachine = useProtoOneMachine();
+  const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
+  return useMemo(() => {
+    if (!oneMachine || activeEnvironmentId === null) return byEnvironment;
+    const own = byEnvironment[activeEnvironmentId];
+    return own ? { [activeEnvironmentId]: own } : {};
+  }, [activeEnvironmentId, byEnvironment, oneMachine]);
+}
+
+export function useInboxEntries(): ReadonlyArray<InboxEntry> {
+  const byEnvironment = useScopedInbox();
   return useMemo(() => mergeInbox(byEnvironment), [byEnvironment]);
 }
 
 /** Unread and not snoozed, on every connected computer. */
 export function useInboxUnreadCount(): number {
-  return useInboxStore((state) =>
-    Object.values(state.byEnvironment).reduce((sum, snapshot) => sum + snapshot.unread, 0),
-  );
+  const byEnvironment = useScopedInbox();
+  return Object.values(byEnvironment).reduce((sum, snapshot) => sum + snapshot.unread, 0);
 }
 
 /** Unread items that wait for the person (approvals, questions). */

@@ -18,6 +18,7 @@ import {
   CreditCardIcon,
   FolderIcon,
   InboxIcon,
+  FolderKanbanIcon,
   LayoutGridIcon,
   LogInIcon,
   LogOutIcon,
@@ -57,6 +58,7 @@ import {
 import { accountMenuLines } from "./sidebarD.logic";
 import { sidebarDPanel } from "./sidebarDState";
 import { useSidebarEnvironmentLabelResolver } from "./useSidebarMachineIdentities";
+import { useProtoVariant } from "../../proto/protoState";
 
 /** The computer this window works on, by the name the person knows it by. */
 export function useSidebarDComputerName(): string {
@@ -321,7 +323,7 @@ function PlaceRow(props: {
 function useOpenPlace() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
-  return (to: "/files" | "/sites") => {
+  return (to: "/files" | "/sites" | "/projects") => {
     if (isMobile) setOpenMobile(false);
     sidebarDPanel.closeNow();
     void navigate({ to });
@@ -367,6 +369,8 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const open = useOpenPlace();
   const { shown } = useNeedsYouBadge();
+  // Sidebar prototype (w0115): variant E puts Projects next to Files.
+  const protoVariant = useProtoVariant();
   return (
     <nav aria-label="Uno Work" className="flex flex-col gap-px" data-testid="sidebar-places">
       <PlaceRow
@@ -377,6 +381,15 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
         testId="sidebar-nav-files"
         tour="files"
       />
+      {protoVariant === "E" ? (
+        <PlaceRow
+          icon={<FolderKanbanIcon />}
+          label="Projects"
+          active={pathname.startsWith("/projects")}
+          onClick={() => open("/projects")}
+          testId="sidebar-nav-projects"
+        />
+      ) : null}
       <PlaceRow
         icon={<LayoutGridIcon />}
         label="Apps & sites"
@@ -396,7 +409,12 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
               <InboxIcon />
               <span className="min-w-0 flex-1 truncate">Needs you</span>
               <InboxCountBadge
-                unread={Math.max(badge.unread, badge.needsYou)}
+                unread={
+                  // Sidebar prototype (w0115): the number is the questions waiting, not all news.
+                  protoVariant !== "off" && badge.needsYou > 0
+                    ? badge.needsYou
+                    : Math.max(badge.unread, badge.needsYou)
+                }
                 needsYou={badge.needsYou}
               />
             </PopoverTrigger>

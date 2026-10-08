@@ -93,6 +93,8 @@ import {
   recentHomeFolders,
   tildePath,
 } from "./newProject.logic";
+import { ProtoMachineChip } from "../../proto/ProtoMachineChip";
+import { PROTO, useProtoAllMachines } from "../../proto/protoState";
 
 const SOURCE_COPY: Record<
   Exclude<NewProjectSource, "template">,
@@ -120,6 +122,21 @@ const SOURCE_COPY: Record<
   },
 };
 
+/** Sidebar prototype (w0115): the critics' words — no "laptop", "clone", "repositories". */
+const PROTO_SOURCE_COPY: Partial<typeof SOURCE_COPY> = {
+  upload: {
+    title: "Add a folder or a .zip",
+    body: "From this device — your own files, or what a contractor sent you",
+    Icon: FolderUpIcon,
+  },
+  empty: { title: "Start from scratch", body: "An empty project, Uno names it", Icon: PlusIcon },
+  github: {
+    title: "From a GitHub link",
+    body: "Paste the link a developer gave you",
+    Icon: GitHubIcon,
+  },
+};
+
 function errorMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message ? cause.message : fallback;
 }
@@ -134,6 +151,8 @@ export function NewProjectDialog() {
   const home = useHomeFolderPath(environmentId);
   const machineLabel = useMachineLabel(environmentId);
   const copy = dialogCopy(wording, step);
+  // Sidebar prototype (w0115): with computers joined (Б) the project's computer is a choice.
+  const protoJoined = useProtoAllMachines();
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? undefined : close())}>
@@ -146,7 +165,12 @@ export function NewProjectDialog() {
             data-testid="new-project-machine"
           >
             <MonitorIcon className="size-3.5" />
-            On computer <b className="font-medium text-foreground">{machineLabel}</b>
+            On computer{" "}
+            {protoJoined ? (
+              <ProtoMachineChip environmentId={environmentId} title="Make the project on" />
+            ) : (
+              <b className="font-medium text-foreground">{machineLabel}</b>
+            )}
           </p>
         </DialogHeader>
         {step === "choose" ? (
@@ -289,7 +313,7 @@ function SourceCard({
   primary?: boolean;
   onClick: () => void;
 }) {
-  const { title, body, Icon } = SOURCE_COPY[source];
+  const { title, body, Icon } = (PROTO ? PROTO_SOURCE_COPY[source] : null) ?? SOURCE_COPY[source];
   return (
     <button
       type="button"

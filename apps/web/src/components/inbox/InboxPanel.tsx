@@ -37,6 +37,7 @@ import {
   useSystemNotificationsState,
 } from "../../inbox/systemNotifications";
 import { useOpenInboxItem } from "../../inbox/useOpenInboxItem";
+import { useProtoChatPlace } from "../../proto/protoPlace";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
 import { markInboxItemDone } from "../../inbox/inboxDone";
@@ -299,6 +300,15 @@ export function ItemIcon({ item }: { item: InboxEntry }) {
   );
 }
 
+/** Sidebar prototype (w0115): "MacBook · brand-kit" under an agent's item. */
+function InboxPlace({ item }: { item: InboxEntry }) {
+  const place = useProtoChatPlace(
+    item.environmentId,
+    item.open?.kind === "thread" ? item.open.threadId : null,
+  );
+  return place ? <span className="truncate">{place}</span> : null;
+}
+
 const InboxRow = memo(function InboxRow({ item }: { item: InboxEntry }) {
   const openItem = useOpenInboxItem();
   const [snoozeOpen, setSnoozeOpen] = useState(false);
@@ -350,6 +360,7 @@ const InboxRow = memo(function InboxRow({ item }: { item: InboxEntry }) {
             </span>
           ) : null}
           <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
+            <InboxPlace item={item} />
             {item.source.kind === "app" ? <span>{item.source.name}</span> : null}
             {item.count > 1 ? <span className="tabular-nums">×{item.count}</span> : null}
           </span>
